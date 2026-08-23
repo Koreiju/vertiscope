@@ -385,6 +385,37 @@ class Repl:
 
     _cmd_exit = _cmd_quit
 
+    def _cmd_browser(self, args) -> bool:
+        """Attach a live browser to this REPL.
+
+        Every measurement command needs one, and until now the only way to
+        get a driver in was to construct the REPL from a script. That put the
+        measurement outside the REPL exactly where it was supposed to be
+        inside it: a headless `--command "sweep scan"` had no browser and
+        reported "needs a live browser" instead of scanning. This is the one
+        missing seam.
+
+        `browser` boots headless, `browser show` boots headful.
+        """
+        from ..browser import build_driver
+        from ..config import load_config
+
+        headless = not (args and args[0].lower() in ("show", "headful", "gui"))
+        existing = getattr(self.nav, "driver", None)
+        if existing is not None:
+            try:
+                existing.quit()
+            except Exception:  # noqa: BLE001
+                pass
+        driver = build_driver(load_config(), headless=headless)
+        driver.set_page_load_timeout(45)
+        self.nav.driver = driver
+        self.state.buffers.note(
+            f"browser attached ({'headless' if headless else 'headful'})")
+        print(f"browser attached ({'headless' if headless else 'headful'})",
+              flush=True)
+        return True
+
     def _cmd_sweep(self, args) -> bool:
         """Run the variant sweep and read its tables, from here.
 
