@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Riverside Observatory — Instrument Catalog</title>
+  <meta name="description" content="Telescopes and spectrographs available for booking.">
+</head>
+<body>
+  <nav class="site-nav">
+    <a href="/">Home</a>
+    <a href="/catalog">Catalog</a>
+    <a href="/booking">Booking</a>
+    <a href="/about">About</a>
+  </nav>
+
+  <form action="/search" method="get" role="search">
+    <input type="search" name="q" aria-label="Search instruments" placeholder="Search instruments">
+    <button type="submit">Search</button>
+  </form>
+
+  <main>
+    <h1>Instrument Catalog</h1>
+    <p class="lede">
+      The Riverside Observatory operates nine instruments across two domes.
+      Spectrographs are shared between the 1.2m and 0.6m telescopes; imaging
+      cameras are dome-specific and cannot be relocated during a run.
+    </p>
+
+    <section class="grid">
+      <article class="card" data-id="tel-120">
+        <a href="/instrument/tel-120"><h3>Ritchey-Chretien 1.2m</h3></a>
+        <img src="/img/rc120.jpg" alt="1.2 metre Ritchey-Chretien telescope">
+        <p class="summary">Primary research telescope. Equatorial fork mount,
+        f/8 focal ratio, autoguided to 0.3 arcsec RMS.</p>
+        <span class="price">$420 per night</span>
+        <span class="tag">telescope</span>
+      </article>
+
+      <article class="card" data-id="spec-echelle">
+        <a href="/instrument/spec-echelle"><h3>Echelle Spectrograph</h3></a>
+        <img src="/img/echelle.jpg" alt="Fibre-fed echelle spectrograph">
+        <p class="summary">Fibre-fed echelle covering 380 to 900 nanometres at
+        resolving power 48000. Thermally stabilised enclosure.</p>
+        <span class="price">$610 per night</span>
+        <span class="tag">spectrograph</span>
+      </article>
+
+      <article class="card" data-id="cam-cmos">
+        <a href="/instrument/cam-cmos"><h3>Wide Field CMOS Camera</h3></a>
+        <img src="/img/cmos.jpg" alt="Wide field CMOS imaging camera">
+        <p class="summary">Back-illuminated CMOS sensor, 61 megapixel, 2.2
+        degree field of view on the 0.6m astrograph.</p>
+        <span class="price">$185 per night</span>
+        <span class="tag">camera</span>
+      </article>
+
+      <article class="card" data-id="pol-unit">
+        <a href="/instrument/pol-unit"><h3>Dual Beam Polarimeter</h3></a>
+        <img src="/img/polarimeter.jpg" alt="Dual beam polarimeter">
+        <p class="summary">Measures linear polarisation to 0.01 percent on
+        targets brighter than magnitude 12.</p>
+        <span class="price">$275 per night</span>
+        <span class="tag">polarimeter</span>
+      </article>
+    </section>
+
+    <section class="policy">
+      <h2>Booking policy</h2>
+      <p>
+        Weather cancellations are refunded in full when the dome does not open.
+        Partial nights are billed pro rata against the hours actually observed.
+        Cancellations inside 48 hours forfeit the deposit.
+      </p>
+    </section>
+  </main>
+
+  <div class="pagination">
+    <a href="?page=1" class="prev">Previous</a>
+    <a href="?page=3" class="next">Next</a>
+  </div>
+
+  <footer>
+    <p>Riverside Observatory, Kelowna. Contact scheduling@riverside.example.</p>
+  </footer>
+</body>
+</html>

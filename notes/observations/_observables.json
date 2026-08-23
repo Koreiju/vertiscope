@@ -1,0 +1,30 @@
+{
+  "identity": [
+    "Retriever.search -> Hit",
+    "cli: search",
+    "cli: search --json",
+    "cli: show"
+  ],
+  "position": [
+    "cli: show"
+  ],
+  "pattern": [
+    "Retriever.search -> Hit",
+    "cli: search",
+    "cli: search --json"
+  ],
+  "multiplicity": [],
+  "content": [
+    "Retriever.search -> Hit",
+    "cli: search",
+    "cli: search --json",
+    "cli: show"
+  ],
+  "url": [
+    "Retriever.search -> Hit",
+    "cli: ls",
+    "cli: search",
+    "cli: search --json",
+    "cli: show"
+  ]
+}

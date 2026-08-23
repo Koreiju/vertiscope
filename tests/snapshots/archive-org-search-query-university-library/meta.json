@@ -1,0 +1,41 @@
+{
+  "url": "https://archive.org/search?query=university+library",
+  "slug": "archive-org-search-query-university-library",
+  "stratum": "js-shell",
+  "captured_at": "2026-08-15T22:41:43.174255+00:00",
+  "seconds": 11.3,
+  "snapshots": [
+    {
+      "index": 0,
+      "pass": 1,
+      "chars": 169608,
+      "gz_bytes": 38177
+    },
+    {
+      "index": 1,
+      "pass": 2,
+      "chars": 171931,
+      "gz_bytes": 38250
+    },
+    {
+      "index": 2,
+      "pass": 3,
+      "chars": 174328,
+      "gz_bytes": 38347
+    },
+    {
+      "index": 3,
+      "pass": 4,
+      "chars": 193166,
+      "gz_bytes": 39877
+    },
+    {
+      "index": 4,
+      "pass": 6,
+      "chars": 878259,
+      "gz_bytes": 68884
+    }
+  ],
+  "repeated_passes": 1,
+  "settled": true
+}

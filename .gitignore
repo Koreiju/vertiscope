@@ -1,0 +1,23 @@
+# Measurement and scan artifacts — regenerable, large, and not source.
+build/
+build_live/
+build_sweep/
+logs/
+
+# Downloaded tooling, not source.
+drivers/
+
+# Python and tooling caches.
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+.mypy_cache/
+.ruff_cache/
+
+# Kuzu stores wherever they land.
+*.kuzu/
+kuzu_db/
+
+# Editor state.
+.obsidian/

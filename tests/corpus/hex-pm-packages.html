@@ -1,0 +1,2067 @@
+<!DOCTYPE html>
+<html lang="en" prefix="og: http://ogp.me/ns#">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="A package manager for the Erlang ecosystem">
+    <meta name="sogou_site_verification" content="GrtyJPARqi">
+    <meta name="color-scheme" content="light dark">
+
+    <title data-default="Hex">Packages | Hex</title>
+
+    <script nonce="yqPcivOumL-G0rR_YSyPlCLgXik7lbB3OimDASc7ZJs">
+      (() => {
+        const storageKey = "hexpm-theme";
+
+        let storedTheme = null;
+
+        try {
+          storedTheme = window.localStorage.getItem(storageKey);
+        } catch (_error) {}
+
+        const systemTheme = window.matchMedia("(prefers-color-scheme: dark)").matches
+          ? "dark"
+          : "light";
+
+        const preference = storedTheme === "light" || storedTheme === "dark" ? storedTheme : "system";
+        const theme = preference === "system" ? systemTheme : preference;
+
+        document.documentElement.setAttribute("data-theme", theme);
+        document.documentElement.setAttribute("data-theme-preference", preference);
+        document.documentElement.style.colorScheme = theme;
+      })();
+    </script>
+
+    <meta content="Packages" property="og:title"><meta content="website" property="og:type"><meta property="og:url"><meta content="https://hex.pm/images/favicon-160-3770bc59f1f8ba7656b4db5a1eacd8e3.png?vsn=d" property="og:image"><meta content="160" property="og:image:width"><meta content="160" property="og:image:height"><meta content="A package manager for the Erlang ecosystem" property="og:description"><meta content="Hex" property="og:site_name">
+    
+    <meta content="IhMUDnMEIyweQCk7FDB-TGhDJEgnLTc0lKCm9huyLxFwmQKx-um0eKuA" name="csrf-token">
+
+    <link rel="icon" type="image/svg+xml" href="/images/hex-full-a8183c4f9adac71516516d107d402b18.svg?vsn=d">
+    <link rel="search" type="application/opensearchdescription+xml" title="Hex" href="/hexsearch.xml">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@100;200;300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" nonce="8oTGYijiCUfS_mAWWjKsCMGNBjXvpMzhlfNGvQXKnm0">
+    <link rel="stylesheet" href="/assets/app-a98488357f48df217d9d56e76174d189.css?vsn=d" nonce="8oTGYijiCUfS_mAWWjKsCMGNBjXvpMzhlfNGvQXKnm0">
+    <link rel="alternate" type="application/rss+xml" title="RSS - Blog" href="/feeds/blog.xml">
+
+      <script async defer src="https://s.hex.pm/js/script.js" nonce="yqPcivOumL-G0rR_YSyPlCLgXik7lbB3OimDASc7ZJs">
+      </script>
+      <script nonce="yqPcivOumL-G0rR_YSyPlCLgXik7lbB3OimDASc7ZJs">
+        window.plausible=window.plausible||function(){(plausible.q=plausible.q||[]).push(arguments)},plausible.init=plausible.init||function(i){plausible.o=i||{}};plausible.init({endpoint:"https://s.hex.pm/api/event",captureOnLocalhost:true})
+      </script>
+
+  </head>
+
+  <body>
+    <!--[if lt IE 10]>
+      <p class="browserupgrade">You are using an <strong>outdated</strong> browser. Please <a href="http://browsehappy.com/">upgrade your browser</a> to improve your experience.</p>
+    <![endif]-->
+
+    <div id="phx-GMvhyjFoCUrZNw5h" data-phx-main data-phx-session="SFMyNTY.g2gDaAJhBnQAAAAIdwJpZG0AAAAUcGh4LUdNdmh5akZvQ1VyWk53NWh3B3Nlc3Npb250AAAAAW0AAAAJcmVtb3RlX2lwaARhYGEUYXRhBXcEdmlld3chRWxpeGlyLkhleHBtV2ViLlBhY2thZ2VMaXZlLkluZGV4dwpwYXJlbnRfcGlkdwNuaWx3BnJvdXRlcncWRWxpeGlyLkhleHBtV2ViLlJvdXRlcncIcm9vdF9waWR3A25pbHcJcm9vdF92aWV3dyFFbGl4aXIuSGV4cG1XZWIuUGFja2FnZUxpdmUuSW5kZXh3EWxpdmVfc2Vzc2lvbl9uYW1ldwhwYWNrYWdlc24GAHSNyQOgAWIAAVGA.DXA9Sfc4qABgU1rmuZfTnmUTkeeIHXOx6L1PJ5jPJGY" data-phx-static="SFMyNTY.g2gDaAJhBnQAAAADdwJpZG0AAAAUcGh4LUdNdmh5akZvQ1VyWk53NWh3BWZsYXNodAAAAAB3CmFzc2lnbl9uZXdsAAAAAncUY3VycmVudF9vcmdhbml6YXRpb253DGN1cnJlbnRfdXNlcmpuBgB0jckDoAFiAAFRgA.qdDknxn8n5G9UzP1ZtUdDxb-U1bVBNXZwbsR2rxs5hg"><div class="min-h-dvh flex flex-col">
+  <section class="flex flex-1 flex-col">
+    
+
+    <nav id="main-navbar" class="bg-grey-800 w-full font-sans">
+  <div class="max-w-7xl mx-auto px-4">
+    <div class="flex items-center justify-between h-[72px] gap-8 lg:gap-20">
+      <a href="/" class="shrink-0 flex items-center gap-3">
+  <img src="/images/hex-full-a8183c4f9adac71516516d107d402b18.svg?vsn=d" alt="hex logo" class="h-8 w-auto">
+  <span class="text-white text-2xl font-bold tracking-tight">
+    Hex
+  </span>
+</a>
+      <div class="hidden lg:flex items-center flex-1 justify-end gap-10">
+  <div class="min-w-0 flex-1 mr-auto">
+  <div class="max-w-[420px] w-full">
+    <div id="nav-search" data-phx-session="" data-phx-static="SFMyNTY.g2gDaAJhBnQAAAADdwJpZG0AAAAKbmF2LXNlYXJjaHcFZmxhc2h0AAAAAHcKYXNzaWduX25ld2puBgB0jckDoAFiAAFRgA.RozzIaqawj2uQiqPovsRuei2EDyzH4WX5ZxtVzbpHKo" data-phx-parent-id="phx-GMvhyjFoCUrZNw5h"><form id="nav-search-form" method="get" action="/packages" role="search" class="min-w-0 flex-1" phx-change="suggest" phx-submit="submit" autocomplete="off">
+  <div class="relative flex items-center" phx-click-away="close" phx-hook="SearchInputSync" id="nav-search-wrapper">
+    <div class="absolute left-3 pointer-events-none">
+      <svg aria-hidden="true" class="heroicon heroicon-magnifying-glass text-grey-300" fill="none" height="18" title="magnifying-glass" version="1.1" viewBox="0 0 24 24" width="18"><g title="magnifying-glass"><path d="M21 21L15.8033 15.8033M15.8033 15.8033C17.1605 14.4461 18 12.5711 18 10.5C18 6.35786 14.6421 3 10.5 3C6.35786 3 3 6.35786 3 10.5C3 14.6421 6.35786 18 10.5 18C12.5711 18 14.4461 17.1605 15.8033 15.8033Z" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" /></g></svg>
+    </div>
+    <input type="search" placeholder="Find packages..." name="search" id="nav-search-input" value="" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="nav-suggest-list" phx-keydown="keydown" phx-debounce="100" phx-hook="SearchShortcut" class="w-full h-[40px] bg-grey-800 border border-grey-600 rounded-lg px-3 pl-10 py-[11px] text-white leading-4 placeholder:text-grey-300 focus:outline-none focus:border-grey-500 focus:shadow-[inset_0px_0px_6px_0px_rgba(255,255,255,0.3)]">
+    <input type="hidden" name="sort" value="recent_downloads">
+    <label class="sr-only" for="nav-search-input">Find packages</label>
+
+    
+  </div>
+</form></div>
+  </div>
+</div>
+  <a href="/packages" class="text-grey-200 text-md hover:text-white transition-colors">
+  Packages
+</a>
+<a href="/pricing" class="text-grey-200 text-md hover:text-white transition-colors">
+  Pricing
+</a>
+<a href="/docs" class="text-grey-200 text-md hover:text-white transition-colors">
+  Docs
+</a>
+  <div class="relative flex items-center ">
+  <button type="button" data-theme-toggle class="inline-flex items-center justify-center text-grey-200 transition-colors hover:text-white cursor-pointer h-5 w-5" aria-label="Change theme" aria-haspopup="true">
+    <span class="sr-only">Change color theme</span>
+    <span data-theme-icon="light">
+      <svg aria-hidden="true" class="heroicon heroicon-sun" fill="none" height="18" title="sun" version="1.1" viewBox="0 0 24 24" width="18"><g title="sun"><path d="M12 3V5.25M18.364 5.63604L16.773 7.22703M21 12H18.75M18.364 18.364L16.773 16.773M12 18.75V21M7.22703 16.773L5.63604 18.364M5.25 12H3M7.22703 7.22703L5.63604 5.63604M15.75 12C15.75 14.0711 14.0711 15.75 12 15.75C9.92893 15.75 8.25 14.0711 8.25 12C8.25 9.92893 9.92893 8.25 12 8.25C14.0711 8.25 15.75 9.92893 15.75 12Z" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" /></g></svg>
+    </span>
+    <span data-theme-icon="dark">
+      <svg aria-hidden="true" class="heroicon heroicon-moon" fill="none" height="18" title="moon" version="1.1" viewBox="0 0 24 24" width="18"><g title="moon"><path d="M21.7519 15.0021C20.597 15.484 19.3296 15.7501 18 15.7501C12.6152 15.7501 8.25 11.3849 8.25 6.00011C8.25 4.67052 8.51614 3.40308 8.99806 2.24817C5.47566 3.71798 3 7.19493 3 11.2501C3 16.6349 7.36522 21.0001 12.75 21.0001C16.8052 21.0001 20.2821 18.5245 21.7519 15.0021Z" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" /></g></svg>
+    </span>
+    <span data-theme-icon="system">
+      <svg aria-hidden="true" class="heroicon heroicon-computer-desktop" fill="none" height="18" title="computer-desktop" version="1.1" viewBox="0 0 24 24" width="18"><g title="computer-desktop"><path d="M9 17.25V18.2574C9 19.053 8.68393 19.8161 8.12132 20.3787L7.5 21H16.5L15.8787 20.3787C15.3161 19.8161 15 19.053 15 18.2574V17.25M21 5.25V15C21 16.2426 19.9926 17.25 18.75 17.25H5.25C4.00736 17.25 3 16.2426 3 15V5.25M21 5.25C21 4.00736 19.9926 3 18.75 3H5.25C4.00736 3 3 4.00736 3 5.25M21 5.25V12C21 13.2426 19.9926 14.25 18.75 14.25H5.25C4.00736 14.25 3 13.2426 3 12V5.25" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" /></g></svg>
+    </span>
+  </button>
+
+  <div data-theme-menu class="hidden absolute right-0 top-full mt-2 w-36 bg-grey-700 border border-grey-600 rounded-lg shadow-lg py-1 z-50">
+    <button type="button" data-theme-choice="light" class="w-full flex items-center gap-2 px-4 py-2 text-sm text-grey-200 hover:bg-grey-600 transition-colors cursor-pointer">
+      <svg aria-hidden="true" class="heroicon heroicon-sun" fill="none" height="16" title="sun" version="1.1" viewBox="0 0 24 24" width="16"><g title="sun"><path d="M12 3V5.25M18.364 5.63604L16.773 7.22703M21 12H18.75M18.364 18.364L16.773 16.773M12 18.75V21M7.22703 16.773L5.63604 18.364M5.25 12H3M7.22703 7.22703L5.63604 5.63604M15.75 12C15.75 14.0711 14.0711 15.75 12 15.75C9.92893 15.75 8.25 14.0711 8.25 12C8.25 9.92893 9.92893 8.25 12 8.25C14.0711 8.25 15.75 9.92893 15.75 12Z" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" /></g></svg> Light
+    </button>
+    <button type="button" data-theme-choice="dark" class="w-full flex items-center gap-2 px-4 py-2 text-sm text-grey-200 hover:bg-grey-600 transition-colors cursor-pointer">
+      <svg aria-hidden="true" class="heroicon heroicon-moon" fill="none" height="16" title="moon" version="1.1" viewBox="0 0 24 24" width="16"><g title="moon"><path d="M21.7519 15.0021C20.597 15.484 19.3296 15.7501 18 15.7501C12.6152 15.7501 8.25 11.3849 8.25 6.00011C8.25 4.67052 8.51614 3.40308 8.99806 2.24817C5.47566 3.71798 3 7.19493 3 11.2501C3 16.6349 7.36522 21.0001 12.75 21.0001C16.8052 21.0001 20.2821 18.5245 21.7519 15.0021Z" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" /></g></svg> Dark
+    </button>
+    <button type="button" data-theme-choice="system" class="w-full flex items-center gap-2 px-4 py-2 text-sm text-grey-200 hover:bg-grey-600 transition-colors cursor-pointer">
+      <svg aria-hidden="true" class="heroicon heroicon-computer-desktop" fill="none" height="16" title="computer-desktop" version="1.1" viewBox="0 0 24 24" width="16"><g title="computer-desktop"><path d="M9 17.25V18.2574C9 19.053 8.68393 19.8161 8.12132 20.3787L7.5 21H16.5L15.8787 20.3787C15.3161 19.8161 15 19.053 15 18.2574V17.25M21 5.25V15C21 16.2426 19.9926 17.25 18.75 17.25H5.25C4.00736 17.25 3 16.2426 3 15V5.25M21 5.25C21 4.00736 19.9926 3 18.75 3H5.25C4.00736 3 3 4.00736 3 5.25M21 5.25V12C21 13.2426 19.9926 14.25 18.75 14.25H5.25C4.00736 14.25 3 13.2426 3 12V5.25" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" /></g></svg> System
+    </button>
+  </div>
+</div>
+  
+<a href="/login" class="inline-flex items-center justify-center whitespace-nowrap bg-grey-400 px-6 py-1 rounded-lg text-white text-md hover:bg-grey-500 hover:scale-105 transition-all duration-200">
+  Log In
+</a>
+</div>
+      <div class="flex lg:hidden items-center gap-6">
+  
+  <div class="relative flex items-center ">
+  <button type="button" data-theme-toggle class="inline-flex items-center justify-center text-grey-200 transition-colors hover:text-white cursor-pointer h-10 w-10" aria-label="Change theme" aria-haspopup="true">
+    <span class="sr-only">Change color theme</span>
+    <span data-theme-icon="light">
+      <svg aria-hidden="true" class="heroicon heroicon-sun" fill="none" height="18" title="sun" version="1.1" viewBox="0 0 24 24" width="18"><g title="sun"><path d="M12 3V5.25M18.364 5.63604L16.773 7.22703M21 12H18.75M18.364 18.364L16.773 16.773M12 18.75V21M7.22703 16.773L5.63604 18.364M5.25 12H3M7.22703 7.22703L5.63604 5.63604M15.75 12C15.75 14.0711 14.0711 15.75 12 15.75C9.92893 15.75 8.25 14.0711 8.25 12C8.25 9.92893 9.92893 8.25 12 8.25C14.0711 8.25 15.75 9.92893 15.75 12Z" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" /></g></svg>
+    </span>
+    <span data-theme-icon="dark">
+      <svg aria-hidden="true" class="heroicon heroicon-moon" fill="none" height="18" title="moon" version="1.1" viewBox="0 0 24 24" width="18"><g title="moon"><path d="M21.7519 15.0021C20.597 15.484 19.3296 15.7501 18 15.7501C12.6152 15.7501 8.25 11.3849 8.25 6.00011C8.25 4.67052 8.51614 3.40308 8.99806 2.24817C5.47566 3.71798 3 7.19493 3 11.2501C3 16.6349 7.36522 21.0001 12.75 21.0001C16.8052 21.0001 20.2821 18.5245 21.7519 15.0021Z" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" /></g></svg>
+    </span>
+    <span data-theme-icon="system">
+      <svg aria-hidden="true" class="heroicon heroicon-computer-desktop" fill="none" height="18" title="computer-desktop" version="1.1" viewBox="0 0 24 24" width="18"><g title="computer-desktop"><path d="M9 17.25V18.2574C9 19.053 8.68393 19.8161 8.12132 20.3787L7.5 21H16.5L15.8787 20.3787C15.3161 19.8161 15 19.053 15 18.2574V17.25M21 5.25V15C21 16.2426 19.9926 17.25 18.75 17.25H5.25C4.00736 17.25 3 16.2426 3 15V5.25M21 5.25C21 4.00736 19.9926 3 18.75 3H5.25C4.00736 3 3 4.00736 3 5.25M21 5.25V12C21 13.2426 19.9926 14.25 18.75 14.25H5.25C4.00736 14.25 3 13.2426 3 12V5.25" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" /></g></svg>
+    </span>
+  </button>
+
+  <div data-theme-menu class="hidden absolute right-0 top-full mt-2 w-36 bg-grey-700 border border-grey-600 rounded-lg shadow-lg py-1 z-50">
+    <button type="button" data-theme-choice="light" class="w-full flex items-center gap-2 px-4 py-2 text-sm text-grey-200 hover:bg-grey-600 transition-colors cursor-pointer">
+      <svg aria-hidden="true" class="heroicon heroicon-sun" fill="none" height="16" title="sun" version="1.1" viewBox="0 0 24 24" width="16"><g title="sun"><path d="M12 3V5.25M18.364 5.63604L16.773 7.22703M21 12H18.75M18.364 18.364L16.773 16.773M12 18.75V21M7.22703 16.773L5.63604 18.364M5.25 12H3M7.22703 7.22703L5.63604 5.63604M15.75 12C15.75 14.0711 14.0711 15.75 12 15.75C9.92893 15.75 8.25 14.0711 8.25 12C8.25 9.92893 9.92893 8.25 12 8.25C14.0711 8.25 15.75 9.92893 15.75 12Z" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" /></g></svg> Light
+    </button>
+    <button type="button" data-theme-choice="dark" class="w-full flex items-center gap-2 px-4 py-2 text-sm text-grey-200 hover:bg-grey-600 transition-colors cursor-pointer">
+      <svg aria-hidden="true" class="heroicon heroicon-moon" fill="none" height="16" title="moon" version="1.1" viewBox="0 0 24 24" width="16"><g title="moon"><path d="M21.7519 15.0021C20.597 15.484 19.3296 15.7501 18 15.7501C12.6152 15.7501 8.25 11.3849 8.25 6.00011C8.25 4.67052 8.51614 3.40308 8.99806 2.24817C5.47566 3.71798 3 7.19493 3 11.2501C3 16.6349 7.36522 21.0001 12.75 21.0001C16.8052 21.0001 20.2821 18.5245 21.7519 15.0021Z" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" /></g></svg> Dark
+    </button>
+    <button type="button" data-theme-choice="system" class="w-full flex items-center gap-2 px-4 py-2 text-sm text-grey-200 hover:bg-grey-600 transition-colors cursor-pointer">
+      <svg aria-hidden="true" class="heroicon heroicon-computer-desktop" fill="none" height="16" title="computer-desktop" version="1.1" viewBox="0 0 24 24" width="16"><g title="computer-desktop"><path d="M9 17.25V18.2574C9 19.053 8.68393 19.8161 8.12132 20.3787L7.5 21H16.5L15.8787 20.3787C15.3161 19.8161 15 19.053 15 18.2574V17.25M21 5.25V15C21 16.2426 19.9926 17.25 18.75 17.25H5.25C4.00736 17.25 3 16.2426 3 15V5.25M21 5.25C21 4.00736 19.9926 3 18.75 3H5.25C4.00736 3 3 4.00736 3 5.25M21 5.25V12C21 13.2426 19.9926 14.25 18.75 14.25H5.25C4.00736 14.25 3 13.2426 3 12V5.25" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" /></g></svg> System
+    </button>
+  </div>
+</div>
+  <button type="button" class="text-grey-200 p-0 cursor-pointer " phx-click="[[&quot;toggle&quot;,{&quot;ins&quot;:[[&quot;transition-all&quot;,&quot;ease-out&quot;,&quot;duration-200&quot;,&quot;transform&quot;],[&quot;opacity-0&quot;,&quot;-translate-y-2&quot;],[&quot;opacity-100&quot;,&quot;translate-y-0&quot;]],&quot;to&quot;:&quot;#mobile-search-bar&quot;,&quot;outs&quot;:[[&quot;transition-all&quot;,&quot;ease-in&quot;,&quot;duration-150&quot;,&quot;transform&quot;],[&quot;opacity-100&quot;,&quot;translate-y-0&quot;],[&quot;opacity-0&quot;,&quot;-translate-y-2&quot;]]}],[&quot;hide&quot;,{&quot;to&quot;:&quot;#navbar-mobile&quot;}],[&quot;show&quot;,{&quot;to&quot;:&quot;#menu-open-icon&quot;}],[&quot;hide&quot;,{&quot;to&quot;:&quot;#menu-close-icon&quot;}],[&quot;focus&quot;,{&quot;to&quot;:&quot;#mobile-search-input&quot;}]]" aria-label="Search" aria-expanded="false" aria-controls="mobile-search-bar">
+  <svg aria-hidden="true" class="heroicon heroicon-magnifying-glass" fill="none" height="18" title="magnifying-glass" version="1.1" viewBox="0 0 24 24" width="18"><g title="magnifying-glass"><path d="M21 21L15.8033 15.8033M15.8033 15.8033C17.1605 14.4461 18 12.5711 18 10.5C18 6.35786 14.6421 3 10.5 3C6.35786 3 3 6.35786 3 10.5C3 14.6421 6.35786 18 10.5 18C12.5711 18 14.4461 17.1605 15.8033 15.8033Z" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" /></g></svg>
+</button>
+  <button type="button" class="bg-grey-700 rounded-lg p-[10px] w-10 h-10 flex items-center justify-center cursor-pointer " phx-click="[[&quot;toggle&quot;,{&quot;ins&quot;:[[&quot;transition-all&quot;,&quot;ease-out&quot;,&quot;duration-300&quot;,&quot;transform&quot;],[&quot;opacity-0&quot;,&quot;-translate-y-2&quot;],[&quot;opacity-100&quot;,&quot;translate-y-0&quot;]],&quot;to&quot;:&quot;#navbar-mobile&quot;,&quot;outs&quot;:[[&quot;transition-all&quot;,&quot;ease-in&quot;,&quot;duration-200&quot;,&quot;transform&quot;],[&quot;opacity-100&quot;,&quot;translate-y-0&quot;],[&quot;opacity-0&quot;,&quot;-translate-y-2&quot;]]}],[&quot;toggle&quot;,{&quot;to&quot;:&quot;#menu-open-icon&quot;}],[&quot;toggle&quot;,{&quot;to&quot;:&quot;#menu-close-icon&quot;}],[&quot;hide&quot;,{&quot;to&quot;:&quot;#mobile-search-bar&quot;}]]" aria-expanded="false" aria-controls="navbar-mobile">
+  <span class="sr-only">Toggle navigation</span>
+  
+  <span id="menu-open-icon" class="block">
+    <svg aria-hidden="true" class="heroicon heroicon-bars-3 text-grey-200" fill="none" height="20" title="bars-3" version="1.1" viewBox="0 0 24 24" width="20"><g title="bars-3"><path d="M3.75 6.75H20.25M3.75 12H20.25M3.75 17.25H20.25" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" /></g></svg>
+  </span>
+  
+  <span id="menu-close-icon" class="hidden">
+    <svg aria-hidden="true" class="heroicon heroicon-x-mark text-grey-200" fill="none" height="20" title="x-mark" version="1.1" viewBox="0 0 24 24" width="20"><g title="x-mark"><path d="M6 18L18 6M6 6L18 18" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" /></g></svg>
+  </span>
+</button>
+</div>
+    </div>
+
+    <div id="mobile-search-bar" class="hidden lg:hidden! bg-grey-800 pb-4">
+  <div class="flex items-center gap-2">
+    <form id="mobile-search-bar-form" role="search" action="/packages" class="flex-1" phx-submit="[[&quot;dispatch&quot;,{&quot;event&quot;:&quot;blur-active&quot;}],[&quot;push&quot;,{&quot;event&quot;:&quot;search_submit&quot;}]]" phx-hook="FormSync" data-sync-to="mobile-menu-search-form">
+      <div class="relative">
+        <div class="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none">
+          <svg aria-hidden="true" class="heroicon heroicon-magnifying-glass text-grey-300" fill="none" height="18" title="magnifying-glass" version="1.1" viewBox="0 0 24 24" width="18"><g title="magnifying-glass"><path d="M21 21L15.8033 15.8033M15.8033 15.8033C17.1605 14.4461 18 12.5711 18 10.5C18 6.35786 14.6421 3 10.5 3C6.35786 3 3 6.35786 3 10.5C3 14.6421 6.35786 18 10.5 18C12.5711 18 14.4461 17.1605 15.8033 15.8033Z" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" /></g></svg>
+        </div>
+        <input id="mobile-search-input" name="search" type="search" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="Find packages..." class="w-full bg-grey-800 border border-grey-600 rounded-lg px-3 pl-10 py-[11px] text-white text-base font-medium leading-4 placeholder:text-grey-300 focus:outline-none focus:border-grey-500 focus:shadow-[inset_0px_0px_6px_0px_rgba(255,255,255,0.3)]">
+        
+      </div>
+    </form>
+    <button type="button" phx-click="[[&quot;remove_class&quot;,{&quot;names&quot;:[&quot;hidden&quot;],&quot;to&quot;:&quot;#search-cheatsheet&quot;,&quot;transition&quot;:[[&quot;transition-all&quot;,&quot;transform&quot;,&quot;ease-out&quot;,&quot;duration-300&quot;],[&quot;opacity-0&quot;],[&quot;opacity-100&quot;]]}],[&quot;remove_class&quot;,{&quot;names&quot;:[&quot;hidden&quot;],&quot;to&quot;:&quot;#search-cheatsheet-backdrop&quot;,&quot;transition&quot;:[[&quot;transition-all&quot;,&quot;transform&quot;,&quot;ease-out&quot;,&quot;duration-300&quot;],[&quot;opacity-0&quot;],[&quot;opacity-100&quot;]]}],[&quot;remove_class&quot;,{&quot;names&quot;:[&quot;hidden&quot;],&quot;to&quot;:&quot;#search-cheatsheet-content&quot;,&quot;transition&quot;:[[&quot;transition-all&quot;,&quot;transform&quot;,&quot;ease-out&quot;,&quot;duration-300&quot;],[&quot;opacity-0&quot;,&quot;translate-y-4&quot;,&quot;sm:translate-y-0&quot;,&quot;sm:scale-95&quot;],[&quot;opacity-100&quot;,&quot;translate-y-0&quot;,&quot;sm:scale-100&quot;]]}],[&quot;add_class&quot;,{&quot;names&quot;:[&quot;overflow-hidden&quot;],&quot;to&quot;:&quot;body&quot;}],[&quot;focus_first&quot;,{&quot;to&quot;:&quot;#search-cheatsheet-content&quot;}]]" aria-label="Search filter cheatsheet" class="flex items-center justify-center w-[43px] self-stretch shrink-0 text-grey-200 hover:text-white border border-grey-600 rounded-lg text-sm font-medium cursor-pointer">
+      ?
+    </button>
+  </div>
+</div>
+    <div id="navbar-mobile" class="hidden lg:hidden! bg-grey-800 pb-6">
+  <div class="flex flex-col">
+    <div class="flex items-center gap-2 pb-4">
+      <form id="mobile-menu-search-form" role="search" action="/packages" class="flex-1" phx-submit="[[&quot;dispatch&quot;,{&quot;event&quot;:&quot;blur-active&quot;}],[&quot;push&quot;,{&quot;event&quot;:&quot;search_submit&quot;}]]" phx-hook="FormSync" data-sync-to="mobile-search-bar-form" phx-auto-recover="ignore">
+        <div class="relative">
+          <div class="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none">
+            <svg aria-hidden="true" class="heroicon heroicon-magnifying-glass text-grey-300" fill="none" height="18" title="magnifying-glass" version="1.1" viewBox="0 0 24 24" width="18"><g title="magnifying-glass"><path d="M21 21L15.8033 15.8033M15.8033 15.8033C17.1605 14.4461 18 12.5711 18 10.5C18 6.35786 14.6421 3 10.5 3C6.35786 3 3 6.35786 3 10.5C3 14.6421 6.35786 18 10.5 18C12.5711 18 14.4461 17.1605 15.8033 15.8033Z" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" /></g></svg>
+          </div>
+          <input name="search" type="search" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="Find packages..." class="w-full bg-grey-800 border border-grey-600 rounded-lg px-3 pl-10 py-[11px] text-white text-base font-medium leading-4 placeholder:text-grey-300 focus:outline-none focus:border-grey-500 focus:shadow-[inset_0px_0px_6px_0px_rgba(255,255,255,0.3)]">
+          
+        </div>
+      </form>
+      <button type="button" phx-click="[[&quot;remove_class&quot;,{&quot;names&quot;:[&quot;hidden&quot;],&quot;to&quot;:&quot;#search-cheatsheet&quot;,&quot;transition&quot;:[[&quot;transition-all&quot;,&quot;transform&quot;,&quot;ease-out&quot;,&quot;duration-300&quot;],[&quot;opacity-0&quot;],[&quot;opacity-100&quot;]]}],[&quot;remove_class&quot;,{&quot;names&quot;:[&quot;hidden&quot;],&quot;to&quot;:&quot;#search-cheatsheet-backdrop&quot;,&quot;transition&quot;:[[&quot;transition-all&quot;,&quot;transform&quot;,&quot;ease-out&quot;,&quot;duration-300&quot;],[&quot;opacity-0&quot;],[&quot;opacity-100&quot;]]}],[&quot;remove_class&quot;,{&quot;names&quot;:[&quot;hidden&quot;],&quot;to&quot;:&quot;#search-cheatsheet-content&quot;,&quot;transition&quot;:[[&quot;transition-all&quot;,&quot;transform&quot;,&quot;ease-out&quot;,&quot;duration-300&quot;],[&quot;opacity-0&quot;,&quot;translate-y-4&quot;,&quot;sm:translate-y-0&quot;,&quot;sm:scale-95&quot;],[&quot;opacity-100&quot;,&quot;translate-y-0&quot;,&quot;sm:scale-100&quot;]]}],[&quot;add_class&quot;,{&quot;names&quot;:[&quot;overflow-hidden&quot;],&quot;to&quot;:&quot;body&quot;}],[&quot;focus_first&quot;,{&quot;to&quot;:&quot;#search-cheatsheet-content&quot;}]]" aria-label="Search filter cheatsheet" class="flex items-center justify-center w-[43px] self-stretch shrink-0 text-grey-200 hover:text-white border border-grey-600 rounded-lg text-sm font-medium cursor-pointer">
+        ?
+      </button>
+    </div>
+    <a href="/packages" class="text-grey-200 text-md py-2 hover:text-white">
+  Packages
+</a>
+<a href="/pricing" class="text-grey-200 text-md py-2 hover:text-white">
+  Pricing
+</a>
+<a href="/docs" class="text-grey-200 text-md py-2 hover:text-white">
+  Docs
+</a>
+    
+<a href="/login" class="bg-grey-600 px-6 py-[11px] rounded-lg text-white text-md text-center hover:bg-grey-500 mt-2">
+  Log In
+</a>
+  </div>
+</div>
+  </div>
+</nav>
+
+      <div class="sticky top-4 z-50 h-0 pointer-events-none">
+        <div id="flash-container" class="max-w-7xl mx-auto px-4 flex flex-col items-end gap-3 pt-3">
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+
+    <main class="flex flex-1 flex-col bg-slate-100 dark:bg-grey-950">
+      <div class="bg-white dark:bg-grey-950 min-h-dvh">
+  
+  <header class="bg-white dark:bg-grey-950 border-b border-grey-100 dark:border-grey-700 pt-14 pb-6">
+    <div class="max-w-7xl mx-auto px-4">
+      <h1 class="text-h2 font-bold tracking-[-0.02em] text-grey-900 dark:text-grey-100 m-0">
+        Packages
+      </h1>
+      <p class="mt-2 text-body text-grey-500 dark:text-grey-300">
+        Browse and discover packages for the Erlang ecosystem
+      </p>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto px-4 pt-8 pb-20">
+    
+    <div class="md:hidden sticky top-0 z-20 -mx-4 px-4 py-2.5 mb-3 bg-white/95 dark:bg-grey-900/95 backdrop-blur border-b border-grey-100 dark:border-grey-700 flex items-center gap-2">
+      <button type="button" phx-click="[[&quot;remove_class&quot;,{&quot;names&quot;:[&quot;hidden&quot;],&quot;to&quot;:&quot;#filter-sheet&quot;}],[&quot;add_class&quot;,{&quot;names&quot;:[&quot;flex&quot;],&quot;to&quot;:&quot;#filter-sheet&quot;}],[&quot;set_attr&quot;,{&quot;attr&quot;:[&quot;aria-hidden&quot;,&quot;false&quot;],&quot;to&quot;:&quot;#filter-sheet&quot;}]]" class="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border-[1.5px] border-grey-900 dark:border-grey-100 bg-transparent text-grey-900 dark:text-grey-100 text-small font-medium hover:bg-grey-900 hover:text-white dark:hover:bg-grey-100 dark:hover:text-grey-900 transition-colors">
+        <svg aria-hidden="true" class="heroicon heroicon-funnel" fill="none" height="14" title="funnel" version="1.1" viewBox="0 0 24 24" width="14"><g title="funnel"><path d="M12.0001 3C14.7548 3 17.4552 3.23205 20.0831 3.67767C20.6159 3.76803 21 4.23355 21 4.77402V5.81802C21 6.41476 20.7629 6.98705 20.341 7.40901L14.909 12.841C14.4871 13.2629 14.25 13.8352 14.25 14.432V17.3594C14.25 18.2117 13.7685 18.9908 13.0062 19.3719L9.75 21V14.432C9.75 13.8352 9.51295 13.2629 9.09099 12.841L3.65901 7.40901C3.23705 6.98705 3 6.41476 3 5.81802V4.77404C3 4.23357 3.38408 3.76805 3.91694 3.67769C6.54479 3.23206 9.24533 3 12.0001 3Z" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" /></g></svg> Filters
+        
+      </button>
+      <div class="flex-1"></div>
+      <form id="sort-form-mobile" phx-change="sort_change" phx-auto-recover="ignore" phx-hook="FormSync" data-sync-to="sort-form" class="inline-flex">
+        <label for="sort-select-mobile" class="sr-only">Sort</label>
+        <div class="relative">
+          <select id="sort-select-mobile" name="sort" class="appearance-none h-9 pl-3 pr-8 text-small font-medium bg-white dark:bg-grey-800 border border-grey-200 dark:border-grey-600 rounded-lg text-grey-600 dark:text-grey-200 cursor-pointer focus:outline-none focus:border-primary-600 focus:ring-[3px] focus:ring-primary-100 dark:focus:ring-primary-900/40 transition-[border-color,box-shadow] duration-150">
+            <option value="recent_downloads" selected>
+              Sort: Recent downloads
+            </option><option value="total_downloads">
+              Sort: Total downloads
+            </option><option value="updated_at">
+              Sort: Recently updated
+            </option><option value="inserted_at">
+              Sort: Recently created
+            </option><option value="name">
+              Sort: Name (A–Z)
+            </option>
+          </select>
+          <div class="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-grey-400 dark:text-grey-300">
+            <svg aria-hidden="true" class="heroicon heroicon-chevron-down" fill="none" height="12" title="chevron-down" version="1.1" viewBox="0 0 24 24" width="12"><g title="chevron-down"><path d="M19.5 8.25L12 15.75L4.5 8.25" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" /></g></svg>
+          </div>
+        </div>
+      </form>
+    </div>
+
+    
+    
+
+    <div class="md:grid md:grid-cols-[264px_1fr] md:gap-8">
+      
+      <aside class="hidden md:block w-full md:w-[264px] md:shrink-0 md:self-start md:sticky md:top-6" aria-label="Filters">
+  <div class="bg-white dark:bg-grey-800 border border-grey-100 dark:border-grey-700 rounded-xl p-5">
+    <div class="flex items-center justify-between gap-2 pb-4 mb-4 border-b border-grey-100 dark:border-grey-700">
+  <div class="flex items-baseline gap-2">
+  <span class="text-tiny font-semibold uppercase tracking-[0.08em] text-grey-400 dark:text-grey-300">
+    Filters
+  </span>
+  
+</div>
+</div>
+    <form id="filter-form" phx-change="filter_change" phx-hook="FormSync" data-sync-to="filter-form-mobile">
+  <div class="mb-[18px]">
+    <label class="flex items-center justify-between gap-2 text-small font-semibold text-grey-600 dark:text-grey-200 mb-1.5" for="filter-form-build-tool">
+      Build tool
+    </label>
+    <div class="relative">
+      <select id="filter-form-build-tool" name="build_tool" class="w-full h-9 pl-3 pr-8 text-small bg-white dark:bg-grey-700 border border-grey-200 dark:border-grey-600 rounded-lg text-grey-700 dark:text-grey-100 cursor-pointer appearance-none focus:outline-none focus:border-primary-600 focus:ring-[3px] focus:ring-primary-100 dark:focus:ring-primary-900/40 transition-[border-color,box-shadow] duration-150">
+        <option value="" selected>Any</option>
+        <option value="mix">
+          mix
+        </option><option value="rebar3">
+          rebar3
+        </option><option value="make">
+          make
+        </option><option value="gleam">
+          gleam
+        </option>
+      </select>
+      <div class="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-grey-400 dark:text-grey-300">
+        <svg aria-hidden="true" class="heroicon heroicon-chevron-down" fill="none" height="14" title="chevron-down" version="1.1" viewBox="0 0 24 24" width="14"><g title="chevron-down"><path d="M19.5 8.25L12 15.75L4.5 8.25" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" /></g></svg>
+      </div>
+    </div>
+  </div>
+
+  <div class="mb-[18px]">
+    <label class="flex items-center justify-between gap-2 text-small font-semibold text-grey-600 dark:text-grey-200 mb-1.5" for="filter-form-depends">
+      Depends on
+    </label>
+    <div class="relative">
+      <span class="absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-grey-300 dark:text-grey-400">
+        <svg aria-hidden="true" class="heroicon heroicon-magnifying-glass" fill="none" height="14" title="magnifying-glass" version="1.1" viewBox="0 0 24 24" width="14"><g title="magnifying-glass"><path d="M21 21L15.8033 15.8033M15.8033 15.8033C17.1605 14.4461 18 12.5711 18 10.5C18 6.35786 14.6421 3 10.5 3C6.35786 3 3 6.35786 3 10.5C3 14.6421 6.35786 18 10.5 18C12.5711 18 14.4461 17.1605 15.8033 15.8033Z" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" /></g></svg>
+      </span>
+      <input id="filter-form-depends" type="text" name="depends" value="" placeholder="package name" phx-debounce="300" class="w-full h-9 pl-[34px] pr-3 text-small bg-white dark:bg-grey-700 border border-grey-200 dark:border-grey-600 rounded-lg text-grey-700 dark:text-grey-100 placeholder:text-grey-300 dark:placeholder:text-grey-400 focus:outline-none focus:border-primary-600 focus:ring-[3px] focus:ring-primary-100 dark:focus:ring-primary-900/40 transition-[border-color,box-shadow] duration-150">
+    </div>
+  </div>
+
+  <div class="mb-5">
+    <label class="flex items-center justify-between gap-2 text-small font-semibold text-grey-600 dark:text-grey-200 mb-1.5" for="filter-form-updated-after">
+      <span>Updated after</span>
+      <span class="text-tiny font-normal text-grey-400 dark:text-grey-300">last release</span>
+    </label>
+    <input id="filter-form-updated-after" type="date" name="updated_after" value="" class="w-full h-9 px-3 text-small bg-white dark:bg-grey-700 border border-grey-200 dark:border-grey-600 rounded-lg text-grey-700 dark:text-grey-100 tabular-nums focus:outline-none focus:border-primary-600 focus:ring-[3px] focus:ring-primary-100 dark:focus:ring-primary-900/40 transition-[border-color,box-shadow] duration-150">
+  </div>
+</form>
+    <div class="flex gap-2 pt-4 border-t border-grey-100 dark:border-grey-700">
+  <button id="clear-filters" type="button" phx-click="clear_filters" class="flex-1 h-9 rounded-lg border-[1.5px] border-grey-900 dark:border-grey-100 bg-transparent text-grey-900 dark:text-grey-100 text-small font-medium hover:bg-grey-900 hover:text-white dark:hover:bg-grey-100 dark:hover:text-grey-900 transition-colors">
+    Clear all
+  </button>
+</div>
+  </div>
+</aside>
+
+      
+      <div class="min-w-0">
+        
+        
+
+        
+        
+
+        
+        <div>
+          
+          <div class="hidden md:flex items-end justify-between gap-6 mb-4">
+            <div>
+              <h2 class="text-[28px] leading-tight font-bold tracking-[-0.01em] text-grey-900 dark:text-grey-100 m-0">
+                All Packages
+              </h2>
+              <div class="text-small text-grey-500 dark:text-grey-300 mt-1.5">
+                <strong class="text-grey-700 dark:text-grey-100 font-semibold tabular-nums">
+                  22 374
+                </strong>
+                packages found 
+                <span class="inline-block w-[3px] h-[3px] rounded-full bg-grey-300 dark:bg-grey-500 align-middle mx-2"></span>
+                <span>
+                  Page 1 of 746
+                </span>
+              </div>
+            </div>
+            <div class="text-right shrink-0">
+              <label for="sort-select" class="block text-tiny font-semibold uppercase tracking-[0.08em] text-grey-400 dark:text-grey-300 mb-1.5">
+                Sort by
+              </label>
+              <form id="sort-form" phx-change="sort_change" phx-hook="FormSync" data-sync-to="sort-form-mobile">
+                <div class="relative min-w-[200px]">
+                  <select id="sort-select" name="sort" class="w-full h-9 pl-3 pr-8 text-small bg-white dark:bg-grey-800 border border-grey-200 dark:border-grey-600 rounded-lg text-grey-700 dark:text-grey-100 cursor-pointer appearance-none focus:outline-none focus:border-primary-600 focus:ring-[3px] focus:ring-primary-100 dark:focus:ring-primary-900/40 transition-[border-color,box-shadow] duration-150">
+                    <option value="recent_downloads" selected>
+                      Recent downloads
+                    </option><option value="total_downloads">
+                      Total downloads
+                    </option><option value="updated_at">
+                      Recently updated
+                    </option><option value="inserted_at">
+                      Recently created
+                    </option><option value="name">
+                      Name (A–Z)
+                    </option>
+                  </select>
+                  <div class="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-grey-400 dark:text-grey-300">
+                    <svg aria-hidden="true" class="heroicon heroicon-chevron-down" fill="none" height="14" title="chevron-down" version="1.1" viewBox="0 0 24 24" width="14"><g title="chevron-down"><path d="M19.5 8.25L12 15.75L4.5 8.25" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" /></g></svg>
+                  </div>
+                </div>
+              </form>
+            </div>
+          </div>
+
+          
+          <div class="md:hidden flex items-baseline justify-between mb-2 px-1">
+            <h2 class="text-[17px] font-bold text-grey-900 dark:text-grey-100 m-0">
+              All Packages
+            </h2>
+            <span class="text-caption text-grey-400 dark:text-grey-300 tabular-nums">
+              <strong class="text-grey-700 dark:text-grey-100 font-semibold">
+                22 374
+              </strong>
+              found
+            </span>
+          </div>
+
+          
+          <div class="bg-white dark:bg-grey-800 md:border md:border-grey-100 dark:md:border-grey-700 md:rounded-xl overflow-hidden">
+            <ul class="divide-y divide-grey-100 dark:divide-grey-700">
+              
+                
+<li class="group px-4 md:px-6 py-5 transition-colors hover:bg-grey-50 dark:hover:bg-grey-700/60">
+  <div class="flex flex-wrap items-baseline gap-2.5 min-w-0 mb-1">
+    <a href="/packages/jason" class="min-w-0 break-words text-xl font-semibold transition-colors text-grey-700 dark:text-grey-100 hover:text-primary-600 dark:hover:text-primary-300">
+      jason
+    </a>
+
+      <a href="/packages/jason" class="inline-flex shrink-0 items-center px-2 py-0.5 rounded text-xs font-medium transition-colors bg-grey-50 dark:bg-grey-700 border border-grey-100 dark:border-grey-600 text-grey-500 dark:text-grey-200 hover:bg-primary-100 dark:hover:bg-primary-900/30 hover:text-primary-700 dark:hover:text-primary-200">
+        v1.4.5
+      </a>
+
+
+  </div>
+
+  <div class="grid grid-cols-[minmax(0,1fr)_auto] gap-4 md:gap-6 items-start">
+
+    <div class="min-w-0">
+
+        <p class="text-grey-500 dark:text-grey-300 text-small leading-snug line-clamp-2 mb-1.5">
+          A blazing fast JSON parser and generator in pure Elixir.
+        </p>
+
+
+        <p class="text-grey-400 dark:text-grey-400 text-caption mt-1.5">
+          Updated <span title="May 05, 2026">3 months ago</span>
+        </p>
+
+    </div>
+
+    <div class="text-right shrink-0 w-fit">
+      <div class="text-[22px] font-bold tracking-[-0.01em] text-grey-900 dark:text-grey-100 tabular-nums leading-none">
+        6 842 699
+      </div>
+      <div class="text-grey-400 dark:text-grey-300 text-caption mt-1.5">
+        recent downloads
+      </div>
+      <div class="text-grey-400 dark:text-grey-300 text-caption mt-0.5 tabular-nums cursor-help hidden md:block" title="total downloads: 206 529 293">
+        total downloads: 206 529 293
+      </div>
+    </div>
+  </div>
+</li>
+              
+                
+<li class="group px-4 md:px-6 py-5 transition-colors hover:bg-grey-50 dark:hover:bg-grey-700/60">
+  <div class="flex flex-wrap items-baseline gap-2.5 min-w-0 mb-1">
+    <a href="/packages/telemetry" class="min-w-0 break-words text-xl font-semibold transition-colors text-grey-700 dark:text-grey-100 hover:text-primary-600 dark:hover:text-primary-300">
+      telemetry
+    </a>
+
+      <a href="/packages/telemetry" class="inline-flex shrink-0 items-center px-2 py-0.5 rounded text-xs font-medium transition-colors bg-grey-50 dark:bg-grey-700 border border-grey-100 dark:border-grey-600 text-grey-500 dark:text-grey-200 hover:bg-primary-100 dark:hover:bg-primary-900/30 hover:text-primary-700 dark:hover:text-primary-200">
+        v1.4.2
+      </a>
+
+
+  </div>
+
+  <div class="grid grid-cols-[minmax(0,1fr)_auto] gap-4 md:gap-6 items-start">
+
+    <div class="min-w-0">
+
+        <p class="text-grey-500 dark:text-grey-300 text-small leading-snug line-clamp-2 mb-1.5">
+          Dynamic dispatching library for metrics and instrumentations
+        </p>
+
+
+        <p class="text-grey-400 dark:text-grey-400 text-caption mt-1.5">
+          Updated <span title="May 11, 2026">3 months ago</span>
+        </p>
+
+    </div>
+
+    <div class="text-right shrink-0 w-fit">
+      <div class="text-[22px] font-bold tracking-[-0.01em] text-grey-900 dark:text-grey-100 tabular-nums leading-none">
+        5 699 210
+      </div>
+      <div class="text-grey-400 dark:text-grey-300 text-caption mt-1.5">
+        recent downloads
+      </div>
+      <div class="text-grey-400 dark:text-grey-300 text-caption mt-0.5 tabular-nums cursor-help hidden md:block" title="total downloads: 159 514 347">
+        total downloads: 159 514 347
+      </div>
+    </div>
+  </div>
+</li>
+              
+                
+<li class="group px-4 md:px-6 py-5 transition-colors hover:bg-grey-50 dark:hover:bg-grey-700/60">
+  <div class="flex flex-wrap items-baseline gap-2.5 min-w-0 mb-1">
+    <a href="/packages/plug" class="min-w-0 break-words text-xl font-semibold transition-colors text-grey-700 dark:text-grey-100 hover:text-primary-600 dark:hover:text-primary-300">
+      plug
+    </a>
+
+      <a href="/packages/plug" class="inline-flex shrink-0 items-center px-2 py-0.5 rounded text-xs font-medium transition-colors bg-grey-50 dark:bg-grey-700 border border-grey-100 dark:border-grey-600 text-grey-500 dark:text-grey-200 hover:bg-primary-100 dark:hover:bg-primary-900/30 hover:text-primary-700 dark:hover:text-primary-200">
+        v1.20.3
+      </a>
+
+
+  </div>
+
+  <div class="grid grid-cols-[minmax(0,1fr)_auto] gap-4 md:gap-6 items-start">
+
+    <div class="min-w-0">
+
+        <p class="text-grey-500 dark:text-grey-300 text-small leading-snug line-clamp-2 mb-1.5">
+          Compose web applications with functions
+        </p>
+
+
+        <p class="text-grey-400 dark:text-grey-400 text-caption mt-1.5">
+          Updated <span title="July 09, 2026">1 month ago</span>
+        </p>
+
+    </div>
+
+    <div class="text-right shrink-0 w-fit">
+      <div class="text-[22px] font-bold tracking-[-0.01em] text-grey-900 dark:text-grey-100 tabular-nums leading-none">
+        4 821 997
+      </div>
+      <div class="text-grey-400 dark:text-grey-300 text-caption mt-1.5">
+        recent downloads
+      </div>
+      <div class="text-grey-400 dark:text-grey-300 text-caption mt-0.5 tabular-nums cursor-help hidden md:block" title="total downloads: 162 749 549">
+        total downloads: 162 749 549
+      </div>
+    </div>
+  </div>
+</li>
+              
+                
+<li class="group px-4 md:px-6 py-5 transition-colors hover:bg-grey-50 dark:hover:bg-grey-700/60">
+  <div class="flex flex-wrap items-baseline gap-2.5 min-w-0 mb-1">
+    <a href="/packages/plug_crypto" class="min-w-0 break-words text-xl font-semibold transition-colors text-grey-700 dark:text-grey-100 hover:text-primary-600 dark:hover:text-primary-300">
+      plug_crypto
+    </a>
+
+      <a href="/packages/plug_crypto" class="inline-flex shrink-0 items-center px-2 py-0.5 rounded text-xs font-medium transition-colors bg-grey-50 dark:bg-grey-700 border border-grey-100 dark:border-grey-600 text-grey-500 dark:text-grey-200 hover:bg-primary-100 dark:hover:bg-primary-900/30 hover:text-primary-700 dark:hover:text-primary-200">
+        v2.2.0
+      </a>
+
+
+  </div>
+
+  <div class="grid grid-cols-[minmax(0,1fr)_auto] gap-4 md:gap-6 items-start">
+
+    <div class="min-w-0">
+
+        <p class="text-grey-500 dark:text-grey-300 text-small leading-snug line-clamp-2 mb-1.5">
+          Crypto-related functionality for the web
+        </p>
+
+
+        <p class="text-grey-400 dark:text-grey-400 text-caption mt-1.5">
+          Updated <span title="July 24, 2026">3 weeks ago</span>
+        </p>
+
+    </div>
+
+    <div class="text-right shrink-0 w-fit">
+      <div class="text-[22px] font-bold tracking-[-0.01em] text-grey-900 dark:text-grey-100 tabular-nums leading-none">
+        4 811 327
+      </div>
+      <div class="text-grey-400 dark:text-grey-300 text-caption mt-1.5">
+        recent downloads
+      </div>
+      <div class="text-grey-400 dark:text-grey-300 text-caption mt-0.5 tabular-nums cursor-help hidden md:block" title="total downloads: 154 249 073">
+        total downloads: 154 249 073
+      </div>
+    </div>
+  </div>
+</li>
+              
+                
+<li class="group px-4 md:px-6 py-5 transition-colors hover:bg-grey-50 dark:hover:bg-grey-700/60">
+  <div class="flex flex-wrap items-baseline gap-2.5 min-w-0 mb-1">
+    <a href="/packages/mime" class="min-w-0 break-words text-xl font-semibold transition-colors text-grey-700 dark:text-grey-100 hover:text-primary-600 dark:hover:text-primary-300">
+      mime
+    </a>
+
+      <a href="/packages/mime" class="inline-flex shrink-0 items-center px-2 py-0.5 rounded text-xs font-medium transition-colors bg-grey-50 dark:bg-grey-700 border border-grey-100 dark:border-grey-600 text-grey-500 dark:text-grey-200 hover:bg-primary-100 dark:hover:bg-primary-900/30 hover:text-primary-700 dark:hover:text-primary-200">
+        v2.0.7
+      </a>
+
+
+  </div>
+
+  <div class="grid grid-cols-[minmax(0,1fr)_auto] gap-4 md:gap-6 items-start">
+
+    <div class="min-w-0">
+
+        <p class="text-grey-500 dark:text-grey-300 text-small leading-snug line-clamp-2 mb-1.5">
+          A MIME type module for Elixir
+        </p>
+
+
+        <p class="text-grey-400 dark:text-grey-400 text-caption mt-1.5">
+          Updated <span title="May 15, 2025">about 1 year ago</span>
+        </p>
+
+    </div>
+
+    <div class="text-right shrink-0 w-fit">
+      <div class="text-[22px] font-bold tracking-[-0.01em] text-grey-900 dark:text-grey-100 tabular-nums leading-none">
+        4 801 581
+      </div>
+      <div class="text-grey-400 dark:text-grey-300 text-caption mt-1.5">
+        recent downloads
+      </div>
+      <div class="text-grey-400 dark:text-grey-300 text-caption mt-0.5 tabular-nums cursor-help hidden md:block" title="total downloads: 158 630 770">
+        total downloads: 158 630 770
+      </div>
+    </div>
+  </div>
+</li>
+              
+                
+<li class="group px-4 md:px-6 py-5 transition-colors hover:bg-grey-50 dark:hover:bg-grey-700/60">
+  <div class="flex flex-wrap items-baseline gap-2.5 min-w-0 mb-1">
+    <a href="/packages/decimal" class="min-w-0 break-words text-xl font-semibold transition-colors text-grey-700 dark:text-grey-100 hover:text-primary-600 dark:hover:text-primary-300">
+      decimal
+    </a>
+
+      <a href="/packages/decimal" class="inline-flex shrink-0 items-center px-2 py-0.5 rounded text-xs font-medium transition-colors bg-grey-50 dark:bg-grey-700 border border-grey-100 dark:border-grey-600 text-grey-500 dark:text-grey-200 hover:bg-primary-100 dark:hover:bg-primary-900/30 hover:text-primary-700 dark:hover:text-primary-200">
+        v3.1.1
+      </a>
+
+
+  </div>
+
+  <div class="grid grid-cols-[minmax(0,1fr)_auto] gap-4 md:gap-6 items-start">
+
+    <div class="min-w-0">
+
+        <p class="text-grey-500 dark:text-grey-300 text-small leading-snug line-clamp-2 mb-1.5">
+          Arbitrary precision decimal arithmetic.
+        </p>
+
+
+        <p class="text-grey-400 dark:text-grey-400 text-caption mt-1.5">
+          Updated <span title="May 27, 2026">2 months ago</span>
+        </p>
+
+    </div>
+
+    <div class="text-right shrink-0 w-fit">
+      <div class="text-[22px] font-bold tracking-[-0.01em] text-grey-900 dark:text-grey-100 tabular-nums leading-none">
+        4 751 290
+      </div>
+      <div class="text-grey-400 dark:text-grey-300 text-caption mt-1.5">
+        recent downloads
+      </div>
+      <div class="text-grey-400 dark:text-grey-300 text-caption mt-0.5 tabular-nums cursor-help hidden md:block" title="total downloads: 157 761 675">
+        total downloads: 157 761 675
+      </div>
+    </div>
+  </div>
+</li>
+              
+                
+<li class="group px-4 md:px-6 py-5 transition-colors hover:bg-grey-50 dark:hover:bg-grey-700/60">
+  <div class="flex flex-wrap items-baseline gap-2.5 min-w-0 mb-1">
+    <a href="/packages/hpax" class="min-w-0 break-words text-xl font-semibold transition-colors text-grey-700 dark:text-grey-100 hover:text-primary-600 dark:hover:text-primary-300">
+      hpax
+    </a>
+
+      <a href="/packages/hpax" class="inline-flex shrink-0 items-center px-2 py-0.5 rounded text-xs font-medium transition-colors bg-grey-50 dark:bg-grey-700 border border-grey-100 dark:border-grey-600 text-grey-500 dark:text-grey-200 hover:bg-primary-100 dark:hover:bg-primary-900/30 hover:text-primary-700 dark:hover:text-primary-200">
+        v1.0.4
+      </a>
+
+
+  </div>
+
+  <div class="grid grid-cols-[minmax(0,1fr)_auto] gap-4 md:gap-6 items-start">
+
+    <div class="min-w-0">
+
+        <p class="text-grey-500 dark:text-grey-300 text-small leading-snug line-clamp-2 mb-1.5">
+          Implementation of the HPACK protocol (RFC 7541) for Elixir
+        </p>
+
+
+        <p class="text-grey-400 dark:text-grey-400 text-caption mt-1.5">
+          Updated <span title="July 05, 2026">1 month ago</span>
+        </p>
+
+    </div>
+
+    <div class="text-right shrink-0 w-fit">
+      <div class="text-[22px] font-bold tracking-[-0.01em] text-grey-900 dark:text-grey-100 tabular-nums leading-none">
+        4 420 606
+      </div>
+      <div class="text-grey-400 dark:text-grey-300 text-caption mt-1.5">
+        recent downloads
+      </div>
+      <div class="text-grey-400 dark:text-grey-300 text-caption mt-0.5 tabular-nums cursor-help hidden md:block" title="total downloads: 40 562 539">
+        total downloads: 40 562 539
+      </div>
+    </div>
+  </div>
+</li>
+              
+                
+<li class="group px-4 md:px-6 py-5 transition-colors hover:bg-grey-50 dark:hover:bg-grey-700/60">
+  <div class="flex flex-wrap items-baseline gap-2.5 min-w-0 mb-1">
+    <a href="/packages/mint" class="min-w-0 break-words text-xl font-semibold transition-colors text-grey-700 dark:text-grey-100 hover:text-primary-600 dark:hover:text-primary-300">
+      mint
+    </a>
+
+      <a href="/packages/mint" class="inline-flex shrink-0 items-center px-2 py-0.5 rounded text-xs font-medium transition-colors bg-grey-50 dark:bg-grey-700 border border-grey-100 dark:border-grey-600 text-grey-500 dark:text-grey-200 hover:bg-primary-100 dark:hover:bg-primary-900/30 hover:text-primary-700 dark:hover:text-primary-200">
+        v1.9.3
+      </a>
+
+
+  </div>
+
+  <div class="grid grid-cols-[minmax(0,1fr)_auto] gap-4 md:gap-6 items-start">
+
+    <div class="min-w-0">
+
+        <p class="text-grey-500 dark:text-grey-300 text-small leading-snug line-clamp-2 mb-1.5">
+          Small and composable HTTP client.
+        </p>
+
+
+        <p class="text-grey-400 dark:text-grey-400 text-caption mt-1.5">
+          Updated <span title="July 16, 2026">4 weeks ago</span>
+        </p>
+
+    </div>
+
+    <div class="text-right shrink-0 w-fit">
+      <div class="text-[22px] font-bold tracking-[-0.01em] text-grey-900 dark:text-grey-100 tabular-nums leading-none">
+        4 325 246
+      </div>
+      <div class="text-grey-400 dark:text-grey-300 text-caption mt-1.5">
+        recent downloads
+      </div>
+      <div class="text-grey-400 dark:text-grey-300 text-caption mt-0.5 tabular-nums cursor-help hidden md:block" title="total downloads: 63 483 909">
+        total downloads: 63 483 909
+      </div>
+    </div>
+  </div>
+</li>
+              
+                
+<li class="group px-4 md:px-6 py-5 transition-colors hover:bg-grey-50 dark:hover:bg-grey-700/60">
+  <div class="flex flex-wrap items-baseline gap-2.5 min-w-0 mb-1">
+    <a href="/packages/ranch" class="min-w-0 break-words text-xl font-semibold transition-colors text-grey-700 dark:text-grey-100 hover:text-primary-600 dark:hover:text-primary-300">
+      ranch
+    </a>
+
+      <a href="/packages/ranch" class="inline-flex shrink-0 items-center px-2 py-0.5 rounded text-xs font-medium transition-colors bg-grey-50 dark:bg-grey-700 border border-grey-100 dark:border-grey-600 text-grey-500 dark:text-grey-200 hover:bg-primary-100 dark:hover:bg-primary-900/30 hover:text-primary-700 dark:hover:text-primary-200">
+        v2.2.1
+      </a>
+
+
+  </div>
+
+  <div class="grid grid-cols-[minmax(0,1fr)_auto] gap-4 md:gap-6 items-start">
+
+    <div class="min-w-0">
+
+        <p class="text-grey-500 dark:text-grey-300 text-small leading-snug line-clamp-2 mb-1.5">
+          Socket acceptor pool for TCP protocols.
+        </p>
+
+
+        <p class="text-grey-400 dark:text-grey-400 text-caption mt-1.5">
+          Updated <span title="July 28, 2026">2 weeks ago</span>
+        </p>
+
+    </div>
+
+    <div class="text-right shrink-0 w-fit">
+      <div class="text-[22px] font-bold tracking-[-0.01em] text-grey-900 dark:text-grey-100 tabular-nums leading-none">
+        4 278 310
+      </div>
+      <div class="text-grey-400 dark:text-grey-300 text-caption mt-1.5">
+        recent downloads
+      </div>
+      <div class="text-grey-400 dark:text-grey-300 text-caption mt-0.5 tabular-nums cursor-help hidden md:block" title="total downloads: 160 065 129">
+        total downloads: 160 065 129
+      </div>
+    </div>
+  </div>
+</li>
+              
+                
+<li class="group px-4 md:px-6 py-5 transition-colors hover:bg-grey-50 dark:hover:bg-grey-700/60">
+  <div class="flex flex-wrap items-baseline gap-2.5 min-w-0 mb-1">
+    <a href="/packages/nimble_options" class="min-w-0 break-words text-xl font-semibold transition-colors text-grey-700 dark:text-grey-100 hover:text-primary-600 dark:hover:text-primary-300">
+      nimble_options
+    </a>
+
+      <a href="/packages/nimble_options" class="inline-flex shrink-0 items-center px-2 py-0.5 rounded text-xs font-medium transition-colors bg-grey-50 dark:bg-grey-700 border border-grey-100 dark:border-grey-600 text-grey-500 dark:text-grey-200 hover:bg-primary-100 dark:hover:bg-primary-900/30 hover:text-primary-700 dark:hover:text-primary-200">
+        v1.1.1
+      </a>
+
+
+  </div>
+
+  <div class="grid grid-cols-[minmax(0,1fr)_auto] gap-4 md:gap-6 items-start">
+
+    <div class="min-w-0">
+
+        <p class="text-grey-500 dark:text-grey-300 text-small leading-snug line-clamp-2 mb-1.5">
+          A tiny library for validating and documenting high-level options
+        </p>
+
+
+        <p class="text-grey-400 dark:text-grey-400 text-caption mt-1.5">
+          Updated <span title="May 25, 2024">about 2 years ago</span>
+        </p>
+
+    </div>
+
+    <div class="text-right shrink-0 w-fit">
+      <div class="text-[22px] font-bold tracking-[-0.01em] text-grey-900 dark:text-grey-100 tabular-nums leading-none">
+        4 204 225
+      </div>
+      <div class="text-grey-400 dark:text-grey-300 text-caption mt-1.5">
+        recent downloads
+      </div>
+      <div class="text-grey-400 dark:text-grey-300 text-caption mt-0.5 tabular-nums cursor-help hidden md:block" title="total downloads: 67 424 614">
+        total downloads: 67 424 614
+      </div>
+    </div>
+  </div>
+</li>
+              
+                
+<li class="group px-4 md:px-6 py-5 transition-colors hover:bg-grey-50 dark:hover:bg-grey-700/60">
+  <div class="flex flex-wrap items-baseline gap-2.5 min-w-0 mb-1">
+    <a href="/packages/idna" class="min-w-0 break-words text-xl font-semibold transition-colors text-grey-700 dark:text-grey-100 hover:text-primary-600 dark:hover:text-primary-300">
+      idna
+    </a>
+
+      <a href="/packages/idna" class="inline-flex shrink-0 items-center px-2 py-0.5 rounded text-xs font-medium transition-colors bg-grey-50 dark:bg-grey-700 border border-grey-100 dark:border-grey-600 text-grey-500 dark:text-grey-200 hover:bg-primary-100 dark:hover:bg-primary-900/30 hover:text-primary-700 dark:hover:text-primary-200">
+        v7.1.0
+      </a>
+
+
+  </div>
+
+  <div class="grid grid-cols-[minmax(0,1fr)_auto] gap-4 md:gap-6 items-start">
+
+    <div class="min-w-0">
+
+        <p class="text-grey-500 dark:text-grey-300 text-small leading-snug line-clamp-2 mb-1.5">
+          A pure Erlang IDNA implementation
+        </p>
+
+
+        <p class="text-grey-400 dark:text-grey-400 text-caption mt-1.5">
+          Updated <span title="January 21, 2026">6 months ago</span>
+        </p>
+
+    </div>
+
+    <div class="text-right shrink-0 w-fit">
+      <div class="text-[22px] font-bold tracking-[-0.01em] text-grey-900 dark:text-grey-100 tabular-nums leading-none">
+        4 108 065
+      </div>
+      <div class="text-grey-400 dark:text-grey-300 text-caption mt-1.5">
+        recent downloads
+      </div>
+      <div class="text-grey-400 dark:text-grey-300 text-caption mt-0.5 tabular-nums cursor-help hidden md:block" title="total downloads: 173 024 856">
+        total downloads: 173 024 856
+      </div>
+    </div>
+  </div>
+</li>
+              
+                
+<li class="group px-4 md:px-6 py-5 transition-colors hover:bg-grey-50 dark:hover:bg-grey-700/60">
+  <div class="flex flex-wrap items-baseline gap-2.5 min-w-0 mb-1">
+    <a href="/packages/ecto" class="min-w-0 break-words text-xl font-semibold transition-colors text-grey-700 dark:text-grey-100 hover:text-primary-600 dark:hover:text-primary-300">
+      ecto
+    </a>
+
+      <a href="/packages/ecto" class="inline-flex shrink-0 items-center px-2 py-0.5 rounded text-xs font-medium transition-colors bg-grey-50 dark:bg-grey-700 border border-grey-100 dark:border-grey-600 text-grey-500 dark:text-grey-200 hover:bg-primary-100 dark:hover:bg-primary-900/30 hover:text-primary-700 dark:hover:text-primary-200">
+        v3.14.2
+      </a>
+
+
+  </div>
+
+  <div class="grid grid-cols-[minmax(0,1fr)_auto] gap-4 md:gap-6 items-start">
+
+    <div class="min-w-0">
+
+        <p class="text-grey-500 dark:text-grey-300 text-small leading-snug line-clamp-2 mb-1.5">
+          A toolkit for data mapping and language integrated query for Elixir
+        </p>
+
+
+        <p class="text-grey-400 dark:text-grey-400 text-caption mt-1.5">
+          Updated <span title="August 14, 2026">12 hours ago</span>
+        </p>
+
+    </div>
+
+    <div class="text-right shrink-0 w-fit">
+      <div class="text-[22px] font-bold tracking-[-0.01em] text-grey-900 dark:text-grey-100 tabular-nums leading-none">
+        4 058 259
+      </div>
+      <div class="text-grey-400 dark:text-grey-300 text-caption mt-1.5">
+        recent downloads
+      </div>
+      <div class="text-grey-400 dark:text-grey-300 text-caption mt-0.5 tabular-nums cursor-help hidden md:block" title="total downloads: 145 146 751">
+        total downloads: 145 146 751
+      </div>
+    </div>
+  </div>
+</li>
+              
+                
+<li class="group px-4 md:px-6 py-5 transition-colors hover:bg-grey-50 dark:hover:bg-grey-700/60">
+  <div class="flex flex-wrap items-baseline gap-2.5 min-w-0 mb-1">
+    <a href="/packages/ssl_verify_fun" class="min-w-0 break-words text-xl font-semibold transition-colors text-grey-700 dark:text-grey-100 hover:text-primary-600 dark:hover:text-primary-300">
+      ssl_verify_fun
+    </a>
+
+      <a href="/packages/ssl_verify_fun" class="inline-flex shrink-0 items-center px-2 py-0.5 rounded text-xs font-medium transition-colors bg-grey-50 dark:bg-grey-700 border border-grey-100 dark:border-grey-600 text-grey-500 dark:text-grey-200 hover:bg-primary-100 dark:hover:bg-primary-900/30 hover:text-primary-700 dark:hover:text-primary-200">
+        v1.1.7
+      </a>
+
+
+  </div>
+
+  <div class="grid grid-cols-[minmax(0,1fr)_auto] gap-4 md:gap-6 items-start">
+
+    <div class="min-w-0">
+
+        <p class="text-grey-500 dark:text-grey-300 text-small leading-snug line-clamp-2 mb-1.5">
+          SSL verification library
+        </p>
+
+
+        <p class="text-grey-400 dark:text-grey-400 text-caption mt-1.5">
+          Updated <span title="June 20, 2023">about 3 years ago</span>
+        </p>
+
+    </div>
+
+    <div class="text-right shrink-0 w-fit">
+      <div class="text-[22px] font-bold tracking-[-0.01em] text-grey-900 dark:text-grey-100 tabular-nums leading-none">
+        4 046 861
+      </div>
+      <div class="text-grey-400 dark:text-grey-300 text-caption mt-1.5">
+        recent downloads
+      </div>
+      <div class="text-grey-400 dark:text-grey-300 text-caption mt-0.5 tabular-nums cursor-help hidden md:block" title="total downloads: 171 341 253">
+        total downloads: 171 341 253
+      </div>
+    </div>
+  </div>
+</li>
+              
+                
+<li class="group px-4 md:px-6 py-5 transition-colors hover:bg-grey-50 dark:hover:bg-grey-700/60">
+  <div class="flex flex-wrap items-baseline gap-2.5 min-w-0 mb-1">
+    <a href="/packages/phoenix" class="min-w-0 break-words text-xl font-semibold transition-colors text-grey-700 dark:text-grey-100 hover:text-primary-600 dark:hover:text-primary-300">
+      phoenix
+    </a>
+
+      <a href="/packages/phoenix" class="inline-flex shrink-0 items-center px-2 py-0.5 rounded text-xs font-medium transition-colors bg-grey-50 dark:bg-grey-700 border border-grey-100 dark:border-grey-600 text-grey-500 dark:text-grey-200 hover:bg-primary-100 dark:hover:bg-primary-900/30 hover:text-primary-700 dark:hover:text-primary-200">
+        v1.8.11
+      </a>
+
+
+  </div>
+
+  <div class="grid grid-cols-[minmax(0,1fr)_auto] gap-4 md:gap-6 items-start">
+
+    <div class="min-w-0">
+
+        <p class="text-grey-500 dark:text-grey-300 text-small leading-snug line-clamp-2 mb-1.5">
+          Peace of mind from prototype to production
+        </p>
+
+
+        <p class="text-grey-400 dark:text-grey-400 text-caption mt-1.5">
+          Updated <span title="August 12, 2026">2 days ago</span>
+        </p>
+
+    </div>
+
+    <div class="text-right shrink-0 w-fit">
+      <div class="text-[22px] font-bold tracking-[-0.01em] text-grey-900 dark:text-grey-100 tabular-nums leading-none">
+        4 033 816
+      </div>
+      <div class="text-grey-400 dark:text-grey-300 text-caption mt-1.5">
+        recent downloads
+      </div>
+      <div class="text-grey-400 dark:text-grey-300 text-caption mt-0.5 tabular-nums cursor-help hidden md:block" title="total downloads: 153 589 693">
+        total downloads: 153 589 693
+      </div>
+    </div>
+  </div>
+</li>
+              
+                
+<li class="group px-4 md:px-6 py-5 transition-colors hover:bg-grey-50 dark:hover:bg-grey-700/60">
+  <div class="flex flex-wrap items-baseline gap-2.5 min-w-0 mb-1">
+    <a href="/packages/cowlib" class="min-w-0 break-words text-xl font-semibold transition-colors text-grey-700 dark:text-grey-100 hover:text-primary-600 dark:hover:text-primary-300">
+      cowlib
+    </a>
+
+      <a href="/packages/cowlib" class="inline-flex shrink-0 items-center px-2 py-0.5 rounded text-xs font-medium transition-colors bg-grey-50 dark:bg-grey-700 border border-grey-100 dark:border-grey-600 text-grey-500 dark:text-grey-200 hover:bg-primary-100 dark:hover:bg-primary-900/30 hover:text-primary-700 dark:hover:text-primary-200">
+        v2.19.0
+      </a>
+
+
+  </div>
+
+  <div class="grid grid-cols-[minmax(0,1fr)_auto] gap-4 md:gap-6 items-start">
+
+    <div class="min-w-0">
+
+        <p class="text-grey-500 dark:text-grey-300 text-small leading-snug line-clamp-2 mb-1.5">
+          Support library for manipulating Web protocols.
+        </p>
+
+
+        <p class="text-grey-400 dark:text-grey-400 text-caption mt-1.5">
+          Updated <span title="July 28, 2026">2 weeks ago</span>
+        </p>
+
+    </div>
+
+    <div class="text-right shrink-0 w-fit">
+      <div class="text-[22px] font-bold tracking-[-0.01em] text-grey-900 dark:text-grey-100 tabular-nums leading-none">
+        3 976 328
+      </div>
+      <div class="text-grey-400 dark:text-grey-300 text-caption mt-1.5">
+        recent downloads
+      </div>
+      <div class="text-grey-400 dark:text-grey-300 text-caption mt-0.5 tabular-nums cursor-help hidden md:block" title="total downloads: 103 026 204">
+        total downloads: 103 026 204
+      </div>
+    </div>
+  </div>
+</li>
+              
+                
+<li class="group px-4 md:px-6 py-5 transition-colors hover:bg-grey-50 dark:hover:bg-grey-700/60">
+  <div class="flex flex-wrap items-baseline gap-2.5 min-w-0 mb-1">
+    <a href="/packages/db_connection" class="min-w-0 break-words text-xl font-semibold transition-colors text-grey-700 dark:text-grey-100 hover:text-primary-600 dark:hover:text-primary-300">
+      db_connection
+    </a>
+
+      <a href="/packages/db_connection" class="inline-flex shrink-0 items-center px-2 py-0.5 rounded text-xs font-medium transition-colors bg-grey-50 dark:bg-grey-700 border border-grey-100 dark:border-grey-600 text-grey-500 dark:text-grey-200 hover:bg-primary-100 dark:hover:bg-primary-900/30 hover:text-primary-700 dark:hover:text-primary-200">
+        v2.10.2
+      </a>
+
+
+  </div>
+
+  <div class="grid grid-cols-[minmax(0,1fr)_auto] gap-4 md:gap-6 items-start">
+
+    <div class="min-w-0">
+
+        <p class="text-grey-500 dark:text-grey-300 text-small leading-snug line-clamp-2 mb-1.5">
+          Database connection behaviour for database transactions and connection pooling
+        </p>
+
+
+        <p class="text-grey-400 dark:text-grey-400 text-caption mt-1.5">
+          Updated <span title="July 06, 2026">1 month ago</span>
+        </p>
+
+    </div>
+
+    <div class="text-right shrink-0 w-fit">
+      <div class="text-[22px] font-bold tracking-[-0.01em] text-grey-900 dark:text-grey-100 tabular-nums leading-none">
+        3 911 636
+      </div>
+      <div class="text-grey-400 dark:text-grey-300 text-caption mt-1.5">
+        recent downloads
+      </div>
+      <div class="text-grey-400 dark:text-grey-300 text-caption mt-0.5 tabular-nums cursor-help hidden md:block" title="total downloads: 147 786 518">
+        total downloads: 147 786 518
+      </div>
+    </div>
+  </div>
+</li>
+              
+                
+<li class="group px-4 md:px-6 py-5 transition-colors hover:bg-grey-50 dark:hover:bg-grey-700/60">
+  <div class="flex flex-wrap items-baseline gap-2.5 min-w-0 mb-1">
+    <a href="/packages/phoenix_pubsub" class="min-w-0 break-words text-xl font-semibold transition-colors text-grey-700 dark:text-grey-100 hover:text-primary-600 dark:hover:text-primary-300">
+      phoenix_pubsub
+    </a>
+
+      <a href="/packages/phoenix_pubsub" class="inline-flex shrink-0 items-center px-2 py-0.5 rounded text-xs font-medium transition-colors bg-grey-50 dark:bg-grey-700 border border-grey-100 dark:border-grey-600 text-grey-500 dark:text-grey-200 hover:bg-primary-100 dark:hover:bg-primary-900/30 hover:text-primary-700 dark:hover:text-primary-200">
+        v2.2.0
+      </a>
+
+
+  </div>
+
+  <div class="grid grid-cols-[minmax(0,1fr)_auto] gap-4 md:gap-6 items-start">
+
+    <div class="min-w-0">
+
+        <p class="text-grey-500 dark:text-grey-300 text-small leading-snug line-clamp-2 mb-1.5">
+          Distributed PubSub and Presence platform
+        </p>
+
+
+        <p class="text-grey-400 dark:text-grey-400 text-caption mt-1.5">
+          Updated <span title="October 22, 2025">9 months ago</span>
+        </p>
+
+    </div>
+
+    <div class="text-right shrink-0 w-fit">
+      <div class="text-[22px] font-bold tracking-[-0.01em] text-grey-900 dark:text-grey-100 tabular-nums leading-none">
+        3 858 125
+      </div>
+      <div class="text-grey-400 dark:text-grey-300 text-caption mt-1.5">
+        recent downloads
+      </div>
+      <div class="text-grey-400 dark:text-grey-300 text-caption mt-0.5 tabular-nums cursor-help hidden md:block" title="total downloads: 135 821 741">
+        total downloads: 135 821 741
+      </div>
+    </div>
+  </div>
+</li>
+              
+                
+<li class="group px-4 md:px-6 py-5 transition-colors hover:bg-grey-50 dark:hover:bg-grey-700/60">
+  <div class="flex flex-wrap items-baseline gap-2.5 min-w-0 mb-1">
+    <a href="/packages/finch" class="min-w-0 break-words text-xl font-semibold transition-colors text-grey-700 dark:text-grey-100 hover:text-primary-600 dark:hover:text-primary-300">
+      finch
+    </a>
+
+      <a href="/packages/finch" class="inline-flex shrink-0 items-center px-2 py-0.5 rounded text-xs font-medium transition-colors bg-grey-50 dark:bg-grey-700 border border-grey-100 dark:border-grey-600 text-grey-500 dark:text-grey-200 hover:bg-primary-100 dark:hover:bg-primary-900/30 hover:text-primary-700 dark:hover:text-primary-200">
+        v0.23.0
+      </a>
+
+
+  </div>
+
+  <div class="grid grid-cols-[minmax(0,1fr)_auto] gap-4 md:gap-6 items-start">
+
+    <div class="min-w-0">
+
+        <p class="text-grey-500 dark:text-grey-300 text-small leading-snug line-clamp-2 mb-1.5">
+          An HTTP client focused on performance.
+        </p>
+
+
+        <p class="text-grey-400 dark:text-grey-400 text-caption mt-1.5">
+          Updated <span title="June 17, 2026">1 month ago</span>
+        </p>
+
+    </div>
+
+    <div class="text-right shrink-0 w-fit">
+      <div class="text-[22px] font-bold tracking-[-0.01em] text-grey-900 dark:text-grey-100 tabular-nums leading-none">
+        3 770 042
+      </div>
+      <div class="text-grey-400 dark:text-grey-300 text-caption mt-1.5">
+        recent downloads
+      </div>
+      <div class="text-grey-400 dark:text-grey-300 text-caption mt-0.5 tabular-nums cursor-help hidden md:block" title="total downloads: 59 213 307">
+        total downloads: 59 213 307
+      </div>
+    </div>
+  </div>
+</li>
+              
+                
+<li class="group px-4 md:px-6 py-5 transition-colors hover:bg-grey-50 dark:hover:bg-grey-700/60">
+  <div class="flex flex-wrap items-baseline gap-2.5 min-w-0 mb-1">
+    <a href="/packages/certifi" class="min-w-0 break-words text-xl font-semibold transition-colors text-grey-700 dark:text-grey-100 hover:text-primary-600 dark:hover:text-primary-300">
+      certifi
+    </a>
+
+      <a href="/packages/certifi" class="inline-flex shrink-0 items-center px-2 py-0.5 rounded text-xs font-medium transition-colors bg-grey-50 dark:bg-grey-700 border border-grey-100 dark:border-grey-600 text-grey-500 dark:text-grey-200 hover:bg-primary-100 dark:hover:bg-primary-900/30 hover:text-primary-700 dark:hover:text-primary-200">
+        v2.17.0
+      </a>
+
+
+  </div>
+
+  <div class="grid grid-cols-[minmax(0,1fr)_auto] gap-4 md:gap-6 items-start">
+
+    <div class="min-w-0">
+
+        <p class="text-grey-500 dark:text-grey-300 text-small leading-snug line-clamp-2 mb-1.5">
+          CA bundle adapted from Mozilla by https://certifi.io
+        </p>
+
+
+        <p class="text-grey-400 dark:text-grey-400 text-caption mt-1.5">
+          Updated <span title="June 05, 2026">2 months ago</span>
+        </p>
+
+    </div>
+
+    <div class="text-right shrink-0 w-fit">
+      <div class="text-[22px] font-bold tracking-[-0.01em] text-grey-900 dark:text-grey-100 tabular-nums leading-none">
+        3 715 205
+      </div>
+      <div class="text-grey-400 dark:text-grey-300 text-caption mt-1.5">
+        recent downloads
+      </div>
+      <div class="text-grey-400 dark:text-grey-300 text-caption mt-0.5 tabular-nums cursor-help hidden md:block" title="total downloads: 175 842 797">
+        total downloads: 175 842 797
+      </div>
+    </div>
+  </div>
+</li>
+              
+                
+<li class="group px-4 md:px-6 py-5 transition-colors hover:bg-grey-50 dark:hover:bg-grey-700/60">
+  <div class="flex flex-wrap items-baseline gap-2.5 min-w-0 mb-1">
+    <a href="/packages/file_system" class="min-w-0 break-words text-xl font-semibold transition-colors text-grey-700 dark:text-grey-100 hover:text-primary-600 dark:hover:text-primary-300">
+      file_system
+    </a>
+
+      <a href="/packages/file_system" class="inline-flex shrink-0 items-center px-2 py-0.5 rounded text-xs font-medium transition-colors bg-grey-50 dark:bg-grey-700 border border-grey-100 dark:border-grey-600 text-grey-500 dark:text-grey-200 hover:bg-primary-100 dark:hover:bg-primary-900/30 hover:text-primary-700 dark:hover:text-primary-200">
+        v1.1.1
+      </a>
+
+
+  </div>
+
+  <div class="grid grid-cols-[minmax(0,1fr)_auto] gap-4 md:gap-6 items-start">
+
+    <div class="min-w-0">
+
+        <p class="text-grey-500 dark:text-grey-300 text-small leading-snug line-clamp-2 mb-1.5">
+          An Elixir file system change watcher wrapper based on FS, the native file
+system listener.
+        </p>
+
+
+        <p class="text-grey-400 dark:text-grey-400 text-caption mt-1.5">
+          Updated <span title="September 08, 2025">11 months ago</span>
+        </p>
+
+    </div>
+
+    <div class="text-right shrink-0 w-fit">
+      <div class="text-[22px] font-bold tracking-[-0.01em] text-grey-900 dark:text-grey-100 tabular-nums leading-none">
+        3 674 808
+      </div>
+      <div class="text-grey-400 dark:text-grey-300 text-caption mt-1.5">
+        recent downloads
+      </div>
+      <div class="text-grey-400 dark:text-grey-300 text-caption mt-0.5 tabular-nums cursor-help hidden md:block" title="total downloads: 87 743 544">
+        total downloads: 87 743 544
+      </div>
+    </div>
+  </div>
+</li>
+              
+                
+<li class="group px-4 md:px-6 py-5 transition-colors hover:bg-grey-50 dark:hover:bg-grey-700/60">
+  <div class="flex flex-wrap items-baseline gap-2.5 min-w-0 mb-1">
+    <a href="/packages/ecto_sql" class="min-w-0 break-words text-xl font-semibold transition-colors text-grey-700 dark:text-grey-100 hover:text-primary-600 dark:hover:text-primary-300">
+      ecto_sql
+    </a>
+
+      <a href="/packages/ecto_sql" class="inline-flex shrink-0 items-center px-2 py-0.5 rounded text-xs font-medium transition-colors bg-grey-50 dark:bg-grey-700 border border-grey-100 dark:border-grey-600 text-grey-500 dark:text-grey-200 hover:bg-primary-100 dark:hover:bg-primary-900/30 hover:text-primary-700 dark:hover:text-primary-200">
+        v3.14.0
+      </a>
+
+
+  </div>
+
+  <div class="grid grid-cols-[minmax(0,1fr)_auto] gap-4 md:gap-6 items-start">
+
+    <div class="min-w-0">
+
+        <p class="text-grey-500 dark:text-grey-300 text-small leading-snug line-clamp-2 mb-1.5">
+          SQL-based adapters for Ecto and database migrations
+        </p>
+
+
+        <p class="text-grey-400 dark:text-grey-400 text-caption mt-1.5">
+          Updated <span title="May 19, 2026">2 months ago</span>
+        </p>
+
+    </div>
+
+    <div class="text-right shrink-0 w-fit">
+      <div class="text-[22px] font-bold tracking-[-0.01em] text-grey-900 dark:text-grey-100 tabular-nums leading-none">
+        3 660 270
+      </div>
+      <div class="text-grey-400 dark:text-grey-300 text-caption mt-1.5">
+        recent downloads
+      </div>
+      <div class="text-grey-400 dark:text-grey-300 text-caption mt-0.5 tabular-nums cursor-help hidden md:block" title="total downloads: 126 797 134">
+        total downloads: 126 797 134
+      </div>
+    </div>
+  </div>
+</li>
+              
+                
+<li class="group px-4 md:px-6 py-5 transition-colors hover:bg-grey-50 dark:hover:bg-grey-700/60">
+  <div class="flex flex-wrap items-baseline gap-2.5 min-w-0 mb-1">
+    <a href="/packages/cowboy" class="min-w-0 break-words text-xl font-semibold transition-colors text-grey-700 dark:text-grey-100 hover:text-primary-600 dark:hover:text-primary-300">
+      cowboy
+    </a>
+
+      <a href="/packages/cowboy" class="inline-flex shrink-0 items-center px-2 py-0.5 rounded text-xs font-medium transition-colors bg-grey-50 dark:bg-grey-700 border border-grey-100 dark:border-grey-600 text-grey-500 dark:text-grey-200 hover:bg-primary-100 dark:hover:bg-primary-900/30 hover:text-primary-700 dark:hover:text-primary-200">
+        v2.18.0
+      </a>
+
+
+  </div>
+
+  <div class="grid grid-cols-[minmax(0,1fr)_auto] gap-4 md:gap-6 items-start">
+
+    <div class="min-w-0">
+
+        <p class="text-grey-500 dark:text-grey-300 text-small leading-snug line-clamp-2 mb-1.5">
+          Small, fast, modern HTTP server.
+        </p>
+
+
+        <p class="text-grey-400 dark:text-grey-400 text-caption mt-1.5">
+          Updated <span title="July 28, 2026">2 weeks ago</span>
+        </p>
+
+    </div>
+
+    <div class="text-right shrink-0 w-fit">
+      <div class="text-[22px] font-bold tracking-[-0.01em] text-grey-900 dark:text-grey-100 tabular-nums leading-none">
+        3 655 398
+      </div>
+      <div class="text-grey-400 dark:text-grey-300 text-caption mt-1.5">
+        recent downloads
+      </div>
+      <div class="text-grey-400 dark:text-grey-300 text-caption mt-0.5 tabular-nums cursor-help hidden md:block" title="total downloads: 147 225 459">
+        total downloads: 147 225 459
+      </div>
+    </div>
+  </div>
+</li>
+              
+                
+<li class="group px-4 md:px-6 py-5 transition-colors hover:bg-grey-50 dark:hover:bg-grey-700/60">
+  <div class="flex flex-wrap items-baseline gap-2.5 min-w-0 mb-1">
+    <a href="/packages/websock" class="min-w-0 break-words text-xl font-semibold transition-colors text-grey-700 dark:text-grey-100 hover:text-primary-600 dark:hover:text-primary-300">
+      websock
+    </a>
+
+      <a href="/packages/websock" class="inline-flex shrink-0 items-center px-2 py-0.5 rounded text-xs font-medium transition-colors bg-grey-50 dark:bg-grey-700 border border-grey-100 dark:border-grey-600 text-grey-500 dark:text-grey-200 hover:bg-primary-100 dark:hover:bg-primary-900/30 hover:text-primary-700 dark:hover:text-primary-200">
+        v0.5.3
+      </a>
+
+
+  </div>
+
+  <div class="grid grid-cols-[minmax(0,1fr)_auto] gap-4 md:gap-6 items-start">
+
+    <div class="min-w-0">
+
+        <p class="text-grey-500 dark:text-grey-300 text-small leading-snug line-clamp-2 mb-1.5">
+          A specification for WebSocket connections
+        </p>
+
+
+        <p class="text-grey-400 dark:text-grey-400 text-caption mt-1.5">
+          Updated <span title="August 15, 2023">about 3 years ago</span>
+        </p>
+
+    </div>
+
+    <div class="text-right shrink-0 w-fit">
+      <div class="text-[22px] font-bold tracking-[-0.01em] text-grey-900 dark:text-grey-100 tabular-nums leading-none">
+        3 640 863
+      </div>
+      <div class="text-grey-400 dark:text-grey-300 text-caption mt-1.5">
+        recent downloads
+      </div>
+      <div class="text-grey-400 dark:text-grey-300 text-caption mt-0.5 tabular-nums cursor-help hidden md:block" title="total downloads: 33 702 347">
+        total downloads: 33 702 347
+      </div>
+    </div>
+  </div>
+</li>
+              
+                
+<li class="group px-4 md:px-6 py-5 transition-colors hover:bg-grey-50 dark:hover:bg-grey-700/60">
+  <div class="flex flex-wrap items-baseline gap-2.5 min-w-0 mb-1">
+    <a href="/packages/nimble_pool" class="min-w-0 break-words text-xl font-semibold transition-colors text-grey-700 dark:text-grey-100 hover:text-primary-600 dark:hover:text-primary-300">
+      nimble_pool
+    </a>
+
+      <a href="/packages/nimble_pool" class="inline-flex shrink-0 items-center px-2 py-0.5 rounded text-xs font-medium transition-colors bg-grey-50 dark:bg-grey-700 border border-grey-100 dark:border-grey-600 text-grey-500 dark:text-grey-200 hover:bg-primary-100 dark:hover:bg-primary-900/30 hover:text-primary-700 dark:hover:text-primary-200">
+        v1.1.0
+      </a>
+
+
+  </div>
+
+  <div class="grid grid-cols-[minmax(0,1fr)_auto] gap-4 md:gap-6 items-start">
+
+    <div class="min-w-0">
+
+        <p class="text-grey-500 dark:text-grey-300 text-small leading-snug line-clamp-2 mb-1.5">
+          A tiny resource-pool implementation
+        </p>
+
+
+        <p class="text-grey-400 dark:text-grey-400 text-caption mt-1.5">
+          Updated <span title="March 25, 2024">about 2 years ago</span>
+        </p>
+
+    </div>
+
+    <div class="text-right shrink-0 w-fit">
+      <div class="text-[22px] font-bold tracking-[-0.01em] text-grey-900 dark:text-grey-100 tabular-nums leading-none">
+        3 621 104
+      </div>
+      <div class="text-grey-400 dark:text-grey-300 text-caption mt-1.5">
+        recent downloads
+      </div>
+      <div class="text-grey-400 dark:text-grey-300 text-caption mt-0.5 tabular-nums cursor-help hidden md:block" title="total downloads: 57 140 917">
+        total downloads: 57 140 917
+      </div>
+    </div>
+  </div>
+</li>
+              
+                
+<li class="group px-4 md:px-6 py-5 transition-colors hover:bg-grey-50 dark:hover:bg-grey-700/60">
+  <div class="flex flex-wrap items-baseline gap-2.5 min-w-0 mb-1">
+    <a href="/packages/websock_adapter" class="min-w-0 break-words text-xl font-semibold transition-colors text-grey-700 dark:text-grey-100 hover:text-primary-600 dark:hover:text-primary-300">
+      websock_adapter
+    </a>
+
+      <a href="/packages/websock_adapter" class="inline-flex shrink-0 items-center px-2 py-0.5 rounded text-xs font-medium transition-colors bg-grey-50 dark:bg-grey-700 border border-grey-100 dark:border-grey-600 text-grey-500 dark:text-grey-200 hover:bg-primary-100 dark:hover:bg-primary-900/30 hover:text-primary-700 dark:hover:text-primary-200">
+        v0.6.0
+      </a>
+
+
+  </div>
+
+  <div class="grid grid-cols-[minmax(0,1fr)_auto] gap-4 md:gap-6 items-start">
+
+    <div class="min-w-0">
+
+        <p class="text-grey-500 dark:text-grey-300 text-small leading-snug line-clamp-2 mb-1.5">
+          A set of WebSock adapters for common web servers
+        </p>
+
+
+        <p class="text-grey-400 dark:text-grey-400 text-caption mt-1.5">
+          Updated <span title="April 15, 2026">4 months ago</span>
+        </p>
+
+    </div>
+
+    <div class="text-right shrink-0 w-fit">
+      <div class="text-[22px] font-bold tracking-[-0.01em] text-grey-900 dark:text-grey-100 tabular-nums leading-none">
+        3 620 340
+      </div>
+      <div class="text-grey-400 dark:text-grey-300 text-caption mt-1.5">
+        recent downloads
+      </div>
+      <div class="text-grey-400 dark:text-grey-300 text-caption mt-0.5 tabular-nums cursor-help hidden md:block" title="total downloads: 33 528 069">
+        total downloads: 33 528 069
+      </div>
+    </div>
+  </div>
+</li>
+              
+                
+<li class="group px-4 md:px-6 py-5 transition-colors hover:bg-grey-50 dark:hover:bg-grey-700/60">
+  <div class="flex flex-wrap items-baseline gap-2.5 min-w-0 mb-1">
+    <a href="/packages/mimerl" class="min-w-0 break-words text-xl font-semibold transition-colors text-grey-700 dark:text-grey-100 hover:text-primary-600 dark:hover:text-primary-300">
+      mimerl
+    </a>
+
+      <a href="/packages/mimerl" class="inline-flex shrink-0 items-center px-2 py-0.5 rounded text-xs font-medium transition-colors bg-grey-50 dark:bg-grey-700 border border-grey-100 dark:border-grey-600 text-grey-500 dark:text-grey-200 hover:bg-primary-100 dark:hover:bg-primary-900/30 hover:text-primary-700 dark:hover:text-primary-200">
+        v1.5.0
+      </a>
+
+
+  </div>
+
+  <div class="grid grid-cols-[minmax(0,1fr)_auto] gap-4 md:gap-6 items-start">
+
+    <div class="min-w-0">
+
+        <p class="text-grey-500 dark:text-grey-300 text-small leading-snug line-clamp-2 mb-1.5">
+          Library to handle mimetypes
+        </p>
+
+
+        <p class="text-grey-400 dark:text-grey-400 text-caption mt-1.5">
+          Updated <span title="April 02, 2026">4 months ago</span>
+        </p>
+
+    </div>
+
+    <div class="text-right shrink-0 w-fit">
+      <div class="text-[22px] font-bold tracking-[-0.01em] text-grey-900 dark:text-grey-100 tabular-nums leading-none">
+        3 600 487
+      </div>
+      <div class="text-grey-400 dark:text-grey-300 text-caption mt-1.5">
+        recent downloads
+      </div>
+      <div class="text-grey-400 dark:text-grey-300 text-caption mt-0.5 tabular-nums cursor-help hidden md:block" title="total downloads: 164 766 047">
+        total downloads: 164 766 047
+      </div>
+    </div>
+  </div>
+</li>
+              
+                
+<li class="group px-4 md:px-6 py-5 transition-colors hover:bg-grey-50 dark:hover:bg-grey-700/60">
+  <div class="flex flex-wrap items-baseline gap-2.5 min-w-0 mb-1">
+    <a href="/packages/parse_trans" class="min-w-0 break-words text-xl font-semibold transition-colors text-grey-700 dark:text-grey-100 hover:text-primary-600 dark:hover:text-primary-300">
+      parse_trans
+    </a>
+
+      <a href="/packages/parse_trans" class="inline-flex shrink-0 items-center px-2 py-0.5 rounded text-xs font-medium transition-colors bg-grey-50 dark:bg-grey-700 border border-grey-100 dark:border-grey-600 text-grey-500 dark:text-grey-200 hover:bg-primary-100 dark:hover:bg-primary-900/30 hover:text-primary-700 dark:hover:text-primary-200">
+        v3.4.2
+      </a>
+
+
+  </div>
+
+  <div class="grid grid-cols-[minmax(0,1fr)_auto] gap-4 md:gap-6 items-start">
+
+    <div class="min-w-0">
+
+        <p class="text-grey-500 dark:text-grey-300 text-small leading-snug line-clamp-2 mb-1.5">
+          Parse transform library
+        </p>
+
+
+        <p class="text-grey-400 dark:text-grey-400 text-caption mt-1.5">
+          Updated <span title="October 08, 2023">about 2 years ago</span>
+        </p>
+
+    </div>
+
+    <div class="text-right shrink-0 w-fit">
+      <div class="text-[22px] font-bold tracking-[-0.01em] text-grey-900 dark:text-grey-100 tabular-nums leading-none">
+        3 587 472
+      </div>
+      <div class="text-grey-400 dark:text-grey-300 text-caption mt-1.5">
+        recent downloads
+      </div>
+      <div class="text-grey-400 dark:text-grey-300 text-caption mt-0.5 tabular-nums cursor-help hidden md:block" title="total downloads: 171 198 496">
+        total downloads: 171 198 496
+      </div>
+    </div>
+  </div>
+</li>
+              
+                
+<li class="group px-4 md:px-6 py-5 transition-colors hover:bg-grey-50 dark:hover:bg-grey-700/60">
+  <div class="flex flex-wrap items-baseline gap-2.5 min-w-0 mb-1">
+    <a href="/packages/postgrex" class="min-w-0 break-words text-xl font-semibold transition-colors text-grey-700 dark:text-grey-100 hover:text-primary-600 dark:hover:text-primary-300">
+      postgrex
+    </a>
+
+      <a href="/packages/postgrex" class="inline-flex shrink-0 items-center px-2 py-0.5 rounded text-xs font-medium transition-colors bg-grey-50 dark:bg-grey-700 border border-grey-100 dark:border-grey-600 text-grey-500 dark:text-grey-200 hover:bg-primary-100 dark:hover:bg-primary-900/30 hover:text-primary-700 dark:hover:text-primary-200">
+        v0.22.4
+      </a>
+
+
+  </div>
+
+  <div class="grid grid-cols-[minmax(0,1fr)_auto] gap-4 md:gap-6 items-start">
+
+    <div class="min-w-0">
+
+        <p class="text-grey-500 dark:text-grey-300 text-small leading-snug line-clamp-2 mb-1.5">
+          PostgreSQL driver for Elixir
+        </p>
+
+
+        <p class="text-grey-400 dark:text-grey-400 text-caption mt-1.5">
+          Updated <span title="August 07, 2026">1 week ago</span>
+        </p>
+
+    </div>
+
+    <div class="text-right shrink-0 w-fit">
+      <div class="text-[22px] font-bold tracking-[-0.01em] text-grey-900 dark:text-grey-100 tabular-nums leading-none">
+        3 555 477
+      </div>
+      <div class="text-grey-400 dark:text-grey-300 text-caption mt-1.5">
+        recent downloads
+      </div>
+      <div class="text-grey-400 dark:text-grey-300 text-caption mt-0.5 tabular-nums cursor-help hidden md:block" title="total downloads: 138 500 720">
+        total downloads: 138 500 720
+      </div>
+    </div>
+  </div>
+</li>
+              
+                
+<li class="group px-4 md:px-6 py-5 transition-colors hover:bg-grey-50 dark:hover:bg-grey-700/60">
+  <div class="flex flex-wrap items-baseline gap-2.5 min-w-0 mb-1">
+    <a href="/packages/phoenix_template" class="min-w-0 break-words text-xl font-semibold transition-colors text-grey-700 dark:text-grey-100 hover:text-primary-600 dark:hover:text-primary-300">
+      phoenix_template
+    </a>
+
+      <a href="/packages/phoenix_template" class="inline-flex shrink-0 items-center px-2 py-0.5 rounded text-xs font-medium transition-colors bg-grey-50 dark:bg-grey-700 border border-grey-100 dark:border-grey-600 text-grey-500 dark:text-grey-200 hover:bg-primary-100 dark:hover:bg-primary-900/30 hover:text-primary-700 dark:hover:text-primary-200">
+        v1.0.4
+      </a>
+
+
+  </div>
+
+  <div class="grid grid-cols-[minmax(0,1fr)_auto] gap-4 md:gap-6 items-start">
+
+    <div class="min-w-0">
+
+        <p class="text-grey-500 dark:text-grey-300 text-small leading-snug line-clamp-2 mb-1.5">
+          Template rendering for Phoenix
+        </p>
+
+
+        <p class="text-grey-400 dark:text-grey-400 text-caption mt-1.5">
+          Updated <span title="December 19, 2023">about 2 years ago</span>
+        </p>
+
+    </div>
+
+    <div class="text-right shrink-0 w-fit">
+      <div class="text-[22px] font-bold tracking-[-0.01em] text-grey-900 dark:text-grey-100 tabular-nums leading-none">
+        3 550 333
+      </div>
+      <div class="text-grey-400 dark:text-grey-300 text-caption mt-1.5">
+        recent downloads
+      </div>
+      <div class="text-grey-400 dark:text-grey-300 text-caption mt-0.5 tabular-nums cursor-help hidden md:block" title="total downloads: 39 361 333">
+        total downloads: 39 361 333
+      </div>
+    </div>
+  </div>
+</li>
+              
+                
+<li class="group px-4 md:px-6 py-5 transition-colors hover:bg-grey-50 dark:hover:bg-grey-700/60">
+  <div class="flex flex-wrap items-baseline gap-2.5 min-w-0 mb-1">
+    <a href="/packages/hackney" class="min-w-0 break-words text-xl font-semibold transition-colors text-grey-700 dark:text-grey-100 hover:text-primary-600 dark:hover:text-primary-300">
+      hackney
+    </a>
+
+      <a href="/packages/hackney" class="inline-flex shrink-0 items-center px-2 py-0.5 rounded text-xs font-medium transition-colors bg-grey-50 dark:bg-grey-700 border border-grey-100 dark:border-grey-600 text-grey-500 dark:text-grey-200 hover:bg-primary-100 dark:hover:bg-primary-900/30 hover:text-primary-700 dark:hover:text-primary-200">
+        v4.7.4
+      </a>
+
+
+  </div>
+
+  <div class="grid grid-cols-[minmax(0,1fr)_auto] gap-4 md:gap-6 items-start">
+
+    <div class="min-w-0">
+
+        <p class="text-grey-500 dark:text-grey-300 text-small leading-snug line-clamp-2 mb-1.5">
+          Simple HTTP client with HTTP/1.1, HTTP/2, and HTTP/3 support
+        </p>
+
+
+        <p class="text-grey-400 dark:text-grey-400 text-caption mt-1.5">
+          Updated <span title="August 12, 2026">2 days ago</span>
+        </p>
+
+    </div>
+
+    <div class="text-right shrink-0 w-fit">
+      <div class="text-[22px] font-bold tracking-[-0.01em] text-grey-900 dark:text-grey-100 tabular-nums leading-none">
+        3 529 692
+      </div>
+      <div class="text-grey-400 dark:text-grey-300 text-caption mt-1.5">
+        recent downloads
+      </div>
+      <div class="text-grey-400 dark:text-grey-300 text-caption mt-0.5 tabular-nums cursor-help hidden md:block" title="total downloads: 171 066 579">
+        total downloads: 171 066 579
+      </div>
+    </div>
+  </div>
+</li>
+              
+            </ul>
+          </div>
+
+          
+          <div class="mt-8">
+            
+<div class="flex flex-col sm:flex-row items-center justify-between gap-4 py-6">
+
+  <div class="text-grey-600 dark:text-grey-300 text-sm">
+
+      Showing
+      <span class="font-medium text-grey-900 dark:text-white">
+        1&ndash;30
+      </span>
+      packages of <span class="font-medium text-grey-900 dark:text-white">22374</span>
+      total
+
+  </div>
+
+
+    <nav class="flex items-center gap-1" aria-label="Pagination">
+
+
+        <span class="inline-flex items-center justify-center size-10 bg-grey-50 dark:bg-grey-900 border border-grey-200 dark:border-grey-700 rounded-lg text-grey-400 dark:text-grey-300 cursor-not-allowed">
+          <svg class="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+          </svg>
+        </span>
+
+
+      <div class="flex items-center gap-1">
+
+
+            <span class="inline-flex items-center justify-center min-w-10 h-10 px-3 bg-primary-600 text-white font-semibold rounded-lg border border-primary-600" aria-current="page">
+              1
+            </span>
+
+
+
+            <a href="/packages?sort=recent_downloads&amp;page=2" class="inline-flex items-center justify-center min-w-10 h-10 px-3 bg-white dark:bg-grey-800 border border-grey-300 dark:border-grey-600 rounded-lg text-grey-700 dark:text-grey-200 font-medium hover:bg-grey-50 dark:hover:bg-grey-700 hover:border-grey-400 dark:hover:border-grey-500 transition-colors">
+              2
+            </a>
+
+
+
+            <a href="/packages?sort=recent_downloads&amp;page=3" class="inline-flex items-center justify-center min-w-10 h-10 px-3 bg-white dark:bg-grey-800 border border-grey-300 dark:border-grey-600 rounded-lg text-grey-700 dark:text-grey-200 font-medium hover:bg-grey-50 dark:hover:bg-grey-700 hover:border-grey-400 dark:hover:border-grey-500 transition-colors">
+              3
+            </a>
+
+
+
+            <a href="/packages?sort=recent_downloads&amp;page=4" class="inline-flex items-center justify-center min-w-10 h-10 px-3 bg-white dark:bg-grey-800 border border-grey-300 dark:border-grey-600 rounded-lg text-grey-700 dark:text-grey-200 font-medium hover:bg-grey-50 dark:hover:bg-grey-700 hover:border-grey-400 dark:hover:border-grey-500 transition-colors">
+              4
+            </a>
+
+
+
+            <a href="/packages?sort=recent_downloads&amp;page=5" class="inline-flex items-center justify-center min-w-10 h-10 px-3 bg-white dark:bg-grey-800 border border-grey-300 dark:border-grey-600 rounded-lg text-grey-700 dark:text-grey-200 font-medium hover:bg-grey-50 dark:hover:bg-grey-700 hover:border-grey-400 dark:hover:border-grey-500 transition-colors">
+              5
+            </a>
+
+
+      </div>
+
+
+        <a href="/packages?sort=recent_downloads&amp;page=2" class="inline-flex items-center justify-center size-10 bg-white dark:bg-grey-800 border border-grey-300 dark:border-grey-600 rounded-lg text-grey-700 dark:text-grey-200 hover:bg-grey-50 dark:hover:bg-grey-700 hover:border-grey-400 dark:hover:border-grey-500 transition-colors" aria-label="Next page">
+          <svg class="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+          </svg>
+        </a>
+
+    </nav>
+
+</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  
+  <div id="filter-sheet" class="md:hidden fixed inset-0 z-40 hidden flex-col" aria-hidden="true">
+  <button type="button" aria-label="Close filters" class="flex-1 bg-grey-900/45" phx-click="[[&quot;add_class&quot;,{&quot;names&quot;:[&quot;hidden&quot;],&quot;to&quot;:&quot;#filter-sheet&quot;}],[&quot;remove_class&quot;,{&quot;names&quot;:[&quot;flex&quot;],&quot;to&quot;:&quot;#filter-sheet&quot;}],[&quot;set_attr&quot;,{&quot;attr&quot;:[&quot;aria-hidden&quot;,&quot;true&quot;],&quot;to&quot;:&quot;#filter-sheet&quot;}]]"></button>
+  <div class="bg-white dark:bg-grey-800 rounded-t-[20px] shadow-[0_-8px_24px_rgba(3,9,19,0.16)] pt-2 pb-6 flex flex-col max-h-[85%]">
+    <div class="w-9 h-1 rounded-full bg-grey-200 dark:bg-grey-600 mx-auto mt-1.5 mb-1"></div>
+    <div class="flex items-center justify-between px-4 pt-2.5 pb-3.5 border-b border-grey-100 dark:border-grey-700">
+      <div class="flex items-baseline gap-2">
+  <span class="text-tiny font-semibold uppercase tracking-[0.08em] text-grey-400 dark:text-grey-300">
+    Filters
+  </span>
+  
+</div>
+      <button type="button" aria-label="Close filters" class="w-8 h-8 rounded-lg inline-flex items-center justify-center text-grey-500 dark:text-grey-300 hover:bg-grey-50 dark:hover:bg-grey-700 transition-colors" phx-click="[[&quot;add_class&quot;,{&quot;names&quot;:[&quot;hidden&quot;],&quot;to&quot;:&quot;#filter-sheet&quot;}],[&quot;remove_class&quot;,{&quot;names&quot;:[&quot;flex&quot;],&quot;to&quot;:&quot;#filter-sheet&quot;}],[&quot;set_attr&quot;,{&quot;attr&quot;:[&quot;aria-hidden&quot;,&quot;true&quot;],&quot;to&quot;:&quot;#filter-sheet&quot;}]]">
+        <svg aria-hidden="true" class="heroicon heroicon-x-mark" fill="none" height="18" title="x-mark" version="1.1" viewBox="0 0 24 24" width="18"><g title="x-mark"><path d="M6 18L18 6M6 6L18 18" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" /></g></svg>
+      </button>
+    </div>
+
+    <div class="overflow-y-auto px-4 pt-4 pb-1">
+      <form id="filter-form-mobile" phx-change="filter_change" phx-auto-recover="ignore" phx-hook="FormSync" data-sync-to="filter-form">
+  <div class="mb-[18px]">
+    <label class="flex items-center justify-between gap-2 text-small font-semibold text-grey-600 dark:text-grey-200 mb-1.5" for="filter-form-mobile-build-tool">
+      Build tool
+    </label>
+    <div class="relative">
+      <select id="filter-form-mobile-build-tool" name="build_tool" class="w-full h-9 pl-3 pr-8 text-small bg-white dark:bg-grey-700 border border-grey-200 dark:border-grey-600 rounded-lg text-grey-700 dark:text-grey-100 cursor-pointer appearance-none focus:outline-none focus:border-primary-600 focus:ring-[3px] focus:ring-primary-100 dark:focus:ring-primary-900/40 transition-[border-color,box-shadow] duration-150">
+        <option value="" selected>Any</option>
+        <option value="mix">
+          mix
+        </option><option value="rebar3">
+          rebar3
+        </option><option value="make">
+          make
+        </option><option value="gleam">
+          gleam
+        </option>
+      </select>
+      <div class="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-grey-400 dark:text-grey-300">
+        <svg aria-hidden="true" class="heroicon heroicon-chevron-down" fill="none" height="14" title="chevron-down" version="1.1" viewBox="0 0 24 24" width="14"><g title="chevron-down"><path d="M19.5 8.25L12 15.75L4.5 8.25" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" /></g></svg>
+      </div>
+    </div>
+  </div>
+
+  <div class="mb-[18px]">
+    <label class="flex items-center justify-between gap-2 text-small font-semibold text-grey-600 dark:text-grey-200 mb-1.5" for="filter-form-mobile-depends">
+      Depends on
+    </label>
+    <div class="relative">
+      <span class="absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-grey-300 dark:text-grey-400">
+        <svg aria-hidden="true" class="heroicon heroicon-magnifying-glass" fill="none" height="14" title="magnifying-glass" version="1.1" viewBox="0 0 24 24" width="14"><g title="magnifying-glass"><path d="M21 21L15.8033 15.8033M15.8033 15.8033C17.1605 14.4461 18 12.5711 18 10.5C18 6.35786 14.6421 3 10.5 3C6.35786 3 3 6.35786 3 10.5C3 14.6421 6.35786 18 10.5 18C12.5711 18 14.4461 17.1605 15.8033 15.8033Z" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" /></g></svg>
+      </span>
+      <input id="filter-form-mobile-depends" type="text" name="depends" value="" placeholder="package name" phx-debounce="300" class="w-full h-9 pl-[34px] pr-3 text-small bg-white dark:bg-grey-700 border border-grey-200 dark:border-grey-600 rounded-lg text-grey-700 dark:text-grey-100 placeholder:text-grey-300 dark:placeholder:text-grey-400 focus:outline-none focus:border-primary-600 focus:ring-[3px] focus:ring-primary-100 dark:focus:ring-primary-900/40 transition-[border-color,box-shadow] duration-150">
+    </div>
+  </div>
+
+  <div class="mb-5">
+    <label class="flex items-center justify-between gap-2 text-small font-semibold text-grey-600 dark:text-grey-200 mb-1.5" for="filter-form-mobile-updated-after">
+      <span>Updated after</span>
+      <span class="text-tiny font-normal text-grey-400 dark:text-grey-300">last release</span>
+    </label>
+    <input id="filter-form-mobile-updated-after" type="date" name="updated_after" value="" class="w-full h-9 px-3 text-small bg-white dark:bg-grey-700 border border-grey-200 dark:border-grey-600 rounded-lg text-grey-700 dark:text-grey-100 tabular-nums focus:outline-none focus:border-primary-600 focus:ring-[3px] focus:ring-primary-100 dark:focus:ring-primary-900/40 transition-[border-color,box-shadow] duration-150">
+  </div>
+</form>
+    </div>
+
+    <div class="flex gap-2 px-4 pt-3.5 border-t border-grey-100 dark:border-grey-700 mt-2">
+      <button type="button" phx-click="clear_filters" class="flex-1 h-11 rounded-lg border-[1.5px] border-grey-900 dark:border-grey-100 bg-transparent text-grey-900 dark:text-grey-100 text-sm font-medium hover:bg-grey-900 hover:text-white dark:hover:bg-grey-100 dark:hover:text-grey-900 transition-colors">
+        Clear all
+      </button>
+      <button type="button" class="flex-[2] h-11 rounded-lg border-0 bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 transition-colors" phx-click="[[&quot;add_class&quot;,{&quot;names&quot;:[&quot;hidden&quot;],&quot;to&quot;:&quot;#filter-sheet&quot;}],[&quot;remove_class&quot;,{&quot;names&quot;:[&quot;flex&quot;],&quot;to&quot;:&quot;#filter-sheet&quot;}],[&quot;set_attr&quot;,{&quot;attr&quot;:[&quot;aria-hidden&quot;,&quot;true&quot;],&quot;to&quot;:&quot;#filter-sheet&quot;}]]">
+        Show results
+      </button>
+    </div>
+  </div>
+</div>
+</div>
+    </main>
+  </section>
+
+  <footer class="bg-grey-800 text-grey-200 font-sans">
+  <div class="max-w-7xl mx-auto px-4 pt-12 pb-10 flex flex-col gap-10">
+    <div class="flex flex-col gap-10 lg:flex-row lg:items-start lg:gap-24 xl:gap-28">
+      <div class="flex w-full items-start justify-between gap-6 lg:w-auto lg:flex-col lg:items-start lg:justify-start lg:gap-6">
+  <div class="flex items-center gap-3">
+    <img src="/images/hex-full-a8183c4f9adac71516516d107d402b18.svg?vsn=d" alt="hex logo" class="h-8 w-auto">
+    <span class="text-white text-2xl font-bold tracking-tight">
+      Hex
+    </span>
+  </div>
+  <div class="flex gap-3 lg:mt-4">
+  <a href="https://github.com/hexpm" class="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-grey-700 text-slate-200 hover:bg-grey-600 transition duration-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-grey-500" target="_blank" rel="noopener noreferrer" aria-label="GitHub">
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" class="h-4 w-4" aria-hidden="true">
+  <path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.528 2 12.07c0 4.449 2.865 8.222 6.839 9.558.5.095.683-.219.683-.487 0-.24-.01-1.034-.014-1.876-2.782.609-3.369-1.193-3.369-1.193-.454-1.166-1.11-1.477-1.11-1.477-.908-.625.07-.612.07-.612 1.004.071 1.532 1.045 1.532 1.045.893 1.55 2.341 1.103 2.91.844.091-.656.35-1.103.636-1.357-2.22-.257-4.555-1.117-4.555-4.969 0-1.098.388-1.995 1.025-2.698-.103-.259-.445-1.296.098-2.704 0 0 .84-.27 2.75 1.03A9.517 9.517 0 0 1 12 6.844a9.5 9.5 0 0 1 2.5.341c1.91-1.3 2.749-1.03 2.749-1.03.544 1.408.202 2.445.1 2.704.64.703 1.024 1.6 1.024 2.698 0 3.861-2.339 4.708-4.566 4.961.359.313.678.928.678 1.872 0 1.352-.013 2.442-.013 2.775 0 .27.18.586.688.486C19.138 20.287 22 16.517 22 12.07 22 6.528 17.523 2 12 2Z" fill="currentColor"></path>
+</svg>
+</a>
+  <a href="https://x.com/hexpm" class="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-grey-700 text-slate-200 hover:bg-grey-600 transition duration-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-grey-500" target="_blank" rel="noopener noreferrer" aria-label="X">
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" class="h-4 w-4" aria-hidden="true">
+  <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" fill="currentColor"></path>
+</svg>
+</a>
+</div>
+</div>
+      <div class="flex-1">
+  <div class="grid grid-cols-1 gap-y-10 gap-x-12 md:grid-cols-3 lg:gap-x-16 xl:gap-x-24">
+    <div class="flex flex-col gap-3 font-medium leading-4">
+  
+      <a href="/about" class="text-grey-200 hover:text-white transition-colors">
+  About
+</a>
+      <a href="/blog" class="text-grey-200 hover:text-white transition-colors">
+  Blog
+</a>
+      <a href="/sponsors" class="text-grey-200 hover:text-white transition-colors">
+  Sponsors
+</a>
+      <a href="https://status.hex.pm" class="text-grey-200 hover:text-white transition-colors" target="_blank" rel="noopener noreferrer">
+  Status
+</a>
+      <a href="https://osv.dev/list?ecosystem=Hex" class="text-grey-200 hover:text-white transition-colors" target="_blank" rel="noopener noreferrer">
+  Advisories
+</a>
+    
+</div>
+
+    <div class="flex flex-col gap-3 font-medium leading-4">
+  
+      <a href="/docs" class="text-grey-200 hover:text-white transition-colors">
+  Documentation
+</a>
+      <a href="/docs/faq" class="text-grey-200 hover:text-white transition-colors">
+  FAQ
+</a>
+      <a href="https://github.com/hexpm/specifications" class="text-grey-200 hover:text-white transition-colors" target="_blank" rel="noopener noreferrer">
+  Specifications
+</a>
+      <a href="https://github.com/hexpm/hex/issues" class="text-grey-200 hover:text-white transition-colors" target="_blank" rel="noopener noreferrer">
+  Report Client Issue
+</a>
+      <a href="https://github.com/hexpm/hexpm/issues" class="text-grey-200 hover:text-white transition-colors" target="_blank" rel="noopener noreferrer">
+  Report General Issue
+</a>
+      <a href="mailto:security@hex.pm" class="text-grey-200 hover:text-white transition-colors">
+  Report Security Issue
+</a>
+      <a href="mailto:support@hex.pm" class="text-grey-200 hover:text-white transition-colors">
+  Contact Support
+</a>
+    
+</div>
+
+    <div class="flex flex-col gap-3 font-medium leading-4">
+  
+      <a href="/policies/codeofconduct" class="text-grey-200 hover:text-white transition-colors">
+  Code of Conduct
+</a>
+      <a href="/policies/termsofservice" class="text-grey-200 hover:text-white transition-colors">
+  Terms of Service
+</a>
+      <a href="/policies/privacy" class="text-grey-200 hover:text-white transition-colors">
+  Privacy Policy
+</a>
+      <a href="/policies/copyright" class="text-grey-200 hover:text-white transition-colors">
+  Copyright Policy
+</a>
+      <a href="/policies/dispute" class="text-grey-200 hover:text-white transition-colors">
+  Dispute Policy
+</a>
+    
+</div>
+  </div>
+</div>
+    </div>
+  </div>
+  <div class="bg-grey-700">
+  <div class="max-w-7xl mx-auto px-4 py-4 flex flex-col items-center gap-3 text-sm text-grey-200 md:flex-row md:justify-between">
+    <p class="text-center leading-[14px] md:text-left">
+      Copyright 2015. Six Colors AB.
+    </p>
+    <p class="text-center leading-[18px] md:text-right">
+      Powered by the
+      <a href="https://www.erlang.org/" class="underline hover:text-grey-300">Erlang VM</a>
+      and the
+      <a href="https://elixir-lang.org/" class="underline hover:text-grey-300">
+        Elixir Programming Language
+      </a>
+    </p>
+  </div>
+</div>
+</footer>
+  <div id="search-cheatsheet" class="fixed inset-0 z-50 hidden " aria-labelledby="search-cheatsheet-title">
+  
+  <div id="search-cheatsheet-backdrop" class="fixed inset-0 bg-grey-900/25 dark:bg-grey-950/60 transition-opacity hidden" aria-hidden="true" phx-click="[[&quot;add_class&quot;,{&quot;names&quot;:[&quot;hidden&quot;],&quot;to&quot;:&quot;#search-cheatsheet&quot;,&quot;transition&quot;:[[&quot;transition-all&quot;,&quot;transform&quot;,&quot;ease-in&quot;,&quot;duration-200&quot;],[&quot;opacity-100&quot;],[&quot;opacity-0&quot;]]}],[&quot;add_class&quot;,{&quot;names&quot;:[&quot;hidden&quot;],&quot;to&quot;:&quot;#search-cheatsheet-backdrop&quot;,&quot;transition&quot;:[[&quot;transition-all&quot;,&quot;transform&quot;,&quot;ease-in&quot;,&quot;duration-200&quot;],[&quot;opacity-100&quot;],[&quot;opacity-0&quot;]]}],[&quot;add_class&quot;,{&quot;names&quot;:[&quot;hidden&quot;],&quot;to&quot;:&quot;#search-cheatsheet-content&quot;,&quot;transition&quot;:[[&quot;transition-all&quot;,&quot;transform&quot;,&quot;ease-in&quot;,&quot;duration-200&quot;],[&quot;opacity-100&quot;,&quot;translate-y-0&quot;,&quot;sm:scale-100&quot;],[&quot;opacity-0&quot;,&quot;translate-y-4&quot;,&quot;sm:translate-y-0&quot;,&quot;sm:scale-95&quot;]]}],[&quot;remove_class&quot;,{&quot;names&quot;:[&quot;overflow-hidden&quot;],&quot;to&quot;:&quot;body&quot;}]]">
+  </div>
+
+  
+  <div class="fixed inset-0 z-10 overflow-y-auto">
+    <div class="flex min-h-full items-center justify-center p-4">
+      
+      <div id="search-cheatsheet-content" class="relative w-full bg-white dark:bg-grey-800 border border-grey-200 dark:border-grey-700 rounded-[20px] flex flex-col max-h-[calc(100vh-2rem)] p-6 shadow-[0px_15px_50px_0px_rgba(3,9,19,0.4)] hidden max-w-2xl" role="dialog" aria-modal="true" phx-click-away="[[&quot;add_class&quot;,{&quot;names&quot;:[&quot;hidden&quot;],&quot;to&quot;:&quot;#search-cheatsheet&quot;,&quot;transition&quot;:[[&quot;transition-all&quot;,&quot;transform&quot;,&quot;ease-in&quot;,&quot;duration-200&quot;],[&quot;opacity-100&quot;],[&quot;opacity-0&quot;]]}],[&quot;add_class&quot;,{&quot;names&quot;:[&quot;hidden&quot;],&quot;to&quot;:&quot;#search-cheatsheet-backdrop&quot;,&quot;transition&quot;:[[&quot;transition-all&quot;,&quot;transform&quot;,&quot;ease-in&quot;,&quot;duration-200&quot;],[&quot;opacity-100&quot;],[&quot;opacity-0&quot;]]}],[&quot;add_class&quot;,{&quot;names&quot;:[&quot;hidden&quot;],&quot;to&quot;:&quot;#search-cheatsheet-content&quot;,&quot;transition&quot;:[[&quot;transition-all&quot;,&quot;transform&quot;,&quot;ease-in&quot;,&quot;duration-200&quot;],[&quot;opacity-100&quot;,&quot;translate-y-0&quot;,&quot;sm:scale-100&quot;],[&quot;opacity-0&quot;,&quot;translate-y-4&quot;,&quot;sm:translate-y-0&quot;,&quot;sm:scale-95&quot;]]}],[&quot;remove_class&quot;,{&quot;names&quot;:[&quot;overflow-hidden&quot;],&quot;to&quot;:&quot;body&quot;}]]" phx-window-keydown="[[&quot;add_class&quot;,{&quot;names&quot;:[&quot;hidden&quot;],&quot;to&quot;:&quot;#search-cheatsheet&quot;,&quot;transition&quot;:[[&quot;transition-all&quot;,&quot;transform&quot;,&quot;ease-in&quot;,&quot;duration-200&quot;],[&quot;opacity-100&quot;],[&quot;opacity-0&quot;]]}],[&quot;add_class&quot;,{&quot;names&quot;:[&quot;hidden&quot;],&quot;to&quot;:&quot;#search-cheatsheet-backdrop&quot;,&quot;transition&quot;:[[&quot;transition-all&quot;,&quot;transform&quot;,&quot;ease-in&quot;,&quot;duration-200&quot;],[&quot;opacity-100&quot;],[&quot;opacity-0&quot;]]}],[&quot;add_class&quot;,{&quot;names&quot;:[&quot;hidden&quot;],&quot;to&quot;:&quot;#search-cheatsheet-content&quot;,&quot;transition&quot;:[[&quot;transition-all&quot;,&quot;transform&quot;,&quot;ease-in&quot;,&quot;duration-200&quot;],[&quot;opacity-100&quot;,&quot;translate-y-0&quot;,&quot;sm:scale-100&quot;],[&quot;opacity-0&quot;,&quot;translate-y-4&quot;,&quot;sm:translate-y-0&quot;,&quot;sm:scale-95&quot;]]}],[&quot;remove_class&quot;,{&quot;names&quot;:[&quot;overflow-hidden&quot;],&quot;to&quot;:&quot;body&quot;}]]" phx-key="escape">
+        
+        <div class="absolute top-6 right-6">
+          <button type="button" class="p-2 rounded transition-colors cursor-pointer text-grey-400 hover:text-grey-700 hover:bg-grey-100 disabled:hover:text-grey-400 disabled:hover:bg-transparent dark:text-grey-300 dark:hover:text-grey-100 dark:hover:bg-grey-800 dark:disabled:hover:text-grey-300 disabled:opacity-50 disabled:cursor-not-allowed " phx-click="[[&quot;add_class&quot;,{&quot;names&quot;:[&quot;hidden&quot;],&quot;to&quot;:&quot;#search-cheatsheet&quot;,&quot;transition&quot;:[[&quot;transition-all&quot;,&quot;transform&quot;,&quot;ease-in&quot;,&quot;duration-200&quot;],[&quot;opacity-100&quot;],[&quot;opacity-0&quot;]]}],[&quot;add_class&quot;,{&quot;names&quot;:[&quot;hidden&quot;],&quot;to&quot;:&quot;#search-cheatsheet-backdrop&quot;,&quot;transition&quot;:[[&quot;transition-all&quot;,&quot;transform&quot;,&quot;ease-in&quot;,&quot;duration-200&quot;],[&quot;opacity-100&quot;],[&quot;opacity-0&quot;]]}],[&quot;add_class&quot;,{&quot;names&quot;:[&quot;hidden&quot;],&quot;to&quot;:&quot;#search-cheatsheet-content&quot;,&quot;transition&quot;:[[&quot;transition-all&quot;,&quot;transform&quot;,&quot;ease-in&quot;,&quot;duration-200&quot;],[&quot;opacity-100&quot;,&quot;translate-y-0&quot;,&quot;sm:scale-100&quot;],[&quot;opacity-0&quot;,&quot;translate-y-4&quot;,&quot;sm:translate-y-0&quot;,&quot;sm:scale-95&quot;]]}],[&quot;remove_class&quot;,{&quot;names&quot;:[&quot;overflow-hidden&quot;],&quot;to&quot;:&quot;body&quot;}]]" aria-label="Close modal">
+  <svg aria-hidden="true" class="heroicon heroicon-x-mark" fill="none" height="16" title="x-mark" version="1.1" viewBox="0 0 24 24" width="16"><g title="x-mark"><path d="M6 18L18 6M6 6L18 18" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" /></g></svg>
+</button>
+        </div>
+
+        
+        
+          <div class="mb-4 pr-10">
+            
+              <h2 id="search-cheatsheet-title" class="text-lg font-semibold text-grey-900 dark:text-white">
+                Search filters
+              </h2>
+            
+          </div>
+        
+
+        
+        <div class="flex-1 overflow-y-auto p-1.5">
+          
+  <p class="text-sm text-grey-600 dark:text-grey-300 mb-3">
+    Type any of these into the search box. They can be combined with free text
+    which searches package names and descriptions.
+  </p>
+  <table class="w-full text-sm">
+    <thead>
+      <tr class="text-left border-b">
+        <th class="py-1 pr-3">Operator</th>
+        <th class="py-1 pr-3">Description</th>
+        <th class="py-1">Example</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr class="border-b last:border-b-0">
+        <td class="py-1 pr-3 font-mono">name:</td>
+        <td class="py-1 pr-3">Match package name. Supports * wildcards and repo/package form</td>
+        <td class="py-1 font-mono">name:phx* or name:hexpm/phoenix</td>
+      </tr><tr class="border-b last:border-b-0">
+        <td class="py-1 pr-3 font-mono">description:</td>
+        <td class="py-1 pr-3">Full-text search of package descriptions</td>
+        <td class="py-1 font-mono">description:auth</td>
+      </tr><tr class="border-b last:border-b-0">
+        <td class="py-1 pr-3 font-mono">depends:</td>
+        <td class="py-1 pr-3">Packages depending on a given package. Supports repo:package form</td>
+        <td class="py-1 font-mono">depends:ecto or depends:hexpm:ecto</td>
+      </tr><tr class="border-b last:border-b-0">
+        <td class="py-1 pr-3 font-mono">build_tool:</td>
+        <td class="py-1 pr-3">Filter by build tool</td>
+        <td class="py-1 font-mono">build_tool:mix</td>
+      </tr><tr class="border-b last:border-b-0">
+        <td class="py-1 pr-3 font-mono">updated_after:</td>
+        <td class="py-1 pr-3">Packages updated after an ISO8601 datetime</td>
+        <td class="py-1 font-mono">updated_after:2025-01-01T00:00:00Z</td>
+      </tr><tr class="border-b last:border-b-0">
+        <td class="py-1 pr-3 font-mono">extra:</td>
+        <td class="py-1 pr-3">Match custom metadata (key,value). Nested keys are separated by commas</td>
+        <td class="py-1 font-mono">extra:license,MIT</td>
+      </tr>
+    </tbody>
+  </table>
+  <p class="text-sm text-grey-600 dark:text-grey-300 mt-4">
+    Wrap values in double quotes to include spaces, e.g. <code class="font-mono">name:"my package"</code>.
+  </p>
+
+        </div>
+
+        
+        
+      </div>
+    </div>
+  </div>
+</div>
+</div></div>
+
+    <script src="/assets/app-eba2dd2ccda30b8b1dd035df22225a61.js?vsn=d" nonce="yqPcivOumL-G0rR_YSyPlCLgXik7lbB3OimDASc7ZJs">
+    </script>
+  </body>
+</html>

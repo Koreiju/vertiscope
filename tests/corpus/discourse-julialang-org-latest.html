@@ -1,0 +1,1445 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Latest topics - Julia Programming Language</title>
+    <meta name="description" content="The Julia programming language forum: discuss usage, development, packages, and community.">
+    <meta name="generator" content="Discourse 2026.8.0-latest.1 - https://github.com/discourse/discourse version 763655f6faf47b088afee1a59e2d97cec5886c97">
+<link rel="icon" type="image/png" href="https://global.discourse-cdn.com/julialang/optimized/3X/5/2/52e282d46eadd4022c458057bb740061d8efad72_2_32x32.png">
+<link rel="apple-touch-icon" type="image/png" href="https://global.discourse-cdn.com/julialang/optimized/3X/5/2/52e282d46eadd4022c458057bb740061d8efad72_2_180x180.png">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#fff">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#111111">
+
+<meta name="color-scheme" content="light dark">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0, viewport-fit=cover">
+<link rel="canonical" href="https://discourse.julialang.org/latest" />
+
+<meta name="discourse-track-view-session-id" content="muRjXJyMwvauAH8VR9O9XKCwJcu5zhJg"><meta name="discourse-beacon-pageview-enabled" content="true"><meta name="discourse-engagement-tracking-enabled" content="true">
+<link rel="search" type="application/opensearchdescription+xml" href="https://discourse.julialang.org/opensearch.xml" title="Julia Programming Language Search">
+
+    
+    <link href="https://sea2.discourse-cdn.com/julialang/stylesheets/color_definitions_light-default_-1_53_5b341832ba7eda180b4557451294c3d78b35a975.css?__ws=discourse.julialang.org" media="(prefers-color-scheme: light)" rel="stylesheet" class="light-scheme"/><link href="https://sea2.discourse-cdn.com/julialang/stylesheets/color_definitions_dark-scheme_3_53_917033b5366492a495cadc671937363a7a3afecc.css?__ws=discourse.julialang.org" media="(prefers-color-scheme: dark)" rel="stylesheet" class="dark-scheme" data-scheme-id="3"/>
+
+<link href="https://sea2.discourse-cdn.com/julialang/stylesheets/common_688fe32edbd08748d8d2a71be5d3e770e6afd2b4.css?__ws=discourse.julialang.org" media="all" rel="stylesheet" data-target="common"  />
+
+
+
+  <link href="https://sea2.discourse-cdn.com/julialang/stylesheets/chat_688fe32edbd08748d8d2a71be5d3e770e6afd2b4.css?__ws=discourse.julialang.org" media="all" rel="stylesheet" data-target="chat"  />
+  <link href="https://sea2.discourse-cdn.com/julialang/stylesheets/checklist_688fe32edbd08748d8d2a71be5d3e770e6afd2b4.css?__ws=discourse.julialang.org" media="all" rel="stylesheet" data-target="checklist"  />
+  <link href="https://sea2.discourse-cdn.com/julialang/stylesheets/discourse-ai_688fe32edbd08748d8d2a71be5d3e770e6afd2b4.css?__ws=discourse.julialang.org" media="all" rel="stylesheet" data-target="discourse-ai"  />
+  <link href="https://sea2.discourse-cdn.com/julialang/stylesheets/discourse-akismet_688fe32edbd08748d8d2a71be5d3e770e6afd2b4.css?__ws=discourse.julialang.org" media="all" rel="stylesheet" data-target="discourse-akismet"  />
+  <link href="https://sea2.discourse-cdn.com/julialang/stylesheets/discourse-assign_688fe32edbd08748d8d2a71be5d3e770e6afd2b4.css?__ws=discourse.julialang.org" media="all" rel="stylesheet" data-target="discourse-assign"  />
+  <link href="https://sea2.discourse-cdn.com/julialang/stylesheets/discourse-cakeday_688fe32edbd08748d8d2a71be5d3e770e6afd2b4.css?__ws=discourse.julialang.org" media="all" rel="stylesheet" data-target="discourse-cakeday"  />
+  <link href="https://sea2.discourse-cdn.com/julialang/stylesheets/discourse-calendar_688fe32edbd08748d8d2a71be5d3e770e6afd2b4.css?__ws=discourse.julialang.org" media="all" rel="stylesheet" data-target="discourse-calendar"  />
+  <link href="https://sea2.discourse-cdn.com/julialang/stylesheets/discourse-data-explorer_688fe32edbd08748d8d2a71be5d3e770e6afd2b4.css?__ws=discourse.julialang.org" media="all" rel="stylesheet" data-target="discourse-data-explorer"  />
+  <link href="https://sea2.discourse-cdn.com/julialang/stylesheets/discourse-details_688fe32edbd08748d8d2a71be5d3e770e6afd2b4.css?__ws=discourse.julialang.org" media="all" rel="stylesheet" data-target="discourse-details"  />
+  <link href="https://sea2.discourse-cdn.com/julialang/stylesheets/discourse-github_688fe32edbd08748d8d2a71be5d3e770e6afd2b4.css?__ws=discourse.julialang.org" media="all" rel="stylesheet" data-target="discourse-github"  />
+  <link href="https://sea2.discourse-cdn.com/julialang/stylesheets/discourse-graphviz_688fe32edbd08748d8d2a71be5d3e770e6afd2b4.css?__ws=discourse.julialang.org" media="all" rel="stylesheet" data-target="discourse-graphviz"  />
+  <link href="https://sea2.discourse-cdn.com/julialang/stylesheets/discourse-lazy-videos_688fe32edbd08748d8d2a71be5d3e770e6afd2b4.css?__ws=discourse.julialang.org" media="all" rel="stylesheet" data-target="discourse-lazy-videos"  />
+  <link href="https://sea2.discourse-cdn.com/julialang/stylesheets/discourse-local-dates_688fe32edbd08748d8d2a71be5d3e770e6afd2b4.css?__ws=discourse.julialang.org" media="all" rel="stylesheet" data-target="discourse-local-dates"  />
+  <link href="https://sea2.discourse-cdn.com/julialang/stylesheets/discourse-math_688fe32edbd08748d8d2a71be5d3e770e6afd2b4.css?__ws=discourse.julialang.org" media="all" rel="stylesheet" data-target="discourse-math"  />
+  <link href="https://sea2.discourse-cdn.com/julialang/stylesheets/discourse-narrative-bot_688fe32edbd08748d8d2a71be5d3e770e6afd2b4.css?__ws=discourse.julialang.org" media="all" rel="stylesheet" data-target="discourse-narrative-bot"  />
+  <link href="https://sea2.discourse-cdn.com/julialang/stylesheets/discourse-policy_688fe32edbd08748d8d2a71be5d3e770e6afd2b4.css?__ws=discourse.julialang.org" media="all" rel="stylesheet" data-target="discourse-policy"  />
+  <link href="https://sea2.discourse-cdn.com/julialang/stylesheets/discourse-presence_688fe32edbd08748d8d2a71be5d3e770e6afd2b4.css?__ws=discourse.julialang.org" media="all" rel="stylesheet" data-target="discourse-presence"  />
+  <link href="https://sea2.discourse-cdn.com/julialang/stylesheets/discourse-solved_688fe32edbd08748d8d2a71be5d3e770e6afd2b4.css?__ws=discourse.julialang.org" media="all" rel="stylesheet" data-target="discourse-solved"  />
+  <link href="https://sea2.discourse-cdn.com/julialang/stylesheets/discourse-templates_688fe32edbd08748d8d2a71be5d3e770e6afd2b4.css?__ws=discourse.julialang.org" media="all" rel="stylesheet" data-target="discourse-templates"  />
+  <link href="https://sea2.discourse-cdn.com/julialang/stylesheets/discourse-topic-voting_688fe32edbd08748d8d2a71be5d3e770e6afd2b4.css?__ws=discourse.julialang.org" media="all" rel="stylesheet" data-target="discourse-topic-voting"  />
+  <link href="https://sea2.discourse-cdn.com/julialang/stylesheets/discourse-user-notes_688fe32edbd08748d8d2a71be5d3e770e6afd2b4.css?__ws=discourse.julialang.org" media="all" rel="stylesheet" data-target="discourse-user-notes"  />
+  <link href="https://sea2.discourse-cdn.com/julialang/stylesheets/footnote_688fe32edbd08748d8d2a71be5d3e770e6afd2b4.css?__ws=discourse.julialang.org" media="all" rel="stylesheet" data-target="footnote"  />
+  <link href="https://sea2.discourse-cdn.com/julialang/stylesheets/hosted-site_688fe32edbd08748d8d2a71be5d3e770e6afd2b4.css?__ws=discourse.julialang.org" media="all" rel="stylesheet" data-target="hosted-site"  />
+  <link href="https://sea2.discourse-cdn.com/julialang/stylesheets/poll_688fe32edbd08748d8d2a71be5d3e770e6afd2b4.css?__ws=discourse.julialang.org" media="all" rel="stylesheet" data-target="poll"  />
+  <link href="https://sea2.discourse-cdn.com/julialang/stylesheets/spoiler-alert_688fe32edbd08748d8d2a71be5d3e770e6afd2b4.css?__ws=discourse.julialang.org" media="all" rel="stylesheet" data-target="spoiler-alert"  />
+  <link href="https://sea2.discourse-cdn.com/julialang/stylesheets/chat_mobile_688fe32edbd08748d8d2a71be5d3e770e6afd2b4.css?__ws=discourse.julialang.org" media="(width < 40rem)" rel="stylesheet" data-target="chat_mobile"  />
+  <link href="https://sea2.discourse-cdn.com/julialang/stylesheets/discourse-ai_mobile_688fe32edbd08748d8d2a71be5d3e770e6afd2b4.css?__ws=discourse.julialang.org" media="(width < 40rem)" rel="stylesheet" data-target="discourse-ai_mobile"  />
+  <link href="https://sea2.discourse-cdn.com/julialang/stylesheets/discourse-assign_mobile_688fe32edbd08748d8d2a71be5d3e770e6afd2b4.css?__ws=discourse.julialang.org" media="(width < 40rem)" rel="stylesheet" data-target="discourse-assign_mobile"  />
+  <link href="https://sea2.discourse-cdn.com/julialang/stylesheets/discourse-calendar_mobile_688fe32edbd08748d8d2a71be5d3e770e6afd2b4.css?__ws=discourse.julialang.org" media="(width < 40rem)" rel="stylesheet" data-target="discourse-calendar_mobile"  />
+  <link href="https://sea2.discourse-cdn.com/julialang/stylesheets/chat_desktop_688fe32edbd08748d8d2a71be5d3e770e6afd2b4.css?__ws=discourse.julialang.org" media="(width >= 40rem)" rel="stylesheet" data-target="chat_desktop"  />
+  <link href="https://sea2.discourse-cdn.com/julialang/stylesheets/discourse-ai_desktop_688fe32edbd08748d8d2a71be5d3e770e6afd2b4.css?__ws=discourse.julialang.org" media="(width >= 40rem)" rel="stylesheet" data-target="discourse-ai_desktop"  />
+  <link href="https://sea2.discourse-cdn.com/julialang/stylesheets/discourse-calendar_desktop_688fe32edbd08748d8d2a71be5d3e770e6afd2b4.css?__ws=discourse.julialang.org" media="(width >= 40rem)" rel="stylesheet" data-target="discourse-calendar_desktop"  />
+  <link href="https://sea2.discourse-cdn.com/julialang/stylesheets/poll_desktop_688fe32edbd08748d8d2a71be5d3e770e6afd2b4.css?__ws=discourse.julialang.org" media="(width >= 40rem)" rel="stylesheet" data-target="poll_desktop"  />
+
+  <link href="https://sea2.discourse-cdn.com/julialang/stylesheets/common_theme_46_87fb3a9f45b022bbd9fc9fcf7449c1f7c7fb0fdd.css?__ws=discourse.julialang.org" media="all" rel="stylesheet" data-target="common_theme" data-theme-id="46" data-theme-name="discotoc"/>
+<link href="https://sea2.discourse-cdn.com/julialang/stylesheets/common_theme_40_3269cf328f89342b3480d14af470b16b5f833346.css?__ws=discourse.julialang.org" media="all" rel="stylesheet" data-target="common_theme" data-theme-id="40" data-theme-name="easy footer"/>
+<link href="https://sea2.discourse-cdn.com/julialang/stylesheets/common_theme_51_d05818e04a8479c7ac6c98224efe859ccc1cae0c.css?__ws=discourse.julialang.org" media="all" rel="stylesheet" data-target="common_theme" data-theme-id="51" data-theme-name="juliamonofonts"/>
+<link href="https://sea2.discourse-cdn.com/julialang/stylesheets/common_theme_44_4cfb2edc802cd8cd74e79333e461a93549b86da5.css?__ws=discourse.julialang.org" media="all" rel="stylesheet" data-target="common_theme" data-theme-id="44" data-theme-name="wikified posts"/>
+<link href="https://sea2.discourse-cdn.com/julialang/stylesheets/common_theme_53_91d230423944cdac3b9ed3e33544340edc4bcc57.css?__ws=discourse.julialang.org" media="all" rel="stylesheet" data-target="common_theme" data-theme-id="53" data-theme-name="julia default theme"/>
+  
+  <link href="https://sea2.discourse-cdn.com/julialang/stylesheets/desktop_theme_53_2f3215990acfa9011f19580b0a1b0cef44142634.css?__ws=discourse.julialang.org" media="(width >= 40rem)" rel="stylesheet" data-target="desktop_theme" data-theme-id="53" data-theme-name="julia default theme"/>
+
+    
+    <meta id="data-ga-universal-analytics" data-tracking-code="UA-28835595-5" data-json="{&quot;cookieDomain&quot;:&quot;auto&quot;}" data-auto-link-domains="">
+
+  <script async src="https://www.googletagmanager.com/gtag/js?id=UA-28835595-5" nonce="uv3R85vKFJH0g46aAFEmXemNU"></script>
+  <script defer src="https://global.discourse-cdn.com/julialang/assets/br/google-universal-analytics-v4-43cb071f.js" data-discourse-entrypoint="js/google-universal-analytics-v4" nonce="uv3R85vKFJH0g46aAFEmXemNU"></script>
+
+
+        <link rel="next" href="/latest?no_definitions=true&amp;page=1">
+    <link rel="alternate" type="application/rss+xml" title="Latest posts" href="https://discourse.julialang.org/posts.rss" />
+      <link rel="alternate" type="application/rss+xml" title="Latest topics" href="https://discourse.julialang.org/latest.rss" />
+    <meta property="og:site_name" content="Julia Programming Language" />
+<meta property="og:type" content="website" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:image" content="https://global.discourse-cdn.com/julialang/original/3X/4/d/4d76a1d8062ed9397f2f00f22abdd69926b51785.png" />
+<meta property="og:image" content="https://global.discourse-cdn.com/julialang/original/3X/4/d/4d76a1d8062ed9397f2f00f22abdd69926b51785.png" />
+<meta property="og:url" content="https://discourse.julialang.org/latest" />
+<meta name="twitter:url" content="https://discourse.julialang.org/latest" />
+<meta property="og:title" content="Julia Programming Language" />
+<meta name="twitter:title" content="Julia Programming Language" />
+<meta property="og:description" content="The Julia programming language forum: discuss usage, development, packages, and community." />
+<meta name="twitter:description" content="The Julia programming language forum: discuss usage, development, packages, and community." />
+
+    
+  </head>
+  <body class="crawler ">
+    
+    <header>
+  <a href="/">Julia Programming Language</a>
+</header>
+
+    <div id="main-outlet" class="wrap" role="main">
+      
+
+
+
+
+<div class="topic-list-container" itemscope itemtype='http://schema.org/ItemList'>
+  <meta itemprop='itemListOrder' content='http://schema.org/ItemListOrderDescending'>
+
+  <table class='topic-list'>
+
+    <thead>
+      <tr>
+        <th>Topic</th>
+        <th></th>
+        <th class="replies">Replies</th>
+        <th class="views">Views</th>
+        <th>Activity</th>
+      </tr>
+    </thead>
+
+    <tbody>
+        <tr class="topic-list-item">
+          <td class="main-link" itemprop='itemListElement' itemscope itemtype='http://schema.org/ListItem'>
+            <meta itemprop='position' content='1'>
+            <span class="link-top-line">
+              <a itemprop='url' href='https://discourse.julialang.org/t/please-read-make-it-easier-to-help-you/14757' class='title raw-link raw-topic-link'>Please read: make it easier to help you</a>
+            </span>
+            <div class="link-bottom-line">
+                <a href='/c/meta/3' class='badge-wrapper bullet'>
+                  <span class='badge-category-bg' style='background-color: #92278F'></span>
+                  <span class='badge-category clear-badge'>
+                    <span class='category-name'>Meta Discussion</span>
+                  </span>
+                </a>
+                <div class="discourse-tags">
+                    <a href='https://discourse.julialang.org/tag/psa/225' class='discourse-tag'>psa</a>
+                    
+                </div>
+            </div>
+              <p class='excerpt'>
+                Welcome to the Julia Discourse! We are enthusiastic about helping Julia programmers, both beginner and experienced. This public service announcement (PSA) outlines best practices when asking for help. Following these poi&hellip;
+              </p>
+          </td>
+          <td class='posters'>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/Tamas_Papp" class="latest">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/tamas_papp/25/25949_2.png" class="avatar" title='Tamas_Papp - Original Poster, Most Recent Poster' aria-label='Tamas_Papp - Original Poster, Most Recent Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/vchuravy" class="">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/vchuravy/25/8_2.png" class="avatar" title='vchuravy - Frequent Poster' aria-label='vchuravy - Frequent Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/StefanKarpinski" class="">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/stefankarpinski/25/24_2.png" class="avatar" title='StefanKarpinski - Recent Poster' aria-label='StefanKarpinski - Recent Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/mbauman" class="">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/mbauman/25/31082_2.png" class="avatar" title='mbauman - Recent Poster' aria-label='mbauman - Recent Poster'>
+              </a>
+          </td>
+          <td class="replies">
+            <span class='posts' title='posts'>0</span>
+          </td>
+          <td class="views">
+            <span class='views' title='views'>49821</span>
+          </td>
+          <td>
+            September 10, 2018
+          </td>
+        </tr>
+        <tr class="topic-list-item">
+          <td class="main-link" itemprop='itemListElement' itemscope itemtype='http://schema.org/ListItem'>
+            <meta itemprop='position' content='2'>
+            <span class="link-top-line">
+              <a itemprop='url' href='https://discourse.julialang.org/t/welcome-to-discourse/8' class='title raw-link raw-topic-link'>Welcome to Discourse</a>
+            </span>
+            <div class="link-bottom-line">
+                <a href='/c/meta/3' class='badge-wrapper bullet'>
+                  <span class='badge-category-bg' style='background-color: #92278F'></span>
+                  <span class='badge-category clear-badge'>
+                    <span class='category-name'>Meta Discussion</span>
+                  </span>
+                </a>
+                <div class="discourse-tags">
+                </div>
+            </div>
+          </td>
+          <td class='posters'>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/system" class="latest">
+                <img width="25" height="25" src="https://global.discourse-cdn.com/julialang/original/3X/1/2/12829a7ba92b924d4ce81099cbf99785bee9b405.png" class="avatar" title='system - Original Poster, Most Recent Poster' aria-label='system - Original Poster, Most Recent Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/vchuravy" class="">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/vchuravy/25/8_2.png" class="avatar" title='vchuravy - Recent Poster' aria-label='vchuravy - Recent Poster'>
+              </a>
+          </td>
+          <td class="replies">
+            <span class='posts' title='posts'>0</span>
+          </td>
+          <td class="views">
+            <span class='views' title='views'>11561</span>
+          </td>
+          <td>
+            October 19, 2016
+          </td>
+        </tr>
+        <tr class="topic-list-item">
+          <td class="main-link" itemprop='itemListElement' itemscope itemtype='http://schema.org/ListItem'>
+            <meta itemprop='position' content='3'>
+            <span class="link-top-line">
+              <a itemprop='url' href='https://discourse.julialang.org/t/state-of-audio-dsp-feature-extraction-in-julia-gaps-priorities-and-future-directions/138722' class='title raw-link raw-topic-link'>State of Audio DSP &amp; Feature Extraction in Julia: Gaps, Priorities, and Future Directions</a>
+            </span>
+            <div class="link-bottom-line">
+                <a href='/c/domain/dsp/26' class='badge-wrapper bullet'>
+                  <span class='badge-category-bg' style='background-color: #F1592A'></span>
+                  <span class='badge-category clear-badge'>
+                    <span class='category-name'>Signal and Image Processing</span>
+                  </span>
+                </a>
+                <div class="discourse-tags">
+                    <a href='https://discourse.julialang.org/tag/package/4' class='discourse-tag'>package</a>
+                    ,&nbsp;
+                    <a href='https://discourse.julialang.org/tag/dsp/414' class='discourse-tag'>dsp</a>
+                    ,&nbsp;
+                    <a href='https://discourse.julialang.org/tag/audio/714' class='discourse-tag'>audio</a>
+                    
+                </div>
+            </div>
+          </td>
+          <td class='posters'>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/blah_blah.jl" class="latest">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/blah_blah.jl/25/223304_2.png" class="avatar" title='blah_blah.jl - Original Poster, Most Recent Poster' aria-label='blah_blah.jl - Original Poster, Most Recent Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/kahliburke" class="">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/kahliburke/25/208472_2.png" class="avatar" title='kahliburke - Frequent Poster' aria-label='kahliburke - Frequent Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/sletz" class="">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/sletz/25/18675_2.png" class="avatar" title='sletz - Frequent Poster' aria-label='sletz - Frequent Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/j_u" class="">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/j_u/25/219081_2.png" class="avatar" title='j_u - Recent Poster' aria-label='j_u - Recent Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/BambOoxX" class="">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/bambooxx/25/22179_2.png" class="avatar" title='BambOoxX - Recent Poster' aria-label='BambOoxX - Recent Poster'>
+              </a>
+          </td>
+          <td class="replies">
+            <span class='posts' title='posts'>22</span>
+          </td>
+          <td class="views">
+            <span class='views' title='views'>484</span>
+          </td>
+          <td>
+            August 15, 2026
+          </td>
+        </tr>
+        <tr class="topic-list-item">
+          <td class="main-link" itemprop='itemListElement' itemscope itemtype='http://schema.org/ListItem'>
+            <meta itemprop='position' content='4'>
+            <span class="link-top-line">
+              <a itemprop='url' href='https://discourse.julialang.org/t/manual-control-of-overloading-existing-methods/133836' class='title raw-link raw-topic-link'>Manual control of overloading existing methods</a>
+            </span>
+            <div class="link-bottom-line">
+                <a href='/c/dev/5' class='badge-wrapper bullet'>
+                  <span class='badge-category-bg' style='background-color: #25AAE2'></span>
+                  <span class='badge-category clear-badge'>
+                    <span class='category-name'>Internals &amp; Design</span>
+                  </span>
+                </a>
+                <div class="discourse-tags">
+                    <a href='https://discourse.julialang.org/tag/proposal/5' class='discourse-tag'>proposal</a>
+                    ,&nbsp;
+                    <a href='https://discourse.julialang.org/tag/function/325' class='discourse-tag'>function</a>
+                    ,&nbsp;
+                    <a href='https://discourse.julialang.org/tag/feature-request/1026' class='discourse-tag'>feature-request</a>
+                    ,&nbsp;
+                    <a href='https://discourse.julialang.org/tag/multiple-dispatch/1215' class='discourse-tag'>multiple-dispatch</a>
+                    ,&nbsp;
+                    <a href='https://discourse.julialang.org/tag/overloading/1666' class='discourse-tag'>overloading</a>
+                    
+                </div>
+            </div>
+          </td>
+          <td class='posters'>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/frankwswang" class="latest">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/frankwswang/25/18561_2.png" class="avatar" title='frankwswang - Original Poster, Most Recent Poster' aria-label='frankwswang - Original Poster, Most Recent Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/adienes" class="">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/adienes/25/37459_2.png" class="avatar" title='adienes - Frequent Poster' aria-label='adienes - Frequent Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/Benny" class="">
+                <img width="25" height="25" src="https://avatars.discourse-cdn.com/v4/letter/b/49beb7/25.png" class="avatar" title='Benny - Recent Poster' aria-label='Benny - Recent Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/stevengj" class="">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/stevengj/25/71_2.png" class="avatar" title='stevengj - Recent Poster' aria-label='stevengj - Recent Poster'>
+              </a>
+          </td>
+          <td class="replies">
+            <span class='posts' title='posts'>17</span>
+          </td>
+          <td class="views">
+            <span class='views' title='views'>488</span>
+          </td>
+          <td>
+            August 15, 2026
+          </td>
+        </tr>
+        <tr class="topic-list-item">
+          <td class="main-link" itemprop='itemListElement' itemscope itemtype='http://schema.org/ListItem'>
+            <meta itemprop='position' content='5'>
+            <span class="link-top-line">
+              <a itemprop='url' href='https://discourse.julialang.org/t/julia-package-vs-juliaup-from-aur-vs-shell-command-for-julia-install-on-arch-linux-derivative/138817' class='title raw-link raw-topic-link'>Julia package vs. Juliaup from AUR vs. shell command for Julia install on Arch Linux derivative?</a>
+            </span>
+            <div class="link-bottom-line">
+                <a href='/c/usage/6' class='badge-wrapper bullet'>
+                  <span class='badge-category-bg' style='background-color: #3AB54A'></span>
+                  <span class='badge-category clear-badge'>
+                    <span class='category-name'>General Usage</span>
+                  </span>
+                </a>
+                <div class="discourse-tags">
+                    <a href='https://discourse.julialang.org/tag/question/3' class='discourse-tag'>question</a>
+                    ,&nbsp;
+                    <a href='https://discourse.julialang.org/tag/installation/182' class='discourse-tag'>installation</a>
+                    
+                </div>
+            </div>
+          </td>
+          <td class='posters'>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/ducksoverip" class="">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/ducksoverip/25/31967_2.png" class="avatar" title='ducksoverip - Original Poster' aria-label='ducksoverip - Original Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/thimotedupuch" class="">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/thimotedupuch/25/222492_2.png" class="avatar" title='thimotedupuch - Frequent Poster' aria-label='thimotedupuch - Frequent Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/csvance" class="">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/csvance/25/218927_2.png" class="avatar" title='csvance - Recent Poster' aria-label='csvance - Recent Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/obsidianjulua" class="latest">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/obsidianjulua/25/221495_2.png" class="avatar" title='obsidianjulua - Most Recent Poster' aria-label='obsidianjulua - Most Recent Poster'>
+              </a>
+          </td>
+          <td class="replies">
+            <span class='posts' title='posts'>4</span>
+          </td>
+          <td class="views">
+            <span class='views' title='views'>85</span>
+          </td>
+          <td>
+            August 15, 2026
+          </td>
+        </tr>
+        <tr class="topic-list-item">
+          <td class="main-link" itemprop='itemListElement' itemscope itemtype='http://schema.org/ListItem'>
+            <meta itemprop='position' content='6'>
+            <span class="link-top-line">
+              <a itemprop='url' href='https://discourse.julialang.org/t/ann-vinecopulas-jl-c-vines-d-vines-and-experimental-r-vines-in-julia/137930' class='title raw-link raw-topic-link'>[ANN] VineCopulas.jl: C-vines, D-vines, and experimental R-vines in Julia</a>
+            </span>
+            <div class="link-bottom-line">
+                <a href='/c/package-announcements/60' class='badge-wrapper bullet'>
+                  <span class='badge-category-bg' style='background-color: #FDDA0D'></span>
+                  <span class='badge-category clear-badge'>
+                    <span class='category-name'>Package Announcements</span>
+                  </span>
+                </a>
+                <div class="discourse-tags">
+                    <a href='https://discourse.julialang.org/tag/announcement/6' class='discourse-tag'>announcement</a>
+                    ,&nbsp;
+                    <a href='https://discourse.julialang.org/tag/statistics/30' class='discourse-tag'>statistics</a>
+                    ,&nbsp;
+                    <a href='https://discourse.julialang.org/tag/packages/58' class='discourse-tag'>packages</a>
+                    ,&nbsp;
+                    <a href='https://discourse.julialang.org/tag/probability/684' class='discourse-tag'>probability</a>
+                    ,&nbsp;
+                    <a href='https://discourse.julialang.org/tag/copula/952' class='discourse-tag'>copula</a>
+                    
+                </div>
+            </div>
+          </td>
+          <td class='posters'>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/Santymax98" class="">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/santymax98/25/211772_2.png" class="avatar" title='Santymax98 - Original Poster' aria-label='Santymax98 - Original Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/lrnv" class="">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/lrnv/25/19373_2.png" class="avatar" title='lrnv - Frequent Poster' aria-label='lrnv - Frequent Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/dcelisgarza" class="">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/dcelisgarza/25/215951_2.png" class="avatar" title='dcelisgarza - Recent Poster' aria-label='dcelisgarza - Recent Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/langestefan" class="latest">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/langestefan/25/207923_2.png" class="avatar" title='langestefan - Most Recent Poster' aria-label='langestefan - Most Recent Poster'>
+              </a>
+          </td>
+          <td class="replies">
+            <span class='posts' title='posts'>12</span>
+          </td>
+          <td class="views">
+            <span class='views' title='views'>412</span>
+          </td>
+          <td>
+            August 14, 2026
+          </td>
+        </tr>
+        <tr class="topic-list-item">
+          <td class="main-link" itemprop='itemListElement' itemscope itemtype='http://schema.org/ListItem'>
+            <meta itemprop='position' content='7'>
+            <span class="link-top-line">
+              <a itemprop='url' href='https://discourse.julialang.org/t/ann-perth-jl-project-schedules-you-can-compute-on-with-a-browser-ui-attached/138797' class='title raw-link raw-topic-link'>[ANN] Perth.jl — project schedules you can compute on, with a browser UI attached</a>
+            </span>
+            <div class="link-bottom-line">
+                <a href='/c/package-announcements/60' class='badge-wrapper bullet'>
+                  <span class='badge-category-bg' style='background-color: #FDDA0D'></span>
+                  <span class='badge-category clear-badge'>
+                    <span class='category-name'>Package Announcements</span>
+                  </span>
+                </a>
+                <div class="discourse-tags">
+                    <a href='https://discourse.julialang.org/tag/package/4' class='discourse-tag'>package</a>
+                    ,&nbsp;
+                    <a href='https://discourse.julialang.org/tag/announcement/6' class='discourse-tag'>announcement</a>
+                    
+                </div>
+            </div>
+          </td>
+          <td class='posters'>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/dantebertuzzi" class="latest">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/dantebertuzzi/25/215393_2.png" class="avatar" title='dantebertuzzi - Original Poster, Most Recent Poster' aria-label='dantebertuzzi - Original Poster, Most Recent Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/oxinabox" class="">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/oxinabox/25/206603_2.png" class="avatar" title='oxinabox - Recent Poster' aria-label='oxinabox - Recent Poster'>
+              </a>
+          </td>
+          <td class="replies">
+            <span class='posts' title='posts'>2</span>
+          </td>
+          <td class="views">
+            <span class='views' title='views'>211</span>
+          </td>
+          <td>
+            August 14, 2026
+          </td>
+        </tr>
+        <tr class="topic-list-item">
+          <td class="main-link" itemprop='itemListElement' itemscope itemtype='http://schema.org/ListItem'>
+            <meta itemprop='position' content='8'>
+            <span class="link-top-line">
+              <a itemprop='url' href='https://discourse.julialang.org/t/proposal-for-turingregressions-jl-bayesian-regression-model-alternative-to-turingglm-jl/138815' class='title raw-link raw-topic-link'>Proposal for TuringRegressions.jl - Bayesian regression model alternative to TuringGLM.jl</a>
+            </span>
+            <div class="link-bottom-line">
+                <a href='/c/package-announcements/60' class='badge-wrapper bullet'>
+                  <span class='badge-category-bg' style='background-color: #FDDA0D'></span>
+                  <span class='badge-category clear-badge'>
+                    <span class='category-name'>Package Announcements</span>
+                  </span>
+                </a>
+                <div class="discourse-tags">
+                    <a href='https://discourse.julialang.org/tag/package/4' class='discourse-tag'>package</a>
+                    ,&nbsp;
+                    <a href='https://discourse.julialang.org/tag/regression/204' class='discourse-tag'>regression</a>
+                    ,&nbsp;
+                    <a href='https://discourse.julialang.org/tag/turing/236' class='discourse-tag'>turing</a>
+                    ,&nbsp;
+                    <a href='https://discourse.julialang.org/tag/glm/351' class='discourse-tag'>glm</a>
+                    ,&nbsp;
+                    <a href='https://discourse.julialang.org/tag/bayesian-inference/410' class='discourse-tag'>bayesian-inference</a>
+                    
+                </div>
+            </div>
+          </td>
+          <td class='posters'>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/jalster" class="">
+                <img width="25" height="25" src="https://avatars.discourse-cdn.com/v4/letter/j/dec6dc/25.png" class="avatar" title='jalster - Original Poster' aria-label='jalster - Original Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/mthelm85" class="">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/mthelm85/25/222779_2.png" class="avatar" title='mthelm85 - Recent Poster' aria-label='mthelm85 - Recent Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/parn4q" class="latest">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/parn4q/25/222376_2.png" class="avatar" title='parn4q - Most Recent Poster' aria-label='parn4q - Most Recent Poster'>
+              </a>
+          </td>
+          <td class="replies">
+            <span class='posts' title='posts'>2</span>
+          </td>
+          <td class="views">
+            <span class='views' title='views'>63</span>
+          </td>
+          <td>
+            August 14, 2026
+          </td>
+        </tr>
+        <tr class="topic-list-item">
+          <td class="main-link" itemprop='itemListElement' itemscope itemtype='http://schema.org/ListItem'>
+            <meta itemprop='position' content='9'>
+            <span class="link-top-line">
+              <a itemprop='url' href='https://discourse.julialang.org/t/ann-documenterlandingpage-jl-a-vitepress-style-landing-page-for-documenter-jl/138819' class='title raw-link raw-topic-link'>[ANN] DocumenterLandingPage.jl, a VitePress-style landing page for Documenter.jl</a>
+            </span>
+            <div class="link-bottom-line">
+                <a href='/c/package-announcements/60' class='badge-wrapper bullet'>
+                  <span class='badge-category-bg' style='background-color: #FDDA0D'></span>
+                  <span class='badge-category clear-badge'>
+                    <span class='category-name'>Package Announcements</span>
+                  </span>
+                </a>
+                <div class="discourse-tags">
+                    <a href='https://discourse.julialang.org/tag/package/4' class='discourse-tag'>package</a>
+                    ,&nbsp;
+                    <a href='https://discourse.julialang.org/tag/announcement/6' class='discourse-tag'>announcement</a>
+                    ,&nbsp;
+                    <a href='https://discourse.julialang.org/tag/documenter/59' class='discourse-tag'>documenter</a>
+                    
+                </div>
+            </div>
+          </td>
+          <td class='posters'>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/csvance" class="latest single">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/csvance/25/218927_2.png" class="avatar" title='csvance - Original Poster, Most Recent Poster' aria-label='csvance - Original Poster, Most Recent Poster'>
+              </a>
+          </td>
+          <td class="replies">
+            <span class='posts' title='posts'>0</span>
+          </td>
+          <td class="views">
+            <span class='views' title='views'>66</span>
+          </td>
+          <td>
+            August 14, 2026
+          </td>
+        </tr>
+        <tr class="topic-list-item">
+          <td class="main-link" itemprop='itemListElement' itemscope itemtype='http://schema.org/ListItem'>
+            <meta itemprop='position' content='10'>
+            <span class="link-top-line">
+              <a itemprop='url' href='https://discourse.julialang.org/t/documentercodeblocks-jl-announcement/138552' class='title raw-link raw-topic-link'>DocumenterCodeBlocks.jl announcement</a>
+            </span>
+            <div class="link-bottom-line">
+                <a href='/c/package-announcements/60' class='badge-wrapper bullet'>
+                  <span class='badge-category-bg' style='background-color: #FDDA0D'></span>
+                  <span class='badge-category clear-badge'>
+                    <span class='category-name'>Package Announcements</span>
+                  </span>
+                </a>
+                <div class="discourse-tags">
+                    <a href='https://discourse.julialang.org/tag/documentation/7' class='discourse-tag'>documentation</a>
+                    ,&nbsp;
+                    <a href='https://discourse.julialang.org/tag/documenter/59' class='discourse-tag'>documenter</a>
+                    
+                </div>
+            </div>
+          </td>
+          <td class='posters'>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/fredrikekre" class="latest">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/fredrikekre/25/1688_2.png" class="avatar" title='fredrikekre - Original Poster, Most Recent Poster' aria-label='fredrikekre - Original Poster, Most Recent Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/csvance" class="">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/csvance/25/218927_2.png" class="avatar" title='csvance - Frequent Poster' aria-label='csvance - Frequent Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/odow" class="">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/odow/25/28685_2.png" class="avatar" title='odow - Frequent Poster' aria-label='odow - Frequent Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/kellertuer" class="">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/kellertuer/25/220707_2.png" class="avatar" title='kellertuer - Recent Poster' aria-label='kellertuer - Recent Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/dcelisgarza" class="">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/dcelisgarza/25/215951_2.png" class="avatar" title='dcelisgarza - Recent Poster' aria-label='dcelisgarza - Recent Poster'>
+              </a>
+          </td>
+          <td class="replies">
+            <span class='posts' title='posts'>21</span>
+          </td>
+          <td class="views">
+            <span class='views' title='views'>1114</span>
+          </td>
+          <td>
+            August 14, 2026
+          </td>
+        </tr>
+        <tr class="topic-list-item">
+          <td class="main-link" itemprop='itemListElement' itemscope itemtype='http://schema.org/ListItem'>
+            <meta itemprop='position' content='11'>
+            <span class="link-top-line">
+              <a itemprop='url' href='https://discourse.julialang.org/t/using-type-parameters-in-the-types-of-the-fields/138790' class='title raw-link raw-topic-link'>Using type parameters in the types of the fields</a>
+            </span>
+            <div class="link-bottom-line">
+                <a href='/c/usage/6' class='badge-wrapper bullet'>
+                  <span class='badge-category-bg' style='background-color: #3AB54A'></span>
+                  <span class='badge-category clear-badge'>
+                    <span class='category-name'>General Usage</span>
+                  </span>
+                </a>
+                <div class="discourse-tags">
+                    <a href='https://discourse.julialang.org/tag/data-structures/213' class='discourse-tag'>data_structures</a>
+                    ,&nbsp;
+                    <a href='https://discourse.julialang.org/tag/struct/383' class='discourse-tag'>struct</a>
+                    
+                </div>
+            </div>
+          </td>
+          <td class='posters'>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/rokke" class="latest">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/rokke/25/222691_2.png" class="avatar" title='rokke - Original Poster, Most Recent Poster' aria-label='rokke - Original Poster, Most Recent Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/frankwswang" class="">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/frankwswang/25/18561_2.png" class="avatar" title='frankwswang - Frequent Poster' aria-label='frankwswang - Frequent Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/mikmoore" class="">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/mikmoore/25/31109_2.png" class="avatar" title='mikmoore - Recent Poster' aria-label='mikmoore - Recent Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/Benny" class="">
+                <img width="25" height="25" src="https://avatars.discourse-cdn.com/v4/letter/b/49beb7/25.png" class="avatar" title='Benny - Recent Poster' aria-label='Benny - Recent Poster'>
+              </a>
+          </td>
+          <td class="replies">
+            <span class='posts' title='posts'>10</span>
+          </td>
+          <td class="views">
+            <span class='views' title='views'>211</span>
+          </td>
+          <td>
+            August 14, 2026
+          </td>
+        </tr>
+        <tr class="topic-list-item">
+          <td class="main-link" itemprop='itemListElement' itemscope itemtype='http://schema.org/ListItem'>
+            <meta itemprop='position' content='12'>
+            <span class="link-top-line">
+              <a itemprop='url' href='https://discourse.julialang.org/t/still-not-getting-it-heavy-sigh/138800' class='title raw-link raw-topic-link'>Still not getting it. &lt;heavy sigh&gt;</a>
+            </span>
+            <div class="link-bottom-line">
+                <a href='/c/offtopic/29' class='badge-wrapper bullet'>
+                  <span class='badge-category-bg' style='background-color: #B3B5B4'></span>
+                  <span class='badge-category clear-badge'>
+                    <span class='category-name'>Offtopic</span>
+                  </span>
+                </a>
+                <div class="discourse-tags">
+                </div>
+            </div>
+          </td>
+          <td class='posters'>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/skypuppy" class="">
+                <img width="25" height="25" src="https://avatars.discourse-cdn.com/v4/letter/s/54ee81/25.png" class="avatar" title='skypuppy - Original Poster' aria-label='skypuppy - Original Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/madppiper" class="">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/madppiper/25/220029_2.png" class="avatar" title='madppiper - Frequent Poster' aria-label='madppiper - Frequent Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/Palli" class="">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/palli/25/3380_2.png" class="avatar" title='Palli - Frequent Poster' aria-label='Palli - Frequent Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/tobydriscoll" class="">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/tobydriscoll/25/1843_2.png" class="avatar" title='tobydriscoll - Recent Poster' aria-label='tobydriscoll - Recent Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/technocrat" class="latest">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/technocrat/25/220947_2.png" class="avatar" title='technocrat - Most Recent Poster' aria-label='technocrat - Most Recent Poster'>
+              </a>
+          </td>
+          <td class="replies">
+            <span class='posts' title='posts'>10</span>
+          </td>
+          <td class="views">
+            <span class='views' title='views'>375</span>
+          </td>
+          <td>
+            August 14, 2026
+          </td>
+        </tr>
+        <tr class="topic-list-item">
+          <td class="main-link" itemprop='itemListElement' itemscope itemtype='http://schema.org/ListItem'>
+            <meta itemprop='position' content='13'>
+            <span class="link-top-line">
+              <a itemprop='url' href='https://discourse.julialang.org/t/ann-interactivedatalanguage-jl/135914' class='title raw-link raw-topic-link'>[ANN] InteractiveDataLanguage.jl</a>
+            </span>
+            <div class="link-bottom-line">
+                <a href='/c/package-announcements/60' class='badge-wrapper bullet'>
+                  <span class='badge-category-bg' style='background-color: #FDDA0D'></span>
+                  <span class='badge-category clear-badge'>
+                    <span class='category-name'>Package Announcements</span>
+                  </span>
+                </a>
+                <div class="discourse-tags">
+                </div>
+            </div>
+          </td>
+          <td class='posters'>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/cshen" class="latest">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/cshen/25/217287_2.png" class="avatar" title='cshen - Original Poster, Most Recent Poster' aria-label='cshen - Original Poster, Most Recent Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/mihalybaci" class="">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/mihalybaci/25/13528_2.png" class="avatar" title='mihalybaci - Recent Poster' aria-label='mihalybaci - Recent Poster'>
+              </a>
+          </td>
+          <td class="replies">
+            <span class='posts' title='posts'>3</span>
+          </td>
+          <td class="views">
+            <span class='views' title='views'>553</span>
+          </td>
+          <td>
+            August 14, 2026
+          </td>
+        </tr>
+        <tr class="topic-list-item">
+          <td class="main-link" itemprop='itemListElement' itemscope itemtype='http://schema.org/ListItem'>
+            <meta itemprop='position' content='14'>
+            <span class="link-top-line">
+              <a itemprop='url' href='https://discourse.julialang.org/t/bug-bounties-and-mini-grants-for-software-in-quantum-science/117714' class='title raw-link raw-topic-link'>Bug Bounties and Mini Grants for Software in Quantum Science</a>
+            </span>
+            <div class="link-bottom-line">
+                <a href='/c/community/22' class='badge-wrapper bullet'>
+                  <span class='badge-category-bg' style='background-color: #12A89D'></span>
+                  <span class='badge-category clear-badge'>
+                    <span class='category-name'>Community</span>
+                  </span>
+                </a>
+                <div class="discourse-tags">
+                    <a href='https://discourse.julialang.org/tag/quantum/15' class='discourse-tag'>quantum</a>
+                    ,&nbsp;
+                    <a href='https://discourse.julialang.org/tag/community/199' class='discourse-tag'>community</a>
+                    ,&nbsp;
+                    <a href='https://discourse.julialang.org/tag/bounty/1583' class='discourse-tag'>bounty</a>
+                    
+                </div>
+            </div>
+          </td>
+          <td class='posters'>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/Krastanov" class="">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/krastanov/25/6817_2.png" class="avatar" title='Krastanov - Original Poster' aria-label='Krastanov - Original Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/mahmudsudo" class="latest">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/mahmudsudo/25/223358_2.png" class="avatar" title='mahmudsudo - Most Recent Poster' aria-label='mahmudsudo - Most Recent Poster'>
+              </a>
+          </td>
+          <td class="replies">
+            <span class='posts' title='posts'>1</span>
+          </td>
+          <td class="views">
+            <span class='views' title='views'>546</span>
+          </td>
+          <td>
+            August 14, 2026
+          </td>
+        </tr>
+        <tr class="topic-list-item">
+          <td class="main-link" itemprop='itemListElement' itemscope itemtype='http://schema.org/ListItem'>
+            <meta itemprop='position' content='15'>
+            <span class="link-top-line">
+              <a itemprop='url' href='https://discourse.julialang.org/t/which-is-the-best-open-model-for-julia-coding-and-practical-and-still-reasonably-good/138640' class='title raw-link raw-topic-link'>Which is the best open model for [Julia] coding? And practical, and still reasonably good</a>
+            </span>
+            <div class="link-bottom-line">
+                <a href='/c/usage/6' class='badge-wrapper bullet'>
+                  <span class='badge-category-bg' style='background-color: #3AB54A'></span>
+                  <span class='badge-category clear-badge'>
+                    <span class='category-name'>General Usage</span>
+                  </span>
+                </a>
+                <div class="discourse-tags">
+                </div>
+            </div>
+          </td>
+          <td class='posters'>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/Palli" class="">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/palli/25/3380_2.png" class="avatar" title='Palli - Original Poster' aria-label='Palli - Original Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/j_u" class="">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/j_u/25/219081_2.png" class="avatar" title='j_u - Frequent Poster' aria-label='j_u - Frequent Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/csvance" class="">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/csvance/25/218927_2.png" class="avatar" title='csvance - Frequent Poster' aria-label='csvance - Frequent Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/madppiper" class="">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/madppiper/25/220029_2.png" class="avatar" title='madppiper - Recent Poster' aria-label='madppiper - Recent Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/Tortar" class="latest">
+                <img width="25" height="25" src="https://avatars.discourse-cdn.com/v4/letter/t/6bbea6/25.png" class="avatar" title='Tortar - Most Recent Poster' aria-label='Tortar - Most Recent Poster'>
+              </a>
+          </td>
+          <td class="replies">
+            <span class='posts' title='posts'>21</span>
+          </td>
+          <td class="views">
+            <span class='views' title='views'>1429</span>
+          </td>
+          <td>
+            August 14, 2026
+          </td>
+        </tr>
+        <tr class="topic-list-item">
+          <td class="main-link" itemprop='itemListElement' itemscope itemtype='http://schema.org/ListItem'>
+            <meta itemprop='position' content='16'>
+            <span class="link-top-line">
+              <a itemprop='url' href='https://discourse.julialang.org/t/julide-an-ide-for-the-julia-programming-language/136322' class='title raw-link raw-topic-link'>JulIDE - an IDE for the Julia programming language</a>
+            </span>
+            <div class="link-bottom-line">
+                <a href='/c/tools/35' class='badge-wrapper bullet'>
+                  <span class='badge-category-bg' style='background-color: #9EB83B'></span>
+                  <span class='badge-category clear-badge'>
+                    <span class='category-name'>Tooling</span>
+                  </span>
+                </a>
+                <div class="discourse-tags">
+                    <a href='https://discourse.julialang.org/tag/ide/148' class='discourse-tag'>ide</a>
+                    
+                </div>
+            </div>
+          </td>
+          <td class='posters'>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/sinisterMage" class="latest">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/sinistermage/25/222897_2.png" class="avatar" title='sinisterMage - Original Poster, Most Recent Poster' aria-label='sinisterMage - Original Poster, Most Recent Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/madppiper" class="">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/madppiper/25/220029_2.png" class="avatar" title='madppiper - Frequent Poster' aria-label='madppiper - Frequent Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/technocrat" class="">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/technocrat/25/220947_2.png" class="avatar" title='technocrat - Frequent Poster' aria-label='technocrat - Frequent Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/Sole" class="">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/sole/25/202974_2.png" class="avatar" title='Sole - Recent Poster' aria-label='Sole - Recent Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/joa-quim" class="">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/joa-quim/25/227_2.png" class="avatar" title='joa-quim - Recent Poster' aria-label='joa-quim - Recent Poster'>
+              </a>
+          </td>
+          <td class="replies">
+            <span class='posts' title='posts'>84</span>
+          </td>
+          <td class="views">
+            <span class='views' title='views'>4020</span>
+          </td>
+          <td>
+            August 14, 2026
+          </td>
+        </tr>
+        <tr class="topic-list-item">
+          <td class="main-link" itemprop='itemListElement' itemscope itemtype='http://schema.org/ListItem'>
+            <meta itemprop='position' content='17'>
+            <span class="link-top-line">
+              <a itemprop='url' href='https://discourse.julialang.org/t/testing-websites-and-guis/138491' class='title raw-link raw-topic-link'>Testing websites and GUIs</a>
+            </span>
+            <div class="link-bottom-line">
+                <a href='/c/usage/6' class='badge-wrapper bullet'>
+                  <span class='badge-category-bg' style='background-color: #3AB54A'></span>
+                  <span class='badge-category clear-badge'>
+                    <span class='category-name'>General Usage</span>
+                  </span>
+                </a>
+                <div class="discourse-tags">
+                </div>
+            </div>
+          </td>
+          <td class='posters'>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/cstjean" class="">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/cstjean/25/1444_2.png" class="avatar" title='cstjean - Original Poster' aria-label='cstjean - Original Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/sinisterMage" class="">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/sinistermage/25/222897_2.png" class="avatar" title='sinisterMage - Frequent Poster' aria-label='sinisterMage - Frequent Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/kahliburke" class="">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/kahliburke/25/208472_2.png" class="avatar" title='kahliburke - Recent Poster' aria-label='kahliburke - Recent Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/frankier" class="latest">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/frankier/25/35101_2.png" class="avatar" title='frankier - Most Recent Poster' aria-label='frankier - Most Recent Poster'>
+              </a>
+          </td>
+          <td class="replies">
+            <span class='posts' title='posts'>4</span>
+          </td>
+          <td class="views">
+            <span class='views' title='views'>251</span>
+          </td>
+          <td>
+            August 14, 2026
+          </td>
+        </tr>
+        <tr class="topic-list-item">
+          <td class="main-link" itemprop='itemListElement' itemscope itemtype='http://schema.org/ListItem'>
+            <meta itemprop='position' content='18'>
+            <span class="link-top-line">
+              <a itemprop='url' href='https://discourse.julialang.org/t/julia-v1-13-0-rc3-is-now-available/138805' class='title raw-link raw-topic-link'>Julia v1.13.0-rc3 is now available</a>
+            </span>
+            <div class="link-bottom-line">
+                <a href='/c/announce/25' class='badge-wrapper bullet'>
+                  <span class='badge-category-bg' style='background-color: #ED207B'></span>
+                  <span class='badge-category clear-badge'>
+                    <span class='category-name'>Announcements</span>
+                  </span>
+                </a>
+                <div class="discourse-tags">
+                </div>
+            </div>
+          </td>
+          <td class='posters'>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/kristoffer.carlsson" class="latest">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/kristoffer.carlsson/25/22_2.png" class="avatar" title='kristoffer.carlsson - Original Poster, Most Recent Poster' aria-label='kristoffer.carlsson - Original Poster, Most Recent Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/system" class="">
+                <img width="25" height="25" src="https://global.discourse-cdn.com/julialang/original/3X/1/2/12829a7ba92b924d4ce81099cbf99785bee9b405.png" class="avatar" title='system - Recent Poster' aria-label='system - Recent Poster'>
+              </a>
+          </td>
+          <td class="replies">
+            <span class='posts' title='posts'>0</span>
+          </td>
+          <td class="views">
+            <span class='views' title='views'>226</span>
+          </td>
+          <td>
+            August 14, 2026
+          </td>
+        </tr>
+        <tr class="topic-list-item">
+          <td class="main-link" itemprop='itemListElement' itemscope itemtype='http://schema.org/ListItem'>
+            <meta itemprop='position' content='19'>
+            <span class="link-top-line">
+              <a itemprop='url' href='https://discourse.julialang.org/t/compiler-output-maybe-showing-when-i-try-to-run-code/138791' class='title raw-link raw-topic-link'>Compiler output (maybe?) showing when I try to run code</a>
+            </span>
+            <div class="link-bottom-line">
+                <a href='/c/usage/6' class='badge-wrapper bullet'>
+                  <span class='badge-category-bg' style='background-color: #3AB54A'></span>
+                  <span class='badge-category clear-badge'>
+                    <span class='category-name'>General Usage</span>
+                  </span>
+                </a>
+                <div class="discourse-tags">
+                </div>
+            </div>
+          </td>
+          <td class='posters'>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/johnb" class="">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/johnb/25/44115_2.png" class="avatar" title='johnb - Original Poster' aria-label='johnb - Original Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/gdalle" class="">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/gdalle/25/27854_2.png" class="avatar" title='gdalle - Recent Poster' aria-label='gdalle - Recent Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/GunnarFarneback" class="latest">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/gunnarfarneback/25/1827_2.png" class="avatar" title='GunnarFarneback - Most Recent Poster' aria-label='GunnarFarneback - Most Recent Poster'>
+              </a>
+          </td>
+          <td class="replies">
+            <span class='posts' title='posts'>4</span>
+          </td>
+          <td class="views">
+            <span class='views' title='views'>130</span>
+          </td>
+          <td>
+            August 14, 2026
+          </td>
+        </tr>
+        <tr class="topic-list-item">
+          <td class="main-link" itemprop='itemListElement' itemscope itemtype='http://schema.org/ListItem'>
+            <meta itemprop='position' content='20'>
+            <span class="link-top-line">
+              <a itemprop='url' href='https://discourse.julialang.org/t/aocl-jl-v5-3-1/138718' class='title raw-link raw-topic-link'>AOCL.jl v5.3.1</a>
+            </span>
+            <div class="link-bottom-line">
+                <a href='/c/package-announcements/60' class='badge-wrapper bullet'>
+                  <span class='badge-category-bg' style='background-color: #FDDA0D'></span>
+                  <span class='badge-category clear-badge'>
+                    <span class='category-name'>Package Announcements</span>
+                  </span>
+                </a>
+                <div class="discourse-tags">
+                    <a href='https://discourse.julialang.org/tag/blas/61' class='discourse-tag'>blas</a>
+                    ,&nbsp;
+                    <a href='https://discourse.julialang.org/tag/hpc/62' class='discourse-tag'>hpc</a>
+                    ,&nbsp;
+                    <a href='https://discourse.julialang.org/tag/lapack/202' class='discourse-tag'>lapack</a>
+                    
+                </div>
+            </div>
+          </td>
+          <td class='posters'>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/agodbole" class="">
+                <img width="25" height="25" src="https://avatars.discourse-cdn.com/v4/letter/a/97f17d/25.png" class="avatar" title='agodbole - Original Poster' aria-label='agodbole - Original Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/BjarkeHautop" class="">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/bjarkehautop/25/219291_2.png" class="avatar" title='BjarkeHautop - Frequent Poster' aria-label='BjarkeHautop - Frequent Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/linwaytin" class="">
+                <img width="25" height="25" src="https://avatars.discourse-cdn.com/v4/letter/l/898d66/25.png" class="avatar" title='linwaytin - Frequent Poster' aria-label='linwaytin - Frequent Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/dwannetts" class="">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/dwannetts/25/219012_2.png" class="avatar" title='dwannetts - Recent Poster' aria-label='dwannetts - Recent Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/skypuppy" class="latest">
+                <img width="25" height="25" src="https://avatars.discourse-cdn.com/v4/letter/s/54ee81/25.png" class="avatar" title='skypuppy - Most Recent Poster' aria-label='skypuppy - Most Recent Poster'>
+              </a>
+          </td>
+          <td class="replies">
+            <span class='posts' title='posts'>8</span>
+          </td>
+          <td class="views">
+            <span class='views' title='views'>541</span>
+          </td>
+          <td>
+            August 14, 2026
+          </td>
+        </tr>
+        <tr class="topic-list-item">
+          <td class="main-link" itemprop='itemListElement' itemscope itemtype='http://schema.org/ListItem'>
+            <meta itemprop='position' content='21'>
+            <span class="link-top-line">
+              <a itemprop='url' href='https://discourse.julialang.org/t/two-years-of-test-item-framework-updates/138792' class='title raw-link raw-topic-link'>Two years of test item framework updates</a>
+            </span>
+            <div class="link-bottom-line">
+                <a href='/c/tools/35' class='badge-wrapper bullet'>
+                  <span class='badge-category-bg' style='background-color: #9EB83B'></span>
+                  <span class='badge-category clear-badge'>
+                    <span class='category-name'>Tooling</span>
+                  </span>
+                </a>
+                <div class="discourse-tags">
+                    <a href='https://discourse.julialang.org/tag/announcement/6' class='discourse-tag'>announcement</a>
+                    
+                </div>
+            </div>
+          </td>
+          <td class='posters'>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/davidanthoff" class="">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/davidanthoff/25/94_2.png" class="avatar" title='davidanthoff - Original Poster' aria-label='davidanthoff - Original Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/CameronBieganek" class="latest">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/cameronbieganek/25/6915_2.png" class="avatar" title='CameronBieganek - Most Recent Poster' aria-label='CameronBieganek - Most Recent Poster'>
+              </a>
+          </td>
+          <td class="replies">
+            <span class='posts' title='posts'>1</span>
+          </td>
+          <td class="views">
+            <span class='views' title='views'>228</span>
+          </td>
+          <td>
+            August 14, 2026
+          </td>
+        </tr>
+        <tr class="topic-list-item">
+          <td class="main-link" itemprop='itemListElement' itemscope itemtype='http://schema.org/ListItem'>
+            <meta itemprop='position' content='22'>
+            <span class="link-top-line">
+              <a itemprop='url' href='https://discourse.julialang.org/t/ann-luximm-jl-lux-ports-of-timm-image-backbones-with-huggingface-pretrained-weights/137153' class='title raw-link raw-topic-link'>[ANN] Luximm.jl: Lux ports of timm image backbones, with HuggingFace pretrained weights</a>
+            </span>
+            <div class="link-bottom-line">
+                <a href='/c/package-announcements/60' class='badge-wrapper bullet'>
+                  <span class='badge-category-bg' style='background-color: #FDDA0D'></span>
+                  <span class='badge-category clear-badge'>
+                    <span class='category-name'>Package Announcements</span>
+                  </span>
+                </a>
+                <div class="discourse-tags">
+                    <a href='https://discourse.julialang.org/tag/package/4' class='discourse-tag'>package</a>
+                    ,&nbsp;
+                    <a href='https://discourse.julialang.org/tag/lux/1216' class='discourse-tag'>lux</a>
+                    ,&nbsp;
+                    <a href='https://discourse.julialang.org/tag/computer-vision/1563' class='discourse-tag'>computer-vision</a>
+                    
+                </div>
+            </div>
+          </td>
+          <td class='posters'>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/csvance" class="">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/csvance/25/218927_2.png" class="avatar" title='csvance - Original Poster' aria-label='csvance - Original Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/yolhan_mannes" class="">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/yolhan_mannes/25/220485_2.png" class="avatar" title='yolhan_mannes - Frequent Poster' aria-label='yolhan_mannes - Frequent Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/greatpet" class="">
+                <img width="25" height="25" src="https://avatars.discourse-cdn.com/v4/letter/g/e495f1/25.png" class="avatar" title='greatpet - Frequent Poster' aria-label='greatpet - Frequent Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/madppiper" class="">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/madppiper/25/220029_2.png" class="avatar" title='madppiper - Recent Poster' aria-label='madppiper - Recent Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/JackDevine" class="latest">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/jackdevine/25/1048_2.png" class="avatar" title='JackDevine - Most Recent Poster' aria-label='JackDevine - Most Recent Poster'>
+              </a>
+          </td>
+          <td class="replies">
+            <span class='posts' title='posts'>13</span>
+          </td>
+          <td class="views">
+            <span class='views' title='views'>1065</span>
+          </td>
+          <td>
+            August 14, 2026
+          </td>
+        </tr>
+        <tr class="topic-list-item">
+          <td class="main-link" itemprop='itemListElement' itemscope itemtype='http://schema.org/ListItem'>
+            <meta itemprop='position' content='23'>
+            <span class="link-top-line">
+              <a itemprop='url' href='https://discourse.julialang.org/t/analysis-on-result-of-abstractmcmc-sample/138793' class='title raw-link raw-topic-link'>Analysis on result of `AbstractMCMC.sample`</a>
+            </span>
+            <div class="link-bottom-line">
+                <a href='/c/domain/probprog/48' class='badge-wrapper bullet'>
+                  <span class='badge-category-bg' style='background-color: #F1592A'></span>
+                  <span class='badge-category clear-badge'>
+                    <span class='category-name'>Probabilistic Programming</span>
+                  </span>
+                </a>
+                <div class="discourse-tags">
+                </div>
+            </div>
+          </td>
+          <td class='posters'>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/slwu89" class="latest single">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/slwu89/25/217323_2.png" class="avatar" title='slwu89 - Original Poster, Most Recent Poster' aria-label='slwu89 - Original Poster, Most Recent Poster'>
+              </a>
+          </td>
+          <td class="replies">
+            <span class='posts' title='posts'>0</span>
+          </td>
+          <td class="views">
+            <span class='views' title='views'>51</span>
+          </td>
+          <td>
+            August 13, 2026
+          </td>
+        </tr>
+        <tr class="topic-list-item">
+          <td class="main-link" itemprop='itemListElement' itemscope itemtype='http://schema.org/ListItem'>
+            <meta itemprop='position' content='24'>
+            <span class="link-top-line">
+              <a itemprop='url' href='https://discourse.julialang.org/t/marswitching-jl-markov-switching-regression-in-julia/104550' class='title raw-link raw-topic-link'>MarSwitching.jl - Markov Switching regression in Julia</a>
+            </span>
+            <div class="link-bottom-line">
+                <a href='/c/package-announcements/60' class='badge-wrapper bullet'>
+                  <span class='badge-category-bg' style='background-color: #FDDA0D'></span>
+                  <span class='badge-category clear-badge'>
+                    <span class='category-name'>Package Announcements</span>
+                  </span>
+                </a>
+                <div class="discourse-tags">
+                    <a href='https://discourse.julialang.org/tag/package/4' class='discourse-tag'>package</a>
+                    ,&nbsp;
+                    <a href='https://discourse.julialang.org/tag/statistics/30' class='discourse-tag'>statistics</a>
+                    ,&nbsp;
+                    <a href='https://discourse.julialang.org/tag/time-series/193' class='discourse-tag'>time-series</a>
+                    
+                </div>
+            </div>
+          </td>
+          <td class='posters'>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/m-dadej" class="latest">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/m-dadej/25/51609_2.png" class="avatar" title='m-dadej - Original Poster, Most Recent Poster' aria-label='m-dadej - Original Poster, Most Recent Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/PharmCat" class="">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/pharmcat/25/6953_2.png" class="avatar" title='PharmCat - Recent Poster' aria-label='PharmCat - Recent Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/gdalle" class="">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/gdalle/25/27854_2.png" class="avatar" title='gdalle - Recent Poster' aria-label='gdalle - Recent Poster'>
+              </a>
+          </td>
+          <td class="replies">
+            <span class='posts' title='posts'>13</span>
+          </td>
+          <td class="views">
+            <span class='views' title='views'>1468</span>
+          </td>
+          <td>
+            August 13, 2026
+          </td>
+        </tr>
+        <tr class="topic-list-item">
+          <td class="main-link" itemprop='itemListElement' itemscope itemtype='http://schema.org/ListItem'>
+            <meta itemprop='position' content='25'>
+            <span class="link-top-line">
+              <a itemprop='url' href='https://discourse.julialang.org/t/remote-registration-no-link/138715' class='title raw-link raw-topic-link'>Remote registration - no link</a>
+            </span>
+            <div class="link-bottom-line">
+                <a href='/c/juliacon/juliacon2026/76' class='badge-wrapper bullet'>
+                  <span class='badge-category-bg' style='background-color: #F7941D'></span>
+                  <span class='badge-category clear-badge'>
+                    <span class='category-name'>2026</span>
+                  </span>
+                </a>
+                <div class="discourse-tags">
+                </div>
+            </div>
+          </td>
+          <td class='posters'>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/johnh" class="">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/johnh/25/3615_2.png" class="avatar" title='johnh - Original Poster' aria-label='johnh - Original Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/ranocha" class="">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/ranocha/25/35588_2.png" class="avatar" title='ranocha - Frequent Poster' aria-label='ranocha - Frequent Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/scelles" class="">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/scelles/25/220408_2.png" class="avatar" title='scelles - Recent Poster' aria-label='scelles - Recent Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/tp2750" class="latest">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/tp2750/25/207806_2.png" class="avatar" title='tp2750 - Most Recent Poster' aria-label='tp2750 - Most Recent Poster'>
+              </a>
+          </td>
+          <td class="replies">
+            <span class='posts' title='posts'>3</span>
+          </td>
+          <td class="views">
+            <span class='views' title='views'>282</span>
+          </td>
+          <td>
+            August 13, 2026
+          </td>
+        </tr>
+        <tr class="topic-list-item">
+          <td class="main-link" itemprop='itemListElement' itemscope itemtype='http://schema.org/ListItem'>
+            <meta itemprop='position' content='26'>
+            <span class="link-top-line">
+              <a itemprop='url' href='https://discourse.julialang.org/t/error-while-installing-juila-packages-on-windows/138758' class='title raw-link raw-topic-link'>Error while installing Juila packages on windows</a>
+            </span>
+            <div class="link-bottom-line">
+                <a href='/c/usage/6' class='badge-wrapper bullet'>
+                  <span class='badge-category-bg' style='background-color: #3AB54A'></span>
+                  <span class='badge-category clear-badge'>
+                    <span class='category-name'>General Usage</span>
+                  </span>
+                </a>
+                <div class="discourse-tags">
+                    <a href='https://discourse.julialang.org/tag/installation/182' class='discourse-tag'>installation</a>
+                    ,&nbsp;
+                    <a href='https://discourse.julialang.org/tag/differentialequation/751' class='discourse-tag'>differentialequation</a>
+                    
+                </div>
+            </div>
+          </td>
+          <td class='posters'>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/Aditya747S" class="">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/aditya747s/25/219549_2.png" class="avatar" title='Aditya747S - Original Poster' aria-label='Aditya747S - Original Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/ChrisRackauckas" class="">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/chrisrackauckas/25/77_2.png" class="avatar" title='ChrisRackauckas - Frequent Poster' aria-label='ChrisRackauckas - Frequent Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/BjarkeHautop" class="">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/bjarkehautop/25/219291_2.png" class="avatar" title='BjarkeHautop - Recent Poster' aria-label='BjarkeHautop - Recent Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/ufechner7" class="latest">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/ufechner7/25/51363_2.png" class="avatar" title='ufechner7 - Most Recent Poster' aria-label='ufechner7 - Most Recent Poster'>
+              </a>
+          </td>
+          <td class="replies">
+            <span class='posts' title='posts'>11</span>
+          </td>
+          <td class="views">
+            <span class='views' title='views'>186</span>
+          </td>
+          <td>
+            August 13, 2026
+          </td>
+        </tr>
+        <tr class="topic-list-item">
+          <td class="main-link" itemprop='itemListElement' itemscope itemtype='http://schema.org/ListItem'>
+            <meta itemprop='position' content='27'>
+            <span class="link-top-line">
+              <a itemprop='url' href='https://discourse.julialang.org/t/generating-an-unstructured-triangle-grid/138784' class='title raw-link raw-topic-link'>Generating an unstructured triangle grid</a>
+            </span>
+            <div class="link-bottom-line">
+                <a href='/c/first-steps/8' class='badge-wrapper bullet'>
+                  <span class='badge-category-bg' style='background-color: #652D90'></span>
+                  <span class='badge-category clear-badge'>
+                    <span class='category-name'>New to Julia</span>
+                  </span>
+                </a>
+                <div class="discourse-tags">
+                    <a href='https://discourse.julialang.org/tag/package/4' class='discourse-tag'>package</a>
+                    
+                </div>
+            </div>
+          </td>
+          <td class='posters'>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/omgplshelp" class="">
+                <img width="25" height="25" src="https://avatars.discourse-cdn.com/v4/letter/o/e9c0ed/25.png" class="avatar" title='omgplshelp - Original Poster' aria-label='omgplshelp - Original Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/j-fu" class="">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/j-fu/25/11373_2.png" class="avatar" title='j-fu - Recent Poster' aria-label='j-fu - Recent Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/juliohm" class="latest">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/juliohm/25/215266_2.png" class="avatar" title='juliohm - Most Recent Poster' aria-label='juliohm - Most Recent Poster'>
+              </a>
+          </td>
+          <td class="replies">
+            <span class='posts' title='posts'>2</span>
+          </td>
+          <td class="views">
+            <span class='views' title='views'>156</span>
+          </td>
+          <td>
+            August 13, 2026
+          </td>
+        </tr>
+        <tr class="topic-list-item">
+          <td class="main-link" itemprop='itemListElement' itemscope itemtype='http://schema.org/ListItem'>
+            <meta itemprop='position' content='28'>
+            <span class="link-top-line">
+              <a itemprop='url' href='https://discourse.julialang.org/t/inconsistent-results-using-view/138785' class='title raw-link raw-topic-link'>Inconsistent results using view()</a>
+            </span>
+            <div class="link-bottom-line">
+                <a href='/c/usage/6' class='badge-wrapper bullet'>
+                  <span class='badge-category-bg' style='background-color: #3AB54A'></span>
+                  <span class='badge-category clear-badge'>
+                    <span class='category-name'>General Usage</span>
+                  </span>
+                </a>
+                <div class="discourse-tags">
+                </div>
+            </div>
+          </td>
+          <td class='posters'>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/tomtom" class="">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/tomtom/25/5106_2.png" class="avatar" title='tomtom - Original Poster' aria-label='tomtom - Original Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/mbauman" class="">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/mbauman/25/31082_2.png" class="avatar" title='mbauman - Recent Poster' aria-label='mbauman - Recent Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/Benny" class="latest">
+                <img width="25" height="25" src="https://avatars.discourse-cdn.com/v4/letter/b/49beb7/25.png" class="avatar" title='Benny - Most Recent Poster' aria-label='Benny - Most Recent Poster'>
+              </a>
+          </td>
+          <td class="replies">
+            <span class='posts' title='posts'>8</span>
+          </td>
+          <td class="views">
+            <span class='views' title='views'>96</span>
+          </td>
+          <td>
+            August 13, 2026
+          </td>
+        </tr>
+        <tr class="topic-list-item">
+          <td class="main-link" itemprop='itemListElement' itemscope itemtype='http://schema.org/ListItem'>
+            <meta itemprop='position' content='29'>
+            <span class="link-top-line">
+              <a itemprop='url' href='https://discourse.julialang.org/t/flexible-julia-tutorial-videos/138764' class='title raw-link raw-topic-link'>Flexible Julia: Tutorial Videos</a>
+            </span>
+            <div class="link-bottom-line">
+                <a href='/c/tools/35' class='badge-wrapper bullet'>
+                  <span class='badge-category-bg' style='background-color: #9EB83B'></span>
+                  <span class='badge-category clear-badge'>
+                    <span class='category-name'>Tooling</span>
+                  </span>
+                </a>
+                <div class="discourse-tags">
+                </div>
+            </div>
+          </td>
+          <td class='posters'>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/madppiper" class="latest">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/madppiper/25/220029_2.png" class="avatar" title='madppiper - Original Poster, Most Recent Poster' aria-label='madppiper - Original Poster, Most Recent Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/sinisterMage" class="">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/sinistermage/25/222897_2.png" class="avatar" title='sinisterMage - Recent Poster' aria-label='sinisterMage - Recent Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/franckgaga" class="">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/franckgaga/25/218241_2.png" class="avatar" title='franckgaga - Recent Poster' aria-label='franckgaga - Recent Poster'>
+              </a>
+          </td>
+          <td class="replies">
+            <span class='posts' title='posts'>7</span>
+          </td>
+          <td class="views">
+            <span class='views' title='views'>233</span>
+          </td>
+          <td>
+            August 13, 2026
+          </td>
+        </tr>
+        <tr class="topic-list-item">
+          <td class="main-link" itemprop='itemListElement' itemscope itemtype='http://schema.org/ListItem'>
+            <meta itemprop='position' content='30'>
+            <span class="link-top-line">
+              <a itemprop='url' href='https://discourse.julialang.org/t/curl-fails-on-macos/138773' class='title raw-link raw-topic-link'>Curl fails on macos</a>
+            </span>
+            <div class="link-bottom-line">
+                <a href='/c/first-steps/8' class='badge-wrapper bullet'>
+                  <span class='badge-category-bg' style='background-color: #652D90'></span>
+                  <span class='badge-category clear-badge'>
+                    <span class='category-name'>New to Julia</span>
+                  </span>
+                </a>
+                <div class="discourse-tags">
+                </div>
+            </div>
+          </td>
+          <td class='posters'>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/cellocgw" class="latest">
+                <img width="25" height="25" src="https://avatars.discourse-cdn.com/v4/letter/c/c77e96/25.png" class="avatar" title='cellocgw - Original Poster, Most Recent Poster' aria-label='cellocgw - Original Poster, Most Recent Poster'>
+              </a>
+              <a rel='nofollow' href="https://discourse.julialang.org/u/technocrat" class="">
+                <img width="25" height="25" src="/user_avatar/discourse.julialang.org/technocrat/25/220947_2.png" class="avatar" title='technocrat - Recent Poster' aria-label='technocrat - Recent Poster'>
+              </a>
+          </td>
+          <td class="replies">
+            <span class='posts' title='posts'>2</span>
+          </td>
+          <td class="views">
+            <span class='views' title='views'>155</span>
+          </td>
+          <td>
+            August 13, 2026
+          </td>
+        </tr>
+    </tbody>
+
+  </table>
+</div>
+
+  <div class="navigation" role='navigation' itemscope itemtype='http://schema.org/SiteNavigationElement'>
+      <span itemprop='name'><b><a href='/latest?no_definitions=true&amp;page=1' rel='next' itemprop='url'>next page →</a></b></span>
+  </div>
+
+ <!-- include_crawler_content? -->
+
+
+
+  
+
+    </div>
+    <footer class="container wrap">
+  <nav class='crawler-nav'>
+    <ul>
+      <li itemscope itemtype='http://schema.org/SiteNavigationElement'>
+        <span itemprop='name'>
+          <a href='/' itemprop="url">Home </a>
+        </span>
+      </li>
+      <li itemscope itemtype='http://schema.org/SiteNavigationElement'>
+        <span itemprop='name'>
+          <a href='/categories' itemprop="url">Categories </a>
+        </span>
+      </li>
+      <li itemscope itemtype='http://schema.org/SiteNavigationElement'>
+        <span itemprop='name'>
+          <a href='/guidelines' itemprop="url">Guidelines </a>
+        </span>
+      </li>
+        <li itemscope itemtype='http://schema.org/SiteNavigationElement'>
+          <span itemprop='name'>
+            <a href='/tos' itemprop="url">Terms of Service </a>
+          </span>
+        </li>
+        <li itemscope itemtype='http://schema.org/SiteNavigationElement'>
+          <span itemprop='name'>
+            <a href='/privacy' itemprop="url">Privacy Policy </a>
+          </span>
+        </li>
+    </ul>
+  </nav>
+  <p class='powered-by-link'>Powered by <a href="https://www.discourse.org">Discourse</a>, best viewed with JavaScript enabled</p>
+</footer>
+
+    
+    
+  </body>
+  
+</html>

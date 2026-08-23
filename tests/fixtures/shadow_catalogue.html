@@ -1,0 +1,111 @@
+<!doctype html>
+<!--
+  A composed tree shaped like the ones the sensor exists for.
+
+  Written because every live site reachable during development reported zero
+  shadow addresses, which left the composed-tree half of the addressing
+  unverified: the `#shadow-root` boundary step, the separate shadow/light
+  ordinal namespaces, taxonomy inside a shadow root, and a pager that lives
+  in one. archive.org is the real article (its results page carries well over
+  a thousand shadow roots) and was offline; this stands in for its *shape*,
+  not for the site.
+
+  What it deliberately contains:
+    * open shadow roots on custom elements
+    * a shadow root nested inside another shadow root
+    * slotted light-DOM content projected into a shadow root
+    * a light <div> sibling of a shadow host whose shadow root also holds a
+      <div> -- the case that used to shift every light-DOM ordinal
+    * a search input and a "Next" pager, both inside shadow roots
+    * enough text to cross the chunk budget more than once
+-->
+<meta charset="utf-8">
+<title>Shadow Catalogue</title>
+<style>body{font:14px/1.5 system-ui;margin:0;padding:1rem}</style>
+
+<h1>Shadow Catalogue</h1>
+
+<div id="light-first">A light-DOM div that precedes every shadow host.</div>
+
+<search-bar></search-bar>
+
+<result-list id="results"></result-list>
+
+<div id="light-last">A light-DOM div that follows every shadow host.</div>
+
+<script>
+// ---- the search control, inside a shadow root ------------------------------
+class SearchBar extends HTMLElement {
+  connectedCallback() {
+    const root = this.attachShadow({mode: 'open'});
+    root.innerHTML = `
+      <div class="wrap">
+        <label for="q">Find in catalogue</label>
+        <input id="q" type="search" name="search" placeholder="Search the catalogue">
+        <button type="button" id="go">Search</button>
+      </div>`;
+  }
+}
+customElements.define('search-bar', SearchBar);
+
+// ---- one card: a shadow root that itself hosts a shadow root ---------------
+class ResultCard extends HTMLElement {
+  connectedCallback() {
+    const root = this.attachShadow({mode: 'open'});
+    const n = this.getAttribute('n');
+    root.innerHTML = `
+      <article>
+        <h2>Record ${n} — University Library Bulletin</h2>
+        <div>A light div inside the shadow root, first.</div>
+        <blockquote>Holdings note ${n}: bound periodicals, manuscripts and
+          plate volumes transferred from the reading room in 19${40 + (n % 50)}.</blockquote>
+        <ul><li>Language: English</li><li>Pages: ${100 + n * 7}</li></ul>
+        <a href="/record/${n}">Read record ${n}</a>
+        <card-meta n="${n}"></card-meta>
+        <slot name="note"></slot>
+      </article>`;
+  }
+}
+customElements.define('result-card', ResultCard);
+
+// ---- a shadow root nested one level deeper --------------------------------
+class CardMeta extends HTMLElement {
+  connectedCallback() {
+    const root = this.attachShadow({mode: 'open'});
+    const n = this.getAttribute('n');
+    root.innerHTML = `<p class="meta">Shelfmark MS.${n}.b — deposited by the
+      Friends of the University Library.</p>`;
+  }
+}
+customElements.define('card-meta', CardMeta);
+
+// ---- the list, with its pager inside a shadow root ------------------------
+class ResultList extends HTMLElement {
+  connectedCallback() {
+    this.page = 1;
+    const root = this.attachShadow({mode: 'open'});
+    root.innerHTML = `<div id="items"></div>
+      <nav class="pagination">
+        <a href="#" id="prev">&lsaquo; Previous</a>
+        <button id="next" type="button">Next</button>
+      </nav>`;
+    root.getElementById('next').addEventListener('click', () => this.more());
+    this.more();
+  }
+  more() {
+    const items = this.shadowRoot.getElementById('items');
+    for (let i = 0; i < 6; i++) {
+      const n = (this.page - 1) * 6 + i + 1;
+      const card = document.createElement('result-card');
+      card.setAttribute('n', String(n));
+      const note = document.createElement('span');
+      note.setAttribute('slot', 'note');
+      note.textContent = `Slotted note for record ${n}, projected from light DOM.`;
+      card.appendChild(note);
+      items.appendChild(card);
+    }
+    this.page += 1;
+  }
+}
+customElements.define('result-list', ResultList);
+</script>

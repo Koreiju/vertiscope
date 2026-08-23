@@ -1,0 +1,5661 @@
+
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="format-detection" content="telephone=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#e2dcc5">
+
+    <link rel="canonical" href="https://openlibrary.org/search?q=telescope" />
+
+    <link rel="preconnect" href="https://athena.archive.org">
+    <link rel="preconnect" href="https://apollo.archive.org">
+    
+    <link rel="search" type="application/opensearchdescription+xml" title="Open Library" href="/static/opensearch.xml">
+    <link rel="manifest" href="/static/manifest.json">
+
+    <link href="/static/images/openlibrary-128x128.png" rel="apple-touch-icon" />
+    <link href="/static/images/openlibrary-152x152.png" rel="apple-touch-icon" sizes="152x152" />
+    <link href="/static/images/openlibrary-167x167.png" rel="apple-touch-icon" sizes="167x167" />
+    <link href="/static/images/openlibrary-180x180.png" rel="apple-touch-icon" sizes="180x180" />
+    <link href="/static/images/openlibrary-192x192.png" rel="icon" sizes="192x192" />
+    <link href="/static/images/openlibrary-128x128.png" rel="icon" sizes="128x128" />
+    
+    <link href="/static/build/css/tokens.css?v=79c75097a646230eb98234f0e15167c1" rel="stylesheet" type="text/css" />
+    <link href="/static/build/css/ol-components.css?v=2e0867d59276ee1ed1605d7eb1b08763" rel="stylesheet" type="text/css" />
+    <link href="/static/build/css/page-user.css?v=2c3e57d3c8f67e57fe9c47544360f24a" rel="stylesheet" type="text/css" />
+
+    <noscript>
+      <style>
+        /* Don't hide content with clamp if no js to show more/less */
+        .clamp {
+          -webkit-line-clamp: unset !important;
+        }
+
+        /* @width-breakpoint-tablet media query: */
+        @media only screen and (min-width: 768px) {
+          /* Sticky navbar to top of screen if compact title cannot be stickied */
+          .work-menu {
+            top: 0 !important;
+          }
+        }
+      </style>
+    </noscript>
+
+    <script>
+      window.OL_EXPERIMENTS = {};
+    </script>
+
+ <script>
+ // Dimension 1 (visit-scoped): "Days Since Registration" — ID must match Matomo admin config (issue #12144)
+ var _paq = window._paq = window._paq || [];
+ _paq.push(['setCustomDimension', 1, "visitor"]);
+ // One-shot ActivationSuccess: cookie set by /account/verify on successful email activation.
+ // Cleared immediately so it only fires once per activation.
+ if (document.cookie.match(/(?:^|;\s*)ol_activation=1/)) {
+   _paq.push(['trackEvent', 'Account', 'ActivationSuccess']);
+   document.cookie = 'ol_activation=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
+ }
+ 
+ var _mtm = window._mtm = window._mtm || [];
+ _mtm.push({'mtm.startTime': (new Date().getTime()), 'event': 'mtm.Start'});
+ (function() {
+   var d=document, g=d.createElement('script'), s=d.getElementsByTagName('script')[0];
+   g.async=true; g.src='https://apollo.archive.org/js/container_7cLc1b4U.js'; s.parentNode.insertBefore(g,s);
+ })();
+ 
+/* @licstart  The following is the entire license notice for the
+ * JavaScript code in this page served from openlibrary.org.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Affero General Public License for more details.
+ *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ * @licend  The above is the entire license notice
+ * for the JavaScript code in this page.
+ */
+  </script>
+
+    <meta name="google-site-verification" content="KrqcZD4l5BLNVyjzSi2sjZBiwgmkJ1W7n6w7ThD7A74" />
+    <meta name="google-site-verification" content="vtXGm8q3UgP-f6qXTvQBo85uh3nmIYIotVqqdJDpyz4" />
+    
+    <meta name="google-site-verification" content="XYOJ9Uj0MBr6wk7kj1IkttXrqY-bbRstFMADTfEt354" />
+    
+    <meta name="msvalidate.01" content="8BEBECBEF537077737975A49D55B857D" />
+
+    <meta name="description" content="Open Library is an open, editable library catalog, building towards a web page for every book ever published. Read, borrow, and discover more than 3M books for free." />
+    
+    <title>search | Open Library</title>
+
+    <meta name="sentry-trace" content="72253b00eaf941a0a34856dfb49e5139-93c8894ee0916b5c">
+    <meta name="baggage" content="sentry-trace_id=72253b00eaf941a0a34856dfb49e5139,sentry-environment=production,sentry-release=7ea6b9e,sentry-public_key=a27de9a317a64432866ac301a855f04e,sentry-sample_rate=0.02">
+    
+    <script>window.OL_SENTRY = {"dsn": "https://8470b9d8af98fa200a09162f2e30ac87@sink.archive.org/82", "environment": "production", "tracesSampleRate": 0.02, "sampleRate": 0.001, "release": "7ea6b9e", "transactionName": "/search"};</script>
+</head>
+
+
+
+
+<body class="search-page" >
+  <script>
+      // Provide a signal that JS will load
+      document.body.className += ' client-js';
+  </script>
+  <span id="top"></span>
+  <div id="offline-info">It looks like you&#39;re offline.</div>
+  
+  
+  
+
+
+
+
+
+<div id="donato"></div>
+<script src="/cdn/archive.org/donate.js" data-platform="ol"></script>
+
+
+
+<div id="topNotice">
+  <div class="page-banner page-banner-black page-banner-center">
+    <div class="iaBar">
+        <a class="iaLogo" href="https://archive.org"><img alt="Internet Archive logo" src="/static/images/ia-logo.svg" width="160"></a>
+        
+        <a class="ghost-btn iabar-mobile" href="https://archive.org/donate/?platform=ol&origin=olwww-TopNavDonateButton" data-ol-link-track="IABar|DonateButton">Donate <span class="heart" aria-hidden="true">♥</span></a>
+        <div class="language-component header-dropdown iabar-mobile">
+        <details>
+          <summary>
+            <span>English (en)</span>
+            <img class="translate-icon" src="/static/images/language-icon.svg" title="Change Website Language" alt="Change Website Language"/>
+          </summary>
+          <div class="language-dropdown-component">
+            
+<ul class="locale-options dropdown-menu">
+  <li><a href="#" lang="ar" data-lang-id="ar" title="Arabic">العربية (ar)</a></li> 
+  <li><a href="#" lang="cs" data-lang-id="cs" title="Czech">Čeština (cs)</a></li> 
+  <li><a href="#" lang="de" data-lang-id="de" title="German">Deutsch (de)</a></li> 
+  <li><a href="#" lang="en" data-lang-id="en" title="English">English (en)</a></li> 
+  <li><a href="#" lang="es" data-lang-id="es" title="Spanish">Español (es)</a></li> 
+  <li><a href="#" lang="fr" data-lang-id="fr" title="French">Français (fr)</a></li> 
+  <li><a href="#" lang="hi" data-lang-id="hi" title="Hindi">हिंदी (hi)</a></li> 
+  <li><a href="#" lang="hr" data-lang-id="hr" title="Croatian">Hrvatski (hr)</a></li> 
+  <li><a href="#" lang="it" data-lang-id="it" title="Italian">Italiano (it)</a></li> 
+  <li><a href="#" lang="ko" data-lang-id="ko" title="Korean">한국어 (ko)</a></li> 
+  <li><a href="#" lang="pt" data-lang-id="pt" title="Portuguese">Português (pt)</a></li> 
+  <li><a href="#" lang="ro" data-lang-id="ro" title="Romanian">Română (ro)</a></li> 
+  <li><a href="#" lang="sc" data-lang-id="sc" title="Sardinian">Sardu (sc)</a></li> 
+  <li><a href="#" lang="te" data-lang-id="te" title="Telugu">తెలుగు (te)</a></li> 
+  <li><a href="#" lang="uk" data-lang-id="uk" title="Ukrainian">Українська (uk)</a></li> 
+  <li><a href="#" lang="zh" data-lang-id="zh" title="Chinese">中文 (zh)</a></li> 
+  <li><a href="#" lang="tl" data-lang-id="tl" title="Filipino">Filipino (tl)</a></li> 
+</ul>
+
+          </div>
+        </details>
+      </div>
+    </div>
+  </div>
+</div>
+
+  <header id="header-bar" class="header-bar">
+
+
+
+  <div class="logo-component">
+    <a href="/" title="The Internet Archive&#39;s Open Library: One page for every book">
+      <div class="logo-txt">
+        <img class="logo-icon" src="/static/images/openlibrary-logo-tighter.svg"
+          width="189" height="47"
+          alt="Open Library logo"/>
+      </div>
+    </a>
+    
+    <a
+      href="/search?show_page_status=1"
+      style="color:transparent;position:absolute;pointer-events:none;"
+      tabindex="-1"
+      aria-hidden="true"
+    >Page Status</a>
+  </div>
+
+  <ul class="navigation-component">
+    <li>
+
+
+
+
+
+
+
+
+
+
+
+
+<div class="mybooks-component header-dropdown">
+  <a href="/account/books"
+    data-ol-link-track="MainNav|MyBooks"
+  >My Books</a>
+</div>
+</li>
+    <li>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div class="browse-component header-dropdown">
+  <ol-popover class="browse-popover" placement="bottom-center" aria-label="Browse" data-ol-open-track="MainNav|BrowseOpen">
+    <button type="button" slot="trigger" class="browse-popover__trigger">
+      Browse
+      <svg class="down-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </button>
+    <div class="browse-popover__panel">
+      <div class="browse-popover__featured">
+        <a class="browse-feature" href="/subjects" data-ol-link-track="MainNav|Subjects|1">
+          <span class="browse-feature__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="3" width="7" height="7" rx="1.5"/>
+              <rect x="14" y="3" width="7" height="7" rx="1.5"/>
+              <rect x="3" y="14" width="7" height="7" rx="1.5"/>
+              <rect x="14" y="14" width="7" height="7" rx="1.5"/>
+            </svg>
+          </span>
+          <span class="browse-feature__body">
+            <span class="browse-feature__title">Subjects</span>
+            <span class="browse-feature__desc">Browse books by topic</span>
+          </span>
+        </a>
+        <a class="browse-feature" href="/trending" data-ol-link-track="MainNav|Trending|2">
+          <span class="browse-feature__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="3 16.5 9.5 10 13.5 14 21 6.5"/>
+              <polyline points="15 6.5 21 6.5 21 12.5"/>
+            </svg>
+          </span>
+          <span class="browse-feature__body">
+            <span class="browse-feature__title">Trending</span>
+            <span class="browse-feature__desc">Most popular right now</span>
+          </span>
+        </a>
+        <a class="browse-feature" href="/explore" data-ol-link-track="MainNav|Explore|3">
+          <span class="browse-feature__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="9"/>
+              <polygon points="15.8 8.2 10.4 10.4 8.2 15.8 13.6 13.6"/>
+            </svg>
+          </span>
+          <span class="browse-feature__body">
+            <span class="browse-feature__title">Library Explorer</span>
+            <span class="browse-feature__desc">Browse the virtual shelves</span>
+          </span>
+        </a>
+        <a class="browse-feature" href="/lists" data-ol-link-track="MainNav|Lists|4">
+          <span class="browse-feature__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="9" y1="6" x2="20" y2="6"/>
+              <line x1="9" y1="12" x2="20" y2="12"/>
+              <line x1="9" y1="18" x2="20" y2="18"/>
+              <circle cx="4.5" cy="6" r="1.3" fill="currentColor" stroke="none"/>
+              <circle cx="4.5" cy="12" r="1.3" fill="currentColor" stroke="none"/>
+              <circle cx="4.5" cy="18" r="1.3" fill="currentColor" stroke="none"/>
+            </svg>
+          </span>
+          <span class="browse-feature__body">
+            <span class="browse-feature__title">Lists</span>
+            <span class="browse-feature__desc">Reader-curated collections</span>
+          </span>
+        </a>
+      </div>
+      <hr class="browse-popover__divider">
+      <ul class="browse-popover__links">
+        <li><a class="browse-popover__link" href="/collections" data-ol-link-track="MainNav|Collections|5">Collections</a></li>
+        <li><a class="browse-popover__link" href="/k-12" data-ol-link-track="MainNav|K12Library|6">K-12 Student Library</a></li>
+        <li><a class="browse-popover__link" href="/booktalks" data-ol-link-track="MainNav|BookTalks|7">Book Talks</a></li>
+        <li><a class="browse-popover__link" href="/random" data-ol-link-track="MainNav|RandomBook|8">Random Book</a></li>
+      </ul>
+    </div>
+  </ol-popover>
+</div>
+</li>
+  </ul>
+
+  <div class="search-component">
+    <div class="search-bar-component">
+      
+      
+      
+      
+      
+      
+      
+      
+      
+      
+      
+      
+      
+      
+      <button type="button" class="search-bar-trigger" aria-haspopup="dialog" aria-label="Search" data-i18n="
+
+
+
+
+{&quot;all&quot;: {&quot;label&quot;: &quot;All books&quot;}, &quot;readable&quot;: {&quot;label&quot;: &quot;Readable Only&quot;}, &quot;open&quot;: {&quot;label&quot;: &quot;Free to read now&quot;}, &quot;borrowable&quot;: {&quot;label&quot;: &quot;Borrow online&quot;}}
+" data-i18n-ui="
+
+
+
+
+
+
+
+{&quot;dialogAria&quot;: &quot;Search Open Library&quot;, &quot;inputPlaceholder&quot;: &quot;Search books and authors\u2026&quot;, &quot;inputAria&quot;: &quot;Search&quot;, &quot;closeAria&quot;: &quot;Close search&quot;, &quot;clearAria&quot;: &quot;Clear search&quot;, &quot;seeAll&quot;: &quot;See results&quot;, &quot;seeOne&quot;: &quot;See %s result&quot;, &quot;seeMany&quot;: &quot;See %s results&quot;, &quot;seeAllMany&quot;: &quot;See all %s results&quot;, &quot;clearAll&quot;: &quot;Clear all&quot;, &quot;filtersAria&quot;: &quot;Search filters&quot;, &quot;availabilityLabel&quot;: &quot;Availability&quot;, &quot;languageLabel&quot;: &quot;Language&quot;, &quot;languagePlaceholder&quot;: &quot;Search languages\u2026&quot;, &quot;languageHeading&quot;: &quot;Languages&quot;, &quot;searching&quot;: &quot;Searching\u2026&quot;, &quot;noResults&quot;: &quot;No results found&quot;, &quot;resultsAnnounce&quot;: &quot;Showing %s of %s results&quot;, &quot;topResults&quot;: &quot;Top results&quot;, &quot;untitled&quot;: &quot;Untitled&quot;, &quot;authorLabel&quot;: &quot;Author&quot;, &quot;accessReadable&quot;: &quot;Readable&quot;, &quot;inLanguage&quot;: &quot;In %s&quot;, &quot;recentSearches&quot;: &quot;Recent searches&quot;, &quot;removeRecent&quot;: &quot;Remove \&quot;%s\&quot; from recent searches&quot;}
+" data-search-lang="en" data-print-disabled="false">
+        <span class="search-bar-trigger__label">Search</span>
+        <span class="search-bar-trigger__icon" aria-hidden="true"></span>
+      </button>
+    </div>
+    
+    
+    <a
+      id="barcode_scanner_link"
+      class="search-by-barcode"
+      aria-label="Search by barcode"
+      title="Search by barcode"
+      href="/barcodescanner?returnTo=/isbn/$$$"
+    >
+      <img src="/static/images/icons/barcode_scanner.svg" alt="" width="22" height="22"/>
+    </a>
+  </div>
+
+  <ul class="auth-component">
+    <li class="hide-me">
+      <a class="btn"
+         href="/account/login">Log In</a></li>
+    <li><a class="btn primary" href="/account/create">Sign Up</a></li>
+  </ul>
+  
+  
+
+
+
+
+
+
+
+
+
+
+
+
+<div class="hamburger-component header-dropdown">
+  <details>
+    <summary data-ol-link-track="HeaderBar|Hamburger">
+      <img class="hamburger__icon" src="/static/images/hamburger-icon.svg" alt="additional options menu"/>
+      <img class="down-arrow" aria-hidden="true" src="/static/images/down-arrow.png" alt="" role="presentation" width="7" height="4">
+    </summary>
+    <div class="mask-menu"></div>
+    <div
+    class="app-drawer"
+    >
+      <ul class="dropdown-menu hamburger-dropdown-menu">
+        <li class="subsection">
+          My Open Library
+        </li>
+        <li class="login-links">
+          <a class="login-links__secondary" href="/account/login">Log In</a>
+          <a class="login-links__primary" href="/account/create">Sign Up</a>
+        </li>
+        <li class="subsection">
+          Browse
+        </li>
+        <li>
+        <a href="/subjects"
+          data-ol-link-track="Hamburger|Subjects"
+        >
+          Subjects
+        </a>
+        </li>
+        <li>
+        <a href="/trending"
+          data-ol-link-track="Hamburger|Trending"
+        >
+          Trending
+        </a>
+        </li>
+        <li>
+        <a href="/explore"
+          data-ol-link-track="Hamburger|Explore"
+        >
+          Library Explorer
+        </a>
+        </li>
+        <li>
+        <a href="/lists"
+          data-ol-link-track="Hamburger|Lists"
+        >
+          Lists
+        </a>
+        </li>
+        <li>
+        <a href="/collections"
+          data-ol-link-track="Hamburger|Collections"
+        >
+          Collections
+        </a>
+        </li>
+        <li>
+        <a href="/k-12"
+          data-ol-link-track="Hamburger|K12Library"
+        >
+          K-12 Student Library
+        </a>
+        </li>
+        <li>
+        <a href="/booktalks"
+          data-ol-link-track="Hamburger|BookTalks"
+        >
+          Book Talks
+        </a>
+        </li>
+        <li>
+        <a href="/random"
+          data-ol-link-track="Hamburger|RandomBook"
+        >
+          Random Book
+        </a>
+        </li>
+        <li>
+        <a href="/advancedsearch"
+          data-ol-link-track="Hamburger|AdvancedSearch"
+        >
+          Advanced Search
+        </a>
+        </li>
+        <li class="subsection">
+          Contribute
+        </li>
+        <li>
+        <a href="/books/add"
+          data-ol-link-track="Hamburger|AddBook"
+        >
+          Add a Book
+        </a>
+        </li>
+        <li>
+        <a href="/recentchanges"
+          data-ol-link-track="Hamburger|RecentEdits"
+        >
+          Recent Community Edits
+        </a>
+        </li>
+        <li class="subsection">
+          Resources
+        </li>
+        <li>
+        <a href="/help"
+          data-ol-link-track="Hamburger|Help"
+        >
+          Help &amp; Support
+        </a>
+        </li>
+        <li>
+        <a href="/developers"
+          data-ol-link-track="Hamburger|DevelopersHelp"
+        >
+          Developer Center
+        </a>
+        </li>
+        <li>
+        <a href="/librarians"
+          data-ol-link-track="Hamburger|LibrariansHelp"
+        >
+          Librarians Portal
+        </a>
+        </li>
+      </ul>
+    </div>
+  </details>
+</div>
+
+
+</header>
+<header class="header-bar mobile">
+  <ul class="navigation-component mobile">
+    <li>
+
+
+
+
+
+
+
+
+
+
+
+
+<div class="mybooks-component header-dropdown">
+  <a href="/account/books"
+    data-ol-link-track="MainNav|MyBooks"
+  >My Books</a>
+</div>
+</li>
+    
+    
+    <li>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div class="browse-component header-dropdown">
+  <ol-popover class="browse-popover" placement="bottom-center" aria-label="Browse" data-ol-open-track="MainNavMobile|BrowseOpen">
+    <button type="button" slot="trigger" class="browse-popover__trigger">
+      Browse
+      <svg class="down-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </button>
+    <div class="browse-popover__panel">
+      <div class="browse-popover__featured">
+        <a class="browse-feature" href="/subjects" data-ol-link-track="MainNavMobile|Subjects|1">
+          <span class="browse-feature__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="3" width="7" height="7" rx="1.5"/>
+              <rect x="14" y="3" width="7" height="7" rx="1.5"/>
+              <rect x="3" y="14" width="7" height="7" rx="1.5"/>
+              <rect x="14" y="14" width="7" height="7" rx="1.5"/>
+            </svg>
+          </span>
+          <span class="browse-feature__body">
+            <span class="browse-feature__title">Subjects</span>
+            <span class="browse-feature__desc">Browse books by topic</span>
+          </span>
+        </a>
+        <a class="browse-feature" href="/trending" data-ol-link-track="MainNavMobile|Trending|2">
+          <span class="browse-feature__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="3 16.5 9.5 10 13.5 14 21 6.5"/>
+              <polyline points="15 6.5 21 6.5 21 12.5"/>
+            </svg>
+          </span>
+          <span class="browse-feature__body">
+            <span class="browse-feature__title">Trending</span>
+            <span class="browse-feature__desc">Most popular right now</span>
+          </span>
+        </a>
+        <a class="browse-feature" href="/explore" data-ol-link-track="MainNavMobile|Explore|3">
+          <span class="browse-feature__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="9"/>
+              <polygon points="15.8 8.2 10.4 10.4 8.2 15.8 13.6 13.6"/>
+            </svg>
+          </span>
+          <span class="browse-feature__body">
+            <span class="browse-feature__title">Library Explorer</span>
+            <span class="browse-feature__desc">Browse the virtual shelves</span>
+          </span>
+        </a>
+        <a class="browse-feature" href="/lists" data-ol-link-track="MainNavMobile|Lists|4">
+          <span class="browse-feature__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="9" y1="6" x2="20" y2="6"/>
+              <line x1="9" y1="12" x2="20" y2="12"/>
+              <line x1="9" y1="18" x2="20" y2="18"/>
+              <circle cx="4.5" cy="6" r="1.3" fill="currentColor" stroke="none"/>
+              <circle cx="4.5" cy="12" r="1.3" fill="currentColor" stroke="none"/>
+              <circle cx="4.5" cy="18" r="1.3" fill="currentColor" stroke="none"/>
+            </svg>
+          </span>
+          <span class="browse-feature__body">
+            <span class="browse-feature__title">Lists</span>
+            <span class="browse-feature__desc">Reader-curated collections</span>
+          </span>
+        </a>
+      </div>
+      <hr class="browse-popover__divider">
+      <ul class="browse-popover__links">
+        <li><a class="browse-popover__link" href="/collections" data-ol-link-track="MainNavMobile|Collections|5">Collections</a></li>
+        <li><a class="browse-popover__link" href="/k-12" data-ol-link-track="MainNavMobile|K12Library|6">K-12 Student Library</a></li>
+        <li><a class="browse-popover__link" href="/booktalks" data-ol-link-track="MainNavMobile|BookTalks|7">Book Talks</a></li>
+        <li><a class="browse-popover__link" href="/random" data-ol-link-track="MainNavMobile|RandomBook|8">Random Book</a></li>
+      </ul>
+    </div>
+  </ol-popover>
+</div>
+</li>
+  </ul>
+</header>
+
+  
+  <main id="test-body-mobile">
+    
+    <div class="flash-messages">
+    </div>
+    
+    
+    
+    
+
+<div>
+    <div id="contentHead">
+      <h1>Search Books</h1>
+    </div>
+
+<div id="contentBody">
+  
+
+<ul class="nav-bar">
+  <li class="selected">
+    <a data-ol-link-track="SearchNav|SearchBooks"
+       href="/search?q=telescope">Books</a>
+  </li>
+  <li class="">
+    <a data-ol-link-track="SearchNav|SearchAuthors"
+       href="/search/authors?q=telescope">Authors</a>
+  </li>
+  <li class="">
+    <a data-ol-link-track="SearchNav|SearchFulltext"
+       href="/search/inside?q=telescope">Search Inside</a>
+  </li>
+  <li class="">
+    <a data-ol-link-track="SearchNav|SearchSubjects"
+       href="/search/subjects?q=telescope">Subjects</a>
+  </li>
+  <li class="">
+    <a data-ol-link-track="SearchNav|SearchLists"
+       href="/search/lists?q=telescope">Lists</a>
+  </li>
+  <li class="">
+    <a data-ol-link-track="SearchNav|SearchAdvanced"
+       href="/advancedsearch">Advanced Search</a>
+  </li>
+</ul>
+
+  <div class="search-controls">
+
+    <form method="get" action="/search" class="siteSearch search-row olform">
+      <label for="q" class="hidden">Keywords</label>
+      
+
+<div class="searchbox">
+    <input type="search" enterkeyhint="search" class="searchbox__input" name="q" size="100" placeholder="Search" aria-label="Search" value="telescope" autofocus>
+    <div>
+        <input type="submit" value="" class="searchbox__btn-icon" aria-label="Search">
+    </div>
+</div>
+
+
+    </form>
+
+        
+        
+        
+        
+        
+        
+        <div class="search-filter-row" id="search-filter-row">
+          <ol-toggle
+            variant="button"
+            label="Readable Only"
+            accessible-label="Filter by availability"
+            sublabel="402"
+          ></ol-toggle>
+          <ol-select-popover
+            label="Language"
+            placeholder="Search languages…"
+            unselected-heading="Languages"
+            aria-label="Filter by language"
+          ></ol-select-popover>
+        </div>
+
+        
+        
+        
+        
+        
+        
+        
+        <span class="selected-search-facets-container">
+            
+
+
+        </span>
+
+        <div class="search-results-stats">
+          3,233 hits
+        
+          
+<span class="sort">
+    <details class="sort-dropper">
+      <summary class="tool-button">
+        <img src="/static/images/icons/icon_sort.png" alt="Sorting by" width="9" height="11" />
+        Relevance
+      </summary>
+      <span class="sort-content">
+        <span class="sort-content-inner">
+          <a class="sort-selected">Relevance</a>
+          <a href="/search?q=telescope&amp;sort=editions"
+              data-ol-link-track="SearchSort|Editions"
+              rel="nofollow"
+          >
+            Most Editions
+          </a>
+          <a href="/search?q=telescope&amp;sort=old"
+              data-ol-link-track="SearchSort|Old"
+              rel="nofollow"
+          >
+            First Published
+          </a>
+          <a href="/search?q=telescope&amp;sort=new"
+              data-ol-link-track="SearchSort|New"
+              rel="nofollow"
+          >
+            Most Recent
+          </a>
+          <a href="/search?q=telescope&amp;sort=rating"
+              data-ol-link-track="SearchSort|Rating"
+              rel="nofollow"
+          >
+            Top Rated
+          </a>
+          <a href="/search?q=telescope&amp;sort=readinglog"
+              data-ol-link-track="SearchSort|ReadingLog"
+              rel="nofollow"
+          >
+            Reading Log
+          </a>
+          <a href="/search?q=telescope&amp;sort=trending"
+              data-ol-link-track="SearchSort|Trending"
+              rel="nofollow"
+          >
+            Trending
+          </a>
+          <a href="/search?q=telescope&amp;sort=random"
+              data-ol-link-track="SearchSort|Random"
+              rel="nofollow"
+          >
+            Random
+          </a>
+        </span>
+      </span>
+    </details>
+</span>
+
+          
+          
+<span class="tools--layout tool-button tool-button--group" title="View as: ">
+  <a
+    class="tool-button active"
+    data-value="details"
+    href="/search?q=telescope"
+    data-ol-link-track="SearchLayout|Details"
+  >Details</a>
+  <a
+    class="tool-button "
+    data-value="grid"
+    href="/search?q=telescope&amp;layout=grid"
+    data-ol-link-track="SearchLayout|Grid"
+  >Grid</a>
+</span>
+
+        </div>
+    </div>
+
+
+<!-- results -->
+
+    <div class="resultsContainer search-results-container">
+    <div id="searchResults">
+      
+      
+      
+      
+      <ul class="list-books ">
+    
+        
+        
+<li class="searchResultItem sri--w-main" itemscope itemtype="https://schema.org/Book" >
+  <div class="sri__main">
+    <span class="bookcover ">
+      <a href="/works/OL7108878W/All_about_telescopes?edition=key%3A/books/OL5237248M">
+        <img
+          itemprop="image"
+          src="//covers.openlibrary.org/b/id/9327863-M.jpg"
+          alt="Cover of: All about telescopes"
+          title="Cover of: All about telescopes"
+          
+          /></a>
+    </span>
+
+    <div class="details">
+        <div class="resultTitle">
+          <h3 itemprop="name" class="booktitle">
+            <a itemprop="url" href="/works/OL7108878W/All_about_telescopes?edition=key%3A/books/OL5237248M" class="results">All about telescopes</a>
+          </h3>
+        </div>
+        <span itemprop="author" itemscope itemtype="https://schema.org/Organization" class="bookauthor">
+          
+by <a href="/authors/OL2015221A/Brown_Sam" >Brown, Sam</a>
+
+        </span>
+        <span class="resultStats">
+          
+<span class="ratingsByline">29 Want to read</span>
+
+        </span>
+
+        <br />
+        <ol-chip-group class="srw__subjects" gap="small">
+          
+          <ol-chip size="small" href="/subjects/telescopes"><em>Telescopes</em></ol-chip>
+          
+          <ol-chip size="small" href="/subjects/telescope_building"><em>telescope</em> building</ol-chip>
+        </ol-chip-group>
+        
+        <span class="resultDetails">
+          <span>
+            First published in 1967
+          </span>
+          <br>
+          <span>
+            <a href="/works/OL7108878W/All_about_telescopes?edition=key%3A/books/OL5237248M&amp;mode=all#editions-list">3 editions</a>
+          </span>
+        </span>
+        
+    </div>
+
+    <div class="searchResultItemCTA">
+        <div class="searchResultItemCTA-lending">
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div class="cta-button-group">
+  
+
+<a class="cta-btn cta-btn--available cta-btn--external" href="/books/OL5237248M/-/borrow?action=locate" target="_blank" rel="noopener noreferrer"
+  data-ol-link-track="CTAClick|Locate">Locate</a>
+
+</div>
+
+
+
+        </div>
+
+        
+
+
+
+
+
+
+
+
+<div class="generic-dropper-wrapper my-books-dropper generic-dropper--disabled"  data-work-key=/works/OL7108878W >
+  <div class="generic-dropper">
+    <div class="generic-dropper__actions">
+      <div class="generic-dropper__primary">
+        
+<form class="reading-log primary-action" method="POST" action="/works/OL7108878W/bookshelves.json">
+  
+
+
+  <input type="hidden" name="action" value="add"/>
+  <input type="hidden" name="bookshelf_id" value="1"/>
+  <input type="hidden" name="work_id" value="/works/OL7108878W"/>
+  <input type="hidden" name="edition_id" value="/books/OL5237248M"/>
+  <button class="book-progress-btn primary-action unactivated js-login-intent" type="submit" disabled data-ol-link-track="ReadingLog|AddToList" data-action="Want to Read" data-title="All about telescopes" data-type="book">
+    <span class="activated-check hidden">✓</span>
+    <span class="btn-text">Add to List</span>
+  </button>
+</form>
+
+
+
+      </div>
+      <a class="generic-dropper__dropclick" href="javascript:;" aria-label="More reading options for All about telescopes">
+        <div class="arrow"></div>
+      </a>
+    </div>
+    <div class="generic-dropper__dropdown">
+      
+
+
+<div class="read-statuses">
+  <form class="reading-log" method="POST" action="/works/OL7108878W/bookshelves.json">
+    <input type="hidden" name="action" value="remove"/>
+    <input type="hidden" name="bookshelf_id" value="-1"/>
+    <input type="hidden" name="default-key" value="/books/OL5237248M" />
+    <input type="hidden" name="edition_id" value="/books/OL5237248M"/>
+    <input type="hidden" name="work_id" value="/works/OL7108878W"/>
+    <button class="remove-from-list hidden" type="submit" data-ol-link-track="ReadingLog|RemoveFromShelf">Remove From Shelf</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL7108878W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="1"/>
+    <input type="hidden" name="edition_id" value="/books/OL5237248M"/>
+    <button class="nostyle-btn hidden" type="submit" data-ol-link-track="ReadingLog|WantToRead">Want to Read</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL7108878W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="2"/>
+    <input type="hidden" name="edition_id" value="/books/OL5237248M"/>
+    <button class="nostyle-btn " type="submit" data-ol-link-track="ReadingLog|CurrentlyReading">Currently Reading</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL7108878W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="3"/>
+    <input type="hidden" name="edition_id" value="/books/OL5237248M"/>
+    <button class="nostyle-btn " type="submit" data-ol-link-track="ReadingLog|AlreadyRead">Already Read</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL7108878W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="4"/>
+    <input type="hidden" name="edition_id" value="/books/OL5237248M"/>
+    <button class="nostyle-btn " type="submit" data-ol-link-track="ReadingLog|StoppedReading">Stopped Reading</button>
+  </form>
+</div>
+
+
+
+
+
+<div class="reading-lists">
+  <p class="reading-list-title">My Reading Lists:</p>
+  <div class="my-lists" data-seed-key="/books/OL5237248M" data-work-key="/works/OL7108878W" data-user-key="">
+  </div>
+  <p class="create checkboxes">
+    <label>
+      <input type="checkbox" class="work-checkbox"/>
+      <span>Use this Work</span>
+    </label>
+  </p>
+  <a href="javascript:;" class="create create-new-list" aria-controls="addList">Create a new list</a>
+</div>
+
+
+
+<div class="hidden">
+  <div class="floaterAdd" id="addList">
+    <div class="floaterHead">
+      <h2>Create a new list</h2>
+      <a class="dialog--close">&times;<span class="shift">Close</span></a>
+    </div>
+    <form method="post" class="floatform" name="new-list" id="create-list-form">
+      <div class="formElement">
+        <div class="label">
+          <label for="list_label">Name:</label>
+        </div>
+        <div class="input">
+          <input type="text" name="list_label" id="list_label" class="text required" value="" required/>
+        </div>
+      </div>
+      <div class="formElement">
+        <div class="label">
+          <label for="list_desc">Description:</label>
+        </div>
+        <div class="input">
+          <textarea name="list_desc" id="list_desc" rows="5" cols="30"></textarea>
+        </div>
+      </div>
+      <div class="formElement">
+        <div class="input">
+          <button id="create-list-button" type="submit" class="larger">Create new list</button>
+          &nbsp; &nbsp;
+          <a class="small dialog--close plain red">Cancel</a>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
+
+
+
+<input type="hidden" name="list-i18n-strings" value="{&quot;cover_of&quot;: &quot;Cover of: &quot;, &quot;see_this_list&quot;: &quot;See this list&quot;, &quot;remove_from_list&quot;: &quot;Remove from your list?&quot;, &quot;from&quot;: &quot;from&quot;, &quot;you&quot;: &quot;You&quot;}">
+
+
+
+<input type="hidden" name="reading-log-i18n-strings" value="{&quot;saving&quot;: &quot;saving...&quot;, &quot;confirmRemoveWithCheckIns&quot;: &quot;Removing this book from your shelves will delete your check-ins for this work.  Continue?&quot;}">
+
+    </div>
+  </div>
+</div>
+
+
+
+        
+    </div>
+  </div>
+
+</li>
+
+        
+<li class="searchResultItem sri--w-main" itemscope itemtype="https://schema.org/Book" >
+  <div class="sri__main">
+    <span class="bookcover ">
+      <a href="/works/OL2734569W/The_Dobsonian_telescope?edition=key%3A/books/OL695586M">
+        <img
+          itemprop="image"
+          src="//covers.openlibrary.org/b/id/11219920-M.jpg"
+          alt="Cover of: The Dobsonian telescope: a practical manual for building large aperture telescopes"
+          title="Cover of: The Dobsonian telescope: a practical manual for building large aperture telescopes"
+          
+          /></a>
+      
+
+
+<div class="cta-button-group">
+  <a class="cta-btn cta-btn--preview"
+    href="#bookPreview"
+    data-book-preview
+    data-iframe-src="https://archive.org/details/dobsoniantelesco00krie_116?view=theater&wrapper=false"
+    data-iframe-link="https://archive.org/details/dobsoniantelesco00krie_116"
+    data-ol-link-track="CTAClick|Preview">Preview</a>
+</div>
+
+
+<ol-dialog id="bookPreview" label="Preview Book" width="large">
+  <div class="book-preview">
+    <iframe width="100%" style="border: 0;" title="Book Preview"></iframe>
+    <!-- <p class="learn-more">
+      <a data-key="book_preview_learn_more"
+         data-ol-link-track="book_preview_learn_more">See more about this book on Archive.org</a>
+    </p> -->
+  </div>
+</ol-dialog>
+
+
+    </span>
+
+    <div class="details">
+        <div class="resultTitle">
+          <h3 itemprop="name" class="booktitle">
+            <a itemprop="url" href="/works/OL2734569W/The_Dobsonian_telescope?edition=key%3A/books/OL695586M" class="results">The Dobsonian telescope: a practical manual for building large aperture telescopes</a>
+          </h3>
+        </div>
+        <span itemprop="author" itemscope itemtype="https://schema.org/Organization" class="bookauthor">
+          
+by <a href="/authors/OL400704A/David_Kriege" >David Kriege</a>
+
+        </span>
+        <span class="resultStats">
+          
+<span class="ratingsByline">14 Want to read</span>
+
+        </span>
+
+        <br />
+        <ol-chip-group class="srw__subjects" gap="small">
+          
+          <ol-chip size="small" href="/subjects/dobsonian_telescopes">Dobsonian <em>telescopes</em></ol-chip>
+        </ol-chip-group>
+        
+        <span class="resultDetails">
+          <span>
+            First published in 1997
+          </span>
+          <br>
+          <span>
+            <a href="/works/OL2734569W/The_Dobsonian_telescope?edition=key%3A/books/OL695586M&amp;mode=all#editions-list">1 edition</a>,
+          </span>
+          <span>
+            <a href="/works/OL2734569W/The_Dobsonian_telescope?edition=key%3A/books/OL695586M&amp;mode=all#editions-list">1 ebook</a>
+          </span>
+        </span>
+        
+    </div>
+
+    <div class="searchResultItemCTA">
+        <div class="searchResultItemCTA-lending">
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div class="cta-button-group">
+  
+
+<a class="cta-btn cta-btn--available cta-btn--external" href="/books/OL695586M/-/borrow?action=locate" target="_blank" rel="noopener noreferrer"
+  data-ol-link-track="CTAClick|Locate">Locate</a>
+
+</div>
+
+
+
+        </div>
+
+        
+
+
+
+
+
+
+
+
+<div class="generic-dropper-wrapper my-books-dropper generic-dropper--disabled"  data-work-key=/works/OL2734569W >
+  <div class="generic-dropper">
+    <div class="generic-dropper__actions">
+      <div class="generic-dropper__primary">
+        
+<form class="reading-log primary-action" method="POST" action="/works/OL2734569W/bookshelves.json">
+  
+
+
+  <input type="hidden" name="action" value="add"/>
+  <input type="hidden" name="bookshelf_id" value="1"/>
+  <input type="hidden" name="work_id" value="/works/OL2734569W"/>
+  <input type="hidden" name="edition_id" value="/books/OL695586M"/>
+  <button class="book-progress-btn primary-action unactivated js-login-intent" type="submit" disabled data-ol-link-track="ReadingLog|AddToList" data-action="Want to Read" data-title="The Dobsonian telescope" data-type="book">
+    <span class="activated-check hidden">✓</span>
+    <span class="btn-text">Add to List</span>
+  </button>
+</form>
+
+
+
+      </div>
+      <a class="generic-dropper__dropclick" href="javascript:;" aria-label="More reading options for The Dobsonian telescope">
+        <div class="arrow"></div>
+      </a>
+    </div>
+    <div class="generic-dropper__dropdown">
+      
+
+
+<div class="read-statuses">
+  <form class="reading-log" method="POST" action="/works/OL2734569W/bookshelves.json">
+    <input type="hidden" name="action" value="remove"/>
+    <input type="hidden" name="bookshelf_id" value="-1"/>
+    <input type="hidden" name="default-key" value="/books/OL695586M" />
+    <input type="hidden" name="edition_id" value="/books/OL695586M"/>
+    <input type="hidden" name="work_id" value="/works/OL2734569W"/>
+    <button class="remove-from-list hidden" type="submit" data-ol-link-track="ReadingLog|RemoveFromShelf">Remove From Shelf</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL2734569W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="1"/>
+    <input type="hidden" name="edition_id" value="/books/OL695586M"/>
+    <button class="nostyle-btn hidden" type="submit" data-ol-link-track="ReadingLog|WantToRead">Want to Read</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL2734569W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="2"/>
+    <input type="hidden" name="edition_id" value="/books/OL695586M"/>
+    <button class="nostyle-btn " type="submit" data-ol-link-track="ReadingLog|CurrentlyReading">Currently Reading</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL2734569W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="3"/>
+    <input type="hidden" name="edition_id" value="/books/OL695586M"/>
+    <button class="nostyle-btn " type="submit" data-ol-link-track="ReadingLog|AlreadyRead">Already Read</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL2734569W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="4"/>
+    <input type="hidden" name="edition_id" value="/books/OL695586M"/>
+    <button class="nostyle-btn " type="submit" data-ol-link-track="ReadingLog|StoppedReading">Stopped Reading</button>
+  </form>
+</div>
+
+
+
+
+
+<div class="reading-lists">
+  <p class="reading-list-title">My Reading Lists:</p>
+  <div class="my-lists" data-seed-key="/books/OL695586M" data-work-key="/works/OL2734569W" data-user-key="">
+  </div>
+  <p class="create checkboxes">
+    <label>
+      <input type="checkbox" class="work-checkbox"/>
+      <span>Use this Work</span>
+    </label>
+  </p>
+  <a href="javascript:;" class="create create-new-list" aria-controls="addList">Create a new list</a>
+</div>
+
+
+
+
+
+    </div>
+  </div>
+</div>
+
+
+
+        
+    </div>
+  </div>
+
+</li>
+
+        
+<li class="searchResultItem sri--w-main" itemscope itemtype="https://schema.org/Book" >
+  <div class="sri__main">
+    <span class="bookcover ">
+      <a href="/works/OL24590911W/The_Wrong_End_of_the_Telescope?edition=key%3A/books/OL34708418M">
+        <img
+          itemprop="image"
+          src="//covers.openlibrary.org/b/id/12404293-M.jpg"
+          alt="Cover of: Wrong End of the Telescope"
+          title="Cover of: Wrong End of the Telescope"
+          
+          /></a>
+    </span>
+
+    <div class="details">
+        <div class="resultTitle">
+          <h3 itemprop="name" class="booktitle">
+            <a itemprop="url" href="/works/OL24590911W/The_Wrong_End_of_the_Telescope?edition=key%3A/books/OL34708418M" class="results">Wrong End of the Telescope</a>
+          </h3>
+        </div>
+        <span itemprop="author" itemscope itemtype="https://schema.org/Organization" class="bookauthor">
+          
+by <a href="/authors/OL24646A/Rabih_Alameddine" >Rabih Alameddine</a>
+
+        </span>
+        <span class="resultStats">
+          
+<span class="ratingsByline">5 Want to read</span>
+
+        </span>
+
+        <span class="resultDetails">
+          <span>
+            First published in 2021
+          </span>
+          <br>
+          <span>
+            <a href="/works/OL24590911W/The_Wrong_End_of_the_Telescope?edition=key%3A/books/OL34708418M&amp;mode=all#editions-list">6 editions</a>
+          </span>
+        </span>
+        
+    </div>
+
+    <div class="searchResultItemCTA">
+        <div class="searchResultItemCTA-lending">
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div class="cta-button-group">
+  
+
+<a class="cta-btn cta-btn--available cta-btn--external" href="/books/OL34708418M/-/borrow?action=locate" target="_blank" rel="noopener noreferrer"
+  data-ol-link-track="CTAClick|Locate">Locate</a>
+
+</div>
+
+
+
+        </div>
+
+        
+
+
+
+
+
+
+
+
+<div class="generic-dropper-wrapper my-books-dropper generic-dropper--disabled"  data-work-key=/works/OL24590911W >
+  <div class="generic-dropper">
+    <div class="generic-dropper__actions">
+      <div class="generic-dropper__primary">
+        
+<form class="reading-log primary-action" method="POST" action="/works/OL24590911W/bookshelves.json">
+  
+
+
+  <input type="hidden" name="action" value="add"/>
+  <input type="hidden" name="bookshelf_id" value="1"/>
+  <input type="hidden" name="work_id" value="/works/OL24590911W"/>
+  <input type="hidden" name="edition_id" value="/books/OL34708418M"/>
+  <button class="book-progress-btn primary-action unactivated js-login-intent" type="submit" disabled data-ol-link-track="ReadingLog|AddToList" data-action="Want to Read" data-title="The Wrong End of the Telescope" data-type="book">
+    <span class="activated-check hidden">✓</span>
+    <span class="btn-text">Add to List</span>
+  </button>
+</form>
+
+
+
+      </div>
+      <a class="generic-dropper__dropclick" href="javascript:;" aria-label="More reading options for The Wrong End of the Telescope">
+        <div class="arrow"></div>
+      </a>
+    </div>
+    <div class="generic-dropper__dropdown">
+      
+
+
+<div class="read-statuses">
+  <form class="reading-log" method="POST" action="/works/OL24590911W/bookshelves.json">
+    <input type="hidden" name="action" value="remove"/>
+    <input type="hidden" name="bookshelf_id" value="-1"/>
+    <input type="hidden" name="default-key" value="/books/OL34708418M" />
+    <input type="hidden" name="edition_id" value="/books/OL34708418M"/>
+    <input type="hidden" name="work_id" value="/works/OL24590911W"/>
+    <button class="remove-from-list hidden" type="submit" data-ol-link-track="ReadingLog|RemoveFromShelf">Remove From Shelf</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL24590911W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="1"/>
+    <input type="hidden" name="edition_id" value="/books/OL34708418M"/>
+    <button class="nostyle-btn hidden" type="submit" data-ol-link-track="ReadingLog|WantToRead">Want to Read</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL24590911W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="2"/>
+    <input type="hidden" name="edition_id" value="/books/OL34708418M"/>
+    <button class="nostyle-btn " type="submit" data-ol-link-track="ReadingLog|CurrentlyReading">Currently Reading</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL24590911W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="3"/>
+    <input type="hidden" name="edition_id" value="/books/OL34708418M"/>
+    <button class="nostyle-btn " type="submit" data-ol-link-track="ReadingLog|AlreadyRead">Already Read</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL24590911W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="4"/>
+    <input type="hidden" name="edition_id" value="/books/OL34708418M"/>
+    <button class="nostyle-btn " type="submit" data-ol-link-track="ReadingLog|StoppedReading">Stopped Reading</button>
+  </form>
+</div>
+
+
+
+
+
+<div class="reading-lists">
+  <p class="reading-list-title">My Reading Lists:</p>
+  <div class="my-lists" data-seed-key="/books/OL34708418M" data-work-key="/works/OL24590911W" data-user-key="">
+  </div>
+  <p class="create checkboxes">
+    <label>
+      <input type="checkbox" class="work-checkbox"/>
+      <span>Use this Work</span>
+    </label>
+  </p>
+  <a href="javascript:;" class="create create-new-list" aria-controls="addList">Create a new list</a>
+</div>
+
+
+
+
+
+    </div>
+  </div>
+</div>
+
+
+
+        
+    </div>
+  </div>
+
+</li>
+
+        
+<li class="searchResultItem sri--w-main" itemscope itemtype="https://schema.org/Book" >
+  <div class="sri__main">
+    <span class="bookcover ">
+      <a href="/works/OL6033370W/A_manual_for_amateur_telescope_makers?edition=key%3A/books/OL3683962M">
+        <img
+          itemprop="image"
+          src="//covers.openlibrary.org/b/id/11441889-M.jpg"
+          alt="Cover of: A manual for amateur telescope makers: with detailed plans to construct three different telescopes"
+          title="Cover of: A manual for amateur telescope makers: with detailed plans to construct three different telescopes"
+          
+          /></a>
+    </span>
+
+    <div class="details">
+        <div class="resultTitle">
+          <h3 itemprop="name" class="booktitle">
+            <a itemprop="url" href="/works/OL6033370W/A_manual_for_amateur_telescope_makers?edition=key%3A/books/OL3683962M" class="results">A manual for amateur telescope makers: with detailed plans to construct three different telescopes</a>
+          </h3>
+        </div>
+        <span itemprop="author" itemscope itemtype="https://schema.org/Organization" class="bookauthor">
+          
+by <a href="/authors/OL1516593A/Karine_Lecleire" >Karine Lecleire</a>
+
+        </span>
+        <span class="resultStats">
+          
+<span class="ratingsByline">9 Want to read</span>
+
+        </span>
+
+        <br />
+        <ol-chip-group class="srw__subjects" gap="small">
+          
+          <ol-chip size="small" href="/subjects/telescopes"><em>Telescopes</em></ol-chip>
+        </ol-chip-group>
+        
+        <span class="resultDetails">
+          <span>
+            First published in 2003
+          </span>
+          <br>
+          <span>
+            <a href="/works/OL6033370W/A_manual_for_amateur_telescope_makers?edition=key%3A/books/OL3683962M&amp;mode=all#editions-list">1 edition</a>
+          </span>
+        </span>
+        
+    </div>
+
+    <div class="searchResultItemCTA">
+        <div class="searchResultItemCTA-lending">
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div class="cta-button-group">
+  
+
+<a class="cta-btn cta-btn--available cta-btn--external" href="/books/OL3683962M/-/borrow?action=locate" target="_blank" rel="noopener noreferrer"
+  data-ol-link-track="CTAClick|Locate">Locate</a>
+
+</div>
+
+
+
+        </div>
+
+        
+
+
+
+
+
+
+
+
+<div class="generic-dropper-wrapper my-books-dropper generic-dropper--disabled"  data-work-key=/works/OL6033370W >
+  <div class="generic-dropper">
+    <div class="generic-dropper__actions">
+      <div class="generic-dropper__primary">
+        
+<form class="reading-log primary-action" method="POST" action="/works/OL6033370W/bookshelves.json">
+  
+
+
+  <input type="hidden" name="action" value="add"/>
+  <input type="hidden" name="bookshelf_id" value="1"/>
+  <input type="hidden" name="work_id" value="/works/OL6033370W"/>
+  <input type="hidden" name="edition_id" value="/books/OL3683962M"/>
+  <button class="book-progress-btn primary-action unactivated js-login-intent" type="submit" disabled data-ol-link-track="ReadingLog|AddToList" data-action="Want to Read" data-title="A manual for amateur telescope makers" data-type="book">
+    <span class="activated-check hidden">✓</span>
+    <span class="btn-text">Add to List</span>
+  </button>
+</form>
+
+
+
+      </div>
+      <a class="generic-dropper__dropclick" href="javascript:;" aria-label="More reading options for A manual for amateur telescope makers">
+        <div class="arrow"></div>
+      </a>
+    </div>
+    <div class="generic-dropper__dropdown">
+      
+
+
+<div class="read-statuses">
+  <form class="reading-log" method="POST" action="/works/OL6033370W/bookshelves.json">
+    <input type="hidden" name="action" value="remove"/>
+    <input type="hidden" name="bookshelf_id" value="-1"/>
+    <input type="hidden" name="default-key" value="/books/OL3683962M" />
+    <input type="hidden" name="edition_id" value="/books/OL3683962M"/>
+    <input type="hidden" name="work_id" value="/works/OL6033370W"/>
+    <button class="remove-from-list hidden" type="submit" data-ol-link-track="ReadingLog|RemoveFromShelf">Remove From Shelf</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL6033370W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="1"/>
+    <input type="hidden" name="edition_id" value="/books/OL3683962M"/>
+    <button class="nostyle-btn hidden" type="submit" data-ol-link-track="ReadingLog|WantToRead">Want to Read</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL6033370W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="2"/>
+    <input type="hidden" name="edition_id" value="/books/OL3683962M"/>
+    <button class="nostyle-btn " type="submit" data-ol-link-track="ReadingLog|CurrentlyReading">Currently Reading</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL6033370W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="3"/>
+    <input type="hidden" name="edition_id" value="/books/OL3683962M"/>
+    <button class="nostyle-btn " type="submit" data-ol-link-track="ReadingLog|AlreadyRead">Already Read</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL6033370W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="4"/>
+    <input type="hidden" name="edition_id" value="/books/OL3683962M"/>
+    <button class="nostyle-btn " type="submit" data-ol-link-track="ReadingLog|StoppedReading">Stopped Reading</button>
+  </form>
+</div>
+
+
+
+
+
+<div class="reading-lists">
+  <p class="reading-list-title">My Reading Lists:</p>
+  <div class="my-lists" data-seed-key="/books/OL3683962M" data-work-key="/works/OL6033370W" data-user-key="">
+  </div>
+  <p class="create checkboxes">
+    <label>
+      <input type="checkbox" class="work-checkbox"/>
+      <span>Use this Work</span>
+    </label>
+  </p>
+  <a href="javascript:;" class="create create-new-list" aria-controls="addList">Create a new list</a>
+</div>
+
+
+
+
+
+    </div>
+  </div>
+</div>
+
+
+
+        
+    </div>
+  </div>
+
+</li>
+
+        
+<li class="searchResultItem sri--w-main" itemscope itemtype="https://schema.org/Book" >
+  <div class="sri__main">
+    <span class="bookcover ">
+      <a href="/works/OL3907805W/Build_your_own_telescope?edition=key%3A/books/OL1428159M">
+        <img
+          itemprop="image"
+          src="//covers.openlibrary.org/b/id/7385892-M.jpg"
+          alt="Cover of: Build your own telescope"
+          title="Cover of: Build your own telescope"
+          loading="lazy"
+          /></a>
+      
+
+
+<div class="cta-button-group">
+  <a class="cta-btn cta-btn--preview"
+    href="#bookPreview"
+    data-book-preview
+    data-iframe-src="https://archive.org/details/buildyourowntele00berr_0?view=theater&wrapper=false"
+    data-iframe-link="https://archive.org/details/buildyourowntele00berr_0"
+    data-ol-link-track="CTAClick|Preview">Preview</a>
+</div>
+
+
+
+
+    </span>
+
+    <div class="details">
+        <div class="resultTitle">
+          <h3 itemprop="name" class="booktitle">
+            <a itemprop="url" href="/works/OL3907805W/Build_your_own_telescope?edition=key%3A/books/OL1428159M" class="results">Build your own telescope</a>
+          </h3>
+        </div>
+        <span itemprop="author" itemscope itemtype="https://schema.org/Organization" class="bookauthor">
+          
+by <a href="/authors/OL2929021A/Richard_Berry" >Richard Berry</a>
+
+        </span>
+        <span class="resultStats">
+          
+<span class="ratingsByline">9 Want to read</span>
+
+        </span>
+
+        <br />
+        <ol-chip-group class="srw__subjects" gap="small">
+          
+          <ol-chip size="small" href="/subjects/telescopes"><em>Telescopes</em></ol-chip>
+        </ol-chip-group>
+        
+        
+        <div class="search-result-item__preview-covers-container">
+          <span class="search-result-item__preview-covers ">
+            <a href="/works/OL3907805W/Build_your_own_telescope?edition=ia:buildyourowntele00berr_106">
+              <img width="35" height="53" loading="lazy" src="//archive.org/services/img/buildyourowntele00berr_106" alt="Cover of edition buildyourowntele00berr_106">
+            </a>
+          </span>
+        
+          <span class="resultDetails">
+            <span>
+              First published in 1985
+            </span>
+            <br>
+            <span>
+              <a href="/works/OL3907805W/Build_your_own_telescope?edition=key%3A/books/OL1428159M&amp;mode=all#editions-list">3 editions</a>,
+            </span>
+            <span>
+              <a href="/works/OL3907805W/Build_your_own_telescope?edition=key%3A/books/OL1428159M&amp;mode=all#editions-list">2 ebooks</a>
+            </span>
+          </span>
+        </div>
+        
+    </div>
+
+    <div class="searchResultItemCTA">
+        <div class="searchResultItemCTA-lending">
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div class="cta-button-group">
+  <a class="cta-btn cta-btn--preview"
+    href="#bookPreview"
+    data-book-preview
+    data-iframe-src="https://archive.org/details/buildyourowntele00berr_0?view=theater&wrapper=false"
+    data-iframe-link="https://archive.org/details/buildyourowntele00berr_0"
+    data-ol-link-track="CTAClick|Preview">Preview Only</a>
+</div>
+
+
+
+
+
+
+
+        </div>
+
+        
+
+
+
+
+
+
+
+
+<div class="generic-dropper-wrapper my-books-dropper generic-dropper--disabled"  data-work-key=/works/OL3907805W >
+  <div class="generic-dropper">
+    <div class="generic-dropper__actions">
+      <div class="generic-dropper__primary">
+        
+<form class="reading-log primary-action" method="POST" action="/works/OL3907805W/bookshelves.json">
+  
+
+
+  <input type="hidden" name="action" value="add"/>
+  <input type="hidden" name="bookshelf_id" value="1"/>
+  <input type="hidden" name="work_id" value="/works/OL3907805W"/>
+  <input type="hidden" name="edition_id" value="/books/OL1428159M"/>
+  <button class="book-progress-btn primary-action unactivated js-login-intent" type="submit" disabled data-ol-link-track="ReadingLog|AddToList" data-action="Want to Read" data-title="Build your own telescope" data-type="book">
+    <span class="activated-check hidden">✓</span>
+    <span class="btn-text">Add to List</span>
+  </button>
+</form>
+
+
+
+      </div>
+      <a class="generic-dropper__dropclick" href="javascript:;" aria-label="More reading options for Build your own telescope">
+        <div class="arrow"></div>
+      </a>
+    </div>
+    <div class="generic-dropper__dropdown">
+      
+
+
+<div class="read-statuses">
+  <form class="reading-log" method="POST" action="/works/OL3907805W/bookshelves.json">
+    <input type="hidden" name="action" value="remove"/>
+    <input type="hidden" name="bookshelf_id" value="-1"/>
+    <input type="hidden" name="default-key" value="/books/OL1428159M" />
+    <input type="hidden" name="edition_id" value="/books/OL1428159M"/>
+    <input type="hidden" name="work_id" value="/works/OL3907805W"/>
+    <button class="remove-from-list hidden" type="submit" data-ol-link-track="ReadingLog|RemoveFromShelf">Remove From Shelf</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL3907805W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="1"/>
+    <input type="hidden" name="edition_id" value="/books/OL1428159M"/>
+    <button class="nostyle-btn hidden" type="submit" data-ol-link-track="ReadingLog|WantToRead">Want to Read</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL3907805W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="2"/>
+    <input type="hidden" name="edition_id" value="/books/OL1428159M"/>
+    <button class="nostyle-btn " type="submit" data-ol-link-track="ReadingLog|CurrentlyReading">Currently Reading</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL3907805W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="3"/>
+    <input type="hidden" name="edition_id" value="/books/OL1428159M"/>
+    <button class="nostyle-btn " type="submit" data-ol-link-track="ReadingLog|AlreadyRead">Already Read</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL3907805W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="4"/>
+    <input type="hidden" name="edition_id" value="/books/OL1428159M"/>
+    <button class="nostyle-btn " type="submit" data-ol-link-track="ReadingLog|StoppedReading">Stopped Reading</button>
+  </form>
+</div>
+
+
+
+
+
+<div class="reading-lists">
+  <p class="reading-list-title">My Reading Lists:</p>
+  <div class="my-lists" data-seed-key="/books/OL1428159M" data-work-key="/works/OL3907805W" data-user-key="">
+  </div>
+  <p class="create checkboxes">
+    <label>
+      <input type="checkbox" class="work-checkbox"/>
+      <span>Use this Work</span>
+    </label>
+  </p>
+  <a href="javascript:;" class="create create-new-list" aria-controls="addList">Create a new list</a>
+</div>
+
+
+
+
+
+    </div>
+  </div>
+</div>
+
+
+
+        
+    </div>
+  </div>
+
+</li>
+
+        
+<li class="searchResultItem sri--w-main" itemscope itemtype="https://schema.org/Book" >
+  <div class="sri__main">
+    <span class="bookcover ">
+      <a href="/works/OL6034350W/The_history_of_the_telescope?edition=key%3A/books/OL4434856M">
+        <img
+          itemprop="image"
+          src="//covers.openlibrary.org/b/id/8125798-M.jpg"
+          alt="Cover of: The history of the telescope"
+          title="Cover of: The history of the telescope"
+          loading="lazy"
+          /></a>
+      
+
+
+<div class="cta-button-group">
+  <a class="cta-btn cta-btn--preview"
+    href="#bookPreview"
+    data-book-preview
+    data-iframe-src="https://archive.org/details/historyoftelesco00henr?view=theater&wrapper=false"
+    data-iframe-link="https://archive.org/details/historyoftelesco00henr"
+    data-ol-link-track="CTAClick|Preview">Preview</a>
+</div>
+
+
+
+
+    </span>
+
+    <div class="details">
+        <div class="resultTitle">
+          <h3 itemprop="name" class="booktitle">
+            <a itemprop="url" href="/works/OL6034350W/The_history_of_the_telescope?edition=key%3A/books/OL4434856M" class="results">The history of the telescope</a>
+          </h3>
+        </div>
+        <span itemprop="author" itemscope itemtype="https://schema.org/Organization" class="bookauthor">
+          
+by <a href="/authors/OL1516973A/Henry_C._King" >Henry C. King</a>
+
+        </span>
+        <span class="resultStats">
+          
+
+
+<span
+  class="ratingsByline"
+  itemprop="aggregateRating" itemscope itemtype="https://schema.org/AggregateRating"
+>
+  <meta itemprop="ratingValue" content="5.0"/>
+  <meta itemprop="ratingCount" content="1"/>
+  <span class="star star--small" aria-hidden="true">★</span><span class="star star--small" aria-hidden="true">★</span><span class="star star--small" aria-hidden="true">★</span><span class="star star--small" aria-hidden="true">★</span><span class="star star--small" aria-hidden="true">★</span>
+  <span>5.0 (1 rating)</span>
+</span>
+
+<span class="dot">·</span>
+<span class="ratingsByline">4 Want to read</span>
+
+        </span>
+
+        <br />
+        <ol-chip-group class="srw__subjects" gap="small">
+          
+          <ol-chip size="small" href="/subjects/telescopes"><em>Telescopes</em></ol-chip>
+        </ol-chip-group>
+        
+        <span class="resultDetails">
+          <span>
+            First published in 1955
+          </span>
+          <br>
+          <span>
+            <a href="/works/OL6034350W/The_history_of_the_telescope?edition=key%3A/books/OL4434856M&amp;mode=all#editions-list">5 editions</a>,
+          </span>
+          <span>
+            <a href="/works/OL6034350W/The_history_of_the_telescope?edition=key%3A/books/OL4434856M&amp;mode=all#editions-list">1 ebook</a>
+          </span>
+        </span>
+        
+    </div>
+
+    <div class="searchResultItemCTA">
+        <div class="searchResultItemCTA-lending">
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div class="cta-dropper cta-button-group">
+  <a href="/borrow/ia/historyoftelesco00henr?ref=ol" title="Borrow ebook from Internet Archive" class="cta-btn cta-btn--ia cta-btn--available cta-btn--borrow js-login-intent"
+      data-ol-link-track="CTAClick|Borrow"
+
+
+      data-action="Borrow" data-title="The history of the telescope" data-type="book" data-resumeurl="/books/OL4434856M"
+      >Borrow</a>
+  <details class="cta-btn cta-btn--available">
+    <summary aria-label="More reading options"></summary>
+    <ul class="dropper-menu">
+      <li>
+        <a href="/borrow/ia/historyoftelesco00henr?ref=ol&_autoReadAloud=show"
+          title="Borrow ebook from Internet Archive using Read Aloud"
+          data-ol-link-track="CTAClick|BorrowListen"
+
+
+          class="cta-btn cta-btn--available cta-btn--w-icon">
+          <span class="btn-icon listen"></span>
+          <span class="btn-label">Listen</span>
+        </a>
+      </li>
+      <li>
+        
+
+<a class="cta-btn cta-btn--available cta-btn--w-icon cta-btn--external" href="/books/OL4434856M/-/borrow?action=locate" target="_blank" rel="noopener noreferrer"
+  data-ol-link-track="CTAClick|Locate">
+
+  <span class="btn-icon map"></span>
+  <span class="btn-label">Locate</span>
+</a>
+
+      </li>
+    </ul>
+  </details>
+</div>
+
+
+
+
+
+        </div>
+
+        
+
+
+
+
+
+
+
+
+<div class="generic-dropper-wrapper my-books-dropper generic-dropper--disabled"  data-work-key=/works/OL6034350W >
+  <div class="generic-dropper">
+    <div class="generic-dropper__actions">
+      <div class="generic-dropper__primary">
+        
+<form class="reading-log primary-action" method="POST" action="/works/OL6034350W/bookshelves.json">
+  
+
+
+  <input type="hidden" name="action" value="add"/>
+  <input type="hidden" name="bookshelf_id" value="1"/>
+  <input type="hidden" name="work_id" value="/works/OL6034350W"/>
+  <input type="hidden" name="edition_id" value="/books/OL4434856M"/>
+  <button class="book-progress-btn primary-action unactivated js-login-intent" type="submit" disabled data-ol-link-track="ReadingLog|AddToList" data-action="Want to Read" data-title="The history of the telescope" data-type="book">
+    <span class="activated-check hidden">✓</span>
+    <span class="btn-text">Add to List</span>
+  </button>
+</form>
+
+
+
+      </div>
+      <a class="generic-dropper__dropclick" href="javascript:;" aria-label="More reading options for The history of the telescope">
+        <div class="arrow"></div>
+      </a>
+    </div>
+    <div class="generic-dropper__dropdown">
+      
+
+
+<div class="read-statuses">
+  <form class="reading-log" method="POST" action="/works/OL6034350W/bookshelves.json">
+    <input type="hidden" name="action" value="remove"/>
+    <input type="hidden" name="bookshelf_id" value="-1"/>
+    <input type="hidden" name="default-key" value="/books/OL4434856M" />
+    <input type="hidden" name="edition_id" value="/books/OL4434856M"/>
+    <input type="hidden" name="work_id" value="/works/OL6034350W"/>
+    <button class="remove-from-list hidden" type="submit" data-ol-link-track="ReadingLog|RemoveFromShelf">Remove From Shelf</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL6034350W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="1"/>
+    <input type="hidden" name="edition_id" value="/books/OL4434856M"/>
+    <button class="nostyle-btn hidden" type="submit" data-ol-link-track="ReadingLog|WantToRead">Want to Read</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL6034350W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="2"/>
+    <input type="hidden" name="edition_id" value="/books/OL4434856M"/>
+    <button class="nostyle-btn " type="submit" data-ol-link-track="ReadingLog|CurrentlyReading">Currently Reading</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL6034350W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="3"/>
+    <input type="hidden" name="edition_id" value="/books/OL4434856M"/>
+    <button class="nostyle-btn " type="submit" data-ol-link-track="ReadingLog|AlreadyRead">Already Read</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL6034350W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="4"/>
+    <input type="hidden" name="edition_id" value="/books/OL4434856M"/>
+    <button class="nostyle-btn " type="submit" data-ol-link-track="ReadingLog|StoppedReading">Stopped Reading</button>
+  </form>
+</div>
+
+
+
+
+
+<div class="reading-lists">
+  <p class="reading-list-title">My Reading Lists:</p>
+  <div class="my-lists" data-seed-key="/books/OL4434856M" data-work-key="/works/OL6034350W" data-user-key="">
+  </div>
+  <p class="create checkboxes">
+    <label>
+      <input type="checkbox" class="work-checkbox"/>
+      <span>Use this Work</span>
+    </label>
+  </p>
+  <a href="javascript:;" class="create create-new-list" aria-controls="addList">Create a new list</a>
+</div>
+
+
+
+
+
+    </div>
+  </div>
+</div>
+
+
+
+        
+    </div>
+  </div>
+
+</li>
+
+        
+<li class="searchResultItem sri--w-main" itemscope itemtype="https://schema.org/Book" >
+  <div class="sri__main">
+    <span class="bookcover ">
+      <a href="/works/OL12638413W/How_to_make_a_telescope?edition=key%3A/books/OL46952601M">
+        <img
+          itemprop="image"
+          src="//covers.openlibrary.org/b/id/14983480-M.jpg"
+          alt="Cover of: How to Make a Telescope"
+          title="Cover of: How to Make a Telescope"
+          loading="lazy"
+          /></a>
+      
+
+
+<div class="cta-button-group">
+  <a class="cta-btn cta-btn--preview"
+    href="#bookPreview"
+    data-book-preview
+    data-iframe-src="https://archive.org/details/howtomaketelesco0000jean?view=theater&wrapper=false"
+    data-iframe-link="https://archive.org/details/howtomaketelesco0000jean"
+    data-ol-link-track="CTAClick|Preview">Preview</a>
+</div>
+
+
+
+
+    </span>
+
+    <div class="details">
+        <div class="resultTitle">
+          <h3 itemprop="name" class="booktitle">
+            <a itemprop="url" href="/works/OL12638413W/How_to_make_a_telescope?edition=key%3A/books/OL46952601M" class="results">How to Make a Telescope</a>
+          </h3>
+        </div>
+        <span itemprop="author" itemscope itemtype="https://schema.org/Organization" class="bookauthor">
+          
+by <a href="/authors/OL5635688A/Jean_Texereau" >Jean Texereau</a>
+
+        </span>
+        <span class="resultStats">
+          
+<span class="ratingsByline">6 Want to read</span>
+
+        </span>
+
+        <br />
+        <ol-chip-group class="srw__subjects" gap="small">
+          
+          <ol-chip size="small" href="/subjects/cassegrainian_telescope">Cassegrainian <em>Telescope</em></ol-chip>
+          
+          <ol-chip size="small" href="/subjects/newtonian_telescope">Newtonian <em>telescope</em></ol-chip>
+        </ol-chip-group>
+        
+        <span class="resultDetails">
+          <span>
+            First published in 1957
+          </span>
+          <br>
+          <span>
+            <a href="/works/OL12638413W/How_to_make_a_telescope?edition=key%3A/books/OL46952601M&amp;mode=all#editions-list">4 editions</a>,
+          </span>
+          <span>
+            <a href="/works/OL12638413W/How_to_make_a_telescope?edition=key%3A/books/OL46952601M&amp;mode=all#editions-list">1 ebook</a>
+          </span>
+        </span>
+        
+    </div>
+
+    <div class="searchResultItemCTA">
+        <div class="searchResultItemCTA-lending">
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div class="cta-dropper cta-button-group">
+  <a href="/borrow/ia/howtomaketelesco0000jean?ref=ol" title="Borrow ebook from Internet Archive" class="cta-btn cta-btn--ia cta-btn--available cta-btn--borrow js-login-intent"
+      data-ol-link-track="CTAClick|Borrow"
+
+
+      data-action="Borrow" data-title="How to Make a Telescope" data-type="book" data-resumeurl="/books/OL46952601M"
+      >Borrow</a>
+  <details class="cta-btn cta-btn--available">
+    <summary aria-label="More reading options"></summary>
+    <ul class="dropper-menu">
+      <li>
+        <a href="/borrow/ia/howtomaketelesco0000jean?ref=ol&_autoReadAloud=show"
+          title="Borrow ebook from Internet Archive using Read Aloud"
+          data-ol-link-track="CTAClick|BorrowListen"
+
+
+          class="cta-btn cta-btn--available cta-btn--w-icon">
+          <span class="btn-icon listen"></span>
+          <span class="btn-label">Listen</span>
+        </a>
+      </li>
+      <li>
+        
+
+<a class="cta-btn cta-btn--available cta-btn--w-icon cta-btn--external" href="/books/OL46952601M/-/borrow?action=locate" target="_blank" rel="noopener noreferrer"
+  data-ol-link-track="CTAClick|Locate">
+
+  <span class="btn-icon map"></span>
+  <span class="btn-label">Locate</span>
+</a>
+
+      </li>
+    </ul>
+  </details>
+</div>
+
+
+
+
+
+        </div>
+
+        
+
+
+
+
+
+
+
+
+<div class="generic-dropper-wrapper my-books-dropper generic-dropper--disabled"  data-work-key=/works/OL12638413W >
+  <div class="generic-dropper">
+    <div class="generic-dropper__actions">
+      <div class="generic-dropper__primary">
+        
+<form class="reading-log primary-action" method="POST" action="/works/OL12638413W/bookshelves.json">
+  
+
+
+  <input type="hidden" name="action" value="add"/>
+  <input type="hidden" name="bookshelf_id" value="1"/>
+  <input type="hidden" name="work_id" value="/works/OL12638413W"/>
+  <input type="hidden" name="edition_id" value="/books/OL46952601M"/>
+  <button class="book-progress-btn primary-action unactivated js-login-intent" type="submit" disabled data-ol-link-track="ReadingLog|AddToList" data-action="Want to Read" data-title="How to make a telescope" data-type="book">
+    <span class="activated-check hidden">✓</span>
+    <span class="btn-text">Add to List</span>
+  </button>
+</form>
+
+
+
+      </div>
+      <a class="generic-dropper__dropclick" href="javascript:;" aria-label="More reading options for How to make a telescope">
+        <div class="arrow"></div>
+      </a>
+    </div>
+    <div class="generic-dropper__dropdown">
+      
+
+
+<div class="read-statuses">
+  <form class="reading-log" method="POST" action="/works/OL12638413W/bookshelves.json">
+    <input type="hidden" name="action" value="remove"/>
+    <input type="hidden" name="bookshelf_id" value="-1"/>
+    <input type="hidden" name="default-key" value="/books/OL46952601M" />
+    <input type="hidden" name="edition_id" value="/books/OL46952601M"/>
+    <input type="hidden" name="work_id" value="/works/OL12638413W"/>
+    <button class="remove-from-list hidden" type="submit" data-ol-link-track="ReadingLog|RemoveFromShelf">Remove From Shelf</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL12638413W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="1"/>
+    <input type="hidden" name="edition_id" value="/books/OL46952601M"/>
+    <button class="nostyle-btn hidden" type="submit" data-ol-link-track="ReadingLog|WantToRead">Want to Read</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL12638413W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="2"/>
+    <input type="hidden" name="edition_id" value="/books/OL46952601M"/>
+    <button class="nostyle-btn " type="submit" data-ol-link-track="ReadingLog|CurrentlyReading">Currently Reading</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL12638413W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="3"/>
+    <input type="hidden" name="edition_id" value="/books/OL46952601M"/>
+    <button class="nostyle-btn " type="submit" data-ol-link-track="ReadingLog|AlreadyRead">Already Read</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL12638413W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="4"/>
+    <input type="hidden" name="edition_id" value="/books/OL46952601M"/>
+    <button class="nostyle-btn " type="submit" data-ol-link-track="ReadingLog|StoppedReading">Stopped Reading</button>
+  </form>
+</div>
+
+
+
+
+
+<div class="reading-lists">
+  <p class="reading-list-title">My Reading Lists:</p>
+  <div class="my-lists" data-seed-key="/books/OL46952601M" data-work-key="/works/OL12638413W" data-user-key="">
+  </div>
+  <p class="create checkboxes">
+    <label>
+      <input type="checkbox" class="work-checkbox"/>
+      <span>Use this Work</span>
+    </label>
+  </p>
+  <a href="javascript:;" class="create create-new-list" aria-controls="addList">Create a new list</a>
+</div>
+
+
+
+
+
+    </div>
+  </div>
+</div>
+
+
+
+        
+    </div>
+  </div>
+
+</li>
+
+        
+<li class="searchResultItem sri--w-main" itemscope itemtype="https://schema.org/Book" >
+  <div class="sri__main">
+    <span class="bookcover ">
+      <a href="/works/OL1653580W/The_Newtonian_system_of_philosophy?edition=key%3A/books/OL14030687M">
+        <img
+          itemprop="image"
+          src="//covers.openlibrary.org/b/id/5787026-M.jpg"
+          alt="Cover of: The Newtonian system of philosophy: explained by familiar objects, in an entertaining manner, for the use of young ladies &amp; gentlemen"
+          title="Cover of: The Newtonian system of philosophy: explained by familiar objects, in an entertaining manner, for the use of young ladies &amp; gentlemen"
+          loading="lazy"
+          /></a>
+      
+
+
+<div class="cta-button-group">
+  <a class="cta-btn cta-btn--preview"
+    href="#bookPreview"
+    data-book-preview
+    data-iframe-src="https://archive.org/details/newtoniansystemo00telerich?view=theater&wrapper=false"
+    data-iframe-link="https://archive.org/details/newtoniansystemo00telerich"
+    data-ol-link-track="CTAClick|Preview">Preview</a>
+</div>
+
+
+
+
+    </span>
+
+    <div class="details">
+        <div class="resultTitle">
+          <h3 itemprop="name" class="booktitle">
+            <a itemprop="url" href="/works/OL1653580W/The_Newtonian_system_of_philosophy?edition=key%3A/books/OL14030687M" class="results">The Newtonian system of philosophy: explained by familiar objects, in an entertaining manner, for the use of young ladies &amp; gentlemen</a>
+          </h3>
+        </div>
+        <span itemprop="author" itemscope itemtype="https://schema.org/Organization" class="bookauthor">
+          
+by <a href="/authors/OL184921A/Tom_Telescope" >Tom Telescope</a>
+
+        </span>
+        <span class="resultStats">
+          
+<span class="ratingsByline">1 Want to read</span>
+
+        </span>
+
+        
+        <div class="search-result-item__preview-covers-container">
+          <span class="search-result-item__preview-covers ">
+            <a href="/works/OL1653580W/The_Newtonian_system_of_philosophy?edition=ia:newtoniansystem01goldgoog">
+              <img width="35" height="53" loading="lazy" src="//archive.org/services/img/newtoniansystem01goldgoog" alt="Cover of edition newtoniansystem01goldgoog">
+            </a>
+          </span>
+        
+          <span class="resultDetails">
+            <span>
+              First published in 1766
+            </span>
+            <br>
+            <span>
+              <a href="/works/OL1653580W/The_Newtonian_system_of_philosophy?edition=key%3A/books/OL14030687M&amp;mode=all#editions-list">18 editions</a>,
+            </span>
+            <span>
+              <a href="/works/OL1653580W/The_Newtonian_system_of_philosophy?edition=key%3A/books/OL14030687M&amp;mode=all#editions-list">2 ebooks</a>
+            </span>
+          </span>
+        </div>
+        
+    </div>
+
+    <div class="searchResultItemCTA">
+        <div class="searchResultItemCTA-lending">
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div class="cta-dropper cta-button-group">
+  <a href="/borrow/ia/newtoniansystemo00telerich?ref=ol" title="Read ebook from Internet Archive" class="cta-btn cta-btn--ia cta-btn--available cta-btn--read "
+      data-ol-link-track="CTAClick|Read"
+
+
+      
+      >Read</a>
+  <details class="cta-btn cta-btn--available">
+    <summary aria-label="More reading options"></summary>
+    <ul class="dropper-menu">
+      <li>
+        <a href="/borrow/ia/newtoniansystemo00telerich?ref=ol&_autoReadAloud=show"
+          title="Read ebook from Internet Archive using Read Aloud"
+          data-ol-link-track="CTAClick|ReadListen"
+
+
+          class="cta-btn cta-btn--available cta-btn--w-icon">
+          <span class="btn-icon listen"></span>
+          <span class="btn-label">Listen</span>
+        </a>
+      </li>
+      <li>
+        
+
+<a class="cta-btn cta-btn--available cta-btn--w-icon cta-btn--external" href="/books/OL14030687M/-/borrow?action=locate" target="_blank" rel="noopener noreferrer"
+  data-ol-link-track="CTAClick|Locate">
+
+  <span class="btn-icon map"></span>
+  <span class="btn-label">Locate</span>
+</a>
+
+      </li>
+    </ul>
+  </details>
+</div>
+
+
+
+
+        </div>
+
+        
+
+
+
+
+
+
+
+
+<div class="generic-dropper-wrapper my-books-dropper generic-dropper--disabled"  data-work-key=/works/OL1653580W >
+  <div class="generic-dropper">
+    <div class="generic-dropper__actions">
+      <div class="generic-dropper__primary">
+        
+<form class="reading-log primary-action" method="POST" action="/works/OL1653580W/bookshelves.json">
+  
+
+
+  <input type="hidden" name="action" value="add"/>
+  <input type="hidden" name="bookshelf_id" value="1"/>
+  <input type="hidden" name="work_id" value="/works/OL1653580W"/>
+  <input type="hidden" name="edition_id" value="/books/OL14030687M"/>
+  <button class="book-progress-btn primary-action unactivated js-login-intent" type="submit" disabled data-ol-link-track="ReadingLog|AddToList" data-action="Want to Read" data-title="The Newtonian system of philosophy" data-type="book">
+    <span class="activated-check hidden">✓</span>
+    <span class="btn-text">Add to List</span>
+  </button>
+</form>
+
+
+
+      </div>
+      <a class="generic-dropper__dropclick" href="javascript:;" aria-label="More reading options for The Newtonian system of philosophy">
+        <div class="arrow"></div>
+      </a>
+    </div>
+    <div class="generic-dropper__dropdown">
+      
+
+
+<div class="read-statuses">
+  <form class="reading-log" method="POST" action="/works/OL1653580W/bookshelves.json">
+    <input type="hidden" name="action" value="remove"/>
+    <input type="hidden" name="bookshelf_id" value="-1"/>
+    <input type="hidden" name="default-key" value="/books/OL14030687M" />
+    <input type="hidden" name="edition_id" value="/books/OL14030687M"/>
+    <input type="hidden" name="work_id" value="/works/OL1653580W"/>
+    <button class="remove-from-list hidden" type="submit" data-ol-link-track="ReadingLog|RemoveFromShelf">Remove From Shelf</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL1653580W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="1"/>
+    <input type="hidden" name="edition_id" value="/books/OL14030687M"/>
+    <button class="nostyle-btn hidden" type="submit" data-ol-link-track="ReadingLog|WantToRead">Want to Read</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL1653580W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="2"/>
+    <input type="hidden" name="edition_id" value="/books/OL14030687M"/>
+    <button class="nostyle-btn " type="submit" data-ol-link-track="ReadingLog|CurrentlyReading">Currently Reading</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL1653580W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="3"/>
+    <input type="hidden" name="edition_id" value="/books/OL14030687M"/>
+    <button class="nostyle-btn " type="submit" data-ol-link-track="ReadingLog|AlreadyRead">Already Read</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL1653580W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="4"/>
+    <input type="hidden" name="edition_id" value="/books/OL14030687M"/>
+    <button class="nostyle-btn " type="submit" data-ol-link-track="ReadingLog|StoppedReading">Stopped Reading</button>
+  </form>
+</div>
+
+
+
+
+
+<div class="reading-lists">
+  <p class="reading-list-title">My Reading Lists:</p>
+  <div class="my-lists" data-seed-key="/books/OL14030687M" data-work-key="/works/OL1653580W" data-user-key="">
+  </div>
+  <p class="create checkboxes">
+    <label>
+      <input type="checkbox" class="work-checkbox"/>
+      <span>Use this Work</span>
+    </label>
+  </p>
+  <a href="javascript:;" class="create create-new-list" aria-controls="addList">Create a new list</a>
+</div>
+
+
+
+
+
+    </div>
+  </div>
+</div>
+
+
+
+        
+    </div>
+  </div>
+
+</li>
+
+        
+<li class="searchResultItem sri--w-main" itemscope itemtype="https://schema.org/Book" >
+  <div class="sri__main">
+    <span class="bookcover ">
+      <a href="/works/OL6033278W/Making_your_own_telescope?edition=key%3A/books/OL6513618M">
+        <img
+          itemprop="image"
+          src="//covers.openlibrary.org/b/id/9568960-M.jpg"
+          alt="Cover of: Making your own telescope"
+          title="Cover of: Making your own telescope"
+          loading="lazy"
+          /></a>
+      
+
+
+<div class="cta-button-group">
+  <a class="cta-btn cta-btn--preview"
+    href="#bookPreview"
+    data-book-preview
+    data-iframe-src="https://archive.org/details/makingyourowntel00thom?view=theater&wrapper=false"
+    data-iframe-link="https://archive.org/details/makingyourowntel00thom"
+    data-ol-link-track="CTAClick|Preview">Preview</a>
+</div>
+
+
+
+
+    </span>
+
+    <div class="details">
+        <div class="resultTitle">
+          <h3 itemprop="name" class="booktitle">
+            <a itemprop="url" href="/works/OL6033278W/Making_your_own_telescope?edition=key%3A/books/OL6513618M" class="results">Making your own telescope</a>
+          </h3>
+        </div>
+        <span itemprop="author" itemscope itemtype="https://schema.org/Organization" class="bookauthor">
+          
+by <a href="/authors/OL1516557A/Allyn_J._Thompson" >Allyn J. Thompson</a>
+
+        </span>
+        <span class="resultStats">
+          
+<span class="ratingsByline">5 Want to read</span>
+
+        </span>
+
+        <br />
+        <ol-chip-group class="srw__subjects" gap="small">
+          
+          <ol-chip size="small" href="/subjects/reflecting_telescopes">Reflecting <em>telescopes</em></ol-chip>
+          
+          <ol-chip size="small" href="/subjects/telescopes"><em>Telescopes</em></ol-chip>
+        </ol-chip-group>
+        
+        
+        <div class="search-result-item__preview-covers-container">
+          <span class="search-result-item__preview-covers ">
+            <a href="/works/OL6033278W/Making_your_own_telescope?edition=ia:makingyourowntel00thom_185">
+              <img width="35" height="53" loading="lazy" src="//archive.org/services/img/makingyourowntel00thom_185" alt="Cover of edition makingyourowntel00thom_185">
+            </a>
+          </span>
+        
+          <span class="resultDetails">
+            <span>
+              First published in 1947
+            </span>
+            <br>
+            <span>
+              <a href="/works/OL6033278W/Making_your_own_telescope?edition=key%3A/books/OL6513618M&amp;mode=all#editions-list">3 editions</a>,
+            </span>
+            <span>
+              <a href="/works/OL6033278W/Making_your_own_telescope?edition=key%3A/books/OL6513618M&amp;mode=all#editions-list">2 ebooks</a>
+            </span>
+          </span>
+        </div>
+        
+    </div>
+
+    <div class="searchResultItemCTA">
+        <div class="searchResultItemCTA-lending">
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div class="cta-dropper cta-button-group">
+  <a href="/borrow/ia/makingyourowntel00thom?ref=ol" title="Borrow ebook from Internet Archive" class="cta-btn cta-btn--ia cta-btn--available cta-btn--borrow js-login-intent"
+      data-ol-link-track="CTAClick|Borrow"
+
+
+      data-action="Borrow" data-title="Making your own telescope" data-type="book" data-resumeurl="/books/OL6513618M"
+      >Borrow</a>
+  <details class="cta-btn cta-btn--available">
+    <summary aria-label="More reading options"></summary>
+    <ul class="dropper-menu">
+      <li>
+        <a href="/borrow/ia/makingyourowntel00thom?ref=ol&_autoReadAloud=show"
+          title="Borrow ebook from Internet Archive using Read Aloud"
+          data-ol-link-track="CTAClick|BorrowListen"
+
+
+          class="cta-btn cta-btn--available cta-btn--w-icon">
+          <span class="btn-icon listen"></span>
+          <span class="btn-label">Listen</span>
+        </a>
+      </li>
+      <li>
+        
+
+<a class="cta-btn cta-btn--available cta-btn--w-icon cta-btn--external" href="/books/OL6513618M/-/borrow?action=locate" target="_blank" rel="noopener noreferrer"
+  data-ol-link-track="CTAClick|Locate">
+
+  <span class="btn-icon map"></span>
+  <span class="btn-label">Locate</span>
+</a>
+
+      </li>
+    </ul>
+  </details>
+</div>
+
+
+
+
+
+        </div>
+
+        
+
+
+
+
+
+
+
+
+<div class="generic-dropper-wrapper my-books-dropper generic-dropper--disabled"  data-work-key=/works/OL6033278W >
+  <div class="generic-dropper">
+    <div class="generic-dropper__actions">
+      <div class="generic-dropper__primary">
+        
+<form class="reading-log primary-action" method="POST" action="/works/OL6033278W/bookshelves.json">
+  
+
+
+  <input type="hidden" name="action" value="add"/>
+  <input type="hidden" name="bookshelf_id" value="1"/>
+  <input type="hidden" name="work_id" value="/works/OL6033278W"/>
+  <input type="hidden" name="edition_id" value="/books/OL6513618M"/>
+  <button class="book-progress-btn primary-action unactivated js-login-intent" type="submit" disabled data-ol-link-track="ReadingLog|AddToList" data-action="Want to Read" data-title="Making your own telescope" data-type="book">
+    <span class="activated-check hidden">✓</span>
+    <span class="btn-text">Add to List</span>
+  </button>
+</form>
+
+
+
+      </div>
+      <a class="generic-dropper__dropclick" href="javascript:;" aria-label="More reading options for Making your own telescope">
+        <div class="arrow"></div>
+      </a>
+    </div>
+    <div class="generic-dropper__dropdown">
+      
+
+
+<div class="read-statuses">
+  <form class="reading-log" method="POST" action="/works/OL6033278W/bookshelves.json">
+    <input type="hidden" name="action" value="remove"/>
+    <input type="hidden" name="bookshelf_id" value="-1"/>
+    <input type="hidden" name="default-key" value="/books/OL6513618M" />
+    <input type="hidden" name="edition_id" value="/books/OL6513618M"/>
+    <input type="hidden" name="work_id" value="/works/OL6033278W"/>
+    <button class="remove-from-list hidden" type="submit" data-ol-link-track="ReadingLog|RemoveFromShelf">Remove From Shelf</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL6033278W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="1"/>
+    <input type="hidden" name="edition_id" value="/books/OL6513618M"/>
+    <button class="nostyle-btn hidden" type="submit" data-ol-link-track="ReadingLog|WantToRead">Want to Read</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL6033278W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="2"/>
+    <input type="hidden" name="edition_id" value="/books/OL6513618M"/>
+    <button class="nostyle-btn " type="submit" data-ol-link-track="ReadingLog|CurrentlyReading">Currently Reading</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL6033278W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="3"/>
+    <input type="hidden" name="edition_id" value="/books/OL6513618M"/>
+    <button class="nostyle-btn " type="submit" data-ol-link-track="ReadingLog|AlreadyRead">Already Read</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL6033278W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="4"/>
+    <input type="hidden" name="edition_id" value="/books/OL6513618M"/>
+    <button class="nostyle-btn " type="submit" data-ol-link-track="ReadingLog|StoppedReading">Stopped Reading</button>
+  </form>
+</div>
+
+
+
+
+
+<div class="reading-lists">
+  <p class="reading-list-title">My Reading Lists:</p>
+  <div class="my-lists" data-seed-key="/books/OL6513618M" data-work-key="/works/OL6033278W" data-user-key="">
+  </div>
+  <p class="create checkboxes">
+    <label>
+      <input type="checkbox" class="work-checkbox"/>
+      <span>Use this Work</span>
+    </label>
+  </p>
+  <a href="javascript:;" class="create create-new-list" aria-controls="addList">Create a new list</a>
+</div>
+
+
+
+
+
+    </div>
+  </div>
+</div>
+
+
+
+        
+    </div>
+  </div>
+
+</li>
+
+        
+<li class="searchResultItem sri--w-main" itemscope itemtype="https://schema.org/Book" >
+  <div class="sri__main">
+    <span class="bookcover ">
+      <a href="/works/OL8674024W/Build_Your_Own_Telescope?edition=key%3A/books/OL21616060M">
+        <img
+          itemprop="image"
+          src="//covers.openlibrary.org/b/id/9337220-M.jpg"
+          alt="Cover of: Build your own telescope"
+          title="Cover of: Build your own telescope"
+          loading="lazy"
+          /></a>
+    </span>
+
+    <div class="details">
+        <div class="resultTitle">
+          <h3 itemprop="name" class="booktitle">
+            <a itemprop="url" href="/works/OL8674024W/Build_Your_Own_Telescope?edition=key%3A/books/OL21616060M" class="results">Build your own telescope</a>
+          </h3>
+        </div>
+        <span itemprop="author" itemscope itemtype="https://schema.org/Organization" class="bookauthor">
+          
+by <a href="/authors/OL2929021A/Richard_Berry" >Richard Berry</a>
+
+        </span>
+        <span class="resultStats">
+          
+<span class="ratingsByline">6 Want to read</span>
+
+        </span>
+
+        <br />
+        <ol-chip-group class="srw__subjects" gap="small">
+          
+          <ol-chip size="small" href="/subjects/telescopes"><em>Telescopes</em></ol-chip>
+        </ol-chip-group>
+        
+        <span class="resultDetails">
+          <span>
+            First published in 1985
+          </span>
+          <br>
+          <span>
+            <a href="/works/OL8674024W/Build_Your_Own_Telescope?edition=key%3A/books/OL21616060M&amp;mode=all#editions-list">4 editions</a>
+          </span>
+        </span>
+        
+    </div>
+
+    <div class="searchResultItemCTA">
+        <div class="searchResultItemCTA-lending">
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div class="cta-button-group">
+  
+
+<a class="cta-btn cta-btn--available cta-btn--external" href="/books/OL21616060M/-/borrow?action=locate" target="_blank" rel="noopener noreferrer"
+  data-ol-link-track="CTAClick|Locate">Locate</a>
+
+</div>
+
+
+
+        </div>
+
+        
+
+
+
+
+
+
+
+
+<div class="generic-dropper-wrapper my-books-dropper generic-dropper--disabled"  data-work-key=/works/OL8674024W >
+  <div class="generic-dropper">
+    <div class="generic-dropper__actions">
+      <div class="generic-dropper__primary">
+        
+<form class="reading-log primary-action" method="POST" action="/works/OL8674024W/bookshelves.json">
+  
+
+
+  <input type="hidden" name="action" value="add"/>
+  <input type="hidden" name="bookshelf_id" value="1"/>
+  <input type="hidden" name="work_id" value="/works/OL8674024W"/>
+  <input type="hidden" name="edition_id" value="/books/OL21616060M"/>
+  <button class="book-progress-btn primary-action unactivated js-login-intent" type="submit" disabled data-ol-link-track="ReadingLog|AddToList" data-action="Want to Read" data-title="Build Your Own Telescope" data-type="book">
+    <span class="activated-check hidden">✓</span>
+    <span class="btn-text">Add to List</span>
+  </button>
+</form>
+
+
+
+      </div>
+      <a class="generic-dropper__dropclick" href="javascript:;" aria-label="More reading options for Build Your Own Telescope">
+        <div class="arrow"></div>
+      </a>
+    </div>
+    <div class="generic-dropper__dropdown">
+      
+
+
+<div class="read-statuses">
+  <form class="reading-log" method="POST" action="/works/OL8674024W/bookshelves.json">
+    <input type="hidden" name="action" value="remove"/>
+    <input type="hidden" name="bookshelf_id" value="-1"/>
+    <input type="hidden" name="default-key" value="/books/OL21616060M" />
+    <input type="hidden" name="edition_id" value="/books/OL21616060M"/>
+    <input type="hidden" name="work_id" value="/works/OL8674024W"/>
+    <button class="remove-from-list hidden" type="submit" data-ol-link-track="ReadingLog|RemoveFromShelf">Remove From Shelf</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL8674024W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="1"/>
+    <input type="hidden" name="edition_id" value="/books/OL21616060M"/>
+    <button class="nostyle-btn hidden" type="submit" data-ol-link-track="ReadingLog|WantToRead">Want to Read</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL8674024W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="2"/>
+    <input type="hidden" name="edition_id" value="/books/OL21616060M"/>
+    <button class="nostyle-btn " type="submit" data-ol-link-track="ReadingLog|CurrentlyReading">Currently Reading</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL8674024W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="3"/>
+    <input type="hidden" name="edition_id" value="/books/OL21616060M"/>
+    <button class="nostyle-btn " type="submit" data-ol-link-track="ReadingLog|AlreadyRead">Already Read</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL8674024W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="4"/>
+    <input type="hidden" name="edition_id" value="/books/OL21616060M"/>
+    <button class="nostyle-btn " type="submit" data-ol-link-track="ReadingLog|StoppedReading">Stopped Reading</button>
+  </form>
+</div>
+
+
+
+
+
+<div class="reading-lists">
+  <p class="reading-list-title">My Reading Lists:</p>
+  <div class="my-lists" data-seed-key="/books/OL21616060M" data-work-key="/works/OL8674024W" data-user-key="">
+  </div>
+  <p class="create checkboxes">
+    <label>
+      <input type="checkbox" class="work-checkbox"/>
+      <span>Use this Work</span>
+    </label>
+  </p>
+  <a href="javascript:;" class="create create-new-list" aria-controls="addList">Create a new list</a>
+</div>
+
+
+
+
+
+    </div>
+  </div>
+</div>
+
+
+
+        
+    </div>
+  </div>
+
+</li>
+
+        
+<li class="searchResultItem sri--w-main" itemscope itemtype="https://schema.org/Book" >
+  <div class="sri__main">
+    <span class="bookcover ">
+      <a href="/works/OL5915019W/Standard_handbook_for_telescope_making?edition=key%3A/books/OL5774545M">
+        <img
+          itemprop="image"
+          src="//covers.openlibrary.org/b/id/8750144-M.jpg"
+          alt="Cover of: Standard handbook for telescope making."
+          title="Cover of: Standard handbook for telescope making."
+          loading="lazy"
+          /></a>
+      
+
+
+<div class="cta-button-group">
+  <a class="cta-btn cta-btn--preview"
+    href="#bookPreview"
+    data-book-preview
+    data-iframe-src="https://archive.org/details/standardhandbook00howa?view=theater&wrapper=false"
+    data-iframe-link="https://archive.org/details/standardhandbook00howa"
+    data-ol-link-track="CTAClick|Preview">Preview</a>
+</div>
+
+
+
+
+    </span>
+
+    <div class="details">
+        <div class="resultTitle">
+          <h3 itemprop="name" class="booktitle">
+            <a itemprop="url" href="/works/OL5915019W/Standard_handbook_for_telescope_making?edition=key%3A/books/OL5774545M" class="results">Standard handbook for telescope making.</a>
+          </h3>
+        </div>
+        <span itemprop="author" itemscope itemtype="https://schema.org/Organization" class="bookauthor">
+          
+by <a href="/authors/OL1460587A/Neale_E._Howard" >Neale E. Howard</a>
+
+        </span>
+        <span class="resultStats">
+          
+<span class="ratingsByline">5 Want to read</span>
+
+        </span>
+
+        <br />
+        <ol-chip-group class="srw__subjects" gap="small">
+          
+          <ol-chip size="small" href="/subjects/telescopes"><em>Telescopes</em></ol-chip>
+          
+          <ol-chip size="small" href="/subjects/reflecting_telescopes">Reflecting <em>telescopes</em></ol-chip>
+        </ol-chip-group>
+        
+        
+        <div class="search-result-item__preview-covers-container">
+          <span class="search-result-item__preview-covers ">
+            <a href="/works/OL5915019W/Standard_handbook_for_telescope_making?edition=ia:standardhandbook0000howa">
+              <img width="35" height="53" loading="lazy" src="//archive.org/services/img/standardhandbook0000howa" alt="Cover of edition standardhandbook0000howa">
+            </a>
+          </span>
+        
+          <span class="resultDetails">
+            <span>
+              First published in 1959
+            </span>
+            <br>
+            <span>
+              <a href="/works/OL5915019W/Standard_handbook_for_telescope_making?edition=key%3A/books/OL5774545M&amp;mode=all#editions-list">2 editions</a>,
+            </span>
+            <span>
+              <a href="/works/OL5915019W/Standard_handbook_for_telescope_making?edition=key%3A/books/OL5774545M&amp;mode=all#editions-list">2 ebooks</a>
+            </span>
+          </span>
+        </div>
+        
+    </div>
+
+    <div class="searchResultItemCTA">
+        <div class="searchResultItemCTA-lending">
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div class="cta-dropper cta-button-group">
+  <a href="/borrow/ia/standardhandbook00howa?ref=ol" title="Borrow ebook from Internet Archive" class="cta-btn cta-btn--ia cta-btn--available cta-btn--borrow js-login-intent"
+      data-ol-link-track="CTAClick|Borrow"
+
+
+      data-action="Borrow" data-title="Standard handbook for telescope making." data-type="book" data-resumeurl="/books/OL5774545M"
+      >Borrow</a>
+  <details class="cta-btn cta-btn--available">
+    <summary aria-label="More reading options"></summary>
+    <ul class="dropper-menu">
+      <li>
+        <a href="/borrow/ia/standardhandbook00howa?ref=ol&_autoReadAloud=show"
+          title="Borrow ebook from Internet Archive using Read Aloud"
+          data-ol-link-track="CTAClick|BorrowListen"
+
+
+          class="cta-btn cta-btn--available cta-btn--w-icon">
+          <span class="btn-icon listen"></span>
+          <span class="btn-label">Listen</span>
+        </a>
+      </li>
+      <li>
+        
+
+<a class="cta-btn cta-btn--available cta-btn--w-icon cta-btn--external" href="/books/OL5774545M/-/borrow?action=locate" target="_blank" rel="noopener noreferrer"
+  data-ol-link-track="CTAClick|Locate">
+
+  <span class="btn-icon map"></span>
+  <span class="btn-label">Locate</span>
+</a>
+
+      </li>
+    </ul>
+  </details>
+</div>
+
+
+
+
+
+        </div>
+
+        
+
+
+
+
+
+
+
+
+<div class="generic-dropper-wrapper my-books-dropper generic-dropper--disabled"  data-work-key=/works/OL5915019W >
+  <div class="generic-dropper">
+    <div class="generic-dropper__actions">
+      <div class="generic-dropper__primary">
+        
+<form class="reading-log primary-action" method="POST" action="/works/OL5915019W/bookshelves.json">
+  
+
+
+  <input type="hidden" name="action" value="add"/>
+  <input type="hidden" name="bookshelf_id" value="1"/>
+  <input type="hidden" name="work_id" value="/works/OL5915019W"/>
+  <input type="hidden" name="edition_id" value="/books/OL5774545M"/>
+  <button class="book-progress-btn primary-action unactivated js-login-intent" type="submit" disabled data-ol-link-track="ReadingLog|AddToList" data-action="Want to Read" data-title="Standard handbook for telescope making" data-type="book">
+    <span class="activated-check hidden">✓</span>
+    <span class="btn-text">Add to List</span>
+  </button>
+</form>
+
+
+
+      </div>
+      <a class="generic-dropper__dropclick" href="javascript:;" aria-label="More reading options for Standard handbook for telescope making">
+        <div class="arrow"></div>
+      </a>
+    </div>
+    <div class="generic-dropper__dropdown">
+      
+
+
+<div class="read-statuses">
+  <form class="reading-log" method="POST" action="/works/OL5915019W/bookshelves.json">
+    <input type="hidden" name="action" value="remove"/>
+    <input type="hidden" name="bookshelf_id" value="-1"/>
+    <input type="hidden" name="default-key" value="/books/OL5774545M" />
+    <input type="hidden" name="edition_id" value="/books/OL5774545M"/>
+    <input type="hidden" name="work_id" value="/works/OL5915019W"/>
+    <button class="remove-from-list hidden" type="submit" data-ol-link-track="ReadingLog|RemoveFromShelf">Remove From Shelf</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL5915019W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="1"/>
+    <input type="hidden" name="edition_id" value="/books/OL5774545M"/>
+    <button class="nostyle-btn hidden" type="submit" data-ol-link-track="ReadingLog|WantToRead">Want to Read</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL5915019W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="2"/>
+    <input type="hidden" name="edition_id" value="/books/OL5774545M"/>
+    <button class="nostyle-btn " type="submit" data-ol-link-track="ReadingLog|CurrentlyReading">Currently Reading</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL5915019W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="3"/>
+    <input type="hidden" name="edition_id" value="/books/OL5774545M"/>
+    <button class="nostyle-btn " type="submit" data-ol-link-track="ReadingLog|AlreadyRead">Already Read</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL5915019W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="4"/>
+    <input type="hidden" name="edition_id" value="/books/OL5774545M"/>
+    <button class="nostyle-btn " type="submit" data-ol-link-track="ReadingLog|StoppedReading">Stopped Reading</button>
+  </form>
+</div>
+
+
+
+
+
+<div class="reading-lists">
+  <p class="reading-list-title">My Reading Lists:</p>
+  <div class="my-lists" data-seed-key="/books/OL5774545M" data-work-key="/works/OL5915019W" data-user-key="">
+  </div>
+  <p class="create checkboxes">
+    <label>
+      <input type="checkbox" class="work-checkbox"/>
+      <span>Use this Work</span>
+    </label>
+  </p>
+  <a href="javascript:;" class="create create-new-list" aria-controls="addList">Create a new list</a>
+</div>
+
+
+
+
+
+    </div>
+  </div>
+</div>
+
+
+
+        
+    </div>
+  </div>
+
+</li>
+
+        
+<li class="searchResultItem sri--w-main" itemscope itemtype="https://schema.org/Book" >
+  <div class="sri__main">
+    <span class="bookcover ">
+      <a href="/works/OL5354313W/How_to_make_a_telescope?edition=key%3A/books/OL15375294M">
+        <img
+          itemprop="image"
+          src="//covers.openlibrary.org/b/id/9337170-M.jpg"
+          alt="Cover of: How to make a telescope"
+          title="Cover of: How to make a telescope"
+          loading="lazy"
+          /></a>
+    </span>
+
+    <div class="details">
+        <div class="resultTitle">
+          <h3 itemprop="name" class="booktitle">
+            <a itemprop="url" href="/works/OL5354313W/How_to_make_a_telescope?edition=key%3A/books/OL15375294M" class="results">How to make a telescope</a>
+          </h3>
+        </div>
+        <span itemprop="author" itemscope itemtype="https://schema.org/Organization" class="bookauthor">
+          
+by <a href="/authors/OL1232495A/Jean_Texereau" >Jean Texereau</a>
+
+        </span>
+        <span class="resultStats">
+          
+
+
+<span
+  class="ratingsByline"
+  itemprop="aggregateRating" itemscope itemtype="https://schema.org/AggregateRating"
+>
+  <meta itemprop="ratingValue" content="4.0"/>
+  <meta itemprop="ratingCount" content="1"/>
+  <span class="star star--small" aria-hidden="true">★</span><span class="star star--small" aria-hidden="true">★</span><span class="star star--small" aria-hidden="true">★</span><span class="star star--small" aria-hidden="true">★</span>
+  <span>4.0 (1 rating)</span>
+</span>
+
+<span class="dot">·</span>
+<span class="ratingsByline">4 Want to read</span>
+
+        </span>
+
+        <br />
+        <ol-chip-group class="srw__subjects" gap="small">
+          
+          <ol-chip size="small" href="/subjects/cassegrainian_telescopes">Cassegrainian <em>telescopes</em></ol-chip>
+          
+          <ol-chip size="small" href="/subjects/newtonian_telescopes">Newtonian <em>telescopes</em></ol-chip>
+          
+          <ol-chip size="small" href="/subjects/telescopes"><em>Telescopes</em></ol-chip>
+        </ol-chip-group>
+        
+        <span class="resultDetails">
+          <span>
+            First published in 1957
+          </span>
+          <br>
+          <span>
+            <a href="/works/OL5354313W/How_to_make_a_telescope?edition=key%3A/books/OL15375294M&amp;mode=all#editions-list">4 editions</a>
+          </span>
+        </span>
+        
+    </div>
+
+    <div class="searchResultItemCTA">
+        <div class="searchResultItemCTA-lending">
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div class="cta-button-group">
+  
+
+<a class="cta-btn cta-btn--available cta-btn--external" href="/books/OL15375294M/-/borrow?action=locate" target="_blank" rel="noopener noreferrer"
+  data-ol-link-track="CTAClick|Locate">Locate</a>
+
+</div>
+
+
+
+        </div>
+
+        
+
+
+
+
+
+
+
+
+<div class="generic-dropper-wrapper my-books-dropper generic-dropper--disabled"  data-work-key=/works/OL5354313W >
+  <div class="generic-dropper">
+    <div class="generic-dropper__actions">
+      <div class="generic-dropper__primary">
+        
+<form class="reading-log primary-action" method="POST" action="/works/OL5354313W/bookshelves.json">
+  
+
+
+  <input type="hidden" name="action" value="add"/>
+  <input type="hidden" name="bookshelf_id" value="1"/>
+  <input type="hidden" name="work_id" value="/works/OL5354313W"/>
+  <input type="hidden" name="edition_id" value="/books/OL15375294M"/>
+  <button class="book-progress-btn primary-action unactivated js-login-intent" type="submit" disabled data-ol-link-track="ReadingLog|AddToList" data-action="Want to Read" data-title="How to make a telescope" data-type="book">
+    <span class="activated-check hidden">✓</span>
+    <span class="btn-text">Add to List</span>
+  </button>
+</form>
+
+
+
+      </div>
+      <a class="generic-dropper__dropclick" href="javascript:;" aria-label="More reading options for How to make a telescope">
+        <div class="arrow"></div>
+      </a>
+    </div>
+    <div class="generic-dropper__dropdown">
+      
+
+
+<div class="read-statuses">
+  <form class="reading-log" method="POST" action="/works/OL5354313W/bookshelves.json">
+    <input type="hidden" name="action" value="remove"/>
+    <input type="hidden" name="bookshelf_id" value="-1"/>
+    <input type="hidden" name="default-key" value="/books/OL15375294M" />
+    <input type="hidden" name="edition_id" value="/books/OL15375294M"/>
+    <input type="hidden" name="work_id" value="/works/OL5354313W"/>
+    <button class="remove-from-list hidden" type="submit" data-ol-link-track="ReadingLog|RemoveFromShelf">Remove From Shelf</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL5354313W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="1"/>
+    <input type="hidden" name="edition_id" value="/books/OL15375294M"/>
+    <button class="nostyle-btn hidden" type="submit" data-ol-link-track="ReadingLog|WantToRead">Want to Read</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL5354313W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="2"/>
+    <input type="hidden" name="edition_id" value="/books/OL15375294M"/>
+    <button class="nostyle-btn " type="submit" data-ol-link-track="ReadingLog|CurrentlyReading">Currently Reading</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL5354313W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="3"/>
+    <input type="hidden" name="edition_id" value="/books/OL15375294M"/>
+    <button class="nostyle-btn " type="submit" data-ol-link-track="ReadingLog|AlreadyRead">Already Read</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL5354313W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="4"/>
+    <input type="hidden" name="edition_id" value="/books/OL15375294M"/>
+    <button class="nostyle-btn " type="submit" data-ol-link-track="ReadingLog|StoppedReading">Stopped Reading</button>
+  </form>
+</div>
+
+
+
+
+
+<div class="reading-lists">
+  <p class="reading-list-title">My Reading Lists:</p>
+  <div class="my-lists" data-seed-key="/books/OL15375294M" data-work-key="/works/OL5354313W" data-user-key="">
+  </div>
+  <p class="create checkboxes">
+    <label>
+      <input type="checkbox" class="work-checkbox"/>
+      <span>Use this Work</span>
+    </label>
+  </p>
+  <a href="javascript:;" class="create create-new-list" aria-controls="addList">Create a new list</a>
+</div>
+
+
+
+
+
+    </div>
+  </div>
+</div>
+
+
+
+        
+    </div>
+  </div>
+
+</li>
+
+        
+<li class="searchResultItem sri--w-main" itemscope itemtype="https://schema.org/Book" >
+  <div class="sri__main">
+    <span class="bookcover ">
+      <a href="/works/OL18633130W/Making_a_refractor_telescope?edition=key%3A/books/OL24052737M">
+        <img
+          itemprop="image"
+          src="//covers.openlibrary.org/b/id/9329831-M.jpg"
+          alt="Cover of: Making a refractor telescope: how to design, grind, polish, test, correct, and mount a doublet lens"
+          title="Cover of: Making a refractor telescope: how to design, grind, polish, test, correct, and mount a doublet lens"
+          loading="lazy"
+          /></a>
+    </span>
+
+    <div class="details">
+        <div class="resultTitle">
+          <h3 itemprop="name" class="booktitle">
+            <a itemprop="url" href="/works/OL18633130W/Making_a_refractor_telescope?edition=key%3A/books/OL24052737M" class="results">Making a refractor telescope: how to design, grind, polish, test, correct, and mount a doublet lens</a>
+          </h3>
+        </div>
+        <span itemprop="author" itemscope itemtype="https://schema.org/Organization" class="bookauthor">
+          
+by <a href="/authors/OL6783407A/Norman_Remer" >Norman Remer</a>
+
+        </span>
+        <span class="resultStats">
+          
+
+
+<span
+  class="ratingsByline"
+  itemprop="aggregateRating" itemscope itemtype="https://schema.org/AggregateRating"
+>
+  <meta itemprop="ratingValue" content="5.0"/>
+  <meta itemprop="ratingCount" content="1"/>
+  <span class="star star--small" aria-hidden="true">★</span><span class="star star--small" aria-hidden="true">★</span><span class="star star--small" aria-hidden="true">★</span><span class="star star--small" aria-hidden="true">★</span><span class="star star--small" aria-hidden="true">★</span>
+  <span>5.0 (1 rating)</span>
+</span>
+
+<span class="dot">·</span>
+<span class="ratingsByline">10 Want to read</span>
+
+        </span>
+
+        <br />
+        <ol-chip-group class="srw__subjects" gap="small">
+          
+          <ol-chip size="small" href="/subjects/refracting_telescopes">Refracting <em>telescopes</em></ol-chip>
+        </ol-chip-group>
+        
+        <span class="resultDetails">
+          <span>
+            First published in 2006
+          </span>
+          <br>
+          <span>
+            <a href="/works/OL18633130W/Making_a_refractor_telescope?edition=key%3A/books/OL24052737M&amp;mode=all#editions-list">1 edition</a>
+          </span>
+        </span>
+        
+    </div>
+
+    <div class="searchResultItemCTA">
+        <div class="searchResultItemCTA-lending">
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div class="cta-button-group">
+  
+
+<a class="cta-btn cta-btn--available cta-btn--external" href="/books/OL24052737M/-/borrow?action=locate" target="_blank" rel="noopener noreferrer"
+  data-ol-link-track="CTAClick|Locate">Locate</a>
+
+</div>
+
+
+
+        </div>
+
+        
+
+
+
+
+
+
+
+
+<div class="generic-dropper-wrapper my-books-dropper generic-dropper--disabled"  data-work-key=/works/OL18633130W >
+  <div class="generic-dropper">
+    <div class="generic-dropper__actions">
+      <div class="generic-dropper__primary">
+        
+<form class="reading-log primary-action" method="POST" action="/works/OL18633130W/bookshelves.json">
+  
+
+
+  <input type="hidden" name="action" value="add"/>
+  <input type="hidden" name="bookshelf_id" value="1"/>
+  <input type="hidden" name="work_id" value="/works/OL18633130W"/>
+  <input type="hidden" name="edition_id" value="/books/OL24052737M"/>
+  <button class="book-progress-btn primary-action unactivated js-login-intent" type="submit" disabled data-ol-link-track="ReadingLog|AddToList" data-action="Want to Read" data-title="Making a refractor telescope" data-type="book">
+    <span class="activated-check hidden">✓</span>
+    <span class="btn-text">Add to List</span>
+  </button>
+</form>
+
+
+
+      </div>
+      <a class="generic-dropper__dropclick" href="javascript:;" aria-label="More reading options for Making a refractor telescope">
+        <div class="arrow"></div>
+      </a>
+    </div>
+    <div class="generic-dropper__dropdown">
+      
+
+
+<div class="read-statuses">
+  <form class="reading-log" method="POST" action="/works/OL18633130W/bookshelves.json">
+    <input type="hidden" name="action" value="remove"/>
+    <input type="hidden" name="bookshelf_id" value="-1"/>
+    <input type="hidden" name="default-key" value="/books/OL24052737M" />
+    <input type="hidden" name="edition_id" value="/books/OL24052737M"/>
+    <input type="hidden" name="work_id" value="/works/OL18633130W"/>
+    <button class="remove-from-list hidden" type="submit" data-ol-link-track="ReadingLog|RemoveFromShelf">Remove From Shelf</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL18633130W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="1"/>
+    <input type="hidden" name="edition_id" value="/books/OL24052737M"/>
+    <button class="nostyle-btn hidden" type="submit" data-ol-link-track="ReadingLog|WantToRead">Want to Read</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL18633130W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="2"/>
+    <input type="hidden" name="edition_id" value="/books/OL24052737M"/>
+    <button class="nostyle-btn " type="submit" data-ol-link-track="ReadingLog|CurrentlyReading">Currently Reading</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL18633130W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="3"/>
+    <input type="hidden" name="edition_id" value="/books/OL24052737M"/>
+    <button class="nostyle-btn " type="submit" data-ol-link-track="ReadingLog|AlreadyRead">Already Read</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL18633130W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="4"/>
+    <input type="hidden" name="edition_id" value="/books/OL24052737M"/>
+    <button class="nostyle-btn " type="submit" data-ol-link-track="ReadingLog|StoppedReading">Stopped Reading</button>
+  </form>
+</div>
+
+
+
+
+
+<div class="reading-lists">
+  <p class="reading-list-title">My Reading Lists:</p>
+  <div class="my-lists" data-seed-key="/books/OL24052737M" data-work-key="/works/OL18633130W" data-user-key="">
+  </div>
+  <p class="create checkboxes">
+    <label>
+      <input type="checkbox" class="work-checkbox"/>
+      <span>Use this Work</span>
+    </label>
+  </p>
+  <a href="javascript:;" class="create create-new-list" aria-controls="addList">Create a new list</a>
+</div>
+
+
+
+
+
+    </div>
+  </div>
+</div>
+
+
+
+        
+    </div>
+  </div>
+
+</li>
+
+        
+<li class="searchResultItem sri--w-main" itemscope itemtype="https://schema.org/Book" >
+  <div class="sri__main">
+    <span class="bookcover ">
+      <a href="/works/OL7368713W/Celestial_objects_for_common_telescopes?edition=key%3A/books/OL23385608M">
+        <img
+          itemprop="image"
+          src="//covers.openlibrary.org/b/id/6127598-M.jpg"
+          alt="Cover of: Celestial objects for common telescopes"
+          title="Cover of: Celestial objects for common telescopes"
+          loading="lazy"
+          /></a>
+      
+
+
+<div class="cta-button-group">
+  <a class="cta-btn cta-btn--preview"
+    href="#bookPreview"
+    data-book-preview
+    data-iframe-src="https://archive.org/details/celestialobject05webbgoog?view=theater&wrapper=false"
+    data-iframe-link="https://archive.org/details/celestialobject05webbgoog"
+    data-ol-link-track="CTAClick|Preview">Preview</a>
+</div>
+
+
+
+
+    </span>
+
+    <div class="details">
+        <div class="resultTitle">
+          <h3 itemprop="name" class="booktitle">
+            <a itemprop="url" href="/works/OL7368713W/Celestial_objects_for_common_telescopes?edition=key%3A/books/OL23385608M" class="results">Celestial objects for common telescopes</a>
+          </h3>
+        </div>
+        <span itemprop="author" itemscope itemtype="https://schema.org/Organization" class="bookauthor">
+          
+by <a href="/authors/OL2193291A/T._W._Webb" >T. W. Webb</a>
+
+        </span>
+        <span class="resultStats">
+          
+<span class="ratingsByline">1 Want to read</span>
+
+        </span>
+
+        
+        <div class="search-result-item__preview-covers-container">
+          <span class="search-result-item__preview-covers ">
+            <a href="/works/OL7368713W/Celestial_objects_for_common_telescopes?edition=ia:celestialobjects02webb">
+              <img width="35" height="53" loading="lazy" src="//archive.org/services/img/celestialobjects02webb" alt="Cover of edition celestialobjects02webb">
+            </a>
+            <a href="/works/OL7368713W/Celestial_objects_for_common_telescopes?edition=ia:celestialobjects01webbrich">
+              <img width="35" height="53" loading="lazy" src="//archive.org/services/img/celestialobjects01webbrich" alt="Cover of edition celestialobjects01webbrich">
+            </a>
+            <a href="/works/OL7368713W/Celestial_objects_for_common_telescopes?edition=ia:celestialobject05webbgoog">
+              <img width="35" height="53" loading="lazy" src="//archive.org/services/img/celestialobject05webbgoog" alt="Cover of edition celestialobject05webbgoog">
+            </a>
+          </span>
+        
+          <span class="resultDetails">
+            <span>
+              First published in 1859
+            </span>
+            <br>
+            <span>
+              <a href="/works/OL7368713W/Celestial_objects_for_common_telescopes?edition=key%3A/books/OL23385608M&amp;mode=all#editions-list">12 editions</a>,
+            </span>
+            <span>
+              <a href="/works/OL7368713W/Celestial_objects_for_common_telescopes?edition=key%3A/books/OL23385608M&amp;mode=all#editions-list">4 ebooks</a>
+            </span>
+          </span>
+        </div>
+        
+    </div>
+
+    <div class="searchResultItemCTA">
+        <div class="searchResultItemCTA-lending">
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div class="cta-dropper cta-button-group">
+  <a href="/borrow/ia/celestialobject05webbgoog?ref=ol" title="Read ebook from Internet Archive" class="cta-btn cta-btn--ia cta-btn--available cta-btn--read "
+      data-ol-link-track="CTAClick|Read"
+
+
+      
+      >Read</a>
+  <details class="cta-btn cta-btn--available">
+    <summary aria-label="More reading options"></summary>
+    <ul class="dropper-menu">
+      <li>
+        <a href="/borrow/ia/celestialobject05webbgoog?ref=ol&_autoReadAloud=show"
+          title="Read ebook from Internet Archive using Read Aloud"
+          data-ol-link-track="CTAClick|ReadListen"
+
+
+          class="cta-btn cta-btn--available cta-btn--w-icon">
+          <span class="btn-icon listen"></span>
+          <span class="btn-label">Listen</span>
+        </a>
+      </li>
+      <li>
+        
+
+<a class="cta-btn cta-btn--available cta-btn--w-icon cta-btn--external" href="/books/OL23385608M/-/borrow?action=locate" target="_blank" rel="noopener noreferrer"
+  data-ol-link-track="CTAClick|Locate">
+
+  <span class="btn-icon map"></span>
+  <span class="btn-label">Locate</span>
+</a>
+
+      </li>
+    </ul>
+  </details>
+</div>
+
+
+
+
+        </div>
+
+        
+
+
+
+
+
+
+
+
+<div class="generic-dropper-wrapper my-books-dropper generic-dropper--disabled"  data-work-key=/works/OL7368713W >
+  <div class="generic-dropper">
+    <div class="generic-dropper__actions">
+      <div class="generic-dropper__primary">
+        
+<form class="reading-log primary-action" method="POST" action="/works/OL7368713W/bookshelves.json">
+  
+
+
+  <input type="hidden" name="action" value="add"/>
+  <input type="hidden" name="bookshelf_id" value="1"/>
+  <input type="hidden" name="work_id" value="/works/OL7368713W"/>
+  <input type="hidden" name="edition_id" value="/books/OL23385608M"/>
+  <button class="book-progress-btn primary-action unactivated js-login-intent" type="submit" disabled data-ol-link-track="ReadingLog|AddToList" data-action="Want to Read" data-title="Celestial objects for common telescopes" data-type="book">
+    <span class="activated-check hidden">✓</span>
+    <span class="btn-text">Add to List</span>
+  </button>
+</form>
+
+
+
+      </div>
+      <a class="generic-dropper__dropclick" href="javascript:;" aria-label="More reading options for Celestial objects for common telescopes">
+        <div class="arrow"></div>
+      </a>
+    </div>
+    <div class="generic-dropper__dropdown">
+      
+
+
+<div class="read-statuses">
+  <form class="reading-log" method="POST" action="/works/OL7368713W/bookshelves.json">
+    <input type="hidden" name="action" value="remove"/>
+    <input type="hidden" name="bookshelf_id" value="-1"/>
+    <input type="hidden" name="default-key" value="/books/OL23385608M" />
+    <input type="hidden" name="edition_id" value="/books/OL23385608M"/>
+    <input type="hidden" name="work_id" value="/works/OL7368713W"/>
+    <button class="remove-from-list hidden" type="submit" data-ol-link-track="ReadingLog|RemoveFromShelf">Remove From Shelf</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL7368713W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="1"/>
+    <input type="hidden" name="edition_id" value="/books/OL23385608M"/>
+    <button class="nostyle-btn hidden" type="submit" data-ol-link-track="ReadingLog|WantToRead">Want to Read</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL7368713W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="2"/>
+    <input type="hidden" name="edition_id" value="/books/OL23385608M"/>
+    <button class="nostyle-btn " type="submit" data-ol-link-track="ReadingLog|CurrentlyReading">Currently Reading</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL7368713W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="3"/>
+    <input type="hidden" name="edition_id" value="/books/OL23385608M"/>
+    <button class="nostyle-btn " type="submit" data-ol-link-track="ReadingLog|AlreadyRead">Already Read</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL7368713W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="4"/>
+    <input type="hidden" name="edition_id" value="/books/OL23385608M"/>
+    <button class="nostyle-btn " type="submit" data-ol-link-track="ReadingLog|StoppedReading">Stopped Reading</button>
+  </form>
+</div>
+
+
+
+
+
+<div class="reading-lists">
+  <p class="reading-list-title">My Reading Lists:</p>
+  <div class="my-lists" data-seed-key="/books/OL23385608M" data-work-key="/works/OL7368713W" data-user-key="">
+  </div>
+  <p class="create checkboxes">
+    <label>
+      <input type="checkbox" class="work-checkbox"/>
+      <span>Use this Work</span>
+    </label>
+  </p>
+  <a href="javascript:;" class="create create-new-list" aria-controls="addList">Create a new list</a>
+</div>
+
+
+
+
+
+    </div>
+  </div>
+</div>
+
+
+
+        
+    </div>
+  </div>
+
+</li>
+
+        
+<li class="searchResultItem sri--w-main" itemscope itemtype="https://schema.org/Book" >
+  <div class="sri__main">
+    <span class="bookcover ">
+      <a href="/works/OL46115W/Eyes_on_the_universe?edition=key%3A/books/OL5194299M">
+        <img
+          itemprop="image"
+          src="//covers.openlibrary.org/b/id/9302096-M.jpg"
+          alt="Cover of: Eyes on the universe: a history of the telescope"
+          title="Cover of: Eyes on the universe: a history of the telescope"
+          loading="lazy"
+          /></a>
+      
+
+
+<div class="cta-button-group">
+  <a class="cta-btn cta-btn--preview"
+    href="#bookPreview"
+    data-book-preview
+    data-iframe-src="https://archive.org/details/eyesonuniverse00isaa?view=theater&wrapper=false"
+    data-iframe-link="https://archive.org/details/eyesonuniverse00isaa"
+    data-ol-link-track="CTAClick|Preview">Preview</a>
+</div>
+
+
+
+
+    </span>
+
+    <div class="details">
+        <div class="resultTitle">
+          <h3 itemprop="name" class="booktitle">
+            <a itemprop="url" href="/works/OL46115W/Eyes_on_the_universe?edition=key%3A/books/OL5194299M" class="results">Eyes on the universe: a history of the telescope</a>
+          </h3>
+        </div>
+        <span itemprop="author" itemscope itemtype="https://schema.org/Organization" class="bookauthor">
+          
+by <a href="/authors/OL34221A/Isaac_Asimov" >Isaac Asimov</a>
+
+        </span>
+        <span class="resultStats">
+          
+<span class="ratingsByline">9 Want to read</span>
+
+        </span>
+
+        <br />
+        <ol-chip-group class="srw__subjects" gap="small">
+          
+          <ol-chip size="small" href="/subjects/telescopes"><em>Telescopes</em></ol-chip>
+        </ol-chip-group>
+        
+        
+        <div class="search-result-item__preview-covers-container">
+          <span class="search-result-item__preview-covers ">
+            <a href="/works/OL46115W/Eyes_on_the_universe?edition=ia:eyesonuniverse00isaa">
+              <img width="35" height="53" loading="lazy" src="//archive.org/services/img/eyesonuniverse00isaa" alt="Cover of edition eyesonuniverse00isaa">
+            </a>
+          </span>
+        
+          <span class="resultDetails">
+            <span>
+              First published in 1975
+            </span>
+            <br>
+            <span>
+              <a href="/works/OL46115W/Eyes_on_the_universe?edition=key%3A/books/OL5194299M&amp;mode=all#editions-list">6 editions</a>,
+            </span>
+            <span>
+              <a href="/works/OL46115W/Eyes_on_the_universe?edition=key%3A/books/OL5194299M&amp;mode=all#editions-list">2 ebooks</a>
+            </span>
+          </span>
+        </div>
+        
+    </div>
+
+    <div class="searchResultItemCTA">
+        <div class="searchResultItemCTA-lending">
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div class="cta-dropper cta-button-group">
+  <a href="/borrow/ia/eyesonuniverse00isaa?ref=ol" title="Borrow ebook from Internet Archive" class="cta-btn cta-btn--ia cta-btn--available cta-btn--borrow js-login-intent"
+      data-ol-link-track="CTAClick|Borrow"
+
+
+      data-action="Borrow" data-title="Eyes on the universe" data-type="book" data-resumeurl="/books/OL5194299M"
+      >Borrow</a>
+  <details class="cta-btn cta-btn--available">
+    <summary aria-label="More reading options"></summary>
+    <ul class="dropper-menu">
+      <li>
+        <a href="/borrow/ia/eyesonuniverse00isaa?ref=ol&_autoReadAloud=show"
+          title="Borrow ebook from Internet Archive using Read Aloud"
+          data-ol-link-track="CTAClick|BorrowListen"
+
+
+          class="cta-btn cta-btn--available cta-btn--w-icon">
+          <span class="btn-icon listen"></span>
+          <span class="btn-label">Listen</span>
+        </a>
+      </li>
+      <li>
+        
+
+<a class="cta-btn cta-btn--available cta-btn--w-icon cta-btn--external" href="/books/OL5194299M/-/borrow?action=locate" target="_blank" rel="noopener noreferrer"
+  data-ol-link-track="CTAClick|Locate">
+
+  <span class="btn-icon map"></span>
+  <span class="btn-label">Locate</span>
+</a>
+
+      </li>
+    </ul>
+  </details>
+</div>
+
+
+
+
+
+        </div>
+
+        
+
+
+
+
+
+
+
+
+<div class="generic-dropper-wrapper my-books-dropper generic-dropper--disabled"  data-work-key=/works/OL46115W >
+  <div class="generic-dropper">
+    <div class="generic-dropper__actions">
+      <div class="generic-dropper__primary">
+        
+<form class="reading-log primary-action" method="POST" action="/works/OL46115W/bookshelves.json">
+  
+
+
+  <input type="hidden" name="action" value="add"/>
+  <input type="hidden" name="bookshelf_id" value="1"/>
+  <input type="hidden" name="work_id" value="/works/OL46115W"/>
+  <input type="hidden" name="edition_id" value="/books/OL5194299M"/>
+  <button class="book-progress-btn primary-action unactivated js-login-intent" type="submit" disabled data-ol-link-track="ReadingLog|AddToList" data-action="Want to Read" data-title="Eyes on the universe" data-type="book">
+    <span class="activated-check hidden">✓</span>
+    <span class="btn-text">Add to List</span>
+  </button>
+</form>
+
+
+
+      </div>
+      <a class="generic-dropper__dropclick" href="javascript:;" aria-label="More reading options for Eyes on the universe">
+        <div class="arrow"></div>
+      </a>
+    </div>
+    <div class="generic-dropper__dropdown">
+      
+
+
+<div class="read-statuses">
+  <form class="reading-log" method="POST" action="/works/OL46115W/bookshelves.json">
+    <input type="hidden" name="action" value="remove"/>
+    <input type="hidden" name="bookshelf_id" value="-1"/>
+    <input type="hidden" name="default-key" value="/books/OL5194299M" />
+    <input type="hidden" name="edition_id" value="/books/OL5194299M"/>
+    <input type="hidden" name="work_id" value="/works/OL46115W"/>
+    <button class="remove-from-list hidden" type="submit" data-ol-link-track="ReadingLog|RemoveFromShelf">Remove From Shelf</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL46115W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="1"/>
+    <input type="hidden" name="edition_id" value="/books/OL5194299M"/>
+    <button class="nostyle-btn hidden" type="submit" data-ol-link-track="ReadingLog|WantToRead">Want to Read</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL46115W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="2"/>
+    <input type="hidden" name="edition_id" value="/books/OL5194299M"/>
+    <button class="nostyle-btn " type="submit" data-ol-link-track="ReadingLog|CurrentlyReading">Currently Reading</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL46115W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="3"/>
+    <input type="hidden" name="edition_id" value="/books/OL5194299M"/>
+    <button class="nostyle-btn " type="submit" data-ol-link-track="ReadingLog|AlreadyRead">Already Read</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL46115W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="4"/>
+    <input type="hidden" name="edition_id" value="/books/OL5194299M"/>
+    <button class="nostyle-btn " type="submit" data-ol-link-track="ReadingLog|StoppedReading">Stopped Reading</button>
+  </form>
+</div>
+
+
+
+
+
+<div class="reading-lists">
+  <p class="reading-list-title">My Reading Lists:</p>
+  <div class="my-lists" data-seed-key="/books/OL5194299M" data-work-key="/works/OL46115W" data-user-key="">
+  </div>
+  <p class="create checkboxes">
+    <label>
+      <input type="checkbox" class="work-checkbox"/>
+      <span>Use this Work</span>
+    </label>
+  </p>
+  <a href="javascript:;" class="create create-new-list" aria-controls="addList">Create a new list</a>
+</div>
+
+
+
+
+
+    </div>
+  </div>
+</div>
+
+
+
+        
+    </div>
+  </div>
+
+</li>
+
+        
+<li class="searchResultItem sri--w-main" itemscope itemtype="https://schema.org/Book" >
+  <div class="sri__main">
+    <span class="bookcover ">
+      <a href="/works/OL1849637W/Telescopes_and_techniques?edition=key%3A/books/OL3684327M">
+        <img
+          itemprop="image"
+          src="//covers.openlibrary.org/b/id/900135-M.jpg"
+          alt="Cover of: Telescopes and techniques: an introduction to practical astronomy"
+          title="Cover of: Telescopes and techniques: an introduction to practical astronomy"
+          loading="lazy"
+          /></a>
+      
+
+
+<div class="cta-button-group">
+  <a class="cta-btn cta-btn--preview"
+    href="#bookPreview"
+    data-book-preview
+    data-iframe-src="https://archive.org/details/telescopestechni0000kitc_u0m6?view=theater&wrapper=false"
+    data-iframe-link="https://archive.org/details/telescopestechni0000kitc_u0m6"
+    data-ol-link-track="CTAClick|Preview">Preview</a>
+</div>
+
+
+
+
+    </span>
+
+    <div class="details">
+        <div class="resultTitle">
+          <h3 itemprop="name" class="booktitle">
+            <a itemprop="url" href="/works/OL1849637W/Telescopes_and_techniques?edition=key%3A/books/OL3684327M" class="results">Telescopes and techniques: an introduction to practical astronomy</a>
+          </h3>
+        </div>
+        <span itemprop="author" itemscope itemtype="https://schema.org/Organization" class="bookauthor">
+          
+by <a href="/authors/OL221393A/C._R._Kitchin" >C. R. Kitchin</a>
+
+        </span>
+        <span class="resultStats">
+          
+<span class="ratingsByline">1 Want to read</span>
+
+        </span>
+
+        <br />
+        <ol-chip-group class="srw__subjects" gap="small">
+          
+          <ol-chip size="small" href="/subjects/telescopes"><em>Telescopes</em></ol-chip>
+        </ol-chip-group>
+        
+        <br />
+        
+        <ol-read-more class="srw__chapters" more-text="Show more" less-text="Show less" background-color="#E2ECF8" label-size="small">
+        </ol-read-more>
+        
+        
+        <div class="search-result-item__preview-covers-container">
+          <span class="search-result-item__preview-covers ">
+            <a href="/works/OL1849637W/Telescopes_and_techniques?edition=ia:telescopestechni0000kitc">
+              <img width="35" height="53" loading="lazy" src="//archive.org/services/img/telescopestechni0000kitc" alt="Cover of edition telescopestechni0000kitc">
+            </a>
+          </span>
+        
+          <span class="resultDetails">
+            <span>
+              First published in 1995
+            </span>
+            <br>
+            <span>
+              <a href="/works/OL1849637W/Telescopes_and_techniques?edition=key%3A/books/OL3684327M&amp;mode=all#editions-list">9 editions</a>,
+            </span>
+            <span>
+              <a href="/works/OL1849637W/Telescopes_and_techniques?edition=key%3A/books/OL3684327M&amp;mode=all#editions-list">2 ebooks</a>
+            </span>
+          </span>
+        </div>
+        
+    </div>
+
+    <div class="searchResultItemCTA">
+        <div class="searchResultItemCTA-lending">
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div class="cta-button-group">
+  
+
+<a class="cta-btn cta-btn--available cta-btn--external" href="/books/OL3684327M/-/borrow?action=locate" target="_blank" rel="noopener noreferrer"
+  data-ol-link-track="CTAClick|Locate">Locate</a>
+
+</div>
+
+
+
+        </div>
+
+        
+
+
+
+
+
+
+
+
+<div class="generic-dropper-wrapper my-books-dropper generic-dropper--disabled"  data-work-key=/works/OL1849637W >
+  <div class="generic-dropper">
+    <div class="generic-dropper__actions">
+      <div class="generic-dropper__primary">
+        
+<form class="reading-log primary-action" method="POST" action="/works/OL1849637W/bookshelves.json">
+  
+
+
+  <input type="hidden" name="action" value="add"/>
+  <input type="hidden" name="bookshelf_id" value="1"/>
+  <input type="hidden" name="work_id" value="/works/OL1849637W"/>
+  <input type="hidden" name="edition_id" value="/books/OL3684327M"/>
+  <button class="book-progress-btn primary-action unactivated js-login-intent" type="submit" disabled data-ol-link-track="ReadingLog|AddToList" data-action="Want to Read" data-title="Telescopes and techniques" data-type="book">
+    <span class="activated-check hidden">✓</span>
+    <span class="btn-text">Add to List</span>
+  </button>
+</form>
+
+
+
+      </div>
+      <a class="generic-dropper__dropclick" href="javascript:;" aria-label="More reading options for Telescopes and techniques">
+        <div class="arrow"></div>
+      </a>
+    </div>
+    <div class="generic-dropper__dropdown">
+      
+
+
+<div class="read-statuses">
+  <form class="reading-log" method="POST" action="/works/OL1849637W/bookshelves.json">
+    <input type="hidden" name="action" value="remove"/>
+    <input type="hidden" name="bookshelf_id" value="-1"/>
+    <input type="hidden" name="default-key" value="/books/OL3684327M" />
+    <input type="hidden" name="edition_id" value="/books/OL3684327M"/>
+    <input type="hidden" name="work_id" value="/works/OL1849637W"/>
+    <button class="remove-from-list hidden" type="submit" data-ol-link-track="ReadingLog|RemoveFromShelf">Remove From Shelf</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL1849637W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="1"/>
+    <input type="hidden" name="edition_id" value="/books/OL3684327M"/>
+    <button class="nostyle-btn hidden" type="submit" data-ol-link-track="ReadingLog|WantToRead">Want to Read</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL1849637W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="2"/>
+    <input type="hidden" name="edition_id" value="/books/OL3684327M"/>
+    <button class="nostyle-btn " type="submit" data-ol-link-track="ReadingLog|CurrentlyReading">Currently Reading</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL1849637W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="3"/>
+    <input type="hidden" name="edition_id" value="/books/OL3684327M"/>
+    <button class="nostyle-btn " type="submit" data-ol-link-track="ReadingLog|AlreadyRead">Already Read</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL1849637W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="4"/>
+    <input type="hidden" name="edition_id" value="/books/OL3684327M"/>
+    <button class="nostyle-btn " type="submit" data-ol-link-track="ReadingLog|StoppedReading">Stopped Reading</button>
+  </form>
+</div>
+
+
+
+
+
+<div class="reading-lists">
+  <p class="reading-list-title">My Reading Lists:</p>
+  <div class="my-lists" data-seed-key="/books/OL3684327M" data-work-key="/works/OL1849637W" data-user-key="">
+  </div>
+  <p class="create checkboxes">
+    <label>
+      <input type="checkbox" class="work-checkbox"/>
+      <span>Use this Work</span>
+    </label>
+  </p>
+  <a href="javascript:;" class="create create-new-list" aria-controls="addList">Create a new list</a>
+</div>
+
+
+
+
+
+    </div>
+  </div>
+</div>
+
+
+
+        
+    </div>
+  </div>
+
+</li>
+
+        
+<li class="searchResultItem sri--w-main" itemscope itemtype="https://schema.org/Book" >
+  <div class="sri__main">
+    <span class="bookcover ">
+      <a href="/works/OL1942494W/Radio_astronomy?edition=key%3A/books/OL16538807M">
+        <img
+          itemprop="image"
+          src="/static/images/icons/avatar_book-sm.png"
+          alt="Cover of: Radio astronomy.: With a chapter on radio-telescope receivers"
+          title="Cover of: Radio astronomy.: With a chapter on radio-telescope receivers"
+          loading="lazy"
+          /></a>
+    </span>
+
+    <div class="details">
+        <div class="resultTitle">
+          <h3 itemprop="name" class="booktitle">
+            <a itemprop="url" href="/works/OL1942494W/Radio_astronomy?edition=key%3A/books/OL16538807M" class="results">Radio astronomy.: With a chapter on radio-telescope receivers</a>
+          </h3>
+        </div>
+        <span itemprop="author" itemscope itemtype="https://schema.org/Organization" class="bookauthor">
+          
+by <a href="/authors/OL233114A/John_Daniel_Kraus" >John Daniel Kraus</a>
+
+        </span>
+        <span class="resultStats">
+          
+
+
+<span
+  class="ratingsByline"
+  itemprop="aggregateRating" itemscope itemtype="https://schema.org/AggregateRating"
+>
+  <meta itemprop="ratingValue" content="5.0"/>
+  <meta itemprop="ratingCount" content="1"/>
+  <span class="star star--small" aria-hidden="true">★</span><span class="star star--small" aria-hidden="true">★</span><span class="star star--small" aria-hidden="true">★</span><span class="star star--small" aria-hidden="true">★</span><span class="star star--small" aria-hidden="true">★</span>
+  <span>5.0 (1 rating)</span>
+</span>
+
+<span class="dot">·</span>
+<span class="ratingsByline">8 Want to read</span>
+
+        </span>
+
+        
+        <div class="search-result-item__preview-covers-container">
+          <span class="search-result-item__preview-covers ">
+            <a href="/works/OL1942494W/Radio_astronomy?edition=ia:radioastronomy0000krau">
+              <img width="35" height="53" loading="lazy" src="//archive.org/services/img/radioastronomy0000krau" alt="Cover of edition radioastronomy0000krau">
+            </a>
+          </span>
+        
+          <span class="resultDetails">
+            <span>
+              First published in 1966
+            </span>
+            <br>
+            <span>
+              <a href="/works/OL1942494W/Radio_astronomy?edition=key%3A/books/OL16538807M&amp;mode=all#editions-list">5 editions</a>,
+            </span>
+            <span>
+              <a href="/works/OL1942494W/Radio_astronomy?edition=key%3A/books/OL16538807M&amp;mode=all#editions-list">2 ebooks</a>
+            </span>
+          </span>
+        </div>
+        
+    </div>
+
+    <div class="searchResultItemCTA">
+        <div class="searchResultItemCTA-lending">
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div class="cta-button-group">
+  
+
+<a class="cta-btn cta-btn--available cta-btn--external" href="/books/OL16538807M/-/borrow?action=locate" target="_blank" rel="noopener noreferrer"
+  data-ol-link-track="CTAClick|Locate">Locate</a>
+
+</div>
+
+
+
+        </div>
+
+        
+
+
+
+
+
+
+
+
+<div class="generic-dropper-wrapper my-books-dropper generic-dropper--disabled"  data-work-key=/works/OL1942494W >
+  <div class="generic-dropper">
+    <div class="generic-dropper__actions">
+      <div class="generic-dropper__primary">
+        
+<form class="reading-log primary-action" method="POST" action="/works/OL1942494W/bookshelves.json">
+  
+
+
+  <input type="hidden" name="action" value="add"/>
+  <input type="hidden" name="bookshelf_id" value="1"/>
+  <input type="hidden" name="work_id" value="/works/OL1942494W"/>
+  <input type="hidden" name="edition_id" value="/books/OL16538807M"/>
+  <button class="book-progress-btn primary-action unactivated js-login-intent" type="submit" disabled data-ol-link-track="ReadingLog|AddToList" data-action="Want to Read" data-title="Radio astronomy" data-type="book">
+    <span class="activated-check hidden">✓</span>
+    <span class="btn-text">Add to List</span>
+  </button>
+</form>
+
+
+
+      </div>
+      <a class="generic-dropper__dropclick" href="javascript:;" aria-label="More reading options for Radio astronomy">
+        <div class="arrow"></div>
+      </a>
+    </div>
+    <div class="generic-dropper__dropdown">
+      
+
+
+<div class="read-statuses">
+  <form class="reading-log" method="POST" action="/works/OL1942494W/bookshelves.json">
+    <input type="hidden" name="action" value="remove"/>
+    <input type="hidden" name="bookshelf_id" value="-1"/>
+    <input type="hidden" name="default-key" value="/books/OL16538807M" />
+    <input type="hidden" name="edition_id" value="/books/OL16538807M"/>
+    <input type="hidden" name="work_id" value="/works/OL1942494W"/>
+    <button class="remove-from-list hidden" type="submit" data-ol-link-track="ReadingLog|RemoveFromShelf">Remove From Shelf</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL1942494W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="1"/>
+    <input type="hidden" name="edition_id" value="/books/OL16538807M"/>
+    <button class="nostyle-btn hidden" type="submit" data-ol-link-track="ReadingLog|WantToRead">Want to Read</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL1942494W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="2"/>
+    <input type="hidden" name="edition_id" value="/books/OL16538807M"/>
+    <button class="nostyle-btn " type="submit" data-ol-link-track="ReadingLog|CurrentlyReading">Currently Reading</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL1942494W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="3"/>
+    <input type="hidden" name="edition_id" value="/books/OL16538807M"/>
+    <button class="nostyle-btn " type="submit" data-ol-link-track="ReadingLog|AlreadyRead">Already Read</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL1942494W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="4"/>
+    <input type="hidden" name="edition_id" value="/books/OL16538807M"/>
+    <button class="nostyle-btn " type="submit" data-ol-link-track="ReadingLog|StoppedReading">Stopped Reading</button>
+  </form>
+</div>
+
+
+
+
+
+<div class="reading-lists">
+  <p class="reading-list-title">My Reading Lists:</p>
+  <div class="my-lists" data-seed-key="/books/OL16538807M" data-work-key="/works/OL1942494W" data-user-key="">
+  </div>
+  <p class="create checkboxes">
+    <label>
+      <input type="checkbox" class="work-checkbox"/>
+      <span>Use this Work</span>
+    </label>
+  </p>
+  <a href="javascript:;" class="create create-new-list" aria-controls="addList">Create a new list</a>
+</div>
+
+
+
+
+
+    </div>
+  </div>
+</div>
+
+
+
+        
+    </div>
+  </div>
+
+</li>
+
+        
+<li class="searchResultItem sri--w-main" itemscope itemtype="https://schema.org/Book" >
+  <div class="sri__main">
+    <span class="bookcover ">
+      <a href="/works/OL4625639W/Telescope_Optics?edition=key%3A/books/OL2037901M">
+        <img
+          itemprop="image"
+          src="//covers.openlibrary.org/b/id/8726425-M.jpg"
+          alt="Cover of: Telescope Optics: Evaluation and Design"
+          title="Cover of: Telescope Optics: Evaluation and Design"
+          loading="lazy"
+          /></a>
+    </span>
+
+    <div class="details">
+        <div class="resultTitle">
+          <h3 itemprop="name" class="booktitle">
+            <a itemprop="url" href="/works/OL4625639W/Telescope_Optics?edition=key%3A/books/OL2037901M" class="results">Telescope Optics: Evaluation and Design</a>
+          </h3>
+        </div>
+        <span itemprop="author" itemscope itemtype="https://schema.org/Organization" class="bookauthor">
+          
+by <a href="/authors/OL949147A/Harrie_G._J._Rutten" >Harrie G. J. Rutten</a> and <a href="/authors/OL7442163A/Martin_van_Venrooij" >Martin van Venrooij</a>
+
+        </span>
+        <span class="resultStats">
+          
+<span class="ratingsByline">4 Want to read</span>
+
+        </span>
+
+        <br />
+        <ol-chip-group class="srw__subjects" gap="small">
+          
+          <ol-chip size="small" href="/subjects/telescopes"><em>Telescopes</em></ol-chip>
+        </ol-chip-group>
+        
+        <br />
+        
+        <ol-read-more class="srw__chapters" more-text="Show more" less-text="Show less" background-color="#E2ECF8" label-size="small">
+          <div class="srw__chapter" >
+            <span>
+              
+              
+              Chapter 5. 
+               The Newtonian <em>Telescope</em> 
+            </span>
+          </div>
+          <div class="srw__chapter" >
+            <span>
+              
+              
+              Chapter 2. 
+               Development of the Amateur <em>Telescope</em> 
+            </span>
+          </div>
+          <div class="srw__chapter" >
+            <span>
+              
+              
+              Chapter 16. 
+               Eyepieces for <em>Telescopes</em> 
+            </span>
+          </div>
+          <div class="srw__chapter" >
+            <span>
+              
+              
+              Chapter 21. 
+               Designing <em>Telescope</em> Optical Systems 
+            </span>
+          </div>
+          <div class="srw__chapter" >
+            <span>
+              
+              
+              Chapter 11. 
+               The Maksutov-Cassegrain <em>Telescope</em> 
+            </span>
+          </div>
+          <div class="srw__chapter" >
+            <span>
+              
+              
+              Chapter 22. 
+               How to Use the <em>Telescope</em> Design Programs 
+            </span>
+          </div>
+          <div class="srw__chapter" >
+            <span>
+              
+              
+              Chapter 7. 
+               The Cassegrain <em>Telescope</em> 
+            </span>
+          </div>
+          <div class="srw__chapter" >
+            <span>
+              
+              
+              Chapter 9. 
+               The Schmidt-Cassegrain <em>Telescope</em> 
+            </span>
+          </div>
+        </ol-read-more>
+        
+        <span class="resultDetails">
+          <span>
+            First published in 1988
+          </span>
+          <br>
+          <span>
+            <a href="/works/OL4625639W/Telescope_Optics?edition=key%3A/books/OL2037901M&amp;mode=all#editions-list">1 edition</a>
+          </span>
+        </span>
+        
+    </div>
+
+    <div class="searchResultItemCTA">
+        <div class="searchResultItemCTA-lending">
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div class="cta-button-group">
+  
+
+<a class="cta-btn cta-btn--available cta-btn--external" href="/books/OL2037901M/-/borrow?action=locate" target="_blank" rel="noopener noreferrer"
+  data-ol-link-track="CTAClick|Locate">Locate</a>
+
+</div>
+
+
+
+        </div>
+
+        
+
+
+
+
+
+
+
+
+<div class="generic-dropper-wrapper my-books-dropper generic-dropper--disabled"  data-work-key=/works/OL4625639W >
+  <div class="generic-dropper">
+    <div class="generic-dropper__actions">
+      <div class="generic-dropper__primary">
+        
+<form class="reading-log primary-action" method="POST" action="/works/OL4625639W/bookshelves.json">
+  
+
+
+  <input type="hidden" name="action" value="add"/>
+  <input type="hidden" name="bookshelf_id" value="1"/>
+  <input type="hidden" name="work_id" value="/works/OL4625639W"/>
+  <input type="hidden" name="edition_id" value="/books/OL2037901M"/>
+  <button class="book-progress-btn primary-action unactivated js-login-intent" type="submit" disabled data-ol-link-track="ReadingLog|AddToList" data-action="Want to Read" data-title="Telescope Optics" data-type="book">
+    <span class="activated-check hidden">✓</span>
+    <span class="btn-text">Add to List</span>
+  </button>
+</form>
+
+
+
+      </div>
+      <a class="generic-dropper__dropclick" href="javascript:;" aria-label="More reading options for Telescope Optics">
+        <div class="arrow"></div>
+      </a>
+    </div>
+    <div class="generic-dropper__dropdown">
+      
+
+
+<div class="read-statuses">
+  <form class="reading-log" method="POST" action="/works/OL4625639W/bookshelves.json">
+    <input type="hidden" name="action" value="remove"/>
+    <input type="hidden" name="bookshelf_id" value="-1"/>
+    <input type="hidden" name="default-key" value="/books/OL2037901M" />
+    <input type="hidden" name="edition_id" value="/books/OL2037901M"/>
+    <input type="hidden" name="work_id" value="/works/OL4625639W"/>
+    <button class="remove-from-list hidden" type="submit" data-ol-link-track="ReadingLog|RemoveFromShelf">Remove From Shelf</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL4625639W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="1"/>
+    <input type="hidden" name="edition_id" value="/books/OL2037901M"/>
+    <button class="nostyle-btn hidden" type="submit" data-ol-link-track="ReadingLog|WantToRead">Want to Read</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL4625639W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="2"/>
+    <input type="hidden" name="edition_id" value="/books/OL2037901M"/>
+    <button class="nostyle-btn " type="submit" data-ol-link-track="ReadingLog|CurrentlyReading">Currently Reading</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL4625639W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="3"/>
+    <input type="hidden" name="edition_id" value="/books/OL2037901M"/>
+    <button class="nostyle-btn " type="submit" data-ol-link-track="ReadingLog|AlreadyRead">Already Read</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL4625639W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="4"/>
+    <input type="hidden" name="edition_id" value="/books/OL2037901M"/>
+    <button class="nostyle-btn " type="submit" data-ol-link-track="ReadingLog|StoppedReading">Stopped Reading</button>
+  </form>
+</div>
+
+
+
+
+
+<div class="reading-lists">
+  <p class="reading-list-title">My Reading Lists:</p>
+  <div class="my-lists" data-seed-key="/books/OL2037901M" data-work-key="/works/OL4625639W" data-user-key="">
+  </div>
+  <p class="create checkboxes">
+    <label>
+      <input type="checkbox" class="work-checkbox"/>
+      <span>Use this Work</span>
+    </label>
+  </p>
+  <a href="javascript:;" class="create create-new-list" aria-controls="addList">Create a new list</a>
+</div>
+
+
+
+
+
+    </div>
+  </div>
+</div>
+
+
+
+        
+    </div>
+  </div>
+
+</li>
+
+        
+<li class="searchResultItem sri--w-main" itemscope itemtype="https://schema.org/Book" >
+  <div class="sri__main">
+    <span class="bookcover ">
+      <a href="/works/OL11103372W/The_telescope?edition=key%3A/books/OL59070634M">
+        <img
+          itemprop="image"
+          src="//covers.openlibrary.org/b/olid/OL59070634M-M.jpg"
+          alt="Cover of: The Telescope"
+          title="Cover of: The Telescope"
+          loading="lazy"
+          /></a>
+      
+
+
+<div class="cta-button-group">
+  <a class="cta-btn cta-btn--preview"
+    href="#bookPreview"
+    data-book-preview
+    data-iframe-src="https://archive.org/details/telescope029809mbp?view=theater&wrapper=false"
+    data-iframe-link="https://archive.org/details/telescope029809mbp"
+    data-ol-link-track="CTAClick|Preview">Preview</a>
+</div>
+
+
+
+
+    </span>
+
+    <div class="details">
+        <div class="resultTitle">
+          <h3 itemprop="name" class="booktitle">
+            <a itemprop="url" href="/works/OL11103372W/The_telescope?edition=key%3A/books/OL59070634M" class="results">The Telescope</a>
+          </h3>
+        </div>
+        <span itemprop="author" itemscope itemtype="https://schema.org/Organization" class="bookauthor">
+          
+by <a href="/authors/OL4631977A/Louis_Bell" >Louis Bell</a>
+
+        </span>
+        <span class="resultStats">
+          
+
+        </span>
+
+        <span class="resultDetails">
+          <span>
+            First published in 1922
+          </span>
+          <br>
+          <span>
+            <a href="/works/OL11103372W/The_telescope?edition=key%3A/books/OL59070634M&amp;mode=all#editions-list">6 editions</a>,
+          </span>
+          <span>
+            <a href="/works/OL11103372W/The_telescope?edition=key%3A/books/OL59070634M&amp;mode=all#editions-list">1 ebook</a>
+          </span>
+        </span>
+        
+    </div>
+
+    <div class="searchResultItemCTA">
+        <div class="searchResultItemCTA-lending">
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div class="cta-dropper cta-button-group">
+  <a href="/borrow/ia/telescope029809mbp?ref=ol" title="Read ebook from Internet Archive" class="cta-btn cta-btn--ia cta-btn--available cta-btn--read "
+      data-ol-link-track="CTAClick|Read"
+
+
+      
+      >Read</a>
+  <details class="cta-btn cta-btn--available">
+    <summary aria-label="More reading options"></summary>
+    <ul class="dropper-menu">
+      <li>
+        <a href="/borrow/ia/telescope029809mbp?ref=ol&_autoReadAloud=show"
+          title="Read ebook from Internet Archive using Read Aloud"
+          data-ol-link-track="CTAClick|ReadListen"
+
+
+          class="cta-btn cta-btn--available cta-btn--w-icon">
+          <span class="btn-icon listen"></span>
+          <span class="btn-label">Listen</span>
+        </a>
+      </li>
+      <li>
+        
+
+<a class="cta-btn cta-btn--available cta-btn--w-icon cta-btn--external" href="/books/OL59070634M/-/borrow?action=locate" target="_blank" rel="noopener noreferrer"
+  data-ol-link-track="CTAClick|Locate">
+
+  <span class="btn-icon map"></span>
+  <span class="btn-label">Locate</span>
+</a>
+
+      </li>
+    </ul>
+  </details>
+</div>
+
+
+
+
+        </div>
+
+        
+
+
+
+
+
+
+
+
+<div class="generic-dropper-wrapper my-books-dropper generic-dropper--disabled"  data-work-key=/works/OL11103372W >
+  <div class="generic-dropper">
+    <div class="generic-dropper__actions">
+      <div class="generic-dropper__primary">
+        
+<form class="reading-log primary-action" method="POST" action="/works/OL11103372W/bookshelves.json">
+  
+
+
+  <input type="hidden" name="action" value="add"/>
+  <input type="hidden" name="bookshelf_id" value="1"/>
+  <input type="hidden" name="work_id" value="/works/OL11103372W"/>
+  <input type="hidden" name="edition_id" value="/books/OL59070634M"/>
+  <button class="book-progress-btn primary-action unactivated js-login-intent" type="submit" disabled data-ol-link-track="ReadingLog|AddToList" data-action="Want to Read" data-title="The telescope" data-type="book">
+    <span class="activated-check hidden">✓</span>
+    <span class="btn-text">Add to List</span>
+  </button>
+</form>
+
+
+
+      </div>
+      <a class="generic-dropper__dropclick" href="javascript:;" aria-label="More reading options for The telescope">
+        <div class="arrow"></div>
+      </a>
+    </div>
+    <div class="generic-dropper__dropdown">
+      
+
+
+<div class="read-statuses">
+  <form class="reading-log" method="POST" action="/works/OL11103372W/bookshelves.json">
+    <input type="hidden" name="action" value="remove"/>
+    <input type="hidden" name="bookshelf_id" value="-1"/>
+    <input type="hidden" name="default-key" value="/books/OL59070634M" />
+    <input type="hidden" name="edition_id" value="/books/OL59070634M"/>
+    <input type="hidden" name="work_id" value="/works/OL11103372W"/>
+    <button class="remove-from-list hidden" type="submit" data-ol-link-track="ReadingLog|RemoveFromShelf">Remove From Shelf</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL11103372W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="1"/>
+    <input type="hidden" name="edition_id" value="/books/OL59070634M"/>
+    <button class="nostyle-btn hidden" type="submit" data-ol-link-track="ReadingLog|WantToRead">Want to Read</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL11103372W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="2"/>
+    <input type="hidden" name="edition_id" value="/books/OL59070634M"/>
+    <button class="nostyle-btn " type="submit" data-ol-link-track="ReadingLog|CurrentlyReading">Currently Reading</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL11103372W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="3"/>
+    <input type="hidden" name="edition_id" value="/books/OL59070634M"/>
+    <button class="nostyle-btn " type="submit" data-ol-link-track="ReadingLog|AlreadyRead">Already Read</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL11103372W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="4"/>
+    <input type="hidden" name="edition_id" value="/books/OL59070634M"/>
+    <button class="nostyle-btn " type="submit" data-ol-link-track="ReadingLog|StoppedReading">Stopped Reading</button>
+  </form>
+</div>
+
+
+
+
+
+<div class="reading-lists">
+  <p class="reading-list-title">My Reading Lists:</p>
+  <div class="my-lists" data-seed-key="/books/OL59070634M" data-work-key="/works/OL11103372W" data-user-key="">
+  </div>
+  <p class="create checkboxes">
+    <label>
+      <input type="checkbox" class="work-checkbox"/>
+      <span>Use this Work</span>
+    </label>
+  </p>
+  <a href="javascript:;" class="create create-new-list" aria-controls="addList">Create a new list</a>
+</div>
+
+
+
+
+
+    </div>
+  </div>
+</div>
+
+
+
+        
+    </div>
+  </div>
+
+</li>
+
+        
+<li class="searchResultItem sri--w-main" itemscope itemtype="https://schema.org/Book" >
+  <div class="sri__main">
+    <span class="bookcover ">
+      <a href="/works/OL18232137W/Amateur_telescope_making?edition=key%3A/books/OL371955M">
+        <img
+          itemprop="image"
+          src="//covers.openlibrary.org/b/id/900011-M.jpg"
+          alt="Cover of: Amateur telescope making"
+          title="Cover of: Amateur telescope making"
+          loading="lazy"
+          /></a>
+      
+
+
+<div class="cta-button-group">
+  <a class="cta-btn cta-btn--preview"
+    href="#bookPreview"
+    data-book-preview
+    data-iframe-src="https://archive.org/details/amateurtelescope00tonk?view=theater&wrapper=false"
+    data-iframe-link="https://archive.org/details/amateurtelescope00tonk"
+    data-ol-link-track="CTAClick|Preview">Preview</a>
+</div>
+
+
+
+
+    </span>
+
+    <div class="details">
+        <div class="resultTitle">
+          <h3 itemprop="name" class="booktitle">
+            <a itemprop="url" href="/works/OL18232137W/Amateur_telescope_making?edition=key%3A/books/OL371955M" class="results">Amateur telescope making</a>
+          </h3>
+        </div>
+        <span itemprop="author" itemscope itemtype="https://schema.org/Organization" class="bookauthor">
+          
+by <a href="/authors/OL3150679A/Stephen_Tonkin" >Stephen Tonkin</a>
+
+        </span>
+        <span class="resultStats">
+          
+
+
+<span
+  class="ratingsByline"
+  itemprop="aggregateRating" itemscope itemtype="https://schema.org/AggregateRating"
+>
+  <meta itemprop="ratingValue" content="5.0"/>
+  <meta itemprop="ratingCount" content="1"/>
+  <span class="star star--small" aria-hidden="true">★</span><span class="star star--small" aria-hidden="true">★</span><span class="star star--small" aria-hidden="true">★</span><span class="star star--small" aria-hidden="true">★</span><span class="star star--small" aria-hidden="true">★</span>
+  <span>5.0 (1 rating)</span>
+</span>
+
+<span class="dot">·</span>
+<span class="ratingsByline">1 Want to read</span>
+
+        </span>
+
+        <br />
+        <ol-chip-group class="srw__subjects" gap="small">
+          
+          <ol-chip size="small" href="/subjects/telescopes"><em>Telescopes</em></ol-chip>
+        </ol-chip-group>
+        
+        <span class="resultDetails">
+          <span>
+            First published in 1999
+          </span>
+          <br>
+          <span>
+            <a href="/works/OL18232137W/Amateur_telescope_making?edition=key%3A/books/OL371955M&amp;mode=all#editions-list">2 editions</a>,
+          </span>
+          <span>
+            <a href="/works/OL18232137W/Amateur_telescope_making?edition=key%3A/books/OL371955M&amp;mode=all#editions-list">1 ebook</a>
+          </span>
+        </span>
+        
+    </div>
+
+    <div class="searchResultItemCTA">
+        <div class="searchResultItemCTA-lending">
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div class="cta-button-group">
+  
+
+<a class="cta-btn cta-btn--available cta-btn--external" href="/books/OL371955M/-/borrow?action=locate" target="_blank" rel="noopener noreferrer"
+  data-ol-link-track="CTAClick|Locate">Locate</a>
+
+</div>
+
+
+
+        </div>
+
+        
+
+
+
+
+
+
+
+
+<div class="generic-dropper-wrapper my-books-dropper generic-dropper--disabled"  data-work-key=/works/OL18232137W >
+  <div class="generic-dropper">
+    <div class="generic-dropper__actions">
+      <div class="generic-dropper__primary">
+        
+<form class="reading-log primary-action" method="POST" action="/works/OL18232137W/bookshelves.json">
+  
+
+
+  <input type="hidden" name="action" value="add"/>
+  <input type="hidden" name="bookshelf_id" value="1"/>
+  <input type="hidden" name="work_id" value="/works/OL18232137W"/>
+  <input type="hidden" name="edition_id" value="/books/OL371955M"/>
+  <button class="book-progress-btn primary-action unactivated js-login-intent" type="submit" disabled data-ol-link-track="ReadingLog|AddToList" data-action="Want to Read" data-title="Amateur telescope making" data-type="book">
+    <span class="activated-check hidden">✓</span>
+    <span class="btn-text">Add to List</span>
+  </button>
+</form>
+
+
+
+      </div>
+      <a class="generic-dropper__dropclick" href="javascript:;" aria-label="More reading options for Amateur telescope making">
+        <div class="arrow"></div>
+      </a>
+    </div>
+    <div class="generic-dropper__dropdown">
+      
+
+
+<div class="read-statuses">
+  <form class="reading-log" method="POST" action="/works/OL18232137W/bookshelves.json">
+    <input type="hidden" name="action" value="remove"/>
+    <input type="hidden" name="bookshelf_id" value="-1"/>
+    <input type="hidden" name="default-key" value="/books/OL371955M" />
+    <input type="hidden" name="edition_id" value="/books/OL371955M"/>
+    <input type="hidden" name="work_id" value="/works/OL18232137W"/>
+    <button class="remove-from-list hidden" type="submit" data-ol-link-track="ReadingLog|RemoveFromShelf">Remove From Shelf</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL18232137W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="1"/>
+    <input type="hidden" name="edition_id" value="/books/OL371955M"/>
+    <button class="nostyle-btn hidden" type="submit" data-ol-link-track="ReadingLog|WantToRead">Want to Read</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL18232137W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="2"/>
+    <input type="hidden" name="edition_id" value="/books/OL371955M"/>
+    <button class="nostyle-btn " type="submit" data-ol-link-track="ReadingLog|CurrentlyReading">Currently Reading</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL18232137W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="3"/>
+    <input type="hidden" name="edition_id" value="/books/OL371955M"/>
+    <button class="nostyle-btn " type="submit" data-ol-link-track="ReadingLog|AlreadyRead">Already Read</button>
+  </form>
+
+  <form class="reading-log" method="POST" action="/works/OL18232137W/bookshelves.json">
+    <input type="hidden" name="action" value="add"/>
+    <input type="hidden" name="bookshelf_id" value="4"/>
+    <input type="hidden" name="edition_id" value="/books/OL371955M"/>
+    <button class="nostyle-btn " type="submit" data-ol-link-track="ReadingLog|StoppedReading">Stopped Reading</button>
+  </form>
+</div>
+
+
+
+
+
+<div class="reading-lists">
+  <p class="reading-list-title">My Reading Lists:</p>
+  <div class="my-lists" data-seed-key="/books/OL371955M" data-work-key="/works/OL18232137W" data-user-key="">
+  </div>
+  <p class="create checkboxes">
+    <label>
+      <input type="checkbox" class="work-checkbox"/>
+      <span>Use this Work</span>
+    </label>
+  </p>
+  <a href="javascript:;" class="create create-new-list" aria-controls="addList">Create a new list</a>
+</div>
+
+
+
+
+
+    </div>
+  </div>
+</div>
+
+
+
+        
+    </div>
+  </div>
+
+</li>
+
+      </ul>
+      
+<div class="ol-pagination-wrapper">
+    <ol-pagination
+        total-pages="162"
+        current-page="1"
+        label-previous-page="Go to previous page"
+        label-next-page="Go to next page"
+        label-go-to-page="Go to page {page}"
+        label-current-page="Page {page}, current page"
+        label-pagination="Pagination"
+    ></ol-pagination>
+</div>
+
+    </div>
+<!-- /results -->
+
+<!-- facets -->
+
+
+
+<div id="searchFacets" data-config="{&quot;start_facet_count&quot;: 5, &quot;facet_inc&quot;: 10}" data-param="{&quot;q&quot;: &quot;telescope&quot;}" data-async-load="true">
+    <h3 class="collapse">Zoom In</h3>
+    <div class="smallest lightgreen sansserif" style="margin-bottom:20px;">
+        Focus your results using these <a href="/search/howto">filters</a>
+    </div>
+    
+    
+    
+    
+    <div class="facet language">
+    <h4 class="facetHead">Language</h4>
+    <div class="facetEntry">
+    <span class="small">Loading...</span>
+</div>
+
+
+</div>
+
+
+    
+    
+    <div class="facet author_key">
+    <h4 class="facetHead">Author</h4>
+    <div class="facetEntry">
+    <span class="small">Loading...</span>
+</div>
+
+
+</div>
+
+
+    
+    
+    <div class="facet subject_facet">
+    <h4 class="facetHead">Subjects</h4>
+    <div class="facetEntry">
+    <span class="small">Loading...</span>
+</div>
+
+
+</div>
+
+
+    
+    
+    <div class="facet first_publish_year">
+    <h4 class="facetHead">First published</h4>
+    <div class="facetEntry">
+    <span class="small">Loading...</span>
+</div>
+
+
+</div>
+
+
+    
+    
+    <div class="facet publisher_facet">
+    <h4 class="facetHead">Publisher</h4>
+    <div class="facetEntry">
+    <span class="small">Loading...</span>
+</div>
+
+
+</div>
+
+
+    
+    
+    <div class="facet person_facet">
+    <h4 class="facetHead">People</h4>
+    <div class="facetEntry">
+    <span class="small">Loading...</span>
+</div>
+
+
+</div>
+
+
+    
+    
+    <div class="facet place_facet">
+    <h4 class="facetHead">Places</h4>
+    <div class="facetEntry">
+    <span class="small">Loading...</span>
+</div>
+
+
+</div>
+
+
+    
+    
+    <div class="facet time_facet">
+    <h4 class="facetHead">Times</h4>
+    <div class="facetEntry">
+    <span class="small">Loading...</span>
+</div>
+
+
+</div>
+
+
+    
+    
+</div>
+
+<!-- /facets -->
+    </div>
+  </div>
+</div>
+
+  </main>
+
+
+
+
+<!--For analytics-->
+
+<div class="clearfix"></div>
+
+
+<footer>
+  <div id="footer-content" >
+    <div id="footer-links">
+      <div>
+        <h2>Open Library</h2>
+        <ul>
+          <li><a href="/about/vision">Vision</a></li>
+          <li><a href="/volunteer">Volunteer</a></li>
+          <li><a href="/partner-with-us">Partner With Us</a></li>
+          <li><a href="https://archive.org/about/jobs.php" title="Jobs">Careers</a></li>
+          <li><a href="https://blog.openlibrary.org/">Blog</a></li>
+          <li><a href="https://archive.org/about/terms.php">Terms of Service</a></li>
+          <li><a href="https://archive.org/donate/?platform=ol&origin=olwww-TopNavDonateButton">Donate</a></li>
+        </ul>
+      </div>
+      <div>
+        <h2>Discover</h2>
+        <ul>
+          <li><a href="/" title="Go home">Home</a></li>
+          <li><a href="/search" title="Explore Books">Books</a></li>
+          <li><a href="/search/authors" title="Explore authors">Authors</a></li>
+          <li><a href="/subjects" title="Explore subjects">Subjects</a></li>
+          <li><a href="/collections" title="Explore collections">Collections</a></li>
+          <li><a href="/advancedsearch" title="Advanced Search">Advanced Search</a></li>
+          <li><a href="#top" title="Navigate to top of this page">Return to Top</a></li>
+        </ul>
+      </div>
+      <div>
+        <h2>Develop</h2>
+        <ul>
+          <li><a href="/developers" title="Explore Open Library Developer Center">Developer Center</a></li>
+          <li><a href="/developers/api" title="Explore Open Library APIs">API Documentation</a></li>
+          <li><a href="/developers/dumps" title="Bulk Open Library data">Bulk Data Dumps</a></li>
+          <li><a href="https://docs.openlibrary.org/developers/backend/writing-bots.html" title="Write a bot">Writing Bots</a></li>
+        </ul>
+      </div>
+      <div>
+        <h2>Help</h2>
+        <ul>
+          <li><a href="/help">Help Center</a></li>
+          <li><a href="mailto:openlibrary@archive.org?subject=Support Case" title="Contact">Contact Us</a></li>
+          <li><a href="/help/faq/editing" title="Suggest Edits">Suggesting Edits</a></li>
+          <li><a href="/books/add" title="Add a new book to Open Library">Add a Book</a></li>
+          <li><a href="https://github.com/internetarchive/openlibrary/releases" title="Release Notes">Release Notes</a></li>
+        </ul>
+        <aside>
+          <a class="footer-icon" title="Bluesky" href="https://bsky.app/profile/openlibrary.org"><img src="/static/images/bsky.svg" alt="Open Library on Bluesky" loading="lazy"></a>
+          <a class="footer-icon" title="Twitter" href="https://twitter.com/OpenLibrary"><img src="/static/images/tweet.svg" alt="Open Library on Twitter" loading="lazy"></a>
+          <a class="footer-icon" title="GitHub" href="https://github.com/internetarchive/openlibrary"><img src="/static/images/github.svg" alt="Open Library on GitHub" loading="lazy"></a>
+        </aside>
+      </div>
+      <div>
+        <h2>Change Website Language</h2>
+        
+<ul class="locale-options ">
+  <li><a href="#" lang="ar" data-lang-id="ar" title="Arabic">العربية (ar)</a></li> 
+  <li><a href="#" lang="cs" data-lang-id="cs" title="Czech">Čeština (cs)</a></li> 
+  <li><a href="#" lang="de" data-lang-id="de" title="German">Deutsch (de)</a></li> 
+  <li><a href="#" lang="en" data-lang-id="en" title="English">English (en)</a></li> 
+  <li><a href="#" lang="es" data-lang-id="es" title="Spanish">Español (es)</a></li> 
+  <li><a href="#" lang="fr" data-lang-id="fr" title="French">Français (fr)</a></li> 
+  <li><a href="#" lang="hi" data-lang-id="hi" title="Hindi">हिंदी (hi)</a></li> 
+  <li><a href="#" lang="hr" data-lang-id="hr" title="Croatian">Hrvatski (hr)</a></li> 
+  <li><a href="#" lang="it" data-lang-id="it" title="Italian">Italiano (it)</a></li> 
+  <li><a href="#" lang="ko" data-lang-id="ko" title="Korean">한국어 (ko)</a></li> 
+  <li><a href="#" lang="pt" data-lang-id="pt" title="Portuguese">Português (pt)</a></li> 
+  <li><a href="#" lang="ro" data-lang-id="ro" title="Romanian">Română (ro)</a></li> 
+  <li><a href="#" lang="sc" data-lang-id="sc" title="Sardinian">Sardu (sc)</a></li> 
+  <li><a href="#" lang="te" data-lang-id="te" title="Telugu">తెలుగు (te)</a></li> 
+  <li><a href="#" lang="uk" data-lang-id="uk" title="Ukrainian">Українська (uk)</a></li> 
+  <li><a href="#" lang="zh" data-lang-id="zh" title="Chinese">中文 (zh)</a></li> 
+  <li><a href="#" lang="tl" data-lang-id="tl" title="Filipino">Filipino (tl)</a></li> 
+</ul>
+
+      </div>
+    </div>
+    <hr>
+    <div id="footer-details">
+      <img id="archive-logo" src="/static/images/pantheon.png" alt="Open Library logo" loading="lazy">
+      <div id="legal-details" >
+        <span>Open Library is an initiative of the <a href="//archive.org/">Internet Archive</a>, a 501(c)(3) non-profit, building a digital library of Internet sites and other cultural artifacts in  digital form. Other <a href="//archive.org/projects/">projects</a> include the <a href="//archive.org/web/">Wayback Machine</a>, <a href="//archive.org/">archive.org</a> and <a href="//archive-it.org">archive-it.org</a></span>
+      </div>
+      <div id="version-details">
+        <span class="version">version <a href="https://github.com/internetarchive/openlibrary/commit/7ea6b9e">7ea6b9e</a></span>
+      </div>
+    </div>
+  </div>
+</footer>
+
+
+<script src="/cdn/archive.org/athena.js" type="text/javascript"></script>
+
+<script src="/static/build/js/all.js?v=557f2a3b0f92b7cc810aeba0b0f27a3a" type="text/javascript"></script>
+<script src="/static/build/lit-components/production/ol-components.js?v=926c9085790285c0520723f4c9756333" type="module"></script>
+<div class="analytics-stats-time-calculator" data-time="0"></div>
+</body>
+</html>
+

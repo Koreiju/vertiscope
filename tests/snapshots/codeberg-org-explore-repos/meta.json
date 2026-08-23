@@ -1,0 +1,17 @@
+{
+  "url": "https://codeberg.org/explore/repos",
+  "slug": "codeberg-org-explore-repos",
+  "stratum": "js-shell",
+  "captured_at": "2026-08-15T22:42:07.326445+00:00",
+  "seconds": 11.6,
+  "snapshots": [
+    {
+      "index": 0,
+      "pass": 1,
+      "chars": 107722,
+      "gz_bytes": 16380
+    }
+  ],
+  "repeated_passes": 5,
+  "settled": true
+}

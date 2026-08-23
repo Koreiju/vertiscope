@@ -1,0 +1,1656 @@
+/*
+ * sensor.js — a passive catamorphism cache over the composed tree.
+ *
+ * One fold computes, per node, in one visit:
+ *   spine        balanced aggregation over children: digest + count (rank)
+ *   content      commutative invertible fingerprint over tokens
+ *   chars        content size, for chunk boundaries
+ *   det          local content detections
+ *   sketch       fixed-width token counts, for containment tests
+ * and carries `path` downward as an inherited attribute.
+ *
+ * State lives in a WeakMap keyed on Node. Nothing is written to the DOM: no
+ * attributes, no expandos. Nothing reads layout. The only reachable surface
+ * is the handle returned by this IIFE, which the injector parks under a
+ * random non-enumerable property.
+ *
+ * Boundary contract (one round trip):
+ *   drain() -> {v, dict[], chunks[], removed[], stats{}}
+ */
+(function (CFG) {
+  'use strict';
+
+  // A factory expression, not a self-invocation: the injector applies it and
+  // keeps the returned handle. That keeps the module a single value with no
+  // statement of its own, so it can be embedded in any boot wrapper without
+  // the wrapper having to know how it ends.
+  CFG = CFG || {};
+  var BUDGET = CFG.budget > 0 ? CFG.budget : 1200;
+  var MERGE_AT = BUDGET >> 1;          // hysteresis: split at BUDGET, merge below half
+  // Both are reassigned by the `budget` axis below.
+  var DEBOUNCE = CFG.debounce > 0 ? CFG.debounce : 80;
+  var SKETCH_W = 16;                   // counters per node, fixed width
+
+  // Variants. Each names one mechanism from the design space and can be
+  // switched independently, so the harness can run the same pages through
+  // different combinations and compare them rather than argue about them.
+  // Each axis names one mechanism from the design-space notes and defaults to
+  // the choice the design settled on, so `variant <name> off` in the REPL
+  // reads the same page without it and the two can be compared rather than
+  // argued about.
+  var V = CFG.variants || {};
+  var USE_DEDUP = !!V.dedup;           // II §7  sketch-then-verify subsumption
+  var USE_GATE = V.gate !== false;     // II §10 emit only moved digests
+  var USE_CACHE = V.cache !== false;   // II §6  cache-consulting walk filter
+  var USE_INTERN = V.intern !== false; // II §10 / DS §J interned transport
+
+  // --- transport encodings ------------------------------------------------
+  // Measured: the payload is ~45% path and ~22% text, and drain time tracks
+  // payload at roughly 0.9 ms/KB, so what crosses the wire is the dominant
+  // per-pass cost. These four attack it from different directions and are
+  // off by default, because a transport that is not the one the decoder
+  // expects is a corruption, not a saving.
+  var USE_PATHDELTA = !!V.pathdelta;   // path as (shared prefix, suffix)
+  var USE_SHAPE = !!V.shape;           // shape table + per-line ordinals
+  var USE_VALDICT = !!V.valdict;       // intern line values, not just segments
+  var USE_PACKED = !!V.packed;         // int runs as one string, not an array
+
+  // --- work avoided -------------------------------------------------------
+  var USE_SUBTREEGATE = !!V.subtreegate;  // never descend an unmoved subtree
+  var USE_SPANS = !!V.spans;              // re-aggregate only the dirty range
+  var USE_VIEWPORT = !!V.viewport;        // emit what is on screen first
+
+  // --- chunking policy ----------------------------------------------------
+  var USE_MERGE = !!V.merge;       // MERGE_AT hysteresis: fold tiny siblings
+  var USE_SEMANTIC = !!V.semantic; // prefer heading/section boundaries
+  var USE_RANK = !!V.rank;         // heaviest subtree first, not document order
+  var WIDE = V.budget === 'wide', NARROW = V.budget === 'narrow';
+
+  // --- observation --------------------------------------------------------
+  var USE_WIDEATTRS = !!V.attrs;      // every attribute, not the content ten
+  var NO_CHARWATCH = V.charwatch === false;  // stop watching text mutations
+  var USE_PERCHUNK = !!V.perchunk;    // an observer per chunk root
+
+  // --- scheduling ---------------------------------------------------------
+  var USE_LAZY = !!V.lazy;    // no timer at all: repair only when drained
+  var USE_EAGER = !!V.eager;  // repair inside the mutation callback
+
+  // --- addressing ---------------------------------------------------------
+  var USE_ANCHORED = !!V.anchored;  // generalise ordinals below the landmark
+  var USE_IDANCHOR = !!V.idanchor;  // root the path at the nearest id
+
+  // --- dedup / suppression ------------------------------------------------
+  var USE_SIMHASH = !!V.simhash;    // near-duplicate, not exact containment
+  // simhash is a mode of dedup, not a peer of it: the suppression it changes
+  // only runs on the dedup path. Selecting it alone silently did nothing, so
+  // it turns dedup on rather than pretending to be independent.
+  if (USE_SIMHASH) USE_DEDUP = true;
+  // Content digests the receiver already holds, passed in at boot. This is
+  // the original serializer's `known_hashes` idea moved to where it pays:
+  // it prunes before the bytes cross rather than after.
+  var KNOWN = {};
+  if (CFG.known && CFG.known.length) {
+    for (var _k = 0; _k < CFG.known.length; _k++) KNOWN[CFG.known[_k]] = 1;
+  }
+  var USE_CROSSPAGE = !!V.crosspage;
+
+  // --- variants proposed from what the sweep measured ---------------------
+  // `chunkdelta`: the largest untested headroom. Every existing axis
+  // compresses *within* one payload; none exploits that a re-emitted chunk
+  // usually differs from its predecessor by a line or two. Send the lines
+  // that changed against the version the receiver already holds.
+  var USE_CHUNKDELTA = !!V.chunkdelta;
+  // `textdict`: interning covers path segments and, with `valdict`, whole
+  // line values. Neither helps prose, which is ~22% of the payload and
+  // mostly unique — but its *words* are not. A per-drain word dictionary
+  // costs one pass over text already in hand.
+  var USE_TEXTDICT = !!V.textdict;
+  // `coalesce`: measured drains showed many passes carrying a single
+  // changed chunk. Holding a drain until either N chunks or T ms have
+  // accumulated trades latency for round trips, and the boundary is the
+  // fixed cost.
+  var USE_COALESCE = !!V.coalesce;
+  // `deepgate`: `subtreegate` stops the *walk*; the fold above it still
+  // re-aggregates a clean subtree's ancestors. Carry the emitted digest
+  // upward so an unchanged branch is skipped before its parent sums it.
+  var USE_DEEPGATE = !!V.deepgate;
+
+  // `shape` and `pathdelta` both rewrite the same field, so they are not
+  // independent and must not both be believed in one sweep. Shape wins when
+  // both are set, and the flag reported back says which actually ran.
+  if (USE_SHAPE) USE_PATHDELTA = false;
+
+  if (WIDE) { BUDGET = BUDGET * 2; MERGE_AT = BUDGET >> 1; }
+  if (NARROW) { BUDGET = BUDGET >> 1; MERGE_AT = BUDGET >> 1; }
+
+  // Blocks a reader would not want split down the middle. `semantic` lets one
+  // of these overrun the budget rather than cut it, which trades a bigger
+  // chunk for a whole one — a quality choice, so `verify` judges it, not
+  // `compare`.
+  var SEMANTIC_TAGS = { ARTICLE: 1, SECTION: 1, LI: 1, TR: 1, BLOCKQUOTE: 1,
+                        FIGURE: 1, DD: 1, DT: 1, ASIDE: 1, MAIN: 1, NAV: 1,
+                        HEADER: 1, FOOTER: 1, FORM: 1, TABLE: 1, UL: 1, OL: 1 };
+  var LANDMARK_TAGS = { MAIN: 1, NAV: 1, ARTICLE: 1, SECTION: 1, ASIDE: 1,
+                        HEADER: 1, FOOTER: 1, FORM: 1, TABLE: 1 };
+
+  var SKIP_TAGS = { SCRIPT: 1, STYLE: 1, NOSCRIPT: 1, TEMPLATE: 1, svg: 1 };
+  var CONTENT_ATTRS = ['href', 'src', 'srcset', 'alt', 'aria-label', 'title',
+                       'value', 'placeholder', 'content', 'datetime'];
+  // With `attrs` on, every attribute is content. That is more of the page,
+  // and also every framework's bookkeeping — the cost of the wider net is
+  // exactly what the axis exists to price.
+  var ATTR_FILTER = USE_WIDEATTRS ? null : CONTENT_ATTRS;
+
+  // ---- state ------------------------------------------------------------
+  var records = new WeakMap();   // Node -> Record
+  var chunkOf = new WeakMap();   // Node -> {id, digest} for chunk roots only
+  var roots = new Map();         // root Node -> MutationObserver
+  var dirtySpans = new Map();    // parent Node -> {lo, hi}
+  var front = [], back = [];     // double-buffered emissions
+  var removedIds = [];
+  var chunkRoots = [];           // live chunk-root slots, for the removal sweep
+  var dict = [], dictIndex = new Map(), dictSent = 0;
+  var timer = null, chunkSeq = 1, version = 0;
+  var stats = { nodes: 0, folds: 0, repairs: 0, chunks: 0, spans: 0,
+                observers: 0, closedRoots: 0, errors: 0, skipped: 0,
+                sketchHits: 0, deduped: 0, pruned: 0, offscreen: 0,
+                sr_seen: 0, sr_badtype: 0, sr_badname: 0,
+                sr_novocab: 0, sr_hit: 0, sr_form: 0, sr_type: 0,
+                sr_url: 0, sr_queryform: 0, chunkDeltas: 0,
+                wordsInterned: 0, coalesced: 0, deepPruned: 0,
+                spanHits: 0, spanWide: 0, merged: 0, knownSkips: 0,
+                nearDups: 0 };
+
+  // ---- interning (§10) --------------------------------------------------
+  // With the axis off, a segment travels as its own string. The payload then
+  // needs no dictionary and no receiver state, and costs the difference —
+  // which is the point of being able to switch it.
+  function intern(s) {
+    if (!USE_INTERN) return s;
+    var id = dictIndex.get(s);
+    if (id === undefined) { id = dict.length; dict.push(s); dictIndex.set(s, id); }
+    return id;
+  }
+
+  // ---- hashing ----------------------------------------------------------
+  // 32-bit FNV-1a. Structure digests combine positionally; content
+  // fingerprints combine by addition mod 2^32, which is commutative and
+  // invertible so an ancestor repairs by subtract-old/add-new.
+  function fnv(s) {
+    var h = 0x811c9dc5;
+    for (var i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0;
+    }
+    return h >>> 0;
+  }
+  function mix(a, b) { return (((a << 5) - a) + b) >>> 0; }
+
+  // ---- tokens -----------------------------------------------------------
+  var TOKEN_RE = /[A-Za-z0-9À-￿]+/g;
+  function tokenize(text) {
+    if (!text) return null;
+    return text.toLowerCase().match(TOKEN_RE);
+  }
+
+  // ---- records ----------------------------------------------------------
+  // One shape, always the same fields in the same order, never deleted, so
+  // the JIT keeps a single hidden class for every record in the document.
+  function newRecord() {
+    return {
+      digest: 0,        // positional, over children
+      content: 0,       // commutative invertible, over tokens
+      chars: 0,
+      count: 1,         // subtree node count, doubles as spine rank weight
+      det: null,
+      sketch: null,
+      text: '',
+      toks: null,       // own tokens, for the exact containment check
+      tax: null,        // memoised [taxId, ruleId, rank]; local, not inherited
+      sim: 0,           // memoised simhash, for the near-duplicate axis
+      chunk: 0,
+      emit: -1,         // digest at last emission, for `subtreegate`
+      lo: -1,           // dirty child range, for `spans`
+      hi: -1,
+      // The aggregate over children as last computed, kept apart from the
+      // node's own totals (which also carry its detections). `spans` repairs
+      // these by subtract-old/add-new instead of re-summing every child —
+      // which is the whole reason the content fingerprint is commutative and
+      // invertible rather than positional like the digest.
+      kc: 0, kh: 0, kn: 0, ks: null,
+      dirty: true
+    };
+  }
+
+  // The element's own classification, computed once per fold. `taxonomyOf`
+  // needs the label text for the pagination vocabulary, and only anchors and
+  // buttons carry a label worth reading — bounded by the chunk budget, so
+  // this never walks a large subtree.
+  function taxOf(node, rec) {
+    if (rec.tax) return rec.tax;
+    var tag = node.tagName, text = '';
+    if ((tag === 'A' || tag === 'BUTTON') && rec.chars <= BUDGET) {
+      try { text = node.textContent || ''; } catch (e) { text = ''; }
+    }
+    var t = taxonomyOf(node, text);
+    rec.tax = [intern(t[0]), intern(t[1]), TAX_RANK[t[0]] || 0];
+    return rec.tax;
+  }
+
+  function sketchOf(tokens, into) {
+    var s = into || new Uint16Array(SKETCH_W);
+    if (tokens) {
+      for (var i = 0; i < tokens.length; i++) {
+        s[fnv(tokens[i]) & (SKETCH_W - 1)] += 1;
+      }
+    }
+    return s;
+  }
+  function sketchAdd(dst, src) {
+    for (var i = 0; i < SKETCH_W; i++) dst[i] += src[i];
+    return dst;
+  }
+  // §7 step one: does the ancestor account for every counter of the child?
+  function covers(anc, child) {
+    for (var i = 0; i < SKETCH_W; i++) if (child[i] > anc[i]) return false;
+    return true;
+  }
+
+
+  // ---- the detection bank ------------------------------------------------
+  // Every entry has an address, and that address is the `@regex-addr` tail of
+  // the §1 path — so a rendered line can name the rule that found it. The
+  // taxonomy it returns is the `@taxonomy` segment, which decides what
+  // markdown field the content becomes.
+  //
+  // Negative vocabularies matter more than positive ones here: on a real page
+  // "next" appears in a video player, a cart and a social toolbar long before
+  // it appears in a pager. Ported from the collectors in
+  // backend/dom/web_distiller_freq.py.
+  var SEARCH_VOCAB = ['search', 'query', 'find', 'keyword', 'lookup', 'srch',
+                      'buscar', 'recherche', 'suche'];
+  var SEARCH_BAD_TYPE = { hidden: 1, email: 1, checkbox: 1, radio: 1, file: 1,
+                          image: 1, color: 1, date: 1, range: 1, password: 1 };
+  var SEARCH_BAD_NAME = /(first.?name|last.?name|subbox|subscribe|signup|newsletter|password|captcha|token|nonce|csrf|turnstile)/i;
+
+  var PAGE_NEG = { player: 1, volume: 1, mute: 1, fullscreen: 1, pip: 1,
+                   rewind: 1, scrub: 1, playback: 1, audio: 1, video: 1,
+                   cart: 1, wishlist: 1, addtocart: 1, reply: 1, repost: 1,
+                   retweet: 1, bookmark: 1, dropdown: 1, haspopup: 1,
+                   favorite: 1, share: 1, social: 1 };
+  var PAGE_WIDGET_DENY = { 'slick-fab': 1, 'slick-heartbeat': 1,
+                           'soso-button': 1, 'soso-icon-button': 1,
+                           'soso-icon': 1 };
+
+  // Specificity. Taxonomy descends as an inherited attribute (§1: the
+  // `@taxonomy` segment belongs to the extracted content, not to whichever
+  // element happens to hold the characters), and a descendant overrides an
+  // ancestor only when it is at least as specific. That is what makes inline
+  // wrappers transparent without enumerating them: SPAN, EM, SMALL and their
+  // kind classify as `paragraph`, rank 0, which never overrides — so text
+  // inside `<h1><span>` is a heading, and text inside `<blockquote><p>` is a
+  // quote. Equal ranks let the deeper element win, so LI beats UL.
+  var TAX_RANK = { paragraph: 0, field: 3, control: 3, link: 3,
+                   list: 4, table: 4, quote: 4, code: 4, media: 4, form: 4,
+                   heading: 5, search: 6, pagination: 6 };
+
+  var HEADING = { H1: 1, H2: 2, H3: 3, H4: 4, H5: 5, H6: 6 };
+  var LIST_TAGS = { UL: 1, OL: 1, LI: 1, DL: 1, DT: 1, DD: 1 };
+  var MEDIA_TAGS = { IMG: 1, PICTURE: 1, VIDEO: 1, AUDIO: 1, SOURCE: 1,
+                     FIGURE: 1, CANVAS: 1, OBJECT: 1, EMBED: 1 };
+
+  function attrSoup(el) {
+    var s = el.tagName.toLowerCase(), a = el.attributes, i;
+    for (i = 0; i < a.length; i++) {
+      s += ' ' + a[i].name.toLowerCase() + '=' + (a[i].value || '').toLowerCase();
+    }
+    return s;
+  }
+
+  function hasNeg(soup, table) {
+    for (var k in table) if (soup.indexOf(k) !== -1) return true;
+    return false;
+  }
+
+  // A whole label that names a pager. Anchored at both ends on purpose: a
+  // pager says what it is and nothing else, so "Next" is one and "Search
+  // with your voice" is not, however much markup happens to contain "next".
+  var PAGE_LABEL = new RegExp(
+    '^[\\s«»‹›←→]*(?:' +
+      '\\d{1,4}' +                                   // 1 2 3 …
+      '|(?:load|show|see|view|read)\\s+more(?:\\s+\\w+)?' +
+      '|more\\s+(?:results|pages|items|posts|stories|articles|entries|comments)' +
+      '|next(?:\\s+(?:page|results|set))?' +
+      '|prev(?:ious)?(?:\\s+(?:page|results|set))?' +
+      '|(?:older|newer)(?:\\s+\\w+)?' +
+      '|continue(?:\\s+reading)?' +
+      '|first(?:\\s+page)?|last(?:\\s+page)?' +
+    ')[\\s«»‹›←→]*$', 'i');
+
+  // A bare number is a page number only inside something that says it is a
+  // pager. Four levels is enough for `nav > ul > li > a` and stops there.
+  function nearPagerContainer(el) {
+    var n = el, hops = 0;
+    while (n && n.nodeType === 1 && hops++ < 4) {
+      var id = ((n.className && n.className.baseVal !== undefined
+                 ? n.className.baseVal : n.className) || '') + ' ' + (n.id || '');
+      if (/paginat|pager\b|page-nav|page-numbers/i.test(id)) return true;
+      var role = n.getAttribute && n.getAttribute('aria-label');
+      if (role && /paginat|pages?\b/i.test(role)) return true;
+      n = n.parentNode;
+    }
+    return false;
+  }
+
+  // ---- structural signals ------------------------------------------------
+  // Vocabulary is a guess about what a page calls a thing. These are
+  // statements about what the thing *is*, and they hold in any language.
+
+  // A field whose name appears as a query parameter of the page you are
+  // standing on produced this page. Nothing needs to be recognised: the URL
+  // is the evidence, and it is evidence the site itself wrote.
+  function fieldEchoedInUrl(name) {
+    if (!name) return false;
+    try {
+      var qs = location.search || '';
+      if (!qs) return false;
+      var esc = String(name).replace(/[^A-Za-z0-9_]/g, '\$&');
+      return new RegExp('[?&]' + esc + '=').test(qs);
+    } catch (e) { return false; }
+  }
+
+  // A GET form carrying exactly one visible text field and nothing else to
+  // fill in is a query form. That is what "search" *means* structurally —
+  // submitting it can only produce a URL with that field in the query — and
+  // it is true of sites that call the field `q`, `s`, `term`, or nothing.
+  function isQueryForm(el) {
+    var f = null;
+    try { f = el.form || (el.closest ? el.closest('form') : null); }
+    catch (e) { return false; }
+    if (!f) return false;
+    var method = ((f.getAttribute && f.getAttribute('method')) || 'get')
+      .toLowerCase();
+    if (method !== 'get') return false;
+    var els = f.elements || [], texts = 0, others = 0, i, c, t;
+    for (i = 0; i < els.length; i++) {
+      c = els[i];
+      t = ((c.type || '') + '').toLowerCase();
+      if (t === 'hidden' || t === 'submit' || t === 'image' || t === 'button'
+          || c.tagName === 'BUTTON') continue;
+      if (t === 'text' || t === 'search' || t === ''
+          || c.tagName === 'TEXTAREA') texts++;
+      else others++;
+    }
+    return texts === 1 && others === 0;
+  }
+
+  // Sibling links whose hrefs are identical except for their digits are a
+  // pager, whatever they are labelled. `?page=2` beside `?page=3` beside
+  // `?page=4` is a pagination control in every language there is, and the
+  // vocabulary bank never has to have heard of the site.
+  function numericFamily(el) {
+    var href = el.getAttribute && el.getAttribute('href');
+    if (!href || !/\d/.test(href)) return false;
+    var scope = el.parentNode;
+    for (var up = 0; up < 3 && scope && scope.parentNode; up++) {
+      scope = scope.parentNode;
+    }
+    if (!scope || !scope.querySelectorAll) return false;
+    var links = scope.querySelectorAll('a[href]');
+    if (links.length < 3) return false;
+    var mask = function (h) { return h.replace(/\d+/g, '#'); };
+    var mine = mask(href), seen = {}, n = 0, i, h, m;
+    for (i = 0; i < links.length; i++) {
+      h = links[i].getAttribute('href');
+      if (!h || mask(h) !== mine) continue;
+      m = h.match(/\d+/g);
+      if (!m) continue;
+      var key = m.join(',');
+      if (!seen[key]) { seen[key] = 1; n++; }
+    }
+    // Three distinct members of one numeric family, differing only in their
+    // digits. Two is a coincidence; three is a series.
+    return n >= 3;
+  }
+
+  // -> the rule that fired, i.e. the `@regex-addr` tail, or null
+  function pagerSignal(el, lowText) {
+    // The standard first: rel=next / rel=prev is what the spec provides for
+    // exactly this, and a page that uses it is telling us outright.
+    var rel = (el.getAttribute && el.getAttribute('rel') || '').toLowerCase();
+    if (/(^|\s)(next|prev|previous)(\s|$)/.test(rel)) return 'pagination.rel';
+
+    // A numeric family of sibling links is a pager in any language. This
+    // sits above the label vocabulary because it needs no words at all: the
+    // site's own url scheme is the evidence, and a page that numbers its
+    // pages has told us where they are without naming them.
+    if (numericFamily(el)) return 'pagination.family';
+
+    // Then the accessible name — what a reader would call the control.
+    var label = lowText;
+    if (!label && el.getAttribute) {
+      // `value` last, and it matters: a great many pagers are
+      // `<input type=submit value="Next">`, which has no text content at all.
+      label = (el.getAttribute('aria-label') || el.getAttribute('title')
+               || el.getAttribute('value') || '').trim().toLowerCase();
+    }
+    if (label && label.length <= 40 && PAGE_LABEL.test(label)) {
+      if (/^[\s«»‹›←→]*\d{1,4}[\s«»‹›←→]*$/.test(label)
+          && !nearPagerContainer(el)) {
+        return null;                      // a bare number, but not in a pager
+      }
+      return 'pagination.label';
+    }
+
+    // Finally a class or id that names pagination outright. Whole tokens
+    // only, which is the difference between `pagination` and `shape-next`.
+    var cls = ((el.className && el.className.baseVal !== undefined
+                ? el.className.baseVal : el.className) || '')
+              + ' ' + (el.id || '');
+    if (/(^|[\s_-])(paginat\w*|pager|page-numbers|load-?more)([\s_-]|$)/i
+        .test(cls)) return 'pagination.class';
+    return null;
+  }
+
+  // -> [taxonomy, regexAddr]
+  function taxonomyOf(el, text) {
+    var tag = el.tagName;
+    var soup = attrSoup(el);
+    var lowText = (text || '').trim().toLowerCase();
+    var i;
+
+    // search: an input-ish thing whose vocabulary says search and whose
+    // type and name do not say something else entirely
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT'
+        || /role="?(search|searchbox|combobox)/.test(soup)) {
+      var type = (el.getAttribute && el.getAttribute('type') || '').toLowerCase();
+      var name = (el.getAttribute && el.getAttribute('name') || '');
+      // A submit whose label names a page is a pager, and this is not an
+      // edge case: html.duckduckgo.com — generic search results, the most
+      // ordinary page there is — turns its pages with
+      // `<input type=submit value="Next">`, which the A/BUTTON-only branch
+      // below could never see.
+      if (type === 'submit' || type === 'button' || type === 'image') {
+        var ph = pagerSignal(el, '');
+        if (ph) return ['pagination', ph];
+      }
+      // Counted, not just decided. Search is found on ~65% of pages and
+      // nothing said what the other third looked like: a page with no box
+      // at all and a page whose box was rejected are the same outcome and
+      // completely different problems.
+      stats.sr_seen++;
+      if (SEARCH_BAD_TYPE[type]) { stats.sr_badtype++; return ['field', 'field.input']; }
+      if (SEARCH_BAD_NAME.test(name)) { stats.sr_badname++; return ['field', 'field.input']; }
+      // Structure first. The URL echo is the strongest evidence there is —
+      // the page in front of us was produced by submitting this field — and
+      // the query-form shape is what "search" means independently of what
+      // the site calls it. Vocabulary is the fallback now, not the rule.
+      if (fieldEchoedInUrl(name)) { stats.sr_url++; return ['search', 'search.urlparam']; }
+      if (isQueryForm(el)) { stats.sr_queryform++; return ['search', 'search.queryform']; }
+      for (i = 0; i < SEARCH_VOCAB.length; i++) {
+        if (soup.indexOf(SEARCH_VOCAB[i]) !== -1) {
+          stats.sr_hit++;
+          return ['search', 'search.vocab'];
+        }
+      }
+      // The vocabulary missed. Before giving up, ask the *form* — a text
+      // input alone in a form that submits to a search endpoint is a search
+      // box whatever it calls itself, and plenty of sites name the field
+      // `q`, `s`, `term` or nothing at all.
+      if (type === '' || type === 'text' || type === 'search'
+          || tag === 'TEXTAREA') {
+        var f = el.form || (el.closest ? el.closest('form') : null);
+        if (f) {
+          var act = ((f.getAttribute && f.getAttribute('action')) || '')
+            .toLowerCase();
+          var frole = ((f.getAttribute && f.getAttribute('role')) || '')
+            .toLowerCase();
+          if (frole === 'search' || /search|find|query|suche|recherche/.test(act)) {
+            stats.sr_form++;
+            return ['search', 'search.form'];
+          }
+        }
+        if (type === 'search') { stats.sr_type++; return ['search', 'search.type']; }
+      }
+      stats.sr_novocab++;
+      return ['field', 'field.input'];
+    }
+
+    // pagination: anchors and buttons only, and judged on the control's
+    // *name* rather than on its markup. Searching the whole attribute soup
+    // for a bare substring is what made this useless on a real page:
+    // YouTube's design system calls a component `yt-spec-button-shape-next`,
+    // so 37 controls on one results page matched "next" — the mic button,
+    // "My Ad Center", "Filters", and "Sign in", whose return URL carries a
+    // `next=` query parameter. Class names and query strings are not
+    // evidence about what a control does; its accessible name is.
+    if (tag === 'A' || tag === 'BUTTON') {
+      if (!PAGE_WIDGET_DENY[tag.toLowerCase()] && !hasNeg(soup, PAGE_NEG)) {
+        var how = pagerSignal(el, lowText);
+        if (how) return ['pagination', how];
+      }
+      if (tag === 'A') return ['link', 'link.anchor'];
+      return ['control', 'control.button'];
+    }
+
+    if (HEADING[tag]) return ['heading', 'heading.tag'];
+    if (LIST_TAGS[tag]) return ['list', 'list.tag'];
+    if (tag === 'TABLE' || tag === 'TR' || tag === 'TD' || tag === 'TH')
+      return ['table', 'table.tag'];
+    if (tag === 'BLOCKQUOTE' || tag === 'Q') return ['quote', 'quote.tag'];
+    if (tag === 'PRE' || tag === 'CODE') return ['code', 'code.tag'];
+    if (MEDIA_TAGS[tag]) return ['media', 'media.tag'];
+    if (tag === 'FORM') return ['form', 'form.tag'];
+    return ['paragraph', 'text.visible'];
+  }
+
+  // ---- detection (§6: the rules live in one place) ----------------------
+  function detect(el, rec) {
+    var out = null, i, name, val;
+    var tag = el.tagName;
+    if (USE_WIDEATTRS) {
+      // Every attribute is content. Widening the observer alone changed
+      // nothing measurable, because extraction still read the chosen ten —
+      // the axis has to move both ends or it is only pretending to.
+      var all = el.attributes || [];
+      for (i = 0; i < all.length; i++) {
+        val = all[i].value;
+        if (!val) continue;
+        (out || (out = [])).push([intern(all[i].name), val]);
+      }
+    } else {
+    for (i = 0; i < CONTENT_ATTRS.length; i++) {
+      name = CONTENT_ATTRS[i];
+      if (!el.hasAttribute || !el.hasAttribute(name)) continue;
+      val = el.getAttribute(name);
+      if (!val) continue;
+      (out || (out = [])).push([intern(name), val]);
+    }
+    }
+    if (tag === 'A' || tag === 'AREA') { /* link-ness implied by href above */ }
+    else if (tag === 'INPUT' || tag === 'BUTTON' || tag === 'SELECT' ||
+             tag === 'TEXTAREA') {
+      (out || (out = [])).push([intern('@control'), tag.toLowerCase()]);
+    } else if (el.hasAttribute && el.hasAttribute('role')) {
+      (out || (out = [])).push([intern('@role'), el.getAttribute('role')]);
+    }
+    return out;
+  }
+
+  // ---- composed children -----------------------------------------------
+  // Shadow children come first and are counted apart from light ones. Sharing
+  // one ordinal namespace shifted every light-DOM index on a shadow host — a
+  // host whose shadow root holds a <div> made the host's own first <div> read
+  // as div[2], which no engine would resolve. `shadowCount` marks where the
+  // boundary falls so callers can address across it explicitly.
+  function childrenOf(node) {
+    var kids = [], n = 0;
+    if (node.shadowRoot) {
+      var sk = node.shadowRoot.childNodes;
+      for (var i = 0; i < sk.length; i++) kids.push(sk[i]);
+      n = sk.length;
+      observe(node.shadowRoot);
+    }
+    var ck = node.childNodes;
+    for (var j = 0; j < ck.length; j++) kids.push(ck[j]);
+    kids.shadowCount = n;
+    return kids;
+  }
+
+  // One path step for a child, in the composed tree. `counts` and `scounts`
+  // are separate ordinal namespaces; crossing into the shadow root inserts an
+  // explicit `#shadow-root` step, so the address says where the boundary is
+  // rather than hiding it in an index.
+  var SHADOW_SEG = null;
+  function stepFor(kid, path, inShadow, counts, scounts) {
+    var c = inShadow ? scounts : counts, key, tag;
+    if (kid.nodeType === 1) {
+      if (SKIP_TAGS[kid.tagName]) return null;
+      tag = kid.tagName.toLowerCase();
+      key = tag;
+    } else if (kid.nodeType === 3) {
+      tag = '#text';
+      key = tag;
+    } else return null;
+    c[key] = (c[key] || 0) + 1;
+    if (!inShadow) return path.concat([intern(tag), c[key]]);
+    if (SHADOW_SEG === null) SHADOW_SEG = intern('#shadow-root');
+    return path.concat([SHADOW_SEG, 1, intern(tag), c[key]]);
+  }
+
+  // ---- the fold ---------------------------------------------------------
+  // Post-order. Children first, then this node's summaries from theirs.
+  // A node whose record is present and clean is returned untouched, which
+  // is where incrementality actually lives: a clean subtree costs one map
+  // lookup, not a traversal.
+  function fold(node) {
+    var rec = records.get(node);
+    // The whole of incrementality is this line: a clean subtree costs one map
+    // lookup instead of a traversal. With the axis off every node is re-folded
+    // on every repair, which is the O(page) baseline the design is measured
+    // against — not a mode anyone should run, but the one that says what the
+    // cache is worth.
+    if (rec && !rec.dirty && USE_CACHE) return rec;
+    // `deepgate`: a node marked dirty only because a *sibling* changed has
+    // nothing of its own to recompute. `cache` returns a clean record
+    // untouched; this catches the case one level up, where the parent is
+    // dirty and most of its children are not, and stops the aggregation
+    // from descending into branches whose digest has not moved since they
+    // were last emitted.
+    if (USE_DEEPGATE && rec && rec.digest !== 0 && rec.emit === rec.digest) {
+      rec.dirty = false;
+      stats.deepPruned++;
+      return rec;
+    }
+
+    var type = node.nodeType;
+    if (type === 3) {                       // text
+      rec = rec || newRecord();
+      var t = node.nodeValue || '';
+      var trimmed = t.trim();
+      rec.text = trimmed;
+      rec.chars = trimmed.length;
+      rec.count = 1;
+      var toks = tokenize(trimmed);
+      rec.digest = trimmed ? fnv('t|' + trimmed) : 0;
+      rec.content = rec.digest;
+      rec.sketch = sketchOf(toks, rec.sketch && rec.sketch.fill(0));
+      rec.toks = toks;
+      rec.det = null;
+      rec.tax = null;
+      rec.dirty = false;
+      records.set(node, rec);
+      stats.folds++;
+      return rec;
+    }
+    if (type !== 1) return null;            // comments, doctype: no record
+    if (SKIP_TAGS[node.tagName]) return null;
+
+    rec = rec || newRecord();
+    if (rec.sketch) rec.sketch.fill(0); else rec.sketch = new Uint16Array(SKETCH_W);
+    rec.chars = 0; rec.count = 1; rec.content = 0; rec.text = ''; rec.tax = null;
+
+    var d = fnv(node.tagName);
+    var kids = childrenOf(node), i, k, kr;
+    // The span path: re-fold only the children a mutation actually touched
+    // and repair the aggregate by subtracting what they contributed before
+    // and adding what they contribute now. Every quantity here is
+    // commutative and invertible, which is why this is possible at all; the
+    // digest is positional and is recomputed by walking the children's
+    // cached digests, which costs a map lookup each and no recursion.
+    //
+    // It falls back to the full sum whenever the bookkeeping cannot be
+    // trusted — no cached aggregate, a child count that moved, a span that
+    // covers everything — because a wrong aggregate is a wrong digest is a
+    // wrong chunk, and the saving is not worth that.
+    var spanned = USE_SPANS && rec.ks !== null && rec.lo >= 0
+      && rec.kn >= 0 && rec.hi <= kids.length && rec.lo < rec.hi
+      && (rec.hi - rec.lo) < kids.length;
+    if (spanned) {
+      stats.spanHits++;
+      var kc = rec.kc, kh = rec.kh, kn = rec.kn, ks = rec.ks;
+      var old16 = new Uint16Array(SKETCH_W);
+      for (i = rec.lo; i < rec.hi; i++) {
+        var before = records.get(kids[i]);
+        if (before) {
+          kc = (kc - before.content) >>> 0;
+          kh -= before.chars;
+          kn -= before.count;
+          if (before.sketch) old16.set(before.sketch);
+          else old16.fill(0);
+        } else {
+          old16.fill(0);
+        }
+        kr = fold(kids[i]);
+        if (kr) {
+          kc = (kc + kr.content) >>> 0;
+          kh += kr.chars;
+          kn += kr.count;
+          for (k = 0; k < SKETCH_W; k++) {
+            ks[k] = (ks[k] - old16[k] + (kr.sketch ? kr.sketch[k] : 0));
+          }
+        } else {
+          for (k = 0; k < SKETCH_W; k++) ks[k] = ks[k] - old16[k];
+        }
+      }
+      rec.kc = kc; rec.kh = kh; rec.kn = kn;
+      rec.content = kc; rec.chars = kh; rec.count = 1 + kn;
+      rec.sketch.set(ks);
+      for (i = 0; i < kids.length; i++) {
+        kr = records.get(kids[i]);
+        if (kr) d = mix(d, kr.digest);
+      }
+    } else {
+      var akc = 0, akh = 0, akn = 0;
+      for (i = 0; i < kids.length; i++) {
+        kr = fold(kids[i]);
+        if (!kr) continue;
+        d = mix(d, kr.digest);                       // positional
+        rec.content = (rec.content + kr.content) >>> 0;   // commutative
+        rec.chars += kr.chars;
+        rec.count += kr.count;
+        sketchAdd(rec.sketch, kr.sketch);
+        akc = (akc + kr.content) >>> 0; akh += kr.chars; akn += kr.count;
+      }
+      if (USE_SPANS) {
+        rec.kc = akc; rec.kh = akh; rec.kn = akn;
+        if (rec.ks === null) rec.ks = new Uint16Array(SKETCH_W);
+        rec.ks.set(rec.sketch);
+      }
+    }
+    rec.lo = -1; rec.hi = -1;
+    rec.det = detect(node, rec);
+    if (rec.det) {
+      for (i = 0; i < rec.det.length; i++) {
+        var av = fnv(String(rec.det[i][1]));
+        d = mix(d, av);
+        rec.content = (rec.content + av) >>> 0;
+        rec.chars += String(rec.det[i][1]).length;
+      }
+    }
+    rec.digest = d >>> 0;
+    rec.dirty = false;
+    records.set(node, rec);
+    stats.folds++;
+    return rec;
+  }
+
+  // ---- chunking (§2) ----------------------------------------------------
+  // A node is a chunk root when it fits the budget and its parent does not.
+  // Emission walks down only until the predicate fires, so a settled region
+  // is never descended into.
+  function emitChunks(node, path, out) {
+    var rec = records.get(node);
+    if (!rec) return;
+    if (rec.chars === 0) return;
+    // `semantic` lets a block a reader thinks of as one thing stay one
+    // thing: a list item or a table row may overrun the budget rather than
+    // be cut in half. Bounded at twice the budget so a whole <main> cannot
+    // swallow the page.
+    var limit = BUDGET;
+    if (USE_SEMANTIC && node.nodeType === 1 && SEMANTIC_TAGS[node.tagName]) {
+      limit = BUDGET * 2;
+    }
+    if (rec.chars <= limit) {
+      // A chunk is emitted only when its digest differs from the one last
+      // sent. The digest is already maintained by the fold, so this costs a
+      // comparison and turns the drain into a statement about what changed
+      // rather than a re-description of the page.
+      var prev = chunkOf.get(node);
+      if (USE_GATE && prev && prev.digest === rec.digest) {
+        stats.skipped++; return;
+      }
+      // Read what is on screen first. This is the one emission rule that
+      // changes *what arrives*, not merely how much or how fast, so it is
+      // the one that has to be judged by `verify` rather than by `compare`:
+      // a page read this way is a different reading, not a cheaper one.
+      if (USE_VIEWPORT && node.getBoundingClientRect) {
+        var r = node.getBoundingClientRect();
+        var vh = window.innerHeight || 0;
+        if (!(r.width === 0 && r.height === 0)
+            && (r.bottom < -vh || r.top > vh * 2)) {
+          stats.offscreen++; return;
+        }
+      }
+      // The receiver already holds this content under some url. Skipping
+      // here is the original serializer's `known_hashes` prune moved to the
+      // side of the boundary where it saves the crossing rather than the
+      // storage — boilerplate that repeats across a crawl is 15-30% of
+      // consecutive pages by measurement.
+      if (USE_CROSSPAGE && KNOWN[String(rec.content)]) {
+        stats.knownSkips++; return;
+      }
+      out.push(makeChunk(node, path, rec));
+      return;
+    }
+    // An interior node whose digest has not moved since the last emission
+    // contains nothing that has moved — that is the Merkle property the fold
+    // already maintains. Without this the walk descends to every chunk root
+    // on every repair (measured: 89 gate-skips per idle drain on YouTube)
+    // and only then finds nothing to say.
+    if (USE_SUBTREEGATE && rec.emit === rec.digest) { stats.pruned++; return; }
+    var kids = childrenOf(node), nsh = kids.shadowCount;
+    var counts = {}, scounts = {}, i, kid, seg;
+    // `merge` is the other half of the hysteresis the budget was always
+    // described as having: split above BUDGET, and gather back up below
+    // MERGE_AT. Without it a parent that overruns the budget scatters into
+    // one chunk per tiny child, and each one pays a whole path.
+    var run = [], runChars = 0;
+    function flushRun() {
+      if (!run.length) return;
+      if (run.length === 1) {
+        emitChunks(run[0].node, run[0].seg, out);
+      } else {
+        var merged = makeMerged(run, path);
+        if (merged) out.push(merged);
+      }
+      run = []; runChars = 0;
+    }
+    for (i = 0; i < kids.length; i++) {
+      kid = kids[i];
+      seg = stepFor(kid, path, i < nsh, counts, scounts);
+      if (seg === null) continue;
+      if (USE_MERGE) {
+        var krec = records.get(kid);
+        // A node with no content emits nothing, so it must not *interrupt* a
+        // run either. Whitespace text nodes sit between every pair of
+        // element siblings in real markup, and treating them as run-breakers
+        // cut every run to length one — the axis measured as a perfect
+        // no-op on a page where eleven siblings were waiting to be merged.
+        if (!krec || krec.chars === 0) continue;
+        if (krec.chars <= MERGE_AT
+            && runChars + krec.chars <= BUDGET) {
+          run.push({ node: kid, seg: seg, rec: krec });
+          runChars += krec.chars;
+          continue;
+        }
+        flushRun();
+      }
+      emitChunks(kid, seg, out);
+    }
+    if (USE_MERGE) flushRun();
+    rec.emit = rec.digest;
+  }
+
+  // One chunk made of several adjacent siblings. Its identity is the first
+  // member's, so a run that keeps its head keeps its chunk id across passes.
+  function makeMerged(run, parentPath) {
+    var first = run[0];
+    var slot = chunkOf.get(first.node);
+    if (!slot) {
+      slot = { id: chunkSeq++, digest: 0, tracked: false, node: first.node };
+      chunkOf.set(first.node, slot);
+      chunkRoots.push(slot);
+      slot.tracked = true;
+    }
+    var d = 0, chars = 0, lines = [], i;
+    if (!TAX_ROOT) TAX_ROOT = [intern('paragraph'), intern('text.visible'), 0];
+    for (i = 0; i < run.length; i++) {
+      d = mix(d, run[i].rec.digest);
+      chars += run[i].rec.chars;
+      collectLines(run[i].node, run[i].seg, run[i].rec, 0, lines, [], TAX_ROOT);
+    }
+    d = d >>> 0;
+    if (USE_GATE && slot.digest === d) { stats.skipped++; return null; }
+    slot.digest = d;
+    slot.node = first.node;
+    encodeLines(lines);
+    stats.chunks++;
+    stats.merged += run.length;
+    return { id: slot.id, path: parentPath, digest: d, chars: chars,
+             content: d, lines: lines };
+  }
+
+  // ---- transport encodings ----------------------------------------------
+  // Applied once, over the finished line list, in a fixed order the decoder
+  // mirrors in reverse. Kept out of `collectLines` on purpose: collection is
+  // about what the page says, encoding is about how it travels, and mixing
+  // the two is how a wire format starts deciding what content exists.
+  //
+  // A line is [depth, text, path, attr, seq, taxId, ruleId] and `path` is a
+  // flat [tagId, ord, tagId, ord, ...] run. Only the line paths are
+  // transformed; a chunk's own path is one per chunk and not worth the
+  // asymmetry.
+  var shapes = [], shapeIndex = new Map(), shapesSent = 0;
+
+  function shapeIdOf(path) {
+    var tags = [], i;
+    for (i = 0; i < path.length; i += 2) tags.push(path[i]);
+    var key = tags.join(',');
+    var id = shapeIndex.get(key);
+    if (id === undefined) {
+      id = shapes.length;
+      shapes.push(tags);
+      shapeIndex.set(key, id);
+    }
+    return id;
+  }
+
+  // Landmark tag ids, resolved lazily because interning happens as the walk
+  // proceeds and these may not exist yet at module load.
+  var LANDMARK_IDS = null;
+  function landmarkIds() {
+    if (LANDMARK_IDS) return LANDMARK_IDS;
+    LANDMARK_IDS = {};
+    for (var t in LANDMARK_TAGS) LANDMARK_IDS[intern(t.toLowerCase())] = 1;
+    return LANDMARK_IDS;
+  }
+
+  // `anchored`: keep everything down to the deepest landmark verbatim and
+  // erase the ordinals below it. The address then names a *kind* of place
+  // rather than one node, which is what makes two rows of a list comparable
+  // — and what makes the address stop resolving to exactly one element.
+  // That trade is the measurement.
+  function anchorPath(path) {
+    var ids = landmarkIds(), cut = -1, i;
+    for (i = 0; i < path.length; i += 2) if (ids[path[i]]) cut = i;
+    if (cut < 0) return path;
+    var out = path.slice(0);
+    for (i = cut + 2; i < out.length; i += 2) out[i + 1] = 0;
+    return out;
+  }
+
+  function encodeLines(lines) {
+    var prev = null, i, j, k, ln, path, out;
+    for (i = 0; i < lines.length; i++) {
+      ln = lines[i];
+      if (USE_VALDICT && typeof ln[1] === 'string') ln[1] = intern(ln[1]);
+      else if (USE_TEXTDICT && typeof ln[1] === 'string'
+               && ln[1].length > 12) {
+        // Prose is mostly unique; its words are not. `valdict` cannot help
+        // where no two sentences match, but almost every noun repeats — so
+        // intern per word and send a run of ids. Marked with a leading -1 so
+        // the receiver can tell a word-run from a path.
+        var ws = ln[1].split(' ');
+        if (ws.length > 2) {
+          var enc = [-1], wi;
+          for (wi = 0; wi < ws.length; wi++) enc.push(intern(ws[wi]));
+          stats.wordsInterned += ws.length;
+          ln[1] = enc;
+        }
+      }
+      path = ln[2];
+      if (USE_ANCHORED) { path = anchorPath(path); ln[2] = path; }
+      if (USE_SHAPE) {
+        // The tag sequence repeats overwhelmingly — 15 distinct shapes for
+        // 86 lines on one page, 29 for 290 on another — so it is sent once
+        // in a table and each line carries an id plus its own ordinals.
+        out = [shapeIdOf(path)];
+        for (j = 1; j < path.length; j += 2) out.push(path[j]);
+        ln[2] = out;
+      } else if (USE_PATHDELTA) {
+        // Consecutive lines in a post-order walk share nearly their whole
+        // prefix, so each carries how much of the previous path it keeps
+        // and only what differs after that.
+        k = 0;
+        if (prev) {
+          while (k < path.length && k < prev.length && path[k] === prev[k]) k++;
+        }
+        out = [k];
+        for (j = k; j < path.length; j++) out.push(path[j]);
+        prev = path;
+        ln[2] = out;
+      }
+      if (USE_PACKED && ln[2] && ln[2].join) ln[2] = ln[2].join(',');
+    }
+    return lines;
+  }
+
+  // `idanchor`: root the path at the nearest ancestor carrying an id or a
+  // test id. An absolute path breaks when a sibling is inserted above it;
+  // an id-rooted one survives, which matters because a stored address has to
+  // still mean something in the next session, not only in this drain.
+  var ID_SEG = null;
+
+  // The path from an ancestor down to `node`, as (tag, ordinal) pairs. The
+  // ordinal counts same-tag siblings, exactly as the descending walk does,
+  // so an anchored path and an absolute one name the same node.
+  function stepsBetween(anc, node) {
+    var out = [], n = node, i, ord, sib;
+    while (n && n !== anc && n.parentNode) {
+      ord = 1;
+      for (i = 0; i < n.parentNode.children.length; i++) {
+        sib = n.parentNode.children[i];
+        if (sib === n) break;
+        if (sib.tagName === n.tagName) ord++;
+      }
+      out.push(intern(n.tagName.toLowerCase()), ord);
+      n = n.parentNode;
+    }
+    if (n !== anc) return null;              // anchor was not an ancestor
+    // collected leaf-upward; the path runs the other way
+    var rev = [];
+    for (i = out.length - 2; i >= 0; i -= 2) rev.push(out[i], out[i + 1]);
+    return rev;
+  }
+
+  function idAnchorFor(node) {
+    var n = node, hops = 0, v;
+    while (n && n.nodeType === 1 && hops++ < 12) {
+      if (n.getAttribute) {
+        v = n.getAttribute('id') || n.getAttribute('data-testid')
+            || n.getAttribute('data-test-id');
+        if (v) {
+          if (ID_SEG === null) ID_SEG = intern('#id');
+          // The steps from the anchor down to this node must be kept.
+          // Dropping them gave every chunk under one anchor the same
+          // address: 276 distinct addresses collapsed to 213, and a
+          // colliding address is worse than a fragile one.
+          var rel = stepsBetween(n, node);
+          if (rel === null) return null;
+          return [ID_SEG, intern(String(v))].concat(rel);
+        }
+      }
+      n = n.parentNode;
+    }
+    return null;
+  }
+
+  // What was last sent for a chunk, so the next send can be a difference.
+  var lastLines = new WeakMap();
+
+  // Line-level delta against the version the receiver holds. A chunk whose
+  // digest moved is usually a chunk that gained or lost a line, not one that
+  // was rewritten; sending the whole chunk to convey that is the same
+  // mistake the original serializer makes at document scale, one level down.
+  function deltaLines(node, lines) {
+    var prev = lastLines.get(node);
+    lastLines.set(node, lines.map(function (l) { return l[1]; }));
+    if (!prev || prev.length === 0) return null;
+    var keep = [], i, same = 0;
+    for (i = 0; i < lines.length; i++) {
+      if (i < prev.length && prev[i] === lines[i][1]) { same++; continue; }
+      keep.push(i);
+    }
+    // Only worth it when most of the chunk is unchanged; otherwise the
+    // index list costs more than the lines it saves.
+    if (same < lines.length * 0.6) return null;
+    var out = [];
+    for (i = 0; i < keep.length; i++) out.push(lines[keep[i]]);
+    return { keep: keep, lines: out, was: prev.length };
+  }
+
+  function makeChunk(node, path, rec) {
+    var slot = chunkOf.get(node);
+    if (!slot) { slot = { id: chunkSeq++, digest: 0 }; chunkOf.set(node, slot); }
+    // Tracked so removals can be named. `chunkOf` is a WeakMap and cannot be
+    // walked, so the live roots are kept alongside it; a node that leaves the
+    // composed tree is swept in `repair` and its id reported.
+    if (!slot.tracked) { slot.tracked = true; chunkRoots.push(slot); }
+    slot.node = node;
+    slot.digest = rec.digest;
+    if (USE_PERCHUNK && !slot.watched) {
+      try {
+        var o = new MutationObserver(onMutations);
+        o.observe(node, { subtree: true, childList: true,
+                          characterData: !NO_CHARWATCH, attributes: true });
+        slot.watched = true;
+        stats.observers++;
+      } catch (e) { stats.errors++; }
+    }
+    var id = slot.id;
+    var lines = [];
+    textSeq = 0;
+    if (USE_IDANCHOR) {
+      var anc = idAnchorFor(node);
+      if (anc) path = anc;
+    }
+    if (!TAX_ROOT) TAX_ROOT = [intern('paragraph'), intern('text.visible'), 0];
+    collectLines(node, path, rec, 0, lines, [], TAX_ROOT);
+    encodeLines(lines);
+    stats.chunks++;
+    // `content` travels alongside `digest`: the digest is positional and
+    // identifies this node, the fingerprint is commutative and identifies
+    // this *content* wherever it appears. Cross-page suppression needs the
+    // second, and the receiver had no way to name it before.
+    if (USE_CHUNKDELTA) {
+      var dl = deltaLines(node, lines);
+      if (dl) {
+        stats.chunkDeltas++;
+        return { id: id, path: path, digest: rec.digest, chars: rec.chars,
+                 content: rec.content, lines: dl.lines, keep: dl.keep,
+                 was: dl.was };
+      }
+    }
+    return { id: id, path: path, digest: rec.digest, chars: rec.chars,
+             content: rec.content, lines: lines };
+  }
+
+  // §7 in place: a child whose sketch is covered by an emitting ancestor and
+  // whose tokens are exactly contained is not emitted again.
+  // Two steps. The sketch rejects the overwhelming majority with a handful
+  // of word comparisons and no strings touched; whatever it admits is then
+  // confirmed exactly, so suppression only ever follows proven containment
+  // and an approximate sketch cannot lose content.
+  // A 32-bit simhash over the record's tokens. Near-duplicate rather than
+  // exact containment: two lines that say almost the same thing collapse,
+  // where the sketch-then-verify path requires one to literally contain the
+  // other. Lossier by construction, which is why it is its own axis.
+  function simOf(rec) {
+    if (rec.sim !== 0) return rec.sim;
+    var v = new Int16Array(32), i, b, h;
+    var toks = rec.toks || [];
+    for (i = 0; i < toks.length; i++) {
+      h = fnv(toks[i]);
+      for (b = 0; b < 32; b++) v[b] += (h >>> b) & 1 ? 1 : -1;
+    }
+    var out = 0;
+    for (b = 0; b < 32; b++) if (v[b] > 0) out |= (1 << b);
+    rec.sim = out >>> 0 || 1;
+    return rec.sim;
+  }
+  function hamming(a, b) {
+    var x = (a ^ b) >>> 0, n = 0;
+    while (x) { n += x & 1; x >>>= 1; }
+    return n;
+  }
+
+  function subsumed(rec, seen) {
+    if (!rec.toks || !rec.toks.length) return false;
+    if (USE_SIMHASH) {
+      var mine = simOf(rec);
+      for (var q = 0; q < seen.length; q++) {
+        if (hamming(mine, simOf(seen[q])) <= 3) {
+          stats.nearDups++; stats.deduped++; return true;
+        }
+      }
+      return false;
+    }
+    for (var i = 0; i < seen.length; i++) {
+      if (!covers(seen[i].sketch, rec.sketch)) continue;   // cheap reject
+      stats.sketchHits++;
+      var have = seen[i].text;
+      if (have && have.indexOf(rec.text) !== -1) {          // exact confirm
+        stats.deduped++;
+        return true;
+      }
+    }
+    return false;
+  }
+
+  var textSeq = 0;
+  var TAX_ROOT = null;   // interned lazily: the default a chunk root inherits
+
+  function collectLines(node, path, rec, depth, lines, seen, inh) {
+    if (!rec || rec.chars === 0) return;
+    if (node.nodeType === 3) {
+      // A text node has no classification of its own — it takes the one that
+      // descended to it, which is the nearest ancestor that said anything
+      // specific about what this content is.
+      if (rec.text && !(USE_DEDUP && subsumed(rec, seen))) {
+        // -1, not 0: interned ids start at 0, so "no attribute" and "the
+        // attribute interned first" were the same value on the wire. When
+        // that happened to be `href`, every link decoded as a text line, the
+        // addresses lost the attribute they came from, and the link graph —
+        // and with it PageRank's only real edges — came out empty.
+        lines.push([depth, rec.text, path, -1, 0, inh[0], inh[1]]);
+        seen.push(rec);
+      }
+      return;
+    }
+    // An element's own detections describe the *element* — an href inside a
+    // heading is still a link — so they carry its local classification. Only
+    // what descends to the text takes the region's, which is why these two
+    // are computed separately rather than one being reused for the other.
+    var own = taxOf(node, rec);
+    notePager(node, own[0]);
+    var here = own[2] < inh[2] ? inh : own;
+    if (rec.det) {
+      for (var i = 0; i < rec.det.length; i++) {
+        lines.push([depth, String(rec.det[i][1]), path, rec.det[i][0], 0,
+                    own[0], own[1]]);
+      }
+    }
+    // A text node is addressed by its own position among its parent's text
+    // children, which is what `text()[n]` means. Inheriting the parent's path
+    // put every text child of an element on one address, and a per-chunk
+    // counter repeated that address in the next chunk; a child ordinal is
+    // unique across the page because the parent path already is.
+    var kids = childrenOf(node), nsh = kids.shadowCount;
+    var counts = {}, scounts = {}, j, kid, kr, seg;
+    for (j = 0; j < kids.length; j++) {
+      kid = kids[j];
+      kr = records.get(kid);
+      if (!kr) continue;
+      seg = stepFor(kid, path, j < nsh, counts, scounts);
+      if (seg === null) continue;
+      collectLines(kid, seg, kr, depth + 1, lines, seen, here);
+    }
+  }
+
+  // ---- the scroller (§5: scrolling and pagination are one loop) ---------
+  // Pagination is not an end-of-scroll fallback. A pager is enacted the
+  // moment it is first detected and again whenever it re-enters view,
+  // because a feed that alternates lazy loading with an explicit "more"
+  // button only advances if both are driven.
+  //
+  // Two kinds of pager, and treating them alike is wrong in a way a reader
+  // notices. A control that appends in place (a button, or an anchor with no
+  // usable href) is *pressed while scrolling*. A control that navigates (an
+  // anchor with a real href) replaces the document, so pressing it mid-read
+  // would throw away the page you are reading; it is enacted only once the
+  // scroll can go no further, which is §7.6's "stepping off the bottom
+  // turns the page".
+  //
+  // This is the one place that reads layout. The fold must not — a fold that
+  // measures forces synchronous style resolution on every mutation — but an
+  // actuator has to know what is on screen, and it runs once per step rather
+  // than once per node.
+  var pagers = new WeakMap();     // element -> {fires, last, empties}
+  var pagerList = [];             // insertion order; pruned when detached
+  var firedLast = [];             // enacted by the previous step
+  var lastEmit = 0, emptySteps = 0;
+  var PAG_ID = -1;
+
+  function notePager(node, taxId) {
+    if (PAG_ID < 0) PAG_ID = intern('pagination');
+    if (taxId !== PAG_ID || node.nodeType !== 1) return;
+    if (pagers.has(node)) return;
+    pagers.set(node, { fires: 0, last: 0, empties: 0 });
+    pagerList.push(node);
+  }
+
+  function inView(el) {
+    var r = el.getBoundingClientRect();
+    if (r.width === 0 && r.height === 0) return false;
+    var h = window.innerHeight || document.documentElement.clientHeight || 0;
+    return r.bottom > 0 && r.top < h;
+  }
+
+  // An anchor that would replace the document rather than extend it.
+  function navigates(el) {
+    if (el.tagName === 'A') {
+      var href = el.getAttribute('href');
+      if (!href) return false;
+      href = href.trim();
+      if (!href || href.charAt(0) === '#') return false;
+      return !/^javascript:/i.test(href);
+    }
+    // Submitting a form replaces the document just as surely as following a
+    // link, so a submit pager waits for the bottom like any other navigating
+    // control. Classifying it as in-place would press it on every scroll
+    // step and page past everything unread.
+    var type = (el.getAttribute && el.getAttribute('type') || '').toLowerCase();
+    return (type === 'submit' || type === 'image') && !!el.form;
+  }
+
+  // Detection and enactment are not the same question. `‹ Previous` and
+  // `Last »` are pagination — the REPL renders them, and classifying them as
+  // anything else would be wrong — but pressing them does not advance a
+  // read. Backward controls undo progress, and a jump to the last page skips
+  // everything between. So the scroller detects every pager and enacts only
+  // the ones that move forward by one.
+  var BACKWARD = /(^|\W)(prev|previous|newer|first|back|earlier)(\W|$)|[‹«←]/i;
+  var JUMPS = /(^|\W)(last|newest|oldest|end)(\W|$)/i;
+  var NEXTISH = /(^|\W)(next|more|older|continue)(\W|$)|[›»→]/i;
+
+  // Never enacted, whatever it was classified as. The scroller clicks things
+  // on a live page under a real session, so a misclassification is not a bad
+  // reading — it is an action taken on the user's behalf. On one YouTube
+  // results page the pager detector offered up "Sign in"; a classifier will
+  // always be wrong sometimes, so the controls that must never be pressed
+  // are refused independently of what any classifier concluded.
+  var NEVER_LABEL = new RegExp(
+    'sign\\s?(in|up|out)|log\\s?(in|out)|register|subscribe|unsubscribe' +
+    '|checkout|buy|purchase|order|add to (cart|bag)|donate|pay\\b|upgrade' +
+    '|delete|remove|discard|clear all|unfollow|block\\b|report\\b|flag\\b' +
+    '|upload|publish|submit|send\\b|reply|confirm|accept|agree|consent' +
+    '|install|download', 'i');
+  var NEVER_HREF = new RegExp(
+    '(^|\\.|/)(accounts?|auth|login|signin|signup|register|logout|signout' +
+    '|checkout|cart|basket|billing|payment|donate|subscribe)(/|\\.|\\?|$)'
+    + '|[?&](sign|log)in=', 'i');
+
+  // A form is dangerous when submitting it sends something that cannot be
+  // taken back — credentials, a card number, an identity. It is not
+  // dangerous merely for being a form: search results paginate through the
+  // search form, usually by POST, so refusing every `form[action]` and every
+  // submit button refused the pager on the most ordinary page there is. The
+  // label check already rejects "Sign in" and "Buy"; this narrows the form
+  // rule to the fields that make a submission irreversible.
+  var RISKY_FIELD = 'input[type=password], input[autocomplete^="cc-"], '
+    + 'input[name*="card"], input[name*="cvv"], input[name*="cvc"], '
+    + 'input[name*="ssn"], input[name*="iban"], input[autocomplete="one-time-code"]';
+
+  function riskyForm(el) {
+    if (!el.closest) return false;
+    if (el.closest('dialog[open]')) return true;   // a modal is a decision
+    var f = el.closest('form');
+    if (!f || !f.querySelector) return false;
+    return !!f.querySelector(RISKY_FIELD);
+  }
+
+  function refused(el) {
+    var label = pagerLabel(el);
+    if (label && NEVER_LABEL.test(label)) return true;
+    var href = (el.getAttribute && el.getAttribute('href') || '');
+    if (href && NEVER_HREF.test(href)) return true;
+    return riskyForm(el);
+  }
+
+  function pagerLabel(el) {
+    var t = (el.textContent || '').trim();
+    if (!t && el.getAttribute) {
+      t = el.getAttribute('aria-label') || el.getAttribute('title')
+          || el.getAttribute('value') || '';
+    }
+    return t.slice(0, 80);
+  }
+
+  function advances(el) {
+    if (refused(el)) return false;
+    var label = pagerLabel(el);
+    if (BACKWARD.test(label)) return false;
+    if (JUMPS.test(label)) return false;
+    return true;
+  }
+
+  function atBottom() {
+    var doc = document.documentElement;
+    var h = window.innerHeight || doc.clientHeight || 0;
+    var y = window.scrollY || window.pageYOffset || 0;
+    return (y + h) >= (doc.scrollHeight - 2);
+  }
+
+  function step(px) {
+    // One counter per gate, not one total. A single `skipped` said six of
+    // every seven detected pagers were declined and could not say by what —
+    // and the gates disagree about what they are for: `empties` retires a
+    // control that stopped working, `offscreen` is waiting for the reader,
+    // `refused` is a safety decision, `notbottom` is a policy about when a
+    // navigation is allowed. Only one of those is worth relaxing.
+    var out = { scrolled: 0, delta: 0, fired: [], skipped: 0, pagers: 0,
+                bottom: false, exhausted: false, errors: 0,
+                sk_empties: 0, sk_disabled: 0, sk_offscreen: 0,
+                sk_refused: 0, sk_backward: 0, sk_notbottom: 0,
+                sk_scrolledto: 0,
+                sk_lostrace: 0, seen_pagers: 0 };
+    try {
+      // What the previous step's presses actually produced. A pager is
+      // judged by its deltas, not by its label (§7.8), and this is where
+      // that judgement is recorded.
+      var produced = stats.chunks - lastEmit;
+      lastEmit = stats.chunks;
+      out.delta = produced;
+      for (var i = 0; i < firedLast.length; i++) {
+        var st = pagers.get(firedLast[i]);
+        if (!st) continue;
+        st.last = produced;
+        if (produced === 0) st.empties++; else st.empties = 0;
+      }
+      emptySteps = produced === 0 ? emptySteps + 1 : 0;
+      firedLast = [];
+
+      var before = window.scrollY || window.pageYOffset || 0;
+      var amount = px > 0 ? px
+        : Math.max(200, (window.innerHeight || 600) - 60);
+      window.scrollBy(0, amount);
+      out.scrolled = (window.scrollY || window.pageYOffset || 0) - before;
+      out.bottom = atBottom();
+
+      var keep = [], ready = [], nav = null, navCandidates = 0;
+      for (i = 0; i < pagerList.length; i++) {
+        var el = pagerList[i];
+        if (!el.isConnected) continue;          // gone from the page
+        keep.push(el);
+        var s = pagers.get(el);
+        if (!s) continue;
+        // A control that has stopped producing deltas stops being pressed.
+        out.seen_pagers++;
+        if (s.empties >= 2) { out.skipped++; out.sk_empties++; continue; }
+        if (el.disabled) { out.skipped++; out.sk_disabled++; continue; }
+        // A pager below the fold is not a reason to wait — it is a
+        // reason to scroll. Gating enactment on `inView` meant the scroller
+        // declined a control it had already found, and on pages with a
+        // detected pager that never advanced, 87% of every sighting was
+        // refused for exactly this. Pagers live at the bottom; requiring one
+        // to come to us inverts §5's "enacted the moment it is first
+        // detected". Bring it into view instead, and only give up if it
+        // cannot be brought.
+        if (!inView(el)) {
+          try {
+            el.scrollIntoView({ block: 'center' });
+            out.sk_scrolledto++;
+          } catch (e) { out.sk_offscreen++; continue; }
+          if (!inView(el)) { out.sk_offscreen++; continue; }
+        }
+        if (refused(el)) { out.skipped++; out.sk_refused++; continue; }
+        if (!advances(el)) { out.skipped++; out.sk_backward++; continue; }
+        if (!navigates(el)) { ready.push(el); continue; }
+        // Navigating pagers wait for the end of the document, and exactly
+        // one is taken: two navigations in one step race, and the loser's
+        // delta is attributed to the winner.
+        if (!out.bottom) { out.skipped++; out.sk_notbottom++; continue; }
+        navCandidates++;
+        if (nav === null || (!NEXTISH.test(pagerLabel(nav))
+                             && NEXTISH.test(pagerLabel(el)))) {
+          nav = el;
+        }
+      }
+      pagerList = keep;
+      if (nav !== null) ready.push(nav);
+      out.sk_lostrace = navCandidates > 1 ? navCandidates - 1 : 0;
+      for (i = 0; i < ready.length; i++) {
+        var target = ready[i], ts = pagers.get(target);
+        try {
+          target.click();
+          if (ts) ts.fires++;
+          firedLast.push(target);
+          out.fired.push([target.tagName.toLowerCase(),
+                          pagerLabel(target).slice(0, 40),
+                          navigates(target) ? 'navigate' : 'in-place']);
+        } catch (e) { out.errors++; stats.errors++; }
+      }
+      out.pagers = pagerList.length;
+      out.exhausted = emptySteps >= 2;
+    } catch (e) { out.errors++; stats.errors++; }
+    return out;
+  }
+
+  // ---- invalidation (§5 spans) -----------------------------------------
+  function markDirty(node) {
+    var n = node;
+    while (n) {
+      var rec = records.get(n);
+      if (rec) { if (rec.dirty) break; rec.dirty = true; }
+      n = n.parentNode || (n.host || null) ||
+          (n.getRootNode && n.getRootNode().host) || null;
+    }
+  }
+
+  // Record which children of a parent a mutation touched. The map existed
+  // and was written, cleared, and never read — `stats.spans` counted
+  // something nothing consumed. This makes it load-bearing.
+  function noteSpan(m) {
+    var parent = m.target.parentNode;
+    if (m.type === 'childList') parent = m.target;
+    if (!parent || parent.nodeType !== 1) return;
+    var prec = records.get(parent);
+    if (!prec) return;
+    var kids = parent.childNodes, idx = -1, i;
+    var probe = m.type === 'childList'
+      ? (m.addedNodes[0] || m.previousSibling || null) : m.target;
+    for (i = 0; i < kids.length; i++) {
+      if (kids[i] === probe) { idx = i; break; }
+    }
+    if (idx < 0) { prec.lo = 0; prec.hi = kids.length; stats.spanWide++; return; }
+    prec.lo = prec.lo < 0 ? idx : Math.min(prec.lo, idx);
+    prec.hi = prec.hi < 0 ? idx + 1 : Math.max(prec.hi, idx + 1);
+    stats.spans++;
+  }
+
+  function onMutations(recs) {
+    try {
+      for (var i = 0; i < recs.length; i++) {
+        var m = recs[i];
+        if (USE_SPANS) noteSpan(m);
+        if (m.type === 'childList') {
+          for (var a = 0; a < m.addedNodes.length; a++) {
+            var an = m.addedNodes[a];
+            if (an.nodeType === 1 && an.shadowRoot) observe(an.shadowRoot);
+          }
+        }
+        markDirty(m.target);
+        var parent = m.target.parentNode;
+        if (parent) {
+          var span = dirtySpans.get(parent);
+          if (!span) { dirtySpans.set(parent, { lo: 0, hi: 0 }); stats.spans++; }
+        }
+      }
+      schedule();
+    } catch (e) { stats.errors++; }
+  }
+
+  function schedule() {
+    // `lazy`: no background work at all. The fold happens when someone
+    // drains, which is the most literal reading of "passive sensor" — the
+    // page pays nothing for being watched until it is asked.
+    if (USE_LAZY) return;
+    // `eager`: fold inside the mutation callback. The opposite bound, and
+    // the one that shows what the debounce is worth.
+    if (USE_EAGER) { repair(); return; }
+    if (timer !== null) return;
+    var run = function () { timer = null; repair(); };
+    timer = (typeof requestIdleCallback === 'function')
+      ? requestIdleCallback(function () { run(); }, { timeout: DEBOUNCE * 4 })
+      : setTimeout(run, DEBOUNCE);
+  }
+
+  function repair() {
+    try {
+      stats.repairs++;
+      var out = [];
+      roots.forEach(function (_obs, root) {
+        var host = root.host || root;
+        var node = root.nodeType === 9 ? root.documentElement : root;
+        if (!node || node.nodeType !== 1) return;
+        var rec = fold(node);
+        if (!rec) return;
+        emitChunks(node, [], out);
+      });
+      // `rank` orders emission by subtree weight instead of document
+      // order, so a reader receiving a stream sees substance before chrome.
+      // `count` has been maintained on every fold since the beginning and
+      // read by nothing; this is what it was named for.
+      if (USE_RANK) {
+        out.sort(function (a, b) { return (b.chars || 0) - (a.chars || 0); });
+      }
+      for (var i = 0; i < out.length; i++) front.push(out[i]);
+      // Name what left. Without this the delta could only ever add: a chunk
+      // whose node was deleted stayed in the store with an address that no
+      // longer resolved, and on a page that re-renders its results — Bing
+      // rewrites most of its list — the great majority of stored addresses
+      // went dead while every one of them looked fine.
+      var live = [];
+      for (i = 0; i < chunkRoots.length; i++) {
+        var slot = chunkRoots[i];
+        if (slot.node && slot.node.isConnected) { live.push(slot); continue; }
+        slot.tracked = false;
+        slot.node = null;
+        removedIds.push(slot.id);
+      }
+      chunkRoots = live;
+      dirtySpans.clear();
+      stats.nodes = 0;
+    } catch (e) { stats.errors++; }
+  }
+
+  // ---- observation (§3 of the injection doc: one per root) -------------
+  function observe(root) {
+    if (!root || roots.has(root)) return;
+    var obs = new MutationObserver(onMutations);
+    var opts = {
+      // `perchunk` narrows the document-level observer and puts observers on
+      // the chunk roots instead — the reference engine's arrangement.
+      // Localised invalidation, many more observers, and a real risk of
+      // missing content outside any chunk: exactly the trade worth pricing.
+      subtree: !USE_PERCHUNK,
+      childList: true,
+      characterData: !NO_CHARWATCH,
+      attributes: true
+    };
+    if (ATTR_FILTER) opts.attributeFilter = ATTR_FILTER;
+    obs.observe(root.nodeType === 9 ? root.documentElement : root, opts);
+    roots.set(root, obs);
+    stats.observers++;
+    markDirty(root.nodeType === 9 ? root.documentElement : root);
+    schedule();
+  }
+
+  // ---- drain (one round trip) ------------------------------------------
+  var lastDrain = 0;
+  function drain() {
+    if (USE_LAZY || front.length === 0 && removedIds.length === 0) repair();
+    // `coalesce`: a crossing costs the same whether it carries one chunk or
+    // forty. Holding a thin payload until it thickens — or until enough time
+    // has passed that the reader deserves it — trades a little latency for
+    // round trips, which measured as the fixed cost of a pass.
+    if (USE_COALESCE && front.length && front.length < 4) {
+      var nowms = (typeof performance !== 'undefined' && performance.now)
+        ? performance.now() : Date.now();
+      if (nowms - lastDrain < 400) {
+        stats.coalesced++;
+        return { v: version, url: '', dict: [], shapes: [], chunks: [],
+                 removed: [], settled: false, stats: { held: true } };
+      }
+    }
+    lastDrain = (typeof performance !== 'undefined' && performance.now)
+      ? performance.now() : Date.now();
+    var chunks = front; front = back.length ? back : []; back = chunks;
+    var newDict = dict.slice(dictSent);
+    dictSent = dict.length;
+    var shapesBefore = shapesSent;
+    shapesSent = shapes.length;
+    var payload = {
+      v: ++version,
+      // Carried in the payload rather than asked for separately. An SPA route
+      // change rewrites the address without destroying the realm, so the
+      // handle survives and nothing else would notice the document is now a
+      // different document; a second round trip to ask would cost the fixed
+      // 5-11 ms toll on every drain to learn something almost always
+      // unchanged.
+      url: (function () {
+        try { return String(location.href); } catch (e) { return ''; }
+      })(),
+      dict: newDict,
+      // Append-only, exactly like the dictionary: a shape ships once and
+      // every later payload sends only what was added since.
+      shapes: USE_SHAPE ? shapes.slice(shapesBefore) : [],
+      chunks: chunks,
+      removed: removedIds,
+      settled: timer === null,
+      stats: {
+        folds: stats.folds, repairs: stats.repairs, chunks: stats.chunks,
+        observers: stats.observers, spans: stats.spans, errors: stats.errors,
+        dictSize: dict.length, skipped: stats.skipped,
+        deduped: stats.deduped, sketchHits: stats.sketchHits,
+        // What actually ran, not what was asked for — `shape` disables
+        // `pathdelta`, and a decoder that believed the request rather than
+        // the report would mis-read every path.
+        variants: {dedup: USE_DEDUP, gate: USE_GATE,
+                   cache: USE_CACHE, intern: USE_INTERN,
+                   pathdelta: USE_PATHDELTA, shape: USE_SHAPE,
+                   valdict: USE_VALDICT, packed: USE_PACKED,
+                   subtreegate: USE_SUBTREEGATE, spans: USE_SPANS,
+                   viewport: USE_VIEWPORT, merge: USE_MERGE,
+                   semantic: USE_SEMANTIC, rank: USE_RANK,
+                   attrs: USE_WIDEATTRS, charwatch: !NO_CHARWATCH,
+                   perchunk: USE_PERCHUNK, lazy: USE_LAZY, eager: USE_EAGER,
+                   anchored: USE_ANCHORED, idanchor: USE_IDANCHOR,
+                   simhash: USE_SIMHASH, crosspage: USE_CROSSPAGE,
+                   chunkdelta: USE_CHUNKDELTA, textdict: USE_TEXTDICT,
+                   coalesce: USE_COALESCE, deepgate: USE_DEEPGATE},
+        merged: stats.merged, knownSkips: stats.knownSkips,
+        pruned: stats.pruned, offscreen: stats.offscreen,
+        spanHits: stats.spanHits, nearDups: stats.nearDups,
+        deduped: stats.deduped, skipped: stats.skipped,
+        wordsInterned: stats.wordsInterned,
+        chunkDeltas: stats.chunkDeltas, coalesced: stats.coalesced,
+        deepPruned: stats.deepPruned,
+        search: {seen: stats.sr_seen, hit: stats.sr_hit,
+                 form: stats.sr_form, type: stats.sr_type,
+                 badtype: stats.sr_badtype,
+                 badname: stats.sr_badname,
+                 novocab: stats.sr_novocab,
+                 urlparam: stats.sr_url,
+                 queryform: stats.sr_queryform}
+      }
+    };
+    front = []; removedIds = [];
+    return payload;
+  }
+
+  observe(document);
+
+  return {
+    drain: drain,
+    step: step,
+    // One call that scrolls and reports. Two calls pay the round-trip toll
+    // twice — measured at 1.46 ms each on this setup, against 0.05-0.25 ms
+    // of actual in-page work — so the boundary, not the algorithm, is what
+    // a pass mostly costs.
+    pass: function (px) { var a = step(px); var b = drain(); return [a, b]; },
+    settled: function () { return timer === null; },
+    stats: function () { return stats; }
+  };
+})

@@ -1,0 +1,17 @@
+{
+  "url": "https://quotes.toscrape.com/js",
+  "slug": "quotes-js",
+  "stratum": "spa,practice",
+  "captured_at": "2026-08-15T19:50:10.161125+00:00",
+  "seconds": 9.1,
+  "snapshots": [
+    {
+      "index": 0,
+      "pass": 1,
+      "chars": 6964,
+      "gz_bytes": 2058
+    }
+  ],
+  "repeated_passes": 5,
+  "settled": true
+}

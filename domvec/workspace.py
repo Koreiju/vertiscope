@@ -1,0 +1,744 @@
+"""The workspace: one object owning every persistent piece.
+
+The pipeline's parts each persist somewhere different, and for good reasons —
+the graph holds what is linked, the frequency matrix holds what is corpus-wide,
+the JSONL holds what is streamable. Those reasons are internal, though. From
+outside there is one thing: a directory you scan into and search out of.
+
+    ws = Workspace("build")
+    ws.scan("https://example.com")          # live, streaming, incremental
+    ws.index_html(html, url)                # offline, same destination
+    ws.search("query")
+
+    build/
+      graph.kuzu     addresses, chunks, embeddings and the edges between
+      freq/          the frequency matrix, as numpy arrays
+      chunks/*.jsonl the markdown checkpoint, one file per page
+
+Keeping the three in one object is what makes them consistent: every write
+path goes through :meth:`Workspace.ingest`, so a page cannot land in the graph
+without a frequency row, and the integer row that aligns the three vector
+factors is issued in exactly one place.
+"""
+
+from __future__ import annotations
+
+import shutil
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
+
+import numpy as np
+
+from .address import ContentAddress
+from .graphstore import GraphStore
+from .markdown import (MarkdownChunk, RenderReport, read_jsonl,
+                       render_trie, write_jsonl)
+from .search import Hit, SearchDiagnostics, ThreeFormIndex
+from .stream import ScanUpdate, StreamingScan
+from .trie import AddressTrie
+from .vectors import EmbeddingMatrix, FreqMatrix, VectorQueue
+
+__all__ = ["Workspace", "ScanResult"]
+
+ProgressFn = Callable[[str, str], None]
+
+
+@dataclass
+class ScanResult:
+    """What one page's scan produced."""
+
+    url: str
+    addresses: int = 0
+    chunks: int = 0
+    lines: int = 0
+    passes: int = 0
+    wire_bytes: int = 0
+    document_bytes: int = 0
+    updates: List[ScanUpdate] = field(default_factory=list)
+    report: RenderReport = field(default_factory=RenderReport)
+
+    @property
+    def wire_saving(self) -> float:
+        return 1.0 - (self.wire_bytes / self.document_bytes) \
+            if self.document_bytes else 0.0
+
+    def summary(self) -> Dict[str, object]:
+        return {
+            "url": self.url,
+            "addresses": self.addresses,
+            "chunks": self.chunks,
+            "lines": self.lines,
+            "passes": self.passes,
+            "wire_saving": round(self.wire_saving, 4),
+        }
+
+
+class Workspace:
+    """A scanned corpus on disk. Use as ``with Workspace(path) as ws:``."""
+
+    def __init__(self, path, *, context_window: int = 1200,
+                 embedder=None) -> None:
+        self.path = Path(path)
+        self.path.mkdir(parents=True, exist_ok=True)
+        self.chunks_dir = self.path / "chunks"
+        self.chunks_dir.mkdir(exist_ok=True)
+        self.context_window = context_window
+
+        self.store = GraphStore(self.path / "graph.kuzu")
+        self.freq = FreqMatrix.load(self.path / "freq")
+        self.embeddings = EmbeddingMatrix() if embedder is not None else None
+        self.embedder = embedder
+        # Chunks are queued for vectorisation here and embedded in batches;
+        # nothing on the write path calls the embedder directly.
+        self.vectors = VectorQueue()
+        self._index: Optional[ThreeFormIndex] = None
+
+    def __enter__(self) -> "Workspace":
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()
+
+    def close(self) -> None:
+        # The queue is in memory, so anything still in it at close is work
+        # that would be lost — and lost invisibly, because hydration only
+        # backfills chunks with *no* vector and would leave a changed chunk
+        # answering with the vector of what it used to say.
+        try:
+            self.flush_vectors()
+        except Exception:  # noqa: BLE001 - closing must still save the rest
+            pass
+        try:
+            self.freq.save(self.path / "freq")
+        finally:
+            self.store.close()
+
+    # -- writing ----------------------------------------------------------
+    def ingest(
+        self,
+        url: str,
+        trie: AddressTrie,
+        *,
+        report: Optional[RenderReport] = None,
+        title: str = "",
+    ) -> Tuple[List[MarkdownChunk], Dict[str, int]]:
+        """Render, index and store one page's trie. The single write path.
+
+        Every caller — live scan, offline file, REPL re-scan — comes through
+        here, so there is one place where a chunk gets its frequency row and
+        one place where the graph and the matrix can fall out of step. They
+        cannot fall out of step, because neither is written without the other.
+        """
+        chunks = render_trie(trie, context_window=self.context_window,
+                             report=report)
+        addresses = [
+            (node.address, node.value, node.content_hash)
+            for node in trie.leaves() if node.address is not None
+        ]
+        return self.ingest_chunks(url, chunks, addresses, title=title,
+                                  root_hash=trie.root_hash)
+
+    def ingest_chunks(
+        self,
+        url: str,
+        chunks: List[MarkdownChunk],
+        addresses=None,
+        *,
+        title: str = "",
+        root_hash: str = "",
+        complete: bool = True,
+        removed: Optional[Sequence[str]] = None,
+    ) -> Tuple[List[MarkdownChunk], Dict[str, int]]:
+        """Write already-rendered chunks. The single write path's body.
+
+        `ingest` renders a trie and delegates here; the in-page sensor calls
+        here directly, because its chunks arrive rendered and re-deriving them
+        from a trie on this side would be a second pipeline. Both entry points
+        share every line below, so frequency rows, embeddings, the graph and
+        the JSONL checkpoint cannot fall out of step between them.
+
+        `addresses` may be omitted, in which case it is taken from the chunks'
+        own line anchors — which is what a delta carries.
+
+        `complete` says whether `chunks` is the whole page or a delta. It
+        governs retirement, and the distinction is not cosmetic: retiring
+        "every stored chunk not in this batch" is right for a full write and
+        destroys the index on a partial one. A delta names what it removed;
+        it never implies removal by omission.
+        """
+        if addresses is None:
+            addresses = [
+                (line.address, line.text, "")
+                for chunk in chunks for line in chunk.lines
+                if line.address is not None
+            ]
+        # Retire the rows of chunks this page no longer produces, before
+        # issuing rows for the ones it does. The graph reconciles the same set
+        # (GraphStore._reconcile); doing it here too is what keeps the two
+        # stores coupled — a row left behind would go on inflating document
+        # frequency for a chunk that no longer exists.
+        if complete:
+            superseded = ({c.cid for c in self.store.chunks(url)}
+                          - {c.cid for c in chunks})
+        else:
+            superseded = set(removed or ())
+        for cid in superseded:
+            self.freq.remove(cid)
+
+        rows = {c.cid: self.freq.add(c.cid, c.markdown) for c in chunks}
+
+        # Queued, not embedded. This is a write path — the sensor calls it
+        # once per drain, so embedding here made vectorisation a per-delta
+        # cost, which OBJECT_MODEL 8 forbids outright. The queue also drops
+        # chunks whose markdown digest has not moved, so a page that re-emits
+        # a settled chunk costs nothing. Vectors are computed in batches by
+        # `flush_vectors`, which the query surface calls before it answers.
+        self.vectors.forget(superseded)
+        self.vectors.extend(chunks)
+        vectors: Dict[str, Sequence[float]] = {}
+
+        # The page node must exist before links can resolve to it.
+        self.store.conn.execute(
+            "MERGE (p:Page {url: $url}) SET p.title = $title",
+            {"url": url, "title": title},
+        )
+        counts = self.store.ingest(
+            url, addresses, chunks, rows=rows,
+            embeddings=vectors or None, title=title,
+            root_hash=root_hash, complete=complete,
+        )
+        # The mirror is rewritten only by a write that describes the whole
+        # page. A delta names some chunks; writing those alone replaced the
+        # file with a fragment of itself, and measured across 60 swept pages
+        # 21 of them held fewer chunks on disk than in the store — one with
+        # 16 against 537. The mirror is meant to be the checkpoint the store
+        # can be rebuilt from, so a partial write must add to it, not define
+        # it.
+        mirror = self.chunks_dir / f"{_slug(url)}.jsonl"
+        if complete:
+            write_jsonl(chunks, mirror)
+        else:
+            merged = {c.cid: c for c in read_jsonl(mirror)} if mirror.exists() else {}
+            merged.update({c.cid: c for c in chunks})
+            for cid in (removed or ()):
+                merged.pop(cid, None)
+            write_jsonl(list(merged.values()), mirror)
+        self._index = None      # ranks are stale once the graph changed
+        # A write that describes a whole page is a settled unit, and flushing
+        # it is a batch — one embedder call for the page, which is what the
+        # design asks for. A delta is not settled and stays queued. This is
+        # the line the prohibition actually draws: batch, not per-delta.
+        if complete:
+            self.flush_vectors()
+        return chunks, counts
+
+    def page_url(self, url: str) -> str:
+        """The spelling to *look a page up* by, given the caller's spelling.
+
+        An already-stored spelling wins, so a caller who types
+        `https://a.test/` reaches the page stored as `https://a.test`.
+        Otherwise the canonical form, which is what makes it usable as a
+        dedup key for pages not yet scanned. Otherwise the url as given — a
+        `file://` uri has no canonical http form.
+
+        Reads only. Normalising what gets *written* was tried and reverted:
+        it would have changed the url component of every address key, and the
+        duplication it guards against measured **zero** on a real workspace
+        (`pages that canonicalise together: none`). `resolve_page` fixes the
+        defect that was actually measured — three of four link edges dropped
+        — without rewriting anything on disk.
+        """
+        from .graphstore import canonical_url
+
+        return self.store.resolve_page(url) or canonical_url(url) or url
+
+    def index_html(self, html: str, url: str, *, title: str = "") -> ScanResult:
+        """Offline path: one snapshot, no browser."""
+        from .core.content_tagger import ContentTagger
+        from .core.shadow_html_parser import ShadowDOM
+
+        tagged = ContentTagger(ShadowDOM(html)).tag()
+        trie = AddressTrie.from_tagged(tagged, url)
+        report = RenderReport()
+        chunks, _counts = self.ingest(url, trie, report=report, title=title)
+        return ScanResult(
+            url=url, addresses=len(trie), chunks=len(chunks),
+            lines=sum(len(c.lines) for c in chunks), passes=1,
+            wire_bytes=len(html), document_bytes=len(html), report=report,
+        )
+
+    def scan(
+        self,
+        url: str,
+        *,
+        config=None,
+        duration: int = 25,
+        pause: float = 1.2,
+        passes: int = 6,
+        headless: bool = True,
+        incremental: bool = True,
+        driver=None,
+        progress: Optional[ProgressFn] = None,
+    ) -> ScanResult:
+        """Live path: drive the page, folding each snapshot in as it arrives.
+
+        The store is written once, at the end, from the final trie. The
+        per-pass deltas are what make the *scan* incremental — they say which
+        chunks would need rewriting — but committing every pass would write
+        the same rows repeatedly for a page still settling.
+
+        Pass ``driver`` to reuse an open browser; :meth:`crawl` does, because
+        starting Firefox costs several seconds and a crawl would otherwise pay
+        it once per page.
+        """
+        from .browser import browser_session
+        from .capture import stream_snapshots
+        from .config import load_config
+
+        cfg = config or load_config()
+        scan = StreamingScan(url, context_window=self.context_window)
+
+        def drive(active) -> None:
+            for passno, snapshot in stream_snapshots(
+                active, url, max_duration=duration, pause=pause,
+                max_snapshots=passes, incremental=incremental,
+            ):
+                update = scan.push(snapshot, passno)
+                scan.dirty_chunks(update)
+                if progress:
+                    progress("pass", update.row())
+
+        if driver is not None:
+            drive(driver)
+        else:
+            with browser_session(cfg, headless=headless) as owned:
+                drive(owned)
+
+        if scan.trie is None:
+            raise RuntimeError(f"scan of {url} produced no snapshot")
+
+        report = RenderReport()
+        chunks, _counts = self.ingest(url, scan.trie, report=report)
+        summary = scan.summary()
+        return ScanResult(
+            url=url,
+            addresses=len(scan.trie),
+            chunks=len(chunks),
+            lines=sum(len(c.lines) for c in chunks),
+            passes=int(summary.get("passes", 0)),
+            wire_bytes=int(summary.get("wire_bytes", 0)),
+            document_bytes=int(summary.get("snapshot_bytes", 0)),
+            updates=scan.updates,
+            report=report,
+        )
+
+    def sense(
+        self,
+        url: str,
+        *,
+        config=None,
+        scrolls: int = 10,
+        pause: float = 0.6,
+        headless: bool = True,
+        driver=None,
+        variants: Optional[Dict[str, bool]] = None,
+        progress: Optional[ProgressFn] = None,
+    ) -> ScanResult:
+        """Live path via the in-page sensor: the page keeps the fold.
+
+        The peer of :meth:`scan`. That one serialises a settled snapshot per
+        pass and folds it here; this one folds in the page and receives only
+        the chunks whose digest moved. Both end at `ingest_chunks`, so the
+        store, the index, the mirror and the REPL cannot tell them apart —
+        which is what makes them comparable on the same pages.
+        """
+        from .browser import browser_session
+        from .config import load_config
+        from .sensing import Sensor
+
+        cfg = config or load_config()
+        passes: List[ScanUpdate] = []
+        totals = {"lines": 0, "chunks": 0, "addresses": 0,
+                  "wire": 0, "document": 0}
+
+        def drive(active) -> None:
+            sensor = Sensor(active, url, budget=self.context_window,
+                            variants=variants)
+            active.set_page_load_timeout(40)
+            active.get(url)
+            time.sleep(pause)
+            # The document, once, as the baseline the deltas are measured
+            # against. Without it `wire_saving` divided by zero and reported
+            # a flat 0.0% on every sensor run — a number that looked like a
+            # measurement and was only an absent one.
+            try:
+                totals["document"] = len(active.page_source or "")
+            except Exception:  # noqa: BLE001
+                totals["document"] = 0
+            sensor.boot()
+            time.sleep(pause)
+            for passno in range(scrolls + 1):
+                if passno:
+                    sensor.scroll()
+                    time.sleep(pause)
+                sp = sensor.drain(passno)
+                # The sensor names removals by its own chunk id, which is the
+                # chunk's `part`; the store is keyed by `cid`, the hash of
+                # (url, xpath, part). Passing the raw id retired nothing, so a
+                # chunk whose node was deleted stayed in the store forever —
+                # the same defect the REPL had, and it has to be fixed in both
+                # places because both are entry points to one write path.
+                seen = {c.part: c.cid for c in self.store.chunks(url)}
+                seen.update({c.part: c.cid for c in sp.chunks})
+                gone = [seen[r] for r in sp.removed if r in seen]
+                if sp.chunks or gone:
+                    self.ingest_chunks(url, sp.chunks, complete=False,
+                                       removed=gone)
+                totals["lines"] += sp.lines
+                totals["chunks"] += sp.changed
+                totals["addresses"] += sp.addresses
+                totals["wire"] += sp.wire_bytes
+                if progress:
+                    progress("pass", f"{sp.passno:>4} {sp.changed:>5} chunks "
+                                     f"{sp.lines:>6} lines "
+                                     f"{sp.drain_ms:>7.1f} drain "
+                                     f"{sp.store_ms:>8.1f} store")
+
+        if driver is not None:
+            drive(driver)
+        else:
+            with browser_session(cfg, headless=headless) as owned:
+                drive(owned)
+
+        stored = list(self.store.chunks(url))
+        return ScanResult(
+            url=url,
+            addresses=totals["addresses"],
+            chunks=len(stored),
+            lines=totals["lines"],
+            passes=scrolls + 1,
+            wire_bytes=totals["wire"],
+            document_bytes=totals["document"],
+        )
+
+    def links_from(self, url: str, *, same_host: bool = True) -> List[str]:
+        """Documents this one links to, taken from its stored addresses.
+
+        No separate link extractor: a link is a `urls.*` address, which the
+        trie already holds, so the crawl frontier falls out of the same
+        structure retrieval uses.
+
+        Non-documents are filtered by extension. The extractor is deliberately
+        attribute-agnostic — it takes URLs from *any* attribute, which is what
+        makes it survive sites that invent their own — so a stylesheet's
+        `href` is a `urls.internal` address just like an anchor's. That is
+        right for extraction and wrong for a crawl frontier: without the
+        filter, a six-page budget was spending two pages on `main.css` and
+        `bootstrap.min.css`, which chunk to two lines of nothing.
+        """
+        from urllib.parse import urlsplit
+
+        from .graphstore import canonical_url
+
+        url = self.page_url(url)
+        host = urlsplit(url).netloc
+        out: List[str] = []
+        # Seeded with the page's own canonical form, so a self-link does not
+        # enter its own frontier under a second spelling.
+        seen = {canonical_url(url) or url}
+        for chunk in self.store.chunks(url):
+            for address, value in self.store.addresses_of(chunk.cid):
+                if not address.is_url:
+                    continue
+                target = canonical_url(value, url)
+                if not target or target in seen or target == url:
+                    continue
+                if same_host and urlsplit(target).netloc != host:
+                    continue
+                if not _is_document(target):
+                    continue
+                seen.add(target)
+                out.append(target)
+        return out
+
+    def crawl(
+        self,
+        seed: str,
+        *,
+        max_pages: int = 10,
+        depth: int = 2,
+        same_host: bool = True,
+        config=None,
+        headless: bool = True,
+        legacy: bool = False,
+        variants: Optional[Dict[str, bool]] = None,
+        progress: Optional[ProgressFn] = None,
+        **scan_kwargs,
+    ) -> List[ScanResult]:
+        """Breadth-first crawl from a seed, reusing one browser session.
+
+        Exists because the rank factor needs a graph. Measured over the frozen
+        corpus — 54 pages across 47 hosts — there were **six** resolvable
+        cross-page links in total, so PageRank ran over containment edges
+        alone and came out near-uniform: it contributed nothing to ranking
+        while appearing to. A single-site crawl is what puts real edges in.
+
+        Breadth-first rather than depth-first, so a shallow wide site is
+        covered evenly when the page budget runs out instead of the budget
+        disappearing down one branch.
+        """
+        from .browser import browser_session
+        from .config import load_config
+
+        from .graphstore import canonical_url
+
+        cfg = config or load_config()
+        results: List[ScanResult] = []
+        frontier: List[Tuple[str, int]] = [(seed, 0)]
+        # Keyed on the canonical form. `links_from` returns canonical targets
+        # while the seed is whatever was typed, so a bare-host seed met its
+        # own home page again as `https://a.test/` — a different string, never
+        # in `visited`, and the crawl spent a page from its budget re-scanning
+        # the page it started on.
+        #
+        # `canonical_url` and not `page_url`: the latter prefers a spelling
+        # already in the store, so it *changes* for a url once that page has
+        # been scanned — which is precisely the wrong property for a set that
+        # records what has been scanned. A dedup key has to be a function of
+        # the url alone.
+        visited: set = set()
+
+        # Directory-index aliases collapse too. A four-page crawl of
+        # books.toscrape.com spent two of its pages on `https://books.toscrape.com`
+        # and `https://books.toscrape.com/index.html` — the same document, byte
+        # for byte (501 addresses, 20 chunks, 366 lines, twice). `canonical_url`
+        # does not collapse them because they are genuinely different urls; for
+        # a *crawl budget* they are one page, and the budget is the scarce
+        # thing. Dedup key only: nothing is stored under a rewritten url.
+        _INDEX_FILES = ("/index.html", "/index.htm", "/index.php",
+                        "/default.html", "/default.htm", "/index.asp")
+
+        def key_of(url: str) -> str:
+            key = canonical_url(url) or url
+            lowered = key.lower()
+            for suffix in _INDEX_FILES:
+                if lowered.endswith(suffix):
+                    return key[: -len(suffix)] + "/"
+            return key
+
+        with browser_session(cfg, headless=headless) as driver:
+            while frontier and len(results) < max_pages:
+                url, level = frontier.pop(0)
+                key = key_of(url)
+                if key in visited:
+                    continue
+                visited.add(key)
+                if progress:
+                    progress("page", f"[{len(results) + 1}/{max_pages}] "
+                                     f"depth {level}  {url}")
+                try:
+                    # Everything above this line — the frontier, the canonical
+                    # keys, the index-file collapsing, the depth budget — is
+                    # independent of how a page is read. Only this call knew
+                    # about the extraction path, which is why crawling was the
+                    # last thing keeping the snapshot-per-pass route alive.
+                    if legacy:
+                        result = self.scan(url, config=cfg, driver=driver,
+                                           progress=progress, **scan_kwargs)
+                    else:
+                        result = self.sense(
+                            url, config=cfg, driver=driver,
+                            scrolls=scan_kwargs.get("passes", 10),
+                            pause=scan_kwargs.get("pause", 0.6),
+                            variants=variants, progress=progress)
+                except Exception as exc:  # noqa: BLE001 — one bad page is data
+                    if progress:
+                        progress("error", f"{url}: {type(exc).__name__}: {exc}")
+                    continue
+                results.append(result)
+
+                if level < depth:
+                    for target in self.links_from(url, same_host=same_host):
+                        if key_of(target) not in visited:
+                            frontier.append((target, level + 1))
+        return results
+
+    # -- vectorisation ----------------------------------------------------
+    def flush_vectors(self, *, limit: Optional[int] = None,
+                      progress: Optional[ProgressFn] = None) -> Dict[str, int]:
+        """Embed everything queued, in batches, and write the vectors back.
+
+        The single place the embedder is called on the write side. Splitting
+        it out from ingest is what makes vectorisation a function of *settled*
+        change rather than of delta count: a chunk rewritten on every frame of
+        a scroll is embedded once, when someone asks a question.
+        """
+        if self.embedder is None or self.embeddings is None:
+            return self.vectors.report()
+        if progress and len(self.vectors):
+            progress("embed", f"{len(self.vectors)} chunk(s) queued")
+        produced = self.vectors.flush(self.embedder, limit=limit)
+        if produced:
+            rows = []
+            for cid, vector in produced.items():
+                self.embeddings.set(cid, vector)
+                rows.append({"cid": cid, "emb": np.asarray(vector).tolist()})
+            self.store._batch(
+                "UNWIND $rows AS r MATCH (c:Chunk {cid: r.cid}) "
+                "SET c.embedding = r.emb",
+                rows,
+            )
+            self._index = None       # scores are stale once vectors moved
+        return self.vectors.report()
+
+    # -- reading ----------------------------------------------------------
+    def _hydrate_embeddings(self, *, backfill: bool = True,
+                            progress: Optional[ProgressFn] = None) -> Dict[str, int]:
+        """Make the query-side matrix reflect every chunk in the store.
+
+        Two failures this exists to prevent, both of which present as "no
+        results" under the strict triple product, where a zero is a veto:
+
+        * vectors are **stored but not loaded** — they live on the Chunk
+          nodes, which is the whole point of putting them there, but a freshly
+          opened workspace starts with an empty matrix and scores every row 0;
+        * vectors were **never computed**, because the page was indexed
+          without an embedder. Asking for semantic search then vetoed
+          everything and reported it as an absence of matches.
+
+        The second is backfilled rather than reported: the chunks are present,
+        embedding them is well defined, and the result is written back so the
+        cost is paid once. Rows already set in this session are left alone.
+        """
+        counts = {"loaded": 0, "embedded": 0}
+        if self.embeddings is None:
+            return counts
+
+        missing: List = []
+        for chunk in self.store.chunks():
+            if self.embeddings.row_of(chunk.cid) is not None:
+                continue
+            vector = self.store.embedding(chunk.cid)
+            if vector and any(vector):
+                self.embeddings.set(chunk.cid, np.asarray(vector, dtype=np.float32))
+                counts["loaded"] += 1
+            else:
+                missing.append(chunk)
+
+        if missing and backfill and self.embedder is not None:
+            if progress:
+                progress("embed", f"{len(missing)} chunk(s) without a vector")
+            matrix = self.embedder.embed_texts([c.md for c in missing])
+            rows = []
+            for chunk, vector in zip(missing, matrix):
+                self.embeddings.set(chunk.cid, vector)
+                rows.append({"cid": chunk.cid, "emb": vector.tolist()})
+                counts["embedded"] += 1
+            if rows:
+                self.store._batch(
+                    "UNWIND $rows AS r MATCH (c:Chunk {cid: r.cid}) "
+                    "SET c.embedding = r.emb",
+                    rows,
+                )
+        return counts
+
+    @property
+    def index(self) -> ThreeFormIndex:
+        """The query surface, rebuilt when the graph has changed under it."""
+        if self._index is None:
+            # Flush before hydrating: the queue holds chunks whose markdown
+            # moved, and hydration only fills in chunks that have no vector at
+            # all. Without this a *changed* chunk would keep answering with
+            # the vector of what it used to say.
+            self.flush_vectors()
+            self._hydrate_embeddings()
+            self._index = ThreeFormIndex(
+                self.store, self.freq, self.embeddings, embedder=self.embedder
+            ).build()
+        return self._index
+
+    def search(self, query: str, k: int = 10, **kwargs) -> List[Hit]:
+        return self.index.search(query, k=k, **kwargs)
+
+    def addresses_for(self, cid: str):
+        return self.store.addresses_of(cid)
+
+    def pages(self) -> List[str]:
+        return self.store.page_urls()
+
+    def stats(self) -> Dict[str, object]:
+        stats = dict(self.store.stats())
+        stats["freq_rows"] = self.freq.shape[0]
+        stats["freq_terms"] = self.freq.shape[1]
+        stats["path"] = str(self.path)
+        return stats
+
+    def purge(self, url: str = "") -> None:
+        # Through the stored spelling, so `--url https://a.test/` purges the
+        # page held as `https://a.test` instead of silently purging nothing.
+        url = self.page_url(url) if url else ""
+        if url:
+            # Retire the frequency rows *before* dropping the chunks, while
+            # the graph can still say which rows they were. Doing it after
+            # leaves rows with no chunk: idf then counts documents that no
+            # longer exist, which shifts every score without failing anything.
+            for chunk in self.store.chunks(url):
+                self.freq.remove(chunk.cid)
+                if self.embeddings is not None:
+                    row = self.embeddings.row_of(chunk.cid)
+                    if row is not None:
+                        self.embeddings.matrix[row] = 0.0
+            self.store.purge_page(url)
+            jsonl = self.chunks_dir / f"{_slug(url)}.jsonl"
+            if jsonl.exists():
+                jsonl.unlink()
+        else:
+            self.close()
+            shutil.rmtree(self.path, ignore_errors=True)
+            self.__init__(self.path, context_window=self.context_window,
+                          embedder=self.embedder)
+        self._index = None
+
+
+# Extensions that are never a document worth chunking. An allowlist would be
+# wrong here: most real pages have no extension at all (`/tag/life/`), so
+# requiring one would reject exactly the links a crawl wants.
+_NON_DOCUMENT_EXTENSIONS = frozenset({
+    ".css", ".js", ".mjs", ".json", ".xml", ".rss", ".atom", ".map",
+    ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".avif", ".ico", ".bmp",
+    ".woff", ".woff2", ".ttf", ".otf", ".eot",
+    ".mp4", ".webm", ".ogg", ".mp3", ".wav", ".m4a", ".mov", ".avi",
+    ".pdf", ".zip", ".gz", ".tar", ".rar", ".7z", ".exe", ".dmg", ".iso",
+    ".csv", ".xlsx", ".doc", ".docx", ".ppt", ".pptx",
+})
+
+
+def _is_document(url: str) -> bool:
+    """Whether a URL plausibly leads to a page rather than an asset."""
+    from urllib.parse import urlsplit
+
+    path = urlsplit(url).path.lower()
+    dot = path.rfind(".")
+    slash = path.rfind("/")
+    if dot <= slash:            # no extension in the final segment
+        return True
+    return path[dot:] not in _NON_DOCUMENT_EXTENSIONS
+
+
+def _slug(url: str) -> str:
+    """A filesystem-safe name for a URL.
+
+    Truncated, so a pathological query string cannot exceed the filesystem's
+    name limit — and hashed at the tail, so two long URLs sharing a prefix do
+    not collide into one file after truncation.
+    """
+    import hashlib
+
+    body = url.split("//")[-1]
+    safe = "".join(c if (c.isalnum() or c in "-_.") else "-" for c in body)
+    if len(safe) <= 60:
+        return safe
+    digest = hashlib.sha1(url.encode("utf-8")).hexdigest()[:8]
+    return f"{safe[:50]}-{digest}"

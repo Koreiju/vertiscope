@@ -1,0 +1,35 @@
+{
+  "url": "https://archive.org/details/texts",
+  "slug": "archive-org-details-texts",
+  "stratum": "js-shell",
+  "captured_at": "2026-08-15T22:41:55.712551+00:00",
+  "seconds": 12.5,
+  "snapshots": [
+    {
+      "index": 0,
+      "pass": 1,
+      "chars": 95654,
+      "gz_bytes": 27620
+    },
+    {
+      "index": 1,
+      "pass": 4,
+      "chars": 173383,
+      "gz_bytes": 37932
+    },
+    {
+      "index": 2,
+      "pass": 5,
+      "chars": 178150,
+      "gz_bytes": 38667
+    },
+    {
+      "index": 3,
+      "pass": 6,
+      "chars": 182868,
+      "gz_bytes": 38815
+    }
+  ],
+  "repeated_passes": 2,
+  "settled": true
+}

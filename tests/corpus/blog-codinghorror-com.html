@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+
+    <title>Coding Horror</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <link rel="preload" as="style" href="https://blog.codinghorror.com/assets/built/screen.css?v=JuRjU-5K4QnoRcxD">
+    <link rel="preload" as="style" href="https://blog.codinghorror.com/assets/built/custom.css?v=lX-tmTTPCsZhMAnO">
+    <link rel="preload" as="script" href="https://blog.codinghorror.com/assets/built/source.js?v=GN2N4BbKxkHEIjLG">
+
+    <link rel="preload" as="font" type="font/woff2" href="https://blog.codinghorror.com/assets/fonts/inter-roman.woff2?v=OecsB5TBLy27FKD2" crossorigin="anonymous">
+<style>
+    @font-face {
+        font-family: "Inter";
+        font-style: normal;
+        font-weight: 100 900;
+        font-display: optional;
+        src: url(https://blog.codinghorror.com/assets/fonts/inter-roman.woff2?v=OecsB5TBLy27FKD2) format("woff2");
+        unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+    }
+</style><link rel="preload" as="font" type="font/woff2" href="https://blog.codinghorror.com/assets/fonts/frutiger.woff2?v=Yg-XfeCyZmpbwJoR" crossorigin="anonymous">
+<style>
+    @font-face {
+        font-family: "Frutiger";
+        src: url(https://blog.codinghorror.com/assets/fonts/frutiger.woff2?v=Yg-XfeCyZmpbwJoR) format("woff2");
+        font-display: swap;
+    }
+    :root {
+        --gh-font-heading: 'Frutiger';
+    }
+</style>
+
+
+    <link rel="stylesheet" type="text/css" href="https://blog.codinghorror.com/assets/built/screen.css?v=JuRjU-5K4QnoRcxD">
+    <link rel="stylesheet" type="text/css" href="https://blog.codinghorror.com/assets/built/custom.css?v=lX-tmTTPCsZhMAnO">
+
+    <style>
+        :root {
+            --background-color: #ffffff;
+            --content-spacing-factor: 0.5;
+        }
+    </style>
+
+    <script>
+        /* The script for calculating the color contrast has been taken from
+        https://gomakethings.com/dynamically-changing-the-text-color-based-on-background-color-contrast-with-vanilla-js/ */
+        var accentColor = getComputedStyle(document.documentElement).getPropertyValue('--background-color');
+        accentColor = accentColor.trim().slice(1);
+
+        if (accentColor.length === 3) {
+            accentColor = accentColor[0] + accentColor[0] + accentColor[1] + accentColor[1] + accentColor[2] + accentColor[2];
+        }
+
+        var r = parseInt(accentColor.substr(0, 2), 16);
+        var g = parseInt(accentColor.substr(2, 2), 16);
+        var b = parseInt(accentColor.substr(4, 2), 16);
+        var yiq = ((r * 299) + (g * 587) + (b * 114)) / 1000;
+        var textColor = (yiq >= 128) ? 'dark' : 'light';
+
+        document.documentElement.className = `has-${textColor}-text`;
+    </script>
+
+    <meta name="description" content="programming and human factors">
+    <link rel="icon" href="https://storage.ghost.io/c/eb/aa/ebaa2665-01a8-4415-8825-69d1f0e8fd19/content/images/size/w256h256/2020/06/3cffc4b347c3587f19fe222caaac69f63b9a5e73.png" type="image/png">
+    <link rel="canonical" href="https://blog.codinghorror.com/">
+    <meta name="referrer" content="no-referrer-when-downgrade">
+    <link rel="next" href="https://blog.codinghorror.com/page/2/">
+    
+    <meta property="og:site_name" content="Coding Horror">
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="Coding Horror">
+    <meta property="og:description" content="programming and human factors">
+    <meta property="og:url" content="https://blog.codinghorror.com/">
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:title" content="Coding Horror">
+    <meta name="twitter:description" content="programming and human factors">
+    <meta name="twitter:url" content="https://blog.codinghorror.com/">
+    
+    <script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "WebSite",
+    "publisher": {
+        "@type": "Organization",
+        "name": "Coding Horror",
+        "url": "https://blog.codinghorror.com/",
+        "logo": {
+            "@type": "ImageObject",
+            "url": "https://storage.ghost.io/c/eb/aa/ebaa2665-01a8-4415-8825-69d1f0e8fd19/content/images/2025/01/codinghorror-landscape.png"
+        }
+    },
+    "url": "https://blog.codinghorror.com/",
+    "name": "Coding Horror",
+    "mainEntityOfPage": "https://blog.codinghorror.com/",
+    "description": "programming and human factors"
+}
+    </script>
+
+    <meta name="generator" content="Ghost 6.57">
+    <link rel="alternate" type="application/rss+xml" title="Coding Horror" href="https://blog.codinghorror.com/rss/">
+    <script defer src="https://cdn.jsdelivr.net/ghost/portal@~2.69/umd/portal.min.js" data-i18n="true" data-ghost="https://blog.codinghorror.com/" data-key="4cdc4eb742c4969fd6d5cc1b82" data-api="https://codinghorror.ghost.io/ghost/api/content/" data-locale="en" crossorigin="anonymous"></script><style id="gh-members-styles">.gh-post-upgrade-cta-content,
+.gh-post-upgrade-cta {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+    text-align: center;
+    width: 100%;
+    color: #ffffff;
+    font-size: 16px;
+}
+
+.gh-post-upgrade-cta-content {
+    border-radius: 8px;
+    padding: 40px 4vw;
+}
+
+.gh-post-upgrade-cta h2 {
+    color: #ffffff;
+    font-size: 28px;
+    letter-spacing: -0.2px;
+    margin: 0;
+    padding: 0;
+}
+
+.gh-post-upgrade-cta p {
+    margin: 20px 0 0;
+    padding: 0;
+}
+
+.gh-post-upgrade-cta small {
+    font-size: 16px;
+    letter-spacing: -0.2px;
+}
+
+.gh-post-upgrade-cta a {
+    color: #ffffff;
+    cursor: pointer;
+    font-weight: 500;
+    box-shadow: none;
+    text-decoration: underline;
+}
+
+.gh-post-upgrade-cta a:hover {
+    color: #ffffff;
+    opacity: 0.8;
+    box-shadow: none;
+    text-decoration: underline;
+}
+
+.gh-post-upgrade-cta a.gh-btn {
+    display: block;
+    background: #ffffff;
+    text-decoration: none;
+    margin: 28px 0 0;
+    padding: 8px 18px;
+    border-radius: 4px;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.gh-post-upgrade-cta a.gh-btn:hover {
+    opacity: 0.92;
+}</style><script async src="https://js.stripe.com/v3/"></script>
+    <script defer src="https://cdn.jsdelivr.net/ghost/sodo-search@~1.8/umd/sodo-search.min.js" data-key="4cdc4eb742c4969fd6d5cc1b82" data-styles="https://cdn.jsdelivr.net/ghost/sodo-search@~1.8/umd/main.css" data-sodo-search="https://codinghorror.ghost.io/" data-locale="en" crossorigin="anonymous"></script>
+    
+    <link href="https://blog.codinghorror.com/webmentions/receive/" rel="webmention">
+    <script defer src="/public/cards.min.js?v=D6OJpxckK_6QDJ1o"></script>
+    <link rel="stylesheet" type="text/css" href="/public/cards.min.css?v=zbOBSN8qHrr3rC6Y">
+    <script defer src="/public/ghost-stats.min.js?v=XExDLZJ3NKpv0kSa" data-stringify-payload="false" data-datasource="analytics_events" data-storage="localStorage" data-host="https://blog.codinghorror.com/.ghost/analytics/api/v1/page_hit"  tb_site_uuid="ebaa2665-01a8-4415-8825-69d1f0e8fd19" tb_post_uuid="undefined" tb_post_type="null" tb_member_uuid="undefined" tb_member_status="undefined" tb_gift_link=""></script><style>:root {--ghost-accent-color: #143e7c;}</style>
+    <meta name="fediverse:creator" content="@codinghorror@infosec.exchange">
+<meta name="google-site-verification" content="bjsmFxELsrDwK1Uwr3bRYsofOI9RPVmHH8FNcbzWmr0" />
+
+</head>
+<body class="home-template has-sans-title has-sans-body">
+
+<div class="gh-viewport">
+
+    <header id="gh-navigation" class="gh-navigation is-stacked gh-outer">
+    <div class="gh-navigation-inner gh-inner">
+
+        <div class="gh-navigation-brand">
+            <a class="gh-navigation-logo is-title" href="https://blog.codinghorror.com">
+                    <img src="https://storage.ghost.io/c/eb/aa/ebaa2665-01a8-4415-8825-69d1f0e8fd19/content/images/2025/01/codinghorror-landscape.png" alt="Coding Horror">
+            </a>
+            <button class="gh-search gh-icon-button" aria-label="Search this site" data-ghost-search>
+    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" width="20" height="20"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg></button>            <button class="gh-burger gh-icon-button" aria-label="Menu">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" viewBox="0 0 256 256"><path d="M224,128a8,8,0,0,1-8,8H40a8,8,0,0,1,0-16H216A8,8,0,0,1,224,128ZM40,72H216a8,8,0,0,0,0-16H40a8,8,0,0,0,0,16ZM216,184H40a8,8,0,0,0,0,16H216a8,8,0,0,0,0-16Z"></path></svg>                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" viewBox="0 0 256 256"><path d="M205.66,194.34a8,8,0,0,1-11.32,11.32L128,139.31,61.66,205.66a8,8,0,0,1-11.32-11.32L116.69,128,50.34,61.66A8,8,0,0,1,61.66,50.34L128,116.69l66.34-66.35a8,8,0,0,1,11.32,11.32L139.31,128Z"></path></svg>            </button>
+        </div>
+
+        <nav class="gh-navigation-menu">
+            <ul class="nav">
+    <li class="nav-archive"><a href="https://blog.codinghorror.com/page/2/">Archive</a></li>
+    <li class="nav-discourse"><a href="https://www.discourse.org/">Discourse</a></li>
+    <li class="nav-stack"><a href="https://www.stackexchange.com/">Stack</a></li>
+    <li class="nav-rgmii"><a href="https://rgmii.org/">RGMII</a></li>
+    <li class="nav-reading"><a href="https://blog.codinghorror.com/recommended-reading-for-developers/">Reading</a></li>
+    <li class="nav-about"><a href="https://blog.codinghorror.com/about-me/">About</a></li>
+    <li class="nav-shop"><a href="https://blog.codinghorror.com/own-a-coding-horror/">Shop</a></li>
+</ul>
+
+            <a class="gh-header-icon" href="https://infosec.exchange/@codinghorror" target="_blank">
+                <svg xmlns="http://www.w3.org/2000/svg" width="61.076954mm" height="65.47831mm" viewBox="0 0 216.4144 232.00976">
+    <path fill="#000" d="M211.80734 139.0875c-3.18125 16.36625-28.4925 34.2775-57.5625 37.74875-15.15875 1.80875-30.08375 3.47125-45.99875 2.74125-26.0275-1.1925-46.565-6.2125-46.565-6.2125 0 2.53375.15625 4.94625.46875 7.2025 3.38375 25.68625 25.47 27.225 46.39125 27.9425 21.11625.7225 39.91875-5.20625 39.91875-5.20625l.8675 19.09s-14.77 7.93125-41.08125 9.39c-14.50875.7975-32.52375-.365-53.50625-5.91875C9.23234 213.82 1.40609 165.31125.20859 116.09125c-.365-14.61375-.14-28.39375-.14-39.91875 0-50.33 32.97625-65.0825 32.97625-65.0825C49.67234 3.45375 78.20359.2425 107.86484 0h.72875c29.66125.2425 58.21125 3.45375 74.8375 11.09 0 0 32.975 14.7525 32.975 65.0825 0 0 .41375 37.13375-4.59875 62.915"/>
+    <path fill="#fff" d="M177.50984 80.077v60.94125h-24.14375v-59.15c0-12.46875-5.24625-18.7975-15.74-18.7975-11.6025 0-17.4175 7.5075-17.4175 22.3525v32.37625H96.20734V85.42325c0-14.845-5.81625-22.3525-17.41875-22.3525-10.49375 0-15.74 6.32875-15.74 18.7975v59.15H38.90484V80.077c0-12.455 3.17125-22.3525 9.54125-29.675 6.56875-7.3225 15.17125-11.07625 25.85-11.07625 12.355 0 21.71125 4.74875 27.8975 14.2475l6.01375 10.08125 6.015-10.08125c6.185-9.49875 15.54125-14.2475 27.8975-14.2475 10.6775 0 19.28 3.75375 25.85 11.07625 6.36875 7.3225 9.54 17.22 9.54 29.675"/>
+</svg>
+            </a>
+            <a class="gh-header-icon" href="https://blog.codinghorror.com/rss" target="_blank">
+                <svg width="20px" height="20px" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M5 11C9.41828 11 13 14.5817 13 19M5 5C12.732 5 19 11.268 19 19M7 18C7 18.5523 6.55228 19 6 19C5.44772 19 5 18.5523 5 18C5 17.4477 5.44772 17 6 17C6.55228 17 7 17.4477 7 18Z" stroke="#000000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+            </a>
+        </nav>
+
+        <div class="gh-navigation-actions">
+                <button class="gh-search gh-icon-button" aria-label="Search this site" data-ghost-search>
+    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" width="20" height="20"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg></button>        </div>
+
+    </div>
+</header>
+
+    
+
+    
+
+
+<section class="gh-container is-list gh-outer">
+    <div class="gh-container-inner gh-inner">
+
+            <h2 class="gh-container-title">
+                Archive
+            </h2>
+
+        <main class="gh-main">
+            <div class="gh-feed">
+
+                                <article class="gh-article post">
+
+    <header class="gh-article-header gh-canvas">
+
+        <h1 class="gh-article-title is-title">
+            <a href="/every-choice-changes-everything-the-show/">Every Choice Changes Everything: The Show</a>
+        </h1>
+
+            <div class="gh-article-meta">
+                <div class="gh-article-author-image instapaper_ignore">
+                            <a href="/author/jeff-atwood/">
+                                <img class="author-profile-image" src="/assets/images/codinghorror.png" alt="Jeff Atwood">
+                            </a>
+                </div>
+                <div class="gh-article-meta-wrapper">
+                    <h4 class="gh-article-author-name"><a href="/author/jeff-atwood/">Jeff Atwood</a></h4>
+                    <div class="gh-article-meta-content">
+                        <time class="gh-article-meta-date" datetime="2026-06-22">22 Jun 2026</time>
+                            <span class="gh-article-meta-length"><span class="bull">—</span> 5 min read</span>
+                    </div>
+                </div>
+            </div>
+    </header>
+
+    <section class="gh-content gh-canvas is-body">
+        <p>About 3 weeks ago, <a href="https://en.wikipedia.org/wiki/Leo_Laporte" rel="noreferrer">Leo Laporte</a> and I recorded the first episode of what will be a new monthly show on the <a href="https://twit.tv/" rel="noreferrer">TWiT network</a>. Naming things is hard, and we almost voted on the name, like we did for <a href="https://blog.codinghorror.com/help-name-our-website/" rel="noreferrer">Stack Overflow</a>, but we quickly landed on <a href="https://twit.tv/obo" rel="noreferrer"><strong>Off By One with Jeff Atwood</strong></a> – which is funny for so many reasons, but mainly because of this programmer joke:</p><figure class="kg-card kg-image-card"><a href="https://www.martinfowler.com/bliki/TwoHardThings.html"><img src="https://storage.ghost.io/c/eb/aa/ebaa2665-01a8-4415-8825-69d1f0e8fd19/content/images/2026/05/image.png" class="kg-image" alt="There are two hard things in computer science: cache invalidation, naming things, and off-by-one errors." loading="lazy" width="1083" height="326" srcset="https://storage.ghost.io/c/eb/aa/ebaa2665-01a8-4415-8825-69d1f0e8fd19/content/images/size/w600/2026/05/image.png 600w, https://storage.ghost.io/c/eb/aa/ebaa2665-01a8-4415-8825-69d1f0e8fd19/content/images/size/w1000/2026/05/image.png 1000w, https://storage.ghost.io/c/eb/aa/ebaa2665-01a8-4415-8825-69d1f0e8fd19/content/images/2026/05/image.png 1083w" sizes="(min-width: 720px) 720px"></a></figure><p>No, I did not come up with this variation on <a href="https://www.martinfowler.com/bliki/TwoHardThings.html" rel="noreferrer">the classic quote</a>, but I wish I had. Well, whatever, here's show number two – free to view for everyone.</p><figure class="kg-card kg-embed-card"><iframe width="200" height="113" src="https://www.youtube.com/embed/jveUllo7Mjs?feature=oembed" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen="" title="Club TWiT: Off By One With Jeff Atwood #2 - From Stack Overflow to Stay Gold, America"></iframe></figure><p>The show is 1h 47m of pure joy end to end. No negativity, just low-level insanity and of course, <em>mandatory fun</em>. We record the next episode in 4 days – and there's a live stream for <a href="https://twit.tv/clubtwit" rel="noreferrer">Club TWiT Members</a>. </p><p>(Let's do this. If, and <em>only if</em>, you watched the whole episode and liked what you saw ... for the first 10 people that <a href="https://forms.gle/y5STN9zQREQbt7Na6" rel="noreferrer">fill out this form</a>, I'll cover your Club TWiT membership for one full year so you can see if you enjoy the rest of the programming.)</p><p> The permanent show homepage is at <a href="https://twit.tv/obo" rel="noreferrer">twit.tv/obo</a>:</p><figure class="kg-card kg-image-card kg-card-hascaption"><a href="https://twit.tv/obo"><img src="https://storage.ghost.io/c/eb/aa/ebaa2665-01a8-4415-8825-69d1f0e8fd19/content/images/2026/06/fca2de3652b07a0e.jpeg" class="kg-image" alt="An interactive TWiT Series You're the hero of the story! Choose from 1,024 possible endings. OFF by ONE with Jeff Atwood Hosted by Leo Laporte &quot;every choice changes everything!&quot; young person in a strange land choosing between two paths, both vaguely digital, one more abstract vector lines, the other a strange collection of consoles, disks, and a glowing computer in the distance" loading="lazy" width="2000" height="2000" srcset="https://storage.ghost.io/c/eb/aa/ebaa2665-01a8-4415-8825-69d1f0e8fd19/content/images/size/w600/2026/06/fca2de3652b07a0e.jpeg 600w, https://storage.ghost.io/c/eb/aa/ebaa2665-01a8-4415-8825-69d1f0e8fd19/content/images/size/w1000/2026/06/fca2de3652b07a0e.jpeg 1000w, https://storage.ghost.io/c/eb/aa/ebaa2665-01a8-4415-8825-69d1f0e8fd19/content/images/size/w1600/2026/06/fca2de3652b07a0e.jpeg 1600w, https://storage.ghost.io/c/eb/aa/ebaa2665-01a8-4415-8825-69d1f0e8fd19/content/images/2026/06/fca2de3652b07a0e.jpeg 2000w" sizes="(min-width: 720px) 720px"></a><figcaption><span style="white-space: pre-wrap;">art by the incredibly talented </span><a href="https://www.claygrahamart.com/"><span style="white-space: pre-wrap;">claygrahamart.com</span></a></figcaption></figure><blockquote>Jeff Atwood, co-founder of <a href="https://stackoverflow.com" rel="noreferrer">Stack Overflow</a> and <a href="https://discourse.org" rel="noreferrer">Discourse</a>, creator of the <a href="https://blog.codinghorror.com/" rel="noreferrer">Coding Horror blog</a>, joins Leo Laporte monthly for a conversation that follows its own logic. Prop comedy, computing history, the open web, wealth inequality, yo-yos. Off by one topic at all times, in the best possible way.</blockquote><p>This is another way for Leo and I to share our enthusiasm for positive stuff in tech, and <a href="https://blog.codinghorror.com/on-the-meaning-of-coding-horror/" rel="noreferrer">sharing is crucial</a> because...</p><blockquote>I realized, that’s it. That’s it exactly. That is what is so intensely satisfying about writing here.&nbsp;<strong>My happiness only becomes real when I share it with all of you.</strong></blockquote><p>Now, thanks to <a href="https://wesleyfaulkner.com/" rel="noreferrer">Wesley Faulkner</a>, who introduced me to Leo and recommended I appear on a show, every month we can <strong>make our happiness real </strong>in a completely different dimension than writing alone – via the expressions on our faces, the tone of our voices, our body language. In other words, you can see and hear <strong>how we <em>feel</em></strong>.</p><p>Here are 3 key quotes from the second Off By One episode, with linked timestamps, so you can jump directly to that section.</p><div class="kg-card kg-button-card kg-align-left"><a href="https://youtu.be/jveUllo7Mjs?si=-zx-IWmxldVCPf4w&amp;t=2748" class="kg-btn kg-btn-accent">Off By One, Episode #2, 45:47</a></div><blockquote>Jeff: I am not an elite coder by any stretch of the imagination... I am very persistent.<br><br>Leo: Isn't that funny? Because people... I mean, I think of you as one of the voices, one of the chief voices, in coding<br><br>Jeff: Well, I advocate for code that doesn't kill you in so many different ways. You know, survivable code. Ideally, no code at all.<br><br>Leo: Right.<br><br>Jeff: That's the best code, is none.<br><br>Leo: Right.<br><br>Jeff: It's a bit of a zen statement but it's true. So, I'm an advocate for, you know, good engineering. Good process. A process that recognizes that we're human and we should do this together, and we should actually kinda like each other, even.</blockquote><div class="kg-card kg-button-card kg-align-left"><a href="https://youtu.be/jveUllo7Mjs?si=NSLiTu3me0Bt37ro&amp;t=3937" class="kg-btn kg-btn-accent">Off by One, Episode #2, 01:05:37</a></div><blockquote>Jeff: Dad's funny. He had kind of a dark sense of humor that I enjoyed. Betsy doesn't like it so much, and not too much, and I get it, but I enjoy it. And I called it "the last season of the John Atwood show". It's gonna be a real banger! And it <strong>was</strong>, it f***** was, it really was! Because we won capitalism, and then <strong>we went back and made it better for everyone</strong>. I don't think it gets better than that for me.</blockquote><div class="kg-card kg-button-card kg-align-left"><a href="https://youtu.be/jveUllo7Mjs?si=y507y3c2rzZXy8iA&amp;t=4082" class="kg-btn kg-btn-accent">Off by One - Episode #2, 01:08:02</a></div><blockquote>Jeff: And the other thing is, you can just run the math on this, I've posted several times on Mastodon and other places like LinkedIn, I've done some research and if we simply collected a fair tax from Billionaires, we could literally elimate all poverty in this country at the 100% FPL level, which is $15,000 per year. <strong>All poverty</strong>. We would have zero poverty. We have the <strong>means</strong> to do it.<br><br>Leo: That's really important.<br><br>Jeff: We lack the <strong>will</strong>.</blockquote><p>If you want to witness the chaotic good of my original guest appearance which led to this show, watch <strong>the first 45 minutes </strong>of <a href="https://twit.tv/shows/intelligent-machines/episodes/859" rel="noreferrer">Intelligent Machines #859</a>, recorded on Feb 25th along with <a href="https://parismartineau.com/" rel="noreferrer">Paris Martineau</a>, <a href="https://en.wikipedia.org/wiki/Jeff_Jarvis" rel="noreferrer">Jeff Jarvis</a>, and Leo. I dialed down the chaos considerably for the Off By One show, but for this one, I personally think it's funnier to watch Paris' reaction to me for the entire show. <em>You've been warned!</em></p><figure class="kg-card kg-embed-card"><iframe width="200" height="113" src="https://www.youtube.com/embed/h_DWm6ReuaI?feature=oembed" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen="" title="What's Behind the Fox? - Tech's Gilded Age"></iframe></figure><p>Here are 3 key quotes from this episode, with linked timestamps, so you can jump directly to that section.</p><div class="kg-card kg-button-card kg-align-left"><a href="https://youtu.be/h_DWm6ReuaI&amp;t=1828s" class="kg-btn kg-btn-accent">Intelligent Machines #859 - What's Behind the Fox? 30:28</a></div><blockquote>Leo: Well in a way it's a shame because we have in the last year kind of stepped back from our global initiatives in the united states and I think we do have a responsibility. I think your partner is absolutely right. <strong>If you have everything you need, then help others have everything they need</strong>.<br><br>Jeff: What is money even FOR? I don't even have "that much", what do you.. how do you spend it all? I don't have.. I just want a simple life, man!</blockquote><div class="kg-card kg-button-card kg-align-left"><a href="https://youtu.be/h_DWm6ReuaI?t=1979" class="kg-btn kg-btn-accent">Intelligent Machines #859 - What's Behind The Fox? 32:59</a></div><blockquote>Jeff: I mean.. have you seen some of the stuff LLMs will do when you tell them to optimize? It's like, optimize this for 95% and it's like okay, "return true".<br><br>Leo: That's a good optimization!<br><br>Jeff: Well, because it doesn't know what it's doing. It has no actual understanding. It's playing a game of global brain statistics and copy paste. And it's good at like, merging... I call it <strong>JPEG for words</strong>, which it kind of is. And there's so much stuff. It's like reading summaries. And it is very accurate with summaries. We saw this on discourse. They implemented it. I was very skeptical. And I went to some very complex discussions. We had on our internal discourse and read the summary and was like <strong>that is a very good summary</strong> and it captured the key points in the discussion. It could have captured more, but it got nothing wrong. And it basically <strong>was JPEG for that conversation, wasn't it.. </strong>without much loss.<br><br>Jeff: Now does JPEG work on EVERY image? No. Garfield is a bad choice, for, yknow, JPEG.</blockquote><div class="kg-card kg-button-card kg-align-left"><a href="https://youtu.be/h_DWm6ReuaI&amp;t=2530" class="kg-btn kg-btn-accent">Intelligent Machines #859 - What's Behind The Fox? 42:10</a></div><blockquote>Jeff Atwood – Ok, the first guilded age, we're deep in the second one now. I mean, just look up the numbers. More money in the hands of fewer people than in any other period of  time. In the first guilded age, that was basically the railroad barons. Guess who it is in the second guilded age? <em>I'm in this picture and I don't like it.  </em>So like, <strong>what are we gonna do about it?</strong></blockquote><p>So thank you, Leo and Wesley, for giving me another way to make happiness real by sharing it with all of you, now in video and audio form, all the feels, all the time. Well, once per month.</p><p>Let us know what you think –  I don't mind comments here but I'm much more likely to answer on the <a href="https://www.twit.community/" rel="noreferrer">TWiT community Discourse</a>. Try on a paragraph for size, our old pal the pilcrow ¶. You might even like it! It's possible the practice of writing paragraphs and forming coherent narratives might even improve your overall writing and communication skills. <a href="https://blog.codinghorror.com/nobodys-going-to-help-you-and-thats-awesome/" rel="noreferrer">Or your life, even. </a></p><figure class="kg-card kg-embed-card"><iframe width="200" height="150" src="https://www.youtube.com/embed/FHgAXOubLCU?feature=oembed" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen="" title="Discourse sticker &quot;Power of the Paragraph&quot;"></iframe></figure><p></p><p>I also heard a rumor that any Club TWiT users who make their way from the Discord and post regularly on the <a href="https://www.twit.community/" rel="noreferrer">TWiT Discourse</a> might get a super cool little token of appreciation in the postal mail from some user named "Junk". Who knows? Who can say what might happen? 🤔</p>
+        <div class="gh-discussion-meta">
+            <a href="//blog.codinghorror.com/every-choice-changes-everything-the-show/#discourse-comments">Discussion</a>
+        </div>
+    </section>
+</article>
+                                <article class="gh-article post">
+
+    <header class="gh-article-header gh-canvas">
+
+        <h1 class="gh-article-title is-title">
+            <a href="/thank-you-for-being-a-friend/">Thank You For Being a Friend</a>
+        </h1>
+
+            <div class="gh-article-meta">
+                <div class="gh-article-author-image instapaper_ignore">
+                            <a href="/author/jeff-atwood/">
+                                <img class="author-profile-image" src="/assets/images/codinghorror.png" alt="Jeff Atwood">
+                            </a>
+                </div>
+                <div class="gh-article-meta-wrapper">
+                    <h4 class="gh-article-author-name"><a href="/author/jeff-atwood/">Jeff Atwood</a></h4>
+                    <div class="gh-article-meta-content">
+                        <time class="gh-article-meta-date" datetime="2026-04-20">20 Apr 2026</time>
+                            <span class="gh-article-meta-length"><span class="bull">—</span> 2 min read</span>
+                    </div>
+                </div>
+            </div>
+    </header>
+
+    <section class="gh-content gh-canvas is-body">
+        <p>It's been one of those months, and by that, I mean one of the 663 months since I was born. This won't be a long post, because I only have two things to say. First, I'm really glad we re-ordered the <a href="https://rgmii.org/" rel="noreferrer">GMI (Guaranteed Minimum Income) rural study counties</a> so Mercer County, WV, my Dad's county, went first in October 2025. I knew dad was close to the end, and sure enough, that was the last time I ever saw him.</p><p>You can kinda sorta meet my dad on this page, if you want to. </p><figure class="kg-card kg-bookmark-card"><a class="kg-bookmark-container" href="https://rgmii.org/why-pledge-to-share-the-american-dream/"><div class="kg-bookmark-content"><div class="kg-bookmark-title">Why Pledge to Share the American Dream? • RGMII</div><div class="kg-bookmark-description">Why we pledged to Share the American Dream: RGMII’s $50M plan funds rural guaranteed minimum income studies to expand opportunity and strengthen democracy.</div><div class="kg-bookmark-metadata"><img class="kg-bookmark-icon" src="https://static.ghost.org/v5.0.0/images/link-icon.svg" alt=""><span class="kg-bookmark-author">Rural Guaranteed Minimum Income Initiative • RGMII</span><span class="kg-bookmark-publisher">Jeff Atwood</span></div></div><div class="kg-bookmark-thumbnail"><img src="https://storage.ghost.io/c/c5/40/c5405d40-5ed6-4e52-8454-abc01f974d22/content/images/size/w1200/2026/01/atwood-burton-jump-2026-midpoint.jpg" alt="" onerror="this.style.display = 'none'"></div></a></figure><p>I knew this was coming, and so did he. There is no loss, because nothing ever ends.  </p><figure class="kg-card kg-image-card"><a href="https://bookshop.org/p/books/watchmen-2019-edition-alan-moore/d6070514ef8a64d5"><img src="https://storage.ghost.io/c/eb/aa/ebaa2665-01a8-4415-8825-69d1f0e8fd19/content/images/2026/04/image.png" class="kg-image" alt="" loading="lazy" width="1188" height="1005" srcset="https://storage.ghost.io/c/eb/aa/ebaa2665-01a8-4415-8825-69d1f0e8fd19/content/images/size/w600/2026/04/image.png 600w, https://storage.ghost.io/c/eb/aa/ebaa2665-01a8-4415-8825-69d1f0e8fd19/content/images/size/w1000/2026/04/image.png 1000w, https://storage.ghost.io/c/eb/aa/ebaa2665-01a8-4415-8825-69d1f0e8fd19/content/images/2026/04/image.png 1188w" sizes="(min-width: 720px) 720px"></a></figure><p>All those experiences I had with my father, particularly that last October trip, will stay with me forever.  Nothing was lost.<em> Everything was gained</em>. We won capitalism, then went back to help improve it for everyone. And believe me, I'm far from being done with <a href="https://staygold.us/" rel="noreferrer">my third startup</a>.</p><p>Second, I want to take a moment to <strong>thank everyone – and I do mean <em>everyone</em> – who ever contributed to Stack Overflow in any way</strong>. And lucky you, it's <a href="https://blog.codinghorror.com/the-great-mp3-bitrate-experiment/" rel="noreferrer">not Starship</a> this time!</p><figure class="kg-card kg-embed-card"><iframe width="200" height="113" src="https://www.youtube.com/embed/s8iXW3GHx3w?feature=oembed" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen="" title="The Vast and Endless Sea"></iframe></figure><p>Did you know that <strong>LLMs basically <em>could not code at all</em> without access to the extremely high quality creative commons programming Q&amp;A dataset that all of us built together at </strong><a href="https://stackoverflow.com/" rel="noreferrer"><strong>Stack Overflow</strong></a><strong>?</strong> Don't take it from me, ask the LLMs. They'll tell you themselves. Go ahead. G'wan. Ask. Really grill 'em on this one. I strongly recommend you use pro mode when asking, though, because those are the only decent LLM modes in my experience. It is incredible what you can do with global brain statistics and a strongly curated dataset created by we, the people! </p><p>One last thing. If the LLMs end up hollowing out the very communities that produce all their training data, they're going to really, <em>really</em> regret that. I'll give these LLM / GAI companies the same advice I gave Joel Spolsky when I left Stack Overflow to start <a href="https://www.discourse.org/" rel="noreferrer">Discourse</a> – <em>do not, for any reason, under any circumstances, kill the goose that lays the golden eggs</em>, aka the <strong>human community around your product that does all the real work.</strong> It's pretty simple. Just treat the community with the respect they deserve... that <em>we all deserve</em>. </p><p><a href="https://infosec.exchange/@codinghorror/116390847963896783" rel="noreferrer">Thank you for being a friend</a>, because there's no way I could have done any of this without you. 💛</p>
+        <div class="gh-discussion-meta">
+            <a href="//blog.codinghorror.com/thank-you-for-being-a-friend/#discourse-comments">Discussion</a>
+        </div>
+    </section>
+</article>
+                                <article class="gh-article post">
+
+    <header class="gh-article-header gh-canvas">
+
+        <h1 class="gh-article-title is-title">
+            <a href="/launching-the-rural-guaranteed-minimum-income-initiative/">Launching The Rural Guaranteed Minimum Income Initiative</a>
+        </h1>
+
+            <div class="gh-article-meta">
+                <div class="gh-article-author-image instapaper_ignore">
+                            <a href="/author/jeff-atwood/">
+                                <img class="author-profile-image" src="/assets/images/codinghorror.png" alt="Jeff Atwood">
+                            </a>
+                </div>
+                <div class="gh-article-meta-wrapper">
+                    <h4 class="gh-article-author-name"><a href="/author/jeff-atwood/">Jeff Atwood</a></h4>
+                    <div class="gh-article-meta-content">
+                        <time class="gh-article-meta-date" datetime="2026-02-03">03 Feb 2026</time>
+                            <span class="gh-article-meta-length"><span class="bull">—</span> 8 min read</span>
+                    </div>
+                </div>
+            </div>
+    </header>
+
+    <section class="gh-content gh-canvas is-body">
+        <p>It's been a year since I invited Americans to join us in a <strong>pledge to Share the American Dream</strong>:</p><blockquote>1. Support organizations you feel are&nbsp;<a href="https://www.charitynavigator.org/" rel="noopener noreferrer">effectively helping</a>&nbsp;those most in need across America <strong>right now</strong>.<br><br>2. Within the next five years, also contribute&nbsp;<strong>public dedications of time or funds towards longer term efforts&nbsp;</strong>to keep the American Dream fair and attainable for all our children.<br><br><a href="https://blog.codinghorror.com/stay-gold-america/" rel="noreferrer">Stay gold, America.</a> 💛</blockquote><p>Personally, I’ve become a big believer in one particular quote, especially considering the specific context in which it was delivered:</p>
+<!--kg-card-begin: html-->
+<blockquote class="kg-blockquote-alt">“From those to whom much is given, much is expected.” — <a style="font-weight:300;color: var(--color-secondary-text);" href="https://rgmii.org/mary-gates-philanthropic-quote/" rel="noopener noreferrer" target="_blank">Mary Gates</a></blockquote>
+<!--kg-card-end: html-->
+<p>Those 10 words had a profound effect on the world. Indeed, we <em>were</em> given much, so we, as a family, <strong>will <em>choose to give much</em></strong>. On <a href="https://denver-frederick.com/2025/06/24/the-american-dream-is-broken-this-50-million-bet-could-help-rebuild-it/" rel="noreferrer">a recent podcast</a>, my partner Betsy said it better than I could have:</p><blockquote><em>“Well, we have everything we need!” That’s how I’ve always phrased it to [our children]. That, I think, extends [to our philanthropy]. We have everything we need;&nbsp;</em><strong>how do we make sure everybody has what they need?</strong><em>&nbsp;Because that’s the basic thing — Do you have a comfortable place to live? Do you have enough to eat? Do you have healthcare? If you have the basics, you’re in a good place in life, and everybody should have that opportunity.</em></blockquote><p>It’s a question I’ve asked myself a lot <a href="https://techcrunch.com/2021/06/02/stack-overflow-acquired-by-prosus-for-a-reported-1-8-billion/" rel="noreferrer">since 2021</a>. <em>When, exactly, is <strong>enough?</strong></em></p><figure class="kg-card kg-image-card"><a href="https://www.instagram.com/starshapedpress/p/DSh-Oo5DtS1/"><img src="https://storage.ghost.io/c/eb/aa/ebaa2665-01a8-4415-8825-69d1f0e8fd19/content/images/2026/02/starshaped-press-we-have-everything-we-need-letterpress-dec-2025.jpg" class="kg-image" alt="" loading="lazy" width="1600" height="861" srcset="https://storage.ghost.io/c/eb/aa/ebaa2665-01a8-4415-8825-69d1f0e8fd19/content/images/size/w600/2026/02/starshaped-press-we-have-everything-we-need-letterpress-dec-2025.jpg 600w, https://storage.ghost.io/c/eb/aa/ebaa2665-01a8-4415-8825-69d1f0e8fd19/content/images/size/w1000/2026/02/starshaped-press-we-have-everything-we-need-letterpress-dec-2025.jpg 1000w, https://storage.ghost.io/c/eb/aa/ebaa2665-01a8-4415-8825-69d1f0e8fd19/content/images/2026/02/starshaped-press-we-have-everything-we-need-letterpress-dec-2025.jpg 1600w" sizes="(min-width: 720px) 720px"></a></figure><p>We do have everything we need. <em>Why can’t everyone else have the basic things they need, too?</em></p><p>Beyond the $1M to eight nonprofit charities we listed in January 2025, we saw immediate needs becoming so urgent that we quickly added an additional $13M in donations within a few months, for a total of $21M.</p><div class="kg-card kg-toggle-card" data-kg-toggle-state="close">
+            <div class="kg-toggle-heading">
+                <h4 class="kg-toggle-heading-text"><span style="white-space: pre-wrap;">Immediate Share The American Dream Donations (~$21M)</span></h4>
+                <button class="kg-toggle-card-icon" aria-label="Expand toggle to read content">
+                    <svg id="Regular" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+                        <path class="cls-1" d="M23.25,7.311,12.53,18.03a.749.749,0,0,1-1.06,0L.75,7.311"></path>
+                    </svg>
+                </button>
+            </div>
+            <div class="kg-toggle-content"><ul><li value="1"><a href="https://teamrubiconusa.org/" target="_blank" rel="noopener noreferrer"><span style="white-space: pre-wrap;">Team Rubicon</span></a><span style="white-space: pre-wrap;"> — $1M</span></li><li value="2"><a href="https://childrenshungerfund.org/" target="_blank" rel="noopener noreferrer"><span style="white-space: pre-wrap;">Children’s Hunger Fund</span></a><span style="white-space: pre-wrap;"> — $1M</span></li><li value="3"><a href="https://pen.org/" target="_blank" rel="noopener noreferrer"><span style="white-space: pre-wrap;">PEN America</span></a><span style="white-space: pre-wrap;"> — $1M</span></li><li value="4"><a href="https://www.thetrevorproject.org/" target="_blank" rel="noopener noreferrer"><span style="white-space: pre-wrap;">The Trevor Project</span></a><span style="white-space: pre-wrap;"> — $1M</span></li><li value="5"><a href="https://www.naacpldf.org/" target="_blank" rel="noopener noreferrer"><span style="white-space: pre-wrap;">NAACP Legal Defense and Educational Fund</span></a><span style="white-space: pre-wrap;"> — $1M + $100k</span></li><li value="6"><a href="https://www.firstgenerationinvestors.com/" target="_blank" rel="noopener noreferrer"><span style="white-space: pre-wrap;">First Generation Investors</span></a><span style="white-space: pre-wrap;"> — $1M</span></li><li value="7"><a href="https://www.globalrefuge.org/" target="_blank" rel="noopener noreferrer"><span style="white-space: pre-wrap;">Global Refuge</span></a><span style="white-space: pre-wrap;"> — $1M</span></li><li value="8"><a href="https://www.plannedparenthood.org/" target="_blank" rel="noopener noreferrer"><span style="white-space: pre-wrap;">Planned Parenthood</span></a><span style="white-space: pre-wrap;"> — $1M</span></li><li value="9"><a href="https://votevets.org/" rel="noreferrer"><span style="white-space: pre-wrap;">VoteVets</span></a><span style="white-space: pre-wrap;"> — $2M</span></li><li value="10"><a href="https://joinmastodon.org/" rel="noreferrer"><span style="white-space: pre-wrap;">Mastodon</span></a><span style="white-space: pre-wrap;"> — $1.5M</span></li><li value="11"><a href="https://www.404media.co/" rel="noreferrer"><span style="white-space: pre-wrap;">404 Media</span></a><span style="white-space: pre-wrap;"> — $1.1M</span></li><li value="12"><a href="https://www.garbageday.email/" rel="noreferrer"><span style="white-space: pre-wrap;">Ryan Broderick / Garbage Day</span></a><span style="white-space: pre-wrap;"> — $1M</span></li><li value="13"><a href="https://archive.org/" rel="noreferrer"><span style="white-space: pre-wrap;">Internet Archive</span></a><span style="white-space: pre-wrap;"> — $1M </span></li><li value="14"><a href="https://commoncrawl.org/" rel="noreferrer"><span style="white-space: pre-wrap;">Common Crawl Foundation</span></a><span style="white-space: pre-wrap;"> — $1M</span></li><li value="15"><span style="white-space: pre-wrap;">Wikipedia / </span><a href="https://wikimediafoundation.org/" rel="noreferrer"><span style="white-space: pre-wrap;">Wikimedia foundation</span></a><span style="white-space: pre-wrap;"> — $1M</span></li><li value="16"><a href="https://www.abetterinternet.org/" rel="noreferrer"><span style="white-space: pre-wrap;">Internet Security Research Group</span></a><span style="white-space: pre-wrap;"> — $1M</span></li><li value="17"><a href="https://www.dnalounge.com/" rel="noreferrer"><span style="white-space: pre-wrap;">DNA Lounge</span></a><span style="white-space: pre-wrap;"> — $1M</span></li><li value="18"><a href="https://murena.com/" rel="noreferrer"><span style="white-space: pre-wrap;">Murena</span></a><span style="white-space: pre-wrap;"> — $500k</span></li><li value="19"><a href="https://sharewellnow.com/" rel="noreferrer"><span style="white-space: pre-wrap;">Sharewell</span></a><span style="white-space: pre-wrap;"> — $300k</span></li><li value="20"><a href="https://www.preciousplastic.com/" rel="noreferrer"><span style="white-space: pre-wrap;">Precious Plastic</span></a><span style="white-space: pre-wrap;"> — $100k</span></li><li value="21"><a href="https://economicsecurityproject.org/" rel="noreferrer"><span style="white-space: pre-wrap;">Economic Security Project</span></a><span style="white-space: pre-wrap;"> — $100k</span></li><li value="22"><a href="https://ruraldemocracyinitiative.org/" rel="noreferrer"><span style="white-space: pre-wrap;">Rural Democracy Initiative</span></a><span style="white-space: pre-wrap;"> — $100k</span></li><li value="23"><a href="https://civicnation.org/" rel="noreferrer"><span style="white-space: pre-wrap;">Civic Nation</span></a><span style="white-space: pre-wrap;"> — $100k</span></li><li value="24"><a href="https://www.sojournproject.org/" rel="noreferrer"><span style="white-space: pre-wrap;">Sojourn Project</span></a><span style="white-space: pre-wrap;"> — $750k</span></li><li value="25"><a href="https://www.alamedafoodbank.org/" rel="noreferrer"><span style="white-space: pre-wrap;">Alameda Food Bank</span></a><span style="white-space: pre-wrap;"> — $150k </span></li><li value="26"><a href="https://urbancompassionproject.org/" rel="noreferrer"><span style="white-space: pre-wrap;">Urban Compassion Project</span></a><span style="white-space: pre-wrap;"> — $75k</span></li></ul></div>
+        </div><p>But you can’t take a completely short term view and fight each individual fire reactively, as it comes. You'll never stop firefighting. We also have to do fire abatement and deal with the root causes, improving conditions in this country such that <em>there aren’t so many fires</em>. Thus for the second half, much longer term part, in addition to the $21M already donated, we <strong>pledged $50M </strong>— half of our remaining wealth — to address the underlying, systemic issues. </p><p>I proposed some <a href="https://blog.codinghorror.com/stay-gold-america/#long-term-efforts" rel="noreferrer">speculative ideas</a> in “Stay Gold,” and this one ended up being the closest:</p><blockquote>We could found a new organization loosely based on the original&nbsp;<a href="https://en.wikipedia.org/wiki/RAND_Corporation" rel="noopener noreferrer">RAND Corporation</a>, but modernized like&nbsp;<a href="https://www.leverforchange.org/" rel="noopener noreferrer">Lever for Change</a>. We can empower the best and brightest to determine a realistic, achievable path toward preserving the American Dream for&nbsp;<em>everyone,</em>&nbsp;working within the current system or outside it.</blockquote><p>By March, 2025 we had consensus — <a href="https://blog.codinghorror.com/the-road-not-taken-is-guaranteed-minimum-income/" rel="noreferrer">The Road Not Taken is Guaranteed Minimum Income</a>.<strong>  </strong></p><figure class="kg-card kg-bookmark-card"><a class="kg-bookmark-container" href="https://blog.codinghorror.com/the-road-not-taken-is-guaranteed-minimum-income/"><div class="kg-bookmark-content"><div class="kg-bookmark-title">The Road Not Taken is Guaranteed Minimum Income</div><div class="kg-bookmark-description">The dream is incomplete until we share it with our fellow Americans.</div><div class="kg-bookmark-metadata"><img class="kg-bookmark-icon" src="https://storage.ghost.io/c/eb/aa/ebaa2665-01a8-4415-8825-69d1f0e8fd19/content/images/icon/3cffc4b347c3587f19fe222caaac69f63b9a5e73-6.png" alt=""><span class="kg-bookmark-author">Coding Horror</span><span class="kg-bookmark-publisher">Jeff Atwood</span></div></div><div class="kg-bookmark-thumbnail"><img src="https://storage.ghost.io/c/eb/aa/ebaa2665-01a8-4415-8825-69d1f0e8fd19/content/images/thumbnail/IMG_7003-1.jpg" alt="" onerror="this.style.display = 'none'"></div></a></figure><p><strong>Guaranteed Minimum Income (GMI)</strong> is an improved version of the older concept of Universal Basic Income (UBI) — rather than indiscriminately giving money to “everyone,” GMI <strong>directs the money towards those who most need it</strong>, particularly families experiencing generational poverty. </p><div class="kg-card kg-cta-card kg-cta-bg-grey kg-cta-minimal    " data-layout="minimal">
+            
+            <div class="kg-cta-content">
+                
+                
+                    <div class="kg-cta-content-inner">
+                    
+                        <div class="kg-cta-text">
+                            <p><span style="white-space: pre-wrap;">📢 Please note that after this post, Coding Horror will revert to normal nerdy blog posts, and all future GMI content will be at a dedicated site linked below.</span></p>
+                        </div>
+                    
+                    
+                    </div>
+                
+            </div>
+        </div><h3 id="why-did-we-decide-on-gmi">Why did we decide on GMI?</h3><ul><li>Almost every <strong>existing UBI/GMI study result data we could find indicates <em>cash generally works</em></strong>. For example, OpenResearch <a href="https://rgmii.org/openresearch-ubi-study-2018-2023-analysis/" rel="noreferrer">data showed</a> the greatest increase in spending among study participants was in meeting basic needs, with the greatest percent increase in support to others (26%), along with huge decreases in reported alcohol use (20% less) and days using non-prescribed painkillers (53% fewer). Why wouldn’t we continue to build something that has generally been shown to work, study after study, time and time again? </li><li>This is <strong>survival money</strong>,<strong> </strong>cash for folks so they can put food on the table, get a roof over their heads, have a functioning vehicle to go to work, and decide how to meet their most basic, critical needs. It pains me to say this, but we live in a world where many people simply do not often experience open generosity, or regular income. When you show someone what it feels like to just not be hungry for a little while, their view of the world changes. They feel trusted. They see <em>possibility</em>. </li></ul><p></p>
+<!--kg-card-begin: html-->
+<style>
+  :root {
+    --brand-green: #0a5d43;
+    --text-gray: #333;
+  }
+  
+  .rise-container {
+    background-color: #eee;
+    display: flex;  
+    flex-direction: row; /* Default side-by-side */
+    max-width: 1000px;
+    margin: 0 auto;    
+    color: var(--text-gray);
+  }
+
+  /* Left Side: The Photo */
+  .rise-photo-column {
+    flex: 0 0 48%; /* Matches the image proportion */
+    display: flex;
+    padding: 10px;
+    flex-direction: column;
+  }
+
+  .rise-photo-column img {
+    width: 100%;
+    height: 450px;
+    object-fit: cover;
+    display: block;
+  }
+
+
+  /* Right Side: The Text */
+  .rise-text-column {
+    flex: 1;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    line-height: 1.5;
+    font-size: 14px;
+  }
+
+  .rise-text-column p {
+    margin-bottom: 20px;
+  }
+
+  .rise-badge {
+    background-color: var(--brand-green);
+    color: white;
+    padding: 8px 20px;    
+    font-size: 14px;
+    text-align: center;    
+    font-weight: 500;
+  }  
+
+  @media (max-width: 768px) {
+    .rise-container {
+      flex-direction: column; /* Stack vertically */
+      width: 100%;
+    }
+
+    .rise-photo-column {
+      flex: 1 0 auto;
+      padding: 10px;
+    }
+
+    .rise-text-column {
+      padding: 20px;
+      font-size: 12px;
+    }
+    
+    .rise-badge {
+      font-size: 14px;
+      margin-top: 9px;
+    }
+</style>
+
+<div class="rise-container">
+  <div class="rise-photo-column">
+    <img src="https://storage.ghost.io/c/eb/aa/ebaa2665-01a8-4415-8825-69d1f0e8fd19/content/images/2026/02/rise-recipient1.png" alt="Stacy D. and baby">
+    <div class="rise-badge">
+      RISE Recipient Stacy D. | WV
+    </div>    
+  </div>
+
+  <div class="rise-text-column">
+    <blockquote style="border: none !important;">
+      <p>I moved here with my family. And I have no family up here other than who I brought with me. <strong>So, how most people can be like, “Hey, I’m having a hard time. Got $20 or a pack of diapers.” I have nobody up here to do that.</strong> So, if me and my husband don't figure it out, it don't get figured out.</p>
+    
+      <p>So, I’ve got five kids that live with me... I was working full-time until I got pregnant. I prayed for this baby for 10 years. <strong>So, as soon as I got pregnant, I stopped working. I was high risk.</strong></p>
+    
+      <p><strong>The day I got cleared to go back to work, my vehicle broke down.</strong> It was the only vehicle that we had that carried all the kids. So, I’ve been four months without my car. So this is also going to get my vehicle back on the road.</p>
+    
+      <p>You don’t know how hard it is to ask people, hey, can I get a ride to the grocery store? Or, hey, my baby has two month shots. I had to borrow a vehicle. <strong>This is gonna... it’s going to do a lot!</i></strong></p>
+    </blockquote>
+  </div>
+</div>
+<!--kg-card-end: html-->
+<ul><li>Unlike many other social programs, <strong>GMI studies require initiative</strong>. These are opt-in studies that you have to sign up for, demonstrate that you meet the income criteria and are a resident of the county — and because spots are limited, be randomly selected from eligible applicants. We emphasize that this is not passive, it is active <strong>teamwork</strong> to improve the GMI program with your family, your community, and everyone else we can reach together over the next few decades.</li></ul><h2 id="building-on-what-works">Building On What Works</h2><ul><li>The <a href="https://www.openresearchlab.org/studies/unconditional-cash-study/study" rel="noreferrer">massive OpenResearch UBI study</a>, the largest and most detailed guaranteed income study ever conducted in the USA, was designed to be a template for future, more refined studies, and that’s <em>exactly </em>what we’re doing. We will also use what we learn in this group of three counties — as in software, <a href="https://blog.codinghorror.com/rule-of-three/" rel="noreferrer">the rule of three</a> — to <strong>iterate, adapt, and improve our GMI study playbook with every new group of three counties</strong>, generating a playbook anyone can use. </li><li>We strive to do repeatable, replicable <strong>science</strong> in every study, and <strong>all our data will be open and freely shared with the world</strong>. We’re contributing to — and partially funding — a global, open data repository for basic income pilots all around the world, <a href="https://ubidata.io/" rel="noreferrer">UBIdata</a>. It’s the same reason we made <a href="https://stackoverflow.com/" rel="noreferrer">Stack Overflow</a> content part of the creative commons, and <a href="https://www.discourse.org/" rel="noreferrer">Discourse</a> fully open source.</li><li>GMI is <strong>seed funding for families,</strong> investing in our fellow Americans, those who need it the most. A large body of research shows that dollars targeted to lower-income families are more likely to be spent quickly and reduce hardship, and can improve outcomes for children. “<strong>Trickle up” economics works,</strong> whereas "trickle down" tax cuts for the rich <a href="https://academic.oup.com/ser/article/20/2/539/6500315" rel="noreferrer">increase income inequality</a> and provide no significant effect on growth or jobs.</li><li>This is the newer <a href="https://ssir.org/articles/entry/trust-based-philanthropy-strategic">trust based model of philanthropy</a>, much closer to venture capital funding. We primarily empower, fund, and build up <strong>existing organizations</strong> like GiveDirectly and OpenResearch, forming a collaborative team to leverage all their existing work and grow their organizations in whatever way they see fit, because they have the most experience in the GMI space. </li></ul><h2 id="the-rural-guaranteed-minimum-income-initiative">The Rural Guaranteed Minimum Income Initiative</h2><p>I like to <a href="https://blog.codinghorror.com/go-that-way-really-fast/" rel="noreferrer">go that way, really fast</a>, so we are already well underway<em> </em>with the<em> </em><a href="https://rgmii.org/"><strong>Rural Guaranteed Minimum Income Initiative</strong></a>.</p><p>We focus on <strong>rural counties</strong>, where dollars go a lot further, poverty is more prevalent, and populations are smaller for tighter studies. Rural counties are also greatly overlooked in this country, in my opinion, yet they have so much incredible untapped talent. I know because that’s exactly where my parents and I are from.</p><figure class="kg-card kg-image-card"><img src="https://storage.ghost.io/c/eb/aa/ebaa2665-01a8-4415-8825-69d1f0e8fd19/content/images/2026/02/rgmii-metro-vs-rural-counties-usa-2026-2.png" class="kg-image" alt="Map of the United States via rgmii.org showing all 3,143 counties by rural (gold) / metro (grey) and population" loading="lazy" width="1600" height="1075" srcset="https://storage.ghost.io/c/eb/aa/ebaa2665-01a8-4415-8825-69d1f0e8fd19/content/images/size/w600/2026/02/rgmii-metro-vs-rural-counties-usa-2026-2.png 600w, https://storage.ghost.io/c/eb/aa/ebaa2665-01a8-4415-8825-69d1f0e8fd19/content/images/size/w1000/2026/02/rgmii-metro-vs-rural-counties-usa-2026-2.png 1000w, https://storage.ghost.io/c/eb/aa/ebaa2665-01a8-4415-8825-69d1f0e8fd19/content/images/2026/02/rgmii-metro-vs-rural-counties-usa-2026-2.png 1600w" sizes="(min-width: 720px) 720px"></figure><p>We’ve funded three county level programs (Mercer, WV; Beaufort, NC; Warren, MS) that are already underway, where we will help lift thousands of people out of poverty for a period of 16 months, while sharing data and results with the world. That’s a good start.</p><figure class="kg-card kg-image-card"><img src="https://storage.ghost.io/c/eb/aa/ebaa2665-01a8-4415-8825-69d1f0e8fd19/content/images/2026/02/three-initial-rgmii-counties-mercer-beaufort-warren-wide.png" class="kg-image" alt="Zoomed in map of USA with Mercer County, WV and Beaufort County, NC and Warren County, MS highlighted" loading="lazy" width="1300" height="600" srcset="https://storage.ghost.io/c/eb/aa/ebaa2665-01a8-4415-8825-69d1f0e8fd19/content/images/size/w600/2026/02/three-initial-rgmii-counties-mercer-beaufort-warren-wide.png 600w, https://storage.ghost.io/c/eb/aa/ebaa2665-01a8-4415-8825-69d1f0e8fd19/content/images/size/w1000/2026/02/three-initial-rgmii-counties-mercer-beaufort-warren-wide.png 1000w, https://storage.ghost.io/c/eb/aa/ebaa2665-01a8-4415-8825-69d1f0e8fd19/content/images/2026/02/three-initial-rgmii-counties-mercer-beaufort-warren-wide.png 1300w" sizes="(min-width: 720px) 720px"></figure><p>But I think we can do <em>considerably</em> more. With your help, we hope to <strong>reach all 50 states</strong> over time. </p><p>In “Stay Gold,” I <a href="https://blog.codinghorror.com/stay-gold-america/#which-dream" rel="noreferrer">noted</a> that all of American history contains the path of love, and the path of hate. But the path of love is the only survivable path. It’s so much harder, and it’s going to be a lifetime of work. But what else could I possibly buy with our money that would be worth anything close to this, for all of us? </p><h3 id="what-you-can-do">What You Can Do</h3><p><a href="https://rgmii.org/help-out/" rel="noreferrer">Everyone is invited to help</a>. Share <a href="https://rgmii.org/gmi-study-analysis/" rel="noreferrer">results</a>, learn the <a href="https://rgmii.org/history-of-gmi/" rel="noreferrer">history of GMI</a> (it’s actually fascinating, I swear), talk to your representatives and generally spread the word. A surprising number of people have never even heard the terms UBI or GMI, and sometimes have misconceptions about what they are and how they work.</p><figure class="kg-card kg-image-card"><a href="https://rgmii.org"><img src="https://storage.ghost.io/c/eb/aa/ebaa2665-01a8-4415-8825-69d1f0e8fd19/content/images/2026/02/rural-gmi-initiative-logo-qr-urls-wide.png" class="kg-image" alt="logo for the Rural Guaranteed Minimum Income Initiative, a gold star with red/white/blue streamers above staygold.us and a QR code above rgmii.org" loading="lazy" width="2000" height="564" srcset="https://storage.ghost.io/c/eb/aa/ebaa2665-01a8-4415-8825-69d1f0e8fd19/content/images/size/w600/2026/02/rural-gmi-initiative-logo-qr-urls-wide.png 600w, https://storage.ghost.io/c/eb/aa/ebaa2665-01a8-4415-8825-69d1f0e8fd19/content/images/size/w1000/2026/02/rural-gmi-initiative-logo-qr-urls-wide.png 1000w, https://storage.ghost.io/c/eb/aa/ebaa2665-01a8-4415-8825-69d1f0e8fd19/content/images/size/w1600/2026/02/rural-gmi-initiative-logo-qr-urls-wide.png 1600w, https://storage.ghost.io/c/eb/aa/ebaa2665-01a8-4415-8825-69d1f0e8fd19/content/images/size/w2400/2026/02/rural-gmi-initiative-logo-qr-urls-wide.png 2400w" sizes="(min-width: 720px) 720px"></a></figure><p>If you, or someone you know, is “those to whom much is given,” and in a position to sponsor county-scale work, please join us in <a href="https://rgmii.org/become-a-donor/" rel="noreferrer">bringing a GMI study to a new rural county</a> and reach all 50 states. Let’s continue to do science and help lift thousands of people out of poverty while generating open data for the world.</p><figure class="kg-card kg-image-card"><a href="https://rgmii.org/"><img src="https://storage.ghost.io/c/eb/aa/ebaa2665-01a8-4415-8825-69d1f0e8fd19/content/images/2026/02/rgmii-usa-poverty-map-by-county-2026.png" class="kg-image" alt="Map of the United States showing all 3,143 counties heatmapped by poverty level from yellow (least) to dark orange (most)" loading="lazy" width="1678" height="1048" srcset="https://storage.ghost.io/c/eb/aa/ebaa2665-01a8-4415-8825-69d1f0e8fd19/content/images/size/w600/2026/02/rgmii-usa-poverty-map-by-county-2026.png 600w, https://storage.ghost.io/c/eb/aa/ebaa2665-01a8-4415-8825-69d1f0e8fd19/content/images/size/w1000/2026/02/rgmii-usa-poverty-map-by-county-2026.png 1000w, https://storage.ghost.io/c/eb/aa/ebaa2665-01a8-4415-8825-69d1f0e8fd19/content/images/size/w1600/2026/02/rgmii-usa-poverty-map-by-county-2026.png 1600w, https://storage.ghost.io/c/eb/aa/ebaa2665-01a8-4415-8825-69d1f0e8fd19/content/images/2026/02/rgmii-usa-poverty-map-by-county-2026.png 1678w" sizes="(min-width: 720px) 720px"></a></figure><p><strong>This is my third and final startup</strong>. Rather than an “Atwood Foundation,” all we want to do is advance the concept of direct cash transfer. Simply <em>giving money to those most in need </em>is perhaps the most radical act of love we can take on... and <a href="https://rgmii.org/gmi-study-analysis/" rel="noreferrer">all the data</a> I can find shows us that <em>it works</em> — helping people afford basic needs, keep stable housing, and handle unexpected expenses.</p><p>Dreams, like happiness, are only real when shared. So let’s do that together.</p><p><a href="https://staygold.us" rel="noreferrer"><strong>staygold.us</strong></a><strong> 💛</strong></p><p></p><p></p><p></p>
+        <div class="gh-discussion-meta">
+            <a href="//blog.codinghorror.com/launching-the-rural-guaranteed-minimum-income-initiative/#discourse-comments">Discussion</a>
+        </div>
+    </section>
+</article>
+
+                            <a href="/page/2" class="gh-button gh-home-button">More Posts</a>
+                    
+
+
+            </div>
+
+                <div class="gh-more is-title">
+                    <a href="https://blog.codinghorror.com/page/2">See all <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" fill="currentColor" viewBox="0 0 256 256"><path d="M224.49,136.49l-72,72a12,12,0,0,1-17-17L187,140H40a12,12,0,0,1,0-24H187L135.51,64.48a12,12,0,0,1,17-17l72,72A12,12,0,0,1,224.49,136.49Z"></path></svg></a>
+                </div>
+        </main>
+
+
+    </div>
+</section>
+
+<script type="text/javascript">
+    var discourseUrl = "https://discourse.codinghorror.com/";
+
+    (function() {
+        var d = document.createElement('script'); d.type = 'text/javascript'; d.async = true;
+        d.src = discourseUrl + 'javascripts/count.js';
+        (document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(d);
+    })();
+</script>
+
+
+    <footer class="gh-footer gh-outer">
+    <div class="gh-footer-inner gh-inner">
+
+        <div class="gh-footer-bar">
+            <span class="gh-footer-logo is-title">
+                    <a href="/">
+                        <img src="https://storage.ghost.io/c/eb/aa/ebaa2665-01a8-4415-8825-69d1f0e8fd19/content/images/2025/01/codinghorror-landscape.png" alt="Coding Horror">
+                    </a>
+            </span>
+            <nav class="gh-footer-menu">
+                <ul class="nav">
+    <li class="nav-archive"><a href="https://blog.codinghorror.com/page/2/">Archive</a></li>
+    <li class="nav-reading"><a href="https://blog.codinghorror.com/recommended-reading-for-developers/">Reading</a></li>
+    <li class="nav-about"><a href="https://blog.codinghorror.com/about-me/">About</a></li>
+    <li class="nav-shop"><a href="https://blog.codinghorror.com/own-a-coding-horror/">Shop</a></li>
+</ul>
+
+                <div class="gh-footer-socials">
+                    <a class="gh-header-icon" href="https://blog.codinghorror.com/rss" target="_blank">
+                        <svg width="20px" height="20px" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M5 11C9.41828 11 13 14.5817 13 19M5 5C12.732 5 19 11.268 19 19M7 18C7 18.5523 6.55228 19 6 19C5.44772 19 5 18.5523 5 18C5 17.4477 5.44772 17 6 17C6.55228 17 7 17.4477 7 18Z" stroke="#000000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </a>
+                    <a rel="me" class="gh-header-icon" href="https://infosec.exchange/@codinghorror" target="_blank">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="61.076954mm" height="65.47831mm" viewBox="0 0 216.4144 232.00976">
+    <path fill="#000" d="M211.80734 139.0875c-3.18125 16.36625-28.4925 34.2775-57.5625 37.74875-15.15875 1.80875-30.08375 3.47125-45.99875 2.74125-26.0275-1.1925-46.565-6.2125-46.565-6.2125 0 2.53375.15625 4.94625.46875 7.2025 3.38375 25.68625 25.47 27.225 46.39125 27.9425 21.11625.7225 39.91875-5.20625 39.91875-5.20625l.8675 19.09s-14.77 7.93125-41.08125 9.39c-14.50875.7975-32.52375-.365-53.50625-5.91875C9.23234 213.82 1.40609 165.31125.20859 116.09125c-.365-14.61375-.14-28.39375-.14-39.91875 0-50.33 32.97625-65.0825 32.97625-65.0825C49.67234 3.45375 78.20359.2425 107.86484 0h.72875c29.66125.2425 58.21125 3.45375 74.8375 11.09 0 0 32.975 14.7525 32.975 65.0825 0 0 .41375 37.13375-4.59875 62.915"/>
+    <path fill="#fff" d="M177.50984 80.077v60.94125h-24.14375v-59.15c0-12.46875-5.24625-18.7975-15.74-18.7975-11.6025 0-17.4175 7.5075-17.4175 22.3525v32.37625H96.20734V85.42325c0-14.845-5.81625-22.3525-17.41875-22.3525-10.49375 0-15.74 6.32875-15.74 18.7975v59.15H38.90484V80.077c0-12.455 3.17125-22.3525 9.54125-29.675 6.56875-7.3225 15.17125-11.07625 25.85-11.07625 12.355 0 21.71125 4.74875 27.8975 14.2475l6.01375 10.08125 6.015-10.08125c6.185-9.49875 15.54125-14.2475 27.8975-14.2475 10.6775 0 19.28 3.75375 25.85 11.07625 6.36875 7.3225 9.54 17.22 9.54 29.675"/>
+</svg>
+                    </a>
+                </div>
+            </nav>
+            <div class="gh-footer-copyright">
+                Powered by <a href="https://ghost.org/" target="_blank" rel="noopener">Ghost</a> &middot; Themed by <a href="https://oboxthemes.com">Obox</a>
+            </div>
+        </div>
+
+    </div>
+</footer>
+
+</div>
+
+
+<script src="https://blog.codinghorror.com/assets/built/source.js?v=GN2N4BbKxkHEIjLG"></script>
+
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-5QDLQHE1MQ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-5QDLQHE1MQ');
+</script>
+
+</body>
+</html>

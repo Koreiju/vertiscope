@@ -1,0 +1,23 @@
+{
+  "url": "https://www.reddit.com/r/dataisbeautiful/",
+  "slug": "www-reddit-com-r-dataisbeautiful",
+  "stratum": "js-shell",
+  "captured_at": "2026-08-15T22:41:31.878076+00:00",
+  "seconds": 13.4,
+  "snapshots": [
+    {
+      "index": 0,
+      "pass": 1,
+      "chars": 678914,
+      "gz_bytes": 138133
+    },
+    {
+      "index": 1,
+      "pass": 5,
+      "chars": 1871767,
+      "gz_bytes": 412295
+    }
+  ],
+  "repeated_passes": 4,
+  "settled": true
+}
