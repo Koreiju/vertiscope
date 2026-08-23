@@ -173,6 +173,16 @@ class TrieNode:
     value: str = ""
     content_hash: str = ""
 
+    # Identity that outlives this node's address. An address is positional,
+    # so inserting one sibling re-points every later address at different
+    # content: the fifth item in a list is not the same *thing* it was a
+    # moment ago. Position therefore cannot be identity on a live page, and
+    # anything that needs to survive a shift — a memoised binding, a
+    # control's state, "the item I was reading" — has to hang off this
+    # instead. Assigned on first arrival and inherited by whichever address
+    # the content moves to.
+    uid: int = 0
+
     # Merkle hash over this node and everything below it.
     subtree_hash: str = ""
 
@@ -216,6 +226,10 @@ class AddressTrie:
         self.root = TrieNode(segment="", depth=0)
         self._leaf_count = 0
         self._dirty = True
+        # Issues leaf identities. Monotone and never reused, so a uid names
+        # one piece of content for as long as it is on the page, however
+        # often its address is re-pointed underneath it.
+        self._uid_seq = 0
 
     # -- build ------------------------------------------------------------
     def insert(
@@ -281,6 +295,102 @@ class AddressTrie:
             self.insert(addr, value)
             n += 1
         return n
+
+    def apply(self, units, removed=()) -> "TrieDelta":
+        """Repair in place from one drain. The live path's only mutator.
+
+        An address is positional, so a structural shift is not reported to us
+        as a shift — it arrives as every address after the insertion point
+        holding somebody else's content. Absorbing that naively makes one
+        node's arrival cost the whole span: inserting a single ``<li>`` at the
+        head of a hundred-item list was measured at a delta of 101, and the
+        figure was exactly ``N + 1`` at every length tried. Cost tracked the
+        page, which is the O(delta) property failing rather than holding.
+
+        The fix is to re-anchor by content. Before anything is written, the
+        contents about to be displaced are indexed; an address whose new value
+        was, a moment ago, some other address's value is then recognised as
+        that content having *moved*. The moved leaf keeps its ``uid``, so
+        whatever hangs off a leaf's identity survives the shift, and the delta
+        reports one arrival rather than a hundred edits.
+
+        Content is matched on ``content_hash``, which is a candidate key and
+        not a decision (THEORY Prop. 19.3): two genuinely identical strings in
+        one span are indistinguishable, so they may swap uids. That is
+        harmless precisely because they are identical — nothing downstream can
+        observe the difference — and it is why the match is scoped to a
+        parent span rather than the page, so unrelated repetition elsewhere
+        cannot claim a uid.
+        """
+        delta = TrieDelta()
+        units = list(units)
+
+        # What each incoming address is about to hold.
+        want: Dict[Tuple, Tuple[ContentAddress, str, str]] = {}
+        for address, value in units:
+            want[address.key()] = (address, value, content_hash(value))
+
+        # The spans this drain touches. Bounding the re-anchor to them is what
+        # keeps it proportional to the change: a page-wide index would be
+        # rebuilt in full for a two-line edit.
+        spans = {address.path()[:-3] for address, _ in units}
+
+        # Snapshot the contents that are on their way out, before writing.
+        # Only leaves whose value is actually being displaced are candidates:
+        # a leaf that keeps its value has not moved, it has stayed.
+        # Held as (uid, key) rather than as nodes. A node reference would be
+        # read *after* the loop had already overwritten it, so the first
+        # address to be rewritten would hand its brand-new uid to whoever
+        # claimed its old content next, and one uid would spread down the
+        # whole span. The snapshot has to be of values taken before any write.
+        displaced: Dict[str, List[Tuple[int, Tuple]]] = {}
+        for span in spans:
+            node = self.node_at(span)
+            if node is None:
+                continue
+            for leaf in node.leaves():
+                if leaf.address is None:
+                    continue
+                incoming = want.get(leaf.address.key())
+                if incoming is not None and incoming[2] == leaf.content_hash:
+                    continue        # unchanged — not displaced
+                displaced.setdefault(leaf.content_hash, []).append(
+                    (leaf.uid, leaf.address.key()))
+
+        for address, value in units:
+            key = address.key()
+            digest = want[key][2]
+            node = self.find(address)
+            if node is not None and node.content_hash == digest:
+                continue            # already says this; costs nothing
+            pool = displaced.get(digest)
+            inherited = 0
+            while pool:
+                uid, from_key = pool.pop()
+                if not uid or from_key == key:
+                    continue
+                inherited = uid
+                break
+            fresh = self.insert(address, value)
+            # Always re-issue. A leaf whose content changed is not the thing
+            # it was, so keeping the uid already sitting on that address would
+            # attach the departed content's identity to its replacement.
+            if inherited:
+                fresh.uid = inherited
+                delta.moved.append(address)
+            else:
+                self._uid_seq += 1
+                fresh.uid = self._uid_seq
+                (delta.changed if node is not None else delta.added).append(address)
+
+        for address in removed:
+            if self.remove(address):
+                delta.removed.append(address)
+
+        delta.visited = len(units)
+        if delta.touched:
+            self.rehash()
+        return delta
 
     def remove(self, address: ContentAddress) -> bool:
         """Drop one address, and any ancestors it was the last leaf of.
@@ -439,12 +549,23 @@ class TrieDelta:
     added: List[ContentAddress] = field(default_factory=list)
     removed: List[ContentAddress] = field(default_factory=list)
     changed: List[ContentAddress] = field(default_factory=list)
+    # Content that is the same content, at a new address. Counted apart from
+    # `changed` because conflating them makes one insertion look like an
+    # edit to every element after it — the whole list re-vectorised, the
+    # whole list reported as new, for a single node arriving.
+    moved: List[ContentAddress] = field(default_factory=list)
     visited: int = 0
     """Nodes actually compared — the measured cost, for asserting O(delta)."""
 
     @property
     def size(self) -> int:
+        """Genuine change. A move is not change; it is the same fact, re-placed."""
         return len(self.added) + len(self.removed) + len(self.changed)
+
+    @property
+    def touched(self) -> int:
+        """Every address this delta re-points, movement included."""
+        return self.size + len(self.moved)
 
     def summary(self) -> Dict[str, int]:
         return {

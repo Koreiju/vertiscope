@@ -240,25 +240,9 @@ class StreamingScan:
         t0 = time.perf_counter()
         if self.trie is None:
             self.trie = AddressTrie()
-        added: List = []
-        changed: List = []
-        for address, value in units:
-            node = self.trie.find(address)
-            if node is None:
-                added.append(address)
-            elif node.value != value:
-                changed.append(address)
-            else:
-                continue           # a re-emitted, unmoved unit costs nothing
-            self.trie.insert(address, value)
-        gone: List = []
-        for address in removed:
-            if self.trie.remove(address):
-                gone.append(address)
+        delta = self.trie.apply(units, removed=removed)
         t1 = time.perf_counter()
-        if added or changed or gone:
-            self.trie.rehash()
-        t2 = time.perf_counter()
+        t2 = t1
 
         stats = self.trie.stats()
         update = ScanUpdate(
@@ -266,8 +250,7 @@ class StreamingScan:
             snapshot_bytes=0,
             wire_bytes=0,
             trie=self.trie,
-            delta=TrieDelta(added=added, changed=changed, removed=gone,
-                            visited=len(units)),
+            delta=delta,
             nodes=int(stats["nodes"]),
             leaves=int(stats["leaves"]),
             trie_ms=(t1 - t0) * 1000,
@@ -284,8 +267,15 @@ class StreamingScan:
         Filtering by the delta's addresses keeps it proportional to the change.
         """
         started = time.perf_counter()
+        # Movement counts here even though it is not counted as change. A
+        # node that merely moved renders in a different place, so the chunk
+        # holding it says something different and has to be rewritten; only
+        # the *cost accounting* and the vectoriser get to treat a move as
+        # free. Filtering on change alone would leave a pure reorder — a
+        # re-sorted table, a reshuffled feed — stored in its old order.
         touched = {a.key() for a in
-                   update.delta.added + update.delta.changed + update.delta.removed}
+                   update.delta.added + update.delta.changed
+                   + update.delta.removed + update.delta.moved}
         if not touched:
             update.chunk_ms = (time.perf_counter() - started) * 1000
             return []

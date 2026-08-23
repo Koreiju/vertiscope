@@ -402,6 +402,67 @@ class Repl:
 
     _cmd_exit = _cmd_quit
 
+    def _cmd_shift(self, args) -> bool:
+        """Cost of one insertion, against the size of what it lands in.
+
+        The stage-2 acceptance check. An address is positional, so inserting
+        a single node at the head of a list re-points every address after it
+        — and before `AddressTrie.apply` re-anchored by content, the reported
+        delta for that was measured at exactly `N + 1` for every N tried.
+        Cost tracked the page rather than the change, which is the O(delta)
+        property failing.
+
+        What has to hold now: `delta` stays at 1 whatever N is. `moved` may
+        grow with N, because N things genuinely did move; the point is that a
+        move is not an edit and must not be counted or re-vectorised as one.
+        """
+        driver = getattr(self.nav, "driver", None)
+        if driver is None:
+            self.state.buffers.note("shift needs a live browser — run 'browser'")
+            return True
+
+        import time as _t
+
+        from ..sensing import Sensor
+        from ..stream import StreamingScan
+
+        sizes = [int(a) for a in args] or [5, 20, 50, 100, 200]
+        rows = ["", "  one node inserted at the head of an N-item list",
+                "  %6s %8s %8s %9s %9s" % ("items", "delta", "moved",
+                                           "apply_ms", "uid_kept")]
+        for n in sizes:
+            items = "".join("<li>item-%03d</li>" % i for i in range(n))
+            url = ("data:text/html,<html><body><ul id='L'>%s</ul></body></html>"
+                   % items)
+            driver.get(url)
+            _t.sleep(0.35)
+            sensor = Sensor(driver, url, budget=100000)
+            sensor.boot()
+            _t.sleep(0.35)
+            spine = StreamingScan(url)
+            first = sensor.drain(0)
+            spine.absorb(first.units, 0, removed=first.removed_addresses)
+            before = {leaf.value: leaf.uid for leaf in spine.trie.leaves()}
+            driver.execute_script(
+                "var l=document.getElementById('L');"
+                "var li=document.createElement('li');"
+                "li.textContent='NEW';l.insertBefore(li,l.firstChild);")
+            _t.sleep(0.45)
+            second = sensor.drain(1)
+            update = spine.absorb(second.units, 1,
+                                  removed=second.removed_addresses)
+            after = {leaf.value: leaf.uid for leaf in spine.trie.leaves()}
+            kept = sum(1 for v, u in before.items()
+                       if v.strip() and after.get(v) == u)
+            rows.append("  %6d %8d %8d %9.2f %6d/%d"
+                        % (len(before), update.delta.size,
+                           len(update.delta.moved), update.trie_ms,
+                           kept, sum(1 for v in before if v.strip())))
+        rows.append("")
+        print("\n".join(rows), flush=True)
+        self.state.buffers.note("shift: delta must stay flat as N grows")
+        return True
+
     def _cmd_spine(self, args) -> bool:
         """Compare the two paths over one page. The stage-1 acceptance check.
 
