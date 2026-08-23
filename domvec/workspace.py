@@ -153,11 +153,16 @@ class Workspace:
     ) -> Tuple[List[MarkdownChunk], Dict[str, int]]:
         """Write already-rendered chunks. The single write path's body.
 
-        `ingest` renders a trie and delegates here; the in-page sensor calls
-        here directly, because its chunks arrive rendered and re-deriving them
-        from a trie on this side would be a second pipeline. Both entry points
-        share every line below, so frequency rows, embeddings, the graph and
-        the JSONL checkpoint cannot fall out of step between them.
+        `ingest` renders a whole trie and delegates here; the live path
+        delegates here too, with the chunks `render_trie` produced for the
+        subtrees a drain touched. Both are the same renderer over the same
+        structure — the sensor path used to arrive with chunks a second
+        serialiser in JS had built, which meant the markdown a page got
+        depended on which path had read it.
+
+        Both entry points share every line below, so frequency rows,
+        embeddings, the graph and the JSONL checkpoint cannot fall out of
+        step between them.
 
         `addresses` may be omitted, in which case it is taken from the chunks'
         own line anchors — which is what a delta carries.
@@ -362,6 +367,10 @@ class Workspace:
         passes: List[ScanUpdate] = []
         totals = {"lines": 0, "chunks": 0, "addresses": 0,
                   "wire": 0, "document": 0}
+        # One trie for the page, fed by every drain. `scan` holds the same
+        # structure for the snapshot path; holding it here is what makes the
+        # two paths one pipeline instead of two.
+        spine = StreamingScan(url, context_window=self.context_window)
 
         def drive(active) -> None:
             sensor = Sensor(active, url, budget=self.context_window,
@@ -384,18 +393,17 @@ class Workspace:
                     sensor.scroll()
                     time.sleep(pause)
                 sp = sensor.drain(passno)
-                # The sensor names removals by its own chunk id, which is the
-                # chunk's `part`; the store is keyed by `cid`, the hash of
-                # (url, xpath, part). Passing the raw id retired nothing, so a
-                # chunk whose node was deleted stayed in the store forever —
-                # the same defect the REPL had, and it has to be fixed in both
-                # places because both are entry points to one write path.
-                seen = {c.part: c.cid for c in self.store.chunks(url)}
-                seen.update({c.part: c.cid for c in sp.chunks})
-                gone = [seen[r] for r in sp.removed if r in seen]
-                if sp.chunks or gone:
-                    self.ingest_chunks(url, sp.chunks, complete=False,
-                                       removed=gone)
+                # Through the trie, not around it. The sensor supplies
+                # addressed units; the trie holds the page's structure and
+                # `render_trie` partitions it, so the live path and the
+                # snapshot path produce chunks the same way. Removal is
+                # address-level: the sensor names departures by its own chunk
+                # grouping, which the trie does not share.
+                update = spine.absorb(sp.units, sp.passno,
+                                      removed=sp.removed_addresses)
+                dirty = spine.dirty_chunks(update)
+                if dirty:
+                    self.ingest_chunks(url, dirty, complete=False)
                 totals["lines"] += sp.lines
                 totals["chunks"] += sp.changed
                 totals["addresses"] += sp.addresses
@@ -411,6 +419,13 @@ class Workspace:
         else:
             with browser_session(cfg, headless=headless) as owned:
                 drive(owned)
+
+        # One complete write from the settled trie. Per-pass writes keep the
+        # store current while the page is being read, but they are deltas, so
+        # they never retire a chunk that re-partitioning has replaced. The
+        # snapshot path settles the same way, at the same point.
+        if spine.trie is not None and len(spine.trie):
+            self.ingest(url, spine.trie)
 
         stored = list(self.store.chunks(url))
         return ScanResult(

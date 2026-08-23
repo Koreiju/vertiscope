@@ -99,6 +99,10 @@ class Repl:
         self._sensor = None
         self._live_chunks = {}
         self._sense_pass = 0
+        # The page's trie, held across drains. One structure for the live
+        # view, the store and the mirror -- see Workspace.sense, which holds
+        # the same thing for the same reason.
+        self._spine = None
         self._passes = []       # per-pass metrics, for `stats`
         self._exhausted = False  # the page said it has no more to give
         # The pagination trail. Verifying pagination means verifying a
@@ -265,15 +269,28 @@ class Repl:
             url = self._sensor.url
             self._live_chunks.clear()
         self._seen_content.update(delta.contents)
-        for chunk in delta.chunks:
+        # Through the trie. The sensor supplies addressed units and the
+        # renderer partitions them, so what the REPL shows is what the store
+        # holds and what a full scan would have produced -- one structure,
+        # one serialiser. Live rendering used to come from a separate JS
+        # chunker, which is how the same page could read differently
+        # depending on which path had opened it.
+        if self._spine is None or self._spine.url != url:
+            from ..stream import StreamingScan
+            self._spine = StreamingScan(url, context_window=1200)
+        update = self._spine.absorb(delta.units, delta.passno,
+                                    removed=delta.removed_addresses)
+        dirty = self._spine.dirty_chunks(update)
+        for chunk in dirty:
             self._live_chunks[chunk.cid] = chunk
-        # The sensor names removals by its own chunk id, which is the chunk's
-        # `part`; the store and this map are keyed by `cid`, the hash of
-        # (url, xpath, part). Popping by the raw id matched nothing, so a
-        # removal would have been dropped on this side even once the sensor
-        # started reporting one.
-        gone = [c.cid for c in self._live_chunks.values()
-                if c.part in set(delta.removed)]
+        # A departed address can empty a chunk that still has a cid here.
+        # Anything the renderer no longer produces for a touched subtree is
+        # retired by cid, which is what the store is keyed by.
+        gone = []
+        if update.delta.removed:
+            surviving = {c.cid for c in update.all_chunks}
+            gone = [cid for cid, c in self._live_chunks.items()
+                    if c.url == url and cid not in surviving]
         for cid in gone:
             self._live_chunks.pop(cid, None)
 
@@ -281,12 +298,12 @@ class Repl:
         # rows, embeddings, the graph and the markdown mirror together, so a
         # page becomes retrievable in the same motion that shows it.
         store_ms = 0.0
-        if self.workspace is not None and (delta.chunks or gone):
+        if self.workspace is not None and (dirty or gone):
             import time as _t
             started = _t.perf_counter()
             try:
                 self.workspace.ingest_chunks(
-                    url, delta.chunks, complete=False,
+                    url, dirty, complete=False,
                     removed=gone, title=url)
             except Exception as exc:  # noqa: BLE001 - a write must not end a session
                 self.state.buffers.note(f"store: {type(exc).__name__}: {exc}")
@@ -384,6 +401,114 @@ class Repl:
         return False
 
     _cmd_exit = _cmd_quit
+
+    def _cmd_spine(self, args) -> bool:
+        """Compare the two paths over one page. The stage-1 acceptance check.
+
+        `spine <url>` reads the page twice — once through the in-page sensor,
+        once by snapshotting and tagging on this side — and reports how far
+        apart the results are. Both now go through one trie and one renderer,
+        so any divergence left is a difference in *what was detected*, never
+        in how it was structured or serialised. That is the number stage 3
+        has to drive to zero, and it cannot be read at all until both paths
+        share a spine.
+
+        Reported per path: leaves in the trie, chunks the renderer produced,
+        and the size of the address-set difference in each direction.
+        """
+        if not args:
+            self.state.buffers.note("spine needs a url")
+            return True
+        url = args[0]
+        driver = getattr(self.nav, "driver", None)
+        if driver is None:
+            self.state.buffers.note("spine needs a live browser — run 'browser'")
+            return True
+
+        import time as _t
+
+        from ..sensing import Sensor
+        from ..stream import StreamingScan
+
+        scrolls = int(args[1]) if len(args) > 1 else 3
+
+        # --- the live path ------------------------------------------------
+        sensor = Sensor(driver, url, budget=1200)
+        driver.set_page_load_timeout(45)
+        driver.get(url)
+        _t.sleep(0.6)
+        sensor.boot()
+        _t.sleep(0.6)
+        live = StreamingScan(url, context_window=1200)
+        live_ms = 0.0
+        for passno in range(scrolls + 1):
+            if passno:
+                sensor.scroll()
+                _t.sleep(0.5)
+            sp = sensor.drain(passno)
+            started = _t.perf_counter()
+            live.absorb(sp.units, sp.passno, removed=sp.removed_addresses)
+            live_ms += (_t.perf_counter() - started) * 1000
+        # The settled page, not the last delta. Rendering the final update's
+        # dirty set reports zero whenever the last pass happened to change
+        # nothing -- which is most of them, and is how this line first read
+        # "0 chunks" under 188 leaves.
+        from ..markdown import render_trie
+        live_all = (render_trie(live.trie, context_window=1200)
+                    if live.trie is not None else [])
+
+        # --- the snapshot path, on the page as it now stands ---------------
+        html = driver.page_source or ""
+        snap = StreamingScan(url, context_window=1200)
+        update = snap.push(html, 1)
+        snap_all = (render_trie(snap.trie, context_window=1200)
+                    if snap.trie is not None else [])
+
+        live_keys = ({n.address.key() for n in live.trie.leaves()}
+                     if live.trie else set())
+        snap_keys = ({n.address.key() for n in snap.trie.leaves()}
+                     if snap.trie else set())
+        both = live_keys & snap_keys
+        union = live_keys | snap_keys
+
+        rows = [
+            "",
+            f"  spine  {url}",
+            f"  {'':<22}{'leaves':>9}{'chunks':>9}{'ms':>9}",
+            f"  {'sensor (live)':<22}{len(live_keys):>9,}"
+            f"{len(live_all):>9,}{live_ms:>9.1f}",
+            f"  {'snapshot (tagger)':<22}{len(snap_keys):>9,}"
+            f"{len(snap_all):>9,}{update.trie_ms + update.tag_ms:>9.1f}",
+            "",
+            f"  shared addresses     {len(both):>9,}"
+            f"   ({100.0 * len(both) / max(len(union), 1):.1f}% of union)",
+            f"  sensor only          {len(live_keys - snap_keys):>9,}",
+            f"  snapshot only        {len(snap_keys - live_keys):>9,}",
+            "",
+        ]
+        # What the divergence is *made of* — the tag vocabulary each path
+        # uses. Stage 3 unifies these; naming them here is what makes that
+        # stage's target concrete rather than a percentage.
+        def tags(keys, trie):
+            out = {}
+            for n in (trie.leaves() if trie else []):
+                if n.address.key() in keys:
+                    out[n.address.tag] = out.get(n.address.tag, 0) + 1
+            return out
+        lt = tags(live_keys - snap_keys, live.trie)
+        st = tags(snap_keys - live_keys, snap.trie)
+        if lt:
+            rows.append("  sensor-only tags:   " + ", ".join(
+                f"{k}={v}" for k, v in sorted(lt.items(), key=lambda x: -x[1])[:6]))
+        if st:
+            rows.append("  snapshot-only tags: " + ", ".join(
+                f"{k}={v}" for k, v in sorted(st.items(), key=lambda x: -x[1])[:6]))
+        rows.append("")
+        print("\n".join(rows), flush=True)
+        self.state.buffers.note(
+            f"spine: {len(both)} shared, {len(live_keys - snap_keys)} sensor-only, "
+            f"{len(snap_keys - live_keys)} snapshot-only")
+        return True
 
     def _cmd_browser(self, args) -> bool:
         """Attach a live browser to this REPL.

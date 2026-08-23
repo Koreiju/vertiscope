@@ -84,6 +84,11 @@ class ScanUpdate:
 
     # Chunks touched by this delta — the ones a store would have to rewrite.
     dirty_chunks: List[MarkdownChunk] = field(default_factory=list)
+    # Every chunk the page currently renders to. The filter computes this on
+    # the way to the dirty set, and a caller holding live chunks needs it to
+    # retire the ones a removal emptied — recomputing it would be a second
+    # full render for a set already in hand.
+    all_chunks: List[MarkdownChunk] = field(default_factory=list)
 
     @property
     def changed(self) -> int:
@@ -212,6 +217,65 @@ class StreamingScan:
         self.updates.append(update)
         return update
 
+    def absorb(self, units, passno: int = 0, removed=()) -> ScanUpdate:
+        """Fold in already-addressed units from the in-page sensor.
+
+        The peer of :meth:`push`. That one receives a whole snapshot and has
+        to tag it to find out what is in it; this one receives detections that
+        are *already* addressed, because the fold in the page did that work.
+        Both end at the same trie and the same renderer, which is the point:
+        live navigation and a full scan are one pipeline, not two.
+
+        The sensor path used to skip the trie entirely and hand rendered
+        chunks straight to storage, so the markdown on that path came from a
+        second serialiser in JS. Everything downstream — chunk boundaries,
+        anchors, dedup, the graph's structure — was therefore produced by
+        whichever path happened to have read the page.
+
+        No diff is taken. `push` must diff because a snapshot does not say
+        what changed; the sensor does say, so the delta is *observed* rather
+        than recovered, and the cost is proportional to the change by
+        construction rather than by filtering afterwards.
+        """
+        t0 = time.perf_counter()
+        if self.trie is None:
+            self.trie = AddressTrie()
+        added: List = []
+        changed: List = []
+        for address, value in units:
+            node = self.trie.find(address)
+            if node is None:
+                added.append(address)
+            elif node.value != value:
+                changed.append(address)
+            else:
+                continue           # a re-emitted, unmoved unit costs nothing
+            self.trie.insert(address, value)
+        gone: List = []
+        for address in removed:
+            if self.trie.remove(address):
+                gone.append(address)
+        t1 = time.perf_counter()
+        if added or changed or gone:
+            self.trie.rehash()
+        t2 = time.perf_counter()
+
+        stats = self.trie.stats()
+        update = ScanUpdate(
+            passno=passno or len(self.updates) + 1,
+            snapshot_bytes=0,
+            wire_bytes=0,
+            trie=self.trie,
+            delta=TrieDelta(added=added, changed=changed, removed=gone,
+                            visited=len(units)),
+            nodes=int(stats["nodes"]),
+            leaves=int(stats["leaves"]),
+            trie_ms=(t1 - t0) * 1000,
+            diff_ms=(t2 - t1) * 1000,
+        )
+        self.updates.append(update)
+        return update
+
     def dirty_chunks(self, update: ScanUpdate) -> List[MarkdownChunk]:
         """Only the chunks containing a changed address.
 
@@ -227,6 +291,7 @@ class StreamingScan:
             return []
         chunks = render_trie(update.trie, context_window=self.context_window)
         dirty = [c for c in chunks if touched.intersection(c.anchors)]
+        update.all_chunks = chunks
         update.dirty_chunks = dirty
         update.chunk_ms = (time.perf_counter() - started) * 1000
         return dirty

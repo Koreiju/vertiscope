@@ -282,6 +282,45 @@ class AddressTrie:
             n += 1
         return n
 
+    def remove(self, address: ContentAddress) -> bool:
+        """Drop one address, and any ancestors it was the last leaf of.
+
+        The trie was insert-only, which is sound for a snapshot — a snapshot
+        is rebuilt whole, so a departed node simply never reappears. It is not
+        sound for a live page, where the fold reports a node leaving the
+        composed tree and nothing else ever will. Without this, a removed
+        element's address stays in the trie forever and keeps rendering.
+
+        Pruning the emptied ancestors matters as much as the leaf: leaving
+        childless internal nodes behind would keep the *shape* of a departed
+        subtree, so the root hash would never return to what it was before
+        that subtree arrived, and no equality check over structure could work.
+        """
+        path = address.path()
+        node = self.root
+        chain = [node]
+        for seg in path:
+            node = node.children.get(seg)
+            if node is None:
+                return False
+            chain.append(node)
+        if node.address is None:
+            return False
+        node.address = None
+        node.value = ""
+        node.content_hash = ""
+        self._leaf_count -= 1
+        # Walk back up, dropping any node that is now neither a leaf nor an
+        # ancestor of one.
+        for i in range(len(chain) - 1, 0, -1):
+            child = chain[i]
+            if child.children or child.is_leaf:
+                break
+            parent = chain[i - 1]
+            parent.children.pop(child.segment, None)
+        self._dirty = True
+        return True
+
     # -- read -------------------------------------------------------------
     def __len__(self) -> int:
         return self._leaf_count

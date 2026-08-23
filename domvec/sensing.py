@@ -69,8 +69,13 @@ class SensePass:
     """One drain: what changed, and what each stage of handling it cost."""
 
     passno: int
-    chunks: List[MarkdownChunk] = field(default_factory=list)
+    # (ContentAddress, value) in document order — what the trie is fed. The
+    # sensor no longer hands over rendered chunks; the renderer partitions.
+    units: List[tuple] = field(default_factory=list)
     removed: List[int] = field(default_factory=list)
+    # Addresses that left the composed tree, resolved from the sensor's own
+    # chunk ids. The store is keyed by address, not by the sensor's grouping.
+    removed_addresses: List[ContentAddress] = field(default_factory=list)
     addresses: int = 0
     lines: int = 0
     settled: bool = False
@@ -92,7 +97,7 @@ class SensePass:
 
     @property
     def changed(self) -> int:
-        return len(self.chunks)
+        return len(self.units)
 
 
 @dataclass
@@ -135,6 +140,12 @@ class Sensor:
                                                 % 0xFFFFFFFF, "x"))
         self._dict: List[str] = []
         self._shapes: List[List[int]] = []
+        # sensor chunk id -> the addresses last seen under it. The sensor
+        # names removals by its own grouping; the trie is keyed by address,
+        # so the mapping has to be held on this side to translate one to the
+        # other. Without it a departed node's address stayed in the trie and
+        # went on rendering after the element was gone.
+        self._chunk_addrs: Dict[int, List[ContentAddress]] = {}
         self.boot_ms = 0.0
         self.reboots = 0
         self.steps = 0
@@ -240,16 +251,29 @@ class Sensor:
         self._shapes.extend(payload.get("shapes") or [])
         contents = [str(c.get("content")) for c in (payload.get("chunks") or [])
                     if c.get("content") is not None]
-        chunks, addresses, lines = self._decode(
+        units, by_chunk, lines = self._decode(
             payload.get("chunks") or [],
             (payload.get("stats") or {}).get("variants") or {})
+        # A chunk the sensor now reports is the authority on what it holds;
+        # anything it held on an earlier pass and no longer emits has left the
+        # composed tree and must leave the trie too.
+        gone: List[ContentAddress] = []
+        for cid, addrs in by_chunk.items():
+            previous = self._chunk_addrs.get(cid)
+            if previous:
+                fresh = {a.key() for a in addrs}
+                gone.extend(a for a in previous if a.key() not in fresh)
+            self._chunk_addrs[cid] = addrs
+        for cid in payload.get("removed") or []:
+            gone.extend(self._chunk_addrs.pop(int(cid), []))
         decode_ms = (time.perf_counter() - started) * 1000
 
         return SensePass(
             passno=passno,
-            chunks=chunks,
+            units=units,
             removed=list(payload.get("removed") or []),
-            addresses=addresses,
+            removed_addresses=gone,
+            addresses=len(units),
             lines=lines,
             settled=bool(payload.get("settled")),
             stats=payload.get("stats") or {},
@@ -356,15 +380,28 @@ class Sensor:
             line[2] = path
 
     def _decode(self, raw: List[dict], flags: Optional[dict] = None):
+        """Sensor payload -> addressed units, in document order.
+
+        Returns ``(units, by_chunk)``: the flat ``(address, value)`` sequence
+        the trie is fed, and the map from the sensor's own chunk id to the
+        addresses that came out of it — which is what lets a removal named by
+        chunk id be turned into the address-level removals the trie needs.
+
+        This used to assemble :class:`MarkdownChunk` here, which made the
+        sensor's chunk grouping authoritative and bypassed the trie and
+        ``render_trie`` entirely. The grouping is now the renderer's, so both
+        paths partition the same way; the sensor still supplies every fact it
+        always did, because each line already carries its own xpath, taxonomy
+        and detecting rule.
+        """
         flags = flags or {}
-        chunks: List[MarkdownChunk] = []
-        total_addresses = 0
+        units: List[tuple] = []
+        by_chunk: Dict[int, List[ContentAddress]] = {}
         total_lines = 0
         for entry in raw:
             self._paths(entry.get("lines") or [], flags)
-            xpath = self._xpath(entry.get("path") or [])
-            chunk = MarkdownChunk(url=self.url, xpath=xpath,
-                                  part=int(entry.get("id", 0)))
+            cid = int(entry.get("id", 0))
+            mine = by_chunk.setdefault(cid, [])
             for line in entry.get("lines") or []:
                 depth, text, path, attr, seq = line[:5]
                 if not text:
@@ -383,12 +420,10 @@ class Sensor:
                 address = ContentAddress(
                     self.url, self._xpath(path),
                     taxonomy, f"{accessor}|{rule}")
-                chunk.lines.append(MarkdownLine(int(depth), str(text), address))
-                total_addresses += 1
+                units.append((address, str(text)))
+                mine.append(address)
                 total_lines += 1
-            if chunk.lines:
-                chunks.append(chunk)
-        return chunks, total_addresses, total_lines
+        return units, by_chunk, total_lines
 
     # -- driving ----------------------------------------------------------
     def step(self, pixels: int = 0) -> "ScrollStep":
