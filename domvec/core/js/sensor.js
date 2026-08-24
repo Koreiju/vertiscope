@@ -329,8 +329,20 @@
     if ((tag === 'A' || tag === 'BUTTON') && rec.chars <= BUDGET) {
       try { text = node.textContent || ''; } catch (e) { text = ''; }
     }
+    // Two classifications, and only one of them decides anything.
+    //
+    // `kindOf` is the render class: what to draw, from the element's type via
+    // HTML-AAM. It goes in the address's taxonomy slot and governs the glyph,
+    // so every structure on the page is drawn because of what it IS.
+    //
+    // `taxonomyOf` still runs, and its verdict still travels -- as the rule
+    // that fired, in the detection slot, next to the render class it could
+    // not override. That demotion is the point. Search and pagination name
+    // intentions; a wrong guess about one now costs a label in the
+    // provenance and no longer costs a control the reader never sees.
     var t = taxonomyOf(node, text);
-    rec.tax = [intern(t[0]), intern(t[1]), TAX_RANK[t[0]] || 0];
+    var k = kindOf(node);
+    rec.tax = [intern(k[0]), intern(t[1] + '/' + k[1]), KIND_RANK[k[0]] || 0];
     return rec.tax;
   }
 
@@ -390,6 +402,16 @@
   var TAX_RANK = { paragraph: 0, field: 3, control: 3, link: 3,
                    list: 4, table: 4, quote: 4, code: 4, media: 4, form: 4,
                    heading: 5, search: 6, pagination: 6 };
+
+  // Specificity ladder over render classes, so classification is an
+  // inherited attribute and a wrapper cannot claim its content. `group` sits
+  // at the floor deliberately: a container that outranked its children would
+  // draw a whole article as one undifferentiated block.
+  var KIND_RANK = { none: 0, text: 0, group: 0,
+                    item: 2, row: 2, cell: 2,
+                    link: 3, button: 3, field: 3, choice: 3, check: 3,
+                    quote: 4, code: 4, image: 4, media: 4, rule: 4,
+                    heading: 5 };
 
   var HEADING = { H1: 1, H2: 2, H3: 3, H4: 4, H5: 5, H6: 6 };
   var LIST_TAGS = { UL: 1, OL: 1, LI: 1, DL: 1, DT: 1, DD: 1 };
@@ -550,6 +572,58 @@
   }
 
   // -> [taxonomy, regexAddr]
+  // ---- HTML-AAM: element type -> role -> render class -------------------
+  // Mirrors domvec/aam.py. Data, not logic, and checked rather than
+  // trusted: invariants.a1_aam_tables_agree parses this out of the source
+  // and compares it, so a divergence is a reported violation, not a drift.
+  //
+  // Why this replaces taxonomyOf's judgement calls: 'search' and 'pagination'
+  // name intentions, and two independent rebuilds of detecting them settled
+  // at the same ceiling across 890 pages. What a page does declare, in HTML,
+  // is what each element IS -- natively for 98.6 percent of the affordances
+  // measured across five unrelated sites. A search box draws as a field
+  // because it is a field. Nothing has to be recognised for a reader to use
+  // it, which is the whole point: a control we could not name used to be a
+  // control the reader never saw.
+  var IMPLICIT_ROLE = {"article": "article", "aside": "complementary", "audio": "audio", "blockquote": "blockquote", "button": "button", "caption": "caption", "code": "code", "datalist": "listbox", "dd": "definition", "del": "deletion", "details": "group", "dfn": "term", "dialog": "dialog", "dt": "term", "em": "emphasis", "fieldset": "group", "figcaption": "caption", "figure": "figure", "footer": "contentinfo", "form": "form", "h1": "heading", "h2": "heading", "h3": "heading", "h4": "heading", "h5": "heading", "h6": "heading", "header": "banner", "hgroup": "group", "hr": "separator", "iframe": "document", "ins": "insertion", "li": "listitem", "main": "main", "mark": "mark", "math": "math", "menu": "list", "meter": "meter", "nav": "navigation", "ol": "list", "optgroup": "group", "option": "option", "output": "status", "p": "paragraph", "picture": "image", "pre": "code", "progress": "progressbar", "samp": "code", "search": "search", "strong": "strong", "sub": "subscript", "summary": "button", "sup": "superscript", "svg": "graphics-document", "table": "table", "tbody": "rowgroup", "textarea": "textbox", "tfoot": "rowgroup", "thead": "rowgroup", "time": "time", "tr": "row", "ul": "list", "video": "video"};
+  var INPUT_ROLE = {"button": "button", "checkbox": "checkbox", "color": "textbox", "date": "textbox", "datetime-local": "textbox", "email": "textbox", "file": "button", "hidden": "none", "image": "button", "month": "textbox", "number": "spinbutton", "password": "textbox", "radio": "radio", "range": "slider", "reset": "button", "search": "searchbox", "submit": "button", "tel": "textbox", "text": "textbox", "time": "textbox", "url": "textbox", "week": "textbox"};
+  var RENDER_CLASS = {"article": "group", "audio": "media", "banner": "group", "blockquote": "quote", "button": "button", "caption": "text", "cell": "cell", "checkbox": "check", "code": "code", "columnheader": "cell", "combobox": "choice", "complementary": "group", "contentinfo": "group", "definition": "text", "deletion": "text", "dialog": "group", "document": "media", "emphasis": "text", "figure": "group", "form": "group", "graphics-document": "image", "grid": "group", "gridcell": "cell", "group": "group", "heading": "heading", "image": "image", "img": "image", "insertion": "text", "link": "link", "list": "group", "listbox": "choice", "listitem": "item", "main": "group", "mark": "text", "math": "text", "menuitem": "button", "menuitemcheckbox": "check", "menuitemradio": "check", "meter": "text", "navigation": "group", "none": "none", "option": "item", "paragraph": "text", "presentation": "none", "progressbar": "text", "radio": "check", "region": "group", "row": "row", "rowgroup": "group", "rowheader": "cell", "search": "group", "searchbox": "field", "separator": "rule", "slider": "field", "spinbutton": "field", "status": "text", "strong": "text", "subscript": "text", "superscript": "text", "switch": "check", "tab": "button", "table": "group", "tablist": "group", "term": "text", "textbox": "field", "time": "text", "video": "media"};
+  var INTERACTIVE_KIND = {"button": 1, "check": 1, "choice": 1, "field": 1, "link": 1};
+
+  function roleOf(el) {
+    var tag = (el.tagName || '').toLowerCase();
+    var explicit = el.getAttribute ? (el.getAttribute('role') || '') : '';
+    if (explicit) {
+      var toks = explicit.toLowerCase().split(/\s+/);
+      for (var i = 0; i < toks.length; i++)
+        if (RENDER_CLASS[toks[i]]) return toks[i];
+    }
+    function at(n) { return el.getAttribute ? el.getAttribute(n) : null; }
+    if (tag === 'a' || tag === 'area') return at('href') !== null ? 'link' : 'generic';
+    if (tag === 'input') {
+      var t = (at('type') || 'text').toLowerCase();
+      var r = INPUT_ROLE[t] || 'textbox';
+      if (r === 'textbox' && at('list') !== null) return 'combobox';
+      return r;
+    }
+    if (tag === 'select') {
+      var size = parseInt(at('size') || '0', 10) || 0;
+      return (at('multiple') !== null || size > 1) ? 'listbox' : 'combobox';
+    }
+    if (tag === 'img') return at('alt') === '' ? 'none' : 'img';
+    if (tag === 'th') return (at('scope') || '').toLowerCase() === 'row'
+      ? 'rowheader' : 'columnheader';
+    if (tag === 'td') return 'cell';
+    if (tag === 'section')
+      return (at('aria-label') || at('aria-labelledby')) ? 'region' : 'group';
+    return IMPLICIT_ROLE[tag] || 'generic';
+  }
+
+  function kindOf(el) {
+    var role = roleOf(el);
+    return [RENDER_CLASS[role] || 'text', role];
+  }
+
   function taxonomyOf(el, text) {
     var tag = el.tagName;
     var soup = attrSoup(el);

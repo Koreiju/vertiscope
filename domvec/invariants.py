@@ -391,3 +391,54 @@ def check_workspace(workspace: Any) -> dict[str, List[Violation]]:
     out.update(check_graph(workspace.store))
     out.update({name: fn(workspace) for name, fn in WORKSPACE_CLAUSES.items()})
     return out
+
+
+# --- the two copies of the HTML-AAM tables -----------------------------------
+
+
+def a1_aam_tables_agree(_: Any = None) -> List[Violation]:
+    """`domvec/aam.py` and `sensor.js` classify identically.
+
+    The mapping has to exist on both sides of the bridge: Python renders and
+    the fold classifies in the page, and neither can call the other. Two
+    copies of a table is tolerable where two copies of *logic* is not —
+    provided the copies are checked rather than trusted, which is what this
+    is. Parsed out of the JS source rather than executed, so it costs nothing
+    and needs no browser.
+
+    A divergence here is the failure mode that would be hardest to see
+    otherwise: the sensor would draw a control one way, the offline path
+    another, and every comparison between them would silently measure the
+    disagreement instead of the thing under test.
+    """
+    import json
+    import pathlib
+    import re
+
+    from . import aam
+
+    src = (pathlib.Path(__file__).parent / "core" / "js" / "sensor.js")
+    try:
+        text = src.read_text(encoding="utf-8")
+    except OSError as exc:  # noqa: BLE001
+        return [f"cannot read sensor.js: {exc}"]
+
+    out: List[Violation] = []
+    for name, expected in (("IMPLICIT_ROLE", aam.IMPLICIT_ROLE),
+                           ("INPUT_ROLE", aam.INPUT_ROLE),
+                           ("RENDER_CLASS", aam.RENDER_CLASS)):
+        m = re.search(r"var %s = (\{.*?\});" % name, text, re.S)
+        if m is None:
+            out.append(f"{name} missing from sensor.js")
+            continue
+        try:
+            found = json.loads(m.group(1))
+        except ValueError as exc:  # noqa: BLE001
+            out.append(f"{name} in sensor.js is not readable json: {exc}")
+            continue
+        for key in sorted(set(expected) | set(found)):
+            if expected.get(key) != found.get(key):
+                out.append(
+                    f"{name}[{key!r}]: python={expected.get(key)!r} "
+                    f"js={found.get(key)!r}")
+    return out

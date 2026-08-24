@@ -402,6 +402,144 @@ class Repl:
 
     _cmd_exit = _cmd_quit
 
+    _FIDELITY_JS = r"""
+    var out = [];
+    function step(el) {
+      var p = el.parentNode, n = 1, i;
+      if (!p || !p.children) return el.tagName.toLowerCase();
+      for (i = 0; i < p.children.length; i++) {
+        var c = p.children[i];
+        if (c === el) break;
+        if (c.tagName === el.tagName) n++;
+      }
+      var t = el.tagName.toLowerCase();
+      return n > 1 ? t + '[' + n + ']' : t;
+    }
+    function pathOf(el) {
+      var parts = [], cur = el, guard = 0;
+      while (cur && cur.nodeType === 1 && guard++ < 200) {
+        parts.unshift(step(cur));
+        var p = cur.parentNode;
+        if (p && p.nodeType === 11) { parts.unshift('#shadow-root'); cur = p.host; }
+        else cur = p;
+      }
+      return '/' + parts.join('/');
+    }
+    var NATIVE = {A:1, BUTTON:1, INPUT:1, SELECT:1, TEXTAREA:1, SUMMARY:1, AREA:1};
+    function visit(root) {
+      var els = root.querySelectorAll ? root.querySelectorAll('*') : [];
+      for (var i = 0; i < els.length; i++) {
+        var el = els[i];
+        if (el.shadowRoot) visit(el.shadowRoot);
+        var native = NATIVE[el.tagName];
+        if (native === 1 && (el.tagName === 'A' || el.tagName === 'AREA')
+            && el.getAttribute('href') === null) native = 0;
+        if (el.tagName === 'INPUT'
+            && (el.getAttribute('type') || '').toLowerCase() === 'hidden') native = 0;
+        var role = (el.getAttribute('role') || '').toLowerCase();
+        if (!native && !role && el.getAttribute('tabindex') === null) continue;
+        // Only what a reader could act on. A rendered-away control is not a
+        // missing affordance; it is not on the page.
+        var r = el.getBoundingClientRect();
+        if (!r.width && !r.height) continue;
+        out.push([pathOf(el), el.tagName.toLowerCase(), role]);
+      }
+    }
+    visit(document);
+    return out;
+    """
+
+    def _cmd_fidelity(self, args) -> bool:
+        """Does every control on the page appear as an affordance? Stage 4's check.
+
+        The acceptance question used to be "was search detected?", answered at
+        70.1% after two rebuilds, with no way to tell a page that had no
+        search box from one whose box we rejected. It is retired with the
+        premise that produced it.
+
+        This is the replacement, and it involves no judgement about meaning:
+        walk the composed tree for everything a reader could act on, walk the
+        rendered affordances, and report the difference. A miss is a control
+        the reader cannot reach — countable, listable, and nobody has to
+        decide whether it was "really" a pager.
+        """
+        if not args:
+            self.state.buffers.note("fidelity needs a url")
+            return True
+        url = args[0]
+        driver = getattr(self.nav, "driver", None)
+        if driver is None:
+            self.state.buffers.note("fidelity needs a live browser — run 'browser'")
+            return True
+
+        import time as _t
+
+        from ..aam import INTERACTIVE
+        from ..sensing import Sensor
+        from ..stream import StreamingScan
+
+        scrolls = int(args[1]) if len(args) > 1 else 2
+        driver.set_page_load_timeout(45)
+        driver.get(url)
+        _t.sleep(0.8)
+        sensor = Sensor(driver, url, budget=1200)
+        sensor.boot()
+        _t.sleep(0.6)
+        spine = StreamingScan(url, context_window=1200)
+        for passno in range(scrolls + 1):
+            if passno:
+                sensor.scroll()
+                _t.sleep(0.5)
+            sp = sensor.drain(passno)
+            spine.absorb(sp.units, sp.passno, removed=sp.removed_addresses)
+
+        dom = driver.execute_script(self._FIDELITY_JS) or []
+        dom_paths = {row[0] for row in dom}
+
+        drawn: dict = {}
+        for leaf in (spine.trie.leaves() if spine.trie else []):
+            if leaf.address.tag not in INTERACTIVE:
+                continue
+            xp = leaf.address.xpath
+            # An affordance's text sits one step below the control; the
+            # control is what a reader presses.
+            if "/text()" in xp:
+                xp = xp[:xp.index("/text()")]
+            drawn.setdefault(xp, leaf.address.tag)
+
+        hit = dom_paths & set(drawn)
+        missed = dom_paths - set(drawn)
+        extra = set(drawn) - dom_paths
+
+        import collections as _c
+        by_tag = _c.Counter(row[1] for row in dom if row[0] in missed)
+        kinds = _c.Counter(drawn.values())
+
+        pct = 100.0 * len(hit) / max(len(dom_paths), 1)
+        rows = [
+            "",
+            f"  fidelity  {url}",
+            f"  {'interactive in composed tree':<34}{len(dom_paths):>8,}",
+            f"  {'rendered as an affordance':<34}{len(hit):>8,}   {pct:>5.1f}%",
+            f"  {'missed':<34}{len(missed):>8,}",
+            f"  {'drawn but not found in the DOM':<34}{len(extra):>8,}",
+            "",
+            "  affordances drawn, by render class",
+        ]
+        for kind, n in kinds.most_common():
+            rows.append(f"    {kind:<12}{n:>7,}")
+        if by_tag:
+            rows.append("")
+            rows.append("  missed, by element: " + ", ".join(
+                f"{k}={v}" for k, v in by_tag.most_common(8)))
+            for path in sorted(missed)[:5]:
+                rows.append(f"    {path[:88]}")
+        rows.append("")
+        print("\n".join(rows), flush=True)
+        self.state.buffers.note(
+            f"fidelity {pct:.1f}% — {len(missed)} control(s) not reachable")
+        return True
+
     def _cmd_shift(self, args) -> bool:
         """Cost of one insertion, against the size of what it lands in.
 

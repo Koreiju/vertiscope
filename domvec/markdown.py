@@ -191,6 +191,37 @@ def _is_tag_name(value: str) -> bool:
 _SUPPRESSED_TAGS = frozenset({"interactive.links", "interactive.elements"})
 
 
+def _heading_mark(label: str) -> str:
+    return "#" * _HEADINGS.get(label, 2) + " "
+
+
+# One ASCII form per render class. Minimalist and structural: nothing here
+# needs a colour, a box-drawing character, or anything markdown cannot say.
+# The reader acts on these directly, so a control has to look like a control
+# without anyone having decided what it is for.
+_RENDER_FORM = {
+    "link":    lambda v, t, l: f"[{t or v}]",
+    "button":  lambda v, t, l: f"< {t or v} >",
+    "field":   lambda v, t, l: f"[{v}]" if v else "[ ]",
+    "choice":  lambda v, t, l: f"{t or v} v",
+    "check":   lambda v, t, l: f"[ ] {t or v}",
+    "heading": lambda v, t, l: _heading_mark(l) + (v or t),
+    "item":    lambda v, t, l: f"- {v or t}",
+    "row":     lambda v, t, l: f"| {v or t}",
+    "cell":    lambda v, t, l: (v or t),
+    "quote":   lambda v, t, l: f"> {v or t}",
+    "code":    lambda v, t, l: f"`{v or t}`",
+    "image":   lambda v, t, l: (f"![{t}]({v})" if v and not _is_tag_name(v)
+                                else f"![{t or 'image'}]"),
+    "media":   lambda v, t, l: (f"({t or 'media'}) <{v}>" if v
+                                and not _is_tag_name(v) else f"({t or 'media'})"),
+    "rule":    lambda v, t, l: "---",
+    "group":   lambda v, t, l: (v or ""),
+    "text":    lambda v, t, l: ("\\" + v if v.startswith("#") else v),
+    "none":    lambda v, t, l: None,
+}
+
+
 def _render_unit(
     address: ContentAddress,
     value: str,
@@ -210,6 +241,14 @@ def _render_unit(
 
     if address.tag in _SUPPRESSED_TAGS:
         return None
+
+    # A render class, from the live path. It is drawn as what it *is*, with
+    # no branch anywhere below asking what it might have meant: a search box
+    # is a field because it is a field, and a pager is links because they are
+    # links. The tagger's category vocabulary follows underneath, unchanged,
+    # for the offline path that still speaks it.
+    if address.tag in _RENDER_FORM:
+        return _RENDER_FORM[address.tag](value, text_at_node or value, label)
     if cat == "media":
         # A media detection whose value is the element's *tag name* — an
         # inline `<svg>`, a `<source>` whose url was picked up elsewhere —
