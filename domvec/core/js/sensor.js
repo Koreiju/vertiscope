@@ -1527,7 +1527,11 @@
     // control that stopped working, `offscreen` is waiting for the reader,
     // `refused` is a safety decision, `notbottom` is a policy about when a
     // navigation is allowed. Only one of those is worth relaxing.
-    var out = { scrolled: 0, delta: 0, fired: [], skipped: 0, pagers: 0,
+    // `fired` stays, always empty, because the scroller no longer presses.
+    // `offered` is what replaces it: controls that came into view, for a
+    // reader to act on rather than for us to act on.
+    var out = { scrolled: 0, delta: 0, fired: [], offered: [],
+                skipped: 0, pagers: 0,
                 bottom: false, exhausted: false, errors: 0,
                 sk_empties: 0, sk_disabled: 0, sk_offscreen: 0,
                 sk_refused: 0, sk_backward: 0, sk_notbottom: 0,
@@ -1598,16 +1602,25 @@
       pagerList = keep;
       if (nav !== null) ready.push(nav);
       out.sk_lostrace = navCandidates > 1 ? navCandidates - 1 : 0;
+      // The scroller scrolls. It does not press.
+      //
+      // It used to, and the funnel that produced -- 41% of pages with a pager
+      // found, 22% enacted, 16% actually advancing -- existed because *we*
+      // were choosing which control to press. On YouTube that choice reached
+      // for "Sign in", "My Ad Center" and the microphone, 37 false positives
+      // on one results page, and the denylist that stopped it was patching a
+      // decision that should not have been ours.
+      //
+      // The reader presses now, through `perform`. What survives here is the
+      // observation: these are the controls that came into view, reported so
+      // a reader can act on one, with the same `refused` gate in front of the
+      // action wherever it originates.
       for (i = 0; i < ready.length; i++) {
         var target = ready[i], ts = pagers.get(target);
-        try {
-          target.click();
-          if (ts) ts.fires++;
-          firedLast.push(target);
-          out.fired.push([target.tagName.toLowerCase(),
+        if (ts) ts.seen = (ts.seen || 0) + 1;
+        out.offered.push([target.tagName.toLowerCase(),
                           pagerLabel(target).slice(0, 40),
                           navigates(target) ? 'navigate' : 'in-place']);
-        } catch (e) { out.errors++; stats.errors++; }
       }
       out.pagers = pagerList.length;
       out.exhausted = emptySteps >= 2;
@@ -1830,9 +1843,189 @@
 
   observe(document);
 
+  // ---- enactment: action chains, in the page ----------------------------
+  //
+  // Selenium's ActionChains is the model, not the runtime. Its grammar is a
+  // W3C data structure -- input sources crossed with a tick timeline -- and
+  // that structure has no dependency on being driven from outside. Built in
+  // here it gains the one thing the outside version cannot have: targets
+  // resolved through the composed tree, so a control three shadow roots deep
+  // is addressed exactly like a top-level anchor and the boundary is not a
+  // case in the executor, the same way it is not a case in the fold.
+  //
+  // There is one dispatcher. A gesture that does not take is reported as not
+  // having taken; nothing quietly tries a second way, because a second way
+  // that quietly succeeds is how you stop being able to tell whether the
+  // first one works.
+
+  function resolveStep(parent, seg, ordinal) {
+    if (seg === '#shadow-root') return parent.shadowRoot || null;
+    var kids = parent.childNodes || [], n = 0, i;
+    for (i = 0; i < kids.length; i++) {
+      var k = kids[i];
+      if (seg === '#text') {
+        if (k.nodeType !== 3) continue;
+      } else {
+        if (k.nodeType !== 1) continue;
+        if ((k.tagName || '').toLowerCase() !== seg) continue;
+      }
+      if (++n === ordinal) return k;
+    }
+    return null;
+  }
+
+  // A path is the same [tag, ordinal, ...] the fold emits, so an address the
+  // receiver holds resolves back to the node it was taken from without any
+  // spelling being rebuilt on either side.
+  function resolvePath(path) {
+    var node = document.documentElement, i;
+    if (!path || !path.length) return null;
+    // The fold starts at documentElement, so a leading html step names the
+    // node we are already standing on.
+    var head = String(path[0] || '').toLowerCase();
+    var start = (head === 'html') ? 2 : 0;
+    for (i = start; i < path.length - 1; i += 2) {
+      node = resolveStep(node, String(path[i]).toLowerCase(), path[i + 1] || 1);
+      if (!node) return null;
+    }
+    return node;
+  }
+
+  function nativeSet(el, value) {
+    // A framework replaces the value property on the instance, so assigning
+    // through it is invisible to that framework's own listener. The
+    // prototype's setter is the one the browser installed, and the one a
+    // change tracker watches.
+    var proto = HTMLInputElement.prototype;
+    try {
+      if (typeof HTMLTextAreaElement !== 'undefined'
+          && el instanceof HTMLTextAreaElement) proto = HTMLTextAreaElement.prototype;
+      else if (typeof HTMLSelectElement !== 'undefined'
+               && el instanceof HTMLSelectElement) proto = HTMLSelectElement.prototype;
+      var d = Object.getOwnPropertyDescriptor(proto, 'value');
+      if (d && d.set) { d.set.call(el, value); return; }
+    } catch (e) { /* fall through */ }
+    try { el.value = value; } catch (e2) {}
+  }
+
+  function fire(el, type, init) {
+    // composed: true throughout. Without it an event stops at the shadow
+    // boundary and a host-level listener never sees it, which is exactly the
+    // case this executor exists to serve.
+    var opts = { bubbles: true, cancelable: true, composed: true };
+    var ev, k;
+    if (init) for (k in init) if (init.hasOwnProperty(k)) opts[k] = init[k];
+    try {
+      if (type.indexOf('key') === 0) ev = new KeyboardEvent(type, opts);
+      else if (type.indexOf('pointer') === 0) ev = new PointerEvent(type, opts);
+      else if (type.indexOf('mouse') === 0 || type === 'click')
+        ev = new MouseEvent(type, opts);
+      else ev = new Event(type, opts);
+    } catch (e) { ev = new Event(type, opts); }
+    el.dispatchEvent(ev);
+  }
+
+  // One tick. The vocabulary is the subset of the W3C actions grammar a
+  // reader can express from a terminal.
+  function tick(t, out) {
+    var el = t.path ? resolvePath(t.path) : null;
+    if (t.path && !el) { out.failed.push([t.kind, 'unresolved']); return; }
+    if (el && el.nodeType === 3) el = el.parentNode;
+    if (el && refused(el)) { out.failed.push([t.kind, 'refused']); return; }
+    try {
+      switch (t.kind) {
+        case 'pause':
+          break;
+        case 'scrollIntoView':
+          el.scrollIntoView({ block: 'center' });
+          break;
+        case 'pointerDown':
+          fire(el, 'pointerdown'); fire(el, 'mousedown');
+          break;
+        case 'pointerUp':
+          fire(el, 'pointerup'); fire(el, 'mouseup');
+          break;
+        case 'click':
+          try { el.scrollIntoView({ block: 'center' }); } catch (e) {}
+          if (typeof el.focus === 'function') { try { el.focus(); } catch (e) {} }
+          if (typeof el.click === 'function') el.click();
+          else {
+            fire(el, 'pointerdown'); fire(el, 'mousedown');
+            fire(el, 'mouseup'); fire(el, 'click');
+          }
+          break;
+        case 'hover':
+          fire(el, 'pointerover'); fire(el, 'mouseover'); fire(el, 'mousemove');
+          break;
+        case 'type':
+          if (typeof el.focus === 'function') { try { el.focus(); } catch (e) {} }
+          nativeSet(el, String(t.text == null ? '' : t.text));
+          fire(el, 'input', { inputType: 'insertText', data: t.text });
+          fire(el, 'change');
+          break;
+        case 'check':
+          if ('checked' in el) el.checked = !el.checked;
+          fire(el, 'click'); fire(el, 'change');
+          break;
+        case 'choose':
+          if (el.options) {
+            for (var oi = 0; oi < el.options.length; oi++) {
+              var o = el.options[oi];
+              if (o.value === t.text
+                  || (o.textContent || '').trim() === t.text) {
+                el.selectedIndex = oi; break;
+              }
+            }
+          } else { nativeSet(el, String(t.text || '')); }
+          fire(el, 'input'); fire(el, 'change');
+          break;
+        case 'key':
+          var target = el || document.activeElement || document.body;
+          var kinit = { key: t.text || 'Enter' };
+          if (t.code) kinit.code = t.code;
+          fire(target, 'keydown', kinit);
+          fire(target, 'keypress', kinit);
+          fire(target, 'keyup', kinit);
+          break;
+        case 'submit':
+          var form = el.form || (el.closest ? el.closest('form') : null);
+          if (!form) { out.failed.push([t.kind, 'no form']); return; }
+          if (typeof form.requestSubmit === 'function') form.requestSubmit();
+          else form.submit();
+          break;
+        case 'scroll':
+          window.scrollBy(0, t.px || 0);
+          break;
+        default:
+          out.failed.push([t.kind, 'unknown']);
+          return;
+      }
+      out.done.push(t.kind);
+    } catch (e) {
+      out.failed.push([t.kind, String((e && e.message) || e)]);
+    }
+  }
+
+  // A chain returns the moment its last tick is dispatched. It does not wait
+  // for the page to be finished, because a page is never finished: the
+  // listeners are sensors, they assume no terminal state, and whatever this
+  // gesture causes arrives on the same stream as everything else the page
+  // does on its own. Waiting here would be inventing a completion the DOM
+  // does not have.
+  function perform(chain) {
+    var out = { done: [], failed: [], url: '' };
+    var ticks = (chain && chain.ticks) || [];
+    for (var i = 0; i < ticks.length; i++) tick(ticks[i], out);
+    try { out.url = String(location.href); } catch (e) { out.url = ''; }
+    out.version = version;
+    return out;
+  }
+
   return {
     drain: drain,
     step: step,
+    perform: perform,
+    resolve: function (path) { return !!resolvePath(path); },
     // One call that scrolls and reports. Two calls pay the round-trip toll
     // twice — measured at 1.46 ms each on this setup, against 0.05-0.25 ms
     // of actual in-page work — so the boundary, not the algorithm, is what

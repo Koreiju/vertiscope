@@ -106,7 +106,12 @@ class ScrollStep:
 
     scrolled: int = 0          # pixels actually moved
     delta: int = 0             # chunks the *previous* step produced
-    fired: List[tuple] = field(default_factory=list)   # (tag, label, kind)
+    fired: List[tuple] = field(default_factory=list)   # always empty now
+    # Controls that came into view, reported for a reader to act on. The
+    # scroller no longer presses anything: choosing which control to press
+    # was ours to get wrong, and it did -- 37 false positives on one YouTube
+    # results page, reaching for "Sign in". What is left is the observation.
+    offered: List[tuple] = field(default_factory=list)  # (tag, label, kind)
     skipped: int = 0           # in view but not pressed, with reason held
     pagers: int = 0            # pagination controls still attached
     bottom: bool = False       # the scroll can go no further
@@ -425,6 +430,88 @@ class Sensor:
                 total_lines += 1
         return units, by_chunk, total_lines
 
+    # -- enactment --------------------------------------------------------
+    @staticmethod
+    def path_of(address) -> List:
+        """A ContentAddress's xpath as the [tag, ordinal, ...] the page reads.
+
+        The same encoding the fold emits, run backwards. Nothing is
+        reconstructed by guessing: an address that came out of the sensor
+        resolves to the node it came from, including across shadow
+        boundaries, because `#shadow-root` is a step on both sides.
+        """
+        out: List = []
+        xpath = address.xpath if hasattr(address, "xpath") else str(address)
+        for raw in xpath.split("/"):
+            if not raw:
+                continue
+            if raw == _SHADOW:
+                out.extend([_SHADOW, 1])
+                continue
+            label, ordinal = raw, 1
+            if raw.endswith("]") and "[" in raw:
+                label, _, rest = raw.partition("[")
+                try:
+                    ordinal = int(rest[:-1])
+                except ValueError:
+                    ordinal = 1
+            if label.startswith("text()"):
+                label = "#text"
+            out.extend([label, ordinal])
+        return out
+
+    def perform(self, ticks: List[dict]) -> dict:
+        """Run one action chain in the page.
+
+        The whole chain crosses in a single call. Sending a tick at a time
+        would pay the round-trip toll -- 1.46 ms measured here, against
+        0.05-0.25 ms of actual work -- once per tick, so a three-tick gesture
+        would cost more in crossings than in everything it does.
+
+        Returns as soon as the last tick is dispatched. There is no wait for
+        the page to settle, because there is no settling: the listeners are
+        sensors that assume no terminal state, and whatever the gesture
+        causes arrives on the same delta stream as everything the page does
+        on its own. The caller drains when it wants to look.
+        """
+        raw = self._call("perform", {"ticks": ticks}) or {}
+        if raw.get("url"):
+            self.url = raw["url"]
+        return {
+            "done": list(raw.get("done") or []),
+            "failed": [tuple(f) for f in (raw.get("failed") or [])],
+            "url": raw.get("url") or "",
+        }
+
+    # The gestures a reader has, each one chain. Named for what the reader
+    # does, not for what the control is presumed to be: `press` is the same
+    # gesture whether the thing pressed turns out to be a pager, a filter or
+    # a disclosure, and that is the point.
+    def press(self, address) -> dict:
+        return self.perform([{"kind": "click", "path": self.path_of(address)}])
+
+    def fill(self, address, text: str, *, submit: bool = False) -> dict:
+        path = self.path_of(address)
+        ticks = [{"kind": "type", "path": path, "text": text}]
+        if submit:
+            ticks.append({"kind": "key", "path": path, "text": "Enter"})
+            ticks.append({"kind": "submit", "path": path})
+        return self.perform(ticks)
+
+    def toggle(self, address) -> dict:
+        return self.perform([{"kind": "check", "path": self.path_of(address)}])
+
+    def choose(self, address, option: str) -> dict:
+        return self.perform([{"kind": "choose", "path": self.path_of(address),
+                              "text": option}])
+
+    def hover(self, address) -> dict:
+        return self.perform([{"kind": "hover", "path": self.path_of(address)}])
+
+    def resolves(self, address) -> bool:
+        """Whether the address still names a live node."""
+        return bool(self._call("resolve", self.path_of(address)))
+
     # -- driving ----------------------------------------------------------
     def step(self, pixels: int = 0) -> "ScrollStep":
         """One discrete scroll, with pagination folded in (OBJECT_MODEL 5).
@@ -449,6 +536,7 @@ class Sensor:
             scrolled=int(raw.get("scrolled") or 0),
             delta=int(raw.get("delta") or 0),
             fired=fired,
+            offered=[tuple(f) for f in (raw.get("offered") or [])],
             skipped=int(raw.get("skipped") or 0),
             pagers=int(raw.get("pagers") or 0),
             bottom=bool(raw.get("bottom")),

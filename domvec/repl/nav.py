@@ -87,38 +87,28 @@ class WebNav:
             return NavResult(False, "visit", f"{type(exc).__name__}: {exc}")
 
     def click(self, address: ContentAddress) -> NavResult:
-        """Click the element the address names."""
-        blocked = self._guard("click")
-        if blocked:
-            return blocked
-        try:
-            element = self._find(address.xpath)
-            self.driver.execute_script(
-                "arguments[0].scrollIntoView({block:'center'});", element)
-            element.click()
-            return NavResult(True, "click", address.xpath, url=self.current_url)
-        except Exception as exc:
-            return NavResult(False, "click",
-                             f"{address.xpath}: {type(exc).__name__}")
+        """Removed. Enactment lives in the page.
+
+        This used to find the element with `find_element(By.XPATH, ...)` and
+        call Selenium's `click`, which cannot see inside a shadow root: the
+        selector engine stops at the boundary, so every control in a custom
+        element was unreachable from here. Typing had the same ceiling.
+
+        `Sensor.perform` replaces both. It resolves the target through the
+        composed tree, where a shadow boundary is one more step rather than a
+        wall, and dispatches with `composed: true` so a host-level listener
+        actually receives the event. Keeping this alongside it would leave two
+        dispatchers with different reach, and the one with less reach would be
+        the one that quietly answered first.
+        """
+        return NavResult(False, "click",
+                         "enactment moved to Sensor.perform (stage 5)")
 
     def type_into(self, address: ContentAddress, text: str,
                   *, submit: bool = False) -> NavResult:
-        """Fill a field, optionally submitting — the search-box gesture."""
-        blocked = self._guard("type")
-        if blocked:
-            return blocked
-        try:
-            from selenium.webdriver.common.keys import Keys
-
-            element = self._find(address.xpath)
-            element.clear()
-            element.send_keys(text)
-            if submit:
-                element.send_keys(Keys.RETURN)
-            return NavResult(True, "type", f"{text!r} -> {address.xpath}",
-                             url=self.current_url)
-        except Exception as exc:
-            return NavResult(False, "type", f"{type(exc).__name__}: {exc}")
+        """Removed. See :meth:`click`."""
+        return NavResult(False, "type",
+                         "enactment moved to Sensor.perform (stage 5)")
 
     def scroll(self, amount: int = 600) -> NavResult:
         """Scroll the page. The signal that drives incremental re-scan."""

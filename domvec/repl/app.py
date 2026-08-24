@@ -353,7 +353,35 @@ class Repl:
             self.state.buffers.note(f"no local copy of {target or widget.label}")
             return
 
-        self.render_live(self.nav.click(address))
+        self.render_live(self._gesture(address, "click"))
+
+    def _gesture(self, address, kind: str, text: str = "") -> "NavResult":
+        """Every reader-initiated action goes through the page's own executor.
+
+        One dispatcher, so there is no second path with different reach that
+        might quietly answer first. `refused` sits inside it and applies to
+        this exactly as it applies to anything else that asks.
+        """
+        from .nav import NavResult
+
+        sensor = getattr(self, "_sensor", None)
+        if sensor is None:
+            return NavResult(False, kind, "no sensor attached")
+        try:
+            if kind == "click":
+                out = sensor.press(address)
+            elif kind == "type":
+                out = sensor.fill(address, text, submit=True)
+            elif kind == "check":
+                out = sensor.toggle(address)
+            else:
+                return NavResult(False, kind, f"unknown gesture {kind!r}")
+        except Exception as exc:  # noqa: BLE001 - a gesture must not end a session
+            return NavResult(False, kind, f"{type(exc).__name__}: {exc}")
+        if out["failed"]:
+            why = ", ".join(f"{k}:{v}" for k, v in out["failed"])
+            return NavResult(False, kind, why)
+        return NavResult(True, kind, text or "pressed", url=out.get("url", ""))
 
     # -- commands ----------------------------------------------------------
     def command(self, line: str) -> bool:
@@ -448,6 +476,115 @@ class Repl:
     visit(document);
     return out;
     """
+
+    def _cmd_enact(self, args) -> bool:
+        """Do the affordances actually work? The other half of acceptance.
+
+        Fidelity says every control is drawn. This says every drawn control
+        can be acted on: its address still resolves to a live node, and
+        pressing it produces a delta. Both are countable and neither asks
+        what anything means.
+
+        Nothing is filtered by what it might do. A control is pressed and
+        the page answers -- if it navigated, that is the largest delta there
+        is, and the page is reopened to carry on. Deciding in advance which
+        controls were safe to press is the thing this design removed; what
+        remains in front of every press, wherever it comes from, is
+        `refused`, which is a safety denylist and not a classification.
+        """
+        if not args:
+            self.state.buffers.note("enact needs a url")
+            return True
+        url = args[0]
+        driver = getattr(self.nav, "driver", None)
+        if driver is None:
+            self.state.buffers.note("enact needs a live browser — run 'browser'")
+            return True
+
+        import time as _t
+
+        from ..aam import INTERACTIVE
+        from ..sensing import Sensor
+        from ..stream import StreamingScan
+
+        limit = int(args[1]) if len(args) > 1 else 8
+
+        def fold(target):
+            driver.set_page_load_timeout(45)
+            driver.get(target)
+            _t.sleep(0.7)
+            sensor = Sensor(driver, target, budget=1200)
+            sensor.boot()
+            _t.sleep(0.5)
+            spine = StreamingScan(target, context_window=1200)
+            sp = sensor.drain(0)
+            spine.absorb(sp.units, sp.passno, removed=sp.removed_addresses)
+            return sensor, spine
+
+        sensor, spine = fold(url)
+        seen: dict = {}
+        for leaf in (spine.trie.leaves() if spine.trie else []):
+            if leaf.address.tag in INTERACTIVE:
+                seen.setdefault(leaf.address.xpath, leaf.address)
+        affordances = list(seen.values())
+        resolved = sum(1 for a in affordances if sensor.resolves(a))
+
+        pressed = delta_seen = navigated = refused_n = 0
+        failures: list = []
+        for address in affordances[:limit]:
+            before = sensor.url
+            result = sensor.press(address)
+            pressed += 1
+            if any(reason == "refused" for _, reason in result["failed"]):
+                refused_n += 1
+                continue
+            if result["failed"]:
+                failures.append(result["failed"][0])
+                continue
+            _t.sleep(0.6)
+            after = sensor.drain(99)
+            moved = bool(after.units) or bool(after.removed_addresses)
+            # Navigation is learned from the drain, never from the chain's
+            # own return. `perform` reads location.href in the same tick it
+            # dispatched the click, and a navigation has not happened yet at
+            # that point -- so the chain reports the old address, the next
+            # press resolves against a page that has already gone, and the
+            # run blames the executor for what is really the check reading
+            # too early. The drain crosses afterwards and carries the URL
+            # the page actually ended up at.
+            if sensor.url and sensor.url != before:
+                navigated += 1
+                delta_seen += 1
+                sensor, spine = fold(url)          # back to where we started
+            elif moved:
+                delta_seen += 1
+            else:
+                failures.append(("click", "no delta"))
+
+        pct_r = 100.0 * resolved / max(len(affordances), 1)
+        pct_d = 100.0 * delta_seen / max(pressed - refused_n, 1)
+        rows = [
+            "",
+            f"  enactability  {url}",
+            f"  {'affordances drawn':<32}{len(affordances):>8,}",
+            f"  {'addresses that resolve':<32}{resolved:>8,}   {pct_r:>5.1f}%",
+            "",
+            f"  {'pressed':<32}{pressed:>8,}",
+            f"  {'refused (safety denylist)':<32}{refused_n:>8,}",
+            f"  {'produced a delta':<32}{delta_seen:>8,}   {pct_d:>5.1f}%",
+            f"  {'of which navigated':<32}{navigated:>8,}",
+        ]
+        if failures:
+            import collections as _c
+            tally = _c.Counter(f"{k}:{v}" for k, v in failures)
+            rows.append("")
+            rows.append("  did not take: " + ", ".join(
+                f"{k}={v}" for k, v in tally.most_common(6)))
+        rows.append("")
+        print("\n".join(rows), flush=True)
+        self.state.buffers.note(
+            f"enact: {pct_r:.0f}% resolve, {pct_d:.0f}% of presses moved the page")
+        return True
 
     def _cmd_fidelity(self, args) -> bool:
         """Does every control on the page appear as an affordance? Stage 4's check.
@@ -2001,8 +2138,7 @@ class Repl:
                 else:
                     before = self.nav.current_url
                     typed = self.QUERIES.get(name + ":site", "library")
-                    res = self.nav.type_into(found[0].address, typed,
-                                             submit=True)
+                    res = self._gesture(found[0].address, "type", typed)
                     self._await_document(was=before)
                     self.sense()
                     now = self.nav.current_url
@@ -2191,8 +2327,7 @@ class Repl:
         if widget.address is not None and self.nav.live:
             # Submitting a search box navigates, so the document that comes
             # back is the results page — the whole point of typing into it.
-            self.render_live(
-                self.nav.type_into(widget.address, text, submit=True))
+            self.render_live(self._gesture(widget.address, "type", text))
         else:
             self.state.buffers.note(f"line {widget.line} = {text!r}")
         return True

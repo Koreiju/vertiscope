@@ -364,41 +364,53 @@ def test_the_content_tag_decides_the_widget(tag, kind):
 
 def test_nav_reports_rather_than_raises_without_a_browser():
     nav = WebNav()
-    for result in (nav.click(_address()), nav.visit("https://x.test"),
-                   nav.scroll(), nav.back()):
+    for result in (nav.visit("https://x.test"), nav.scroll(), nav.back()):
         assert isinstance(result, NavResult) and result.ok is False
         assert "no browser" in result.detail
 
 
-def test_nav_uses_the_absolute_xpath():
-    """The address is the element handle; no separate registry exists."""
-    calls = []
+def test_enactment_is_not_dispatched_from_python():
+    """`WebNav` no longer presses anything; the page's executor does.
 
-    class FakeElement:
-        def click(self):
-            calls.append("click")
-
-        def clear(self):
-            calls.append("clear")
-
-        def send_keys(self, keys):
-            calls.append(f"keys:{keys}")
-
+    Selenium's selector engine stops at a shadow boundary, so dispatching
+    from here could never reach a control inside a custom element -- and a
+    dispatcher with less reach sitting beside one with more is worse than
+    not having it, because it is the one that answers first. Both entry
+    points now report that they moved rather than half-working.
+    """
     class FakeDriver:
         current_url = "https://x.test/p"
 
-        def find_element(self, by, value):
-            calls.append(f"find:{value}")
-            return FakeElement()
+        def find_element(self, by, value):        # pragma: no cover
+            raise AssertionError("enactment must not resolve elements here")
 
-        def execute_script(self, *a):
-            calls.append("script")
+        def execute_script(self, *a):             # pragma: no cover
+            raise AssertionError("enactment must not script from here")
 
     nav = WebNav(FakeDriver())
     address = _address("/html/body/div[3]/a[2]")
-    assert nav.click(address).ok
-    assert f"find:{address.xpath}" in calls
+    for result in (nav.click(address), nav.type_into(address, "q")):
+        assert result.ok is False
+        assert "Sensor.perform" in result.detail
 
+
+def test_action_chain_encodes_the_composed_path():
+    """An address round-trips to the [tag, ordinal, ...] the page resolves.
+
+    Including the shadow boundary, which is the whole reason enactment moved
+    into the page: `#shadow-root` is one more step here and a wall to any
+    selector engine.
+    """
+    from domvec.sensing import Sensor
+
+    plain = _address("/html/body/form/input[2]")
+    assert Sensor.path_of(plain) == [
+        "html", 1, "body", 1, "form", 1, "input", 2]
+
+    shadowed = _address("/html/body/div[2]/#shadow-root/ul/li[3]/a/text()[1]")
+    assert Sensor.path_of(shadowed) == [
+        "html", 1, "body", 1, "div", 2, "#shadow-root", 1,
+        "ul", 1, "li", 3, "a", 1, "#text", 1]
 
 def test_controls_are_classified_from_labels_not_a_new_category():
     """Hand-written labels, landing in the buckets those words name.
