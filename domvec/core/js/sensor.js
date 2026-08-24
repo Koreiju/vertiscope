@@ -133,7 +133,19 @@
   var LANDMARK_TAGS = { MAIN: 1, NAV: 1, ARTICLE: 1, SECTION: 1, ASIDE: 1,
                         HEADER: 1, FOOTER: 1, FORM: 1, TABLE: 1 };
 
-  var SKIP_TAGS = { SCRIPT: 1, STYLE: 1, NOSCRIPT: 1, TEMPLATE: 1, svg: 1 };
+  // Not traversed, matching docs/CONTENT_EXTRACTION_RULES section 8.5 so
+  // both extraction paths agree on what is not content.
+  //
+  // HEAD is the addition, and it earns its place at the render: a results
+  // page opened with `text/html; charset=UTF-8`, a viewport declaration,
+  // `noindex, nofollow` and eleven favicon urls before the first result.
+  // Those are real detections -- `content` and `href` attributes, exactly as
+  // the rules describe them -- and they are also the first thing a reader
+  // sees, which makes a structure-native render of the page a render of its
+  // metadata. The tagger has never traversed head; the sensor was the only
+  // one that did.
+  var SKIP_TAGS = { SCRIPT: 1, STYLE: 1, NOSCRIPT: 1, TEMPLATE: 1, svg: 1,
+                    HEAD: 1 };
   // The detectable-content space of docs/CONTENT_EXTRACTION_RULES, in the
   // page. This list was ten attributes, chosen by hand, and the cost of that
   // was measured against the host tagger on one Wikipedia article: `resource`

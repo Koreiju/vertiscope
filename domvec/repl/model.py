@@ -72,10 +72,32 @@ _KIND_BY_TAG = {
     "interactive.links": WidgetKind.LINK,
     "interactive.elements": WidgetKind.BUTTON,
     "interactive.event_handlers": WidgetKind.BUTTON,
+
+    # The render classes, from the live path. A widget has to know a button
+    # from a paragraph to let a reader act on it, and after the address's
+    # taxonomy slot became the render class every one of these fell through
+    # to TEXT -- so the page drew its controls and the REPL treated them as
+    # prose. `domvec.aam.RENDER_CLASS` is the authority for what these are;
+    # this maps them onto the widget vocabulary the terminal already has.
+    "link": WidgetKind.LINK,
+    "button": WidgetKind.BUTTON,
+    "field": WidgetKind.INPUT,
+    "choice": WidgetKind.INPUT,
+    "check": WidgetKind.CHECKBOX,
+    "image": WidgetKind.IMAGE,
+    "media": WidgetKind.IMAGE,
 }
 
 
-def kind_for(address: ContentAddress) -> WidgetKind:
+def kind_for(address: Optional[ContentAddress]) -> WidgetKind:
+    """The widget a line becomes. A line without an address is prose.
+
+    Melded rows -- a stored chunk drawn into a live page's row shape -- can
+    reach here, and a line that names no node is not a control however it is
+    spelled.
+    """
+    if address is None:
+        return WidgetKind.TEXT
     explicit = _KIND_BY_TAG.get(address.tag)
     if explicit is not None:
         return explicit

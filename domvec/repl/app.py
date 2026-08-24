@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence
 
 from ..address import ContentAddress
-from ..markdown import MarkdownChunk, read_jsonl
+from ..markdown import _RENDER_FORM, MarkdownChunk, read_jsonl
 from .model import (
     Buffers,
     Document,
@@ -476,6 +476,319 @@ class Repl:
     visit(document);
     return out;
     """
+
+    # A location, as opposed to a question. Deliberately generous about what
+    # counts: guessing wrong toward a search is recoverable in one keystroke,
+    # and guessing wrong toward a navigation is not, so the ambiguous middle
+    # goes to the question and offers the location as the first row.
+    _LOOKS_LIKE_LOCATION = __import__("re").compile(
+        r"""^(?:
+              [a-zA-Z][a-zA-Z0-9+.\-]*://\S+$      # a scheme
+            | (?:www\.)?[a-zA-Z0-9\-]+(?:\.[a-zA-Z0-9\-]+)+(?:[/:?#]\S*)?$
+            | localhost(?::\d+)?(?:[/?#]\S*)?$
+            )""", __import__("re").X)
+
+    @classmethod
+    def looks_like_location(cls, text: str) -> bool:
+        text = (text or "").strip()
+        if not text or " " in text:
+            return False
+        return bool(cls._LOOKS_LIKE_LOCATION.match(text))
+
+    @staticmethod
+    def _row_template(trie, url: str):
+        """The repeating shape a results page uses for one result.
+
+        Not a template we wrote. A list page says what a row looks like by
+        repeating it: group every element by the sequence of render classes
+        hanging under it, and the shape that recurs is the row. Measured on
+        real result pages, shapes collapse hard — 15 distinct shapes for 86
+        lines, 29 for 290 — because that is what a list *is*.
+
+        Taking it from the page rather than declaring it is what lets stored
+        chunks be rendered in the site's own form instead of ours.
+        """
+        import collections
+
+        leaves = [n.address for n in (trie.leaves() if trie else [])
+                  if n.address is not None and n.address.url == url]
+        if not leaves:
+            return None, 0
+
+        # Across ancestor depths, not at one. A row is a container, and how
+        # far above its content that container sits is the site's business:
+        # on one results page the row is the element holding the text, on
+        # another it is three levels up with the title, the url and the
+        # snippet each in their own child. Fixing the depth found the shape
+        # on one page and nothing at all on the next, which is exactly the
+        # per-site brittleness this design exists to avoid.
+        best = (None, 0)
+        for depth in range(2, 7):
+            groups: dict = collections.defaultdict(list)
+            for address in leaves:
+                path = address.path()
+                if len(path) <= depth + 2:
+                    continue
+                groups[path[:-(depth + 2)]].append(address.tag)
+            shapes: collections.Counter = collections.Counter()
+            for classes in groups.values():
+                if 2 <= len(classes) <= 12:
+                    shapes[tuple(classes)] += 1
+            for shape, count in shapes.most_common(1):
+                # More repeats wins; a tie goes to the longer shape, because
+                # the longer one describes more of the row.
+                if count >= 3 and (count, len(shape)) > (best[1], len(best[0] or ())):
+                    best = (shape, count)
+        return best
+
+    @staticmethod
+    def _through_template(shape, title: str, url: str, snippet: str,
+                          mark: str, hit=None) -> "list":
+        """One stored hit, drawn in the shape the live page uses for a row.
+
+        The reader sees one results page. `mark` is the only thing added,
+        because a reader has to be able to tell what came from where — but
+        the *form* is the site's, not ours.
+        """
+        from ..markdown import MarkdownLine
+
+        fields = [title, url, snippet]
+        lines = []
+        used = 0
+        for cls in (shape or ("link", "link", "text")):
+            value = fields[used] if used < len(fields) else ""
+            used += 1
+            if not value:
+                continue
+            form = _RENDER_FORM.get(cls, _RENDER_FORM["text"])
+            drawn = form(value, value, "")
+            if drawn is None:
+                continue
+            # Addressed, not decorative. A melded row names the stored node
+            # it came from, so a reader can act on it exactly as on a live
+            # one -- an unaddressed line would look like a result and behave
+            # like prose, which is the worst of both.
+            here = None
+            if hit is not None:
+                here = ContentAddress(hit.url, getattr(hit, "xpath", "/html"),
+                                      cls, "meld|local")
+            lines.append(MarkdownLine(1, drawn, here))
+            if used >= len(fields):
+                break
+        if lines:
+            lines[0] = MarkdownLine(1, lines[0].text + f"   {mark}",
+                                    lines[0].address)
+        return lines
+
+    def _cmd_retrieve(self, args) -> bool:
+        """The one bar. A location is visited; anything else is a question.
+
+        `open` and `search` survive as aliases for scripting, but a reader
+        has one input, because a browser needs one: the distinction between
+        "go here" and "find this" is the machine's problem, not theirs.
+
+        A question fires *both* retrievals — the triple product over stored
+        chunks, and a live DuckDuckGo visit read structure-natively — and the
+        stored hits are drawn into the live page's own row shape rather than
+        stacked in a pane beside it.
+        """
+        if not args:
+            self.state.buffers.note("retrieve: a url, or a question")
+            return True
+        text = " ".join(args).strip()
+
+        if self.looks_like_location(text):
+            return self._cmd_open([text])
+
+        local = []
+        if self.index is not None:
+            try:
+                local = self.index.search(text, k=8)
+            except Exception as exc:  # noqa: BLE001
+                self.state.buffers.note(f"local: {type(exc).__name__}: {exc}")
+
+        driver = getattr(self.nav, "driver", None)
+        if driver is None:
+            self.state.buffers.note(
+                f"{len(local)} local hit(s); no browser for the live half")
+            return self._cmd_search(args)
+
+        import time as _t
+        import urllib.parse
+
+        from ..sensing import Sensor
+        from ..stream import StreamingScan
+
+        engine = ("https://html.duckduckgo.com/html/?q="
+                  + urllib.parse.quote_plus(text))
+        driver.set_page_load_timeout(45)
+        driver.get(engine)
+        _t.sleep(0.9)
+        sensor = Sensor(driver, engine, budget=1200)
+        sensor.boot()
+        _t.sleep(0.6)
+        self._sensor = sensor
+        spine = StreamingScan(engine, context_window=1200)
+        sp = sensor.drain(0)
+        update = spine.absorb(sp.units, sp.passno, removed=sp.removed_addresses)
+        chunks = list(update.all_chunks or spine.dirty_chunks(update))
+        if not chunks:
+            from ..markdown import render_trie
+            chunks = render_trie(spine.trie, context_window=1200)
+
+        shape, repeats = self._row_template(spine.trie, engine)
+
+        # Interleaved, not appended. A separate pane would be a second
+        # results list the reader has to reconcile; melded, there is one.
+        melded = list(chunks)
+        for rank, hit in enumerate(local):
+            body = (hit.markdown or "").split("\n")
+            title = body[0].strip() if body else hit.url
+            snippet = " ".join(x.strip() for x in body[1:3]).strip()
+            lines = self._through_template(shape, title, hit.url, snippet,
+                                           "local", hit=hit)
+            if not lines:
+                continue
+            from ..markdown import MarkdownChunk
+            row = MarkdownChunk(url=hit.url, xpath=hit.xpath, part=900 + rank)
+            row.lines = lines
+            melded.insert(min(rank * 3 + 1, len(melded)), row)
+
+        self._spine = spine
+        self.load_chunks(melded, title=engine)
+        self.state.buffers.note(
+            f"{len(local)} local + {len(chunks)} live chunk(s); "
+            f"row shape {'x'.join(shape) if shape else 'none'} "
+            f"({repeats} repeats)")
+        return True
+
+    # `open` and `search` stay, for scripts and for muscle memory.
+    _cmd_go = _cmd_retrieve
+
+    def _cmd_walk(self, args) -> bool:
+        """The whole loop, run end to end, with the cost of each step.
+
+        This exists because the trace was once *described* rather than run,
+        and the description did not survive reading. So it is a command: ask
+        a question, land on the results page, scroll to the bottom, press
+        whatever control is there, and show the new rows arriving as a delta.
+
+        Nothing in it knows what pagination is. The control at the bottom is
+        pressed because it is a control, and the page answers or it does not.
+        """
+        import time as _t
+        import urllib.parse
+
+        from ..aam import INTERACTIVE
+        from ..markdown import render_trie
+        from ..sensing import Sensor
+        from ..stream import StreamingScan
+
+        driver = getattr(self.nav, "driver", None)
+        if driver is None:
+            self.state.buffers.note("walk needs a live browser — run 'browser'")
+            return True
+        question = " ".join(args) or "glacier retreat measurements"
+        rows = ["", f"  walk  {question!r}", ""]
+        rows.append(f"  {'step':<34}{'chunks':>8}{'lines':>8}{'bytes':>10}{'ms':>8}")
+
+        def measure(label, spine, ms):
+            chunks = render_trie(spine.trie, context_window=1200) if spine.trie else []
+            lines = sum(len(c.lines) for c in chunks)
+            size = sum(len(c.markdown) for c in chunks)
+            rows.append(f"  {label:<34}{len(chunks):>8,}{lines:>8,}"
+                        f"{size:>10,}{ms:>8.0f}")
+            return chunks
+
+        # 1. the question routes to the engine's own page
+        engine = ("https://html.duckduckgo.com/html/?q="
+                  + urllib.parse.quote_plus(question))
+        t0 = _t.perf_counter()
+        driver.set_page_load_timeout(45)
+        driver.get(engine)
+        _t.sleep(1.0)
+        sensor = Sensor(driver, engine, budget=1200)
+        sensor.boot()
+        _t.sleep(0.6)
+        spine = StreamingScan(engine, context_window=1200)
+        sp = sensor.drain(0)
+        spine.absorb(sp.units, sp.passno, removed=sp.removed_addresses)
+        measure("visit + fold", spine, (_t.perf_counter() - t0) * 1000)
+
+        shape, repeats = self._row_template(spine.trie, engine)
+        rows.append(f"  {'row shape found':<34}"
+                    f"{('x'.join(shape) if shape else 'none'):>26}"
+                    f"  {repeats} repeats")
+
+        # 2. scroll to the bottom
+        t1 = _t.perf_counter()
+        offered = []
+        for _ in range(6):
+            # `step`, not `scroll`: the latter reports milliseconds only,
+            # and what the walk needs is what came into view.
+            step = sensor.step()
+            offered.extend(step.offered)
+            _t.sleep(0.35)
+            sp = sensor.drain(1)
+            spine.absorb(sp.units, sp.passno, removed=sp.removed_addresses)
+            if step.bottom:
+                break
+        before = measure("scroll to bottom", spine, (_t.perf_counter() - t1) * 1000)
+        rows.append(f"  {'controls offered on the way':<34}{len(offered):>8,}")
+
+        # 3. press whatever the bottom of the page puts there
+        seen_xp: set = set()
+        tail = []
+        for leaf in (spine.trie.leaves() if spine.trie else []):
+            a = leaf.address
+            if a.tag not in INTERACTIVE:
+                continue
+            xp = a.xpath.split("/text()")[0]
+            if xp in seen_xp:
+                continue
+            seen_xp.add(xp)
+            tail.append(a)
+        # The last *button*, not the last affordance. That is a reader's
+        # gesture -- scroll down, press the button at the bottom -- expressed
+        # in render classes, and it is not a claim about what the button
+        # does. Taking the last affordance instead pressed a footer link,
+        # because a page has a footer after its controls: on this results
+        # page the pager sits in div[11] and the run reached into div[12].
+        buttons = [a for a in tail if a.tag == "button"]
+        target = (buttons[-1] if buttons else (tail[-1] if tail else None))
+        if target is None:
+            rows.append("  nothing at the bottom to press")
+            rows.append("")
+            print("\n".join(rows), flush=True)
+            return True
+        rows.append(f"  {'pressing':<34}{target.tag:>8}  {target.xpath[-46:]}")
+
+        t2 = _t.perf_counter()
+        was = sensor.url
+        result = sensor.press(target)
+        _t.sleep(1.0)
+        sp = sensor.drain(2)
+        update = spine.absorb(sp.units, sp.passno,
+                              removed=sp.removed_addresses)
+        after = measure("after the press", spine, (_t.perf_counter() - t2) * 1000)
+
+        grew = len(after) - len(before)
+        rows.append("")
+        rows.append(f"  delta from the press: added={len(update.delta.added):,} "
+                    f"changed={len(update.delta.changed):,} "
+                    f"moved={len(update.delta.moved):,} "
+                    f"removed={len(update.delta.removed):,}")
+        rows.append(f"  chunks {'gained' if grew >= 0 else 'lost'}: {abs(grew):,}"
+                    f"   navigated: {'yes' if sensor.url != was else 'no'}")
+        if result["failed"]:
+            rows.append("  chain reported: " + ", ".join(
+                f"{k}:{v}" for k, v in result["failed"]))
+        rows.append("")
+        print("\n".join(rows), flush=True)
+        self.state.buffers.note(
+            f"walk: {len(after)} chunk(s) after the press, "
+            f"delta {update.delta.touched}")
+        return True
 
     def _cmd_enact(self, args) -> bool:
         """Do the affordances actually work? The other half of acceptance.

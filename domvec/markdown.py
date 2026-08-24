@@ -191,6 +191,34 @@ def _is_tag_name(value: str) -> bool:
 _SUPPRESSED_TAGS = frozenset({"interactive.links", "interactive.elements"})
 
 
+# Names the fold uses to say "a control is here". Matched exactly, against a
+# closed set. Testing "short and alphabetic" instead -- which is the right
+# test for a media value and the wrong one here -- deleted `Search` and
+# `DuckDuckGo`, because those are also short and alphabetic. A label that is
+# genuinely the element's name is a tiny set; a label that merely looks like
+# one is most of the words on a page.
+_CONTROL_TAGS = frozenset({
+    "input", "button", "select", "textarea", "a", "form", "option",
+    "optgroup", "label", "fieldset", "datalist", "output", "summary",
+})
+
+
+def _control_label(text: str, value: str) -> str:
+    """A control's visible label, never its element name.
+
+    The fold records a control's existence as `@control -> "input"`, because
+    for an input the element *is* the finding and there is nothing else to
+    put there. Drawn literally that reads `( input )` and `[ ] select` on a
+    results page, which says nothing and looks like a control called
+    "input". The same trap the media renderer fell into with `![images](svg)`.
+    """
+    for candidate in (text, value):
+        candidate = (candidate or "").strip()
+        if candidate and candidate.lower() not in _CONTROL_TAGS:
+            return candidate
+    return ""
+
+
 def _heading_mark(label: str) -> str:
     return "#" * _HEADINGS.get(label, 2) + " "
 
@@ -200,11 +228,17 @@ def _heading_mark(label: str) -> str:
 # The reader acts on these directly, so a control has to look like a control
 # without anyone having decided what it is for.
 _RENDER_FORM = {
-    "link":    lambda v, t, l: f"[{t or v}]",
-    "button":  lambda v, t, l: f"< {t or v} >",
-    "field":   lambda v, t, l: f"[{v}]" if v else "[ ]",
-    "choice":  lambda v, t, l: f"{t or v} v",
-    "check":   lambda v, t, l: f"[ ] {t or v}",
+    # The interactive forms are spelled exactly as the widget layer already
+    # unwraps them. A renderer and a widget disagreeing about a control's
+    # form is a fight this file has had twice before -- it produced
+    # `( === form === )` once and `( [div[onclick]] )` another time -- and
+    # the lesson recorded there is to have one form fewer, not one more.
+    # `< Search >` was a third spelling, and it came back `( < Search > )`.
+    "link":    lambda v, t, l: f"[{_control_label(t, v)}]",
+    "button":  lambda v, t, l: f"( {_control_label(t, v)} )",
+    "field":   lambda v, t, l: f"[ ] {_control_label(t, v)}".rstrip(),
+    "choice":  lambda v, t, l: f"[ ] {_control_label(t, v)}".rstrip(),
+    "check":   lambda v, t, l: f"[ ] {_control_label(t, v)}".rstrip(),
     "heading": lambda v, t, l: _heading_mark(l) + (v or t),
     "item":    lambda v, t, l: f"- {v or t}",
     "row":     lambda v, t, l: f"| {v or t}",
