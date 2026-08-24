@@ -532,6 +532,18 @@ class Repl:
         both = live_keys & snap_keys
         union = live_keys | snap_keys
 
+        # The full key mixes two independent disagreements: what each path
+        # *found*, and what each path *calls* it. Compared whole they cannot
+        # be told apart, and 0% overlap reads as though the sensor sees
+        # nothing the tagger sees -- which is false. Comparing at the node
+        # and detector level strips the naming out, leaving only scope.
+        def by(trie, f):
+            return {f(n.address) for n in (trie.leaves() if trie else [])}
+        live_x = by(live.trie, lambda a: a.xpath)
+        snap_x = by(snap.trie, lambda a: a.xpath)
+        live_d = by(live.trie, lambda a: (a.xpath, a.detector))
+        snap_d = by(snap.trie, lambda a: (a.xpath, a.detector))
+
         rows = [
             "",
             f"  spine  {url}",
@@ -541,10 +553,18 @@ class Repl:
             f"  {'snapshot (tagger)':<22}{len(snap_keys):>9,}"
             f"{len(snap_all):>9,}{update.trie_ms + update.tag_ms:>9.1f}",
             "",
-            f"  shared addresses     {len(both):>9,}"
-            f"   ({100.0 * len(both) / max(len(union), 1):.1f}% of union)",
-            f"  sensor only          {len(live_keys - snap_keys):>9,}",
-            f"  snapshot only        {len(snap_keys - live_keys):>9,}",
+            f"  {'agreement':<22}{'shared':>9}{'union':>9}{'%':>8}",
+            f"  {'full address':<22}{len(both):>9,}{len(union):>9,}"
+            f"{100.0 * len(both) / max(len(union), 1):>7.1f}%",
+            f"  {'node + detector':<22}{len(live_d & snap_d):>9,}"
+            f"{len(live_d | snap_d):>9,}"
+            f"{100.0 * len(live_d & snap_d) / max(len(live_d | snap_d), 1):>7.1f}%",
+            f"  {'node (xpath)':<22}{len(live_x & snap_x):>9,}"
+            f"{len(live_x | snap_x):>9,}"
+            f"{100.0 * len(live_x & snap_x) / max(len(live_x | snap_x), 1):>7.1f}%",
+            "",
+            f"  nodes only the sensor sees   {len(live_x - snap_x):>7,}",
+            f"  nodes only the tagger sees   {len(snap_x - live_x):>7,}",
             "",
         ]
         # What the divergence is *made of* — the tag vocabulary each path
@@ -564,11 +584,35 @@ class Repl:
         if st:
             rows.append("  snapshot-only tags: " + ", ".join(
                 f"{k}={v}" for k, v in sorted(st.items(), key=lambda x: -x[1])[:6]))
+
+        # Detection coverage, compared where the two paths can be compared:
+        # one node, one accessor. Counting leaves instead reads as though the
+        # sensor sees half the media on a page -- the tagger files an image
+        # URL under `urls.external` *and* `media.images`, so it emits two
+        # leaves for one detection where the sensor emits one. That is a
+        # difference in filing, not in what was found.
+        def families(trie):
+            out = {}
+            for n in (trie.leaves() if trie else []):
+                a = n.address
+                head = a.accessor.split("|", 1)[0].split("@", 1)[0]
+                head = head.split("[", 1)[0] or a.accessor
+                out.setdefault(head, set()).add((a.xpath, head))
+            return out
+        lf, sf = families(live.trie), families(snap.trie)
+        rows.append("  detection coverage, by (node, accessor)")
+        rows.append(f"  {'accessor':<20}{'sensor':>9}{'tagger':>9}")
+        order = sorted(set(lf) | set(sf),
+                       key=lambda k: -(len(lf.get(k, ())) + len(sf.get(k, ()))))
+        for k in order[:12]:
+            rows.append(f"  {k[:20]:<20}{len(lf.get(k, ())):>9,}"
+                        f"{len(sf.get(k, ())):>9,}")
         rows.append("")
         print("\n".join(rows), flush=True)
+        node_pct = 100.0 * len(live_x & snap_x) / max(len(live_x | snap_x), 1)
         self.state.buffers.note(
-            f"spine: {len(both)} shared, {len(live_keys - snap_keys)} sensor-only, "
-            f"{len(snap_keys - live_keys)} snapshot-only")
+            f"spine: node agreement {node_pct:.1f}%, "
+            f"{len(snap_x - live_x)} nodes tagger-only")
         return True
 
     def _cmd_browser(self, args) -> bool:

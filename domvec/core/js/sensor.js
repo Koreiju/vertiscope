@@ -134,8 +134,105 @@
                         HEADER: 1, FOOTER: 1, FORM: 1, TABLE: 1 };
 
   var SKIP_TAGS = { SCRIPT: 1, STYLE: 1, NOSCRIPT: 1, TEMPLATE: 1, svg: 1 };
-  var CONTENT_ATTRS = ['href', 'src', 'srcset', 'alt', 'aria-label', 'title',
-                       'value', 'placeholder', 'content', 'datetime'];
+  // The detectable-content space of docs/CONTENT_EXTRACTION_RULES, in the
+  // page. This list was ten attributes, chosen by hand, and the cost of that
+  // was measured against the host tagger on one Wikipedia article: `resource`
+  // 0 vs 85, `data-title` 0 vs 137, `aria-labelledby` 0 vs 48, `data-mw` 0 vs
+  // 465. Every one of those is content the live path could not see and the
+  // snapshot path could, which made the O(delta) route the impoverished one.
+  //
+  // Three named groups, exactly as the host has them: attributes that bear a
+  // URL, attributes that bear an accessible name, and attributes that bear
+  // metadata. Union, deduplicated, because one attribute may be more than one
+  // of those and the address records which rule found it, not which list it
+  // came from.
+  var URL_ATTRS = ['action', 'cite', 'data', 'data-image', 'data-lazy-src',
+                   'data-original', 'data-original-src', 'data-src',
+                   'formaction', 'href', 'longdesc', 'poster', 'src'];
+  var TEXT_ATTRS = ['abbr', 'acronym', 'alt', 'aria-describedby',
+                    'aria-description', 'aria-errormessage', 'aria-label',
+                    'aria-labelledby', 'aria-placeholder',
+                    'aria-roledescription', 'aria-valuetext', 'caption',
+                    'label', 'placeholder', 'summary', 'title'];
+  var META_ATTRS = ['content', 'data-alt', 'data-caption', 'data-description',
+                    'data-label', 'data-name', 'data-placeholder',
+                    'data-text', 'data-title', 'data-tooltip', 'data-value',
+                    'datetime'];
+  var CONTENT_ATTRS = (function () {
+    var seen = {}, out = [], i, g, groups = [URL_ATTRS, TEXT_ATTRS, META_ATTRS,
+                                             ['srcset', 'value']];
+    for (g = 0; g < groups.length; g++)
+      for (i = 0; i < groups[g].length; i++)
+        if (!seen[groups[g][i]]) { seen[groups[g][i]] = 1; out.push(groups[g][i]); }
+    return out;
+  }());
+
+  // Outside the named lists the scan is attribute-agnostic: the URL pattern is
+  // applied to whatever is left. That is what recovers content from
+  // site-specific attributes nobody enumerated -- `data-mw`, `resource` and
+  // `typeof` all carry URLs on real pages and appear in no list anywhere.
+  // Enumerating them was never going to work; the host reaches them this way
+  // and the sensor could not reach them at all.
+  var CONTENT_SET = {};
+  (function () {
+    for (var i = 0; i < CONTENT_ATTRS.length; i++) CONTENT_SET[CONTENT_ATTRS[i]] = 1;
+  }());
+  var ATTR_SKIP = {};
+  (function () {
+    var deny = ('aria-activedescendant aria-atomic aria-busy aria-checked '
+      + 'aria-colcount aria-colindex aria-colspan aria-controls aria-current '
+      + 'aria-disabled aria-expanded aria-flowto aria-haspopup aria-hidden '
+      + 'aria-invalid aria-level aria-live aria-modal aria-multiline '
+      + 'aria-multiselectable aria-orientation aria-owns aria-posinset '
+      + 'aria-pressed aria-readonly aria-relevant aria-required aria-rowcount '
+      + 'aria-rowindex aria-rowspan aria-selected aria-setsize aria-sort '
+      + 'aria-valuemax aria-valuemin aria-valuenow autocapitalize autocomplete '
+      + 'autocorrect class clip-path clip-rule d dir enctype fill fill-rule '
+      + 'filter for height id is lang method name opacity points slot '
+      + 'spellcheck stroke stroke-linecap stroke-linejoin stroke-width style '
+      + 'tabindex target transform translate type version viewbox width xmlns '
+      + 'checked cols colspan contenteditable disabled draggable enterkeyhint '
+      + 'headers hidden inputmode max maxlength min minlength multiple pattern '
+      + 'pubdate readonly required reversed role rows rowspan scope selected '
+      + 'size start step wrap').split(' ');
+    for (var i = 0; i < deny.length; i++) ATTR_SKIP[deny[i]] = 1;
+  }());
+  var ATTR_SKIP_PREFIX = ['data-testid', 'data-cy-', 'data-qa-',
+                          'data-automation', 'data-react', 'data-radix',
+                          'data-state', 'data-orientation', 'data-side',
+                          'data-align', 'data-disabled'];
+  var URL_IN_ATTR = /(https?:\/\/[^\s"'<>(){}\[\]]+|\/\/[^\s"'<>(){}\[\]]+|data:[a-zA-Z0-9+\/.-]+;[^\s"'<>]+|blob:[^\s"'<>]+)/;
+
+  // Every URL in one attribute value, each keyed by where in the value it
+  // sits. The sub-path is intrinsic -- a character offset in the attribute's
+  // own text -- so it is re-derivable by anyone holding the address and does
+  // not depend on the order detectors happened to run in.
+  function pushUrls(out, name, val, skipFirst) {
+    var re = new RegExp(URL_IN_ATTR.source, 'g');
+    var m, n = 0;
+    while ((m = re.exec(val)) !== null) {
+      if (m[0].length < 2) { re.lastIndex++; continue; }
+      if (!(skipFirst && n === 0)) {
+        out.push([intern(n === 0 ? name : name + '@' + m.index), m[0]]);
+      }
+      n++;
+      if (n > 64) break;
+    }
+  }
+
+  var URL_SET = {};
+  (function () {
+    for (var i = 0; i < URL_ATTRS.length; i++) URL_SET[URL_ATTRS[i]] = 1;
+    URL_SET.srcset = 1;
+  }());
+  var MULTI_URL = /[,\s]/;
+
+  function agnosticSkip(name) {
+    if (ATTR_SKIP[name]) return true;
+    for (var i = 0; i < ATTR_SKIP_PREFIX.length; i++)
+      if (name.indexOf(ATTR_SKIP_PREFIX[i]) === 0) return true;
+    return false;
+  }
   // With `attrs` on, every attribute is content. That is more of the page,
   // and also every framework's bookkeeping — the cost of the wider net is
   // exactly what the axis exists to price.
@@ -565,6 +662,23 @@
       val = el.getAttribute(name);
       if (!val) continue;
       (out || (out = [])).push([intern(name), val]);
+      // One accessor can carry an ordered sequence of values, and `srcset`
+      // is the ordinary case rather than the exotic one: every responsive
+      // image on the page names three or four sources in a single
+      // attribute. Taking the attribute whole counted that as one media
+      // resource -- measured at 44 against the host's 88 on one article,
+      // which is every second image on the page going unrecorded.
+      if (URL_SET[name] && MULTI_URL.test(val)) pushUrls(out, name, val, true);
+    }
+    // Then everything the lists do not name, for URLs only. Bounded by the
+    // denylist so a framework's own bookkeeping does not become content.
+    var rest = el.attributes || [];
+    for (i = 0; i < rest.length; i++) {
+      name = rest[i].name;
+      if (CONTENT_SET[name] || agnosticSkip(name)) continue;
+      val = rest[i].value;
+      if (!val || val.length > 8192) continue;
+      pushUrls(out || (out = []), name, val);
     }
     }
     if (tag === 'A' || tag === 'AREA') { /* link-ness implied by href above */ }
