@@ -27,7 +27,8 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence
 
 from ..address import ContentAddress
-from ..markdown import _RENDER_FORM, MarkdownChunk, read_jsonl
+from ..markdown import (_RENDER_FORM, _looks_like_url,
+                        MarkdownChunk, read_jsonl)
 from .model import (
     Buffers,
     Document,
@@ -259,7 +260,28 @@ class Repl:
             self._live_chunks.clear()
 
         was = url
-        delta = prefetched if prefetched is not None             else self._sensor.drain(self._sense_pass)
+        if prefetched is not None:
+            delta = prefetched
+        else:
+            delta = self._sensor.drain(self._sense_pass)
+            # Look again if the first look came back empty.
+            #
+            # A gesture that navigates leaves the old handle in a document
+            # that no longer exists; the next call re-boots into the new one,
+            # and that boot's first drain arrives before the fold has run, so
+            # it is empty. Reading that as "the page is empty" cleared the
+            # view and left a click reporting `0 lines from 0 chunk(s)` on a
+            # page that had 361 units in it.
+            #
+            # This is not the sensor waiting to be finished -- it never is,
+            # and it is not asked to be. It is the reader looking again,
+            # which is the only thing that ever decides when to look.
+            import time as _t
+            for _ in range(6):
+                if delta.units or delta.removed_addresses:
+                    break
+                _t.sleep(0.35)
+                delta = self._sensor.drain(self._sense_pass)
         self._sense_pass += 1
         # The drain is what learns the page has become a different page — an
         # enacted pager that navigates, a route change, a redirect. Reading
@@ -339,20 +361,40 @@ class Repl:
         address = widget.address
         if address is None:
             return
+
+        # A stored page opens from the store, so reading scanned content
+        # never depends on the site still being up. The target comes from the
+        # *address*, not from the label: a link's label used to be its href,
+        # and is now the anchor's own words, so parsing the label as a url
+        # sent `click` to `html.duckduckgo.com/html/[How%20should%20you...`
+        # -- the title of the result, resolved as a relative path.
         if widget.kind in (WidgetKind.LINK, WidgetKind.IMAGE):
             from ..graphstore import canonical_url
 
-            target = canonical_url(widget.label.strip("<>"),
-                                   self.state.document.url)
+            here = self.state.document.url
+            raw = ""
+            if self.store is not None:
+                found = self.store.address(address.aid)
+                if found is not None:
+                    stored = (found[1] or "").strip()
+                    # Only if it IS one. A link line's stored value is the
+                    # anchor's words, not its href, and taking those as a
+                    # target resolved the result's title against the current
+                    # host and "opened" the empty page that came back -- so a
+                    # click reported success and showed nothing.
+                    if _looks_like_url(stored):
+                        raw = stored
+            if not raw and _looks_like_url(widget.label.strip("<>")):
+                raw = widget.label.strip("<>")
+            target = canonical_url(raw, here) if raw else ""
             if target and self.load_url_from_store(target):
                 self.state.buffers.note(f"opened {target} (from store)")
                 return
-            if target and self.nav.live:
-                self.render_live(self.nav.visit(target))
-                return
-            self.state.buffers.note(f"no local copy of {target or widget.label}")
-            return
 
+        # Otherwise the page decides. Pressing the real element is what makes
+        # a redirect, a script-driven route change or a form submission behave
+        # the way it does for anyone else reading the page -- and it is the
+        # only path that reaches a control inside a shadow root.
         self.render_live(self._gesture(address, "click"))
 
     def _gesture(self, address, kind: str, text: str = "") -> "NavResult":
@@ -407,7 +449,13 @@ class Repl:
 
     def _line_arg(self, args: Sequence[str]) -> Optional[Widget]:
         if not args:
-            self.state.buffers.note("need a line number")
+            # No number means "the line I am on". `find` moves the focus and
+            # a gesture acts on it -- which is how a reader works a terminal,
+            # and the only way to drive one without knowing in advance which
+            # line a result will land on.
+            if self.state.focus is not None and                     0 <= self.state.focus < len(self.state.document):
+                return self.state.document.lines[self.state.focus]
+            self.state.buffers.note("need a line number, or a focused line")
             return None
         try:
             n = int(args[0])
@@ -601,6 +649,7 @@ class Repl:
             return self._cmd_open([text])
 
         local = []
+        self._refresh_index()
         if self.index is not None:
             try:
                 local = self.index.search(text, k=8)
@@ -2541,7 +2590,36 @@ class Repl:
         self.state.buffers.note(f"{target}: in {address.url}, line not shown")
         return True
 
+    def _refresh_index(self) -> None:
+        """Rebuild the retrieval index when the store has grown under it.
+
+        The index is built once, at start, from whatever the store held then.
+        Browsing writes through the workspace, so a page read during a
+        session lands in the store -- and stayed invisible to retrieval,
+        because the index was a snapshot of the store as it was before the
+        page existed. Asking for a word from a page visited two minutes
+        earlier answered `no hit`, which is the store and the index
+        disagreeing rather than the query failing.
+        """
+        if self.workspace is None or self.store is None:
+            return
+        try:
+            count = len(list(self.store.chunks()))
+        except Exception:  # noqa: BLE001 - a count must not end a session
+            return
+        if self.index is not None and count == getattr(self, "_indexed", -1):
+            return
+        try:
+            from ..search import ThreeFormIndex
+
+            self.workspace.flush_vectors()
+            self.index = ThreeFormIndex(self.store, self.workspace.freq).build()
+            self._indexed = count
+        except Exception as exc:  # noqa: BLE001
+            self.state.buffers.note(f"index: {type(exc).__name__}: {exc}")
+
     def _cmd_search(self, args) -> bool:
+        self._refresh_index()
         if self.index is None:
             self.state.buffers.note("no index attached")
             return True
@@ -2613,6 +2691,71 @@ class Repl:
         if widget is not None:
             self.state.focus = widget.line
             self.state._activate(widget)
+        return True
+
+    def _cmd_press(self, args) -> bool:
+        """Press the control called <text>. Controls only.
+
+        `find` searches every line, which is right for reading and wrong for
+        acting: asked for "Next" on a results page it landed on "over the
+        next century" in a snippet, and the press that followed opened an
+        article instead of page two. A reader saying "press Next" means the
+        control, and the render already knows which lines are controls.
+
+        The last match wins, because the control a reader wants by name is
+        usually the one furthest down -- a pager sits below the results it
+        pages through.
+        """
+        needle = " ".join(args).lower().strip()
+        if not needle:
+            self.state.buffers.note("press needs a control's name")
+            return True
+        hits = [w for w in self.state.document.lines
+                if w.interactive and needle in w.label.lower()]
+        if not hits:
+            self.state.buffers.note(f"no control named {needle!r}")
+            return True
+        widget = hits[-1]
+        self.state.scroll_to_line(widget.line)
+        self.state.focus = widget.line
+        self.state.buffers.note(
+            f"pressing {widget.label[:40]!r} at line {widget.line}")
+        self.state._activate(widget)
+        return True
+
+    def _cmd_hover(self, args) -> bool:
+        """Point at something without pressing it.
+
+        A menu that opens on hover has no other way in from a terminal: there
+        is no pointer, so the gesture has to be asked for by name. Everything
+        it reveals arrives on the same delta stream as any other change --
+        the page opened a menu, and the menu is now part of the page.
+        """
+        widget = self._line_arg(args)
+        if widget is None or widget.address is None:
+            return True
+        sensor = getattr(self, "_sensor", None)
+        if sensor is None:
+            self.state.buffers.note("hover needs a live page")
+            return True
+        before = len(self.state.document)
+        try:
+            out = sensor.hover(widget.address)
+        except Exception as exc:  # noqa: BLE001
+            self.state.buffers.note(f"hover: {type(exc).__name__}: {exc}")
+            return True
+        if out["failed"]:
+            self.state.buffers.note("hover: " + ", ".join(
+                f"{k}:{v}" for k, v in out["failed"]))
+            return True
+        import time as _t
+        _t.sleep(0.5)
+        self.sense()
+        grew = len(self.state.document) - before
+        self.state.buffers.note(
+            f"hovered {widget.label[:38]!r} — "
+            + (f"the page revealed {grew} more line(s)" if grew > 0
+               else "nothing opened"))
         return True
 
     def _cmd_check(self, args) -> bool:
@@ -2845,6 +2988,32 @@ class Repl:
                 self.feed(data)
 
 
+def _shutdown(repl, workspace) -> None:
+    """Give back what the session took: the browser, then the store.
+
+    A headless `--command` run had no exit path for the driver, so every
+    invocation left a Firefox behind. They are invisible one at a time and
+    not at all in aggregate: a demonstration session ended with 216 of them
+    holding all but 1.8 GB of memory, which slowed the machine enough that a
+    test suite that runs in four minutes stopped finishing at all.
+
+    Browser first. The workspace flushes vectors on close and that is the
+    part worth protecting, so it goes last and runs even if the quit throws.
+    """
+    driver = getattr(getattr(repl, "nav", None), "driver", None)
+    if driver is not None:
+        try:
+            driver.quit()
+        except Exception:  # noqa: BLE001 - shutting down must not raise
+            pass
+        repl.nav.driver = None
+    if workspace is not None:
+        try:
+            workspace.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     import argparse
 
@@ -2858,29 +3027,58 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--no-mouse", action="store_true")
     parser.add_argument("--command", action="append", default=[],
                         help="run a command and exit; repeatable (headless)")
+    parser.add_argument("--snapshot", action="store_true",
+                        help="print the screen after every --command, not "
+                             "only at the end")
     args = parser.parse_args(argv)
 
     repl = Repl()
     build = Path(args.build)
-    if (build / "graph.kuzu").exists():
-        from ..graphstore import GraphStore
+    workspace = None
+    if build.exists() or args.command:
+        # One workspace, opened for the session. Browsing writes through it,
+        # so a page read is a page stored -- there is no second command to
+        # run afterwards to make what you just looked at retrievable, which
+        # is the whole of "the database tracks pages while you navigate".
+        # Without this the REPL read the store and never wrote to it, so
+        # every page visited in a session was gone at the end of it.
         from ..search import ThreeFormIndex
-        from ..vectors import FreqMatrix
+        from ..workspace import Workspace
 
-        repl.store = GraphStore(build / "graph.kuzu")
-        freq = FreqMatrix.load(build / "freq")
-        repl.index = ThreeFormIndex(repl.store, freq).build()
+        workspace = Workspace(build)
+        repl.workspace = workspace
+        repl.store = workspace.store
+        try:
+            repl.index = ThreeFormIndex(workspace.store, workspace.freq).build()
+        except Exception as exc:  # noqa: BLE001 - an empty store is not an error
+            repl.state.buffers.note(f"index: {type(exc).__name__}: {exc}")
 
     if args.target:
         repl.command(f"open {args.target}")
 
     if args.command:
+        # `--snapshot` prints the screen after each command instead of once
+        # at the end. A terminal application's screen *is* its output, and a
+        # single frame after a run of ten gestures says nothing about the
+        # nine before it -- which is the whole of what a walkthrough has to
+        # show.
         for command in args.command:
+            if args.snapshot:
+                print("\n" + "=" * 78)
+                print(f"$ {command}")
+                print("=" * 78)
             repl.command(command)
-        print(repl.render())
+            if args.snapshot:
+                print(repl.render())
+        if not args.snapshot:
+            print(repl.render())
+        _shutdown(repl, workspace)
         return 0
 
-    repl.run(mouse=not args.no_mouse)
+    try:
+        repl.run(mouse=not args.no_mouse)
+    finally:
+        _shutdown(repl, workspace)
     return 0
 
 

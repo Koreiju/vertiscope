@@ -170,6 +170,14 @@ def _label_of(segment: str) -> str:
     return segment.split("[", 1)[0].lower()
 
 
+def _looks_like_url(value: str) -> str:
+    """Whether a value is a target rather than something a reader reads."""
+    v = value.strip()
+    return bool(v) and (v.startswith(("http://", "https://", "//", "/", "#",
+                                      "mailto:", "tel:", "data:", "?"))
+                        or "://" in v)
+
+
 def _is_tag_name(value: str) -> bool:
     """Whether a detection's value is an element name rather than content.
 
@@ -189,6 +197,10 @@ def _is_tag_name(value: str) -> bool:
 # representation, and the REPL has to be able to see it — so those survive,
 # rendered with the element's own text when it has any.
 _SUPPRESSED_TAGS = frozenset({"interactive.links", "interactive.elements"})
+
+# Render classes that draw using the element's own text. Their text unit is
+# consumed, so the words appear once, inside the control.
+_CONSUMING_CLASSES = frozenset({"link", "button", "field", "choice", "check"})
 
 
 # Names the fold uses to say "a control is here". Matched exactly, against a
@@ -488,8 +500,17 @@ def _render_node(node: TrieNode, url: str, url_depth: int) -> MarkdownChunk:
     # label surviving only as part of a longer sibling still names its button.
     text_at: Dict[str, str] = {}
     for a, v, _lbl, _d in units:
-        if a.category == "text" and v.strip():
-            text_at.setdefault(a.xpath, " ".join(v.split()))
+        if not v.strip():
+            continue
+        # Keyed by the *element*, not by the text node. On the live path a
+        # text child has its own address -- `.../a/text()[1]` -- while the
+        # href sits on `.../a`, so keying by the text's own xpath meant a
+        # link never found its own words. Every result on a search page drew
+        # as its raw href: `[//duckduckgo.com/l/?uddg=https%3A%2F%2F...]`
+        # where the page plainly says "Glacial Retreat Calculator".
+        owner = a.xpath.split("/text()")[0]
+        if a.category == "text" or a.tag in ("text", "heading"):
+            text_at.setdefault(owner, " ".join(v.split()))
 
     # Elements whose control rendering will *consume* the text below. The
     # control and its text are two units at one element with unrelated raw
@@ -513,17 +534,63 @@ def _render_node(node: TrieNode, url: str, url_depth: int) -> MarkdownChunk:
         and a.tag not in _SUPPRESSED_TAGS
         and text_at.get(a.xpath)
     }
+    # The same rule for render classes. A control drawn with its own words
+    # has already said them; repeating the bare text underneath is the
+    # `( Add to basket ) / Add to basket` duplication one vocabulary further
+    # on. Recorded by element, because that is where the control is and the
+    # text is one step below it.
+    consumed |= {
+        a.xpath.split("/text()")[0]
+        for a, _v, _lbl, _d in units
+        if a.tag in _CONSUMING_CLASSES
+        and text_at.get(a.xpath.split("/text()")[0])
+    }
 
-    kept = _dedupe([(a, v, lbl) for a, v, lbl, _ in units])
+    # One anchor, one line.
+    #
+    # An anchor produces two units: its href, on the element, and its words,
+    # on the text node below -- which inherits the link class and so also
+    # draws as a link. Both drawn, every search result appeared twice, once
+    # as its title and once as its raw redirect href, and the nested anchors
+    # a results page wraps around each hit multiplied that to four.
+    #
+    # The words win. The href is not lost: it stays on the line's address,
+    # which is what the reader enacts and what the link graph is built from.
+    # A link with no words anywhere below it keeps its line and shows its
+    # target, because nothing else will say where it goes.
+    spoken = {
+        a.xpath.split("/text()")[0]
+        for a, v, _lbl, _d in units
+        if a.tag == "link" and v.strip() and not _looks_like_url(v)
+    }
+
+    def spoken_below(xpath: str) -> bool:
+        if xpath in spoken:
+            return True
+        prefix = xpath + "/"
+        return any(o.startswith(prefix) for o in spoken)
+
+    hidden = {
+        a.key() for a, v, _lbl, _d in units
+        if a.tag == "link" and _looks_like_url(v)
+        and spoken_below(a.xpath.split("/text()")[0])
+    }
+
+    kept = [t for t in _dedupe([(a, v, lbl) for a, v, lbl, _ in units])
+            if t[0].key() not in hidden]
 
     lines = []
     for a, v, lbl in kept:
         if not v.strip():
             continue
+        owner = a.xpath.split("/text()")[0]
         if (a.category == "text" and a.xpath in consumed
                 and " ".join(v.split()) == text_at.get(a.xpath)):
             continue
-        rendered = _render_unit(a, v, lbl, text_at.get(a.xpath, ""))
+        if (a.tag in ("text", "heading") and owner in consumed
+                and " ".join(v.split()) == text_at.get(owner)):
+            continue
+        rendered = _render_unit(a, v, lbl, text_at.get(owner, ""))
         if rendered is None:
             continue
         lines.append(MarkdownLine(

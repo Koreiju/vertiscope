@@ -146,6 +146,10 @@
   // one that did.
   var SKIP_TAGS = { SCRIPT: 1, STYLE: 1, NOSCRIPT: 1, TEMPLATE: 1, svg: 1,
                     HEAD: 1 };
+  // Drawn as a single control, never descended into. Their children exist,
+  // and a reader reaches them by acting on the control -- which is exactly
+  // what a browser does with them.
+  var FOLDED = { SELECT: 1, DATALIST: 1, OPTGROUP: 1 };
   // The detectable-content space of docs/CONTENT_EXTRACTION_RULES, in the
   // page. This list was ten attributes, chosen by hand, and the cost of that
   // was measured against the host tagger on one Wikipedia article: `resource`
@@ -633,6 +637,18 @@
 
   function kindOf(el) {
     var role = roleOf(el);
+    // An option inside a select is not a line of the page. A browser draws
+    // the select collapsed, showing the one value it currently holds, and
+    // the eighty others are behind it until asked for. Drawn flat instead,
+    // DuckDuckGo's region filter opened the results view with eighty lines
+    // of country names before the first result -- structurally faithful to
+    // the markup and useless as a page.
+    if (role === 'option' || el.tagName === 'OPTION') {
+      try {
+        var owner = el.closest && el.closest('select,datalist,[role=listbox]');
+        if (owner) return ['none', role];
+      } catch (e) { /* fall through and draw it */ }
+    }
     return [RENDER_CLASS[role] || 'text', role];
   }
 
@@ -771,6 +787,15 @@
     else if (tag === 'INPUT' || tag === 'BUTTON' || tag === 'SELECT' ||
              tag === 'TEXTAREA') {
       (out || (out = [])).push([intern('@control'), tag.toLowerCase()]);
+    } else if (tag === 'SELECT') {
+      // What the control currently says. Without it the select drew as an
+      // empty `[ ]` -- present, unreadable, and indistinguishable from an
+      // empty text field.
+      try {
+        var sel = el.options && el.options[el.selectedIndex];
+        var shown = sel ? (sel.textContent || sel.value || '') : '';
+        if (shown) (out || (out = [])).push([intern('value'), shown.trim()]);
+      } catch (e) { stats.errors++; }
     } else if (el.hasAttribute && el.hasAttribute('role')) {
       (out || (out = [])).push([intern('@role'), el.getAttribute('role')]);
     }
@@ -1381,6 +1406,15 @@
                     own[0], own[1]]);
       }
     }
+    // A collapsed control is one line, and its contents are behind it.
+    //
+    // Classifying the options `none` was not enough: a text node has no
+    // class of its own and takes the nearest ancestor that said something
+    // specific, so every country name under DuckDuckGo's region filter
+    // inherited `choice` from the select and drew as `[ ] Argentina`. The
+    // control has to be a leaf, not merely a parent of hidden children --
+    // which is what it is on the rendered page.
+    if (FOLDED[node.tagName]) return;
     // A text node is addressed by its own position among its parent's text
     // children, which is what `text()[n]` means. Inheriting the parent's path
     // put every text child of an element on one address, and a per-chunk
