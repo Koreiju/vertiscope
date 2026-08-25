@@ -650,8 +650,19 @@ def _render_node(node: TrieNode, url: str, url_depth: int) -> MarkdownChunk:
     # `( Add to basket ) / Add to basket` duplication one vocabulary further
     # on. Recorded by element, because that is where the control is and the
     # text is one step below it.
-    consumed |= {
-        a.xpath.split("/text()")[0]
+    # Only where the control that would consume the text actually survives.
+    #
+    # The two suppressions each assumed the other unit stayed. An anchor
+    # yields its href and its words; the href is hidden because the anchor
+    # speaks, and the words were consumed because the link would draw them --
+    # so on a search-results page, where every title is an <a> inside an
+    # <h2>, both went and the result had no title at all. Whichever is
+    # dropped, exactly one has to remain.
+    #
+    # `hidden` is computed below and needs `consumed`, so this deliberately
+    # runs after it and only marks owners whose control will be drawn.
+    consuming = {
+        a.xpath.split("/text()")[0]: a
         for a, _v, _lbl, _d in units
         if a.tag in _CONSUMING_CLASSES
         and text_at.get(a.xpath.split("/text()")[0])
@@ -731,6 +742,35 @@ def _render_node(node: TrieNode, url: str, url_depth: int) -> MarkdownChunk:
                     and _control_label(
                         text_at.get(outer, ""), v) == shown
                 }
+
+    # One target, one line. A results page wraps two or three anchors around
+    # each hit, all pointing at the same redirect, and only one of them holds
+    # the words. The others are not ancestors of it -- they are siblings in a
+    # card -- so the "wrapped around something that speaks" rule never saw
+    # them, and each result kept a line of raw redirect url beside its title.
+    #
+    # Sharing a target is what makes them one link. The one with words wins;
+    # if none has words the first keeps its line, because something has to
+    # say where it goes.
+    speaks = {
+        a.xpath.split("/text()")[0]
+        for a, v, _lbl, _d in units
+        if v.strip() and not _looks_like_url(v)
+    }
+    by_target: Dict[str, List] = {}
+    for a, v, _lbl, _d in units:
+        if a.tag == "link" and _looks_like_url(v):
+            by_target.setdefault(v.strip(), []).append(a)
+    for target_url, addresses in by_target.items():
+        if len(addresses) < 2:
+            continue
+        speaking = [a for a in addresses
+                    if a.xpath.split("/text()")[0] in speaks]
+        winner = speaking[0] if speaking else addresses[0]
+        hidden |= {a.key() for a in addresses if a.key() != winner.key()}
+
+    consumed |= {owner for owner, a in consuming.items()
+                 if a.key() not in hidden}
 
     kept = [t for t in _dedupe([(a, v, lbl) for a, v, lbl, _ in units])
             if t[0].key() not in hidden]
