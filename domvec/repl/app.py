@@ -478,6 +478,165 @@ class Repl:
 
     _cmd_exit = _cmd_quit
 
+    _COVERAGE_JS = r"""
+    // Everything a reader could see or follow, counted from the COMPOSED
+    // tree -- across shadow boundaries, after scripts have run. Two separate
+    // questions get answered here: what content exists (so the render can be
+    // checked for completeness), and where it came from (so "did we read the
+    // live DOM or a static snapshot" stops being a matter of trust).
+    var seenShadow = 0, shadowText = 0, hosts = 0;
+    var text = [], links = [], media = [], headings = 0, tables = 0;
+    var SKIP = {SCRIPT:1, STYLE:1, NOSCRIPT:1, TEMPLATE:1, HEAD:1};
+
+    function walk(root, inShadow) {
+      var kids = root.childNodes || [];
+      for (var i = 0; i < kids.length; i++) {
+        var n = kids[i];
+        if (n.nodeType === 3) {
+          var t = (n.nodeValue || '').trim();
+          if (t) { text.push(t); if (inShadow) shadowText++; }
+          continue;
+        }
+        if (n.nodeType !== 1) continue;
+        if (SKIP[n.tagName]) continue;
+        var tag = n.tagName;
+        if (/^H[1-6]$/.test(tag)) headings++;
+        if (tag === 'TABLE') tables++;
+        if (tag === 'A' && n.getAttribute('href') !== null)
+          links.push(n.getAttribute('href'));
+        if (tag === 'IMG' || tag === 'VIDEO' || tag === 'AUDIO'
+            || tag === 'SOURCE' || tag === 'IFRAME') {
+          var src = n.getAttribute('src') || n.getAttribute('srcset')
+                    || n.getAttribute('poster') || n.getAttribute('data-src');
+          if (src) media.push(src);
+        }
+        if (n.shadowRoot) { hosts++; seenShadow++; walk(n.shadowRoot, true); }
+        walk(n, inShadow);
+      }
+    }
+    walk(document.documentElement, false);
+
+    // Provenance. `documentElement.outerHTML` is what a static fetch would
+    // have got; anything past that arrived because scripts ran.
+    var staticLen = 0;
+    try { staticLen = (document.documentElement.outerHTML || '').length; }
+    catch (e) { staticLen = 0; }
+
+    return {
+      text: text, links: links, media: media,
+      headings: headings, tables: tables,
+      shadowHosts: hosts, shadowTextNodes: shadowText,
+      liveChars: staticLen,
+      elements: document.getElementsByTagName('*').length
+    };
+    """
+
+    def _cmd_coverage(self, args) -> bool:
+        """What the page holds, against what the render shows.
+
+        Completeness is not something to be asserted. This walks the composed
+        tree -- across shadow boundaries, after scripts have run -- collects
+        every text run, hyperlink and media reference the page actually has,
+        and checks each one against the rendered document. What is missing is
+        listed, not summarised.
+
+        It also answers where the tree came from, which is the other thing
+        that cannot be taken on trust: shadow hosts crossed, and text nodes
+        found inside shadow roots. A static fetch reaches neither.
+        """
+        if not args:
+            self.state.buffers.note("coverage needs a url")
+            return True
+        url = args[0]
+        driver = getattr(self.nav, "driver", None)
+        if driver is None:
+            self.state.buffers.note("coverage needs a live browser — run 'browser'")
+            return True
+
+        import time as _t
+
+        from ..sensing import Sensor
+        from ..stream import StreamingScan
+
+        driver.set_page_load_timeout(45)
+        driver.get(url)
+        _t.sleep(1.0)
+        sensor = Sensor(driver, url, budget=self.context_window)
+        sensor.boot()
+        _t.sleep(0.7)
+        spine = StreamingScan(url, context_window=self.context_window)
+        sp = sensor.drain(0)
+        spine.absorb(sp.units, sp.passno, removed=sp.removed_addresses)
+
+        page = driver.execute_script(self._COVERAGE_JS) or {}
+        from ..markdown import render_trie
+        chunks = render_trie(spine.trie, context_window=self.context_window)
+        drawn = "\n".join(c.markdown for c in chunks)
+        values = {n.value.strip() for n in (spine.trie.leaves() if spine.trie else [])
+                  if n.value.strip()}
+        blob = drawn + "\n" + "\n".join(values)
+
+        def held(items):
+            """An item counts as held when it survives into the render."""
+            missing = []
+            for item in items:
+                probe = item.strip()
+                if not probe:
+                    continue
+                if probe in blob:
+                    continue
+                # A long run is often split across inline elements; a
+                # substantial head of it landing is the honest test.
+                head = probe[:40]
+                if len(probe) > 40 and head in blob:
+                    continue
+                missing.append(probe)
+            return missing
+
+        text_missing = held(page.get("text") or [])
+        link_missing = held(page.get("links") or [])
+        media_missing = held(page.get("media") or [])
+
+        def row(name, total, missing):
+            got = total - len(missing)
+            pct = 100.0 * got / total if total else 100.0
+            return f"  {name:<22}{got:>7,} / {total:<7,}{pct:>7.1f}%"
+
+        rows = [
+            "",
+            f"  coverage  {url}",
+            "",
+            f"  {'':<22}{'in render':>9}{'on page':>10}{'':>8}",
+            row("text runs", len(page.get("text") or []), text_missing),
+            row("hyperlinks", len(page.get("links") or []), link_missing),
+            row("media references", len(page.get("media") or []), media_missing),
+            "",
+            f"  {'headings on page':<22}{page.get('headings', 0):>7,}"
+            f"   in render {drawn.count(chr(35) + ' '):>5,}",
+            f"  {'tables on page':<22}{page.get('tables', 0):>7,}",
+            "",
+            "  provenance — where this tree came from",
+            f"  {'elements walked':<22}{page.get('elements', 0):>7,}",
+            f"  {'shadow hosts crossed':<22}{page.get('shadowHosts', 0):>7,}",
+            f"  {'text inside shadow':<22}{page.get('shadowTextNodes', 0):>7,}"
+            "   (a static fetch reaches none of this)",
+            f"  {'rendered lines':<22}"
+            f"{sum(len(c.lines) for c in chunks):>7,}",
+        ]
+        for name, missing in (("text", text_missing), ("links", link_missing),
+                              ("media", media_missing)):
+            if missing:
+                rows.append("")
+                rows.append(f"  {name} not in the render ({len(missing)}):")
+                for item in missing[:6]:
+                    rows.append(f"    {item[:84]}")
+        rows.append("")
+        print("\n".join(rows), flush=True)
+        self.state.buffers.note(
+            f"coverage: {len(text_missing)} text, {len(link_missing)} link, "
+            f"{len(media_missing)} media not rendered")
+        return True
+
     _FIDELITY_JS = r"""
     var out = [];
     function step(el) {
