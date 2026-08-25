@@ -335,6 +335,12 @@ class ReplState:
     rows: int = 24
     cols: int = 80
     top: int = 0                       # first visible document line
+    # First visible *column*. A wireframe is as wide as the page it draws,
+    # and a page is routinely wider than a terminal -- a three-column layout
+    # at the page's own proportions does not fit in 80 columns and should
+    # not be squeezed until it does. Reading sideways is how a browser
+    # handles the same thing.
+    left: int = 0
     focus: Optional[int] = None        # focused widget's line index
     hover: Optional[int] = None
     pressed: Optional[int] = None      # widget the pointer went down on

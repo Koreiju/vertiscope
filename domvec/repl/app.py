@@ -2852,6 +2852,63 @@ class Repl:
             self.state._activate(widget)
         return True
 
+    def _cmd_resolution(self, args) -> bool:
+        """`resolution [chars]` — how finely the page is cut, and drawn.
+
+        One knob, because it is genuinely one thing. `context_window` is the
+        chunk budget: it decides how much of the document each stored chunk
+        holds, which decides what a retrieval hit returns, and it decides how
+        much of the page a rendered unit covers. Coarser chunks mean coarser
+        retrieval and a coarser picture, and that is not a coincidence to be
+        hidden behind two settings that can disagree.
+
+        Given no argument it reports. The page is re-read at the new setting
+        so the change is visible rather than pending.
+        """
+        if not args:
+            self.state.buffers.note(
+                f"resolution {self.context_window} chars per chunk"
+                f"  (wire width {getattr(self, '_wire_width', 0) or self.state.cols})")
+            return True
+        try:
+            value = int(args[0])
+        except ValueError:
+            self.state.buffers.note("resolution needs a number of characters")
+            return True
+        self.context_window = max(120, min(20000, value))
+
+        # Re-rendered, not re-scanned. The trie is resolution-independent --
+        # it holds addresses and values, and how those are cut into chunks is
+        # a decision made downstream of it. Clearing the spine and draining
+        # again asked the sensor for deltas on a page that had not changed,
+        # so it correctly reported nothing and the view went empty.
+        #
+        # This is the property of having one structure and many projections:
+        # changing how finely the page is cut costs a render, not a visit.
+        spine = getattr(self, "_spine", None)
+        if spine is not None and spine.trie is not None:
+            from ..markdown import render_trie
+
+            spine.context_window = self.context_window
+            chunks = render_trie(spine.trie,
+                                 context_window=self.context_window)
+            self._live_chunks = {c.cid: c for c in chunks}
+            self._styles = None
+            keep = self.state.top
+            self.load_chunks(list(self._live_chunks.values()),
+                             url=spine.url, title=spine.url)
+            self.state.top = min(keep, self.state.max_top)
+            if self.workspace is not None:
+                try:
+                    self.workspace.ingest_chunks(spine.url, chunks,
+                                                 complete=True, title=spine.url)
+                except Exception as exc:  # noqa: BLE001
+                    self.state.buffers.note(f"store: {type(exc).__name__}: {exc}")
+        self.state.buffers.note(
+            f"resolution {self.context_window} chars per chunk"
+            f" — {len(self._live_chunks)} chunk(s)")
+        return True
+
     def _cmd_wire(self, args) -> bool:
         """Draw the current page as a wireframe. `wire [width]`.
 
@@ -2870,7 +2927,11 @@ class Repl:
         if spine is None or spine.trie is None:
             self.state.buffers.note("wire needs an open page")
             return True
-        width = int(args[0]) if args and args[0].isdigit() else self.state.cols
+        # The canvas is as wide as the page wants; the terminal is a window
+        # onto it. Squeezing a three-column layout into 80 columns until it
+        # fits is not drawing the page, it is drawing a different page.
+        canvas = int(args[0]) if args and args[0].isdigit() else             getattr(self, "_wire_width", 0) or self.state.cols
+        self._wire_width = canvas
         unicode_art = any(a in ("unicode", "u") for a in args)
 
         # The *rendered* units, not the raw leaves.
@@ -2907,18 +2968,26 @@ class Repl:
                     f"measured {len(wanted)} box(es) in "
                     f"{(_t2.perf_counter() - started) * 1000:.0f} ms")
 
-        lines = render_wireframe(drawn, styles, width=width,
+        lines = render_wireframe(drawn, styles, width=canvas,
                                  unicode=unicode_art)
+        self._wire_lines = lines
+
+        view = min(self.state.cols, canvas)
+        widest = max((len(l.text) for l in lines), default=0)
+        left = max(0, min(self.state.left, max(0, widest - view)))
+        self.state.left = left
+        rule = ("=" if not unicode_art else "═") * view
         print()
-        print(("=" if not unicode_art else "═") * width)
-        print(f" {spine.url[:width - 2]}")
-        print(("=" if not unicode_art else "═") * width)
-        for line in lines[: self.state.rows * 3]:
-            print(line.text)
+        print(rule)
+        print(f" {spine.url[:view - 2]}")
+        print(rule)
+        for line in lines[self.state.top:self.state.top + self.state.rows]:
+            print(line.text[left:left + view])
         print()
+        more = "" if widest <= view else             f"  cols {left + 1}-{min(left + view, widest)}/{widest}"
         self.state.buffers.note(
-            f"wireframe: {len(lines)} line(s) at {width} cols, "
-            f"{len(styles)} box(es) measured")
+            f"wireframe {len(lines)} line(s), canvas {canvas}{more}, "
+            f"{len(styles)} box(es)")
         return True
 
     def _cmd_press(self, args) -> bool:
@@ -3035,6 +3104,27 @@ class Repl:
         return True
 
     def _cmd_scroll(self, args) -> bool:
+        # `scroll left 20` / `scroll right 20` move the window sideways over
+        # the wireframe canvas. A page wider than the terminal is the normal
+        # case, not an edge one.
+        if args and args[0].lower() in ("left", "right", "l", "r"):
+            step = 20
+            if len(args) > 1:
+                try:
+                    step = int(args[1])
+                except ValueError:
+                    pass
+            if args[0].lower() in ("left", "l"):
+                step = -step
+            widest = max((len(l.text) for l in getattr(self, "_wire_lines", [])),
+                         default=0)
+            view = min(self.state.cols, getattr(self, "_wire_width", 0)
+                       or self.state.cols)
+            self.state.left = max(0, min(self.state.left + step,
+                                         max(0, widest - view)))
+            self.state.buffers.note(
+                f"column {self.state.left + 1} of {max(1, widest)}")
+            return True
         try:
             lines = int(args[0]) if args else self.state.body_rows
         except ValueError:
