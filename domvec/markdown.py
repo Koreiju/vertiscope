@@ -200,7 +200,8 @@ _SUPPRESSED_TAGS = frozenset({"interactive.links", "interactive.elements"})
 
 # Render classes that draw using the element's own text. Their text unit is
 # consumed, so the words appear once, inside the control.
-_CONSUMING_CLASSES = frozenset({"link", "button", "field", "choice", "check"})
+_CONSUMING_CLASSES = frozenset({"link", "button", "field", "choice",
+                                "check", "slider"})
 
 
 # Names the fold uses to say "a control is here". Matched exactly, against a
@@ -247,9 +248,13 @@ _RENDER_FORM = {
     # the lesson recorded there is to have one form fewer, not one more.
     # `< Search >` was a third spelling, and it came back `( < Search > )`.
     "link":    lambda v, t, l: f"[{_control_label(t, v)}]",
-    "button":  lambda v, t, l: f"( {_control_label(t, v)} )",
+    "button":  lambda v, t, l: f"( {_control_label(t, v) or chr(183)} )",
     "field":   lambda v, t, l: f"[ ] {_control_label(t, v)}".rstrip(),
     "choice":  lambda v, t, l: f"[ ] {_control_label(t, v)}".rstrip(),
+    # A slider is not a text box. This page pairs every number
+    # field with one, and drawn alike they read as the same input
+    # entered twice.
+    "slider":  lambda v, t, l: f"[ ] ={_control_label(t, v)}=",
     "check":   lambda v, t, l: f"[ ] {_control_label(t, v)}".rstrip(),
     "heading": lambda v, t, l: _heading_mark(l) + (v or t),
     "item":    lambda v, t, l: f"- {v or t}",
@@ -493,7 +498,23 @@ def _render_node(node: TrieNode, url: str, url_depth: int) -> MarkdownChunk:
     if not units:
         return MarkdownChunk(url=url, xpath=xpath, lines=[])
 
-    base = min(d for _, _, _, d in units)
+    # Indentation is measured from the page, not from the chunk.
+    #
+    # Rebasing to each chunk's own shallowest unit made the margin jump at
+    # every chunk boundary: a document assembled from fourteen chunks had
+    # fourteen different left edges, and the reader saw the chunker's seams
+    # instead of the page's nesting. The chunker's decisions are not
+    # structure, and nothing on screen should say they are.
+    # `_collect` measures depth from the chunk's own root, so every chunk
+    # starts its content at zero however deep in the page that root sits.
+    # Rebasing to the chunk's shallowest unit kept it that way, and a
+    # document assembled from fourteen chunks had fourteen different left
+    # edges -- the reader saw the chunker's seams instead of the page's
+    # nesting. The chunker's decisions are not structure.
+    #
+    # Offsetting by the root's own depth puts every chunk on the page's
+    # margin instead of its own.
+    base = -(node.depth - url_depth)
     depth_of = {a.key(): d for a, _, _, d in units}
 
     # A control's own text, for labelling it. Taken before dedup so that a
@@ -561,7 +582,8 @@ def _render_node(node: TrieNode, url: str, url_depth: int) -> MarkdownChunk:
     spoken = {
         a.xpath.split("/text()")[0]
         for a, v, _lbl, _d in units
-        if a.tag == "link" and v.strip() and not _looks_like_url(v)
+        if v.strip() and not _looks_like_url(v)
+        and (a.tag in _CONSUMING_CLASSES or a.tag in ("text", "heading"))
     }
 
     def spoken_below(xpath: str) -> bool:
@@ -575,6 +597,50 @@ def _render_node(node: TrieNode, url: str, url_depth: int) -> MarkdownChunk:
         if a.tag == "link" and _looks_like_url(v)
         and spoken_below(a.xpath.split("/text()")[0])
     }
+
+    # A control with nothing to say, wrapped around one that has something,
+    # is not a line either. A page's header renders its category button three
+    # times -- the button, the span inside it, the text inside that -- and two
+    # of those are blank. Measured on one page, 41 of 301 lines were `(  )`
+    # or `[ ]`: one line in seven saying nothing at all.
+    #
+    # A control that is genuinely unlabelled still gets a line. It is a real
+    # affordance and a reader has to be able to reach it; drawn as `( · )` it
+    # is visibly a control rather than an empty pair of brackets.
+    hidden |= {
+        a.key() for a, v, _lbl, _d in units
+        if a.tag in _CONSUMING_CLASSES
+        and not _control_label(text_at.get(a.xpath.split("/text()")[0], ""), v)
+        and spoken_below(a.xpath.split("/text()")[0])
+    }
+
+    # A control wrapped around a control saying the same thing is one
+    # control. A number field rendered as `[ ] 15` and then `[ ] 15` again a
+    # level deeper -- the element and the wrapper around it both carrying the
+    # value -- so every input on a form appeared twice.
+    #
+    # The inner one wins: it is the element a reader acts on, and the outer
+    # is the box drawn around it.
+    labelled: Dict[str, List[str]] = {}
+    for a, v, _lbl, _d in units:
+        if a.tag not in _CONSUMING_CLASSES:
+            continue
+        shown = _control_label(text_at.get(a.xpath.split("/text()")[0], ""), v)
+        if shown:
+            labelled.setdefault(shown, []).append(a.xpath.split("/text()")[0])
+    for shown, paths in labelled.items():
+        if len(paths) < 2:
+            continue
+        for outer in paths:
+            if any(inner != outer and inner.startswith(outer + "/")
+                   for inner in paths):
+                hidden |= {
+                    a.key() for a, v, _lbl, _d in units
+                    if a.tag in _CONSUMING_CLASSES
+                    and a.xpath.split("/text()")[0] == outer
+                    and _control_label(
+                        text_at.get(outer, ""), v) == shown
+                }
 
     kept = [t for t in _dedupe([(a, v, lbl) for a, v, lbl, _ in units])
             if t[0].key() not in hidden]
@@ -666,6 +732,8 @@ def render_trie(
         _annotate_xpaths(page, steps, url)
         _descend(page, url, len(steps), context_window, chunks)
 
+    _level_page(chunks)
+
     if report is not None:
         # Computed after the fact rather than accumulated during the descent:
         # _render_node runs speculatively to test whether a subtree fits, so
@@ -674,6 +742,37 @@ def render_trie(
         # emitted anchors against the trie is exact.
         _fill_report(trie, chunks, report)
     return chunks
+
+
+def _level_page(chunks: List[MarkdownChunk]) -> None:
+    """Put the page on the margin, and give each nesting level one step.
+
+    Two separate problems, both of which read as bad indentation.
+
+    The page sat at column ten, because absolute depth counts every layout
+    wrapper between `<html>` and the content. A reader does not care that a
+    site nests five divs to centre a header.
+
+    And a run of single-child wrappers spent one indent level each, so
+    columns of whitespace accumulated with no structure behind them. Mapping
+    the depths that actually occur onto consecutive levels keeps every
+    nesting relationship -- deeper stays deeper, siblings stay level -- while
+    a chain of five wrappers costs one step instead of five.
+
+    Done per page, after chunking, because it is a property of the document
+    and not of any chunk.
+    """
+    by_url: Dict[str, List[MarkdownChunk]] = {}
+    for chunk in chunks:
+        by_url.setdefault(chunk.url, []).append(chunk)
+    for page in by_url.values():
+        seen = sorted({line.depth for c in page for line in c.lines})
+        if not seen:
+            continue
+        level = {d: i for i, d in enumerate(seen)}
+        for chunk in page:
+            for line in chunk.lines:
+                line.depth = level[line.depth]
 
 
 def _fill_report(

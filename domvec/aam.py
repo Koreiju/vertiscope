@@ -162,7 +162,7 @@ RENDER_CLASS: Dict[str, str] = {
     "textbox": "field",
     "searchbox": "field",
     "spinbutton": "field",
-    "slider": "field",
+    "slider": "slider",
     "option": "item",
     "menuitem": "button",
     "tab": "button",
@@ -223,7 +223,8 @@ RENDER_CLASS: Dict[str, str] = {
 }
 
 # The classes a reader can act on. Stage 5 dispatches against exactly these.
-INTERACTIVE = frozenset({"link", "button", "check", "choice", "field"})
+INTERACTIVE = frozenset({"link", "button", "check", "choice", "field",
+                         "slider"})
 
 # Minimalist ASCII, one form per class. Structure only — no colour, no box
 # drawing, nothing markdown cannot say.
@@ -231,6 +232,7 @@ GLYPH: Dict[str, str] = {
     "link": "[{label}]",
     "button": "<{label}>",
     "field": "[{value}]",
+    "slider": "[={value}=]",
     "choice": "{label} v",
     "check": "[{mark}] {label}",
     "heading": "{hashes} {label}",

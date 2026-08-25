@@ -82,6 +82,7 @@ _KIND_BY_TAG = {
     "link": WidgetKind.LINK,
     "button": WidgetKind.BUTTON,
     "field": WidgetKind.INPUT,
+    "slider": WidgetKind.INPUT,
     "choice": WidgetKind.INPUT,
     "check": WidgetKind.CHECKBOX,
     "image": WidgetKind.IMAGE,
