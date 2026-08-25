@@ -2067,10 +2067,66 @@
     return out;
   }
 
+  // ---- the style peripheral --------------------------------------------
+  //
+  // Layout facts, read on demand, for a caller-supplied set of paths. This
+  // is deliberately NOT part of the fold: the fold reads no layout, which is
+  // what keeps it O(delta), and computing style during it would make every
+  // mutation pay for geometry nobody asked for. What comes back is kept
+  // beside the trie, never in it.
+  //
+  // Geometry rather than CSS. Which elements form a row is answerable from
+  // where they actually are -- overlapping vertically, disjoint
+  // horizontally -- and that is one measurement. Reading `display:flex` and
+  // `flex-direction` and `grid-template-columns` and float and inline-block
+  // is a pile of rules that approximates the same answer and disagrees with
+  // it whenever a site does something unusual. The browser already solved
+  // this; the rect is the solution.
+  function styles(paths) {
+    var out = [];
+    for (var i = 0; i < paths.length; i++) {
+      var el = resolvePath(paths[i]);
+      if (el && el.nodeType === 3) el = el.parentNode;
+      if (!el || el.nodeType !== 1) { out.push(null); continue; }
+      try {
+        var r = el.getBoundingClientRect();
+        var cs = window.getComputedStyle(el);
+        var weight = parseInt(cs.fontWeight, 10) || 400;
+        var size = parseFloat(cs.fontSize) || 16;
+        out.push({
+          x: Math.round(r.left + window.scrollX),
+          y: Math.round(r.top + window.scrollY),
+          w: Math.round(r.width),
+          h: Math.round(r.height),
+          d: cs.display,
+          // Emphasis, reduced to what a terminal can actually show.
+          b: weight >= 600 ? 1 : 0,
+          i: cs.fontStyle === 'italic' ? 1 : 0,
+          u: (cs.textDecorationLine || cs.textDecoration || '')
+               .indexOf('underline') >= 0 ? 1 : 0,
+          s: Math.round(size),
+          a: cs.textAlign,
+          // A box a reader can see: something drew a border or a fill.
+          box: ((parseFloat(cs.borderTopWidth) || 0) > 0
+                || (parseFloat(cs.borderLeftWidth) || 0) > 0
+                || (cs.backgroundColor && cs.backgroundColor !== 'rgba(0, 0, 0, 0)'
+                    && cs.backgroundColor !== 'transparent')) ? 1 : 0,
+          vis: (cs.visibility !== 'hidden' && cs.display !== 'none'
+                && r.width > 0 && r.height > 0) ? 1 : 0
+        });
+      } catch (e) { out.push(null); }
+    }
+    return { styles: out, vw: window.innerWidth || 0,
+             vh: window.innerHeight || 0,
+             doc: (document.documentElement
+                   && document.documentElement.scrollWidth) || 0 };
+  }
+
   return {
     drain: drain,
     step: step,
     perform: perform,
+    styles: styles,
     resolve: function (path) { return !!resolvePath(path); },
     // One call that scrolls and reports. Two calls pay the round-trip toll
     // twice — measured at 1.46 ms each on this setup, against 0.05-0.25 ms

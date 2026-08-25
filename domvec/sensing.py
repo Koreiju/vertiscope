@@ -508,6 +508,23 @@ class Sensor:
     def hover(self, address) -> dict:
         return self.perform([{"kind": "hover", "path": self.path_of(address)}])
 
+    def styles(self, addresses) -> dict:
+        """Geometry and emphasis for a set of addresses, in one crossing.
+
+        One call for the whole window. Per-address would pay the round-trip
+        toll -- 1.46 ms here, against microseconds of actual work -- once per
+        element, and a window holds hundreds.
+
+        Deliberately not part of `drain`. Reading a rect forces the browser
+        to settle layout, and doing that inside the fold would make every
+        mutation pay for geometry nobody asked for.
+        """
+        paths = [self.path_of(a) for a in addresses]
+        if not paths:
+            return {"styles": [], "vw": 0, "vh": 0, "doc": 0}
+        return self._call("styles", paths) or {
+            "styles": [], "vw": 0, "vh": 0, "doc": 0}
+
     def resolves(self, address) -> bool:
         """Whether the address still names a live node."""
         return bool(self._call("resolve", self.path_of(address)))

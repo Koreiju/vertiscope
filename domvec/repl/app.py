@@ -2852,6 +2852,75 @@ class Repl:
             self.state._activate(widget)
         return True
 
+    def _cmd_wire(self, args) -> bool:
+        """Draw the current page as a wireframe. `wire [width]`.
+
+        The other projection. `markdown` is what a chunk means, one unit per
+        line, flattened for the index; this is what the page looks like, with
+        rows drawn as rows at the widths the page gave them. Same trie, same
+        addresses, same glyphs -- only the arrangement differs, which is the
+        whole point of them being two renderers over one structure rather
+        than one format asked to do both jobs.
+        """
+        from ..style import StyleMap
+        from ..wireframe import render_wireframe
+
+        spine = getattr(self, "_spine", None)
+        sensor = getattr(self, "_sensor", None)
+        if spine is None or spine.trie is None:
+            self.state.buffers.note("wire needs an open page")
+            return True
+        width = int(args[0]) if args and args[0].isdigit() else self.state.cols
+        unicode_art = any(a in ("unicode", "u") for a in args)
+
+        # The *rendered* units, not the raw leaves.
+        #
+        # Both projections start from the same place or they are two
+        # pipelines again. Reading leaves directly meant the wireframe missed
+        # every merge markdown does -- an anchor's href and its words are two
+        # leaves and one line -- so every link drew twice, once as
+        # `[/tag/love/]` and once as `[love]`, side by side.
+        #
+        # `render_trie` is where a leaf becomes a drawn unit: glyphs applied,
+        # wrappers suppressed, labels joined. What differs between the two
+        # projections is the arrangement, and only that.
+        from ..markdown import render_trie
+
+        drawn = []
+        for chunk in render_trie(spine.trie, context_window=self.context_window):
+            for line in chunk.lines:
+                if line.address is not None and line.text.strip():
+                    drawn.append((line.address, line.text, line.address.tag))
+
+        styles = self._styles = getattr(self, "_styles", None) or StyleMap()
+        if sensor is not None:
+            wanted = styles.missing(a.xpath for a, _t, _k in drawn)
+            if wanted:
+                import time as _t2
+                started = _t2.perf_counter()
+                # Measured in one crossing, for the page, once. Reading a rect
+                # settles layout, so this is never done inside the fold.
+                payload = sensor.styles(
+                    [type("A", (), {"xpath": x})() for x in wanted])
+                styles.absorb(wanted, payload)
+                self.state.buffers.note(
+                    f"measured {len(wanted)} box(es) in "
+                    f"{(_t2.perf_counter() - started) * 1000:.0f} ms")
+
+        lines = render_wireframe(drawn, styles, width=width,
+                                 unicode=unicode_art)
+        print()
+        print(("=" if not unicode_art else "═") * width)
+        print(f" {spine.url[:width - 2]}")
+        print(("=" if not unicode_art else "═") * width)
+        for line in lines[: self.state.rows * 3]:
+            print(line.text)
+        print()
+        self.state.buffers.note(
+            f"wireframe: {len(lines)} line(s) at {width} cols, "
+            f"{len(styles)} box(es) measured")
+        return True
+
     def _cmd_press(self, args) -> bool:
         """Press the control called <text>. Controls only.
 
