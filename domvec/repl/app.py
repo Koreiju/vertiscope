@@ -104,6 +104,10 @@ class Repl:
         # view, the store and the mirror -- see Workspace.sense, which holds
         # the same thing for the same reason.
         self._spine = None
+        self._wire = None
+        self._wire_top = 0
+        self._filter = ""
+        self._filter_kinds = frozenset()
         self._passes = []       # per-pass metrics, for `stats`
         self._exhausted = False  # the page said it has no more to give
         # The pagination trail. Verifying pagination means verifying a
@@ -344,6 +348,19 @@ class Repl:
         # rebuilding the document did, so every extension undid the reading
         # it was supposed to enable. A genuine page change is the one case
         # where starting at the top is right.
+        # The wireframe, if one is open, takes the same delta.
+        if getattr(self, "_wire", None) is not None:
+            touched = (update.delta.added + update.delta.changed
+                       + update.delta.moved + update.delta.removed)
+            redrawn = self._repaint_wire(touched)
+            if redrawn:
+                # Printed, not noted. The status line holds one message and
+                # the gesture that caused the delta writes its own into it
+                # immediately after, so a note here is written and then lost.
+                print(f"  wireframe: {redrawn} band(s) redrawn of "
+                      f"{len(self._wire.bands)}  "
+                      f"({len(touched)} address(es) changed)", flush=True)
+
         keep_top = self.state.top if url == was else 0
         self.load_chunks(list(self._live_chunks.values()), url=url, title=url)
         if keep_top:
@@ -2909,6 +2926,146 @@ class Repl:
             f" — {len(self._live_chunks)} chunk(s)")
         return True
 
+    def _filtered(self, line):
+        """A wireframe line, or None when the active filter excludes it.
+
+        Applied at draw time rather than by rebuilding the page, so clearing
+        a filter costs nothing and the underlying structure is never the
+        filtered thing. A filter is a way of looking, not a way of storing.
+        """
+        active = getattr(self, "_filter", "")
+        if not active:
+            return line
+        kinds = getattr(self, "_filter_kinds", frozenset())
+        if kinds:
+            tags = {a.tag for a in line.addresses if a is not None}
+            return line if tags & kinds else None
+        return line if active.lower() in line.text.lower() else None
+
+    def _cmd_filter(self, args) -> bool:
+        """`filter <text>` · `filter kind link button` · `filter clear`.
+
+        Narrows what the page shows without changing what it is. Text
+        matches a line's content; `kind` matches render classes, so
+        `filter kind link` is "show me what I can follow" and
+        `filter kind field slider` is "show me what I can fill in".
+
+        A browser's filters are the site's own controls, and those are still
+        there to press -- this is the reader's own, over whatever is drawn.
+        """
+        if not args or args[0].lower() in ("clear", "off", "none"):
+            self._filter = ""
+            self._filter_kinds = frozenset()
+            self.state.buffers.note("filter cleared")
+            return True
+        if args[0].lower() in ("kind", "kinds", "k"):
+            from ..aam import RENDER_CLASS
+
+            wanted = {a.lower() for a in args[1:]}
+            known = set(RENDER_CLASS.values())
+            unknown = wanted - known
+            if unknown:
+                self.state.buffers.note(
+                    "unknown kind(s): " + ", ".join(sorted(unknown))
+                    + " — known: " + ", ".join(sorted(known)))
+                return True
+            self._filter_kinds = frozenset(wanted)
+            self._filter = "kind " + " ".join(sorted(wanted))
+            self.state.buffers.note(f"filter: {self._filter}")
+            return True
+        self._filter_kinds = frozenset()
+        self._filter = " ".join(args)
+        self.state.buffers.note(f"filter: {self._filter!r}")
+        return True
+
+    def _repaint_wire(self, changed) -> int:
+        """Redraw the bands a delta touched, and only those.
+
+        The delta reaches the drawing. The fold emits what moved, the trie
+        absorbs it, the renderer partitions it -- and the wireframe used to
+        throw all of that away and draw the page again, which made the one
+        view that is supposed to feel live the only stage whose cost tracked
+        the page rather than the change.
+
+        Two things are kept proportional. Geometry is re-measured for the
+        touched elements only, which is the expensive part because it is a
+        round trip that settles layout. And only the affected bands are
+        rebuilt, by running the band pipeline over just those elements
+        instead of over the page.
+
+        Content that is *new* -- a menu opening, a feed appending -- has no
+        band yet, so its band is built and placed by where it is on the page.
+        Handling only changes and not arrivals was the first version's bug,
+        and arrivals are the case a live view exists for.
+        """
+        frame = getattr(self, "_wire", None)
+        sensor = getattr(self, "_sensor", None)
+        spine = getattr(self, "_spine", None)
+        if frame is None or sensor is None or spine is None or spine.trie is None:
+            return 0
+        owners = {a.xpath.split("/text()")[0] for a in changed if a is not None}
+        if not owners:
+            return 0
+
+        from ..markdown import _RENDER_FORM
+        from ..style import StyleMap
+        from ..wireframe import render_wireframe
+
+        styles = getattr(self, "_styles", None) or StyleMap()
+        payload = sensor.styles([type("A", (), {"xpath": x})() for x in owners])
+        styles.absorb(sorted(owners), payload)
+        self._styles = styles
+
+        # The drawn units for the touched elements, from the trie directly.
+        # Going through `render_trie` here would re-chunk the page, which is
+        # the cost this method exists to avoid.
+        units = []
+        for leaf in spine.trie.leaves():
+            address = leaf.address
+            if address is None:
+                continue
+            if address.xpath.split("/text()")[0] not in owners:
+                continue
+            form = _RENDER_FORM.get(address.tag)
+            text = form(leaf.value, leaf.value, "", "") if form else leaf.value
+            if text and text.strip():
+                units.append((address, text, address.tag))
+        if not units:
+            return 0
+
+        patch = render_wireframe(units, styles,
+                                 width=getattr(self, "_wire_width", 0)
+                                 or self.state.cols)
+        if not patch.bands:
+            return 0
+
+        known = {owner: i for i, band in enumerate(frame.bands)
+                 for owner in band.owners}
+        redrawn = 0
+        for band in patch.bands:
+            index = next((known[o] for o in band.owners if o in known), None)
+            if index is not None:
+                frame.bands[index] = band
+            else:
+                # New content. Placed by where it sits, so a menu that opened
+                # under its button appears under its button.
+                box = next((styles.get(o) for o in band.owners
+                            if styles.get(o) is not None), None)
+                at = len(frame.bands)
+                if box is not None:
+                    for i, existing in enumerate(frame.bands):
+                        other = next((styles.get(o) for o in existing.owners
+                                      if styles.get(o) is not None), None)
+                        if other is not None and other.y > box.y:
+                            at = i
+                            break
+                frame.bands.insert(at, band)
+                known = {owner: i for i, b in enumerate(frame.bands)
+                         for owner in b.owners}
+            redrawn += 1
+        self._wire_lines = frame.lines
+        return redrawn
+
     def _cmd_wire(self, args) -> bool:
         """Draw the current page as a wireframe. `wire [width]`.
 
@@ -2968,8 +3125,10 @@ class Repl:
                     f"measured {len(wanted)} box(es) in "
                     f"{(_t2.perf_counter() - started) * 1000:.0f} ms")
 
-        lines = render_wireframe(drawn, styles, width=canvas,
+        frame = render_wireframe(drawn, styles, width=canvas,
                                  unicode=unicode_art)
+        self._wire = frame
+        lines = frame.lines
         self._wire_lines = lines
 
         view = min(self.state.cols, canvas)
@@ -2981,13 +3140,23 @@ class Repl:
         print(rule)
         print(f" {spine.url[:view - 2]}")
         print(rule)
-        for line in lines[self.state.top:self.state.top + self.state.rows]:
+        # The wireframe has its own line space -- a page drawn in columns is
+        # not the same number of lines as the same page drawn one unit per
+        # line -- so it keeps its own vertical position. Sharing `state.top`
+        # scrolled the markdown document and left the drawing at the top.
+        top = max(0, min(getattr(self, "_wire_top", 0),
+                         max(0, len(lines) - self.state.rows)))
+        self._wire_top = top
+        shown = [self._filtered(line) for line in lines]
+        shown = [l for l in shown if l is not None]
+        for line in shown[top:top + self.state.rows]:
             print(line.text[left:left + view])
         print()
         more = "" if widest <= view else             f"  cols {left + 1}-{min(left + view, widest)}/{widest}"
+        active = "" if not self._filter else f", filter {self._filter!r}"
         self.state.buffers.note(
-            f"wireframe {len(lines)} line(s), canvas {canvas}{more}, "
-            f"{len(styles)} box(es)")
+            f"wireframe {len(shown)}/{len(lines)} line(s), canvas {canvas}"
+            f"{more}{active}, {len(styles)} box(es), {len(frame.bands)} band(s)")
         return True
 
     def _cmd_press(self, args) -> bool:
@@ -3131,6 +3300,10 @@ class Repl:
             self.state.buffers.note("scroll needs a number")
             return True
         before = self.state.top
+        # Both views move. They count lines differently -- a page in columns
+        # is fewer lines than the same page one unit per line -- so each keeps
+        # its own position and a scroll advances both by the same amount.
+        self._wire_top = max(0, getattr(self, "_wire_top", 0) + lines)
         self.state.scroll(lines)
         # Past the end of what is rendered, the scroll stops being a viewport
         # motion and becomes the page's (OBJECT_MODEL 7.6): the live document
