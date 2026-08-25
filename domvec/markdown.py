@@ -216,6 +216,19 @@ _CONTROL_TAGS = frozenset({
 })
 
 
+def _media_alt(text: str, value: str) -> str:
+    """What an image or a player is *of*, never its file name.
+
+    An `alt` or a caption if the page gave one; otherwise nothing, because
+    `![ /assets/hero-2x.webp ](...)` describes a path and not a picture.
+    """
+    for candidate in (text, value):
+        candidate = (candidate or "").strip()
+        if candidate and not _looks_like_url(candidate)                 and candidate.lower() not in _CONTROL_TAGS:
+            return candidate
+    return ""
+
+
 def _control_label(text: str, value: str) -> str:
     """A control's visible label, never its element name.
 
@@ -241,35 +254,38 @@ def _heading_mark(label: str) -> str:
 # The reader acts on these directly, so a control has to look like a control
 # without anyone having decided what it is for.
 _RENDER_FORM = {
-    # The interactive forms are spelled exactly as the widget layer already
-    # unwraps them. A renderer and a widget disagreeing about a control's
-    # form is a fight this file has had twice before -- it produced
-    # `( === form === )` once and `( [div[onclick]] )` another time -- and
-    # the lesson recorded there is to have one form fewer, not one more.
-    # `< Search >` was a third spelling, and it came back `( < Search > )`.
-    "link":    lambda v, t, l: f"[{_control_label(t, v)}]",
-    "button":  lambda v, t, l: f"( {_control_label(t, v) or chr(183)} )",
-    "field":   lambda v, t, l: f"[ ] {_control_label(t, v)}".rstrip(),
-    "choice":  lambda v, t, l: f"[ ] {_control_label(t, v)}".rstrip(),
-    # A slider is not a text box. This page pairs every number
-    # field with one, and drawn alike they read as the same input
-    # entered twice.
-    "slider":  lambda v, t, l: f"[ ] ={_control_label(t, v)}=",
-    "check":   lambda v, t, l: f"[ ] {_control_label(t, v)}".rstrip(),
-    "heading": lambda v, t, l: _heading_mark(l) + (v or t),
-    "item":    lambda v, t, l: f"- {v or t}",
-    "row":     lambda v, t, l: f"| {v or t}",
-    "cell":    lambda v, t, l: (v or t),
-    "quote":   lambda v, t, l: f"> {v or t}",
-    "code":    lambda v, t, l: f"`{v or t}`",
-    "image":   lambda v, t, l: (f"![{t}]({v})" if v and not _is_tag_name(v)
-                                else f"![{t or 'image'}]"),
-    "media":   lambda v, t, l: (f"({t or 'media'}) <{v}>" if v
-                                and not _is_tag_name(v) else f"({t or 'media'})"),
-    "rule":    lambda v, t, l: "---",
-    "group":   lambda v, t, l: (v or ""),
-    "text":    lambda v, t, l: ("\\" + v if v.startswith("#") else v),
-    "none":    lambda v, t, l: None,
+    # Every form takes (value, text, label, target). Links and media carry
+    # their target *in the line*, not only on the address: markdown that
+    # leaves the REPL -- into a chunk, into the index, into a retrieval hit
+    # -- used to arrive with no idea where anything pointed. The address
+    # is how a reader enacts it; the markdown is how a reader reads it, and
+    # both need to be true.
+    "link":    lambda v, t, l, u="": (
+        f"[{_control_label(t, v)}]({u})" if u and _control_label(t, v)
+        else f"[{_control_label(t, v) or u}]"),
+    "button":  lambda v, t, l, u="": f"( {_control_label(t, v) or chr(183)} )",
+    "field":   lambda v, t, l, u="": f"[ ] {_control_label(t, v)}".rstrip(),
+    "slider":  lambda v, t, l, u="": f"[ ] ={_control_label(t, v)}=",
+    "choice":  lambda v, t, l, u="": f"[ ] {_control_label(t, v)}".rstrip(),
+    "check":   lambda v, t, l, u="": f"[ ] {_control_label(t, v)}".rstrip(),
+    "heading": lambda v, t, l, u="": _heading_mark(l) + (v or t),
+    "item":    lambda v, t, l, u="": f"- {v or t}",
+    "row":     lambda v, t, l, u="": f"| {v or t}",
+    "cell":    lambda v, t, l, u="": (v or t),
+    "quote":   lambda v, t, l, u="": f"> {v or t}",
+    "code":    lambda v, t, l, u="": f"`{v or t}`",
+    # An image is its alt text and its source together, which is what makes
+    # a stored chunk able to say what a picture showed.
+    "image":   lambda v, t, l, u="": (
+        f"![{_media_alt(t, v)}]({u or (v if _looks_like_url(v) else '')})"
+        if (u or _looks_like_url(v)) else f"![{_media_alt(t, v)}]"),
+    "media":   lambda v, t, l, u="": (
+        f"({_media_alt(t, v) or 'media'})[{u or v}]"
+        if (u or _looks_like_url(v)) else f"({_media_alt(t, v) or 'media'})"),
+    "rule":    lambda v, t, l, u="": "---",
+    "group":   lambda v, t, l, u="": (v or ""),
+    "text":    lambda v, t, l, u="": ("\\" + v if v.startswith("#") else v),
+    "none":    lambda v, t, l, u="": None,
 }
 
 
@@ -278,6 +294,7 @@ def _render_unit(
     value: str,
     label: str,
     text_at_node: str = "",
+    target: str = "",
 ) -> Optional[str]:
     """One address plus its value as one markdown line, or None to suppress.
 
@@ -299,7 +316,8 @@ def _render_unit(
     # links. The tagger's category vocabulary follows underneath, unchanged,
     # for the offline path that still speaks it.
     if address.tag in _RENDER_FORM:
-        return _RENDER_FORM[address.tag](value, text_at_node or value, label)
+        return _RENDER_FORM[address.tag](value, text_at_node or value, label,
+                                         target)
     if cat == "media":
         # A media detection whose value is the element's *tag name* — an
         # inline `<svg>`, a `<source>` whose url was picked up elsewhere —
@@ -363,6 +381,68 @@ def _render_unit(
     if value.startswith("#"):
         return "\\" + value
     return value
+
+
+def _drawn_as_control(text: str) -> bool:
+    """Whether a line is already drawn as something a reader acts on.
+
+    Tested on the *rendered form*, not on the tag. Both extraction paths are
+    in play and they name controls differently -- `field` on the live path,
+    `interactive.inputs` on the snapshot one -- so a check against either
+    vocabulary passes the other straight through. It did: a label absorbed a
+    control, the widget layer re-wrapped the result, and 135 lines across the
+    corpus came back as `=== My Reading Lists: === label === ===` and
+    `( compound-operator: ( show ) )`.
+
+    The glyphs are the one thing both paths agree on, because there is one
+    renderer.
+    """
+    stripped = text.strip()
+    return stripped.startswith(("( ", "[ ] ", "=== ", "[", "!["))         or stripped.endswith((" )", " ==="))
+
+
+def _join_labels(lines: List[MarkdownLine]) -> List[MarkdownLine]:
+    """A label line ending in a colon absorbs the line it labels.
+
+    `Tags:` and `change, deep-thoughts` are one fact split across two
+    elements, and split across two lines they read as a heading with no
+    content followed by content with no heading.
+
+    The rule itself is `domvec.core.content_tree._colon_join`, which has been
+    in the tree since the §U work and was never wired into anything -- the
+    module carries a note saying so, and saying that what gets indexed is
+    supposed to be derived from it. This is the part of that which applies
+    here. Its `_dedupe` deliberately is not: that one is chunk-scoped, and
+    the element-scoped rule above replaced it precisely because chunk scope
+    collapsed every card in a grid sharing a placeholder image down to one,
+    taking each card's address with it.
+
+    A control is never absorbed. `Base retreat rate (m/yr)` labels an input,
+    and folding the input into its label would leave a line a reader can read
+    and cannot type into.
+    """
+    from .core.content_tree import _colon_join
+
+    out: List[MarkdownLine] = []
+    i = 0
+    while i < len(lines):
+        cur = lines[i]
+        nxt = lines[i + 1] if i + 1 < len(lines) else None
+        joinable = (
+            nxt is not None
+            and cur.text.rstrip().endswith(":")
+            and not _drawn_as_control(cur.text)
+            and not _drawn_as_control(nxt.text)
+        )
+        if joinable:
+            joined = _colon_join([cur.text.rstrip(), nxt.text.strip()])
+            if len(joined) == 1:
+                out.append(MarkdownLine(cur.depth, joined[0], nxt.address))
+                i += 2
+                continue
+        out.append(cur)
+        i += 1
+    return out
 
 
 def _dedupe(units: List[Tuple[ContentAddress, str, str]]) -> List[Tuple[ContentAddress, str, str]]:
@@ -519,7 +599,17 @@ def _render_node(node: TrieNode, url: str, url_depth: int) -> MarkdownChunk:
 
     # A control's own text, for labelling it. Taken before dedup so that a
     # label surviving only as part of a longer sibling still names its button.
+    # element -> where it points. The mirror of `text_at`: an anchor's words
+    # are on the text node below it and its target on the element, and a
+    # markdown link needs both in one line. Dropping the href to the address
+    # kept the link *enactable* and made the markdown lossy -- text carried
+    # out of the REPL, into a chunk, into the index, arrived with no idea
+    # where it pointed.
+    href_at: Dict[str, str] = {}
     text_at: Dict[str, str] = {}
+    for a, v, _lbl, _d in units:
+        if a.tag in ("link", "image", "media") and _looks_like_url(v):
+            href_at.setdefault(a.xpath.split("/text()")[0], v.strip())
     for a, v, _lbl, _d in units:
         if not v.strip():
             continue
@@ -656,13 +746,14 @@ def _render_node(node: TrieNode, url: str, url_depth: int) -> MarkdownChunk:
         if (a.tag in ("text", "heading") and owner in consumed
                 and " ".join(v.split()) == text_at.get(owner)):
             continue
-        rendered = _render_unit(a, v, lbl, text_at.get(owner, ""))
+        rendered = _render_unit(a, v, lbl, text_at.get(owner, ""),
+                                target=href_at.get(owner, ""))
         if rendered is None:
             continue
         lines.append(MarkdownLine(
             depth=depth_of[a.key()] - base, text=rendered, address=a
         ))
-    return MarkdownChunk(url=url, xpath=xpath, lines=lines)
+    return MarkdownChunk(url=url, xpath=xpath, lines=_join_labels(lines))
 
 
 def _xpath_of(node: TrieNode, url: str) -> str:
