@@ -43,6 +43,7 @@ from domvec import invariants as inv
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 FIXTURE = ROOT / "tests" / "fixtures" / "composed_slots.html"
+BULK = ROOT / "tests" / "fixtures" / "composed_slots_bulk.html"
 
 LIVE = pytest.mark.skipif(
     not os.environ.get("DOMVEC_LIVE"),
@@ -391,3 +392,64 @@ def test_slot_reassignment_costs_a_move_not_a_rebuild(sensed):
     assert not delta.changed, (
         f"content that only changed slots was reported as edited: "
         f"{[a.xpath for a in delta.changed]}")
+# --- the same move, on a subtree big enough to be its own chunk --------------
+
+
+@pytest.fixture(scope="module")
+def moved_in_bulk():
+    """One browser, one page, a reassignment of a whole section.
+
+    Deliberately a *large* block and a small budget, because that is a
+    different path: a node that fits inside its parent's chunk is re-emitted
+    whenever the parent is, and its new address rides along. A subtree the
+    walk descends past is gated on its own digest instead — and a digest says
+    what a subtree holds, not where it is.
+    """
+    from domvec.browser import browser_session
+    from domvec.config import load_config
+    from domvec.sensing import Sensor
+    from domvec.stream import StreamingScan
+
+    url = BULK.as_uri()
+    with browser_session(load_config(), headless=True) as driver:
+        driver.get(url)
+        time.sleep(1.0)
+        sensor = Sensor(driver, url, budget=200)
+        sensor.boot()
+        time.sleep(0.7)
+        first = sensor.drain(0)
+        driver.execute_script("window.promote();")
+        time.sleep(0.8)
+        second = sensor.drain(1)
+
+    scan = StreamingScan(url, context_window=200)
+    scan.absorb(first.units, 0, removed=first.removed_addresses)
+    scan.absorb(second.units, 1, removed=second.removed_addresses)
+    yield {"first": first, "second": second, "trie": scan.trie}
+
+
+@LIVE
+def test_a_large_moved_subtree_is_re_addressed(moved_in_bulk):
+    """claim: the store never holds an address the page does not draw.
+
+    The gate compared digests alone, and a subtree that moves keeps its
+    digest exactly, so its chunk was suppressed. Measured before the fix:
+    both addresses for the moved block still said ``/main/slot/...`` while
+    the page drew it under ``/header/slot/...``, and nothing anywhere
+    reported a change. Stale beats missing only in the sense that it is
+    harder to notice.
+    """
+    leaves = {node.address.xpath: (node.value or "").strip()
+              for node in moved_in_bulk["trie"].leaves()}
+    movable = {x: v for x, v in leaves.items() if v.startswith("BULK-MOVABLE")}
+    assert movable, "the moved block is not in the trie at all"
+    stale = [x for x in movable if "/main/" in x]
+    assert not stale, f"addresses the page no longer draws: {stale}"
+    assert all("/header/slot/" in x for x in movable), movable
+
+
+@LIVE
+def test_the_move_is_reported_at_all(moved_in_bulk):
+    """The gate suppressing it looked exactly like a quiet page."""
+    second = moved_in_bulk["second"]
+    assert second.units, "a whole section changed slots and the drain was empty"

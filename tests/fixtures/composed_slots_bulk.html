@@ -1,0 +1,66 @@
+<!doctype html>
+<!--
+  The same slot reassignment as composed_slots.html, but on a subtree large
+  enough to be its own chunk.
+
+  Written because the two cases go down different paths and only the small one
+  was covered. A node small enough to sit inside its parent's chunk is
+  re-emitted whenever the parent is, so its new address rides along. A subtree
+  big enough that the walk descends past it is gated on its own digest -- and
+  moving a subtree does not change its digest, only its address. If the gate
+  wins, the store keeps the address the content used to have, with nothing
+  anywhere reporting a change.
+
+  Two blocks, each well over any sane chunk budget, and a gesture that moves
+  the first one from the unnamed slot to the named one. The rendered order
+  changes; not one character of either block does.
+-->
+<meta charset="utf-8">
+<title>Composed Slots, in bulk</title>
+
+<h1>BULK-PAGE-TITLE</h1>
+
+<bulk-host id="host">
+  <section id="movable">
+    <h2>BULK-MOVABLE-HEADING</h2>
+    <p>BULK-MOVABLE-ONE. The paragraph is long on purpose: a chunk budget is
+      counted in characters, and a subtree that fits inside its parent's chunk
+      never exercises the gate this fixture exists to reach. Bound periodicals,
+      manuscripts and plate volumes transferred from the reading room.</p>
+    <p>BULK-MOVABLE-TWO. A second paragraph of comparable weight, so that the
+      block stays over the budget even when the harness lowers it. Holdings
+      notes, shelfmarks, and the accession registers that go with them.</p>
+    <p>BULK-MOVABLE-THREE. And a third, because the point is not to be near
+      the boundary but comfortably past it, in every configuration the axes
+      allow.</p>
+  </section>
+  <section id="anchored">
+    <h2>BULK-ANCHORED-HEADING</h2>
+    <p>BULK-ANCHORED-ONE. This block never moves. It is here so that the
+      default slot is not left empty by the reassignment, which would make the
+      slot change shape as well as contents and confuse what is being
+      measured.</p>
+    <p>BULK-ANCHORED-TWO. More of the same, at the same weight, for the same
+      reason: the two blocks have to be comparable or the comparison says
+      nothing about the gate.</p>
+  </section>
+</bulk-host>
+
+<div id="tail">BULK-LIGHT-TAIL</div>
+
+<script>
+class BulkHost extends HTMLElement {
+  connectedCallback() {
+    this.attachShadow({mode: 'open'}).innerHTML = `
+      <header>BULK-HEAD-BEFORE<slot name="lead"></slot>BULK-HEAD-AFTER</header>
+      <main>BULK-BODY-BEFORE<slot></slot>BULK-BODY-AFTER</main>`;
+  }
+}
+customElements.define('bulk-host', BulkHost);
+
+// The whole gesture: one attribute, no node moves in the light DOM, and the
+// composed tree reorders by a section.
+window.promote = function () {
+  document.getElementById('movable').setAttribute('slot', 'lead');
+};
+</script>

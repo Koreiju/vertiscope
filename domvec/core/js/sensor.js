@@ -299,6 +299,25 @@
   }
   function mix(a, b) { return (((a << 5) - a) + b) >>> 0; }
 
+  // A digest says what a subtree contains. It does not say where the subtree
+  // is, and the two gates below were treating "unchanged" as though it did.
+  // A subtree that MOVES keeps its digest exactly — a slot reassignment, a
+  // reordered list — so its chunk was suppressed and the receiver went on
+  // holding the address the content used to have, with nothing anywhere
+  // reporting a change. Measured on composed_slots_bulk.html at budget 200:
+  // after one slot reassignment, both addresses for the moved block were
+  // stale and neither was right. The path is already built by the time
+  // either gate runs, so closing this costs one fold over it.
+  function pathKey(path) {
+    var h = 2166136261, i, v;
+    if (!path) return 0;
+    for (i = 0; i < path.length; i++) {
+      v = path[i];
+      h = mix(h, (typeof v === 'number') ? (v >>> 0) : fnv(String(v)));
+    }
+    return h >>> 0;
+  }
+
   // ---- tokens -----------------------------------------------------------
   var TOKEN_RE = /[A-Za-z0-9À-￿]+/g;
   function tokenize(text) {
@@ -323,6 +342,7 @@
       sim: 0,           // memoised simhash, for the near-duplicate axis
       chunk: 0,
       emit: -1,         // digest at last emission, for `subtreegate`
+      emitPath: -1,     // and where it was emitted, so a move is not "unchanged"
       lo: -1,           // dirty child range, for `spans`
       hi: -1,
       // The aggregate over children as last computed, kept apart from the
@@ -1094,7 +1114,9 @@
       // comparison and turns the drain into a statement about what changed
       // rather than a re-description of the page.
       var prev = chunkOf.get(node);
-      if (USE_GATE && prev && prev.digest === rec.digest) {
+      var here = pathKey(path);
+      if (USE_GATE && prev && prev.digest === rec.digest
+          && prev.path === here) {
         stats.skipped++; return;
       }
       // Read what is on screen first. This is the one emission rule that
@@ -1125,7 +1147,10 @@
     // already maintains. Without this the walk descends to every chunk root
     // on every repair (measured: 89 gate-skips per idle drain on YouTube)
     // and only then finds nothing to say.
-    if (USE_SUBTREEGATE && rec.emit === rec.digest) { stats.pruned++; return; }
+    var mine = pathKey(path);
+    if (USE_SUBTREEGATE && rec.emit === rec.digest && rec.emitPath === mine) {
+      stats.pruned++; return;
+    }
     var kids = childrenOf(node), nsh = kids.shadowCount;
     var counts = {}, scounts = {}, i, kid, seg;
     // `merge` is the other half of the hysteresis the budget was always
@@ -1167,6 +1192,7 @@
     }
     if (USE_MERGE) flushRun();
     rec.emit = rec.digest;
+    rec.emitPath = mine;
   }
 
   // One chunk made of several adjacent siblings. Its identity is the first
@@ -1175,7 +1201,8 @@
     var first = run[0];
     var slot = chunkOf.get(first.node);
     if (!slot) {
-      slot = { id: chunkSeq++, digest: 0, tracked: false, node: first.node };
+      slot = { id: chunkSeq++, digest: 0, path: -1, tracked: false,
+               node: first.node };
       chunkOf.set(first.node, slot);
       chunkRoots.push(slot);
       slot.tracked = true;
@@ -1188,8 +1215,12 @@
       collectLines(run[i].node, run[i].seg, run[i].rec, 0, lines, [], TAX_ROOT);
     }
     d = d >>> 0;
-    if (USE_GATE && slot.digest === d) { stats.skipped++; return null; }
+    var where = pathKey(parentPath);
+    if (USE_GATE && slot.digest === d && slot.path === where) {
+      stats.skipped++; return null;
+    }
     slot.digest = d;
+    slot.path = where;
     slot.node = first.node;
     encodeLines(lines);
     stats.chunks++;
@@ -1369,13 +1400,20 @@
 
   function makeChunk(node, path, rec) {
     var slot = chunkOf.get(node);
-    if (!slot) { slot = { id: chunkSeq++, digest: 0 }; chunkOf.set(node, slot); }
+    if (!slot) {
+      slot = { id: chunkSeq++, digest: 0, path: -1 };
+      chunkOf.set(node, slot);
+    }
     // Tracked so removals can be named. `chunkOf` is a WeakMap and cannot be
     // walked, so the live roots are kept alongside it; a node that leaves the
     // composed tree is swept in `repair` and its id reported.
     if (!slot.tracked) { slot.tracked = true; chunkRoots.push(slot); }
     slot.node = node;
     slot.digest = rec.digest;
+    // Before the id-anchor rewrite below: the gate compares composed paths,
+    // and an anchored address is stable under exactly the moves it needs to
+    // notice.
+    slot.path = pathKey(path);
     if (USE_PERCHUNK && !slot.watched) {
       try {
         var o = new MutationObserver(onMutations);
