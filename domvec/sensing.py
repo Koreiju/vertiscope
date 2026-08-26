@@ -138,11 +138,20 @@ class Sensor:
         # `known_hashes` prune moved to the side of the boundary where it
         # saves the crossing instead of the storage.
         self.known = list(known or [])
-        # A per-session random name, non-enumerable, holding only functions.
-        # Nothing about it is guessable from the page and nothing is written
-        # into the document itself.
-        self.handle = handle or ("__s" + format(abs(hash((url, time.time())))
-                                                % 0xFFFFFFFF, "x"))
+        # A per-session name holding only functions. Nothing is written into
+        # the document itself -- that part was and remains true.
+        #
+        # What was NOT true, and was asserted here for a long time, is that
+        # the page cannot find it. `enumerable: false` hides a property from
+        # `for...in` and `Object.keys`; it is still an own property of
+        # `window` and `Object.getOwnPropertyNames(window)` lists it. The
+        # fixed `__s` prefix made it worse than merely findable -- one regex
+        # isolated it -- so the prefix is gone and the name is drawn from
+        # shapes that occur on ordinary pages. That raises the cost of
+        # finding it from a regex to a diff against a clean profile. It does
+        # not make it unfindable, and claiming otherwise is what this comment
+        # is replacing.
+        self.handle = handle or self._plausible_name(url)
         self._dict: List[str] = []
         self._shapes: List[List[int]] = []
         # sensor chunk id -> the addresses last seen under it. The sensor
@@ -156,13 +165,33 @@ class Sensor:
         self.steps = 0
         self.enacted = 0
 
+    @staticmethod
+    def _plausible_name(url: str) -> str:
+        """A property name that does not announce itself.
+
+        Deliberately drawn from the shapes real libraries leave on `window`
+        rather than from randomness alone: a page cannot tell `_k3f9a2` from
+        the hundred other globals a modern site installs, whereas `__s` plus
+        hex was a signature.
+        """
+        import random
+
+        seed = random.Random(f"{url}{time.time()}")
+        lead = seed.choice(("_", "__", ""))
+        stem = seed.choice(("k", "q", "z", "n", "r", "v", "b", "j"))
+        return f"{lead}{stem}{seed.randrange(0x100000, 0xFFFFFF):x}"
+
     # -- lifecycle --------------------------------------------------------
     def boot(self) -> float:
         source = _JS.read_text(encoding="utf-8")
         script = (
             "var h = (" + source + ")(arguments[0]);"
+            # `configurable: false`: a page that finds the handle could
+            # otherwise `delete` it and silently stop the fold, which reads
+            # as the sensor breaking rather than as the page defending
+            # itself.
             "Object.defineProperty(window, '" + self.handle + "', "
-            "{value: h, enumerable: false, configurable: true});"
+            "{value: h, enumerable: false, configurable: false});"
             "return typeof window." + self.handle + ".drain === 'function';"
         )
         started = time.perf_counter()

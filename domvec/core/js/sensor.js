@@ -758,8 +758,23 @@
         (out || (out = [])).push([intern(all[i].name), val]);
       }
     } else {
+    // A hidden or password input's `value` is not content.
+    //
+    // Reading the *attribute* rather than the property already means nothing
+    // a reader types is captured -- a real and non-obvious safeguard. But a
+    // server-rendered `<input type=hidden value=...>` carries CSRF tokens,
+    // session ids and cart state, and those were being stored verbatim in
+    // the address value. They are not what anyone came to read, and keeping
+    // them makes the local record hold credentials it has no use for.
+    var inputType = '';
+    if (tag === 'INPUT' && el.getAttribute) {
+      inputType = (el.getAttribute('type') || '').toLowerCase();
+    }
+    var secretive = (inputType === 'hidden' || inputType === 'password');
+
     for (i = 0; i < CONTENT_ATTRS.length; i++) {
       name = CONTENT_ATTRS[i];
+      if (secretive && name === 'value') continue;
       if (!el.hasAttribute || !el.hasAttribute(name)) continue;
       val = el.getAttribute(name);
       if (!val) continue;

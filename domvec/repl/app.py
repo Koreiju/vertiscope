@@ -2942,6 +2942,52 @@ class Repl:
             return line if tags & kinds else None
         return line if active.lower() in line.text.lower() else None
 
+    def _cmd_forget(self, args) -> bool:
+        """`forget <url>` · `forget here` · `forget all` — unrecord a page.
+
+        Browsing writes through the workspace, which is what makes a page
+        read a page retrievable. The other half of that bargain is being
+        able to take it back, and there was no way to: `Workspace.purge`
+        existed and only the CLI could reach it, so the REPL could record a
+        page and could not un-record one.
+
+        A tool that keeps everything you look at and offers no way to forget
+        is a tool you have to be careful in front of, which is the opposite
+        of what this is for.
+        """
+        if self.workspace is None:
+            self.state.buffers.note("no workspace attached")
+            return True
+        target = " ".join(args).strip()
+        if not target:
+            self.state.buffers.note(
+                "forget <url> | forget here | forget all")
+            return True
+        if target in ("here", "this", "."):
+            target = self.state.document.url or ""
+            if not target:
+                self.state.buffers.note("no page open")
+                return True
+        try:
+            if target == "all":
+                self.workspace.purge()
+                self._live_chunks.clear()
+                self.state.buffers.note("forgot everything in this workspace")
+            else:
+                self.workspace.purge(target)
+                gone = [cid for cid, c in self._live_chunks.items()
+                        if c.url == target]
+                for cid in gone:
+                    self._live_chunks.pop(cid, None)
+                self.state.buffers.note(f"forgot {target}")
+        except Exception as exc:  # noqa: BLE001
+            self.state.buffers.note(f"forget: {type(exc).__name__}: {exc}")
+            return True
+        # The index still holds what was just dropped until it is rebuilt.
+        self._indexed = -1
+        self._refresh_index()
+        return True
+
     def _cmd_filter(self, args) -> bool:
         """`filter <text>` · `filter kind link button` · `filter clear`.
 
