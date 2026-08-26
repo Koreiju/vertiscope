@@ -39,6 +39,32 @@ def _tax(repl) -> Dict[str, int]:
     return out
 
 
+def _det(repl) -> Dict[str, int]:
+    """What each line's *detecting rule* decided, counted by its family.
+
+    `_tax` counts `address.tag`, which is the render class -- what to draw.
+    Search and pagination are not render classes and never appear there, so
+    `tax.get("search")` was 0 on every page ever measured, including the 38%
+    where the detector had in fact resolved a search box. The verdict lives
+    in the other half of the accessor, `"<detector>|<rule>"`, where the rule
+    reads `search.urlparam`, `pagination.rel`, `text.visible` and so on.
+
+    One number that is wrong in the same direction on every row is worse than
+    no number, because it reads as a finding about the web.
+    """
+    out: Dict[str, int] = {}
+    for c in repl._live_chunks.values():
+        for ln in c.lines:
+            if ln.address is None:
+                continue
+            accessor = ln.address.accessor or ""
+            rule = accessor.split("|", 1)[1] if "|" in accessor else ""
+            if not rule:
+                continue
+            out[rule.split(".", 1)[0]] = out.get(rule.split(".", 1)[0], 0) + 1
+    return out
+
+
 def run_page(repl, url: str, variant: str, variants: dict,
              scrolls: int = SCROLLS, stay: bool = False) -> dict:
     """One page, one configuration, end to end. Never raises.
@@ -117,6 +143,7 @@ def run_page(repl, url: str, variant: str, variants: dict,
                 break
 
         tax = _tax(repl)
+        det = _det(repl)
         grown = len(repl.state.document.lines) if repl.state.document else 0
         row.update({
             "ok": True,
@@ -129,9 +156,11 @@ def run_page(repl, url: str, variant: str, variants: dict,
             "store_ms": round(store_ms, 1),
             "elapsed_s": round(time.perf_counter() - t0, 1),
             "scrolls": scrolls,
-            # the two detection rates the sweep exists to establish
-            "search_found": int(tax.get("search", 0)),
-            "pagination_found": int(tax.get("pagination", 0)),
+            # the two detection rates the sweep exists to establish, read
+            # from the rule that fired rather than from the class it drew as
+            "search_found": int(det.get("search", 0)),
+            "pagination_found": int(det.get("pagination", 0)),
+            "detections": det,
             "controls_enacted": len(repl._fired),
             "pages_reached": len(repl._trail),
             "exhausted": bool(repl._exhausted),

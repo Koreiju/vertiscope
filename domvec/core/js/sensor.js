@@ -358,6 +358,11 @@
     // provenance and no longer costs a control the reader never sees.
     var t = taxonomyOf(node, text);
     var k = kindOf(node);
+    // The verdict is registered here, from `t`, because here is the only
+    // place it still exists. The line below keeps `t[1]` -- the rule that
+    // fired -- and drops `t[0]`, the word it decided on, so a caller reading
+    // the finished address cannot ask "is this a pager?" any more.
+    notePager(node, t[0]);
     rec.tax = [intern(k[0]), intern(t[1] + '/' + k[1]), KIND_RANK[k[0]] || 0];
     return rec.tax;
   }
@@ -1413,7 +1418,6 @@
     // what descends to the text takes the region's, which is why these two
     // are computed separately rather than one being reused for the other.
     var own = taxOf(node, rec);
-    notePager(node, own[0]);
     var here = own[2] < inh[2] ? inh : own;
     if (rec.det) {
       for (var i = 0; i < rec.det.length; i++) {
@@ -1469,11 +1473,18 @@
   var pagerList = [];             // insertion order; pruned when detached
   var firedLast = [];             // enacted by the previous step
   var lastEmit = 0, emptySteps = 0;
-  var PAG_ID = -1;
-
-  function notePager(node, taxId) {
-    if (PAG_ID < 0) PAG_ID = intern('pagination');
-    if (taxId !== PAG_ID || node.nodeType !== 1) return;
+  // Takes `taxonomyOf`'s verdict, not the render class.
+  //
+  // It used to take the render class, compared against `intern('pagination')`,
+  // and that comparison could not be true: the render-class vocabulary is
+  // {group, button, link, field, item, ...} and 'pagination' is not in it.
+  // So no node was ever registered, `pagerList` stayed empty for the life of
+  // every page, and every gate below counted zero -- including `seen_pagers`,
+  // which is how a dead registry reads exactly like a page with no pager.
+  // Across 202 measured pages: zero candidates examined, against 41% of pages
+  // finding one before the render classes were introduced.
+  function notePager(node, verdict) {
+    if (verdict !== 'pagination' || node.nodeType !== 1) return;
     if (pagers.has(node)) return;
     pagers.set(node, { fires: 0, last: 0, empties: 0 });
     pagerList.push(node);
