@@ -572,8 +572,75 @@ def _is_terminal_pair(node: TrieNode) -> bool:
     return bool(kids) and all(k.is_leaf for k in kids)
 
 
+def _flow_owner(xpath: str) -> str:
+    """The block element a run of inline text belongs to.
+
+    Walks up from the leaf past every inline element -- `span`, `b`, `em`,
+    `a` -- and stops at the first thing that starts a new line on the page.
+    Two units sharing a flow owner are two pieces of one sentence.
+
+    The inline set is `core.content_tagger._INLINE_TAGS`, which
+    CONTENT_EXTRACTION_RULES §8.3 describes as being "used to decide
+    line-joining during rendering" -- the exact job, listed since the
+    original extraction and used by nothing on this path until now.
+    """
+    from .core.content_tagger import _INLINE_TAGS
+
+    steps = xpath.split("/")
+    while steps:
+        label = steps[-1].split("[", 1)[0]
+        if label.startswith("text()") or label in _INLINE_TAGS:
+            steps.pop()
+            continue
+        break
+    return "/".join(steps)
+
+
+def _join_inline(units: List[Tuple[ContentAddress, str, str, int]]
+                 ) -> List[Tuple[ContentAddress, str, str, int]]:
+    """Sentences broken by inline markup are put back together.
+
+    A page writes `<p>This data is crucial for <b>tracking</b> ice loss</p>`
+    and the fold, correctly, sees three text nodes. Rendered one per line
+    that reads as three fragments, and the wireframe then took the fragments
+    for a row and drew them as columns -- so one sentence became three
+    columns of a table that does not exist.
+
+    Joined only within one flow: same block ancestor, same render class,
+    adjacent. The first unit's address carries the line, which is right for
+    enactment too -- every fragment of a sentence inside one anchor goes to
+    the same place, so pressing any of it should.
+
+    A unit that is its own block is untouched, and so is any run that
+    crosses a class boundary: a link inside a paragraph stays a link.
+    """
+    if len(units) < 2:
+        return units
+    out: List[Tuple[ContentAddress, str, str, int]] = []
+    for unit in units:
+        address, value, label, depth = unit
+        if not out:
+            out.append(unit)
+            continue
+        prev = out[-1]
+        joinable = (
+            prev[0].tag == address.tag
+            and _flow_owner(prev[0].xpath) == _flow_owner(address.xpath)
+            and _flow_owner(address.xpath) != address.xpath.split("/text()")[0]
+            and not _looks_like_url(value)
+            and not _looks_like_url(prev[1])
+            and prev[3] == depth
+        )
+        if joinable:
+            merged = (prev[1].rstrip() + " " + value.lstrip()).strip()
+            out[-1] = (prev[0], merged, prev[2], prev[3])
+            continue
+        out.append(unit)
+    return out
+
+
 def _render_node(node: TrieNode, url: str, url_depth: int) -> MarkdownChunk:
-    units = _collect(node, url_depth)
+    units = _join_inline(_collect(node, url_depth))
     xpath = _xpath_of(node, url)
     if not units:
         return MarkdownChunk(url=url, xpath=xpath, lines=[])
