@@ -549,3 +549,91 @@ def c1_composed_walks_resolve_slots(sources: Any = None) -> List[Violation]:
                        "to the host's own children — slotted content is "
                        "emitted twice, once where the page never draws it")
     return out
+
+
+# Functions in sensor.js allowed to read layout, and why each one is not the
+# fold. Anything else that measures is a violation by construction.
+_LAYOUT_READERS = {
+    # The style peripheral. Reading geometry is its entire job, it is called
+    # from Python with an explicit address list, and it never runs during a
+    # drain -- which is what keeps geometry out of the trie.
+    "styles",
+    # The actuator. `step` has to know what is on screen before it scrolls,
+    # and it runs once per step rather than once per node.
+    "inView",
+    "atBottom",
+    # The `viewport` variant, and only under its flag. This one is on the
+    # emission walk, so it is listed here rather than allowed silently -- see
+    # the docstring below for what that costs and what it does not.
+    "emitChunks",
+}
+
+_LAYOUT_CALLS = (
+    r"getBoundingClientRect|getClientRects|getComputedStyle"
+    r"|\.offset(?:Top|Left|Width|Height)"
+    r"|\.client(?:Top|Left|Width|Height)"
+    r"|\.scroll(?:Top|Left|Width|Height)"
+)
+
+
+def c2_fold_reads_no_layout(source: Any = None) -> List[Violation]:
+    """The fold measures nothing. Geometry is a peripheral, not a field.
+
+    The load-bearing claim is that folding a mutation costs a digest and a map
+    write -- never a measurement. A single ``getBoundingClientRect`` inside
+    ``fold`` forces synchronous layout per mutated node, and the O(delta)
+    number stops being about the fold and starts being about the browser's
+    layout engine.
+
+    This asserts it textually rather than trusting it, because the regression
+    is one line long and looks harmless at the call site. Every layout-reading
+    call in ``sensor.js`` must sit in one of ``_LAYOUT_READERS``; anything
+    else -- most of all ``fold`` itself or a helper it calls -- is reported.
+
+    A correction is recorded here, because the wrong version of this claim was
+    believed for a while: ``fold`` does *not* read layout and never did. The
+    read that was mistaken for it is in ``emitChunks``, on the emission walk
+    that follows the fold, under the ``viewport`` flag alone. That is a real
+    cost -- with ``eager`` scheduling the emission walk runs inside the
+    MutationObserver callback, so ``viewport + eager`` measures layout, not
+    folding -- but it is not this invariant being broken, and "the fold reads
+    no layout" holds as written.
+
+    Pass ``source`` to check text other than the file on disk.
+
+    claim: the O(delta) fold is a catamorphism over content, and content is
+    what the DOM says, not what the layout engine computes from it.
+    """
+    import pathlib
+    import re
+
+    if source is None:
+        path = pathlib.Path(__file__).parent / "core" / "js" / "sensor.js"
+        try:
+            source = path.read_text(encoding="utf-8")
+        except OSError as exc:  # noqa: BLE001
+            return [f"cannot read sensor.js: {exc}"]
+
+    out: List[Violation] = []
+    calls = re.compile(_LAYOUT_CALLS)
+    where = re.compile(r"^  function (\w+)", re.M)
+
+    current = "<module scope>"
+    seen_any = False
+    for line in source.splitlines():
+        named = where.match(line)
+        if named:
+            current = named.group(1)
+        if not calls.search(line):
+            continue
+        seen_any = True
+        if current not in _LAYOUT_READERS:
+            out.append(f"sensor.js/{current}: reads layout — "
+                       f"{line.strip()[:60]}")
+
+    # Non-vacuity: a pattern that matches nothing would pass this silently
+    # forever, and a renamed API is exactly how that happens.
+    if not seen_any:
+        out.append("sensor.js: no layout call found at all — either the "
+                   "peripheral is gone or the pattern no longer matches it")
+    return out
