@@ -828,18 +828,90 @@
   // host whose shadow root holds a <div> made the host's own first <div> read
   // as div[2], which no engine would resolve. `shadowCount` marks where the
   // boundary falls so callers can address across it explicitly.
+  //
+  // `childNodes` is not the composed tree, and the two differ at exactly the
+  // points a component library lives at. A light child of a shadow host is
+  // drawn where the <slot> that claims it sits *inside* the shadow root, not
+  // where it is written; a slot with something assigned to it does not draw
+  // its own children; a slot with nothing assigned draws them and only them.
+  // Walking `childNodes` got all three wrong at once, and measurably: on
+  // tests/fixtures/composed_slots.html the fold emitted every filled slot's
+  // fallback — text no reader can ever see — and put the slotted content
+  // after the whole shadow subtree instead of inside it, so a card's title
+  // read out below its own footer.
+  function composedKids(node) {
+    if (node.nodeType !== 1) return node.childNodes;
+    if (node.tagName === 'SLOT' && node.assignedNodes) {
+      var an = null;
+      try { an = node.assignedNodes({ flatten: true }); }
+      catch (e) { stats.errors++; an = null; }
+      // Assigned or fallback, never both — that is what the slot algorithm
+      // says and what the fallback is for.
+      if (an && an.length) return an;
+    }
+    return node.childNodes;
+  }
+
   function childrenOf(node) {
-    var kids = [], n = 0;
+    var kids = [], i;
     if (node.shadowRoot) {
       var sk = node.shadowRoot.childNodes;
-      for (var i = 0; i < sk.length; i++) kids.push(sk[i]);
-      n = sk.length;
+      for (i = 0; i < sk.length; i++) kids.push(sk[i]);
       observe(node.shadowRoot);
+      // The host's own light children are deliberately *not* appended. Each
+      // one is drawn at the slot that claims it and is reached through that
+      // slot, one descent further down; appending them here as well is how
+      // the same text arrived twice, once in the wrong place. A light child
+      // no slot claims is drawn nowhere, and is dropped here for the same
+      // reason the renderer drops it.
+      kids.shadowCount = sk.length;
+      return kids;
     }
-    var ck = node.childNodes;
-    for (var j = 0; j < ck.length; j++) kids.push(ck[j]);
-    kids.shadowCount = n;
+    noteOpaque(node);
+    var ck = composedKids(node);
+    for (i = 0; i < ck.length; i++) kids.push(ck[i]);
+    kids.shadowCount = 0;
     return kids;
+  }
+
+  // A closed root is unreachable from script and stays that way: reaching in
+  // means patching `attachShadow`, which is detectable and is the one thing
+  // the privacy posture rules out. What is *not* acceptable is for it to read
+  // as an empty element, because then the coverage number quietly counts a
+  // component we cannot see as a component with nothing in it.
+  //
+  // There is no API that answers "does this element have a closed root", so
+  // this reports the observable fact instead: a defined custom element that
+  // exposes neither an open root nor any light children. That is the set of
+  // elements we can see nothing inside of, whatever the reason.
+  // Held rather than counted, and re-checked each repair. A count incremented
+  // during the walk reads 0 on any pass where the fold legitimately skips the
+  // clean subtree the host sits in — which is most passes, and is the whole
+  // point of the cache. What the number has to mean is "opaque right now".
+  var opaqueHosts = (typeof Set === 'function') ? new Set() : null;
+  function noteOpaque(node) {
+    if (!opaqueHosts || node.nodeType !== 1) return;
+    var name = node.localName || '';
+    if (name.indexOf('-') < 0 || node.childNodes.length) return;
+    try { if (!customElements.get(name)) return; }
+    catch (e) { return; }
+    opaqueHosts.add(node);
+  }
+
+  // Anything that has since gained children, gained an open root, or left the
+  // document is no longer opaque and stops being counted. Bounded by the
+  // number of such elements on the page, so the strong references are cheap
+  // and are dropped the moment the element is.
+  function sweepOpaque() {
+    if (!opaqueHosts) return;
+    opaqueHosts.forEach(function (el) {
+      try {
+        if (!el.isConnected || el.shadowRoot || el.childNodes.length) {
+          opaqueHosts.delete(el);
+        }
+      } catch (e) { opaqueHosts.delete(el); }
+    });
+    stats.closedRoots = opaqueHosts.size;
   }
 
   // One path step for a child, in the composed tree. `counts` and `scounts`
@@ -1706,7 +1778,12 @@
     while (n) {
       var rec = records.get(n);
       if (rec) { if (rec.dirty) break; rec.dirty = true; }
-      n = n.parentNode || (n.host || null) ||
+      // `assignedSlot` first: a slotted node's parent *in the fold* is the
+      // slot that draws it, not the host it is written under. Climbing
+      // `parentNode` walked straight past the slot and every shadow ancestor
+      // between it and the host, leaving their records clean — so the fold
+      // returned a cached subtree that no longer described the page.
+      n = n.assignedSlot || n.parentNode || (n.host || null) ||
           (n.getRootNode && n.getRootNode().host) || null;
     }
   }
@@ -1720,7 +1797,13 @@
     if (!parent || parent.nodeType !== 1) return;
     var prec = records.get(parent);
     if (!prec) return;
-    var kids = parent.childNodes, idx = -1, i;
+    // The same array the fold walks, or the span names the wrong children:
+    // a host's fold children are its shadow root's, and a slot's are the
+    // nodes assigned to it. Indexing `childNodes` against either was off by
+    // the shadow root's length, silently, for every shadow host on the page.
+    var kids = parent.shadowRoot ? parent.shadowRoot.childNodes
+                                 : composedKids(parent);
+    var idx = -1, i;
     var probe = m.type === 'childList'
       ? (m.addedNodes[0] || m.previousSibling || null) : m.target;
     for (i = 0; i < kids.length; i++) {
@@ -1803,14 +1886,33 @@
         removedIds.push(slot.id);
       }
       chunkRoots = live;
+      sweepOpaque();
       dirtySpans.clear();
       stats.nodes = 0;
     } catch (e) { stats.errors++; }
   }
 
   // ---- observation (§3 of the injection doc: one per root) -------------
+  // Slot assignment moves content without moving a node. The light child
+  // stays exactly where it is written and only the slot that claims it
+  // changes, so the composed tree reorders and *no mutation record describes
+  // it* — the fold saw a page that had not changed, and drained nothing, on a
+  // page whose reading order had just been rewritten. `slotchange` is the
+  // only notification there is, and it bubbles inside the shadow root, so one
+  // listener per root covers every slot in it.
+  function onSlotChange(e) {
+    try {
+      markDirty(e.target);
+      schedule();
+    } catch (err) { stats.errors++; }
+  }
+
   function observe(root) {
     if (!root || roots.has(root)) return;
+    if (root.nodeType === 11) {
+      try { root.addEventListener('slotchange', onSlotChange); }
+      catch (e) { stats.errors++; }
+    }
     var obs = new MutationObserver(onMutations);
     var opts = {
       // `perchunk` narrows the document-level observer and puts observers on
@@ -1877,6 +1979,10 @@
         observers: stats.observers, spans: stats.spans, errors: stats.errors,
         dictSize: dict.length, skipped: stats.skipped,
         deduped: stats.deduped, sketchHits: stats.sketchHits,
+        // How much of the composed tree we could not see into. Reported
+        // rather than left in the page, because a coverage figure that does
+        // not name what it could not reach is not a coverage figure.
+        closedRoots: stats.closedRoots,
         // What actually ran, not what was asked for — `shape` disables
         // `pathdelta`, and a decoder that believed the request rather than
         // the report would mis-read every path.
@@ -1932,7 +2038,9 @@
 
   function resolveStep(parent, seg, ordinal) {
     if (seg === '#shadow-root') return parent.shadowRoot || null;
-    var kids = parent.childNodes || [], n = 0, i;
+    // The children the fold addressed, so an address it emitted resolves
+    // back to the node it was taken from — through a slot included.
+    var kids = composedKids(parent) || [], n = 0, i;
     for (i = 0; i < kids.length; i++) {
       var k = kids[i];
       if (seg === '#text') {

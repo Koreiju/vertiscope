@@ -501,12 +501,36 @@ class Repl:
     // questions get answered here: what content exists (so the render can be
     // checked for completeness), and where it came from (so "did we read the
     // live DOM or a static snapshot" stops being a matter of trust).
-    var seenShadow = 0, shadowText = 0, hosts = 0;
+    var seenShadow = 0, shadowText = 0, hosts = 0, opaque = 0;
     var text = [], links = [], media = [], headings = 0, tables = 0;
     var SKIP = {SCRIPT:1, STYLE:1, NOSCRIPT:1, TEMPLATE:1, HEAD:1};
 
+    // The composed tree, which is not childNodes: a light child of a shadow
+    // host is drawn at the slot that claims it, and a filled slot does not
+    // draw its fallback. Counting childNodes instead made this walk wrong in
+    // exactly the way the fold was wrong, so the two agreed and the
+    // disagreement with the *page* went unmeasured -- which is the one thing
+    // a coverage number exists to prevent.
+    // Returns [children, whetherThoseChildrenAreShadowContent]. The flag is
+    // not simply inherited: nodes assigned to a slot are drawn inside the
+    // shadow tree but *are* light DOM, and a static fetch reaches them --
+    // counting them as shadow content would overstate the one number here
+    // whose whole job is to say what a static fetch cannot get.
+    function kidsOf(node, inShadow) {
+      if (node.nodeType === 1 && node.shadowRoot)
+        return [node.shadowRoot.childNodes, true];
+      if (node.nodeType === 1 && node.tagName === 'SLOT' && node.assignedNodes) {
+        var an = null;
+        try { an = node.assignedNodes({flatten: true}); } catch (e) { an = null; }
+        if (an && an.length) return [an, false];
+      }
+      return [node.childNodes || [], inShadow];
+    }
+
     function walk(root, inShadow) {
-      var kids = root.childNodes || [];
+      var region = kidsOf(root, inShadow);
+      var kids = region[0];
+      inShadow = region[1];
       for (var i = 0; i < kids.length; i++) {
         var n = kids[i];
         if (n.nodeType === 3) {
@@ -527,7 +551,19 @@ class Repl:
                     || n.getAttribute('poster') || n.getAttribute('data-src');
           if (src) media.push(src);
         }
-        if (n.shadowRoot) { hosts++; seenShadow++; walk(n.shadowRoot, true); }
+        if (n.shadowRoot) {
+          hosts++; seenShadow++;
+          walk(n, true);
+          continue;
+        }
+        // Unreachable by design (CONTENT_EXTRACTION_RULES 8.4), and so
+        // counted rather than read as an empty element -- otherwise a
+        // component we cannot see into is indistinguishable from one with
+        // nothing in it, and the percentage above silently rounds up.
+        var ln = n.localName || '';
+        if (ln.indexOf('-') > -1 && !n.childNodes.length) {
+          try { if (customElements.get(ln)) opaque++; } catch (e) {}
+        }
         walk(n, inShadow);
       }
     }
@@ -542,7 +578,7 @@ class Repl:
     return {
       text: text, links: links, media: media,
       headings: headings, tables: tables,
-      shadowHosts: hosts, shadowTextNodes: shadowText,
+      shadowHosts: hosts, shadowTextNodes: shadowText, opaqueHosts: opaque,
       liveChars: staticLen,
       elements: document.getElementsByTagName('*').length
     };
@@ -637,6 +673,8 @@ class Repl:
             f"  {'shadow hosts crossed':<22}{page.get('shadowHosts', 0):>7,}",
             f"  {'text inside shadow':<22}{page.get('shadowTextNodes', 0):>7,}"
             "   (a static fetch reaches none of this)",
+            f"  {'opaque hosts':<22}{page.get('opaqueHosts', 0):>7,}"
+            "   (closed roots: unreachable by design, not counted as read)",
             f"  {'rendered lines':<22}"
             f"{sum(len(c.lines) for c in chunks):>7,}",
         ]
@@ -2942,6 +2980,30 @@ class Repl:
             return line if tags & kinds else None
         return line if active.lower() in line.text.lower() else None
 
+    def _forget_session(self, url: str = "") -> None:
+        """Drop the session's own copies of a page. `url` empty means all.
+
+        The store is not the only place a visit is recorded. This process
+        holds the chunks it is showing, the trie they were folded from, the
+        content fingerprints it has seen and the trail of urls it walked --
+        and every one of those answers "was this read?" for as long as the
+        session lives. A `forget` that cleared the database and left them
+        would be a `forget` that works until someone scrolls up.
+        """
+        if not url:
+            self._live_chunks.clear()
+            self._spine = None
+            self._seen_content.clear()
+            self._trail.clear()
+            self._passes.clear()
+            return
+        gone = [cid for cid, c in self._live_chunks.items() if c.url == url]
+        for cid in gone:
+            self._live_chunks.pop(cid, None)
+        if self._spine is not None and getattr(self._spine, "url", "") == url:
+            self._spine = None
+        self._trail = [u for u in self._trail if u != url]
+
     def _cmd_forget(self, args) -> bool:
         """`forget <url>` · `forget here` · `forget all` — unrecord a page.
 
@@ -2971,14 +3033,19 @@ class Repl:
         try:
             if target == "all":
                 self.workspace.purge()
-                self._live_chunks.clear()
+                self._forget_session()
                 self.state.buffers.note("forgot everything in this workspace")
             else:
+                # Resolve to the stored spelling *before* purging, because
+                # purging is what makes it unresolvable. A url typed with its
+                # campaign tag still attached, or with a trailing slash the
+                # store does not have, reaches the same page -- and the
+                # in-memory copies have to be dropped by the same key the
+                # store was, or `forget` clears the database and leaves the
+                # page on the screen.
+                stored = self.workspace.page_url(target)
                 self.workspace.purge(target)
-                gone = [cid for cid, c in self._live_chunks.items()
-                        if c.url == target]
-                for cid in gone:
-                    self._live_chunks.pop(cid, None)
+                self._forget_session(stored)
                 self.state.buffers.note(f"forgot {target}")
         except Exception as exc:  # noqa: BLE001
             self.state.buffers.note(f"forget: {type(exc).__name__}: {exc}")

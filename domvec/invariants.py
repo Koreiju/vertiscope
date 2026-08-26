@@ -442,3 +442,110 @@ def a1_aam_tables_agree(_: Any = None) -> List[Violation]:
                     f"{name}[{key!r}]: python={expected.get(key)!r} "
                     f"js={found.get(key)!r}")
     return out
+
+
+# --- the two copies of the composed-tree walk --------------------------------
+
+# Where each walk lives, and the pattern that isolates it. Two copies of a
+# *table* is tolerable when they are checked; two copies of a *walk* is worse,
+# so this is the check.
+_COMPOSED_WALKS = {
+    "sensor.js/composedKids": (("core", "js", "sensor.js"),
+                               r"function composedKids\(.*?\n  \}"),
+    "repl/coverage kidsOf": (("repl", "app.py"),
+                             r"function kidsOf\(.*?\n    \}"),
+}
+
+
+def c1_composed_walks_resolve_slots(sources: Any = None) -> List[Violation]:
+    """Both walks descend the tree the browser draws, not ``childNodes``.
+
+    There are two of them — the fold in ``sensor.js`` and the coverage walk in
+    the REPL — and they are checked against each other for the same reason the
+    AAM tables are. The coverage walk exists to say what the fold missed, so a
+    coverage walk that repeats the fold's mistake reports 100% of a page that
+    neither of them read; the agreement is the measurement, and two walks that
+    are wrong in the same way agree perfectly.
+
+    Three properties, each naming a bug that was there:
+
+    * assignment is resolved (``assignedNodes({flatten: true})``) — without it
+      a light child of a shadow host is read where it is *written* rather than
+      where it is *drawn*, which reorders every component on the page;
+    * assigned nodes displace the fallback instead of joining it — without it
+      every filled slot contributes text no reader can ever see;
+    * a shadow host's own ``childNodes`` are not walked beside its shadow root
+      — they are reached through the slot that claims them, and walking both
+      emits the same content twice.
+
+    Read out of the sources rather than executed, like ``a1``: it needs no
+    browser, and the regression it guards is a walk being quietly returned to
+    the simple one, which is a textual change. Pass ``sources`` as a
+    ``{name: text}`` mapping to check something other than the files on disk.
+
+    claim: CONTENT_EXTRACTION_RULES 8.4 — shadow content is addressable in the
+    same space as light content, which requires it to be in the same *order*.
+    """
+    import pathlib
+    import re
+
+    here = pathlib.Path(__file__).parent
+    given = dict(sources or {})
+    out: List[Violation] = []
+    text_of: dict = {}
+
+    for name, (parts, pattern) in _COMPOSED_WALKS.items():
+        if name in given:
+            text = given[name]
+        else:
+            path = here.joinpath(*parts)
+            try:
+                text = path.read_text(encoding="utf-8")
+            except OSError as exc:  # noqa: BLE001
+                out.append(f"cannot read {path.name}: {exc}")
+                continue
+        text_of[name] = text
+        m = re.search(pattern, text, re.S)
+        if m is None:
+            out.append(f"{name}: the composed-children walk is gone")
+            continue
+        body = m.group(0)
+        if "assignedNodes" not in body:
+            out.append(f"{name}: does not resolve slot assignment")
+        if "flatten" not in body:
+            out.append(f"{name}: assignedNodes without flatten — a slot "
+                       f"assigned to a slot resolves to the slot itself")
+        # Assigned or fallback, never both. Both copies spell it the same
+        # way: return the assigned nodes when there are any, fall through to
+        # childNodes when there are not.
+        if not re.search(r"if \(an && an\.length\)", body):
+            out.append(f"{name}: does not prefer assigned nodes over fallback")
+
+    text = text_of.get("sensor.js/composedKids")
+    if text is None:
+        return out
+    m = re.search(r"function childrenOf\(.*?\n  \}", text, re.S)
+    if m is None:
+        out.append("sensor.js: childrenOf is gone")
+        return out
+    body = m.group(0)
+    if "composedKids(" not in body:
+        out.append("sensor.js/childrenOf: does not go through composedKids, "
+                   "so it is walking childNodes directly")
+    # The shadow branch has to *return*. Falling out of it into the host's own
+    # light children is the original bug: they were appended after the shadow
+    # root's children, so slotted content came back a second time, in a
+    # position the page never draws it in.
+    _head, marker, tail = body.partition("if (node.shadowRoot)")
+    if not marker:
+        out.append("sensor.js/childrenOf: no shadow-root branch at all")
+    else:
+        ret = tail.find("return kids;")
+        light = min((i for i in (tail.find("node.childNodes"),
+                                 tail.find("composedKids(")) if i >= 0),
+                    default=-1)
+        if ret < 0 or (0 <= light < ret):
+            out.append("sensor.js/childrenOf: the shadow branch falls through "
+                       "to the host's own children — slotted content is "
+                       "emitted twice, once where the page never draws it")
+    return out
