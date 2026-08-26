@@ -1,0 +1,120 @@
+<!doctype html>
+<!--
+  The composed tree at its awkward points.
+
+  `shadow_catalogue.html` shows that the boundary is crossed at all. This one
+  asks whether what comes back across it is in the shape the browser actually
+  renders, which is a different question and the one slots decide:
+
+    * light children of a host render at the <slot> that claims them, not
+      where they are written -- so both the reading order and the count of
+      what is emitted depend on assignment, not on childNodes;
+    * a slot with assigned nodes does not render its fallback, and a slot
+      with none renders nothing else;
+    * named and default slots claim different children, and several children
+      assigned to one slot keep their relative order;
+    * shadow roots nest, and the ordinals inside each one are its own;
+    * a declarative shadow root is already attached by the time script runs,
+      so the <template> that spelled it is not in the tree at all;
+    * a closed root is unreachable by design, and has to be *reported* as
+      unreachable rather than read as an empty element.
+
+  Every marker is unique and greppable, so a wrong order, a duplicate and a
+  phantom are all distinguishable from each other in the output.
+-->
+<meta charset="utf-8">
+<title>Composed Slots</title>
+
+<h1>MARK-PAGE-TITLE</h1>
+
+<!-- 1,2,3: assignment, fallback, named vs default, multiple per slot -->
+<slot-host id="host">
+  <span slot="title">MARK-TITLE-SLOTTED</span>
+  <p>MARK-DEFAULT-FIRST</p>
+  <em slot="title">MARK-TITLE-SECOND</em>
+  <p>MARK-DEFAULT-SECOND</p>
+</slot-host>
+
+<!-- 4: three shadow roots deep, with an ordinal trap at every level -->
+<depth-one id="deep"></depth-one>
+
+<!-- 5: declarative shadow DOM, parsed before any script ran -->
+<dsd-host id="dsd">
+  <template shadowrootmode="open">
+    <div>MARK-DSD-SHADOW</div>
+    <slot>MARK-DSD-FALLBACK</slot>
+  </template>
+  <span>MARK-DSD-SLOTTED</span>
+</dsd-host>
+
+<!-- 7: unreachable by design; must be reported, not silently empty -->
+<closed-host id="closed"></closed-host>
+
+<div id="light-tail">MARK-LIGHT-TAIL</div>
+
+<script>
+// ---- 1,2,3 -----------------------------------------------------------------
+// Rendered order is: HEAD-BEFORE, TITLE-SLOTTED, TITLE-SECOND, HEAD-AFTER,
+// BODY-BEFORE, DEFAULT-FIRST, DEFAULT-SECOND, BODY-AFTER, EMPTY-FALLBACK.
+// Neither TITLE-FALLBACK nor DEFAULT-FALLBACK is rendered: both slots are
+// filled. EMPTY-FALLBACK is, because nothing claims that slot.
+class SlotHost extends HTMLElement {
+  connectedCallback() {
+    this.attachShadow({mode: 'open'}).innerHTML = `
+      <header>MARK-HEAD-BEFORE
+        <slot name="title">MARK-TITLE-FALLBACK</slot>
+      MARK-HEAD-AFTER</header>
+      <section>MARK-BODY-BEFORE
+        <slot>MARK-DEFAULT-FALLBACK</slot>
+      MARK-BODY-AFTER</section>
+      <footer><slot name="nobody">MARK-EMPTY-FALLBACK</slot></footer>`;
+  }
+}
+customElements.define('slot-host', SlotHost);
+
+// ---- 4 ---------------------------------------------------------------------
+// Each level puts a light <div> next to a shadow <div> so that sharing one
+// ordinal namespace across the boundary would show up as a shifted index.
+class DepthOne extends HTMLElement {
+  connectedCallback() {
+    this.attachShadow({mode: 'open'}).innerHTML =
+      `<div>MARK-DEPTH-1</div><depth-two></depth-two>`;
+  }
+}
+class DepthTwo extends HTMLElement {
+  connectedCallback() {
+    this.attachShadow({mode: 'open'}).innerHTML =
+      `<div>MARK-DEPTH-2</div><depth-three></depth-three>`;
+  }
+}
+class DepthThree extends HTMLElement {
+  connectedCallback() {
+    this.attachShadow({mode: 'open'}).innerHTML =
+      `<div>MARK-DEPTH-3</div>`;
+  }
+}
+customElements.define('depth-three', DepthThree);
+customElements.define('depth-two', DepthTwo);
+customElements.define('depth-one', DepthOne);
+
+// ---- 7 ---------------------------------------------------------------------
+class ClosedHost extends HTMLElement {
+  connectedCallback() {
+    this.attachShadow({mode: 'closed'}).innerHTML =
+      `<p>MARK-CLOSED-UNREACHABLE</p>`;
+  }
+}
+customElements.define('closed-host', ClosedHost);
+
+// ---- 6 ---------------------------------------------------------------------
+// Slot reassignment, driven from outside. The node does not move in the light
+// DOM -- only the slot it is assigned to changes -- so the composed tree
+// reorders while childNodes does not.
+window.reassign = function () {
+  document.querySelector('#host > p').setAttribute('slot', 'title');
+};
+window.unassign = function () {
+  var el = document.querySelector('#host > [slot="title"]');
+  if (el) el.removeAttribute('slot');
+};
+</script>

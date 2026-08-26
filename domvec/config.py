@@ -27,6 +27,27 @@ def _env_bool(name: str, default: bool = False) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+# The realm name used when `DOMVEC_SANDBOX` is set to a plain truthy token
+# rather than to a name of its own.
+SANDBOX_DEFAULT_REALM = "domvec"
+
+
+def _env_sandbox(name: str) -> str:
+    """Resolve the sandbox knob to a realm name, or to "" for off.
+
+    Three spellings, because the knob answers two questions at once: whether
+    to use a sandbox at all, and what to call it. `1`/`true`/`on` mean "yes,
+    you pick the name"; any other non-empty value *is* the name; unset or a
+    falsey token means the main world, which stays the default.
+    """
+    raw = (os.environ.get(name) or "").strip()
+    if not raw or raw.lower() in {"0", "false", "no", "off"}:
+        return ""
+    if raw.lower() in {"1", "true", "yes", "on"}:
+        return SANDBOX_DEFAULT_REALM
+    return raw
+
+
 @dataclass
 class Config:
     """Resolved runtime settings."""
@@ -40,6 +61,12 @@ class Config:
     page_load_timeout: int = 45
     geckodriver: str = ""
     embed_device: str = "gpu"
+    # The realm the sensor is hosted in. Empty -- the default -- is the main
+    # world, which is where every measurement in this repo was taken. A
+    # non-empty value names a WebDriver BiDi sandbox realm to host it in
+    # instead, which costs a cross-realm hop per property access and buys
+    # the page not being able to find the handle. Off unless asked for.
+    sandbox: str = ""
 
     # --- derived paths ---------------------------------------------------
     @property
@@ -99,5 +126,6 @@ def load_config(home: str | os.PathLike[str] | None = None) -> Config:
         page_load_timeout=_env_int("DOMVEC_PAGE_LOAD_TIMEOUT", 45),
         geckodriver=os.environ.get("DOMVEC_GECKODRIVER") or _default_geckodriver(),
         embed_device=os.environ.get("DOMVEC_EMBED_DEVICE", "gpu"),
+        sandbox=_env_sandbox("DOMVEC_SANDBOX"),
     )
     return cfg

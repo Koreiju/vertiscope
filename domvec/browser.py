@@ -74,8 +74,17 @@ def _resolve_firefox_binary() -> Optional[str]:
     return shutil.which("firefox")
 
 
-def build_driver(cfg: Config, headless: Optional[bool] = None) -> webdriver.Firefox:
-    """Construct a Firefox WebDriver honouring ``cfg``."""
+def build_driver(cfg: Config, headless: Optional[bool] = None, *,
+                 bidi: Optional[bool] = None) -> webdriver.Firefox:
+    """Construct a Firefox WebDriver honouring ``cfg``.
+
+    ``bidi`` asks for a WebDriver BiDi websocket alongside the classic
+    session, which is what hosting the sensor in a sandbox realm needs. It
+    defaults to whether ``cfg.sandbox`` names one, and it is the *only*
+    thing that flag changes here: no preference is added, removed or
+    altered by it, because the profile is a measuring instrument and a
+    corpus read under two different profiles is two corpora.
+    """
     use_headless = cfg.headless if headless is None else headless
 
     options = Options()
@@ -88,6 +97,13 @@ def build_driver(cfg: Config, headless: Optional[bool] = None) -> webdriver.Fire
     options.set_preference("media.volume_scale", "0.0")
     options.set_preference("app.update.auto", False)
     options.set_preference("datareporting.healthreport.uploadEnabled", False)
+
+    if bidi is None:
+        bidi = bool(getattr(cfg, "sandbox", ""))
+    if bidi:
+        # `webSocketUrl: true`. A capability, not a preference — it asks
+        # geckodriver for the BiDi endpoint and leaves the profile alone.
+        options.enable_bidi = True
 
     binary = _resolve_firefox_binary()
     if binary:
@@ -115,10 +131,10 @@ def build_driver(cfg: Config, headless: Optional[bool] = None) -> webdriver.Fire
 
 @contextmanager
 def browser_session(
-    cfg: Config, headless: Optional[bool] = None
+    cfg: Config, headless: Optional[bool] = None, *, bidi: Optional[bool] = None
 ) -> Iterator[webdriver.Firefox]:
     """Own a Firefox driver for the duration of the block, always quitting it."""
-    driver = build_driver(cfg, headless=headless)
+    driver = build_driver(cfg, headless=headless, bidi=bidi)
     try:
         yield driver
     finally:
