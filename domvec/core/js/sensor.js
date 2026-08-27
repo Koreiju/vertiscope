@@ -660,6 +660,22 @@
     return IMPLICIT_ROLE[tag] || 'generic';
   }
 
+  // Elements whose whole purpose is to carry a resource, and the attributes
+  // that carry it. Mirrored by `aam.MEDIA_TAGS` / `aam.has_source`.
+  var MEDIA_TAGS = { IMG: 1, PICTURE: 1, SVG: 1, VIDEO: 1, AUDIO: 1,
+                     SOURCE: 1, IFRAME: 1, EMBED: 1, OBJECT: 1 };
+  var MEDIA_SRC_ATTRS = ['src', 'srcset', 'poster', 'data', 'data-src',
+                         'href'];
+
+  function hasSource(el) {
+    if (!el || !el.getAttribute) return false;
+    for (var i = 0; i < MEDIA_SRC_ATTRS.length; i++) {
+      var v = el.getAttribute(MEDIA_SRC_ATTRS[i]);
+      if (v !== null && String(v).trim() !== '') return true;
+    }
+    return false;
+  }
+
   function kindOf(el) {
     var role = roleOf(el);
     // An option inside a select is not a line of the page. A browser draws
@@ -674,7 +690,27 @@
         if (owner) return ['none', role];
       } catch (e) { /* fall through and draw it */ }
     }
-    return [RENDER_CLASS[role] || 'text', role];
+    var kind = RENDER_CLASS[role] || 'text';
+    // A picture with no alt text is still a picture.
+    //
+    // `roleOf` is right, and stays right: `<img alt="">` is role
+    // `presentation` in HTML-AAM, because an empty alt is the author saying
+    // "do not announce this". That is a statement about announcement. It is
+    // not a statement that the resource does not exist, and using the role
+    // as the *render class* turned it into one -- the media reference was
+    // dropped and the file was gone from the record. On lit.dev every
+    // illustration carries `alt=""`, so the page rendered with zero of its
+    // images: 0 of 3 media references reached the markdown.
+    //
+    // The role is left alone and the class is corrected here, beside the
+    // OPTION case, for the same reason: the AAM tables are data checked by
+    // invariant a1 and must keep saying what the standard says. What a
+    // reader is shown is a separate decision, and this is where it is made.
+    if (kind === 'none' && MEDIA_TAGS[el.tagName] && hasSource(el)) {
+      return [el.tagName === 'IMG' || el.tagName === 'PICTURE'
+              || el.tagName === 'SVG' ? 'image' : 'media', role];
+    }
+    return [kind, role];
   }
 
   function taxonomyOf(el, text) {

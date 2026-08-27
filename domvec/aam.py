@@ -308,10 +308,41 @@ def render_class(role: str) -> str:
     return RENDER_CLASS.get(role, "text")
 
 
+# Elements whose whole purpose is to carry a resource, and the attributes
+# that carry it. Mirrored by `MEDIA_TAGS` / `hasSource` in sensor.js.
+MEDIA_TAGS = frozenset({"img", "picture", "svg", "video", "audio",
+                        "source", "iframe", "embed", "object"})
+MEDIA_SRC_ATTRS = ("src", "srcset", "poster", "data", "data-src", "href")
+_STILL = frozenset({"img", "picture", "svg"})
+
+
+def has_source(attrs: Optional[Mapping[str, str]] = None) -> bool:
+    """Whether an element carries a resource reference."""
+    attrs = attrs or {}
+    return any((attrs.get(name) or "").strip() for name in MEDIA_SRC_ATTRS)
+
+
 def kind_of(tag: str, attrs: Optional[Mapping[str, str]] = None) -> Tuple[str, str]:
-    """``(render class, role)`` for one element."""
+    """``(render class, role)`` for one element.
+
+    A picture with no alt text is still a picture. ``role_of`` is faithful to
+    HTML-AAM, where ``<img alt="">`` is presentational -- an empty alt is the
+    author saying "do not announce this", which is a statement about
+    announcement and not about whether the file exists. Using the role as the
+    render class turned it into the second thing and dropped the reference:
+    every illustration on lit.dev carries ``alt=""``, and the page rendered
+    with none of its images.
+
+    So the role is left exactly as the standard has it and the class is
+    corrected here. The tables stay honest for invariant ``a1``; what a
+    reader is shown is a separate decision, made in this function.
+    """
     role = role_of(tag, attrs)
-    return render_class(role), role
+    kind = render_class(role)
+    tag = (tag or "").lower()
+    if kind == "none" and tag in MEDIA_TAGS and has_source(attrs):
+        return ("image" if tag in _STILL else "media"), role
+    return kind, role
 
 
 def is_interactive(kind: str) -> bool:

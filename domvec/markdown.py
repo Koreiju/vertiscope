@@ -401,6 +401,43 @@ def _drawn_as_control(text: str) -> bool:
     return stripped.startswith(("( ", "[ ] ", "=== ", "[", "!["))         or stripped.endswith((" )", " ==="))
 
 
+def _target_of(owner: str, href_at: Dict[str, str]) -> str:
+    """Where the element at ``owner`` points, or the nearest ancestor does.
+
+    An anchor's href is on the anchor and its words are on a text node under
+    it, and `href_at` is keyed by the element the href came from. When the
+    words sit directly inside the anchor those are the same key and a direct
+    lookup works, which is why this went unnoticed: `<a href>words</a>` is
+    the common shape and it renders `[words](url)` correctly.
+
+    A card does not have that shape. lit.dev writes
+    `<a href><div><span>Spectrum Web Components</span></div></a>`, so the
+    label's owner is `.../a/div/span`, the direct lookup misses, and the line
+    renders `[Spectrum Web Components]` with nowhere to go. The href unit is
+    separately suppressed -- correctly, the anchor speaks and a raw url
+    beside its own label is noise -- so the target was not merely unrendered,
+    it was gone from the markdown entirely. 16 of 41 distinct targets on one
+    page, every one of them a link a reader can see and follow.
+
+    Walking up by prefix is exact rather than heuristic: a descendant's
+    xpath *is* its ancestors', and the nearest ancestor holding an href is
+    the anchor that contains this text. The loop is bounded by depth, and
+    the first hit wins so an outer anchor never overrides an inner one.
+    """
+    direct = href_at.get(owner)
+    if direct:
+        return direct
+    at = owner
+    while "/" in at:
+        at = at.rsplit("/", 1)[0]
+        if not at:
+            break
+        found = href_at.get(at)
+        if found:
+            return found
+    return ""
+
+
 def _join_labels(lines: List[MarkdownLine]) -> List[MarkdownLine]:
     """A label line ending in a colon absorbs the line it labels.
 
@@ -437,7 +474,24 @@ def _join_labels(lines: List[MarkdownLine]) -> List[MarkdownLine]:
         if joinable:
             joined = _colon_join([cur.text.rstrip(), nxt.text.strip()])
             if len(joined) == 1:
-                out.append(MarkdownLine(cur.depth, joined[0], nxt.address))
+                # Addressed at the label, not at what it absorbed.
+                #
+                # The merged line begins with the label, so the label's
+                # position is where the line starts on the page -- and the
+                # absorbed element is frequently one the page never draws.
+                # quotes.toscrape.com writes `<div class=tags>Tags: <meta
+                # class=keywords content=...><a>...` : the words come from a
+                # `display:none` meta, and taking that element's address
+                # filed a line the reader can see under an element the reader
+                # cannot. The wireframe places a unit by its owner's box, so
+                # every one of those lines was dropped from the drawing --
+                # ten of them on one page -- while markdown showed them.
+                #
+                # No geometry is consulted to decide this, and none may be:
+                # markdown is the semantic projection and the style map is a
+                # peripheral. The label being the head of the line is reason
+                # enough on its own.
+                out.append(MarkdownLine(cur.depth, joined[0], cur.address))
                 i += 2
                 continue
         out.append(cur)
@@ -854,7 +908,7 @@ def _render_node(node: TrieNode, url: str, url_depth: int) -> MarkdownChunk:
                 and " ".join(v.split()) == text_at.get(owner)):
             continue
         rendered = _render_unit(a, v, lbl, text_at.get(owner, ""),
-                                target=href_at.get(owner, ""))
+                                target=_target_of(owner, href_at))
         if rendered is None:
             continue
         lines.append(MarkdownLine(
