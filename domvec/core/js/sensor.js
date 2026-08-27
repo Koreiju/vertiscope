@@ -2299,6 +2299,32 @@
       try {
         var r = el.getBoundingClientRect();
         var cs = window.getComputedStyle(el);
+        // An element with no box of its own is not an element with nothing
+        // in it.
+        //
+        // `display: contents` generates no box -- that is its definition --
+        // and its children lay out in its parent's flow, so the rect comes
+        // back 0x0 while the text is plainly on the screen. It is also the
+        // UA default for `<slot>`, which makes this the normal shape of a
+        // web component rather than an edge case: on salesforce.com, where
+        // 194 shadow hosts carry two thirds of the page's text, treating
+        // "no rect" as "not visible" removed a fifth of the drawn content
+        // from the wireframe.
+        //
+        // A range over the element's own contents measures what was actually
+        // laid out, which is the thing being asked for. A genuinely empty or
+        // `display:none` element still measures 0x0 and still reads as not
+        // visible, so nothing that should be hidden is admitted by this.
+        if (r.width === 0 && r.height === 0
+            && cs.display !== 'none' && cs.visibility !== 'hidden') {
+          try {
+            var range = document.createRange();
+            range.selectNodeContents(el);
+            var rr = range.getBoundingClientRect();
+            if (rr && rr.width > 0 && rr.height > 0) r = rr;
+            range.detach && range.detach();
+          } catch (e) { /* keep the empty rect */ }
+        }
         var weight = parseInt(cs.fontWeight, 10) || 400;
         var size = parseFloat(cs.fontSize) || 16;
         out.push({
