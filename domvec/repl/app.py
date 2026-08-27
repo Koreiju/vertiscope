@@ -502,6 +502,7 @@ class Repl:
     // checked for completeness), and where it came from (so "did we read the
     // live DOM or a static snapshot" stops being a matter of trust).
     var seenShadow = 0, shadowText = 0, hosts = 0, opaque = 0;
+    var hiddenText = 0;
     var text = [], links = [], media = [], headings = 0, tables = 0;
     var SKIP = {SCRIPT:1, STYLE:1, NOSCRIPT:1, TEMPLATE:1, HEAD:1};
 
@@ -535,7 +536,32 @@ class Repl:
         var n = kids[i];
         if (n.nodeType === 3) {
           var t = (n.nodeValue || '').trim();
-          if (t) { text.push(t); if (inShadow) shadowText++; }
+          // The flag travels with the item, not just into a counter. Whether
+          // shadow content survives the projections *at the same rate as*
+          // light content is the question a single total cannot answer, and
+          // it is the one that says whether a component library reads.
+          if (t) {
+            // Whether the page actually draws this run. The two projections
+            // have different denominators and pretending otherwise makes the
+            // visual one look broken: markdown is semantic and indexes
+            // `display:none` content on purpose -- quotes.toscrape.com keeps
+            // its keywords in a hidden <meta>, and those are real content --
+            // while the wireframe is a drawing and must not show what the
+            // page does not. Scored against everything, a correct wireframe
+            // read 78%.
+            //
+            // A layout read, deliberately, and safe here: this walk is a
+            // diagnostic that runs once per page. It is not the fold, which
+            // measures nothing (invariants.c2).
+            var drawn = true;
+            try {
+              var host = n.parentElement;
+              drawn = !!(host && host.getClientRects().length);
+            } catch (e) { drawn = true; }
+            text.push({v: t, s: inShadow, d: drawn});
+            if (inShadow) shadowText++;
+            if (!drawn) hiddenText++;
+          }
           continue;
         }
         if (n.nodeType !== 1) continue;
@@ -544,12 +570,12 @@ class Repl:
         if (/^H[1-6]$/.test(tag)) headings++;
         if (tag === 'TABLE') tables++;
         if (tag === 'A' && n.getAttribute('href') !== null)
-          links.push(n.getAttribute('href'));
+          links.push({v: n.getAttribute('href'), s: inShadow});
         if (tag === 'IMG' || tag === 'VIDEO' || tag === 'AUDIO'
             || tag === 'SOURCE' || tag === 'IFRAME') {
           var src = n.getAttribute('src') || n.getAttribute('srcset')
                     || n.getAttribute('poster') || n.getAttribute('data-src');
-          if (src) media.push(src);
+          if (src) media.push({v: src, s: inShadow});
         }
         if (n.shadowRoot) {
           hosts++; seenShadow++;
@@ -579,10 +605,58 @@ class Repl:
       text: text, links: links, media: media,
       headings: headings, tables: tables,
       shadowHosts: hosts, shadowTextNodes: shadowText, opaqueHosts: opaque,
+      hiddenText: hiddenText,
       liveChars: staticLen,
       elements: document.getElementsByTagName('*').length
     };
     """
+
+    def _wire_text(self, spine, sensor, drawn=None) -> str:
+        """The wireframe's drawn text, for checking content against it.
+
+        The second projection has to be measured the same way the first is or
+        "two renderers over one structure" is an aspiration rather than a
+        claim. Both start from `render_trie`, so what is being tested here is
+        the arrangement -- banding, allocation, wrapping -- not the glyphs.
+
+        `visual_text` is applied to the units before they are drawn: the
+        wireframe deliberately drops `](url)` because a drawing does not show
+        link targets, so a bare href would read as a loss here when it is a
+        format difference. Measuring the words against the words is the
+        comparison that means something.
+
+        Returns "" rather than raising when there is no geometry to draw
+        with: a page whose boxes could not be measured has no wireframe, and
+        that is a missing measurement, not a projection failure.
+        """
+        from ..markdown import render_trie
+        from ..style import StyleMap
+        from ..wireframe import render_wireframe
+
+        if spine is None or spine.trie is None:
+            return ""
+        chunks = drawn if drawn is not None else render_trie(
+            spine.trie, context_window=self.context_window)
+        units = [(line.address, line.text, line.address.tag)
+                 for chunk in chunks for line in chunk.lines
+                 if line.address is not None and line.text.strip()]
+        if not units:
+            return ""
+        styles = StyleMap()
+        if sensor is not None:
+            wanted = styles.missing(a.xpath for a, _t, _k in units)
+            if wanted:
+                try:
+                    payload = sensor.styles(
+                        [type("A", (), {"xpath": x})() for x in wanted])
+                    styles.absorb(wanted, payload)
+                except Exception:  # noqa: BLE001 - no geometry, no wireframe
+                    return ""
+        try:
+            frame = render_wireframe(units, styles, width=200)
+        except Exception:  # noqa: BLE001
+            return ""
+        return "\n".join(line.text for line in frame.lines)
 
     def _cmd_coverage(self, args) -> bool:
         """What the page holds, against what the render shows.
@@ -627,42 +701,148 @@ class Repl:
         drawn = "\n".join(c.markdown for c in chunks)
         values = {n.value.strip() for n in (spine.trie.leaves() if spine.trie else [])
                   if n.value.strip()}
-        blob = drawn + "\n" + "\n".join(values)
 
-        def held(items):
-            """An item counts as held when it survives into the render."""
+        # Three stages, not one blob.
+        #
+        # This used to test every item against `markdown + trie values`
+        # concatenated together, and call the result "in render". A run the
+        # markdown dropped still counted as rendered so long as the trie had
+        # held it -- so the number said *captured* while the column said
+        # *rendered*, and every projection loss was invisible by construction.
+        # Capture and projection are different failures with different fixes,
+        # and the whole reason there are two renderers over one structure is
+        # that they can disagree.
+        captured_blob = "\n".join(values)
+        markdown_blob = drawn
+        wire_blob = self._wire_text(spine, sensor, drawn=chunks)
+
+        # Case-folded, because the wireframe uppercases what the page sets in
+        # bold (`_emphasise`). A case-sensitive test scored the drawn heading
+        # `# QUOTES TO SCRAPE` and every drawn author name as missing, which
+        # is this tool failing to recognise the renderer's own convention and
+        # reporting it as the renderer's loss.
+        captured_blob = captured_blob.lower()
+        markdown_blob = markdown_blob.lower()
+        wire_blob = wire_blob.lower()
+
+        def survives(probe: str, blob: str) -> bool:
+            probe = probe.lower()
+            if probe in blob:
+                return True
+            # A long run is often split across inline elements; a substantial
+            # head of it landing is the honest test.
+            return len(probe) > 40 and probe[:40] in blob
+
+        def stages(items, unique=False):
+            """Per-stage survival, split by where the content came from.
+
+            Returns (totals, survivors, missing) where the first two are
+            keyed (origin, stage) with origin in {'light','shadow'}.
+            """
+            totals = {"light": 0, "shadow": 0}
+            # The wireframe's denominator is what the page draws, which is a
+            # strict subset of what it holds. Counted separately rather than
+            # subtracted at the end, so a page with a lot of hidden content
+            # does not quietly change what the percentage is *of*.
+            drawn_totals = {"light": 0, "shadow": 0}
+            kept = {}
             missing = []
-            for item in items:
-                probe = item.strip()
+            wire_missing = []
+            # `unique` scores distinct targets rather than occurrences.
+            # A page that links its repository six times has one target, and
+            # markdown keeps one line for it on purpose -- "one target, one
+            # line". Counting the five collapsed anchors as losses measured
+            # a deliberate rule and reported it as a defect: lit.dev read
+            # 69.4% while every distinct target it has was rendered.
+            seen_targets = set()
+            for item in items or []:
+                # Tolerates the old shape so a stale driver payload reads as
+                # light-and-drawn rather than raising.
+                spec = item if isinstance(item, dict) else {"v": item}
+                probe = (spec.get("v") or "").strip()
                 if not probe:
                     continue
-                if probe in blob:
-                    continue
-                # A long run is often split across inline elements; a
-                # substantial head of it landing is the honest test.
-                head = probe[:40]
-                if len(probe) > 40 and head in blob:
-                    continue
-                missing.append(probe)
-            return missing
+                if unique:
+                    if probe in seen_targets:
+                        continue
+                    seen_targets.add(probe)
+                origin = "shadow" if spec.get("s") else "light"
+                is_drawn = spec.get("d", True)
+                totals[origin] += 1
+                if is_drawn:
+                    drawn_totals[origin] += 1
+                for stage, blob in (("captured", captured_blob),
+                                    ("markdown", markdown_blob),
+                                    ("wireframe", wire_blob)):
+                    if stage == "wireframe" and not is_drawn:
+                        continue
+                    if survives(probe, blob):
+                        kept[(origin, stage)] = kept.get((origin, stage), 0) + 1
+                    elif stage == "markdown":
+                        missing.append(probe)
+                    elif stage == "wireframe":
+                        wire_missing.append(probe)
+            return totals, kept, missing, drawn_totals, wire_missing
 
-        text_missing = held(page.get("text") or [])
-        link_missing = held(page.get("links") or [])
-        media_missing = held(page.get("media") or [])
+        (text_totals, text_kept, text_missing, text_drawn,
+         text_wire_missing) = stages(page.get("text"))
+        link_totals, link_kept, link_missing, _, _ = stages(
+            page.get("links"), unique=True)
+        media_totals, media_kept, media_missing, _, _ = stages(
+            page.get("media"), unique=True)
 
-        def row(name, total, missing):
-            got = total - len(missing)
-            pct = 100.0 * got / total if total else 100.0
-            return f"  {name:<22}{got:>7,} / {total:<7,}{pct:>7.1f}%"
+        def _cells(name, total, pct_of, wire):
+            cells = [f"  {name:<18}"]
+            for stage in ("captured", "markdown", "wireframe"):
+                if stage == "wireframe" and not wire:
+                    cells.append(f"{'n/a':>9}")
+                    continue
+                cells.append(f"{pct_of(stage):>8.1f}%")
+            cells.append(f"{total:>9,}")
+            return "".join(cells)
+
+        def _pct(kept, origins, stage, totals, drawn):
+            base = drawn if stage == "wireframe" and drawn else totals
+            denom = sum(base[o] for o in origins)
+            got = sum(kept.get((o, stage), 0) for o in origins)
+            return 100.0 * got / denom if denom else 100.0
+
+        def row(name, totals, kept, wire=True, drawn=None):
+            both = ("light", "shadow")
+            return _cells(name, totals["light"] + totals["shadow"],
+                          lambda stage: _pct(kept, both, stage, totals, drawn),
+                          wire)
+
+        def split_row(name, totals, kept, origin, wire=True, drawn=None):
+            if not totals[origin]:
+                return (f"  {name:<18}{'—':>9}{'—':>9}{'—':>9}{0:>9,}")
+            return _cells(name, totals[origin],
+                          lambda stage: _pct(kept, (origin,), stage,
+                                             totals, drawn),
+                          wire)
 
         rows = [
             "",
             f"  coverage  {url}",
             "",
-            f"  {'':<22}{'in render':>9}{'on page':>10}{'':>8}",
-            row("text runs", len(page.get("text") or []), text_missing),
-            row("hyperlinks", len(page.get("links") or []), link_missing),
-            row("media references", len(page.get("media") or []), media_missing),
+            f"  {'':<18}{'captured':>9}{'markdown':>9}{'wire':>9}{'on page':>9}",
+            row("text runs", text_totals, text_kept, drawn=text_drawn),
+            # No wireframe column for targets, and it is not an omission: the
+            # wireframe strips `](url)` on purpose, because a drawing shows
+            # where a link *is*, not where it goes. Scoring an href against a
+            # projection built to drop hrefs measured this tool's confusion
+            # and reported it as the renderer's -- it read 1.8% on a page
+            # whose links all draw.
+            row("hyperlinks (distinct)", link_totals, link_kept, wire=False),
+            row("media (distinct)", media_totals, media_kept, wire=False),
+            "",
+            "  the same, split by where the content lives",
+            split_row("text · light", text_totals, text_kept, "light",
+                      drawn=text_drawn),
+            split_row("text · shadow", text_totals, text_kept, "shadow",
+                      drawn=text_drawn),
+            split_row("links · light", link_totals, link_kept, "light", wire=False),
+            split_row("links · shadow", link_totals, link_kept, "shadow", wire=False),
             "",
             f"  {'headings on page':<22}{page.get('headings', 0):>7,}"
             f"   in render {drawn.count(chr(35) + ' '):>5,}",
@@ -671,6 +851,8 @@ class Repl:
             "  provenance — where this tree came from",
             f"  {'elements walked':<22}{page.get('elements', 0):>7,}",
             f"  {'shadow hosts crossed':<22}{page.get('shadowHosts', 0):>7,}",
+            f"  {'text the page hides':<22}{page.get('hiddenText', 0):>7,}"
+            "   (indexed by markdown, correctly absent from the wireframe)",
             f"  {'text inside shadow':<22}{page.get('shadowTextNodes', 0):>7,}"
             "   (a static fetch reaches none of this)",
             f"  {'opaque hosts':<22}{page.get('opaqueHosts', 0):>7,}"
@@ -679,7 +861,9 @@ class Repl:
             f"{sum(len(c.lines) for c in chunks):>7,}",
         ]
         for name, missing in (("text", text_missing), ("links", link_missing),
-                              ("media", media_missing)):
+                              ("media", media_missing),
+                              ("drawn text, absent from the wireframe",
+                               text_wire_missing)):
             if missing:
                 rows.append("")
                 rows.append(f"  {name} not in the render ({len(missing)}):")
