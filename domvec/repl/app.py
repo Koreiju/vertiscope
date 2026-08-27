@@ -19,6 +19,7 @@ keyboard equivalent (tab to focus, space to activate, arrows to scroll).
 
 from __future__ import annotations
 
+import re
 import shlex
 import sys
 import time
@@ -725,13 +726,34 @@ class Repl:
         markdown_blob = markdown_blob.lower()
         wire_blob = wire_blob.lower()
 
+        wire_words = set(re.findall(r"[\w']+", wire_blob))
+
         def survives(probe: str, blob: str) -> bool:
             probe = probe.lower()
             if probe in blob:
                 return True
             # A long run is often split across inline elements; a substantial
             # head of it landing is the honest test.
-            return len(probe) > 40 and probe[:40] in blob
+            if len(probe) > 40 and probe[:40] in blob:
+                return True
+            # Wrapping is not loss.
+            #
+            # The wireframe draws a row of five cards at the widths the page
+            # gave them, so a card's text lands in a column of about twenty
+            # characters -- and a forty-character head can never appear in a
+            # twenty-character column. Scored by substring, every one of
+            # those read as missing: salesforce.com reported 80% while its
+            # canvas held every word. Checked word by word, the same page
+            # loses nothing.
+            #
+            # Only for the drawing, and only because the drawing is allowed
+            # to break lines wherever the page's own geometry says to. The
+            # markdown column keeps the substring test, where a line is a
+            # unit and a broken one is a defect.
+            if blob is not wire_blob:
+                return False
+            words = [w for w in re.findall(r"[\w']+", probe) if len(w) > 3]
+            return bool(words) and all(w in wire_words for w in words)
 
         def stages(items, unique=False):
             """Per-stage survival, split by where the content came from.
