@@ -201,6 +201,43 @@ class FreqMatrix:
         self._invalidate()
         return True
 
+    def forget_vocabulary(self) -> int:
+        """Drop terms no surviving row contains. Returns terms dropped.
+
+        Emptying a row is enough to stop it being *retrieved*; it is not
+        enough to stop it being *read*. The vocabulary is a list of every
+        word the corpus has ever contained, it is persisted verbatim in
+        `freq_meta.json`, and after a purge it went on naming the words of
+        the page that was purged. Anyone with the file could recover the bag
+        of words of a page the store had been told to forget, which makes the
+        promise `forget` advertises one it does not keep.
+
+        Columns are compacted here where rows never are, and the asymmetry is
+        the point: rows are the key the semantic matrix and the rank vector
+        are aligned on, so moving one silently re-points both. Nothing
+        outside this class is aligned to a column — `query_vector` looks
+        every term up through `vocab` on each call, `document_frequency` is
+        derived, and the saved matrix is rebuilt from the same file it was
+        written to. So a column can be renumbered and a row cannot.
+        """
+        live = set()
+        for counts in self._counts:
+            live.update(counts)
+        if len(live) == len(self.vocab):
+            return 0
+        remap: Dict[int, int] = {}
+        new_vocab: Dict[str, int] = {}
+        for term, col in sorted(self.vocab.items(), key=lambda kv: kv[1]):
+            if col in live:
+                remap[col] = len(new_vocab)
+                new_vocab[term] = remap[col]
+        dropped = len(self.vocab) - len(new_vocab)
+        self.vocab = new_vocab
+        self._counts = [{remap[c]: n for c, n in counts.items() if c in remap}
+                        for counts in self._counts]
+        self._invalidate()
+        return dropped
+
     @property
     def live_rows(self) -> int:
         """Rows still holding a chunk, tombstones excluded."""
@@ -310,6 +347,19 @@ class FreqMatrix:
         """Cosine similarity of every row against the query."""
         if not self.shape[0]:
             return np.zeros(0, dtype=np.float32)
+        # No columns is a different emptiness from no rows, and it is the one
+        # `forget` produces: rows stay allocated as tombstones because the
+        # semantic matrix and the rank vector are aligned on them, while
+        # `forget_vocabulary` compacts the columns away entirely. Forgetting
+        # the last page therefore leaves 8 rows and 0 terms.
+        #
+        # `query_vector` gets that right and returns a length-0 vector. The
+        # sparse builder does not -- an empty CSR still reports one column --
+        # so the two disagreed and the matmul raised instead of returning
+        # nothing. A corpus with no terms matches no query, which is a real
+        # answer and the one a reader who just forgot everything should get.
+        if not self.shape[1]:
+            return np.zeros(self.shape[0], dtype=np.float32)
         return np.asarray(self.tfidf() @ self.query_vector(query)).ravel()
 
     # -- persistence -------------------------------------------------------
@@ -452,6 +502,28 @@ class EmbeddingMatrix:
             grown = np.zeros((n_rows, self.dim), dtype=np.float32)
             grown[: self._matrix.shape[0]] = self._matrix
             self._matrix = grown
+
+    def forget(self, cids: Iterable[str]) -> int:
+        """Zero and tombstone the rows of retired chunks. Returns how many.
+
+        Zeroing alone was what a purge did, and it left the chunk id in
+        `rows` and in `_row_of`. A chunk id is a hash of `(url, xpath, part)`,
+        so anyone holding a url can recompute it and ask whether it is still
+        there — a purged page answering "yes, I was here" is exactly the
+        question a purge is supposed to make unanswerable. The row itself
+        stays allocated, tombstoned like the frequency matrix's, because rows
+        are the key the two matrices are aligned on.
+        """
+        gone = 0
+        for cid in cids:
+            row = self._row_of.pop(cid, None)
+            if row is None:
+                continue
+            self.rows[row] = ""
+            if self._matrix is not None and row < self._matrix.shape[0]:
+                self._matrix[row] = 0.0
+            gone += 1
+        return gone
 
     def row_of(self, cid: str) -> Optional[int]:
         return self._row_of.get(cid)

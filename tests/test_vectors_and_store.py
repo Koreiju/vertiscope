@@ -376,3 +376,30 @@ def test_hits_navigate_back_to_addresses(built):
         assert addresses, f"hit {hit.cid} anchors nothing"
         for address, _value in addresses:
             assert address.xpath.startswith("/")
+
+
+def test_forgetting_everything_leaves_a_matrix_that_still_answers():
+    """claim: `forget` is a guarantee, so the store must survive keeping it.
+
+    Forgetting the last page is the degenerate shape and the one a reader
+    reaches deliberately: `forget_vocabulary` compacts every column away
+    while the rows stay allocated as tombstones, because rows are the key the
+    semantic matrix and the rank vector are aligned on. That leaves a matrix
+    with rows and no terms.
+
+    The regression this pins raised `matmul: dimension mismatch` out of the
+    next `retrieve` -- an empty CSR reports one column where `query_vector`
+    correctly reports none. A store that crashes when asked about a page it
+    was told to forget has not forgotten it quietly; it has announced it.
+    """
+    fm = FreqMatrix()
+    fm.add("a", "einstein relativity")
+    assert fm.similarities("einstein").any()
+
+    fm.remove("a")
+    fm.forget_vocabulary()
+    assert fm.shape[1] == 0, "the vocabulary still names the forgotten page"
+
+    scores = fm.similarities("einstein")
+    assert len(scores) == fm.shape[0]
+    assert not scores.any(), "a corpus with no terms matched a query"
