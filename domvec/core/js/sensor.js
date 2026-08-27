@@ -1927,6 +1927,20 @@
   }
 
   function repair() {
+    // How long the mutation-chunking phase costs inside the page, kept apart
+    // from the round trip. `drain_ms` on the Python side is the whole
+    // crossing -- WebDriver toll, serialisation, transport -- and the fold
+    // itself is a small fraction of it, so one number could never say
+    // whether a variant made the *algorithm* faster or merely sent less.
+    //
+    // A duration, not a timestamp: it is a difference of two reads, so a
+    // clamped clock (RFP quantises to 16.667ms) coarsens it without biasing
+    // it, and nothing here depends on ordering between frames.
+    //
+    // `performance.now()` is not a layout read, so this does not touch the
+    // property invariants.c2 enforces.
+    var t0 = (typeof performance !== 'undefined' && performance.now)
+      ? performance.now() : Date.now();
     try {
       stats.repairs++;
       var out = [];
@@ -1964,6 +1978,9 @@
       dirtySpans.clear();
       stats.nodes = 0;
     } catch (e) { stats.errors++; }
+    var t1 = (typeof performance !== 'undefined' && performance.now)
+      ? performance.now() : Date.now();
+    stats.repairMs = (stats.repairMs || 0) + (t1 - t0);
   }
 
   // ---- observation (§3 of the injection doc: one per root) -------------
@@ -2080,6 +2097,9 @@
         wordsInterned: stats.wordsInterned,
         chunkDeltas: stats.chunkDeltas, coalesced: stats.coalesced,
         deepPruned: stats.deepPruned,
+        // The mutation-chunking phase's own cost, so the algorithm can be
+        // timed apart from the crossing that carries its result.
+        repairMs: stats.repairMs,
         search: {seen: stats.sr_seen, hit: stats.sr_hit,
                  form: stats.sr_form, type: stats.sr_type,
                  badtype: stats.sr_badtype,
