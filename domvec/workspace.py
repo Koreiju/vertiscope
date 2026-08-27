@@ -35,6 +35,7 @@ from .address import ContentAddress
 from .graphstore import GraphStore
 from .markdown import (MarkdownChunk, RenderReport, read_jsonl,
                        render_trie, write_jsonl)
+from .privacy import STORE_NAME_RE, redact_url, store_name
 from .search import Hit, SearchDiagnostics, ThreeFormIndex
 from .stream import ScanUpdate, StreamingScan
 from .trie import AddressTrie
@@ -87,6 +88,12 @@ class Workspace:
         self.context_window = context_window
 
         self.store = GraphStore(self.path / "graph.kuzu")
+        # After the store, never before. `GraphStore` takes an exclusive OS
+        # lock on the workspace, so reaching this line is the proof that no
+        # other process is writing these files -- which is what makes it safe
+        # to rename them. A workspace someone else holds raises above and is
+        # never touched.
+        self._retire_readable_names()
         self.freq = FreqMatrix.load(self.path / "freq")
         self.embeddings = EmbeddingMatrix() if embedder is not None else None
         self.embedder = embedder
@@ -94,6 +101,65 @@ class Workspace:
         # nothing on the write path calls the embedder directly.
         self.vectors = VectorQueue()
         self._index: Optional[ThreeFormIndex] = None
+
+    # -- on-disk naming ---------------------------------------------------
+    def mirror_path(self, url: str) -> Path:
+        """Where one page's markdown checkpoint lives.
+
+        Named by digest rather than by url. The mirror has to be findable
+        from a url — `forget` finds it that way, and so does every rewrite —
+        but it must not be readable *as* a url, because the directory it
+        lives in is listable by anything on the machine and a listing that
+        names the pages is the browsing history in plain sight.
+
+        The digest is taken over the redacted url, so the same page reached
+        with and without a campaign tag is one file rather than two.
+        """
+        return self.chunks_dir / f"{store_name(url)}.jsonl"
+
+    def _retire_readable_names(self) -> int:
+        """Rename any legacy human-readable mirror to its digest name.
+
+        A migration and not an opt-in, because an opt-in leaves the leak in
+        place in every workspace that already exists — and those are the ones
+        with the history in them. It is cheap (a rename, no rewrite), it is
+        idempotent, and it is driven by the url *inside* each file rather
+        than by parsing the filename, so a name that was truncated or
+        collided in the old scheme still lands in the right place.
+
+        Every failure is skipped rather than raised. A file another process
+        has open, a name that no longer parses, a directory that is read-only
+        — none of those is a reason to refuse to open a workspace, and the
+        next open tries again.
+        """
+        renamed = 0
+        try:
+            entries = sorted(self.chunks_dir.glob("*.jsonl"))
+        except OSError:
+            return 0
+        for legacy in entries:
+            if STORE_NAME_RE.match(legacy.stem):
+                continue
+            try:
+                first = next(iter(read_jsonl(legacy)), None)
+            except Exception:  # noqa: BLE001 - an unreadable mirror is skipped
+                continue
+            url = getattr(first, "url", "") if first is not None else ""
+            if not url:
+                continue
+            target = self.mirror_path(url)
+            try:
+                if target.exists():
+                    # Two spellings of one page, or a re-scan that already
+                    # wrote the new name. The digest file is the current one;
+                    # the legacy file is the copy that must not survive.
+                    legacy.unlink()
+                else:
+                    legacy.replace(target)
+                renamed += 1
+            except OSError:
+                continue
+        return renamed
 
     def __enter__(self) -> "Workspace":
         return self
@@ -173,6 +239,14 @@ class Workspace:
         destroys the index on a partial one. A delta names what it removed;
         it never implies removal by omission.
         """
+        # The url reaches this store redacted or it does not reach it at all.
+        # Every caller above already redacts -- the scan paths at the point
+        # they take the address off the browser, `Sensor.url` on the sensor
+        # path -- and this line is the one that makes that a property of the
+        # store rather than a habit of its callers. It is a no-op on every
+        # path in this file, and it is what a fifth path added later will
+        # hit.
+        url = redact_url(url)
         if addresses is None:
             addresses = [
                 (line.address, line.text, "")
@@ -221,7 +295,7 @@ class Workspace:
         # 16 against 537. The mirror is meant to be the checkpoint the store
         # can be rebuilt from, so a partial write must add to it, not define
         # it.
-        mirror = self.chunks_dir / f"{_slug(url)}.jsonl"
+        mirror = self.mirror_path(url)
         if complete:
             write_jsonl(chunks, mirror)
         else:
@@ -264,6 +338,7 @@ class Workspace:
         from .core.content_tagger import ContentTagger
         from .core.shadow_html_parser import ShadowDOM
 
+        url = redact_url(url)
         tagged = ContentTagger(ShadowDOM(html)).tag()
         trie = AddressTrie.from_tagged(tagged, url)
         report = RenderReport()
@@ -303,11 +378,19 @@ class Workspace:
         from .config import load_config
 
         cfg = config or load_config()
+        # Two spellings, deliberately. `visit` is what the browser is pointed
+        # at and is the reader's own url, whole: a page reached through a
+        # link with a token in it needs that token to render the page that
+        # was meant. `url` is what the store records, and the store has no
+        # use for the token. Dropping it before navigation would have fetched
+        # a different document; keeping it after would have filed the
+        # reader's credentials under a page title.
+        visit, url = url, redact_url(url)
         scan = StreamingScan(url, context_window=self.context_window)
 
         def drive(active) -> None:
             for passno, snapshot in stream_snapshots(
-                active, url, max_duration=duration, pause=pause,
+                active, visit, max_duration=duration, pause=pause,
                 max_snapshots=passes, incremental=incremental,
             ):
                 update = scan.push(snapshot, passno)
@@ -364,6 +447,8 @@ class Workspace:
         from .sensing import Sensor
 
         cfg = config or load_config()
+        # Navigate with the url as given, store the url redacted. See `scan`.
+        visit, url = url, redact_url(url)
         passes: List[ScanUpdate] = []
         totals = {"lines": 0, "chunks": 0, "addresses": 0,
                   "wire": 0, "document": 0}
@@ -373,10 +458,10 @@ class Workspace:
         spine = StreamingScan(url, context_window=self.context_window)
 
         def drive(active) -> None:
-            sensor = Sensor(active, url, budget=self.context_window,
+            sensor = Sensor(active, visit, budget=self.context_window,
                             variants=variants)
             active.set_page_load_timeout(40)
-            active.get(url)
+            active.get(visit)
             time.sleep(pause)
             # The document, once, as the baseline the deltas are measured
             # against. Without it `wire_saving` divided by zero and reported
@@ -691,24 +776,61 @@ class Workspace:
         return stats
 
     def purge(self, url: str = "") -> None:
+        """Unrecord a page, everywhere it is recorded.
+
+        A purge that leaves residue is worse than no purge, because it
+        advertises a guarantee it does not keep. There are five places one
+        page lives, and every one of them is a way to answer "was this read?"
+
+        * the **graph** — page, chunks, addresses and every edge on them;
+        * the **frequency matrix** — the row, *and* the words: a vocabulary
+          is a bag of words of the corpus and it is written to disk as plain
+          json, so a page's terms outlived the page until `forget_vocabulary`;
+        * the **semantic matrix** — zeroed rows still carried the chunk id,
+          which is a hash of the url and so a yes/no oracle for anyone
+          holding one;
+        * the **queue** — chunks waiting to be vectorised hold their markdown
+          in memory. Nothing dropped them, so a page purged before the next
+          flush was purged from the store and then written back into it;
+        * the **mirror** on disk.
+
+        Retire the frequency rows *before* dropping the chunks, while the
+        graph can still say which rows they were. Doing it after leaves rows
+        with no chunk: idf then counts documents that no longer exist, which
+        shifts every score without failing anything.
+
+        **What this does not do.** Content that reached `graph.kuzu` in an
+        *earlier* session survives a single-page purge as bytes in that file:
+        the rows are gone from every query and every index, and the text is
+        still findable with `grep`. Kuzu has no `VACUUM`, and `CHECKPOINT`
+        was measured not to reclaim the pages, so the only scrub is to write
+        the store out again from scratch. `purge()` with no url does exactly
+        that -- it removes the directory -- and is therefore complete;
+        per-page compaction is a rebuild and is not attempted here. Anything
+        written and purged inside one session leaves nothing, because it was
+        never checkpointed. `tests/test_privacy.py` pins both halves.
+        """
         # Through the stored spelling, so `--url https://a.test/` purges the
         # page held as `https://a.test` instead of silently purging nothing.
         url = self.page_url(url) if url else ""
         if url:
-            # Retire the frequency rows *before* dropping the chunks, while
-            # the graph can still say which rows they were. Doing it after
-            # leaves rows with no chunk: idf then counts documents that no
-            # longer exist, which shifts every score without failing anything.
-            for chunk in self.store.chunks(url):
-                self.freq.remove(chunk.cid)
-                if self.embeddings is not None:
-                    row = self.embeddings.row_of(chunk.cid)
-                    if row is not None:
-                        self.embeddings.matrix[row] = 0.0
+            cids = [chunk.cid for chunk in self.store.chunks(url)]
+            for cid in cids:
+                self.freq.remove(cid)
+            if self.embeddings is not None:
+                self.embeddings.forget(cids)
+            self.vectors.forget(cids)
             self.store.purge_page(url)
-            jsonl = self.chunks_dir / f"{_slug(url)}.jsonl"
+            self.freq.forget_vocabulary()
+            jsonl = self.mirror_path(url)
             if jsonl.exists():
                 jsonl.unlink()
+            # Written through immediately. Everything above is in memory
+            # until `close`, so a forget followed by a crash -- or by a
+            # session the reader simply never closed cleanly -- left the
+            # words and the rows of the forgotten page on disk. A forget has
+            # to survive the process it was asked in.
+            self.freq.save(self.path / "freq")
         else:
             self.close()
             shutil.rmtree(self.path, ignore_errors=True)
@@ -743,11 +865,18 @@ def _is_document(url: str) -> bool:
 
 
 def _slug(url: str) -> str:
-    """A filesystem-safe name for a URL.
+    """The old, readable mirror name. Kept only to recognise its own output.
 
-    Truncated, so a pathological query string cannot exceed the filesystem's
-    name limit — and hashed at the tail, so two long URLs sharing a prefix do
-    not collide into one file after truncation.
+    `ls build/chunks/` printed a browsing history: `en.wikipedia.org-wiki-
+    Insomnia.jsonl` says everything about a page without opening it, and a
+    directory listing is available to anything that can read the disk and to
+    every backup that ever ran. The name is a digest now
+    (`domvec.privacy.store_name`).
+
+    This function survives so that :meth:`Workspace._retire_readable_names`
+    can tell a legacy file from a migrated one without a manifest — a
+    manifest mapping digests back to urls would have re-created the leak in a
+    second file.
     """
     import hashlib
 

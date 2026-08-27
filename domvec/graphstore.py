@@ -44,6 +44,7 @@ from urllib.parse import urljoin, urlsplit, urlunsplit
 
 from .address import ContentAddress
 from .markdown import MarkdownChunk
+from .privacy import redact_url
 
 __all__ = ["GraphStore", "StoredChunk", "canonical_url"]
 
@@ -69,14 +70,30 @@ _SCHEMA = [
 
 
 def canonical_url(url: str, base: str = "") -> str:
-    """Absolutise and strip the fragment, so link targets can be matched.
+    """Absolutise, redact, and strip the fragment, so link targets can match.
 
     The fragment is dropped because it addresses a position *within* a
     document and the graph's Page node is the document. Keeping it would make
     `a.html` and `a.html#top` two pages that are one page.
+
+    The query is **not** dropped, and the reason is the same one: for a great
+    many pages the query is the document. `?id=123`, `?v=<id>`, `?page=2` and
+    `?query=university+library` all name which page this is, and a store that
+    threw them away would answer with a different document than the one that
+    was read.
+
+    What is dropped is everything in the query that is not the document:
+    campaign and click identifiers, which are attached by whoever sent you
+    and change nothing the page says, and credential-shaped values, which a
+    local database has no business holding. `domvec.privacy` owns those
+    rules; this function is where they meet the store, so that a url looked
+    *up* is redacted exactly as the url that was stored. Userinfo goes with
+    them — `https://user:pass@host/` is a password in a database with no
+    password on it.
     """
     if base:
         url = urljoin(base, url)
+    url = redact_url(url)
     try:
         parts = urlsplit(url)
     except ValueError:

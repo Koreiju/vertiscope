@@ -3046,7 +3046,16 @@ class Repl:
                 stored = self.workspace.page_url(target)
                 self.workspace.purge(target)
                 self._forget_session(stored)
-                self.state.buffers.note(f"forgot {target}")
+                # Said out loud, because a promise with an exception in it is
+                # only kept if the exception is stated. A page that was
+                # already on disk when this session started is gone from
+                # every index and still present as bytes in `graph.kuzu`
+                # until the store is written out again -- kuzu has no
+                # vacuum. `forget all` removes the directory and so has no
+                # such gap.
+                self.state.buffers.note(
+                    f"forgot {target} — indexes clear; earlier sessions' "
+                    "bytes remain in graph.kuzu until 'forget all'")
         except Exception as exc:  # noqa: BLE001
             self.state.buffers.note(f"forget: {type(exc).__name__}: {exc}")
             return True

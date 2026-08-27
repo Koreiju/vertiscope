@@ -22,6 +22,7 @@ from typing import Dict, List, Optional
 
 from .address import ContentAddress
 from .markdown import MarkdownChunk, MarkdownLine
+from .privacy import redact_url
 
 _JS = (pathlib.Path(__file__).parent / "core" / "js" / "sensor.js")
 
@@ -239,6 +240,24 @@ class Sensor:
             self._shapes = []
             self.reboots += 1
             return self.driver.execute_script(script, *args)
+
+    # The address a page is filed under, and the one place it is decided.
+    #
+    # A url reaches this object four ways -- the constructor, a re-boot after
+    # the document was replaced, the page stating its own address in a
+    # payload, and a gesture that navigated -- and every one of them is a url
+    # the browser hands over whole, session tokens and campaign tags
+    # included. Whatever is set here becomes the url on every address the
+    # sensor emits, so it is the last point before the store where a
+    # credential can be turned away. A plain attribute would have needed the
+    # same call written four times and correct in all four.
+    @property
+    def url(self) -> str:
+        return self._url
+
+    @url.setter
+    def url(self, value: str) -> None:
+        self._url = redact_url(value or "")
 
     def _current_url(self) -> str:
         try:

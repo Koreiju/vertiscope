@@ -12,6 +12,7 @@ import pathlib
 import pytest
 
 from domvec.markdown import read_jsonl
+from domvec.privacy import store_name
 from domvec.workspace import Workspace, _slug
 
 CORPUS = pathlib.Path(__file__).parent / "corpus"
@@ -44,7 +45,7 @@ def test_indexing_writes_all_three_stores(ws):
     stats = ws.stats()
     assert stats["chunks"] == result.chunks
     assert stats["freq_rows"] == result.chunks
-    assert (ws.chunks_dir / f"{_slug(url)}.jsonl").exists()
+    assert ws.mirror_path(url).exists()
 
 
 def test_every_chunk_has_a_frequency_row(ws):
@@ -62,7 +63,7 @@ def test_every_chunk_has_a_frequency_row(ws):
 def test_the_jsonl_matches_what_was_stored(ws):
     url, html = _html()
     ws.index_html(html, url)
-    from_file = list(read_jsonl(ws.chunks_dir / f"{_slug(url)}.jsonl"))
+    from_file = list(read_jsonl(ws.mirror_path(url)))
     from_graph = {c.cid: c for c in ws.store.chunks(url)}
     assert len(from_file) == len(from_graph)
     for chunk in from_file:
@@ -164,26 +165,96 @@ def test_reopening_and_adding_keeps_the_earlier_rows(tmp_path):
 def test_purging_a_page_removes_it_from_the_graph_and_disk(ws):
     url, html = _html()
     ws.index_html(html, url)
-    assert (ws.chunks_dir / f"{_slug(url)}.jsonl").exists()
+    assert ws.mirror_path(url).exists()
 
     ws.purge(url)
     assert ws.stats()["chunks"] == 0
-    assert not (ws.chunks_dir / f"{_slug(url)}.jsonl").exists()
+    assert not ws.mirror_path(url).exists()
 
 
-# --- slugs ------------------------------------------------------------------
+_PAGE = "<html><body><h1>Title</h1><p>Some words here.</p></body></html>"
 
 
-def test_slug_is_filesystem_safe():
-    slug = _slug("https://x.test/a/b?q=1&r=2#frag")
-    assert "/" not in slug and "?" not in slug and "#" not in slug
+# --- store names ------------------------------------------------------------
+#
+# The old scheme kept the url in the filename, which made `ls chunks/` a
+# browsing history readable without opening anything. What replaced it has to
+# stay filesystem-safe and collision-free -- the two properties the slug was
+# there for -- while disclosing nothing.
+
+
+def test_a_store_name_is_filesystem_safe():
+    name = store_name("https://x.test/a/b?q=1&r=2#frag")
+    assert "/" not in name and "?" not in name and "#" not in name
 
 
 def test_long_urls_sharing_a_prefix_do_not_collide():
     """Truncation without a hash would map two pages to one file."""
     base = "https://x.test/" + "a" * 100
-    assert _slug(base + "/one") != _slug(base + "/two")
-    assert len(_slug(base + "/one")) <= 60
+    assert store_name(base + "/one") != store_name(base + "/two")
+    assert len(store_name(base + "/one")) <= 60
+
+
+def test_a_store_name_discloses_no_part_of_the_url():
+    """The name is the whole disclosure surface of a directory listing."""
+    url = "https://en.wikipedia.org/wiki/Insomnia?utm_source=x"
+    name = store_name(url)
+    for fragment in ("wikipedia", "wiki", "Insomnia", "insomnia", "https",
+                     "en", "org", "utm"):
+        assert fragment not in name
+
+
+def test_a_listing_of_the_chunk_directory_is_not_a_history(ws):
+    """The whole of B3: what `ls` prints must not name what was read."""
+    ws.index_html(_PAGE, "https://secret.example/very-private-topic")
+    listing = " ".join(p.name for p in ws.chunks_dir.iterdir())
+    assert listing
+    for fragment in ("secret", "example", "private", "topic"):
+        assert fragment not in listing.lower()
+
+
+def test_a_page_is_stored_under_one_name_however_it_was_reached(ws):
+    """Campaign tags must not split one page into two mirrors."""
+    plain = "https://a.test/article"
+    tagged = "https://a.test/article?utm_source=newsletter&fbclid=123abc"
+    ws.index_html(_PAGE, plain)
+    ws.index_html(_PAGE, tagged)
+    assert len(list(ws.chunks_dir.glob("*.jsonl"))) == 1
+
+
+def test_a_legacy_readable_mirror_is_renamed_on_open(tmp_path):
+    """Existing workspaces are migrated, not left leaking.
+
+    An opt-in would have left the readable names in place in exactly the
+    workspaces that have a history in them.
+    """
+    from domvec.markdown import read_jsonl as _read
+
+    path = tmp_path / "ws"
+    url = "https://en.wikipedia.org/wiki/Insomnia"
+    with Workspace(path) as ws:
+        ws.index_html(_PAGE, url)
+        digest = ws.mirror_path(url)
+        legacy = ws.chunks_dir / f"{_slug(url)}.jsonl"
+        digest.replace(legacy)          # put the old scheme back on disk
+
+    assert legacy.exists()
+    with Workspace(path) as ws:
+        assert not legacy.exists()
+        assert ws.mirror_path(url).exists()
+        assert list(_read(ws.mirror_path(url)))
+
+
+def test_migration_skips_a_file_it_cannot_read(tmp_path):
+    """A junk file is left alone rather than taking the workspace down."""
+    path = tmp_path / "ws"
+    path.mkdir()
+    (path / "chunks").mkdir()
+    junk = path / "chunks" / "not-a-mirror.jsonl"
+    junk.write_text("this is not json\n", encoding="utf-8")
+    with Workspace(path) as ws:
+        assert ws.chunks_dir.exists()
+    assert junk.exists()
 
 
 # --- semantic vectors -------------------------------------------------------

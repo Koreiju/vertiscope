@@ -54,6 +54,67 @@ logger = logging.getLogger(__name__)
 #     after a single poll, whereas scrollHeight polling always burns the full
 #     stable_for window.
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# The names this scanner leaves on `window`.
+#
+# Everything below installs page-visible state: an observer, two configuration
+# numbers, the chunk engine's handle, and the element the pagination probe
+# picked. All of them used to be enumerable own properties under a fixed
+# `_wfh` prefix, which is two separate problems.
+#
+# A fixed prefix is a *signature*: one regex over `Object.keys(window)` names
+# the tool that is reading the page, and a reader who came here specifically
+# not to be profiled is then profiled by the thing they read the page with.
+# Enumerability is what makes that regex a one-liner rather than a diff
+# against a clean profile.
+#
+# So the names are drawn per scan from the shapes ordinary pages leave on
+# `window`, and every one is installed non-enumerable. The honest claim -- the
+# same one `sensing.py` makes about the sensor handle -- is that this raises
+# the cost of finding them, not that it makes them unfindable:
+# `Object.getOwnPropertyNames` still lists a non-enumerable own property. What
+# it removes is the cheap, targeted probe.
+#
+# The placeholders are kept literal in the JS below so the source stays
+# greppable; `ShadowDOMScanner._js` substitutes the session's names on the way
+# to the browser, including into the chunk engine's own source.
+# ---------------------------------------------------------------------------
+PAGE_GLOBALS = ("_wfhEngine", "_wfhCharBudget", "_wfhDebounceMs",
+                "_wfhMO", "_wfhMOReady", "_wfhMOTimer", "_wfhPaginateTop")
+
+
+def _new_page_globals() -> Dict[str, str]:
+    """One unremarkable name per global, distinct within the session."""
+    from ..sensing import Sensor
+
+    chosen: Dict[str, str] = {}
+    taken = set()
+    for i, name in enumerate(PAGE_GLOBALS):
+        candidate = Sensor._plausible_name(f"{name}{i}")
+        while candidate in taken:
+            candidate = Sensor._plausible_name(f"{name}{i}{len(taken)}")
+        taken.add(candidate)
+        chosen[name] = candidate
+    return chosen
+
+
+# Redefine an already-assigned global as non-enumerable. Used for the chunk
+# engine's handle, which the engine's own source assigns to itself.
+HIDE_GLOBAL_JS = (
+    "var k = arguments[0];"
+    "if (!Object.prototype.hasOwnProperty.call(window, k)) return false;"
+    "var v = window[k];"
+    "try { delete window[k]; } catch (e) { return false; }"
+    "Object.defineProperty(window, k, "
+    "{value: v, writable: true, configurable: true, enumerable: false});"
+    "return true;"
+)
+
+# Remove one global entirely. A property that is gone cannot be found at all,
+# which is strictly better than hidden wherever the value is no longer needed.
+DROP_GLOBAL_JS = "try { delete window[arguments[0]]; } catch (e) {}"
+
+
 INSTALL_OBSERVER_JS = """
 (function() {
     if (window._wfhMO) return;
@@ -370,6 +431,9 @@ class ShadowDOMScanner:
 
     def __init__(self, driver: WebDriver):
         self.driver = driver
+        # Fresh per scanner, so two sessions do not share a name a page could
+        # correlate them by.
+        self._globals = _new_page_globals()
         self.master_tree: Optional[dict] = None
         self._changes_detected: bool = False
         self._added_nodes: list = []
@@ -439,6 +503,31 @@ class ShadowDOMScanner:
         """
         return {}
 
+    def _js(self, source: str) -> str:
+        """This session's spelling of a script written against placeholders.
+
+        Longest placeholder first, because `_wfhMO` is a prefix of
+        `_wfhMOReady`: substituting the short one first would rewrite
+        `window._wfhMOReady` into a name that belongs to neither.
+        """
+        for placeholder in sorted(self._globals, key=len, reverse=True):
+            source = source.replace(placeholder, self._globals[placeholder])
+        return source
+
+    def _hide_global(self, name: str) -> None:
+        """Make one already-assigned global non-enumerable. Never fatal."""
+        try:
+            self.driver.execute_script(HIDE_GLOBAL_JS, self._globals[name])
+        except Exception as exc:  # noqa: BLE001 - a page that refuses still scans
+            logger.debug("[Scanner] could not hide %s: %s", name, exc)
+
+    def _drop_global(self, name: str) -> None:
+        """Remove one global outright. Never fatal."""
+        try:
+            self.driver.execute_script(DROP_GLOBAL_JS, self._globals[name])
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("[Scanner] could not drop %s: %s", name, exc)
+
     def _inject_chunk_engine(self):
         # Single canonical location. The upstream two-path fallback existed
         # only because the asset lived in the mapper package; here it ships
@@ -457,11 +546,26 @@ class ShadowDOMScanner:
         # The engine reads window._wfhCharBudget and window._wfhDebounceMs
         # at startup. Without this prefix the engine fell back to its
         # hardcoded 2048 default, so --char-budget was a no-op in JS mode.
+        # Non-enumerable from the moment they exist, rather than assigned and
+        # hidden afterwards: between the two statements they would have been
+        # listable, and a MutationObserver on the page runs in that gap.
         self.driver.execute_script(
-            f"window._wfhCharBudget = {char_budget};"
-            f"window._wfhDebounceMs = 80;"
+            self._js(
+                "Object.defineProperty(window, '_wfhCharBudget', "
+                f"{{value: {char_budget}, writable: true, "
+                "configurable: true, enumerable: false});"
+                "Object.defineProperty(window, '_wfhDebounceMs', "
+                "{value: 80, writable: true, configurable: true, "
+                "enumerable: false});"
+            )
         )
-        self.driver.execute_script(engine_js)
+        self.driver.execute_script(self._js(engine_js))
+        # The engine assigns its own handle, so it can only be hidden after
+        # the fact. The two numbers it read at boot are not needed again and
+        # are deleted rather than hidden.
+        self._hide_global("_wfhEngine")
+        self._drop_global("_wfhCharBudget")
+        self._drop_global("_wfhDebounceMs")
         logger.info("JS chunk engine injected (char_budget=%d)", char_budget)
 
     # Combined fetch — pulls both the delta queue AND the engine stats in
@@ -482,7 +586,8 @@ class ShadowDOMScanner:
     def _fetch_deltas_and_stats(self):
         """Single round-trip for delta drain + instrumentation counters."""
         try:
-            res = self.driver.execute_script(self._FETCH_DELTAS_AND_STATS_JS)
+            res = self.driver.execute_script(
+                self._js(self._FETCH_DELTAS_AND_STATS_JS))
             return res or {"deltas": [], "stats": None}
         except Exception:
             return {"deltas": [], "stats": None}
@@ -490,17 +595,17 @@ class ShadowDOMScanner:
     def _fetch_engine_stats(self):
         """Fetch the JS engine's instrumentation counters for diagnostics."""
         try:
-            return self.driver.execute_script(
+            return self.driver.execute_script(self._js(
                 "return window._wfhEngine && window._wfhEngine.getStats "
                 "? window._wfhEngine.getStats() : null;"
-            )
+            ))
         except Exception:
             return None
 
     def _fetch_js_deltas(self):
-        return self.driver.execute_script(
+        return self.driver.execute_script(self._js(
             "return window._wfhEngine ? window._wfhEngine.getDeltaQueue() : [];"
-        )
+        ))
 
     def scan(
         self, url: str, max_duration: int = 60, pause: float = 1.0,
@@ -866,7 +971,10 @@ class ShadowDOMScanner:
             return
 
         if self._use_js_engine:
-            self.driver.execute_script("window._wfhEngine = undefined;")
+            # Deleted, not set to undefined. `window.x = undefined` leaves
+            # the own property in place, so the page kept a name that said a
+            # scanner had been here after the scanner had gone.
+            self._drop_global("_wfhEngine")
             time.sleep(0.2)
 
         try:
@@ -1218,7 +1326,9 @@ class ShadowDOMScanner:
         Returns True iff a click was dispatched.
         """
         try:
-            ranked = self.driver.execute_script(self._PAGINATE_RANK_JS)
+            ranked = self.driver.execute_script(
+                self._js(self._PAGINATE_RANK_JS))
+            self._hide_global("_wfhPaginateTop")
         except Exception as exc:
             logger.debug("[Scanner] _paginate ranking failed: %s", exc)
             return False
@@ -1258,13 +1368,17 @@ class ShadowDOMScanner:
             )
             return False
         try:
-            ok = self.driver.execute_script(
+            ok = self.driver.execute_script(self._js(
                 "if (window._wfhPaginateTop) { "
                 "  try { window._wfhPaginateTop.scrollIntoView({block:'center'}); } catch(e) {} "
                 "  window._wfhPaginateTop.click(); "
                 "  return true; "
                 "} return false;"
-            )
+            ))
+            # The probe holds a live element reference. Keeping it past the
+            # click pins a DOM node the page has moved on from, and leaves a
+            # global whose value is "the thing that was clicked".
+            self._drop_global("_wfhPaginateTop")
             if not ok:
                 logger.info("[Scanner] _paginate: target element was missing.")
                 return False
@@ -1283,7 +1397,9 @@ class ShadowDOMScanner:
         old document.
         """
         try:
-            self.driver.execute_script(INSTALL_OBSERVER_JS)
+            self.driver.execute_script(self._js(INSTALL_OBSERVER_JS))
+            for name in ("_wfhMO", "_wfhMOReady", "_wfhMOTimer"):
+                self._hide_global(name)
         except Exception as exc:
             logger.debug(
                 "MutationObserver install failed (%s); "
@@ -1305,7 +1421,7 @@ class ShadowDOMScanner:
         while time.time() - start < timeout:
             time.sleep(self.POLL_INTERVAL)
             try:
-                if self.driver.execute_script(CHECK_OBSERVER_JS):
+                if self.driver.execute_script(self._js(CHECK_OBSERVER_JS)):
                     return
             except Exception:
                 # Observer unavailable — degrade gracefully.
