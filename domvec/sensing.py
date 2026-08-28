@@ -18,11 +18,12 @@ import pathlib
 import re
 import time
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from .address import ContentAddress
 from .markdown import MarkdownChunk, MarkdownLine
 from .privacy import redact_url
+from .trie import content_hash
 
 _JS = (pathlib.Path(__file__).parent / "core" / "js" / "sensor.js")
 
@@ -160,7 +161,7 @@ class Sensor:
         # so the mapping has to be held on this side to translate one to the
         # other. Without it a departed node's address stayed in the trie and
         # went on rendering after the element was gone.
-        self._chunk_addrs: Dict[int, List[ContentAddress]] = {}
+        self._chunk_addrs: Dict[int, List[Tuple[ContentAddress, str]]] = {}
         self.boot_ms = 0.0
         self.reboots = 0
         self.steps = 0
@@ -314,11 +315,30 @@ class Sensor:
         for cid, addrs in by_chunk.items():
             previous = self._chunk_addrs.get(cid)
             if previous:
-                fresh = {a.key() for a in addrs}
-                gone.extend(a for a in previous if a.key() not in fresh)
+                fresh = {a.key() for a, _h in addrs}
+                # Content that moved *within* this chunk has not left it.
+                #
+                # A chunk keeps its id across a shift -- `chunkOf` is a WeakMap
+                # on the node, so the id is stable -- but its addresses are
+                # positional, so inserting one <li> at the head makes the same
+                # chunk emit li[2..N+1] where it emitted li[1..N]. Comparing
+                # address sets alone then reads every one of them as departed,
+                # and one node arriving manufactured N phantom removals: 400 of
+                # them for a 400-item list, which the trie faithfully applied,
+                # destroying 399 identities the re-anchor had just preserved.
+                #
+                # An address is only gone when its *content* is gone from the
+                # chunk too. Identical strings are indistinguishable here, as
+                # they are in the trie's own re-anchor (THEORY Prop. 19.3): if
+                # one of two identical values leaves, the survivor's digest
+                # keeps both alive. Harmless for the same reason -- nothing
+                # downstream can tell them apart.
+                still = {h for _a, h in addrs}
+                gone.extend(a for a, h in previous
+                            if a.key() not in fresh and h not in still)
             self._chunk_addrs[cid] = addrs
         for cid in payload.get("removed") or []:
-            gone.extend(self._chunk_addrs.pop(int(cid), []))
+            gone.extend(a for a, _h in self._chunk_addrs.pop(int(cid), []))
         decode_ms = (time.perf_counter() - started) * 1000
 
         return SensePass(
@@ -474,7 +494,10 @@ class Sensor:
                     self.url, self._xpath(path),
                     taxonomy, f"{accessor}|{rule}")
                 units.append((address, str(text)))
-                mine.append(address)
+                # The value's digest travels with the address, because
+                # "no longer emitted at this address" and "gone" are
+                # different facts and only the second is a removal.
+                mine.append((address, content_hash(str(text))))
                 total_lines += 1
         return units, by_chunk, total_lines
 
