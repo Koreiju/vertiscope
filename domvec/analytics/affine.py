@@ -161,7 +161,10 @@ class _Emitted:
     line and nothing else can explain it.
     """
 
+    # ident -> count, where ident is (xpath, accessor). Duplication.
     exact: Dict[str, int] = field(default_factory=dict)
+    # the xpaths those idents cover. Coverage.
+    exact_paths: Set[str] = field(default_factory=set)
     owners: Dict[str, int] = field(default_factory=dict)
     text_at: Dict[str, str] = field(default_factory=dict)
     text_by_parent: Dict[str, str] = field(default_factory=dict)
@@ -177,7 +180,23 @@ class _Emitted:
             if address is None:
                 continue
             path = address.xpath
-            out.exact[path] = out.exact.get(path, 0) + 1
+            # Identity is (xpath, accessor), not xpath alone.
+            #
+            # A `ContentAddress` names *which detection at which node*. One
+            # element legitimately yields several units -- an `aria-label`
+            # and a `title` on the same <svg> are two facts about one node,
+            # not one fact stated twice -- and they carry the same xpath with
+            # different accessors.
+            #
+            # Keyed on xpath alone this counted them as the same address
+            # emitted twice, and reported `page->trie` injectivity at 87.7%
+            # with 78 duplicates. That reading is not merely wrong, it is
+            # impossible: the trie is keyed by address, so it cannot hold one
+            # address twice, and any duplication it appeared to show was the
+            # metric discarding half the key.
+            ident = f"{path}\t{address.accessor}"
+            out.exact[ident] = out.exact.get(ident, 0) + 1
+            out.exact_paths.add(path)
             owner = _owner(path)
             out.owners[owner] = out.owners.get(owner, 0) + 1
             out.paths_by_owner.setdefault(owner, set()).add(path)
@@ -213,7 +232,7 @@ class _Emitted:
         merge; it cannot excuse a loss, because a lost fragment appears in no
         ancestor's text.
         """
-        if xpath in self.exact:
+        if xpath in self.exact_paths:
             return True
         owner = _owner(xpath)
         if owner in self.owners:
@@ -294,7 +313,8 @@ def score_arrow(name: str, truth: PageTruth,
     # an address the composed tree does not contain.
     page_paths = {u.xpath for u in truth.units}
     page_owners = {_owner(u.xpath) for u in truth.units}
-    for path, count in emitted.exact.items():
+    for ident, count in emitted.exact.items():
+        path = ident.split("	", 1)[0]
         if path in page_paths or _owner(path) in page_owners:
             continue
         score.overall.fp += count

@@ -154,10 +154,25 @@ def measure_page(driver, url: str, *, scrolls: int = 2,
         with phases.phase("wire_ms"):
             try:
                 frame = render_wireframe(units, styles, width=200)
+                # One entry per address the drawing places, not one per line
+                # it occupies. A cell wrapped across four rows is four
+                # `WireLine`s carrying the same address list -- one place on
+                # the canvas, drawn on four rows -- and counting rows made a
+                # wrapping layout look like a renderer drawing things twice:
+                # injectivity read 67.8% on a drawing that repeats nothing.
+                # The text of the continuation rows is joined back on, so the
+                # merge check still sees the whole cell.
+                seen: Dict[str, int] = {}
                 for line in frame.lines:
                     for a in (line.addresses or []):
-                        wire_addresses.append(a)
-                        wire_texts.append(line.text)
+                        at = seen.get(a.xpath)
+                        if at is None:
+                            seen[a.xpath] = len(wire_addresses)
+                            wire_addresses.append(a)
+                            wire_texts.append(line.text)
+                        else:
+                            wire_texts[at] = (wire_texts[at] + " "
+                                              + line.text).strip()
             except Exception:  # noqa: BLE001
                 wire_addresses, wire_texts = [], []
 

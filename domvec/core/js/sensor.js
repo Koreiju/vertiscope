@@ -144,12 +144,25 @@
   // sees, which makes a structure-native render of the page a render of its
   // metadata. The tagger has never traversed head; the sensor was the only
   // one that did.
-  var SKIP_TAGS = { SCRIPT: 1, STYLE: 1, NOSCRIPT: 1, TEMPLATE: 1, svg: 1,
+  var SKIP_TAGS = { SCRIPT: 1, STYLE: 1, NOSCRIPT: 1, TEMPLATE: 1,
                     HEAD: 1 };
   // Drawn as a single control, never descended into. Their children exist,
   // and a reader reaches them by acting on the control -- which is exactly
   // what a browser does with them.
-  var FOLDED = { SELECT: 1, DATALIST: 1, OPTGROUP: 1 };
+  //
+  // `svg` moved here from SKIP_TAGS. Skipping it was right about the
+  // children -- a few hundred <path> elements are geometry, not content --
+  // and wrong about the element, which carries the picture's accessible
+  // name. Skipped outright, the fold never saw it, so nothing entered the
+  // trie: every logo on lit.dev ("Adobe", "Cisco", "Google", "IBM",
+  // "Alaska Airlines") was absent from the map, and `attr` capture measured
+  // 72% against a page-side ground truth that counts them.
+  //
+  // Folded instead, the element is emitted with its own detections and its
+  // children are not descended -- the exact shape a <select> already had.
+  // Ordinals are per tag name, so admitting `svg` renumbers only `svg`
+  // siblings and moves no other address.
+  var FOLDED = { SELECT: 1, DATALIST: 1, OPTGROUP: 1, svg: 1 };
   // The detectable-content space of docs/CONTENT_EXTRACTION_RULES, in the
   // page. This list was ten attributes, chosen by hand, and the cost of that
   // was measured against the host tagger on one Wikipedia article: `resource`
