@@ -128,7 +128,8 @@ def measure_page(driver, url: str, *, scrolls: int = 2,
         # Units into the trie. This is the write side of the map.
         with phases.phase("trie_ms"):
             spine.absorb(snapshot.units, snapshot.passno,
-                         removed=snapshot.removed_addresses)
+                         removed=snapshot.removed_addresses,
+                         moved=snapshot.moved_addresses)
     phases.add("fold_ms", fold_ms)
 
     # Both projections are read back out of the trie.

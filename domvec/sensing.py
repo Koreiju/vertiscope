@@ -78,6 +78,12 @@ class SensePass:
     # Addresses that left the composed tree, resolved from the sensor's own
     # chunk ids. The store is keyed by address, not by the sensor's grouping.
     removed_addresses: List[ContentAddress] = field(default_factory=list)
+    # (old address -> new address) for chunks whose content is unchanged
+    # and whose position moved. The values are not on the wire: the trie
+    # holds them, so `StreamingScan.absorb` rebuilds the units from its
+    # own store rather than from a payload that re-sent what it had.
+    moved_addresses: List[Tuple[ContentAddress, ContentAddress]] = field(
+        default_factory=list)
     addresses: int = 0
     lines: int = 0
     settled: bool = False
@@ -122,6 +128,30 @@ class ScrollStep:
     step_ms: float = 0.0
     # Why a detected pager was not pressed, one count per gate.
     gates: Dict[str, int] = field(default_factory=dict)
+
+
+def _common_prefix(paths: List[str]) -> str:
+    """The deepest xpath step every one of these addresses shares.
+
+    A chunk's addresses all hang off its root, so their common prefix *is*
+    that root -- and taking it from the addresses avoids storing the root
+    separately and letting the two disagree. Cut on "/" so the prefix is a
+    whole step: the strings "/html/body/ul/li[1]" and "/html/body/ul/li[12]"
+    share the characters "/html/body/ul/li[1" and no such element exists.
+    """
+    if not paths:
+        return ""
+    head = paths[0]
+    for other in paths[1:]:
+        limit = min(len(head), len(other))
+        i = 0
+        while i < limit and head[i] == other[i]:
+            i += 1
+        head = head[:i]
+        if not head:
+            return ""
+    cut = head.rfind("/")
+    return head[:cut] if cut > 0 else head
 
 
 class Sensor:
@@ -305,9 +335,9 @@ class Sensor:
         self._shapes.extend(payload.get("shapes") or [])
         contents = [str(c.get("content")) for c in (payload.get("chunks") or [])
                     if c.get("content") is not None]
+        flags = (payload.get("stats") or {}).get("variants") or {}
         units, by_chunk, lines = self._decode(
-            payload.get("chunks") or [],
-            (payload.get("stats") or {}).get("variants") or {})
+            payload.get("chunks") or [], flags)
         # A chunk the sensor now reports is the authority on what it holds;
         # anything it held on an earlier pass and no longer emits has left the
         # composed tree and must leave the trie too.
@@ -339,6 +369,41 @@ class Sensor:
             self._chunk_addrs[cid] = addrs
         for cid in payload.get("removed") or []:
             gone.extend(a for a, _h in self._chunk_addrs.pop(int(cid), []))
+
+        # Chunks that moved without changing. The fold sent the new root path
+        # and nothing else, because the receiver already holds every line of
+        # an unchanged chunk; what it does not hold is where they went.
+        #
+        # The old addresses are the ones this chunk emitted last time, and
+        # they all share the chunk's old root as a prefix, so the shift is one
+        # prefix substitution applied across them. Rebuilding the addresses
+        # here keeps `_chunk_addrs` true for the next pass, which is what the
+        # removal comparison above is judged against.
+        moved: List[Tuple[ContentAddress, ContentAddress]] = []
+        for entry in payload.get("moves") or []:
+            try:
+                cid, raw_path = int(entry[0]), entry[1]
+            except (TypeError, ValueError, IndexError):
+                continue
+            known = self._chunk_addrs.get(cid)
+            if not known:
+                continue
+            self._paths([[0, "", list(raw_path), -1, 0]], flags)
+            new_root = self._xpath(list(raw_path))
+            old_root = _common_prefix([a.xpath for a, _h in known])
+            if not old_root or old_root == new_root:
+                continue
+            rebuilt: List[Tuple[ContentAddress, str]] = []
+            for address, digest in known:
+                if not address.xpath.startswith(old_root):
+                    rebuilt.append((address, digest))
+                    continue
+                shifted = ContentAddress(
+                    address.url, new_root + address.xpath[len(old_root):],
+                    address.tag, address.accessor)
+                moved.append((address, shifted))
+                rebuilt.append((shifted, digest))
+            self._chunk_addrs[cid] = rebuilt
         decode_ms = (time.perf_counter() - started) * 1000
 
         return SensePass(
@@ -346,6 +411,7 @@ class Sensor:
             units=units,
             removed=list(payload.get("removed") or []),
             removed_addresses=gone,
+            moved_addresses=moved,
             addresses=len(units),
             lines=lines,
             settled=bool(payload.get("settled")),

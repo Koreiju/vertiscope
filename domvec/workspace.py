@@ -485,7 +485,8 @@ class Workspace:
                 # address-level: the sensor names departures by its own chunk
                 # grouping, which the trie does not share.
                 update = spine.absorb(sp.units, sp.passno,
-                                      removed=sp.removed_addresses)
+                                      removed=sp.removed_addresses,
+                                      moved=sp.moved_addresses)
                 dirty = spine.dirty_chunks(update)
                 if dirty:
                     self.ingest_chunks(url, dirty, complete=False)

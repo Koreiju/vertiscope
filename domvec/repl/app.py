@@ -304,6 +304,7 @@ class Repl:
             from ..stream import StreamingScan
             self._spine = StreamingScan(url, context_window=1200)
         update = self._spine.absorb(delta.units, delta.passno,
+                                    moved=delta.moved_addresses,
                                     removed=delta.removed_addresses)
         dirty = self._spine.dirty_chunks(update)
         for chunk in dirty:
@@ -652,7 +653,9 @@ class Repl:
         self._sensor = sensor
         spine = StreamingScan(engine, context_window=1200)
         sp = sensor.drain(0)
-        update = spine.absorb(sp.units, sp.passno, removed=sp.removed_addresses)
+        update = spine.absorb(sp.units, sp.passno,
+                              removed=sp.removed_addresses,
+                              moved=sp.moved_addresses)
         chunks = list(update.all_chunks or spine.dirty_chunks(update))
         if not chunks:
             from ..markdown import render_trie

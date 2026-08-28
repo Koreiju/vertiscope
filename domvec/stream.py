@@ -217,7 +217,7 @@ class StreamingScan:
         self.updates.append(update)
         return update
 
-    def absorb(self, units, passno: int = 0, removed=()) -> ScanUpdate:
+    def absorb(self, units, passno: int = 0, removed=(), moved=()) -> ScanUpdate:
         """Fold in already-addressed units from the in-page sensor.
 
         The peer of :meth:`push`. That one receives a whole snapshot and has
@@ -240,6 +240,28 @@ class StreamingScan:
         t0 = time.perf_counter()
         if self.trie is None:
             self.trie = AddressTrie()
+        # Chunks that moved without changing arrive as address pairs, with
+        # no values: the fold did not re-send content the receiver already
+        # holds. The trie is that receiver, so the units are rebuilt from it
+        # -- read the value sitting at the old address, re-offer it at the
+        # new one -- and then travel the ordinary path, where `apply`'s
+        # re-anchor recognises them as moves and carries their uids across.
+        #
+        # Rebuilt here rather than in `sensing` because this is where the
+        # trie is. The sensor knows what moved; only the store knows what it
+        # holds.
+        if moved:
+            carried = list(units)
+            seen = {address.key() for address, _value in carried}
+            for old_address, new_address in moved:
+                if new_address.key() in seen:
+                    continue
+                node = self.trie.find(old_address)
+                if node is None or node.value is None:
+                    continue
+                carried.append((new_address, node.value))
+                seen.add(new_address.key())
+            units = carried
         delta = self.trie.apply(units, removed=removed)
         t1 = time.perf_counter()
         t2 = t1

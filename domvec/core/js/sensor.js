@@ -277,7 +277,11 @@
   var chunkRoots = [];           // live chunk-root slots, for the removal sweep
   var dict = [], dictIndex = new Map(), dictSent = 0;
   var timer = null, chunkSeq = 1, version = 0;
+  // Chunks whose content is unchanged and whose address moved.
+  // Carried beside `chunks` and `removed`, and drained with them.
+  var moves = [];
   var stats = { nodes: 0, folds: 0, repairs: 0, chunks: 0, spans: 0,
+                movedChunks: 0,
                 observers: 0, closedRoots: 0, errors: 0, skipped: 0,
                 sketchHits: 0, deduped: 0, pruned: 0, offscreen: 0,
                 sr_seen: 0, sr_badtype: 0, sr_badname: 0,
@@ -1168,6 +1172,24 @@
           && prev.path === here) {
         stats.skipped++; return;
       }
+      // Same content, new position: send where it went, not what it is.
+      //
+      // The receiver already holds this chunk -- the digest is unchanged, so
+      // every line in it is a line it has -- and the only thing it does not
+      // know is that the addresses moved. Re-sending the bodies to tell it
+      // that cost 265 KB for one <li> inserted at the head of a 1600-item
+      // list, because every sibling below the insertion shifted one ordinal.
+      //
+      // The trie is what makes this sound: it is keyed on the address and it
+      // holds the value, so the receiver can rebuild the shifted units from
+      // its own store. The wire carries the address change; the content stays
+      // where it already is.
+      if (USE_GATE && prev && prev.digest === rec.digest && prev.id) {
+        moves.push([prev.id, path]);
+        prev.path = here;
+        stats.movedChunks++;
+        return;
+      }
       // Read what is on screen first. This is the one emission rule that
       // changes *what arrives*, not merely how much or how fast, so it is
       // the one that has to be judged by `verify` rather than by `compare`:
@@ -1267,6 +1289,16 @@
     var where = pathKey(parentPath);
     if (USE_GATE && slot.digest === d && slot.path === where) {
       stats.skipped++; return null;
+    }
+    // The merged-run gate, and the same move rule as the one above it: the
+    // run's digest is unchanged, so the receiver holds every line of it and
+    // needs only the new address.
+    if (USE_GATE && slot.digest === d && slot.id) {
+      moves.push([slot.id, parentPath]);
+      slot.path = where;
+      slot.node = first.node;
+      stats.movedChunks++;
+      return null;
     }
     slot.digest = d;
     slot.path = where;
@@ -2076,6 +2108,7 @@
       // every later payload sends only what was added since.
       shapes: USE_SHAPE ? shapes.slice(shapesBefore) : [],
       chunks: chunks,
+      moves: moves,
       removed: removedIds,
       settled: timer === null,
       stats: {
@@ -2110,6 +2143,7 @@
         wordsInterned: stats.wordsInterned,
         chunkDeltas: stats.chunkDeltas, coalesced: stats.coalesced,
         deepPruned: stats.deepPruned,
+        movedChunks: stats.movedChunks,
         // The mutation-chunking phase's own cost, so the algorithm can be
         // timed apart from the crossing that carries its result.
         repairMs: stats.repairMs,
@@ -2122,7 +2156,7 @@
                  queryform: stats.sr_queryform}
       }
     };
-    front = []; removedIds = [];
+    front = []; removedIds = []; moves = [];
     return payload;
   }
 

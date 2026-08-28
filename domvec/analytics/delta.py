@@ -51,7 +51,8 @@ def _settle(sensor, spine, passes: int = 3):
     for passno in range(passes):
         snapshot = sensor.drain(passno)
         last = spine.absorb(snapshot.units, snapshot.passno,
-                            removed=snapshot.removed_addresses)
+                            removed=snapshot.removed_addresses,
+                            moved=snapshot.moved_addresses)
         time.sleep(0.15)
     return last
 
@@ -100,7 +101,8 @@ def measure_delta_scaling(driver, *, sizes: Sequence[int] = (100, 400, 1600),
             fold_ms = (snapshot.stats or {}).get("repairMs")
             started = time.perf_counter()
             update = spine.absorb(snapshot.units, snapshot.passno,
-                                  removed=snapshot.removed_addresses)
+                                  removed=snapshot.removed_addresses,
+                                  moved=snapshot.moved_addresses)
             apply_ms = (time.perf_counter() - started) * 1000.0
 
             delta = update.delta
@@ -124,6 +126,11 @@ def measure_delta_scaling(driver, *, sizes: Sequence[int] = (100, 400, 1600),
                 "uids_kept": len(before & after),
                 "uids_lost": len(before - after),
                 "apply_ms": apply_ms,
+                # What the shift cost to carry. The fold re-emits every
+                # chunk whose path moved, so this is where an O(page)
+                # payload would show up even when the delta is O(1).
+                "wire_bytes": int(snapshot.wire_bytes or 0),
+                "decode_ms": float(snapshot.decode_ms or 0.0),
                 "fold_ms": float(fold_ms) if isinstance(
                     fold_ms, (int, float)) else None,
             })
@@ -144,7 +151,8 @@ def render_delta_table(report: dict) -> str:
 
     out = ["", "  one insertion at the head of an N-item list", ""]
     out.append(f"  {'N':>6}{'leaves':>9}{'size':>7}{'moved':>8}{'visited':>9}"
-               f"{'uids lost':>11}{'apply ms':>10}{'fold ms':>9}")
+               f"{'uids lost':>11}{'apply ms':>10}{'fold ms':>9}"
+               f"{'wire KB':>9}{'decode':>8}")
     for n in sorted(by_n):
         group = by_n[n]
         out.append(
@@ -154,7 +162,9 @@ def render_delta_table(report: dict) -> str:
             f"{_median([r['visited'] for r in group]):>9.0f}"
             f"{_median([r['uids_lost'] for r in group]):>11.0f}"
             f"{_median([r['apply_ms'] for r in group]):>10.2f}"
-            f"{_median([r['fold_ms'] for r in group]):>9.1f}")
+            f"{_median([r['fold_ms'] for r in group]):>9.1f}"
+            f"{_median([r['wire_bytes'] for r in group]) / 1024:>9.1f}"
+            f"{_median([r['decode_ms'] for r in group]):>8.1f}")
     out.append("")
     sizes = sorted(by_n)
     if len(sizes) >= 2:
