@@ -421,6 +421,25 @@ class AddressTrie:
                 (delta.changed if node is not None else delta.added).append(address)
 
         for address in removed:
+            # A removal this same drain contradicts is stale, and applying it
+            # undoes the re-anchoring above.
+            #
+            # Chunk ids are keyed on position, so a node inserted at the head
+            # of a list retires the id of every chunk below it: the fold
+            # reports N removals for one arrival, naming the *old* layout.
+            # Those addresses are also in `units`, holding the shifted
+            # content, and the loop above has already given them their
+            # previous leaves' uids. Deleting them afterwards destroyed the
+            # very identities the re-anchor had just preserved -- one <li>
+            # into a 400-item list measured 399 uids lost and a delta of 401,
+            # while the same insertion applied without the removal list
+            # measured a delta of 1 and lost none.
+            #
+            # `units` is authoritative for what exists now. A removal is only
+            # a removal when this drain does not also say the address holds
+            # something.
+            if address.key() in want:
+                continue
             if self.remove(address):
                 delta.removed.append(address)
 

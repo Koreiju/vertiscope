@@ -1,0 +1,41 @@
+<!doctype html>
+<!--
+  A page whose size is a parameter, for measuring what one mutation costs.
+
+  The O(delta) claim is that inserting a single node costs work proportional
+  to the insertion, not to the document it lands in. That is only observable
+  against a *varying* N: a single page can show a small delta and say nothing
+  about whether it would stay small.
+
+  `#N` builds a list of N items. Insertion at the HEAD is the adversarial
+  position -- it shifts the positional address of every following sibling, so
+  a scheme that keyed identity on position re-points all N and reports N+1
+  changes for one node arriving.
+-->
+<meta charset="utf-8">
+<title>Delta scaling</title>
+<h1>DELTA-SCALING-FIXTURE</h1>
+<ul id="list"></ul>
+<script>
+  function size() {
+    var n = parseInt((location.hash || '#200').slice(1), 10);
+    return (isFinite(n) && n > 0) ? n : 200;
+  }
+  var list = document.getElementById('list');
+  (function build() {
+    var n = size(), frag = document.createDocumentFragment(), i, li;
+    for (i = 0; i < n; i++) {
+      li = document.createElement('li');
+      li.textContent = 'ITEM-' + i + '-lorem-ipsum-dolor-sit-amet';
+      frag.appendChild(li);
+    }
+    list.appendChild(frag);
+  })();
+  // The mutation under test, driven from outside so its timing is controlled.
+  window.__insertHead = function (label) {
+    var li = document.createElement('li');
+    li.textContent = 'INSERTED-' + label + '-lorem-ipsum-dolor-sit-amet';
+    list.insertBefore(li, list.firstChild);
+    return list.children.length;
+  };
+</script>
