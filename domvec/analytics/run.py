@@ -204,12 +204,63 @@ def measure_page(driver, url: str, *, scrolls: int = 2,
     report.dedup = score_dedup(truth, markdown_addresses,
                                texts=markdown_texts)
 
+    # The fold's own account of its chunking, hashing and dedup work.
+    # `skipped` is the gate: a subtree whose digest and path both match what
+    # was last sent is not sent again, and that is the mechanism the O(delta)
+    # claim rests on. `folds` against `repairs` says how much of the tree the
+    # cache spared. Read straight from the page rather than inferred.
+    stats = dict(snapshot.stats or {})
+    stats.pop("variants", None)
+    stats.pop("search", None)
+    emitted = float(stats.get("chunks") or 0)
+    skipped = float(stats.get("skipped") or 0)
+    report_algorithms = {
+        "folds": float(stats.get("folds") or 0),
+        "repairs": float(stats.get("repairs") or 0),
+        "chunks_emitted": emitted,
+        "gate_skipped": skipped,
+        "gate_skip_rate": skipped / (skipped + emitted) if (skipped + emitted)
+        else 0.0,
+        "deduped": float(stats.get("deduped") or 0),
+        "near_dups": float(stats.get("nearDups") or 0),
+        "sketch_hits": float(stats.get("sketchHits") or 0),
+        "merged": float(stats.get("merged") or 0),
+        "pruned": float(stats.get("pruned") or 0),
+        "deep_pruned": float(stats.get("deepPruned") or 0),
+        "known_skips": float(stats.get("knownSkips") or 0),
+        "span_hits": float(stats.get("spanHits") or 0),
+        "closed_roots": float(stats.get("closedRoots") or 0),
+        "errors": float(stats.get("errors") or 0),
+    }
+
+    # What reaches the trie, sized against the budget the reader set. A
+    # renderer for small context windows is answerable for the size of its
+    # units, and an over-budget chunk is one a small model cannot take whole.
+    lengths = sorted(len(chunk.markdown) for chunk in chunks)
+    if lengths:
+        mid = lengths[len(lengths) // 2]
+        over = sum(1 for n in lengths if n > context_window)
+        report_chunking = {
+            "chunks": float(len(lengths)),
+            "chars_total": float(sum(lengths)),
+            "chars_median": float(mid),
+            "chars_max": float(lengths[-1]),
+            "budget": float(context_window),
+            "over_budget": float(over),
+            "over_budget_rate": over / len(lengths),
+            "lines_total": float(sum(len(c.lines) for c in chunks)),
+        }
+    else:
+        report_chunking = {}
+
     phases.ms["total_ms"] = (time.perf_counter() - total_started) * 1000.0
     phases.ms["queue_pushed"] = float(queue.pushed)
     phases.ms["queue_queued"] = float(queue.queued)
     phases.ms["queue_skipped"] = float(queue.skipped)
     phases.ms["queue_embedded"] = float(queue.embedded)
     report.timings = phases.ms
+    report.algorithms = report_algorithms
+    report.chunking = report_chunking
     return report
 
 
@@ -264,6 +315,39 @@ def render_table(report: AffineReport) -> str:
     rows.append(f"    {'distinct kept':<26}{d.distinct_kept:>8,}")
     rows.append(f"    {'correctness':<26}{d.correctness * 100:>7.1f}%")
     rows.append("")
+    if report.algorithms:
+        a = report.algorithms
+        rows.append("  chunking / hashing / dedup, as the fold counted it")
+        rows.append(f"    {'nodes folded':<24}{a.get('folds', 0):>10,.0f}"
+                    f"   over {a.get('repairs', 0):>3,.0f} repair(s)")
+        rows.append(f"    {'chunks emitted':<24}{a.get('chunks_emitted', 0):>10,.0f}")
+        rows.append(f"    {'gate skipped':<24}{a.get('gate_skipped', 0):>10,.0f}"
+                    f"   {a.get('gate_skip_rate', 0.0) * 100:>5.1f}% of candidates")
+        for label, key in (("subsumed (dedup)", "deduped"),
+                           ("near-duplicates", "near_dups"),
+                           ("sketch hits", "sketch_hits"),
+                           ("runs merged", "merged"),
+                           ("subtrees pruned", "pruned"),
+                           ("deep-gate pruned", "deep_pruned"),
+                           ("known across pages", "known_skips"),
+                           ("closed roots seen", "closed_roots"),
+                           ("fold errors", "errors")):
+            if a.get(key):
+                rows.append(f"    {label:<24}{a.get(key, 0):>10,.0f}")
+        rows.append("")
+    if report.chunking:
+        c = report.chunking
+        rows.append("  what reaches the trie, against the reader's budget")
+        rows.append(f"    {'chunks':<24}{c.get('chunks', 0):>10,.0f}")
+        rows.append(f"    {'lines':<24}{c.get('lines_total', 0):>10,.0f}")
+        rows.append(f"    {'chars total':<24}{c.get('chars_total', 0):>10,.0f}")
+        rows.append(f"    {'chars median / max':<24}"
+                    f"{c.get('chars_median', 0):>10,.0f}"
+                    f" / {c.get('chars_max', 0):,.0f}")
+        rows.append(f"    {'budget':<24}{c.get('budget', 0):>10,.0f}")
+        rows.append(f"    {'over budget':<24}{c.get('over_budget', 0):>10,.0f}"
+                    f"   {c.get('over_budget_rate', 0.0) * 100:>5.1f}%")
+        rows.append("")
     rows.append("  phases (ms)")
     order = ("fold_ms", "drain_ms", "decode_ms", "trie_ms", "markdown_ms",
              "geometry_ms", "wire_ms", "embed_queue_ms", "embed_ms",

@@ -467,6 +467,16 @@ class AffineReport:
     dedup: DedupScore = field(default_factory=DedupScore)
     page: Optional[PageTruth] = None
     timings: Dict[str, float] = field(default_factory=dict)
+    # What the fold's own chunking / hashing / dedup machinery did. These are
+    # counted in the page and were never read on this side: the gate that
+    # decides whether a subtree is re-sent is the whole of the O(delta)
+    # mechanism, and its hit rate is the most direct evidence there is that
+    # the mechanism is working rather than merely present.
+    algorithms: Dict[str, float] = field(default_factory=dict)
+    # The shape of what reaches the trie, against the context budget the
+    # reader configured. A renderer for small context windows is answerable
+    # for the size of the units it produces, not only their content.
+    chunking: Dict[str, float] = field(default_factory=dict)
 
     def as_dict(self) -> dict:
         return {
@@ -481,4 +491,6 @@ class AffineReport:
             "arrows": [a.as_dict() for a in self.arrows],
             "dedup": self.dedup.as_dict(),
             "timings_ms": {k: round(v, 3) for k, v in self.timings.items()},
+            "algorithms": self.algorithms,
+            "chunking": self.chunking,
         }
