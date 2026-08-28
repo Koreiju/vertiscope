@@ -2384,12 +2384,51 @@
         // visible, so nothing that should be hidden is admitted by this.
         if (r.width === 0 && r.height === 0
             && cs.display !== 'none' && cs.visibility !== 'hidden') {
+          // A slot's drawn content is what is *assigned* to it, not what it
+          // contains. `selectNodeContents` on a filled <slot> selects its
+          // fallback children -- the ones the browser does not draw -- and
+          // measures 0x0, so a slotted affordance had no geometry and the
+          // wireframe dropped it: on lit.dev the consent button "Ok, got it"
+          // was rendered in markdown, verified absent from the drawing, and
+          // its owner measured 0x0 with `display: contents`.
+          //
+          // The same composed-tree rule the fold obeys, applied to geometry.
           try {
-            var range = document.createRange();
-            range.selectNodeContents(el);
-            var rr = range.getBoundingClientRect();
-            if (rr && rr.width > 0 && rr.height > 0) r = rr;
-            range.detach && range.detach();
+            if (el.tagName === 'SLOT' && el.assignedNodes) {
+              var kids = el.assignedNodes({flatten: true}) || [];
+              var box = null, j, kr;
+              for (j = 0; j < kids.length; j++) {
+                kr = null;
+                if (kids[j].nodeType === 1) {
+                  kr = kids[j].getBoundingClientRect();
+                } else if (kids[j].nodeType === 3) {
+                  var tr = document.createRange();
+                  tr.selectNodeContents(kids[j]);
+                  kr = tr.getBoundingClientRect();
+                  tr.detach && tr.detach();
+                }
+                if (!kr || (kr.width === 0 && kr.height === 0)) continue;
+                box = box ? {
+                  left: Math.min(box.left, kr.left),
+                  top: Math.min(box.top, kr.top),
+                  right: Math.max(box.right, kr.right),
+                  bottom: Math.max(box.bottom, kr.bottom)
+                } : {left: kr.left, top: kr.top,
+                     right: kr.right, bottom: kr.bottom};
+              }
+              if (box) {
+                r = {left: box.left, top: box.top,
+                     width: box.right - box.left,
+                     height: box.bottom - box.top};
+              }
+            }
+            if (r.width === 0 && r.height === 0) {
+              var range = document.createRange();
+              range.selectNodeContents(el);
+              var rr = range.getBoundingClientRect();
+              if (rr && rr.width > 0 && rr.height > 0) r = rr;
+              range.detach && range.detach();
+            }
           } catch (e) { /* keep the empty rect */ }
         }
         var weight = parseInt(cs.fontWeight, 10) || 400;

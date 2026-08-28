@@ -247,7 +247,7 @@ class _Emitted:
         return out
 
     def covers(self, xpath: str, value: str = "",
-               kind: str = "") -> bool:
+               kind: str = "", structural: Sequence[str] = ()) -> bool:
         """Did anything standing for this page unit reach the render?
 
         Address first, and content only to settle one specific question the
@@ -278,7 +278,7 @@ class _Emitted:
         # the affordance is not lost -- but the wrapper's own accessible name
         # is "" and no content test can ever match an empty probe. Judged by
         # content these read as six losses on a page that loses none of them.
-        if kind == "control" and owner in self.interactive_at:
+        if kind in structural and owner in self.interactive_at:
             return True
         probe = " ".join(value.split()).lower()
         if not probe:
@@ -317,7 +317,8 @@ class _Emitted:
 def score_arrow(name: str, truth: PageTruth,
                 rendered: Sequence[ContentAddress],
                 denominator: str = "all",
-                texts: Optional[Sequence[str]] = None) -> ArrowScore:
+                texts: Optional[Sequence[str]] = None,
+                structural: Sequence[str] = ("control",)) -> ArrowScore:
     """Score one arrow of the map, address against address.
 
     `denominator` selects which page units this arrow is answerable for:
@@ -344,7 +345,8 @@ def score_arrow(name: str, truth: PageTruth,
     covered_values = {
         " ".join(u.value.split()).lower()
         for u in truth.units
-        if u.value.strip() and emitted.covers(u.xpath, u.value)
+        if u.value.strip() and emitted.covers(u.xpath, u.value, u.kind,
+                                              structural)
     }
 
     for unit in truth.units:
@@ -352,7 +354,8 @@ def score_arrow(name: str, truth: PageTruth,
         bucket_kind = score.by_kind.setdefault(unit.kind, Confusion())
         origin = "shadow" if unit.shadow else "light"
         bucket_origin = score.by_origin.setdefault(origin, Confusion())
-        covered = emitted.covers(unit.xpath, unit.value, unit.kind)
+        covered = emitted.covers(unit.xpath, unit.value, unit.kind,
+                                 structural)
 
         if not answerable:
             # Outside the denominator. Omitting it is correct; rendering it

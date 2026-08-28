@@ -199,8 +199,14 @@ def measure_page(driver, url: str, *, scrolls: int = 2,
         score_arrow("page->markdown", truth, markdown_addresses,
                     denominator="all", texts=markdown_texts),
         # The drawing is answerable for what the page draws and nothing else.
+        # A link's coverage in the *drawing* is structural, not textual.
+        # `visual_text` strips `](url)` on purpose -- a drawing shows where a
+        # link is, not where it goes -- so a link unit's value, which is its
+        # target, can never appear there. Scored by content it read 66.7% on
+        # a page whose every link label is drawn.
         score_arrow("page->wireframe", truth, wire_addresses,
-                    denominator="drawn", texts=wire_texts),
+                    denominator="drawn", texts=wire_texts,
+                    structural=("control", "link")),
     ]
     report.dedup = score_dedup(truth, markdown_addresses,
                                texts=markdown_texts)
