@@ -452,9 +452,7 @@ def a1_aam_tables_agree(_: Any = None) -> List[Violation]:
 _COMPOSED_WALKS = {
     "sensor.js/composedKids": (("core", "js", "sensor.js"),
                                r"function composedKids\(.*?\n  \}"),
-    "repl/coverage kidsOf": (("repl", "app.py"),
-                             r"function kidsOf\(.*?\n    \}"),
-    # The third copy. Ground truth exists to say what the fold missed, so a
+    # The independent copy. Ground truth exists to say what the fold missed, so a
     # ground truth that repeats the fold's mistake agrees with it perfectly
     # and measures nothing -- precisely the failure this invariant was
     # written for, now with one more place for it to occur.
@@ -466,9 +464,11 @@ _COMPOSED_WALKS = {
 def c1_composed_walks_resolve_slots(sources: Any = None) -> List[Violation]:
     """Both walks descend the tree the browser draws, not ``childNodes``.
 
-    There are three of them — the fold in ``sensor.js``, the coverage walk in
-    the REPL, and the analytics ground truth — and they are checked against
-    each other for the same reason the AAM tables are. The coverage walk exists to say what the fold missed, so a
+    There are two of them — the fold in ``sensor.js`` and the analytics
+    ground truth — and they are checked against each other for the same
+    reason the AAM tables are. (A third lived in the REPL's `coverage`
+    command; that was measurement rather than browsing and moved out to
+    `domvec/analytics`, which is where its walk lives now.) The coverage walk exists to say what the fold missed, so a
     coverage walk that repeats the fold's mistake reports 100% of a page that
     neither of them read; the agreement is the measurement, and two walks that
     are wrong in the same way agree perfectly.

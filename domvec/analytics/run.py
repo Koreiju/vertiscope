@@ -273,3 +273,74 @@ def render_table(report: AffineReport) -> str:
             rows.append(f"    {name:<18}{report.timings[name]:>10.1f}")
     rows.append("")
     return "\n".join(rows)
+
+
+def qualify(driver, url: str, *, repeats: int = 5, scrolls: int = 1,
+            context_window: int = 1200) -> dict:
+    """Measure one page repeatedly and report the instrument's own spread.
+
+    Nothing this harness says about the map is worth reading until this is
+    known. A metric's movement between two commits is only evidence if it
+    exceeds what the metric does when *nothing changes at all* -- and that
+    floor has never been established here, while five separate defects in the
+    instrument were found and fixed. Systematic error does not average out;
+    more pages would only tighten the interval around a wrong value.
+
+    Same page, same code, `repeats` times. What varies is the page itself
+    (live documents drift), the scheduler, and any nondeterminism in the fold.
+    The spread that produces is the resolution limit: a difference smaller
+    than it is not a finding.
+
+    Reads only from the patricia trie's scored arrows -- this adds no new
+    measurement, it measures the existing one.
+    """
+    import statistics
+
+    runs = [measure_page(driver, url, scrolls=scrolls,
+                         context_window=context_window)
+            for _ in range(max(2, repeats))]
+
+    def series(pick) -> List[float]:
+        return [float(pick(r)) for r in runs]
+
+    tracked: Dict[str, List[float]] = {}
+    for arrow in runs[0].arrows:
+        name = arrow.name
+
+        def by(nm):
+            def pick(r):
+                for a in r.arrows:
+                    if a.name == nm:
+                        return a.overall.recall
+                return 0.0
+            return pick
+        tracked[f"{name} recall"] = series(by(name))
+    tracked["page units"] = series(
+        lambda r: len(r.page.units) if r.page else 0)
+    tracked["dedup correctness"] = series(lambda r: r.dedup.correctness)
+    for phase in ("fold_ms", "trie_ms", "markdown_ms", "wire_ms", "total_ms"):
+        if phase in runs[0].timings:
+            tracked[phase] = series(lambda r, p=phase: r.timings.get(p, 0.0))
+
+    out: Dict[str, dict] = {}
+    for key, values in tracked.items():
+        mean = statistics.fmean(values)
+        spread = max(values) - min(values)
+        sd = statistics.pstdev(values) if len(values) > 1 else 0.0
+        out[key] = {"mean": mean, "sd": sd, "range": spread,
+                    "min": min(values), "max": max(values),
+                    "rel_range": (spread / mean) if mean else 0.0}
+    return {"url": url, "repeats": len(runs), "metrics": out}
+
+
+def render_qualification(report: dict) -> str:
+    rows = ["", f"  instrument qualification  {report['url']}",
+            f"  {report['repeats']} repeats, same page, same code", "",
+            f"  {'metric':<24}{'mean':>12}{'sd':>10}{'range':>10}{'rel':>9}"]
+    for key, m in report["metrics"].items():
+        rows.append(f"  {key:<24}{m['mean']:>12.3f}{m['sd']:>10.3f}"
+                    f"{m['range']:>10.3f}{m['rel_range'] * 100:>8.1f}%")
+    rows.append("")
+    rows.append("  A difference smaller than `range` is not a finding.")
+    rows.append("")
+    return "\n".join(rows)

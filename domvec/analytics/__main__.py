@@ -8,7 +8,8 @@ import sys
 
 from ..browser import browser_session
 from ..config import load_config
-from .run import DEFAULT_ARTIFACT_DIR, measure_page, render_table, write_artifact
+from .run import (DEFAULT_ARTIFACT_DIR, measure_page, qualify,
+                  render_qualification, render_table, write_artifact)
 
 
 def main(argv=None) -> int:
@@ -19,11 +20,30 @@ def main(argv=None) -> int:
     parser.add_argument("--scrolls", type=int, default=2)
     parser.add_argument("--window", type=int, default=1200)
     parser.add_argument("--out", default=str(DEFAULT_ARTIFACT_DIR))
+    parser.add_argument("--qualify", type=int, default=0,
+                        metavar="N",
+                        help="measure each page N times and report the "
+                             "instrument's own spread instead of a score")
     args = parser.parse_args(argv)
 
     cfg = load_config()
     with browser_session(cfg) as driver:
         for url in args.urls:
+            if args.qualify:
+                report = qualify(driver, url, repeats=args.qualify,
+                                 scrolls=args.scrolls,
+                                 context_window=args.window)
+                print(render_qualification(report), flush=True)
+                out = pathlib.Path(args.out)
+                out.mkdir(parents=True, exist_ok=True)
+                with (out / "qualification.jsonl").open(
+                        "a", encoding="utf-8") as handle:
+                    import json as _json
+                    import time as _time
+                    report["t"] = _time.time()
+                    handle.write(_json.dumps(report, separators=(",", ":"))
+                                 + chr(10))
+                continue
             try:
                 report = measure_page(driver, url, scrolls=args.scrolls,
                                       context_window=args.window)
