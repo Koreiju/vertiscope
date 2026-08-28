@@ -290,13 +290,13 @@ def render_table(report: AffineReport) -> str:
             f"{page.opaque_hosts} opaque")
         rows.append("")
     rows.append(f"  {'arrow':<17}{'recall':>8}{'prec':>8}{'inject':>8}"
-                f"{'TP':>7}{'FN':>6}{'FP':>5}{'TN':>6}{'dup':>5}")
+                f"{'TP':>7}{'FN':>6}{'FP':>5}{'TN':>6}{'coll':>6}")
     for arrow in report.arrows:
         c = arrow.overall
         rows.append(
             f"  {arrow.name:<17}{c.recall * 100:>7.1f}%{c.precision * 100:>7.1f}%"
             f"{c.injectivity * 100:>7.1f}%{c.tp:>7,}{c.fn:>6,}{c.fp:>5,}"
-            f"{c.tn:>6,}{c.duplicated:>5,}")
+            f"{c.tn:>6,}{c.collapsed:>6,}")
     rows.append("")
     rows.append("  by origin (recall), page->markdown / page->wireframe")
     for arrow in report.arrows[1:]:

@@ -64,6 +64,7 @@ from dataclasses import dataclass, field
 from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 from ..address import ContentAddress
+from ..aam import INTERACTIVE
 from .groundtruth import PageTruth, PageUnit
 
 __all__ = ["Confusion", "ArrowScore", "AffineReport", "score_arrow",
@@ -79,6 +80,8 @@ class Confusion:
     fp: int = 0            # in the render, not on the page
     tn: int = 0            # correctly omitted
     duplicated: int = 0    # extra emissions of an address already counted
+    collapsed: int = 0     # a redundant spelling the render deliberately
+                           # merged away, another having survived
 
     @property
     def recall(self) -> float:
@@ -105,7 +108,7 @@ class Confusion:
 
     def as_dict(self) -> Dict[str, float]:
         return {"tp": self.tp, "fn": self.fn, "fp": self.fp, "tn": self.tn,
-                "duplicated": self.duplicated,
+                "duplicated": self.duplicated, "collapsed": self.collapsed,
                 "recall": round(self.recall, 6),
                 "precision": round(self.precision, 6),
                 "injectivity": round(self.injectivity, 6),
@@ -169,6 +172,14 @@ class _Emitted:
     text_at: Dict[str, str] = field(default_factory=dict)
     text_by_parent: Dict[str, str] = field(default_factory=dict)
     paths_by_owner: Dict[str, Set[str]] = field(default_factory=dict)
+    # Text drawn anywhere *below* a path, keyed by every ancestor of the
+    # owner it was drawn at. Built once so the descendant lookup is O(1).
+    text_under: Dict[str, str] = field(default_factory=dict)
+    # Paths at or above a rendered *affordance*. A control's coverage is
+    # structural, not textual: it is covered when the reader can act on
+    # it, and its accessible name may be empty or may be the run-together
+    # textContent of its children, neither of which equals any line.
+    interactive_at: Set[str] = field(default_factory=set)
 
     @classmethod
     def of(cls, addresses: Iterable[ContentAddress],
@@ -212,9 +223,31 @@ class _Emitted:
                 out.text_by_parent[parent] = (
                     out.text_by_parent.get(parent, "") + " "
                     + (texts[i] or "")).strip()
+                # And under every ancestor, for the mirror case: content
+                # merged *downward*. `<a href><div><span>words</span></div>
+                # </a>` renders one line addressed at the span, carrying the
+                # anchor's target -- so the anchor's own unit is covered by a
+                # line beneath it, which a search that only walks up can
+                # never see. Links read 67.8% for exactly this.
+                at = owner
+                while "/" in at:
+                    at = at.rsplit("/", 1)[0]
+                    if not at:
+                        break
+                    out.text_under[at] = (out.text_under.get(at, "") + " "
+                                          + (texts[i] or "")).strip()
+            if address.tag in INTERACTIVE:
+                out.interactive_at.add(owner)
+                at = owner
+                while "/" in at:
+                    at = at.rsplit("/", 1)[0]
+                    if not at:
+                        break
+                    out.interactive_at.add(at)
         return out
 
-    def covers(self, xpath: str, value: str = "") -> bool:
+    def covers(self, xpath: str, value: str = "",
+               kind: str = "") -> bool:
         """Did anything standing for this page unit reach the render?
 
         Address first, and content only to settle one specific question the
@@ -237,6 +270,16 @@ class _Emitted:
         owner = _owner(xpath)
         if owner in self.owners:
             return True
+        # A control is covered when an affordance is drawn at or below it.
+        #
+        # `litdev-ripple-icon-button`'s shadow root holds an <a> around a slot
+        # carrying "Learn more". Markdown suppresses the empty wrapper and
+        # draws the slotted label *as a link* -- the reader can press it, and
+        # the affordance is not lost -- but the wrapper's own accessible name
+        # is "" and no content test can ever match an empty probe. Judged by
+        # content these read as six losses on a page that loses none of them.
+        if kind == "control" and owner in self.interactive_at:
+            return True
         probe = " ".join(value.split()).lower()
         if not probe:
             return False
@@ -258,6 +301,12 @@ class _Emitted:
             drawn = self.text_at.get(at)
             if drawn and probe in " ".join(drawn.split()).lower():
                 return True
+        # Or drawn on a line *below* this element -- an anchor whose label
+        # sits two elements down carries the anchor's target on the label's
+        # line, and the anchor's own address is legitimately absent.
+        under = self.text_under.get(owner)
+        if under and probe in " ".join(under.split()).lower():
+            return True
         return False
 
     def duplicates(self) -> int:
@@ -279,12 +328,31 @@ def score_arrow(name: str, truth: PageTruth,
     score = ArrowScore(name=name, denominator=denominator)
     emitted = _Emitted.of(rendered, texts)
 
+    # Which contents reached the render at all, in any of their spellings.
+    #
+    # The map is a quotient and its kernel is deliberate: "one target, one
+    # line" collapses the same link in a desktop nav and a mobile drawer to
+    # a single rendered line, and lit.dev's header and `mwc-drawer` carry the
+    # same items twice by construction. Scored without this, every collapsed
+    # spelling read as a loss and markdown's recall was understated by exactly
+    # the amount of correct deduplication -- which is the kernel being counted
+    # as damage.
+    #
+    # A collapse is only credited when some *other* spelling of the same
+    # content did reach the render. If every spelling is gone, that is
+    # over-dedup, and it stays a loss.
+    covered_values = {
+        " ".join(u.value.split()).lower()
+        for u in truth.units
+        if u.value.strip() and emitted.covers(u.xpath, u.value)
+    }
+
     for unit in truth.units:
         answerable = denominator == "all" or unit.drawn
         bucket_kind = score.by_kind.setdefault(unit.kind, Confusion())
         origin = "shadow" if unit.shadow else "light"
         bucket_origin = score.by_origin.setdefault(origin, Confusion())
-        covered = emitted.covers(unit.xpath, unit.value)
+        covered = emitted.covers(unit.xpath, unit.value, unit.kind)
 
         if not answerable:
             # Outside the denominator. Omitting it is correct; rendering it
@@ -298,6 +366,11 @@ def score_arrow(name: str, truth: PageTruth,
         if covered:
             for b in (score.overall, bucket_kind, bucket_origin):
                 b.tp += 1
+        elif " ".join(unit.value.split()).lower() in covered_values:
+            # Collapsed, not lost: this content is on the page more than once
+            # and the render kept one of them.
+            for b in (score.overall, bucket_kind, bucket_origin):
+                b.collapsed += 1
         else:
             for b in (score.overall, bucket_kind, bucket_origin):
                 b.fn += 1
