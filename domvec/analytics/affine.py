@@ -485,6 +485,29 @@ class DedupScore:
                 "correctness": round(self.correctness, 6)}
 
 
+def _restates(a: PageUnit, b: PageUnit) -> bool:
+    """Whether two same-valued units are one thing said twice.
+
+    A strict ancestor-descendant relation is a restatement: a link's
+    `aria-label`, the component inside it and that component's `<svg><title>`
+    can all say "YouTube", and drawing three lines tells the reader the same
+    thing three times.
+
+    Two units at the *same* element are usually a restatement too -- an
+    element's `title` attribute and the text node under it -- but not when
+    both are text children of it. `_owner` strips `/text()[n]`, so every text
+    child of one element collapses to the same owner and three backticks in
+    one `<pre>` looked like one backtick restated twice. Sibling text nodes
+    are separate characters on the page, and a renderer that collapsed them
+    would be deleting content.
+    """
+    oa, ob = _owner(a.xpath), _owner(b.xpath)
+    if oa == ob:
+        both_text = "/text()" in a.xpath and "/text()" in b.xpath
+        return not both_text
+    return oa.startswith(ob + "/") or ob.startswith(oa + "/")
+
+
 def score_dedup(truth: PageTruth,
                 rendered: Sequence[ContentAddress],
                 texts: Optional[Sequence[str]] = None) -> DedupScore:
@@ -554,10 +577,7 @@ def score_dedup(truth: PageTruth,
         for unit in pending:
             owner = _owner(unit.xpath)
             for bucket in buckets:
-                if any(owner == _owner(m.xpath)
-                       or owner.startswith(_owner(m.xpath) + "/")
-                       or _owner(m.xpath).startswith(owner + "/")
-                       for m in bucket):
+                if any(_restates(unit, m) for m in bucket):
                     bucket.append(unit)
                     break
             else:
