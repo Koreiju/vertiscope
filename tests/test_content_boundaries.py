@@ -1,0 +1,232 @@
+"""Where a chunk ends, and why it matters to the phase after the render.
+
+The greedy merge accumulated siblings until the context window was crossed,
+which packs the window well and has one bad property: a boundary is a function
+of everything before it. Insert one sibling and every boundary after it shifts,
+the phase never comes back, and every chunk downstream holds text it did not
+hold before. `VectorQueue` gates on the digest of the markdown, so those chunks
+are all genuinely new to it and all get embedded again — an O(page) cost in the
+asynchronous phase for an O(1) change to the page, which is the thing the whole
+design exists to avoid.
+
+Content-defined boundaries let the piece decide. The cut fires with probability
+``piece_chars / window`` from a hash of the piece's own rendered text, so the
+expected content between two cuts is one window's worth with no target to tune,
+and a boundary cannot be moved by an insertion that does not touch it.
+
+Two things had to be got right, and the first was got wrong first:
+
+* **The oracle must be address-free.** `TrieNode.exact_hash` was the obvious
+  choice and is the wrong one — it folds in the node's address, so an insertion
+  changes every sibling's hash and no boundary survives. Measured: the re-embed
+  ratio did not move off 1.0. `subtree_hash` fails identically, its Merkle
+  folding in a segment that carries the sibling ordinal. The rendered text is
+  the thing a boundary should depend on, and it is what decides whether a chunk
+  needs embedding at all.
+* **The fill threshold is a trade, not a free parameter.** It reads the running
+  total, so it is the one accumulation-dependent input left. Raising it packs
+  better and re-synchronises worse, and past 0.5 it spends more than it buys.
+"""
+
+import statistics
+
+import pytest
+
+import domvec.markdown as md
+from domvec.markdown import RenderMemo, RenderReport, render_trie
+from domvec.stream import StreamingScan
+
+WINDOW = 1200
+
+
+def _rows(pairs):
+    body = "".join(
+        '<li><h3>Item {}</h3><p>{}</p>'
+        '<a href="https://e.test/{}">open {}</a></li>'.format(i, text, i, i)
+        for i, text in pairs)
+    return ("<html><body><header><h1>Catalogue</h1></header>"
+            "<main><ul>{}</ul></main></body></html>".format(body))
+
+
+def _uniform(n):
+    return [(i, "body text for row {} here".format(i)) for i in range(n)]
+
+
+def _varied(n, seed=5):
+    import random
+
+    rng = random.Random(seed)
+    words = ["alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta"]
+    return [(i, " ".join(rng.choice(words) for _ in range(rng.randint(4, 45))))
+            for i in range(n)]
+
+
+def _render(html, url="https://cdc.test/p", window=WINDOW, report=None):
+    scan = StreamingScan(url, context_window=window)
+    return render_trie(scan.push(html, passno=0).trie, context_window=window,
+                       report=report)
+
+
+def _new_text(before_html, after_html, window=WINDOW):
+    """Chunks in the second render holding text no chunk held in the first.
+
+    Keyed on the text rather than on the chunk id on purpose: the id is
+    address-keyed and every address below an insertion genuinely moves, so id
+    churn is a separate question. What the embedder is asked to do is embed
+    text it has not embedded, and that is this.
+    """
+    url = "https://cdc.test/p"
+    scan = StreamingScan(url, context_window=window)
+    memo = RenderMemo()
+    first = render_trie(scan.push(before_html, passno=0).trie,
+                        context_window=window, memo=memo)
+    seen = {c.markdown for c in first}
+    second = render_trie(scan.push(after_html, passno=1).trie,
+                         context_window=window, memo=memo)
+    return sum(1 for c in second if c.markdown not in seen)
+
+
+@pytest.fixture
+def running_total(monkeypatch):
+    monkeypatch.setattr(md, "CONTENT_BOUNDARIES", False)
+
+
+# --- the property the change exists for -------------------------------------
+
+
+@pytest.mark.parametrize("n", [400, 1600, 6400])
+def test_an_insertion_costs_a_constant_number_of_new_chunks(n):
+    """Constant in the page, which is the whole claim."""
+    rows = _uniform(n)
+    fresh = _new_text(_rows(rows), _rows([(-1, "inserted at the head")] + rows))
+    assert fresh <= 8, "{} new chunks at N={}".format(fresh, n)
+
+
+@pytest.mark.parametrize("n", [400, 1600])
+def test_the_running_total_does_not_have_that_property(running_total, n):
+    """Non-vacuity: the defect is real and this measurement can see it.
+
+    Without it the test above would pass on any chunker that happened to be
+    fast, and there would be no evidence the boundaries are what changed.
+    """
+    rows = _uniform(n)
+    fresh = _new_text(_rows(rows), _rows([(-1, "inserted at the head")] + rows))
+    assert fresh > n // 20, (
+        "expected an insertion to invalidate most of the page, got {} at "
+        "N={}".format(fresh, n))
+
+
+def test_a_middle_insertion_is_also_bounded():
+    rows = _varied(1600)
+    grown = rows[:800] + [(-1, "inserted in the middle")] + rows[800:]
+    assert _new_text(_rows(rows), _rows(grown)) <= 8
+
+
+def test_the_boundary_oracle_ignores_where_a_piece_sits():
+    """The mistake that cost the first attempt.
+
+    A hash that folds in the address changes for every sibling below an
+    insertion, and then no boundary can survive one. `_piece_hash` reads the
+    rendered text and nothing else.
+    """
+    from domvec.markdown import MarkdownChunk, MarkdownLine
+    from domvec.address import ContentAddress
+
+    def chunk(xpath):
+        return MarkdownChunk(
+            url="u", xpath=xpath,
+            lines=[MarkdownLine(depth=1, text="the same words",
+                                address=ContentAddress("u", xpath, "text",
+                                                       "text()[1]"))])
+
+    assert md._piece_hash(chunk("/html/body/li[2]")) == \
+        md._piece_hash(chunk("/html/body/li[9]"))
+
+    # ...and different words must give a different verdict, or the oracle is
+    # constant and every boundary decision is the same decision.
+    other = chunk("/html/body/li[2]")
+    other.lines[0].text = "quite different words"
+    assert md._piece_hash(other) != md._piece_hash(chunk("/html/body/li[2]"))
+
+
+# --- what it must not cost --------------------------------------------------
+
+
+@pytest.mark.parametrize("n", [200, 800])
+def test_the_page_is_still_partitioned(n):
+    """Every unit once, no chunk over the window. The chunker's contract."""
+    report = RenderReport()
+    chunks = _render(_rows(_varied(n)), report=report)
+    anchors = [a for c in chunks for a in c.anchors]
+    assert len(anchors) == len(set(anchors)), "an address reached two chunks"
+    assert anchors, "nothing was chunked"
+    over = [c for c in chunks if c.chars > WINDOW and len(c.lines) > 1]
+    assert not over, "{} chunk(s) over the window".format(len(over))
+
+
+@pytest.mark.parametrize("rows", [_uniform(400), _varied(400)])
+def test_coverage_and_dedup_are_the_same_either_way(rows, monkeypatch):
+    """Boundaries move; what is drawn does not.
+
+    The chunker decides where to cut, not what survives. If a dedup decision
+    changed with the cut points, the two would be entangled and the metric
+    suite would be measuring the chunker.
+    """
+    html = _rows(rows)
+
+    monkeypatch.setattr(md, "CONTENT_BOUNDARIES", False)
+    a_report = RenderReport()
+    a = _render(html, report=a_report)
+
+    monkeypatch.setattr(md, "CONTENT_BOUNDARIES", True)
+    b_report = RenderReport()
+    b = _render(html, report=b_report)
+
+    assert [l.text for c in a for l in c.lines] == \
+        [l.text for c in b for l in c.lines]
+    assert sorted(x for c in a for x in c.anchors) == \
+        sorted(x for c in b for x in c.anchors)
+    assert (a_report.deduped, a_report.empty, a_report.suppressed) == \
+        (b_report.deduped, b_report.empty, b_report.suppressed)
+
+
+def test_the_window_is_still_mostly_full():
+    """Content boundaries buy delta cost with packing, and the price is capped.
+
+    Without the fill threshold the cut fires from the first sibling and sizes
+    come out exponentially distributed -- 65 chunks of median 587 where the
+    running total gave 46 of 755. With it the median is within a few percent
+    of the running total's, which is what makes the trade worth taking.
+    """
+    html = _rows(_uniform(1600))
+
+    md.CONTENT_BOUNDARIES = False
+    try:
+        running = [c.chars for c in _render(html)]
+    finally:
+        md.CONTENT_BOUNDARIES = True
+    content = [c.chars for c in _render(html)]
+
+    assert statistics.median(content) >= 0.85 * statistics.median(running)
+    assert len(content) <= 1.25 * len(running)
+
+
+def test_the_fill_threshold_is_load_bearing(monkeypatch):
+    """Drop it and the packing collapses, which is why it is there."""
+    html = _rows(_uniform(800))
+    with_fill = [c.chars for c in _render(html)]
+    monkeypatch.setattr(md, "MIN_FILL", 0.0)
+    without = [c.chars for c in _render(html)]
+    assert statistics.median(without) < statistics.median(with_fill)
+    assert len(without) > len(with_fill)
+
+
+def test_a_boundary_needs_the_buffer_to_be_full_enough():
+    assert not md._content_boundary(0, 100, 1200, buffered=0)
+    assert not md._content_boundary(0, 100, 1200, buffered=100)
+    # At the threshold the hash decides; `0 % window == 0 < chars` fires.
+    assert md._content_boundary(0, 100, 1200, buffered=600)
+
+
+def test_an_empty_piece_is_never_a_boundary():
+    assert not md._content_boundary(12345, 0, 1200, buffered=1200)

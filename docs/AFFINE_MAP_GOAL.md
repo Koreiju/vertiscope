@@ -261,30 +261,56 @@ the tuning knob the suppression rules are actually setting.
 ### What a change costs the asynchronous phase
 
 Vectorisation runs off the trie recursion rather than inside it, so its cost is
-a separate question from the render's, and `analytics/projection.py` now
-reports it: how many chunks come out holding text they did not hold before,
-which is what `VectorQueue`'s digest gate lets through.
+a separate question from the render's, and `analytics/projection.py` reports
+it: how many chunks come out holding markdown no chunk held before, which is
+what the embedder would have to do.
 
-| change | chunks re-embedded |
-|---|---|
-| redraw | 0 |
-| edit one value | 1 |
-| insert at the head | ~100% of the page |
-| insert in the middle | ~53% of the page |
+The greedy merge accumulated siblings until the context window was crossed. It
+packs the window well and has one bad property: a boundary is a function of
+everything before it, so inserting one sibling shifted every boundary after it
+and the phase never came back. Every downstream chunk genuinely held different
+text — an O(page) cost for an O(1) change.
 
-An insertion re-embeds **every chunk after it**, at every page size measured.
-The chunk ids are stable across it; the text is not. Each chunk holds a run of
-siblings up to the context window, so one more sibling shifts what every later
-chunk contains and the phase never comes back. Those chunks genuinely do hold
-different text, so re-embedding them is correct rather than wasteful — but it
-is an O(page) term in the asynchronous phase for an O(1) change to the page,
-which is exactly what this design exists to avoid.
+**Content-defined boundaries.** The cut now fires with probability
+`piece_chars / window` from a hash of the piece's own rendered text, so the
+expected content between cuts is one window's worth with nothing to tune, and a
+boundary cannot be moved by an insertion that does not touch it.
 
-Removing it means choosing chunk boundaries from content — a rolling hash over
-the sibling run, so a boundary falls where the content says rather than where a
-running total happens to cross the window, and an insertion perturbs only the
-chunk it lands in. That changes what a chunk *is*, so it is measured here
-before it is attempted.
+| chunks holding new text | N=1600 | N=6400 | N=25600 |
+|---|---|---|---|
+| running total | 177 | 711 | 2844 |
+| content-defined | 3 | 3 | 3 |
+
+Constant in the page against linear, and in the harness (which inserts at the
+head of an N-row list) it is **1 at every size**. Coverage and deduplication
+are untouched: over the fixture pages both modes emit the same 365 lines with
+the same 365 unique anchors and the same dedup tally, no chunk over the window,
+nothing addressed twice. The price is packing — about 10% more chunks at a
+median a few percent smaller.
+
+Two things had to be got right, and the first was got wrong first:
+
+- **The oracle must be address-free.** `TrieNode.exact_hash` was the obvious
+  choice and is the wrong one: it folds in the node's address, so an insertion
+  changes every sibling's hash and no boundary survives. Measured — the ratio
+  did not move off 1.0. `subtree_hash` fails identically, its Merkle folding in
+  a segment that carries the sibling ordinal. The rendered text is what a
+  boundary should depend on, and it is what decides whether a chunk needs
+  embedding at all.
+- **The fill threshold is a trade.** It reads the running total, so it is the
+  one accumulation-dependent input left. At 0.65 the packing is better and most
+  cuts become window cuts again: on a middle insertion into variable-length
+  rows the new-text count went from 1 to 30, worse than what it replaces. 0.5
+  is where it stops spending more than it buys.
+
+**What is still in the way.** The queue would still embed ~100% of the page,
+because `VectorQueue` gates on `cid`, and a cid is address-keyed (ERRATA B12)
+so it churns when an insertion shifts the addresses below it: a chunk arrives
+with a new id carrying text embedded an hour ago. Identity is right to be
+address-keyed — a content key collapsed 18.8% of instances on the 54-page
+corpus, the address collapses 0% by construction — so the remedy is not to
+re-key identity but to let the queue recognise text it has already embedded and
+reuse that vector. That gap is the binding constraint on this phase now.
 
 ### Reading order is the fourth thing the map preserves
 

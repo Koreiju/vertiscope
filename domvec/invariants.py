@@ -652,6 +652,39 @@ def c2_fold_reads_no_layout(source: Any = None) -> List[Violation]:
 _PROJECTIONS = ("markdown.py", "wireframe.py")
 
 
+def code_tokens(source: str) -> List[Tuple[int, str]]:
+    """(line, name) for every identifier in ``source``, comments and strings
+    dropped.
+
+    A clause of the form "this module may not reach X" is a claim about
+    *capability*, and capability lives in code. Scanning raw text made two
+    such clauses fire on documentation instead: one on a docstring explaining
+    which of the two Merkles a projection must not key on, another on the word
+    "re-embedding" in a sentence about why a boundary matters. Both were
+    correct sentences and neither granted anything.
+
+    Dropping strings as well as comments is deliberate and does not weaken the
+    check: a banned name inside a string literal cannot be called or imported.
+    What survives is exactly what the module can reach.
+    """
+    import io as _io
+    import tokenize
+
+    out: List[Tuple[int, str]] = []
+    try:
+        for tok in tokenize.generate_tokens(_io.StringIO(source).readline):
+            if tok.type == tokenize.NAME:
+                out.append((tok.start[0], tok.string))
+            elif tok.type == tokenize.OP:
+                out.append((tok.start[0], tok.string))
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+        # An unparseable module cannot be cleared by this clause, but it also
+        # cannot be scanned; fall back to the raw text so a violation is
+        # reported rather than silently passed.
+        return [(i, line) for i, line in enumerate(source.splitlines(), 1)]
+    return out
+
+
 def c3_projections_key_on_exact_hash(sources: Any = None) -> List[Violation]:
     """A projection memo keys on ``exact_hash``, never on ``subtree_hash``.
 
@@ -695,14 +728,10 @@ def c3_projections_key_on_exact_hash(sources: Any = None) -> List[Violation]:
     out: List[Violation] = []
     seen_exact = False
     for name, text in sources.items():
-        for number, line in enumerate(text.splitlines(), 1):
-            bare = line.strip()
-            if bare.startswith("#") or bare.startswith("*"):
-                continue          # prose about the distinction is welcome
-            if "subtree_hash" in bare:
-                out.append(f"{name}:{number}: projection reads subtree_hash "
-                           f"— {bare[:60]}")
-            if "exact_hash" in bare:
+        for number, token in code_tokens(text):
+            if token == "subtree_hash":
+                out.append(f"{name}:{number}: projection reads subtree_hash")
+            elif token == "exact_hash":
                 seen_exact = True
 
     # Non-vacuity: if no projection keys on anything, this clause is checking

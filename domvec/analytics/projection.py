@@ -40,23 +40,26 @@ hold before, because `VectorQueue` gates on the digest of the markdown and
 embeds only those. ``requeued`` is that count and ``gate_skipped`` is what the
 gate stopped.
 
-That column is where the chunker's own behaviour shows up, and it says
-something the timings do not. An edit re-embeds one chunk. An insertion
-re-embeds **every chunk after it** -- about 100% of the page for an insertion
-at the head, about 53% for one in the middle, at every page size measured.
+Those columns are where the chunker's own behaviour shows up, and they say
+something the timings do not.
 
-Not because anything is keyed wrongly: the chunk ids are stable across it.
-It is the greedy packing. Each chunk holds a run of siblings up to the window,
-so one more sibling shifts what every chunk after it contains, and the phase
-never comes back. Every one of those chunks genuinely holds different text, so
-re-embedding them is correct rather than wasteful -- but it is an O(page) term
-in the asynchronous phase for an O(1) change to the page, which is the thing
-the whole design is trying not to have.
+``new_text`` is chunks holding markdown no chunk held before -- what the
+embedder would have to do. With content-defined boundaries it is **1 for an
+insertion at every page size measured**, against ~100% of the page when
+boundaries came from a running total. That is the asynchronous phase becoming
+O(delta), and it is the point of the whole exercise.
 
-Making that O(delta) would mean choosing chunk boundaries from content rather
-than from a running total, so an insertion perturbs only the chunk it lands in.
-That is a change to what a chunk *is*, not an optimisation, so it is measured
-here first.
+``requeued`` is what `VectorQueue` would actually embed, and it is still ~100%
+on an insertion. The two differ because the queue's gate is keyed on `cid`,
+which is address-keyed by ERRATA B12 and therefore churns whenever an
+insertion shifts the addresses below it: a chunk arrives with a new id
+carrying text that was embedded an hour ago. Identity is right to be
+address-keyed -- a content key collapsed 18.8% of instances on the corpus --
+so the fix is not to re-key it but to let the queue recognise text it has
+already embedded and reuse that vector. Until then this gap is the binding
+constraint on the asynchronous phase, and reporting only ``requeued`` hid a
+working chunker behind a churning id.
+
 """
 
 from __future__ import annotations
@@ -175,6 +178,20 @@ def measure_projection_scaling(
                 queue.extend(dirty)
                 requeued = queue.queued - queued_before
                 gate_skipped = queue.skipped - skipped_before
+
+                # And the same question asked of the text rather than of the
+                # id. These differ, and the difference is the whole story: the
+                # queue's gate is keyed on `cid`, which is address-keyed by
+                # ERRATA B12 and so churns whenever an insertion shifts the
+                # addresses below it. A chunk can therefore arrive with a new
+                # id carrying text that was embedded an hour ago.
+                #
+                # `new_text` is what the embedder would have to do if identity
+                # were not in its way, and it is what the chunker is
+                # answerable for. Reporting only `requeued` hid a working
+                # chunker behind a churning id.
+                held = {c.markdown for c in cold_chunks}
+                new_text = sum(1 for c in incr if c.markdown not in held)
                 rows.append({
                     "n": n,
                     "kind": kind,
@@ -194,6 +211,7 @@ def measure_projection_scaling(
                     "dirty_chunks": len(dirty),
                     "requeued": requeued,
                     "gate_skipped": gate_skipped,
+                    "new_text": new_text,
                 })
     return {"sizes": list(sizes), "kinds": list(kinds), "repeats": repeats,
             "context_window": context_window, "rows": rows, "t": time.time()}
@@ -221,7 +239,7 @@ def render_projection_table(report: dict) -> str:
     out = ["", "  what one change costs the markdown projection", ""]
     out.append("  {:>8}{:>7}{:>8}{:>9}{:>10}{:>10}{:>9}{:>8}{:>10}  {}".format(
         "change", "N", "lines", "delta", "full ms", "incr ms", "saved",
-        "chunks", "re-embed", "same"))
+        "chunks", "new text", "same"))
     for kind in report.get("kinds", KINDS):
         for n in report.get("sizes", []):
             group = grouped.get((kind, n))
@@ -237,7 +255,7 @@ def render_projection_table(report: dict) -> str:
                            full, incr,
                            (1.0 - incr / full) * 100.0 if full else 0.0,
                            _median([r["chunks"] for r in group]),
-                           _median([r["requeued"] for r in group]),
+                           _median([r["new_text"] for r in group]),
                            all(r["identical"] for r in group)))
         out.append("")
 
@@ -256,19 +274,20 @@ def render_projection_table(report: dict) -> str:
     out.append("")
     out.append("  What the numbers say, and do not say.")
     out.append("")
-    out.append("  `re-embed` is chunks whose markdown differs from what was")
-    out.append("  last vectorised, out of `chunks` on the page: what the")
-    out.append("  asynchronous phase actually pays. An edit costs one.")
-    out.append("  An insertion re-embeds every chunk after it: about 100% of")
-    out.append("  the page for one at the head, about 53% for one in the")
-    out.append("  middle, at every size measured. The ids are stable across")
-    out.append("  it; the text is not. Each chunk holds a run of siblings up")
-    out.append("  to the window, so one more sibling shifts what every later")
-    out.append("  chunk contains and the phase never comes back. Those chunks")
-    out.append("  really do hold different text, so re-embedding them is")
-    out.append("  correct -- but it is an O(page) term in the asynchronous")
-    out.append("  phase for an O(1) change, which is the thing this design is")
-    out.append("  trying not to have.")
+    out.append("  `new text` is chunks holding markdown no chunk held")
+    out.append("  before: what the embedder would have to do. It is 1 for an")
+    out.append("  insertion at every size here, because a chunk now ends")
+    out.append("  where its content says rather than where a running total")
+    out.append("  crosses the window -- so an insertion cannot move a")
+    out.append("  boundary it does not touch. From a running total the same")
+    out.append("  insertion changed ~100% of the page at every size.")
+    out.append("")
+    out.append("  What the embedder is asked for is still ~100%, because")
+    out.append("  `VectorQueue` gates on `cid` and a cid is address-keyed")
+    out.append("  (ERRATA B12), so it churns when an insertion shifts the")
+    out.append("  addresses below it. Identity is right to be address-keyed;")
+    out.append("  the queue needs to recognise text it has already embedded.")
+    out.append("  That gap is the binding constraint on this phase now.")
     out.append("  Making that O(delta) means choosing boundaries from content")
     out.append("  rather than from a running total, which changes what a")
     out.append("  chunk is and so is measured here before it is attempted.")

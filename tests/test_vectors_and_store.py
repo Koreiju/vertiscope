@@ -349,20 +349,36 @@ def test_deduplication_can_reach_neither_a_vector_nor_the_dom(module):
     Only the absence of the capability says it *cannot*, and that is the
     claim being made. `markdown.py` holds `_dedupe` (token-multiset
     subsumption over strings) and `trie.py` holds the content hashes that
-    filter its candidates; neither may mention either concept.
+    filter its candidates; neither may reach either concept.
+
+    Scanned over identifiers rather than raw text, via
+    `invariants.code_tokens`. The claim is about what the module can *reach*,
+    and a word in a comment reaches nothing: the raw-text form of this check
+    fired on a docstring containing "re-embedding" in a sentence explaining
+    why a chunk boundary matters, which is a correct sentence that grants
+    nothing. Dropping strings as well does not weaken it -- a banned name
+    inside a string literal cannot be imported or called.
     """
     import pathlib
 
+    from domvec.invariants import code_tokens
+
     source = (pathlib.Path(__file__).resolve().parent.parent
               / "domvec" / module).read_text(encoding="utf-8")
-    for banned in ("import numpy", "embedding", "Embedding", "embed_"):
-        assert banned not in source, (
-            f"{module} mentions {banned!r}; deduplication must not be able to "
-            f"reach a vector")
+    names = {name for _line, name in code_tokens(source)}
+
+    assert "numpy" not in names, (
+        f"{module} can reach numpy; deduplication must not be computed with "
+        f"vectors")
+    reachable_vectors = sorted(n for n in names if "embed" in n.lower())
+    assert not reachable_vectors, (
+        f"{module} can reach {reachable_vectors}; deduplication must not be "
+        f"able to reach a vector")
+
     for banned in ("ShadowDOM", "selenium", "webdriver", "BeautifulSoup",
                    "html_raw"):
-        assert banned not in source, (
-            f"{module} mentions {banned!r}; deduplication must work from the "
+        assert banned not in names, (
+            f"{module} can reach {banned!r}; deduplication must work from the "
             f"stored markdown, with no live document")
 
 
@@ -403,3 +419,40 @@ def test_forgetting_everything_leaves_a_matrix_that_still_answers():
     scores = fm.similarities("einstein")
     assert len(scores) == fm.shape[0]
     assert not scores.any(), "a corpus with no terms matched a query"
+
+
+def test_the_capability_scan_still_catches_a_real_reach():
+    """Non-vacuity for the check above, which was just made more precise.
+
+    Making a guard ignore comments is one edit away from making it ignore
+    everything, so the planted defect is asserted here rather than assumed.
+    """
+    from domvec.invariants import code_tokens
+
+    reaching = "import numpy\nv = numpy.array([1])\n"
+    names = {n for _l, n in code_tokens(reaching)}
+    assert "numpy" in names
+
+    embedder = "def go(x):\n    return embed_all(x)\n"
+    names = {n for _l, n in code_tokens(embedder)}
+    assert any("embed" in n.lower() for n in names)
+
+    dom = "from domvec.core.shadow_html_parser import ShadowDOM\n"
+    assert "ShadowDOM" in {n for _l, n in code_tokens(dom)}
+
+
+def test_the_capability_scan_ignores_prose_that_reaches_nothing():
+    from domvec.invariants import code_tokens
+
+    prose = (
+        '"""Why a boundary matters: a chunk needs re-embedding when its\n'
+        'text changes, and numpy is not involved.\n'
+        '"""\n'
+        "# ShadowDOM is not imported here either.\n"
+        "x = 1\n"
+    )
+    names = {n for _l, n in code_tokens(prose)}
+    assert "numpy" not in names
+    assert "ShadowDOM" not in names
+    assert not any("embed" in n.lower() for n in names)
+    assert "x" in names, "the scan must still see the code"

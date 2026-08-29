@@ -1363,6 +1363,101 @@ def _annotate_xpaths(page: TrieNode, url_path: Sequence[str], url: str) -> None:
         walk(child, f"/{child.segment}")
 
 
+# Where a chunk ends: from a running total, or from the content itself.
+#
+# The running total is what the greedy merge has always done -- accumulate
+# siblings until the window is crossed, then cut. It packs the window well and
+# it has one bad property: a boundary is a function of everything before it, so
+# inserting one sibling shifts every boundary after it and the phase never
+# comes back. Measured by `analytics/projection.py`: an insertion re-embeds
+# ~100% of a page's chunks at the head and ~53% in the middle, at every page
+# size, for an O(1) change to the page.
+#
+# The alternative is to let the content decide, which is what content-defined
+# chunking does for deduplicating storage. Kept as a switch rather than a
+# replacement, because it changes what a chunk *is* -- chunk ids, chunk
+# contents and window utilisation all move with it -- and because the
+# comparison is worth being able to re-run.
+#
+# What settled it, measured over an N-row list, counting chunks that come out
+# holding text no chunk held before, which is what the embedder is actually
+# asked to do:
+#
+#     insertion at the head      N=1600   N=6400   N=25600
+#     running total                177      711      2844
+#     content-defined                3        3         3
+#
+# Constant in the page, against linear. Coverage and deduplication are
+# untouched: over the fixture pages both modes emit the same 365 lines with
+# the same 365 unique anchors and the same dedup tally, no chunk over the
+# window and nothing addressed twice. What it costs is packing -- about 10%
+# more chunks at a median a few percent smaller.
+CONTENT_BOUNDARIES = True
+
+
+def _piece_hash(chunk: MarkdownChunk) -> int:
+    """A hash of what a piece *says*, with no trace of where it says it.
+
+    The obvious oracle was `TrieNode.exact_hash`, which the trie already
+    maintains. It is the wrong one, and measurably so: it folds in the node's
+    address, so every sibling's hash changes when an insertion shifts the
+    indices, every boundary decision changes with it, and the renders never
+    re-align. Tried first, and the re-embed ratio did not move off 1.0.
+
+    `subtree_hash` fails the same way for the same reason -- its Merkle folds
+    in `segment`, and a segment carries the sibling ordinal.
+
+    So the oracle is the rendered text, which is what a boundary is supposed
+    to be a function of and what decides whether a chunk needs re-embedding at
+    all. Line text only: depth is rewritten by `_level_page` afterwards, and a
+    piece that moves keeps its words.
+    """
+    return hash(tuple(line.text for line in chunk.lines))
+
+
+# How full a chunk must be before a content boundary is allowed to end it.
+#
+# Without it the cut fires with probability `piece_chars / window` from the
+# first sibling, so sizes come out exponentially distributed and the window
+# goes half used: measured at 65 chunks of median 587 characters where the
+# running total produced 46 of 755.
+#
+# The threshold reads the running total, so it is the one accumulation-
+# dependent input in the decision and it does weaken the re-synchronisation
+# argument from "at the first boundary" to "within a chunk". The window cap
+# was already such an input, and the measurement is what settles it.
+#
+# 0.5 rather than higher, where the packing would be better: at 0.65 most cuts
+# become window cuts again, and on a middle insertion into a page of
+# variable-length rows the new-text count went from 1 to 30 -- worse than the
+# running total it replaces. The threshold buys packing by spending
+# re-synchronisation, and past this point it spends more than it buys.
+MIN_FILL = 0.5
+
+
+def _content_boundary(piece_hash: int, piece_chars: int, window: int,
+                      buffered: int = 0) -> bool:
+    """Should the chunk end after this sibling, judged from the sibling alone?
+
+    A boundary is a property of the piece's own content and of nothing else on
+    the page, which is the whole point: an insertion cannot move a boundary it
+    does not touch, so the two renders re-synchronise at the first boundary at
+    or after the insertion.
+
+    Self-normalising to the window, with no accumulated state. The cut fires
+    with probability `piece_chars / window`, so the expected content between
+    two cuts is one window's worth however large the siblings happen to be --
+    no target count to tune, and nothing that has to be re-derived per page.
+
+    Both inputs belong to the piece: its own hash and its own length. Neither
+    changes when a sibling is inserted before it, which is what makes the
+    re-synchronisation exact rather than probable.
+    """
+    if piece_chars <= 0 or buffered < window * MIN_FILL:
+        return False
+    return (piece_hash % window) < piece_chars
+
+
 def _certainly_overflows(child_chars: Sequence[int], window: int) -> bool:
     """True when the children alone are already too big for the window.
 
@@ -1597,15 +1692,18 @@ def _descend(
     # holds — which is safe, because `anchors` says exactly which addresses
     # are inside. The direction matters: a chunk that over-claimed would let a
     # retrieval hit point at content it does not contain.
-    pieces: List[Tuple[str, object, int]] = []
+    pieces: List[Tuple[str, object, int, int]] = []
     if has_own:
-        pieces.append(("fits", own[0], own[1]))
+        # No hash: these are the node's own units, always first in the run,
+        # and a boundary before anything has accumulated says nothing.
+        pieces.append(("fits", own[0], own[1], _piece_hash(own[0])))
     for child, rendered, rendered_chars in sized:
         # `rendered is None` is `_size_of` saying it proved the overflow
         # without drawing anything, which is exactly the case that splits.
         fits = rendered is not None and rendered_chars <= window
         pieces.append(("fits" if fits else "split",
-                       rendered if fits else child, rendered_chars))
+                       rendered if fits else child, rendered_chars,
+                       _piece_hash(rendered) if fits else 0))
 
     buffer: List[MarkdownChunk] = []
     buffered_chars = 0
@@ -1618,7 +1716,7 @@ def _descend(
         buffer.clear()
         buffered_chars = 0
 
-    for kind, piece, piece_chars in pieces:
+    for kind, piece, piece_chars, piece_hash in pieces:
         if kind == "split":
             flush()
             out.extend(_descend(piece, url, url_depth, window, memo))  # type: ignore[arg-type]
@@ -1632,6 +1730,13 @@ def _descend(
             flush()
         buffer.append(piece)  # type: ignore[arg-type]
         buffered_chars += piece_chars
+        # The window stays a hard cap either way; what changes is whether a
+        # chunk may end *before* it. The cap is still a running total, so a
+        # perturbation can outlive one chunk -- but only until the next
+        # content boundary, which is where the two renders re-align.
+        if CONTENT_BOUNDARIES and _content_boundary(piece_hash, piece_chars,
+                                                    window, buffered_chars):
+            flush()
     flush()
     if key is not None:
         memo.put(key, out)
