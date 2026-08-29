@@ -478,6 +478,14 @@ class AddressTrie:
         # So a reported move is taken as authoritative: the uid travels with
         # the content, and the address it left is vacated below.
         carried: Dict[Tuple, Tuple[int, ContentAddress]] = {}
+        # A removal that is the far side of a reported move is movement, not
+        # an edit. The fold now verifies these against the page before naming
+        # them -- `sensor.alive` -- so they are real removals; but the content
+        # did not leave the document, it changed address, and the destination
+        # is already in `delta.moved`. Counted as edits they made one inserted
+        # node read as a page rewriting itself: delta==1 held on 112 of 121
+        # corpus pages and fell to 21 the moment these arrived.
+        vacated_by_move = {old_address.key() for old_address, _new in moved}
         for old_address, new_address in moved:
             node = self.find(old_address)
             if node is None or not node.is_leaf or not node.uid:
@@ -527,6 +535,24 @@ class AddressTrie:
             digest = want[key][2]
             node = self.find(address)
             if node is not None and node.content_hash == digest:
+                # Already says this, so there is nothing to write -- but a
+                # move reported into this address still has to hand its
+                # identity over, because the fold has also verified the source
+                # as gone and something must carry the uid off it.
+                #
+                # The case is a string that repeats down a list: every card
+                # carries "by", "(about)", "Tags:", so on a shift the value
+                # arriving is the value already there. Without this the uid is
+                # dropped while its source is removed. Safe because every uid
+                # is snapshotted before any write, so a chain of identical
+                # values passes identities along it whatever order the units
+                # arrive in; which of several identical strings carries which
+                # identity is not observable (THEORY Prop. 19.3), a uid
+                # vanishing is.
+                reported = carried.get(key)
+                if reported is not None and node.uid != reported[0]:
+                    node.uid = reported[0]
+                    delta.moved.append(address)
                 # Already says this: nothing to write, and nothing to
                 # re-identify either.
                 #
@@ -621,8 +647,11 @@ class AddressTrie:
             # something.
             if address.key() in want:
                 continue
-            if self.remove(address):
-                delta.removed.append(address)
+            if not self.remove(address):
+                continue
+            if address.key() in vacated_by_move:
+                continue
+            delta.removed.append(address)
 
         delta.visited = len(units)
         if delta.touched:

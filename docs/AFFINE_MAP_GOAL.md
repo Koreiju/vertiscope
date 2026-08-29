@@ -514,7 +514,50 @@ grows**. Content is written at its new address and the old one is never
 vacated, so on two-thirds of real documents the map accumulates addresses the
 page no longer has.
 
-**Two attempts to close it, both of which deleted live content.**
+**Closed, by asking the page.** The fold exposes `alive(paths)`: given the
+addresses the receiver holds, it walks each back to a node in the *composed*
+tree — crossing shadow boundaries, which no XPath engine will do. When a move
+leaves a source orphaned (no other chunk moved into it, no unit re-states it),
+the fold is asked about it once, in a batch. A path that no longer resolves is
+a removal, and it is the only sound one available. A path that still resolves
+is left alone: it holds something, this pass does not know what, and saying
+nothing is the honest answer until the value can be re-read.
+
+Across the 121 measurable corpus pages:
+
+| | before | removals as edits | movement not an edit |
+|---|---|---|---|
+| delta == 1 | 112 | 21 | **112** |
+| trie grew | 88 | 31 | **31** |
+| shrank | 0 | 4 | 4 |
+| lost identities | 47 | 63 | **26** |
+| net addresses, median | +25 | +2 | **+2** |
+| net range | +1 … +1841 | −49 … +595 | −49 … +595 |
+| new text median / p90 / max | 5 / 107 / 746 | 2 / 47 / 438 | **2 / 47 / 438** |
+
+The middle column is why the last one exists: a verified removal is still
+*movement* when it is the far side of a reported move, and counting it as an
+edit made one inserted node read as a page rewriting itself. The content did
+not leave the document; it changed address, and the destination is already in
+`delta.moved`.
+
+Per-page, over ten successive mutations, staleness now grows at one address per
+mutation rather than five to twenty:
+
+| page | stale 1 → 10, before | after |
+|---|---|---|
+| blog.codinghorror.com | 5 → 50 | **1 → 10** |
+| quotes.toscrape.com | 32 → 198 | **1 → 10** |
+| discourse.julialang.org | 183 → 667 | **49 → 86** |
+| ar.wikipedia.org | 1546 → 3863 (at 5) | **965 → 1543** |
+
+**Still open.** Four pages now shrink where none did. `discourse.julialang.org`
+holds 58 addresses with another row's content and loses 44, and
+ar.wikipedia.org loses ~750 — both unchanged by this work and both pre-dating
+it. Wrong content at a right address remains the worst class and the next
+target.
+
+**Two earlier attempts, both of which deleted live content.**
 
 The first put the rule in the trie: an address whose content moved away, and
 which this drain does not claim, is empty. The second put it in the fold, which

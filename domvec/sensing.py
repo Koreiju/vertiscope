@@ -432,6 +432,41 @@ class Sensor:
                 moved.append((address, shifted))
                 rebuilt.append((shifted, digest))
             self._chunk_addrs[cid] = rebuilt
+
+        # A move's source, left orphaned, asked about rather than guessed at.
+        #
+        # When a shift moves content out of an address, the receiver is told
+        # where it went and nothing about what the address holds now. Where
+        # some other chunk moved *into* it, the drain says so and the trie is
+        # repaired. Where nothing did -- 873 of 1,473 sources on one corpus
+        # page -- the trie keeps whatever was there, which is stale content at
+        # a live address, and on discourse.julialang.org that is 58 addresses
+        # holding another row's link, image and count after one insertion.
+        #
+        # Two rules were tried for this and both deleted content the page
+        # still had: one in the trie, one in this file's own chunk
+        # bookkeeping. Both inferred absence from silence. The page is the
+        # only thing that knows, and only from inside: a composed-tree path
+        # crosses shadow boundaries, which no XPath engine will do. So the
+        # fold is asked, in one round trip for all of them.
+        #
+        # A path that no longer resolves is a removal, and this is the only
+        # sound one available. A path that still resolves is left alone: it
+        # holds something, this pass does not know what, and saying nothing is
+        # the honest answer until the value can be re-read.
+        if moved:
+            claimed = {a.key() for a, _v in units}
+            claimed.update(n.key() for _o, n in moved)
+            orphans = [old_address for old_address, _new in moved
+                       if old_address.key() not in claimed]
+            if orphans:
+                try:
+                    alive = self._call("alive", [a.xpath for a in orphans])
+                except Exception:                      # noqa: BLE001
+                    alive = None
+                if isinstance(alive, list) and len(alive) == len(orphans):
+                    gone.extend(address for address, live
+                                in zip(orphans, alive) if not live)
         decode_ms = (time.perf_counter() - started) * 1000
 
         return SensePass(

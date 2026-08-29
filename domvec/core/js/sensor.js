@@ -2238,6 +2238,39 @@
     return node;
   }
 
+  // The receiver's spelling of a composed-tree address, walked back to its
+  // node. Mirrors `sensing.Sensor._xpath`: `#shadow-root` for a boundary,
+  // `text()[n]` for a text child, `tag` or `tag[n]` for an element, and
+  // `*[@id='x']` where the fold re-rooted the address at an id.
+  function resolveXPath(xpath) {
+    if (!xpath || xpath.charAt(0) !== '/') return null;
+    var steps = xpath.split('/'), node = document.documentElement, i, seg;
+    for (i = 1; i < steps.length; i++) {
+      seg = steps[i];
+      if (!seg) continue;
+      if (i === 1 && seg.toLowerCase() === 'html') continue;   // already here
+      var anchored = /^\*\[@id=['"]?([^'"\]]*)['"]?\]$/.exec(seg);
+      if (anchored) {
+        try { node = document.getElementById(anchored[1]); } catch (e) { node = null; }
+        if (!node) return null;
+        continue;
+      }
+      if (seg === '#shadow-root') { node = resolveStep(node, '#shadow-root', 1); }
+      else {
+        var text = /^text\(\)\[(\d+)\]$/.exec(seg);
+        if (text) { node = resolveStep(node, '#text', parseInt(text[1], 10)); }
+        else {
+          var m = /^([^\[\]]+)(?:\[(\d+)\])?$/.exec(seg);
+          if (!m) return null;
+          node = resolveStep(node, m[1].toLowerCase(),
+                             m[2] ? parseInt(m[2], 10) : 1);
+        }
+      }
+      if (!node) return null;
+    }
+    return node;
+  }
+
   function nativeSet(el, value) {
     // A framework replaces the value property on the instance, so assigning
     // through it is invisible to that framework's own listener. The
@@ -2494,6 +2527,30 @@
     perform: perform,
     styles: styles,
     resolve: function (path) { return !!resolvePath(path); },
+
+    // Does each of these addresses still name a node?
+    //
+    // The receiver cannot answer this. It holds addresses and the values it
+    // was told to put there; when a shift moves content out of an address,
+    // nothing says whether the address is now empty or holding somebody
+    // else's content, and guessing has gone wrong twice -- once in the trie
+    // and once in this file's own chunk bookkeeping -- each time by deleting
+    // content the page still had.
+    //
+    // Only the page knows, and only from in here: a composed-tree path
+    // crosses shadow boundaries, which no XPath engine will do.
+    //
+    // Takes the spelling the receiver holds (`sensing._xpath`) rather than
+    // the interned step arrays, because that is what it has, and answers in
+    // one round trip because the caller asks about every orphaned address at
+    // once.
+    alive: function (paths) {
+      var out = [], i;
+      for (i = 0; i < (paths || []).length; i++) {
+        out.push(!!resolveXPath(String(paths[i] || '')));
+      }
+      return out;
+    },
     // One call that scrolls and reports. Two calls pay the round-trip toll
     // twice — measured at 1.46 ms each on this setup, against 0.05-0.25 ms
     // of actual in-page work — so the boundary, not the algorithm, is what
