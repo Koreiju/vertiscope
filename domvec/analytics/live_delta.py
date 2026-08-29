@@ -287,13 +287,20 @@ def measure_live_delta(driver, urls: Sequence[str], *,
             # folded into a rate, because a coverage or dedup number cannot
             # see it: every address present is still correct, there are simply
             # also addresses that are not.
+            # Net, not gross. A shift re-addresses content wholesale -- 663
+            # addresses gained and 662 dropped on news.ycombinator.com for one
+            # inserted row -- and that is the mechanism working, not failing.
+            # What must not happen is the trie ending up bigger than the page:
+            # the first version of this check counted the gain alone and cried
+            # anomaly on three pages that were behaving correctly.
+            row["leaves_net"] = row["leaves_gained"] - row["leaves_dropped"]
             budget = max(8, 4 * max(row["delta_size"], 1))
-            if row["leaves_gained"] > budget:
+            if row["leaves_net"] > budget:
                 row["anomaly"] = (
-                    "trie gained {} addresses for a delta of {} "
-                    "(dropped {})".format(row["leaves_gained"],
-                                          row["delta_size"],
-                                          row["leaves_dropped"]))
+                    "trie grew by {} addresses for a delta of {} "
+                    "(gained {}, dropped {})".format(
+                        row["leaves_net"], row["delta_size"],
+                        row["leaves_gained"], row["leaves_dropped"]))
 
             # The trie must actually have seen the insertion, or everything
             # below is a measurement of nothing happening.
@@ -355,7 +362,9 @@ def render_live_delta_table(report: dict) -> str:
     out.append("  signature of a move the receiver did not honour: the content")
     out.append("  is written at its new address and left at the old one, and")
     out.append("  no coverage or dedup number can see it because every address")
-    out.append("  present is still correct.")
+    out.append("  present is still correct. Gaining and dropping in equal")
+    out.append("  measure is the opposite -- a shift re-addressing content,")
+    out.append("  which is the mechanism working.")
     out.append("")
     out.append("  `delta` is the trie's own count of genuine change and should")
     out.append("  read 1 for one node; `moved` is the addresses the insertion")
