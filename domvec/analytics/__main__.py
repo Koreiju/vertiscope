@@ -23,6 +23,10 @@ def main(argv=None) -> int:
     parser.add_argument("--delta", action="store_true",
                         help="measure what one insertion costs against page "
                              "size, on the local scaling fixture")
+    parser.add_argument("--drift", action="store_true",
+                        help="mutate each page repeatedly and score the "
+                             "repaired trie against a fresh map of it")
+    parser.add_argument("--mutations", type=int, default=10)
     parser.add_argument("--corpus", action="store_true",
                         help="with --live-delta, run over the frozen corpus in "
                              "tests/corpus instead of the urls given")
@@ -64,6 +68,25 @@ def main(argv=None) -> int:
 
     cfg = load_config()
     with browser_session(cfg) as driver:
+        if args.drift:
+            from .drift import (measure_drift, render_drift_table,
+                                write_drift_artifact)
+            targets = list(args.urls)
+            if args.corpus:
+                root = pathlib.Path(__file__).resolve().parent.parent.parent
+                pages = sorted((root / "tests" / "corpus").glob("*.html"))
+                if args.limit:
+                    pages = pages[:args.limit]
+                targets = [p.as_uri() for p in pages]
+            report = measure_drift(driver, targets,
+                                   mutations=args.mutations,
+                                   context_window=args.window)
+            print(render_drift_table(report), flush=True)
+            print(f"  written: "
+                  f"{write_drift_artifact(report, pathlib.Path(args.out))}",
+                  flush=True)
+            return 0
+
         if args.live_delta:
             targets = list(args.urls)
             if args.corpus:

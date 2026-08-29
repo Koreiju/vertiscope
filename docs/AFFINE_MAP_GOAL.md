@@ -535,6 +535,47 @@ harness reports per page while deleting live content is silent. The rule that
 would close it needs positive evidence of absence — the fold looking at the old
 path and finding nothing — which nothing in the pipeline currently produces.
 
+### How fast the map goes wrong
+
+Knowing the trie grows is not the same as knowing what it costs. The same
+sensor can produce a *fresh* map of the page as it now stands, so the repaired
+trie can be scored against it address for address — which is the confusion
+matrix this goal asks for, applied to the map's own totality of coverage.
+`analytics/drift.py` mutates a page ten times and checks in along the way.
+
+Staleness and loss are kept apart deliberately: a lost address is content the
+reader cannot reach, a stale one is content reached twice or wrongly, and one
+"accuracy" figure would average them into something that sounds fine.
+
+| page | truth | recall | stale after 1 → 10 | lost | wrong value |
+|---|---|---|---|---|---|
+| blog.codinghorror.com | 615 → 624 | 100% | 5 → 50 | 0 | 0 |
+| arxiv.org/abs/1706.03762 | 433 → 442 | 100% | 3 → 30 | 0 | 0 |
+| discourse.julialang.org | 889 → 898 | 94.9 → 99.6% | 183 → 667 | 45 → 4 | 58 → 92 |
+| docs.python.org/library/re | 5156 → 5165 | 100% | **2, flat** | 0 | 9 |
+| quotes.toscrape.com | 177 → 186 | 100% | 32 → 198 | 0 | 0 |
+
+Three things this says that the single-mutation numbers could not.
+
+**Recall holds.** On four of five pages the trie never loses an address across
+ten mutations. The map does not forget; it accretes.
+
+**Staleness is linear in mutations, at a page-dependent rate.** Roughly 5 per
+mutation on codinghorror, 3 on arxiv, 20 on quotes, 67 on discourse. There is
+no bound: after ten insertions **quotes.toscrape.com holds 198 stale addresses
+for a page with 186 real ones** — the map is by then more stale than real. That
+is what the growth defect actually costs, and it is not cosmetic.
+
+**And it is not universal.** docs.python.org sits at 2 stale addresses after
+ten mutations on a 5,156-address page. Whatever produces the drift is a
+property of page shape, not of the algorithm everywhere, which is the useful
+half of the finding: there is a class of page where the incremental path is
+already exact.
+
+discourse.julialang.org is the one page carrying *wrong values* at shared
+addresses — 58 rising to 92. Holding the wrong content at a right address is
+worse than either staleness or loss, and it is the next thing to chase.
+
 **An unexplained loss, measured rather than guessed at.** Arabic Wikipedia
 loses 86 identities on one insertion, and ja-wikipedia 3. I attributed that to
 three different mechanisms of my own and was wrong each time; the fourth check
