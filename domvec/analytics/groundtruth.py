@@ -123,9 +123,31 @@ function kidsOf(node, inShadow) {
 // `sensing._name_test`, and `sensor.js::stepFor` for the ordinal.
 function step(tag, n) { return n > 1 ? tag + '[' + n + ']' : tag; }
 
+// Whether a reader can actually see this, not whether it has layout.
+//
+// `getClientRects().length` was the test, and it is the wrong one: an element
+// with `visibility: hidden` or `opacity: 0` is laid out and returns rects
+// while showing nothing. github.com's collapsed mega-menu is exactly that --
+// `rects=1, visibility=hidden` on every item of it -- so a wireframe that
+// correctly declined to draw a menu the reader cannot see was scored as
+// losing 213 units, and read 65.0% on a page it renders faithfully.
+//
+// `checkVisibility` is the predicate that answers the question asked, with
+// the opacity and content-visibility checks turned on explicitly because they
+// are off by default. Falls back to the rect test where it does not exist,
+// which is the old behaviour and no worse than it was.
 function drawnNow(el) {
-  try { return !!(el && el.getClientRects && el.getClientRects().length); }
-  catch (e) { return true; }
+  if (!el) return false;
+  try {
+    if (typeof el.checkVisibility === 'function') {
+      return !!el.checkVisibility({
+        opacityProperty: true,
+        visibilityProperty: true,
+        contentVisibilityAuto: true
+      });
+    }
+    return !!(el.getClientRects && el.getClientRects().length);
+  } catch (e) { return true; }
 }
 
 function sourceOf(el) {
