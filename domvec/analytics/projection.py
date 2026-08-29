@@ -44,9 +44,11 @@ Those columns are where the chunker's own behaviour shows up, and they say
 something the timings do not.
 
 ``new_text`` is chunks holding markdown no chunk held before -- what the
-embedder would have to do. With content-defined boundaries it is **1 for an
-insertion at every page size measured**, against ~100% of the page when
-boundaries came from a running total. That is the asynchronous phase becoming
+embedder would have to do. With content-defined boundaries it is **a small
+constant at every page size measured** (4 for an insertion at the head, 1 for
+an edit, 0 for a redraw), against ~100% of the page when boundaries came from
+a running total. Driven end to end through `VectorQueue` against a counting
+embedder, an insertion asks for 4 embeddings at 400 rows and 4 at 25,600. That is the asynchronous phase becoming
 O(delta), and it is the point of the whole exercise.
 
 ``requeued`` is what `VectorQueue` would actually embed, and it is still ~100%
@@ -275,8 +277,10 @@ def render_projection_table(report: dict) -> str:
     out.append("  What the numbers say, and do not say.")
     out.append("")
     out.append("  `new text` is chunks holding markdown no chunk held")
-    out.append("  before: what the embedder would have to do. It is 1 for an")
-    out.append("  insertion at every size here, because a chunk now ends")
+    out.append("  before: what the embedder would have to do. It is constant")
+    out.append("  for an")
+    out.append("  insertion at every size here (4 at 400 rows and 4 at")
+    out.append("  25,600), because a chunk now ends")
     out.append("  where its content says rather than where a running total")
     out.append("  crosses the window -- so an insertion cannot move a")
     out.append("  boundary it does not touch. From a running total the same")

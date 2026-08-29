@@ -230,3 +230,65 @@ def test_a_boundary_needs_the_buffer_to_be_full_enough():
 
 def test_an_empty_piece_is_never_a_boundary():
     assert not md._content_boundary(12345, 0, 1200, buffered=1200)
+
+
+# --- the same page must chunk the same way tomorrow -------------------------
+
+
+def test_boundaries_do_not_move_between_processes():
+    """A boundary is persisted the moment a chunk id is written down.
+
+    The first version of the oracle used Python's `hash`, which is randomised
+    per process. Boundaries then fell in different places in different runs:
+    the same page chunked differently under different ids every restart, and a
+    stored index would disagree with the next scan of the same page. It showed
+    up as a test that passed alone and failed in the suite, which is a lucky
+    way to find it.
+
+    Run in subprocesses with different `PYTHONHASHSEED`, because that is the
+    only way to observe it -- within one process the randomisation is fixed
+    and everything looks stable.
+    """
+    import hashlib
+    import os
+    import subprocess
+    import sys
+
+    program = (
+        "import hashlib;"
+        "from domvec.stream import StreamingScan;"
+        "from domvec.markdown import render_trie;"
+        "from domvec.analytics.projection import _page;"
+        "ch=render_trie(StreamingScan('https://d.test/p')"
+        ".push(_page(400),passno=0).trie, context_window=1200);"
+        "print(len(ch), hashlib.sha1(('|'.join(c.markdown for c in ch))"
+        ".encode()).hexdigest()[:16])"
+    )
+
+    seen = set()
+    for seed in ("0", "1", "12345"):
+        env = dict(os.environ, PYTHONHASHSEED=seed)
+        out = subprocess.run([sys.executable, "-c", program], env=env,
+                             capture_output=True, text=True, timeout=300)
+        assert out.returncode == 0, out.stderr[-800:]
+        seen.add(out.stdout.strip())
+    assert len(seen) == 1, "the page chunked differently per process: {}".format(
+        seen)
+    assert hashlib  # the import is used by the subprocess program
+
+
+def test_the_oracle_is_deterministic_for_the_same_text():
+    from domvec.markdown import MarkdownChunk, MarkdownLine
+    from domvec.address import ContentAddress
+
+    def chunk():
+        return MarkdownChunk(
+            url="u", xpath="/html/body/p",
+            lines=[MarkdownLine(depth=0, text="stable words here",
+                                address=ContentAddress("u", "/html/body/p",
+                                                       "text", "text()[1]"))])
+
+    assert md._piece_hash(chunk()) == md._piece_hash(chunk())
+    # A known value, so a change of algorithm is a deliberate act: it would
+    # re-chunk every stored page.
+    assert md._piece_hash(chunk()) == 456105809

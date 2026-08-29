@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import zlib
 from dataclasses import dataclass, field, replace
 from typing import Dict, Iterable, Iterator, List, Optional, Sequence, Tuple
 
@@ -1411,8 +1412,19 @@ def _piece_hash(chunk: MarkdownChunk) -> int:
     to be a function of and what decides whether a chunk needs re-embedding at
     all. Line text only: depth is rewritten by `_level_page` afterwards, and a
     piece that moves keeps its words.
+
+    A checksum rather than Python's `hash`, and the distinction is
+    load-bearing. `hash` is randomised per process, so boundaries chosen with
+    it fall in different places in two runs: the same page would chunk
+    differently, under different ids, every time the process restarted, and a
+    stored index would disagree with the next scan of the same page. It got as
+    far as a test that passed alone and failed in the suite before the cause
+    was clear. `TrieNode.exact_hash` may use `hash` because it is consulted
+    in-process and never persisted; a boundary is persisted the moment a chunk
+    id is written down.
     """
-    return hash(tuple(line.text for line in chunk.lines))
+    joined = "\n".join(line.text for line in chunk.lines)
+    return zlib.crc32(joined.encode("utf-8", "replace"))
 
 
 # How full a chunk must be before a content boundary is allowed to end it.

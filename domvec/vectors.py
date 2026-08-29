@@ -575,6 +575,28 @@ class VectorQueue:
     digests: Dict[str, str] = field(default_factory=dict)
     batch: int = 64
 
+    # digest -> the vector that text embedded to, for text that arrives under
+    # an id it has not worn before.
+    #
+    # The gate above is keyed on `cid`, and a cid is address-keyed (ERRATA
+    # B12) precisely so that identity does not collapse where content is
+    # absent -- a content key collapsed 18.8% of instances on the 54-page
+    # corpus against the address's 0%. The cost of that correctness is churn:
+    # an insertion shifts every address below it, so chunks arrive with new
+    # ids carrying text embedded an hour ago, and the gate cannot recognise
+    # them. Measured on an N-row list, an insertion left exactly one chunk
+    # holding new text and still offered the whole page for embedding.
+    #
+    # Reuse resolves it without re-keying anything. An embedding is a function
+    # of the text, so two chunks with the same markdown have the same vector,
+    # and serving the second from the first is exact rather than approximate.
+    vectors: "OrderedDict[str, object]" = field(default_factory=OrderedDict)
+    # Bounded because it is a cache, not a store: the authoritative copy lives
+    # with the chunks. Oldest out first, which keeps a page being edited
+    # resident while a page left behind falls out.
+    vector_cache: int = 4096
+    reused: int = 0        # served from `vectors` instead of the embedder
+
     # counters, so the REPL can report the queue rather than infer it
     pushed: int = 0        # offered
     queued: int = 0        # accepted (digest moved)
@@ -629,17 +651,37 @@ class VectorQueue:
             items.append(self.pending.popitem(last=False))
 
         out: Dict[str, np.ndarray] = {}
-        for i in range(0, len(items), self.batch):
-            window = items[i:i + self.batch]
+
+        # Text already embedded under some other id needs a row, not a call.
+        needed: List[Tuple[str, str]] = []
+        for cid, md in items:
+            digest = self.digest(md)
+            known = self.vectors.get(digest)
+            if known is None:
+                needed.append((cid, md))
+                continue
+            out[cid] = known
+            self.digests[cid] = digest
+            self.vectors.move_to_end(digest)
+            self.reused += 1
+
+        for i in range(0, len(needed), self.batch):
+            window = needed[i:i + self.batch]
             matrix = embedder.embed_texts([md for _cid, md in window])
             for (cid, md), vector in zip(window, matrix):
+                digest = self.digest(md)
                 out[cid] = vector
-                self.digests[cid] = self.digest(md)
+                self.digests[cid] = digest
+                self.vectors[digest] = vector
+                self.vectors.move_to_end(digest)
                 self.embedded += 1
+        while len(self.vectors) > self.vector_cache:
+            self.vectors.popitem(last=False)
         self.flushes += 1
         return out
 
     def report(self) -> Dict[str, int]:
         return {"pending": len(self.pending), "pushed": self.pushed,
                 "queued": self.queued, "skipped": self.skipped,
-                "embedded": self.embedded, "flushes": self.flushes}
+                "embedded": self.embedded, "reused": self.reused,
+                "flushes": self.flushes}

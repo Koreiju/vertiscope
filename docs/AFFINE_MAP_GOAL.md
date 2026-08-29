@@ -281,8 +281,9 @@ boundary cannot be moved by an insertion that does not touch it.
 | running total | 177 | 711 | 2844 |
 | content-defined | 3 | 3 | 3 |
 
-Constant in the page against linear, and in the harness (which inserts at the
-head of an N-row list) it is **1 at every size**. Coverage and deduplication
+Constant in the page against linear. Driven end to end through `VectorQueue`
+against a counting embedder, an insertion at the head asks for **4 embeddings
+at 400 rows and 4 at 25,600** — a page of 3,182 chunks. Coverage and deduplication
 are untouched: over the fixture pages both modes emit the same 365 lines with
 the same 365 unique anchors and the same dedup tally, no chunk over the window,
 nothing addressed twice. The price is packing — about 10% more chunks at a
@@ -303,14 +304,25 @@ Two things had to be got right, and the first was got wrong first:
   rows the new-text count went from 1 to 30, worse than what it replaces. 0.5
   is where it stops spending more than it buys.
 
-**What is still in the way.** The queue would still embed ~100% of the page,
-because `VectorQueue` gates on `cid`, and a cid is address-keyed (ERRATA B12)
-so it churns when an insertion shifts the addresses below it: a chunk arrives
-with a new id carrying text embedded an hour ago. Identity is right to be
-address-keyed — a content key collapsed 18.8% of instances on the 54-page
-corpus, the address collapses 0% by construction — so the remedy is not to
-re-key identity but to let the queue recognise text it has already embedded and
-reuse that vector. That gap is the binding constraint on this phase now.
+**Identity churn, and why it is not fixed by re-keying.** `VectorQueue` gates
+on `cid`, and a cid is address-keyed (ERRATA B12) so it churns when an
+insertion shifts the addresses below it: a chunk can arrive with a new id
+carrying text embedded an hour ago. Identity is right to be address-keyed — a
+content key collapsed 18.8% of instances on the 54-page corpus, the address
+collapses 0% by construction. So the queue keeps a bounded digest→vector cache
+instead: an embedding is a function of its text, so serving the second
+occurrence from the first is exact rather than approximate. Whether it fires
+depends on the page — on some shapes the cid gate already catches everything —
+which is why it is tested directly rather than through a page.
+
+**A boundary is persisted the moment a chunk id is written down.** The oracle
+must therefore be stable across processes, and the first version was not: it
+used Python's `hash`, which is randomised per process, so the same page chunked
+differently under different ids on every restart and a stored index would
+disagree with the next scan. It surfaced as a test that passed alone and failed
+in the suite. The oracle is now a CRC, checked by rendering the same page in
+subprocesses under three different `PYTHONHASHSEED` values and requiring one
+answer.
 
 ### Reading order is the fourth thing the map preserves
 

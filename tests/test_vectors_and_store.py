@@ -20,7 +20,8 @@ from domvec.markdown import render_trie
 from domvec.pipeline import run_pipeline
 from domvec.search import SearchDiagnostics, ThreeFormIndex
 from domvec.trie import AddressTrie
-from domvec.vectors import EmbeddingMatrix, FreqMatrix, pagerank, tokens
+from domvec.vectors import (EmbeddingMatrix, FreqMatrix, VectorQueue, pagerank,
+                            tokens)
 
 CORPUS = pathlib.Path(__file__).parent / "corpus"
 MANIFEST = CORPUS / "manifest.json"
@@ -456,3 +457,157 @@ def test_the_capability_scan_ignores_prose_that_reaches_nothing():
     assert "ShadowDOM" not in names
     assert not any("embed" in n.lower() for n in names)
     assert "x" in names, "the scan must still see the code"
+
+
+# --- reuse: text already embedded needs a row, not a call --------------------
+
+
+class _CountingEmbedder:
+    """Returns a vector that is a function of the text, and counts the asking.
+
+    The vector has to depend on the text or the soundness assertion below is
+    vacuous: reuse is only correct because an embedding is a function of what
+    it embeds, and a constant embedder would satisfy any cache at all.
+    """
+
+    def __init__(self):
+        self.texts = 0
+
+    def embed_texts(self, texts):
+        self.texts += len(texts)
+        return np.stack([np.full(8, float(len(t))) for t in texts])
+
+
+def _rows(pairs):
+    """A list page whose chunk ids churn under an insertion.
+
+    The header and footer matter: they make the page chunk into a run whose
+    ordinals shift when one row is added, which is the condition reuse exists
+    for. On a barer page the `cid` gate already catches everything and there
+    is nothing left to reuse -- true, and it would make these tests vacuous.
+    """
+    body = "".join(
+        '<li class="row"><h3>Item {}</h3><p>{}</p>'
+        '<a href="https://example.test/{}">open {}</a></li>'.format(i, t, i, i)
+        for i, t in pairs)
+    return ("<html><body><header><h1>Catalogue</h1></header>"
+            "<main><ul>{}</ul></main>"
+            "<footer><p>end of list</p></footer></body></html>".format(body))
+
+
+def _insert_and_flush(n, cache=4096):
+    from domvec.markdown import RenderMemo, render_trie
+    from domvec.stream import StreamingScan
+
+    rows = [(i, "body text for row {} here".format(i)) for i in range(n)]
+    scan = StreamingScan("https://q.test/p", context_window=1200)
+    memo = RenderMemo()
+    queue = VectorQueue(vector_cache=cache)
+    embedder = _CountingEmbedder()
+
+    first = render_trie(scan.push(_rows(rows), passno=0).trie,
+                        context_window=1200, memo=memo)
+    queue.extend(first)
+    queue.flush(embedder)
+    before = embedder.texts
+
+    update = scan.push(_rows([(-1, "inserted at the head")] + rows), passno=1)
+    dirty = scan.dirty_chunks(update)
+    queue.extend(dirty)
+    vectors = queue.flush(embedder)
+    return embedder.texts - before, queue, dirty, vectors
+
+
+@pytest.mark.parametrize("n", [400, 1600, 6400])
+def test_an_insertion_asks_the_embedder_for_a_constant_amount(n):
+    """The asynchronous phase, O(delta) at last.
+
+    The chunker made the *text* O(delta); this makes the embedder's workload
+    match it. Between them an insertion at the head of a 6,400-row page costs
+    a fixed number of embeddings instead of one per chunk on the page.
+    """
+    embedded, _queue, _dirty, _vectors = _insert_and_flush(n)
+    assert embedded <= 24, "{} embeddings at N={}".format(embedded, n)
+
+
+def test_the_same_text_under_a_new_id_is_not_embedded_again():
+    """The mechanism, exercised directly rather than through a page.
+
+    Whether a page's chunk ids churn under an insertion depends on its shape;
+    on some pages the `cid` gate catches everything and reuse never fires,
+    which is a fine outcome and a useless test. So the condition reuse exists
+    for is built here: the same markdown arriving under an id it has not worn
+    before, which is what an insertion produces when it shifts the addresses
+    below it.
+    """
+    queue = VectorQueue()
+    embedder = _CountingEmbedder()
+
+    queue.push("cid-a", "the very same words")
+    first = queue.flush(embedder)
+    assert embedder.texts == 1
+
+    queue.push("cid-b", "the very same words")
+    second = queue.flush(embedder)
+
+    assert embedder.texts == 1, "the embedder was asked for text it had"
+    assert queue.reused == 1
+    assert np.allclose(second["cid-b"], first["cid-a"])
+
+
+def test_without_the_cache_the_same_text_is_embedded_twice():
+    """Non-vacuity: turn the cache off and the saving disappears."""
+    queue = VectorQueue(vector_cache=0)
+    embedder = _CountingEmbedder()
+    queue.push("cid-a", "the very same words")
+    queue.flush(embedder)
+    queue.push("cid-b", "the very same words")
+    queue.flush(embedder)
+    assert embedder.texts == 2
+    assert queue.reused == 0
+
+
+def test_a_reused_vector_is_the_one_the_embedder_would_have_returned():
+    """Exact, not approximate. An embedding is a function of its text.
+
+    The embedder here returns a vector derived from the text, so a cache that
+    served the wrong entry would be caught; a constant embedder would make
+    this vacuous.
+    """
+    queue = VectorQueue()
+    embedder = _CountingEmbedder()
+    for i in range(5):
+        queue.push("first-{}".format(i), "text number {}".format(i))
+    queue.flush(embedder)
+
+    for i in range(5):
+        queue.push("second-{}".format(i), "text number {}".format(i))
+    out = queue.flush(embedder)
+
+    assert queue.reused == 5
+    for i in range(5):
+        expected = np.full(8, float(len("text number {}".format(i))))
+        assert np.allclose(out["second-{}".format(i)], expected)
+
+
+def test_changed_text_is_never_served_from_the_cache():
+    """The cache is keyed on the digest, so a changed chunk must miss it."""
+    queue = VectorQueue()
+    embedder = _CountingEmbedder()
+    queue.push("a", "the original words")
+    queue.flush(embedder)
+    first = embedder.texts
+
+    queue.push("a", "quite different words")
+    out = queue.flush(embedder)
+    assert embedder.texts > first, "a changed chunk was served a stale vector"
+    assert np.allclose(out["a"], np.full(8, float(len("quite different words"))))
+
+
+def test_the_vector_cache_is_bounded():
+    queue = VectorQueue(vector_cache=4)
+    embedder = _CountingEmbedder()
+    for i in range(20):
+        queue.push("c{}".format(i), "text number {}".format(i))
+    queue.flush(embedder)
+    assert len(queue.vectors) <= 4
