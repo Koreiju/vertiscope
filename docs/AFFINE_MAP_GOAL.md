@@ -79,6 +79,66 @@ construction, not inside it. The trie recursion is the synchronous O(delta)
 path; embedding is a consumer of it. The two are timed separately because they
 are separately answerable.
 
+### The projection is the other half of O(delta)
+
+The trie applies a mutation in O(delta). The markdown is *read back out* of it,
+and for a long time that read was O(page) -- so the pair was O(page), and the
+O(delta) claim described a component rather than the sensor.
+
+The trie now carries two Merkle hashes over every subtree, for two different
+equivalences, both maintained in one bottom-up pass:
+
+- `subtree_hash` folds in `content_hash`, the hash of a value's normalized
+  token multiset. Blind to word order, case and punctuation *by design* --
+  that blindness is what lets `apply` recognise a paragraph that moved.
+  It answers **"is this the same content?"**, and re-anchoring depends on it.
+- `exact_hash` folds in the exact value and the full address. It answers
+  **"does this draw the same?"**, which is the question a projection has to
+  ask, because it prints values verbatim: `"a b"` and `"b a"` share a
+  `content_hash` and render differently.
+
+A projection memo keyed on `exact_hash` may reuse a subtree exactly when the
+trie says that subtree is unchanged. `analytics/projection.py` measures what
+that is worth, by change kind, against the same render with no memo:
+
+| change | N=100 | N=400 | N=1600 |
+|---|---|---|---|
+| redraw (nothing changed) | 95% | 96% | 97% |
+| edit one value in place | 47% | 50% | 45% |
+| insert one node at the head | 41% | 41% | 30% |
+
+Read honestly, that is **not yet O(delta)**, and the residual is located rather
+than guessed at:
+
+- A **redraw** is nearly free because the page root is clean and one hash
+  comparison answers for the whole page. This is the common case on an
+  interactive surface: scrolling, an idle tick, a keystroke that changes only
+  the viewport.
+- An **edit** is only about half, because the ancestors of the edited leaf
+  reach the root, and the descent asks each ancestor whether its subtree fits
+  the context window -- a question currently answered by *rendering* it.
+  Removing that means answering the fit test from a bound instead of a render,
+  and it is the next thing to remove.
+- An **insertion at the head** is the floor, and not a defect. It shifts the
+  address of everything below it, and the projection prints addresses: a
+  chunk's xpath, a line's anchor. What moved genuinely draws differently. The
+  trie keeps identity across the shift (`uid`); the render cannot inherit it.
+
+Two preconditions had to hold before any of this was sound, and both are
+statements about the trie as the universal link structure:
+
+1. **Nothing in a chunk may be a function of its position.** Chunk ids carried
+   the chunk's global emission ordinal, so a cached subtree could not be
+   spliced in anywhere. `_number_parts` makes the ordinal a property of the
+   (url, xpath) group instead.
+2. **The invalidation signal has to be strict enough to stand behind
+   "identical".** `subtree_hash` is not, and using it would have served a
+   stale render after any reformatting edit. `exact_hash` exists for this.
+
+Every trial checks the memoised render against an unmemoised one on the same
+trie and records `identical`; the table prints a banner if it ever disagrees.
+A speed column without that check measures nothing.
+
 ## The measurement theory
 
 The user asked for dimensions that are "clearly resolvable, expressive of cause

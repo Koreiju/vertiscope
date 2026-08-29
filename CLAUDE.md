@@ -42,6 +42,14 @@ DOM — deduplicated, tracked, updated — in **millisecond range** and in
 5. **The fold reads no layout** (`invariants.c2`). Geometry is a peripheral
    keyed by address, never in the trie.
 
+5b. **Two Merkles, two equivalences — do not confuse them.** `subtree_hash`
+   folds in `content_hash` (a normalized token multiset) and answers *"is this
+   the same content?"*; `apply` needs that blindness to recognise a paragraph
+   that moved. `exact_hash` folds in the exact value and the full address and
+   answers *"does this draw the same?"*; every projection memo must key on
+   that one, because a projection prints values verbatim. Keying a render on
+   `subtree_hash` serves a stale page after any reformatting edit.
+
 6. **Closed shadow roots stay closed.** Reaching in means patching
    `attachShadow`, which is detectable and is refused. Report them as
    unreachable so the coverage figure stays honest.
@@ -72,7 +80,10 @@ denominator is what this component is answerable for.
 
 - `docs/AFFINE_MAP_GOAL.md` — the binding goal, verbatim, plus the metric theory.
 - `domvec/analytics/` — the affine-map confusion matrix, ground truth, phase
-  timings. Run: `python -m domvec.analytics <url>`.
+  timings. Run: `python -m domvec.analytics <url>`. Two scaling harnesses:
+  `--delta` (live, a real insertion in a real browser) and `--projection`
+  (browser-free, what a change costs the markdown read out of the trie, by
+  change kind).
 - `domvec/core/js/sensor.js` — the fold. `domvec/trie.py` — the map itself.
 - `domvec/markdown.py`, `domvec/wireframe.py` — the two projections.
 - `domvec/invariants.py` — `a1` (AAM tables agree), `c1` (three composed-tree

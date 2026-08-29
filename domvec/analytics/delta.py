@@ -91,6 +91,16 @@ def measure_delta_scaling(driver, *, sizes: Sequence[int] = (100, 400, 1600),
                 if spine.trie else set()
             baseline_leaves = len(before)
 
+            # Prime the render memo on the settled page, and time that first
+            # render: it is the honest cost of drawing a page from cold, and
+            # the denominator the incremental figure is claimed against.
+            from ..markdown import RenderMemo, render_trie
+            memo = RenderMemo()
+            started_cold = time.perf_counter()
+            render_trie(spine.trie, context_window=context_window, memo=memo)
+            markdown_cold_ms = (time.perf_counter() - started_cold) * 1000.0
+            primed = memo.reused_lines
+
             # The mutation under test. One node, at the position that shifts
             # every address after it.
             driver.execute_script("return window.__insertHead(arguments[0]);",
@@ -109,13 +119,34 @@ def measure_delta_scaling(driver, *, sizes: Sequence[int] = (100, 400, 1600),
             #
             # The trie is O(delta) by construction; the projections are read
             # back out of it wholesale, so this is where an O(page) cost would
-            # hide behind an O(delta) claim. `render_trie` walks the whole
-            # trie, not the part that moved.
-            from ..markdown import render_trie
+            # hide behind an O(delta) claim.
+            #
+            # Both are timed, on the same trie, in this order:
+            #
+            #   markdown_incr_ms  -- with the memo primed on the pre-insert
+            #                        page, which is what the live path does
+            #   markdown_ms       -- with no memo at all, the old cost, kept
+            #                        as the control the claim is made against
+            #
+            # The ratio between them is the result. Reporting only the
+            # incremental figure would say nothing: what matters is how it
+            # moves with N against a cost known to be O(page).
+            started_incr = time.perf_counter()
+            chunks = render_trie(spine.trie, context_window=context_window,
+                                 memo=memo)
+            markdown_incr_ms = (time.perf_counter() - started_incr) * 1000.0
+            md_reused_lines = memo.reused_lines - primed
+
             started_md = time.perf_counter()
-            chunks = render_trie(spine.trie, context_window=context_window)
+            control = render_trie(spine.trie, context_window=context_window)
             markdown_ms = (time.perf_counter() - started_md) * 1000.0
             md_lines = sum(len(c.lines) for c in chunks)
+
+            # A memo is only worth timing if it draws the same page.
+            md_identical = (
+                [(c.cid, c.markdown) for c in chunks]
+                == [(c.cid, c.markdown) for c in control]
+            )
 
             delta = update.delta
             after = {leaf.uid for leaf in spine.trie.leaves()} \
@@ -144,6 +175,10 @@ def measure_delta_scaling(driver, *, sizes: Sequence[int] = (100, 400, 1600),
                 "wire_bytes": int(snapshot.wire_bytes or 0),
                 "decode_ms": float(snapshot.decode_ms or 0.0),
                 "markdown_ms": markdown_ms,
+                "markdown_incr_ms": markdown_incr_ms,
+                "markdown_cold_ms": markdown_cold_ms,
+                "md_reused_lines": md_reused_lines,
+                "md_identical": md_identical,
                 "md_lines": md_lines,
                 "fold_ms": float(fold_ms) if isinstance(
                     fold_ms, (int, float)) else None,
@@ -166,7 +201,7 @@ def render_delta_table(report: dict) -> str:
     out = ["", "  one insertion at the head of an N-item list", ""]
     out.append(f"  {'N':>6}{'leaves':>9}{'size':>7}{'moved':>8}{'visited':>9}"
                f"{'uids lost':>11}{'apply ms':>10}{'fold ms':>9}"
-               f"{'wire KB':>9}{'decode':>8}{'md ms':>9}")
+               f"{'wire KB':>9}{'decode':>8}{'md full':>9}{'md incr':>9}{'reused':>8}")
     for n in sorted(by_n):
         group = by_n[n]
         out.append(
@@ -179,8 +214,16 @@ def render_delta_table(report: dict) -> str:
             f"{_median([r['fold_ms'] for r in group]):>9.1f}"
             f"{_median([r['wire_bytes'] for r in group]) / 1024:>9.1f}"
             f"{_median([r['decode_ms'] for r in group]):>8.1f}"
-            f"{_median([r['markdown_ms'] for r in group]):>9.1f}")
+            f"{_median([r['markdown_ms'] for r in group]):>9.1f}"
+            f"{_median([r['markdown_incr_ms'] for r in group]):>9.1f}"
+            f"{_median([r['md_reused_lines'] for r in group]):>8.0f}")
     out.append("")
+    wrong = [r for r in rows if not r.get("md_identical", True)]
+    if wrong:
+        # The incremental column is meaningless unless it drew the same page,
+        # so a mismatch is reported here rather than left to a test elsewhere.
+        out.append(f"  ** memoised render disagreed with the control on "
+                   f"{len(wrong)} of {len(rows)} trials **")
     sizes = sorted(by_n)
     if len(sizes) >= 2:
         small, large = sizes[0], sizes[-1]

@@ -48,7 +48,7 @@ from dataclasses import dataclass, field
 from typing import Iterator, List, Optional, Sequence, Tuple
 
 from .address import ContentAddress
-from .markdown import MarkdownChunk, render_trie
+from .markdown import MarkdownChunk, RenderMemo, render_trie
 from .trie import AddressTrie, TrieDelta, diff
 
 __all__ = ["ScanUpdate", "StreamingScan"]
@@ -160,6 +160,11 @@ class StreamingScan:
         # (xpath, subtree hash) -> that subtree's detections, from the last
         # pass. Makes tagging incremental; see ContentTagger.reuse_cache.
         self._reuse: dict = {}
+        # The same idea one stage further along the pipe: subtree renders
+        # carried between passes, keyed on the trie's strict Merkle. The
+        # tagger's cache keeps the trie from re-detecting a clean subtree;
+        # this one keeps the projection from re-drawing it.
+        self.render_memo = RenderMemo()
 
     def push(self, html, passno: int = 0) -> ScanUpdate:
         """Fold one snapshot in. Returns what changed and what it cost.
@@ -301,30 +306,45 @@ class StreamingScan:
         if not touched:
             update.chunk_ms = (time.perf_counter() - started) * 1000
             return []
-        # **This does not yet keep what the docstring promises.**
+        # The projection reuses whatever the last render already established.
         #
-        # `render_trie` walks the whole trie, and the filter below runs after
-        # it -- so the O(page) cost this method exists to avoid is paid in
-        # full on the line above the filter. Measured on the delta fixture,
-        # after a *single* node inserted at the head:
+        # `render_trie` still visits the page, but a subtree whose
+        # `exact_hash` is unchanged is spliced from the memo instead of being
+        # re-derived. Two things had to be true first: `_number_parts` took
+        # chunk ids off global position, so a cached subtree can be spliced
+        # anywhere; and the trie grew `exact_hash`, a Merkle strict enough to
+        # stand behind "this renders identically" -- `subtree_hash` is not,
+        # being blind to word order by design.
         #
-        #     N       trie apply     markdown render
-        #     100        14.9 ms            27.2 ms
-        #     400        45.6 ms           127.8 ms
-        #    1600       155.3 ms           405.4 ms
+        # What that bought, measured by `analytics/projection.py` over an
+        # N-row list, against the same render with no memo:
         #
-        # The trie is O(delta) and the projection read out of it is O(page),
-        # so the fused result is O(page) per change.
+        #     change      N=100   N=400   N=1600
+        #     redraw       95%     96%      97%      saved
+        #     edit         47%     50%      45%
+        #     insert       41%     41%      30%
         #
-        # Doing it properly is not a one-line change and is deliberately not
-        # attempted here: `_level_page` levels depth *across all chunks* of a
-        # page, and `_render_node` renders speculatively to test whether a
-        # subtree fits, so rendering a subset changes both the depths and the
-        # chunk boundaries. The shape of the fix is to retain the previous
-        # chunk set, re-render only the subtrees containing a touched address,
-        # splice, and re-level -- which needs `StreamingScan` to hold the last
-        # render, and needs the levelling separated from the descent.
-        chunks = render_trie(update.trie, context_window=self.context_window)
+        # It is not yet O(delta), and the residual is located rather than
+        # guessed at. A redraw is nearly free because the page root is clean
+        # and one lookup answers for the whole page -- which is the common
+        # case on an interactive surface, where most ticks change nothing. An
+        # edit is only half, because the ancestors of the edited leaf reach
+        # the root and the descent asks each of them whether its subtree fits
+        # the window, a question still answered by rendering it. Removing
+        # that means answering the fit test from a bound instead of a render.
+        #
+        # An insertion at the head is the floor and not a defect: it shifts
+        # every address below it, and the projection prints addresses -- a
+        # chunk's xpath, a line's anchor -- so what moved genuinely draws
+        # differently. The trie keeps identity across the shift (`uid`); the
+        # render cannot inherit it.
+        #
+        # Levelling and numbering still run over the whole page after the
+        # descent. Both are single passes over the emitted lines -- 0.4 ms at
+        # 6,400 lines -- and both are page properties that cannot be decided
+        # from one chunk.
+        chunks = render_trie(update.trie, context_window=self.context_window,
+                             memo=self.render_memo)
         dirty = [c for c in chunks if touched.intersection(c.anchors)]
         update.all_chunks = chunks
         update.dirty_chunks = dirty

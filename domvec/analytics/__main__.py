@@ -23,6 +23,10 @@ def main(argv=None) -> int:
     parser.add_argument("--delta", action="store_true",
                         help="measure what one insertion costs against page "
                              "size, on the local scaling fixture")
+    parser.add_argument("--projection", action="store_true",
+                        help="measure what one change costs the markdown "
+                             "projection, by change kind and page size; "
+                             "needs no browser")
     parser.add_argument("--sizes", default="100,400,1600")
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--qualify", type=int, default=0,
@@ -31,12 +35,29 @@ def main(argv=None) -> int:
                              "instrument's own spread instead of a score")
     args = parser.parse_args(argv)
 
+    sizes = tuple(int(s) for s in args.sizes.split(",") if s.strip())
+
+    if args.projection:
+        # Browser-free, and so deliberately outside the session below: the
+        # question is how the read out of the trie scales, and opening a
+        # browser to ask it would add a variable and a minute.
+        from .projection import (measure_projection_scaling,
+                                 render_projection_table,
+                                 write_projection_artifact)
+        report = measure_projection_scaling(sizes=sizes,
+                                            repeats=args.repeats,
+                                            context_window=args.window)
+        print(render_projection_table(report), flush=True)
+        print(f"  written: "
+              f"{write_projection_artifact(report, pathlib.Path(args.out))}",
+              flush=True)
+        return 0
+
     cfg = load_config()
     with browser_session(cfg) as driver:
         if args.delta:
             from .delta import (measure_delta_scaling, render_delta_table,
                                 write_delta_artifact)
-            sizes = tuple(int(s) for s in args.sizes.split(",") if s.strip())
             report = measure_delta_scaling(driver, sizes=sizes,
                                            repeats=args.repeats,
                                            context_window=args.window)

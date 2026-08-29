@@ -643,3 +643,71 @@ def c2_fold_reads_no_layout(source: Any = None) -> List[Violation]:
         out.append("sensor.js: no layout call found at all — either the "
                    "peripheral is gone or the pattern no longer matches it")
     return out
+
+
+# ---------------------------------------------------------------------------
+# C-3: a projection may not key reuse on the move-tolerant hash
+# ---------------------------------------------------------------------------
+
+_PROJECTIONS = ("markdown.py", "wireframe.py")
+
+
+def c3_projections_key_on_exact_hash(sources: Any = None) -> List[Violation]:
+    """A projection memo keys on ``exact_hash``, never on ``subtree_hash``.
+
+    The trie carries two Merkles over every subtree because two consumers ask
+    two different questions of it:
+
+    * ``subtree_hash`` folds in ``content_hash``, the hash of a normalized
+      token multiset. It is blind to word order, case and punctuation, and
+      that blindness is the point -- it is what lets ``apply`` recognise a
+      paragraph that moved rather than minting a new identity for it.
+    * ``exact_hash`` folds in the exact value and the full address. Equality
+      means the subtree *draws* identically.
+
+    A projection prints values verbatim, so it must key reuse on the second.
+    Keyed on the first, ``"gamma beta"`` edited to ``"beta gamma"`` leaves the
+    hash unchanged and the reader is served the old word order indefinitely --
+    a wrong page, which is worse than a slow one, and one that no timing or
+    coverage number would show.
+
+    Asserted textually because the failure is a one-word substitution at a
+    call site where either name reads as plausible.
+
+    Pass ``sources`` as ``{filename: text}`` to check text other than disk.
+
+    claim: reuse is sound exactly when the equivalence it is keyed on refines
+    the equality the consumer needs.
+    """
+    import pathlib
+
+    if sources is None:
+        here = pathlib.Path(__file__).parent
+        sources = {}
+        for name in _PROJECTIONS:
+            try:
+                sources[name] = (here / name).read_text(encoding="utf-8")
+            except OSError:
+                continue          # wireframe may draw without its own memo
+        if not sources:
+            return ["no projection source readable"]
+
+    out: List[Violation] = []
+    seen_exact = False
+    for name, text in sources.items():
+        for number, line in enumerate(text.splitlines(), 1):
+            bare = line.strip()
+            if bare.startswith("#") or bare.startswith("*"):
+                continue          # prose about the distinction is welcome
+            if "subtree_hash" in bare:
+                out.append(f"{name}:{number}: projection reads subtree_hash "
+                           f"— {bare[:60]}")
+            if "exact_hash" in bare:
+                seen_exact = True
+
+    # Non-vacuity: if no projection keys on anything, this clause is checking
+    # that an absent memo is absent, which is not a property worth asserting.
+    if not seen_exact:
+        out.append("no projection keys reuse on exact_hash — either the memo "
+                   "is gone or this clause no longer finds it")
+    return out

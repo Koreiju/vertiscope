@@ -55,6 +55,7 @@ __all__ = [
     "MarkdownChunk",
     "MarkdownLine",
     "render_trie",
+    "RenderMemo",
     "write_jsonl",
     "read_jsonl",
     "DEFAULT_CONTEXT_WINDOW",
@@ -729,11 +730,55 @@ def _join_inline(units: List[Tuple[ContentAddress, str, str, int]]
     return out
 
 
-def _render_node(node: TrieNode, url: str, url_depth: int) -> MarkdownChunk:
+def _render_node(
+    node: TrieNode,
+    url: str,
+    url_depth: int,
+    memo: Optional["RenderMemo"] = None,
+) -> MarkdownChunk:
+    return _render_sized(node, url, url_depth, memo)[0]
+
+
+def _render_sized(
+    node: TrieNode,
+    url: str,
+    url_depth: int,
+    memo: Optional["RenderMemo"] = None,
+) -> Tuple[MarkdownChunk, int]:
+    """Render ``node``, with its rendered length, possibly from the memo.
+
+    Returns the memo's own object on a hit rather than a copy. The descent
+    calls this speculatively -- to find out whether a subtree fits the window
+    before deciding to keep or split it -- and every ancestor of a node asks
+    the question about a render that contains it, so copying on each hit cost
+    a copy of the page per level of nesting. Measured on a 1,600-item list:
+    6,405 lines emitted, 25,619 lines served, four copies of the page to draw
+    it once.
+
+    The caller owns the clone instead, and does it once, at the point a chunk
+    is committed to the output -- where the count is one copy per emitted
+    line by construction. **A chunk returned from here must be treated as
+    read-only until then**, because it may be the memo's.
+
+    The length is carried alongside because `MarkdownChunk.chars` rebuilds the
+    whole string to measure it, and the fit test asks for nothing else. It is
+    the pre-levelling length, which is what the descent compares against the
+    window; `_level_page` rewrites depths afterwards and does not consult it.
+    """
+    key = _memo_key(node, url, "node", 0) if memo is not None else None
+    if key is not None:
+        cached = memo.get(key)
+        if cached is not None:
+            memo.reused_lines += len(cached[0].lines)
+            return cached
+
     units = _join_inline(_collect(node, url_depth))
     xpath = _xpath_of(node, url)
     if not units:
-        return MarkdownChunk(url=url, xpath=xpath, lines=[])
+        empty = (MarkdownChunk(url=url, xpath=xpath, lines=[]), 0)
+        if key is not None:
+            memo.put(key, empty)
+        return empty
 
     # Indentation is measured from the page, not from the chunk.
     #
@@ -994,7 +1039,11 @@ def _render_node(node: TrieNode, url: str, url_depth: int) -> MarkdownChunk:
                 and a.tag not in ("link", "image", "media")):
             a = replace(a, tag="link")
         lines.append(MarkdownLine(depth=depth, text=rendered, address=a))
-    return MarkdownChunk(url=url, xpath=xpath, lines=_join_labels(lines))
+    rendered = MarkdownChunk(url=url, xpath=xpath, lines=_join_labels(lines))
+    sized = (rendered, rendered.chars)
+    if key is not None:
+        memo.put(key, sized)
+    return sized
 
 
 def _xpath_of(node: TrieNode, url: str) -> str:
@@ -1039,11 +1088,102 @@ class RenderReport:
         }
 
 
+class RenderMemo:
+    """Reuse of subtree renders across successive renders of a live page.
+
+    The trie applies a mutation in O(delta); the projection read out of it
+    was O(page), so the fused result was O(page) per change -- measured at
+    27/128/405 ms of markdown for a *one node* insertion into a 100/400/1600
+    item list. The descent re-rendered every subtree on the page to answer
+    questions it had already answered.
+
+    The invalidation signal is `TrieNode.exact_hash`, the trie's strict
+    Merkle: equal hashes mean the subtree renders byte-identically, so a
+    cached render may be handed out in place of doing the work. Note it is
+    *not* `subtree_hash` -- that one is blind to word order and punctuation
+    by design, and a projection prints values verbatim.
+
+    Two generations, rotated per render. An entry survives a render only if
+    it was consulted during it, which bounds the cache at roughly one page of
+    live subtrees without needing a size cap or a clock. In steady state --
+    the same page, edited repeatedly -- every clean sibling of the dirty path
+    is consulted each render and so stays resident, while a subtree that has
+    left the page falls out after one rotation.
+
+    Cached chunks are cloned on both store and hit. `_level_page` and
+    `_number_parts` rewrite depths and ordinals on the returned chunks after
+    the descent, and a cache that handed out the same objects would let one
+    render's levelling corrupt the next one's input.
+    """
+
+    __slots__ = ("_prev", "_cur", "hits", "misses", "reused_lines")
+
+    def __init__(self) -> None:
+        self._prev: Dict[tuple, object] = {}
+        self._cur: Dict[tuple, object] = {}
+        self.hits = 0
+        self.misses = 0
+        self.reused_lines = 0
+
+    def get(self, key: tuple):
+        entry = self._cur.get(key)
+        if entry is None:
+            entry = self._prev.get(key)
+            if entry is None:
+                self.misses += 1
+                return None
+            self._cur[key] = entry          # consulted, so it survives
+        self.hits += 1
+        return entry
+
+    def put(self, key: tuple, value) -> None:
+        self._cur[key] = value
+
+    def rotate(self) -> None:
+        self._prev, self._cur = self._cur, {}
+
+    @property
+    def resident(self) -> int:
+        return len(self._prev) + len(self._cur)
+
+
+def _clone_chunk(chunk: MarkdownChunk) -> MarkdownChunk:
+    """A copy that the page-global passes may safely rewrite.
+
+    Applied at every point a chunk is committed to the output, without asking
+    whether a memo is in play. Skipping it when there is no memo would be
+    correct and is not worth the second rule: measured at 0.33 ms of a 177 ms
+    render at 1,600 lines and 1.67 ms of 734 ms at 6,400 -- 0.2% either way.
+    One rule, "chunks are cloned on commit", is what keeps `_level_page` from
+    rewriting the depths inside the memo.
+    """
+    return MarkdownChunk(
+        url=chunk.url,
+        xpath=chunk.xpath,
+        lines=[MarkdownLine(depth=l.depth, text=l.text, address=l.address)
+               for l in chunk.lines],
+        part=chunk.part,
+    )
+
+
+def _memo_key(node: TrieNode, url: str, kind: str, window: int) -> Optional[tuple]:
+    """The cache key for ``node``, or None where the node cannot be keyed.
+
+    A node with no `exact_hash` has never been through `rehash`, which means
+    nothing can be said about whether its render is current. Refusing to key
+    it degrades to the uncached path rather than serving a stale subtree.
+    """
+    if not node.exact_hash:
+        return None
+    return (kind, url, getattr(node, "_xpath_cache", None), window, node.exact_hash)
+
+
 def render_trie(
     trie: AddressTrie,
     *,
     context_window: int = DEFAULT_CONTEXT_WINDOW,
     report: Optional[RenderReport] = None,
+    memo: Optional[RenderMemo] = None,
 ) -> List[MarkdownChunk]:
     """Render every page in the trie into context-window-sized chunks.
 
@@ -1062,9 +1202,12 @@ def render_trie(
         if page is None:
             continue
         _annotate_xpaths(page, steps, url)
-        _descend(page, url, len(steps), context_window, chunks)
+        _descend(page, url, len(steps), context_window, chunks, memo)
 
     _level_page(chunks)
+    _number_parts(chunks)
+    if memo is not None:
+        memo.rotate()
 
     if report is not None:
         # Computed after the fact rather than accumulated during the descent:
@@ -1074,6 +1217,37 @@ def render_trie(
         # emitted anchors against the trie is exact.
         _fill_report(trie, chunks, report)
     return chunks
+
+
+def _number_parts(chunks: List[MarkdownChunk]) -> None:
+    """Number the chunks that share a root xpath, 0..n, in emission order.
+
+    `part` exists to keep two chunks rooted at one element from colliding on
+    their id, and the descent satisfied that by handing out the chunk's
+    *global* position -- which gave an ordinal to chunks that shared their
+    root with nobody. Over the fixture pages at two window settings, 24 of 91
+    chunks carried a nonzero ordinal and only 18 had a reason to.
+
+    The reason to fix it is the render memo, not the ids. A cached subtree can
+    only be spliced in at an arbitrary position if nothing inside it is a
+    function of position, and a global ordinal is exactly that. Numbering
+    within the (url, xpath) group makes `part` a property of the group.
+
+    It should also stop an insertion near the top of a page from renaming
+    chunks below it, which is what a store keyed on `cid` has to rewrite.
+    That effect is expected rather than observed: over the fixture pages, at
+    windows of 200/400/1200, an inserted paragraph produced the same surviving
+    id set under both schemes. The pages available do not chunk finely enough
+    to show it, so it is recorded here as a consequence and not as a result.
+
+    Done after the descent, like `_level_page`, because it is a property of
+    the page and not of any one chunk.
+    """
+    seen: Dict[Tuple[str, str], int] = {}
+    for chunk in chunks:
+        key = (chunk.url, chunk.xpath)
+        chunk.part = seen.get(key, 0)
+        seen[key] = chunk.part + 1
 
 
 def _level_page(chunks: List[MarkdownChunk]) -> None:
@@ -1159,13 +1333,38 @@ def _descend(
     url_depth: int,
     window: int,
     out: List[MarkdownChunk],
+    memo: Optional["RenderMemo"] = None,
 ) -> None:
     """Emit chunks for ``node``'s subtree. Leaves are partitioned, never shared."""
-    chunk = _render_node(node, url, url_depth)
+    # A subtree whose `exact_hash` is unchanged chunks the same way it did
+    # last time, so the whole descent below this node can be skipped: the
+    # trie's Merkle answers, in one comparison, a question that otherwise
+    # costs a walk of everything underneath. This is where a clean page pays
+    # nothing for an edit somewhere else on it.
+    #
+    # Sound only because nothing in a chunk is a function of its position any
+    # more -- see `_number_parts`. Spliced chunks keep their own ordinals.
+    key = _memo_key(node, url, "descend", window) if memo is not None else None
+    if key is not None:
+        cached = memo.get(key)
+        if cached is not None:
+            for c in cached:
+                memo.reused_lines += len(c.lines)
+                out.append(_clone_chunk(c))
+            return
+
+    mark = len(out)
+    chunk, chars = _render_sized(node, url, url_depth, memo)
     if not chunk.lines:
+        if key is not None:
+            memo.put(key, [])
         return
-    if chunk.chars <= window:
-        out.append(chunk)
+    if chars <= window:
+        # Cloned on the way into `out`, because `chunk` may be the memo's and
+        # `_level_page` rewrites the depths of everything in `out`.
+        out.append(_clone_chunk(chunk))
+        if key is not None:
+            memo.put(key, [_clone_chunk(chunk)])
         return
 
     element_children = [
@@ -1186,9 +1385,13 @@ def _descend(
         # at this element and `anchors` says exactly which addresses are
         # inside, so it under-claims, never over-claims.
         if len(chunk.lines) <= 1:
-            out.append(chunk)
+            out.append(_clone_chunk(chunk))
+            if key is not None:
+                memo.put(key, [_clone_chunk(chunk)])
             return
         _emit_runs(chunk, window, out)
+        if key is not None:
+            memo.put(key, [_clone_chunk(c) for c in out[mark:]])
         return
 
     # Split, then re-merge adjacent siblings up to the window. Without the
@@ -1201,39 +1404,49 @@ def _descend(
     # holds — which is safe, because `anchors` says exactly which addresses
     # are inside. The direction matters: a chunk that over-claimed would let a
     # retrieval hit point at content it does not contain.
-    pieces: List[Tuple[str, object]] = []
-    own = _own_units_chunk(node, url, url_depth)
-    if own is not None and own.lines:
-        pieces.append(("fits", own))
+    pieces: List[Tuple[str, object, int]] = []
+    own = _own_units_chunk(node, url, url_depth, memo)
+    if own is not None and own[0].lines:
+        pieces.append(("fits", own[0], own[1]))
     for child in element_children:
-        rendered = _render_node(child, url, url_depth)
+        rendered, rendered_chars = _render_sized(child, url, url_depth, memo)
         if not rendered.lines:
             continue
-        pieces.append(("fits" if rendered.chars <= window else "split",
-                       rendered if rendered.chars <= window else child))
+        fits = rendered_chars <= window
+        pieces.append(("fits" if fits else "split",
+                       rendered if fits else child, rendered_chars))
 
     buffer: List[MarkdownChunk] = []
+    buffered_chars = 0
 
     def flush() -> None:
+        nonlocal buffered_chars
         if not buffer:
             return
-        out.append(_merge(buffer, url, chunk.xpath, len(out)))
+        # `_merge` returns its single argument unchanged, and both branches
+        # carry the pieces' own `MarkdownLine` objects -- which may belong to
+        # the memo. The clone here is the one copy per emitted line.
+        out.append(_clone_chunk(_merge(buffer, url, chunk.xpath, len(out))))
         buffer.clear()
+        buffered_chars = 0
 
-    for kind, piece in pieces:
+    for kind, piece, piece_chars in pieces:
         if kind == "split":
             flush()
-            _descend(piece, url, url_depth, window, out)  # type: ignore[arg-type]
+            _descend(piece, url, url_depth, window, out, memo)  # type: ignore[arg-type]
             continue
         # +len(buffer) for the newlines _merge inserts between parts. Omitting
         # them let a chunk exceed the window by one character per merged part,
         # which is small but is exactly the kind of drift that makes a
         # hyperparameter stop meaning what it says.
-        size = sum(c.chars for c in buffer) + len(buffer) + piece.chars  # type: ignore[union-attr]
+        size = buffered_chars + len(buffer) + piece_chars
         if buffer and size > window:
             flush()
         buffer.append(piece)  # type: ignore[arg-type]
+        buffered_chars += piece_chars
     flush()
+    if key is not None:
+        memo.put(key, [_clone_chunk(c) for c in out[mark:]])
 
 
 def _emit_runs(
@@ -1251,12 +1464,12 @@ def _emit_runs(
     for line in chunk.lines:
         cost = len(line.text) + 2 * line.depth
         if run and size + cost + 1 > window:
-            out.append(_part_of(chunk, run, len(out)))
+            out.append(_clone_chunk(_part_of(chunk, run, len(out))))
             run, size = [], 0
         run.append(line)
         size += cost + 1
     if run:
-        out.append(_part_of(chunk, run, len(out)))
+        out.append(_clone_chunk(_part_of(chunk, run, len(out))))
 
 
 def _part_of(
@@ -1286,9 +1499,16 @@ def _merge(
 
 
 def _own_units_chunk(
-    node: TrieNode, url: str, url_depth: int
-) -> Optional[MarkdownChunk]:
-    """The units hanging directly off ``node``, excluding element children."""
+    node: TrieNode,
+    url: str,
+    url_depth: int,
+    memo: Optional["RenderMemo"] = None,
+) -> Optional[Tuple[MarkdownChunk, int]]:
+    """The units hanging directly off ``node``, excluding element children.
+
+    Sized like `_render_sized`, and read-only for the same reason: it may be
+    the memo's copy.
+    """
     direct = TrieNode(segment=node.segment, depth=node.depth)
     direct._xpath_cache = getattr(node, "_xpath_cache", "/")
     for seg, child in node.children.items():
@@ -1296,7 +1516,16 @@ def _own_units_chunk(
             direct.children[seg] = child
     if not direct.children:
         return None
-    return _render_node(direct, url, url_depth)
+    # The synthetic node is not in the trie, so `rehash` never gave it a hash
+    # and it would be unkeyable. Compose one the same way `_hash_node` would,
+    # over the children it actually has: the own-units render is a function of
+    # this node's leaf children and nothing else, so keying it on the parent's
+    # full hash would throw the entry away every time an element child moved.
+    direct.exact_hash = hash((
+        node.segment, None, "",
+        tuple(c.exact_hash for c in direct.ordered_children()),
+    ))
+    return _render_sized(direct, url, url_depth, memo)
 
 
 # --- JSONL ------------------------------------------------------------------

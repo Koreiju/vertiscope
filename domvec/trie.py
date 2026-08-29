@@ -187,6 +187,29 @@ class TrieNode:
     # Merkle hash over this node and everything below it.
     subtree_hash: str = ""
 
+    # A *second* Merkle, over the same subtree under a stricter equivalence.
+    #
+    # `subtree_hash` folds in `content_hash`, which is the hash of a value's
+    # normalized token multiset -- deliberately blind to word order, case and
+    # punctuation, because that blindness is what lets `apply` recognise a
+    # paragraph that moved. Identity has to survive reformatting.
+    #
+    # A projection out of the trie cannot use that hash to decide "nothing
+    # here changed", because it prints the value *verbatim*: "a b" and "b a"
+    # share a content_hash and render differently. `exact_hash` folds in the
+    # exact value and the full address instead, so equality of `exact_hash`
+    # means the subtree renders byte-identically -- the guarantee a memoised
+    # render needs, and one the trie is the right place to make.
+    #
+    # Two hashes for two equivalences, both maintained in one bottom-up pass:
+    # `subtree_hash` answers "is this the same content?" (move detection),
+    # `exact_hash` answers "does this draw the same?" (projection reuse).
+    #
+    # A Python `hash` rather than a digest: it is consulted in-process by the
+    # renderer and never persisted or compared across processes, so the cost
+    # matters and stability across runs does not.
+    exact_hash: int = 0
+
     # label -> that label group's position among this node's children.
     _label_order: Dict[str, int] = field(default_factory=dict, repr=False)
 
@@ -548,10 +571,21 @@ class AddressTrie:
         h.update(b"\x1f")
         # Children in document order, not sorted-by-hash: reordering siblings
         # is a real change to a document and must change the hash.
-        for child in node.ordered_children():
+        kids = node.ordered_children()
+        for child in kids:
             h.update(child.subtree_hash.encode("utf-8"))
             h.update(b"\x1e")
         node.subtree_hash = h.hexdigest()[:16]
+        # The strict twin. `address` is a frozen four-field dataclass, so
+        # hashing it covers url/xpath/tag/accessor exactly; `value` is the raw
+        # string the renderer prints; child order carries sibling order.
+        # Together those are everything any projection reads off a node.
+        node.exact_hash = hash((
+            node.segment,
+            node.address,
+            node.value,
+            tuple(child.exact_hash for child in kids),
+        ))
 
     @property
     def root_hash(self) -> str:

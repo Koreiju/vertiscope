@@ -1019,7 +1019,8 @@ class Repl:
 
             spine.context_window = self.context_window
             chunks = render_trie(spine.trie,
-                                 context_window=self.context_window)
+                                 context_window=self.context_window,
+                                 memo=getattr(spine, "render_memo", None))
             self._live_chunks = {c.cid: c for c in chunks}
             self._styles = None
             keep = self.state.top
@@ -1299,8 +1300,14 @@ class Repl:
         # projections is the arrangement, and only that.
         from ..markdown import render_trie
 
+        # Through the spine's memo: this runs on every draw, and a page the
+        # user is only scrolling has not changed at all. The trie decides
+        # what is stale (`exact_hash`), so the wireframe pays for the part of
+        # the page that moved and not for the part it is looking at.
         drawn = []
-        for chunk in render_trie(spine.trie, context_window=self.context_window):
+        for chunk in render_trie(spine.trie,
+                                 context_window=self.context_window,
+                                 memo=getattr(spine, "render_memo", None)):
             for line in chunk.lines:
                 if line.address is not None and line.text.strip():
                     drawn.append((line.address, line.text, line.address.tag))
