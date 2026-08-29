@@ -64,7 +64,8 @@ def main(argv=None) -> int:
                                      render_live_delta_table,
                                      write_live_delta_artifact)
             report = measure_live_delta(driver, args.urls,
-                                        context_window=args.window)
+                                        context_window=args.window,
+                                        repeats=args.repeats)
             print(render_live_delta_table(report), flush=True)
             print(f"  written: "
                   f"{write_live_delta_artifact(report, pathlib.Path(args.out))}",

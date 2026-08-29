@@ -423,8 +423,36 @@ One inserted node, after that:
 | lit.dev | 1 | 0 | 549 → 551 |
 | www.salesforce.com | 1 | 1 | net +0 (29 gained, 29 dropped) |
 
-salesforce.com is the one page still losing an identity — one, on a page whose
-insertion re-addressed 29 units. Not yet explained, and recorded as such.
+salesforce.com was the one page still looking wrong, and two methodological
+faults were doing it rather than one sensor defect.
+
+The harness chose the page's largest repeated group with no filter, so on
+salesforce it inserted into a run of **17 `<script>` elements**, and on lit.dev
+into a group of `<pre>` code samples. Neither is the page's list, and neither
+is content a reader ever sees. The group must be drawn and must not be one of
+the tags that hold text without being content.
+
+And one run of a live page is evidence of nothing. salesforce answered **341**
+chunks of new text in one run and **10** in the next, for the same mutation a
+minute apart. The harness now repeats each page and prints the range beside the
+median, so a page that does not reproduce says so rather than contributing a
+figure that looks like a measurement.
+
+With both fixed, three runs per page, one node inserted into each page's
+largest *drawn* repeated group:
+
+| page | group | chunks | delta | moved | new text |
+|---|---|---|---|---|---|
+| quotes.toscrape.com | div ×10 | 8 | 1 | 140 | 1 [1–1] |
+| books.toscrape.com | li ×20 | 28 | 1 | 200 | 1 [1–1] |
+| news.ycombinator.com | tr ×92 | 24 | 1 | 662 | 1 [1–1] |
+| lit.dev | a ×14 | 30 | 1 | 84 | 1 [1–1] |
+| www.salesforce.com | div ×16 | 347 | 1 | 40 | 6 [6–6] |
+
+salesforce is also the page the control arm earns its keep on: it reports
+**delta 45 and +41 addresses before anything is inserted**. It rotates its own
+content between two visits, which is what the 341 was. Once that is visible and
+labelled, its insertion costs a delta of 1 and six chunks, reproducibly.
 
 Inference recovers the shift but not the accounting as tightly as a report
 does: a label every card repeats has no *displaced* source when only one card

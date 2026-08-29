@@ -52,9 +52,30 @@ DEFAULT_ARTIFACT_DIR = pathlib.Path("build_analytics")
 INSERT_AT_HEAD_JS = r"""
 var best = null, bestCount = 0;
 
+// Tags that hold text but are not content: inserting into them measures the
+// sensor against something no reader will ever see. The harness picked a
+// group of 17 <script> elements on salesforce.com before this list existed,
+// and a group of <pre> code samples on lit.dev -- neither is the page's
+// "list", and the numbers they produced were about whatever happened to have
+// the most same-tag children.
+var NOT_CONTENT = {SCRIPT: 1, STYLE: 1, TEMPLATE: 1, NOSCRIPT: 1, HEAD: 1,
+                   META: 1, LINK: 1, TITLE: 1, SVG: 1, PATH: 1, DEFS: 1};
+
 function kidsOf(node) {
   if (node.shadowRoot) return Array.prototype.slice.call(node.shadowRoot.children);
   return Array.prototype.slice.call(node.children || []);
+}
+
+function drawn(el) {
+  try {
+    if (typeof el.checkVisibility === 'function'
+        && !el.checkVisibility({opacityProperty: true, visibilityProperty: true,
+                                contentVisibilityAuto: true})) {
+      return false;
+    }
+    var r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0;
+  } catch (e) { return false; }
 }
 
 var stack = [document.documentElement], seen = 0;
@@ -68,16 +89,18 @@ while (stack.length && seen < 20000) {
     stack.push(kids[i]);
   }
   for (var tag in byTag) {
+    if (NOT_CONTENT[tag]) continue;
     var group = byTag[tag];
-    // A group is only interesting if its items carry text; a row of <script>
-    // or <br> is repeated structure with nothing in it to chunk.
-    if (group.length > bestCount && (group[0].textContent || '').trim().length > 20) {
+    // Carrying text is not enough -- it has to be text the page shows.
+    if (group.length > bestCount
+        && (group[0].textContent || '').trim().length > 20
+        && drawn(group[0])) {
       bestCount = group.length; best = group;
     }
   }
 }
 
-if (!best || bestCount < 3) return {ok: false, reason: 'no repeated group', count: bestCount};
+if (!best || bestCount < 3) return {ok: false, reason: 'no drawn repeated group', count: bestCount};
 
 var first = best[0];
 
@@ -215,123 +238,147 @@ class _Mode:
 
 def measure_live_delta(driver, urls: Sequence[str], *,
                        context_window: int = 1200,
-                       settle_s: float = 1.2) -> dict:
-    """Insert one node into each real page and score both chunking modes."""
+                       settle_s: float = 1.2,
+                       repeats: int = 1) -> dict:
+    """Insert one node into each real page and score both chunking modes.
+
+    Repeated, because one run of a live page is evidence of nothing. Measured
+    the hard way: www.salesforce.com reported 341 of 346 chunks holding new
+    text in one run and 10 in the next, for the same mutation on the same
+    page. A marketing site rotates its own content between two visits a minute
+    apart, and a single number from it is a number about that visit.
+
+    The spread is reported alongside the median so a page that does not
+    reproduce says so instead of contributing a figure that looks like a
+    measurement.
+    """
     from ..sensing import Sensor
     from ..stream import StreamingScan
 
     rows: List[dict] = []
     for url in urls:
-        row: Dict[str, object] = {"url": url}
-        try:
-            driver.get("about:blank")
-            driver.get(url)
-            time.sleep(settle_s)
-            sensor = Sensor(driver, url, budget=context_window)
-            sensor.boot()
-            time.sleep(0.6)
-            spine = StreamingScan(url, context_window=context_window)
-            quiescence = settle(sensor, spine)
-            row["settle_passes"] = quiescence["passes"]
-            row["settled"] = quiescence["quiet"]
-            if spine.trie is None:
-                row["error"] = "nothing captured"
-                rows.append(row)
-                continue
+      for attempt in range(max(1, repeats)):
+          row: Dict[str, object] = {"url": url, "attempt": attempt}
+          try:
+              driver.get("about:blank")
+              driver.get(url)
+              time.sleep(settle_s)
+              sensor = Sensor(driver, url, budget=context_window)
+              sensor.boot()
+              time.sleep(0.6)
+              spine = StreamingScan(url, context_window=context_window)
+              quiescence = settle(sensor, spine)
+              row["settle_passes"] = quiescence["passes"]
+              row["settled"] = quiescence["quiet"]
+              if spine.trie is None:
+                  row["error"] = "nothing captured"
+                  rows.append(row)
+                  continue
 
-            # What the page does on its own, before anything is done to it.
-            #
-            # Without this arm a page that hydrates late is indistinguishable
-            # from a sensor that mishandles an insertion, and I spent an
-            # iteration believing the wrong one of those about lit.dev. A
-            # control drain -- same wait, no mutation -- settles it: 0
-            # addresses gained there, so the growth was the insertion's and
-            # the sensor's to answer for.
-            control_before = len(spine.trie)
-            time.sleep(0.7)
-            control_snap = sensor.drain(98)
-            control_update = spine.absorb(
-                control_snap.units, control_snap.passno,
-                removed=control_snap.removed_addresses,
-                moved=control_snap.moved_addresses)
-            row["control_delta"] = control_update.delta.size
-            row["control_net"] = len(spine.trie) - control_before
+              # What the page does on its own, before anything is done to it.
+              #
+              # Without this arm a page that hydrates late is indistinguishable
+              # from a sensor that mishandles an insertion, and I spent an
+              # iteration believing the wrong one of those about lit.dev. A
+              # control drain -- same wait, no mutation -- settles it: 0
+              # addresses gained there, so the growth was the insertion's and
+              # the sensor's to answer for.
+              control_before = len(spine.trie)
+              time.sleep(0.7)
+              control_snap = sensor.drain(98)
+              control_update = spine.absorb(
+                  control_snap.units, control_snap.passno,
+                  removed=control_snap.removed_addresses,
+                  moved=control_snap.moved_addresses)
+              row["control_delta"] = control_update.delta.size
+              row["control_net"] = len(spine.trie) - control_before
 
-            row["leaves_before"] = len(spine.trie)
-            before_keys = {leaf.address.key() for leaf in spine.trie.leaves()
-                           if leaf.address is not None}
-            modes = [_Mode("content", True, context_window),
-                     _Mode("running", False, context_window)]
-            for mode in modes:
-                mode.capture(spine.trie)
+              row["leaves_before"] = len(spine.trie)
+              before_keys = {leaf.address.key() for leaf in spine.trie.leaves()
+                             if leaf.address is not None}
+              modes = [_Mode("content", True, context_window),
+                       _Mode("running", False, context_window)]
+              for mode in modes:
+                  mode.capture(spine.trie)
 
-            found = driver.execute_script(INSERT_AT_HEAD_JS)
-            if not found or not found.get("ok"):
-                row["error"] = "no repeated group ({})".format(
-                    (found or {}).get("reason", "?"))
-                rows.append(row)
-                continue
-            row["group_tag"] = found.get("tag")
-            row["group_size"] = found.get("count")
-            time.sleep(0.5)
+              found = driver.execute_script(INSERT_AT_HEAD_JS)
+              if not found or not found.get("ok"):
+                  row["error"] = "no repeated group ({})".format(
+                      (found or {}).get("reason", "?"))
+                  rows.append(row)
+                  continue
+              row["group_tag"] = found.get("tag")
+              row["group_size"] = found.get("count")
+              time.sleep(0.5)
 
-            snapshot = sensor.drain(99)
-            started = time.perf_counter()
-            update = spine.absorb(snapshot.units, snapshot.passno,
-                                  removed=snapshot.removed_addresses,
-                                  moved=snapshot.moved_addresses)
-            row["apply_ms"] = (time.perf_counter() - started) * 1000.0
-            row["fold_ms"] = (snapshot.stats or {}).get("repairMs")
-            row["delta_size"] = update.delta.size
-            if not row["settled"]:
-                # Said plainly rather than folded into the numbers: whatever
-                # this row measures, it is not one insertion.
-                row["warning"] = ("page never went quiet; the delta includes "
-                                  "its own churn")
-            row["delta_moved"] = len(update.delta.moved)
-            row["visited"] = update.delta.visited
-            row["leaves_after"] = len(spine.trie)
-            after_keys = {leaf.address.key() for leaf in spine.trie.leaves()
-                          if leaf.address is not None}
-            row["leaves_gained"] = len(after_keys - before_keys)
-            row["leaves_dropped"] = len(before_keys - after_keys)
-            # The check that would have caught two decoder defects on sight.
-            #
-            # One node arriving should add about as many addresses as it
-            # carries. A trie that gains a page's worth is writing content at
-            # paths the document does not have -- and since the DOM removed
-            # nothing, nothing removes the originals, so it grows while the
-            # page stays the same size. Reported as an anomaly rather than
-            # folded into a rate, because a coverage or dedup number cannot
-            # see it: every address present is still correct, there are simply
-            # also addresses that are not.
-            # Net, not gross. A shift re-addresses content wholesale -- 663
-            # addresses gained and 662 dropped on news.ycombinator.com for one
-            # inserted row -- and that is the mechanism working, not failing.
-            # What must not happen is the trie ending up bigger than the page:
-            # the first version of this check counted the gain alone and cried
-            # anomaly on three pages that were behaving correctly.
-            row["leaves_net"] = row["leaves_gained"] - row["leaves_dropped"]
-            budget = max(8, 4 * max(row["delta_size"], 1))
-            if row["leaves_net"] > budget:
-                row["anomaly"] = (
-                    "trie grew by {} addresses for a delta of {} "
-                    "(gained {}, dropped {})".format(
-                        row["leaves_net"], row["delta_size"],
-                        row["leaves_gained"], row["leaves_dropped"]))
+              snapshot = sensor.drain(99)
+              started = time.perf_counter()
+              update = spine.absorb(snapshot.units, snapshot.passno,
+                                    removed=snapshot.removed_addresses,
+                                    moved=snapshot.moved_addresses)
+              row["apply_ms"] = (time.perf_counter() - started) * 1000.0
+              row["fold_ms"] = (snapshot.stats or {}).get("repairMs")
+              row["delta_size"] = update.delta.size
+              if not row["settled"]:
+                  # Said plainly rather than folded into the numbers: whatever
+                  # this row measures, it is not one insertion.
+                  row["warning"] = ("page never went quiet; the delta includes "
+                                    "its own churn")
+              row["delta_moved"] = len(update.delta.moved)
+              row["visited"] = update.delta.visited
+              row["leaves_after"] = len(spine.trie)
+              after_keys = {leaf.address.key() for leaf in spine.trie.leaves()
+                            if leaf.address is not None}
+              row["leaves_gained"] = len(after_keys - before_keys)
+              row["leaves_dropped"] = len(before_keys - after_keys)
+              # The check that would have caught two decoder defects on sight.
+              #
+              # One node arriving should add about as many addresses as it
+              # carries. A trie that gains a page's worth is writing content at
+              # paths the document does not have -- and since the DOM removed
+              # nothing, nothing removes the originals, so it grows while the
+              # page stays the same size. Reported as an anomaly rather than
+              # folded into a rate, because a coverage or dedup number cannot
+              # see it: every address present is still correct, there are simply
+              # also addresses that are not.
+              # Net, not gross. A shift re-addresses content wholesale -- 663
+              # addresses gained and 662 dropped on news.ycombinator.com for one
+              # inserted row -- and that is the mechanism working, not failing.
+              # What must not happen is the trie ending up bigger than the page:
+              # the first version of this check counted the gain alone and cried
+              # anomaly on three pages that were behaving correctly.
+              row["leaves_net"] = row["leaves_gained"] - row["leaves_dropped"]
+              budget = max(8, 4 * max(row["delta_size"], 1))
+              if row["leaves_net"] > budget:
+                  row["anomaly"] = (
+                      "trie grew by {} addresses for a delta of {} "
+                      "(gained {}, dropped {})".format(
+                          row["leaves_net"], row["delta_size"],
+                          row["leaves_gained"], row["leaves_dropped"]))
 
-            # The trie must actually have seen the insertion, or everything
-            # below is a measurement of nothing happening.
-            row["saw_insertion"] = any(
-                found["marker"] in (leaf.value or "")
-                for leaf in spine.trie.leaves())
+              # The trie must actually have seen the insertion, or everything
+              # below is a measurement of nothing happening.
+              row["saw_insertion"] = any(
+                  found["marker"] in (leaf.value or "")
+                  for leaf in spine.trie.leaves())
 
-            for mode in modes:
-                row[mode.name] = mode.score(spine.trie)
-        except Exception as exc:                       # noqa: BLE001
-            row["error"] = "{}: {}".format(type(exc).__name__, exc)[:200]
-        rows.append(row)
-    return {"rows": rows, "context_window": context_window, "t": time.time()}
+              for mode in modes:
+                  row[mode.name] = mode.score(spine.trie)
+          except Exception as exc:                       # noqa: BLE001
+              row["error"] = "{}: {}".format(type(exc).__name__, exc)[:200]
+          rows.append(row)
+    return {"rows": rows, "context_window": context_window,
+            "repeats": repeats, "t": time.time()}
+
+
+def _median(values):
+    ordered = sorted(v for v in values if v is not None)
+    if not ordered:
+        return 0
+    mid = len(ordered) // 2
+    if len(ordered) % 2:
+        return ordered[mid]
+    return (ordered[mid - 1] + ordered[mid]) / 2.0
 
 
 def render_live_delta_table(report: dict) -> str:
@@ -339,68 +386,80 @@ def render_live_delta_table(report: dict) -> str:
     if not rows:
         return "  no live delta measurements"
 
-    out = ["", "  one node inserted at the head of each page's largest "
-                "repeated group", ""]
-    out.append("  {:<34}{:>7}{:>7}{:>8}{:>9}{:>9}".format(
-        "page", "chunks", "delta", "moved", "new text", "embedded"))
+    by_url: Dict[str, List[dict]] = {}
     for row in rows:
-        name = row["url"].replace("https://", "").replace("http://", "")[:33]
-        if row.get("error"):
-            out.append("  {:<34}{}".format(name, row["error"]))
+        by_url.setdefault(row["url"], []).append(row)
+
+    out = ["", "  one node inserted at the head of each page's largest drawn "
+                "repeated group", ""]
+    out.append("  {:<26}{:>9}{:>7}{:>7}{:>8}{:>16}".format(
+        "page", "group", "chunks", "delta", "moved", "new text"))
+    for url, attempts in by_url.items():
+        name = url.replace("https://", "").replace("http://", "")[:25]
+        usable = [r for r in attempts
+                  if not r.get("error") and r.get("saw_insertion")]
+        if not usable:
+            reason = attempts[0].get("error") or "insertion not recorded"
+            out.append("  {:<26}{}".format(name, reason))
             continue
-        content = row.get("content", {})
-        running = row.get("running", {})
-        out.append("  {:<34}{:>7}{:>7}{:>8}{:>9}{:>9}   content".format(
-            name, content.get("chunks_before", 0), row.get("delta_size", 0),
-            row.get("delta_moved", 0), content.get("new_text", 0),
-            content.get("embedded", 0)))
-        out.append("  {:<34}{:>7}{:>7}{:>8}{:>9}{:>9}   running".format(
-            "", running.get("chunks_before", 0), row.get("delta_size", 0),
-            row.get("delta_moved", 0), running.get("new_text", 0),
-            running.get("embedded", 0)))
-        if not row.get("saw_insertion"):
-            out.append("  {:<34}** the trie did not record the inserted "
-                       "node **".format(""))
-        if row.get("warning"):
-            out.append("  {:<34}** {} **".format("", row["warning"]))
-        if row.get("anomaly"):
-            out.append("  {:<34}** {} **".format("", row["anomaly"]))
-        if row.get("control_delta") or row.get("control_net"):
-            out.append("  {:<34}(the page moved on its own: delta {}, {:+d} "
+        first = usable[0]
+        group = "{}x{}".format(str(first.get("group_tag", "?")).lower(),
+                              first.get("group_size", 0))
+        for mode in ("content", "running"):
+            fresh = [r[mode]["new_text"] for r in usable if mode in r]
+            spread = ("{:.0f}".format(_median(fresh)) if len(fresh) < 2
+                      else "{:.0f}  [{}-{}]".format(_median(fresh), min(fresh),
+                                                    max(fresh)))
+            out.append("  {:<26}{:>9}{:>7.0f}{:>7.0f}{:>8.0f}{:>16}   {}".format(
+                name if mode == "content" else "",
+                group if mode == "content" else "",
+                _median([r[mode]["chunks_before"] for r in usable]),
+                _median([r["delta_size"] for r in usable]),
+                _median([r["delta_moved"] for r in usable]),
+                spread, mode))
+        # A page that does not give the same answer twice is not measured.
+        fresh = [r["content"]["new_text"] for r in usable if "content" in r]
+        if len(fresh) > 1 and max(fresh) > 4 * max(min(fresh), 1) + 4:
+            out.append("  {:<26}** did not reproduce across {} runs: new text "
+                       "{} **".format("", len(fresh), fresh))
+        for row in usable:
+            if row.get("anomaly"):
+                out.append("  {:<26}** {} **".format("", row["anomaly"]))
+                break
+        moved_on_own = [r for r in usable
+                        if r.get("control_delta") or r.get("control_net")]
+        if moved_on_own:
+            r = moved_on_own[0]
+            out.append("  {:<26}(the page moved on its own: delta {}, {:+d} "
                        "addresses, before anything was inserted)".format(
-                           "", row["control_delta"], row["control_net"]))
+                           "", r["control_delta"], r["control_net"]))
     out.append("")
-    scored = [r for r in rows if not r.get("error") and r.get("saw_insertion")
-              and r.get("settled")]
-    if scored:
-        c_new = sum(r["content"]["new_text"] for r in scored)
-        r_new = sum(r["running"]["new_text"] for r in scored)
-        chunks = sum(r["content"]["chunks_before"] for r in scored)
-        out.append("  across {} page(s), {:,} chunks: {} chunk(s) of new text "
-                   "with content boundaries, {} with a running total"
-                   .format(len(scored), chunks, c_new, r_new))
+    out.append("  `group` is what was mutated: the largest group of same-tag")
+    out.append("  siblings the page actually draws. Shown because it decides")
+    out.append("  what the row means -- an insertion into a page's card grid")
+    out.append("  and one into a run of <script> tags are not the same test,")
+    out.append("  and before the tag filter existed this harness chose the")
+    out.append("  second on two of five pages.")
+    out.append("")
+    out.append("  `new text` is chunks holding markdown no chunk held before:")
+    out.append("  what the embedder is asked to do. With more than one run the")
+    out.append("  range follows the median, because one run of a live page is")
+    out.append("  evidence of nothing -- salesforce.com answered 341 and then")
+    out.append("  10 for the same mutation a minute apart.")
     out.append("")
     out.append("  Every page is drained once without being touched first, so")
     out.append("  a page that hydrates late cannot be mistaken for a sensor")
     out.append("  that mishandles an insertion. A control line appears only")
     out.append("  when the page did something on its own.")
     out.append("")
-    out.append("  A page that gains addresses while dropping none is the")
-    out.append("  signature of a move the receiver did not honour: the content")
-    out.append("  is written at its new address and left at the old one, and")
-    out.append("  no coverage or dedup number can see it because every address")
-    out.append("  present is still correct. Gaining and dropping in equal")
-    out.append("  measure is the opposite -- a shift re-addressing content,")
-    out.append("  which is the mechanism working.")
-    out.append("")
     out.append("  `delta` is the trie's own count of genuine change and should")
     out.append("  read 1 for one node; `moved` is the addresses the insertion")
     out.append("  re-pointed, which grows with the group and is not an edit.")
-    out.append("  `new text` is what the chunker hands the embedder that it")
-    out.append("  has not seen. A page whose largest group is small has little")
-    out.append("  to shift and will look good either way -- read the two rows")
-    out.append("  against each other, not against zero.")
-    return "\n".join(out)
+    out.append("  A page that gains addresses while dropping none is the")
+    out.append("  signature of a move the receiver did not honour. Gaining and")
+    out.append("  dropping in equal measure is the opposite -- a shift")
+    out.append("  re-addressing content, which is the mechanism working.")
+    return chr(10).join(out)
 
 
 def write_live_delta_artifact(
