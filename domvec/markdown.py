@@ -926,6 +926,34 @@ def _render_node(node: TrieNode, url: str, url_depth: int) -> MarkdownChunk:
         winner = speaking[0] if speaking else addresses[0]
         hidden |= {a.key() for a in addresses if a.key() != winner.key()}
 
+    # Not done, and measured rather than argued: collapsing a name restated
+    # down a *containment chain*.
+    #
+    # lit.dev's footer says "YouTube" three times for one link -- the anchor's
+    # `aria-label`, the `lazy-svg` component inside it, and that component's
+    # `<svg><title>` -- and all three draw. Neither rule above sees it:
+    # `_dedupe` is scoped to a single element, and the `labelled` rule wants a
+    # control inside a control. So a chain rule was written: keep the
+    # interactive unit, or the outermost, and hide strict descendants that
+    # repeat its name; consider only units already surviving, so it could
+    # never empty a chain on its own.
+    #
+    # It still cost more than it bought.
+    #
+    #     lit.dev      dedup 90.4 -> 92.7%   wireframe 98.1 -> 96.8%
+    #     salesforce   dedup 91.9 -> 92.0%   wireframe 95.5 -> 93.7%
+    #                  markdown 99.2 -> 98.7%   over-dedup 0 -> 4
+    #
+    # About a point of deduplication for four units of *loss* and a point or
+    # two of recall on both projections. Over-dedup is the dangerous
+    # direction -- every spelling of a thing gone -- and a rule that trades
+    # coverage for tidiness is the wrong trade at any exchange rate. Reverted.
+    #
+    # What the attempt showed: sameness of rendered text is not enough to
+    # justify hiding, because two elements in one chain can carry the same
+    # words and still be two things a reader needs -- a labelled control and
+    # the picture that labels it. A future rule needs a reason beyond
+    # "these strings match", and the measurement above is what it has to beat.
     consumed |= {owner for owner, a in consuming.items()
                  if a.key() not in hidden}
 
