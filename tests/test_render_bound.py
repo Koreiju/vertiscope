@@ -388,3 +388,58 @@ def test_the_bound_actually_fires():
     memo = RenderMemo()
     render_trie(scan.push(html, passno=0).trie, context_window=120, memo=memo)
     assert memo.skipped_fit_tests > 0
+
+
+def test_probing_a_child_does_not_render_it():
+    """`_size_of` proves an overflow without drawing anything.
+
+    The bound alone was not enough. `_descend` measures its children before
+    deciding about itself, and measuring meant *rendering* -- so on the path
+    from an edited leaf to the page root, the same stale subtree was drawn
+    once per level. Profiled at five whole-page `_collect` walks to redraw a
+    1,600-row page after a one-word edit, which was the whole remaining cost.
+
+    Asserted by counting `_collect` calls, because a timing would pass on a
+    slow machine and fail on a fast one, and because the claim is about work
+    done rather than time taken.
+    """
+    from domvec.markdown import RenderMemo, render_trie
+    import domvec.markdown as md
+
+    def page(n, edit=None):
+        def body(i):
+            return "EDITED" if i == edit else "body text for row {}".format(i)
+        rows = "".join(
+            "<li><h3>Item {}</h3><p>{}</p>"
+            "<a href='https://e.test/{}'>open</a></li>".format(i, body(i), i)
+            for i in range(n))
+        return ("<html><body><header><h1>C</h1></header>"
+                "<main><ul>{}</ul></main></body></html>".format(rows))
+
+    n = 400
+    scan = StreamingScan("https://probe.test/page")
+    memo = RenderMemo()
+    render_trie(scan.push(page(n), passno=0).trie, context_window=1200,
+                memo=memo)
+
+    calls = {"n": 0, "nodes": 0}
+    real = md._collect
+
+    def counting(node, url_depth):
+        calls["n"] += 1
+        out = real(node, url_depth)
+        calls["nodes"] += len(out)
+        return out
+
+    md._collect = counting
+    try:
+        render_trie(scan.push(page(n, edit=n // 2), passno=1).trie,
+                    context_window=1200, memo=memo)
+    finally:
+        md._collect = real
+
+    # The edited row and its own small subtree, and nothing resembling the
+    # page. A whole-page walk would put ~n units through a single call.
+    assert calls["nodes"] < n, (
+        "{} units collected over {} calls for a one-word edit on {} rows"
+        .format(calls["nodes"], calls["n"], n))

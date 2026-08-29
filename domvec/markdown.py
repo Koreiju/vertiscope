@@ -1387,6 +1387,73 @@ def _certainly_overflows(child_chars: Sequence[int], window: int) -> bool:
     return sum(child_chars) + len(child_chars) - 1 > window
 
 
+def _size_of(
+    node: TrieNode,
+    url: str,
+    url_depth: int,
+    window: int,
+    memo: Optional["RenderMemo"],
+) -> Tuple[Optional[MarkdownChunk], int]:
+    """``node``'s render and its length, or ``(None, window + 1)``.
+
+    The second form means "this overflows the window, and finding that out did
+    not require rendering it". A caller that only wants to know whether a
+    subtree fits can act on it; a caller that wants the lines has to descend,
+    which is what it was going to do with an overflowing subtree anyway.
+
+    This is the recursive form of `_certainly_overflows`, and it exists
+    because measuring a child used to mean rendering it. On the path from an
+    edited leaf to the page root every ancestor measured its stale child, so
+    the same subtree was rendered once per level -- profiled at five
+    whole-page `_collect` walks to redraw a page after a one-word edit, which
+    was the entire remaining cost.
+
+    The recursion bottoms out on the memo: a clean subtree answers with its
+    cached size, and a stale one asks its own children. Verdicts are cached
+    too, so a probe repeated from each ancestor costs one lookup after the
+    first.
+
+    ``window + 1`` is a *lower* bound on an overflowing subtree's true length,
+    so a sum of these stays a lower bound and `_certainly_overflows` stays
+    sound when it is fed one.
+    """
+    if memo is None:
+        # Nothing to lean on. The recursion below pays for itself only when
+        # its base case is a cached size; without one it walks the subtree
+        # computing sizes by rendering, at every level, and a render with no
+        # memo got three times slower before this guard was here. `_descend`
+        # still gets its floor from the children it measures directly, which
+        # is where the speed-up on this path comes from.
+        return _render_sized(node, url, url_depth, None)
+
+    key = _memo_key(node, url, "node", 0)
+    if key is not None:
+        cached = memo.peek(key)
+        if cached is not None:
+            memo.reused_lines += len(cached[0].lines)
+            return cached
+        verdict = _memo_key(node, url, "overflows", window)
+        if verdict is not None and memo.peek(verdict) is not None:
+            return None, window + 1
+
+    kids = [c for c in node.ordered_children()
+            if not c.is_leaf and not _is_terminal_pair(c)]
+    if kids:
+        child_chars = []
+        for child in kids:
+            _chunk, chars = _size_of(child, url, url_depth, window, memo)
+            child_chars.append(chars)
+        if _certainly_overflows(child_chars, window):
+            if memo is not None:
+                memo.skipped_fit_tests += 1
+                verdict = _memo_key(node, url, "overflows", window)
+                if verdict is not None:
+                    memo.put(verdict, True)
+            return None, window + 1
+
+    return _render_sized(node, url, url_depth, memo)
+
+
 def _descend(
     node: TrieNode,
     url: str,
@@ -1467,11 +1534,11 @@ def _descend(
     # merged, most of them come back from the memo, and by `_certainly_
     # overflows` their sizes put a floor under this node's. When that floor
     # clears the window, this node's own render is never needed.
-    sized: List[Tuple[TrieNode, MarkdownChunk, int]] = []
+    sized: List[Tuple[TrieNode, Optional[MarkdownChunk], int]] = []
     child_chars: List[int] = []
     for child in element_children:
-        rendered, rendered_chars = _render_sized(child, url, url_depth, memo)
-        if not rendered.lines:
+        rendered, rendered_chars = _size_of(child, url, url_depth, window, memo)
+        if rendered is not None and not rendered.lines:
             continue
         sized.append((child, rendered, rendered_chars))
         child_chars.append(rendered_chars)
@@ -1513,7 +1580,9 @@ def _descend(
     if has_own:
         pieces.append(("fits", own[0], own[1]))
     for child, rendered, rendered_chars in sized:
-        fits = rendered_chars <= window
+        # `rendered is None` is `_size_of` saying it proved the overflow
+        # without drawing anything, which is exactly the case that splits.
+        fits = rendered is not None and rendered_chars <= window
         pieces.append(("fits" if fits else "split",
                        rendered if fits else child, rendered_chars))
 

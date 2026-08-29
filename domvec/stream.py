@@ -316,22 +316,35 @@ class StreamingScan:
         # stand behind "this renders identically" -- `subtree_hash` is not,
         # being blind to word order by design.
         #
-        # What that bought, measured by `analytics/projection.py` over an
-        # N-row list, against the same render with no memo:
+        # And the descent no longer renders anything to find out that it is
+        # too big. Every rendering decision is scoped to a single element, so
+        # a node renders every line its children do and their measured sizes
+        # put a floor under its own (`markdown._certainly_overflows`);
+        # `_size_of` applies that recursively, so proving a stale ancestor
+        # overflows costs lookups down to the first cached size rather than a
+        # render. Before it, the path from an edited leaf to the page root
+        # drew the same subtree once per level -- profiled at five whole-page
+        # walks to redraw a page after a one-word edit.
         #
-        #     change      N=100   N=400   N=1600
-        #     redraw       95%     96%      97%      saved
-        #     edit         47%     50%      45%
-        #     insert       41%     41%      30%
+        # Measured by `analytics/projection.py` over an N-row list at a
+        # 1,200-character window, in milliseconds. `was` is where this work
+        # started; the two changes are not separable in the total because the
+        # bound is what makes the memo worth consulting.
         #
-        # It is not yet O(delta), and the residual is located rather than
-        # guessed at. A redraw is nearly free because the page root is clean
-        # and one lookup answers for the whole page -- which is the common
-        # case on an interactive surface, where most ticks change nothing. An
-        # edit is only half, because the ancestors of the edited leaf reach
-        # the root and the descent asks each of them whether its subtree fits
-        # the window, a question still answered by rendering it. Removing
-        # that means answering the fit test from a bound instead of a render.
+        #                     N=100   N=400   N=1600   N=6400
+        #     redraw   was     46      175     1844
+        #              now      2.0      8.8     35      141
+        #     edit     was     48      177     1819
+        #              now      3.0     13.9     53      392
+        #     insert   was     44      179     1827
+        #              now     17       65      279     1270
+        #
+        # A redraw is nearly free -- the page root is clean and one hash
+        # comparison answers for the page, which is what a scroll and an idle
+        # tick cost. An edit is close behind. What is left of it is the one
+        # ancestor whose children *are* the chunk boundaries, re-running its
+        # merge buffer over all N of them: a real dependency, since one child
+        # changing size can move every boundary after it.
         #
         # An insertion at the head is the floor and not a defect: it shifts
         # every address below it, and the projection prints addresses -- a

@@ -116,20 +116,25 @@ With depths absolute and `chars` being `len("
 
 which is a *lower* bound, and a lower bound is what proves "this overflows".
 
-`analytics/projection.py` measures both, browser-free, by change kind. At a
+`_size_of` applies that recursively: proving a stale ancestor overflows costs
+lookups down to the first cached size instead of a render. Without it the path
+from an edited leaf to the page root drew the same subtree once per level --
+profiled at five whole-page walks to redraw a page after a one-word edit.
+
+`analytics/projection.py` measures it, browser-free, by change kind. At a
 1,200-character window, in milliseconds, against where this started:
 
-| change | | N=100 | N=400 | N=1600 |
-|---|---|---|---|---|
-| redraw (nothing changed) | was | 46 | 175 | 1844 |
-| | now | 1.9 | 8.1 | **37** |
-| edit one value in place | was | 48 | 177 | 1819 |
-| | now | 19 | 79 | **327** |
-| insert one node at the head | was | 44 | 179 | 1827 |
-| | now | 24 | 100 | **456** |
+| change | | N=100 | N=400 | N=1600 | N=6400 |
+|---|---|---|---|---|---|
+| redraw (nothing changed) | was | 46 | 175 | 1844 | |
+| | now | 2.0 | 8.8 | **35** | 141 |
+| edit one value in place | was | 48 | 177 | 1819 | |
+| | now | 3.0 | 13.9 | **53** | 392 |
+| insert one node at the head | was | 44 | 179 | 1827 | |
+| | now | 17 | 65 | **279** | 1270 |
 
-The bound alone accounts for about four of those factors and needs no cache at
-all; the test suite's own wall time fell from 740 s to 330 s when it landed.
+The bound needs no cache at all and roughly quartered the plain render; the
+test suite's own wall time fell from 740 s to 330 s when it landed.
 
 Read honestly, this is still not O(delta), and the residual is located rather
 than guessed at:
@@ -138,9 +143,11 @@ than guessed at:
   comparison answers for the whole page. This is the common case on an
   interactive surface: scrolling, an idle tick, a keystroke that changes only
   the viewport.
-- An **edit** still pays for the ancestors of the edited leaf. Their own
-  renders are skipped now, but their children are re-measured and the merge
-  buffer re-run at every level between the leaf and the root.
+- An **edit** is close behind. What is left of it is the one ancestor whose
+  children *are* the chunk boundaries, re-running its merge buffer over all N
+  of them -- a real dependency, since one child changing size can move every
+  boundary after it. That is the linear term still visible from N=1600 to
+  N=6400.
 - An **insertion at the head** is the floor, and not a defect. It shifts the
   address of everything below it, and the projection prints addresses: a
   chunk's xpath, a line's anchor. What moved genuinely draws differently. The
