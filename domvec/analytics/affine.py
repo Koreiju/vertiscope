@@ -82,6 +82,8 @@ class Confusion:
     duplicated: int = 0    # extra emissions of an address already counted
     collapsed: int = 0     # a redundant spelling the render deliberately
                            # merged away, another having survived
+    suspect: int = 0       # counted FN, yet its words are in the render --
+                           # the signature of a scoring error, not a loss
 
     @property
     def recall(self) -> float:
@@ -109,6 +111,7 @@ class Confusion:
     def as_dict(self) -> Dict[str, float]:
         return {"tp": self.tp, "fn": self.fn, "fp": self.fp, "tn": self.tn,
                 "duplicated": self.duplicated, "collapsed": self.collapsed,
+                "suspect": self.suspect,
                 "recall": round(self.recall, 6),
                 "precision": round(self.precision, 6),
                 "injectivity": round(self.injectivity, 6),
@@ -342,6 +345,13 @@ def score_arrow(name: str, truth: PageTruth,
     # A collapse is only credited when some *other* spelling of the same
     # content did reach the render. If every spelling is gone, that is
     # over-dedup, and it stays a loss.
+    # Everything the render drew, as one blob, for the suspicion check
+    # below. Never used to decide coverage -- content matching as a *primary*
+    # test is what went wrong four separate times -- only to ask whether a
+    # loss already counted looks real.
+    all_drawn_text = " ".join(
+        " ".join((text or "").split()).lower() for text in (texts or []))
+
     covered_values = {
         " ".join(u.value.split()).lower()
         for u in truth.units
@@ -377,6 +387,26 @@ def score_arrow(name: str, truth: PageTruth,
         else:
             for b in (score.overall, bucket_kind, bucket_origin):
                 b.fn += 1
+            # Is this loss even real?
+            #
+            # Seven times in this instrument's short life a *correct*
+            # renderer was scored as losing something, always the same way:
+            # the unit was matched against a set the renderer is not
+            # answerable for, or at an address the renderer records
+            # differently. Every one of those was found by hand, after
+            # reporting the wrong number.
+            #
+            # So the check is built in. If a unit is counted lost and its
+            # words are nevertheless somewhere in what was drawn, that is the
+            # signature of a scoring error rather than a loss -- and the
+            # instrument says so itself instead of waiting to be caught.
+            # `suspect` is not subtracted from `fn`: it is a claim about the
+            # measurement, and quietly correcting the number would hide
+            # exactly what needs looking at.
+            probe = " ".join(unit.value.split()).lower()
+            if probe and len(probe) > 3 and probe in all_drawn_text:
+                for b in (score.overall, bucket_kind, bucket_origin):
+                    b.suspect += 1
             score.lost.append(unit)
 
     # Injectivity, asked of the exact address. Counted apart from tp so recall
