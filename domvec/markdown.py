@@ -1224,8 +1224,11 @@ def render_trie(
         page = trie.node_at(steps)
         if page is None:
             continue
-        _annotate_xpaths(page, steps, url)
-        _descend(page, url, len(steps), context_window, chunks, memo)
+        # The one copy. Everything below hands back memo-owned objects, and
+        # the two page-global passes that follow rewrite depths and ordinals
+        # in place.
+        chunks.extend(_clone_chunk(c) for c in
+                      _descend(page, url, len(steps), context_window, memo))
 
     _level_page(chunks)
     _number_parts(chunks)
@@ -1331,10 +1334,20 @@ def _fill_report(
 
 
 def _annotate_xpaths(page: TrieNode, url_path: Sequence[str], url: str) -> None:
-    """Cache each element node's absolute xpath, once, for chunk roots.
+    """Cache each element node's absolute xpath, for chunk roots.
 
-    Recomputing it per candidate chunk would be quadratic in depth, and the
-    descent asks for it at every level.
+    **No longer called by the renderer.** `AddressTrie.insert` assigns
+    `_xpath_cache` when it creates a node, which is where the information
+    already was: `insert` walks the path building the very prefix this
+    function re-derives. Doing it here meant a walk of every element on the
+    page on every render -- an O(page) read of something the write knew --
+    and a node's xpath cannot change anyway, since a segment and its ancestors
+    are fixed for the node's life. Content "moving" in this trie is content
+    arriving at a *different node*, not a node changing address.
+
+    Kept as the reference implementation that
+    `tests/test_render_trie_reads.py` checks the trie's assignment against, so
+    the two definitions cannot drift apart silently.
     """
     def walk(node: TrieNode, prefix: str) -> None:
         node._xpath_cache = prefix or "/"
@@ -1459,10 +1472,21 @@ def _descend(
     url: str,
     url_depth: int,
     window: int,
-    out: List[MarkdownChunk],
     memo: Optional["RenderMemo"] = None,
-) -> None:
-    """Emit chunks for ``node``'s subtree. Leaves are partitioned, never shared."""
+) -> List[MarkdownChunk]:
+    """The chunks for ``node``'s subtree. Leaves are partitioned, never shared.
+
+    **The result is pristine and is not the caller's to modify.** It may be
+    the memo's list, holding the memo's chunks, holding `MarkdownLine` objects
+    shared with the entries of every node below. `render_trie` copies once, on
+    the way out, and that single copy is what `_level_page` and
+    `_number_parts` then rewrite.
+
+    Cloning used to happen here instead, at each point a chunk was committed.
+    That put one copy per emitted line at every level of the dirty path, so a
+    one-word edit on a 6,400-row page copied 25,601 lines six times over --
+    the largest single cost left in the render once the fit tests were gone.
+    """
     # A subtree whose `exact_hash` is unchanged chunks the same way it did
     # last time, so the whole descent below this node can be skipped: the
     # trie's Merkle answers, in one comparison, a question that otherwise
@@ -1477,10 +1501,9 @@ def _descend(
         if cached is not None:
             for c in cached:
                 memo.reused_lines += len(c.lines)
-                out.append(_clone_chunk(c))
-            return
+            return cached
 
-    mark = len(out)
+    out: List[MarkdownChunk] = []
     xpath = _xpath_of(node, url)
     element_children = [
         c for c in node.ordered_children()
@@ -1492,14 +1515,12 @@ def _descend(
         if not chunk.lines:
             if key is not None:
                 memo.put(key, [])
-            return
+            return []
         if chars <= window:
-            # Cloned on the way into `out`, because `chunk` may be the memo's
-            # and `_level_page` rewrites the depths of everything in `out`.
-            out.append(_clone_chunk(chunk))
+            out.append(chunk)
             if key is not None:
-                memo.put(key, [_clone_chunk(chunk)])
-            return
+                memo.put(key, out)
+            return out
         # No element to descend into. If the overflow is *one* unit, it is
         # genuinely indivisible: cutting a single value would leave a chunk
         # whose address over-claims, and that is the rule.
@@ -1513,14 +1534,14 @@ def _descend(
         # at this element and `anchors` says exactly which addresses are
         # inside, so it under-claims, never over-claims.
         if len(chunk.lines) <= 1:
-            out.append(_clone_chunk(chunk))
+            out.append(chunk)
             if key is not None:
-                memo.put(key, [_clone_chunk(chunk)])
-            return
+                memo.put(key, out)
+            return out
         _emit_runs(chunk, window, out)
         if key is not None:
-            memo.put(key, [_clone_chunk(c) for c in out[mark:]])
-        return
+            memo.put(key, out)
+        return out
 
     # The children are measured before this node is, which is the whole point.
     #
@@ -1554,17 +1575,17 @@ def _descend(
         if not chunk.lines:
             if key is not None:
                 memo.put(key, [])
-            return
+            return []
         if chars <= window:
-            out.append(_clone_chunk(chunk))
+            out.append(chunk)
             if key is not None:
-                memo.put(key, [_clone_chunk(chunk)])
-            return
+                memo.put(key, out)
+            return out
 
     if not sized and not has_own:
         if key is not None:
             memo.put(key, [])
-        return
+        return []
 
     # Split, then re-merge adjacent siblings up to the window. Without the
     # merge a page whose root overflows shatters into one chunk per child —
@@ -1593,17 +1614,14 @@ def _descend(
         nonlocal buffered_chars
         if not buffer:
             return
-        # `_merge` returns its single argument unchanged, and both branches
-        # carry the pieces' own `MarkdownLine` objects -- which may belong to
-        # the memo. The clone here is the one copy per emitted line.
-        out.append(_clone_chunk(_merge(buffer, url, xpath, len(out))))
+        out.append(_merge(buffer, url, xpath, len(out)))
         buffer.clear()
         buffered_chars = 0
 
     for kind, piece, piece_chars in pieces:
         if kind == "split":
             flush()
-            _descend(piece, url, url_depth, window, out, memo)  # type: ignore[arg-type]
+            out.extend(_descend(piece, url, url_depth, window, memo))  # type: ignore[arg-type]
             continue
         # +len(buffer) for the newlines _merge inserts between parts. Omitting
         # them let a chunk exceed the window by one character per merged part,
@@ -1616,7 +1634,8 @@ def _descend(
         buffered_chars += piece_chars
     flush()
     if key is not None:
-        memo.put(key, [_clone_chunk(c) for c in out[mark:]])
+        memo.put(key, out)
+    return out
 
 
 def _emit_runs(
@@ -1634,12 +1653,12 @@ def _emit_runs(
     for line in chunk.lines:
         cost = len(line.text) + 2 * line.depth
         if run and size + cost + 1 > window:
-            out.append(_clone_chunk(_part_of(chunk, run, len(out))))
+            out.append(_part_of(chunk, run, len(out)))
             run, size = [], 0
         run.append(line)
         size += cost + 1
     if run:
-        out.append(_clone_chunk(_part_of(chunk, run, len(out))))
+        out.append(_part_of(chunk, run, len(out)))
 
 
 def _part_of(

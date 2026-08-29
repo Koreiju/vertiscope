@@ -322,29 +322,39 @@ class StreamingScan:
         # put a floor under its own (`markdown._certainly_overflows`);
         # `_size_of` applies that recursively, so proving a stale ancestor
         # overflows costs lookups down to the first cached size rather than a
-        # render. Before it, the path from an edited leaf to the page root
-        # drew the same subtree once per level -- profiled at five whole-page
-        # walks to redraw a page after a one-word edit.
+        # render.
+        #
+        # And three reads of the trie that ran over the whole page on *every*
+        # render, whatever had changed, are now maintained by the write:
+        # `urls()` was visiting every leaf to learn one string, the absolute
+        # xpath of each element was re-derived by a walk although `insert`
+        # computes it while building the path, and `ordered_children()`
+        # re-sorted with a regex in its key every time any walk asked any node
+        # for its children. Between them they were most of what an incremental
+        # render cost once the fit tests were gone.
         #
         # Measured by `analytics/projection.py` over an N-row list at a
         # 1,200-character window, in milliseconds. `was` is where this work
-        # started; the two changes are not separable in the total because the
-        # bound is what makes the memo worth consulting.
+        # started; the changes are not separable in the total, because each
+        # one only becomes visible when the one before it is out of the way.
         #
         #                     N=100   N=400   N=1600   N=6400
         #     redraw   was     46      175     1844
-        #              now      2.0      8.8     35      141
+        #              now      0.2      0.7      3.3     16.1
         #     edit     was     48      177     1819
-        #              now      3.0     13.9     53      392
+        #              now      0.6      2.0      9.0     37.6
         #     insert   was     44      179     1827
-        #              now     17       65      279     1270
+        #              now     11.2     47.5    243.3    804.3
         #
-        # A redraw is nearly free -- the page root is clean and one hash
-        # comparison answers for the page, which is what a scroll and an idle
-        # tick cost. An edit is close behind. What is left of it is the one
-        # ancestor whose children *are* the chunk boundaries, re-running its
-        # merge buffer over all N of them: a real dependency, since one child
-        # changing size can move every boundary after it.
+        # A redraw is what a scroll and an idle tick cost: the page root is
+        # clean and one hash comparison answers for the page, at 0.6 us per
+        # line of a 25,000-line render. An edit is close behind.
+        #
+        # Still linear in the page, not in the delta. For an edit the term
+        # left is the one ancestor whose children *are* the chunk boundaries:
+        # it consults all N of them and re-runs its merge buffer, and that is
+        # a real dependency, since one child changing size can move every
+        # boundary after it.
         #
         # An insertion at the head is the floor and not a defect: it shifts
         # every address below it, and the projection prints addresses -- a

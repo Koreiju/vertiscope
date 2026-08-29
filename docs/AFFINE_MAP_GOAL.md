@@ -121,33 +121,60 @@ lookups down to the first cached size instead of a render. Without it the path
 from an edited leaf to the page root drew the same subtree once per level --
 profiled at five whole-page walks to redraw a page after a one-word edit.
 
+### Three reads the write should have been doing
+
+With the renders gone, what was left was profiling as three walks of the whole
+page that ran on **every** render whatever had changed — all of them
+re-deriving something the trie already knew when it was written:
+
+- `AddressTrie.urls()` visited every leaf to learn one string. It is now an
+  insertion-ordered set maintained by `insert`, put back into the trie's own
+  order when there is more than one page (arrival order interleaves pages that
+  a leaf walk grouped by origin).
+- The absolute xpath of every element was cached by a walk before each render.
+  `insert` computes that exact prefix while building the path, so it assigns
+  it when it creates the node — which is also the truer statement: a node's
+  xpath cannot change, because a segment and its ancestors are fixed for its
+  life. Content "moving" here is content arriving at a *different node*.
+- `TrieNode.ordered_children()` re-sorted, with a regex in the sort key, every
+  time any walk asked any node for its children. It is memoised against the
+  child count, which is the whole validity check and is sound rather than
+  convenient: children are only added or dropped, never replaced, and
+  `doc_pos` and `label_order` are set at construction and never assigned
+  again, so nothing can reorder a child list while its length is unchanged.
+
+Each is a claim of *equality* with the walk it replaced, so each is tested
+against that walk as a reference implementation — on the fixture pages, on
+generated shapes, and across live edit/insert passes.
+
+### What it costs now
+
 `analytics/projection.py` measures it, browser-free, by change kind. At a
 1,200-character window, in milliseconds, against where this started:
 
 | change | | N=100 | N=400 | N=1600 | N=6400 |
 |---|---|---|---|---|---|
 | redraw (nothing changed) | was | 46 | 175 | 1844 | |
-| | now | 2.0 | 8.8 | **35** | 141 |
+| | now | 0.2 | 0.7 | **3.3** | 16.1 |
 | edit one value in place | was | 48 | 177 | 1819 | |
-| | now | 3.0 | 13.9 | **53** | 392 |
+| | now | 0.6 | 2.0 | **9.0** | 37.6 |
 | insert one node at the head | was | 44 | 179 | 1827 | |
-| | now | 17 | 65 | **279** | 1270 |
+| | now | 11.2 | 47.5 | **243** | 804 |
 
-The bound needs no cache at all and roughly quartered the plain render; the
-test suite's own wall time fell from 740 s to 330 s when it landed.
+A redraw is what a scroll and an idle tick cost: 16 ms for a 25,602-line page,
+0.6 µs per line.
 
-Read honestly, this is still not O(delta), and the residual is located rather
-than guessed at:
+Read honestly, this is **still linear in the page, not in the delta**, and the
+residual is located rather than guessed at:
 
 - A **redraw** is nearly free because the page root is clean and one hash
-  comparison answers for the whole page. This is the common case on an
-  interactive surface: scrolling, an idle tick, a keystroke that changes only
-  the viewport.
-- An **edit** is close behind. What is left of it is the one ancestor whose
-  children *are* the chunk boundaries, re-running its merge buffer over all N
-  of them -- a real dependency, since one child changing size can move every
-  boundary after it. That is the linear term still visible from N=1600 to
-  N=6400.
+  comparison answers for the whole page.
+- An **edit** is close behind. The term left is the one ancestor whose
+  children *are* the chunk boundaries: it consults all N of them and re-runs
+  its merge buffer. That is a real dependency — one child changing size can
+  move every boundary after it — so removing it means splicing the buffer
+  around the changed child, which needs its own soundness argument rather than
+  a heuristic.
 - An **insertion at the head** is the floor, and not a defect. It shifts the
   address of everything below it, and the projection prints addresses: a
   chunk's xpath, a line's anchor. What moved genuinely draws differently. The

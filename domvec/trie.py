@@ -94,7 +94,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Dict, Iterable, Iterator, List, Optional, Sequence, Tuple
 
-from .address import ContentAddress
+from .address import ContentAddress, url_steps
 from .privacy import redact_url
 
 __all__ = [
@@ -213,6 +213,29 @@ class TrieNode:
     # label -> that label group's position among this node's children.
     _label_order: Dict[str, int] = field(default_factory=dict, repr=False)
 
+    # `ordered_children()` memoised, with the child count it was built from.
+    # Sorting is not free -- the key parses the segment with a regex -- and
+    # every walk of the trie asks every node for its children in order, so on
+    # a page of any size this was being paid tens of thousands of times per
+    # read for an answer that had not changed.
+    #
+    # The count is the whole validity check, and that is sound rather than
+    # convenient: children are only ever added (`insert`) or dropped
+    # (`remove`), never replaced, and `doc_pos` and `label_order` are set when
+    # a node is constructed and never assigned again. So nothing can reorder a
+    # child list while its length stays the same.
+    # A copy goes out, not the cached list. Handing out the internal one
+    # measured 4% faster and would make every caller a potential corruption
+    # of the trie's own view of its order -- `walk` holds the result across
+    # yields, so the bug would surface as a traversal that skipped nodes,
+    # which is the hardest kind of wrong answer to notice here.
+    _ordered: Optional[List["TrieNode"]] = field(default=None, repr=False)
+    _ordered_n: int = field(default=-1, repr=False)
+
+    # Absolute xpath, assigned by `insert` when the node is created. Read by
+    # the projections as a chunk's root address.
+    _xpath_cache: Optional[str] = field(default=None, repr=False)
+
     @property
     def is_leaf(self) -> bool:
         return self.address is not None
@@ -224,12 +247,16 @@ class TrieNode:
         by label, so a partially-restored trie still iterates deterministically
         instead of raising or shuffling.
         """
+        if self._ordered is not None and self._ordered_n == len(self.children):
+            return list(self._ordered)
         kids = list(self.children.values())
         kids.sort(key=lambda n: (
             n.doc_pos < 0, n.doc_pos,
             n.label_order < 0, n.label_order, _seg_key(n.segment)
         ))
-        return kids
+        self._ordered = kids
+        self._ordered_n = len(kids)
+        return list(kids)
 
     def walk(self) -> Iterator["TrieNode"]:
         """Pre-order traversal in document order — self, then each subtree."""
@@ -280,6 +307,8 @@ class AddressTrie:
     def __init__(self) -> None:
         self.root = TrieNode(segment="", depth=0)
         self._leaf_count = 0
+        # Insertion-ordered set of the urls present. See `urls()`.
+        self._urls: Dict[str, None] = {}
         self._dirty = True
         # Issues leaf identities. Monotone and never reused, so a uid names
         # one piece of content for as long as it is on the page, however
@@ -335,10 +364,21 @@ class AddressTrie:
                 child = TrieNode(
                     segment=seg, depth=i, doc_pos=pos, label_order=order
                 )
+                # The node's absolute xpath, fixed here because it is fixed
+                # for the node's life: a segment never changes and neither do
+                # its ancestors, so content "moving" in this trie means
+                # content arriving at a *different node*, not a node changing
+                # address. The renderer used to derive this with a walk of
+                # every element on the page, on every render, to avoid
+                # recomputing it per candidate chunk -- an O(page) read of
+                # something the write already knew.
+                child._xpath_cache = xpath_prefix or "/"
                 node.children[seg] = child
+                node._ordered = None
             node = child
         if node.address is None:
             self._leaf_count += 1
+        self._urls.setdefault(address.url, None)
         node.address = address
         node.value = value
         node.content_hash = content_hash(value) if value else ""
@@ -507,6 +547,14 @@ class AddressTrie:
                 break
             parent = chain[i - 1]
             parent.children.pop(child.segment, None)
+            parent._ordered = None
+        # A url whose page node was pruned is no longer present. Checked here
+        # rather than swept later: `render_trie` iterates `urls()` and asks for
+        # each page node, and a stale entry would have it looking for one that
+        # is gone.
+        url = address.url
+        if url in self._urls and self.node_at(url_steps(url)) is None:
+            del self._urls[url]
         self._dirty = True
         return True
 
@@ -539,12 +587,43 @@ class AddressTrie:
         return [n.address for n in self.leaves() if n.address is not None]
 
     def urls(self) -> List[str]:
-        """Origins and pages present, ordered."""
-        seen: List[str] = []
-        for leaf in self.leaves():
-            if leaf.address and leaf.address.url not in seen:
-                seen.append(leaf.address.url)
-        return seen
+        """Origins and pages present, in the order they first arrived.
+
+        Kept as a set on the side rather than derived, because deriving it
+        meant walking every leaf in the trie -- on a 6,400-row page, 25,601
+        leaves visited to learn one string, once per render. Leaves arrive in
+        document order, so first-arrival order is the order the walk produced.
+
+        A url stays until its page node is gone, which `remove` checks when it
+        prunes: an empty page is not a page, and a stale entry here would make
+        `render_trie` look for a node that is not there.
+
+        With more than one url the arrival order is not enough. The old walk
+        met a page's leaves together, so it grouped pages under one origin;
+        arrival order interleaves them when a scan visits two sites at once,
+        which would reorder the chunks `render_trie` emits for no reason. So
+        the set is put back into the trie's own order, which is what the walk
+        was reporting. Pages are few and the path is short, so this costs
+        nothing next to the leaf walk it replaces.
+        """
+        if len(self._urls) < 2:
+            return list(self._urls)
+        return sorted(self._urls, key=lambda u: self._path_rank(url_steps(u)))
+
+    def _path_rank(self, steps: Sequence[str]) -> Tuple[int, ...]:
+        """Where ``steps`` sits in a document-ordered traversal from the root."""
+        rank: List[int] = []
+        node = self.root
+        for seg in steps:
+            kids = node.ordered_children()
+            for i, kid in enumerate(kids):
+                if kid.segment == seg:
+                    rank.append(i)
+                    node = kid
+                    break
+            else:
+                return tuple(rank)
+        return tuple(rank)
 
     # -- hashing ----------------------------------------------------------
     def rehash(self) -> str:
