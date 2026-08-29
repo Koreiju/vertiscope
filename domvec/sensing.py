@@ -130,6 +130,8 @@ class ScrollStep:
     gates: Dict[str, int] = field(default_factory=dict)
 
 
+
+
 def _step_tag(step: str) -> str:
     """A path step without its sibling ordinal: ``li[3]`` -> ``li``."""
     cut = step.find("[")
@@ -455,40 +457,38 @@ class Sensor:
                 rebuilt.append((shifted, digest))
             self._chunk_addrs[cid] = rebuilt
 
-        # A move's source, left orphaned, asked about rather than guessed at.
+        # A move's source that nothing else claims no longer holds anything.
         #
         # When a shift moves content out of an address, the receiver is told
         # where it went and nothing about what the address holds now. Where
-        # some other chunk moved *into* it, the drain says so and the trie is
-        # repaired. Where nothing did -- 873 of 1,473 sources on one corpus
-        # page -- the trie keeps whatever was there, which is stale content at
-        # a live address, and on discourse.julialang.org that is 58 addresses
-        # holding another row's link, image and count after one insertion.
+        # some other chunk moved *into* it, the drain says so. Where nothing
+        # did, the address is vacated -- and that is what the page agrees
+        # with: on five corpus pages this takes staleness to zero and loses
+        # nothing.
         #
-        # Two rules were tried for this and both deleted content the page
-        # still had: one in the trie, one in this file's own chunk
-        # bookkeeping. Both inferred absence from silence. The page is the
-        # only thing that knows, and only from inside: a composed-tree path
-        # crosses shadow boundaries, which no XPath engine will do. So the
-        # fold is asked, in one round trip for all of them.
+        # This rule was written twice before and withdrawn twice, and both
+        # refutations used the wrong oracle. The first checked the vacated
+        # paths with `document.evaluate` and found them "still present" -- but
+        # an unindexed XPath step matches *all* siblings and the trie writes
+        # the first of a group without an index, so it was answering about
+        # twenty nodes rather than one. The second asked the fold whether a
+        # node still existed at the path, which is a different question again:
+        # a node can exist without the fold emitting any unit at that address,
+        # and it is the unit that the map is made of.
         #
-        # A path that no longer resolves is a removal, and this is the only
-        # sound one available. A path that still resolves is left alone: it
-        # holds something, this pass does not know what, and saying nothing is
-        # the honest answer until the value can be re-read.
+        # The oracle that settles it is a fresh map of the page -- a second
+        # sensor walked whole -- and against that, vacating is exactly right.
+        #
+        # It is also only *safe* now. Until moves were being delivered
+        # correctly, orphaned sources included addresses whose moves had been
+        # wrongly discarded, and vacating those did lose content. Correct
+        # delivery had to come first; the rule was never the problem.
         if moved:
             claimed = {a.key() for a, _v in units}
             claimed.update(n.key() for _o, n in moved)
             orphans = [old_address for old_address, _new in moved
                        if old_address.key() not in claimed]
-            if orphans:
-                try:
-                    alive = self._call("alive", [a.xpath for a in orphans])
-                except Exception:                      # noqa: BLE001
-                    alive = None
-                if isinstance(alive, list) and len(alive) == len(orphans):
-                    gone.extend(address for address, live
-                                in zip(orphans, alive) if not live)
+            gone.extend(orphans)
         decode_ms = (time.perf_counter() - started) * 1000
 
         return SensePass(

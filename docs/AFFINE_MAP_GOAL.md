@@ -596,8 +596,42 @@ Per page:
 | de.wikipedia Physik | 242 / 1541 / 1539 | **0 / 48 / 0** |
 | rfc-editor rfc2616 | 3019 / 1637 / 1632 | **9 / 350 / 0** |
 
-**Still open.** 3,864 stale addresses remain across 73 pages, and 134 wrong
-values across 26. Four pages shrink where none did. `discourse.julialang.org`
+### Vacating, third time, and this time measured against the right thing
+
+A move's source that nothing else claims no longer holds anything, so the trie
+drops it. That rule was written twice before and withdrawn twice, and **both
+refutations used the wrong oracle**:
+
+- The first checked the vacated paths with `document.evaluate` and found them
+  "still present". An unindexed XPath step matches *all* siblings, and the trie
+  writes the first of a group without an index, so it was answering about
+  twenty nodes rather than about one.
+- The second asked the fold whether a node still existed at the path. That is a
+  different question again: a node can exist without the fold emitting any unit
+  at that address, and it is the *unit* the map is made of.
+
+The oracle that settles it is a fresh map of the page — a second sensor walked
+whole — and against that, vacating is exactly right. It is also only *safe*
+now: until moves were delivered correctly, orphaned sources included addresses
+whose moves had been wrongly discarded, and vacating those did lose content.
+Correct delivery had to come first; the rule was never the problem.
+
+| after one insertion, 119 corpus pages | before guard fix | guard fixed | + vacate |
+|---|---|---|---|
+| pages exact — nothing stale, lost or wrong | 30 | 40 | **70** |
+| pages holding wrong content | 43 | 26 | **25** |
+| wrong-value addresses | 6,622 | 134 | **129** |
+| pages losing addresses | 33 | 0 | **0** |
+| addresses lost | 14,502 | 0 | **0** |
+| addresses stale | 17,409 | 3,864 | **241** |
+| recall, median / min | 100% / 4.0% | 100% / 100% | **100% / 100%** |
+
+**70 of 119 pages are now exact after an insertion**, recall is 100%
+everywhere, nothing is lost, and staleness is down from 17,409 addresses to
+241.
+
+**Still open.** 241 stale addresses across 27 pages and 129 wrong values across
+25. The wrong values are the worse class and the next target. `discourse.julialang.org`
 holds 58 addresses with another row's content and loses 44, and
 ar.wikipedia.org loses ~750 — both unchanged by this work and both pre-dating
 it. Wrong content at a right address remains the worst class and the next
