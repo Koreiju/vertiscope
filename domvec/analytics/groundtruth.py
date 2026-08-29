@@ -139,14 +139,24 @@ function step(tag, n) { return n > 1 ? tag + '[' + n + ']' : tag; }
 function drawnNow(el) {
   if (!el) return false;
   try {
-    if (typeof el.checkVisibility === 'function') {
-      return !!el.checkVisibility({
-        opacityProperty: true,
-        visibilityProperty: true,
-        contentVisibilityAuto: true
-      });
+    if (typeof el.checkVisibility === 'function'
+        && !el.checkVisibility({
+             opacityProperty: true,
+             visibilityProperty: true,
+             contentVisibilityAuto: true
+           })) {
+      return false;
     }
-    return !!(el.getClientRects && el.getClientRects().length);
+    // And it has to occupy space. `checkVisibility` answers "is this hidden",
+    // which is not the same question as "can a reader see it": it ignores
+    // geometry entirely, so an <img> that has not loaded reports visible at
+    // 1366x0. salesforce.com carries nine of those, and counting them as
+    // drawn charged the wireframe eleven losses for declining to place
+    // pictures with no area -- media read 76.6% against markdown's 97.2% on
+    // the same page, which is the shape of a denominator fault rather than a
+    // renderer one.
+    var r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0;
   } catch (e) { return true; }
 }
 
