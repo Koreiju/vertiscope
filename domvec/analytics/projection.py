@@ -32,6 +32,26 @@ Three mutation classes, because they are not the same problem:
 
 Every trial checks the memoised render against an unmemoised one and records
 ``identical``. A speed column means nothing without it.
+
+It also measures what the change costs the *next* phase. Vectorisation runs
+off the trie recursion rather than inside it, and its cost is not the render's
+cost: what matters there is how many chunks come out holding text they did not
+hold before, because `VectorQueue` gates on the digest of the markdown and
+embeds only those. ``requeued`` is that count and ``gate_skipped`` is what the
+gate stopped.
+
+That column is where the chunker's own behaviour shows up, and it says
+something the timings do not. An edit re-embeds one chunk. An insertion at the
+head re-embeds the whole page -- not because anything is keyed wrongly (the
+chunk ids are stable across it) but because the window packs a run of siblings
+into each chunk, so one more sibling at the front shifts what every chunk after
+it contains. Every one of them genuinely holds different text, and re-embedding
+them is correct rather than wasteful.
+
+Making that O(delta) would mean choosing chunk boundaries from content rather
+than from a running total, so an insertion perturbs only the chunk it lands in.
+That is a change to what a chunk *is*, not an optimisation, so it is measured
+here first.
 """
 
 from __future__ import annotations
@@ -107,8 +127,9 @@ def measure_projection_scaling(
                 build_ms = (time.perf_counter() - started) * 1000.0
 
                 started = time.perf_counter()
-                render_trie(scan.trie, context_window=context_window,
-                            memo=memo)
+                cold_chunks = render_trie(scan.trie,
+                                          context_window=context_window,
+                                          memo=memo)
                 cold_ms = (time.perf_counter() - started) * 1000.0
                 primed = memo.reused_lines
 
@@ -127,10 +148,28 @@ def measure_projection_scaling(
                                       context_window=context_window)
                 full_ms = (time.perf_counter() - started) * 1000.0
 
+                # Which chunks the sensor would actually hand downstream.
+                dirty = scan.dirty_chunks(update)
+
                 identical = (
                     [(c.cid, c.markdown) for c in incr]
                     == [(c.cid, c.markdown) for c in control]
                 )
+
+                # What the change costs the asynchronous phase. The queue is
+                # primed with the first render, so the counters below are the
+                # second render's contribution alone.
+                from ..vectors import VectorQueue
+                queue = VectorQueue()
+                queue.extend(cold_chunks)
+                queue.digests.update(
+                    {cid: VectorQueue.digest(md)
+                     for cid, md in queue.pending.items()})
+                queue.pending.clear()
+                queued_before, skipped_before = queue.queued, queue.skipped
+                queue.extend(dirty)
+                requeued = queue.queued - queued_before
+                gate_skipped = queue.skipped - skipped_before
                 rows.append({
                     "n": n,
                     "kind": kind,
@@ -147,6 +186,9 @@ def measure_projection_scaling(
                     "full_ms": full_ms,
                     "reused_lines": reused,
                     "identical": identical,
+                    "dirty_chunks": len(dirty),
+                    "requeued": requeued,
+                    "gate_skipped": gate_skipped,
                 })
     return {"sizes": list(sizes), "kinds": list(kinds), "repeats": repeats,
             "context_window": context_window, "rows": rows, "t": time.time()}
@@ -172,9 +214,9 @@ def render_projection_table(report: dict) -> str:
         grouped.setdefault((row["kind"], row["n"]), []).append(row)
 
     out = ["", "  what one change costs the markdown projection", ""]
-    out.append("  {:>8}{:>7}{:>8}{:>9}{:>10}{:>10}{:>9}{:>9}  {}".format(
+    out.append("  {:>8}{:>7}{:>8}{:>9}{:>10}{:>10}{:>9}{:>8}{:>10}  {}".format(
         "change", "N", "lines", "delta", "full ms", "incr ms", "saved",
-        "reused", "same"))
+        "chunks", "re-embed", "same"))
     for kind in report.get("kinds", KINDS):
         for n in report.get("sizes", []):
             group = grouped.get((kind, n))
@@ -183,13 +225,14 @@ def render_projection_table(report: dict) -> str:
             full = _median([r["full_ms"] for r in group])
             incr = _median([r["incr_ms"] for r in group])
             out.append("  {:>8}{:>7}{:>8.0f}{:>9.0f}{:>10.1f}{:>10.1f}"
-                       "{:>8.0f}%{:>9.0f}  {}".format(
+                       "{:>8.0f}%{:>8.0f}{:>10.0f}  {}".format(
                            kind, n,
                            _median([r["lines"] for r in group]),
                            _median([r["delta_size"] for r in group]),
                            full, incr,
                            (1.0 - incr / full) * 100.0 if full else 0.0,
-                           _median([r["reused_lines"] for r in group]),
+                           _median([r["chunks"] for r in group]),
+                           _median([r["requeued"] for r in group]),
                            all(r["identical"] for r in group)))
         out.append("")
 
@@ -207,6 +250,17 @@ def render_projection_table(report: dict) -> str:
     out.append("  its descendants.")
     out.append("")
     out.append("  What the numbers say, and do not say.")
+    out.append("")
+    out.append("  `re-embed` is chunks whose markdown differs from what was")
+    out.append("  last vectorised, out of `chunks` on the page: what the")
+    out.append("  asynchronous phase actually pays. An edit costs one. An")
+    out.append("  insertion at the head costs the page -- correctly, because")
+    out.append("  the window packs a run of siblings into each chunk, so one")
+    out.append("  more sibling at the front shifts what every chunk after it")
+    out.append("  holds. The ids are stable across it; the text is not.")
+    out.append("  Making that O(delta) means choosing boundaries from content")
+    out.append("  rather than from a running total, which changes what a")
+    out.append("  chunk is and so is measured here before it is attempted.")
     out.append("")
     out.append("  `saved` is against the *current* control, which itself got")
     out.append("  several times faster along the way -- the descent stopped")

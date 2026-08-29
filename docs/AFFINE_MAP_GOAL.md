@@ -258,6 +258,42 @@ and they point in opposite directions:
 A single "dedup rate" cannot separate these. Two counts can, and their ratio is
 the tuning knob the suppression rules are actually setting.
 
+### Reading order is the fourth thing the map preserves
+
+An affine map preserves relations, not origin: containment survives as
+indentation, ratios survive as relative size, and **reading order survives as
+the order lines come out**. Coverage says every unit arrived; deduplication
+says none arrived twice. Neither is disturbed by a page whose paragraphs come
+out shuffled, and for a long time none of the numbers here were.
+
+It was not hypothetical. The scan keys walk positions on absolute xpaths and
+indexes an element wherever it has same-tag siblings — `.../ul/li[1]`,
+`.../ul/li[2]`. The trie builds its path from `ContentAddress.path()`, which
+drops the index on the first of a group — `.../ul/li`. The lookup missed for
+exactly one child per group, that child got `doc_pos = -1`, unknown positions
+sort last, and **the first item of every list, table and card grid was drawn
+at the bottom of its group**. Every address was right, every unit present,
+every dedup decision right; the page simply read in the wrong order. Only on
+the snapshot path — the live path supplies no map, so every position is
+unknown and sibling index decides, correctly — which means the two paths that
+are meant to produce the same chunks did not.
+
+Measured over the fixture pages plus a saved real page: **42 prose inversions
+before, 8 after**. `affine.OrderScore` now reports it per page, against the
+ground truth's own composed-tree walk so that slotted content is scored where
+the page puts it.
+
+Two things are excluded, both for the denominator's sake:
+
+- **Headings.** A heading whose words live in child elements is deliberately
+  drawn with the card it labels, ahead of content the walk met earlier.
+  Counting it would make the number a function of how many cards a page has.
+- **The wireframe.** Its order is the page's *layout* — a right-hand sidebar
+  is drawn beside the column it sits next to. Scored against walk order it
+  reads 91% on a page it draws correctly. That is the denominator mistake this
+  project keeps making, so the visual projection is not scored here rather
+  than scored wrongly.
+
 ## Constraints that hold throughout
 
 1. **The fold reads no layout.** Enforced by `invariants.c2`. Geometry is a

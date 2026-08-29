@@ -40,7 +40,7 @@ from contextlib import contextmanager
 from typing import Dict, Iterator, List, Optional, Sequence
 
 from ..address import ContentAddress
-from .affine import AffineReport, score_arrow, score_dedup
+from .affine import AffineReport, score_arrow, score_dedup, score_order
 from .groundtruth import read_page_truth
 
 __all__ = ["Phases", "measure_page", "write_artifact"]
@@ -236,6 +236,22 @@ def measure_page(driver, url: str, *, scrolls: int = 2,
                     denominator="drawn", texts=wire_texts,
                     structural=("control", "link")),
     ]
+    # Does it read in the page's order? Nothing else here asks. Coverage and
+    # dedup are both satisfied by a page whose paragraphs come out shuffled,
+    # and one of them was: see `affine.OrderScore`.
+    #
+    # Markdown only. The wireframe is the *visual* projection and its order is
+    # the page's layout -- a right-hand sidebar is drawn beside the column it
+    # sits next to, not after everything the walk met first. Scored against
+    # walk order it reads 91% on a page it draws correctly, which is the
+    # denominator mistake this project keeps making: a number is a claim about
+    # the renderer AND about what it is scored against, and only one of those
+    # tends to get checked. Its order is answerable to geometry, and geometry
+    # is a peripheral here, so it is not scored rather than scored wrongly.
+    report.order = [
+        score_order("page->markdown", truth, markdown_addresses,
+                    texts=markdown_texts),
+    ]
     report.dedup = score_dedup(truth, markdown_addresses,
                                texts=markdown_texts)
 
@@ -340,6 +356,15 @@ def render_table(report: AffineReport) -> str:
                 continue
             rows.append(f"    {arrow.name:<17}{origin:<8}"
                         f"{c.recall * 100:>7.1f}%   of {c.tp + c.fn:>6,}")
+    if report.order:
+        rows.append("")
+        rows.append("  reading order (against the page's own composed-tree "
+                    "walk; headings excluded)")
+        rows.append("    the wireframe is not scored here: its order is the "
+                    "page's layout, not the walk's")
+        for o in report.order:
+            rows.append(f"    {o.name:<17}{o.monotone * 100:>7.1f}% in order"
+                        f"   {o.inversions:>5,} inversions of {o.lines:>6,}")
     rows.append("")
     d = report.dedup
     rows.append("  deduplication")

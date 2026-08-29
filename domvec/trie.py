@@ -140,6 +140,44 @@ def content_hash(value: str) -> str:
 _SEG_RE = re.compile(r"^([^\[\]]+)(?:\[(\d+)\])?$")
 
 
+# An index of [1] on an element step, which the trie's own segments omit.
+# The lookbehind keeps `text()[1]` intact: that bracket is an accessor's, not
+# a sibling ordinal.
+_INDEX_ONE = re.compile(r"(?<=[A-Za-z0-9_-])\[1\](?=/|$)")
+
+
+def trie_doc_pos(mapping: Dict[str, int]) -> Dict[str, int]:
+    """A scan's ``doc_pos`` map, re-keyed the way the trie names its paths.
+
+    The tagger keys walk positions on absolute xpaths and writes an index
+    wherever an element has same-tag siblings: `.../ul/li[1]`, `.../ul/li[2]`.
+    The trie builds its path from `ContentAddress.path()`, which drops the
+    index on the first of a group: `.../ul/li`, `.../ul/li[2]`.
+
+    So the lookup missed for the first sibling of every repeated group, and
+    only for that one. It got `doc_pos = -1`, `ordered_children` sorts unknown
+    positions *after* known ones, and the first item of every list, table and
+    card grid was drawn at the bottom of its group -- with every address
+    correct and every unit present, so no coverage or dedup number could see
+    it. Reading order is what an affine map is supposed to preserve, and this
+    was the projection quietly not preserving it.
+
+    Only the snapshot path was affected. The live path supplies no map at all,
+    every position is unknown, and `_seg_key` then orders siblings by their
+    index -- correctly. The two paths are meant to produce the same chunks,
+    and one of them was wrong.
+
+    Positions collide only if a map holds both spellings of one path; the
+    earlier position wins, which is the one the walk reached first.
+    """
+    out: Dict[str, int] = {}
+    for key, pos in mapping.items():
+        plain = _INDEX_ONE.sub("", key)
+        if plain not in out or pos < out[plain]:
+            out[plain] = pos
+    return out
+
+
 def _seg_key(seg: str) -> Tuple[str, int]:
     """Sort key for one trie segment: label, then numeric sibling index."""
     m = _SEG_RE.match(seg)
@@ -324,9 +362,12 @@ class AddressTrie:
     ) -> TrieNode:
         """Add one address. Re-inserting an address overwrites its value.
 
-        ``doc_pos`` maps absolute xpath to walk position (the scan's
-        ``TaggedContent.doc_pos``). Supplying it makes sibling order exact;
-        omitting it falls back to label-group order.
+        ``doc_pos`` maps trie path to walk position. A scan's map is keyed by
+        the tagger's convention and must be put through `trie_doc_pos` first;
+        `from_tags` does that. Supplying it makes sibling order exact;
+        omitting it falls back to label-group order, which `_seg_key` then
+        breaks by sibling index -- also correct, just derived rather than
+        observed.
 
         Overwrite rather than append is forced by the addressing being a key
         (see :mod:`domvec.address`): two values at one address would mean the
@@ -681,8 +722,11 @@ class AddressTrie:
         from .address import address_of
 
         trie = cls()
+        # Re-keyed once, here, rather than per insert: the map is the scan's
+        # and its convention is not the trie's. See `trie_doc_pos`.
+        positions = trie_doc_pos(doc_pos) if doc_pos else None
         for tag in tags:
-            trie.insert(address_of(tag, url), tag.value, doc_pos)
+            trie.insert(address_of(tag, url), tag.value, positions)
         trie.rehash()
         return trie
 

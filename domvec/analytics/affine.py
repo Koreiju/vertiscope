@@ -146,6 +146,82 @@ class ArrowScore:
         }
 
 
+@dataclass
+class OrderScore:
+    """Whether the rendering reads in the order the page reads.
+
+    The fourth thing an affine map has to preserve, and the one nothing here
+    was measuring. Coverage says every unit arrived, dedup says none arrived
+    twice, and both are satisfied by a page whose paragraphs come out
+    shuffled.
+
+    It is not a hypothetical. The scan keys its walk positions on absolute
+    xpaths and indexes an element wherever it has same-tag siblings
+    (`.../ul/li[1]`); the trie drops the index on the first of a group
+    (`.../ul/li`). The lookup missed for exactly one child per group, that
+    child got an unknown position, unknown positions sort last, and the first
+    item of every list and card grid was drawn at the bottom of its group.
+    Every address was right and every unit was present, so nothing else in
+    this file could see it. Over the fixture pages it was 42 inversions of
+    prose; the fix left 8.
+
+    The reference is the ground truth's own order, which is a composed-tree
+    walk -- so slotted content is scored where the page puts it, not where its
+    light-DOM address would put it.
+
+    Headings are excluded. A heading whose words live in child elements is
+    deliberately drawn with the card it labels, which places it ahead of
+    content the walk met earlier; counting that would make the number a
+    function of how many cards a page has.
+    """
+
+    name: str
+    lines: int = 0            # rendered lines that could be placed at all
+    inversions: int = 0       # adjacent pairs that read out of order
+    sample: List[str] = field(default_factory=list)
+
+    @property
+    def monotone(self) -> float:
+        """Fraction of adjacent pairs in the right order. 1.0 is perfect."""
+        pairs = max(self.lines - 1, 0)
+        return 1.0 if pairs == 0 else 1.0 - self.inversions / pairs
+
+    def as_dict(self) -> dict:
+        return {
+            "arrow": self.name,
+            "lines": self.lines,
+            "inversions": self.inversions,
+            "monotone": round(self.monotone, 4),
+            "sample": self.sample[:12],
+        }
+
+
+def score_order(name: str, truth: "PageTruth",
+                rendered: Sequence[ContentAddress],
+                texts: Optional[Sequence[str]] = None) -> OrderScore:
+    """Count adjacent rendered lines that read out of the page's order."""
+    rank: Dict[str, int] = {}
+    for i, unit in enumerate(truth.units):
+        rank.setdefault(_owner(unit.xpath), i)
+
+    placed: List[Tuple[int, str]] = []
+    for i, address in enumerate(rendered):
+        text = texts[i] if texts is not None and i < len(texts) else ""
+        if text.lstrip().startswith("#"):
+            continue                      # deliberate placement, see the class
+        where = rank.get(_owner(address.xpath))
+        if where is not None:
+            placed.append((where, text))
+
+    score = OrderScore(name=name, lines=len(placed))
+    for (a, _ta), (b, tb) in zip(placed, placed[1:]):
+        if a > b:
+            score.inversions += 1
+            if len(score.sample) < 12:
+                score.sample.append("{} -> {}: {}".format(a, b, tb[:60]))
+    return score
+
+
 def _owner(xpath: str) -> str:
     return xpath.split("/text()")[0]
 
@@ -622,6 +698,7 @@ class AffineReport:
 
     url: str
     arrows: List[ArrowScore] = field(default_factory=list)
+    order: List[OrderScore] = field(default_factory=list)
     dedup: DedupScore = field(default_factory=DedupScore)
     page: Optional[PageTruth] = None
     timings: Dict[str, float] = field(default_factory=dict)
@@ -647,6 +724,7 @@ class AffineReport:
                 "opaque_hosts": self.page.opaque_hosts if self.page else 0,
             },
             "arrows": [a.as_dict() for a in self.arrows],
+            "order": [o.as_dict() for o in self.order],
             "dedup": self.dedup.as_dict(),
             "timings_ms": {k: round(v, 3) for k, v in self.timings.items()},
             "algorithms": self.algorithms,
