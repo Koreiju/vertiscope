@@ -294,6 +294,7 @@ def measure_live_delta(driver, urls: Sequence[str], *,
               row["control_net"] = len(spine.trie) - control_before
 
               row["leaves_before"] = len(spine.trie)
+              uids_before = {leaf.uid for leaf in spine.trie.leaves()}
               before_keys = {leaf.address.key() for leaf in spine.trie.leaves()
                              if leaf.address is not None}
               modes = [_Mode("content", True, context_window),
@@ -347,6 +348,8 @@ def measure_live_delta(driver, urls: Sequence[str], *,
               # What must not happen is the trie ending up bigger than the page:
               # the first version of this check counted the gain alone and cried
               # anomaly on three pages that were behaving correctly.
+              row["uids_lost"] = len(
+                  uids_before - {leaf.uid for leaf in spine.trie.leaves()})
               row["leaves_net"] = row["leaves_gained"] - row["leaves_dropped"]
               budget = max(8, 4 * max(row["delta_size"], 1))
               if row["leaves_net"] > budget:
@@ -460,6 +463,100 @@ def render_live_delta_table(report: dict) -> str:
     out.append("  dropping in equal measure is the opposite -- a shift")
     out.append("  re-addressing content, which is the mechanism working.")
     return chr(10).join(out)
+
+
+def render_corpus_summary(report: dict) -> str:
+    """A distribution, not 130 rows.
+
+    The claim being tested is that one node arriving costs work proportional
+    to the insertion and not to the page, on documents nobody wrote for the
+    test. A table of every page answers a different question -- "what did
+    page 74 do" -- and buries the one that matters, which is how often the
+    property holds and where it fails.
+
+    So: how many pages were measurable at all, how many gave a delta of 1,
+    what the spread of new text looks like, and every page that lost an
+    identity or grew the trie, named.
+    """
+    rows = [r for r in report.get("rows", [])]
+    if not rows:
+        return "  no corpus measurements"
+
+    def name(row):
+        text = row["url"].rsplit("/", 1)[-1]
+        return text[:-5] if text.endswith(".html") else text
+
+    errored = [r for r in rows if r.get("error")]
+    no_group = [r for r in errored if "repeated group" in str(r.get("error"))]
+    other_err = [r for r in errored if r not in no_group]
+    ok = [r for r in rows if not r.get("error") and r.get("saw_insertion")]
+    missed = [r for r in rows
+              if not r.get("error") and not r.get("saw_insertion")]
+
+    out = ["", "  the frozen corpus: one node into each page's largest drawn "
+                "repeated group", ""]
+    out.append("  {:<34}{:>6}".format("pages in corpus", len(rows)))
+    out.append("  {:<34}{:>6}".format("  measured", len(ok)))
+    out.append("  {:<34}{:>6}   {}".format(
+        "  no drawn repeated group", len(no_group),
+        "nothing to insert into; not a failure"))
+    out.append("  {:<34}{:>6}".format("  insertion not observed", len(missed)))
+    out.append("  {:<34}{:>6}".format("  errored", len(other_err)))
+    if not ok:
+        return chr(10).join(out)
+
+    deltas = [r["delta_size"] for r in ok]
+    fresh = [r["content"]["new_text"] for r in ok if "content" in r]
+    running = [r["running"]["new_text"] for r in ok if "running" in r]
+    lost = [r for r in ok if r.get("uids_lost")]
+    grew = [r for r in ok if r.get("anomaly")]
+    moved_alone = [r for r in ok
+                   if r.get("control_delta") or r.get("control_net")]
+
+    out.append("")
+    out.append("  {:<34}{:>6}   of {}".format(
+        "delta == 1 (one node, one change)",
+        sum(1 for d in deltas if d == 1), len(deltas)))
+    out.append("  {:<34}{:>6}".format("delta <= 3", sum(1 for d in deltas
+                                                        if d <= 3)))
+    out.append("  {:<34}{:>6}".format("worst delta", max(deltas)))
+    out.append("")
+    out.append("  new text, content boundaries   median {:.0f}   p90 {:.0f}   "
+               "max {:.0f}".format(_median(fresh), _pct(fresh, 0.9),
+                                   max(fresh)))
+    if running:
+        out.append("  new text, running total        median {:.0f}   p90 {:.0f}"
+                   "   max {:.0f}".format(_median(running),
+                                          _pct(running, 0.9), max(running)))
+    out.append("")
+    out.append("  {:<34}{:>6}".format("pages that lost an identity", len(lost)))
+    for r in lost[:8]:
+        out.append("     {:<40} {} uid(s), delta {}".format(
+            name(r)[:40], r["uids_lost"], r["delta_size"]))
+    out.append("  {:<34}{:>6}".format("pages where the trie grew", len(grew)))
+    for r in grew[:8]:
+        out.append("     {:<40} {}".format(name(r)[:40], r["anomaly"]))
+    if moved_alone:
+        out.append("  {:<34}{:>6}   (excluded from nothing; just noted)".format(
+            "pages that moved on their own", len(moved_alone)))
+    out.append("")
+    out.append("  A frozen page is loaded from disk and mutated in a real")
+    out.append("  browser, so the fold and the MutationObserver path are the")
+    out.append("  live ones; only the document is fixed. That is deliberate --")
+    out.append("  a benchmark against the internet measures the internet's")
+    out.append("  variance rather than ours, and cannot be replayed.")
+    out.append("  These pages were fetched without running their JavaScript,")
+    out.append("  so script-rendered ones are thin. That is a real class of")
+    out.append("  input and is kept rather than excluded.")
+    return chr(10).join(out)
+
+
+def _pct(values, q):
+    ordered = sorted(values)
+    if not ordered:
+        return 0
+    i = min(len(ordered) - 1, int(q * (len(ordered) - 1) + 0.5))
+    return ordered[i]
 
 
 def write_live_delta_artifact(

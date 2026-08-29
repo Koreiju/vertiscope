@@ -463,6 +463,44 @@ The control arm is now part of the harness. A page that hydrates late is
 otherwise indistinguishable from a sensor that mishandles an insertion, and I
 spent an iteration believing the wrong one of those.
 
+### A corpus I did not pick
+
+Every live number above came from pages I chose. `tests/corpus/` holds ~130
+pages frozen by an earlier pass for *structural* variety — wikis, docs, forums,
+news, standards, government, right-to-left and CJK scripts, table-heavy and
+deliberately-minimal layouts. `--live-delta --corpus` loads each from disk and
+mutates it in a real browser, so the fold and the MutationObserver path are the
+live ones and only the document is fixed. Frozen is the point: a benchmark
+against the internet measures the internet's variance rather than ours and
+cannot be replayed.
+
+It found, in the first eight pages, what five hand-picked LTR sites could not.
+
+**Vacating a moved-from address is wrong, and I had to take it out.** The rule
+was: content moved away, this drain does not claim the old address, so the old
+address is empty. On a flat list that is exactly right — every vacated address
+is immediately reoccupied by its neighbour — and four real pages agreed. Arabic
+Wikipedia did not: 11,793 leaves, 151 list items, one inserted node, and the
+trie *shrank* by 84 addresses while losing 85 identities. Of 60 addresses the
+rule wanted to drop, **47 were still in the live DOM**.
+
+The premise was false. The fold does not re-send content the receiver already
+holds, so its silence about an address is the absence of evidence, not evidence
+of absence. A stale address is a real defect — the trie grows while the page
+does not, and the harness reports it per page. Deleting content the page still
+has is a worse one, and silent.
+
+What survives is the identity carrying, which is sound and independent: it took
+news.ycombinator.com from 654 genuine changes for one inserted row to 1, and
+Arabic Wikipedia from 148 to 1.
+
+**An unexplained loss, measured rather than guessed at.** Arabic Wikipedia
+loses 86 identities on one insertion, and ja-wikipedia 3. I attributed that to
+three different mechanisms of my own and was wrong each time; the fourth check
+was to measure the page at the commit *before* any of this work, where it
+already lost 89. The loss is pre-existing and unexplained. What this work
+changed on that page is the delta — 148 → 1 — and the loss, 89 → 86.
+
 ### Reading order is the fourth thing the map preserves
 
 An affine map preserves relations, not origin: containment survives as

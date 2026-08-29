@@ -477,9 +477,6 @@ class AddressTrie:
         #
         # So a reported move is taken as authoritative: the uid travels with
         # the content, and the address it left is vacated below.
-        # Sources of *inferred* moves, filled in as the re-anchor below
-        # recognises them; vacated alongside the reported ones.
-        inferred: List[ContentAddress] = []
         carried: Dict[Tuple, Tuple[int, ContentAddress]] = {}
         for old_address, new_address in moved:
             node = self.find(old_address)
@@ -511,7 +508,7 @@ class AddressTrie:
         # address to be rewritten would hand its brand-new uid to whoever
         # claimed its old content next, and one uid would spread down the
         # whole span. The snapshot has to be of values taken before any write.
-        displaced: Dict[str, List[Tuple[int, Tuple]]] = {}
+        displaced: Dict[str, List[Tuple[int, Tuple, ContentAddress]]] = {}
         for span in spans:
             node = self.node_at(span)
             if node is None:
@@ -530,28 +527,22 @@ class AddressTrie:
             digest = want[key][2]
             node = self.find(address)
             if node is not None and node.content_hash == digest:
-                # Already says this, so there is nothing to write -- but if a
-                # move was reported into this address, the identity still has
-                # to travel.
+                # Already says this: nothing to write, and nothing to
+                # re-identify either.
                 #
-                # This is the case of a string that repeats down a list: every
-                # card on quotes.toscrape.com carries "by", "(about)" and
-                # "Tags:", so when the cards shift by one the value arriving
-                # at each address is the value already there. The write is a
-                # no-op and the reported uid was dropped on the floor, while
-                # the address it came from was vacated -- four identities
-                # disappearing for one inserted node.
+                # I had this adopt the uid of a reported move whose
+                # destination was already correct, on the grounds that the
+                # identity should travel even when the value does not. It
+                # travelled by *overwriting* the identity already sitting
+                # there, and where the chain of identical values does not
+                # close, the overwritten one simply vanishes. Arabic Wikipedia
+                # lost 85 that way -- a page whose navigation lists repeat the
+                # same link text many times over.
                 #
-                # Handing the uid forward is safe because every uid was
-                # snapshotted before any write, so the chain of identical
-                # values passes identities along it in one step regardless of
-                # the order the units arrive in. Which uid ends up on which of
-                # several identical strings is not observable anyway
-                # (THEORY Prop. 19.3); a uid *vanishing* is.
-                reported = carried.get(key)
-                if reported is not None and node.uid != reported[0]:
-                    node.uid = reported[0]
-                    delta.moved.append(address)
+                # Which of several identical strings carries which identity is
+                # not observable (THEORY Prop. 19.3), so declining to swap
+                # costs nothing; a uid vanishing is observable, and that is
+                # what swapping cost.
                 continue
             pool = displaced.get(digest)
             inherited = 0
@@ -563,17 +554,6 @@ class AddressTrie:
                 if not uid or from_key == key:
                     continue
                 inherited = uid
-                # An inferred move vacates its source for the same reason a
-                # reported one does. This is the case where the fold re-sends
-                # the shifted content as units instead of naming a move --
-                # which it does whenever the chunk holding them changed, so
-                # there is no move to report. On lit.dev an insertion into a
-                # group of code blocks arrived as 185 units and no moves at
-                # all: the re-anchor below recognised every one of them and
-                # carried its uid, and the addresses they came from stayed
-                # behind holding stale copies. 65 addresses gained, none
-                # dropped, for one inserted node.
-                inferred.append(from_address)
                 break
             fresh = self.insert(address, value)
             # Always re-issue. A leaf whose content changed is not the thing
@@ -587,28 +567,39 @@ class AddressTrie:
                 fresh.uid = self._uid_seq
                 (delta.changed if node is not None else delta.added).append(address)
 
-        # Vacate what the reported moves left behind.
+        # Nothing is vacated here, and that is a correction rather than an
+        # omission.
         #
-        # The DOM removed nothing, so the fold reports no removal, and without
-        # this the content is written at its new address while a stale copy
-        # stays at the old one. Measured before it existed: one node inserted
-        # at the head of a list took quotes.toscrape.com from 176 addresses to
-        # 209 and books.toscrape.com from 321 to 332, dropping none either
-        # time -- a trie growing while the page stays the same size.
+        # I had this deleting the address a move came from: content is written
+        # at its new address, the DOM removed nothing so the fold reports no
+        # removal, and the old address would otherwise keep a stale copy. On a
+        # flat list it looked exactly right -- the trie stopped growing, no
+        # identity was lost, and four real pages agreed.
         #
-        # Not counted as a removal. A move is not an edit, and the delta says
-        # so already: the address appears in `delta.moved`. Counting it twice
-        # would make one node arriving look like a page rewriting itself,
-        # which is the exact figure this whole mechanism exists to avoid.
+        # It is wrong, and Arabic Wikipedia is where that became visible: a
+        # page of 11,793 leaves and 151 list items, where one inserted node
+        # made the trie *shrink* by 84 addresses and lose 85 identities. Of
+        # 60 sampled addresses the rule wanted to drop, **47 were still
+        # present in the live DOM**.
         #
-        # Skipped where this drain says the old address still holds
-        # something, which is the ordinary case on a flat list: a shift within
-        # one parent reoccupies every address it vacates.
-        vacate = [old for _k, (_uid, old) in carried.items()] + inferred
-        for old_address in vacate:
-            if old_address.key() in want:
-                continue
-            self.remove(old_address)
+        # The premise was that an address whose content moved away, and which
+        # this drain does not claim, is empty. The fold does not re-send
+        # content the receiver already holds, so its silence about an address
+        # is not evidence about that address -- it is the absence of evidence,
+        # and on a page whose spans do not chain neatly the two are nothing
+        # alike. The flat-list shift reoccupies every address it vacates,
+        # which is why four pages agreed and the fifth did not.
+        #
+        # A stale address is a real defect: the trie grows while the page does
+        # not, and `analytics/live_delta.py` reports it per page. Deleting
+        # content the page still has is a worse one, and silent. Until the
+        # fold can say "this address is now empty" -- which is what `removed`
+        # is for and what it does not currently carry for a shift -- the trie
+        # keeps what it was told and reports what it kept.
+        #
+        # What survives from that work is the identity carrying above, which
+        # is sound and independent: it took news.ycombinator.com from 654
+        # genuine changes for one inserted row to 1.
 
         for address in removed:
             # A removal this same drain contradicts is stale, and applying it

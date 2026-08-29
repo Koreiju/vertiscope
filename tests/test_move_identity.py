@@ -1,35 +1,42 @@
-"""Content that moves keeps its identity, and vacates the address it left.
+"""Content that moves keeps its identity.
 
 `TrieNode.uid` exists so that a positional address shifting does not destroy
 what hangs off a leaf. `AddressTrie.apply` recovers a shift the fold did not
 report by re-anchoring on content hash, bounded to the spans the drain touches
 — which is what keeps that recovery proportional to the change.
 
-Two consequences of that bound, both invisible on a flat list and both plainly
-visible on the first real page:
+A move *between parents* is outside that bound: the old leaf lives under a span
+no incoming unit names, so its uid is never offered to the address that now
+holds its content. On news.ycombinator.com one inserted row read as 654 genuine
+changes — the fold had reported the moves and the receiver was not honouring
+them. A reported move is now authoritative and the uid travels with the
+content, which takes that page to 1.
 
-* **A move between parents is outside its reach.** The old leaf lives under a
-  span no incoming unit names, so its uid is never offered to the address that
-  now holds its content. On news.ycombinator.com one inserted row read as 654
-  genuine changes; the fold had reported the moves, and the receiver was not
-  honouring them.
-* **Nothing vacated the address the content left.** The DOM removed nothing,
-  so the fold reports no removal, and the trie kept a stale copy at the old
-  address while writing the content at the new one. quotes.toscrape.com went
-  from 176 addresses to 209 for one inserted node, dropping none.
+**What is deliberately not done here: vacating the address a move came from.**
+I had that, and took it out. The reasoning for it was that the DOM removes
+nothing on a shift, so the fold reports no removal, and the old address would
+otherwise keep a stale copy — which is a real defect, and on a flat list the
+rule is exactly right, because every vacated address is immediately reoccupied
+by its neighbour. Four real pages agreed.
 
-So a reported move is authoritative: the uid travels with the content and the
-old address is vacated. Vacating is *not* counted as a removal — a move is not
-an edit, and the address is already in `delta.moved`.
+Arabic Wikipedia did not: 11,793 leaves, 151 list items, and one inserted node
+made the trie *shrink* by 84 addresses and lose 85 identities. Of 60 addresses
+the rule wanted to drop, **47 were still in the live DOM**. The premise was
+that an address whose content moved away, and which this drain does not claim,
+is empty; but the fold does not re-send content the receiver already holds, so
+its silence about an address is the absence of evidence rather than evidence of
+absence.
 
-The subtlety that cost the last four identities: where the value arriving at an
-address is the value already there — "by", "(about)", "Tags:", the strings that
-repeat on every card in a list — the write is a no-op and the uid was dropped
-on the floor while the source was vacated. Every uid is snapshotted before any
-write, so handing it forward on a no-op is safe and the chain of identical
-values passes identities along it.
+A stale address is a defect and is reported per page by
+`analytics/live_delta.py`. Deleting content the page still has is a worse one,
+and silent.
+
+Note which tests here discriminate. The ones built from `_drain` re-state every
+address, so nothing was ever vacated in them and they passed both with the rule
+and without it — they were not testing what their names claimed. The case that
+discriminates is a drain that says nothing about the source, which is the
+ordinary case rather than a pathological one.
 """
-
 import pytest
 
 from domvec.address import ContentAddress
@@ -146,7 +153,7 @@ def test_the_trie_does_not_grow_by_more_than_what_arrived():
             before, len(trie)))
 
 
-def test_the_vacated_address_is_gone():
+def test_a_shift_leaves_every_address_holding_its_new_content():
     bodies = ["a", "b"]
     trie = _build(bodies)
     stale = _addr("/html/body/main/div[2]/p/text()[1]")
@@ -164,7 +171,7 @@ def test_the_vacated_address_is_gone():
 # --- what it must not do ---------------------------------------------------
 
 
-def test_vacating_is_not_counted_as_a_removal():
+def test_a_shift_is_not_counted_as_a_removal():
     """A move is not an edit. Counting it twice would make one node arriving
     look like the page rewriting itself, which is the figure this mechanism
     exists to avoid."""
@@ -177,7 +184,7 @@ def test_vacating_is_not_counted_as_a_removal():
     assert delta.moved, "the shift should be reported as movement"
 
 
-def test_an_address_the_drain_still_claims_is_not_vacated():
+def test_a_shift_within_one_parent_reoccupies_what_it_leaves():
     """The ordinary case on a flat list: every vacated address is immediately
     reoccupied by its neighbour, so nothing is dropped at all."""
     bodies = ["a", "b"]
@@ -209,7 +216,7 @@ def test_moves_are_optional():
 # --- an inferred move vacates its source too -------------------------------
 
 
-def test_a_shift_the_fold_did_not_report_still_vacates_its_source():
+def test_a_shift_the_fold_did_not_report_is_still_recognised():
     """The fold reports a move only when the chunk holding it is otherwise
     unchanged. Where the chunk changed -- which is the common case for the
     chunk the insertion lands in -- it re-sends the content as ordinary units
@@ -252,7 +259,7 @@ def test_a_shift_the_fold_did_not_report_still_vacates_its_source():
         "identities were lost to a shift the fold did not report"
 
 
-def test_an_inferred_move_does_not_vacate_an_address_the_drain_claims():
+def test_an_inferred_shift_reoccupies_what_it_leaves():
     """The flat-list case: the drain re-states every address, so nothing is
     vacated and the trie keeps its size."""
     bodies = ["a", "b"]
@@ -269,3 +276,65 @@ def test_an_inferred_move_does_not_vacate_an_address_the_drain_claims():
             "/html/body/main/div[{}]".format(i)
         node = trie.find(_addr(at + "/p/text()[1]"))
         assert node is not None and node.value == body, at
+
+
+# --- what silence from the fold does and does not mean ----------------------
+
+
+def test_a_move_report_never_deletes_content_the_drain_did_not_replace():
+    """The rule I had here, and had to take out.
+
+    I made a reported move delete the address it came from: the DOM removes
+    nothing on a shift, so the fold reports no removal, and the old address
+    would otherwise keep a stale copy. On a flat list that is exactly right --
+    every vacated address is immediately reoccupied -- and four real pages
+    agreed.
+
+    Arabic Wikipedia did not. 11,793 leaves, 151 list items, and one inserted
+    node made the trie *shrink* by 84 addresses and lose 85 identities. Of 60
+    addresses the rule wanted to drop, 47 were still in the live DOM.
+
+    The premise was that an address whose content moved away, and which this
+    drain does not claim, is empty. The fold does not re-send content the
+    receiver already holds, so its silence is the absence of evidence rather
+    than evidence of absence.
+
+    This is the case that discriminates, and the reason the earlier tests here
+    did not: their drains re-state every address, so nothing was ever vacated
+    in them and they passed with the rule and without it.
+    """
+    trie = _build(["a", "b", "c"])
+    before = len(trie)
+    untouched = _addr("/html/body/main/div[3]/p/text()[1]")
+    assert trie.find(untouched).value == "c"
+
+    # One move reported, and a drain that says nothing about the source --
+    # which is the ordinary case, not a pathological one.
+    moved = [(_addr("/html/body/main/div[3]/p/text()[1]"),
+              _addr("/html/body/main/div[9]/p/text()[1]"))]
+    units = [(_addr("/html/body/main/div[9]/p/text()[1]"), "c")]
+    trie.apply(units, moved=moved)
+
+    node = trie.find(untouched)
+    assert node is not None and node.value == "c", (
+        "content the drain never contradicted was deleted")
+    assert len(trie) >= before
+
+
+def test_the_identity_still_travels_even_though_the_source_stays():
+    """What survived the revert, and the part that was sound.
+
+    Carrying the uid is independent of vacating, and it is what took
+    news.ycombinator.com from 654 genuine changes for one inserted row to 1.
+    """
+    trie = _build(["a", "b"])
+    source = _addr("/html/body/main/div[2]/p/text()[1]")
+    uid = trie.find(source).uid
+    assert uid
+
+    destination = _addr("/html/body/main/div[7]/p/text()[1]")
+    delta = trie.apply([(destination, "b")], moved=[(source, destination)])
+
+    assert trie.find(destination).uid == uid
+    assert destination in delta.moved
+    assert delta.size == 0, "a move is not an edit"

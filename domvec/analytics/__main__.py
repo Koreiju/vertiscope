@@ -23,6 +23,11 @@ def main(argv=None) -> int:
     parser.add_argument("--delta", action="store_true",
                         help="measure what one insertion costs against page "
                              "size, on the local scaling fixture")
+    parser.add_argument("--corpus", action="store_true",
+                        help="with --live-delta, run over the frozen corpus in "
+                             "tests/corpus instead of the urls given")
+    parser.add_argument("--limit", type=int, default=0,
+                        help="with --corpus, stop after this many pages")
     parser.add_argument("--live-delta", action="store_true",
                         help="insert one node into each real page given as a "
                              "url and measure what it costs, in both chunking "
@@ -60,13 +65,30 @@ def main(argv=None) -> int:
     cfg = load_config()
     with browser_session(cfg) as driver:
         if args.live_delta:
+            targets = list(args.urls)
+            if args.corpus:
+                # Frozen pages, loaded from disk and mutated in a real
+                # browser. The corpus was selected for structural variety by
+                # an earlier pass and committed; using it means the breadth
+                # claim rests on pages chosen for reasons other than making
+                # this measurement look good, and -- because they are frozen
+                # -- on a run that can be replayed.
+                root = pathlib.Path(__file__).resolve().parent.parent.parent
+                pages = sorted((root / "tests" / "corpus").glob("*.html"))
+                if args.limit:
+                    pages = pages[:args.limit]
+                targets = [p.as_uri() for p in pages]
             from .live_delta import (measure_live_delta,
                                      render_live_delta_table,
                                      write_live_delta_artifact)
-            report = measure_live_delta(driver, args.urls,
+            report = measure_live_delta(driver, targets,
                                         context_window=args.window,
                                         repeats=args.repeats)
-            print(render_live_delta_table(report), flush=True)
+            if args.corpus:
+                from .live_delta import render_corpus_summary
+                print(render_corpus_summary(report), flush=True)
+            else:
+                print(render_live_delta_table(report), flush=True)
             print(f"  written: "
                   f"{write_live_delta_artifact(report, pathlib.Path(args.out))}",
                   flush=True)
