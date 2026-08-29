@@ -477,6 +477,9 @@ class AddressTrie:
         #
         # So a reported move is taken as authoritative: the uid travels with
         # the content, and the address it left is vacated below.
+        # Sources of *inferred* moves, filled in as the re-anchor below
+        # recognises them; vacated alongside the reported ones.
+        inferred: List[ContentAddress] = []
         carried: Dict[Tuple, Tuple[int, ContentAddress]] = {}
         for old_address, new_address in moved:
             node = self.find(old_address)
@@ -520,7 +523,7 @@ class AddressTrie:
                 if incoming is not None and incoming[2] == leaf.content_hash:
                     continue        # unchanged — not displaced
                 displaced.setdefault(leaf.content_hash, []).append(
-                    (leaf.uid, leaf.address.key()))
+                    (leaf.uid, leaf.address.key(), leaf.address))
 
         for address, value in units:
             key = address.key()
@@ -556,10 +559,21 @@ class AddressTrie:
             if reported is not None:
                 inherited = reported[0]
             while not inherited and pool:
-                uid, from_key = pool.pop()
+                uid, from_key, from_address = pool.pop()
                 if not uid or from_key == key:
                     continue
                 inherited = uid
+                # An inferred move vacates its source for the same reason a
+                # reported one does. This is the case where the fold re-sends
+                # the shifted content as units instead of naming a move --
+                # which it does whenever the chunk holding them changed, so
+                # there is no move to report. On lit.dev an insertion into a
+                # group of code blocks arrived as 185 units and no moves at
+                # all: the re-anchor below recognised every one of them and
+                # carried its uid, and the addresses they came from stayed
+                # behind holding stale copies. 65 addresses gained, none
+                # dropped, for one inserted node.
+                inferred.append(from_address)
                 break
             fresh = self.insert(address, value)
             # Always re-issue. A leaf whose content changed is not the thing
@@ -590,7 +604,8 @@ class AddressTrie:
         # Skipped where this drain says the old address still holds
         # something, which is the ordinary case on a flat list: a shift within
         # one parent reoccupies every address it vacates.
-        for _new_key, (_uid, old_address) in carried.items():
+        vacate = [old for _k, (_uid, old) in carried.items()] + inferred
+        for old_address in vacate:
             if old_address.key() in want:
                 continue
             self.remove(old_address)

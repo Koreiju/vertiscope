@@ -239,6 +239,24 @@ def measure_live_delta(driver, urls: Sequence[str], *,
                 rows.append(row)
                 continue
 
+            # What the page does on its own, before anything is done to it.
+            #
+            # Without this arm a page that hydrates late is indistinguishable
+            # from a sensor that mishandles an insertion, and I spent an
+            # iteration believing the wrong one of those about lit.dev. A
+            # control drain -- same wait, no mutation -- settles it: 0
+            # addresses gained there, so the growth was the insertion's and
+            # the sensor's to answer for.
+            control_before = len(spine.trie)
+            time.sleep(0.7)
+            control_snap = sensor.drain(98)
+            control_update = spine.absorb(
+                control_snap.units, control_snap.passno,
+                removed=control_snap.removed_addresses,
+                moved=control_snap.moved_addresses)
+            row["control_delta"] = control_update.delta.size
+            row["control_net"] = len(spine.trie) - control_before
+
             row["leaves_before"] = len(spine.trie)
             before_keys = {leaf.address.key() for leaf in spine.trie.leaves()
                            if leaf.address is not None}
@@ -347,6 +365,10 @@ def render_live_delta_table(report: dict) -> str:
             out.append("  {:<34}** {} **".format("", row["warning"]))
         if row.get("anomaly"):
             out.append("  {:<34}** {} **".format("", row["anomaly"]))
+        if row.get("control_delta") or row.get("control_net"):
+            out.append("  {:<34}(the page moved on its own: delta {}, {:+d} "
+                       "addresses, before anything was inserted)".format(
+                           "", row["control_delta"], row["control_net"]))
     out.append("")
     scored = [r for r in rows if not r.get("error") and r.get("saw_insertion")
               and r.get("settled")]
@@ -357,6 +379,11 @@ def render_live_delta_table(report: dict) -> str:
         out.append("  across {} page(s), {:,} chunks: {} chunk(s) of new text "
                    "with content boundaries, {} with a running total"
                    .format(len(scored), chunks, c_new, r_new))
+    out.append("")
+    out.append("  Every page is drained once without being touched first, so")
+    out.append("  a page that hydrates late cannot be mistaken for a sensor")
+    out.append("  that mishandles an insertion. A control line appears only")
+    out.append("  when the page did something on its own.")
     out.append("")
     out.append("  A page that gains addresses while dropping none is the")
     out.append("  signature of a move the receiver did not honour: the content")

@@ -397,10 +397,43 @@ One inserted node, measured after the fixture and on four real pages:
 | news.ycombinator.com | 1 | 0 | 715 → 716 |
 | lit.dev | 1 | 1 | 549 → 614 |
 
-lit.dev is not yet right: 194 shadow hosts, and it gains 65 addresses while
-dropping none. Whether that is the page hydrating on its own or moves going
-unreported inside a shadow root is not yet established, and it is stated here
-as unestablished.
+lit.dev was not yet right — 65 addresses gained, none dropped — and neither
+guess about why was correct. A **null control** settled it: drain the page
+after settling, same wait, no mutation. It gained 0 addresses, so the page was
+not hydrating; and none of the gained addresses were inside a shadow root, so
+it was not a shadow-root reporting gap either.
+
+What it was: the fold reports a move only when the chunk holding it is
+otherwise unchanged. Where the chunk *did* change — the common case for the
+chunk an insertion lands in — it re-sends the shifted content as ordinary
+units and names no move at all. On lit.dev the drain carried 185 units and
+zero moves. `apply` recognised every one of them by content hash and carried
+its uid, and then nothing vacated the addresses they came from, because the
+vacate rule only applied to *reported* moves. An inferred move now vacates its
+source on the same terms.
+
+One inserted node, after that:
+
+| | delta | uids lost | addresses |
+|---|---|---|---|
+| flat-list fixture | 1 | 0 | 101 → 102 |
+| quotes.toscrape.com | 1 | 0 | 176 → 177 |
+| books.toscrape.com | 1 | 0 | 321 → 322 |
+| news.ycombinator.com | 1 | 0 | 715 → 716 |
+| lit.dev | 1 | 0 | 549 → 551 |
+| www.salesforce.com | 1 | 1 | net +0 (29 gained, 29 dropped) |
+
+salesforce.com is the one page still losing an identity — one, on a page whose
+insertion re-addressed 29 units. Not yet explained, and recorded as such.
+
+Inference recovers the shift but not the accounting as tightly as a report
+does: a label every card repeats has no *displaced* source when only one card
+arrives, so it reads as an arrival rather than as movement. That is why the
+reported channel is worth having even though the inferred one is a safety net.
+
+The control arm is now part of the harness. A page that hydrates late is
+otherwise indistinguishable from a sensor that mishandles an insertion, and I
+spent an iteration believing the wrong one of those.
 
 ### Reading order is the fourth thing the map preserves
 

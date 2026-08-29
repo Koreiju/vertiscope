@@ -204,3 +204,68 @@ def test_moves_are_optional():
     trie = _build(["a", "b"])
     delta = trie.apply([(_addr("/html/body/main/div/p/text()[1]"), "changed")])
     assert delta.size == 1
+
+
+# --- an inferred move vacates its source too -------------------------------
+
+
+def test_a_shift_the_fold_did_not_report_still_vacates_its_source():
+    """The fold reports a move only when the chunk holding it is otherwise
+    unchanged. Where the chunk changed -- which is the common case for the
+    chunk the insertion lands in -- it re-sends the content as ordinary units
+    and names no move at all.
+
+    `apply` recognises those by content hash and carries their uids, and for a
+    while that was all it did: the addresses they came from stayed behind
+    holding stale copies. On lit.dev an insertion into a group of code blocks
+    arrived as 185 units and no moves, and the trie gained 65 addresses while
+    dropping none.
+    """
+    bodies = ["alpha body", "beta body", "gamma body"]
+    trie = _build(bodies)
+    before = len(trie)
+    before_uids = {leaf.uid for leaf in trie.leaves()}
+
+    # The whole span re-sent as units, shifted by one, with no move channel.
+    units = [
+        (_addr("/html/body/main/div/span/text()[1]"), "by"),
+        (_addr("/html/body/main/div/p/text()[1]"), "fresh body"),
+    ]
+    for i, body in enumerate(bodies, start=1):
+        at = "/html/body/main/div[{}]".format(i + 1)
+        units.append((_addr(at + "/span/text()[1]"), "by"))
+        units.append((_addr(at + "/p/text()[1]"), body))
+
+    delta = trie.apply(units)          # note: no `moved`
+
+    # Two, not one, and the difference is worth stating. The card carries a
+    # distinct body and a label that every card repeats. Inference can only
+    # match a value against a *displaced* one, and no "by" was displaced --
+    # every other card still says "by" -- so the new card's label reads as an
+    # arrival. A reported move hands that label forward along the chain and
+    # the same insertion reads as one change. Inference recovers the shift; it
+    # does not recover the accounting as tightly.
+    assert delta.size == 2, delta.size
+    assert len(trie) == before + 2, (
+        "the trie went from {} to {} for one card".format(before, len(trie)))
+    assert not (before_uids - {leaf.uid for leaf in trie.leaves()}), \
+        "identities were lost to a shift the fold did not report"
+
+
+def test_an_inferred_move_does_not_vacate_an_address_the_drain_claims():
+    """The flat-list case: the drain re-states every address, so nothing is
+    vacated and the trie keeps its size."""
+    bodies = ["a", "b"]
+    trie = _build(bodies)
+    units = []
+    for i, body in enumerate(["fresh"] + bodies, start=1):
+        at = "/html/body/main/div" if i == 1 else \
+            "/html/body/main/div[{}]".format(i)
+        units.append((_addr(at + "/span/text()[1]"), "by"))
+        units.append((_addr(at + "/p/text()[1]"), body))
+    trie.apply(units)
+    for i, body in enumerate(["fresh"] + bodies, start=1):
+        at = "/html/body/main/div" if i == 1 else \
+            "/html/body/main/div[{}]".format(i)
+        node = trie.find(_addr(at + "/p/text()[1]"))
+        assert node is not None and node.value == body, at
