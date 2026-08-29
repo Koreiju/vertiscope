@@ -45,7 +45,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Dict, Iterable, Iterator, List, Optional, Sequence, Tuple
 
 from .address import ContentAddress, url_steps
@@ -943,13 +943,29 @@ def _render_node(node: TrieNode, url: str, url_depth: int) -> MarkdownChunk:
         if (a.tag in ("text", "heading") and owner in consumed
                 and " ".join(v.split()) == text_at.get(owner)):
             continue
+        target = _target_of(owner, href_at)
         rendered = _render_unit(a, v, lbl, text_at.get(owner, ""),
-                                target=_target_of(owner, href_at))
+                                target=target)
         if rendered is None:
             continue
-        lines.append(MarkdownLine(
-            depth=depth_of[a.key()] - base, text=rendered, address=a
-        ))
+        # A line drawn as a link is addressed as one.
+        #
+        # The address is what the REPL enacts through, and it finds controls
+        # by render class. A line promoted to the link form because it carries
+        # a target -- Hacker News's `<a href="vote?..."><div title="upvote">`
+        # draws `[upvote](vote?id=...)` -- kept `text` as its class, so it read
+        # as a link and could not be pressed. Visible and inert is worse than
+        # absent: the reader is told an affordance is there and it is not.
+        #
+        # The trie is untouched; this is the class carried *out* of it on the
+        # rendered line, which is the thing the REPL acts on.
+        # Depth is keyed on the *original* address: the tag is part of an
+        # address key, so promoting first loses the lookup.
+        depth = depth_of[a.key()] - base
+        if (target and a.tag in _RENDER_FORM
+                and a.tag not in ("link", "image", "media")):
+            a = replace(a, tag="link")
+        lines.append(MarkdownLine(depth=depth, text=rendered, address=a))
     return MarkdownChunk(url=url, xpath=xpath, lines=_join_labels(lines))
 
 
