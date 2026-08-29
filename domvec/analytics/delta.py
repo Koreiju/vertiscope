@@ -105,6 +105,18 @@ def measure_delta_scaling(driver, *, sizes: Sequence[int] = (100, 400, 1600),
                                   moved=snapshot.moved_addresses)
             apply_ms = (time.perf_counter() - started) * 1000.0
 
+            # The projections, timed after the same one-node insertion.
+            #
+            # The trie is O(delta) by construction; the projections are read
+            # back out of it wholesale, so this is where an O(page) cost would
+            # hide behind an O(delta) claim. `render_trie` walks the whole
+            # trie, not the part that moved.
+            from ..markdown import render_trie
+            started_md = time.perf_counter()
+            chunks = render_trie(spine.trie, context_window=context_window)
+            markdown_ms = (time.perf_counter() - started_md) * 1000.0
+            md_lines = sum(len(c.lines) for c in chunks)
+
             delta = update.delta
             after = {leaf.uid for leaf in spine.trie.leaves()} \
                 if spine.trie else set()
@@ -131,6 +143,8 @@ def measure_delta_scaling(driver, *, sizes: Sequence[int] = (100, 400, 1600),
                 # payload would show up even when the delta is O(1).
                 "wire_bytes": int(snapshot.wire_bytes or 0),
                 "decode_ms": float(snapshot.decode_ms or 0.0),
+                "markdown_ms": markdown_ms,
+                "md_lines": md_lines,
                 "fold_ms": float(fold_ms) if isinstance(
                     fold_ms, (int, float)) else None,
             })
@@ -152,7 +166,7 @@ def render_delta_table(report: dict) -> str:
     out = ["", "  one insertion at the head of an N-item list", ""]
     out.append(f"  {'N':>6}{'leaves':>9}{'size':>7}{'moved':>8}{'visited':>9}"
                f"{'uids lost':>11}{'apply ms':>10}{'fold ms':>9}"
-               f"{'wire KB':>9}{'decode':>8}")
+               f"{'wire KB':>9}{'decode':>8}{'md ms':>9}")
     for n in sorted(by_n):
         group = by_n[n]
         out.append(
@@ -164,7 +178,8 @@ def render_delta_table(report: dict) -> str:
             f"{_median([r['apply_ms'] for r in group]):>10.2f}"
             f"{_median([r['fold_ms'] for r in group]):>9.1f}"
             f"{_median([r['wire_bytes'] for r in group]) / 1024:>9.1f}"
-            f"{_median([r['decode_ms'] for r in group]):>8.1f}")
+            f"{_median([r['decode_ms'] for r in group]):>8.1f}"
+            f"{_median([r['markdown_ms'] for r in group]):>9.1f}")
     out.append("")
     sizes = sorted(by_n)
     if len(sizes) >= 2:

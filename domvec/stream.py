@@ -301,6 +301,29 @@ class StreamingScan:
         if not touched:
             update.chunk_ms = (time.perf_counter() - started) * 1000
             return []
+        # **This does not yet keep what the docstring promises.**
+        #
+        # `render_trie` walks the whole trie, and the filter below runs after
+        # it -- so the O(page) cost this method exists to avoid is paid in
+        # full on the line above the filter. Measured on the delta fixture,
+        # after a *single* node inserted at the head:
+        #
+        #     N       trie apply     markdown render
+        #     100        14.9 ms            27.2 ms
+        #     400        45.6 ms           127.8 ms
+        #    1600       155.3 ms           405.4 ms
+        #
+        # The trie is O(delta) and the projection read out of it is O(page),
+        # so the fused result is O(page) per change.
+        #
+        # Doing it properly is not a one-line change and is deliberately not
+        # attempted here: `_level_page` levels depth *across all chunks* of a
+        # page, and `_render_node` renders speculatively to test whether a
+        # subtree fits, so rendering a subset changes both the depths and the
+        # chunk boundaries. The shape of the fix is to retain the previous
+        # chunk set, re-render only the subtrees containing a touched address,
+        # splice, and re-level -- which needs `StreamingScan` to hold the last
+        # render, and needs the levelling separated from the descent.
         chunks = render_trie(update.trie, context_window=self.context_window)
         dirty = [c for c in chunks if touched.intersection(c.anchors)]
         update.all_chunks = chunks
