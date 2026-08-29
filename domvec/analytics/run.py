@@ -211,12 +211,19 @@ def measure_page(driver, url: str, *, scrolls: int = 2,
     with phases.phase("embed_ms"):
         queue.flush(embedder)
 
-    trie_addresses = [leaf.address for leaf in
-                      (spine.trie.leaves() if spine.trie else [])]
+    # Values travel with the addresses so the capture arrow can run the same
+    # suspicion check the projections do. Without them its `all_drawn_text` is
+    # empty and `suspect` is structurally 0 -- a self-check that cannot fire is
+    # the same failure it was built to catch.
+    trie_pairs = [(leaf.address, leaf.value or "")
+                  for leaf in (spine.trie.leaves() if spine.trie else [])]
+    trie_addresses = [a for a, _v in trie_pairs]
+    trie_values = [v for _a, v in trie_pairs]
 
     report = AffineReport(url=url, page=truth)
     report.arrows = [
-        score_arrow("page->trie", truth, trie_addresses, denominator="all"),
+        score_arrow("page->trie", truth, trie_addresses, denominator="all",
+                    texts=trie_values),
         score_arrow("page->markdown", truth, markdown_addresses,
                     denominator="all", texts=markdown_texts),
         # The drawing is answerable for what the page draws and nothing else.

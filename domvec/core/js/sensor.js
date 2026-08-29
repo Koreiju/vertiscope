@@ -280,6 +280,7 @@
   // Chunks whose content is unchanged and whose address moved.
   // Carried beside `chunks` and `removed`, and drained with them.
   var moves = [];
+  var SVG_TITLE_ID = -1;
   var stats = { nodes: 0, folds: 0, repairs: 0, chunks: 0, spans: 0,
                 movedChunks: 0,
                 observers: 0, closedRoots: 0, errors: 0, skipped: 0,
@@ -1624,7 +1625,32 @@
     // inherited `choice` from the select and drew as `[ ] Argentina`. The
     // control has to be a leaf, not merely a parent of hidden children --
     // which is what it is on the rendered page.
-    if (FOLDED[node.tagName]) return;
+    if (FOLDED[node.tagName]) {
+      // An <svg> is folded so its geometry stays out -- a few hundred <path>
+      // elements are not content -- but `<title>` is how an inline SVG is
+      // named, and it is a *child* element rather than an attribute. Folding
+      // the svg put it out of reach: github.com names its customer logos that
+      // way and "Ford", "Shopify", "Mercedes-Benz" and eighteen others never
+      // entered the trie at all.
+      //
+      // Taken here, at the svg's own address, because that is the thing the
+      // reader sees: one picture with a name. Descending for the name only,
+      // never for the drawing.
+      if (node.tagName === 'svg' && node.querySelector) {
+        try {
+          var named = node.querySelector('title, desc');
+          var label = named && (named.textContent || '').trim();
+          if (label) {
+            lines.push([depth, label.slice(0, BUDGET), path,
+                        SVG_TITLE_ID < 0
+                          ? (SVG_TITLE_ID = intern('title'))
+                          : SVG_TITLE_ID,
+                        0, own[0], own[1]]);
+          }
+        } catch (e) { /* an unnameable picture is still a picture */ }
+      }
+      return;
+    }
     // A text node is addressed by its own position among its parent's text
     // children, which is what `text()[n]` means. Inheriting the parent's path
     // put every text child of an element on one address, and a per-chunk
