@@ -258,6 +258,34 @@ and they point in opposite directions:
 A single "dedup rate" cannot separate these. Two counts can, and their ratio is
 the tuning knob the suppression rules are actually setting.
 
+### What a change costs the asynchronous phase
+
+Vectorisation runs off the trie recursion rather than inside it, so its cost is
+a separate question from the render's, and `analytics/projection.py` now
+reports it: how many chunks come out holding text they did not hold before,
+which is what `VectorQueue`'s digest gate lets through.
+
+| change | chunks re-embedded |
+|---|---|
+| redraw | 0 |
+| edit one value | 1 |
+| insert at the head | ~100% of the page |
+| insert in the middle | ~53% of the page |
+
+An insertion re-embeds **every chunk after it**, at every page size measured.
+The chunk ids are stable across it; the text is not. Each chunk holds a run of
+siblings up to the context window, so one more sibling shifts what every later
+chunk contains and the phase never comes back. Those chunks genuinely do hold
+different text, so re-embedding them is correct rather than wasteful — but it
+is an O(page) term in the asynchronous phase for an O(1) change to the page,
+which is exactly what this design exists to avoid.
+
+Removing it means choosing chunk boundaries from content — a rolling hash over
+the sibling run, so a boundary falls where the content says rather than where a
+running total happens to cross the window, and an insertion perturbs only the
+chunk it lands in. That changes what a chunk *is*, so it is measured here
+before it is attempted.
+
 ### Reading order is the fourth thing the map preserves
 
 An affine map preserves relations, not origin: containment survives as

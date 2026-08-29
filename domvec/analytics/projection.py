@@ -41,12 +41,17 @@ embeds only those. ``requeued`` is that count and ``gate_skipped`` is what the
 gate stopped.
 
 That column is where the chunker's own behaviour shows up, and it says
-something the timings do not. An edit re-embeds one chunk. An insertion at the
-head re-embeds the whole page -- not because anything is keyed wrongly (the
-chunk ids are stable across it) but because the window packs a run of siblings
-into each chunk, so one more sibling at the front shifts what every chunk after
-it contains. Every one of them genuinely holds different text, and re-embedding
-them is correct rather than wasteful.
+something the timings do not. An edit re-embeds one chunk. An insertion
+re-embeds **every chunk after it** -- about 100% of the page for an insertion
+at the head, about 53% for one in the middle, at every page size measured.
+
+Not because anything is keyed wrongly: the chunk ids are stable across it.
+It is the greedy packing. Each chunk holds a run of siblings up to the window,
+so one more sibling shifts what every chunk after it contains, and the phase
+never comes back. Every one of those chunks genuinely holds different text, so
+re-embedding them is correct rather than wasteful -- but it is an O(page) term
+in the asynchronous phase for an O(1) change to the page, which is the thing
+the whole design is trying not to have.
 
 Making that O(delta) would mean choosing chunk boundaries from content rather
 than from a running total, so an insertion perturbs only the chunk it lands in.
@@ -253,11 +258,17 @@ def render_projection_table(report: dict) -> str:
     out.append("")
     out.append("  `re-embed` is chunks whose markdown differs from what was")
     out.append("  last vectorised, out of `chunks` on the page: what the")
-    out.append("  asynchronous phase actually pays. An edit costs one. An")
-    out.append("  insertion at the head costs the page -- correctly, because")
-    out.append("  the window packs a run of siblings into each chunk, so one")
-    out.append("  more sibling at the front shifts what every chunk after it")
-    out.append("  holds. The ids are stable across it; the text is not.")
+    out.append("  asynchronous phase actually pays. An edit costs one.")
+    out.append("  An insertion re-embeds every chunk after it: about 100% of")
+    out.append("  the page for one at the head, about 53% for one in the")
+    out.append("  middle, at every size measured. The ids are stable across")
+    out.append("  it; the text is not. Each chunk holds a run of siblings up")
+    out.append("  to the window, so one more sibling shifts what every later")
+    out.append("  chunk contains and the phase never comes back. Those chunks")
+    out.append("  really do hold different text, so re-embedding them is")
+    out.append("  correct -- but it is an O(page) term in the asynchronous")
+    out.append("  phase for an O(1) change, which is the thing this design is")
+    out.append("  trying not to have.")
     out.append("  Making that O(delta) means choosing boundaries from content")
     out.append("  rather than from a running total, which changes what a")
     out.append("  chunk is and so is measured here before it is attempted.")
