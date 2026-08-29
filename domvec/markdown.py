@@ -315,6 +315,23 @@ def _render_unit(
     # is a field because it is a field, and a pager is links because they are
     # links. The tagger's category vocabulary follows underneath, unchanged,
     # for the offline path that still speaks it.
+    # A line that carries a target is a link, whatever else it is.
+    #
+    # When an anchor's href is suppressed because something inside it speaks,
+    # the words are drawn and the destination has to travel with them or the
+    # affordance becomes unreachable. Hacker News votes with
+    # `<a href="vote?id=..."><div title="upvote"></div></a>`: nothing in that
+    # anchor is text, so the line that speaks is the div's title, and drawn
+    # as plain text it has no slot for a destination. The reader could see the
+    # arrow and not vote.
+    #
+    # `_target_of` already walks up to find the anchor; this is what makes the
+    # answer visible. Only for classes with nowhere else to put it -- a link,
+    # an image and a media unit each name their own target already.
+    if (target and address.tag in _RENDER_FORM
+            and address.tag not in ("link", "image", "media")):
+        return _RENDER_FORM["link"](value, text_at_node or value, label,
+                                    target)
     if address.tag in _RENDER_FORM:
         return _RENDER_FORM[address.tag](value, text_at_node or value, label,
                                          target)
@@ -748,7 +765,7 @@ def _render_node(node: TrieNode, url: str, url_depth: int) -> MarkdownChunk:
     href_at: Dict[str, str] = {}
     text_at: Dict[str, str] = {}
     for a, v, _lbl, _d in units:
-        if a.tag in ("link", "image", "media") and _looks_like_url(v):
+        if a.tag in ("link", "image", "media") and a.is_url:
             href_at.setdefault(a.xpath.split("/text()")[0], v.strip())
     for a, v, _lbl, _d in units:
         if not v.strip():
@@ -823,7 +840,7 @@ def _render_node(node: TrieNode, url: str, url_depth: int) -> MarkdownChunk:
     spoken = {
         a.xpath.split("/text()")[0]
         for a, v, _lbl, _d in units
-        if v.strip() and not _looks_like_url(v)
+        if v.strip() and not a.is_url
         and (a.tag in _CONSUMING_CLASSES or a.tag in ("text", "heading"))
     }
 
@@ -835,7 +852,7 @@ def _render_node(node: TrieNode, url: str, url_depth: int) -> MarkdownChunk:
 
     hidden = {
         a.key() for a, v, _lbl, _d in units
-        if a.tag == "link" and _looks_like_url(v)
+        if a.tag == "link" and a.is_url
         and spoken_below(a.xpath.split("/text()")[0])
     }
 
@@ -895,11 +912,11 @@ def _render_node(node: TrieNode, url: str, url_depth: int) -> MarkdownChunk:
     speaks = {
         a.xpath.split("/text()")[0]
         for a, v, _lbl, _d in units
-        if v.strip() and not _looks_like_url(v)
+        if v.strip() and not a.is_url
     }
     by_target: Dict[str, List] = {}
     for a, v, _lbl, _d in units:
-        if a.tag == "link" and _looks_like_url(v):
+        if a.tag == "link" and a.is_url:
             by_target.setdefault(v.strip(), []).append(a)
     for target_url, addresses in by_target.items():
         if len(addresses) < 2:
