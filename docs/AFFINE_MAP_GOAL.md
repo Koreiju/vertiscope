@@ -551,7 +551,53 @@ mutation rather than five to twenty:
 | discourse.julialang.org | 183 → 667 | **49 → 86** |
 | ar.wikipedia.org | 1546 → 3863 (at 5) | **965 → 1543** |
 
-**Still open.** Four pages now shrink where none did. `discourse.julialang.org`
+### The map, scored against the page, on every corpus document
+
+With a truth map for each page — a second sensor booted on the same live
+document and walked whole — the confusion matrix can be taken over the whole
+corpus after a single insertion. 119 of 136 pages yield one.
+
+| | before | after |
+|---|---|---|
+| pages exact (nothing stale, lost or wrong) | 30 | **40** |
+| pages holding wrong content at a right address | 43 | **26** |
+| wrong-value addresses | 6,622 | **134** |
+| pages losing addresses | 33 | **0** |
+| addresses lost | 14,502 | **0** |
+| addresses stale | 17,409 | **3,864** |
+| recall, median / min | 100% / 4.0% | 100% / **100%** |
+
+**Recall is 100% on all 119 pages**: the trie no longer loses an address
+anywhere in the corpus.
+
+The cause was a guard I had written myself. `_shifted_xpath` accepted a move
+only when the old and new roots differed in their *final* step — which assumed
+the node that moves is the one whose ordinal changes. Usually it is not: when a
+block shifts, the ordinal that changes sits on an **ancestor**, and
+`.../section[3]/ul` becomes `.../section[4]/ul` with everything below riding
+along. Those were refused as "a different branch of the document", so the moves
+never reached the receiver at all — the fold reported 160 moved chunks on
+slashdot.org and 596 on theguardian.com, and the receiver was handed 0 and 27.
+Everything downstream then kept the old addresses with the old content, which
+is where the wrong values came from.
+
+Every test I had written for that guard put the differing step last, so all of
+them passed. The measurement that found it was the fold's own counter
+(`movedChunks`) set beside the number of moves the receiver was given: 160
+against 0 is not a subtle discrepancy, and nothing had been comparing them.
+
+Per page:
+
+| page | wrong / stale / lost, before | after |
+|---|---|---|
+| slashdot.org | 260 / 135 / 135 | **0 / 34 / 0** |
+| theguardian.com | 594 / 940 / 942 | **0 / 0 / 0** |
+| MDN Web/CSS | 260 / 2495 / 2494 | **1 / 0 / 0** |
+| de.wikipedia Physik | 242 / 1541 / 1539 | **0 / 48 / 0** |
+| rfc-editor rfc2616 | 3019 / 1637 / 1632 | **9 / 350 / 0** |
+
+**Still open.** 3,864 stale addresses remain across 73 pages, and 134 wrong
+values across 26. Four pages shrink where none did. `discourse.julialang.org`
 holds 58 addresses with another row's content and loses 44, and
 ar.wikipedia.org loses ~750 — both unchanged by this work and both pre-dating
 it. Wrong content at a right address remains the worst class and the next

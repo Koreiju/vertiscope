@@ -176,9 +176,31 @@ def _shifted_xpath(xpath: str, new_root: str) -> Optional[str]:
         return None
     old_steps = old_root.split("/")
     new_steps = new_root.split("/")
-    if old_steps[:-1] != new_steps[:-1]:
-        return None                     # a different branch of the document
-    if _step_tag(old_steps[-1]) != _step_tag(new_steps[-1]):
+    if len(old_steps) != len(new_steps):
+        return None
+    # Exactly one step differs, and it names the same element.
+    #
+    # This used to insist the differing step was the *last* one, which
+    # quietly assumed the node that moved is the one whose ordinal changed.
+    # It usually is not: when a block shifts, the ordinal that changes is on
+    # an ancestor -- `.../section[3]/ul` becomes `.../section[4]/ul` -- and
+    # the rest of the path rides along unchanged. Insisting on the last step
+    # rejected those as "a different branch of the document", and rejected
+    # nearly all of them: 560 of 560 addresses on slashdot.org and 1,598 of
+    # 1,625 on theguardian.com, so the fold reported 160 and 596 moved chunks
+    # and the receiver was handed 0 and 27. Everything downstream then held
+    # the old addresses with the old content, which is where the wrong values
+    # come from.
+    #
+    # One differing step is still the whole claim -- a move re-indexes one
+    # element -- and the tag check still refuses a path that lands somewhere
+    # genuinely else.
+    differ = [i for i in range(len(old_steps))
+              if old_steps[i] != new_steps[i]]
+    if len(differ) != 1:
+        return None
+    at = differ[0]
+    if _step_tag(old_steps[at]) != _step_tag(new_steps[at]):
         return None                     # not one element re-indexed
     return new_root + xpath[len(old_root):]
 

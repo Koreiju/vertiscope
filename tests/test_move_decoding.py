@@ -139,3 +139,46 @@ def test_a_rebuilt_address_is_a_well_formed_path():
         assert "//" not in out
         assert out.startswith("/html/body/ol/li[4]")
         assert all(step for step in out.split("/")[1:])
+
+
+# --- the step that moves is not always the last one -------------------------
+
+
+def test_an_ancestor_re_indexing_shifts_everything_under_it():
+    """The case every test above missed, and it cost more than all of them.
+
+    Each case here put the differing step *last* -- `ol/li` becoming
+    `ol/li[3]` -- so the guard "old and new differ only in their final step"
+    passed every one of them. Real pages shift at an ancestor: a block moves
+    and `.../section[3]/ul` becomes `.../section[4]/ul` while everything below
+    rides along unchanged.
+
+    Rejected as "a different branch of the document", those moves never
+    reached the receiver at all: the fold reported 160 moved chunks on
+    slashdot.org and 596 on theguardian.com, and the receiver was handed 0 and
+    27. Measured over the frozen corpus, that guard was costing 14,502 lost
+    addresses and 6,622 addresses holding another node's content.
+    """
+    assert _shifted_xpath("/html/body/div/section[3]/ul/li[2]/a/text()[1]",
+                          "/html/body/div/section[4]/ul") == \
+        "/html/body/div/section[4]/ul/li[2]/a/text()[1]"
+
+
+def test_two_steps_differing_is_not_one_element_moving():
+    """The guard still has to refuse something, or it is not a guard."""
+    assert _shifted_xpath("/html/body/div[2]/section[3]/ul/li",
+                          "/html/body/div[5]/section[4]/ul") is None
+
+
+def test_a_path_of_a_different_length_is_refused():
+    assert _shifted_xpath("/html/body/ol/li/a",
+                          "/html/body/main/ol/li[2]") is None
+
+
+@pytest.mark.parametrize("position", [1, 2, 3])
+def test_the_differing_step_may_sit_at_any_depth(position):
+    old = ["", "html", "body", "section", "ul"]
+    new = list(old)
+    new[position] = new[position] + "[4]"
+    shifted = _shifted_xpath("/".join(old) + "/li[2]/span", "/".join(new))
+    assert shifted == "/".join(new) + "/li[2]/span"
