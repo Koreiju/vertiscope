@@ -419,9 +419,24 @@ def score_arrow(name: str, truth: PageTruth,
     # an address the composed tree does not contain.
     page_paths = {u.xpath for u in truth.units}
     page_owners = {_owner(u.xpath) for u in truth.units}
+    # Every ancestor of something the page holds. Rendering at a container is
+    # not invention: an inline <svg> is named by its `title` child, so ground
+    # truth addresses `.../svg[4]/title/text()[1]` while the render addresses
+    # the picture itself at `.../svg[4]`. The render is standing for content
+    # the page really has, one level up, and counting that as a phantom
+    # charged 19 inventions for 19 logos correctly drawn.
+    page_ancestors: Set[str] = set()
+    for unit in truth.units:
+        at = _owner(unit.xpath)
+        while "/" in at:
+            at = at.rsplit("/", 1)[0]
+            if not at:
+                break
+            page_ancestors.add(at)
     for ident, count in emitted.exact.items():
         path = ident.split("	", 1)[0]
-        if path in page_paths or _owner(path) in page_owners:
+        if (path in page_paths or _owner(path) in page_owners
+                or _owner(path) in page_ancestors):
             continue
         score.overall.fp += count
         if len(score.invented) < 25:

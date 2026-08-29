@@ -626,6 +626,12 @@ def _is_terminal_pair(node: TrieNode) -> bool:
     return bool(kids) and all(k.is_leaf for k in kids)
 
 
+# Render classes that are *things* rather than prose. Each carries its own
+# identity and its own name, so a run of them is a row of objects and never a
+# sentence to be reassembled -- see `_join_inline`.
+_OBJECT_CLASSES = frozenset({"image", "media", "rule"})
+
+
 def _flow_owner(xpath: str) -> str:
     """The block element a run of inline text belongs to.
 
@@ -679,6 +685,19 @@ def _join_inline(units: List[Tuple[ContentAddress, str, str, int]]
         prev = out[-1]
         joinable = (
             prev[0].tag == address.tag
+            # A picture is not a sentence fragment.
+            #
+            # Joining is for prose broken by markup, and it decides by render
+            # class and flow owner -- which an inline <svg> satisfies exactly
+            # as an <em> does. github.com sets its customer logos as a row of
+            # twenty inline svgs in one block, so all twenty merged into a
+            # single line whose alt read "American Airlines Duolingo Ernst and
+            # Young Ford ...": one picture named after twenty, and nineteen
+            # addresses gone from the map with it.
+            #
+            # Objects carry their own identity and their own name. Only prose
+            # is reassembled.
+            and address.tag not in _OBJECT_CLASSES
             and _flow_owner(prev[0].xpath) == _flow_owner(address.xpath)
             and _flow_owner(address.xpath) != address.xpath.split("/text()")[0]
             and not _looks_like_url(value)
