@@ -132,6 +132,30 @@ def measure_page(driver, url: str, *, scrolls: int = 2,
                          moved=snapshot.moved_addresses)
     phases.add("fold_ms", fold_ms)
 
+    # One last drain, immediately before ground truth is read.
+    #
+    # The two sides of the map must be sampled at the same moment or the gap
+    # between them is scored as capture loss. Ground truth used to be read
+    # after the projections had been rendered and a geometry round trip had
+    # crossed the boundary, and salesforce.com lazy-loads images on scroll --
+    # so an <img> that arrived during that window was in the page, absent from
+    # the trie, and counted against capture. It was never a capture defect;
+    # it was a photograph taken after the subject moved.
+    #
+    # Writes into the trie, so what ground truth is compared against is the
+    # trie as of the instant ground truth was taken.
+    settling = sensor.drain(scrolls + 1)
+    with phases.phase("trie_ms"):
+        spine.absorb(settling.units, settling.passno,
+                     removed=settling.removed_addresses,
+                     moved=settling.moved_addresses)
+    if isinstance((settling.stats or {}).get("repairMs"), (int, float)):
+        phases.ms["fold_ms"] = float(settling.stats["repairMs"])
+    snapshot = settling
+
+    with phases.phase("groundtruth_ms"):
+        truth = read_page_truth(driver, url)
+
     # Both projections are read back out of the trie.
     with phases.phase("markdown_ms"):
         chunks = render_trie(spine.trie, context_window=context_window)
@@ -186,9 +210,6 @@ def measure_page(driver, url: str, *, scrolls: int = 2,
             queue.push(chunk.cid, chunk.markdown)
     with phases.phase("embed_ms"):
         queue.flush(embedder)
-
-    with phases.phase("groundtruth_ms"):
-        truth = read_page_truth(driver, url)
 
     trie_addresses = [leaf.address for leaf in
                       (spine.trie.leaves() if spine.trie else [])]
