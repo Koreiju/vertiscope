@@ -351,6 +351,12 @@ def render_live_delta_table(report: dict) -> str:
                    "with content boundaries, {} with a running total"
                    .format(len(scored), chunks, c_new, r_new))
     out.append("")
+    out.append("  A page that gains addresses while dropping none is the")
+    out.append("  signature of a move the receiver did not honour: the content")
+    out.append("  is written at its new address and left at the old one, and")
+    out.append("  no coverage or dedup number can see it because every address")
+    out.append("  present is still correct.")
+    out.append("")
     out.append("  `delta` is the trie's own count of genuine change and should")
     out.append("  read 1 for one node; `moved` is the addresses the insertion")
     out.append("  re-pointed, which grows with the group and is not an edit.")

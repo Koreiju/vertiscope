@@ -355,22 +355,52 @@ document does not contain**:
 After all three, 0 of 60 sampled paths are missing from the DOM on all three
 pages, and books' genuine-change count for one inserted node went from 191 to 1.
 
-**Two findings the harness now reports and nothing yet fixes**, stated as
-measured rather than as understood:
+Both findings that run produced turned out to be **one defect in the receiver,
+not two in the fold**, and a correction to what I first said about them.
 
-- **Vacated addresses are not dropped.** Content that moves is written at its
-  new address and left at its old one, because the DOM removed nothing and the
-  drain reports no removal. The trie gains 33 addresses on quotes.toscrape.com
-  and 11 on books.toscrape.com for a delta of 1, dropping none. On a page
-  mutating all day it grows while the page stays the same size. The harness
-  flags it as an anomaly rather than folding it into a rate, because no
-  coverage or dedup number can see it: every address present is still correct,
-  there are simply also addresses that are not.
-- **A shift the fold does not recognise costs the page.** On
-  news.ycombinator.com the same insertion produced 9 moves and a genuine-change
-  count of 654 — the fold saw the table re-write itself rather than one row
-  arriving. Where the move channel does not fire, every downstream guarantee
-  here degrades to O(page) regardless of how the chunker behaves.
+`apply` recovers a shift the fold did not report by re-anchoring on content
+hash, bounded to the spans the drain touches — which is what keeps that
+recovery proportional to the change. A move *between parents* is outside that
+bound: the old leaf lives under a span no incoming unit names, so its uid is
+never offered to the address that now holds its content. The consequences were
+the two things the harness flagged.
+
+- The trie only ever grew. Content was written at its new address and left at
+  its old one, because the DOM removed nothing and so the drain reported no
+  removal: 176 addresses → 209 on quotes.toscrape.com for a delta of 1,
+  dropping none.
+- On news.ycombinator.com the same insertion read as **654 genuine changes**. I
+  recorded that as the fold failing to recognise the shift. That was wrong —
+  the fold reported 662 moves; the receiver was discarding them, so every
+  moved unit was written as a fresh arrival.
+
+A reported move is now authoritative: the uid travels with the content, and the
+address it left is vacated. Vacating is deliberately *not* counted as a
+removal — a move is not an edit, and the address is already in `delta.moved`;
+counting it twice would make one node arriving look like a page rewriting
+itself, which is the figure the whole mechanism exists to avoid.
+
+One subtlety cost the last four identities. Where the value arriving at an
+address is the value already there — `by`, `(about)`, `Tags:`, the labels that
+repeat on every card — the write is a no-op, so the reported uid was dropped
+while the source address was vacated. Every uid is snapshotted before any
+write, so handing it forward on a no-op is safe, and the chain of identical
+values passes identities along it.
+
+One inserted node, measured after the fixture and on four real pages:
+
+| | delta | uids lost | addresses |
+|---|---|---|---|
+| flat-list fixture | 1 | 0 | 101 → 102 |
+| quotes.toscrape.com | 1 | 0 | 176 → 177 |
+| books.toscrape.com | 1 | 0 | 321 → 322 |
+| news.ycombinator.com | 1 | 0 | 715 → 716 |
+| lit.dev | 1 | 1 | 549 → 614 |
+
+lit.dev is not yet right: 194 shadow hosts, and it gains 65 addresses while
+dropping none. Whether that is the page hydrating on its own or moves going
+unreported inside a shadow root is not yet established, and it is stated here
+as unestablished.
 
 ### Reading order is the fourth thing the map preserves
 

@@ -433,7 +433,7 @@ class AddressTrie:
             n += 1
         return n
 
-    def apply(self, units, removed=()) -> "TrieDelta":
+    def apply(self, units, removed=(), moved=()) -> "TrieDelta":
         """Repair in place from one drain. The live path's only mutator.
 
         An address is positional, so a structural shift is not reported to us
@@ -460,6 +460,30 @@ class AddressTrie:
         cannot claim a uid.
         """
         delta = TrieDelta()
+
+        # What the fold *said* moved, read before anything is written.
+        #
+        # The content-hash re-anchor below recovers a shift the fold did not
+        # report, and it is bounded to the spans this drain touches -- which
+        # is what keeps it proportional to the change. A move out of one
+        # parent and into another is therefore outside its reach: the old leaf
+        # lives under a span no incoming unit names, so its uid is never
+        # offered to the address that now holds its content.
+        #
+        # On a flat list that never matters, because a shift re-points
+        # addresses within one parent and the old leaves are in the span. On a
+        # real page it matters constantly, and it is the difference between an
+        # address moving and an address being replaced by a stranger.
+        #
+        # So a reported move is taken as authoritative: the uid travels with
+        # the content, and the address it left is vacated below.
+        carried: Dict[Tuple, Tuple[int, ContentAddress]] = {}
+        for old_address, new_address in moved:
+            node = self.find(old_address)
+            if node is None or not node.is_leaf or not node.uid:
+                continue
+            carried[new_address.key()] = (node.uid, old_address)
+
         # Redacted before the content index below is built, not after: the
         # re-anchoring matches on the value, so admitting one spelling and
         # indexing another would make a moved leaf look like a new one.
@@ -503,10 +527,35 @@ class AddressTrie:
             digest = want[key][2]
             node = self.find(address)
             if node is not None and node.content_hash == digest:
-                continue            # already says this; costs nothing
+                # Already says this, so there is nothing to write -- but if a
+                # move was reported into this address, the identity still has
+                # to travel.
+                #
+                # This is the case of a string that repeats down a list: every
+                # card on quotes.toscrape.com carries "by", "(about)" and
+                # "Tags:", so when the cards shift by one the value arriving
+                # at each address is the value already there. The write is a
+                # no-op and the reported uid was dropped on the floor, while
+                # the address it came from was vacated -- four identities
+                # disappearing for one inserted node.
+                #
+                # Handing the uid forward is safe because every uid was
+                # snapshotted before any write, so the chain of identical
+                # values passes identities along it in one step regardless of
+                # the order the units arrive in. Which uid ends up on which of
+                # several identical strings is not observable anyway
+                # (THEORY Prop. 19.3); a uid *vanishing* is.
+                reported = carried.get(key)
+                if reported is not None and node.uid != reported[0]:
+                    node.uid = reported[0]
+                    delta.moved.append(address)
+                continue
             pool = displaced.get(digest)
             inherited = 0
-            while pool:
+            reported = carried.get(key)
+            if reported is not None:
+                inherited = reported[0]
+            while not inherited and pool:
                 uid, from_key = pool.pop()
                 if not uid or from_key == key:
                     continue
@@ -523,6 +572,28 @@ class AddressTrie:
                 self._uid_seq += 1
                 fresh.uid = self._uid_seq
                 (delta.changed if node is not None else delta.added).append(address)
+
+        # Vacate what the reported moves left behind.
+        #
+        # The DOM removed nothing, so the fold reports no removal, and without
+        # this the content is written at its new address while a stale copy
+        # stays at the old one. Measured before it existed: one node inserted
+        # at the head of a list took quotes.toscrape.com from 176 addresses to
+        # 209 and books.toscrape.com from 321 to 332, dropping none either
+        # time -- a trie growing while the page stays the same size.
+        #
+        # Not counted as a removal. A move is not an edit, and the delta says
+        # so already: the address appears in `delta.moved`. Counting it twice
+        # would make one node arriving look like a page rewriting itself,
+        # which is the exact figure this whole mechanism exists to avoid.
+        #
+        # Skipped where this drain says the old address still holds
+        # something, which is the ordinary case on a flat list: a shift within
+        # one parent reoccupies every address it vacates.
+        for _new_key, (_uid, old_address) in carried.items():
+            if old_address.key() in want:
+                continue
+            self.remove(old_address)
 
         for address in removed:
             # A removal this same drain contradicts is stale, and applying it

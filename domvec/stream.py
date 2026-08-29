@@ -267,7 +267,28 @@ class StreamingScan:
                 carried.append((new_address, node.value))
                 seen.add(new_address.key())
             units = carried
-        delta = self.trie.apply(units, removed=removed)
+            # An address whose content moved away, and that nothing in this
+            # drain claims, no longer holds anything.
+            #
+            # Without this the trie only ever grows on a live page: the DOM
+            # removed nothing, so the fold reports no removal, and the content
+            # is written at its new address while the old one keeps its stale
+            # copy. Measured before this line existed -- one node inserted at
+            # the head of a list took quotes.toscrape.com from 176 addresses
+            # to 209 and books.toscrape.com from 321 to 332, dropping none
+            # either time. A page mutating all day would grow without bound
+            # while staying the same size.
+            #
+            # It costs nothing on a shift within one list, where every vacated
+            # address is immediately reoccupied by its neighbour and so is
+            # claimed: the flat-list fixture drops zero addresses either way,
+            # which is why it never showed the defect.
+            #
+            # The pairs go to `apply` as well as the rebuilt units: it is the
+            # only place that can carry the uid across and vacate what the
+            # move left behind, because it is the only place that knows what
+            # the trie held a moment ago.
+        delta = self.trie.apply(units, removed=removed, moved=moved)
         t1 = time.perf_counter()
         t2 = t1
 
