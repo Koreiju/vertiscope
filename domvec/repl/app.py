@@ -1127,8 +1127,8 @@ class Repl:
                 # vacuum. `forget all` removes the directory and so has no
                 # such gap.
                 self.state.buffers.note(
-                    f"forgot {target} — indexes clear; earlier sessions' "
-                    "bytes remain in graph.kuzu until 'forget all'")
+                    f"forgot {target} — indexes clear; bytes may remain in "
+                    "graph.kuzu until 'forget all'")
         except Exception as exc:  # noqa: BLE001
             self.state.buffers.note(f"forget: {type(exc).__name__}: {exc}")
             return True

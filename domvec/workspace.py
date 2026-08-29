@@ -800,16 +800,25 @@ class Workspace:
         with no chunk: idf then counts documents that no longer exist, which
         shifts every score without failing anything.
 
-        **What this does not do.** Content that reached `graph.kuzu` in an
-        *earlier* session survives a single-page purge as bytes in that file:
-        the rows are gone from every query and every index, and the text is
-        still findable with `grep`. Kuzu has no `VACUUM`, and `CHECKPOINT`
-        was measured not to reclaim the pages, so the only scrub is to write
-        the store out again from scratch. `purge()` with no url does exactly
-        that -- it removes the directory -- and is therefore complete;
-        per-page compaction is a rebuild and is not attempted here. Anything
-        written and purged inside one session leaves nothing, because it was
-        never checkpointed. `tests/test_privacy.py` pins both halves.
+        **What this does not do.** Content that has been *checkpointed* into
+        `graph.kuzu` survives a single-page purge as bytes in that file: the
+        rows are gone from every query and every index, and the text is still
+        findable with `grep`. Kuzu has no `VACUUM`, and `CHECKPOINT` was
+        measured not to reclaim the pages, so the only scrub is to write the
+        store out again from scratch. `purge()` with no url does exactly that
+        -- it removes the directory -- and is therefore complete; per-page
+        compaction is a rebuild and is not attempted here.
+
+        This used to say that anything written and purged inside one session
+        leaves nothing, "because it was never checkpointed". **That premise is
+        not ours to make.** Kuzu checkpoints on its own schedule, and a
+        checkpoint inside the session is enough: forcing one leaves residue
+        every time, and waiting for kuzu to choose one left residue in 4 runs
+        out of 40. So a same-session purge is *usually* a scrub and not
+        reliably one, and the honest statement is that **no single-page purge
+        scrubs bytes; only `purge()` with no url does.**
+        `tests/test_privacy.py` pins both halves, the second one
+        deterministically rather than one run in ten.
         """
         # Through the stored spelling, so `--url https://a.test/` purges the
         # page held as `https://a.test` instead of silently purging nothing.
