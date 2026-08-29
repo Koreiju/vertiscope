@@ -23,6 +23,10 @@ def main(argv=None) -> int:
     parser.add_argument("--delta", action="store_true",
                         help="measure what one insertion costs against page "
                              "size, on the local scaling fixture")
+    parser.add_argument("--live-delta", action="store_true",
+                        help="insert one node into each real page given as a "
+                             "url and measure what it costs, in both chunking "
+                             "modes")
     parser.add_argument("--projection", action="store_true",
                         help="measure what one change costs the markdown "
                              "projection, by change kind and page size; "
@@ -55,6 +59,18 @@ def main(argv=None) -> int:
 
     cfg = load_config()
     with browser_session(cfg) as driver:
+        if args.live_delta:
+            from .live_delta import (measure_live_delta,
+                                     render_live_delta_table,
+                                     write_live_delta_artifact)
+            report = measure_live_delta(driver, args.urls,
+                                        context_window=args.window)
+            print(render_live_delta_table(report), flush=True)
+            print(f"  written: "
+                  f"{write_live_delta_artifact(report, pathlib.Path(args.out))}",
+                  flush=True)
+            return 0
+
         if args.delta:
             from .delta import (measure_delta_scaling, render_delta_table,
                                 write_delta_artifact)

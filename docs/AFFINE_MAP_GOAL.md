@@ -324,6 +324,54 @@ in the suite. The oracle is now a CRC, checked by rendering the same page in
 subprocesses under three different `PYTHONHASHSEED` values and requiring one
 answer.
 
+### What real pages said that the fixtures did not
+
+Every O(delta) number above was measured on an N-row list built to be measured.
+That is the right way to see a *shape* and the wrong way to believe one: a list
+of identical rows is the friendliest possible input to every algorithm here.
+`analytics/live_delta.py` asks the same question of real documents — it finds
+each page's largest repeated-sibling group with no per-site rules, inserts one
+minimal node at its head, and scores both chunking modes against the trie's own
+delta.
+
+It found three defects in the move decoder within the first run, none of which
+the fixture could show, all of which made the trie **write content at paths the
+document does not contain**:
+
+1. The old root came from the common prefix of a chunk's addresses, cut back to
+   the last "/" unconditionally. Right when the prefix stops mid-step ("li[1]"
+   against "li[12]"), wrong when it is already a whole step — which is the case
+   whenever a chunk has a unit addressed at its own root, an href or an
+   aria-label on the element itself. Every rebuilt address gained a spurious
+   step; quotes.toscrape.com went 176 leaves → 317 for one inserted node.
+2. The move entry names the node that moved, while a chunk's addresses hang off
+   whatever is inside it. On books.toscrape.com the entry named the `li` and
+   the addresses hung off the `article` within, so the substitution dropped the
+   `article` step: 60 of 60 sampled paths matched zero nodes.
+3. Deriving the old root from the address makes it a prefix by construction, so
+   the `startswith` guard could never fail and an address in another branch was
+   rewritten onto the moved node. Caught by a test rather than by a page.
+
+After all three, 0 of 60 sampled paths are missing from the DOM on all three
+pages, and books' genuine-change count for one inserted node went from 191 to 1.
+
+**Two findings the harness now reports and nothing yet fixes**, stated as
+measured rather than as understood:
+
+- **Vacated addresses are not dropped.** Content that moves is written at its
+  new address and left at its old one, because the DOM removed nothing and the
+  drain reports no removal. The trie gains 33 addresses on quotes.toscrape.com
+  and 11 on books.toscrape.com for a delta of 1, dropping none. On a page
+  mutating all day it grows while the page stays the same size. The harness
+  flags it as an anomaly rather than folding it into a rate, because no
+  coverage or dedup number can see it: every address present is still correct,
+  there are simply also addresses that are not.
+- **A shift the fold does not recognise costs the page.** On
+  news.ycombinator.com the same insertion produced 9 moves and a genuine-change
+  count of 654 — the fold saw the table re-write itself rather than one row
+  arriving. Where the move channel does not fire, every downstream guarantee
+  here degrades to O(page) regardless of how the chunker behaves.
+
 ### Reading order is the fourth thing the map preserves
 
 An affine map preserves relations, not origin: containment survives as

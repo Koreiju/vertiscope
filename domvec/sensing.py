@@ -130,28 +130,57 @@ class ScrollStep:
     gates: Dict[str, int] = field(default_factory=dict)
 
 
-def _common_prefix(paths: List[str]) -> str:
-    """The deepest xpath step every one of these addresses shares.
+def _step_tag(step: str) -> str:
+    """A path step without its sibling ordinal: ``li[3]`` -> ``li``."""
+    cut = step.find("[")
+    return step if cut < 0 else step[:cut]
 
-    A chunk's addresses all hang off its root, so their common prefix *is*
-    that root -- and taking it from the addresses avoids storing the root
-    separately and letting the two disagree. Cut on "/" so the prefix is a
-    whole step: the strings "/html/body/ul/li[1]" and "/html/body/ul/li[12]"
-    share the characters "/html/body/ul/li[1" and no such element exists.
+
+def _shifted_xpath(xpath: str, new_root: str) -> Optional[str]:
+    """``xpath`` re-addressed for the node at ``new_root``, or None.
+
+    A move is the re-indexing of exactly one step: a node keeps its content,
+    its parent and its tag, and takes a different ordinal among its siblings.
+    Everything addressed inside it keeps its whole path below that step. So
+    the rebuild is a prefix substitution at the depth of the moved node --
+    and None wherever the address is not, in fact, inside it.
+
+    Two defects lived in the previous form of this, both invisible to the
+    flat-list fixture and both obvious on the first real page:
+
+    * It took the old root from the *common prefix* of the chunk's addresses,
+      cut back to the last "/" unconditionally. That is right when the shared
+      prefix stops mid-step ("li[1]" against "li[12]") and wrong when it is
+      already a whole step, which is what happens whenever a chunk has a unit
+      addressed at its own root -- an href or an aria-label on the element
+      itself. The root came out a step too shallow and every rebuilt address
+      gained a spurious step. quotes.toscrape.com went from 176 leaves to 317
+      on one inserted node, and every sampled new path matched zero nodes.
+    * The move entry names the node that moved; a chunk's addresses hang off
+      whatever is inside it. On books.toscrape.com the entry named the `li`
+      and the addresses hung off the `article` within, so substituting one
+      root for the other dropped the `article` step: 60 of 60 sampled paths
+      matched nothing.
+
+    Depth is what actually holds, and the guards below are what keep it
+    honest -- without them an address in a different branch of the document
+    would be rewritten onto the moved node, because a root derived from the
+    address is always a prefix of it and `startswith` can never fail.
     """
-    if not paths:
-        return ""
-    head = paths[0]
-    for other in paths[1:]:
-        limit = min(len(head), len(other))
-        i = 0
-        while i < limit and head[i] == other[i]:
-            i += 1
-        head = head[:i]
-        if not head:
-            return ""
-    cut = head.rfind("/")
-    return head[:cut] if cut > 0 else head
+    depth = new_root.count("/")
+    steps = xpath.split("/")
+    if len(steps) <= depth:
+        return None                     # shallower than the node that moved
+    old_root = "/".join(steps[:depth + 1])
+    if not old_root or old_root == new_root:
+        return None
+    old_steps = old_root.split("/")
+    new_steps = new_root.split("/")
+    if old_steps[:-1] != new_steps[:-1]:
+        return None                     # a different branch of the document
+    if _step_tag(old_steps[-1]) != _step_tag(new_steps[-1]):
+        return None                     # not one element re-indexed
+    return new_root + xpath[len(old_root):]
 
 
 class Sensor:
@@ -390,17 +419,16 @@ class Sensor:
                 continue
             self._paths([[0, "", list(raw_path), -1, 0]], flags)
             new_root = self._xpath(list(raw_path))
-            old_root = _common_prefix([a.xpath for a, _h in known])
-            if not old_root or old_root == new_root:
+            if not new_root:
                 continue
             rebuilt: List[Tuple[ContentAddress, str]] = []
             for address, digest in known:
-                if not address.xpath.startswith(old_root):
+                moved_to = _shifted_xpath(address.xpath, new_root)
+                if moved_to is None:
                     rebuilt.append((address, digest))
                     continue
-                shifted = ContentAddress(
-                    address.url, new_root + address.xpath[len(old_root):],
-                    address.tag, address.accessor)
+                shifted = ContentAddress(address.url, moved_to,
+                                         address.tag, address.accessor)
                 moved.append((address, shifted))
                 rebuilt.append((shifted, digest))
             self._chunk_addrs[cid] = rebuilt
