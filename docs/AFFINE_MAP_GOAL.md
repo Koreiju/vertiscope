@@ -494,6 +494,47 @@ What survives is the identity carrying, which is sound and independent: it took
 news.ycombinator.com from 654 genuine changes for one inserted row to 1, and
 Arabic Wikipedia from 148 to 1.
 
+### The open defect, stated with its size
+
+The corpus was run whole, 136 pages, on an idle machine. 121 were measurable;
+14 have no drawn repeated group to insert into and 1 errored.
+
+| | value |
+|---|---|
+| delta == 1 for one inserted node | **112 of 121** |
+| worst delta | 66 |
+| trie grew | **88 of 121** |
+| net addresses added, median | **+25** (range +1 … +1841) |
+| pages that lost an identity | 47 |
+| chunks holding new text — median / p90 / max | 5 / 107 / 746 |
+
+The trie's *change accounting* generalises: one node reads as one change on 93%
+of pages nobody chose for the test. What does not generalise is that **the trie
+grows**. Content is written at its new address and the old one is never
+vacated, so on two-thirds of real documents the map accumulates addresses the
+page no longer has.
+
+**Two attempts to close it, both of which deleted live content.**
+
+The first put the rule in the trie: an address whose content moved away, and
+which this drain does not claim, is empty. The second put it in the fold, which
+seemed sound — every address belongs to exactly one chunk, so an address no
+chunk claims after a move is one the fold no longer believes in. Across the
+corpus that second version was better on every axis but one: growth 88 → 11
+pages, median net +25 → +1, identities lost 47 → 27, new-text p90 107 → 38.
+
+And it shrank 24 pages, so I asked the DOM. Of 60 sampled addresses it removed,
+**56 were still in the live page** on one and **47 of 60** on another. The
+fold's per-chunk bookkeeping is not a complete model of the page's addresses
+either.
+
+So neither side can currently answer "is this address gone?", and both attempts
+answered it wrongly in the same direction. That is the architectural gap, and
+it is stated here rather than patched, because a stale address is a defect the
+harness reports per page while deleting live content is silent. The rule that
+would close it needs positive evidence of absence — the fold looking at the old
+path and finding nothing — which nothing in the pipeline currently produces.
+
 **An unexplained loss, measured rather than guessed at.** Arabic Wikipedia
 loses 86 identities on one insertion, and ja-wikipedia 3. I attributed that to
 three different mechanisms of my own and was wrong each time; the fourth check
