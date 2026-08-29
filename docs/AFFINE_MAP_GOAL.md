@@ -98,31 +98,62 @@ equivalences, both maintained in one bottom-up pass:
   `content_hash` and render differently.
 
 A projection memo keyed on `exact_hash` may reuse a subtree exactly when the
-trie says that subtree is unchanged. `analytics/projection.py` measures what
-that is worth, by change kind, against the same render with no memo:
+trie says that subtree is unchanged.
 
-| change | N=100 | N=400 | N=1600 |
-|---|---|---|---|
-| redraw (nothing changed) | 95% | 96% | 97% |
-| edit one value in place | 47% | 50% | 45% |
-| insert one node at the head | 41% | 41% | 30% |
+The memo was half the answer. The other half was that the descent asked each
+ancestor of a change whether *its* subtree fits the context window, and
+answered by rendering it -- at the page root, the page. That question is now
+answered from the children, which the descent measures anyway and mostly gets
+back from the memo. The argument is structural: **every rendering decision is
+scoped to a single element** (`_dedupe` groups units by `addr.xpath` and
+compares only within a group; the rule letting a control consume its own label
+is keyed the same way), so nothing in one subtree can remove anything in
+another and the parent's rendering contains every line its children render.
+With depths absolute and `chars` being `len("
+".join(lines))`, that gives
 
-Read honestly, that is **not yet O(delta)**, and the residual is located rather
+    parent_chars  >=  sum(child_chars) + k - 1
+
+which is a *lower* bound, and a lower bound is what proves "this overflows".
+
+`analytics/projection.py` measures both, browser-free, by change kind. At a
+1,200-character window, in milliseconds, against where this started:
+
+| change | | N=100 | N=400 | N=1600 |
+|---|---|---|---|---|
+| redraw (nothing changed) | was | 46 | 175 | 1844 |
+| | now | 1.9 | 8.1 | **37** |
+| edit one value in place | was | 48 | 177 | 1819 |
+| | now | 19 | 79 | **327** |
+| insert one node at the head | was | 44 | 179 | 1827 |
+| | now | 24 | 100 | **456** |
+
+The bound alone accounts for about four of those factors and needs no cache at
+all; the test suite's own wall time fell from 740 s to 330 s when it landed.
+
+Read honestly, this is still not O(delta), and the residual is located rather
 than guessed at:
 
 - A **redraw** is nearly free because the page root is clean and one hash
   comparison answers for the whole page. This is the common case on an
   interactive surface: scrolling, an idle tick, a keystroke that changes only
   the viewport.
-- An **edit** is only about half, because the ancestors of the edited leaf
-  reach the root, and the descent asks each ancestor whether its subtree fits
-  the context window -- a question currently answered by *rendering* it.
-  Removing that means answering the fit test from a bound instead of a render,
-  and it is the next thing to remove.
+- An **edit** still pays for the ancestors of the edited leaf. Their own
+  renders are skipped now, but their children are re-measured and the merge
+  buffer re-run at every level between the leaf and the root.
 - An **insertion at the head** is the floor, and not a defect. It shifts the
   address of everything below it, and the projection prints addresses: a
   chunk's xpath, a line's anchor. What moved genuinely draws differently. The
   trie keeps identity across the shift (`uid`); the render cannot inherit it.
+
+The same element-scoping argument gives a matching *upper* bound,
+`own + sum(child_chars) + k - 1`, which is exactly tight where it holds and
+fails in exactly one place: `_collect` carries a heading label into child
+elements, so a heading whose words live in child elements draws them as a
+heading from the parent and as plain text from the child. That exception is
+pinned by a test rather than left as a comment, because the label inheritance
+it protects is what stopped 124 of the Guardian's 181 headlines arriving as
+ordinary text.
 
 Two preconditions had to hold before any of this was sound, and both are
 statements about the trie as the universal link structure:

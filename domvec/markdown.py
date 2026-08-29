@@ -1116,7 +1116,8 @@ class RenderMemo:
     render's levelling corrupt the next one's input.
     """
 
-    __slots__ = ("_prev", "_cur", "hits", "misses", "reused_lines")
+    __slots__ = ("_prev", "_cur", "hits", "misses", "reused_lines",
+                 "peeks", "skipped_fit_tests")
 
     def __init__(self) -> None:
         self._prev: Dict[tuple, object] = {}
@@ -1124,6 +1125,10 @@ class RenderMemo:
         self.hits = 0
         self.misses = 0
         self.reused_lines = 0
+        self.peeks = 0
+        # Ancestors whose own render was never needed, because a child was
+        # already known to be too big. See `_overflows_by_a_child`.
+        self.skipped_fit_tests = 0
 
     def get(self, key: tuple):
         entry = self._cur.get(key)
@@ -1134,6 +1139,24 @@ class RenderMemo:
                 return None
             self._cur[key] = entry          # consulted, so it survives
         self.hits += 1
+        return entry
+
+    def peek(self, key: tuple):
+        """A lookup that answers from cache or not at all.
+
+        `get` is for a caller that will do the work on a miss; this is for one
+        asking a question it can also decline to answer. Promotes on a hit, so
+        the entry survives the rotation like any other consulted entry, and is
+        counted separately: a `peek` that misses is not a cost the way a `get`
+        that misses is.
+        """
+        entry = self._cur.get(key)
+        if entry is None:
+            entry = self._prev.get(key)
+            if entry is None:
+                return None
+            self._cur[key] = entry
+        self.peeks += 1
         return entry
 
     def put(self, key: tuple, value) -> None:
@@ -1327,6 +1350,43 @@ def _annotate_xpaths(page: TrieNode, url_path: Sequence[str], url: str) -> None:
         walk(child, f"/{child.segment}")
 
 
+def _certainly_overflows(child_chars: Sequence[int], window: int) -> bool:
+    """True when the children alone are already too big for the window.
+
+    The lower bound, and the argument for it in full.
+
+    Every rendering decision is scoped to a single element. `_dedupe` groups
+    units by ``addr.xpath`` and compares only within a group; the rule that
+    lets a control consume its own label is keyed the same way; suppression
+    reads a unit's own tag. Nothing in one subtree can remove anything in
+    another, so the parent's rendering contains every line each child renders.
+
+    They sit at the same indentation from either root: `_collect` measures
+    depth from the chunk root and `_render_node` offsets by
+    ``-(node.depth - url_depth)`` to cancel it, so a line costs the same
+    characters wherever the descent reached it from.
+
+    `chars` is ``len("
+".join(lines))``. A child holding L lines of total
+    rendered length S measures ``S + L - 1``. The parent holding all of them
+    measures at least ``sum(S) + sum(L) - 1``, which is
+    ``sum(child_chars) + k - 1`` for k children.
+
+    `_join_inline` merging a run across a child boundary does not threaten it:
+    joining two lines costs one space and saves one newline. Heading label
+    inheritance only adds characters. So the bound stands, and the descent can
+    skip an ancestor's render whenever the children it has already measured
+    exceed the window between them.
+
+    `tests/test_render_bound.py` holds this from both sides -- the floor, the
+    matching upper bound, the element scoping underneath, and the one case
+    where the *upper* bound fails.
+    """
+    if not child_chars:
+        return False
+    return sum(child_chars) + len(child_chars) - 1 > window
+
+
 def _descend(
     node: TrieNode,
     url: str,
@@ -1354,24 +1414,25 @@ def _descend(
             return
 
     mark = len(out)
-    chunk, chars = _render_sized(node, url, url_depth, memo)
-    if not chunk.lines:
-        if key is not None:
-            memo.put(key, [])
-        return
-    if chars <= window:
-        # Cloned on the way into `out`, because `chunk` may be the memo's and
-        # `_level_page` rewrites the depths of everything in `out`.
-        out.append(_clone_chunk(chunk))
-        if key is not None:
-            memo.put(key, [_clone_chunk(chunk)])
-        return
-
+    xpath = _xpath_of(node, url)
     element_children = [
         c for c in node.ordered_children()
         if not c.is_leaf and not _is_terminal_pair(c)
     ]
+
     if not element_children:
+        chunk, chars = _render_sized(node, url, url_depth, memo)
+        if not chunk.lines:
+            if key is not None:
+                memo.put(key, [])
+            return
+        if chars <= window:
+            # Cloned on the way into `out`, because `chunk` may be the memo's
+            # and `_level_page` rewrites the depths of everything in `out`.
+            out.append(_clone_chunk(chunk))
+            if key is not None:
+                memo.put(key, [_clone_chunk(chunk)])
+            return
         # No element to descend into. If the overflow is *one* unit, it is
         # genuinely indivisible: cutting a single value would leave a chunk
         # whose address over-claims, and that is the rule.
@@ -1394,6 +1455,50 @@ def _descend(
             memo.put(key, [_clone_chunk(c) for c in out[mark:]])
         return
 
+    # The children are measured before this node is, which is the whole point.
+    #
+    # The ancestors of an edited leaf reach the page root; each of them is
+    # stale, and each used to ask whether its own subtree fits the window by
+    # rendering that subtree -- at the root, the page. That was the projection
+    # cost that would not go away no matter how much of the page the memo
+    # could serve.
+    #
+    # The children answer it. They have to be measured anyway to be split or
+    # merged, most of them come back from the memo, and by `_certainly_
+    # overflows` their sizes put a floor under this node's. When that floor
+    # clears the window, this node's own render is never needed.
+    sized: List[Tuple[TrieNode, MarkdownChunk, int]] = []
+    child_chars: List[int] = []
+    for child in element_children:
+        rendered, rendered_chars = _render_sized(child, url, url_depth, memo)
+        if not rendered.lines:
+            continue
+        sized.append((child, rendered, rendered_chars))
+        child_chars.append(rendered_chars)
+
+    own = _own_units_chunk(node, url, url_depth, memo)
+    has_own = own is not None and own[0].lines
+
+    if _certainly_overflows(child_chars, window):
+        if memo is not None:
+            memo.skipped_fit_tests += 1
+    else:
+        chunk, chars = _render_sized(node, url, url_depth, memo)
+        if not chunk.lines:
+            if key is not None:
+                memo.put(key, [])
+            return
+        if chars <= window:
+            out.append(_clone_chunk(chunk))
+            if key is not None:
+                memo.put(key, [_clone_chunk(chunk)])
+            return
+
+    if not sized and not has_own:
+        if key is not None:
+            memo.put(key, [])
+        return
+
     # Split, then re-merge adjacent siblings up to the window. Without the
     # merge a page whose root overflows shatters into one chunk per child —
     # measured at 83 chunks averaging 40 characters against a 1200-character
@@ -1405,13 +1510,9 @@ def _descend(
     # are inside. The direction matters: a chunk that over-claimed would let a
     # retrieval hit point at content it does not contain.
     pieces: List[Tuple[str, object, int]] = []
-    own = _own_units_chunk(node, url, url_depth, memo)
-    if own is not None and own[0].lines:
+    if has_own:
         pieces.append(("fits", own[0], own[1]))
-    for child in element_children:
-        rendered, rendered_chars = _render_sized(child, url, url_depth, memo)
-        if not rendered.lines:
-            continue
+    for child, rendered, rendered_chars in sized:
         fits = rendered_chars <= window
         pieces.append(("fits" if fits else "split",
                        rendered if fits else child, rendered_chars))
@@ -1426,7 +1527,7 @@ def _descend(
         # `_merge` returns its single argument unchanged, and both branches
         # carry the pieces' own `MarkdownLine` objects -- which may belong to
         # the memo. The clone here is the one copy per emitted line.
-        out.append(_clone_chunk(_merge(buffer, url, chunk.xpath, len(out))))
+        out.append(_clone_chunk(_merge(buffer, url, xpath, len(out))))
         buffer.clear()
         buffered_chars = 0
 
