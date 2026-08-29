@@ -531,28 +531,45 @@ def score_dedup(truth: PageTruth,
         if norm(unit.value):
             by_value.setdefault(norm(unit.value), []).append(unit)
 
-    redundant: Set[str] = set()
+    # Redundancy is per **lineage cluster**, not per value.
+    #
+    # The principle was already written down -- one element's content restated
+    # by an element it contains -- and then applied to whole value groups.
+    # Hacker News puts a "hide" link on each of thirty stories: sixty units,
+    # one anchor and one text node per story. Each *pair* is a genuine
+    # restatement and markdown collapses it to one line, correctly. Grouped by
+    # value, all sixty became one group with thirty survivors and the page was
+    # charged twenty-nine under-deduplications for rendering thirty distinct
+    # affordances the reader can each click.
+    #
+    # A page saying one true thing thirty times is not being redundant. Only
+    # units standing in an ancestor-descendant relation are, and each such
+    # cluster is one restatement to be scored on its own.
+    clusters: List[List[PageUnit]] = []
     for _value, group in by_value.items():
         if len(group) < 2:
             continue
-        for i, a in enumerate(group):
-            for b in group[i + 1:]:
-                oa, ob = _owner(a.xpath), _owner(b.xpath)
-                if oa == ob or oa.startswith(ob + "/") or ob.startswith(oa + "/"):
-                    redundant.add(a.xpath)
-                    redundant.add(b.xpath)
-                    score.redundant_pairs += 1
+        pending = sorted(group, key=lambda u: len(_owner(u.xpath)))
+        buckets: List[List[PageUnit]] = []
+        for unit in pending:
+            owner = _owner(unit.xpath)
+            for bucket in buckets:
+                if any(owner == _owner(m.xpath)
+                       or owner.startswith(_owner(m.xpath) + "/")
+                       or _owner(m.xpath).startswith(owner + "/")
+                       for m in bucket):
+                    bucket.append(unit)
+                    break
+            else:
+                buckets.append([unit])
+        for bucket in buckets:
+            if len(bucket) > 1:
+                clusters.append(bucket)
+                score.redundant_pairs += len(bucket) - 1
 
-    # Score each lineage group once, by how many of its spellings survived.
-    seen_groups: Set[str] = set()
-    for _value, group in by_value.items():
-        members = [u for u in group if u.xpath in redundant]
-        if len(members) < 2:
-            continue
-        key = norm(members[0].value) + "|" + _owner(members[0].xpath)
-        if key in seen_groups:
-            continue
-        seen_groups.add(key)
+    redundant: Set[str] = {u.xpath for c in clusters for u in c}
+
+    for members in clusters:
         # How many distinct *lines* this lineage still produces -- not how
         # many of its members are "covered". Every member of a lineage is
         # covered by any one line drawn at the element, so counting members
