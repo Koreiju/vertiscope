@@ -1433,6 +1433,41 @@ memory leak is a worse defect than 7.5 ms on the corpus's largest page, and
 this is a trade worth making only against a measurement that says the scan
 hurts.
 
+### Sustained mutation: ten deletions, no accumulated drift
+
+Every corpus figure above is one gesture against a freshly settled trie, and
+that is a weaker claim than it reads as. Each repair starts from the state the
+last one left, so error that cancels at n=1 can compound at n=10, and a map
+that is correct once is not thereby a map that stays correct. `--mutations 10`
+scores at 1, 3, 5 and 10 so that drift shows *where along the sequence* it
+begins.
+
+Ten successive deletions, eight pages whose stability floor is zero:
+
+| page | addresses at start | reached | stale/lost/wrong at each checkpoint |
+|---|---|---|---|
+| books.toscrape | 321 | n=10 | 0/0/0 at 1, 3, 5, 10 |
+| archive.org details | 608 | n=10 | 0/0/0 at 1, 3, 5, 10 |
+| discourse.julialang | 888 | n=10 | 0/0/0 at 1, 3, 5, 10 |
+| old.reddit | 1,378 | n=10 | 0/0/0 at 1, 3, 5, 10 |
+| docs.python re | 5,155 | n=10 | 0/0/0 at 1, 3, 5, 10 |
+| en.wikipedia largest-cities | 6,845 | n=10 | 0/0/0 at 1, 3, 5, 10 |
+| quotes.toscrape | 176 | n=5 | 0/0/0; group exhausted at 8 |
+| news.ycombinator | 711 | n=1 | 0/0/0; group exhausted at 2 |
+
+**28 of 28 measurements exact.** No drift at any checkpoint, on pages from 321
+to 6,845 addresses. Ten repairs deep, each starting from what the last one
+left, and the trie still matches a freshly booted reader address for address.
+
+The two short runs are the harness running out of material rather than
+failures: `delete` removes members of a repeated group, so a group of ten is
+spent by the eighth deletion and a group of four table rows by the second.
+Recorded as stops, not counted as passes.
+
+That upgrades the claim the corpus supports. "Exact under a gesture" was
+established before; "tracked and updated" -- content held correct across a
+sequence of changes, which is what the goal actually asks for -- needed this.
+
 ### How fast the map goes wrong
 
 Knowing the trie grows is not the same as knowing what it costs. The same
