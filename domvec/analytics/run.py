@@ -83,7 +83,7 @@ def _addresses_of_chunks(chunks):
 
 def measure_page(driver, url: str, *, scrolls: int = 2,
                  context_window: int = 1200,
-                 embedder=None) -> AffineReport:
+                 embedder=None, variants=None) -> AffineReport:
     """Load, read, render, and score one page against its own DOM.
 
     Every arrow scored here is an arrow through the patricia trie: the sensor
@@ -106,7 +106,11 @@ def measure_page(driver, url: str, *, scrolls: int = 2,
         driver.get(url)
         time.sleep(1.0)
 
-    sensor = Sensor(driver, url, budget=context_window)
+    # The sensor under test, which may be running a non-default
+    # mechanism. Ground truth below is read from the page itself and is
+    # unaffected, which is what keeps the comparison honest.
+    sensor = Sensor(driver, url, budget=context_window,
+                    variants=variants or {})
     sensor.boot()
     time.sleep(0.6)
 
@@ -311,6 +315,11 @@ def measure_page(driver, url: str, *, scrolls: int = 2,
     phases.ms["queue_embedded"] = float(queue.embedded)
     report.timings = phases.ms
     report.algorithms = report_algorithms
+    # What the page said it was running. Taken from the report rather
+    # than from the request because `shape` disables `pathdelta` in the
+    # sensor, so a row that believed what was asked for would describe a
+    # configuration that never ran.
+    report.variants = dict(stats.get('variants') or {})
     report.chunking = report_chunking
     return report
 

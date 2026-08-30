@@ -23,6 +23,13 @@ def main(argv=None) -> int:
     parser.add_argument("--delta", action="store_true",
                         help="measure what one insertion costs against page "
                              "size, on the local scaling fixture")
+    parser.add_argument("--variants", default="",
+                        help="sensor mechanisms to set for this run, as "
+                             "name=on/off pairs: `dedup=on,gate=off`. "
+                             "Without this no measurement can exercise "
+                             "anything that is off by default, which is "
+                             "how `dedup` came to be documented as on "
+                             "while the code had it off")
     parser.add_argument("--stability", action="store_true",
                         help="what a page does when nothing is done to it: "
                              "two independent maps of the same live document, "
@@ -86,6 +93,24 @@ def main(argv=None) -> int:
             targets = [p.as_uri() for p in pages]
         return targets
 
+    def _variants(text):
+        """`dedup=on,gate=off` -> {"dedup": True, "gate": False}.
+
+        Refuses rather than guesses: a typo that silently measured the default
+        configuration is the exact failure this flag exists to prevent.
+        """
+        out = {}
+        for part in (p.strip() for p in text.split(",")):
+            if not part:
+                continue
+            name, sep, value = part.partition("=")
+            value = value.strip().lower()
+            if not sep or value not in ("on", "off", "true", "false"):
+                raise SystemExit(
+                    "--variants takes name=on/off pairs, not {!r}".format(part))
+            out[name.strip()] = value in ("on", "true")
+        return out
+
     cfg = load_config()
     with browser_session(cfg) as driver:
         if args.stability:
@@ -113,6 +138,7 @@ def main(argv=None) -> int:
             report = measure_drift(driver, targets,
                                    mutations=args.mutations,
                                    kind=args.kind,
+                                   variants=_variants(args.variants),
                                    context_window=args.window)
             print(render_drift_table(report), flush=True)
             print(f"  written: "
@@ -178,6 +204,7 @@ def main(argv=None) -> int:
                 continue
             try:
                 report = measure_page(driver, url, scrolls=args.scrolls,
+                                      variants=_variants(args.variants),
                                       context_window=args.window)
             except Exception as exc:  # noqa: BLE001 - a failed page is a datum
                 print(f"  {url}: {type(exc).__name__}: {exc}", flush=True)

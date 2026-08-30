@@ -712,10 +712,16 @@ class AffineReport:
     # reader configured. A renderer for small context windows is answerable
     # for the size of the units it produces, not only their content.
     chunking: Dict[str, float] = field(default_factory=dict)
+    # Which sensor mechanisms were actually running, as the page
+    # reported them. Without this a row cannot say what it measured,
+    # and a comparison between two configurations is unreadable a week
+    # later.
+    variants: Dict[str, bool] = field(default_factory=dict)
 
     def as_dict(self) -> dict:
         return {
             "url": self.url,
+            "variants": dict(self.variants),
             "page": {
                 "units": len(self.page.units) if self.page else 0,
                 "drawn": len(self.page.drawn) if self.page else 0,

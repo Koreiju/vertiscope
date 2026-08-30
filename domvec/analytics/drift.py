@@ -181,6 +181,11 @@ def _truth(driver, url, window):
     # same name cannot be booted twice on one document: the second truth map
     # died with "can't redefine" and the run stopped at the first checkpoint.
     _truth.seq = getattr(_truth, "seq", 0) + 1
+    # Deliberately on the defaults, whatever the sensor under test is
+    # running. This is the denominator: hand it the same variant and the
+    # two agree by construction, and a variant that dropped half the page
+    # would score perfectly against a truth map that dropped the same
+    # half.
     sensor = Sensor(driver, url, budget=window,
                     handle="domvec_truth_{}".format(_truth.seq))
     sensor.boot()
@@ -251,6 +256,7 @@ def _score(repaired, truth, before=None, unstable=frozenset()):
 def measure_drift(driver, urls: Sequence[str], *, mutations: int = 10,
                   context_window: int = 1200,
                   kind: str = "insert",
+                  variants=None,
                   checkpoints: Sequence[int] = (1, 3, 5, 10)) -> dict:
     """Mutate a page repeatedly; score the repaired trie against a fresh map."""
     from ..sensing import Sensor
@@ -264,7 +270,8 @@ def measure_drift(driver, urls: Sequence[str], *, mutations: int = 10,
             driver.get("about:blank")
             driver.get(url)
             time.sleep(1.8)
-            sensor = Sensor(driver, url, budget=context_window)
+            sensor = Sensor(driver, url, budget=context_window,
+                            variants=variants or {})
             sensor.boot()
             time.sleep(0.8)
             spine = StreamingScan(url, context_window=context_window)
@@ -329,10 +336,24 @@ def measure_drift(driver, urls: Sequence[str], *, mutations: int = 10,
                              removed=snapshot.removed_addresses,
                              moved=snapshot.moved_addresses)
                 if n in checkpoints:
-                    scored = _score(spine.trie,
-                                    _truth(driver, url, context_window),
+                    after_truth = _truth(driver, url, context_window)
+                    # The tail of the exposure: what the page moved
+                    # during and just after the truth walk itself. Both
+                    # maps are post-gesture, so this cannot absorb the
+                    # gesture and forgive a defect.
+                    tail_a = {leaf.address.key(): (leaf.value or '')
+                              for leaf in after_truth.leaves()
+                              if leaf.address is not None}
+                    tail_b = {leaf.address.key(): (leaf.value or '')
+                              for leaf in _truth(driver, url,
+                                                 context_window).leaves()
+                              if leaf.address is not None}
+                    tail = (set(tail_a) ^ set(tail_b)) | {
+                        k for k in set(tail_a) & set(tail_b)
+                        if tail_a[k] != tail_b[k]}
+                    scored = _score(spine.trie, after_truth,
                                     before=before_map,
-                                    unstable=unstable)
+                                    unstable=unstable | tail)
                     scored["after"] = n
                     row["checkpoints"].append(scored)
         except Exception as exc:                       # noqa: BLE001
