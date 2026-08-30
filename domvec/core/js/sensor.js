@@ -272,6 +272,7 @@
   var chunkOf = new WeakMap();   // Node -> {id, digest} for chunk roots only
   var roots = new Map();         // root Node -> MutationObserver
   var dirtySpans = new Map();    // parent Node -> {lo, hi}
+  var pendingMasks = null;       // masked href -> 1, families to recheck
   var front = [], back = [];     // double-buffered emissions
   var removedIds = [];
   var chunkRoots = [];           // live chunk-root slots, for the removal sweep
@@ -282,7 +283,7 @@
   var moves = [];
   var SVG_TITLE_ID = -1;
   var stats = { nodes: 0, folds: 0, repairs: 0, chunks: 0, spans: 0,
-                movedChunks: 0,
+                movedChunks: 0, unrooted: 0, reclassified: 0,
                 observers: 0, closedRoots: 0, errors: 0, skipped: 0,
                 sketchHits: 0, deduped: 0, pruned: 0, offscreen: 0,
                 sr_seen: 0, sr_badtype: 0, sr_badname: 0,
@@ -1139,6 +1140,23 @@
         rec.chars += String(rec.det[i][1]).length;
       }
     }
+    // The address carries the classification, so the classification is part
+    // of the write decision -- rule 5b, the two Merkles. `rec.content` is
+    // deliberately left out of this: matching content across a move must
+    // stay blind to role, and only the digest, which answers "does this
+    // draw the same?", may see it.
+    //
+    // Deleting one sibling re-classified a citation link from
+    // `pagination.family` to `link.anchor` without touching its href. A
+    // value-only digest made that invisible: the gate skipped the chunk, and
+    // the trie kept four addresses the page no longer had while missing the
+    // four it did. No xpath was wrong -- the accessor was.
+    //
+    // `taxOf` is memoised on the record and cleared at the top of every
+    // re-fold, so this hoists the call rather than adding one, and it reads
+    // `tagName` and `textContent` only -- the fold still reads no layout.
+    var tax = taxOf(node, rec);
+    d = mix(d, fnv(tax[0] + '/' + tax[1]));
     rec.digest = d >>> 0;
     rec.dirty = false;
     records.set(node, rec);
@@ -1169,6 +1187,7 @@
       // rather than a re-description of the page.
       var prev = chunkOf.get(node);
       var here = pathKey(path);
+      if (prev) prev.seen = stats.repairs;
       if (USE_GATE && prev && prev.digest === rec.digest
           && prev.path === here) {
         stats.skipped++; return;
@@ -1490,6 +1509,7 @@
     // walked, so the live roots are kept alongside it; a node that leaves the
     // composed tree is swept in `repair` and its id reported.
     if (!slot.tracked) { slot.tracked = true; chunkRoots.push(slot); }
+    slot.seen = stats.repairs;
     slot.node = node;
     slot.digest = rec.digest;
     // Before the id-anchor rewrite below: the gate compares composed paths,
@@ -1500,7 +1520,8 @@
       try {
         var o = new MutationObserver(onMutations);
         o.observe(node, { subtree: true, childList: true,
-                          characterData: !NO_CHARWATCH, attributes: true });
+                          characterData: !NO_CHARWATCH, attributes: true,
+                          attributeOldValue: true });
         slot.watched = true;
         stats.observers++;
       } catch (e) { stats.errors++; }
@@ -1960,12 +1981,121 @@
     stats.spans++;
   }
 
+  // A link's class is not a function of its own subtree.
+  //
+  // `numericFamily` walks four ancestors up and counts the anchors it finds
+  // there, so adding or removing an anchor anywhere in that scope can
+  // re-classify a link that did not itself change. Nothing marks such a link
+  // dirty, it is never re-folded, and `rec.tax` -- cleared only at the top of
+  // a re-fold -- keeps the old verdict for the life of the page.
+  //
+  // Deleting one <li> from a Wikipedia citation list dropped a family below
+  // three and re-classified four surviving links from `pagination.family` to
+  // `link.anchor`. The trie held four addresses the page did not have and
+  // missed the four it did. That this is a cache and not the wire was settled
+  // by turning the gate off: all 6832 units were re-sent and the same four
+  // were still wrong.
+  //
+  // Which links can be affected follows from the rule, so it is not guessed
+  // at. A mutation at `T` changes the anchor set of `subtree(X)` for exactly
+  // the `X` that are ancestors-or-self of `T`; a link's verdict depends only
+  // on the same-mask anchors within its own scope. So a link can change iff
+  //
+  //   (a) its scope is an ancestor-or-self of the mutation, and
+  //   (b) the anchor that entered or left carries its masked href.
+  //
+  // An earlier version invalidated `subtree(anc4(T))` and ignored masks
+  // entirely. That missed every link satisfying (a) from more than four levels
+  // above the change -- a link high in the document whose scope reaches down
+  // to it -- and it ignored (b) outright, so `relocate` on the Wikipedia table
+  // dropped 1198 verdicts to emit nothing.
+  //
+  // Both halves are now exact, and the pair is cheaper than the scoped version
+  // it replaces. Widening to the document costs one query and a regex per
+  // anchor: arithmetic, proportional to the page, and done once per repair
+  // rather than once per mutation. Filtering by mask cuts what gets marked
+  // dirty from every anchor in scope to the family alone, and marking dirty is
+  // the part that costs a re-fold. O(delta) binds on the fold, not on the
+  // scan, so this trades a page-sized scan for a family-sized fold.
+  //
+  // Document-wide *without* the mask filter would also be exact, and is
+  // refused: it dirties every anchor's path, which makes any anchor-bearing
+  // mutation cost a whole-page fold and gives up O(delta) to buy nothing.
+
+  // The membership key, and deliberately the same expression `numericFamily`
+  // uses. A family is hrefs that differ only in their digits, so an href with
+  // no digits cannot belong to one and cannot disturb one either.
+  function maskOf(href) {
+    if (!href || !/\d/.test(href)) return null;
+    return href.replace(/\d+/g, '#');
+  }
+
+  function noteMask(href) {
+    var mask = maskOf(href);
+    if (!mask) return;
+    if (!pendingMasks) pendingMasks = {};
+    pendingMasks[mask] = 1;
+  }
+
+  function noteMasksIn(list) {
+    for (var i = 0; i < list.length; i++) {
+      var n = list[i];
+      if (!n || n.nodeType !== 1) continue;
+      if (n.tagName === 'A') noteMask(n.getAttribute('href'));
+      if (!n.querySelectorAll) continue;
+      // A removed node is detached, not destroyed; it still answers queries,
+      // so the anchors that left inside a subtree are countable here.
+      var inner = n.querySelectorAll('a[href]');
+      for (var k = 0; k < inner.length; k++) {
+        noteMask(inner[k].getAttribute('href'));
+      }
+    }
+  }
+
+  // Once per repair, not once per mutation: a page that appends fifty rows
+  // should pay for one sweep, and the masks accumulate until someone folds.
+  function reclassify() {
+    if (!pendingMasks) return;
+    var masks = pendingMasks;
+    pendingMasks = null;
+    roots.forEach(function (_obs, root) {
+      // Shadow roots are separate query scopes, and a family inside one is
+      // still a family. Skipping them would make the sweep silently partial
+      // exactly where the map already works hardest to be whole.
+      var scope = root.nodeType === 9 ? root.documentElement : root;
+      if (!scope || !scope.querySelectorAll) return;
+      var links = scope.querySelectorAll('a[href]');
+      for (var i = 0; i < links.length; i++) {
+        var rec = records.get(links[i]);
+        // No record, or no verdict yet: nothing cached to be stale.
+        if (!rec || !rec.tax) continue;
+        var mask = maskOf(links[i].getAttribute('href'));
+        if (!mask || !masks[mask]) continue;
+        // Drop the verdict and put the node back in the fold's path. The
+        // re-fold recomputes the class; the class is in the digest, so the
+        // chunk stops being skipped and the new address is drawn.
+        rec.tax = null;
+        markDirty(links[i]);
+        stats.reclassified++;
+      }
+    });
+  }
+
   function onMutations(recs) {
     try {
       for (var i = 0; i < recs.length; i++) {
         var m = recs[i];
         if (USE_SPANS) noteSpan(m);
+        if (m.type === 'attributes' && m.attributeName === 'href') {
+          // Membership is decided on the href itself, so an edit moves the
+          // link between two families and both counts change. `oldValue` is
+          // the only place the family it left is still named.
+          noteMask(m.oldValue);
+          noteMask(m.target.getAttribute && m.target.getAttribute('href'));
+        }
         if (m.type === 'childList') {
+          noteMasksIn(m.addedNodes);
+          noteMasksIn(m.removedNodes);
           for (var a = 0; a < m.addedNodes.length; a++) {
             var an = m.addedNodes[a];
             if (an.nodeType === 1 && an.shadowRoot) observe(an.shadowRoot);
@@ -2012,6 +2142,10 @@
     // property invariants.c2 enforces.
     var t0 = (typeof performance !== 'undefined' && performance.now)
       ? performance.now() : Date.now();
+    // Before the walk, or the fold reads verdicts this pass has just learned
+    // are stale. Inside the timed region, because it is fold work and a phase
+    // timing that hides its own cost is not a phase timing.
+    reclassify();
     try {
       stats.repairs++;
       var out = [];
@@ -2039,7 +2173,28 @@
       var live = [];
       for (i = 0; i < chunkRoots.length; i++) {
         var slot = chunkRoots[i];
-        if (slot.node && slot.node.isConnected) { live.push(slot); continue; }
+        if (slot.node && slot.node.isConnected) {
+          // Connected, and still a chunk root?
+          //
+          // A node can stop being one without leaving the page: delete a
+          // sibling and the budget re-splits the parent, so the run that was
+          // rooted here is rooted one node along. The old slot keeps a live
+          // node, so this sweep kept it, so its id was never reported gone --
+          // and the receiver went on holding every address that id ever
+          // claimed. On archive.org's details page that was 17 addresses the
+          // page no longer has, invisible to every other channel: no unit, no
+          // move, no removal, and the repaired fold emitting exactly the same
+          // 600 addresses as a cold one.
+          //
+          // A full walk visits every live chunk root, so one that was not
+          // visited is not a chunk root any more. Only sound when the walk is
+          // full: `subtreegate` prunes unmoved subtrees, and there an
+          // unvisited root is merely an unchanged one.
+          if (USE_SUBTREEGATE || slot.seen === stats.repairs) {
+            live.push(slot); continue;
+          }
+          stats.unrooted++;
+        }
         slot.tracked = false;
         slot.node = null;
         removedIds.push(slot.id);
@@ -2084,7 +2239,11 @@
       subtree: !USE_PERCHUNK,
       childList: true,
       characterData: !NO_CHARWATCH,
-      attributes: true
+      attributes: true,
+      // Without this an edited href names the family it joined and not the
+      // one it left, so the abandoned family keeps a count that is one too
+      // high and every member of it keeps a stale verdict.
+      attributeOldValue: true
     };
     if (ATTR_FILTER) opts.attributeFilter = ATTR_FILTER;
     obs.observe(root.nodeType === 9 ? root.documentElement : root, opts);
@@ -2141,6 +2300,10 @@
         folds: stats.folds, repairs: stats.repairs, chunks: stats.chunks,
         observers: stats.observers, spans: stats.spans, errors: stats.errors,
         dictSize: dict.length, skipped: stats.skipped,
+        // Chunk roots a full walk did not visit. They are still in the
+        // document, so the connectedness sweep keeps them; their slot has
+        // stopped being a chunk root, and their addresses would linger.
+        unrooted: stats.unrooted, reclassified: stats.reclassified,
         deduped: stats.deduped, sketchHits: stats.sketchHits,
         // How much of the composed tree we could not see into. Reported
         // rather than left in the page, because a coverage figure that does
