@@ -1386,6 +1386,53 @@ the difference between the arms, which is +6 and +25. Same verdict, a
 twentieth of the magnitude, and stated as an absolute it would have condemned
 the mechanism for the pipeline's behaviour.
 
+### What the classification sweep costs, and the one place O(delta) does not hold
+
+The sweep that invalidates stale link verdicts runs inside `repair()`, inside
+the timed region, and until now had never been priced. "Cheap because it is
+filtered" was a claim.
+
+Isolated by two mutations on the same page and the same load -- a `<p>`, which
+queues no masks and skips the sweep entirely, against an `<a href>`, which
+queues one:
+
+| page | anchors | repair without | repair with | **the sweep** |
+|---|---|---|---|---|
+| en.wikipedia largest-cities | 1,326 | 3.5 ms | 11.0 ms | **7.5 ms** |
+| old.reddit r/programming | 317 | 1.0 ms | 3.5 ms | **2.5 ms** |
+| quotes.toscrape | 55 | 0.0 ms | 1.0 ms | **1.0 ms** |
+
+`repairMs` is cumulative in the page, so these are differences between
+consecutive drains; read as absolutes they would rise through both arms and
+make whichever ran second look expensive.
+
+**The mask filter does exactly what it was built to do.** Six insertions on a
+page holding 1,326 anchors invalidated **21** verdicts in total -- which is
+0+1+2+3+4+5+6, since each inserted `/family/N` masks to `/family/#` and
+disturbs only the ones already sharing it. Unfiltered, the same six mutations
+would have re-folded on the order of eight thousand. The page's other 1,300
+anchors are never touched.
+
+So the 7.5 ms is almost entirely the *scan*, not the marking, which is the
+trade the design intended: a page-sized scan buying a family-sized fold.
+
+**And it is the one place the fold is not O(delta).** The fold proper is
+delta-proportional; the classification scan walks every anchor on the page
+whenever an anchor enters or leaves, so an anchor-bearing structural mutation
+costs O(anchors). On the largest page in the corpus that is 7.5 ms, against 45
+ms of fold on news.ycombinator and 38 seconds of embedding. Small, bounded,
+and real.
+
+It is recorded rather than fixed. The fix is an incremental mask-to-anchors
+index maintained as anchors are folded, which would make the sweep O(family)
+and restore O(delta) everywhere. It also means holding references to DOM nodes
+outside a `WeakMap`, because a JavaScript `WeakSet` cannot be iterated -- so
+the index either leaks anchors that leave the document without being noticed,
+or needs a pruning pass that reintroduces the scan it was meant to remove. A
+memory leak is a worse defect than 7.5 ms on the corpus's largest page, and
+this is a trade worth making only against a measurement that says the scan
+hurts.
+
 ### How fast the map goes wrong
 
 Knowing the trie grows is not the same as knowing what it costs. The same

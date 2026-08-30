@@ -60,6 +60,14 @@ DOM — deduplicated, tracked, updated — in **millisecond range** and in
    memoising anything on a record, write down its actual inputs; if any lie
    outside the node's own subtree, the invalidation has to reach them.
 
+5d. **The classification scan is O(anchors), and it is the one exception to
+   O(delta).** `reclassify` walks every anchor on the page when an anchor
+   enters or leaves, because a link's class depends on a query over its fourth
+   ancestor's subtree. Measured: 7.5ms on a 1,326-anchor page, 1.0ms on a
+   55-anchor one. The mask filter keeps the *fold* delta-sized (21 verdicts
+   invalidated where an unfiltered sweep would have re-folded ~8,000), so the
+   cost is the scan alone. Do not quote O(delta) without this exception.
+
 6. **Closed shadow roots stay closed.** Reaching in means patching
    `attachShadow`, which is detectable and is refused. Report them as
    unreachable so the coverage figure stays honest.
