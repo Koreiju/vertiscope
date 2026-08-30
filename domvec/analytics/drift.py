@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import json
 import pathlib
+import sys
 import time
 from typing import Dict, List, Sequence
 
@@ -189,8 +190,38 @@ def _truth(driver, url, window):
     return spine.trie
 
 
-def _score(repaired, truth):
-    """Address-for-address, plus the values where both agree on the address."""
+def _score(repaired, truth, before=None, unstable=frozenset()):
+    """Address-for-address, plus the values where both agree on the address.
+
+    `footprint` is how much of the page the gesture actually disturbed --
+    addresses added or dropped, plus addresses whose value changed, measured
+    between what the trie held beforehand and what the page holds now. It is
+    the size of the change the trie was asked to track, and a page whose
+    footprint is zero cannot fail whatever the sensor does.
+
+    A plain count difference will not do this job. `edit` changes a value and
+    no addresses at all, so its address count is unchanged by design; and a
+    `relocate` that moves one sibling to the end changes which addresses exist
+    without changing how many. Both would read as vacuous. The symmetric
+    difference is the measure that is right for all four gestures.
+
+    `www.w3schools.com/html/html_forms.asp` scored 0 stale and 0 wrong on one
+    run and 9 stale and 4 wrong on the next, same gesture, same group tag. The
+    first run had deleted a DIV holding no addresses at all -- truth came back
+    equal to the starting count -- so there was nothing to vacate and nothing
+    that could have failed. It was not a pass; it was a measurement of nothing,
+    and it sat in the corpus total as evidence for five other pages too.
+
+    `unstable` is the set of addresses the page moved by itself during a
+    control window on this same load; the `_net` figures are the residue with
+    those addresses removed by name. Counting a residue against a floor would
+    not do: five stale addresses under a floor of eight can still be five real
+    defects somewhere the page held still. Only what actually moved may be
+    discounted, and only individually.
+
+    A metric that can be vacuous has to report its own vacuity, which is the
+    non-vacuity rule turned on the harness rather than on the sensor.
+    """
     mine = {leaf.address.key(): (leaf.value or "")
             for leaf in repaired.leaves() if leaf.address is not None}
     theirs = {leaf.address.key(): (leaf.value or "")
@@ -201,8 +232,19 @@ def _score(repaired, truth):
         "fn": len(set(theirs) - set(mine)),
         "fp": len(set(mine) - set(theirs)),
         "value_wrong": sum(1 for k in shared if mine[k] != theirs[k]),
+        # Residue restricted to addresses the page did not move by itself.
+        "fp_net": len([k for k in set(mine) - set(theirs) if k not in unstable]),
+        "fn_net": len([k for k in set(theirs) - set(mine) if k not in unstable]),
+        "value_wrong_net": sum(1 for k in shared
+                               if mine[k] != theirs[k] and k not in unstable),
+        "floor": len(unstable),
         "truth_addresses": len(theirs),
         "trie_addresses": len(mine),
+        # None when the caller did not hand over the pre-gesture map.
+        "footprint": None if before is None else (
+            len(set(before) ^ set(theirs))
+            + sum(1 for k in set(before) & set(theirs)
+                  if before[k] != theirs[k])),
     }
 
 
@@ -233,8 +275,49 @@ def measure_drift(driver, urls: Sequence[str], *, mutations: int = 10,
                 continue
             row["leaves_at_start"] = len(spine.trie)
 
+            # What the page does when nothing is done to it, measured on this
+            # same load and over the same window the gesture gets. Two full
+            # walks by fresh readers; whatever they disagree about, the page
+            # moved by itself and the sensor may not be charged for it.
+            #
+            # On this load rather than from `stability.jsonl` because ad-sync
+            # iframes differ from one page load to the next: the floor is a
+            # property of the document *and* the visit, and a floor imported
+            # from another visit would discount the wrong addresses by name.
+            control_a = {leaf.address.key(): (leaf.value or "")
+                         for leaf in _truth(driver, url, context_window).leaves()
+                         if leaf.address is not None}
+            time.sleep(0.45)
+            control_b = {leaf.address.key(): (leaf.value or "")
+                         for leaf in _truth(driver, url, context_window).leaves()
+                         if leaf.address is not None}
+            unstable = (set(control_a) ^ set(control_b)) | {
+                k for k in set(control_a) & set(control_b)
+                if control_a[k] != control_b[k]}
+            row["floor"] = len(unstable)
+
             for n in range(1, mutations + 1):
-                found = driver.execute_script(MUTATE_JS, n, kind)
+                # Copied, not referenced. `absorb` mutates the trie in place,
+                # so a map held across it describes the page after the gesture
+                # and reports every footprint as zero.
+                before_map = {leaf.address.key(): (leaf.value or "")
+                              for leaf in spine.trie.leaves()
+                              if leaf.address is not None}
+                # The arm that measures the page rather than the sensor.
+                #
+                # coinmarketcap scored 10 wrong values under `delete` and the
+                # same 10 under no mutation at all: a frozen snapshot still
+                # running a clock. A score taken against a moving page is that
+                # page's motion plus ours, and the two are only separable by
+                # measuring the page alone first. Without this arm those ten
+                # were a defect in the delete path that did not exist.
+                #
+                # It needs no repeated group, so it also covers the pages no
+                # gesture can be performed on.
+                if kind == "none":
+                    found = {"ok": True, "tag": None, "count": 0}
+                else:
+                    found = driver.execute_script(MUTATE_JS, n, kind)
                 if not found or not found.get("ok"):
                     row["error"] = "mutation {}: {}".format(
                         n, (found or {}).get("reason", "?"))
@@ -246,13 +329,26 @@ def measure_drift(driver, urls: Sequence[str], *, mutations: int = 10,
                              removed=snapshot.removed_addresses,
                              moved=snapshot.moved_addresses)
                 if n in checkpoints:
-                    scored = _score(spine.trie, _truth(driver, url,
-                                                       context_window))
+                    scored = _score(spine.trie,
+                                    _truth(driver, url, context_window),
+                                    before=before_map,
+                                    unstable=unstable)
                     scored["after"] = n
                     row["checkpoints"].append(scored)
         except Exception as exc:                       # noqa: BLE001
             row["error"] = "{}: {}".format(type(exc).__name__, exc)[:200]
         rows.append(row)
+        # A corpus arm is twenty minutes of browser and prints nothing until
+        # it ends, so an arm that has wedged and an arm that is working look
+        # identical from outside. One line per page on stderr, which keeps the
+        # table on stdout intact for anything parsing it.
+        last = (row.get("checkpoints") or [{}])[-1]
+        print("  [{}/{}] {} {}".format(
+            len(rows), len(urls), kind,
+            row.get("error") or "tp={} fn={} fp={} wrong={}".format(
+                last.get("tp"), last.get("fn"), last.get("fp"),
+                last.get("value_wrong"))),
+            file=sys.stderr, flush=True)
     return {"rows": rows, "mutations": mutations, "kind": kind,
             "context_window": context_window, "t": time.time()}
 
@@ -264,8 +360,9 @@ def render_drift_table(report: dict) -> str:
 
     out = ["", "  the repaired trie against a fresh map of the same document",
            ""]
-    out.append("  {:<30}{:>6}{:>9}{:>8}{:>8}{:>8}{:>10}".format(
-        "page", "after", "truth", "recall", "stale", "lost", "wrong value"))
+    out.append("  {:<30}{:>6}{:>9}{:>8}{:>8}{:>8}{:>10}{:>8}".format(
+        "page", "after", "truth", "recall", "stale", "lost", "wrong value",
+        "moved"))
     for row in rows:
         label = row["url"].rsplit("/", 1)[-1]
         label = label[:-5] if label.endswith(".html") else label
@@ -274,13 +371,49 @@ def render_drift_table(report: dict) -> str:
             continue
         for i, point in enumerate(row.get("checkpoints", [])):
             truth = point["truth_addresses"] or 1
-            out.append("  {:<30}{:>6}{:>9}{:>7.1f}%{:>8}{:>8}{:>10}".format(
+            foot = point.get("footprint")
+            out.append("  {:<30}{:>6}{:>9}{:>7.1f}%{:>8}{:>8}{:>10}{:>8}".format(
                 label[:29] if i == 0 else "", point["after"],
                 point["truth_addresses"],
                 100.0 * point["tp"] / truth,
-                point["fp"], point["fn"], point["value_wrong"]))
+                point["fp"], point["fn"], point["value_wrong"],
+                "-" if foot is None else foot))
         if row.get("error"):
             out.append("  {:<30}stopped: {}".format("", row["error"][:56]))
+    scored = [pt for row in rows for pt in row.get("checkpoints", [])]
+    footed = [pt for pt in scored if pt.get("footprint") is not None]
+    vacuous = [pt for pt in footed if pt["footprint"] == 0]
+    live = [pt for pt in footed if pt["footprint"] > 0]
+    exact = [pt for pt in live
+             if not (pt["fp"] or pt["fn"] or pt["value_wrong"])]
+    # The same count with the page's own motion discounted by name.
+    net = [pt for pt in live
+           if not (pt.get("fp_net") or pt.get("fn_net")
+                   or pt.get("value_wrong_net"))]
+    still = [pt for pt in live if not pt.get("floor")]
+    still_exact = [pt for pt in still
+                   if not (pt["fp"] or pt["fn"] or pt["value_wrong"])]
+    out.append("")
+    if footed:
+        out.append("  measurements scored          {:>5}".format(len(footed)))
+        out.append("  gesture disturbed nothing    {:>5}   excluded: a page "
+                   "that could not fail".format(len(vacuous)))
+        out.append("  EXACT, of those it could     {:>5} of {}".format(
+            len(exact), len(live)))
+        out.append("  EXACT net of the page's own  {:>5} of {}   motion "
+                   "discounted by address, not by count".format(
+                       len(net), len(live)))
+        out.append("  on pages that held still     {:>5} of {}   the subset "
+                   "where exactness is claimable".format(
+                       len(still_exact), len(still)))
+        out.append("")
+    out.append("  `moved` is the gesture's footprint: addresses added or")
+    out.append("  dropped plus values changed, between what the trie held")
+    out.append("  before and what the page holds now. A page whose footprint")
+    out.append("  is zero cannot fail, so counting it as exact inflates the")
+    out.append("  total with pages that were never asked anything. One page")
+    out.append("  scored 0 stale on a run whose deletion removed no addresses")
+    out.append("  and 9 stale on the next, same gesture, same group.")
     out.append("")
     out.append("  `truth` is a second sensor booted on the same live document")
     out.append("  and walked whole -- a real map of the page as it stands, not")

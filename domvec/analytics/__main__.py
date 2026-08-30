@@ -23,12 +23,19 @@ def main(argv=None) -> int:
     parser.add_argument("--delta", action="store_true",
                         help="measure what one insertion costs against page "
                              "size, on the local scaling fixture")
+    parser.add_argument("--stability", action="store_true",
+                        help="what a page does when nothing is done to it: "
+                             "two independent maps of the same live document, "
+                             "no sensor between them. Their disagreement is "
+                             "the resolution limit every drift score on that "
+                             "page has to beat")
     parser.add_argument("--drift", action="store_true",
                         help="mutate each page repeatedly and score the "
                              "repaired trie against a fresh map of it")
     parser.add_argument("--mutations", type=int, default=10)
     parser.add_argument("--kind", default="insert",
-                        choices=("insert", "delete", "edit", "relocate"),
+                        choices=("insert", "delete", "edit", "relocate",
+                                 "none"),
                         help="which gesture --drift applies")
     parser.add_argument("--corpus", action="store_true",
                         help="with --live-delta, run over the frozen corpus in "
@@ -69,8 +76,30 @@ def main(argv=None) -> int:
               flush=True)
         return 0
 
+    def _targets(args):
+        targets = list(args.urls)
+        if args.corpus:
+            root = pathlib.Path(__file__).resolve().parent.parent.parent
+            pages = sorted((root / "tests" / "corpus").glob("*.html"))
+            if args.limit:
+                pages = pages[:args.limit]
+            targets = [p.as_uri() for p in pages]
+        return targets
+
     cfg = load_config()
     with browser_session(cfg) as driver:
+        if args.stability:
+            from .stability import (measure_stability,
+                                    render_stability_table,
+                                    write_stability_artifact)
+            report = measure_stability(driver, _targets(args),
+                                       context_window=args.window)
+            print(render_stability_table(report), flush=True)
+            print(f"  written: "
+                  f"{write_stability_artifact(report, pathlib.Path(args.out))}",
+                  flush=True)
+            return 0
+
         if args.drift:
             from .drift import (measure_drift, render_drift_table,
                                 write_drift_artifact)
