@@ -889,6 +889,19 @@
       if (CONTENT_SET[name] || agnosticSkip(name)) continue;
       val = rest[i].value;
       if (!val || val.length > 8192) continue;
+      // A serialized payload is not this element's reference.
+      //
+      // Parsoid writes `data-mw='{"parts":[{"template":...}'` on every
+      // transcluded citation, and mining it yielded 106 of es.wikipedia's
+      // charged inventions: urls that are template *parameters*, addressed at
+      // the <cite> that carries the blob. The citation's real link is an
+      // <a href> a few nodes away and is captured there, as itself.
+      //
+      // The test is the shape of the value, not the name of the attribute, so
+      // this does not encode one wiki's conventions: a value that begins as
+      // JSON is structured data whose urls are fields inside it.
+      var lead = val.charAt(0);
+      if (lead === '{' || lead === '[') continue;
       pushUrls(out || (out = []), name, val);
     }
     }

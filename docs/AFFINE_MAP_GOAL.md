@@ -1923,6 +1923,26 @@ page shows a reader?* -- answered wrongly in three different ways:
 | `<link>` | metadata **captured** as content | skip |
 | `input[type=hidden]` | machine payload **claimed** as a control | no placeholder |
 | `role="presentation"` | an annotation meaning *no semantics here*, captured **as** semantics | no `@role` line |
+| `data-mw` and its kind | a serialized payload's **fields** mined as the element's own references | no url mining from a value that begins `{` or `[` |
+
+The last is Parsoid's `data-mw='{"parts":[{"template":...}'`, written on every
+transcluded citation. Mining urls out of it produced 106 of es.wikipedia's
+charged inventions -- template *parameters*, addressed at the `<cite>` that
+carries the blob, while the citation's real link is an `<a href>` a few nodes
+away and is captured there as itself.
+
+The test is the **shape of the value, not the name of the attribute**. Naming
+`data-mw` would encode one wiki's conventions into something that is supposed
+to be a universal scrape-renderer; a value that begins as JSON is structured
+data whose urls are fields inside it, wherever it came from.
+
+es.wikipedia's capture arrow after it: **12,880 addresses, one miss, zero
+inventions -- 100.0% recall and 100.0% precision.**
+
+One consequence went unpredicted and is worth recording because it is the
+right one: dedup moved 13 units from `under_dedup` to `collapsed`. The mined
+urls were duplicates of the rendered links, so removing them removed real
+redundancy from the trie rather than merely removing noise.
 
 The last is the sharpest, because it contradicts the sensor's own reading.
 `RENDER_CLASS` maps `presentation` and `none` to `none` -- the element has no
