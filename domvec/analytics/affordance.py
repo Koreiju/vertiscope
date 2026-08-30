@@ -118,11 +118,20 @@ def score_affordance(truth, drawn) -> dict:
 
     covered, phantom = set(), []
     for path in sorted(repl_yes):
-        hit = next((at for at in _ancestors(path) if at in page_yes), None)
-        if hit is None:
+        # *Every* control on the ancestor chain, not the nearest one.
+        #
+        # Controls nest. `<details>` and its `<summary>` are both controls in
+        # the page, and the disclosure's affordance *is* the summary: a reader
+        # who can act on the summary can open the details. Crediting only the
+        # innermost left every `<details>` uncovered and reported 54 of them
+        # as unreachable -- on a page where the sensor had classed all 100
+        # lines under those summaries as `button`, correctly. The sensor was
+        # right and this loop was wrong.
+        hits = [at for at in _ancestors(path) if at in page_yes]
+        if not hits:
             phantom.append(path)
         else:
-            covered.add(hit)
+            covered.update(hits)
     missed = sorted(page_yes - covered)
 
     universe = page_all | repl_all

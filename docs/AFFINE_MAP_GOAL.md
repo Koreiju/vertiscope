@@ -1550,10 +1550,10 @@ the reader nothing except that the map lies.
 | | |
 |---|---|
 | affordances the pages offer | **74,852** |
-| the REPL presents | **74,250** (99.2%) |
+| the REPL presents | **74,573** (99.63%) |
 | **phantom (invented)** | **8** |
-| missed (unreachable) | 602 |
-| pages exact both ways | 95 of 135 |
+| missed (unreachable) | 279 |
+| pages exact both ways | 106 of 135 |
 
 **Precision 99.99%.** Six of the eight phantoms are on coinmarketcap, which
 rewrites itself between the truth read and the drain. The REPL essentially
@@ -1588,14 +1588,40 @@ Each of those passes the test that keeps such corrections honest: **would I
 make this change if the sensor did not exist?** All three are about what an
 affordance is.
 
-**The gap that is the sensor's is left standing.** `<details>` and `<summary>`
-are the largest identified class among the 602 misses, and MDN's CSS reference
-alone holds 118 of each. A `<summary>` toggles its disclosure when clicked;
-the sensor has no handling for it and draws it as text. Fixing the instrument
-in the same breath as patching the one real defect the instrument found would
-be the bias this measurement exists to prevent, so it is recorded here and
-fixed on its own terms -- and the corpus re-measured after, because changing
-what the sensor draws invalidates every drift number above.
+**A third correction, and it retracts the finding this section first reported.**
+
+The `<details>` / `<summary>` misses were recorded here as the one real sensor
+defect the measurement had found -- "the sensor has no handling for it and
+draws it as text" -- and left deliberately unfixed so that correcting the
+instrument could not be confused with flattering the sensor. That reasoning
+was sound and the fact under it was never checked.
+
+The sensor maps `summary` to `button` in `IMPLICIT_ROLE`, and on MDN's CSS
+reference it classes **all 100 lines under those summaries as `button`**,
+alongside 63 links as `link` and 47 buttons as `button`. It was right.
+
+The fault was in the matcher, which credited only the **nearest** ancestor
+control. `<details>` and `<summary>` are both controls in the page, so a drawn
+line inside the summary marked the summary covered and left the details
+uncovered -- every disclosure on the page counted as unreachable. Controls
+nest, and a disclosure's affordance *is* its summary: a reader who can act on
+the summary can open the details. Crediting every control on the ancestor
+chain took the misses from 602 to 279 and the exact pages from 95 to 106.
+
+The lesson is not about disclosure widgets. This finding was singled out here
+*because* it did not flatter the sensor, and that was treated as grounds to
+trust it more. **Being unflattering is not evidence of being true.** On this
+project the base rate says an unverified number is more likely inert or
+miscomputed than correct, whichever direction it points.
+
+**What is left is a definitional boundary, not a defect.** The 279 remaining
+misses are dominated by elements made focusable with `tabindex="0"` and
+nothing else -- every one of the eight sampled on w3.org's WAI-ARIA spec is a
+`<dfn tabindex="0">` with no role, no `onclick` and no `href`. `tabindex`
+makes an element focusable; it does not make it actionable. Removing
+`tabindex` from `isControl` would drop the figure sharply, and that is
+precisely why it stays: the boundary is documented where it is rather than
+moved to improve the number it produces.
 
 ### How fast the map goes wrong
 
