@@ -330,7 +330,27 @@ def measure_drift(driver, urls: Sequence[str], *, mutations: int = 10,
                         n, (found or {}).get("reason", "?"))
                     break
                 row.setdefault("group_tag", found.get("tag"))
-                time.sleep(0.45)
+                # Drain to quiescence, not for a fixed pause.
+                #
+                # A fixed 0.45s reads the answer before a reactive page has
+                # finished writing it. On coinmarketcap one deleted row makes
+                # the page's own framework re-render ~2,200 addresses, and
+                # measured at 0.45s that scored 3 stale and 3 lost; at 1.5s,
+                # zero and zero, with units still arriving -- 15, then 49, 85,
+                # 203. Nothing was missing. The harness was early.
+                #
+                # It was reported as a sensor defect first, and the number it
+                # produced -- "96% of the cascade captured" -- was a
+                # measurement of the harness wearing the sensor's name.
+                #
+                # `_settle` is the same quiescence rule the initial scan uses,
+                # so the gesture is now read the way the boot is. A page that
+                # never goes quiet (a ticker) exits on `limit`, which is why
+                # the value residue on such pages is irreducible and belongs
+                # to the floor rather than to the gesture.
+                row.setdefault("settle_after", [])
+                row["settle_after"].append(
+                    _settle(sensor, spine, quiet_passes=2, limit=12))
                 snapshot = sensor.drain(100 + n)
                 spine.absorb(snapshot.units, snapshot.passno,
                              removed=snapshot.removed_addresses,

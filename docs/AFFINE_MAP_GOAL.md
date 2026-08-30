@@ -1051,10 +1051,35 @@ Two candidates, not yet separated:
   not seen the tail while truth -- walked later -- has, and a second drain would
   catch up.
 
-They are cheaply separable: drain again after a longer wait and re-score. If
-the residue collapses it is the second, and the harness is under-waiting on
-reactive pages -- which would put an asterisk on every gesture number measured
-through it, not only this one.
+They are cheaply separable: drain again after a longer wait and re-score. The
+answer is the second, and it is not close.
+
+    coinmarketcap, one row deleted, drained repeatedly:
+        after   0.5s   units 15    stale 3   lost 3   wrong 15
+        after   1.5s   units 49    stale 0   lost 0   wrong  7
+        after   4.0s   units 85    stale 0   lost 0   wrong  8
+        after  10.0s   units 203   stale 0   lost 0   wrong  3
+    news.ycombinator, same schedule, as a control:
+        every wait     units 0     stale 0   lost 0   wrong  0
+
+Stale and lost reach zero by 1.5 seconds and stay there while units keep
+arriving -- 15, then 49, 85, 203. **Nothing was missing. The harness was
+early.** The residual wrong values are the ticker, which never settles because
+the page never stops, and they belong to the floor rather than to the gesture.
+
+So the earlier reading here -- "the sensor captures about 96% of the cascade
+within 0.45s" -- was a measurement of the harness wearing the sensor's name.
+The sensor captures all of it. The harness sampled before the page had
+finished writing.
+
+The asterisk lands where it was predicted to: on the harness, not on the page.
+The gesture arm now drains to quiescence using `_settle`, the same rule the
+initial scan already used, so a gesture is read the way a boot is. The static
+corpus is unaffected -- a page with no asynchronous re-render has nothing
+outstanding at 0.45s, which is why the control is clean at every wait -- but a
+fixed pause was wrong in principle regardless of which pages it happened to
+flatter. A page that never goes quiet exits on `limit`, so a ticker cannot
+hang the sweep.
 
 Corpus-wide after all three, one gesture per page:
 
