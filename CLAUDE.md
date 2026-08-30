@@ -31,7 +31,7 @@ DOM — deduplicated, tracked, updated — in **millisecond range** and in
    failure of the map. Removing REPL surface that does not serve this is
    explicitly authorised, including things previously called "cool".
 
-3. **Analytics live outside the REPL**, in `domvec/analytics/`, writing their
+3. **Analytics live outside the REPL** (`invariants.c4`, enforced both ways), in `domvec/analytics/`, writing their
    own artifacts to `build_analytics/`. A measurement that lives inside the
    thing it measures cannot be trusted after that thing changes.
 
@@ -49,6 +49,16 @@ DOM — deduplicated, tracked, updated — in **millisecond range** and in
    answers *"does this draw the same?"*; every projection memo must key on
    that one, because a projection prints values verbatim. Keying a render on
    `subtree_hash` serves a stale page after any reformatting edit.
+
+5c. **A cached verdict must name what it is a function of.** `rec.tax` is a
+   node's class, and the class is part of its address; but `numericFamily`
+   decides it by walking four ancestors up and counting anchors, so it is a
+   function of a *neighbourhood*, not of the node. Caches keyed on a node and
+   invalidated when that node changes will hold such a verdict forever —
+   deleting one `<li>` re-classified four Wikipedia links that nothing marked
+   dirty, and the trie kept four addresses the page did not have. Before
+   memoising anything on a record, write down its actual inputs; if any lie
+   outside the node's own subtree, the invalidation has to reach them.
 
 6. **Closed shadow roots stay closed.** Reaching in means patching
    `attachShadow`, which is detectable and is refused. Report them as
@@ -68,6 +78,22 @@ Two rules earned the hard way here, both binding:
 - **Every metric gets a non-vacuity test.** Assert the *planted defect is
   caught*, not merely that the clean case passes. A check that cannot fail is
   not measuring.
+
+- **Measure the page before blaming the sensor.** Every gesture score needs a
+  null arm: the same measurement with no mutation at all. coinmarketcap scored
+  10 wrong values under `delete` and the same 10 under nothing, because the
+  frozen snapshot still runs a clock. `--drift --kind none` is that arm. A
+  score against a moving page is the page's motion plus ours, and they only
+  separate if the page alone is measured first.
+
+- **Every page has a resolution limit; measure it before reading a residue.**
+  Two independent maps of the same live page, seconds apart, no sensor between
+  them — whatever they disagree about is the document moving. w3schools' nine
+  stale addresses were all ad-sync iframes; coinmarketcap's were a ticker.
+  `python -m domvec.analytics --stability --corpus` gives the floor per page,
+  and `drift` subtracts it **by name, on the same page load** — a count-vs-count
+  comparison would discount real defects, and a floor from another visit would
+  discount the wrong addresses.
 
 And the specific trap this project keeps falling into: **a coverage number is
 a claim about the renderer AND a claim about the denominator, and only one of

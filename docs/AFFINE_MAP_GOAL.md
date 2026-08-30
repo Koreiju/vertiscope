@@ -825,6 +825,370 @@ harness reports per page while deleting live content is silent. The rule that
 would close it needs positive evidence of absence — the fold looking at the old
 path and finding nothing — which nothing in the pipeline currently produces.
 
+### Delete, and the three separate things wrong with it
+
+The section above states delete as one defect with one unknown cause. It was
+three, and none of them was the mechanism the two refuted hypotheses proposed.
+The residue split cleanly by page, which is what eventually gave them away —
+one cause per group of pages, not one cause spread thin over all of them.
+
+**1. A chunk root that stopped being one.** archive.org's details page (17
+stale) and ncbi (4).
+
+The fold tracks chunk roots in slots and sweeps them on each repair, dropping
+any whose node has left the document. A deletion re-splits the budget, so the
+chunk boundary moves to a *different node* — and the old slot's node is still
+in the page. It is connected, so the sweep keeps it; it is no longer a chunk
+root, so nothing ever emits under it again; and its addresses stay in the trie
+for the life of the page.
+
+Connectedness was the wrong question. A full repair walk visits every live
+chunk root, so a slot the walk did not visit is not a chunk root any more,
+whatever its node is doing. Stamping each visited slot with the repair number
+and retiring the unvisited ones closed both pages. The soundness condition is
+that the walk be *full*, which is why the retirement is skipped under
+`subtreegate` — that variant prunes unmoved subtrees, so an unvisited slot
+there means only that the pruning worked.
+
+**2. A class that is not a function of the node.** en.wikipedia.org's
+largest-cities table: 4 stale and 4 lost, which is the whole of that page's
+residue.
+
+The four stale addresses and the four lost ones had **identical xpaths**. They
+differed in the accessor: `href|pagination.family/link` against
+`href|link.anchor/link`. No address arithmetic was wrong. The node's *class*
+had changed, and the class is part of the address.
+
+`numericFamily` decides whether a link is a pager by walking four ancestors up
+and counting the anchors under that scope — three distinct members of one
+numeric family is a series, two is a coincidence. Deleting one `<li>` dropped
+the citation family to two and re-classified the survivors. The survivors did
+not change, so nothing marked them dirty, so they were never re-folded, and
+`rec.tax` — cleared only at the top of a re-fold — kept the old verdict
+permanently.
+
+The gate was innocent, and the measurement that establishes it is the one worth
+keeping: with `gate: False`, **all 6,832 units were re-sent and the same four
+addresses were still wrong**. That rules out, in a single run, every
+explanation that lives in what gets transmitted. The staleness was in the page,
+not on the wire.
+
+Two changes, and neither works without the other:
+
+- the fold invalidates cached verdicts in the scope of an anchor change, and
+  puts those nodes back in its path so the class is recomputed;
+- the class is mixed into `rec.digest`, so a recomputed class is a *reason to
+  redraw*. Without it the re-fold produces an identical digest — the value did
+  not change — the gate skips the chunk, and the page keeps the fresh verdict
+  to itself.
+
+This is rule 5b again, and the sharpest instance of it so far: the digest
+answers "does this draw the same?", and the class changes what is drawn, so the
+digest must see it. `rec.content` deliberately does not take the class, because
+content matching across a move must stay blind to role.
+
+The invalidation is guarded to anchors entering or leaving the scope — or an
+`href` being edited, which changes family membership without adding or removing
+anything — because only anchors are counted. Without the guard it is a
+`querySelectorAll` on every childList mutation a page makes.
+
+It is bounded, not total, and the bound is stated rather than glossed: the
+scope is the rule's own four-ancestor radius taken *from the mutation's side*,
+which covers a family sharing an ancestor with the change. A link whose scope
+reaches the change from further away is not reached. That is named residue.
+
+The mechanism is visibly discriminating rather than a blanket re-send: on the
+`relocate` gesture the same page reclassifies 1,198 links and emits **0 units**,
+because every recomputed verdict came back the same.
+
+#### What the scoped invalidation missed, derived rather than guessed
+
+"Bounded, not total" is not a statement anyone can check. The bound follows
+from the rule itself, so it can be written down exactly.
+
+Let `S(A)` be anchor `A`'s scope — the node four levels above it, which is what
+`numericFamily` walks to. Let `T` be a mutation's target. Then:
+
+- A mutation at `T` changes the anchor set of `subtree(X)` for exactly those
+  `X` that are ancestors-or-self of `T`.
+- `A`'s verdict depends only on how many anchors in `subtree(S(A))` share its
+  masked href.
+
+So **`A`'s verdict can change iff `S(A)` is an ancestor-or-self of `T`, and the
+anchor that entered or left carries `A`'s mask.** Two conditions, and the
+invalidation should match both.
+
+The scoped version invalidates `subtree(anc4(T))`. Against the first condition:
+
+- If `depth(S(A)) >= depth(T) - 4`, then `S(A)` lies on `T`'s ancestor chain at
+  or below `anc4(T)`, so `subtree(S(A))` is inside `subtree(anc4(T))` and `A`
+  is reached. Covered.
+- If `depth(S(A)) < depth(T) - 4`, then `A` sits at `depth(S(A)) + 4`, strictly
+  *above* the mutation, and may be in a branch `subtree(anc4(T))` never
+  touches. Not reached.
+
+The residue is therefore exactly: **an anchor shallower than the change, whose
+fourth ancestor is a strict ancestor of the change's fourth ancestor** — a link
+high in the document whose scope reaches all the way down to the mutation. Not
+"some links far away": a stated set, which a test can construct.
+
+Against the second condition, the scoped version does nothing at all: it
+invalidates every anchor in the scope regardless of mask, which is why
+`relocate` on the Wikipedia table reclassifies 1,198 links to emit nothing.
+
+Both conditions pointed the same way, and the replacement — now in the fold —
+is cheaper than what it replaced:
+
+- **Scope: every observed root.** Exact on the first condition, and it closes
+  the residue outright. Shadow roots are separate query scopes, so the sweep
+  walks `roots` rather than `document`: a family inside a shadow root is still
+  a family, and querying only the document would make the sweep silently
+  partial exactly where the map works hardest to be whole.
+- **Membership: same masked href.** Exact on the second, and it is the rule's
+  own criterion rather than a heuristic filter.
+
+Both halves are held by tests that fail against the scoped version.
+`link_family_deep.html` is built to the derivation rather than found on a page:
+a link two levels down has the whole document for a scope and counts all three
+members of its family, while the members themselves are nested eight divs
+deeper and never make three between them. Removing one re-classifies the
+shallow link from a branch `subtree(anc4(T))` cannot contain, which is the
+residue set stated above and nothing else. The filter's test inserts an anchor
+of a *different* mask and requires that nothing be re-folded for it.
+
+The sweep runs **once per repair, not once per mutation**: masks accumulate as
+mutations arrive and are drained before the fold walks. A page appending fifty
+rows pays for one sweep. It sits inside the timed region, because a phase
+timing that hides its own cost is not a phase timing.
+
+One hole this closed on the way past: the observers now set
+`attributeOldValue`. Without it an edited href names the family it *joined* and
+not the one it *left*, so the abandoned family keeps a count one too high and
+every remaining member of it keeps a stale verdict.
+
+Measured on six pages, one gesture each, the filter is what pays for the
+widening — same units emitted, same exact map, a fraction of the fold:
+
+| page · gesture | anchors marked dirty, scoped | mask-filtered |
+|---|---|---|
+| en.wikipedia largest-cities · delete | 1198 | **2** |
+| en.wikipedia largest-cities · relocate | 1201 | **5** |
+| news.ycombinator · relocate | 228 | **0** |
+| books.toscrape · relocate | 92 | **2** |
+| quotes.toscrape · relocate | 55 | **4** |
+| ncbi pmc · delete | 38 | **0** |
+
+Wikipedia's delete still emits the same 25 units and is still exact; it reaches
+that by re-folding two nodes instead of 1,198. The zeros are the honest half of
+the same story — a relocation that disturbs no numeric family now costs nothing
+at all, where before it re-folded every anchor within four levels of the move.
+
+The cost moves in the right direction because the two changes pull against each
+other. Widening the scope costs one `querySelectorAll` and a regex per anchor —
+work proportional to the page, but arithmetic, done once per repair that saw an
+anchor change rather than once per mutation. Filtering by mask cuts what is
+marked dirty from *every anchor in scope* to *the family*, and marking dirty is
+the part that costs a re-fold. The O(delta) constraint binds on the fold, not
+on the scan, so trading a page-sized scan for a family-sized fold is the trade
+this codebase wants.
+
+The alternative — document-wide invalidation without the mask filter — is
+exact too, and was rejected: it marks every anchor's path dirty, which makes any
+anchor-bearing mutation cost a whole-page fold and gives up O(delta) outright.
+
+Corpus-wide after all three, one gesture per page:
+
+| delete, over the frozen corpus | before | after |
+|---|---|---|
+| pages measured | 117 | 117 |
+| of those, the gesture disturbed nothing | — | 5 |
+| **exact, of the 112 it could fail on** | — | **110** |
+| stale addresses | 25 (3 pages) | 9 (1 page) |
+| **lost addresses** | 4 | **0** |
+| wrong values | 10 | 12, on one self-moving page |
+| addresses scored | — | 303,480 |
+
+The five excluded pages are not a rounding detail; they are the harness
+scoring itself. `www.w3schools.com/html/html_forms.asp` returned 0 stale and 0
+wrong on one run and 9 stale and 4 wrong on the next, same gesture and same
+group tag, because the first run's deletion removed a `DIV` holding no
+addresses at all — truth came back equal to the starting count. Nothing was
+asked of the trie, so nothing could fail, and the page sat in the total as
+evidence. The count without that exclusion was 115 of 117; it is 110 of 112.
+
+`_score` now records a **footprint** — addresses added or dropped plus values
+changed, between what the trie held before the gesture and what the page holds
+after — and the summary excludes footprint-zero measurements from the exact
+count. A plain count difference would not have worked: `edit` changes a value
+and no addresses by design, and a `relocate` of one sibling changes which
+addresses exist without changing how many, so both would have read as vacuous.
+This is the non-vacuity rule turned on the harness rather than on the sensor.
+
+Sixteen pages have no drawn repeated group to delete from and three errored
+(one 45s navigation timeout, two groups too small); both sets are excluded
+from the denominator rather than counted as passes.
+
+What is left is two pages, and they are not the same kind of thing.
+coinmarketcap's twelve wrong values are the page's own clock, measured
+below. `www.w3schools.com/html/html_forms.asp` holds nine stale addresses and
+four wrong values and is **new** — it was not among the three pages carrying
+delete's residue before, so it is a separate fault and is recorded as one
+rather than assumed to be a remnant of these.
+
+**3. A page that moves on its own.** coinmarketcap: 10 wrong values, and not
+ours.
+
+The null control settles it — no mutation at all, sensor booted and drained
+against a truth map taken moments later, and the page scores **10 wrong**,
+which is the same figure the delete gesture reported. It is a frozen snapshot
+still running a clock. The gesture was never the cause, and attributing those
+ten to the delete path would have been a fabricated defect to chase.
+
+That is the arm every gesture measurement needs and only `live_delta` had. A
+score against a moving page is a score of the page's motion plus ours, and
+subtracting requires measuring the page alone first.
+
+### The resolution limit, and why two pages were never defects
+
+Twice a page's residue was read as a sensor defect first, and twice the page
+was the cause. coinmarketcap's twelve wrong values under `delete` were a price
+ticker. `www.w3schools.com/html/html_forms.asp` held nine stale addresses and
+four wrong values, and **every one of them was at `/html/iframe[N]`**, holding
+an ad-sync beacon URL — `user-sync.fwmrm.net`, `ap.lijit.com`,
+`prebid.a-mo.net`. The page's own scripts append and recycle those iframes on
+`<html>` for as long as it is open.
+
+The null control said the same: 7 stale and 6 wrong on that page with no
+mutation at all, all in iframes. But the decisive form of the evidence takes
+the sensor out of the room entirely — **two independent truth maps of the same
+live page, three seconds apart, each a full walk by a freshly booted reader,
+with no incremental path and no mutation between them**:
+
+| page | addresses | disagrees with itself | where |
+|---|---|---|---|
+| w3schools html-forms | 1,773 | **8** | 8 of 8 in iframes |
+| coinmarketcap | 1,524 | **21** | ticker values |
+| quotes.toscrape | 176 | **0** | — |
+
+The document disagrees with itself. Nothing else is present to blame. So
+`delete` is exact on every page in the corpus that holds still, and the two
+pages that were carrying its remaining residue were never carrying a defect.
+
+This is now measured rather than re-derived by hand whenever a page looks
+guilty. `domvec/analytics/stability.py` gives each page a **resolution
+limit**: a page whose floor is eight addresses cannot evidence a four-address
+defect in either direction, and a corpus total that sums residues without
+their floors is summing signal with noise and calling the result accuracy. It
+is deliberately not part of `drift`, because the floor is a property of the
+document rather than of a gesture and has to be measurable without one.
+
+Two things it is careful about, because the crude versions of both are wrong:
+
+- **The floor is subtracted by name, not by count.** Five stale addresses under
+  a floor of eight can still be five real defects somewhere the page held
+  still. `_score` takes the *set* of addresses that moved during a control
+  window and reports `fp_net` / `fn_net` / `value_wrong_net` with exactly those
+  discounted.
+- **The floor is measured on the same page load.** Ad-sync iframes differ from
+  one visit to the next, so a floor imported from `stability.jsonl` would
+  discount the wrong addresses by name. `measure_drift` therefore takes its own
+  control window — two full walks, the same 0.45s the gesture gets — before
+  touching the page.
+
+What the drift table now reports, per arm: how many measurements the gesture
+disturbed nothing on (excluded), how many were exact, how many were exact net
+of the page's own motion, and how many were exact on the subset of pages that
+held still — which is the only subset where "exact" is a claim about the
+sensor at all.
+
+### No measurement can currently exercise a sensor variant
+
+Deduplication correctness is scored, and scored properly: `DedupScore` names
+both errors rather than reporting one rate. `over_dedup` is distinct page
+content collapsed into one -- loss, the dangerous direction -- and
+`under_dedup` is redundancy emitted twice, which is noise. That covers the
+default pipeline, markdown suppression rules included.
+
+What it does not cover is the sensor's own subsumption. `USE_DEDUP` --
+sketch-then-verify, `subsumed(rec, seen)` at emit -- is declared
+`!!V.dedup`, so it is **off unless asked for**, unlike `gate`, `cache` and
+`intern`, which are `V.x !== false`. The catalogue removed from the REPL
+asserted the opposite, listing dedup among the "settled mechanisms, on by
+default". The code disagreed with it, and nothing checked.
+
+The reason that went unnoticed is structural rather than careless: **every
+analytics module constructs its sensor as `Sensor(driver, url, budget=...)`,
+with no variants at all.**
+
+    domvec/analytics/run.py:109        Sensor(driver, url, budget=...)
+    domvec/analytics/drift.py:184      Sensor(driver, url, budget=...)
+    domvec/analytics/drift.py:267      Sensor(driver, url, budget=...)
+    domvec/analytics/delta.py:85       Sensor(driver, url, budget=...)
+    domvec/analytics/live_delta.py:266 Sensor(driver, url, budget=...)
+
+So no measurement in the suite can answer a question about any mechanism that
+is off by default. "Is the sensor's subsumption safe to enable?" is not a hard
+question -- `DedupScore` is exactly the instrument for it, and the failure mode
+it would catch, silent loss of distinct content, is the one that matters -- but
+it is currently unaskable. The design space had a vocabulary and no way to
+measure anything in it, which is the same defect the vocabulary itself turned
+out to be.
+
+The fix is small: thread `variants` through `measure_page` and `measure_drift`
+and expose it on the CLI, then run the dedup arm both ways and let the
+over-dedup count decide. It is not being applied mid-sweep -- the chained arms
+each start a fresh `python -m domvec.analytics`, so an edit to the harness now
+would land between arms and put two instruments in one table.
+
+### The asynchronous phase has never had anything to time
+
+The goal asks for the mutation-chunking algorithm and the embedding phase to
+be timed separately, and structurally they are. One row of `affine.jsonl`:
+
+    fold_ms 14.0   drain_ms 29.9   decode_ms 3.2   trie_ms 17.3
+    markdown_ms 34.4   wire_ms 1.1
+    embed_queue_ms 0.071   embed_ms 0.001   total_ms 3264.3
+
+The fold, the crossing, the decode, the trie write, both renderings, the queue
+and the embedder each have their own number, and the total is there beside
+them. That is the shape the goal asked for.
+
+But `embed_ms` is 0.001 because nothing was embedded. Across **all 84 recorded
+runs: 7,053 chunks pushed to the queue, 0 ever embedded.** `measure_page` takes
+`embedder=None` and the CLI never supplies one, so `queue.flush(embedder)`
+returns immediately.
+
+The code says so rather than hiding it — *"With no embedder this reports the
+queue's own cost and an `embedded` count of zero, which is the honest reading
+of 'decoupled': the delta path did not wait"* — and that reading is fair as far
+as it goes. What `embed_queue_ms` of 0.071ms genuinely establishes is the
+decoupling: pushing 8 chunks costs the delta path a fifteenth of a millisecond,
+so vectorization is off the recursion, which is half of what the goal asks.
+
+The other half is unmeasured. `embed_ms` is not evidence that embedding is
+fast; it is the absence of embedding. A real embedder exists
+(`domvec/core/embedding_service.py`, with a model backend and batching), and
+`live_delta` already uses an input-dependent counting stub for its cache-reuse
+check, deliberately not a constant one because a constant embedder would make
+any cache look correct. Closing this means threading a real embedder into the
+affine run so that `embed_ms` measures embedding and `embed_queue_ms` keeps
+showing the fold did not wait for it. Until then the async phase's own cost and
+throughput are not known, and the timing table should be read as one measured
+half and one placeholder.
+
+While that row was being read, two other numbers in the same artifact settled
+open questions:
+
+    dedup:      redundant_pairs 54  collapsed 54  under_dedup 0  over_dedup 0
+    algorithms: deduped 0  near_dups 0  sketch_hits 0
+
+The pipeline collapses redundancy correctly -- 54 of 54, and **zero
+over-dedup**, which is the direction that loses content. And `deduped: 0`
+confirms from the other side that the sensor's own subsumption contributes
+nothing in the default configuration, exactly as `!!V.dedup` implies. The
+dedup correctness the goal asks for is real; it is the markdown pipeline's,
+not the sensor's.
+
 ### How fast the map goes wrong
 
 Knowing the trie grows is not the same as knowing what it costs. The same
