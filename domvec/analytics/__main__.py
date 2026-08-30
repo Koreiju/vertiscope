@@ -37,6 +37,11 @@ def main(argv=None) -> int:
                              "anything that is off by default, which is "
                              "how `dedup` came to be documented as on "
                              "while the code had it off")
+    parser.add_argument("--affordance", action="store_true",
+                        help="what the REPL offers to interact with, "
+                             "against what the page can be. The coverage "
+                             "arrows score addresses; this scores whether "
+                             "a drawn control is a real one")
     parser.add_argument("--stability", action="store_true",
                         help="what a page does when nothing is done to it: "
                              "two independent maps of the same live document, "
@@ -133,6 +138,18 @@ def main(argv=None) -> int:
 
     cfg = load_config()
     with browser_session(cfg) as driver:
+        if args.affordance:
+            from .affordance import (measure_affordance,
+                                     render_affordance_table,
+                                     write_affordance_artifact)
+            report = measure_affordance(driver, _targets(args),
+                                        context_window=args.window)
+            print(render_affordance_table(report), flush=True)
+            print(f"  written: "
+                  f"{write_affordance_artifact(report, pathlib.Path(args.out))}",
+                  flush=True)
+            return 0
+
         if args.stability:
             from .stability import (measure_stability,
                                     render_stability_table,

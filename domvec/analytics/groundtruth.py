@@ -95,8 +95,17 @@ var FOLDED = {SELECT:1, DATALIST:1, OPTGROUP:1};
 var MEDIA = {IMG:1, PICTURE:1, SVG:1, VIDEO:1, AUDIO:1, SOURCE:1, IFRAME:1,
              EMBED:1, OBJECT:1};
 var MEDIA_ATTRS = ['src', 'srcset', 'poster', 'data', 'data-src'];
-var CONTROL_TAGS = {A:1, BUTTON:1, INPUT:1, SELECT:1, TEXTAREA:1, SUMMARY:1,
-                    DETAILS:1, OPTION:1, LABEL:1};
+// AREA carries an href in an image map and is role=link in HTML-AAM: a
+// clickable region of a picture is a place the page can be interacted with,
+// and leaving it out charged weather.gov's 254 map regions to the renderer as
+// invented affordances when the renderer had them right.
+//
+// LABEL is deliberately absent. A label is a *name* for a control, and
+// clicking one activates the control it names -- which is counted in its own
+// right. Counting both makes one affordance two, and the second is not
+// somewhere a reader can do anything the first does not already offer.
+var CONTROL_TAGS = {A:1, AREA:1, BUTTON:1, INPUT:1, SELECT:1, TEXTAREA:1,
+                    SUMMARY:1, DETAILS:1, OPTION:1};
 var CONTROL_ROLES = {button:1, link:1, checkbox:1, radio:1, textbox:1,
                      searchbox:1, combobox:1, listbox:1, slider:1, tab:1,
                      menuitem:1, switch:1, option:1, spinbutton:1};
@@ -170,7 +179,16 @@ function sourceOf(el) {
 
 function isControl(el) {
   if (CONTROL_TAGS[el.tagName]) {
-    if (el.tagName === 'A') return el.getAttribute('href') !== null;
+    // An anchor or a map region without an href goes nowhere and does
+    // nothing; it is a name, not an affordance.
+    if (el.tagName === 'A' || el.tagName === 'AREA')
+      return el.getAttribute('href') !== null;
+    // An input the page never lays out cannot be reached by a reader, so it
+    // is not an affordance the renderer is answerable for.
+    if (el.tagName === 'INPUT') {
+      var ty = (el.getAttribute('type') || 'text').toLowerCase();
+      if (ty === 'hidden') return false;
+    }
     return true;
   }
   var role = (el.getAttribute('role') || '').trim().toLowerCase();

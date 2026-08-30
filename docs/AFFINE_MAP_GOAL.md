@@ -1528,6 +1528,75 @@ that is genuine, includes the closed-root case, and is small. The corpus figure
 should not be quoted as the evidence for shadow DOM correctness; it is
 consistent with it.
 
+### What the REPL offers to interact with, against what the page can be
+
+The goal asks that what we see in the page is what we get in the REPL, and
+that its interactive elements be the page's own rather than a vocabulary of
+commands laid over it. That is a claim about **affordances**, and none of the
+coverage arrows make it.
+
+`page->wireframe` scores whether the right addresses were drawn, and reports a
+false positive only for an **invented address** -- a path the composed tree
+does not contain. A `<div>` drawn as a button passes it: the path is real and
+only its class is a fiction. The address is right and the affordance is not.
+
+The two errors are not symmetric, so they are counted apart. A **missed**
+control is visible: a reader looking for a button finds prose. A **phantom** is
+worse and invisible: it invites an interaction that cannot exist, and teaches
+the reader nothing except that the map lies.
+
+`domvec/analytics/affordance.py`, over the whole corpus:
+
+| | |
+|---|---|
+| affordances the pages offer | **74,852** |
+| the REPL presents | **74,250** (99.2%) |
+| **phantom (invented)** | **8** |
+| missed (unreachable) | 602 |
+| pages exact both ways | 95 of 135 |
+
+**Precision 99.99%.** Six of the eight phantoms are on coinmarketcap, which
+rewrites itself between the truth read and the drain. The REPL essentially
+never offers an interaction the page cannot perform.
+
+The comparison is deliberately non-circular. The REPL's side is the sensor's
+`INTERACTIVE_KIND`; the page's side is `groundtruth.isControl`, deciding from
+tags, roles, `onclick` and `tabindex` with no knowledge of `RENDER_CLASS`.
+Scored against the sensor's own table it would show only that the table equals
+itself, which is the shape of every vacuous measurement here.
+
+**Getting to that number took two corrections, and both were the instrument.**
+
+Matching by path equality first reported **2,005 invented affordances**.
+Ground truth marks the `<a>`; the sensor addresses the `<span>` holding the
+link's words, which inherits the link class because that is what a reader sees
+-- one link, drawn once, wherever its text sits. Every link on ar.wikipedia
+scored as invented. Both sides were right and the comparison was wrong;
+matching is by containment now, and the reasoning sits in the function so it is
+not simplified back.
+
+The second reading reported **267**, of which 254 were `<area href>` on
+weather.gov's image map. `CONTROL_TAGS` had no `AREA`, though HTML-AAM maps it
+to role `link` and a clickable region of a picture is plainly somewhere a
+reader can act. Also corrected: `LABEL` removed, because a label is a *name*
+for a control and clicking one activates the control it names, which is counted
+in its own right -- counting both makes one affordance two; and
+`input[type=hidden]` excluded, because an input the page never lays out cannot
+be reached.
+
+Each of those passes the test that keeps such corrections honest: **would I
+make this change if the sensor did not exist?** All three are about what an
+affordance is.
+
+**The gap that is the sensor's is left standing.** `<details>` and `<summary>`
+are the largest identified class among the 602 misses, and MDN's CSS reference
+alone holds 118 of each. A `<summary>` toggles its disclosure when clicked;
+the sensor has no handling for it and draws it as text. Fixing the instrument
+in the same breath as patching the one real defect the instrument found would
+be the bias this measurement exists to prevent, so it is recorded here and
+fixed on its own terms -- and the corpus re-measured after, because changing
+what the sensor draws invalidates every drift number above.
+
 ### How fast the map goes wrong
 
 Knowing the trie grows is not the same as knowing what it costs. The same
