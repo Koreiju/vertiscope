@@ -630,8 +630,44 @@ Correct delivery had to come first; the rule was never the problem.
 everywhere, nothing is lost, and staleness is down from 17,409 addresses to
 241.
 
-**Still open.** 241 stale addresses across 27 pages and 129 wrong values across
-25. The wrong values are the worse class and the next target. `discourse.julialang.org`
+### An obsolete guard, and what it was costing
+
+A re-emitted chunk's fresh address set is authoritative for that chunk: an
+address it emitted last time and does not emit now is gone. The fold used to
+spare such an address whenever its *content* reappeared elsewhere in the same
+chunk — a guard written because comparing address sets alone once manufactured
+N phantom removals for one node arriving (400 on a 400-item list), which the
+trie applied, destroying 399 identities the re-anchor had just preserved.
+
+Two things had since made it unnecessary. A shift within a chunk now travels as
+a **move** rather than a re-emission, so the 400-item case reports 400 moves
+and no removals at all, with the guard or without it. And `AddressTrie.apply`
+skips any removal the same drain contradicts, which is the same protection
+stated where the write happens.
+
+What it was costing: on a re-emitted chunk whose addresses shifted, every
+departed address was spared and the trie kept it. doc.rust-lang.org held **54
+stale addresses against a page with 81**, info.cern.ch 30 against 81, noaa.gov
+28 of 357.
+
+| after one insertion, 119 corpus pages | ancestor guard fixed | + vacate orphans | + drop the content guard |
+|---|---|---|---|
+| **pages exact** | 40 | 70 | **91** |
+| addresses stale (pages) | 3,864 (73) | 241 (27) | **3 (1)** |
+| addresses lost | 0 | 0 | 4 |
+| wrong values (pages) | 134 (26) | 129 (25) | 130 (26) |
+| recall, median / min | 100% / 100% | 100% / 100% | 100% / **99.8%** |
+
+**91 of 119 pages are now exact** after an insertion — nothing stale, nothing
+lost, nothing wrong. Two pages are imperfect on addresses at all:
+data.gov.uk holds 3 stale of 3,092, and w3schools loses 4 of 1,774.
+
+**Still open.** 130 wrong values across 26 pages, and the shape of them is now
+clear: 30 of them are on php.net, all `code` tokens inside syntax-highlighted
+`<pre><code><span>` blocks, each both a move source *and* a move destination —
+a permutation among near-identical punctuation. Wrong content at a right
+address remains the worst class, and it is now the only class left at any
+scale. `discourse.julialang.org`
 holds 58 addresses with another row's content and loses 44, and
 ar.wikipedia.org loses ~750 — both unchanged by this work and both pre-dating
 it. Wrong content at a right address remains the worst class and the next

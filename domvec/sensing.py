@@ -399,26 +399,31 @@ class Sensor:
             previous = self._chunk_addrs.get(cid)
             if previous:
                 fresh = {a.key() for a, _h in addrs}
-                # Content that moved *within* this chunk has not left it.
+                # A chunk's fresh address set is authoritative for that chunk:
+                # those are the addresses it has now, so one it emitted last
+                # time and does not emit this time is gone.
                 #
-                # A chunk keeps its id across a shift -- `chunkOf` is a WeakMap
-                # on the node, so the id is stable -- but its addresses are
-                # positional, so inserting one <li> at the head makes the same
-                # chunk emit li[2..N+1] where it emitted li[1..N]. Comparing
-                # address sets alone then reads every one of them as departed,
-                # and one node arriving manufactured N phantom removals: 400 of
-                # them for a 400-item list, which the trie faithfully applied,
-                # destroying 399 identities the re-anchor had just preserved.
+                # This used to spare an address whose *content* reappeared
+                # elsewhere in the chunk, because comparing address sets alone
+                # once manufactured N phantom removals for one node arriving --
+                # 400 on a 400-item list -- which the trie applied, destroying
+                # 399 identities the re-anchor had just preserved.
                 #
-                # An address is only gone when its *content* is gone from the
-                # chunk too. Identical strings are indistinguishable here, as
-                # they are in the trie's own re-anchor (THEORY Prop. 19.3): if
-                # one of two identical values leaves, the survivor's digest
-                # keeps both alive. Harmless for the same reason -- nothing
-                # downstream can tell them apart.
-                still = {h for _a, h in addrs}
-                gone.extend(a for a, h in previous
-                            if a.key() not in fresh and h not in still)
+                # Two things have since made that guard unnecessary, and it is
+                # measurably harmful without them. A shift within a chunk now
+                # travels as a *move* rather than a re-emission, so the
+                # 400-item case reports 400 moves and no removals at all, with
+                # or without the guard. And `AddressTrie.apply` skips any
+                # removal this same drain contradicts, which is the same
+                # protection stated where the write happens.
+                #
+                # What the guard cost: on a re-emitted chunk whose addresses
+                # shifted, every departed address was spared and the trie kept
+                # it. doc.rust-lang.org held 54 stale addresses against a page
+                # with 81, info.cern.ch 30 against 81, noaa.gov 28. Removing
+                # it takes all three to zero, loses nothing and destroys no
+                # identity.
+                gone.extend(a for a, _h in previous if a.key() not in fresh)
             self._chunk_addrs[cid] = addrs
         for cid in payload.get("removed") or []:
             gone.extend(a for a, _h in self._chunk_addrs.pop(int(cid), []))
