@@ -827,6 +827,20 @@
   function detect(el, rec) {
     var out = null, i, name, val;
     var tag = el.tagName;
+    // <link> is metadata content, and a reader never sees one.
+    //
+    // Its href is a machine reference -- a stylesheet, a canonical url, a
+    // category. Wikipedia's Parsoid output puts 377 of them in the *body* of
+    // one article, `rel="mw:PageProp/Category"`, each with zero area, and
+    // capturing their hrefs put 377 addresses per page into the trie that no
+    // reader can reach and that dilute what retrieval ranks over. Ground
+    // truth emits nothing for them, and this was roughly half the corpus's
+    // invented capture addresses.
+    //
+    // The mirror of the svg case: there, folding lost a page's content; here,
+    // capturing gained noise. Both are the same question -- is this something
+    // the page shows a reader -- answered in opposite directions.
+    if (tag === 'LINK') return null;
     if (USE_WIDEATTRS) {
       // Every attribute is content. Widening the observer alone changed
       // nothing measurable, because extraction still read the chosen ten —

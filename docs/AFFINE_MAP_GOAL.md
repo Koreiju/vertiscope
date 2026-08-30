@@ -1788,6 +1788,48 @@ Recorded rather than fixed in the same breath as finding it, because the
 corpus figures in this document are consistent with each other as they stand,
 and a sensor change invalidates all of them at once.
 
+### `<link>` is metadata, and capturing it was the mirror of folding the svg
+
+The corpus's 4,083 invented capture addresses had a dominant class, and it was
+not addressing arithmetic. `<link>` elements: **377 of them in the body of one
+Wikipedia article**, `rel="mw:PageProp/Category"`, hrefs like
+`./Category:Articles_with_short_description`, every one of zero area.
+Parsoid's category references, which no reader sees and ground truth emits
+nothing for.
+
+`<link>` is *metadata content* by the HTML spec. Its href is a machine
+reference -- a stylesheet, a canonical url, a category -- and capturing it put
+377 addresses per page into the trie that no reader can reach and that dilute
+what retrieval ranks over.
+
+| arrow | FP before | after | precision |
+|---|---|---|---|
+| page -> trie | 4,083 | **1,159** | 98.90% -> **99.69%** |
+| page -> markdown | 3,024 | **396** | 99.06% -> **99.88%** |
+| page -> wireframe | 104 | 104 | 99.97% (unchanged) |
+
+On the worst page alone: 714 invented addresses down to **2**, at 100% recall
+and 100% precision over 14,701 units. Affordances and dedup did not move,
+which is the right shape -- a metadata element was never an affordance or a
+redundancy.
+
+**This is the svg case in reverse, and the pairing is the point.** Both ask
+the same question -- *is this something the page shows a reader?* -- and the
+sensor had it wrong in opposite directions:
+
+- folding the svg **lost content**: 14,037 characters of SQL grammar a reader
+  should have had;
+- capturing `<link>` **gained noise**: category references a reader will never
+  see.
+
+Neither was visible in a headline figure. Capture recall read 99.22% while
+sqlite silently lost its documentation, and capture precision read like a
+sensor defect while the actual fault was metadata being treated as content.
+Both surfaced only by reading samples against an independently computed ground
+truth, and in both cases the fix is justified by what the element *is* --
+HTML-AAM for the diagram, the spec's own "metadata content" for the link --
+rather than by which direction it moves a number.
+
 ### How fast the map goes wrong
 
 Knowing the trie grows is not the same as knowing what it costs. The same
