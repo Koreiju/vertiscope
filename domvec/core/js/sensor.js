@@ -920,7 +920,20 @@
         if (shown) (out || (out = [])).push([intern('value'), shown.trim()]);
       } catch (e) { stats.errors++; }
     } else if (el.hasAttribute && el.hasAttribute('role')) {
-      (out || (out = [])).push([intern('@role'), el.getAttribute('role')]);
+      // `presentation` and `none` are the author saying this element has no
+      // semantics. Emitting a content line whose value is the word
+      // "presentation" contradicts the sensor's own reading of it --
+      // RENDER_CLASS maps both to `none` -- and puts a machine annotation
+      // into the trie as though it were something on the page.
+      //
+      // 155 of one eurostat page's charged inventions were exactly this, on
+      // svg, span and ul alike, every value the same word. Third of the
+      // metadata family after <link> and the hidden-input placeholder.
+      var role = el.getAttribute('role');
+      var bare = (role || '').trim().toLowerCase();
+      if (bare !== 'presentation' && bare !== 'none') {
+        (out || (out = [])).push([intern('@role'), role]);
+      }
     }
     return out;
   }

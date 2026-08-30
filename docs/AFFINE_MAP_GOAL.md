@@ -1922,6 +1922,19 @@ page shows a reader?* -- answered wrongly in three different ways:
 | `<svg>` with `<text>` | content **lost** by folding | descend |
 | `<link>` | metadata **captured** as content | skip |
 | `input[type=hidden]` | machine payload **claimed** as a control | no placeholder |
+| `role="presentation"` | an annotation meaning *no semantics here*, captured **as** semantics | no `@role` line |
+
+The last is the sharpest, because it contradicts the sensor's own reading.
+`RENDER_CLASS` maps `presentation` and `none` to `none` -- the element has no
+semantics -- and a few hundred lines away a detection was emitted whose value
+was the word `"presentation"`. Two parts of one file disagreeing about the
+same attribute. 155 of one eurostat page's charged inventions were exactly
+that, on `svg`, `span` and `ul` alike, every value the same word.
+
+It was found with `diagnose.py` rather than a raw diff, so the 155 are units
+the metric charges rather than ones it had already forgiven. That tool was
+written an hour earlier, after the raw diff produced a false account, and this
+is the first thing it found.
 
 None was visible in a headline figure, and each surfaced only from reading
 values and addresses against an independently computed ground truth.
