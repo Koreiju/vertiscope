@@ -1646,7 +1646,28 @@
     // inherited `choice` from the select and drew as `[ ] Argentina`. The
     // control has to be a leaf, not merely a parent of hidden children --
     // which is what it is on the rendered page.
-    if (FOLDED[node.tagName]) {
+    // An <svg> carrying <text> is a diagram, and its labels are the document.
+    //
+    // Folding it keeps geometry out, which is right for an icon: a few hundred
+    // <path> elements are not content. sqlite.org's SELECT reference is the
+    // case that rule was not made for -- 139 svgs holding 2,447 <text>
+    // elements and 14,037 characters of SQL grammar, drawn as railroad
+    // diagrams, and not one address of it reached the trie. A reader got the
+    // prose around the diagrams and none of the grammar.
+    //
+    // Descent is by the ordinary path rather than a targeted query, so the
+    // addresses are the composed tree's and match ground truth by
+    // construction. Geometry is still walked and still emits nothing: a
+    // <path> has no text child and no content attribute, so the cost is a
+    // traversal and not a line.
+    //
+    // Guarded on actually containing <text>, so an icon stays a picture and
+    // costs nothing. The risk this guards is the one DuckDuckGo's region
+    // filter taught -- eighty option lines ahead of the first result --
+    // and the number that would show it is `page->wireframe` precision.
+    var diagram = node.tagName === 'svg' && node.querySelector
+                  && node.querySelector('text');
+    if (FOLDED[node.tagName] && !diagram) {
       // An <svg> is folded so its geometry stays out -- a few hundred <path>
       // elements are not content -- but `<title>` is how an inline SVG is
       // named, and it is a *child* element rather than an attribute. Folding

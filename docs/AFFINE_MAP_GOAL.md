@@ -1719,7 +1719,35 @@ For a diagram whose labels *are* the documentation, the same rule loses the
 document. A reader of that page in the REPL gets the prose around the
 diagrams and none of the grammar.
 
-The shape of the fix, and its cost, stated rather than taken here:
+**Taken, and measured.** An `<svg>` containing `<text>` is no longer folded;
+descent is by the ordinary path, so the addresses are the composed tree's and
+match ground truth by construction rather than by a targeted query that would
+have had to reinvent the addressing scheme. Geometry is still walked and still
+emits nothing: a `<path>` has no text child and no content attribute, so the
+cost is a traversal, not a line.
+
+| | before | after |
+|---|---|---|
+| sqlite capture recall | 37.9% | **99.9%** |
+| corpus capture recall | 99.22% | **99.80%** |
+| corpus capture FN | 2,889 | **725** |
+| corpus capture precision | 98.90% | 98.90% |
+| `page->wireframe` precision | 99.97% | **99.97%** |
+| drift, delete | 115 of 117 | 115 of 117 |
+
+The over-capture canary held. `page->wireframe` precision is the number a
+flood of decorative labels would degrade, and it did not move; nor did capture
+precision, nor the drift result.
+
+Capture and rendering came apart correctly, which is the part worth keeping.
+All 2,447 labels now enter the trie. Only **117 of them have area** -- sqlite
+keeps most of its diagrams in collapsed sections -- and those 117 are what the
+projections draw. The other 2,330 are captured and not drawn, counted `tn`.
+Everything the page holds is addressable; what the reader is shown stays a
+separate decision.
+
+The original statement of the fix, kept because the reasoning is what
+justified it:
 
 - **The rule to change is narrow.** An SVG is a picture unless it contains
   `<text>`; text inside an SVG is content a reader is entitled to. That mirrors

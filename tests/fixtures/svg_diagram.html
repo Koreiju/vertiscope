@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>MARK-SVG-FIXTURE</title></head>
+<body>
+<!--
+  Two SVGs, and the fold must treat them differently.
+
+  #icon is a picture: geometry only, no words. Descending into it would buy
+  nothing and cost a walk over paths that are not content -- the case the
+  folding rule was written for.
+
+  #diagram is a railroad diagram of the kind sqlite.org's SQL reference is
+  made of. Its labels ARE the document: fold it and a reader gets the prose
+  around the picture and none of the grammar.
+-->
+<h1>Syntax</h1>
+<p>The statement is written as follows.</p>
+
+<svg id="icon" width="24" height="24" viewBox="0 0 24 24">
+  <path d="M4 4 L20 4 L20 20 Z"/>
+  <circle cx="12" cy="12" r="4"/>
+</svg>
+
+<svg id="diagram" width="420" height="60" viewBox="0 0 420 60">
+  <title>select statement</title>
+  <rect x="4" y="18" width="70" height="24"/>
+  <text x="10" y="34">SELECT</text>
+  <text x="96" y="34">result-column</text>
+  <text x="210" y="34">FROM</text>
+  <text x="266" y="34">table-or-subquery</text>
+  <path d="M78 30 L92 30"/>
+</svg>
+
+<p>Each label above names a production.</p>
+</body>
+</html>
