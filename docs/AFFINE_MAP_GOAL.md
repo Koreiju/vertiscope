@@ -996,6 +996,37 @@ The alternative — document-wide invalidation without the mask filter — is
 exact too, and was rejected: it marks every anchor's path dirty, which makes any
 anchor-bearing mutation cost a whole-page fold and gives up O(delta) outright.
 
+Re-measured with the footprint and floor instrumentation in place, `delete`
+over the whole corpus, one gesture per page:
+
+| | pages |
+|---|---|
+| instrumented measurements | 117 |
+| **held still, and exact** | **115** |
+| held still, with any residue | **0** |
+| moved on their own | 2 |
+
+Every page in the corpus that holds still is exact under deletion: no stale
+address, no lost address, no wrong value. That is the claim the three fixes
+were for, and it is now the whole static corpus rather than a count with
+exceptions.
+
+The two that move are not one story, and the difference is the useful part.
+`w3schools` discounts cleanly -- raw 12 down to net 1, its eight stale
+addresses and four wrong values falling to one and zero once the addresses it
+moved by itself are removed by name. **coinmarketcap does not**: raw 118, net
+103, against an in-run floor of 18. The discount barely touched it, so its
+residue is not established as page motion, and it is not established as a
+defect either.
+
+The exposure-bracketing window does not settle that one, by its own stated
+limit: bracketing the two *ends* of the exposure cannot catch a page churning
+continuously through the middle, which is precisely what a price ticker does.
+What settles it is the `none` arm -- identical timing, identical walks, no
+gesture -- which measures what looking at that page costs before anything is
+done to it. A gesture residue at or below the control is not a defect; it is
+the price of looking.
+
 Corpus-wide after all three, one gesture per page:
 
 | delete, over the frozen corpus | before | after |
