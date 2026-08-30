@@ -698,12 +698,14 @@ class Repl:
     def _cmd_browser(self, args) -> bool:
         """Attach a live browser to this REPL.
 
-        Every measurement command needs one, and until now the only way to
-        get a driver in was to construct the REPL from a script. That put the
-        measurement outside the REPL exactly where it was supposed to be
-        inside it: a headless `--command "sweep scan"` had no browser and
-        reported "needs a live browser" instead of scanning. This is the one
-        missing seam.
+        The REPL is a browser, so it needs one. Until this existed the only
+        way to get a driver in was to construct the REPL from a script, which
+        left a headless `--command` session reporting "needs a live browser"
+        instead of reading the page. This is the one missing seam.
+
+        It reads nothing into the trie by itself: the driver it attaches is
+        what `open` later folds a page through, and every address the session
+        can reach afterwards arrives by that route.
 
         `browser` boots headless, `browser show` boots headful.
         """
@@ -725,113 +727,6 @@ class Repl:
         print(f"browser attached ({'headless' if headless else 'headful'})",
               flush=True)
         return True
-
-
-
-
-
-
-
-
-
-    # The axes, and what each one costs to turn off. Named here so `compare`
-    # and `variant` agree about what the design space contains.
-    AXES = {
-        # settled mechanisms, on by default
-        "gate": "II §10 emit only chunks whose digest moved",
-        "cache": "II §6  clean-record early return (incrementality itself)",
-        "dedup": "II §7  sketch-then-verify subsumption",
-        "intern": "II §10 interned segments instead of raw strings",
-        # transport: the payload is ~45% path, ~22% text, and drain time
-        # tracks payload at ~0.9 ms/KB, so this is where a pass is spent
-        "pathdelta": "path as (shared prefix, suffix) against the line before",
-        "shape": "tag-sequence table sent once, lines carry id + ordinals",
-        "valdict": "intern line values, not only path segments",
-        "packed": "int runs as one delimited string, not a JSON array",
-        # work avoided
-        "subtreegate": "never descend a subtree whose digest has not moved",
-        "spans": "re-aggregate only the dirty child range, invertibly",
-        "fused": "one round trip per pass instead of step-then-drain",
-        # chunking policy
-        "merge": "gather tiny adjacent siblings back into one chunk",
-        "semantic": "let a list item or row overrun rather than be cut",
-        "rank": "heaviest subtree first, not document order",
-        # observation
-        "attrs": "every attribute is content, not the chosen ten",
-        "charwatch": "watch text mutations (off = stop watching them)",
-        "perchunk": "an observer per chunk root, not one per document",
-        # scheduling
-        "lazy": "no timer: fold only when drained",
-        "eager": "fold inside the mutation callback, no debounce",
-        # addressing
-        "anchored": "erase ordinals below the deepest landmark",
-        "idanchor": "root the path at the nearest id, so it survives edits",
-        # suppression
-        "simhash": "near-duplicate collapse instead of exact containment",
-        "crosspage": "skip content the receiver already holds under another url",
-        # semantics, not cost — judge with `verify`, not `compare`
-        "viewport": "emit what is on or near the screen first",
-        # proposed from what the sweep measured, not from the design space
-        "chunkdelta": "send a chunk as a diff against the version held",
-        "textdict": "intern prose word-by-word, where whole values never repeat",
-        "coalesce": "hold a thin payload until it is worth the crossing",
-        "deepgate": "stop the fold re-summing a branch whose digest has not moved",
-    }
-
-    # Axes that change *what is read*, not merely how it travels. Their
-    # output is supposed to differ from the baseline, so an equivalence
-    # check that flagged them would be reporting the design as a defect.
-    LOSSY = {"dedup", "simhash", "viewport", "crosspage", "attrs"}
-    # Axes that regroup or reorder the same lines rather than change them.
-    REGROUPING = {"merge", "semantic", "rank"}
-    # Axes that rewrite the address itself.
-    READDRESSING = {"anchored", "idanchor"}
-
-    # `shape` supersedes `pathdelta` in the page (both rewrite the same
-    # field), so a sweep that reports both as independent wins is
-    # double-counting. Named here so `compare` can say so rather than leave
-    # it to be noticed.
-    OVERLAPPING = [("shape", "pathdelta")]
-
-
-    # The canonical verification targets, in the order they matter. Held here
-    # rather than in a script because the REPL is the test surface: `targets`
-    # says which are reachable right now, and `targets run` reads each one.
-    TARGETS = [
-        ("archive.org", "https://archive.org/search?query=university+library",
-         "shadow-DOM search results, deep pagination"),
-        ("ddg", "https://html.duckduckgo.com/html/?q=university+library",
-         "generic search results, submit-button pager"),
-        ("bing", "https://www.bing.com/search?q=university+library",
-         "generic search results, anchor pager"),
-        ("youtube", "https://www.youtube.com/results?search_query=university+library",
-         "infinite scroll, adversarial control labels"),
-        ("shadow", "", "local composed-tree fixture: nested shadow roots"),
-        # Ground truth. Every other target is checked for self-consistency —
-        # it grew, the pages differ — which cannot catch a pager that skips
-        # page 3 or loops. This site has exactly 10 pages of 10 quotes, a
-        # fact independent of anything we compute, so the trail can be
-        # checked against the world instead of against itself.
-        ("quotes", "https://quotes.toscrape.com/page/1/",
-         "known ground truth: 10 pages x 10 quotes, sequential pager"),
-    ]
-
-    # `<target>` is the retrieval query; `<target>:site` is what gets typed
-    # into the page's own search box. They differ because one interrogates
-    # our store and the other interrogates the site.
-    QUERIES = {"quotes": "life love inspirational",
-               "quotes:site": "love",
-               "shadow": "catalogue",
-               "ddg:site": "glacier",
-               "bing:site": "glacier",
-               "archive.org:site": "glacier"}
-
-    # url -> (expected page count, the url pattern pages must follow)
-    GROUND_TRUTH = {
-        "quotes": (10, "/page/{n}/"),
-    }
-
-
 
 
     def _cmd_open(self, args) -> bool:

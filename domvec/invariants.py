@@ -740,3 +740,88 @@ def c3_projections_key_on_exact_hash(sources: Any = None) -> List[Violation]:
         out.append("no projection keys reuse on exact_hash — either the memo "
                    "is gone or this clause no longer finds it")
     return out
+
+
+def c4_repl_and_analytics_stay_apart(sources: Any = None) -> List[Violation]:
+    """The REPL is a browser; the analytics measure it. Neither imports the other.
+
+    The standing constraint is that analytics live in ``domvec/analytics/`` and
+    write their own artifacts, separately from the REPL. It was stated, and it
+    was quietly not holding: ``domvec/repl/app.py`` carried eight class-level
+    catalogues -- ``AXES``, ``LOSSY``, ``REGROUPING``, ``READDRESSING``,
+    ``OVERLAPPING``, ``TARGETS``, ``QUERIES``, ``GROUND_TRUTH``, 109 lines --
+    naming a design space and a benchmark corpus. Every one was defined exactly
+    once and referenced nowhere, residue from removing the ``compare`` /
+    ``variant`` / ``sweep`` / ``verify`` commands: deleting a command and
+    deleting its vocabulary are two edits, and only the first is obvious.
+
+    Nothing detected that for however long it sat there, because a constraint
+    with no check is a preference. This is the check.
+
+    The rule asserted here is the import boundary rather than the vocabulary,
+    because the boundary is what the constraint is actually about and it is
+    decidable. A REPL that needs to measure something is a REPL growing a
+    second concern; an analytics module that reaches into the REPL is measuring
+    the instrument instead of the page. Either direction is the same mistake.
+
+    Vocabulary is not asserted: a word list would fail on any comment
+    mentioning a mechanism, and the REPL has to be able to *describe* what it
+    does. What it must not do is depend.
+
+    Pass ``sources`` as ``{filename: text}`` to check text other than disk.
+
+    claim: a separation of concerns is only enforced where it is decidable, and
+    for two packages that is which one may name the other.
+    """
+    import ast
+    import pathlib
+
+    if sources is None:
+        here = pathlib.Path(__file__).parent
+        sources = {}
+        for package in ("repl", "analytics"):
+            folder = here / package
+            if not folder.is_dir():
+                continue
+            for path in sorted(folder.glob("*.py")):
+                try:
+                    sources["{}/{}".format(package, path.name)] = \
+                        path.read_text(encoding="utf-8")
+                except OSError:
+                    continue
+        if not sources:
+            return ["neither repl nor analytics source is readable"]
+
+    # Which package must not be named, from inside which.
+    forbidden = {"repl": "analytics", "analytics": "repl"}
+
+    out: List[Violation] = []
+    for name, text in sorted(sources.items()):
+        package = name.split("/", 1)[0]
+        other = forbidden.get(package)
+        if other is None:
+            continue
+        try:
+            tree = ast.parse(text)
+        except SyntaxError as exc:
+            out.append("{}: will not parse: {}".format(name, exc))
+            continue
+        for node in ast.walk(tree):
+            # `import domvec.analytics`, and its dotted forms.
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if other in alias.name.split("."):
+                        out.append("{}:{} imports {}".format(
+                            name, node.lineno, alias.name))
+            # `from ..analytics import x`, `from domvec.analytics import x`,
+            # and the relative forms the package actually uses.
+            elif isinstance(node, ast.ImportFrom):
+                if node.module and other in node.module.split("."):
+                    out.append("{}:{} imports from {}".format(
+                        name, node.lineno, node.module))
+                elif node.module is None or node.level:
+                    for alias in node.names:
+                        if alias.name == other:
+                            out.append("{}:{} imports {} itself".format(
+                                name, node.lineno, other))
+    return out
