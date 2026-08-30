@@ -1024,8 +1024,37 @@ limit: bracketing the two *ends* of the exposure cannot catch a page churning
 continuously through the middle, which is precisely what a price ticker does.
 What settles it is the `none` arm -- identical timing, identical walks, no
 gesture -- which measures what looking at that page costs before anything is
-done to it. A gesture residue at or below the control is not a defect; it is
-the price of looking.
+done to it.
+
+**It settled it against the comfortable answer.**
+
+| page | floor | none | delete | |
+|---|---|---|---|---|
+| coinmarketcap | 18 | **7** | **103** | 96 above control |
+| w3schools html-forms | 11 | 0 | 1 | control clean |
+
+With no gesture at all and every other cost identical, coinmarketcap's residue
+is **7**. The deletion adds **96**. So the page's own motion is not the
+explanation, and the earlier conclusion here -- that its residue was the price
+ticker, reached from a null control showing 10 wrong values against 12 -- does
+not survive net accounting. The ticker moves values; what the gesture produces
+is 87 *stale addresses*, which is a different defect entirely and was hidden
+behind a plausible story about the same page.
+
+Two candidates, not yet separated:
+
+- **a vacating shortfall under cascade.** Deleting a row makes the page's own
+  framework re-render a region, and 87 addresses the page no longer has stay in
+  the trie. That is the same shape as the two faults already fixed today.
+- **settling latency, and no defect at all.** The drain happens 0.45s after the
+  mutation. If the re-render finishes asynchronously after that, the sensor has
+  not seen the tail while truth -- walked later -- has, and a second drain would
+  catch up.
+
+They are cheaply separable: drain again after a longer wait and re-score. If
+the residue collapses it is the second, and the harness is under-waiting on
+reactive pages -- which would put an asterisk on every gesture number measured
+through it, not only this one.
 
 Corpus-wide after all three, one gesture per page:
 
