@@ -104,7 +104,25 @@ def score_affordance(truth, drawn) -> dict:
     the page; and a page control is presented when it, or anything inside it,
     is drawn as one.
     """
-    page_yes = {u.xpath for u in truth.units if u.kind in PAGE_INTERACTIVE}
+    # Two sets, because the two errors ask different questions and a single
+    # `drawn` filter answers only one of them.
+    #
+    # `page_any` is every control the page has, drawn or not, and it decides
+    # what counts as a **phantom**: the REPL invents an affordance only when
+    # nothing on the drawn line's ancestor chain is a control at all. A link
+    # inside a collapsed section is a real link; presenting it is not a
+    # fiction. Filtering this set to drawn controls took phantoms from 8 to
+    # 8,701 across the corpus, every one of them a control the page genuinely
+    # has.
+    #
+    # `page_drawn` is what the page lays out, and it decides what counts as
+    # **missed**: the reader is denied only an affordance they could have
+    # reached. Options behind a closed dropdown are not that -- `OPTION` is a
+    # control tag and ground truth marks them undrawn, and counting them put
+    # 1,788 of them in the denominator and took missed from 279 to 2,066.
+    page_any = {u.xpath for u in truth.units if u.kind in PAGE_INTERACTIVE}
+    page_drawn = {u.xpath for u in truth.units
+                  if u.kind in PAGE_INTERACTIVE and u.drawn}
     page_all = {_owner(u.xpath) for u in truth.units}
 
     repl_yes, repl_all = set(), set()
@@ -127,12 +145,12 @@ def score_affordance(truth, drawn) -> dict:
         # as unreachable -- on a page where the sensor had classed all 100
         # lines under those summaries as `button`, correctly. The sensor was
         # right and this loop was wrong.
-        hits = [at for at in _ancestors(path) if at in page_yes]
+        hits = [at for at in _ancestors(path) if at in page_any]
         if not hits:
             phantom.append(path)
         else:
             covered.update(hits)
-    missed = sorted(page_yes - covered)
+    missed = sorted(page_drawn - covered)
 
     universe = page_all | repl_all
     tn = len(universe) - len(covered) - len(missed) - len(phantom)
@@ -143,14 +161,15 @@ def score_affordance(truth, drawn) -> dict:
         "phantom": len(phantom),
         "tn": max(tn, 0),
         "universe": len(universe),
-        "page_interactive": len(page_yes),
+        "page_interactive": len(page_drawn),
         "repl_interactive": len(repl_yes),
         # Precision over affordances: of what the REPL offers, how much is
         # real. This is the number a phantom degrades and coverage cannot see.
         "precision": (len(covered) / (len(covered) + len(phantom)))
                      if (covered or phantom) else 1.0,
         # Recall: of what the page offers, how much the REPL presents.
-        "recall": (len(covered) / len(page_yes)) if page_yes else 1.0,
+        "recall": (len(covered & page_drawn) / len(page_drawn))
+                  if page_drawn else 1.0,
         "missed_sample": missed[:8],
         "phantom_sample": phantom[:8],
     }

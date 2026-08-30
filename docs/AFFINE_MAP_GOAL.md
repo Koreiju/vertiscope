@@ -1549,11 +1549,30 @@ the reader nothing except that the map lies.
 
 | | |
 |---|---|
-| affordances the pages offer | **74,852** |
-| the REPL presents | **74,573** (99.63%) |
+| affordances the pages lay out | **74,797** |
+| the REPL presents | **74,573** (99.70%) |
 | **phantom (invented)** | **8** |
-| missed (unreachable) | 279 |
-| pages exact both ways | 106 of 135 |
+| missed (unreachable) | 224 |
+| pages exact both ways | **111 of 135** |
+
+**The two errors take different denominators, and that is not a detail.**
+
+They ask different questions. A phantom asks *did the REPL invent this?* and is
+scored against every control the page has, drawn or not -- a link inside a
+collapsed section is a real link, and presenting it is not a fiction. A miss
+asks *was the reader denied something reachable?* and is scored against what
+the page lays out -- options behind a closed dropdown are not that.
+
+A single `drawn` filter answers one and breaks the other, and both halves were
+measured. Counting undrawn controls as missable put 1,788 dropdown options in
+the denominator and took missed from 279 to **2,066**, for a REPL correctly
+declining to offer choices behind a dropdown nobody had opened. Filtering the
+phantom side the same way took phantoms from 8 to **8,701**, every one of them
+a control the page genuinely has.
+
+That is the fifth place this codebase has needed the capture/projection
+distinction, and the first where the flat form of the rule -- "reader-facing
+measures use `drawn`" -- was actively wrong rather than merely incomplete.
 
 **Precision 99.99%.** Six of the eight phantoms are on coinmarketcap, which
 rewrites itself between the truth read and the drain. The REPL essentially

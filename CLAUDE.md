@@ -103,6 +103,22 @@ Two rules earned the hard way here, both binding:
   comparison would discount real defects, and a floor from another visit would
   discount the wrong addresses.
 
+- **Name the denominator before reading the number, and check it is the one
+  that question is answerable for.** Capture is answerable for everything the
+  page holds; a projection for what the page lays out. Getting this wrong has
+  produced, in one session: 7,043 "invented" capture addresses that were a
+  select's options the trie correctly held; a markdown recall of 5.2% for
+  collapsing a dropdown as a browser does; an over-dedup of 2,290 for the same;
+  115 of 117 pages "exact" where five had been asked nothing; and 133 pages
+  credited by a null arm for a question nobody put to them.
+
+  **And the rule is not flat.** Where a measure has two error directions they
+  may need different denominators, because they ask different questions. A
+  phantom affordance asks *did the REPL invent this?* -- every control the page
+  has, drawn or not. A missed one asks *was the reader denied something
+  reachable?* -- only what the page draws. One filter for both took missed from
+  279 to 2,066 in one direction and phantoms from 8 to 8,701 in the other.
+
 And the specific trap this project keeps falling into: **a coverage number is
 a claim about the renderer AND a claim about the denominator, and only one of
 them tends to get checked.** Four separate times a correct renderer read as

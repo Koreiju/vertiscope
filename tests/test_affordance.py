@@ -33,14 +33,19 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 
 class _Unit:
-    def __init__(self, xpath, kind):
+    def __init__(self, xpath, kind, drawn=True):
         self.xpath = xpath
         self.kind = kind
+        # A real `PageUnit` carries this, and the score reads it: an
+        # affordance the page does not lay out is not one the REPL is
+        # answerable for. The fakes here omitted it at first, which is why
+        # these tests passed while modelling a unit the code could not accept.
+        self.drawn = drawn
 
 
 class _Truth:
     def __init__(self, units):
-        self.units = [_Unit(p, k) for p, k in units]
+        self.units = [_Unit(*u) for u in units]
 
 
 class _Address:
@@ -158,3 +163,71 @@ def test_a_page_with_no_controls_scores_one_rather_than_zero():
     out = score_affordance(truth, drawn(("/html/body/p", "text")))
     assert out["precision"] == 1.0 and out["recall"] == 1.0
     assert out["phantom"] == 0 and out["missed"] == 0
+
+
+# --- what the page does not lay out ------------------------------------------
+
+
+def test_a_control_the_page_does_not_draw_is_not_the_repls_to_present():
+    """Options behind a closed dropdown.
+
+    Ground truth descends into a collapsed `<select>` and marks its options
+    undrawn, and `OPTION` is a control tag. Counted, 1,788 of them across the
+    corpus became affordances the page "has" and the missed figure went 279 to
+    2,066 -- for a REPL correctly declining to offer choices behind a dropdown
+    the reader has not opened.
+    """
+    truth = _Truth([("/html/body/select", "control", True),
+                    ("/html/body/select/option", "control", False),
+                    ("/html/body/select/option[2]", "control", False)])
+    out = score_affordance(truth, drawn(("/html/body/select", "choice")))
+    assert out["missed"] == 0
+    assert out["tp"] == 1
+
+
+def test_an_undrawn_control_is_not_a_phantom_either():
+    """Symmetry: excluded from the denominator, not moved to the other error."""
+    truth = _Truth([("/html/body/select/option", "control", False)])
+    out = score_affordance(truth, drawn(("/html/body/p", "text")))
+    assert (out["missed"], out["phantom"], out["tp"]) == (0, 0, 0)
+
+
+def test_presenting_an_undrawn_control_is_not_inventing_one():
+    """The case that broke the corpus and that none of the above catches.
+
+    Filtering the phantom denominator to *drawn* controls made every REPL line
+    for a real-but-undrawn control a fiction: phantoms went from 8 to 8,701
+    across the corpus, every one of them a control the page genuinely has --
+    a link inside a collapsed section, an option in a dropdown.
+
+    So the two errors take different denominators, because they ask different
+    questions. A phantom is scored against every control the page has, drawn
+    or not: did the REPL invent this? A miss is scored against what the page
+    lays out: was the reader denied something they could have reached.
+
+    Every test above passed through the version that got this wrong, which is
+    what a missing case looks like from the inside.
+    """
+    truth = _Truth([("/html/body/nav/a", "link", False)])
+    out = score_affordance(truth, drawn(("/html/body/nav/a", "link")))
+    assert out["phantom"] == 0, "a real control drawn is not an invention"
+    assert out["missed"] == 0, "and not a miss either -- it was not reachable"
+
+
+def test_the_two_denominators_do_not_collapse_into_one():
+    """One page, both errors, each judged on its own denominator.
+
+    A genuine fiction beside a real-but-undrawn control: the first must be a
+    phantom, the second must be neither, and a drawn control the REPL ignores
+    must still be a miss. No single filter produces all three.
+    """
+    truth = _Truth([("/html/body/nav/a", "link", False),      # real, hidden
+                    ("/html/body/main/button", "control", True),  # reachable
+                    ("/html/body/main/p", "text", True)])
+    out = score_affordance(truth, drawn(
+        ("/html/body/nav/a", "link"),            # fine: real control
+        ("/html/body/main/p", "button"),         # fiction: not a control
+        ("/html/body/main/button", "text")))     # miss: drawn, not offered
+    assert out["phantom"] == 1
+    assert out["missed"] == 1
+    assert out["recall"] == 0.0                  # of what was reachable, none
