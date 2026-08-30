@@ -95,11 +95,57 @@ while (stack.length && seen < 20000) {
 if (!best || bestCount < 3) return {ok: false, reason: 'no drawn repeated group'};
 
 var first = best[0];
+var kind = arguments[1] || 'insert';
 var marker = 'DOMVEC-' + arguments[0] + '-' + Math.random().toString(36).slice(2, 6);
+
+// Four gestures, not one.
+//
+// Everything here was proved against a single one -- a node inserted at the
+// head of a repeated group -- and a map that tracks one kind of change is not
+// a map that tracks change. These are the other things a page does to itself,
+// each an O(1) edit the trie should absorb exactly:
+//
+//   insert   a new sibling at the head; every later address shifts
+//   delete   the first sibling leaves; every later address shifts back
+//   edit     one text node changes; no address moves at all
+//   relocate a sibling moves to the end of its group; two shifts at once
+//
+// `edit` is the one with no structural component, so it isolates the value
+// path from the address path; `delete` is `insert` run backwards, which the
+// receiver has never been asked to do; `relocate` moves a node without
+// changing how many there are.
+if (kind === 'delete') {
+  if (bestCount < 4) return {ok: false, reason: 'group too small to delete from'};
+  var goneText = (first.textContent || '').trim().slice(0, 40);
+  first.parentNode.removeChild(first);
+  return {ok: true, kind: kind, tag: first.tagName, count: bestCount,
+          marker: goneText};
+}
+
+if (kind === 'edit') {
+  var walker = document.createTreeWalker(first, NodeFilter.SHOW_TEXT, null, false);
+  var n, target = null;
+  while ((n = walker.nextNode())) { if ((n.nodeValue || '').trim()) { target = n; break; } }
+  if (!target) return {ok: false, reason: 'nothing to edit in the group'};
+  target.nodeValue = marker;
+  return {ok: true, kind: kind, tag: first.tagName, count: bestCount,
+          marker: marker};
+}
+
+if (kind === 'relocate') {
+  if (bestCount < 4) return {ok: false, reason: 'group too small to relocate in'};
+  var last = best[bestCount - 1];
+  last.parentNode.insertBefore(first, last.nextSibling);
+  return {ok: true, kind: kind, tag: first.tagName, count: bestCount,
+          marker: (first.textContent || '').trim().slice(0, 40)};
+}
+
+// insert
 var fresh = document.createElement(first.tagName);
 fresh.appendChild(document.createTextNode(marker));
 first.parentNode.insertBefore(fresh, first);
-return {ok: true, tag: first.tagName, count: bestCount, marker: marker};
+return {ok: true, kind: 'insert', tag: first.tagName, count: bestCount,
+        marker: marker};
 """
 
 
@@ -162,6 +208,7 @@ def _score(repaired, truth):
 
 def measure_drift(driver, urls: Sequence[str], *, mutations: int = 10,
                   context_window: int = 1200,
+                  kind: str = "insert",
                   checkpoints: Sequence[int] = (1, 3, 5, 10)) -> dict:
     """Mutate a page repeatedly; score the repaired trie against a fresh map."""
     from ..sensing import Sensor
@@ -170,7 +217,7 @@ def measure_drift(driver, urls: Sequence[str], *, mutations: int = 10,
     rows: List[dict] = []
     for url in urls:
         row: Dict[str, object] = {"url": url, "mutations": mutations,
-                                  "checkpoints": []}
+                                  "kind": kind, "checkpoints": []}
         try:
             driver.get("about:blank")
             driver.get(url)
@@ -187,7 +234,7 @@ def measure_drift(driver, urls: Sequence[str], *, mutations: int = 10,
             row["leaves_at_start"] = len(spine.trie)
 
             for n in range(1, mutations + 1):
-                found = driver.execute_script(MUTATE_JS, n)
+                found = driver.execute_script(MUTATE_JS, n, kind)
                 if not found or not found.get("ok"):
                     row["error"] = "mutation {}: {}".format(
                         n, (found or {}).get("reason", "?"))
@@ -206,7 +253,7 @@ def measure_drift(driver, urls: Sequence[str], *, mutations: int = 10,
         except Exception as exc:                       # noqa: BLE001
             row["error"] = "{}: {}".format(type(exc).__name__, exc)[:200]
         rows.append(row)
-    return {"rows": rows, "mutations": mutations,
+    return {"rows": rows, "mutations": mutations, "kind": kind,
             "context_window": context_window, "t": time.time()}
 
 

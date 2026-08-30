@@ -740,7 +740,40 @@ variety and not by me. Recall is 100% on every page. Across the day the exact
 count went 30 → 40 → 70 → 91 → 116 → 118.
 
 The single page that is not exact is data.gov.uk's search results: 3 stale
-addresses of 3,092. `discourse.julialang.org`
+addresses of 3,092.
+
+### Four gestures, not one
+
+All of the above was proved against a single gesture — a node inserted at the
+head of a repeated group — and a map that tracks one kind of change is not a
+map that tracks change. `--drift --kind` now applies four, each an O(1) edit
+the trie should absorb exactly:
+
+- **insert** — a new sibling at the head; every later address shifts.
+- **delete** — the first sibling leaves; every later address shifts back.
+- **edit** — one text node changes; no address moves at all, so this isolates
+  the value path from the address path.
+- **relocate** — a sibling moves to the end of its group; two shifts at once,
+  with the number of siblings unchanged.
+
+Corpus-wide, one gesture per page:
+
+| gesture | pages | **exact** | stale (pages) | lost | wrong | recall min |
+|---|---|---|---|---|---|---|
+| insert | 119 | 118 | 3 (1) | 0 | 0 | 100% |
+| edit | 113 | **113** | 0 | 0 | 0 | 100% |
+| relocate | 117 | **117** | 0 | 0 | 0 | 100% |
+| delete | 117 | 113 | 25 (3) | 4 (1) | 10 (1) | 99.9% |
+
+In-place editing and relocation are **exact on every page that supports them**.
+Insertion misses one page. The page counts differ because a gesture needs
+somewhere to happen: `edit` needs text inside the group, `delete` and
+`relocate` need at least four siblings.
+
+**Deletion is the weak gesture**, and it is the one the receiver has never been
+asked to do in reverse: 4 pages imperfect, 25 stale addresses on three of them,
+10 wrong values on coinmarketcap and 4 lost on the Wikipedia largest-cities
+table. That is now the next target, and it is a narrow one. `discourse.julialang.org`
 holds 58 addresses with another row's content and loses 44, and
 ar.wikipedia.org loses ~750 — both unchanged by this work and both pre-dating
 it. Wrong content at a right address remains the worst class and the next

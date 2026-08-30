@@ -27,6 +27,9 @@ def main(argv=None) -> int:
                         help="mutate each page repeatedly and score the "
                              "repaired trie against a fresh map of it")
     parser.add_argument("--mutations", type=int, default=10)
+    parser.add_argument("--kind", default="insert",
+                        choices=("insert", "delete", "edit", "relocate"),
+                        help="which gesture --drift applies")
     parser.add_argument("--corpus", action="store_true",
                         help="with --live-delta, run over the frozen corpus in "
                              "tests/corpus instead of the urls given")
@@ -80,6 +83,7 @@ def main(argv=None) -> int:
                 targets = [p.as_uri() for p in pages]
             report = measure_drift(driver, targets,
                                    mutations=args.mutations,
+                                   kind=args.kind,
                                    context_window=args.window)
             print(render_drift_table(report), flush=True)
             print(f"  written: "
