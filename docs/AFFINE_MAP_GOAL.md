@@ -1474,6 +1474,17 @@ All four gestures, same eight pages, ten mutations each:
 | relocate | 29 | **29/29** | news.ycombinator: group of 4 rows too small at 3 |
 | | **117** | **117/117** | |
 
+**Re-run after both sensor changes -- the svg descent and the `<link>`
+exclusion -- and unchanged: 117 of 117.** Changing what the fold captures did
+not disturb what it tracks. Single-gesture over the corpus in the same run:
+insert 118/119, edit 111/112, relocate 117/117, delete 116/117.
+
+The stability arm was included in that chain deliberately, and it is the one
+that would have been most informative had it moved: 133 of 135 pages hold
+still, identical to before. The floor is a property of the document, not of
+the sensor, so a shift there after two sensor changes would have meant the
+measurement is not measuring what it claims. It did not shift.
+
 **117 of 117 measurements exact under sustained mutation.** Every shortfall is
 the harness running out of material -- a repeated group spent by repeated
 deletion, a group of four table rows too small to relocate within, a group
