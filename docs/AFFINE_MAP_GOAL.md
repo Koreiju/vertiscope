@@ -1484,6 +1484,50 @@ That upgrades the claim the corpus supports. "Exact under a gesture" was
 established before; "tracked and updated" -- content held correct across a
 sequence of changes, which is what the goal actually asks for -- needed this.
 
+### How much of the corpus evidence crosses a shadow boundary
+
+The goal calls this a map of the *shadow DOMs*, and the composed tree is where
+the hard part of that lives. `test_composed_tree.py` proves the fold resolves
+slots correctly against a fixture built for it. The 1,520,933 addresses scored
+over the corpus prove nothing about it unless the corpus has shadow roots --
+and a claim about shadow handling backed by pages that contain none would be
+invisible, because every one of those addresses is mapped correctly either way.
+
+Measured at runtime, walking *through* shadow roots rather than grepping
+source, over all 135 pages:
+
+| page | hosts | nodes in shadow | closed roots | roots observed |
+|---|---|---|---|---|
+| developer.mozilla CSS | 15 | 585 | 0 | 24 |
+| developer.mozilla HTML | 15 | 585 | 0 | 24 |
+| github.com/python/cpython | 5 | 15 | **1** | 6 |
+| github.com/scrapy/scrapy | 4 | 12 | **1** | 5 |
+| ec.europa.eu eurostat | 2 | 4 | 0 | 3 |
+| github.com/trending | 1 | 3 | **1** | 2 |
+| redis.io docs | 1 | 1 | 0 | 2 |
+
+**Seven pages of 135**, and all seven are exact under all four gestures --
+28 of 28. The sensor follows the boundary in the wild, observing up to 24 roots
+on a page rather than the document alone.
+
+Three carry a **closed** root, reported as unreachable rather than reached.
+That is the constraint holding on real pages and not only in principle:
+reaching in means patching `attachShadow`, which is detectable, and is refused.
+
+But the honest reading of "exact on a page with a closed root" is narrower than
+it sounds, and worth stating because it is a denominator question again. The
+truth map is a second sensor, and it cannot see into a closed root either. Both
+sides agree about content neither can reach. So those pages establish that the
+map is exact over the *reachable* composed tree with the unreachable part
+named -- not that anything is known about what is inside.
+
+And the corpus contribution is thin: about 1,205 nodes inside shadow roots
+across the whole corpus, well under one percent of the addresses scored. The
+composed-tree handling rests mainly on its fixture, with real-page corroboration
+that is genuine, includes the closed-root case, and is small. The corpus figure
+should not be quoted as the evidence for shadow DOM correctness; it is
+consistent with it.
+
 ### How fast the map goes wrong
 
 Knowing the trie grows is not the same as knowing what it costs. The same
