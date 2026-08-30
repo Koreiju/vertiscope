@@ -1841,6 +1841,41 @@ truth, and in both cases the fix is justified by what the element *is* --
 HTML-AAM for the diagram, the spec's own "metadata content" for the link --
 rather than by which direction it moves a number.
 
+### Where the remaining capture gap actually is
+
+After the svg and `<link>` fixes the capture arrow reads 99.80% recall and
+99.69% precision, and what is left is long tail: 727 units never captured
+across 135 pages, worst page 64, against 2,167 on a single page before.
+
+The largest identifiable class is `option`, and chasing it produced two
+refuted hypotheses before an answer, which is worth recording because both
+were plausible and both were mine.
+
+**First: "the sensor's `FOLDED` conflates capture with rendering."** The fold
+folds a `<select>` so eighty country names do not draw, and it seemed obvious
+that folding also prevented capture -- the same capture/projection confusion
+the measurement side had to be taught four times. Refuted directly:
+data.gov.uk holds 1,511 options and the trie holds **2,960 option addresses**
+for them. They are captured.
+
+**Second: "the collapsed select draws its current value, so the first option
+is captured at the select's address instead."** Also wrong. A per-address diff
+narrowed it to exactly one missing address per select -- `/select/option`, the
+first -- and the check that settled it was looking for that option's text
+elsewhere in the trie.
+
+**Its text is empty.** The first option is a placeholder. Ground truth emits a
+`control` unit for it because `isControl(OPTION)` is true; the sensor emits
+nothing because there is nothing to emit. A unit with no value carries no
+content, so the trie is right to hold none, and the miss is the instrument
+counting an empty placeholder as something to capture.
+
+The lesson is the one this whole document keeps arriving at from new
+directions. Both hypotheses were architectural and interesting, and the answer
+was that a string was empty. Neither sample tallies nor a plausible mechanism
+would have found it -- only diffing addresses on one page and then asking what
+the value actually was.
+
 ### How fast the map goes wrong
 
 Knowing the trie grows is not the same as knowing what it costs. The same
