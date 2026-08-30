@@ -130,8 +130,31 @@ def token_multiset(value: str) -> Tuple[Tuple[str, int], ...]:
 
 
 def content_hash(value: str) -> str:
-    """Hash of the token multiset — a dedup *candidate* key, never a decision."""
-    payload = "\x1f".join(f"{t}:{n}" for t, n in token_multiset(value))
+    """Hash of the token multiset — a dedup *candidate* key, never a decision.
+
+    With one fallback, for values the multiset cannot describe at all.
+
+    Blindness to word order, case and punctuation is what lets a paragraph be
+    recognised after it moved and was reformatted, and that is worth having.
+    But a value made *only* of punctuation has an empty multiset, so `(`, `=>`,
+    `,` and `->` all hashed alike — and this hash is what the re-anchor matches
+    on, so it would hand one token's identity to a different token, and what
+    the dedup filter groups by, so it pooled every such value together.
+
+    There is nothing to be blind about in a value with no tokens: the multiset
+    carries no information, and the only thing left that distinguishes them is
+    the text. So those are keyed on the whitespace-normalized string instead —
+    still blind to the reformatting the token path is blind to, since
+    collapsing whitespace is exactly what that does.
+
+    The two keyings live in separate namespaces, so a punctuation-only value
+    can never collide with a tokenized one.
+    """
+    tokens = token_multiset(value)
+    if tokens:
+        payload = "\x1f".join(f"{t}:{n}" for t, n in tokens)
+    else:
+        payload = "\x00" + " ".join(value.split())
     return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:16]
 
 

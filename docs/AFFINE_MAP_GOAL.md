@@ -703,11 +703,44 @@ Every page that is not exact, in full:
 | w3schools.com forms | 0 | 4 | 0 | 1,774 |
 | data.gov.uk search | 3 | 0 | 0 | 3,092 |
 
-The cost of writing those values rather than refusing them is uid churn: where
-a value is punctuation-only the re-anchor cannot identify which source it came
-from, because that identification is exactly what the empty multiset cannot
-support, so the leaf is re-issued. That is a smaller and more honest defect
-than holding the wrong content, and it is the next thing to look at. `discourse.julialang.org`
+### The empty multiset, and the last of it
+
+Writing those values rather than refusing them exposed the same root cause one
+level down. `content_hash` is the hash of a token multiset, and the re-anchor
+matches on it — so with punctuation-only values hashing alike, it would hand
+one token's identity to a *different* token, and the dedup filter pooled every
+such value together. That is why the leaves were re-issued.
+
+Blindness to word order, case and punctuation is what lets a paragraph be
+recognised after it moved and was reformatted, and it is worth having. But
+there is nothing to be blind about in a value with *no tokens*: the multiset
+carries no information and the only thing distinguishing them is the text. So
+a value with an empty multiset is keyed on its whitespace-normalized string
+instead, in a separate namespace so it can never collide with a tokenized one —
+still blind to the reformatting the token path is blind to, since collapsing
+whitespace is exactly what that does.
+
+`],
+    [` still matches `], [`; `buy buy` still matches `Buy  BUY`; `a, b`
+still matches `b a`. `(`, `=>`, `,` and `->` no longer match each other.
+
+### Where this leaves the map
+
+| after one insertion, 119 corpus pages | start of the day | + exact-value write | + punctuation-aware hash |
+|---|---|---|---|
+| **pages exact** | 30 | 116 | **118** |
+| wrong values (pages) | 6,622 (43) | 18 (1) | **0 (0)** |
+| addresses stale (pages) | 17,409 (84) | 6 (2) | **3 (1)** |
+| addresses lost | 14,502 | 7 | **0** |
+| recall, median / min | 100% / 4.0% | 100% / 99.8% | **100% / 100%** |
+
+**118 of 119 pages are exact after an insertion** — nothing stale, nothing
+lost, nothing wrong, on a corpus selected by an earlier pass for structural
+variety and not by me. Recall is 100% on every page. Across the day the exact
+count went 30 → 40 → 70 → 91 → 116 → 118.
+
+The single page that is not exact is data.gov.uk's search results: 3 stale
+addresses of 3,092. `discourse.julialang.org`
 holds 58 addresses with another row's content and loses 44, and
 ar.wikipedia.org loses ~750 — both unchanged by this work and both pre-dating
 it. Wrong content at a right address remains the worst class and the next
