@@ -1247,7 +1247,55 @@ over-dedup count decide. It is not being applied mid-sweep -- the chained arms
 each start a fresh `python -m domvec.analytics`, so an edit to the harness now
 would land between arms and put two instruments in one table.
 
-### The asynchronous phase has never had anything to time
+### The asynchronous phase, measured at last
+
+`--embed cpu` supplies a real embedder -- `nomic-embed-text-v1.5.f16.gguf`,
+present locally, no download -- so `queue.flush` does work instead of returning
+immediately. Deliberately not `WFH_FAKE_EMBEDDER`, which exists and would let
+this run without a model: timing a fake would produce exactly the kind of
+number the flag was added to stop producing.
+
+| phase | quotes.toscrape | news.ycombinator |
+|---|---|---|
+| fold — the in-page chunking algorithm | 18.0 ms | 45.0 ms |
+| drain — the crossing | 32.7 ms | 87.9 ms |
+| trie — payload into the patricia trie | 28.0 ms | 72.4 ms |
+| markdown | 49.7 ms | 183.7 ms |
+| wireframe | 1.9 ms | 6.0 ms |
+| **embed_queue — what the delta path pays** | **0.112 ms** | **0.377 ms** |
+| **embed — the asynchronous phase** | **7,638 ms** | **38,111 ms** |
+
+**The asynchronous phase costs 100 to 400 times the entire synchronous
+pipeline.** Embedding news.ycombinator's 24 chunks takes 38 seconds; folding,
+crossing, writing the trie and rendering both projections takes 395ms between
+them.
+
+That is the argument for doing vectorization off the recursion, and it is now a
+measurement rather than a design preference: **the delta path pays 0.377ms to
+hand off 38 seconds of work**, about a thousandth of one percent. Synchronous,
+a page would cost 38 seconds instead of 45 milliseconds and the millisecond
+claim would be dead. The decoupling is not an optimisation; it is the only
+reason the interactive path exists.
+
+Three limits on these numbers. They are CPU, and GPU is unmeasured. Per-chunk
+cost scales with chunk size -- 955ms per chunk here against 20ms per short
+string in a smoke test, because real chunks run to the 1200-character budget.
+And `embed_ms` is taken with `flush` called inline, which is how the cost
+becomes visible at all; on the live path it is off-thread, and what the
+interactive path actually pays is `embed_queue_ms`.
+
+The embedder is deterministic across calls -- the same text in two calls is
+bit-identical, which is what `VectorQueue`'s digest-keyed reuse depends on.
+Within a single batch there is float noise of about 5e-08 from accumulation
+order at different batch positions, which is below anything the cache or the
+retrieval side can notice.
+
+en.wikipedia's largest-cities page (6,845 addresses) exceeded ten minutes on
+CPU and did not complete. Recorded rather than dropped.
+
+### What the phase was reporting before this
+
+#### The reading it replaced
 
 The goal asks for the mutation-chunking algorithm and the embedding phase to
 be timed separately, and structurally they are. One row of `affine.jsonl`:

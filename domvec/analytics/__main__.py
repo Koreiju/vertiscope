@@ -23,6 +23,13 @@ def main(argv=None) -> int:
     parser.add_argument("--delta", action="store_true",
                         help="measure what one insertion costs against page "
                              "size, on the local scaling fixture")
+    parser.add_argument("--embed", default="", metavar="DEVICE",
+                        help="run the asynchronous phase for real, on `cpu` or "
+                             "`gpu`. Without it `queue.flush` returns "
+                             "immediately and `embed_ms` measures the "
+                             "absence of embedding rather than its cost: "
+                             "7,053 chunks were queued across 84 recorded "
+                             "runs and none were ever embedded")
     parser.add_argument("--variants", default="",
                         help="sensor mechanisms to set for this run, as "
                              "name=on/off pairs: `dedup=on,gate=off`. "
@@ -110,6 +117,19 @@ def main(argv=None) -> int:
                     "--variants takes name=on/off pairs, not {!r}".format(part))
             out[name.strip()] = value in ("on", "true")
         return out
+
+    def _embedder(device):
+        """A real embedder, or None.
+
+        Deliberately not the fake one. `WFH_FAKE_EMBEDDER` exists and would
+        make this run without a model, and timing it would produce exactly the
+        kind of number this flag was added to stop producing -- a phase that
+        reports a cost for work it did not do.
+        """
+        if not device:
+            return None
+        from ..core.embedding_service import EmbeddingService
+        return EmbeddingService(device=device)
 
     cfg = load_config()
     with browser_session(cfg) as driver:
@@ -205,6 +225,7 @@ def main(argv=None) -> int:
             try:
                 report = measure_page(driver, url, scrolls=args.scrolls,
                                       variants=_variants(args.variants),
+                                      embedder=_embedder(args.embed),
                                       context_window=args.window)
             except Exception as exc:  # noqa: BLE001 - a failed page is a datum
                 print(f"  {url}: {type(exc).__name__}: {exc}", flush=True)
