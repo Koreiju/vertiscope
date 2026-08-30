@@ -534,7 +534,28 @@ class AddressTrie:
             key = address.key()
             digest = want[key][2]
             node = self.find(address)
-            if node is not None and node.content_hash == digest:
+            # The *exact* value, not the content hash.
+            #
+            # `content_hash` is the hash of a normalized token multiset, and
+            # that blindness is deliberate: it is what lets the re-anchor
+            # below recognise a paragraph that moved and was reformatted. It
+            # is the wrong test for "is there anything to write", because a
+            # value made only of punctuation has an empty multiset -- `(`,
+            # `=>`, `,`, `->` and a bracketed line break all hash to
+            # sha1("") -- so every
+            # change between two of them looked like no change at all and was
+            # dropped.
+            #
+            # Syntax-highlighted code is made of those: on php.net's manual
+            # page, 30 addresses inside `<pre><code><span>` held one token
+            # while the page held another, and the move channel had delivered
+            # the right value to the right address every time. The write was
+            # refused after it arrived.
+            #
+            # Same distinction the renderer needs between `subtree_hash` and
+            # `exact_hash`, in a second place: matching is allowed to be
+            # blind, deciding whether to write is not.
+            if node is not None and node.value == value:
                 # Already says this, so there is nothing to write -- but a
                 # move reported into this address still has to hand its
                 # identity over, because the fold has also verified the source

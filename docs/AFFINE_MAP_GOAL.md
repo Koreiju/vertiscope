@@ -662,12 +662,52 @@ stale addresses against a page with 81**, info.cern.ch 30 against 81, noaa.gov
 lost, nothing wrong. Two pages are imperfect on addresses at all:
 data.gov.uk holds 3 stale of 3,092, and w3schools loses 4 of 1,774.
 
-**Still open.** 130 wrong values across 26 pages, and the shape of them is now
-clear: 30 of them are on php.net, all `code` tokens inside syntax-highlighted
-`<pre><code><span>` blocks, each both a move source *and* a move destination —
-a permutation among near-identical punctuation. Wrong content at a right
-address remains the worst class, and it is now the only class left at any
-scale. `discourse.julialang.org`
+### Matching may be blind; writing may not
+
+`apply` decided "already says this, nothing to write" by comparing
+`content_hash` — the hash of a normalized *token multiset*. That blindness is
+deliberate and load-bearing for the re-anchor, which has to recognise a
+paragraph that moved and was reformatted. It is the wrong test for whether
+there is anything to write, because **a value made only of punctuation has an
+empty multiset**: `(`, `=>`, `,`, `->` and a bracketed line break all hash to
+`sha1("")`. Every change between two of them looked like no change and was
+refused.
+
+Syntax-highlighted code is made of exactly those. On php.net's manual page, 30
+addresses inside `<pre><code><span>` held one token while the page held
+another — and the move channel had delivered the right value to the right
+address every time. The write was refused after it arrived, which is why every
+earlier diagnosis pointed at the mapping and found nothing wrong with it.
+
+The test is now the exact value. This is the same distinction the renderer
+needs between `subtree_hash` and `exact_hash`, arrived at independently in a
+second place: **matching is allowed to be blind, deciding whether to write is
+not.**
+
+| after one insertion, 119 corpus pages | + vacate orphans | + drop content guard | + exact-value write |
+|---|---|---|---|
+| **pages exact** | 70 | 91 | **116** |
+| wrong values (pages) | 129 (25) | 130 (26) | **18 (1)** |
+| addresses stale (pages) | 241 (27) | 3 (1) | 6 (2) |
+| addresses lost | 0 | 4 | 7 |
+| recall, median / min | 100% / 100% | 100% / 99.8% | 100% / 99.8% |
+
+**116 of 119 pages are exact after an insertion** — nothing stale, nothing
+lost, nothing wrong. Across the day the figure went 30 → 40 → 70 → 91 → 116.
+
+Every page that is not exact, in full:
+
+| page | stale | lost | wrong | of |
+|---|---|---|---|---|
+| coinmarketcap.com | 3 | 3 | 18 | 1,525 |
+| w3schools.com forms | 0 | 4 | 0 | 1,774 |
+| data.gov.uk search | 3 | 0 | 0 | 3,092 |
+
+The cost of writing those values rather than refusing them is uid churn: where
+a value is punctuation-only the re-anchor cannot identify which source it came
+from, because that identification is exactly what the empty multiset cannot
+support, so the leaf is re-issued. That is a smaller and more honest defect
+than holding the wrong content, and it is the next thing to look at. `discourse.julialang.org`
 holds 58 addresses with another row's content and loses 44, and
 ar.wikipedia.org loses ~750 — both unchanged by this work and both pre-dating
 it. Wrong content at a right address remains the worst class and the next
