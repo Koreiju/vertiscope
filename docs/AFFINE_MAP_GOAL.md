@@ -1876,6 +1876,56 @@ was that a string was empty. Neither sample tallies nor a plausible mechanism
 would have found it -- only diffing addresses on one page and then asking what
 the value actually was.
 
+### A hidden input is a machine payload, not a control
+
+The invented capture addresses had one more class, and the value gave it away:
+**422 addresses on openlibrary whose value was the literal string `input`**.
+Not plausible page content. It is the placeholder the fold emits for every
+form field -- a line saying *there is a control here* -- and that page carries
+exactly **422 `input[type=hidden]`**.
+
+A hidden input is a form's machine payload. Nobody can see it or use it, and
+the trie was carrying an assertion that it was something to interact with.
+
+The fix keeps the distinction sharp. A hidden field's `value` and `name` are
+still captured if they hold anything, because **a hidden field's content is
+content**; what is dropped is only the claim that there is a control.
+
+| | before | after |
+|---|---|---|
+| capture FP | 1,159 | **563** |
+| capture precision | 99.69% | **99.85%** |
+| openlibrary invented | 422 | **0** |
+| markdown / wireframe / dedup | — | unchanged |
+| affordances | — | unchanged |
+| **drift, delete** | 116 of 117 | **117 of 117** |
+| suite | — | 1,500 passed |
+
+**Affordances not moving was the prediction, and checking it was the point.**
+Ground truth had already excluded hidden inputs from `isControl`, so the sensor
+ceasing to claim them should move nothing there. Had it moved, the account of
+which side was wrong would have been incomplete and the change would not have
+been committed.
+
+And **this was exposed by an earlier instrument change of ours.** Excluding
+hidden inputs from `isControl` stopped truth counting them as controls, and
+the sensor's placeholder went from matching to mismatching. The instrument
+change was right on its own terms -- a hidden input is unreachable -- and it
+made visible a sensor over-capture that had been silently cancelling out
+against a matching error on the other side. Two wrongs had been agreeing.
+
+That completes a family of three, all one question -- *is this something the
+page shows a reader?* -- answered wrongly in three different ways:
+
+| | error | fix |
+|---|---|---|
+| `<svg>` with `<text>` | content **lost** by folding | descend |
+| `<link>` | metadata **captured** as content | skip |
+| `input[type=hidden]` | machine payload **claimed** as a control | no placeholder |
+
+None was visible in a headline figure, and each surfaced only from reading
+values and addresses against an independently computed ground truth.
+
 ### How fast the map goes wrong
 
 Knowing the trie grows is not the same as knowing what it costs. The same

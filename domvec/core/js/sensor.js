@@ -895,7 +895,21 @@
     if (tag === 'A' || tag === 'AREA') { /* link-ness implied by href above */ }
     else if (tag === 'INPUT' || tag === 'BUTTON' || tag === 'SELECT' ||
              tag === 'TEXTAREA') {
-      (out || (out = [])).push([intern('@control'), tag.toLowerCase()]);
+      // A hidden input is a form's machine payload, not a control a reader
+      // can reach: openlibrary's search results carry 422 of them, and the
+      // placeholder emitted here was 422 of that page's invented capture
+      // addresses -- a line saying "there is an input here" about something
+      // nobody can see or use.
+      //
+      // The same judgement as <link>: metadata the page carries for the
+      // machine does not enter the trie as content. Its `value` and `name`
+      // are still captured above if they hold anything, because a hidden
+      // field's *content* is content; what is dropped is the claim that
+      // there is a control to interact with.
+      if (tag !== 'INPUT'
+          || (el.getAttribute('type') || 'text').toLowerCase() !== 'hidden') {
+        (out || (out = [])).push([intern('@control'), tag.toLowerCase()]);
+      }
     } else if (tag === 'SELECT') {
       // What the control currently says. Without it the select drew as an
       // empty `[ ]` -- present, unreadable, and indistinguishable from an
