@@ -1698,6 +1698,49 @@ projection's own loss: 2,591 units reached the trie and did not reach the
 reader. That decomposition is the point of scoring the arrows separately --
 one figure over the whole pipeline would have hidden which half to fix.
 
+### The largest remaining capture gap: text inside SVG
+
+Of 2,889 units the trie never captured across the corpus, **2,167 are on one
+page** -- `sqlite.org/lang_select.html` -- and the mechanism is not a defect in
+the fold's bookkeeping. It is a design decision meeting a case it was not made
+for.
+
+That page carries **139 SVGs holding 2,447 `<text>` elements and 14,037
+characters**: the SQL grammar, drawn as railroad diagrams. The trie captures
+**zero** addresses containing `/svg`.
+
+`SVG` is in `MEDIA_TAGS`, so an inline SVG is rendered as one media reference
+and the fold does not descend into it. For icons and logos that is right and
+deliberate -- a page with two hundred tiny path SVGs should not turn each into
+content, and the existing note about `.../svg[4]/title` shows the render
+standing for the picture rather than its parts on purpose.
+
+For a diagram whose labels *are* the documentation, the same rule loses the
+document. A reader of that page in the REPL gets the prose around the
+diagrams and none of the grammar.
+
+The shape of the fix, and its cost, stated rather than taken here:
+
+- **The rule to change is narrow.** An SVG is a picture unless it contains
+  `<text>`; text inside an SVG is content a reader is entitled to. That mirrors
+  the reasoning already written beside `<img alt="">` in `kindOf` -- the role is
+  left alone and the *render class* is corrected, because what a reader is
+  shown is a separate decision from what the AAM tables say.
+- **It is a sensor change, so every number above moves.** What the fold
+  captures changes, so coverage, drift, affordance and dedup all need
+  re-measuring, and the sustained-mutation runs with them. That is roughly two
+  hours of browser time, not a patch and a smoke test.
+- **The risk is over-capture, and it has a name here.** DuckDuckGo's region
+  filter taught this codebase that structurally faithful is not the same as
+  useful: eighty option lines ahead of the first result. A decorative SVG with
+  a stray `<text>` label would draw a line the reader did not need. The
+  measurement that would decide it already exists -- `page->wireframe`
+  precision, currently 99.97%, is exactly the number over-capture degrades.
+
+Recorded rather than fixed in the same breath as finding it, because the
+corpus figures in this document are consistent with each other as they stand,
+and a sensor change invalidates all of them at once.
+
 ### How fast the map goes wrong
 
 Knowing the trie grows is not the same as knowing what it costs. The same
