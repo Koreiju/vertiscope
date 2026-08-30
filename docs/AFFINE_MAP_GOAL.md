@@ -1074,6 +1074,28 @@ The document disagrees with itself. Nothing else is present to blame. So
 `delete` is exact on every page in the corpus that holds still, and the two
 pages that were carrying its remaining residue were never carrying a defect.
 
+Over the whole corpus, with no sensor involved anywhere in it:
+
+| the page against itself, 3s apart | pages |
+|---|---|
+| measured | 135 |
+| **hold still (floor 0)** | **133** |
+| move on their own | 2 |
+| errored | 1 (codeberg, 45s navigation timeout, every run) |
+
+The two are coinmarketcap (floor 10, entirely value churn -- the ticker) and
+w3schools html-forms (floor 4, entirely address churn -- the iframes). They are
+exactly the two pages carrying `delete`'s remaining residue, identified here by
+a measurement in which the sensor takes no part. The corpus is 133/135 static,
+so exactness is claimable nearly everywhere, and the exceptions are named
+rather than averaged in.
+
+The floors also move between visits -- w3schools measured 8 by hand earlier and
+4 here, coinmarketcap 21 and 10 -- because ad-sync and ticker timing differ per
+load. That is not inconsistency in the measurement; it is the reason `drift`
+takes its own control window on each page load instead of importing this
+artifact. A floor is a property of the document *and* the visit.
+
 This is now measured rather than re-derived by hand whenever a page looks
 guilty. `domvec/analytics/stability.py` gives each page a **resolution
 limit**: a page whose floor is eight addresses cannot evidence a four-address
