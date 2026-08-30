@@ -773,7 +773,32 @@ somewhere to happen: `edit` needs text inside the group, `delete` and
 **Deletion is the weak gesture**, and it is the one the receiver has never been
 asked to do in reverse: 4 pages imperfect, 25 stale addresses on three of them,
 10 wrong values on coinmarketcap and 4 lost on the Wikipedia largest-cities
-table. That is now the next target, and it is a narrow one. `discourse.julialang.org`
+table.
+
+What is established about it, and what is not:
+
+- The drain says **nothing at all** about the stale addresses. On
+  archive.org's details page: 0 moves, 0 movedChunks, and all 17 stale
+  addresses untouched by units, moves and removals alike.
+- They belong to four chunk ids (50, 51, 56, 57) that are **the same before and
+  after** the drain and are still claimed by the fold afterwards. So the fold
+  believes those chunks are unchanged while their line addresses have shifted:
+  the deletion removed `section[2]/div[1]` and the content moved to `div[2]`,
+  `div[3]` and so on, with the receiver still holding the old spellings.
+
+Two hypotheses tested and refuted, so the next attempt does not repeat them:
+
+1. *The merged-run gate compares the parent path, so a run shifting inside an
+   unchanged parent is skipped.* Plausible, and false here — adding the run's
+   own head path to that gate changed the skip count not at all (176 before and
+   after), and the residue was identical.
+2. *These chunks are id-anchored, and an anchored path is deliberately stable
+   under shifts.* Also false: none of the 17 stale addresses is id-anchored,
+   and the page's truth map has no id-anchored addresses at all.
+
+The single-chunk gate does compare the chunk's *own* path, which is what makes
+insert, edit and relocate exact, so whatever spares these four chunks is
+something else again. `discourse.julialang.org`
 holds 58 addresses with another row's content and loses 44, and
 ar.wikipedia.org loses ~750 — both unchanged by this work and both pre-dating
 it. Wrong content at a right address remains the worst class and the next
