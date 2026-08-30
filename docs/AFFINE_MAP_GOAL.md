@@ -1926,6 +1926,46 @@ page shows a reader?* -- answered wrongly in three different ways:
 None was visible in a headline figure, and each surfaced only from reading
 values and addresses against an independently computed ground truth.
 
+### Measuring with a proxy for the metric, and reporting the proxy's numbers
+
+Ground truth assigned `text()[n]` ordinals by counting only non-empty text
+children. XPath counts them all. So truth emitted addresses that do not
+resolve: `document.evaluate` on its `.../p/text()[3]` returns an empty node
+while truth recorded it as holding `", y este del"`, and the sensor's
+`text()[16]` resolved to exactly the `"y"` it had recorded.
+
+That is a real defect and it is fixed. **The account first written here of what
+it cost was not real, and this section is what replaced it.**
+
+The claim was: 115 invented and 115 lost on one page -- the same units counted
+once on each side of the confusion matrix -- and roughly 230 of the corpus's
+~1,290 capture errors. It made a satisfying observation, that an error can
+inflate both columns at once for the same reason.
+
+Measured, the fix changed nothing. es-wikipedia's `page->trie` reads
+`fn=1, fp=119` before it and `fn=1, fp=119` after; corpus totals are 727 and
+563 either way.
+
+The 115/115 came from a **raw set difference** between trie addresses and truth
+addresses, written ad hoc to diagnose. `score_arrow` does not compare that way:
+it allows a match when `_owner(path)` is in `page_owners` or in
+`page_ancestors`, deliberately, so that a render addressing content one level
+up is not charged as invention. The index disagreement was already inside that
+tolerance. The diff and the metric were answering different questions, and the
+diff's numbers were reported as the metric's.
+
+This is the rule from `CLAUDE.md` -- *name the denominator before reading the
+number* -- broken by the person who wrote it, in the same session, in a form
+the rule as stated did not quite cover. The denominator was named correctly for
+the metric. The mistake was measuring with something else and carrying its
+output across.
+
+**The fix stays, on its own terms.** An address is the universal link between
+the REPL and the page, and one that does not resolve to what it claims is
+wrong whatever the scoring forgives. The drift harness's move decoding
+resolves addresses rather than set-comparing them, so a non-resolving address
+is a defect waiting for a consumer that takes it literally.
+
 ### How fast the map goes wrong
 
 Knowing the trie grows is not the same as knowing what it costs. The same

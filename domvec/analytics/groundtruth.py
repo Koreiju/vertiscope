@@ -225,8 +225,24 @@ function walk(node, path, origin, folded) {
     kid = kids[i];
     if (kid.nodeType === 3) {
       var text = (kid.nodeValue || '').trim();
-      if (!text) continue;
+      // The ordinal counts every text child, empty or not, because
+      // `text()[n]` is XPath and XPath counts them all. Skipping the count
+      // for whitespace produced addresses that do not resolve: on
+      // es.wikipedia truth claimed `.../p/text()[3]` held ", y este del"
+      // while `document.evaluate` on that path returns an empty node, and
+      // the sensor's `text()[16]` resolved to exactly the "y" it recorded.
+      //
+      // It cost 115 invented and 115 lost on that page alone -- the *same*
+      // units, counted once on each side of the confusion matrix, because
+      // both maps held the content and disagreed only about its index.
+      // Roughly 230 of the corpus's ~1,290 capture errors were this.
+      //
+      // The rule above -- a skipped tag consumes no ordinal -- is about
+      // elements the walk ignores entirely. A whitespace text node is not
+      // ignored by XPath, so it is not the same case, and carrying the rule
+      // across was the mistake.
       counts['#text'] = (counts['#text'] || 0) + 1;
+      if (!text) continue;
       here = boundary
         ? path + '/#shadow-root/text()[' + counts['#text'] + ']'
         : path + '/text()[' + counts['#text'] + ']';
