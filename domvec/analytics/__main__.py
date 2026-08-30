@@ -165,13 +165,7 @@ def main(argv=None) -> int:
         if args.drift:
             from .drift import (measure_drift, render_drift_table,
                                 write_drift_artifact)
-            targets = list(args.urls)
-            if args.corpus:
-                root = pathlib.Path(__file__).resolve().parent.parent.parent
-                pages = sorted((root / "tests" / "corpus").glob("*.html"))
-                if args.limit:
-                    pages = pages[:args.limit]
-                targets = [p.as_uri() for p in pages]
+            targets = _targets(args)
             report = measure_drift(driver, targets,
                                    mutations=args.mutations,
                                    kind=args.kind,
@@ -223,7 +217,12 @@ def main(argv=None) -> int:
             print(f"  written: {write_delta_artifact(report, pathlib.Path(args.out))}",
                   flush=True)
             return 0
-        for url in args.urls:
+        # The same target list as every other mode, so `--corpus` means
+        # one thing everywhere. The coverage arrows score against
+        # `groundtruth.isControl`, so a change there moves these
+        # numbers, and re-measuring the whole corpus has to be one
+        # command rather than a shell loop someone has to remember.
+        for url in _targets(args):
             if args.qualify:
                 report = qualify(driver, url, repeats=args.qualify,
                                  scrolls=args.scrolls,

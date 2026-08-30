@@ -1623,6 +1623,43 @@ makes an element focusable; it does not make it actionable. Removing
 precisely why it stays: the boundary is documented where it is rather than
 moved to improve the number it produces.
 
+### The coverage matrix, corpus-wide, against the corrected denominator
+
+Every arrow of the map over all 135 pages, scored against `groundtruth` as it
+now stands -- `AREA` counted, `LABEL` dropped, hidden inputs excluded. Figures
+taken before those fixes are not comparable to these.
+
+| arrow | TP | FN | FP | recall | precision |
+|---|---|---|---|---|---|
+| page -> trie (capture) | 362,559 | 2,399 | 7,043 | **99.34%** | 98.09% |
+| page -> markdown | 358,456 | 4,990 | 3,024 | **98.63%** | 99.16% |
+| page -> wireframe | 316,531 | 3,366 | 104 | **98.95%** | **99.97%** |
+
+Deduplication, same run: 77,902 redundant pairs, **52,849 collapsed**, 15,340
+under-dedup, **654 over-dedup**, 148,995 distinct kept. Correctness 92.66%.
+
+The useful thing about these is that they are not 100%, and each column fails
+differently:
+
+- **2,399 units the trie never captured** is the floor of everything
+  downstream -- content missing here cannot be recovered by any projection.
+- **7,043 invented addresses on capture** is the largest single error in the
+  table, and the one to take next. An invented address is content placed
+  somewhere the page does not have it, which is worse than a stale one: the
+  reader is not merely served twice, they are served a location that does not
+  exist.
+- **The wireframe invents almost nothing** -- 104 in 316,635 -- which is
+  consistent with the affordance result, where it offered 8 controls the page
+  did not have in 74,581.
+- **654 over-dedup** is the loss direction of the dedup decision, against
+  52,849 collapsings that were correct. Small, and the direction that costs
+  content rather than noise, so it is the dedup number worth watching.
+
+The gap between capture recall (99.34%) and markdown recall (98.63%) is the
+projection's own loss: 2,591 units reached the trie and did not reach the
+reader. That decomposition is the point of scoring the arrows separately --
+one figure over the whole pipeline would have hidden which half to fix.
+
 ### How fast the map goes wrong
 
 Knowing the trie grows is not the same as knowing what it costs. The same
