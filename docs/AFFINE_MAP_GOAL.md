@@ -1464,6 +1464,22 @@ failures: `delete` removes members of a repeated group, so a group of ten is
 spent by the eighth deletion and a group of four table rows by the second.
 Recorded as stops, not counted as passes.
 
+All four gestures, same eight pages, ten mutations each:
+
+| gesture | measurements | exact | pages short of n=10 |
+|---|---|---|---|
+| insert | 32 | **32/32** | none |
+| delete | 28 | **28/28** | quotes (group spent at 8), news.ycombinator (at 2) |
+| edit | 28 | **28/28** | docs.python: no text in the chosen group, n=0 |
+| relocate | 29 | **29/29** | news.ycombinator: group of 4 rows too small at 3 |
+| | **117** | **117/117** | |
+
+**117 of 117 measurements exact under sustained mutation.** Every shortfall is
+the harness running out of material -- a repeated group spent by repeated
+deletion, a group of four table rows too small to relocate within, a group
+with no text to edit -- and each is recorded as a stop rather than counted as
+a pass. 32 minus 4 and 32 minus 3 account for the two short arms exactly.
+
 That upgrades the claim the corpus supports. "Exact under a gesture" was
 established before; "tracked and updated" -- content held correct across a
 sequence of changes, which is what the goal actually asks for -- needed this.
