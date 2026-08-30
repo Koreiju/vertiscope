@@ -319,7 +319,10 @@ def measure_page(driver, url: str, *, scrolls: int = 2,
     # than from the request because `shape` disables `pathdelta` in the
     # sensor, so a row that believed what was asked for would describe a
     # configuration that never ran.
-    report.variants = dict(stats.get('variants') or {})
+    # From `snapshot.stats`, not from `stats`: the dict above has already had
+    # `variants` popped out of it, so reading it there records {} for every
+    # run and two configurations become indistinguishable in the artifact.
+    report.variants = dict((snapshot.stats or {}).get('variants') or {})
     report.chunking = report_chunking
     return report
 

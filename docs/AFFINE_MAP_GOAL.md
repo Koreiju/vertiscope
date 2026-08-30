@@ -1296,6 +1296,48 @@ nothing in the default configuration, exactly as `!!V.dedup` implies. The
 dedup correctness the goal asks for is real; it is the markdown pipeline's,
 not the sensor's.
 
+### The sensor's own subsumption loses content, and stays off
+
+`USE_DEDUP` -- sketch-then-verify, `subsumed(rec, seen)` at emit -- was
+declared `!!V.dedup`, off, while a catalogue in the REPL listed it among the
+"settled mechanisms, on by default". Nothing checked, because until
+`--variants` existed no measurement in the suite could exercise a mechanism
+that was off. The question is now askable, and the answer is no.
+
+Both arms over eight corpus pages whose stability floor is zero, so none of
+this is page motion. The marginal effect of turning it on:
+
+| | change |
+|---|---|
+| redundancy collapsed | **+22** |
+| under_dedup (noise) | **-29** |
+| **over_dedup (loss)** | **+6** |
+| **addresses lost from the trie** | **+25** |
+
+It stays off. `under_dedup` is noise and survivable; content collapsed away is
+not, and 25 addresses missing from the trie is content the reader cannot
+reach at any price in payload.
+
+**The row that matters is `docs.python.org/3/library/re.html`**: 17 more
+redundant pairs collapsed, 17 fewer noisy duplicates, and **no additional
+over-dedup at all**. On the dedup axis alone that is a pure win, and it would
+have been the strongest evidence for enabling the mechanism. Its recall fell
+from 100% to 99.5%: **24 addresses gone from the trie.**
+
+That is the whole reason the check reads two axes rather than one. A
+suppression mechanism can only ever remove emissions, so it can always improve
+its own dedup score by dropping content -- and here it did, with every dedup
+number moving the right way. `DedupScore` alone would have recommended it.
+
+One correction to record, because it was this document's kind of mistake. The
+first reading of these arms reported 109 over-dedup and 47 lost addresses,
+taken from the totals of the ON arm. Almost all of that is the markdown
+pipeline's and is present with the sensor's dedup off --
+`docs-python` carries 88 over-dedup in both arms. The meaningful quantity is
+the difference between the arms, which is +6 and +25. Same verdict, a
+twentieth of the magnitude, and stated as an absolute it would have condemned
+the mechanism for the pipeline's behaviour.
+
 ### How fast the map goes wrong
 
 Knowing the trie grows is not the same as knowing what it costs. The same
