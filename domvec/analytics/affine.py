@@ -586,8 +586,18 @@ def _restates(a: PageUnit, b: PageUnit) -> bool:
 
 def score_dedup(truth: PageTruth,
                 rendered: Sequence[ContentAddress],
-                texts: Optional[Sequence[str]] = None) -> DedupScore:
+                texts: Optional[Sequence[str]] = None,
+                drawn_only: bool = True) -> DedupScore:
     """Was redundancy collapsed, and was anything distinct collapsed with it?
+
+    Scored over what the page lays out, for the same reason the projection
+    arrows are. A dedup decision is a decision about what the *reader* is
+    shown, so content the page never draws cannot have been wrongly collapsed
+    out of a rendering it was never going to enter. Ground truth descends into
+    a folded `<select>` and marks its options undrawn; counted here they read
+    as distinct content destroyed, and `over_dedup` went from 654 to 2,290
+    across the corpus for a renderer that had collapsed a dropdown exactly as
+    a browser does.
 
     **Redundancy is a lineage relation, not equality of text.** A page that
     says "inspirational" under six different quotes is not being redundant --
@@ -617,6 +627,11 @@ def score_dedup(truth: PageTruth,
     decidable -- asking the render what was redundant is asking it to mark
     its own paper.
     """
+    if drawn_only:
+        truth = PageTruth(url=truth.url,
+                          units=[u for u in truth.units if u.drawn],
+                          elements=truth.elements,
+                          shadow_hosts=truth.shadow_hosts)
     score = DedupScore()
     emitted = _Emitted.of(rendered, texts)
 

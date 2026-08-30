@@ -228,8 +228,15 @@ def measure_page(driver, url: str, *, scrolls: int = 2,
     report.arrows = [
         score_arrow("page->trie", truth, trie_addresses, denominator="all",
                     texts=trie_values),
+        # `drawn`, not `all`, and for the same reason the wireframe uses it.
+        # Markdown is a projection *for a reader*: it collapses a select to
+        # the value it shows, as a browser does. Scored against everything the
+        # page holds, data.gov.uk's 1,511 collapsed options read as 3,015
+        # units the projection lost, and its recall fell to 5.2% for behaving
+        # correctly. Capture is answerable for everything the page holds; a
+        # projection is answerable for what the page lays out.
         score_arrow("page->markdown", truth, markdown_addresses,
-                    denominator="all", texts=markdown_texts),
+                    denominator="drawn", texts=markdown_texts),
         # The drawing is answerable for what the page draws and nothing else.
         # A link's coverage in the *drawing* is structural, not textual.
         # `visual_text` strips `](url)` on purpose -- a drawing shows where a

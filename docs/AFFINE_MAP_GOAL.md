@@ -1631,12 +1631,50 @@ taken before those fixes are not comparable to these.
 
 | arrow | TP | FN | FP | recall | precision |
 |---|---|---|---|---|---|
-| page -> trie (capture) | 362,559 | 2,399 | 7,043 | **99.34%** | 98.09% |
-| page -> markdown | 358,456 | 4,990 | 3,024 | **98.63%** | 99.16% |
-| page -> wireframe | 316,531 | 3,366 | 104 | **98.95%** | **99.97%** |
+| page -> trie (capture) | 365,524 | 2,889 | 4,083 | **99.22%** | 98.90% |
+| page -> markdown | 317,528 | 2,622 | 3,024 | **99.18%** | 99.06% |
+| page -> wireframe | 316,532 | 3,385 | 104 | **98.94%** | **99.97%** |
 
-Deduplication, same run: 77,902 redundant pairs, **52,849 collapsed**, 15,340
-under-dedup, **654 over-dedup**, 148,995 distinct kept. Correctness 92.66%.
+Deduplication, same run: 67,618 redundant pairs, **46,773 collapsed**, 11,648
+under-dedup, **624 over-dedup**, 137,652 distinct kept. Correctness 93.76%.
+
+**One denominator error, found in three places at once.**
+
+The first version of this table showed 7,043 invented addresses on capture,
+and it named that the largest error in the map and the thing to fix next. It
+was the measurement. 2,960 of them were on data.gov.uk, and **2,960 of that
+page's 2,962 were `/option` paths** -- a page holding 1,511 options in
+collapsed `<select>` elements.
+
+Ground truth pruned the subtree under a folded control entirely, which
+conflates *the page does not lay this out* with *the page does not have it*.
+The trie captures a select's options, because they are content the page holds.
+The renderer collapses the select to the value it shows, because that is what
+a browser does. Both are right. Only the denominator was wrong, and the
+`drawn` flag for expressing the difference already existed and was not
+consulted.
+
+Fixing it required three changes that pull against each other, and each one
+exposed the next:
+
+- ground truth **descends** into a folded control, marking everything inside
+  `drew: false`. Capture FP fell 7,043 -> 4,083.
+- `page->markdown` scores against **drawn**, not **all**. Without this the
+  first change put data.gov.uk's 3,015 undrawn options in the projection's
+  denominator and its recall fell to **5.2% for behaving correctly**.
+- `score_dedup` scores over **drawn** content. Without this the same options
+  read as distinct content destroyed, and `over_dedup` rose 654 -> 2,290 for a
+  renderer that had collapsed a dropdown exactly as a browser does. Corrected,
+  it is 624 -- below where it started, because the filter also removes
+  undrawn cases that were always being miscounted.
+
+The principle the three share, and the one to keep:
+
+> **Capture is answerable for everything the page holds. Every reader-facing
+> measure -- markdown, wireframe, dedup -- is answerable for what the page
+> lays out.**
+
+A single denominator across both must be wrong for one of them.
 
 The useful thing about these is that they are not 100%, and each column fails
 differently:

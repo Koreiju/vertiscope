@@ -212,7 +212,7 @@ function isControl(el) {
 // tree at all, which is what the light/shadow split reports. It is inherited,
 // and it is deliberately false for slotted nodes -- they are drawn inside the
 // component but they are light DOM, and a static fetch reaches them.
-function walk(node, path, origin) {
+function walk(node, path, origin, folded) {
   var region = kidsOf(node, origin);
   var kids = region[0];
   var boundary = node.nodeType === 1 && !!node.shadowRoot;
@@ -243,7 +243,9 @@ function walk(node, path, origin) {
     seg = step(tag, counts[tag]);
     here = boundary ? path + '/#shadow-root/' + seg : path + '/' + seg;
 
-    var drew = drawnNow(kid);
+    // Inside a folded control nothing is laid out, whatever the box
+    // model says about the option elements themselves.
+    var drew = folded ? false : drawnNow(kid);
     if (kid.tagName === 'A' && kid.getAttribute('href') !== null) {
       units.push({p: here, k: 'link',
                   v: String(kid.getAttribute('href') || '').trim(),
@@ -279,7 +281,7 @@ function walk(node, path, origin) {
       units.push({p: here, k: 'control', v: label, d: drew, s: childOrigin});
     }
 
-    if (kid.shadowRoot) { hosts++; walk(kid, here, childOrigin); continue; }
+    if (kid.shadowRoot) { hosts++; walk(kid, here, childOrigin, folded); continue; }
     // Unreachable by design (CONTENT_EXTRACTION_RULES 8.4): counted, never
     // read as an empty element, so the coverage figure stays honest about
     // what it could not see.
@@ -287,8 +289,19 @@ function walk(node, path, origin) {
     if (ln.indexOf('-') > -1 && !kid.childNodes.length) {
       try { if (customElements.get(ln)) opaque++; } catch (e) {}
     }
-    if (FOLDED[kid.tagName]) continue;
-    walk(kid, here, childOrigin);
+    // Descend into a folded control, marking everything inside undrawn,
+    // rather than skipping it.
+    //
+    // Skipping conflates "the page does not lay this out" with "the page does
+    // not have it", and the two arrows need those apart. The trie *captures* a
+    // select's options -- content the page holds -- while the render collapses
+    // the select to the one value it shows, which is right. Omitted from
+    // ground truth, those captured options read as addresses the sensor
+    // invented: 2,960 of data.gov.uk's 2,962, on a page holding 1,511 options,
+    // and a large share of 7,043 across the corpus.
+    //
+    // `drew` is exactly the flag for this distinction, and it already exists.
+    walk(kid, here, childOrigin, folded || !!FOLDED[kid.tagName]);
   }
 }
 
