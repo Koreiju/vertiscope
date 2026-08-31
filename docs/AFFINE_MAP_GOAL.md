@@ -2230,6 +2230,61 @@ unchanged precision, and every new address resolves against the page. The
 budget now does what the goal asks of it: a smaller window produces more,
 smaller pieces rather than deleting the page beyond it.
 
+### The independent recall check, and a Latin-shaped assumption in it
+
+`visible.py` compares what a reader sees against what the trie holds **using
+no addresses at all**, so an addressing mistake cannot hide a miss. `innerText`
+is computed by layout rather than by anyone's walk, which is what makes it the
+only independent check on recall this project has.
+
+| | |
+|---|---|
+| pages | 135 |
+| words a reader sees | 499,329 |
+| **present in the trie** | **99.74%** |
+| pages showing everything | **103 of 135** |
+
+Getting to a number worth stating took four corrections, every one of them
+the instrument and every one caught before the figure was reported:
+
+1. **Requiring a visible line to appear contiguously in one trie value** --
+   59% "missing". `innerText` lines are layout-joined runs across several
+   elements: arxiv renders "Search Submit Donate Log in" from four separate
+   links. Requiring that of the trie asks it to reproduce the browser's line
+   breaking, which it neither does nor should.
+2. **Dividing an unseen *word* count by a *line* count** -- 51%. A unit error
+   in my own summary line.
+3. **Stripping punctuation inside a token instead of splitting on it** --
+   `innerText` joins a label span and a heading as `Title:Language Models`,
+   and the token `titlelanguage` exists nowhere by construction.
+4. **Gating the concatenation check on token length** -- and the gate excluded
+   the case it was built for.
+
+The fourth is the one worth keeping. `innerText` joins adjacent inline
+elements with no separator where the script has no spacing convention to
+apply, so a navbox of links becomes one run of letters. I gated the
+segmentation check at 24 characters, reasoning that anything longer "is not a
+word" -- **a Latin-shaped assumption**. Arabic words are short: `تطبيقية` +
+`فيزياء`, applied + physics, join into thirteen characters and read as one
+ordinary word. **133 of ar.wikipedia's 138 misses were that shape and never
+reached the check meant for them.**
+
+The gate was also unnecessary. Segmentation runs only on a *miss*, so its cost
+was already bounded -- 138 attempts, not 11,814 tokens. I optimised against a
+cost the control flow had already bounded, and lost 130 of 138 recoveries
+doing it. ar.wikipedia went from 138 unseen to **8**, and the corpus from
+0.49% to **0.26%**.
+
+Two limits on the segmentation, since it is now load-bearing:
+
+* **greedy longest-match is not optimal.** It can fail to split a run a
+  smarter segmentation would consume, so it may over-report misses. It never
+  under-reports: a successful split means the parts really are in the trie.
+* it could in principle forgive a genuine miss whose letters happen to be
+  spellable from other held words. At a three-character minimum in alphabetic
+  scripts that is implausible, but it is a property of the check rather than
+  something ruled out.
+
 ### How fast the map goes wrong
 
 Knowing the trie grows is not the same as knowing what it costs. The same

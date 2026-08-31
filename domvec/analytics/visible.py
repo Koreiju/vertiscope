@@ -108,25 +108,55 @@ def _tokens(text):
     return out
 
 
+def _decomposes(token, by_length):
+    """Can this run of letters be read as words the trie holds?
+
+    A concatenation artifact is not a missing word. ar.wikipedia renders a
+    navbox of physicists' names as one unbroken run -- each name is a separate
+    <a>, held separately in the trie, and only `innerText` joins them. Counted
+    as a token it exists nowhere and read as 471 missing words on one page.
+
+    Greedy from the left, longest match first: if the whole run is consumed by
+    words the trie holds, the content is present and only the joining is the
+    browser's. If any part is left over, that part really is missing.
+
+    Tried on **every** missing token, not only long ones. Gating on length was
+    backwards: the cost is already bounded because this is reached only on a
+    miss, and the threshold excluded the common case. Arabic words are short,
+    so two of them joined -- `تطبيقية` + `فيزياء`, applied + physics -- look
+    like one ordinary word of thirteen characters. 133 of ar.wikipedia's 138
+    misses were that shape and never reached the check meant for them.
+    """
+    at = 0
+    while at < len(token):
+        for word in by_length:
+            if token.startswith(word, at):
+                at += len(word)
+                break
+        else:
+            return False
+    return True
+
+
 def score_visible(lines: Sequence[str], values: Sequence[str]) -> dict:
     """How many of the words a reader sees are in the trie at all.
 
-    Measured on **words, not lines**, and that is not a convenience.
-    `innerText` lines are layout-joined runs across several elements: arxiv
-    renders "Search Submit Donate Log in" as one line from four separate
-    links, and "Title:Attention Is All You Need" from a label span and a
-    heading with no space between them. Requiring such a line to appear
+    Measured on **words, not lines**. `innerText` lines are layout-joined runs
+    across several elements -- arxiv renders "Search Submit Donate Log in" as
+    one line from four separate links -- so requiring a line to appear
     contiguously in the trie asks the trie to reproduce the browser's line
-    breaking, which it neither does nor should -- it addresses each element
-    separately, correctly. Scored that way, 59% of what a reader sees read as
-    missing on eight pages, and almost none of it was.
+    breaking, which it neither does nor should. Scored that way, 59% of what a
+    reader sees read as missing, and almost none of it was.
 
-    A word is the smallest unit both sides agree on. It carries no assumption
-    about where content lives, which is the whole point of this tier.
+    A word is the smallest unit both sides agree on, and it carries no
+    assumption about where content lives, which is the point of this tier.
     """
     held = set()
     for value in values:
         held.update(_tokens(value))
+    # Sorted once, not per attempt: longest-first is what makes the greedy
+    # walk prefer a real word over a shorter prefix of one.
+    by_length = sorted((w for w in held if len(w) >= 3), key=len, reverse=True)
 
     total = 0
     missing_words = 0
@@ -136,7 +166,13 @@ def score_visible(lines: Sequence[str], values: Sequence[str]) -> dict:
         if not words:
             continue
         total += len(words)
-        gone = [w for w in words if w not in held]
+        gone = []
+        for word in words:
+            if word in held:
+                continue
+            if _decomposes(word, by_length):
+                continue
+            gone.append(word)
         missing_words += len(gone)
         if gone:
             incomplete.append((line[:90], gone[:6]))
