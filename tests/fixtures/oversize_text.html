@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>MARK-OVERSIZE-TEXT</title></head>
+<body>
+<!--
+  One text node far larger than any budget a reader would set, beside a
+  short one.
+
+  The chunker splits above the budget and merges below it, and both halves
+  were expressed in elements: a node too big becomes several chunks by
+  recursing into its children. A text node has no children, so the
+  recursion had no base case and the node was never emitted -- RFC 791 is
+  one 94,887-character node and the trie held none of it.
+
+  The budget is what the goal asks a reader to turn down for a small
+  context window, so the failure got worse exactly as the reader asked for
+  less.
+-->
+<p id="short">A short paragraph that fits any budget.</p>
+<p id="long">Paragraph token 1 carries enough words that the whole node runs well past any small budget. Paragraph token 2 carries enough words that the whole node runs well past any small budget. Paragraph token 3 carries enough words that the whole node runs well past any small budget. Paragraph token 4 carries enough words that the whole node runs well past any small budget. Paragraph token 5 carries enough words that the whole node runs well past any small budget. Paragraph token 6 carries enough words that the whole node runs well past any small budget. Paragraph token 7 carries enough words that the whole node runs well past any small budget. Paragraph token 8 carries enough words that the whole node runs well past any small budget. Paragraph token 9 carries enough words that the whole node runs well past any small budget. Paragraph token 10 carries enough words that the whole node runs well past any small budget. Paragraph token 11 carries enough words that the whole node runs well past any small budget. Paragraph token 12 carries enough words that the whole node runs well past any small budget. Paragraph token 13 carries enough words that the whole node runs well past any small budget. Paragraph token 14 carries enough words that the whole node runs well past any small budget. Paragraph token 15 carries enough words that the whole node runs well past any small budget. Paragraph token 16 carries enough words that the whole node runs well past any small budget. Paragraph token 17 carries enough words that the whole node runs well past any small budget. Paragraph token 18 carries enough words that the whole node runs well past any small budget. Paragraph token 19 carries enough words that the whole node runs well past any small budget. Paragraph token 20 carries enough words that the whole node runs well past any small budget. Paragraph token 21 carries enough words that the whole node runs well past any small budget. Paragraph token 22 carries enough words that the whole node runs well past any small budget. Paragraph token 23 carries enough words that the whole node runs well past any small budget. Paragraph token 24 carries enough words that the whole node runs well past any small budget. Paragraph token 25 carries enough words that the whole node runs well past any small budget.</p>
+</body>
+</html>
