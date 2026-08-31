@@ -1999,6 +1999,144 @@ wrong whatever the scoring forgives. The drift harness's move decoding
 resolves addresses rather than set-comparing them, so a non-resolving address
 is a defect waiting for a consumer that takes it literally.
 
+## How much these numbers are worth
+
+Asked directly whether the measurements are valid and the interpretation
+robust, and the honest answer has three tiers of independence and one clean
+result.
+
+### The clean result: the denominators did not move
+
+The failure most worth ruling out is improving a rate by shrinking what it is
+scored against. Across the corpus runs of one session:
+
+| run | trie denominator | markdown denominator | trie precision |
+|---|---|---|---|
+| 1 | 371,594 | 320,313 | 98.90% |
+| 3 | 387,398 | 335,525 | 99.70% |
+| 5 | 381,802 | 332,994 | 99.82% |
+| 7 | 382,741 | 333,846 | **99.94%** |
+
+The denominators **grew** slightly -- the svg fix added units -- while
+precision rose a full point. So the improvement is removal of false positives,
+not denominator manipulation.
+
+### Three tiers of independence, and what each can see
+
+**Tier 1, `drift`: a sensor against a second sensor.** `_truth` boots another
+`Sensor` on the same page and walks it whole. That catches everything the
+incremental path never heard about, which is what it is for -- but it is
+**self-consistency, not correctness**. "117 of 117 exact, ten deep" means the
+incremental fold agrees with a cold boot of the same code. A systematic
+mis-reading present in both is invisible to it, by construction.
+
+**Tier 2, the affine arrows: the sensor against `groundtruth`.** A separate
+implementation, written to disagree where the fold is wrong -- and
+deliberately sharing the *addressing convention*, because two maps that
+address differently cannot be compared at all. `groundtruth.py` cites
+`sensor.js::stepFor` for its ordinals, and `invariants.c1` parses both walks
+and checks they agree on slot resolution.
+
+That shared convention is necessary and it is a blind spot. **An error in the
+convention itself is invisible to this tier**, and one was: truth counted only
+non-empty text children when assigning `text()[n]`, so both maps were internally
+consistent and both were wrong about where a text node lives.
+
+**Tier 3, `document.evaluate`: the page itself.** The only fully independent
+oracle used all day. Asking the browser to resolve an address settled the
+text-ordinal question in one measurement -- truth's `.../p/text()[3]` returned
+an empty node while claiming to hold `", y este del"`, and the sensor's
+`text()[16]` resolved to exactly the `"y"` it recorded.
+
+It is the only check that cannot be fooled by a shared assumption, and it is
+available for every address in the trie rather than only when a diagnosis
+stalls. It is now a measurement of its own, `--resolvable`, with its own
+artifact, and it is the strongest statement this project can make:
+
+| the page asked about the trie's own addresses | |
+|---|---|
+| pages | 135 |
+| addresses asked | **42,038** |
+| **unresolvable** | **0** |
+| mismatched | 46 (0.11%), of which 36 on one page whose cdn rotates image urls mid-measurement |
+| foreign namespace | 467 |
+| synthetic annotation | 1,463 |
+
+**Every address the trie holds names a real node in the page, and holds what
+that node holds.** That is the `url:xpath:markdown:content` claim tested
+against the only authority that cannot be argued with, and it says nothing
+about completeness -- content that never entered the trie is invisible here.
+
+Two things no other tier could have surfaced:
+
+- **467 addresses into `<svg>` and `<math>` do not resolve under plain
+  XPath.** Those elements are in foreign namespaces and `document.evaluate`
+  with unprefixed names cannot match them. The nodes are real and the
+  addresses are right about the composed tree, but a consumer following one
+  literally -- which is what a universal link structure implies -- gets
+  nothing. It only became visible *because* the svg fix put diagram labels
+  into the trie in the first place.
+- **1,463 synthetic annotations** (`@control`, `@role`) have no counterpart in
+  the page at all. They are the sensor's classification living in the same
+  address space as content.
+
+The checker needed four corrections before it could say any of this, each
+found by reading samples and each caught before a number was reported: an
+`href` compared against element text (619 of 1,581 "mismatched", every link
+sampled), a synthetic annotation treated as content, foreign-namespace nodes
+counted as wrong addresses, and a whole value compared against a truncated
+window. `verdict()` is extracted so all four are planted as tests, together
+with three that force it to still be able to fail.
+
+### On having changed ground truth five times
+
+A fair suspicion: each change moved numbers, and the person judging whether
+they were principled is the person who wanted them. The test applied each time
+-- *would I make this change if the sensor did not exist?* -- is necessary and
+not sufficient.
+
+The direction of the five is the evidence against systematic flattery, and it
+is mixed:
+
+| change | effect on the sensor's numbers |
+|---|---|
+| `AREA` added to control tags | better (254 phantoms became real affordances) |
+| `LABEL` removed | better (misses fell) |
+| hidden inputs excluded | better -- *then exposed a real sensor over-capture* |
+| descend into folded controls | **worse** (options became capture misses, then a markdown recall of 5.2%) |
+| text ordinals count all children | no change at all |
+
+Two of the five did not flatter, one actively made the numbers worse and cost
+two further fixes to resolve, and one changed nothing. That is not the profile
+of tuning.
+
+### How much the matching tolerance forgives
+
+`score_arrow` accepts a match when the address's owner is a truth owner or a
+truth ancestor. If that tolerance were doing heavy lifting, precision would be
+an artifact of it. Measured with `diagnose.py`, which reports both:
+
+| page | charged | forgiven |
+|---|---|---|
+| eurostat | 155 | 17 |
+| es.wikipedia | 107 | 4 |
+| musicbrainz | 0 | 2 |
+
+Forgiveness is single digits to seventeen against hundreds charged. The
+tolerance is not carrying the result.
+
+### What the corpus cannot tell us
+
+Frozen pages, loaded from disk. Their scripts *do* run -- that is how
+ad-sync iframes and a price ticker got into the stability floor -- but
+server-rendered content fetched at capture time is fixed, and pages that build
+themselves from an API are thin. Coverage on a live web is not established by
+this corpus and is not claimed.
+
+Shadow DOM is the sharpest case: **7 pages of 135**, about 1,205 nodes. The
+composed-tree handling rests on its fixture; the corpus corroborates and does
+not prove.
+
 ### How fast the map goes wrong
 
 Knowing the trie grows is not the same as knowing what it costs. The same

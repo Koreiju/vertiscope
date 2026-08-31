@@ -37,6 +37,11 @@ def main(argv=None) -> int:
                              "anything that is off by default, which is "
                              "how `dedup` came to be documented as on "
                              "while the code had it off")
+    parser.add_argument("--resolvable", action="store_true",
+                        help="ask the page whether every address in the "
+                             "trie names a node it has. The only oracle "
+                             "independent of the fold and the walk, which "
+                             "share an addressing convention by design")
     parser.add_argument("--affordance", action="store_true",
                         help="what the REPL offers to interact with, "
                              "against what the page can be. The coverage "
@@ -138,6 +143,18 @@ def main(argv=None) -> int:
 
     cfg = load_config()
     with browser_session(cfg) as driver:
+        if args.resolvable:
+            from .resolvable import (measure_resolvable,
+                                     render_resolvable_table,
+                                     write_resolvable_artifact)
+            report = measure_resolvable(driver, _targets(args),
+                                        context_window=args.window)
+            print(render_resolvable_table(report), flush=True)
+            print(f"  written: "
+                  f"{write_resolvable_artifact(report, pathlib.Path(args.out))}",
+                  flush=True)
+            return 0
+
         if args.affordance:
             from .affordance import (measure_affordance,
                                      render_affordance_table,
