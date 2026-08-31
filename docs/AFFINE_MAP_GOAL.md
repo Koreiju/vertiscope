@@ -1181,6 +1181,23 @@ load. That is not inconsistency in the measurement; it is the reason `drift`
 takes its own control window on each page load instead of importing this
 artifact. A floor is a property of the document *and* the visit.
 
+**This is why `delete`'s headline figure moves between runs, and why a move is
+not news.** Three consecutive corpus runs of the delete arm, spanning a change
+to sibling ordering:
+
+| run | ordering | pages with net error |
+|---|---|---|
+| 22:28 | before | coinmarketcap, w3schools |
+| 02:31 | after | none |
+| 04:47 | after | coinmarketcap, w3schools |
+
+117 of 117, then 115 of 117, on the same corpus. It reads as a regression and
+is not one: the same two pages, always the same two, each error under its own
+floor for that run (coinmarketcap 7 against 16, w3schools 2 against 3), and the
+run *before* the change shows the identical pair. `drift` imports nothing from
+the modules that changed in between. A figure that moves by two on this arm is
+the corpus breathing, and the named pages are how you tell that from a defect.
+
 This is now measured rather than re-derived by hand whenever a page looks
 guilty. `domvec/analytics/stability.py` gives each page a **resolution
 limit**: a page whose floor is eight addresses cannot evidence a four-address
