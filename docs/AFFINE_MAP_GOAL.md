@@ -2367,9 +2367,14 @@ exactly one child per group, that child got `doc_pos = -1`, unknown positions
 sort last, and **the first item of every list, table and card grid was drawn
 at the bottom of its group**. Every address was right, every unit present,
 every dedup decision right; the page simply read in the wrong order. Only on
-the snapshot path — the live path supplies no map, so every position is
-unknown and sibling index decides, correctly — which means the two paths that
-are meant to produce the same chunks did not.
+the snapshot path, which is the path that builds the index.
+
+**The reassurance in the second half of that sentence used to read "the live
+path supplies no map, so every position is unknown and sibling index decides,
+correctly", and it was wrong.** The same sentence stood in `trie_doc_pos`, in
+`insert`, and here: three copies of one claim, never checked, and each copy a
+reason not to look. Sibling index decides correctly only for siblings that
+*share a label*. See "The live path had no order check at all" below.
 
 Measured over the fixture pages plus a saved real page: **42 prose inversions
 before, 8 after**. `affine.OrderScore` now reports it per page, against the
@@ -2386,6 +2391,67 @@ Two things are excluded, both for the denominator's sake:
   reads 91% on a page it draws correctly. That is the denominator mistake this
   project keeps making, so the visual projection is not scored here rather
   than scored wrongly.
+
+### The live path had no order check at all
+
+Everything in the section above is measured through `StreamingScan.push`,
+which tags the html and supplies a walk-position map. The sensor path
+supplies no map, and nobody had ever asked what it does without one.
+
+It grouped by label. `insert` gave a node's children a position by label
+group -- every text child, then every anchor child -- which is right for
+siblings that share a label and wrong for a parent whose children
+*alternate*. A sentence with a link in it is exactly that parent, and
+`tests/fixtures/mixed_inline.html` is seven lines of it:
+
+    page            Physics studies matter and energy across space and time.
+    sensor path     Physics studies / and / across / and time.
+                    then [matter] / [energy] / space
+    snapshot path   Physics studies matter and energy across space and time.
+
+The two paths are meant to produce the same chunks. They produced different
+sentences, and the one that ships was the wrong one.
+
+**Nothing could see it.** Coverage compares address sets, dedup compares
+values, drift compares a sensor against a sensor; sequence appears in none of
+them, and the one check that does look at sequence only ever ran on the path
+that was already correct. It surfaced instead through the address-free recall
+check, which counted `에너지나` on ko.wikipedia as unseen -- that run exists
+only when a link's text and the text node after it are adjacent, so a
+reordering is precisely the shape of defect it shows up as.
+
+The fix is to observe the order rather than derive it. The fold walks the DOM
+recursively and `sensing._decode` hands the units over in that order, so
+`insert` stamps each newly met DOM node with the next value of a counter.
+First arrival fixes the position and only the first: a node re-offered by a
+later drain has not moved, and re-stamping it would let a page reorder itself
+merely by being watched.
+
+What it moved, over the 113 pages measured in both runs:
+
+    words a reader sees, not in the trie   1,620 -> 786   (0.32% -> 0.16%)
+    pages showing everything                 108 -> 113
+    page->trie          missed                493 -> 471   invented 143 -> 143
+    page->markdown      missed              2,070 -> 1,937 invented 142 -> 142
+    page->wireframe     missed              2,889 -> 2,754 invented  70 ->  70
+    affordances missed / phantom             224 / 8, unchanged
+    delete, ten deep                         117 of 117 exact, unchanged
+
+Recall halved and not one arrow lost precision, which is what a reordering
+should look like when it is corrected: the content was always there.
+
+**One control moved the wrong way and is not yet explained.** Dedup
+correctness went 95.15% -> 95.02%, with `over_dedup` +40 and `collapsed` -38.
+That shape says roughly forty lineage groups stopped keeping a survivor and
+now keep none, which is loss, in the direction this project calls the
+dangerous one. It is concentrated: +28 of it on ja.wikipedia alone (13 -> 41
+of that page's 1,532 redundant groups), +5 on ar.wikipedia, the rest ones and
+twos. The same page's unseen words fell 141 -> 78 over the same change.
+
+It is not diagnosed, because `DedupScore` reports counts and no samples --
+the exact failure `visible`'s `unseen_sample` was added to prevent, repeated
+in the neighbouring instrument. Naming the mechanism requires the sample
+first, so that is the next thing rather than a guess recorded as a cause.
 
 ## Constraints that hold throughout
 

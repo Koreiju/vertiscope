@@ -375,6 +375,11 @@ class AddressTrie:
         # one piece of content for as long as it is on the page, however
         # often its address is re-pointed underneath it.
         self._uid_seq = 0
+        # Where a node was met, when nobody supplied a map. `insert` hands
+        # each newly created DOM node the next value, so a caller that
+        # arrives in document order gets document order recorded rather
+        # than re-derived. See `insert` for why derivation was not enough.
+        self._arrival = 0
 
     # -- build ------------------------------------------------------------
     def insert(
@@ -387,10 +392,32 @@ class AddressTrie:
 
         ``doc_pos`` maps trie path to walk position. A scan's map is keyed by
         the tagger's convention and must be put through `trie_doc_pos` first;
-        `from_tags` does that. Supplying it makes sibling order exact;
-        omitting it falls back to label-group order, which `_seg_key` then
-        breaks by sibling index -- also correct, just derived rather than
-        observed.
+        `from_tags` does that.
+
+        Without it, order is taken from **arrival**: each DOM node gets the
+        next value of a monotone counter as it is first met. The live path
+        hands units over in document order -- `sensing._decode` walks the
+        fold's own recursive descent and says so -- so recording that order
+        is observing it, not guessing.
+
+        It used to be derived instead, by label group and then sibling index,
+        and this docstring called that "also correct". It is correct only for
+        siblings that share a label. A parent whose children *alternate* --
+        which is what a sentence with a link in it is -- was emitted one
+        label group at a time:
+
+            page    Physics studies [matter] and [energy] across space
+            trie    "Physics studies" / "and" / "across" ...
+                    then [matter], [energy], then "space"
+
+        Every address was right, every unit was present, and no coverage,
+        dedup or drift number could see it, because not one of them looks at
+        sequence. The reader-facing claim is that the REPL shows what the page
+        shows, and word order is most of what that means. Measured on
+        tests/fixtures/mixed_inline.html and on ko.wikipedia, where a lead
+        paragraph's prose and its inline links came out as two separate runs.
+
+        The snapshot path was never affected: it supplies the map.
 
         Overwrite rather than append is forced by the addressing being a key
         (see :mod:`domvec.address`): two values at one address would mean the
@@ -423,8 +450,16 @@ class AddressTrie:
                     order = len(node._label_order)
                     node._label_order[label] = order
                 pos = -1
-                if in_dom and doc_pos is not None:
-                    pos = doc_pos.get(xpath_prefix, -1)
+                if in_dom:
+                    if doc_pos is not None:
+                        pos = doc_pos.get(xpath_prefix, -1)
+                    else:
+                        # First arrival fixes the position, and only the
+                        # first: a node re-offered later has not moved, and
+                        # re-stamping it would let a repair reorder a page
+                        # that did not change.
+                        pos = self._arrival
+                        self._arrival += 1
                 child = TrieNode(
                     segment=seg, depth=i, doc_pos=pos, label_order=order
                 )

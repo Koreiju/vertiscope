@@ -1,0 +1,13 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Inline links inside a sentence</title>
+<!--
+  A paragraph of mixed content: text nodes and inline elements alternating.
+  A reader sees one sentence. Ordering a parent's children by label group
+  emits every text node first and every anchor afterwards, which is a
+  different sentence.
+-->
+<body>
+<p id="s">Physics studies <a href="https://x.test/matter">matter</a> and
+<a href="https://x.test/energy">energy</a> across <em>space</em> and time.</p>
+</body>
