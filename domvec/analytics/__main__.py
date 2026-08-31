@@ -37,6 +37,11 @@ def main(argv=None) -> int:
                              "anything that is off by default, which is "
                              "how `dedup` came to be documented as on "
                              "while the code had it off")
+    parser.add_argument("--visible", action="store_true",
+                        help="what a reader sees, against what the trie "
+                             "holds, using no addresses at all. The only "
+                             "independent check on recall: innerText is "
+                             "computed by layout, not by a walk")
     parser.add_argument("--resolvable", action="store_true",
                         help="ask the page whether every address in the "
                              "trie names a node it has. The only oracle "
@@ -143,6 +148,17 @@ def main(argv=None) -> int:
 
     cfg = load_config()
     with browser_session(cfg) as driver:
+        if args.visible:
+            from .visible import (measure_visible, render_visible_table,
+                                  write_visible_artifact)
+            report = measure_visible(driver, _targets(args),
+                                     context_window=args.window)
+            print(render_visible_table(report), flush=True)
+            print(f"  written: "
+                  f"{write_visible_artifact(report, pathlib.Path(args.out))}",
+                  flush=True)
+            return 0
+
         if args.resolvable:
             from .resolvable import (measure_resolvable,
                                      render_resolvable_table,

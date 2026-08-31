@@ -2137,6 +2137,67 @@ Shadow DOM is the sharpest case: **7 pages of 135**, about 1,205 nodes. The
 composed-tree handling rests on its fixture; the corpus corroborates and does
 not prove.
 
+### A text node larger than the budget is dropped, not split
+
+The independent recall check found this, and no other tier could have. The
+affine arrows compare against `groundtruth`, which walks the same way the fold
+does; `drift` compares a sensor against a sensor. Neither notices content that
+*neither* side ever reaches. `innerText` does, because layout produced it.
+
+Two arxiv pages, adjacent in the corpus and nearly identical in structure:
+
+| page | longest text node | in the trie? |
+|---|---|---|
+| arxiv 1706.03762 | 1,136 chars | **yes** -- longest trie value 1,136 |
+| arxiv 2005.14165 | 1,789 chars | **no** -- longest trie value 241 |
+
+The budget is 1,200. The abstract that fits is captured; the abstract that
+does not is **absent entirely**. A reader of that page in the REPL gets the
+title, the authors and the metadata, and not the paper.
+
+**The mechanism.** `emitChunks` handles a node that overruns the budget by
+descending into its children until something fits. A text node has no
+children, so the recursion has no base case for it and the node is never
+emitted. Splitting above the budget and merging below it is the hysteresis the
+chunker is built around, and it is expressed entirely in terms of *elements*.
+
+**The size, counted only over text a reader can see** -- excluding `<script>`
+and `<style>`, whose contents the fold is right to skip:
+
+| | |
+|---|---|
+| pages affected | **14 of 135** |
+| oversize text nodes | 129 |
+| characters unreachable | **326,820** |
+
+and the pages are the ones this matters most for:
+
+    RFC 2616, the HTTP spec           69 nodes   113,509 chars
+    RFC 791, plain text                1 node     94,887 chars
+    Pride and Prejudice (Gutenberg)   43 nodes    63,356 chars
+
+RFC 791 is **one text node of 94,887 characters -- the whole document** -- and
+the trie holds none of it.
+
+**Why this is worse than its share of the corpus suggests.** The goal asks for
+a renderer *configurable for small language model context windows*. The budget
+is that configuration. As it stands, **making the window smaller silently
+destroys more content**: a reader who sets a 400-character budget to fit a
+small model loses every paragraph longer than 400 characters, with nothing to
+indicate the loss. The knob that is supposed to adapt the map to a reader's
+capacity instead deletes the page for them.
+
+The fix is a base case: a text node over the budget is cut into budget-sized
+pieces, at content boundaries where possible. It needs an address per piece,
+because the trie is keyed on address and two pieces of one text node must be
+distinguishable -- an offset suffix on the `text()[n]` step is the obvious
+form, and it must still resolve, which the third-tier check can verify
+directly.
+
+Recorded rather than taken in the same breath as finding it, for the reason
+the svg gap was: it changes what the fold captures, so coverage, drift,
+affordance, dedup and the sustained-mutation runs all move together.
+
 ### How fast the map goes wrong
 
 Knowing the trie grows is not the same as knowing what it costs. The same
