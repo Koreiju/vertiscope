@@ -101,6 +101,28 @@ def test_the_check_is_not_gated_on_length():
     assert out["unseen"] == 0
 
 
+def test_a_machine_value_does_not_join_a_readers_run():
+    """The run is asked of what the page draws as text. A link's target sits
+    between its own words and the next element's, so `Bookmarks Extensions`
+    reads as one run for a reader and as
+    `bookmarks` + `httpsxtestextension` + `extensions` in the trie -- 216 of
+    one corpus page's 216 unseen words were an href wedged into a sentence."""
+    values = ["Bookmarks", "https://x.test/extension", "Extensions"]
+    drawn = ["Bookmarks", "Extensions"]
+    assert score_visible(["BookmarksExtensions"], values,
+                         drawn=drawn)["unseen"] == 0
+    # ...and with the machine value spliced in, the run is not there.
+    assert "bookmarksextensions" not in blob_of(*values)
+
+
+def test_presence_is_still_asked_of_every_value():
+    """Only adjacency narrows to drawn text. A word held in an attribute is
+    still held, and reporting it missing would be a different error."""
+    out = score_visible(["chromodynamics quantum"],
+                        ["chromodynamics quantum"], drawn=[])
+    assert out["unseen"] == 0
+
+
 def test_a_run_with_a_part_the_trie_lacks_is_still_missing():
     """Or the check forgives everything and measures nothing."""
     assert "newtoneinsteinbohr" not in blob_of("newton", "einstein")

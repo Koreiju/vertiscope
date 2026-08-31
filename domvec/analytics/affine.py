@@ -199,17 +199,53 @@ class OrderScore:
 def score_order(name: str, truth: "PageTruth",
                 rendered: Sequence[ContentAddress],
                 texts: Optional[Sequence[str]] = None) -> OrderScore:
-    """Count adjacent rendered lines that read out of the page's order."""
+    """Count adjacent rendered lines that read out of the page's order.
+
+    Ranked on the **unit's own xpath**, with the owner as a fallback. Ranking
+    on the owner alone -- which this did, `_owner` stripping `/text()[n]` --
+    collapses every text child of one element onto a single position, taken
+    from the first. A paragraph is then a single point in the order, and a
+    sentence with a link in it cannot be represented at all:
+
+        page              Physics studies [matter] and [energy] across ...
+        owner-keyed rank  p, a, p, a[2], p, em, p
+                          -> every return to the prose is an inversion
+
+    So the metric scored *grouping* as perfect and reading order as broken,
+    which is exactly backwards. Measured on tests/fixtures/mixed_inline.html,
+    one capture rendered both ways:
+
+        label-grouped      owner-keyed  0 inversions    exact-keyed  1
+        reading order      owner-keyed  3 inversions    exact-keyed  0
+
+    It mattered: correcting the live path's order took the corpus from 4,475
+    inversions to 29,776 by this measure, all of it concentrated on prose
+    pages with inline links, while an independent recall check over the same
+    change fell from 1,620 unseen words to 786. A metric that moves six-fold
+    against a change three other measures call an improvement is reporting on
+    itself.
+
+    The owner fallback stays, and is why the quotient does not break the
+    count: markdown merges an anchor's href and its words into `[words](url)`
+    on purpose, so a rendered line's exact address may be one of several the
+    page holds at that element. Exact first, owner second, keeps the merge
+    tolerated without collapsing siblings that are genuinely apart.
+    """
     rank: Dict[str, int] = {}
     for i, unit in enumerate(truth.units):
-        rank.setdefault(_owner(unit.xpath), i)
+        rank.setdefault(unit.xpath, i)
+    owner_rank: Dict[str, int] = {}
+    for i, unit in enumerate(truth.units):
+        owner_rank.setdefault(_owner(unit.xpath), i)
 
     placed: List[Tuple[int, str]] = []
     for i, address in enumerate(rendered):
         text = texts[i] if texts is not None and i < len(texts) else ""
         if text.lstrip().startswith("#"):
             continue                      # deliberate placement, see the class
-        where = rank.get(_owner(address.xpath))
+        where = rank.get(address.xpath)
+        if where is None:
+            where = owner_rank.get(_owner(address.xpath))
         if where is not None:
             placed.append((where, text))
 
@@ -545,6 +581,12 @@ class DedupScore:
     under_dedup: int = 0         # ...and rendered more than once (FN)
     over_dedup: int = 0          # distinct content collapsed away (FP)
     distinct_kept: int = 0       # distinct content kept distinct (TN)
+    #: What was lost, not just how much. A count alone is undiagnosable: a
+    #: corpus change moved `over_dedup` by +40 and there was no way to say
+    #: which clusters, so the cause could only be guessed at. `visible` had
+    #: already learned this and carries `unseen_sample`; the lesson had not
+    #: crossed to the instrument next door.
+    over_dedup_sample: List[Tuple[str, str]] = field(default_factory=list)
 
     @property
     def correctness(self) -> float:
@@ -558,6 +600,7 @@ class DedupScore:
                 "under_dedup": self.under_dedup,
                 "over_dedup": self.over_dedup,
                 "distinct_kept": self.distinct_kept,
+                "over_dedup_sample": list(self.over_dedup_sample),
                 "correctness": round(self.correctness, 6)}
 
 
@@ -693,6 +736,9 @@ def score_dedup(truth: PageTruth,
         survivors = len(lines_drawn)
         if survivors == 0:
             score.over_dedup += 1
+            if len(score.over_dedup_sample) < 12:
+                score.over_dedup_sample.append(
+                    (_owner(members[0].xpath), (members[0].value or "")[:70]))
         elif survivors == 1:
             score.collapsed += 1
         else:

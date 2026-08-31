@@ -51,7 +51,7 @@ import json
 import pathlib
 import sys
 import time
-from typing import Dict, List, Sequence
+from typing import Dict, List, Optional, Sequence
 
 DEFAULT_ARTIFACT_DIR = pathlib.Path("build_analytics")
 
@@ -111,6 +111,16 @@ def _tokens(text):
 def _run_blob(values):
     """Every value's letters and digits, in order, with all separators gone.
 
+    Given the values the page **draws as text**, not every value. `innerText`
+    is composed of text nodes, so a run the browser joined is a run of text
+    nodes; splicing an `href` or a `title` in between them breaks exactly the
+    adjacency this exists to recognise. A link's target sits between its own
+    words and the next element's -- `Bookmarks Extensions Privacy` reads as
+    one run for a reader and as
+    `bookmarks` + `httpsenwikipediaorgwikiextension` + `extensions` here --
+    so 216 of one page's 216 unseen words were machine values wedged into a
+    reader's sentence.
+
     `innerText` joins adjacent elements with whatever the layout dictates and
     sometimes with nothing at all: `km<sup>2</sup>` reads as `km2`, a navbox of
     links reads as one run, and Chinese and Korean have no word spacing to
@@ -131,7 +141,8 @@ def _run_blob(values):
     return "".join(out)
 
 
-def score_visible(lines: Sequence[str], values: Sequence[str]) -> dict:
+def score_visible(lines: Sequence[str], values: Sequence[str],
+                  drawn: Optional[Sequence[str]] = None) -> dict:
     """How many of the words a reader sees are in the trie at all.
 
     Measured on **words, not lines**. `innerText` lines are layout-joined runs
@@ -147,8 +158,10 @@ def score_visible(lines: Sequence[str], values: Sequence[str]) -> dict:
     held = set()
     for value in values:
         held.update(_tokens(value))
-    # One pass over the values, reused for every miss below.
-    blob = _run_blob(values)
+    # Presence is asked of every value -- a word is in the trie or it is not,
+    # whichever kind of value holds it. Adjacency is asked only of the values
+    # the page draws as text, because those are what `innerText` concatenates.
+    blob = _run_blob(values if drawn is None else drawn)
 
     total = 0
     missing_words = 0
@@ -200,9 +213,13 @@ def measure_visible(driver, urls: Sequence[str], *,
             time.sleep(0.6)
             spine = StreamingScan(url, context_window=context_window)
             _settle(sensor, spine)
-            values = [leaf.value or "" for leaf in spine.trie.leaves()]
+            leaves = list(spine.trie.leaves())
+            values = [leaf.value or "" for leaf in leaves]
+            drawn = [leaf.value or "" for leaf in leaves
+                     if (getattr(leaf.address, "accessor", "") or "")
+                     .startswith("text()")]
             lines = driver.execute_script(VISIBLE_JS, min_line)
-            row.update(score_visible(lines, values))
+            row.update(score_visible(lines, values, drawn=drawn))
         except Exception as exc:                       # noqa: BLE001
             row["error"] = "{}: {}".format(type(exc).__name__, exc)[:200]
         rows.append(row)
