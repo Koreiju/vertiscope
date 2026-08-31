@@ -2194,9 +2194,41 @@ distinguishable -- an offset suffix on the `text()[n]` step is the obvious
 form, and it must still resolve, which the third-tier check can verify
 directly.
 
-Recorded rather than taken in the same breath as finding it, for the reason
-the svg gap was: it changes what the fold captures, so coverage, drift,
-affordance, dedup and the sustained-mutation runs all move together.
+**Taken.** Two parts, and the second only became visible because the first
+worked.
+
+`emitChunks` now treats an oversize *leaf* as its own chunk, because a text
+node has no children to descend into. That recovered the content and left RFC
+791 as one 94,887-character chunk, which is no more use to a 1,200-character
+window than nothing was. So `collectLines` cuts an oversize value into
+budget-sized pieces, breaking at a space near the boundary so a piece ends
+between words.
+
+The addressing took a correction worth recording. Each piece needs a
+**distinct address**, because the trie is keyed on one -- the first attempt
+gave every piece the same interned `text()@` and they overwrote each other, so
+94,887 characters came back as *two* leaves. The `@offset` form already existed
+for exactly this (`data-mw@496` names one match inside a longer attribute), so
+a piece carries its start offset: `text()@1200`, `text()@2400`. RFC 791 now
+yields 80 leaves of 1,200 characters holding 94,594 of the node's 94,887, the
+difference being whitespace trimmed at the boundaries.
+
+| | before | after |
+|---|---|---|
+| **capture tp** | 367,964 | **382,013** (+14,049 addresses) |
+| capture precision | 99.94% | **99.94%** unchanged |
+| markdown tp | 317,648 | 331,312 |
+| wireframe tp | 316,654 | 330,298 |
+| words a reader sees, unseen | -- | **0.49%** |
+| pages showing everything | -- | **93 of 135** |
+| unresolvable addresses | 0 | **0**, of 42,043 asked |
+| dedup correctness | 93.77% | 93.94% |
+| affordances, drift | -- | unchanged |
+
+**14,049 addresses of content the map could not previously reach**, at
+unchanged precision, and every new address resolves against the page. The
+budget now does what the goal asks of it: a smaller window produces more,
+smaller pieces rather than deleting the page beyond it.
 
 ### How fast the map goes wrong
 

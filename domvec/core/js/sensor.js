@@ -282,6 +282,7 @@
   // Carried beside `chunks` and `removed`, and drained with them.
   var moves = [];
   var SVG_TITLE_ID = -1;
+  var OFFSET_ID = -1;   // `text()@`, the accessor a split piece carries
   var stats = { nodes: 0, folds: 0, repairs: 0, chunks: 0, spans: 0,
                 movedChunks: 0, unrooted: 0, reclassified: 0,
                 observers: 0, closedRoots: 0, errors: 0, skipped: 0,
@@ -1234,6 +1235,31 @@
     if (USE_SEMANTIC && node.nodeType === 1 && SEMANTIC_TAGS[node.tagName]) {
       limit = BUDGET * 2;
     }
+    // A leaf that overruns the budget has nowhere to descend to.
+    //
+    // The split-above, merge-below hysteresis this chunker is built around is
+    // expressed entirely in elements: a node too big becomes several chunks
+    // by recursing into its children. A text node has no children, so the
+    // recursion has no base case for it and the node was never emitted at
+    // all.
+    //
+    // Measured: arxiv 2005.14165's abstract is one text node of 1,789
+    // characters against a budget of 1,200, and none of it reached the trie,
+    // while the neighbouring paper's 1,136-character abstract did. Across the
+    // corpus, 129 reader-visible text nodes on 14 pages, 326,820 characters
+    // -- RFC 791 is a single 94,887-character node holding the whole
+    // document.
+    //
+    // Worse than its share, because the budget is the knob the goal asks a
+    // reader to turn for a small context window: as it stood, asking for a
+    // smaller window silently deleted more of the page.
+    //
+    // So an oversize leaf is emitted as its own chunk. `collectLines` cuts
+    // its text into budget-sized pieces, each addressed by an offset, so the
+    // chunk contract still holds downstream.
+    if (rec.chars > limit && node.nodeType === 3) {
+      limit = rec.chars;
+    }
     if (rec.chars <= limit) {
       // A chunk is emitted only when its digest differs from the one last
       // sent. The digest is already maintained by the fold, so this costs a
@@ -1675,7 +1701,43 @@
         // that happened to be `href`, every link decoded as a text line, the
         // addresses lost the attribute they came from, and the link graph —
         // and with it PageRank's only real edges — came out empty.
-        lines.push([depth, rec.text, path, -1, 0, inh[0], inh[1]]);
+        // One line, unless the text itself overruns the budget.
+        //
+        // An oversize text node is now emitted as its own chunk rather than
+        // lost, and a chunk of 94,887 characters -- RFC 791 is one -- is no
+        // more use to a small context window than nothing was. So the value
+        // is cut into budget-sized pieces here, at a space where one is near
+        // the boundary, so a piece breaks between words rather than inside
+        // one.
+        //
+        // Each piece is a distinct address: the trie is keyed on address, and
+        // two pieces of one text node must be distinguishable or the second
+        // overwrites the first. The `@offset` form already exists for exactly
+        // this -- `data-mw@496` names one match inside a longer attribute --
+        // so a piece carries its start offset and the address stays
+        // resolvable to the node that holds it.
+        if (rec.text.length <= BUDGET) {
+          lines.push([depth, rec.text, path, -1, 0, inh[0], inh[1]]);
+        } else {
+          var at = 0;
+          while (at < rec.text.length) {
+            var end = Math.min(at + BUDGET, rec.text.length);
+            if (end < rec.text.length) {
+              var space = rec.text.lastIndexOf(' ', end);
+              if (space > at + (BUDGET >> 1)) end = space;
+            }
+            // The offset goes into the interned accessor, the way a
+            // multi-match attribute already does it (`data-mw@496`). One
+            // shared `text()@` for every piece is one address: the trie is
+            // keyed on it, so the pieces overwrote each other and a 94,887
+            // character node came back as two leaves instead of eighty.
+            lines.push([depth, rec.text.slice(at, end), path,
+                        at === 0 ? -1 : intern('text()@' + at),
+                        0, inh[0], inh[1]]);
+            at = end === at ? rec.text.length : end;
+            while (rec.text.charAt(at) === ' ') at++;
+          }
+        }
         seen.push(rec);
       }
       return;
