@@ -2465,6 +2465,38 @@ dangerous one. It is concentrated: +28 of it on ja.wikipedia alone (13 -> 41
 of that page's 1,532 redundant groups), +5 on ar.wikipedia, the rest ones and
 twos. The same page's unseen words fell 141 -> 78 over the same change.
 
+**The order metric could not see the fix, because it could not represent the
+thing it measured.** `score_order` ranked a rendered line by its owner
+element, and `_owner` strips `/text()[n]`, so every text child of one element
+collapsed onto a single position taken from the first. A paragraph was one
+point in the reading order; prose returning to itself between inline links is
+an inversion at every return. It scored grouping as perfect and reading order
+as broken, and under it a *fully reversed* render scored clean. Ranked on the
+unit's own xpath now, with the owner kept as a fallback for the `[words](url)`
+merge.
+
+With the corrected rank, one capture per page folded into two tries --
+`doc_pos={}` reproduces the old grouping exactly, so sibling order is the only
+variable -- scored against the same ground truth:
+
+| ordering | inversions | lines | rate |
+|---|---|---|---|
+| label-grouped | 32,818 | 185,204 | 17.72% |
+| reading order | 22,638 | 199,698 | **11.34%** |
+
+**116 pages better, 0 worse, 19 unchanged.** Not one page in the corpus reads
+worse in the page's own order, which is what a correction should look like and
+what the earlier six-fold "regression" was hiding. Individual pages move by
+more than an order of magnitude: RFC 9110 1,710 -> 81, Unicode TR-9 212 -> 6,
+xkcd 13 -> 2. The corrected order also emits 14,494 more lines across the
+corpus, so sequence was not bought with content.
+
+The 11.34% that remains is the renderer's own grouping, not the trie's: the
+chunker places a heading with the card it labels and gathers a sidebar
+together, both deliberately. That residue has not been separated into
+deliberate and accidental, and until it is, the number is a ceiling on what
+this measure can currently claim.
+
 It is not diagnosed, because `DedupScore` reports counts and no samples --
 the exact failure `visible`'s `unseen_sample` was added to prevent, repeated
 in the neighbouring instrument. Naming the mechanism requires the sample
