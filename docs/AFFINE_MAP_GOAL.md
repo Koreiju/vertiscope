@@ -2457,50 +2457,43 @@ What it moved, over the 113 pages measured in both runs:
 Recall halved and not one arrow lost precision, which is what a reordering
 should look like when it is corrected: the content was always there.
 
-**One control moved the wrong way and is not yet explained.** Dedup
-correctness went 95.15% -> 95.02%, with `over_dedup` +40 and `collapsed` -38.
-That shape says roughly forty lineage groups stopped keeping a survivor and
-now keep none, which is loss, in the direction this project calls the
-dangerous one. It is concentrated: +28 of it on ja.wikipedia alone (13 -> 41
-of that page's 1,532 redundant groups), +5 on ar.wikipedia, the rest ones and
-twos. The same page's unseen words fell 141 -> 78 over the same change.
+**One control appeared to move the wrong way, and the attribution was wrong.**
+Dedup correctness read 95.15% -> 95.02% across the two corpus runs either side
+of this change, `over_dedup` +40 and `collapsed` -38, +28 of it on
+ja.wikipedia. That was recorded here, and in the commit, as a cost of the
+ordering fix. It was not.
 
-**The order metric could not see the fix, because it could not represent the
-thing it measured.** `score_order` ranked a rendered line by its owner
-element, and `_owner` strips `/text()[n]`, so every text child of one element
-collapsed onto a single position taken from the first. A paragraph was one
-point in the reading order; prose returning to itself between inline links is
-an inversion at every return. It scored grouping as perfect and reading order
-as broken, and under it a *fully reversed* render scored clean. Ranked on the
-unit's own xpath now, with the owner kept as a fallback for the `[words](url)`
-merge.
-
-With the corrected rank, one capture per page folded into two tries --
-`doc_pos={}` reproduces the old grouping exactly, so sibling order is the only
+The controlled form of the question is one capture folded into two tries --
+`doc_pos={}` reproducing the old grouping, so sibling order is the only
 variable -- scored against the same ground truth:
 
-| ordering | inversions | lines | rate |
-|---|---|---|---|
-| label-grouped | 32,818 | 185,204 | 17.72% |
-| reading order | 22,638 | 199,698 | **11.34%** |
+| page | ordering | collapsed | under | over | correctness |
+|---|---|---|---|---|---|
+| ja.wikipedia | label-grouped | 923 | 101 | 41 | 94.13% |
+| ja.wikipedia | reading order | 923 | 101 | 41 | 94.13% |
+| ar.wikipedia | label-grouped | 2,497 | 107 | 43 | 98.06% |
+| ar.wikipedia | reading order | 2,497 | 110 | 43 | 98.03% |
 
-**116 pages better, 0 worse, 19 unchanged.** Not one page in the corpus reads
-worse in the page's own order, which is what a correction should look like and
-what the earlier six-fold "regression" was hiding. Individual pages move by
-more than an order of magnitude: RFC 9110 1,710 -> 81, Unicode TR-9 212 -> 6,
-xkcd 13 -> 2. The corrected order also emits 14,494 more lines across the
-corpus, so sequence was not bought with content.
+**Ordering does not move `over_dedup` at all.** The corpus comparison was not
+controlled: its "before" run is from the previous day, 08-30 18:34, and
+`4e1f11a` -- the sensor fix that splits an oversize text node instead of
+dropping it, and which added some fourteen thousand addresses -- landed at
+22:40, between the two. More units means more lineage clusters, which is where
+the +40 came from. Both runs taken after that fix report `over_dedup` 617,
+identically.
 
-The 11.34% that remains is the renderer's own grouping, not the trie's: the
-chunker places a heading with the card it labels and gathers a sidebar
-together, both deliberately. That residue has not been separated into
-deliberate and accidental, and until it is, the number is a ceiling on what
-this measure can currently claim.
+Two lessons, and the second is the one that keeps recurring here. A run
+separated by hours is separated by every commit in those hours, so a
+before/after across it is a comparison of code states and not of a change. And
+the diagnosis only became available once `DedupScore` carried samples: the
+counts alone supported a plausible, confident, wrong story about adjacency and
+suppression, which is exactly what a count without an instance is for.
 
-It is not diagnosed, because `DedupScore` reports counts and no samples --
-the exact failure `visible`'s `unseen_sample` was added to prevent, repeated
-in the neighbouring instrument. Naming the mechanism requires the sample
-first, so that is the next thing rather than a guess recorded as a cause.
+The 617 stands as a characterised gap rather than a regression. Its samples on
+ja.wikipedia are navbox and citation links -- `Portal:物理学`,
+`Category:物理学`, `Template:物理学サイドバー` -- lineage clusters at anchors
+where the render draws no line at all. Whether those anchors should be drawn
+is a separate question from ordering, and is not yet answered.
 
 ## Constraints that hold throughout
 
