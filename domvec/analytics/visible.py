@@ -108,34 +108,27 @@ def _tokens(text):
     return out
 
 
-def _decomposes(token, by_length):
-    """Can this run of letters be read as words the trie holds?
+def _run_blob(values):
+    """Every value's letters and digits, in order, with all separators gone.
 
-    A concatenation artifact is not a missing word. ar.wikipedia renders a
-    navbox of physicists' names as one unbroken run -- each name is a separate
-    <a>, held separately in the trie, and only `innerText` joins them. Counted
-    as a token it exists nowhere and read as 471 missing words on one page.
+    `innerText` joins adjacent elements with whatever the layout dictates and
+    sometimes with nothing at all: `km<sup>2</sup>` reads as `km2`, a navbox of
+    links reads as one run, and Chinese and Korean have no word spacing to
+    begin with. The trie holds those parts separately and correctly.
 
-    Greedy from the left, longest match first: if the whole run is consumed by
-    words the trie holds, the content is present and only the joining is the
-    browser's. If any part is left over, that part really is missing.
-
-    Tried on **every** missing token, not only long ones. Gating on length was
-    backwards: the cost is already bounded because this is reached only on a
-    miss, and the threshold excluded the common case. Arabic words are short,
-    so two of them joined -- `تطبيقية` + `فيزياء`, applied + physics -- look
-    like one ordinary word of thirteen characters. 133 of ar.wikipedia's 138
-    misses were that shape and never reached the check meant for them.
+    Stripping separators from both sides and asking whether the run appears
+    *in reading order* answers "is this content here" without asking the trie
+    to reproduce the browser's joining. It replaced a greedy segmentation
+    against a word set, which could not consume `km` + `2` because a
+    one-character token is not a word and was excluded from the set -- 246
+    misses on one page, every one of them the superscript in an area column.
     """
-    at = 0
-    while at < len(token):
-        for word in by_length:
-            if token.startswith(word, at):
-                at += len(word)
-                break
-        else:
-            return False
-    return True
+    out = []
+    for value in values:
+        for ch in (value or "").lower():
+            if ch.isalnum():
+                out.append(ch)
+    return "".join(out)
 
 
 def score_visible(lines: Sequence[str], values: Sequence[str]) -> dict:
@@ -154,9 +147,8 @@ def score_visible(lines: Sequence[str], values: Sequence[str]) -> dict:
     held = set()
     for value in values:
         held.update(_tokens(value))
-    # Sorted once, not per attempt: longest-first is what makes the greedy
-    # walk prefer a real word over a shorter prefix of one.
-    by_length = sorted((w for w in held if len(w) >= 3), key=len, reverse=True)
+    # One pass over the values, reused for every miss below.
+    blob = _run_blob(values)
 
     total = 0
     missing_words = 0
@@ -170,7 +162,9 @@ def score_visible(lines: Sequence[str], values: Sequence[str]) -> dict:
         for word in words:
             if word in held:
                 continue
-            if _decomposes(word, by_length):
+            # A run the browser joined: present in reading order once the
+            # separators both sides disagree about are removed.
+            if word in blob:
                 continue
             gone.append(word)
         missing_words += len(gone)

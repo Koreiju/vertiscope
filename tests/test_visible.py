@@ -28,14 +28,11 @@ look broken, each caught by reading samples before a figure was reported:
 All four are planted here, with the guards that keep the check able to fail.
 """
 
-from domvec.analytics.visible import _decomposes, _tokens, score_visible
+from domvec.analytics.visible import _run_blob, _tokens, score_visible
 
 
-def held_from(*values):
-    words = set()
-    for value in values:
-        words.update(_tokens(value))
-    return sorted((w for w in words if len(w) >= 3), key=len, reverse=True)
+def blob_of(*values):
+    return _run_blob(values)
 
 
 # --- what a word is ----------------------------------------------------------
@@ -84,8 +81,15 @@ def test_the_report_counts_words_not_lines():
 
 def test_a_run_of_joined_words_is_not_missing_content():
     """A navbox of links arrives from `innerText` as one run of letters."""
-    held = held_from("newton", "einstein", "maxwell")
-    assert _decomposes("newtoneinsteinmaxwell", held)
+    assert "newtoneinsteinmaxwell" in blob_of("newton", "einstein", "maxwell")
+
+
+def test_a_superscript_joined_to_its_unit_is_not_missing():
+    """`km<sup>2</sup>` reads as `km2`. The trie holds `km` and `2` as
+    separate text nodes, correctly. A word-set segmentation could not consume
+    this, because a one-character token is not a word -- 246 misses on one
+    page, every one the superscript in an area column."""
+    assert "km2" in blob_of("Area (km", "2", "): 468.0")
 
 
 def test_the_check_is_not_gated_on_length():
@@ -98,9 +102,14 @@ def test_the_check_is_not_gated_on_length():
 
 
 def test_a_run_with_a_part_the_trie_lacks_is_still_missing():
-    """Or segmentation forgives everything and the check measures nothing."""
-    held = held_from("newton", "einstein")
-    assert not _decomposes("newtoneinsteinbohr", held)
+    """Or the check forgives everything and measures nothing."""
+    assert "newtoneinsteinbohr" not in blob_of("newton", "einstein")
+
+
+def test_the_run_must_appear_in_reading_order():
+    """Order is what keeps this from matching letters scattered anywhere in
+    the page. A run assembled backwards is not the same content."""
+    assert "einsteinnewton" not in blob_of("newton", "einstein")
 
 
 def test_a_word_the_trie_lacks_outright_is_missing():

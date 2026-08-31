@@ -2275,15 +2275,33 @@ cost the control flow had already bounded, and lost 130 of 138 recoveries
 doing it. ar.wikipedia went from 138 unseen to **8**, and the corpus from
 0.49% to **0.26%**.
 
-Two limits on the segmentation, since it is now load-bearing:
+**The fifth correction replaced the segmentation rather than tuning it.**
 
-* **greedy longest-match is not optimal.** It can fail to split a run a
-  smarter segmentation would consume, so it may over-report misses. It never
-  under-reports: a successful split means the parts really are in the trie.
-* it could in principle forgive a genuine miss whose letters happen to be
-  spellable from other held words. At a three-character minimum in alphabetic
-  scripts that is implausible, but it is a property of the check rather than
-  something ruled out.
+Matching against a set of *words* could not handle `km<sup>2</sup>`, which
+`innerText` renders as `km2` while the trie correctly holds `km` and `2` as
+separate text nodes. `2` is not a word: it was excluded by the same
+three-character minimum that stops `the` and `of` matching by chance. 246
+misses on one page, every one a superscript in an area column, and no
+threshold fixes it without making the check forgive everything.
+
+Asking instead whether the run appears in **the trie's text, read in order,
+with separators removed** handles every case uniformly -- a superscript joined
+to its unit, a navbox of links, Arabic words joined, Chinese with no word
+spacing at all. The trie holds each part separately and correctly; only the
+browser's joining differs.
+
+**The reported number got worse, and that is the evidence it improved.**
+Unseen went 1,304 to 1,620 (0.26% to 0.32%) while pages showing everything
+went 103 to 108. Segmentation matched held words at each position *in any
+order*, so it was forgiving about 316 runs whose parts existed somewhere but
+not in that sequence. Requiring reading order removed that false forgiveness.
+`einsteinnewton` no longer matches a page holding `newton` then `einstein`,
+and that is now a test.
+
+The limit that remains: the check asks whether content is present *somewhere*
+in reading order, not whether it is addressed where the reader would look for
+it. That question belongs to the coverage arrows and to `resolvable`, and
+keeping them apart is what stops one number from answering neither.
 
 ### How fast the map goes wrong
 
