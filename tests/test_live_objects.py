@@ -1,0 +1,162 @@
+"""The callable interface, driven end to end against a real browser.
+
+docs/CALLABLE_INTERFACE.md. The loop this holds is the one the design exists
+for: open a page, descend into it, type into a field, press a link, have the
+new page arrive without asking for it, and go back.
+
+Two properties matter more than the mechanics and are asserted directly:
+
+* **The object tree is the trie**, so nothing here names a node for what it is
+  *for*. `form` is `form`; `ol` is `ol`. If a class named `Search` or `Result`
+  ever appears, agnosticism has been lost and these tests should be the thing
+  that notices.
+* **A label is what a reader sees.** An anchor's own leaf is its href and its
+  words live a level deeper, so labelling from the nearest leaf named every
+  link after its target -- three list items reading "live_target.html" where
+  the page says "Go to the target page". The TUI made this mistake once
+  already.
+
+    DOMVEC_LIVE=1 python -m pytest tests/test_live_objects.py -q
+"""
+
+import os
+import pathlib
+
+import pytest
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+START = (ROOT / "tests" / "fixtures" / "live_start.html").resolve().as_uri()
+TARGET_NAME = "live_target.html"
+
+LIVE = pytest.mark.skipif(
+    not os.environ.get("DOMVEC_LIVE"),
+    reason="needs a real browser; set DOMVEC_LIVE=1")
+
+
+@pytest.fixture
+def session():
+    """A browser for one test, given back however the test ends."""
+    import domvec.live as live
+
+    live.close()
+    yield live
+    live.close()
+
+
+# --- reading ------------------------------------------------------------------
+
+
+@LIVE
+def test_a_page_opens_onto_its_document_element(session):
+    out = repr(session.Page(START))
+    assert "Page(" in out
+    assert "body(1)" in out
+
+
+@LIVE
+def test_descending_shows_the_pages_own_structure(session):
+    session.Page(START)
+    out = repr(session.body(1))
+    # The tags the page actually wrote, and no name for what they are for.
+    assert "header(1)" in out
+    assert "form(1)" in out
+    assert "ol(1)" in out
+    for invented in ("Search", "Result", "Nav", "Menu", "Card"):
+        assert "%s(" % invented not in out, invented
+
+
+@LIVE
+def test_a_label_is_the_readers_words_not_the_target(session):
+    """The href bug, planted. `live_target.html` is where the link goes;
+    "Go to the target page" is what the page shows."""
+    session.Page(START)
+    session.body(1)
+    out = repr(session.ol(1))
+    assert "Go to the target page" in out
+    assert TARGET_NAME not in out
+
+
+@LIVE
+def test_counts_are_counted_from_tags(session):
+    session.Page(START)
+    out = repr(session.body(1))
+    assert "1button" in out and "1input" in out
+
+
+@LIVE
+def test_a_handle_is_a_slice_of_the_address(session):
+    session.Page(START)
+    session.body(1)
+    node = session.ol(1)
+    assert node.handle() == "ol(1)"
+    assert node.where().endswith("/html/body/ol")
+
+
+# --- moving about -------------------------------------------------------------
+
+
+@LIVE
+def test_up_returns_to_the_parent(session):
+    session.Page(START)
+    session.body(1)
+    session.ol(1)
+    session.li(1)
+    out = repr(session.up())
+    assert out.startswith("ol(1)")
+
+
+@LIVE
+def test_top_returns_to_the_document(session):
+    session.Page(START)
+    session.body(1)
+    session.ol(1)
+    assert "Page(" in repr(session.top())
+
+
+# --- acting -------------------------------------------------------------------
+
+
+@LIVE
+def test_typing_into_a_field(session):
+    session.Page(START)
+    session.body(1)
+    session.form(1)
+    node = session.input(1) << "glacier retreat"
+    assert node.handle() == "input(1)"
+
+
+@LIVE
+def test_pressing_a_link_loads_the_new_page_by_itself(session):
+    """The whole point of the loop: no second call to say "now go and read
+    what you just navigated to"."""
+    session.Page(START)
+    session.body(1)
+    session.ol(1)
+    session.li(1)
+    out = repr(session.a(1)())
+    assert TARGET_NAME in out
+    assert "The target page" in out
+
+
+@LIVE
+def test_back_returns_and_refolds(session):
+    session.Page(START)
+    session.body(1)
+    session.ol(1)
+    session.li(1)
+    session.a(1)()
+    out = repr(session.back())
+    assert "live_start.html" in out
+    assert "form(1)" in repr(session.body(1))
+
+
+# --- the safety rule reaches the objects, not only the module ------------------
+
+
+@LIVE
+def test_a_refused_target_is_not_visited(session):
+    from domvec.live import Refused
+
+    session.Page(START)
+    with pytest.raises(Refused):
+        session.Page("https://x.test/checkout")
