@@ -312,7 +312,24 @@ def _label_of(tnode, width: int = 46) -> str:
         if sum(len(p) for p in parts) > width:
             break
     if not parts:
-        for _address, value in _leaves_of(tnode):
+        for address, value in _leaves_of(tnode):
+            # Never a synthetic annotation.
+            #
+            # `@control` and `@role` are the fold's own classification, not
+            # anything the page displays -- `resolvable` calls them synthetic
+            # for exactly this reason and scores them neither right nor
+            # wrong. Their value is the tag name, so every `<input>` on every
+            # page labelled itself `'input'`: machine bookkeeping printed
+            # where a reader looks for words, in the one column that says
+            # what a control is.
+            #
+            # A control with genuinely nothing to say gets an empty label,
+            # which is the truth. On a real page it rarely happens -- the
+            # placeholder, the aria-label or the title is content the page
+            # does show, and duckduckgo's search box reads "Search with
+            # DuckDuckGo" from one of them.
+            if (getattr(address, "accessor", "") or "").startswith("@"):
+                continue
             value = " ".join((value or "").split())
             if value:
                 parts.append(value)

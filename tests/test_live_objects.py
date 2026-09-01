@@ -290,3 +290,43 @@ def test_the_fallback_does_not_route_around_the_refusal(session):
     assert danger is not None, [n._target() for n in session.acts("a")]
     with pytest.raises(Refused):
         danger.press()
+
+
+# --- a label is content, never the fold's own bookkeeping ---------------------
+
+
+@LIVE
+def test_a_control_with_no_words_is_not_labelled_with_its_tag(session):
+    """Every `<input>` on every page used to label itself `'input'`.
+
+    Its only leaf is `@control|search.queryform/textbox`, whose value is the
+    tag name -- the fold's own classification, which `resolvable` already
+    calls synthetic and scores neither right nor wrong. Falling back to it
+    printed machine bookkeeping in the one column that tells a reader what a
+    control is.
+
+    An empty label is the honest answer for a control that says nothing.
+    """
+    session.Page(START)
+    session.body(1)
+    fields = session.acts("input")
+    assert fields, "the fixture has inputs"
+    import domvec.live as live
+
+    for node in fields:
+        label = live._label_of(node._t, 40)
+        assert label.strip().lower() != "input", node.where()
+
+
+@LIVE
+def test_a_control_that_does_have_words_still_shows_them(session):
+    """Non-vacuity: suppressing the annotation must not suppress real text.
+    A `<button>Search</button>` says Search, and the fixture's labels say
+    what they say."""
+    session.Page(START)
+    session.body(1)
+    import domvec.live as live
+
+    labels = {live._label_of(n._t, 40) for n in session.acts()}
+    assert "Search" in labels, labels
+    assert any("Search the fixtures" in x for x in labels), labels
