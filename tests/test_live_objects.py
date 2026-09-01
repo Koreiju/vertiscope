@@ -226,3 +226,67 @@ def test_a_flat_listing_is_addressed_by_position(session):
     every = session.acts()
     assert session.act(0).where() == every[0].where()
     assert session.act(1).where() == every[1].where()
+
+
+# --- pressing what a click cannot simply have --------------------------------
+
+AWKWARD = (ROOT / "tests" / "fixtures" / "live_awkward.html").resolve().as_uri()
+
+
+def _link(session, needle):
+    for node in session.acts("a"):
+        if needle in node.where() or needle in node._target():
+            return node
+    return None
+
+
+@LIVE
+def test_a_link_below_the_fold_is_scrolled_to_and_clicked(session):
+    """A page that has not been scrolled has most of its links outside the
+    viewport, and Marionette refuses to click what it cannot reach. Driving a
+    live results page, the first candidate raised "could not be scrolled into
+    view" and the caller got a stack trace where it wanted a page.
+
+    The fold reads no layout; an actuator has to. Same split the scroller
+    already makes.
+    """
+    session.Page(AWKWARD)
+    session.body(1)
+    far = session.acts("a")[-1]
+    out = repr(far.press())
+    assert TARGET_NAME in out, out[:200]
+    assert not session._S.clicked_via_href, "it fell back instead of clicking"
+
+
+@LIVE
+def test_a_zero_sized_link_falls_back_to_its_target(session):
+    """Still unreachable after scrolling: an overlay, a consent wall, or an
+    anchor drawn at zero size -- which is how duckduckgo draws a promo link.
+
+    A link's job is its destination and the click was only the means, so the
+    target is followed and the fallback is recorded rather than hidden. It is
+    recorded because "tries == 1" passed a check while the click was still
+    failing, and a flag is what makes the difference observable.
+    """
+    session.Page(AWKWARD)
+    session.body(1)
+    zero = _link(session, "live_target")
+    assert zero is not None
+    out = repr(zero.press())
+    assert TARGET_NAME in out, out[:200]
+    assert session._S.clicked_via_href, "expected the fallback to be used"
+
+
+@LIVE
+def test_the_fallback_does_not_route_around_the_refusal(session):
+    """The dangerous half. The fallback navigates directly, so it must ask
+    the same question the click asked -- otherwise an unclickable `/checkout`
+    link becomes a way to reach checkout that a clickable one is not."""
+    from domvec.live import Refused
+
+    session.Page(AWKWARD)
+    session.body(1)
+    danger = _link(session, "/checkout/")
+    assert danger is not None, [n._target() for n in session.acts("a")]
+    with pytest.raises(Refused):
+        danger.press()

@@ -107,6 +107,7 @@ class _Session:
         self.cursor = None          # a TrieNode
         self.acts = []              # the last acts() listing, for act(n)
         self.workspace = None       # opened by `workspace()`; None = no index
+        self.clicked_via_href = False   # last press fell back to the target
         self.window = 1200
 
     # -- browser ---------------------------------------------------------
@@ -440,10 +441,47 @@ class Node:
         return ""
 
     def press(self) -> "Node":
+        """Press this, then read whatever the press produced.
+
+        Scrolled into view first. A page that has not been scrolled to has
+        most of its links outside the viewport, and Marionette refuses to
+        click what it cannot reach: driving a real results page, the first
+        candidate raised "could not be scrolled into view" and a caller got a
+        stack trace where it wanted a page. The fold reads no layout, but an
+        actuator has to -- the same split the scroller already makes.
+        """
         _refuse_check(_label_of(self._t, 80), self._target())
         driver = _S.need_driver()
         node = driver.find_element("xpath", self.xpath)
-        node.click()
+        try:
+            driver.execute_script(
+                "arguments[0].scrollIntoView({block: 'center'});", node)
+            _time.sleep(0.2)
+        except Exception:           # noqa: BLE001 - a click may still work
+            pass
+        _S.clicked_via_href = False
+        try:
+            node.click()
+        except Exception as exc:    # noqa: BLE001
+            _S.clicked_via_href = True
+            # Still unreachable: an overlay, a zero-sized anchor, a consent
+            # wall. Say so, and follow the target if there is one, because a
+            # link's job is its destination and the click was only the means.
+            #
+            # Resolved against the page first. Most hrefs on a real page are
+            # relative -- `live_target.html`, `/topics/glaciers` -- and an
+            # earlier version tested `startswith("http")` and re-raised on
+            # every one of them, so the fallback worked only for the outbound
+            # links that needed it least.
+            from urllib.parse import urljoin
+
+            target = urljoin(_S.url, self._target())
+            if not target or target == _S.url:
+                raise
+            print("  (click blocked: %s; following the target instead)"
+                  % type(exc).__name__)
+            _refuse_check("", target)
+            driver.get(target)
         _time.sleep(1.2)
         _S.refold()
         return Page()
