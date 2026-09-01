@@ -943,11 +943,19 @@
       // 155 of one eurostat page's charged inventions were exactly this, on
       // svg, span and ul alike, every value the same word. Third of the
       // metadata family after <link> and the hidden-input placeholder.
-      var role = el.getAttribute('role');
-      var bare = (role || '').trim().toLowerCase();
-      if (bare !== 'presentation' && bare !== 'none') {
-        (out || (out = [])).push([intern('@role'), role]);
-      }
+      // A role is never text a reader sees. It is the author naming what
+      // an element IS, which this fold already reads -- RENDER_CLASS is
+      // computed from it -- so emitting it a second time as a content line
+      // puts the annotation into the document as though the page displayed
+      // the word.
+      //
+      // The exclusion above was written for `presentation` and `none` and
+      // the reasoning never depended on which value it was: 155 of one
+      // eurostat page's charged inventions were roles, and duckduckgo draws
+      // `list`, `navigation` and `radiogroup` as lines of prose. Same
+      // argument, whole class.
+      //
+      // The role still classifies. It just stops being content.
     }
     return out;
   }

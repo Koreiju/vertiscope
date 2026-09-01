@@ -172,12 +172,34 @@ def _label_of(segment: str) -> str:
     return segment.split("[", 1)[0].lower()
 
 
+#: Prefixes that make a value a target rather than prose -- but only when
+#: something follows them. See `_looks_like_url`.
+_URL_LEADS = ("http://", "https://", "//", "/", "#", "mailto:", "tel:",
+              "data:", "?")
+
+
 def _looks_like_url(value: str) -> str:
-    """Whether a value is a target rather than something a reader reads."""
+    """Whether a value is a target rather than something a reader reads.
+
+    A lone separator is not a target. `/` passed this test on its prefix
+    alone, and a page that writes a character counter as `0` `/` `500` --
+    three text nodes, which duckduckgo does -- had the middle one read as a
+    root-relative path. `_join_inline` refuses to join a url to prose, quite
+    rightly, so the counter stayed three lines of a document where a reader
+    sees one.
+
+    The rule is unchanged except that a prefix must lead somewhere: `/` is
+    punctuation, `/docs` is a path.
+    """
     v = value.strip()
-    return bool(v) and (v.startswith(("http://", "https://", "//", "/", "#",
-                                      "mailto:", "tel:", "data:", "?"))
-                        or "://" in v)
+    if not v:
+        return False
+    if "://" in v:
+        return True
+    for lead in _URL_LEADS:
+        if v.startswith(lead) and len(v) > len(lead):
+            return True
+    return False
 
 
 def _is_tag_name(value: str) -> bool:
@@ -695,6 +717,23 @@ def _join_inline(units: List[Tuple[ContentAddress, str, str, int]]
     """
     if len(units) < 2:
         return units
+    # Which flows are MIXED content: a block holding inline markup as well as
+    # its own text.
+    #
+    # This is what separates a sentence from a document. `<p>text <b>b</b>
+    # more</p>` interleaves text children with inline elements, and its
+    # fragments are one sentence. A text/plain file addresses every paragraph
+    # as a direct text child of one `<pre>` with nothing between them, and
+    # those are sixty paragraphs, not one.
+    #
+    # Joining every direct text child merged all sixty into a single line AT
+    # EVERY WINDOW SETTING -- the context-window hyperparameter, which is the
+    # knob this whole project exists to offer, stopped having any effect on
+    # that shape of document.
+    mixed = {
+        _flow_owner(a.xpath) for a, _v, _l, _d in units
+        if _flow_owner(a.xpath) != a.xpath.split("/text()")[0]
+    }
     out: List[Tuple[ContentAddress, str, str, int]] = []
     for unit in units:
         address, value, label, depth = unit
@@ -718,7 +757,25 @@ def _join_inline(units: List[Tuple[ContentAddress, str, str, int]]
             # is reassembled.
             and address.tag not in _OBJECT_CLASSES
             and _flow_owner(prev[0].xpath) == _flow_owner(address.xpath)
-            and _flow_owner(address.xpath) != address.xpath.split("/text()")[0]
+            # A block's own text children join, but only inside a flow
+            # that holds inline markup -- see `mixed` above.
+            #
+            # This used to require the text to sit inside an inline element,
+            # so `<p>text <a>link</a> more</p>` rejoined the link's words and
+            # left the paragraph's own two fragments as separate lines. On
+            # duckduckgo a character counter written as three text nodes --
+            # `0`, `/`, `500` -- drew as three lines of a document, which is
+            # the shape a reader reads as three facts.
+            #
+            # The guard was there to stop a run joining across an intervening
+            # block. Adjacency now does that instead: units arrive in
+            # document order, so a block between two text children lands
+            # between them here and breaks the run by having a different flow
+            # owner. Before reading order was observed rather than derived,
+            # that was not true and this guard was standing in for it.
+            and (_flow_owner(address.xpath)
+                 != address.xpath.split("/text()")[0]
+                 or _flow_owner(address.xpath) in mixed)
             and not _looks_like_url(value)
             and not _looks_like_url(prev[1])
             and prev[3] == depth
