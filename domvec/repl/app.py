@@ -1554,16 +1554,30 @@ class Repl:
             while self.running:
                 sys.stdout.write("\x1b[H\x1b[2J" + self.render())
                 sys.stdout.flush()
+                if not term.raw:
+                    # No raw mode: read a whole LINE, because `term.read()`
+                    # returns exactly one character here. `_drain` needs
+                    # `select`, which does not work on a Windows console
+                    # handle, so it returns "" and the read is a single char.
+                    #
+                    # This branch used to call `term.read()` and treat the
+                    # result as a typed line -- the two comments contradicted
+                    # each other, one file apart, and the code believed the
+                    # wrong one. Every command on Windows was dispatched
+                    # letter by letter: `help` became `h`, `e`, `l`, `p`,
+                    # four unknown commands and no help. `quit` became `q`,
+                    # `u`, `i`, `t`, so the session could not even be closed,
+                    # and because it stayed open it kept the kuzu lock on the
+                    # store and the *next* launch failed too.
+                    line = sys.stdin.readline()
+                    if not line:
+                        break
+                    if not self.command(line.strip()):
+                        break
+                    continue
                 data = term.read()
                 if not data:
                     break
-                if not term.raw:
-                    # No raw mode: the read is a typed line, so treat it as a
-                    # command rather than as key events. This is the Windows
-                    # and non-tty path, and it keeps the REPL usable there.
-                    if not self.command(data.strip()):
-                        break
-                    continue
                 if data == "\x03" or data == "q":
                     break
                 if data == ":":

@@ -141,7 +141,9 @@ class GraphStore:
             if "lock" in str(exc).lower():
                 raise RuntimeError(
                     f"workspace {self.path} is held by another process — "
-                    "give each concurrent run its own --workspace"
+                    "close it, or give this run its own store "
+                    "(--build <dir> for the repl, --workspace <dir> for the "
+                    "cli)"
                 ) from exc
             raise
         self.conn = kuzu.Connection(self.db)
