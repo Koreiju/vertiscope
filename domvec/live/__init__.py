@@ -679,6 +679,33 @@ def Page(what: Optional[str] = None):
     return _ask(text)
 
 
+def _rank_str(rank: float) -> str:
+    """PageRank as a multiple of the average chunk, not as a raw share.
+
+    PageRank sums to one over the corpus, so a chunk's raw value is a
+    function of how many chunks there are and not only of its standing. On
+    256 chunks every hit printed `r0.00` at two decimals -- while the factor
+    was ranking perfectly well, spread 0.0034 to 0.0097 across 21 distinct
+    values. The number was alive and the display said it was dead, which is
+    the same failure this project keeps finding in its own instruments.
+
+    More decimals would only postpone it: at a hundred thousand chunks the
+    mean is 1e-5 and any fixed width goes blank again. Dividing by the mean
+    is scale-free, and it says the thing a reader wants: `x2.5` is two and a
+    half times the standing of an average chunk, on a corpus of any size.
+    """
+    ranks = None
+    if _S.workspace is not None:
+        try:
+            ranks = _S.workspace.index.ranks
+        except Exception:           # noqa: BLE001
+            ranks = None
+    if ranks is None or not len(ranks):
+        return "%.2f" % rank
+    mean = float(ranks.mean()) or 1.0
+    return "x%.1f" % (rank / mean)
+
+
 def same_page(a: str, b: str) -> bool:
     """Are these two spellings the same document?
 
@@ -722,6 +749,17 @@ def _ask(query: str, *, everywhere: bool = False, k: int = 8):
         return ("no workspace: open one with workspace('build') to retrieve.\n"
                 "  the index needs somewhere to keep frequency rows, "
                 "embeddings and the graph")
+    # Embed anything read but not yet vectorised.
+    #
+    # Here rather than in `_record`, because navigation should not pay for
+    # retrieval that may never be asked for: `ingest_chunks` queues the
+    # chunks and this is where the queue is worth draining. A page opened and
+    # never questioned costs nothing.
+    try:
+        _S.workspace.flush_vectors()
+    except Exception as exc:        # noqa: BLE001
+        print("  (embedding failed: %s: %s)" % (type(exc).__name__, exc))
+
     hits = _S.workspace.search(query, k=k * 3)
     if not everywhere:
         hits = [h for h in hits if same_page(h.url, _S.url)]
@@ -739,8 +777,9 @@ def _ask(query: str, *, everywhere: bool = False, k: int = 8):
             # The three factors, because a single score cannot say WHY: a hit
             # that is all pagerank and no text is a different answer from one
             # that is all text and no standing.
-            out.append("|-- %-58s  r%.2f l%.2f s%.2f"
-                       % (head, hit.rank, hit.lexical, hit.semantic))
+            out.append("|-- %-58s  r%s l%.2f s%.2f"
+                       % (head, _rank_str(hit.rank), hit.lexical,
+                          hit.semantic))
     return "\n".join(out)
 
 
@@ -754,13 +793,23 @@ def Browser(query: str, k: int = 8):
     return _ask(query, everywhere=True, k=k)
 
 
-def workspace(path: str = "build"):
+def workspace(path: str = "build", *, semantic: bool = True):
     """Open a workspace, so folds are recorded and can be retrieved.
 
     Without one the session still browses -- the fold, the tree, the
     affordances all work -- but nothing is indexed and `Page(query)` has
     nothing to rank. With one, every page opened is written through the same
     path a scan uses, so what you read becomes what you can search.
+
+    `semantic` loads the nomic embedder, and it is on by default because the
+    ranking is a product of three factors and a missing one is not a smaller
+    answer, it is a different one. `Workspace` takes `embedder=None` and then
+    builds no embedding matrix at all, so every hit scored s0.00 and the
+    "three-form" index was ranking on two.
+
+    Say `semantic=False` to skip it deliberately -- it costs a model load and
+    a few seconds -- and the sessions says which it got either way, because
+    "s0.00 on every row" is not something a reader should have to notice.
     """
     from ..workspace import Workspace
 
@@ -769,9 +818,25 @@ def workspace(path: str = "build"):
             _S.workspace.close()
         except Exception:           # noqa: BLE001
             pass
-    _S.workspace = Workspace(path, context_window=_S.window)
-    return "workspace open at %s (%s)" % (
-        path, _S.workspace.stats().get("chunks", "?"))
+
+    embedder, note = None, "lexical + pagerank only (semantic=False)"
+    if semantic:
+        try:
+            from ..core.embedding_service import get_default_service
+
+            embedder = get_default_service()
+            status = embedder.status()
+            note = "semantic on: %s on %s" % (
+                status.get("model", "?"), status.get("device", "?"))
+        except Exception as exc:    # noqa: BLE001
+            # Loud, not silent. A retrieval quietly missing a third of itself
+            # is the failure this whole file keeps rediscovering.
+            note = ("semantic UNAVAILABLE (%s: %s) -- ranking on two factors"
+                    % (type(exc).__name__, str(exc)[:60]))
+
+    _S.workspace = Workspace(path, context_window=_S.window, embedder=embedder)
+    return "workspace open at %s (%s chunks)\n  %s" % (
+        path, _S.workspace.stats().get("chunks", "?"), note)
 
 
 def acts(tag: Optional[str] = None) -> List[Node]:
