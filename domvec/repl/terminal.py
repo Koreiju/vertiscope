@@ -244,6 +244,8 @@ class RawTerminal:
         self._fd: Optional[int] = None
         self._saved = None
         self.raw = False
+        # Console-at-a-time reading on Windows, where `termios` is absent.
+        self._win = False
 
     def __enter__(self) -> "RawTerminal":
         try:
@@ -255,7 +257,31 @@ class RawTerminal:
             tty.setraw(self._fd)
             self.raw = True
         except Exception:
-            self.raw = False        # not a tty, or Windows: keep going
+            self.raw = False        # not a tty, or Windows: try msvcrt below
+        if not self.raw:
+            # Windows has no `termios`, and for a long time that meant no
+            # arrow keys, no single-key scrolling, and no way to move about a
+            # page except by typing line numbers at a prompt.
+            #
+            # `msvcrt` reads the console one keystroke at a time with no mode
+            # change, which is all raw mode was wanted for here. Special keys
+            # arrive as a lead byte (0xE0 or NUL) followed by a code, so they
+            # are translated into the escape sequences xterm sends and
+            # everything downstream -- decode_stream, the key table, the
+            # widgets -- stays exactly as it is.
+            #
+            # The mouse is NOT available this way: it needs the console input
+            # mode changed and events read as records, a different mechanism.
+            # Saying so is honest, and the key path is what makes a page
+            # navigable.
+            try:
+                import msvcrt            # noqa: F401 - probing for it
+                if sys.stdin.isatty():
+                    self._win = True
+                    self.raw = True
+                    self.mouse = False
+            except Exception:
+                self._win = False
         out = ""
         if self.alt_screen:
             out += ALT_SCREEN
@@ -297,14 +323,82 @@ class RawTerminal:
         """Read whatever is available. Blocks for at least one character.
 
         May return part of an escape sequence: `_drain` needs `select`, which
-        does not work on a console handle, so on Windows this yields exactly
-        one character per call. The caller reassembles — see
+        does not work on a console handle, so on the POSIX non-tty path this
+        can yield one character per call. The caller reassembles — see
         :func:`decode_stream`.
+
+        On Windows it reads the console through `msvcrt` and translates the
+        special-key encoding into the escape sequences the rest of this file
+        already understands.
         """
+        if self._win:
+            return _read_console()
         try:
             return sys.stdin.read(1) + _drain(sys.stdin)
         except Exception:
             return ""
+
+    def read_line(self) -> str:
+        """One typed line, echoed, for the `:` command prompt.
+
+        Read through `msvcrt` on Windows rather than `sys.stdin.readline()`:
+        the console is being read a keystroke at a time by `read`, and mixing
+        the two buffers drops characters. Backspace and Escape are handled
+        here because at this level nothing else will.
+        """
+        if not self._win:
+            return sys.stdin.readline()
+        import msvcrt
+
+        out = []
+        while True:
+            ch = msvcrt.getwch()
+            if ch in ("\r", "\n"):
+                self.stream.write("\n")
+                self.stream.flush()
+                return "".join(out)
+            if ch in ("\x03", "\x1b"):          # ctrl-c or escape: abandon
+                return ""
+            if ch in ("\x08", "\x7f"):          # backspace
+                if out:
+                    out.pop()
+                    self.stream.write("\b \b")
+                    self.stream.flush()
+                continue
+            if ch in ("\x00", "\xe0"):          # a special key: ignore it
+                msvcrt.getwch()
+                continue
+            out.append(ch)
+            self.stream.write(ch)
+            self.stream.flush()
+
+
+#: Windows console special keys, as the escape sequences xterm would send.
+#: Translating here means `decode_stream` and the key table never learn that
+#: Windows exists.
+_WIN_KEYS = {
+    "H": "\x1b[A", "P": "\x1b[B", "M": "\x1b[C", "K": "\x1b[D",
+    "G": "\x1b[H", "O": "\x1b[F", "I": "\x1b[5~", "Q": "\x1b[6~",
+    "S": "\x1b[3~",
+}
+
+
+def _read_console() -> str:
+    """Block for one keystroke, then take whatever else is already typed."""
+    import msvcrt
+
+    out = []
+    first = True
+    while first or msvcrt.kbhit():
+        first = False
+        ch = msvcrt.getwch()
+        if ch in ("\x00", "\xe0"):
+            out.append(_WIN_KEYS.get(msvcrt.getwch(), ""))
+        elif ch == "\r":
+            out.append("\n")
+        else:
+            out.append(ch)
+    return "".join(out)
 
 
 def _drain(stream) -> str:

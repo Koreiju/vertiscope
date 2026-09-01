@@ -1578,16 +1578,56 @@ class Repl:
                 data = term.read()
                 if not data:
                     break
-                if data == "\x03" or data == "q":
+                if data == "\x03":
                     break
-                if data == ":":
-                    sys.stdout.write("\x1b[?25h\n:")
+                # A typed character opens the command line, seeded with it.
+                #
+                # Without this, raw mode is a trap: printable keys do nothing
+                # unless a text field happens to hold focus (`model._key`
+                # drops them), so a reader who typed `open ...` watched a
+                # frozen screen and concluded the REPL was broken. It had
+                # simply given them no way in. `:` still works and is what
+                # the status line advertises; typing is the discoverable
+                # path to the same prompt.
+                if self._starts_a_command(data):
+                    seed = "" if data == ":" else data
+                    sys.stdout.write("\x1b[?25h\n:" + seed)
                     sys.stdout.flush()
-                    if not self.command(sys.stdin.readline()):
-                        break
+                    # Through the terminal, not `sys.stdin`: on Windows the
+                    # console is being read a keystroke at a time and mixing
+                    # the two buffers drops characters.
+                    line = seed + term.read_line()
                     sys.stdout.write("\x1b[?25l")
+                    if not line.strip():
+                        continue
+                    if not self.command(line):
+                        break
                     continue
                 self.feed(data)
+
+    def _starts_a_command(self, data: str) -> bool:
+        """Should this keystroke open the command line rather than navigate?
+
+        `:` always does. So does any single printable character -- unless a
+        text field has focus, where it belongs to the field and typing into
+        the page is the whole point.
+
+        Escape sequences never do: an arrow key is navigation, and seeding a
+        prompt with `\x1b[A` would put the sequence into the command instead
+        of scrolling.
+        """
+        if data == ":":
+            return True
+        if len(data) != 1 or not data.isprintable():
+            return False
+        focus = self.state.focus
+        if focus is not None:
+            try:
+                if self.state.document.lines[focus].kind is WidgetKind.INPUT:
+                    return False
+            except (IndexError, AttributeError):
+                pass
+        return True
 
 
 def _shutdown(repl, workspace) -> None:
