@@ -231,3 +231,32 @@ def test_the_two_denominators_do_not_collapse_into_one():
     assert out["phantom"] == 1
     assert out["missed"] == 1
     assert out["recall"] == 0.0                  # of what was reachable, none
+
+# --- capture is not presentation ---------------------------------------------
+
+
+def test_an_affordance_the_renderer_omits_is_missed():
+    """The distinction the measure was not making.
+
+    `measure_affordance` passed `spine.trie.leaves()` as its `drawn`
+    argument, so it asked whether the fold *captured* the affordance while
+    the report read "...the REPL presents". On ja.wikipedia that scored
+    recall 1.0 on a page whose visible `カテゴリ` link has no rendered line at
+    its anchor or at any ancestor -- the fold held it and the projection
+    dropped it, and a reader acts on the projection.
+
+    Scored over what the render actually emits, the same affordance is
+    missed, which is the answer the goal's question wants.
+    """
+    truth = _Truth([("/html/body/div/a", "link", True)])
+    held = drawn(("/html/body/div/a", "link"))
+    assert score_affordance(truth, held)["missed"] == 0
+    assert score_affordance(truth, [])["missed"] == 1
+
+
+def test_presentation_still_credits_a_nested_drawing():
+    """The containment tolerance is unchanged: the renderer addresses a
+    link's words at the span holding them, and that is still the same link."""
+    truth = _Truth([("/html/body/div/a", "link", True)])
+    presented = drawn(("/html/body/div/a/span", "link"))
+    assert score_affordance(truth, presented)["missed"] == 0

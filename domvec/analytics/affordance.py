@@ -177,6 +177,7 @@ def score_affordance(truth, drawn) -> dict:
 
 def measure_affordance(driver, urls: Sequence[str], *,
                        context_window: int = 1200) -> dict:
+    from ..markdown import render_trie
     from ..sensing import Sensor
     from ..stream import StreamingScan
     from .drift import _settle
@@ -194,9 +195,27 @@ def measure_affordance(driver, urls: Sequence[str], *,
             time.sleep(0.6)
             spine = StreamingScan(url, context_window=context_window)
             _settle(sensor, spine)
-            drawn = [(leaf.address, leaf.value)
-                     for leaf in spine.trie.leaves() if leaf.address]
-            row.update(score_affordance(read_page_truth(driver, url), drawn))
+            truth = read_page_truth(driver, url)
+            # Two different questions, and this file used to ask only the
+            # first while its report claimed to answer the second.
+            #
+            # `held` is the trie: did the fold *capture* the affordance.
+            # `presented` is `render_trie`: does the REPL *draw* it. A reader
+            # acts on what the projection puts in front of them, so the goal's
+            # question -- are the page's interactive elements interactable in
+            # the REPL -- is the second one. Scored on the trie, ja.wikipedia
+            # reports recall 1.0 while a visible `カテゴリ` link has no
+            # rendered line at its anchor or any ancestor of it.
+            held = [(leaf.address, leaf.value)
+                    for leaf in spine.trie.leaves() if leaf.address]
+            out = render_trie(spine.trie, context_window=context_window)
+            chunks = out[0] if isinstance(out, tuple) else out
+            presented = [(line.address, line.text)
+                         for chunk in chunks for line in chunk.lines
+                         if line.address is not None]
+            row.update(score_affordance(truth, held))
+            for key, value in score_affordance(truth, presented).items():
+                row["drawn_" + key] = value
         except Exception as exc:                       # noqa: BLE001
             row["error"] = "{}: {}".format(type(exc).__name__, exc)[:200]
         rows.append(row)
@@ -231,10 +250,23 @@ def render_affordance_table(report: dict) -> str:
     out.append("")
     out.append("  pages measured              {:>6}".format(len(rows)))
     out.append("  exact both ways             {:>6}".format(len(clean)))
+    dtp = sum(r.get("drawn_tp", 0) for r in rows)
+    dmissed = sum(r.get("drawn_missed", 0) for r in rows)
+    dphantom = sum(r.get("drawn_phantom", 0) for r in rows)
     out.append("  affordances the page has    {:>6}".format(tp + missed))
-    out.append("  ...the REPL presents        {:>6}".format(tp))
-    out.append("  MISSED (unreachable)        {:>6}".format(missed))
+    out.append("  ...the fold captured        {:>6}".format(tp))
+    out.append("  MISSED by capture           {:>6}".format(missed))
     out.append("  PHANTOM (invented)          {:>6}".format(phantom))
+    out.append("")
+    out.append("  ...the REPL actually draws  {:>6}".format(dtp))
+    out.append("  MISSED by the projection    {:>6}   a reader cannot act on "
+               "these".format(dmissed))
+    out.append("  PHANTOM in the projection   {:>6}".format(dphantom))
+    out.append("")
+    out.append("  Capture and presentation are different questions and only")
+    out.append("  the first was being asked: `drawn` was the trie's leaves.")
+    out.append("  An affordance the fold holds and the renderer omits is one")
+    out.append("  the reader cannot reach, and it scored as present.")
     out.append("")
     out.append("  A phantom is the worse error. A missed control is visible --")
     out.append("  a reader looking for a button finds prose. An invented one")
