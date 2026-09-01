@@ -33,8 +33,8 @@ import time as _time
 from typing import List, Optional, Sequence, Tuple
 
 __all__ = [
-    "Page", "up", "top", "back", "here", "where", "attach", "close",
-    "acts", "act", "Refused", "Node",
+    "Page", "Browser", "workspace", "up", "top", "back", "here", "where",
+    "attach", "close", "acts", "act", "Refused", "Node",
 ]
 
 #: Every HTML tag, exported as a selector. Static, so `import *` works and so
@@ -106,6 +106,7 @@ class _Session:
         self.sensor = None
         self.cursor = None          # a TrieNode
         self.acts = []              # the last acts() listing, for act(n)
+        self.workspace = None       # opened by `workspace()`; None = no index
         self.window = 1200
 
     # -- browser ---------------------------------------------------------
@@ -120,6 +121,12 @@ class _Session:
         return self.driver
 
     def close(self) -> None:
+        if self.workspace is not None:
+            try:
+                self.workspace.close()
+            except Exception:       # noqa: BLE001
+                pass
+            self.workspace = None
         if self.driver is not None:
             try:
                 self.driver.quit()
@@ -158,6 +165,28 @@ class _Session:
                 break
             _time.sleep(0.25)
         self.cursor = _page_root(self.spine.trie)
+        self._record()
+
+    def _record(self) -> None:
+        """Write this fold into the workspace, if one is open.
+
+        The chunks the index ranks are the chunks the object tree shows --
+        the same `render_trie` output, ingested through the same path a scan
+        uses. Folding once and ingesting is what keeps retrieval answering
+        about the page you are actually looking at.
+
+        A failure here must not take the browsing session with it: reading a
+        page is useful even when recording it is not possible.
+        """
+        if self.workspace is None or self.spine is None:
+            return
+        from ..markdown import render_trie
+
+        try:
+            chunks = render_trie(self.spine.trie, context_window=self.window)
+            self.workspace.ingest_chunks(self.url, list(chunks))
+        except Exception as exc:                # noqa: BLE001
+            print("  (not recorded: %s: %s)" % (type(exc).__name__, exc))
 
     def refold(self) -> None:
         """After an enactment. The url may have changed under us."""
@@ -612,32 +641,99 @@ def Page(what: Optional[str] = None):
     return _ask(text)
 
 
-def _ask(query: str):
-    """Rank this page's chunks against a question.
+def same_page(a: str, b: str) -> bool:
+    """Are these two spellings the same document?
 
-    Scored on token overlap for now, over the same chunks the renderer
-    produces. The three-form index -- pagerank times tfidf times nomic -- is
-    what this becomes; it needs a workspace open, and wiring that in is the
-    next slice rather than a thing to fake here.
+    `canonical_url` returns the EMPTY STRING for any scheme that is not http
+    or https, which is deliberate -- it exists to make link targets match and
+    a `file://` uri has no canonical http form. Comparing two canonicalised
+    file uris therefore compares "" with "", which is true of every pair, and
+    a "this page only" filter built on it silently returned hits from every
+    page in the store.
+
+    Worse than wrong: it would have worked on the live site and failed on
+    every fixture, so it was broken exactly where the tests run.
+
+    The rule here is `Workspace.page_url`'s: prefer the canonical form when
+    there is one, fall back to the url as given when there is not.
     """
-    from ..markdown import render_trie
+    from ..graphstore import canonical_url
 
-    want = {w for w in _re.split(r"\W+", query.lower()) if len(w) > 2}
-    scored = []
-    for chunk in render_trie(_S.spine.trie, context_window=_S.window):
-        body = chunk.markdown
-        have = {w for w in _re.split(r"\W+", body.lower()) if len(w) > 2}
-        hit = len(want & have)
-        if hit:
-            scored.append((hit, chunk))
-    scored.sort(key=lambda pair: -pair[0])
-    if not scored:
-        return "no chunk on this page matches %r" % query
-    out = ["%r - %d chunks match" % (query, len(scored))]
-    for hit, chunk in scored[:8]:
-        head = " ".join(chunk.markdown.split())[:66]
-        out.append("|-- %-3d %s" % (hit, head))
+    left, right = canonical_url(a), canonical_url(b)
+    if left and right:
+        return left == right
+    return (a or "").split("#", 1)[0] == (b or "").split("#", 1)[0]
+
+
+def _ask(query: str, *, everywhere: bool = False, k: int = 8):
+    """Rank chunks by the triple product: pagerank, tf-idf, nomic.
+
+    The same `ThreeFormIndex` the rest of the project retrieves through, over
+    the same chunks the object tree shows -- because `Page(url)` ingests the
+    fold it already has, rather than folding a second time for the index.
+
+    Scoped to the current page unless `everywhere`, which is what `Browser`
+    passes: the question is the same, the corpus is not.
+
+    Without a workspace open there is nothing to rank against, and this says
+    so rather than quietly falling back to counting shared words. A retrieval
+    that is secretly a word count is the kind of thing this project spends
+    its time discovering it had.
+    """
+    if _S.workspace is None:
+        return ("no workspace: open one with workspace('build') to retrieve.\n"
+                "  the index needs somewhere to keep frequency rows, "
+                "embeddings and the graph")
+    hits = _S.workspace.search(query, k=k * 3)
+    if not everywhere:
+        hits = [h for h in hits if same_page(h.url, _S.url)]
+    hits = hits[:k]
+    if not hits:
+        where_ = "anywhere in the store" if everywhere else "on this page"
+        return "nothing %s matches %r" % (where_, query)
+
+    out = ["%r - %d hits" % (query, len(hits))]
+    for hit in hits:
+        head = " ".join((hit.markdown or "").split())[:58] or hit.xpath[-58:]
+        if everywhere:
+            out.append("|-- %-58s  %s" % (head, hit.url[:34]))
+        else:
+            # The three factors, because a single score cannot say WHY: a hit
+            # that is all pagerank and no text is a different answer from one
+            # that is all text and no standing.
+            out.append("|-- %-58s  r%.2f l%.2f s%.2f"
+                       % (head, hit.rank, hit.lexical, hit.semantic))
     return "\n".join(out)
+
+
+def Browser(query: str, k: int = 8):
+    """Ask the whole store, not just the page in front of you.
+
+    Every trace ever folded into this workspace, ranked by the same triple
+    product, with the url on each row because a hit from somewhere else is
+    only useful if you can tell where it came from.
+    """
+    return _ask(query, everywhere=True, k=k)
+
+
+def workspace(path: str = "build"):
+    """Open a workspace, so folds are recorded and can be retrieved.
+
+    Without one the session still browses -- the fold, the tree, the
+    affordances all work -- but nothing is indexed and `Page(query)` has
+    nothing to rank. With one, every page opened is written through the same
+    path a scan uses, so what you read becomes what you can search.
+    """
+    from ..workspace import Workspace
+
+    if _S.workspace is not None:
+        try:
+            _S.workspace.close()
+        except Exception:           # noqa: BLE001
+            pass
+    _S.workspace = Workspace(path, context_window=_S.window)
+    return "workspace open at %s (%s)" % (
+        path, _S.workspace.stats().get("chunks", "?"))
 
 
 def acts(tag: Optional[str] = None) -> List[Node]:
