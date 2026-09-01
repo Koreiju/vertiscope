@@ -34,7 +34,7 @@ from typing import List, Optional, Sequence, Tuple
 
 __all__ = [
     "Page", "up", "top", "back", "here", "where", "attach", "close",
-    "Refused", "Node",
+    "acts", "act", "Refused", "Node",
 ]
 
 #: Every HTML tag, exported as a selector. Static, so `import *` works and so
@@ -105,6 +105,7 @@ class _Session:
         self.spine = None
         self.sensor = None
         self.cursor = None          # a TrieNode
+        self.acts = []              # the last acts() listing, for act(n)
         self.window = 1200
 
     # -- browser ---------------------------------------------------------
@@ -364,6 +365,44 @@ class Node:
     def interactive(self) -> bool:
         return self.tag in _INTERACTIVE
 
+    def acts(self, tag: Optional[str] = None) -> List["Node"]:
+        """Everything below here that can be acted on, in document order.
+
+        The answer to "find the search box on the page", and the reason it
+        has to be complete: an earlier version stopped at fourteen and the
+        page's only `<textarea>` -- which is what duckduckgo's search box is
+        -- fell off the end, so the listing said there was nothing writable
+        on a page with a search box in the middle of it. A truncated list
+        that does not say it is truncated is a display telling a lie.
+
+        Filter by tag to narrow it: `acts("textarea")`. By tag, because a tag
+        is a fact; nothing here decides which control is *for* searching.
+        """
+        out: List[Node] = []
+        stack = [self._t]
+        while stack:
+            node = stack.pop(0)
+            for kid in _dom_children(node):
+                if _tag_of(kid) in _INTERACTIVE:
+                    if tag is None or _tag_of(kid) == tag:
+                        out.append(Node(kid))
+                stack.append(kid)
+        _S.acts = out
+        return out
+
+    def act(self, n: int) -> "Node":
+        """The nth thing from the last `acts()` listing, by position.
+
+        A handle like `button(1)` is an ordinal *within its own parent*, so a
+        flat list of affordances repeats it -- duckduckgo's front page shows
+        five separate `button(1)`. Position in the listing is the only
+        unambiguous way to name one of them, and `.where()` still gives the
+        real address.
+        """
+        if not _S.acts:
+            self.acts()
+        return _S.acts[n]
+
     # -- acting ----------------------------------------------------------
     def _target(self) -> str:
         for address, value in _leaves_of(self._t):
@@ -380,13 +419,39 @@ class Node:
         _S.refold()
         return Page()
 
+    #: `input` types that accept typing. A radio or a checkbox is pressed,
+    #: not written into, and a colour or a file picker is neither.
+    _WRITABLE = frozenset({
+        "", "text", "search", "email", "url", "tel", "number", "date",
+        "datetime-local", "month", "week", "time",
+    })
+
     def type(self, text: str) -> "Node":
-        _refuse_check(_label_of(self._t, 80), self._target())
+        """Write into this node, if it is a thing that can be written into.
+
+        Checked before the driver is asked. duckduckgo's first `<input>` in
+        document order is `<input name="chip-select" type="radio">`, and
+        sending it `clear()` produced a Marionette stack trace ending in
+        "Unable to clear element that cannot be edited" -- true, and useless
+        to anyone deciding what to do next. A caller is told what the element
+        is and what to do with it instead.
+        """
         driver = _S.need_driver()
         node = driver.find_element("xpath", self.xpath)
+        kind = (node.get_attribute("type") or "").lower()
+        if self.tag == "input" and kind == "password":
+            raise Refused("a password field is never typed into")
+        if self.tag not in ("input", "textarea") or (
+                self.tag == "input" and kind not in self._WRITABLE):
+            what = "%s type=%r" % (self.tag, kind) if kind else self.tag
+            hint = " -- press it instead" if kind in ("radio", "checkbox",
+                                                      "submit", "button") else ""
+            raise TypeError("%s is not writable (%s)%s"
+                            % (self.handle(), what, hint))
+        _refuse_check(_label_of(self._t, 80), self._target())
         node.clear()
         node.send_keys(text)
-        print('%s = %r' % (self.handle(), text))
+        print("%s = %r" % (self.handle(), text))
         return self
 
     def enter(self) -> "Node":
@@ -417,7 +482,25 @@ class Node:
             head = "Page(%r) - %d chunks" % (_S.url, _chunk_count())
         else:
             head = "%s - %d children" % (self.handle(), len(kids))
-        return "\n".join([head] + _tree_lines(kids))
+        lines = [head] + _tree_lines(kids)
+        # What can be acted on, drawn apart from what can be read. This is the
+        # half the TUI never separated, and the reason a reader could not tell
+        # what any box was for.
+        acts = self.acts()
+        if acts:
+            from collections import Counter
+
+            tally = Counter(a.tag for a in acts)
+            lines.append("act: %d - %s" % (
+                len(acts),
+                " ".join("%d%s" % (n, t) for t, n in sorted(tally.items()))))
+            for n, a in enumerate(acts[:6]):
+                lines.append("  act(%d) %-9s %r"
+                             % (n, a.tag, _label_of(a._t, 40)))
+            if len(acts) > 6:
+                lines.append("  ... %d more; acts('textarea') to narrow"
+                             % (len(acts) - 6))
+        return "\n".join(lines)
 
 
 def _chunk_count() -> int:
@@ -555,6 +638,33 @@ def _ask(query: str):
         head = " ".join(chunk.markdown.split())[:66]
         out.append("|-- %-3d %s" % (hit, head))
     return "\n".join(out)
+
+
+def acts(tag: Optional[str] = None) -> List[Node]:
+    """Everything actionable below the current node, in document order.
+
+    At module level as well as on `Node`, because this is the answer to "what
+    can I do here" and having to write `Node(cursor).acts()` to ask it is a
+    worse question than the one being asked.
+
+        acts()             everything
+        acts("textarea")   narrowed by tag -- a tag is a fact
+    """
+    if _S.cursor is None:
+        return []
+    return Node(_S.cursor).acts(tag)
+
+
+def act(n: int) -> Node:
+    """The nth affordance from the last listing, by position.
+
+    `button(1)` is an ordinal within its own parent, so a flat list repeats
+    it: duckduckgo's front page shows five separate `button(1)`. Position is
+    the only unambiguous handle across such a list.
+    """
+    if _S.cursor is None:
+        raise RuntimeError("no page: call Page(url) first")
+    return Node(_S.cursor).act(n)
 
 
 def up():

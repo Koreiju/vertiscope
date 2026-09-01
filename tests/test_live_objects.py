@@ -160,3 +160,69 @@ def test_a_refused_target_is_not_visited(session):
     session.Page(START)
     with pytest.raises(Refused):
         session.Page("https://x.test/checkout")
+
+
+# --- what the live site taught, which no fixture could ------------------------
+
+
+@LIVE
+def test_a_radio_is_not_written_into(session):
+    """duckduckgo's first `<input>` in document order is
+    `<input name="chip-select" type="radio">`, and its search box is a
+    `<textarea>`. Sending the radio `clear()` produced a Marionette stack
+    trace ending "Unable to clear element that cannot be edited" -- true, and
+    no use to anyone deciding what to do next."""
+    session.Page(START)
+    session.body(1)
+    radios = [n for n in session.acts("input")
+              if n.where().endswith("input[2]")]
+    assert radios, "the fixture's radio is missing from the listing"
+    with pytest.raises(TypeError) as caught:
+        radios[0].type("anything")
+    assert "not writable" in str(caught.value)
+    assert "press it instead" in str(caught.value)
+
+
+@LIVE
+def test_a_password_field_is_refused_not_merely_rejected(session):
+    """A password field IS writable in the mechanical sense, which is exactly
+    why refusing it cannot be left to the writability check. It raises
+    `Refused`, the same class a sign-in label raises, so a caller handling
+    safety handles both."""
+    from domvec.live import Refused
+
+    session.Page(START)
+    session.body(1)
+    fields = [n for n in session.acts("input") if "pw" in n.where()
+              or n.where().endswith("form[2]/input")]
+    assert fields, "the fixture's password field is missing"
+    with pytest.raises(Refused):
+        fields[0].type("hunter2")
+
+
+@LIVE
+def test_the_affordance_listing_is_complete(session):
+    """It stopped at fourteen once, and the page's only `<textarea>` fell off
+    the end -- so the listing said nothing was writable on a page with a
+    search box in the middle of it. A truncated list that does not say it is
+    truncated is a display telling a lie."""
+    session.Page(START)
+    session.body(1)
+    every = session.acts()
+    inputs = session.acts("input")
+    assert len(inputs) >= 3, [n.where() for n in inputs]
+    assert all(n.tag == "input" for n in inputs)
+    assert len(every) >= len(inputs)
+
+
+@LIVE
+def test_a_flat_listing_is_addressed_by_position(session):
+    """`button(1)` is an ordinal within its own parent, so a flat list of
+    affordances repeats it -- duckduckgo's front page shows five separate
+    `button(1)`. Position is the only unambiguous handle across such a
+    list, and `.where()` still gives the real address."""
+    session.Page(START)
+    session.body(1)
+    every = session.acts()
+    assert session.act(0).where() == every[0].where()
+    assert session.act(1).where() == every[1].where()
