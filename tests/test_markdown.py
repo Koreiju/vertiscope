@@ -154,12 +154,23 @@ def test_smaller_windows_produce_more_chunks(window, rendered):
 
 
 def test_no_address_is_lost_when_the_window_changes(rendered):
-    """Re-chunking must repartition the same units, not drop some."""
+    """Re-chunking must repartition the same units, not drop some.
+
+    Asked of `covered` rather than `anchors`. A line that puts a sentence's
+    inline markup back together accounts for several addresses, and whether
+    two fragments end up on one line depends on whether the chunker cut
+    between them -- which is exactly what the window changes. Counting only
+    the first address of each line therefore reported 589 addresses "lost"
+    at window 200 that were sitting in the line beside it.
+
+    `anchors` stays one-per-line for the callers that zip it against lines;
+    the question here is coverage, and that is what `covered` answers.
+    """
     m = rendered[0]
-    base = {k for c in m["chunks"] for k in c.anchors}
+    base = {k for c in m["chunks"] for k in c.covered}
     for window in (200, 4000):
         other = {k for c in render_trie(m["trie"], context_window=window)
-                 for k in c.anchors}
+                 for k in c.covered}
         assert other == base, (
             f"window {window} changed the covered set by "
             f"{len(base ^ other)} address(es)"

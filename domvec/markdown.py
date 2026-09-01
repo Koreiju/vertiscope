@@ -83,6 +83,12 @@ class MarkdownLine:
     depth: int
     text: str
     address: ContentAddress
+    #: Addresses merged into this line by `_inline_flow`, in reading order.
+    #: A sentence with a link in it is one line for a reader and several
+    #: addresses for anyone who wants to act on it, and dropping the second
+    #: to get the first would make the prose read correctly at the cost of
+    #: making the link unreachable.
+    inline: Tuple[ContentAddress, ...] = ()
 
     def render(self) -> str:
         return "  " * self.depth + self.text
@@ -106,8 +112,33 @@ class MarkdownChunk:
 
     @property
     def anchors(self) -> List[str]:
-        """Address keys, one per line, in line order."""
+        """Address keys, ONE PER LINE, in line order.
+
+        Positional by contract: the jsonl round-trip, the depth recovery and
+        the REPL all zip this against `lines`. Widening it to include merged
+        addresses broke four of those at once -- see `covered`, which is
+        where that question belongs.
+        """
         return [line.address.key() for line in self.lines]
+
+    @property
+    def covered(self) -> List[str]:
+        """Every address this chunk accounts for, merged ones included.
+
+        `anchors` is one per line and must stay that way. But a line that put
+        a sentence's inline markup back together accounts for every address
+        folded into it, and counting only the first made those look lost:
+        the covered set then depended on where the chunker happened to cut,
+        and moving the context window from 1200 to 200 moved 589 of them.
+
+        Coverage is a property of the chunk. How many lines it took to draw
+        is not.
+        """
+        out: List[str] = []
+        for line in self.lines:
+            out.append(line.address.key())
+            out.extend(a.key() for a in line.inline)
+        return out
 
     @property
     def chars(self) -> int:
@@ -1097,11 +1128,158 @@ def _render_sized(
                 and a.tag not in ("link", "image", "media")):
             a = replace(a, tag="link")
         lines.append(MarkdownLine(depth=depth, text=rendered, address=a))
-    rendered = MarkdownChunk(url=url, xpath=xpath, lines=_join_labels(lines))
+    rendered = MarkdownChunk(url=url, xpath=xpath,
+                             lines=_inline_flow(_join_labels(lines)))
     sized = (rendered, rendered.chars)
     if key is not None:
         memo.put(key, sized)
     return sized
+
+
+def _inline_flow(lines: List[MarkdownLine]) -> List[MarkdownLine]:
+    """A sentence with a link in it is one line.
+
+    `_join_inline` puts prose fragments back together on the *unit* side, but
+    only where they agree on render class and depth. Real markup agrees on
+    neither: text inside an `<a>` or an `<em>` is one level deeper than the
+    paragraph's own text and carries the inline element's class. So a
+    paragraph came out as a ladder --
+
+        'Monthly solutions resolve basin-scale mass change, and'      depth 0
+        '[the GRACE-FO record](https://nasa.gov/grace)'               depth 1
+        'continues the series into'                                   depth 0
+        '2024'                                                        depth 1
+        'with better coverage of'                                     depth 0
+
+    -- where a reader sees one sentence. This runs after rendering instead,
+    which is the point: by here the anchor is already `[words](target)`, so
+    folding it into the prose keeps the link *in* the sentence rather than
+    stripping it to text.
+
+    Merged only within one flow: same block ancestor, and only across the
+    inline elements. Objects keep their own line -- an image is a thing on
+    the page and not a word in a sentence -- and a run that crosses into
+    another block stops, because that block is a different paragraph.
+
+    The merged addresses are kept on the line rather than dropped. Reading
+    and acting are different questions and this answers only the first; a
+    caller that wants the link still has it.
+    """
+    if len(lines) < 2:
+        return lines
+    out: List[MarkdownLine] = []
+    for line in lines:
+        prev = out[-1] if out else None
+        if prev is None or not _flows_together(prev, line):
+            out.append(line)
+            continue
+        merged = (prev.text.rstrip() + " " + line.text.lstrip()).strip()
+        out[-1] = MarkdownLine(
+            depth=min(prev.depth, line.depth), text=merged,
+            address=prev.address,
+            inline=prev.inline + (line.address,))
+    return out
+
+
+#: Render classes that are their own thing on the page rather than a word in
+#: a sentence. An image interrupting a paragraph is still an image.
+_STANDALONE = frozenset({"image", "media", "rule", "heading", "control",
+                         "button", "field", "check", "choice"})
+
+
+def _flows_together(prev: MarkdownLine, line: MarkdownLine) -> bool:
+    """Are these two rendered lines part of one run of prose?"""
+    a, b = prev.address, line.address
+    if a is None or b is None:
+        return False
+    # Prose only, decided by the ACCESSOR rather than the tag.
+    #
+    # `_STANDALONE` below is written in render-class vocabulary -- `image`,
+    # `control` -- and the offline path speaks the tagger's instead:
+    # `urls.internal`, `text.visible`, `media.tag`. So a pager's href line
+    # passed the class check and was merged into the prose beside it, and
+    # `classify_controls` then looked for "Next" in `</page/2/> - Next` and
+    # found no label at all.
+    #
+    # An accessor is the same on both paths: `text()` is the words a reader
+    # sees, `href` and `src` are targets. A sentence is made of the first
+    # kind only, and an anchor's words are a `text()` accessor -- which is
+    # why a link still folds in, carrying its target with it.
+    if not (_is_text_accessor(a) and _is_text_accessor(b)):
+        return False
+    if a.tag in _STANDALONE or b.tag in _STANDALONE:
+        return False
+    # And by the rendered FORM, for the same reason: a heading is `# words`
+    # and a control is `( words )` or `[ ] words` on both paths, whatever
+    # either vocabulary calls them. Merging a heading into the prose under it
+    # erased every "control inside a heading" on the eurostat page -- which a
+    # non-vacuity guard noticed, because the test that watches that invariant
+    # asserts the pattern still exists before testing it.
+    if _drawn_as_its_own_thing(prev.text) or _drawn_as_its_own_thing(line.text):
+        return False
+    if _is_bare_target(prev.text) or _is_bare_target(line.text):
+        return False
+    # One flow: the same block once the inline elements are stripped off.
+    owner = _flow_owner(a.xpath)
+    if owner != _flow_owner(b.xpath):
+        return False
+    # At least one side is inline, OR the run has already begun.
+    #
+    # The first clause is what keeps sixty paragraphs of a text/plain file
+    # apart: they are bare text children of one `<pre>` with no markup
+    # between them, so no run ever starts. The second is what lets a
+    # sentence finish: `<p>text <b>b</b> more</p>` merges the bold in, and
+    # then `more` is a bare child again -- with the first clause alone the
+    # sentence stopped dead after the markup it was interrupted by.
+    started = bool(prev.inline)
+    return (started
+            or owner != a.xpath.split("/text()")[0]
+            or owner != b.xpath.split("/text()")[0])
+
+
+#: Rendered prefixes that mean "this line is a thing, not a word". A heading,
+#: a control, a checkbox, a rule. Written as forms rather than as classes
+#: because both the live and the offline path draw them the same way while
+#: naming them differently.
+_OWN_LINE_FORMS = ("#", "( ", "[ ] ", "[x] ", "===", "---", "- ", "* ")
+
+
+def _drawn_as_its_own_thing(text: str) -> bool:
+    stripped = (text or "").lstrip()
+    return stripped.startswith(_OWN_LINE_FORMS)
+
+
+def _is_text_accessor(address: ContentAddress) -> bool:
+    """Does this address name words a reader sees, or a machine value?
+
+    `text()` and `text()@<offset>` are the reader's; `href`, `src`, `title`,
+    `aria-label` and `@control` are not. The accessor is the same on the
+    offline and the live path, which the tag is not.
+    """
+    return (getattr(address, "accessor", "") or "").startswith("text()")
+
+
+def _is_bare_target(text: str) -> bool:
+    """Is this line a target, rather than a line with a target inside it?
+
+    `_looks_like_url` answers the first question for a *value*, and it says
+    yes to a rendered markdown link because `[words](https://x)` contains
+    `://`. Used here unmodified it refused to fold any link into a sentence
+    -- which is the one thing this merge exists to do, since by this point
+    the anchor is already `[words](target)` and folding it in is what keeps
+    the link inside the prose rather than stripped out of it.
+    """
+    stripped = (text or "").strip()
+    if not stripped or stripped.startswith(("[", "![", "<")):
+        return False
+    # A target is one token. Testing "contains a url" instead poisoned every
+    # line it had already merged a link into: once the prose held
+    # `[words](https://x)`, the NEXT fragment of the same sentence was
+    # refused because the line it would join now contained `://`. So a
+    # paragraph merged its first link and then stopped dead.
+    if len(stripped.split()) > 1:
+        return False
+    return bool(_looks_like_url(stripped))
 
 
 def _xpath_of(node: TrieNode, url: str) -> str:
@@ -1241,7 +1419,13 @@ def _clone_chunk(chunk: MarkdownChunk) -> MarkdownChunk:
     return MarkdownChunk(
         url=chunk.url,
         xpath=chunk.xpath,
-        lines=[MarkdownLine(depth=l.depth, text=l.text, address=l.address)
+        # `inline` travels with the copy. Dropped here, a sentence that had
+        # merged its links read correctly and arrived with no record of what
+        # was folded into it -- the reading was right and the affordances
+        # were gone, which is the half of the bargain this field exists to
+        # keep.
+        lines=[MarkdownLine(depth=l.depth, text=l.text, address=l.address,
+                            inline=l.inline)
                for l in chunk.lines],
         part=chunk.part,
     )

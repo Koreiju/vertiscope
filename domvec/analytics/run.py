@@ -76,8 +76,25 @@ def _addresses_of_chunks(chunks):
     own addresses are then legitimately absent. The scorer uses the text only
     to confirm that specific merge at a specific ancestor.
     """
-    pairs = [(line.address, line.text) for chunk in chunks
-             for line in chunk.lines if line.address is not None]
+    pairs = []
+    for chunk in chunks:
+        for line in chunk.lines:
+            if line.address is None:
+                continue
+            pairs.append((line.address, line.text))
+            # Addresses folded into this line by the inline-flow merge.
+            #
+            # A sentence with a link in it is ONE line and several
+            # addresses. Counting only the first told the arrows that every
+            # other fragment had never been rendered: page->markdown went
+            # from 1,937 missed to 18,918 and dedup's over-collapse from 621
+            # to 18,672, on a change that had not dropped a single unit.
+            #
+            # The line's text travels with each, which is what the scorer
+            # wants -- it uses the text to confirm exactly this merge at
+            # exactly this ancestor.
+            for merged in line.inline:
+                pairs.append((merged, line.text))
     return [a for a, _t in pairs], [t for _a, t in pairs]
 
 
@@ -168,6 +185,20 @@ def measure_page(driver, url: str, *, scrolls: int = 2,
     units = [(line.address, line.text, line.address.tag)
              for chunk in chunks for line in chunk.lines
              if line.address is not None and line.text.strip()]
+    # What each drawn unit also stands for.
+    #
+    # A merged sentence is ONE box on the canvas and several addresses, and
+    # the wireframe is built from the line list -- so the addresses folded in
+    # were never placed and read as undrawn: page->wireframe went from 2,751
+    # missed to 14,612 on a change that draws exactly the same picture.
+    #
+    # They are credited where their line was drawn, which is where they are:
+    # a link inside a sentence is at the sentence.
+    merged_at = {}
+    for chunk in chunks:
+        for line in chunk.lines:
+            if line.address is not None and line.inline:
+                merged_at[line.address.key()] = list(line.inline)
     styles = StyleMap()
     wire_addresses: List[ContentAddress] = []
     wire_texts: List[str] = []
@@ -193,15 +224,18 @@ def measure_page(driver, url: str, *, scrolls: int = 2,
                 # merge check still sees the whole cell.
                 seen: Dict[str, int] = {}
                 for line in frame.lines:
-                    for a in (line.addresses or []):
-                        at = seen.get(a.xpath)
-                        if at is None:
-                            seen[a.xpath] = len(wire_addresses)
-                            wire_addresses.append(a)
-                            wire_texts.append(line.text)
-                        else:
-                            wire_texts[at] = (wire_texts[at] + " "
-                                              + line.text).strip()
+                    for placed in (line.addresses or []):
+                        # The address drawn, plus everything the merge folded
+                        # into its line: one box, several addresses.
+                        for a in [placed] + merged_at.get(placed.key(), []):
+                            at = seen.get(a.xpath)
+                            if at is None:
+                                seen[a.xpath] = len(wire_addresses)
+                                wire_addresses.append(a)
+                                wire_texts.append(line.text)
+                            else:
+                                wire_texts[at] = (wire_texts[at] + " "
+                                                  + line.text).strip()
             except Exception:  # noqa: BLE001
                 wire_addresses, wire_texts = [], []
 
