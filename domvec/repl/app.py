@@ -52,7 +52,8 @@ HELP = """\
 commands
   open <url|path|aid> load a page from the store, a jsonl file, an address
                       id (jumps to its line), or the web
-  search <query>      three-form retrieval; results become the document
+  search <query>      three-form retrieval over every page ever folded;
+                      each hit headed by its url and its r/l/s factors
   goto <n>            jump to document line n
   find <text>         scroll to the next line containing text
   controls            list pagination / menu / filter / search controls
@@ -811,17 +812,36 @@ class Repl:
             self.state.buffers.note(f"no hit for {query!r} (a factor vetoed all)")
             return True
         chunks = []
+        from ..markdown import MarkdownLine
+
         for hit in hits:
             chunk = MarkdownChunk(url=hit.url, xpath=hit.xpath)
             addresses = self.index.addresses_for(hit.cid)
-            from ..markdown import MarkdownLine
+            # Every hit says where it came from, and why it ranked.
+            #
+            # This is store-wide retrieval: the hits are drawn from every page
+            # ever folded, while `load_chunks` takes the document url from the
+            # FIRST chunk alone. So the screen named one page and showed
+            # results from twenty, and nothing on the screen said which line
+            # belonged to which -- the reader could not tell a hit from their
+            # own last scan from a hit from something read a week ago.
+            #
+            # The three factors travel with it because one score cannot say
+            # why: all-standing-no-text and all-text-no-standing are different
+            # answers to the same question.
+            head = "%s   r%.2f l%.2f s%.2f" % (
+                hit.url, hit.rank, hit.lexical, hit.semantic)
+            chunk.lines.append(
+                MarkdownLine(0, head, addresses[0][0] if addresses else None))
             for text, (address, _value) in zip(hit.markdown.split("\n"), addresses):
                 stripped = text.lstrip(" ")
                 depth = (len(text) - len(stripped)) // 2
-                chunk.lines.append(MarkdownLine(depth, stripped, address))
+                chunk.lines.append(MarkdownLine(depth + 1, stripped, address))
             chunks.append(chunk)
         self.load_chunks(chunks, title=f"search: {query}")
-        self.state.buffers.note(f"{len(hits)} hit(s) for {query!r}")
+        pages = len({hit.url for hit in hits})
+        self.state.buffers.note(
+            "%d hit(s) for %r across %d page(s)" % (len(hits), query, pages))
         return True
 
     def _cmd_goto(self, args) -> bool:
