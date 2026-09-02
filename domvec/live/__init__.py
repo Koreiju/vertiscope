@@ -34,7 +34,7 @@ from typing import List, Optional, Sequence, Tuple
 
 __all__ = [
     "Page", "Browser", "workspace", "up", "top", "back", "here", "where",
-    "attach", "close", "acts", "act", "Refused", "Node",
+    "attach", "close", "acts", "act", "wire", "Refused", "Node", "Drawing",
 ]
 
 #: Every HTML tag, exported as a selector. Static, so `import *` works and so
@@ -114,6 +114,9 @@ class _Session:
         # the trie does not change under us, so re-rendering per repr was
         # paying a page-sized cost to print eight lines. See `rendered`.
         self._chunks = None
+        # Geometry for this fold, measured lazily by `wire`. Layout is a
+        # peripheral keyed by address and never part of the fold.
+        self.styles = None
 
     # -- browser ---------------------------------------------------------
     def attach(self, *, headless: bool = True):
@@ -171,6 +174,7 @@ class _Session:
                 break
             _time.sleep(0.25)
         self._chunks = None         # a new page: whatever was cached is gone
+        self.styles = None          # and its geometry with it
         self.cursor = _page_root(self.spine.trie)
         self._record()
 
@@ -491,6 +495,28 @@ class Node:
     def interactive(self) -> bool:
         return self.tag in _INTERACTIVE
 
+    def wire(self, width: int = 100) -> "Drawing":
+        """This subtree drawn where the page puts it.
+
+        The tree view answers "what is inside what"; this answers "what is
+        beside what". Both are the same trie -- the drawing is built from the
+        same rendered lines, positioned by geometry read from the page.
+        """
+        from ..wireframe import render_wireframe
+
+        want = self.xpath
+        drawn = []
+        for chunk in _S.rendered():
+            for line in chunk.lines:
+                if line.address is None or not line.text.strip():
+                    continue
+                if line.address.xpath.startswith(want):
+                    drawn.append((line.address, line.text, line.address.tag))
+        if not drawn:
+            return Drawing(_EmptyFrame(), width)
+        styles = _geometry(drawn)
+        return Drawing(render_wireframe(drawn, styles, width=width), width)
+
     def acts(self, tag: Optional[str] = None) -> List["Node"]:
         """Everything below here that can be acted on, in document order.
 
@@ -668,6 +694,98 @@ class Node:
 
 def _chunk_count() -> int:
     return len(_S.rendered())
+
+
+class _EmptyFrame:
+    """Nothing to draw: a node with no rendered text under it."""
+
+    lines: list = []
+
+
+class Drawing:
+    """The page as its layout puts it, with every box still addressable.
+
+    The tree says what contains what. This says what sits beside what, which
+    is a different fact about the same page and the one the indented view
+    cannot express: a sidebar reads as a column here and as a deep branch
+    there, and only one of those is what a reader sees.
+
+    Geometry is read from the page, once, at the moment of drawing -- never
+    during the fold. `invariants.c2` holds the fold to reading no layout, and
+    an actuator is exactly where that rule stops applying: the scroller makes
+    the same crossing for the same reason.
+
+    Addressable by row. `wire()[3]` is the nodes drawn on row 3, in the order
+    they are drawn, so a box on the picture is a `Node` with everything a
+    node has -- `.where()`, `.press()`, `.text()`.
+    """
+
+    def __init__(self, frame, width: int) -> None:
+        self._frame = frame
+        self.width = width
+
+    @property
+    def rows(self) -> List[str]:
+        return [line.text for line in self._frame.lines]
+
+    def __len__(self) -> int:
+        return len(self._frame.lines)
+
+    def __getitem__(self, row: int) -> List["Node"]:
+        """The nodes drawn on one row, left to right."""
+        line = self._frame.lines[row]
+        out, seen = [], set()
+        for address in line.addresses:
+            owner = (address.xpath or "").split("/text()")[0]
+            if owner in seen:
+                continue
+            seen.add(owner)
+            found = _find_by_xpath(_page_root(_S.spine.trie), owner)
+            if found is not None:
+                out.append(Node(found))
+        return out
+
+    def acts(self) -> List["Node"]:
+        """Everything on the drawing a reader can act on, row by row."""
+        out = []
+        for n in range(len(self)):
+            out.extend(node for node in self[n] if node.interactive())
+        _S.acts = out
+        return out
+
+    def __repr__(self) -> str:
+        head = "%s  %d rows x %d cols" % (_S.url, len(self), self.width)
+        body = []
+        for n, line in enumerate(self._frame.lines):
+            # The row number is the handle. `wire()[7]` is what is on row 7,
+            # which is how a picture becomes something you can act on rather
+            # than only look at.
+            body.append("%3d| %s" % (n, line.text))
+        return "\n".join([head, "=" * min(self.width + 5, 100)] + body)
+
+
+def _geometry(drawn) -> object:
+    """Layout for these addresses, measured once and kept for the fold.
+
+    Reading a rect settles style, so it is done in one crossing for the whole
+    page rather than per box, and only for addresses not already measured.
+    """
+    from ..style import StyleMap
+
+    if _S.styles is None:
+        _S.styles = StyleMap()
+    sensor = _S.sensor
+    if sensor is None:
+        return _S.styles
+    wanted = _S.styles.missing(a.xpath for a, _t, _k in drawn)
+    if wanted:
+        try:
+            payload = sensor.styles(
+                [type("A", (), {"xpath": x})() for x in wanted])
+            _S.styles.absorb(wanted, payload)
+        except Exception as exc:            # noqa: BLE001
+            print("  (no geometry: %s: %s)" % (type(exc).__name__, exc))
+    return _S.styles
 
 
 def _tree_lines(kids: Sequence) -> List[str]:
@@ -956,6 +1074,18 @@ def act(n: int) -> Node:
     if _S.cursor is None:
         raise RuntimeError("no page: call Page(url) first")
     return Node(_S.cursor).act(n)
+
+
+def wire(width: int = 100) -> Drawing:
+    """Draw the page where the page puts it, from the current node down.
+
+    `wire()[7]` is the nodes on row 7, so a box in the picture is a `Node`:
+    it can be pressed, read, or asked for its address. A drawing you can only
+    look at is a screenshot.
+    """
+    if _S.cursor is None:
+        raise RuntimeError("no page: call Page(url) first")
+    return Node(_S.cursor).wire(width)
 
 
 def up():

@@ -262,6 +262,44 @@ Every handle in it is a slice of an address the trie already holds: `ol(1)`,
 It is the only thing added to the page's own form, and it is a fact about
 provenance rather than a reading of the page.
 
+## 5b. The cartesian view
+
+The tree says what contains what. It cannot say what sits **beside** what,
+and that is a different fact about the same page -- a sidebar reads as a
+column to a reader and as a deep branch in an indented listing, and only one
+of those is what the page shows.
+
+    >>> wire(96)
+    https://duckduckgo.com/  362 rows x 96 cols
+    ====================================================================
+      0| - Main       /                             Search the web with DuckDuckGo
+      1| navigation
+      3| [ ] Search with DuckDuckGo     [ ] Search privately     ( Clear
+      6| ( Search )                      navigation
+     10| # Switch to DuckDuckGo. It is private        # and free!
+
+Both views are the same trie. The drawing is built from the same rendered
+lines, positioned by geometry read from the page -- so a fix to what gets
+drawn lands in both, and every measurement that already watches the render
+watches this too.
+
+**The boxes are nodes.** `wire()[7]` is the nodes drawn on row 7, in the
+order they are drawn, each one a `Node` with `.where()`, `.press()`,
+`.text()`. A drawing you can only look at is a screenshot; the row number is
+the handle that makes it usable.
+
+**Geometry is read once, at the moment of drawing, and never in the fold.**
+`invariants.c2` holds the fold to reading no layout -- a fold that measures
+forces synchronous style resolution on every mutation -- and an actuator is
+exactly where that rule stops applying. The scroller already makes the same
+crossing for the same reason. The measurement is one round trip for the whole
+page, cached for the fold and dropped when the page changes.
+
+What is deliberately NOT here is section 5's melding of stored hits into the
+page's row template. That is a pre-computed structural heuristic and section
+8 rules it out; the drawing shows the page, and `Browser(query)` shows the
+store, and neither pretends to be the other.
+
 ## 6. Safety, because this is an SLM-facing surface
 
 `refused()` exists and is strict: labels matching sign-in, checkout, buy,

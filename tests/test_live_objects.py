@@ -330,3 +330,76 @@ def test_a_control_that_does_have_words_still_shows_them(session):
     labels = {live._label_of(n._t, 40) for n in session.acts()}
     assert "Search" in labels, labels
     assert any("Search the fixtures" in x for x in labels), labels
+
+
+# --- the cartesian view -------------------------------------------------------
+
+
+@LIVE
+def test_the_drawing_puts_things_where_the_page_puts_them(session):
+    """The tree says what contains what; the drawing says what sits BESIDE
+    what. They are different facts about one page, and the second is the one
+    an indented listing cannot express -- a sidebar reads as a column here
+    and as a deep branch there, and only one of those is what a reader sees.
+
+    The fixture's `<label>` and `<button>` are siblings in one form, drawn on
+    one row. In the tree they are two lines at the same depth, which says
+    nothing about them being side by side.
+    """
+    session.Page(START)
+    session.body(1)
+    drawing = session.wire(64)
+    assert len(drawing) > 0
+    rows = [set(n.tag for n in drawing[i]) for i in range(len(drawing))]
+    assert any({"label", "button"} <= row for row in rows), rows
+
+
+@LIVE
+def test_a_box_on_the_drawing_is_a_node(session):
+    """A drawing you can only look at is a screenshot. Every box carries its
+    address, so it can be read, pressed or asked where it is."""
+    session.Page(START)
+    session.body(1)
+    drawing = session.wire(64)
+    boxes = [n for row in range(len(drawing)) for n in drawing[row]]
+    assert boxes
+    for node in boxes:
+        assert node.where().startswith("/html"), node.where()
+        assert node.handle()
+
+
+@LIVE
+def test_pressing_a_box_from_the_drawing_navigates(session):
+    """The whole point of the boxes being nodes."""
+    session.Page(START)
+    session.body(1)
+    drawing = session.wire(64)
+    links = [n for n in drawing.acts() if n.tag == "a"]
+    assert links, "the fixture's links are missing from the drawing"
+    out = repr(links[0].press())
+    assert TARGET_NAME in out, out[:200]
+
+
+@LIVE
+def test_the_drawing_is_addressed_by_row(session):
+    """`wire()[7]` is what is on row 7. The row number is the handle, which
+    is what makes the picture usable rather than only readable."""
+    session.Page(START)
+    session.body(1)
+    drawing = session.wire(64)
+    assert "  0|" in repr(drawing)
+    assert isinstance(drawing[0], list)
+    assert len(drawing.rows) == len(drawing)
+
+
+@LIVE
+def test_a_node_with_nothing_drawn_gives_an_empty_drawing(session):
+    """Rather than raising. A leaf with no rendered text is a legitimate
+    thing to ask about."""
+    session.Page(START)
+    session.body(1)
+    empty = [n for n in session.acts("input")]
+    assert empty
+    drawing = empty[0].wire(40)
+    assert len(drawing) == 0
+    assert drawing.acts() == []
