@@ -109,6 +109,11 @@ class _Session:
         self.workspace = None       # opened by `workspace()`; None = no index
         self.clicked_via_href = False   # last press fell back to the target
         self.window = 1200
+        # The rendered chunks for the fold now in hand. Cleared by `fold`,
+        # which is the only thing that can invalidate them: within one page
+        # the trie does not change under us, so re-rendering per repr was
+        # paying a page-sized cost to print eight lines. See `rendered`.
+        self._chunks = None
 
     # -- browser ---------------------------------------------------------
     def attach(self, *, headless: bool = True):
@@ -165,8 +170,34 @@ class _Session:
             if delta.settled and not delta.units:
                 break
             _time.sleep(0.25)
+        self._chunks = None         # a new page: whatever was cached is gone
         self.cursor = _page_root(self.spine.trie)
         self._record()
+
+    def rendered(self):
+        """This fold's chunks, rendered once.
+
+        `_chunk_count` and `Node.text` both went through `render_trie` over
+        the whole trie, with no memo, on every call. Printing the page object
+        therefore cost a full re-render: 9.83s to produce 490 characters on a
+        2.6MB page, and 9.54s again for any childless node, because its repr
+        is its text.
+
+        That is the opposite of the argument this interface is built on --
+        that a reader pays for the eight children in front of them and pays
+        again only when they descend. They were paying for the page, every
+        time, and the token cost being small hid a latency cost that was not.
+
+        Cleared by `fold`, which is the only event that can invalidate it.
+        """
+        if self._chunks is None:
+            from ..markdown import render_trie
+
+            if self.spine is None:
+                return []
+            self._chunks = list(
+                render_trie(self.spine.trie, context_window=self.window))
+        return self._chunks
 
     def _record(self) -> None:
         """Write this fold into the workspace, if one is open.
@@ -181,11 +212,9 @@ class _Session:
         """
         if self.workspace is None or self.spine is None:
             return
-        from ..markdown import render_trie
-
         try:
-            chunks = render_trie(self.spine.trie, context_window=self.window)
-            self.workspace.ingest_chunks(self.url, list(chunks))
+            # The same render the reader sees, not a second one.
+            self.workspace.ingest_chunks(self.url, list(self.rendered()))
         except Exception as exc:                # noqa: BLE001
             print("  (not recorded: %s: %s)" % (type(exc).__name__, exc))
 
@@ -253,27 +282,41 @@ def _leaves_of(tnode) -> List[Tuple[object, str]]:
     return out
 
 
-def _spoken_under(tnode) -> List[Tuple[object, str]]:
+def _spoken_under(tnode, limit: Optional[int] = None) -> List[Tuple[object, str]]:
     """Every `text()` value in this subtree, in document order.
 
     Reader-facing text only. An `href`, a `title`, a `@control` annotation are
     all values the trie is right to hold and none of them is what the page
     shows in the place this node occupies.
+
+    `limit` stops the walk once that many characters have been gathered.
+    Without it a label was produced by collecting every text leaf under a
+    node and *then* keeping 46 characters of it -- so labelling the `<div>`
+    that holds a whole page walked the whole page: 9.4 seconds to print one
+    line of a tree listing, with the answer decided by the first few nodes
+    visited.
     """
     out: List[Tuple[object, str]] = []
+    seen = [0]
 
-    def walk(node) -> None:
+    def walk(node) -> bool:
+        """False to stop: enough has been gathered."""
         mine = getattr(node, "_xpath_cache", None)
         for kid in node.ordered_children():
             if (getattr(kid, "_xpath_cache", None) or mine) != mine:
-                walk(kid)                       # a DOM child
+                if not walk(kid):               # a DOM child
+                    return False
                 continue
             if kid.is_leaf and (kid.value or "").strip():
                 accessor = getattr(kid.address, "accessor", "") or ""
                 if accessor.startswith("text()"):
                     out.append((kid.address, kid.value))
-            else:
-                walk(kid)                       # a taxonomy step
+                    seen[0] += len(kid.value or "")
+                    if limit is not None and seen[0] >= limit:
+                        return False
+            elif not walk(kid):                 # a taxonomy step
+                return False
+        return True
 
     walk(tnode)
     return out
@@ -305,7 +348,8 @@ def _label_of(tnode, width: int = 46) -> str:
     # made this exact mistake once -- a label is what a reader sees, a target
     # is where it goes.
     parts = []
-    for _address, value in _spoken_under(tnode):
+    # Gather only a little more than the label can show.
+    for _address, value in _spoken_under(tnode, limit=width * 3):
         value = " ".join((value or "").split())
         if value:
             parts.append(value)
@@ -340,20 +384,35 @@ def _label_of(tnode, width: int = 46) -> str:
     return text if len(text) <= width else text[:width - 3] + "..."
 
 
+#: How many nodes `_counts` will visit before saying "and more". A tree
+#: listing calls it once per child, so an uncapped walk is quadratic in the
+#: page.
+_COUNT_CAP = 6000
+
+
 def _counts(tnode) -> str:
     """What is inside, counted by tag. Counted, not interpreted."""
     from collections import Counter
 
     seen = Counter()
     stack = list(_dom_children(tnode))
+    # Capped, for the same reason the label is: a tree listing calls this for
+    # every child, and one of those children is often the div that holds the
+    # entire page. An exact tally of a hundred thousand nodes is not worth
+    # nine seconds when the line has room for `102a 37button`.
+    visited, capped = 0, False
     while stack:
+        if visited >= _COUNT_CAP:
+            capped = True
+            break
         node = stack.pop()
+        visited += 1
         tag = _tag_of(node)
         if tag in ("a", "input", "button", "img", "select", "textarea", "li"):
             seen[tag] += 1
         stack.extend(_dom_children(node))
-    return " ".join("%d%s" % (n, t) for t, n in sorted(seen.items())
-                    if n) or ""
+    out = " ".join("%d%s" % (n, t) for t, n in sorted(seen.items()) if n)
+    return (out + "+") if (out and capped) else out
 
 
 _INTERACTIVE = {"a", "button", "input", "select", "textarea", "option",
@@ -395,19 +454,39 @@ class Node:
     def children(self) -> List["Node"]:
         return [Node(k) for k in _dom_children(self._t)]
 
-    def text(self) -> str:
-        """This subtree as markdown, through the one renderer everything uses."""
-        from ..markdown import render_trie
+    #: How much text a bare `text()` hands back, as a multiple of the
+    #: session's context window. Tied to that knob rather than to a constant,
+    #: so it scales with what the reader actually configured.
+    BUDGET_WINDOWS = 8
 
+    def text(self, budget: Optional[int] = -1) -> str:
+        """This subtree as markdown, through the one renderer everything uses.
+
+        Windowed by default. Unwindowed it returned 366,005 characters for
+        one Wikipedia page -- on an interface whose whole premise is a small
+        context window, which makes it the most expensive possible way to
+        answer "what does this say".
+
+        `budget=None` gives all of it, deliberately. A truncation says how
+        much was left and how to ask for it, because a reader who cannot tell
+        a short page from a truncated one has been given the wrong answer
+        twice.
+        """
+        if budget == -1:
+            budget = _S.window * self.BUDGET_WINDOWS
         want = self.xpath
         lines = []
-        for chunk in render_trie(_S.spine.trie, context_window=_S.window):
+        for chunk in _S.rendered():
             for line in chunk.lines:
                 if line.address is None:
                     continue
                 if line.address.xpath.startswith(want):
                     lines.append(line.text)
-        return "\n".join(lines)
+        body = "\n".join(lines)
+        if budget is None or len(body) <= budget:
+            return body
+        return "%s\n... [%d of %d characters; text(None) for all of it]" % (
+            body[:budget].rstrip(), budget, len(body))
 
     def interactive(self) -> bool:
         return self.tag in _INTERACTIVE
@@ -588,11 +667,7 @@ class Node:
 
 
 def _chunk_count() -> int:
-    from ..markdown import render_trie
-
-    if _S.spine is None:
-        return 0
-    return len(render_trie(_S.spine.trie, context_window=_S.window))
+    return len(_S.rendered())
 
 
 def _tree_lines(kids: Sequence) -> List[str]:
