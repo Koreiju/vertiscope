@@ -177,3 +177,40 @@ def test_the_fold_decides_what_is_actionable_not_a_tag_list(html, xpath):
     root = load(html)
     assert [n.xpath for n in root.acts()] == [xpath]
     assert L.Node(root.acts()[0]._t).interactive()
+
+
+# --- pages with no single root element --------------------------------------
+
+FRAGMENT = ("<meta charset='utf-8'>"
+            "<ul><li><a href='/one'>one</a></li></ul>"
+            "<footer><a href='/two'>two</a><a href='/three'>three</a></footer>")
+
+
+def test_a_page_with_no_document_element_is_not_reduced_to_its_first_tag():
+    """`Page("https://danluu.com")` opened onto a `<meta>` tag.
+
+    Hand-written and very old html often has no single root: danluu.com's top
+    level is `/meta /meta[2] /ul /footer /script`, rfc2616 is 60-odd bare
+    `<pre>` blocks, and info.cern.ch has `/header` beside `/body`. The walk
+    took the FIRST child carrying an xpath as the document element, so on
+    those three pages it visited one node and the whole page was invisible to
+    the object model -- 1,884 of the corpus's 1,885 unreachable affordances,
+    and every word of text with them.
+    """
+    root = load(FRAGMENT)
+    assert root.xpath in ("", "/")
+    reached = {n.xpath for n in root.acts()}
+    assert reached == {"/ul/li/a", "/footer/a", "/footer/a[2]"}
+
+
+def test_a_rootless_page_still_reads_and_marks():
+    root = load(FRAGMENT)
+    reading = root.read()
+    assert reading.controls == 3
+    assert reading.unmarked == 0
+    assert "one" in reading.body
+
+
+def test_a_well_formed_page_still_descends_to_its_document_element():
+    root = load("<html><body><a href='/x'>x</a></body></html>")
+    assert root.xpath == "/html"

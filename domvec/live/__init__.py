@@ -277,6 +277,11 @@ def _under(xpath: str, root: str) -> bool:
     `/html/body/nav` is not under `/html/body/na`, and no amount of
     `startswith` knows that.
     """
+    if root in ("", "/"):
+        # The whole document. A page with no single root element is held by
+        # the url node, whose xpath is "/" -- and "/x" does not start with
+        # "//", so the general test answers no for every node on such a page.
+        return True
     xpath, root = _canon(xpath), _canon(root)
     return xpath == root or xpath.startswith(root + "/")
 
@@ -293,11 +298,21 @@ def _page_root(trie):
         kids = node.ordered_children()
         real = [k for k in kids
                 if (getattr(k, "_xpath_cache", "/") or "/") != "/"]
-        if real:
-            # The first child carrying an xpath IS the document element.
+        if len(real) == 1:
+            # The one child carrying an xpath IS the document element.
             # Stopping one short of it made the cursor the url segment, so a
             # session opened onto a filename with one child under it.
             return real[0]
+        if real:
+            # Several. There is no document element to descend to, and
+            # taking the first is how `Page("https://danluu.com")` came to
+            # open onto a `<meta>` tag: its top level is
+            # `/meta /meta[2] /ul /footer /script`, so the walk visited one
+            # node and the whole page -- 203 links included -- was invisible
+            # to the object model. Three corpus pages are shaped this way,
+            # all of them hand-written or very old html that never had one
+            # root. The node holding them all is the honest cursor.
+            return node
         if len(kids) != 1:
             return node
         node = kids[0]
