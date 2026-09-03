@@ -214,3 +214,55 @@ def test_a_rootless_page_still_reads_and_marks():
 def test_a_well_formed_page_still_descends_to_its_document_element():
     root = load("<html><body><a href='/x'>x</a></body></html>")
     assert root.xpath == "/html"
+
+
+# --- labels are the page's words, never the fold's bookkeeping --------------
+
+def test_a_label_is_never_the_element_name():
+    """Hacker News listed its `<body>` as "img a a a a a a a a a new | past".
+
+    The tagger records a control's existence as the tag name -- `'a'` at the
+    `<a>`, `'img'` at the `<img>` -- because for those the element IS the
+    finding. The guard against printing that skipped accessors beginning `@`,
+    which is how the SENSOR spells its synthetic annotations; the tagger
+    spells the same thing with an empty accessor, which the trie normalises
+    to `text()`. So on the snapshot path every one of them passed the
+    reader-facing-text test, and all 228 of that page's links labelled
+    themselves `'a'`.
+    """
+    root = load("<html><body><nav><a href='/n'>News</a>"
+                "<a href='/j'>Jobs</a></nav>"
+                "<p>Words the page shows.</p></body></html>")
+    body = [k for k in root.children() if k.tag == "body"][0]
+    label = L._label_of(body._t)
+    assert label
+    assert "a a" not in label
+    assert label.split()[0] not in ("a", "img", "input", "button")
+
+
+def test_echoes_its_element_compares_against_the_address_own_step():
+    class _A:
+        def __init__(self, xpath):
+            self.xpath = xpath
+    assert L._echoes_its_element(_A("/html/body/p/a[1]"), "a")
+    assert L._echoes_its_element(_A("/html/body/img"), "img")
+    # A short alphabetic word is not bookkeeping. `markdown._is_tag_name`
+    # would delete all three of these, which is why it is not used here.
+    assert not L._echoes_its_element(_A("/html/body/p/a[1]"), "Search")
+    assert not L._echoes_its_element(_A("/html/body/p/a[1]"), "Home")
+    assert not L._echoes_its_element(_A("/html/body/p/a[1]"), "News")
+
+
+def test_the_acts_listing_shows_what_the_markdown_shows():
+    """One derivation, two views.
+
+    A control's label in the listing is the line the render drew for it, so
+    `[ ] Search` and `( Go )` read the same in both places. Taken from the
+    fold alone they read `'input'` and `'button'`.
+    """
+    root = load("<html><body><form>"
+                "<input type='search' placeholder='Search'>"
+                "<button>Go</button></form></body></html>")
+    shown = repr(root)
+    assert "'[ ] Search'" in shown
+    assert "'( Go )'" in shown

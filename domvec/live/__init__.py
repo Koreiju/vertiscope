@@ -374,7 +374,8 @@ def _spoken_under(tnode, limit: Optional[int] = None) -> List[Tuple[object, str]
                 continue
             if kid.is_leaf and (kid.value or "").strip():
                 accessor = getattr(kid.address, "accessor", "") or ""
-                if accessor.startswith("text()"):
+                if (accessor.startswith("text()")
+                        and not _echoes_its_element(kid.address, kid.value)):
                     out.append((kid.address, kid.value))
                     seen[0] += len(kid.value or "")
                     if limit is not None and seen[0] >= limit:
@@ -385,6 +386,34 @@ def _spoken_under(tnode, limit: Optional[int] = None) -> List[Tuple[object, str]
 
     walk(tnode)
     return out
+
+
+def _echoes_its_element(address, value: str) -> bool:
+    """Is this value the page's words, or the fold repeating the element name?
+
+    `_add('interactive', 'links', xpath, tag, '')` stores `'a'` at the `<a>`
+    and `_add('media', 'images', ...)` stores `'img'` at the `<img>`, because
+    for those the element IS the finding and there is nothing else to record.
+
+    The guard that already existed skipped accessors beginning `@` --
+    `@control`, `@role` -- which is how the SENSOR spells its synthetic
+    annotations. The tagger spells the same thing with an empty accessor,
+    which the trie normalises to `text()`, so on the snapshot path every one
+    of these passed the "reader-facing text" test. Hacker News listed its
+    `<body>` as `"img a a a a a a a a a new | past | comments"` and all 228
+    of its links as `'a'`: the fold's bookkeeping printed in the one column a
+    reader looks at to tell two links apart.
+
+    Compared against the address's OWN last step, not against a list of tag
+    names. A list would have to be kept in step with the html spec, and the
+    "short and alphabetic" test `markdown._is_tag_name` uses -- right for a
+    media value -- deletes `Search`, `Home` and `DuckDuckGo` when used on a
+    label. A page whose link text is literally "a" loses its label, which is
+    the same trade `_control_label` already makes.
+    """
+    xpath = getattr(address, "xpath", "") or ""
+    step = xpath.rstrip("/").rsplit("/", 1)[-1].split("[")[0]
+    return bool(step) and value.strip().lower() == step.lower()
 
 
 def _tag_of(tnode) -> str:
@@ -438,6 +467,8 @@ def _label_of(tnode, width: int = 46) -> str:
             # does show, and duckduckgo's search box reads "Search with
             # DuckDuckGo" from one of them.
             if (getattr(address, "accessor", "") or "").startswith("@"):
+                continue
+            if _echoes_its_element(address, value or ""):
                 continue
             value = " ".join((value or "").split())
             if value:
@@ -515,6 +546,33 @@ def _is_affordance(tnode) -> bool:
         if tag.startswith("interactive") or tag in _CONTROL_CLASSES:
             return True
     return _tag_of(tnode) in _INTERACTIVE
+
+
+def _drawn_at() -> dict:
+    """Address xpath -> the markdown line drawn from it. Built once per fold.
+
+    An anchor inside prose has no words of its own in the fold. The tagger
+    emits a paragraph whose children are all inline as ONE text unit at the
+    paragraph and skips every descendant, deliberately, so the words are not
+    counted twice -- `content_tagger` says so at the point it does it. The
+    cost is that `<a href="/rates">retreat rates</a>` holds an href and
+    nothing else, so a label taken from the fold reads `/rates`.
+
+    The renderer already solved this: `_inline_flow` puts the sentence back
+    together and keeps every address that went into it. So the label a reader
+    should see is the line the render drew -- one derivation, two views,
+    rather than a second guess at what the words were.
+    """
+    at = {}
+    for chunk in _S.rendered():
+        for line in chunk.lines:
+            text = line.text.strip()
+            if not text:
+                continue
+            for address in (line.address,) + tuple(line.inline):
+                if address is not None:
+                    at.setdefault(_canon(address.xpath), text)
+    return at
 
 
 class Node:
@@ -843,9 +901,17 @@ class Node:
             lines.append("act: %d - %s" % (
                 len(acts),
                 " ".join("%d%s" % (n, t) for t, n in sorted(tally.items()))))
+            drawn = _drawn_at()
             for n, a in enumerate(acts[:6]):
-                lines.append("  act(%d) %-9s %r"
-                             % (n, a.tag, _label_of(a._t, 40)))
+                # The line the render drew for it, when there is one. A
+                # listing that showed `act(1) a 'news'` for a link the page
+                # labels "Hacker News" is naming links after their targets,
+                # which is the one thing `_label_of` exists to avoid and
+                # cannot do alone.
+                shown = drawn.get(_canon(a.xpath)) or _label_of(a._t, 40)
+                if len(shown) > 40:
+                    shown = shown[:37] + "..."
+                lines.append("  act(%d) %-9s %r" % (n, a.tag, shown))
             if len(acts) > 6:
                 lines.append("  ... %d more; acts('textarea') to narrow"
                              % (len(acts) - 6))
