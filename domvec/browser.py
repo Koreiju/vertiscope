@@ -75,7 +75,8 @@ def _resolve_firefox_binary() -> Optional[str]:
 
 
 def build_driver(cfg: Config, headless: Optional[bool] = None, *,
-                 bidi: Optional[bool] = None) -> webdriver.Firefox:
+                 bidi: Optional[bool] = None,
+                 prefs: Optional[dict] = None) -> webdriver.Firefox:
     """Construct a Firefox WebDriver honouring ``cfg``.
 
     ``bidi`` asks for a WebDriver BiDi websocket alongside the classic
@@ -84,6 +85,14 @@ def build_driver(cfg: Config, headless: Optional[bool] = None, *,
     thing that flag changes here: no preference is added, removed or
     altered by it, because the profile is a measuring instrument and a
     corpus read under two different profiles is two corpora.
+
+    ``prefs`` is the deliberate exception, and it exists so that "two
+    corpora" can be *measured* rather than only warned about. Hardening the
+    browser against being tracked changes the profile, which may change what
+    the page does and therefore what the fold sees; `analytics.anonymity`
+    passes an arm's preferences here and diffs the result against the
+    baseline, so the fidelity cost of each measure is a number instead of an
+    argument. Nothing in the ordinary path supplies it.
     """
     use_headless = cfg.headless if headless is None else headless
 
@@ -97,6 +106,11 @@ def build_driver(cfg: Config, headless: Optional[bool] = None, *,
     options.set_preference("media.volume_scale", "0.0")
     options.set_preference("app.update.auto", False)
     options.set_preference("datareporting.healthreport.uploadEnabled", False)
+
+    # Applied last so an arm can override a default above rather than fight
+    # it, and only ever supplied by the harness that measures the cost.
+    for name, value in (prefs or {}).items():
+        options.set_preference(name, value)
 
     if bidi is None:
         bidi = bool(getattr(cfg, "sandbox", ""))
@@ -131,10 +145,15 @@ def build_driver(cfg: Config, headless: Optional[bool] = None, *,
 
 @contextmanager
 def browser_session(
-    cfg: Config, headless: Optional[bool] = None, *, bidi: Optional[bool] = None
+    cfg: Config, headless: Optional[bool] = None, *,
+    bidi: Optional[bool] = None, prefs: Optional[dict] = None
 ) -> Iterator[webdriver.Firefox]:
-    """Own a Firefox driver for the duration of the block, always quitting it."""
-    driver = build_driver(cfg, headless=headless, bidi=bidi)
+    """Own a Firefox driver for the duration of the block, always quitting it.
+
+    `prefs` is passed through to `build_driver` and exists only so the
+    anonymity harness can measure what a hardened profile costs the fold.
+    """
+    driver = build_driver(cfg, headless=headless, bidi=bidi, prefs=prefs)
     try:
         yield driver
     finally:
