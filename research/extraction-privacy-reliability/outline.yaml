@@ -1,0 +1,103 @@
+topic: >-
+  Privacy, design and content-extraction factors of a browser-based
+  web-to-markdown serializer, and the ideas that would improve its reliability
+
+# What this research is FOR. Every item is judged against these, not in the
+# abstract, because the interesting result is usually a conflict.
+project_constraints:
+  structure_agnosticism: >-
+    No pre-computed heuristics on page structure. No classifier naming a region
+    nav / article / result. Tag plus interactivity only.
+  no_layout_in_the_fold: >-
+    Geometry is a peripheral keyed by address, read only by actuators.
+    invariants.c2 enforces it.
+  o_delta: >-
+    Incremental update proportional to the change, not to the page.
+  no_mocks: >-
+    Real browser, real embedder, no stubs in any measured path.
+  closed_shadow_roots_stay_closed: >-
+    Patching attachShadow is refused as detectable; unreachable roots are
+    reported as unreachable so the coverage figure stays honest.
+
+# Where the evidence currently stands, so research can be aimed at the gaps.
+open_questions:
+  - Ingest cost degrades superlinearly as the store grows (582 -> 840 -> 1539 ms
+    at 136 / 250 / 500 pages) and cProfile attributes only ~6% of it.
+  - The projection draws 80.9% of the affordances a page offers; capture holds
+    99.7%. The gap is measured but not diagnosed.
+  - Dedup recall is 85.5% against 98.3% precision -- the weakest metric held.
+  - All fidelity evidence rests on 136 pages from 109 origins, and 75% of those
+    pages fetch live resources on every read, so the corpus is not frozen.
+  - The fold reads no layout, so it cannot filter the dominant class of
+    concealed injected content.
+
+items:
+  # --- A. Content extraction and serialization ------------------------------
+  - Mozilla Readability
+  - Trafilatura and rs-trafilatura
+  - Resiliparse
+  - Chromium DOM Distiller
+  - Boilerpipe and text-density heuristics
+  - jusText and newspaper3k
+  - SingleFile
+  - Browsertrix and the WARC standard
+  - html-to-markdown converters (Turndown, MarkItDown, Docling)
+  - Commercial serializers (Crawl4AI, Firecrawl, Jina Reader, Web2MD)
+  - Reader-LM and model-based HTML-to-markdown
+  - Learned extraction (Web2Text, GROWN+UP, GoldMiner)
+
+  # --- B. Privacy, tracking, anti-detection ---------------------------------
+  - Tor Browser fingerprint-resistance model
+  - Firefox resistFingerprinting and letterboxing
+  - Brave farbling
+  - uBlock Origin and EasyList tracker blocking
+  - Fingerprint linkability research (FP-Stalker, FP-Radar, Cover Your Tracks)
+  - CDP and Runtime.enable detection signals
+  - Stealth automation (undetected-chromedriver, playwright-stealth)
+  - Web Bot Auth and Signature Agent Card
+  - GDPR consent banners and CMP prevalence
+
+  # --- C. Structure, dedup, and O(delta) architecture -----------------------
+  - MinHash and SimHash near-duplicate detection
+  - FastCDC and gear-hash content-defined chunking
+  - Ddelta and chunk-context-aware resemblance detection
+  - Merkle-DAG and content addressing (IPFS, git)
+  - Patricia and radix tries in crawl-state architecture
+  - W3C Web Annotation selectors and fuzzy re-anchoring
+  - MutationObserver semantics and its blind spots
+  - Change detection and notification of web pages (survey)
+  - Element.getHTML serializable shadow roots and declarative shadow DOM
+
+  # --- D. Evaluation methodology --------------------------------------------
+  - WCXB multi-type web content extraction benchmark
+  - CleanEval, CleanPortalEval and the multilingual extraction study
+  - Oracle-free extraction metrics (recall, compression, round-trip fixed point)
+  - Web archiving fidelity tradeoffs (IMC 2025)
+  - WebArena, Mind2Web, WebLists and SkillWeaver
+  - WAREX benchmark-reliability evaluation
+
+  # --- E. SLM-facing interface ----------------------------------------------
+  - Agent-computer interfaces (SWE-agent ACI and successors)
+  - Accessibility-tree versus DOM versus screenshot versus markdown
+  - DOM downsampling for LLM web agents
+  - Context rot and positional attention bias
+  - Constrained decoding and grammar-guided tool calls
+  - Spatial text rendering and ASCII layout comprehension
+
+  # --- F. Adversarial content and injection ---------------------------------
+  - Indirect prompt injection in the wild
+  - Unicode-level sanitization (tag chars, bidi, zero-width, homoglyphs)
+  - Markdown as an injection vector and escaping policy
+  - Provenance-tagging defenses (IPIGuard, CausalArmor, Parallax)
+  - TRAP task-redirecting agent persuasion benchmark
+  - C2PA capture provenance and attestation
+
+  # --- G. Governance and legal ----------------------------------------------
+  - EDPB Guidelines 03/2026 on web scraping for generative AI
+  - robots.txt, Content Signals, ai.txt and IETF AIPREF
+  - HTTP 402 pay-per-crawl and edge enforcement
+
+execution:
+  batch_size: 3
+  items_per_agent: 16
+  output_dir: ./research/extraction-privacy-reliability/results

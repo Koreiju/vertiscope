@@ -1,0 +1,178 @@
+# Fields each item is researched against.
+#
+# Shape is the one `validate_json.py` accepts and the only one it accepts:
+#   fields:
+#     <category>:
+#       - {name: ..., description: ..., detail_level: ...}
+# The first version of this file used a nested-mapping shape instead, so
+# every agent's validation step failed on contact and three of them
+# researched 51 items against a contract that could not be checked.
+#
+# detail_level: brief -> moderate -> detailed. `detailed` is reserved for
+# dimensions that can change a design decision here.
+
+fields:
+  identity:
+  - name: name
+    description: Canonical name and any aliases
+    detail_level: brief
+  - name: kind
+    description: library, browser feature, standard, benchmark, research result,
+      service, or regulation
+    detail_level: brief
+  - name: maturity
+    description: Research prototype, production, deprecated, or standards-track
+    detail_level: brief
+  - name: license
+    description: License, and whether it permits use in this project
+    detail_level: brief
+  extraction_behaviour:
+  - name: keeps_and_discards
+    description: What content survives the approach and what it drops
+    detail_level: detailed
+  - name: structure_preserved
+    description: What structural information survives -- nesting, order, tabular
+      relations, shadow boundaries
+    detail_level: detailed
+  - name: interactive_elements
+    description: How controls are handled, if at all
+    detail_level: moderate
+  - name: interactive_state_fidelity
+    description: Are disabled / checked / selected / expanded / aria states preserved,
+      and at what token cost? This is the axis on which markdown loses to the accessibility
+      tree, and where "tag plus interactivity" has to earn its keep.
+    detail_level: detailed
+  - name: layout_awareness
+    description: Does it read geometry, and where in the pipeline
+    detail_level: moderate
+  - name: javascript_required
+    description: Does it need the page's scripts to have run? Bears directly on
+      whether telemetry fires while reading.
+    detail_level: moderate
+  fidelity_evidence:
+  - name: evaluation_method
+    description: How correctness is established
+    detail_level: detailed
+  - name: corpus_size_and_origins
+    description: How many pages, from how many distinct origins, and from when.
+      CleanEval is 58 English pages from 2007; this field exists so such numbers
+      cannot be quoted without their reach.
+    detail_level: detailed
+  - name: reported_precision_recall
+    description: Published figures, with the denominator they were measured against
+    detail_level: detailed
+  - name: independent_oracle
+    description: Is there any check that does not share assumptions with the thing
+      being checked?
+    detail_level: detailed
+  - name: evidence_independence
+    description: Were the numbers produced by the tool's own authors or vendor?
+      Nearly all current HTML-to-markdown comparisons are vendor-run and mutually
+      contradictory.
+    detail_level: moderate
+  - name: page_archetype_coverage
+    description: Per-type performance across article / forum / product / collection
+      / listing / documentation / service. WCXB's 0.93-to-0.41 spread makes any
+      single aggregate misleading.
+    detail_level: detailed
+  - name: script_and_locale_behaviour
+    description: CJK, RTL, whitespace-free segmentation. A structure-agnostic claim
+      should be script-invariant and most extractors are not.
+    detail_level: moderate
+  privacy_posture:
+  - name: leaks_outward
+    description: What the approach discloses to the page or to third parties
+    detail_level: detailed
+  - name: mechanism_detectability
+    description: What the extraction TECHNIQUE leaks -- attachShadow patching, CDP
+      Runtime.enable, extension presence, timing side channels. Distinct from what
+      data leaks; this is whether the page can tell it is being read.
+    detail_level: detailed
+  - name: countermeasures
+    description: What hardening is available
+    detail_level: moderate
+  - name: measured_fidelity_cost
+    description: What the hardening costs the capture, measured rather than asserted,
+      and against what control
+    detail_level: detailed
+  - name: gate_state_at_capture
+    description: Was the capture behind a consent banner, paywall, login wall or
+      CAPTCHA, and is that state recorded? 67% of top sites show a consent interface,
+      so without this a corpus silently mixes gated and ungated captures.
+    detail_level: moderate
+  reliability:
+  - name: determinism
+    description: Same input, same output, within one version
+    detail_level: detailed
+  - name: determinism_across_versions
+    description: Does output drift with browser version, AX-tree implementation
+      or CDP revision? Separate from run-to-run determinism, which it is often conflated
+      with.
+    detail_level: moderate
+  - name: reproducibility
+    description: Can a result be re-obtained later? Includes whether the evaluation
+      corpus itself stays fixed.
+    detail_level: detailed
+  - name: failure_modes
+    description: How and where it breaks
+    detail_level: detailed
+  - name: failure_visibility
+    description: Does it fail loudly or degrade silently? Silent degradation is
+      the anti-pattern this project already refuses.
+    detail_level: moderate
+  - name: scale_limits
+    description: Where cost stops being linear, and in what
+    detail_level: moderate
+  - name: delta_cost_model
+    description: Is there a defined per-change cost, and what changes fall OUTSIDE
+      it -- shadow mutations, CSS-driven change, canvas, declarative shadow DOM
+      in the initial parse. Needed to make an O(delta) claim falsifiable.
+    detail_level: detailed
+  - name: reanchoring_stability
+    description: How node identity survives DOM change -- raw xpath, dual xpath,
+      quote selector, content hash, CDC boundary -- and the measured re-anchor rate.
+    detail_level: detailed
+  safety:
+  - name: adversarial_exposure
+    description: What invisible-to-human content does the approach preserve, and
+      can it filter concealment WITHOUT reading layout? A layout-blind fold is structurally
+      more exposed than the heuristic extractors it is compared against.
+    detail_level: detailed
+  - name: provenance_carrying
+    description: Does the representation preserve per-token origin -- url, xpath,
+      capture time, shadow depth, gate state? Current injection defenses require
+      it and the trie key already supplies it.
+    detail_level: detailed
+  - name: roundtrip_safety
+    description: Is serialize -> parse -> serialize a fixed point, and what is the
+      escaping policy? Doubles as an injection-hardening metric and an oracle-free
+      fidelity metric.
+    detail_level: moderate
+  slm_interface:
+  - name: token_budget_and_ordering
+    description: What is truncated, in what order, and where in the context the
+      highest-value content lands. Past 50% context fill, position bias becomes
+      recency-dominant, which makes ordering an output contract.
+    detail_level: detailed
+  - name: representation_cost
+    description: Tokens per page, and what is lost per token saved
+    detail_level: moderate
+  applicability:
+  - name: what_could_be_adopted
+    description: The specific mechanism worth taking, if any
+    detail_level: detailed
+  - name: constraint_violation_ledger
+    description: 'Per-item verdict against the five hard constraints, with severity:
+      adoptable as-is / adoptable in the actuator layer only / negative oracle only
+      / rejected. Makes the flagging queryable rather than prose.'
+    detail_level: detailed
+  - name: governance_signal_handling
+    description: robots.txt, Content Signals, ai.txt, AIPREF vocabulary, Web Bot
+      Auth, HTTP 402. Now access-determining, not only compliance.
+    detail_level: moderate
+  - name: legal_basis_and_pii_posture
+    description: Under EDPB Guidelines 03/2026, what lawful basis covers stored
+      artifacts and what PII is retained? Storing page content persistently is the
+      regulated act.
+    detail_level: moderate
+uncertain: []
