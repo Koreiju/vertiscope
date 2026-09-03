@@ -18,20 +18,30 @@ it, and each loses things for its own reason:
     it, which is the only thing that makes what a reader SEES and what a
     reader can PRESS the same surface.
 
-``labelless``
-    the fold holds no text and no media at or under the element, so there was
-    never anything to draw. `<a name="chap01">` and `<a href="#section"></a>`
-    are affordances the fold is right to record and a reader cannot be shown.
+``empty``
+    the element has no text content IN THE DOCUMENT, so there was never
+    anything to draw. `<a name="chap01">` and an empty permalink anchor are
+    affordances the fold is right to record and a reader cannot be shown.
 
-**`labelless` is a denominator, not a result.** Counting a label-less anchor
-against the render is the mistake `affordance.py` documents at length, and it
-dominates here: of 179 undrawn controls on 25 pages, 177 have no label
-anywhere and 2 are real. Reported against every captured control the render
-draws 98.66%; against the controls that could be drawn at all, 99.98%.
+``collapsed``
+    the page shows words for it and the fold did not address them there. A
+    real miss, and the interesting one.
 
-The test comes from the FOLD and not from the render, because "not a miss
-because it was not drawn" is circular. It asks whether any text or media
-value exists at or under the element -- a question the render has no part in.
+**The excused set is a denominator, so getting it wrong flatters the render.**
+The first version of this asked the FOLD whether any text existed at or under
+the control, and excused it when none did. That over-excused, because
+`content_tagger` emits a paragraph whose children are all inline as ONE text
+unit at the paragraph and adds every descendant to `_skip_text_ids`. An `<a>`
+inside prose has no text addressed at it even though the page plainly shows
+its words, so it was filed as nothing-to-draw and dropped from a denominator
+it belongs in. Of 164 undrawn controls on 12 pages, 104 were that and 59 were
+genuinely empty -- so the reported figure moved from 99.98% to 98.42%, and
+the higher number was the measure excusing the render its most common miss.
+
+So the arbiter is the PARSE, which knows nothing of `_skip_text_ids` and
+nothing of the render: does this element have non-whitespace text content?
+Not the fold, which is the thing under test on this exact point, and not the
+render, since "not a miss because it was not drawn" is circular.
 
 `affordance.py` asks a different and complementary question -- whether the
 REPL invents controls or misses ones the page lays out -- against JS ground
@@ -73,8 +83,37 @@ def _leaf_tag(xpath: str) -> str:
     return step.split("[")[0].lower()
 
 
-def score_page(trie, chunks) -> dict:
-    """One page's four counts, and the taxonomy labels behind each loss."""
+def _text_by_xpath(dom) -> Dict[str, bool]:
+    """canon xpath -> does this element have text content in the document?
+
+    Siblings are numbered the way an xpath numbers them, so the keys line up
+    with the fold's addresses. This is the independent arbiter for `empty`:
+    it is built from the parse and consults neither the fold's addressing nor
+    the render's output.
+    """
+    out: Dict[str, bool] = {}
+
+    def walk(node, path):
+        kids = [k for k in node.get_children(include_shadow=True)
+                if k.tag and not k.tag.startswith("#")]
+        seen: collections.Counter = collections.Counter()
+        for kid in kids:
+            tag = kid.tag.lower()
+            seen[tag] += 1
+            here = "%s/%s[%d]" % (path, tag, seen[tag])
+            try:
+                words = kid.get_text(recursive=True, separator=" ") or ""
+            except Exception:                           # noqa: BLE001
+                words = ""
+            out[here] = bool(words.strip())
+            walk(kid, here)
+
+    walk(getattr(dom, "root", dom), "")
+    return out
+
+
+def score_page(trie, chunks, dom=None) -> dict:
+    """One page's counts, and the taxonomy labels behind each loss."""
     from ..live import _canon, _page_root, _under, Node
 
     captured: Dict[str, str] = {}
@@ -102,6 +141,7 @@ def score_page(trie, chunks) -> dict:
 
     root = Node(_page_root(trie))
     reachable = {_canon(node.xpath) for node in root.acts()}
+    shows_text = _text_by_xpath(dom) if dom is not None else {}
 
     by_label: Dict[str, collections.Counter] = collections.defaultdict(
         collections.Counter)
@@ -118,12 +158,19 @@ def score_page(trie, chunks) -> dict:
         if not is_drawn:
             # Asked only of the undrawn, because it is a question about them
             # and the scan is the expensive part of this measure.
-            if any(_under(at, xpath) for at in labels):
+            in_fold = any(_under(at, xpath) for at in labels)
+            if in_fold or shows_text.get(xpath):
+                # The page shows words for it. A real miss either way: the
+                # `in_fold` case is one the render dropped, the other one the
+                # fold never addressed here.
                 by_label[label]["undrawn"] += 1
                 undrawn_tags[_leaf_tag(xpath)] += 1
+                if not in_fold:
+                    counts["collapsed"] += 1
+                    by_label[label]["collapsed"] += 1
             else:
-                counts["labelless"] += 1
-                by_label[label]["labelless"] += 1
+                counts["empty"] += 1
+                by_label[label]["empty"] += 1
         if not is_reach:
             by_label[label]["unreachable"] += 1
 
@@ -132,7 +179,8 @@ def score_page(trie, chunks) -> dict:
         "drawn": counts["drawn"],
         "reachable": counts["reachable"],
         "markable": counts["markable"],
-        "labelless": counts["labelless"],
+        "empty": counts["empty"],
+        "collapsed": counts["collapsed"],
         "by_label": {k: dict(v) for k, v in by_label.items()},
         "undrawn_tags": dict(undrawn_tags.most_common(8)),
     }
@@ -153,8 +201,12 @@ def measure_reach(pages: Sequence[pathlib.Path], *,
             html = io.open(page, encoding="utf-8", errors="replace").read()
             tagged = ContentTagger(ShadowDOM(html)).tag()
             trie = AddressTrie.from_tagged(tagged, "https://x.test/" + page.stem)
+            # A second parse for the arbiter. The tagger keeps state across
+            # its walk and the point of this check is to be downstream of
+            # none of it, so the extra parse is the price of independence.
             row.update(score_page(trie, render_trie(trie,
-                                                    context_window=window)))
+                                                    context_window=window),
+                                  dom=ShadowDOM(html)))
         except Exception as exc:                        # noqa: BLE001
             row["error"] = "%s: %s" % (type(exc).__name__, exc)[:160]
         rows.append(row)
@@ -177,7 +229,7 @@ def render_reach_table(report: dict) -> str:
     undrawn_tags: collections.Counter = collections.Counter()
     for row in rows:
         for key in ("captured", "drawn", "reachable", "markable",
-                    "labelless"):
+                    "empty", "collapsed"):
             total[key] += row.get(key, 0)
         for label, counts in (row.get("by_label") or {}).items():
             for key, n in counts.items():
@@ -189,12 +241,14 @@ def render_reach_table(report: dict) -> str:
     # Every control that had a label to draw. The rest were never drawable,
     # and holding the render to them measures the corpus's `<a name=...>`
     # anchors rather than the render.
-    drawable = max(cap - total["labelless"], 1)
+    drawable = max(cap - total["empty"], 1)
     out = ["", "  from a control in the page to a caller who can press it", ""]
     out.append("  pages                          %7d" % len(rows))
     out.append("  captured by the fold           %7d" % total["captured"])
-    out.append("  of those, nothing to draw      %7d  (no text or media at "
-               "or under it)" % total["labelless"])
+    out.append("  of those, empty in the page    %7d  (no text content at "
+               "all -- excused)" % total["empty"])
+    out.append("  of those, words not addressed  %7d  (the page shows them; "
+               "COUNTED as a miss)" % total["collapsed"])
     out.append("")
     # `drawable` is the denominator for the two questions the render
     # answers. It is NOT one for `reachable`: a label-less anchor is as
@@ -210,25 +264,29 @@ def render_reach_table(report: dict) -> str:
         out.append(line + ")")
     out.append("")
     out.append("  %-26s %9s %9s %10s %11s"
-               % ("taxonomy label", "captured", "undrawn", "labelless",
+               % ("taxonomy label", "captured", "undrawn", "empty",
                   "unreachable"))
     for label, counts in sorted(by_label.items(),
                                 key=lambda kv: -kv[1]["captured"]):
         out.append("  %-26s %9d %9d %10d %11d"
                    % (label, counts["captured"], counts["undrawn"],
-                      counts["labelless"], counts["unreachable"]))
+                      counts["empty"], counts["unreachable"]))
     if undrawn_tags:
         out.append("")
         out.append("  elements the render did not draw:")
         for tag, n in undrawn_tags.most_common(10):
             out.append("    %-16s %7d" % (tag or "(none)", n))
     out.append("")
-    out.append("  `undrawn` is now the real losses only. A control with no")
-    out.append("  text and no media at or under it -- `<a name=\'chap01\'>`,")
-    out.append("  an empty permalink anchor -- could not have been drawn, and")
-    out.append("  counting it against the render measures the corpus rather")
-    out.append("  than the render. The test is asked of the FOLD, since")
-    out.append("  \'not a miss because it was not drawn\' is circular.")
+    out.append("  Only a control with NO text content in the document is")
+    out.append("  excused. Asking the fold instead excused 104 of 164 undrawn")
+    out.append("  controls on 12 pages, because the tagger collapses an")
+    out.append("  all-inline paragraph into one unit and skips its")
+    out.append("  descendants -- so an anchor in prose had no text addressed")
+    out.append("  at it while the page showed its words. That read 99.98%")
+    out.append("  where the honest figure is 98.42%. The arbiter is the")
+    out.append("  PARSE: not the fold, which is under test on this point, and")
+    out.append("  not the render, since \'not a miss because it was not")
+    out.append("  drawn\' is circular.")
     out.append("")
     out.append("  Keyed on POSITION, never on the address key. A link is")
     out.append("  captured as `interactive.links` and drawn from its `urls.*`")
