@@ -283,6 +283,75 @@ lines, positioned by geometry read from the page -- so a fix to what gets
 drawn lands in both, and every measurement that already watches the render
 watches this too.
 
+### `read()` -- the markdown carries its own handles
+
+`text()` gave the page's words and `acts()` gave the page's controls, and
+nothing gave both at once. A reader who saw `[ ] Search` in the text had to
+run a second listing and match it back by label -- which fails exactly where
+it matters, because a page with eight `( More )` buttons has eight identical
+labels and one of them is the one meant.
+
+`read()` puts the mark on the markdown:
+
+    >>> read()
+    # Glacier data
+    See the retreat rates and mass balance.
+    [ ] Search  act(3)
+    ( Go )  act(4)
+    ( Load more )  act(5)
+    - Alpha  act(6)
+    - Beta  act(7)
+
+    8 controls, 8 marked
+
+A handle is trailing text, so the structure, the heading levels and the
+control forms are untouched and the whole thing is still markdown -- it can
+go to a file, into a chunk, or into a model's context and stay what it is.
+What it adds is **the arrow back**: a mark names a trie address, the address
+names an xpath, and the xpath names the element in the live document. That is
+the only path by which something read in the terminal can be pressed in the
+page, and it is the `url : xpath : taxonomy : content` key doing the work it
+was built for.
+
+The numbering is **reading order**, from the same document-ordered walk
+`act(n)` indexes, so "the third thing you can see" and `act(3)` are one
+thing. A sentence carrying three links gets three marks, because
+`_inline_flow` put three addresses on that one line and all three are still
+enactable.
+
+A `Reading` reports what it could not mark. A control the render never drew
+is still reachable through `acts()`, and a count of it is the difference
+between a reader who knows to ask and one who believes the page has nothing
+else on it.
+
+**What is actionable is decided by the fold, not by a list of tag names.**
+The distiller marks a control from four routes -- the tag, `role=`,
+`contenteditable`, and any `on*` handler -- and `acts()` used to ask a
+whitelist of eight tags. So a `<div role="button">` that the markdown had
+already drawn as `( Load more )` was invisible to the listing: the reader
+could see the affordance and find nothing to press it with. The
+generalisation a whitelist cannot express is the one the distiller already
+computes, and asking it is both simpler and broader.
+
+#### One spelling per position
+
+A trie node spells the first of its kind `/p/a`; the address the renderer
+carries spells the same element `/p/a[1]`. Two strings, one position, and
+every comparison between the object model and the markdown crossed that seam.
+
+It cost two things, both silent:
+
+* `read()` could not mark the first link, the first input or the first button
+  on a page -- which on most pages is the one meant.
+* `text()` compared with `startswith`, and `"/p/a[2]"` starts with `"/p/a"`.
+  Asking the first paragraph what it said returned the second paragraph as
+  well, with nothing in the answer to say so.
+
+`_canon` indexes every step and `_under` tests ancestry at a step boundary,
+which makes the two vocabularies one and makes the prefix test mean what it
+says. `tests/test_live_read_marks.py` holds both down, and each of its
+assertions fails against the code it replaced.
+
 **The boxes are nodes.** `wire()[7]` is the nodes drawn on row 7, in the
 order they are drawn, each one a `Node` with `.where()`, `.press()`,
 `.text()`. A drawing you can only look at is a screenshot; the row number is

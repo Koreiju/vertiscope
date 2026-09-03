@@ -12,9 +12,16 @@ See docs/CALLABLE_INTERFACE.md. The short of it:
 * **Calling is descent.** A container focuses; an affordance acts. That is
   expand-collapse without a screen to redraw, which is the whole reason this
   is cheaper than a TUI for a small context window.
+* **The markdown carries its handles.** `read()` is `text()` with every
+  affordance marked `act(n)` in reading order, so what a reader sees and what
+  a reader can press are one surface. A mark names a trie address, the
+  address names an xpath, the xpath names the element -- the arrow back to
+  the live document, along the same `url : xpath : taxonomy : content` key
+  the fold is built on.
 
     >>> from domvec.live import *
     >>> Page("https://duckduckgo.com")
+    >>> read()
     >>> input(1) << "glacier retreat"
     >>> button(1)()
     >>> ol(1)
@@ -34,7 +41,8 @@ from typing import List, Optional, Sequence, Tuple
 
 __all__ = [
     "Page", "Browser", "workspace", "up", "top", "back", "here", "where",
-    "attach", "close", "acts", "act", "wire", "Refused", "Node", "Drawing",
+    "attach", "close", "acts", "act", "wire", "read", "Refused", "Node",
+    "Drawing", "Reading",
 ]
 
 #: Every HTML tag, exported as a selector. Static, so `import *` works and so
@@ -235,6 +243,44 @@ class _Session:
 _S = _Session()
 
 
+#: A positional xpath step already carrying its index.
+_STEP_INDEXED = _re.compile(r"\[\d+\]$")
+
+
+def _canon(xpath: str) -> str:
+    """One spelling per position.
+
+    A trie node spells the first of its kind `/p/a`, while the address the
+    renderer carries spells the same element `/p/a[1]`. Two strings, one
+    position, and every comparison between the object model and the markdown
+    crosses that seam.
+
+    It cost two things, both silent. `read()` could not mark the first link,
+    the first input or the first button on a page -- which on most pages is
+    the one meant. And `text()` compared with `startswith`, where
+    `"/p/a[2]"` starts with `"/p/a"`: asking the first paragraph what it said
+    returned the second paragraph as well, with nothing in the answer to say
+    so. Indexing every step makes the two vocabularies one, and makes the
+    prefix test mean ancestry again.
+    """
+    steps = []
+    for step in xpath.split("/"):
+        if step and not step.startswith("@") and not _STEP_INDEXED.search(step):
+            step += "[1]"
+        steps.append(step)
+    return "/".join(steps)
+
+
+def _under(xpath: str, root: str) -> bool:
+    """Is `xpath` at or below `root`? A step boundary, never a substring.
+
+    `/html/body/nav` is not under `/html/body/na`, and no amount of
+    `startswith` knows that.
+    """
+    xpath, root = _canon(xpath), _canon(root)
+    return xpath == root or xpath.startswith(root + "/")
+
+
 def _page_root(trie):
     """Descend past the url path segments to the document node.
 
@@ -419,8 +465,41 @@ def _counts(tnode) -> str:
     return (out + "+") if (out and capped) else out
 
 
+#: Tags that are affordances no matter what the fold said about them. A
+#: fallback, not the authority: see `_is_affordance`.
 _INTERACTIVE = {"a", "button", "input", "select", "textarea", "option",
                 "summary", "label"}
+
+#: How the fold says "a control is here", in both of its vocabularies. The
+#: snapshot path names an address by what it HELD (`interactive.inputs`); the
+#: sensor path names it by what it IS (`field`, `button`). Anything reading
+#: only one of them is right on one path and blind on the other -- the same
+#: split that made the projection gap look like a 19% loss when it was a
+#: comparison keyed on the wrong component.
+_CONTROL_CLASSES = frozenset({"link", "button", "field", "choice", "check",
+                              "slider"})
+
+
+def _is_affordance(tnode) -> bool:
+    """Can this element be acted on?
+
+    Asked of the fold, not of a tag whitelist. The tagger marks a control
+    from four routes -- the tag, `role=`, `contenteditable`, and any `on*`
+    handler -- and a whitelist of eight tag names sees only the first. On the
+    corpus that whitelist misses controls at `div`, `span` and `script`
+    elements that the markdown had already drawn as buttons, so a reader
+    could see an affordance in the text and find nothing in `acts()` to press
+    it with. The generalisation the whitelist cannot express is exactly the
+    one the distiller already computes.
+
+    The tag set stays as a fallback for nodes carrying no address of their
+    own, which happens when a control's detections all hang off a child.
+    """
+    for address, _value in _leaves_of(tnode):
+        tag = getattr(address, "tag", "") or ""
+        if tag.startswith("interactive") or tag in _CONTROL_CLASSES:
+            return True
+    return _tag_of(tnode) in _INTERACTIVE
 
 
 class Node:
@@ -432,7 +511,9 @@ class Node:
 
         node()          focus, or press
         node << "text"  type into it
-        node.text()     the full markdown of its subtree
+        node.text()     the markdown of its subtree
+        node.read()     the same markdown, affordances marked `act(n)`
+        node.wire()     the same lines, placed where the page puts them
         node.where()    its address
     """
 
@@ -484,7 +565,7 @@ class Node:
             for line in chunk.lines:
                 if line.address is None:
                     continue
-                if line.address.xpath.startswith(want):
+                if _under(line.address.xpath, want):
                     lines.append(line.text)
         body = "\n".join(lines)
         if budget is None or len(body) <= budget:
@@ -493,7 +574,66 @@ class Node:
             body[:budget].rstrip(), budget, len(body))
 
     def interactive(self) -> bool:
-        return self.tag in _INTERACTIVE
+        return _is_affordance(self._t)
+
+    def read(self, budget: Optional[int] = -1) -> "Reading":
+        """This subtree as markdown, with every affordance carrying its handle.
+
+        `text()` gives the page's words and `acts()` gives the page's
+        controls, and until now nothing gave both at once. A reader who saw
+        `[ ] Search` in the text had to run a second listing and match it
+        back by label -- which fails exactly where it matters, because a page
+        with eight `( More )` buttons has eight identical labels and one of
+        them is the one meant.
+
+        So the marks go on the markdown itself. A line drawn from an
+        affordance's address gets ` act(n)` appended, where n is that
+        control's position in READING ORDER -- the same n `act(n)` takes,
+        because both come from the same document-ordered walk. A sentence
+        carrying three links gets three marks, since `_inline_flow` put three
+        addresses on that one line and all three are still enactable.
+
+        The markdown stays markdown: a handle is trailing text, so the
+        structure, the heading levels and the control forms are untouched and
+        the whole thing still round-trips. What it adds is the arrow back --
+        a mark names a trie address, the address names an xpath, and the
+        xpath names the element in the live document. That is the only path
+        by which something read in the terminal can be pressed in the page.
+        """
+        if budget == -1:
+            budget = _S.window * self.BUDGET_WINDOWS
+
+        controls = self.acts()
+        at = {}
+        for n, node in enumerate(controls):
+            at.setdefault(_canon(node.xpath), []).append(n)
+
+        want = self.xpath
+        lines, marked = [], set()
+        for chunk in _S.rendered():
+            for line in chunk.lines:
+                if line.address is None:
+                    continue
+                if not _under(line.address.xpath, want):
+                    continue
+                hits = []
+                for address in (line.address,) + tuple(line.inline):
+                    for n in at.get(_canon(address.xpath), ()):
+                        if n not in marked:
+                            marked.add(n)
+                            hits.append(n)
+                text = line.text
+                if hits:
+                    text = "%s  %s" % (
+                        text, " ".join("act(%d)" % n for n in hits))
+                lines.append(text)
+
+        # Controls the render never drew. Reported rather than dropped: a
+        # count of what is missing is the difference between a reader who
+        # knows to call `acts()` and one who believes the page has nothing
+        # else on it.
+        return Reading("\n".join(lines), len(controls),
+                       len(marked), budget)
 
     def wire(self, width: int = 100) -> "Drawing":
         """This subtree drawn where the page puts it.
@@ -510,7 +650,7 @@ class Node:
             for line in chunk.lines:
                 if line.address is None or not line.text.strip():
                     continue
-                if line.address.xpath.startswith(want):
+                if _under(line.address.xpath, want):
                     drawn.append((line.address, line.text, line.address.tag))
         if not drawn:
             return Drawing(_EmptyFrame(), width)
@@ -531,14 +671,19 @@ class Node:
         is a fact; nothing here decides which control is *for* searching.
         """
         out: List[Node] = []
-        stack = [self._t]
+        # Pre-order, depth first. This walk used to be breadth first while
+        # its docstring said document order, so on
+        # `<a>one</a><div><a>two</a></div><a>four</a>` it listed `four`
+        # second -- the last link on the page, offered as the second thing
+        # under it. Nothing downstream could recover the real order, and
+        # `act(n)` is a promise about position, so the promise was false for
+        # every page whose controls sit at more than one depth.
+        stack = list(reversed(_dom_children(self._t)))
         while stack:
-            node = stack.pop(0)
-            for kid in _dom_children(node):
-                if _tag_of(kid) in _INTERACTIVE:
-                    if tag is None or _tag_of(kid) == tag:
-                        out.append(Node(kid))
-                stack.append(kid)
+            node = stack.pop()
+            if _is_affordance(node) and (tag is None or _tag_of(node) == tag):
+                out.append(Node(node))
+            stack.extend(reversed(_dom_children(node)))
         _S.acts = out
         return out
 
@@ -694,6 +839,46 @@ class Node:
 
 def _chunk_count() -> int:
     return len(_S.rendered())
+
+
+class Reading:
+    """Markdown with its affordances marked, and the count of those it could not mark.
+
+    A value rather than a string so the shortfall travels with the text.
+    `str(reading)` is the markdown alone, for anything that wants to write it
+    to a file or hand it to a model.
+    """
+
+    def __init__(self, body: str, controls: int, marked: int,
+                 budget: Optional[int]) -> None:
+        self.body = body
+        self.controls = controls
+        self.marked = marked
+        self.budget = budget
+
+    @property
+    def unmarked(self) -> int:
+        return self.controls - self.marked
+
+    def __str__(self) -> str:
+        return self.body
+
+    def __len__(self) -> int:
+        return len(self.body)
+
+    def __repr__(self) -> str:
+        body = self.body
+        cut = ""
+        if self.budget is not None and len(body) > self.budget:
+            cut = ("\n... [%d of %d characters; read(None) for all of it]"
+                   % (self.budget, len(body)))
+            body = body[:self.budget].rstrip()
+        note = "\n\n%d controls, %d marked" % (self.controls,
+                                                   self.marked)
+        if self.unmarked:
+            note += ("; %d the render did not draw -- acts() reaches them"
+                     % self.unmarked)
+        return body + cut + note
 
 
 class _EmptyFrame:
@@ -1074,6 +1259,18 @@ def act(n: int) -> Node:
     if _S.cursor is None:
         raise RuntimeError("no page: call Page(url) first")
     return Node(_S.cursor).act(n)
+
+
+def read(budget: Optional[int] = -1) -> Reading:
+    """The markdown here, with its affordances marked. See `Node.read`.
+
+    At module level for the same reason as `acts`: this is the answer to
+    "what does this page say, and what can I press", and it should be
+    askable without naming the cursor.
+    """
+    if _S.cursor is None:
+        raise RuntimeError("no page: call Page(url) first")
+    return Node(_S.cursor).read(budget)
 
 
 def wire(width: int = 100) -> Drawing:

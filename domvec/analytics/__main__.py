@@ -37,6 +37,19 @@ def main(argv=None) -> int:
                              "anything that is off by default, which is "
                              "how `dedup` came to be documented as on "
                              "while the code had it off")
+    parser.add_argument("--anonymity", action="store_true",
+                        help="measure what each anti-tracking measure costs "
+                             "the fold, arm by arm")
+    parser.add_argument("--arm", default="",
+                        help="with --anonymity, run only this arm")
+    parser.add_argument("--scale", action="store_true",
+                        help="grow a store to thousands of pages and measure "
+                             "what it costs; needs no browser")
+    parser.add_argument("--fidelity", action="store_true",
+                        help="report how far the capture evidence reaches -- "
+                             "how many pages and origins stand behind it")
+    parser.add_argument("--pages", type=int, default=2000,
+                        help="with --scale, how many pages to grow to")
     parser.add_argument("--visible", action="store_true",
                         help="what a reader sees, against what the trie "
                              "holds, using no addresses at all. The only "
@@ -47,6 +60,11 @@ def main(argv=None) -> int:
                              "trie names a node it has. The only oracle "
                              "independent of the fold and the walk, which "
                              "share an addressing convention by design")
+    parser.add_argument("--reach", action="store_true",
+                        help="from a control in the page to a caller who "
+                             "can press it: captured by the fold, drawn in "
+                             "the markdown, reachable from acts(), markable "
+                             "by read(). Browser-free, over the corpus")
     parser.add_argument("--affordance", action="store_true",
                         help="what the REPL offers to interact with, "
                              "against what the page can be. The coverage "
@@ -105,6 +123,61 @@ def main(argv=None) -> int:
               flush=True)
         return 0
 
+    if args.reach:
+        corpus = sorted(
+            (pathlib.Path(__file__).resolve().parent.parent.parent
+             / "tests" / "corpus").glob("*.html"))
+        if args.limit:
+            corpus = corpus[:args.limit]
+        from .reach import (measure_reach, render_reach_table,
+                            write_reach_artifact)
+
+        report = measure_reach(corpus, window=args.window)
+        print(render_reach_table(report), flush=True)
+        print("  written: %s"
+              % write_reach_artifact(report, pathlib.Path(args.out)),
+              flush=True)
+        return 0
+
+    if args.scale or args.fidelity:
+        # Browser-free, and outside the session for the same reason
+        # `--projection` is: growing a store to thousands of pages takes
+        # minutes and there is no reason to hold a driver open through it.
+        corpus = sorted(
+            (pathlib.Path(__file__).resolve().parent.parent.parent
+             / "tests" / "corpus").glob("*.html"))
+        from .scale import (fidelity_reach, measure_scale, render_scale_table,
+                            write_scale_artifact)
+
+        if args.fidelity:
+            reach = fidelity_reach(corpus)
+            print("")
+            print("  how far the capture evidence reaches")
+            print("")
+            print("    pages measured        %6d" % reach["pages"])
+            print("    distinct origins      %6d" % reach["distinct_origins"])
+            print("    megabytes of html     %6.1f" % reach["megabytes"])
+            print("")
+            print("  Every coverage, order, dedup and recall figure this")
+            print("  project reports is measured on exactly these. A number")
+            print("  that holds here is a claim about these documents. It is")
+            print("  not evidence about the next thousand.")
+            if not args.scale:
+                return 0
+
+        if args.scale:
+            import tempfile
+
+            with tempfile.TemporaryDirectory(prefix="wfh_scale_") as tmp:
+                report = measure_scale(corpus,
+                                       str(pathlib.Path(tmp) / "ws"),
+                                       target=args.pages)
+            print(render_scale_table(report), flush=True)
+            print("  written: %s"
+                  % write_scale_artifact(report, pathlib.Path(args.out)),
+                  flush=True)
+        return 0
+
     def _targets(args):
         targets = list(args.urls)
         if args.corpus:
@@ -148,6 +221,24 @@ def main(argv=None) -> int:
 
     cfg = load_config()
     with browser_session(cfg) as driver:
+        if args.anonymity:
+            from .anonymity import (ARMS, measure_anonymity,
+                                    render_anonymity_table,
+                                    write_anonymity_artifact)
+            wanted = [a for a in args.arm.split(",") if a.strip()] or None
+            for name in (wanted or []):
+                if name not in ARMS:
+                    print("unknown arm %r; have: %s"
+                          % (name, ", ".join(ARMS)), flush=True)
+                    return 2
+            report = measure_anonymity(_targets(args), window=args.window,
+                                       arms=wanted)
+            print(render_anonymity_table(report), flush=True)
+            print(f"  written: "
+                  f"{write_anonymity_artifact(report, pathlib.Path(args.out))}",
+                  flush=True)
+            return 0
+
         if args.visible:
             from .visible import (measure_visible, render_visible_table,
                                   write_visible_artifact)
