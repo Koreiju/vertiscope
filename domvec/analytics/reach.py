@@ -34,9 +34,13 @@ the control, and excused it when none did. That over-excused, because
 unit at the paragraph and adds every descendant to `_skip_text_ids`. An `<a>`
 inside prose has no text addressed at it even though the page plainly shows
 its words, so it was filed as nothing-to-draw and dropped from a denominator
-it belongs in. Of 164 undrawn controls on 12 pages, 104 were that and 59 were
-genuinely empty -- so the reported figure moved from 99.98% to 98.42%, and
-the higher number was the measure excusing the render its most common miss.
+it belongs in. Over the whole corpus the old test excused 1,340 controls and
+only 165 deserved it: 1,175 real misses were being written off, and the
+reported figure moved from 99.98% to 98.50%.
+
+Those 1,175 are the largest remaining loss in the pipeline before
+vectorisation, and they are one defect with one cause -- the all-inline
+collapse -- rather than a long tail.
 
 So the arbiter is the PARSE, which knows nothing of `_skip_text_ids` and
 nothing of the render: does this element have non-whitespace text content?
@@ -278,12 +282,12 @@ def render_reach_table(report: dict) -> str:
             out.append("    %-16s %7d" % (tag or "(none)", n))
     out.append("")
     out.append("  Only a control with NO text content in the document is")
-    out.append("  excused. Asking the fold instead excused 104 of 164 undrawn")
-    out.append("  controls on 12 pages, because the tagger collapses an")
+    out.append("  excused. Asking the fold instead excused 1,340 over the")
+    out.append("  corpus where 165 deserved it, because the tagger collapses an")
     out.append("  all-inline paragraph into one unit and skips its")
     out.append("  descendants -- so an anchor in prose had no text addressed")
     out.append("  at it while the page showed its words. That read 99.98%")
-    out.append("  where the honest figure is 98.42%. The arbiter is the")
+    out.append("  where the honest figure is 98.50%. The arbiter is the")
     out.append("  PARSE: not the fold, which is under test on this point, and")
     out.append("  not the render, since \'not a miss because it was not")
     out.append("  drawn\' is circular.")
