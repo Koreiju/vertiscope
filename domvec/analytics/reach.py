@@ -18,6 +18,21 @@ it, and each loses things for its own reason:
     it, which is the only thing that makes what a reader SEES and what a
     reader can PRESS the same surface.
 
+``labelless``
+    the fold holds no text and no media at or under the element, so there was
+    never anything to draw. `<a name="chap01">` and `<a href="#section"></a>`
+    are affordances the fold is right to record and a reader cannot be shown.
+
+**`labelless` is a denominator, not a result.** Counting a label-less anchor
+against the render is the mistake `affordance.py` documents at length, and it
+dominates here: of 179 undrawn controls on 25 pages, 177 have no label
+anywhere and 2 are real. Reported against every captured control the render
+draws 98.66%; against the controls that could be drawn at all, 99.98%.
+
+The test comes from the FOLD and not from the render, because "not a miss
+because it was not drawn" is circular. It asks whether any text or media
+value exists at or under the element -- a question the render has no part in.
+
 `affordance.py` asks a different and complementary question -- whether the
 REPL invents controls or misses ones the page lays out -- against JS ground
 truth in a live browser. This one is browser-free and asks about the stretch
@@ -60,16 +75,21 @@ def _leaf_tag(xpath: str) -> str:
 
 def score_page(trie, chunks) -> dict:
     """One page's four counts, and the taxonomy labels behind each loss."""
-    from ..live import _canon, _is_affordance, _page_root, Node
+    from ..live import _canon, _page_root, _under, Node
 
     captured: Dict[str, str] = {}
+    labels: List[str] = []
     for leaf in trie.leaves():
         address = leaf.address
         if address is None:
             continue
-        if not (address.tag or "").startswith("interactive"):
-            continue
-        captured[_canon(address.xpath)] = address.tag
+        tag = address.tag or ""
+        if tag.startswith("interactive"):
+            captured[_canon(address.xpath)] = tag
+        elif (tag.split(".")[0] in ("text", "media")
+                and (leaf.value or "").strip()):
+            labels.append(_canon(address.xpath))
+    labels.sort()
 
     drawn = set()
     for chunk in chunks:
@@ -96,8 +116,14 @@ def score_page(trie, chunks) -> dict:
         counts["markable"] += (is_drawn and is_reach)
         by_label[label]["captured"] += 1
         if not is_drawn:
-            by_label[label]["undrawn"] += 1
-            undrawn_tags[_leaf_tag(xpath)] += 1
+            # Asked only of the undrawn, because it is a question about them
+            # and the scan is the expensive part of this measure.
+            if any(_under(at, xpath) for at in labels):
+                by_label[label]["undrawn"] += 1
+                undrawn_tags[_leaf_tag(xpath)] += 1
+            else:
+                counts["labelless"] += 1
+                by_label[label]["labelless"] += 1
         if not is_reach:
             by_label[label]["unreachable"] += 1
 
@@ -106,6 +132,7 @@ def score_page(trie, chunks) -> dict:
         "drawn": counts["drawn"],
         "reachable": counts["reachable"],
         "markable": counts["markable"],
+        "labelless": counts["labelless"],
         "by_label": {k: dict(v) for k, v in by_label.items()},
         "undrawn_tags": dict(undrawn_tags.most_common(8)),
     }
@@ -149,7 +176,8 @@ def render_reach_table(report: dict) -> str:
         collections.Counter)
     undrawn_tags: collections.Counter = collections.Counter()
     for row in rows:
-        for key in ("captured", "drawn", "reachable", "markable"):
+        for key in ("captured", "drawn", "reachable", "markable",
+                    "labelless"):
             total[key] += row.get(key, 0)
         for label, counts in (row.get("by_label") or {}).items():
             for key, n in counts.items():
@@ -158,27 +186,49 @@ def render_reach_table(report: dict) -> str:
             undrawn_tags[tag] += n
 
     cap = total["captured"] or 1
+    # Every control that had a label to draw. The rest were never drawable,
+    # and holding the render to them measures the corpus's `<a name=...>`
+    # anchors rather than the render.
+    drawable = max(cap - total["labelless"], 1)
     out = ["", "  from a control in the page to a caller who can press it", ""]
     out.append("  pages                          %7d" % len(rows))
     out.append("  captured by the fold           %7d" % total["captured"])
-    for key, what in (("drawn", "drawn in the markdown"),
-                      ("reachable", "reachable from acts()"),
-                      ("markable", "markable by read()")):
-        out.append("  %-30s %7d  (%.2f%%)"
-                   % (what, total[key], 100.0 * total[key] / cap))
+    out.append("  of those, nothing to draw      %7d  (no text or media at "
+               "or under it)" % total["labelless"])
     out.append("")
-    out.append("  %-26s %9s %9s %11s" % ("taxonomy label", "captured",
-                                         "undrawn", "unreachable"))
+    # `drawable` is the denominator for the two questions the render
+    # answers. It is NOT one for `reachable`: a label-less anchor is as
+    # reachable as any other, and dividing it out gave 101.35%.
+    for key, what, against_drawable in (
+            ("drawn", "drawn in the markdown", True),
+            ("reachable", "reachable from acts()", False),
+            ("markable", "markable by read()", True)):
+        line = "  %-30s %7d  (%.2f%% of captured" % (
+            what, total[key], 100.0 * total[key] / cap)
+        if against_drawable:
+            line += ", %.2f%% of drawable" % (100.0 * total[key] / drawable)
+        out.append(line + ")")
+    out.append("")
+    out.append("  %-26s %9s %9s %10s %11s"
+               % ("taxonomy label", "captured", "undrawn", "labelless",
+                  "unreachable"))
     for label, counts in sorted(by_label.items(),
                                 key=lambda kv: -kv[1]["captured"]):
-        out.append("  %-26s %9d %9d %11d"
+        out.append("  %-26s %9d %9d %10d %11d"
                    % (label, counts["captured"], counts["undrawn"],
-                      counts["unreachable"]))
+                      counts["labelless"], counts["unreachable"]))
     if undrawn_tags:
         out.append("")
         out.append("  elements the render did not draw:")
         for tag, n in undrawn_tags.most_common(10):
             out.append("    %-16s %7d" % (tag or "(none)", n))
+    out.append("")
+    out.append("  `undrawn` is now the real losses only. A control with no")
+    out.append("  text and no media at or under it -- `<a name=\'chap01\'>`,")
+    out.append("  an empty permalink anchor -- could not have been drawn, and")
+    out.append("  counting it against the render measures the corpus rather")
+    out.append("  than the render. The test is asked of the FOLD, since")
+    out.append("  \'not a miss because it was not drawn\' is circular.")
     out.append("")
     out.append("  Keyed on POSITION, never on the address key. A link is")
     out.append("  captured as `interactive.links` and drawn from its `urls.*`")
