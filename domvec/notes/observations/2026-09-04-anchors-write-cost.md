@@ -88,3 +88,61 @@ two orders of magnitude too high.
 Also: several timings in this session were taken while a full test suite ran
 on the same machine. Ratios within one run are sound; absolute per-page
 figures from those runs are upper bounds, not measurements.
+
+---
+
+## Update: COPY is not the answer for nodes either, and 10 ms is not reachable this way
+
+**COPY into a NODE table is 4.4x SLOWER than MERGE.** Same real rows, same
+fresh store:
+
+    MERGE into Address     65.5 ms/page
+    COPY into Address     287.8 ms/page      0.2x
+
+The asymmetry with the rel table makes sense in hindsight. COPY beat MERGE on
+`Anchors` by 109x because a rel MERGE resolves two endpoints by scan, which
+is the entire bug. A node MERGE has no endpoints to resolve, so COPY saves
+nothing and pays CSV parsing on top.
+
+For the record, since they would have mattered had it been faster: re-COPYing
+the same primary keys **raises** `Found duplicated primary key value` rather
+than silently duplicating, and COPY after DELETE **survives** -- node tables
+do not have the rel table's crash.
+
+## What the store costs, and why 10 ms is out of reach on this path
+
+Fresh store, 24 pages, 41 KB median, nothing else running, after the
+zero-vector fix:
+
+    parse    3.0    tag   3.2    trie  11.2
+    render  39.1    leaves 0.6   store 141.5      TOTAL 198.6 ms/page
+
+Every mechanism available has now been measured:
+
+| lever | effect |
+|---|---|
+| drop the zero embedding | store -28%, page -22%  (**landed**) |
+| COPY for rel edges | 109x on that statement, **segfaults kuzu 0.11.3** |
+| COPY for node tables | **0.2x** -- slower |
+| one transaction per page | 1.15x |
+| bigger batches per statement | none; cost is per row |
+| trimming Address columns | ~14% of that statement; `akey` is 5.6 ms |
+| rewriting the Anchors MATCH | four variants, all >= current |
+
+Per-row node MERGE is ~0.12 ms/row and nothing in kuzu goes faster for this
+shape. A page writes ~535 addresses, ~15 chunks and ~385 anchors. **Even with
+the store at zero the remaining pipeline is 56 ms**, still 5.6x above a 10 ms
+target.
+
+So 10 ms/page requires that the ingest path not write to kuzu per page at
+all -- deferring graph materialisation the way `flush_vectors` already defers
+vectorisation. That is an architectural decision, not an optimisation, and it
+is open.
+
+## A harness flaw worth not repeating
+
+The column-breakdown benchmark did not dedupe `aid` before writing, so it
+wrote more rows than a page has and reported 227.8 ms/page where production
+measures 69 and a deduped harness measures 65.5. Its *ratios* stand; its
+absolute figures do not. Cross-check every isolated harness against the
+end-to-end number before quoting it.
