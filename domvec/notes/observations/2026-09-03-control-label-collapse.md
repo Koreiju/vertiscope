@@ -85,3 +85,82 @@ suppressions are computed in different passes.
 
 Do the renderer half first, then the tagger half, and measure both against
 `--reach` and the line/chunk counts above.
+
+---
+
+## Update, same day: the renderer half landed, the other two are blocked
+
+**Landed (`c2f2758`).** `_render_unit`'s `urls` branch now draws
+`[words](target)` and consumes the text unit. Suite green at 1666. It gets
+SMALLER while gaining labels -- lines -14.8%, chunks -2.1%, chars +2.3% --
+and moves the new `labelled` column from 28.92% to 37.08%.
+
+That column had to be added because this change moved nothing `--reach` could
+already see: `drawn` counts an xpath however its line reads, so a control
+drawn as a bare destination scored the same as one drawn with its name.
+
+**Blocked: the tagger half.** It contradicts a named invariant.
+`test_an_inline_only_subtree_is_still_one_detection` asserts that for
+
+    <p>See <a href='/a'>Alpha</a> and <em>Beta</em> for more.</p>
+
+the address `/html/body/p/a` must NOT exist -- "prose with links in it stays
+one line rather than shattering into a fragment per anchor". Emitting the
+control's own label creates exactly that address. Four tests fail on it: that
+invariant, both REPL pager tests, and `test_link_edges_reach_the_graph`.
+
+This is a design decision and not a defect to fix quietly. The question it
+poses: is a control's label a SECOND detection at the anchor, or does the
+one-detection rule outrank a link's right to be named? The measured stake is
+1,175 controls corpus-wide whose words the page shows and the fold does not
+address, and roughly 34 points of the `labelled` column.
+
+**Blocked: folding links into the sentence.** Substitutes each link's markup
+back where its words sit in an ancestor's prose, so
+
+    [retreat rates](/rates)
+    [mass balance](/mass)
+    See the retreat rates and mass balance .
+
+becomes one line: `See the [retreat rates](/rates) and [mass balance](/mass) .`
+with both anchors on `line.inline` and both markable by `read()`.
+
+It fails `test_suppressed_units_are_a_deliberate_choice_not_a_leak`: 73 url
+units vanish with no duplicate kept at the SAME element, because the href now
+lives on the parent's line and the anchor's address survives only on
+`inline`. That may be the `anchors`-vs-`covered` distinction this codebase
+already draws, but the test states a contract and changing it to suit the
+change is the wrong order of operations.
+
+Two things learned building it, worth keeping whoever finishes it:
+
+* **Match on any ANCESTOR, not the parent.** The collapse happens at the
+  outermost all-inline element, often several levels up: `<body><span><b><a>`
+  puts the text unit on `body` while the anchor sits at `body/span/b/a`.
+  Keying on the parent found nothing on exactly the pages it exists for.
+* **It must not live in the descent.** `_size_of` and `_descend` call
+  `_render_sized` speculatively at every level they consider, so an
+  O(lines x links) pass there runs many times per emitted chunk: the 30-page
+  render went from 22.2s to past 500s. Hoisted to one pass per finished chunk
+  it costs 23.3s, +5%. `render_trie`'s report block already records this
+  hazard in its correctness form.
+
+  The hoist has a price: sizing then measures the UNFOLDED text, so chunks
+  come out under-filled -- 7,015 against 6,216 for the in-descent version.
+  Recoverable by re-packing after the fold, if chunk count ever matters more
+  than render time.
+
+**If all three were adopted**, measured together on 30 pages: labelled
+71.43%, controls with unaddressed words 0, drawn 99.66%, reachable 100.00%,
+lines -25.5%, chunks +4.4%, render +5%.
+
+**A caution on the `labelled` column itself.** It produced two false signals
+while I was building this, both making the code look worse than it was. It
+compares against `get_text(recursive=True)`, which pulls image alt text, so a
+link correctly drawn as `[Western Europe sets new temperature record...]`
+scored unlabelled because the parse saw the photo caption first -- roughly
+2,000 of the cases behind an earlier "63% unlabelled" claim. And keying on
+the first line carrying an address read the fold as a 10.6-point regression
+that was really a tooltip line winning a `setdefault`. The second is fixed;
+the alt-text confusion is not. Trust deltas measured the same way; treat the
+absolute value as soft.
