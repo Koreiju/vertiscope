@@ -31,6 +31,18 @@ it, and each loses things for its own reason:
     of the controls that WERE drawn, the ones whose line carries the page's
     own words for them rather than only a destination.
 
+Over the whole corpus, 136 pages and 79,186 captured affordances:
+
+    empty        165   nothing to draw, excused
+    collapsed  1,173   the page shows words the fold does not address
+    drawn      98.29% of captured, 98.50% of drawable
+    reachable 100.00%
+    labelled   45.35% of those drawn with words to show
+
+`labelled` is the one to read carefully. It is 54.66% over the first 30
+pages, which are link-rich news front pages, so any subset of this corpus
+flatters it by several points. Quote the 136-page figure.
+
 **`drawn` cannot see whether a control arrived with its label**, and that is
 worth stating because it hid a real defect for as long as this file existed.
 A tagger-path anchor used to draw as two lines at one xpath -- `</target>`
