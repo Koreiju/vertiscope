@@ -400,6 +400,27 @@ def _render_unit(
             return f"![{address.subcategory}]"
         return f"![{address.subcategory}]({value})"
     if cat == "urls":
+        # The words and the destination on ONE line.
+        #
+        # The tagger path names an address by what it HELD (`urls.internal`)
+        # where the sensor names it by what it IS (`link`), and every
+        # link-shaped rule above keys on the sensor's spelling. So an anchor
+        # the tagger folded drew twice --
+        #
+        #     </target>
+        #     Glacial Retreat Calculator
+        #
+        # the href and its own words as two lines at one xpath, where a
+        # reader wants `[Glacial Retreat Calculator](/target)`. 53.7% of the
+        # corpus's `urls.*` addresses have their words at their own xpath and
+        # every one of them was drawn this way.
+        #
+        # Not when the words ARE the url: `[https://x](https://x)` says the
+        # same thing twice and `<https://x>` is the honest form for a bare
+        # target.
+        words = " ".join((text_at_node or "").split())
+        if words and words != value:
+            return _RENDER_FORM["link"](value, words, label, value)
         return f"<{value}>"
     if cat == "json_data":
         return f"`{value}`"
@@ -1093,6 +1114,22 @@ def _render_sized(
 
     kept = [t for t in _dedupe([(a, v, lbl) for a, v, lbl, _ in units])
             if t[0].key() not in hidden]
+
+    # A tagger-path link drawing its own words has said them, so the bare
+    # repeat underneath goes -- the `( Add to basket ) / Add to basket`
+    # duplication one vocabulary further on.
+    #
+    # Taken from `kept`, not from `units`, so the text is only dropped when
+    # the line that will speak for it actually survives. This is the trap
+    # `_dedupe` records above: the href hidden because the anchor speaks and
+    # the words consumed because the link would draw them, so on a
+    # search-results page both went and the result had no title at all.
+    # Whichever is dropped, exactly one has to remain, and reading `kept`
+    # is what makes that structural rather than hopeful.
+    consumed |= {a.xpath for a, v, _lbl in kept
+                 if a.category == "urls" and v.strip()
+                 and " ".join((text_at.get(a.xpath) or "").split()) not in
+                 ("", " ".join(v.split()))}
 
     lines = []
     for a, v, lbl in kept:

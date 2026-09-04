@@ -27,6 +27,18 @@ it, and each loses things for its own reason:
     the page shows words for it and the fold did not address them there. A
     real miss, and the interesting one.
 
+``labelled``
+    of the controls that WERE drawn, the ones whose line carries the page's
+    own words for them rather than only a destination.
+
+**`drawn` cannot see whether a control arrived with its label**, and that is
+worth stating because it hid a real defect for as long as this file existed.
+A tagger-path anchor used to draw as two lines at one xpath -- `</target>`
+and `Glacial Retreat Calculator` -- and `drawn` counted the xpath either way,
+so merging them into `[Glacial Retreat Calculator](/target)` moved this
+measure by exactly nothing while changing what a reader sees. `labelled` is
+the column that moves.
+
 **The excused set is a denominator, so getting it wrong flatters the render.**
 The first version of this asked the FOLD whether any text existed at or under
 the control, and excused it when none did. That over-excused, because
@@ -87,15 +99,15 @@ def _leaf_tag(xpath: str) -> str:
     return step.split("[")[0].lower()
 
 
-def _text_by_xpath(dom) -> Dict[str, bool]:
-    """canon xpath -> does this element have text content in the document?
+def _text_by_xpath(dom) -> Dict[str, str]:
+    """canon xpath -> this element's text content in the document.
 
     Siblings are numbered the way an xpath numbers them, so the keys line up
     with the fold's addresses. This is the independent arbiter for `empty`:
     it is built from the parse and consults neither the fold's addressing nor
     the render's output.
     """
-    out: Dict[str, bool] = {}
+    out: Dict[str, str] = {}
 
     def walk(node, path):
         kids = [k for k in node.get_children(include_shadow=True)
@@ -109,7 +121,7 @@ def _text_by_xpath(dom) -> Dict[str, bool]:
                 words = kid.get_text(recursive=True, separator=" ") or ""
             except Exception:                           # noqa: BLE001
                 words = ""
-            out[here] = bool(words.strip())
+            out[here] = " ".join(words.split())
             walk(kid, here)
 
     walk(getattr(dom, "root", dom), "")
@@ -134,18 +146,45 @@ def score_page(trie, chunks, dom=None) -> dict:
             labels.append(_canon(address.xpath))
     labels.sort()
 
-    drawn = set()
+    # xpath -> the line that drew it. A set of xpaths answers "did it reach
+    # the page"; the text is what answers "did it arrive with its label".
+    drawn: Dict[str, List[str]] = collections.defaultdict(list)
     for chunk in chunks:
         for line in chunk.lines:
             if not line.text.strip():
                 continue
             for address in (line.address,) + tuple(line.inline):
                 if address is not None:
-                    drawn.add(_canon(address.xpath))
+                    drawn[_canon(address.xpath)].append(line.text)
 
     root = Node(_page_root(trie))
     reachable = {_canon(node.xpath) for node in root.acts()}
     shows_text = _text_by_xpath(dom) if dom is not None else {}
+
+    def carries_label(xpath: str, lines: Sequence[str]) -> bool:
+        """Does the line a control was drawn on say what the page calls it?
+
+        The arbiter is the PARSE, as it is for `empty`: the element's own
+        text content, which neither the fold's addressing nor the render's
+        output has a say in. Compared on a bounded prefix, since a long
+        label is wrapped or truncated by the render and the question is
+        whether the words are there at all, not whether they are complete.
+        """
+        words = shows_text.get(xpath, "")
+        if not words:
+            return False
+        head = words[:40].strip().lower()
+        if not head:
+            return False
+        # ANY line that carries this control's address, not the first one.
+        #
+        # Keeping only the first read the fold as a 10.6-point regression it
+        # was not. An anchor can be on several lines -- its own, and its
+        # `title` tooltip -- and once the fold merged the link into its
+        # sentence, `setdefault` handed back the tooltip instead: Arabic
+        # Wikipedia scored `[the main page](/wiki/...)` as unlabelled
+        # because the line it looked at said "main page button [z]".
+        return any(head in " ".join(one.split()).lower() for one in lines)
 
     by_label: Dict[str, collections.Counter] = collections.defaultdict(
         collections.Counter)
@@ -158,6 +197,13 @@ def score_page(trie, chunks, dom=None) -> dict:
         counts["drawn"] += is_drawn
         counts["reachable"] += is_reach
         counts["markable"] += (is_drawn and is_reach)
+        if is_drawn:
+            if carries_label(xpath, drawn.get(xpath, ())):
+                counts["labelled"] += 1
+                by_label[label]["labelled"] += 1
+            elif shows_text.get(xpath):
+                counts["unlabelled"] += 1
+                by_label[label]["unlabelled"] += 1
         by_label[label]["captured"] += 1
         if not is_drawn:
             # Asked only of the undrawn, because it is a question about them
@@ -185,6 +231,8 @@ def score_page(trie, chunks, dom=None) -> dict:
         "markable": counts["markable"],
         "empty": counts["empty"],
         "collapsed": counts["collapsed"],
+        "labelled": counts["labelled"],
+        "unlabelled": counts["unlabelled"],
         "by_label": {k: dict(v) for k, v in by_label.items()},
         "undrawn_tags": dict(undrawn_tags.most_common(8)),
     }
@@ -233,7 +281,7 @@ def render_reach_table(report: dict) -> str:
     undrawn_tags: collections.Counter = collections.Counter()
     for row in rows:
         for key in ("captured", "drawn", "reachable", "markable",
-                    "empty", "collapsed"):
+                    "empty", "collapsed", "labelled", "unlabelled"):
             total[key] += row.get(key, 0)
         for label, counts in (row.get("by_label") or {}).items():
             for key, n in counts.items():
@@ -266,6 +314,19 @@ def render_reach_table(report: dict) -> str:
         if against_drawable:
             line += ", %.2f%% of drawable" % (100.0 * total[key] / drawable)
         out.append(line + ")")
+
+    # Of the ones that reached the page, how many arrived with their name.
+    # `drawn` counts an xpath however its line reads, so a control drawn as
+    # a bare destination scores the same as one drawn as `[words](target)`.
+    # This is the column that separates them.
+    shown = total["labelled"] + total["unlabelled"]
+    if shown:
+        out.append("")
+        out.append("  %-30s %7d  (%.2f%% of those drawn with words to show)"
+                   % ("drawn WITH the page's words", total["labelled"],
+                      100.0 * total["labelled"] / shown))
+        out.append("  %-30s %7d  (drawn, but only as a destination)"
+                   % ("drawn WITHOUT them", total["unlabelled"]))
     out.append("")
     out.append("  %-26s %9s %9s %10s %11s"
                % ("taxonomy label", "captured", "undrawn", "empty",
