@@ -87,6 +87,7 @@ import collections
 import io
 import json
 import pathlib
+import re
 import sys
 import time
 from typing import Dict, List, Sequence
@@ -99,15 +100,89 @@ def _leaf_tag(xpath: str) -> str:
     return step.split("[")[0].lower()
 
 
-def _text_by_xpath(dom) -> Dict[str, str]:
-    """canon xpath -> this element's text content in the document.
+#: Attributes a page uses to name a control when its words are a picture.
+_LABEL_ATTRS = ("aria-label", "title", "alt", "placeholder", "value")
 
-    Siblings are numbered the way an xpath numbers them, so the keys line up
-    with the fold's addresses. This is the independent arbiter for `empty`:
-    it is built from the parse and consults neither the fold's addressing nor
-    the render's output.
+#: How far below an element to look for something it could be called. Three
+#: covers `<a><div><img alt><h2>Headline</h2></div></a>`, which is the shape
+#: this exists for, and keeps the walk linear in the page.
+_LABEL_DEPTH = 3
+
+#: Shorter than this and a match proves nothing -- "AP" appears inside
+#: hundreds of unrelated lines.
+_MIN_LABEL = 4
+
+
+#: A markdown link's target, and a bare target line. Stripped before a label
+#: is looked for, because a target is not something a reader can read.
+_TARGET_RE = re.compile(r"\]\([^)]*\)")
+_BARE_RE = re.compile(r"<[^>]*>")
+
+
+def _visible_words(text: str) -> str:
+    """A line with its destinations removed -- what a reader actually sees.
+
+    Matching against the whole line counted a url slug as a label. AP's
+    `<https://apnews.com/hub/tennis>` is a bare target with no words in it,
+    and the candidate `Tennis` matched because the word is in the path: the
+    line said nothing to a reader and scored as labelled. Slugs are built
+    from labels, so this is not a rare coincidence -- it is systematic, and
+    it flatters exactly the bare-target lines the column exists to count.
     """
-    out: Dict[str, str] = {}
+    without = _TARGET_RE.sub("]", text)
+    without = _BARE_RE.sub(" ", without)
+    return " ".join(without.split()).lower()
+
+
+def _labels_by_xpath(dom) -> Dict[str, List[str]]:
+    """canon xpath -> every string the page could reasonably be calling it.
+
+    The independent arbiter, built from the parse: it consults neither the
+    fold's addressing nor the render's output, which is what lets it decide
+    `empty` and `labelled` without either grading its own work.
+
+    **Several candidates, not one string.** The first version returned
+    `get_text(recursive=True)` and compared its first 40 characters. That
+    walks `iter_all()` and folds in `alt` and `aria-label` for childless
+    nodes, so an anchor wrapping a photo and a headline answered with the
+    photo's caption -- and a line correctly drawn as
+    `[Western Europe sets new temperature record...]` scored as unlabelled
+    because the caption came first. Roughly 2,000 cases, all of them
+    reporting the render as worse than it is.
+
+    A control has more than one true name: its words, the words of anything
+    inside it, and whatever `aria-label`, `title` or `alt` calls it. Any of
+    them appearing in the drawn line means the reader can tell what it is,
+    which is the question being asked.
+
+    `out[xpath][0]` is the whole text when there is any, so truthiness still
+    answers `empty` exactly as before.
+    """
+    out: Dict[str, List[str]] = {}
+
+    def names(node) -> List[str]:
+        found: List[str] = []
+        frontier = [(node, 0)]
+        while frontier:
+            here, depth = frontier.pop()
+            own = " ".join((getattr(here, "text", "") or "").split())
+            if len(own) >= _MIN_LABEL:
+                found.append(own)
+            for attr in _LABEL_ATTRS:
+                try:
+                    value = " ".join((here.get_attr(attr, "") or "").split())
+                except Exception:                       # noqa: BLE001
+                    continue
+                if len(value) >= _MIN_LABEL:
+                    found.append(value)
+            if depth < _LABEL_DEPTH:
+                try:
+                    kids = here.get_children(include_shadow=True)
+                except Exception:                       # noqa: BLE001
+                    kids = []
+                frontier.extend((k, depth + 1) for k in kids
+                                if k.tag and not k.tag.startswith("#"))
+        return found
 
     def walk(node, path):
         kids = [k for k in node.get_children(include_shadow=True)
@@ -118,10 +193,13 @@ def _text_by_xpath(dom) -> Dict[str, str]:
             seen[tag] += 1
             here = "%s/%s[%d]" % (path, tag, seen[tag])
             try:
-                words = kid.get_text(recursive=True, separator=" ") or ""
+                whole = " ".join(
+                    (kid.get_text(recursive=True, separator=" ") or "").split())
             except Exception:                           # noqa: BLE001
-                words = ""
-            out[here] = " ".join(words.split())
+                whole = ""
+            candidates = [whole] if whole else []
+            candidates.extend(names(kid))
+            out[here] = candidates
             walk(kid, here)
 
     walk(getattr(dom, "root", dom), "")
@@ -159,7 +237,7 @@ def score_page(trie, chunks, dom=None) -> dict:
 
     root = Node(_page_root(trie))
     reachable = {_canon(node.xpath) for node in root.acts()}
-    shows_text = _text_by_xpath(dom) if dom is not None else {}
+    shows_text = _labels_by_xpath(dom) if dom is not None else {}
 
     def carries_label(xpath: str, lines: Sequence[str]) -> bool:
         """Does the line a control was drawn on say what the page calls it?
@@ -170,21 +248,26 @@ def score_page(trie, chunks, dom=None) -> dict:
         label is wrapped or truncated by the render and the question is
         whether the words are there at all, not whether they are complete.
         """
-        words = shows_text.get(xpath, "")
-        if not words:
+        candidates = shows_text.get(xpath) or ()
+        if not candidates:
             return False
-        head = words[:40].strip().lower()
-        if not head:
-            return False
-        # ANY line that carries this control's address, not the first one.
+        # ANY line that carries this control's address, against ANY name
+        # the page has for it.
         #
-        # Keeping only the first read the fold as a 10.6-point regression it
-        # was not. An anchor can be on several lines -- its own, and its
-        # `title` tooltip -- and once the fold merged the link into its
-        # sentence, `setdefault` handed back the tooltip instead: Arabic
-        # Wikipedia scored `[the main page](/wiki/...)` as unlabelled
+        # Keeping only the first line read a later experiment as a
+        # 10.6-point regression it was not. An anchor can be on several
+        # lines -- its own, and its `title` tooltip -- and once a link is
+        # merged into its sentence, taking the first hands back the tooltip:
+        # Arabic Wikipedia scored `[the main page](/wiki/...)` as unlabelled
         # because the line it looked at said "main page button [z]".
-        return any(head in " ".join(one.split()).lower() for one in lines)
+        drawn_text = [_visible_words(one) for one in lines]
+        for name in candidates:
+            head = name[:40].strip().lower()
+            if len(head) < _MIN_LABEL:
+                continue
+            if any(head in one for one in drawn_text):
+                return True
+        return False
 
     by_label: Dict[str, collections.Counter] = collections.defaultdict(
         collections.Counter)
