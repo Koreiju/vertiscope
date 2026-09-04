@@ -174,14 +174,43 @@ def built(tmp_path, scanned_page):
 
 
 def test_address_reaches_its_chunk_and_embedding(built):
-    """The navigational requirement the store exists to satisfy."""
+    """The navigational requirement the store exists to satisfy.
+
+    The embedding half is asserted in both of its states, because a chunk has
+    no vector until `flush_vectors` gives it one -- which is the whole point
+    of splitting vectorisation out of the write path, so that a chunk
+    rewritten on every frame of a scroll is embedded once, when someone asks
+    a question.
+
+    This used to assert 768 floats immediately after an ingest that supplied
+    no embeddings, which passed only because every chunk was written with a
+    zero vector standing in for the absent one. That placeholder cost 768
+    floats per chunk -- ~11,500 per page -- written to be overwritten, 28% of
+    the store phase and 22% of the whole page. Nothing consumed it: the
+    backfill reads `if vector and any(vector)`, for which an all-zero vector
+    was already missing, so absence is now spelled the way the reader already
+    understood it.
+    """
     _url, _trie, chunks, _addresses, _freq, store = built
     anchored = next(c for c in chunks if c.lines)
     aid = anchored.lines[0].address.aid
 
     chunk = store.chunk_for_address(aid)
     assert chunk is not None and chunk.cid == anchored.cid
-    assert len(store.embedding(chunk.cid)) == 768
+
+    # Before: no vector, and asking for one is not an error.
+    assert store.embedding(chunk.cid) is None
+
+    # After: the vector the embedder produced, at full width. Written the
+    # way `flush_vectors` writes it, so this exercises the real path rather
+    # than a convenience the production code does not use.
+    store._batch(
+        "UNWIND $rows AS r MATCH (c:Chunk {cid: r.cid}) SET c.embedding = r.emb",
+        [{"cid": chunk.cid, "emb": [0.5] * 768}],
+    )
+    got = store.embedding(chunk.cid)
+    assert got is not None and len(got) == 768
+    assert got[0] == pytest.approx(0.5)
 
 
 def test_addresses_of_a_chunk_come_back_in_line_order(built):

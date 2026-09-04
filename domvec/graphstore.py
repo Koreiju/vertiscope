@@ -247,24 +247,41 @@ class GraphStore:
             )
             counts["addresses"] = len(address_rows)
 
-        zeros = [0.0] * EMBED_DIM
+        # A vector is written only when there is one to write.
+        #
+        # `ingest_chunks` never supplies embeddings -- `flush_vectors` computes
+        # them afterwards, deliberately, so that vectorisation is a function of
+        # settled change rather than of delta count. Every chunk write was
+        # therefore materialising 768 zero floats and storing them, ~11,500
+        # per page, for `flush_vectors` to overwrite. Measured on identical
+        # rows, dropping `c.embedding` from the SET is **4.0x** on this
+        # statement: 33.77 -> 8.36 ms/page.
+        #
+        # The absent vector is spelled NULL rather than zeros, and the reader
+        # already means the same thing by both: `flush_vectors`' backfill asks
+        # `if vector and any(vector)` and treats anything else as missing, for
+        # which an all-zero vector already qualified. `embedding()` gains the
+        # NULL guard, since `list(None)` raises.
+        has_vectors = bool(embeddings)
         chunk_rows = []
         for chunk in chunks:
-            vector = list(embeddings.get(chunk.cid) or zeros)[:EMBED_DIM]
-            if len(vector) < EMBED_DIM:
-                vector = vector + [0.0] * (EMBED_DIM - len(vector))
-            chunk_rows.append({
+            row = {
                 "cid": chunk.cid, "url": chunk.url, "xp": chunk.xpath,
                 "part": chunk.part, "md": chunk.markdown, "chars": chunk.chars,
                 "lines": len(chunk.lines), "row": int(rows.get(chunk.cid, -1)),
-                "emb": vector,
-            })
+            }
+            if has_vectors:
+                vector = list(embeddings.get(chunk.cid) or [])[:EMBED_DIM]
+                if len(vector) < EMBED_DIM:
+                    vector = vector + [0.0] * (EMBED_DIM - len(vector))
+                row["emb"] = vector
+            chunk_rows.append(row)
         if chunk_rows:
             self._batch(
                 "UNWIND $rows AS r MERGE (c:Chunk {cid: r.cid}) "
                 "SET c.url = r.url, c.xpath = r.xp, c.part = r.part, "
                 "c.md = r.md, c.chars = r.chars, c.line_count = r.lines, "
-                "c.row = r.row, c.embedding = r.emb",
+                "c.row = r.row" + (", c.embedding = r.emb" if has_vectors else ""),
                 chunk_rows,
             )
             self._batch(
@@ -520,7 +537,12 @@ class GraphStore:
     def embedding(self, cid: str) -> Optional[List[float]]:
         rows = self._rows(
             "MATCH (c:Chunk {cid: $cid}) RETURN c.embedding", {"cid": cid})
-        return list(rows[0][0]) if rows else None
+        if not rows or rows[0][0] is None:
+            # A chunk written before `flush_vectors` reached it has no vector
+            # rather than a zero one. `list(None)` raises; the caller reads
+            # None the same way it read all-zeros.
+            return None
+        return list(rows[0][0])
 
     def addresses_of(self, cid: str) -> List[Tuple[ContentAddress, str]]:
         """The addresses a chunk anchors, in line order."""
