@@ -164,3 +164,74 @@ the first line carrying an address read the fold as a 10.6-point regression
 that was really a tooltip line winning a `setdefault`. The second is fixed;
 the alt-text confusion is not. Trust deltas measured the same way; treat the
 absolute value as soft.
+
+---
+
+## Update 2026-09-04: the tagger half LANDED, and the fold's real blocker
+
+**The tagger half is in (`8573ca9`), and the invariant was never the
+obstacle.** `test_an_inline_only_subtree_is_still_one_detection` counts TEXT
+detections -- `_texts` filters `category == "text"` -- and the anchor already
+carries an `interactive.links` detection whose value was the literal string
+`'a'`, the tag name `_control_label` strips as bookkeeping. Carrying the
+label there adds no detection, so the invariant passes untouched.
+
+    drawn WITH the page's words   54.66% -> 83.31%
+    collapsed                        121 -> 113
+
+Three load-bearing details: the label is built WITHOUT the node's tail
+(`get_text(recursive=True)` appends each node's text AND tail, which labelled
+a link "retreat rates and"); `text_at` uses `setdefault` so a real text unit
+always wins; and `_is_tag_name` guards the fallback so `<a name="chap01">` is
+not drawn as `[a](/x)`.
+
+`repl/nav.py` had to learn a third shape. It knew `<target>` and bare words
+and chose by testing `label.startswith("<")`; `[1-50](/list?skip=0)` starts
+with `[`, so it read as a NAME and a numeric pager classified as nothing.
+`_split_rendered` returns (words, target) for all three.
+
+## The fold is cheaper than reported, and blocked on ONE thing
+
+Re-measured on the current tree, 30 pages:
+
+    lines    51,376 -> 44,181   (-14.0%)
+    chars 3,435,372 -> 3,301,506 (-3.9%)
+    chunks    6,865 -> 6,865     (identical)
+    render     17.0s -> 16.8s
+
+**The +4.4% chunk cost is gone.** The hoist means sizing runs before folding
+so boundaries are untouched, and now that links carry their own words,
+folding one into its sentence REMOVES a line instead of adding markup to
+compensate for a bare target.
+
+`test_suppressed_units_are_a_deliberate_choice_not_a_leak` is NOT the
+blocker either. It asks a coverage question with `anchors`, which is one key
+per line by contract; `covered` is the coverage set and its own docstring
+describes this exact failure. With the fold, 2,575 of 3,139 units outside
+`anchors` are in `covered`, and substituting it passes while keeping the
+test's teeth (dropping `media` -- 41 units in the fixture -- still fails it;
+a `json_data` mutation is inert because the fixture has none).
+
+That change is NOT in the tree: without the fold only 2 of 566 units differ,
+so it would be an unmotivated widening.
+
+**The blocker is `repl/model.py`.** `Document.lines` is a `List[Widget]`
+where the list INDEX IS THE LINE NUMBER, and `widget_at` resolves by line,
+using the column only to place a text cursor inside an input. A folded line
+holds several controls at different column offsets, so folded links vanish
+from the control listing entirely -- `live.read()` finds them on
+`line.inline`, the REPL cannot. Two pager tests fail on exactly this.
+
+Making it work is a core change to the interaction model:
+
+* `Widget` gains a column span
+* `Document` holds several widgets per line, so `lines[i]` stops meaning
+  "the widget on line i"
+* `widget_at` hit-tests by (line, column)
+* `render` composes a line from several widgets instead of one
+
+Everything that indexes `document.lines` by line number is affected --
+hit-testing, rendering, scrolling, key handling. It is the feature the
+standing goal asks for ("within-chunk webpage interactions ... embedded
+hyperlinks, buttons; radios; toggles"), and it is a deliberate piece of work
+rather than a patch. Do it whole or not at all.
