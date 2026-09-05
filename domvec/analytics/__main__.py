@@ -65,6 +65,14 @@ def main(argv=None) -> int:
                              "can press it: captured by the fold, drawn in "
                              "the markdown, reachable from acts(), markable "
                              "by read(). Browser-free, over the corpus")
+    parser.add_argument("--spoken", action="store_true",
+                        help="words the fold captured that the render never "
+                             "says. Every other measure grades an ADDRESS, "
+                             "and all of them can be satisfied while the "
+                             "page's words go missing -- two addresses at "
+                             "one element, one deduped and one suppressed, "
+                             "each a counted outcome, and no line drawn. "
+                             "Browser-free, over the corpus")
     parser.add_argument("--affordance", action="store_true",
                         help="what the REPL offers to interact with, "
                              "against what the page can be. The coverage "
@@ -136,6 +144,22 @@ def main(argv=None) -> int:
         print(render_reach_table(report), flush=True)
         print("  written: %s"
               % write_reach_artifact(report, pathlib.Path(args.out)),
+              flush=True)
+        return 0
+
+    if args.spoken:
+        corpus = sorted(
+            (pathlib.Path(__file__).resolve().parent.parent.parent
+             / "tests" / "corpus").glob("*.html"))
+        if args.limit:
+            corpus = corpus[:args.limit]
+        from .spoken import (measure_spoken, render_spoken_table,
+                             write_spoken_artifact)
+
+        report = measure_spoken(corpus, window=args.window)
+        print(render_spoken_table(report), flush=True)
+        print("  written: %s"
+              % write_spoken_artifact(report, pathlib.Path(args.out)),
               flush=True)
         return 0
 
