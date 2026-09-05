@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import zlib
 from dataclasses import dataclass, field, replace
 from typing import Dict, Iterable, Iterator, List, Optional, Sequence, Tuple
@@ -1191,6 +1192,92 @@ def _render_sized(
     return sized
 
 
+#: A rendered link: `[words](target)`. Non-greedy on the label so a line
+#: holding two of them yields two matches rather than one spanning both.
+_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]*)\)")
+
+
+def _fold_links_into_prose(lines: List[MarkdownLine]) -> List[MarkdownLine]:
+    """A link inside a sentence belongs in the sentence, not above it.
+
+    `_inline_flow` solves this for the SENSOR path, where a paragraph arrives
+    as a ladder of fragments and merging adjacent lines rebuilds it. The
+    tagger path has the opposite shape: `content_tagger` emits an all-inline
+    paragraph as ONE text unit holding every word, and each anchor as its own
+    unit. Nothing is adjacent to merge, so a paragraph came out as
+
+        [retreat rates](/rates)
+        [mass balance](/mass)
+        See the retreat rates and mass balance .
+
+    -- the words twice, and the links stripped out above the prose they
+    belong to. So the operation here is substitution rather than
+    concatenation: put each link's markup back where its words already sit in
+    the parent's text, and drop the line that was standing in for it.
+
+    Only within one parent and only where the words are actually there. A
+    link whose label does not appear in the prose keeps its own line, because
+    that line is then the only place those words exist.
+
+    The anchor's address rides on `inline`, which is what keeps it enactable:
+    `read()` marks a control from the line that drew it, and after this the
+    line that draws the link is the sentence.
+    """
+    if len(lines) < 2:
+        return lines
+
+    # Link lines, by the parent whose prose could hold them. Keyed on the
+    # element's parent, since an anchor's words live in its parent's text.
+    from collections import defaultdict
+
+    candidates = defaultdict(list)
+    for i, line in enumerate(lines):
+        if line.address is None:
+            continue
+        match = _LINK_RE.fullmatch(line.text.strip())
+        if not match:
+            continue
+        words = match.group(1).strip()
+        if not words:
+            continue
+        parent = line.address.xpath.rstrip("/").rsplit("/", 1)[0]
+        candidates[parent].append((i, words, line.text.strip(), line.address))
+
+    if not candidates:
+        return lines
+
+    folded = {}                     # index -> new MarkdownLine
+    consumed = set()                # indices of link lines to drop
+    for i, line in enumerate(lines):
+        if line.address is None or i in consumed:
+            continue
+        kids = candidates.get(line.address.xpath.rstrip("/"))
+        if not kids:
+            continue
+        text = line.text
+        added = []
+        # Document order, so two links with the same words land in the order
+        # the page has them.
+        for j, words, markup, address in sorted(kids):
+            if j == i or j in consumed:
+                continue
+            at = text.find(words)
+            if at < 0:
+                continue            # the prose does not say it; leave its line
+            text = text[:at] + markup + text[at + len(words):]
+            consumed.add(j)
+            added.append(address)
+        if added:
+            folded[i] = MarkdownLine(depth=line.depth, text=text,
+                                     address=line.address,
+                                     inline=line.inline + tuple(added))
+
+    if not consumed:
+        return lines
+    return [folded.get(i, line) for i, line in enumerate(lines)
+            if i not in consumed]
+
+
 def _inline_flow(lines: List[MarkdownLine]) -> List[MarkdownLine]:
     """A sentence with a link in it is one line.
 
@@ -1526,6 +1613,13 @@ def render_trie(
         # in place.
         chunks.extend(_clone_chunk(c) for c in
                       _descend(page, url, len(steps), context_window, memo))
+
+    # Folded once per finished chunk, never inside the descent:
+    # `_size_of` and `_descend` call `_render_sized` speculatively at
+    # every level they consider, and an O(lines x links) pass there took
+    # the 30-page render from 22.2s to past 500s.
+    for chunk in chunks:
+        chunk.lines = _fold_links_into_prose(chunk.lines)
 
     _level_page(chunks)
     _number_parts(chunks)

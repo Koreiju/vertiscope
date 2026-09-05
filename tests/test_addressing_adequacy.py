@@ -275,7 +275,24 @@ def test_suppressed_units_are_a_deliberate_choice_not_a_leak(scanned):
     report = RenderReport()
     chunks = render_trie(trie, context_window=1200, report=report)
 
-    emitted = {k for c in chunks for k in c.anchors}
+    # `covered`, not `anchors`.
+    #
+    # This asks whether an address was ACCOUNTED FOR. `anchors` is one key per
+    # line by contract -- positional, so the jsonl round-trip and the REPL can
+    # zip it against `lines` -- and a line that put a sentence's inline markup
+    # back together accounts for every address folded into it. `covered` is
+    # the set that says so, and its own docstring records the same failure:
+    # counting only the first "made those look lost", and the answer then
+    # moved with the context window (589 of them between 1200 and 200).
+    #
+    # Measured with the prose fold in place: 3,139 url/media units sit outside
+    # `anchors` and 2,575 of them are in `covered`. Asking with `anchors` made
+    # this test depend on which line a link's markup happened to land on,
+    # which is the renderer's business and not what this test is about.
+    #
+    # It keeps its teeth: silently dropping `media` -- 41 units in the
+    # fixture -- still fails it.
+    emitted = {k for c in chunks for k in c.covered}
     kept_by_node: dict = {}
     for chunk in chunks:
         for line in chunk.lines:

@@ -29,6 +29,7 @@ indices. :meth:`ReplState.hit` is the only place the two meet.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
@@ -90,6 +91,10 @@ _KIND_BY_TAG = {
 }
 
 
+#: A rendered link inside a drawn line: `[words](target)`.
+_LINK_SPAN = re.compile(r"\[(?P<words>[^\]]*)\]\((?P<target>[^)]*)\)")
+
+
 def kind_for(address: Optional[ContentAddress]) -> WidgetKind:
     """The widget a line becomes. A line without an address is prose.
 
@@ -118,6 +123,18 @@ class Widget:
     label: str
     address: Optional[ContentAddress] = None
     depth: int = 0
+
+    #: The columns this widget occupies, when it is one of several on a line.
+    #: `(0, 0)` means the whole line, which is what every widget in
+    #: `Document.lines` is: those own their line and render it. A widget with
+    #: a real span is a HIT TARGET only -- it never renders, because the line
+    #: it sits in is already drawn by the widget that owns it.
+    col: int = 0
+    end: int = 0
+
+    @property
+    def spans_line(self) -> bool:
+        return self.end <= self.col
 
     # interaction state
     checked: bool = False
@@ -195,6 +212,28 @@ class Document:
     title: str = ""
     url: str = ""
 
+    #: line number -> the controls sharing that line, left to right.
+    #:
+    #: `lines` stays one widget per line, indexed by line number, because
+    #: eight call sites read `document.lines[n]` that way and rendering,
+    #: scrolling and key handling all depend on it. A line that draws a
+    #: sentence with two links in it still has ONE widget that owns and
+    #: renders it; the links are additional hit targets with column spans.
+    #:
+    #: Without this a folded link is reachable only through `line.inline`,
+    #: which `live.read()` consults and the REPL could not: the controls
+    #: listing lost them entirely.
+    inline: Dict[int, List[Widget]] = field(default_factory=dict)
+
+    def controls(self) -> List[Widget]:
+        """Every interactive widget, line-owning and inline, in reading order."""
+        out: List[Widget] = []
+        for n, widget in enumerate(self.lines):
+            if widget.interactive:
+                out.append(widget)
+            out.extend(w for w in self.inline.get(n, ()) if w.interactive)
+        return out
+
     def __len__(self) -> int:
         return len(self.lines)
 
@@ -242,7 +281,42 @@ class Document:
                     value="" if kind is not WidgetKind.INPUT else "",
                     heading=heading_mark,
                 ))
-        return cls(lines=widgets, url=url, title=title)
+        # The controls a line drew inside itself.
+        #
+        # `_inline_flow` and the prose fold put several addresses on one line:
+        # a sentence with two links in it is one line for a reader and three
+        # addresses for anyone who wants to act on it. The line-owning widget
+        # above is built from `line.address`, so those merged addresses had
+        # nowhere to go and dropped out of the controls listing.
+        #
+        # Located by finding each rendered `[words](target)` in the drawn
+        # text, left to right, and pairing it with the merged addresses in
+        # the order `inline` records them -- which is reading order, by
+        # `MarkdownLine.inline`'s contract.
+        inline: Dict[int, List[Widget]] = {}
+        row = 0
+        for chunk in chunks:
+            for line in chunk.lines:
+                merged = tuple(getattr(line, "inline", ()) or ())
+                if merged:
+                    spans = list(_LINK_SPAN.finditer(line.text))
+                    for address, hit in zip(merged, spans):
+                        inline.setdefault(row, []).append(Widget(
+                            line=row, kind=kind_for(address),
+                            # The whole rendered form, `[words](target)`,
+                            # not just the words. `nav._split_rendered` wants
+                            # both halves -- a pager is identified by its
+                            # href -- and the address cannot supply the
+                            # target, which is a leaf VALUE and not one of
+                            # the four address components. Substring
+                            # matching for `press <name>` still finds the
+                            # words inside it.
+                            label=hit.group(0),
+                            address=address, depth=line.depth,
+                            col=hit.start(), end=hit.end(),
+                        ))
+                row += 1
+        return cls(lines=widgets, url=url, title=title, inline=inline)
 
 
 @dataclass
@@ -399,7 +473,17 @@ class ReplState:
 
     def widget_at(self, x: int, y: int) -> Optional[Widget]:
         line = self.hit(x, y)
-        return self.document.lines[line] if line is not None else None
+        if line is None:
+            return None
+        # A control inside the line wins over the line that owns it, because
+        # clicking the words of a link in a sentence means the link. The
+        # column is measured in the same coordinates the line was drawn in:
+        # `x` is 1-based and `left` is the first visible column.
+        column = (x - 1) + self.left
+        for widget in self.document.inline.get(line, ()):
+            if widget.col <= column < widget.end:
+                return widget
+        return self.document.lines[line]
 
     # -- events ------------------------------------------------------------
     def handle(self, event: Event) -> Optional[Widget]:

@@ -444,9 +444,12 @@ def _controls_of(html: str, url: str):
     trie = AddressTrie.from_tagged(run_pipeline(html, url).tagged, url)
     document = Document.from_chunks(render_trie(trie, context_window=1200),
                                     url=url)
-    lines = [w for w in document.lines if w.address is not None]
-    pairs = [(w.address, w.label) for w in lines if w.interactive]
-    texts = [(w.address.xpath, w.label) for w in lines if not w.interactive]
+    # The same path `_cmd_controls` takes. Reading `document.lines` here
+    # instead would test a listing production does not build.
+    pairs = [(w.address, w.label) for w in document.controls()
+             if w.address is not None]
+    texts = [(w.address.xpath, w.label) for w in document.lines
+             if w.address is not None and not w.interactive]
     return classify_controls(attach_context(pairs, texts))
 
 

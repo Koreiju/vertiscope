@@ -868,8 +868,12 @@ class Repl:
         return True
 
     def _cmd_controls(self, args) -> bool:
-        lines = [w for w in self.state.document.lines if w.address is not None]
-        pairs = [(w.address, w.label) for w in lines if w.interactive]
+        # `controls()`, not `lines`: a sentence with two links in it is one
+        # line and three addresses, and the merged ones are hit targets on
+        # that line rather than lines of their own. Reading `lines` here lost
+        # every link the render folded into its prose.
+        pairs = [(w.address, w.label) for w in self.state.document.controls()
+                 if w.address is not None]
         # A link's own label is its href. The words that name a control live
         # on the surrounding text lines, so the two are joined by xpath before
         # anything is classified — see `attach_context`.
@@ -1293,8 +1297,8 @@ class Repl:
         if not needle:
             self.state.buffers.note("press needs a control's name")
             return True
-        hits = [w for w in self.state.document.lines
-                if w.interactive and needle in w.label.lower()]
+        hits = [w for w in self.state.document.controls()
+                if needle in w.label.lower()]
         if not hits:
             self.state.buffers.note(f"no control named {needle!r}")
             return True
