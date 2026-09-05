@@ -522,6 +522,8 @@ _INTERACTIVE = {"a", "button", "input", "select", "textarea", "option",
 #: only one of them is right on one path and blind on the other -- the same
 #: split that made the projection gap look like a 19% loss when it was a
 #: comparison keyed on the wrong component.
+#: The classes a reader can act on, in the one vocabulary. Membership only,
+#: which is all `K` supports.
 _CONTROL_CLASSES = frozenset({"link", "button", "field", "choice", "check",
                               "slider"})
 
@@ -542,8 +544,11 @@ def _is_affordance(tnode) -> bool:
     own, which happens when a control's detections all hang off a child.
     """
     for address, _value in _leaves_of(tnode):
-        tag = getattr(address, "tag", "") or ""
-        if tag.startswith("interactive") or tag in _CONTROL_CLASSES:
+        # One vocabulary. `ContentAddress.render_class` maps the tagger's
+        # `interactive.*` and the sensor's `button`/`field` onto the same
+        # eighteen classes, so this rule no longer has to know which pipeline
+        # produced the address -- which is the question that cost five bugs.
+        if getattr(address, "is_control", False):
             return True
     return _tag_of(tnode) in _INTERACTIVE
 

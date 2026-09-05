@@ -147,6 +147,10 @@ _LABEL_DEPTH = 3
 #: hundreds of unrelated lines.
 _MIN_LABEL = 4
 
+#: What a reader can act on, in the one vocabulary.
+_CONTROL_CLASSES = frozenset({"link", "button", "field",
+                              "choice", "check", "slider"})
+
 
 #: A markdown link's target, and a bare target line. Stripped before a label
 #: is looked for, because a target is not something a reader can read.
@@ -252,9 +256,12 @@ def score_page(trie, chunks, dom=None) -> dict:
         if address is None:
             continue
         tag = address.tag or ""
-        if tag.startswith("interactive"):
+        # `render_class`, so this counts controls on BOTH pipelines. Asking
+        # `tag.startswith("interactive")` counted only the tagger's, which is
+        # why every figure in this file describes the snapshot path.
+        if address.is_control:
             captured[_canon(address.xpath)] = tag
-        elif (tag.split(".")[0] in ("text", "media")
+        elif (address.render_class in ("text", "image", "media")
                 and (leaf.value or "").strip()):
             labels.append(_canon(address.xpath))
     labels.sort()

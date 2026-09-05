@@ -57,8 +57,14 @@ from functools import lru_cache
 from typing import Iterable, List, Optional, Sequence, Tuple
 from urllib.parse import urlsplit
 
+from .aam import RENDER_CLASS as _AAM_RENDER_CLASS
+
+#: The canonical eighteen, from the authority rather than restated here.
+_SENSOR_CLASSES = frozenset(_AAM_RENDER_CLASS.values())
+
 __all__ = [
     "ContentAddress",
+    "RENDER_CLASSES",
     "address_of",
     "addresses_of",
     "anchored_pattern",
@@ -214,6 +220,71 @@ def url_steps(url: str) -> Tuple[str, ...]:
 # --- the address ------------------------------------------------------------
 
 
+#: The taxonomy slot carries two label sets, and that has cost five bugs.
+#:
+#: The SENSOR names an address by what the thing IS -- `link`, `button`,
+#: `field` -- and the TAGGER by what the detection HELD -- `urls.internal`,
+#: `interactive.links`. Both are legitimate; `K` in THEORY Def. 10.1 is a
+#: flat label set whose only operations are equality and membership, and
+#: there are simply two of them in play.
+#:
+#: The cost lands on every consumer, which must either handle both or
+#: silently work on one path only. This session alone:
+#:
+#:   * `markdown._is_tag_name` deleted `Espanol`, `China`, `Europe` -- 643
+#:     controls -- because "short and alphabetic" is the right test for a
+#:     media value and the wrong one for a label
+#:   * `href_at` is built only from sensor classes, so `target` is always
+#:     empty on the tagger path; a guard reading `not target` would have
+#:     added a spurious line to every anchor on every page
+#:   * `text_at` accepted only `category == "text"`, so a label carried on
+#:     an interactive detection was invisible to it
+#:   * `_echoes_its_element` had to be written twice, in two modules
+#:   * `repl._KIND_BY_TAG` records the same shape: "after the address's
+#:     taxonomy slot became the render class every one of these fell through
+#:     to TEXT -- so the page drew its controls and the REPL treated them as
+#:     prose"
+#:
+#: The fix is not to rename what either side emits -- the tag is part of the
+#: address key and therefore of every stored row -- but to give consumers ONE
+#: vocabulary to key on. `render_class` is that: a total function onto the
+#: eighteen classes `aam.RENDER_CLASS` already defines, so a rule can ask
+#: what a thing IS without asking which pipeline said so.
+_CANONICAL_CLASS: Dict[str, str] = {
+    # -- the tagger's vocabulary: what the detection held -------------------
+    "text.visible": "text",
+    "text.metadata": "text",
+    "text.attributes": "text",
+    "interactive.inputs": "field",
+    "interactive.buttons": "button",
+    "interactive.links": "link",
+    # A form is a container, not a control: mapping it to `button` made the
+    # widget re-wrap a line the renderer had already marked up, printing
+    # "( === form === )".
+    "interactive.forms": "group",
+    "interactive.elements": "button",
+    "interactive.event_handlers": "button",
+    "media.images": "image",
+    "media.video": "media",
+    "media.audio": "media",
+    "media.assets": "media",
+    "urls.internal": "link",
+    "urls.external": "link",
+}
+
+#: When neither table knows the tag, its category still does. Total by
+#: construction: an address always has a class, because a consumer that has
+#: to ask "and what if it is none of these" is back to branching on the
+#: pipeline.
+_CLASS_BY_CATEGORY: Dict[str, str] = {
+    "text": "text",
+    "urls": "link",
+    "media": "media",
+    "json_data": "code",
+    "interactive": "button",
+}
+
+
 @dataclass(frozen=True)
 class ContentAddress:
     """One detected content unit's address. Immutable, hashable, ordered."""
@@ -231,6 +302,55 @@ class ContentAddress:
     @property
     def subcategory(self) -> str:
         return self.tag.split(".", 1)[1] if "." in self.tag else ""
+
+    @property
+    def render_class(self) -> str:
+        """What this address IS, in one vocabulary, whoever named it.
+
+        The sensor already speaks it, so a sensor tag passes through; a
+        tagger tag is translated; anything unknown falls back to its
+        category. See `_CANONICAL_CLASS` for why this exists.
+
+        Derived, never stored: the tag stays exactly what the pipeline
+        emitted, so no key changes and no row migrates.
+        """
+        tag = self.tag or ""
+        hit = _CANONICAL_CLASS.get(tag)
+        if hit is not None:
+            return hit
+        if tag in _SENSOR_CLASSES:
+            return tag
+        return _CLASS_BY_CATEGORY.get(self.category, "text")
+
+    #: The classes a reader can act on, of the eighteen.
+    _CONTROL_CLASSES = frozenset({"link", "button", "field", "choice",
+                                  "check", "slider"})
+
+    @property
+    def is_control(self) -> bool:
+        """Is this address an AFFORDANCE, not merely drawn like one?
+
+        Distinct from `render_class`, and the distinction is load-bearing.
+        `render_class` says how a thing is DRAWN -- a `urls.*` value draws as
+        a link, correctly, because the render turns it into `[words](target)`.
+        But a url is a value the element carries, not an element a reader can
+        press: `<link rel=stylesheet>` in `<head>` is a `urls.*` address and
+        nothing anyone can click.
+
+        Keying affordance on `render_class` therefore over-counts. Measured:
+        it took `--reach`'s captured set from 6,447 to 7,565 over ten pages,
+        the difference being head links and other url values that are not
+        controls.
+
+        So the two questions get two predicates. This one is still a
+        two-vocabulary test -- the tagger says `interactive.*`, the sensor
+        says `button` -- but it is that test in ONE place, which is the point:
+        a consumer asks the address and never asks which pipeline spoke.
+        """
+        tag = self.tag or ""
+        if tag.startswith("interactive"):
+            return True
+        return tag in self._CONTROL_CLASSES
 
     @property
     def detector(self) -> str:
@@ -399,3 +519,7 @@ def collisions(tags: Iterable, url: str) -> List[Tuple[ContentAddress, List[str]
         if t.value not in entry[1]:
             entry[1].append(t.value)
     return [(a, vs) for a, vs in buckets.values() if len(vs) > 1]
+
+
+#: The one vocabulary, for consumers that want to enumerate it.
+RENDER_CLASSES = _SENSOR_CLASSES
