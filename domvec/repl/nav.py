@@ -20,7 +20,8 @@ click is unusable. The failure is reported into the status line instead.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Optional
+import re
+from typing import List, Optional, Tuple
 
 from ..address import ContentAddress
 
@@ -320,6 +321,31 @@ _PAGING_PARAMS = frozenset({
 _LOOSE_PAGING_PARAMS = frozenset({"p", "pg", "count", "n"})
 
 
+#: `[words](target)` as the render now draws a link that has both.
+_RENDERED_LINK = re.compile(r"^\[(?P<words>[^\]]*)\]\((?P<target>[^)]*)\)$")
+
+
+def _split_rendered(label: str) -> Tuple[str, str]:
+    """A drawn line -> (the words a reader sees, the target it points at).
+
+    Three shapes reach the classifier and each answers differently:
+
+        `[1-50](/list?skip=0)`  ->  ("1-50", "/list?skip=0")
+        `<https://x/page/2>`    ->  ("",     "https://x/page/2")
+        `Next page`             ->  ("Next page", "")
+
+    The middle one is a target with no words -- returning it as a name is how
+    a Next.js page came to report eighty-four stylesheets by their urls.
+    """
+    text = (label or "").strip()
+    hit = _RENDERED_LINK.match(text)
+    if hit:
+        return hit.group("words").strip(), hit.group("target").strip()
+    if text.startswith("<") and text.endswith(">"):
+        return "", text[1:-1].strip()
+    return text, ""
+
+
 def _is_paging_target(url: str, base: str = "", *, loose: bool = False) -> bool:
     """Whether a link's target is the same listing at a different position.
 
@@ -459,9 +485,24 @@ def classify_controls(entries) -> dict:
         address, label = entry[0], entry[1]
         context = entry[2] if len(entry) > 2 else ""
         row = (address, label, context)
-        # An href is a target, not a name. Fall back to the label only when it
-        # is not the markdown rendering of a URL.
-        shown = context or ("" if (label or "").startswith("<") else label or "")
+        # An href is a target, not a name -- and a line can now carry both.
+        #
+        # A link used to reach here in one of two shapes: `<target>` when it
+        # had no words the fold could see, or its words alone. So `label` was
+        # read as the target whenever it looked like a url, and as a name
+        # otherwise. Once `content_tagger` began carrying an anchor's own
+        # words on its `interactive.links` detection, a third shape arrived --
+        # `[1-50](/list?skip=0&show=50)` -- which is neither: it starts with
+        # `[`, so it was taken as a NAME, and the paging test that needed the
+        # href stopped seeing one. A numeric pager classified as nothing.
+        #
+        # Splitting the rendered form is strictly better than either branch:
+        # the words become the name and the target stays the target, so a
+        # pager identified only by its href is still found and now has a
+        # label to show for it.
+        words_of, target_of = _split_rendered(label or "")
+        shown = context or words_of
+        label = target_of or label
         text = shown.lower()
         target = address.xpath.lower()
         words = _words(text)

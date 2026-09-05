@@ -440,6 +440,26 @@ _NON_URL_ATTRS = frozenset({
 # Core tagger
 # ---------------------------------------------------------------------------
 
+def _own_label(node) -> str:
+	"""An element's own words, WITHOUT its tail.
+
+	The tail belongs to the parent's prose, not to this element:
+	`get_text(recursive=True)` walks `iter_all()`, which yields self
+	first and appends each node's text AND tail, so using it here
+	labelled `<a href=/rates>retreat rates</a> and ...` as
+	"retreat rates and", swallowing the clause after the link.
+	"""
+	parts = [node.text or ""]
+	if hasattr(node, "iter_descendants"):
+		for desc in node.iter_descendants():
+			if desc.text:
+				parts.append(desc.text)
+			if desc.tail:
+				parts.append(desc.tail)
+	out = " ".join(p.strip() for p in parts if p and p.strip())
+	return out.translate(_INVISIBLE_TRANS).strip()
+
+
 class ContentTagger:
 	"""
 	Walks a ShadowDOM tree and extracts all contentful xpaths.
@@ -714,7 +734,21 @@ class ContentTagger:
 			elif tag in _BUTTON_TAGS:
 				self._add('interactive', 'buttons', xpath, tag, '')
 			elif tag == 'a':
-				self._add('interactive', 'links', xpath, tag, '')
+				# The link's own words, not the string 'a'.
+				#
+				# This detection recorded the TAG NAME as its value, because
+				# for a control the element is the finding. But an anchor
+				# inside all-inline prose has its words folded into the
+				# paragraph's single text unit and skipped here, so nothing
+				# downstream could say what the link was called: the render
+				# drew `</rates>` and the REPL named links by their targets.
+				#
+				# Carrying the label on the detection that already exists
+				# adds NO detection. `an inline-only subtree is still one
+				# detection` counts TEXT units, and this is the interactive
+				# one, emitted for this element either way.
+				self._add('interactive', 'links', xpath,
+					_own_label(node) or tag, '')
 			elif tag in _FORM_TAGS:
 				self._add('interactive', 'forms', xpath, tag, '')
 			else:

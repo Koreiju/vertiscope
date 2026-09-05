@@ -934,6 +934,24 @@ def _render_sized(
         owner = a.xpath.split("/text()")[0]
         if a.category == "text" or a.tag in ("text", "heading"):
             text_at.setdefault(owner, " ".join(v.split()))
+        elif a.tag == "interactive.links" and not _is_tag_name(v):
+            # A link's own words, carried on its interactive detection.
+            #
+            # An anchor inside all-inline prose has its text folded into the
+            # paragraph's single unit, so there is no `text.visible` at the
+            # anchor to label it with -- which is why links drew as bare
+            # targets. `content_tagger` puts the label on the detection it
+            # already emits for that element rather than adding a second one,
+            # so `an inline-only subtree is still one detection` still holds:
+            # that rule counts TEXT units and this is not one.
+            #
+            # `setdefault` is deliberate: a real text unit at the same
+            # element always wins, so this only fills a gap.
+            #
+            # Guarded by `_is_tag_name` because the value falls back to the
+            # tag when the anchor genuinely has no words -- `<a name=...>` --
+            # and `[a](/x)` would be worse than `</x>`.
+            text_at.setdefault(owner, " ".join(v.split()))
 
     # Elements whose control rendering will *consume* the text below. The
     # control and its text are two units at one element with unrelated raw
