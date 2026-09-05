@@ -313,6 +313,23 @@ class ContentAddress:
 
         Derived, never stored: the tag stays exactly what the pipeline
         emitted, so no key changes and no row migrates.
+
+        **It is a projection, and it is lossy where the tagger is more
+        specific than the sensor's role vocabulary.** `interactive.forms`
+        becomes `group`, and so do `role=article`, `nav`, `main`, `list`,
+        `table`, `region` and nine others -- the sensor simply does not
+        distinguish a form from a section, because ARIA does not.
+
+        So a consumer needing that distinction must NOT key on this.
+        `repl._KIND_BY_TAG` is the live example: it maps `interactive.forms`
+        to FORM, which draws `=== form ===`, and a sensor `group` to TEXT,
+        because a section is not a control. Migrating it to `render_class`
+        would make every `<article>` and `<nav>` a FORM widget -- a
+        regression that looks exactly like an obvious cleanup.
+
+        The rule: use `render_class` where the eighteen classes are the whole
+        question, `is_control` for affordance, and the raw `tag` where a
+        pipeline's extra specificity is what you need.
         """
         tag = self.tag or ""
         hit = _CANONICAL_CLASS.get(tag)
