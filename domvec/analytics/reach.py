@@ -264,6 +264,14 @@ def score_page(trie, chunks, dom=None) -> dict:
     reachable = {_canon(node.xpath) for node in root.acts()}
     shows_text = _labels_by_xpath(dom) if dom is not None else {}
 
+    # xpaths that hold another control. Built once from the captured set,
+    # sorted so the ancestry test is a prefix scan rather than a product.
+    _control_paths = sorted(captured)
+
+    def contains_a_control(xpath: str) -> bool:
+        prefix = xpath + "/"
+        return any(other.startswith(prefix) for other in _control_paths)
+
     def carries_label(xpath: str, lines: Sequence[str]) -> bool:
         """Does the line a control was drawn on say what the page calls it?
 
@@ -276,6 +284,23 @@ def score_page(trie, chunks, dom=None) -> dict:
         candidates = shows_text.get(xpath) or ()
         if not candidates:
             return False
+        # A container is not unlabelled because it does not repeat its
+        # contents.
+        #
+        # `<form>` draws as `=== form ===`, which is the right line for it --
+        # the fields inside are drawn as their own controls. But this
+        # arbiter's first candidate is `get_text(recursive=True)`, so the
+        # form was being asked to show "Keyword Search... Search Query
+        # Submit Search" on its own line, and scored unlabelled for not
+        # doing it. 51 of ~80 residual cases on ten pages were this, plus
+        # every `<label>` wrapping an input.
+        #
+        # A control with interactive DESCENDANTS is a container: whatever
+        # words it has belong to the things inside it, and those are counted
+        # in their own right. Judged from the parse, like everything else
+        # here -- `contains` is built from the same walk.
+        if contains_a_control(xpath):
+            return True
         # ANY line that carries this control's address, against ANY name
         # the page has for it.
         #
