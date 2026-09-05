@@ -1225,6 +1225,30 @@ def _render_sized(
     kept = [t for t in _dedupe([(a, v, lbl) for a, v, lbl, _ in units])
             if t[0].key() not in hidden]
 
+    # How many units still stand at each element, which is a different
+    # question from how many arrived.
+    #
+    # `units_at` above counts what was COLLECTED, and `alone` -- the escape
+    # that lets a suppressed `interactive.links` draw itself when nothing
+    # else speaks for its element -- was asked of that. So an anchor whose
+    # words `_dedupe` had already collapsed still looked accompanied: the
+    # exact-tie branch keeps `interactive.links` and drops the `text.visible`
+    # carrying the same string, then suppression fired on the survivor
+    # because the count said two. Neither drew, and `<a>Disable MathJax</a>`
+    # -- an anchor with no href, the very case the `alone` escape was added
+    # for -- disappeared from the page entirely. Not merely unpressable:
+    # the words were gone.
+    #
+    # This is the trap `consumed` records ten lines down, in the same
+    # function, for the same reason: "taken from `kept`, not from `units`, so
+    # the text is only dropped when the line that will speak for it actually
+    # survives". `alone` needed the same treatment and did not get it.
+    drawn_at: Dict[str, int] = {}
+    for _a, _v, _lbl in kept:
+        if (_v or "").strip():
+            _owner = _a.xpath.split("/text()")[0]
+            drawn_at[_owner] = drawn_at.get(_owner, 0) + 1
+
     # A tagger-path link drawing its own words has said them, so the bare
     # repeat underneath goes -- the `( Add to basket ) / Add to basket`
     # duplication one vocabulary further on.
@@ -1255,7 +1279,7 @@ def _render_sized(
         target = _target_of(owner, href_at)
         rendered = _render_unit(a, v, lbl, text_at.get(owner, ""),
                                 target=target,
-                                alone=units_at.get(owner, 0) <= 1)
+                                alone=drawn_at.get(owner, 0) <= 1)
         if rendered is None:
             continue
         # A line drawn as a link is addressed as one.

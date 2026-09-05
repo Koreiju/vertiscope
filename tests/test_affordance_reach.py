@@ -153,3 +153,60 @@ def test_the_window_does_not_change_what_is_reachable():
     narrow = {a.key() for ln in _render(html, 200) for a in _all_addresses(ln)}
     assert wide == narrow, \
         "reachable addresses differ by window: %d vs %d" % (len(wide), len(narrow))
+
+
+NO_HREF = ("<html><body><a>Disable MathJax</a>"
+           "<p>other words here</p></body></html>")
+
+
+def test_an_anchor_with_no_href_still_says_its_words():
+    """Content loss, not merely a missing affordance.
+
+    `_dedupe`'s exact-tie branch keeps the `interactive.links` unit and drops
+    the `text.visible` one carrying the same string. `_render_unit` then
+    suppresses `interactive.links` unless it is `alone` -- and `alone` was
+    asked of the units COLLECTED rather than the units that SURVIVED, so the
+    lone remaining unit looked accompanied and suppressed itself. Neither
+    drew, and the page's words disappeared: not unpressable, gone.
+
+    `<a>` with no href is the exact case the `alone` escape was written for
+    (arxiv's `Disable MathJax`), which is what makes this worth pinning.
+    """
+    texts = [ln.text for ln in _render(NO_HREF)]
+    assert any("Disable MathJax" in t for t in texts), \
+        "the anchor's words are absent from the render: %r" % texts
+
+
+def test_that_anchor_is_also_an_affordance():
+    """And having said its words, it must be pressable."""
+    lines = [ln for ln in _render(NO_HREF) if "Disable MathJax" in ln.text]
+    assert lines, "the anchor was not drawn"
+    assert any(a.is_control for a in _all_addresses(lines[0])), \
+        "the drawn anchor carries no affordance address"
+
+
+def test_the_repl_lists_every_drawn_control():
+    """The object model facade is the consumer this has to reach.
+
+    `Document.controls()` walks line-owning widgets and `line.inline` alike,
+    so a control the render carries reaches the terminal listing. Asserted
+    against the REPL rather than the render because the render being right
+    is not the same as the REPL seeing it -- `_KIND_BY_TAG` records a version
+    where the page drew its controls and the REPL read them as prose.
+    """
+    from domvec.repl.model import Document
+
+    html = ("<html><body><p>Read <a href='/n.html'>the next page</a> now.</p>"
+            "<a>Disable MathJax</a>"
+            "<span onclick='go()'>Expand all</span>"
+            "<button>Add to basket</button>"
+            "<input placeholder='Search books'></body></html>")
+    trie = AddressTrie.from_tagged(
+        ContentTagger(ShadowDOM(html)).tag(), "https://x.test/")
+    doc = Document.from_chunks(render_trie(trie, context_window=1500),
+                              url="https://x.test/")
+    labels = " | ".join(w.label for w in doc.controls())
+    for expected in ("next page", "Disable MathJax", "Expand all",
+                     "Add to basket", "Search books"):
+        assert expected in labels, \
+            "%r missing from the REPL controls listing: %s" % (expected, labels)
