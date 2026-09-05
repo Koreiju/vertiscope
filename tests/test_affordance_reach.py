@@ -242,3 +242,42 @@ def test_the_dropped_duplicate_keeps_its_address():
     tags = {a.tag for a in _all_addresses(line)}
     assert "interactive.event_handlers" in tags, \
         "the handler address was dropped with the duplicate line: %s" % tags
+
+
+ARIA_SUPERSET = ("<html><body>"
+                 "<button aria-label='Move Main menu to sidebar'>move to sidebar"
+                 "</button><p>filler text</p></body></html>")
+
+
+def test_a_control_that_did_not_survive_cannot_consume_its_text():
+    """Wikimedia's sidebar toggle drew nothing at all.
+
+    Three units at one element: the button (`move to sidebar`), the visible
+    text (the same string), and the `aria-label` (`Move Main menu to
+    sidebar`, a superset of both). `_dedupe` keeps the aria-label and drops
+    the other two -- correctly, it is the fullest spelling.
+
+    But `consumed` was built from the units COLLECTED, so it still said "a
+    control will speak for this element" and the surviving aria-label was
+    skipped in deference to a button that no longer existed. A page showing
+    `move to sidebar`, `hide` and `Cookie Settings` said none of them.
+
+    Third instance of the same trap in one function: `alone` had it, and the
+    url branch already records "taken from `kept`, not from `units`".
+    """
+    texts = " | ".join(ln.text for ln in _render(ARIA_SUPERSET))
+    assert "sidebar" in texts.lower(), \
+        "the element drew nothing: %r" % texts
+
+
+def test_the_consumed_rule_still_prevents_its_own_duplication():
+    """The rule exists for `( Add to basket ) / Add to basket`.
+
+    Loosening it must not bring that back: a button whose words are its own
+    text draws exactly one line.
+    """
+    lines = [ln.text for ln in
+             _render("<html><body><button>Add to basket</button>"
+                     "<p>filler text</p></body></html>")]
+    said = [t for t in lines if "Add to basket" in t]
+    assert len(said) == 1, "the control and its text both drew: %r" % said

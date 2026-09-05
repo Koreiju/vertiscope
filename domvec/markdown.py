@@ -1067,6 +1067,10 @@ def _render_sized(
         and a.tag not in _SUPPRESSED_TAGS
         and text_at.get(a.xpath)
     }
+    # Kept apart so it can be re-checked against `kept` below: this set names
+    # elements whose text a CONTROL is expected to speak, and that expectation
+    # has to survive `_dedupe`.
+    consumed_by_control = set(consumed)
     # The same rule for render classes. A control drawn with its own words
     # has already said them; repeating the bare text underneath is the
     # `( Add to basket ) / Add to basket` duplication one vocabulary further
@@ -1224,6 +1228,34 @@ def _render_sized(
 
     kept = [t for t in _dedupe([(a, v, lbl) for a, v, lbl, _ in units])
             if t[0].key() not in hidden]
+
+    # A control that did not survive cannot consume anything.
+    #
+    # `consumed` was built from the units COLLECTED, and `_dedupe` runs after
+    # it. Wikimedia's sidebar toggle is
+    #
+    #     <button aria-label="Move Main menu to sidebar">move to sidebar</button>
+    #
+    # which yields three units at one element: the button (`move to sidebar`),
+    # the visible text (the same), and the `aria-label` (a superset of both).
+    # Subsumption keeps the aria-label and drops the other two -- correctly,
+    # it is the fullest spelling. But `consumed` still said "a control will
+    # speak for this element", so the surviving aria-label was skipped in
+    # deference to a button that no longer existed. The element drew NOTHING,
+    # and a page that shows `move to sidebar`, `hide`, `Cookie Settings` said
+    # none of them.
+    #
+    # This is the third time in this function: `alone` had it, the url branch
+    # below records it ("taken from `kept`, not from `units`, so the text is
+    # only dropped when the line that will speak for it actually survives"),
+    # and `_dedupe`'s own docstring warns that two suppressions must never
+    # each assume the other's unit stayed. Any rule that defers to another
+    # unit has to be asked after `_dedupe`, not before.
+    speaks = {a.xpath for a, _v, _lbl in kept
+              if a.category == "interactive" and a.tag not in _SUPPRESSED_TAGS}
+    speaks |= {a.xpath.split("/text()")[0] for a, _v, _lbl in kept
+               if a.tag in _CONSUMING_CLASSES}
+    consumed -= {x for x in consumed_by_control if x not in speaks}
 
     # How many units still stand at each element, which is a different
     # question from how many arrived.
