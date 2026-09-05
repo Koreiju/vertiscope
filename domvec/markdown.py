@@ -370,6 +370,7 @@ def _render_unit(
     label: str,
     text_at_node: str = "",
     target: str = "",
+    alone: bool = False,
 ) -> Optional[str]:
     """One address plus its value as one markdown line, or None to suppress.
 
@@ -383,6 +384,25 @@ def _render_unit(
     cat = address.category
 
     if address.tag in _SUPPRESSED_TAGS:
+        # ... unless it is the only unit the element has.
+        #
+        # `interactive.links` is suppressed because an anchor also yields its
+        # href as a `urls.*` unit and its words as a `text.visible` one, so
+        # drawing it too would print `[a]` beside them. That held while its
+        # value WAS the tag name.
+        #
+        # It now carries the anchor's own label, and an anchor can have
+        # nothing else: arxiv's `Disable MathJax` is an `<a>` with no href,
+        # no handler, and its words folded into an all-inline parent, so this
+        # unit is all there is and suppressing it drew the control nowhere.
+        # 106 anchors over 16 corpus pages, each one words the page shows.
+        #
+        # `alone` is counted at the call site, which is the only place that
+        # knows what else sits at this element. An anchor with an href still
+        # has two units and still draws exactly one line.
+        if (alone and address.tag == "interactive.links"
+                and not _echoes_its_element(address, value)):
+            return f"[{value}]"
         return None
 
     # A render class, from the live path. It is drawn as what it *is*, with
@@ -937,6 +957,14 @@ def _render_sized(
     # kept the link *enactable* and made the markdown lossy -- text carried
     # out of the REPL, into a chunk, into the index, arrived with no idea
     # where it pointed.
+    # How many units sit at each element, so a suppressed unit can tell
+    # whether anything else speaks for it.
+    units_at: Dict[str, int] = {}
+    for a, v, _lbl, _d in units:
+        if (v or "").strip():
+            owner = a.xpath.split("/text()")[0]
+            units_at[owner] = units_at.get(owner, 0) + 1
+
     href_at: Dict[str, str] = {}
     text_at: Dict[str, str] = {}
     for a, v, _lbl, _d in units:
@@ -1182,7 +1210,8 @@ def _render_sized(
             continue
         target = _target_of(owner, href_at)
         rendered = _render_unit(a, v, lbl, text_at.get(owner, ""),
-                                target=target)
+                                target=target,
+                                alone=units_at.get(owner, 0) <= 1)
         if rendered is None:
             continue
         # A line drawn as a link is addressed as one.
