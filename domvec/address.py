@@ -300,10 +300,28 @@ class ContentAddress:
 
     # -- canonical key -----------------------------------------------------
     def key(self) -> str:
-        """Injective string form. ``parse(a.key()) == a`` for every ``a``."""
-        return _SEP.join(
-            _esc(p) for p in (self.url, self.xpath, self.tag, self.accessor)
-        )
+        """Injective string form. ``parse(a.key()) == a`` for every ``a``.
+
+        Computed once per address, then remembered on the instance.
+
+        The key is the identity everything downstream is keyed on -- chunk
+        anchors, the store's rows, every dict the render builds -- so it is
+        asked for far more often than there are addresses to ask about:
+        profiling one render measured 322,858 calls across 24 pages, roughly
+        25 per address, each escaping and joining four strings. `_esc` alone
+        ran 1.29 million times.
+
+        `object.__setattr__` because the dataclass is frozen. The cache is
+        not a field, so it takes no part in `__eq__`, `__hash__` or `parse`,
+        and it cannot outlive the address it belongs to.
+        """
+        cached = self.__dict__.get("_key_cache")
+        if cached is None:
+            cached = _SEP.join(
+                _esc(p) for p in (self.url, self.xpath, self.tag, self.accessor)
+            )
+            object.__setattr__(self, "_key_cache", cached)
+        return cached
 
     @staticmethod
     def parse(key: str) -> "ContentAddress":
