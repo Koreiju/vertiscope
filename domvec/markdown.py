@@ -90,6 +90,23 @@ class MarkdownLine:
     #: to get the first would make the prose read correctly at the cost of
     #: making the link unreachable.
     inline: Tuple[ContentAddress, ...] = ()
+    #: Addresses this line SPEAKS FOR: other spellings of the same fact at
+    #: the same element, which the collapse folded into it.
+    #:
+    #: `inline` and this both put an address on a line that is not its own,
+    #: and they answer different questions. An inline address was MERGED --
+    #: its words are visibly in this line and a reader can act on it there.
+    #: An absorbed one was DROPPED -- an `aria-label` beside the text it
+    #: duplicates, an href hidden because the anchor speaks. Its words are
+    #: not separately visible; what it needs is to remain findable.
+    #:
+    #: Collapse was otherwise terminal. The surviving unit keeps the
+    #: element's xpath so navigation holds, but the dropped address key was
+    #: gone and nothing could say the render had accounted for it. That is
+    #: what makes over-dedup the dangerous direction, and why the fold is
+    #: tuned 17:1 toward leaving noise rather than risking loss. Once a
+    #: collapse names what it collapsed, folding harder stops meaning losing.
+    absorbed: Tuple[ContentAddress, ...] = ()
 
     def render(self) -> str:
         return "  " * self.depth + self.text
@@ -140,6 +157,22 @@ class MarkdownChunk:
             out.append(line.address.key())
             out.extend(a.key() for a in line.inline)
         return out
+
+    # `absorbed` is deliberately NOT counted here.
+    #
+    # Coverage must not move with the context window --
+    # `test_no_address_is_lost_when_the_window_changes` holds that -- and
+    # whether an element draws a line at all is a chunking outcome. Counting
+    # a collapse as covered therefore made the set window-dependent by four
+    # addresses at window 200, twice: once collecting drops inside the
+    # speculative descent, and again with the drops derived from the trie,
+    # because the ATTACHMENT still needs a line to land on.
+    #
+    # Nothing is lost by leaving it out. `covered` asks what the chunk
+    # accounted for; `absorbed` asks what a line speaks for, which is the
+    # question the object model needs in order to reach a folded spelling.
+    # Keeping them apart is what lets folding get more aggressive without
+    # making a coverage figure move.
 
     @property
     def chars(self) -> int:
@@ -624,7 +657,8 @@ def _join_labels(lines: List[MarkdownLine]) -> List[MarkdownLine]:
                 # markdown is the semantic projection and the style map is a
                 # peripheral. The label being the head of the line is reason
                 # enough on its own.
-                out.append(MarkdownLine(cur.depth, joined[0], cur.address))
+                out.append(MarkdownLine(cur.depth, joined[0], cur.address,
+                                       absorbed=cur.absorbed + nxt.absorbed))
                 i += 2
                 continue
         out.append(cur)
@@ -632,7 +666,9 @@ def _join_labels(lines: List[MarkdownLine]) -> List[MarkdownLine]:
     return out
 
 
-def _dedupe(units: List[Tuple[ContentAddress, str, str]]) -> List[Tuple[ContentAddress, str, str]]:
+def _dedupe(units: List[Tuple[ContentAddress, str, str]],
+            dropped_out: Optional[Dict[str, List[ContentAddress]]] = None
+            ) -> List[Tuple[ContentAddress, str, str]]:
     """Token-multiset subsumption, scoped to a single element.
 
     A hash can only say two units are equal (THEORY Prop. 19.3), so it cannot
@@ -709,6 +745,14 @@ def _dedupe(units: List[Tuple[ContentAddress, str, str]]) -> List[Tuple[ContentA
             else:
                 seen_urls.add(value)
 
+    if dropped_out is not None:
+        # Element-scoped by construction -- `by_node` groups on the exact
+        # xpath -- so a drop and the unit that kept it share an element and
+        # the owner needs no search.
+        for i in dropped:
+            address = units[i][0]
+            dropped_out.setdefault(address.xpath.split("/text()")[0],
+                                   []).append(address)
     return [u for i, u in enumerate(units) if i not in dropped]
 
 
@@ -1318,7 +1362,8 @@ def _fold_links_into_prose(lines: List[MarkdownLine]) -> List[MarkdownLine]:
         if added:
             folded[i] = MarkdownLine(depth=line.depth, text=text,
                                      address=line.address,
-                                     inline=line.inline + tuple(added))
+                                     inline=line.inline + tuple(added),
+                                     absorbed=line.absorbed)
 
     if not consumed:
         return lines
@@ -1367,7 +1412,8 @@ def _inline_flow(lines: List[MarkdownLine]) -> List[MarkdownLine]:
         out[-1] = MarkdownLine(
             depth=min(prev.depth, line.depth), text=merged,
             address=prev.address,
-            inline=prev.inline + (line.address,))
+            inline=prev.inline + (line.address,),
+            absorbed=prev.absorbed + line.absorbed)
     return out
 
 
@@ -1615,6 +1661,7 @@ def _clone_chunk(chunk: MarkdownChunk) -> MarkdownChunk:
         # were gone, which is the half of the bargain this field exists to
         # keep.
         lines=[MarkdownLine(depth=l.depth, text=l.text, address=l.address,
+                            absorbed=l.absorbed,
                             inline=l.inline)
                for l in chunk.lines],
         part=chunk.part,
@@ -1631,6 +1678,72 @@ def _memo_key(node: TrieNode, url: str, kind: str, window: int) -> Optional[tupl
     if not node.exact_hash:
         return None
     return (kind, url, getattr(node, "_xpath_cache", None), window, node.exact_hash)
+
+
+def _absorbed_by_element(trie: AddressTrie,
+                         url: str) -> Dict[str, List[ContentAddress]]:
+    """element -> the spellings the collapse drops there.
+
+    Computed from the trie, not from render-time drops, and that distinction
+    is the whole reason this exists as a separate pass.
+
+    The first attempt collected drops inside `_render_sized` and attached
+    them there. `_render_sized` runs SPECULATIVELY at every level `_size_of`
+    and `_descend` consider, and is memoised, so which call observes a drop
+    depends on how the chunker descended -- which is exactly what the context
+    window changes. The covered set then moved with the window, and
+    `test_no_address_is_lost_when_the_window_changes` exists for that
+    property: 4 addresses differed at window 200.
+
+    The trie does not move with the window. `_dedupe` is element-scoped, so
+    running it over every unit at once gives each element the same verdict it
+    would get in any subtree, and the answer is a property of the document.
+
+    This is the same correction the prose fold needed: a pass whose result
+    must not depend on the descent belongs outside it.
+    """
+    units: List[Tuple[ContentAddress, str, str]] = []
+    for node in trie.leaves():
+        address = node.address
+        if address is None or not (node.value or "").strip():
+            continue
+        units.append((address, node.value, address.tag))
+    out: Dict[str, List[ContentAddress]] = {}
+    _dedupe(units, out)
+    return out
+
+
+def _name_the_collapse(chunks: List[MarkdownChunk],
+                       absorbed: Dict[str, List[ContentAddress]]) -> None:
+    """Give every line the spellings its element lost.
+
+    Every line at an element claims them, not the first: which line is first
+    depends on where the chunker cut, and coverage is a property of the
+    chunk rather than of how many lines it took to draw. `covered` is asked
+    as a set by every caller that asks it.
+    """
+    for chunk in chunks:
+        given: set = set()
+        for i, line in enumerate(chunk.lines):
+            if line.address is None:
+                continue
+            owner = line.address.xpath.split("/text()")[0]
+            if owner in given:
+                # Once per element per chunk. Giving every line at an owner
+                # the same set is correct for findability and costs 19x the
+                # entries -- 121,398 tuple slots for 6,401 distinct facts
+                # over twenty pages -- because memoisation and cloning leave
+                # many lines sharing an element. One line carrying it is
+                # enough for anything scanning the chunk.
+                continue
+            taken = absorbed.get(owner)
+            if not taken:
+                continue
+            given.add(owner)
+            # Never itself: a line does not speak for the address it IS.
+            keep = tuple(a for a in taken if a.key() != line.address.key())
+            if keep:
+                chunk.lines[i] = replace(line, absorbed=keep)
 
 
 def render_trie(
@@ -1668,6 +1781,12 @@ def render_trie(
     # the 30-page render from 22.2s to past 500s.
     for chunk in chunks:
         chunk.lines = _fold_links_into_prose(chunk.lines)
+
+    # Named after the fold, so a line that merged links still reports what
+    # its element collapsed. Both are post-passes for the same reason.
+    for url in trie.urls():
+        _name_the_collapse(chunks, _absorbed_by_element(trie, url))
+        break
 
     _level_page(chunks)
     _number_parts(chunks)
