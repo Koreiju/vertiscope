@@ -190,3 +190,53 @@ Diagnosing over_dedup needs the sensor's own rendered set from the live run,
 not a static re-render. Everything else in this file's history is the same
 mistake in a different costume: reasoning about one path from the other
 path's output.
+
+## Non-destructive collapse: attempted, reverted, and why
+
+**The idea.** `over_dedup` is dangerous because collapse is terminal: the
+surviving unit keeps the element's xpath so navigation holds, but the dropped
+address key is gone and nothing can say the render accounted for it. That
+asymmetry is what justifies tuning 17:1 toward leaving noise. If a line named
+what it collapsed, folding harder would stop meaning losing and recall could
+rise.
+
+**Built:** `MarkdownLine.absorbed`, alongside `inline` and distinct from it --
+`inline` is MERGED (words visibly in the line, actionable there), `absorbed`
+is DROPPED (an `aria-label` beside the text it duplicates, an href hidden
+because the anchor speaks; not separately visible, only findable). `_dedupe`
+reports what it dropped, `hidden` counts as a collapse too, and `covered`
+accounts for both.
+
+**Measured, on 20 pages:** 4,411 collapses named across 3,484 lines, `covered`
+29,021 -> 33,432, `anchors` unchanged at 21,785. The breakdown is the right
+shape -- text.visible 2,397, urls.external 687, text.accessible 451,
+text.metadata 334: the alternate spellings of one fact.
+
+**Reverted.** It makes the covered set depend on the context window, and
+`test_no_address_is_lost_when_the_window_changes` exists for exactly that
+property: 4 addresses differ at window 200.
+
+The cause is structural, not a detail. `absorbed_at` collects drops during
+one `_render_sized` call, but that function runs SPECULATIVELY at every level
+`_size_of` and `_descend` consider, and is memoised. Which call observes a
+drop, and whether the line that would claim it is in the emitted chunk,
+depends on how the chunker descended -- which is what the window changes.
+Switching the attachment from `pop` (first line wins) to `get` (every line at
+the element) removed one source of nondeterminism and did not fix it.
+
+**What a working version needs:** the absorbed set must be a property of the
+ELEMENT, derived from the units at that element, computed independently of
+which render call happened to see them -- the same discipline the fold pass
+needed when it had to be hoisted out of the descent for cost. Collect it from
+the trie, not at render time.
+
+Two lessons banked either way:
+
+* the field was a silent no-op at first. `_dedupe` reported 76,502 drops, the
+  owners were collected, the attachment fired, and ZERO survived, because
+  four places RECONSTRUCT `MarkdownLine` and none carried the new field --
+  `_join_labels`, `_fold_links_into_prose`, `_inline_flow`, `_clone_chunk`.
+  `_clone_chunk`'s own docstring warns about this for `inline`. Reading the
+  code would not have caught it; measuring did.
+* coverage must not move with the window, and any per-element bookkeeping
+  added at render time will move with it unless it is derived from the trie.
