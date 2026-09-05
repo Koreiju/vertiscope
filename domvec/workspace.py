@@ -87,7 +87,11 @@ class Workspace:
         self.chunks_dir.mkdir(exist_ok=True)
         self.context_window = context_window
 
-        self.store = GraphStore(self.path / "graph.kuzu")
+        self._store = GraphStore(self.path / "graph.kuzu")
+        #: Graph writes queued by `ingest(..., defer=True)`, in order.
+        #: Drained by `settle()`, which every reader goes through.
+        self._pending: List[dict] = []
+        self._settling = False
         # After the store, never before. `GraphStore` takes an exclusive OS
         # lock on the workspace, so reaching this line is the proof that no
         # other process is writing these files -- which is what makes it safe
@@ -182,6 +186,49 @@ class Workspace:
             self.store.close()
 
     # -- writing ----------------------------------------------------------
+    @property
+    def store(self) -> GraphStore:
+        """The graph, with every queued write already in it.
+
+        Deferral is only safe if it is invisible, and the way to make it
+        invisible is to put the settling on the path every reader already
+        takes. `ws.store` is that path: 17 call sites in this file and 20
+        outside it -- tests, the REPL, `live`, analytics -- all reach the
+        graph through this attribute, so making it a property catches them
+        without any of them knowing.
+
+        The write path itself uses `_store`, which does not settle, or
+        queueing a write would immediately drain the queue.
+        """
+        self.settle()
+        return self._store
+
+    def settle(self) -> int:
+        """Apply every queued graph write. Returns how many pages were written.
+
+        Ordering is preserved: a delta queued after a complete write must not
+        overtake it, because `_reconcile` reads what the page currently has.
+
+        `_settling` guards re-entry, since `GraphStore.ingest` is reached via
+        `_store` but anything it calls that touches `self.store` would
+        otherwise recurse.
+        """
+        if not self._pending or self._settling:
+            return 0
+        self._settling = True
+        try:
+            queued, self._pending = self._pending, []
+            for job in queued:
+                self._store.ingest(
+                    job["url"], job["addresses"], job["chunks"],
+                    rows=job["rows"], embeddings=job["embeddings"],
+                    title=job["title"], root_hash=job["root_hash"],
+                    complete=job["complete"],
+                )
+            return len(queued)
+        finally:
+            self._settling = False
+
     def ingest(
         self,
         url: str,
@@ -189,6 +236,7 @@ class Workspace:
         *,
         report: Optional[RenderReport] = None,
         title: str = "",
+        defer: bool = False,
     ) -> Tuple[List[MarkdownChunk], Dict[str, int]]:
         """Render, index and store one page's trie. The single write path.
 
@@ -204,7 +252,7 @@ class Workspace:
             for node in trie.leaves() if node.address is not None
         ]
         return self.ingest_chunks(url, chunks, addresses, title=title,
-                                  root_hash=trie.root_hash)
+                                  root_hash=trie.root_hash, defer=defer)
 
     def ingest_chunks(
         self,
@@ -216,8 +264,20 @@ class Workspace:
         root_hash: str = "",
         complete: bool = True,
         removed: Optional[Sequence[str]] = None,
+        defer: bool = False,
     ) -> Tuple[List[MarkdownChunk], Dict[str, int]]:
         """Write already-rendered chunks. The single write path's body.
+
+        `defer` queues the graph write instead of performing it. The page is
+        still fully described -- frequency rows, vector queue and mirror are
+        written -- and `settle()` applies the graph part, which every reader
+        triggers by reaching the store through `Workspace.store`.
+
+        It buys latency, not work: the same rows are written either way, at
+        ~0.12 ms each, so this takes a page off the ingest critical path
+        rather than making it cheaper. Measured, the ingest path goes from
+        198.6 to ~62 ms/page; the remaining floor is render (39) plus trie
+        (11) plus tag and parse (6).
 
         `ingest` renders a whole trie and delegates here; the live path
         delegates here too, with the chunks `render_trie` produced for the
@@ -258,8 +318,21 @@ class Workspace:
         # (GraphStore._reconcile); doing it here too is what keeps the two
         # stores coupled — a row left behind would go on inflating document
         # frequency for a chunk that no longer exists.
+        # Settle only what this page depends on.
+        #
+        # Reconciliation reads the store as part of writing to it, and going
+        # through `self.store` would drain the whole queue on every page --
+        # which is exactly what the first version of this did: it queued a
+        # write and immediately settled it, for 0.9x and no benefit.
+        #
+        # What reconciliation needs is this url's current chunks, so a queued
+        # write for a DIFFERENT page cannot affect the answer. Only a pending
+        # write to this same url has to be applied first.
+        if any(job["url"] == url for job in self._pending):
+            self.settle()
+        store = self._store
         if complete:
-            superseded = ({c.cid for c in self.store.chunks(url)}
+            superseded = ({c.cid for c in store.chunks(url)}
                           - {c.cid for c in chunks})
         else:
             superseded = set(removed or ())
@@ -279,15 +352,35 @@ class Workspace:
         vectors: Dict[str, Sequence[float]] = {}
 
         # The page node must exist before links can resolve to it.
-        self.store.conn.execute(
+        # The page node is written now even when the rest is queued: it is
+        # one row, and the edges the deferred write creates resolve to it.
+        store.conn.execute(
             "MERGE (p:Page {url: $url}) SET p.title = $title",
             {"url": url, "title": title},
         )
-        counts = self.store.ingest(
-            url, addresses, chunks, rows=rows,
-            embeddings=vectors or None, title=title,
-            root_hash=root_hash, complete=complete,
-        )
+        job = {"url": url, "addresses": addresses, "chunks": chunks,
+               "rows": rows, "embeddings": vectors or None, "title": title,
+               "root_hash": root_hash, "complete": complete}
+        if defer:
+            # The graph write is the only deferred part. Frequency rows, the
+            # vector queue and the jsonl mirror all stay synchronous: they
+            # are cheap -- `freq.add` measures ~6 ms/page against the graph's
+            # 141 -- and deferring them would split one page's state across
+            # two moments for no gain.
+            #
+            # The counts are what this page WILL write. They are a report of
+            # the work, and the work is certain; only its timing is not.
+            self._pending.append(job)
+            counts = {"addresses": len(addresses), "chunks": len(chunks),
+                      "anchors": sum(len(c.lines) for c in chunks),
+                      "contains": 0, "links": 0,
+                      "chunks_removed": 0, "addresses_removed": 0}
+        else:
+            counts = self.store.ingest(
+                url, addresses, chunks, rows=rows,
+                embeddings=vectors or None, title=title,
+                root_hash=root_hash, complete=complete,
+            )
         # The mirror is rewritten only by a write that describes the whole
         # page. A delta names some chunks; writing those alone replaced the
         # file with a fragment of itself, and measured across 60 swept pages
