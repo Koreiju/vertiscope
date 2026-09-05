@@ -1713,6 +1713,94 @@ def _absorbed_by_element(trie: AddressTrie,
     return out
 
 
+def _suppressed_controls(trie: AddressTrie) -> Dict[str, ContentAddress]:
+    """element -> the affordance address the render suppresses there.
+
+    `_SUPPRESSED_TAGS` exists for a rendering reason that is correct: an
+    anchor also yields its href and its words, so drawing its
+    `interactive.links` unit too would print `[a]` beside them. But
+    `_render_unit` returns None to suppress, and a unit that draws no line
+    leaves no address -- so suppressing the RENDERING silently discarded the
+    ADDRESS, which is the only thing that says the line is pressable.
+
+    Measured over the 136-page corpus before this existed: 71,866
+    `interactive.links` addresses made, 7,325 surviving anywhere in the
+    output -- 89.8% lost -- against 0.2% of inputs and 0.1% of forms, which
+    have no competing unit to be suppressed in favour of. Anchors are 88% of
+    every affordance on the corpus, so the interactive surface drew most
+    hyperlinks as dead text.
+
+    Derived from the trie rather than collected during the render, for the
+    reason `_absorbed_by_element` records: `_render_sized` runs speculatively
+    at every level the chunker considers, so anything gathered inside it
+    moves with the context window. This does not.
+    """
+    out: Dict[str, ContentAddress] = {}
+    for node in trie.leaves():
+        address = node.address
+        if address is None or not (node.value or "").strip():
+            continue
+        if address.tag in _SUPPRESSED_TAGS and address.is_control:
+            out.setdefault(address.xpath.split("/text()")[0], address)
+    return out
+
+
+def _carry_affordance(chunks: List[MarkdownChunk],
+                      controls: Dict[str, ContentAddress]) -> None:
+    """Put the suppressed control on the line, in `inline`. Never in the slot.
+
+    The first version of this promoted the control into `line.address` when
+    the line WAS the anchor, which read well and broke the crawl.
+
+    `line.address` is the only thing the store persists per line: the
+    `Anchors` edge is one address per line by contract, keyed on `ord`, and
+    `Workspace.links_from` reads it back through `addresses_of` to build the
+    crawl frontier -- "no separate link extractor: a link is a `urls.*`
+    address, which the trie already holds". Promoting the control therefore
+    pushed the anchor's `urls.internal` address out of the store, and a page
+    full of anchors produced an empty frontier.
+    `test_links_come_from_the_stored_addresses` caught it, which is what it is
+    for.
+
+    So the address slot stays exactly as the render chose it, and the control
+    rides in `inline` -- already defined as the addresses a line merged and a
+    reader can act on there. That is enough for the two things that were
+    actually missing: `covered` accounts for the affordance, and
+    `graphstore._link_hyperlinks` gives it a chunk.
+
+    It is NOT enough to make the affordance visible to a consumer reading the
+    store, because `inline` is not persisted either. That consumer asks
+    `addresses_at(element)` instead -- see `obsidian.sidecar.chunk_payload`.
+    The alternative was widening the `Anchors` contract, and one address per
+    line is depended on by the jsonl round-trip, the depth recovery and the
+    REPL alike.
+
+    One element is claimed once, in chunk and line order, because repeating a
+    control down every line that mentions it says nothing extra.
+    """
+    claimed: set = set()
+    for chunk in chunks:
+        for i, line in enumerate(chunk.lines):
+            if line.address is None:
+                continue
+            added = []
+            # The line's own element, and every element folded into it: an
+            # anchor inside a sentence rides here as its href, so its element
+            # is reachable even though the line is addressed elsewhere.
+            for carried in (line.address,) + tuple(line.inline) + tuple(line.absorbed):
+                owner = carried.xpath.split("/text()")[0]
+                control = controls.get(owner)
+                if control is None or owner in claimed:
+                    continue
+                if control.key() == carried.key():
+                    continue            # already here under its own name
+                claimed.add(owner)
+                added.append(control)
+            if added:
+                chunk.lines[i] = replace(
+                    line, inline=tuple(line.inline) + tuple(added))
+
+
 def _name_the_collapse(chunks: List[MarkdownChunk],
                        absorbed: Dict[str, List[ContentAddress]]) -> None:
     """Give every line the spellings its element lost.
@@ -1787,6 +1875,13 @@ def render_trie(
     for url in trie.urls():
         _name_the_collapse(chunks, _absorbed_by_element(trie, url))
         break
+
+    # Last, so it sees the lines the fold and the collapse-naming settled on:
+    # an anchor folded into a sentence is a different line than the one that
+    # entered those passes, and the affordance belongs on the line a reader
+    # actually sees. It only ever appends to `inline`; the address slot is
+    # what the store persists and the crawl reads back.
+    _carry_affordance(chunks, _suppressed_controls(trie))
 
     _level_page(chunks)
     _number_parts(chunks)
