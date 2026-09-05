@@ -732,7 +732,15 @@ class ContentTagger:
 			if tag in _INPUT_TAGS:
 				self._add('interactive', 'inputs', xpath, tag, '')
 			elif tag in _BUTTON_TAGS:
-				self._add('interactive', 'buttons', xpath, tag, '')
+				# The button's own words, for the same reason as the
+				# anchor below: `_render_unit` draws `( shown )` where
+				# `shown = text_at_node or value`, so a button whose text
+				# was folded into an all-inline parent fell back to the
+				# tag and drew `( button )` on a page that says `Menu`.
+				# A button with genuinely no words still yields the tag,
+				# which is what `( button )` should mean.
+				self._add('interactive', 'buttons', xpath,
+					_own_label(node) or tag, '')
 			elif tag == 'a':
 				# The link's own words, not the string 'a'.
 				#
