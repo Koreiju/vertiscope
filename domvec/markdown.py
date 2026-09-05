@@ -1266,6 +1266,20 @@ def _render_sized(
                  ("", " ".join(v.split()))}
 
     lines = []
+    # (element, drawn text) -> the line that already said it.
+    #
+    # `_dedupe` compares RAW values and cannot see this: a `<button onclick>`
+    # yields an `interactive.buttons` detection valued by `_own_name` and an
+    # `interactive.event_handlers` one valued `button[onclick]`, which share
+    # no tokens, so both survive correctly on what that rule can see. The
+    # duplication only appears here, where `_render_unit` draws BOTH from
+    # `text_at[owner]` and numpy's docs print `( Go Back )` twice.
+    #
+    # This is the same shape as `consumed` -- "the duplication appears later,
+    # when `_render_unit` draws the control using the text unit's value" --
+    # which handles control-against-text and not control-against-control.
+    # 208 lines over the corpus, 203 of them this exact pair.
+    drawn_here: Dict[Tuple[str, str], int] = {}
     for a, v, lbl in kept:
         if not v.strip():
             continue
@@ -1299,6 +1313,22 @@ def _render_sized(
         if (target and a.tag in _RENDER_FORM
                 and a.tag not in ("link", "image", "media")):
             a = replace(a, tag="link")
+
+        # One element does not say the same thing twice. The second detection
+        # keeps its ADDRESS, on the surviving line's `inline`, because it is a
+        # real affordance -- the `onclick` half of that button is what makes
+        # it pressable on the live path -- and dropping the line must not drop
+        # the handle. This is the lesson `_carry_affordance` records one
+        # commit earlier: suppressing a rendering is not licence to discard an
+        # address.
+        here = (owner, rendered)
+        prior = drawn_here.get(here)
+        if prior is not None:
+            was = lines[prior]
+            if a.key() != was.address.key():
+                lines[prior] = replace(was, inline=was.inline + (a,))
+            continue
+        drawn_here[here] = len(lines)
         lines.append(MarkdownLine(depth=depth, text=rendered, address=a))
     rendered = MarkdownChunk(url=url, xpath=xpath,
                              lines=_inline_flow(_join_labels(lines)))

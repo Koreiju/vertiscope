@@ -210,3 +210,35 @@ def test_the_repl_lists_every_drawn_control():
                      "Add to basket", "Search books"):
         assert expected in labels, \
             "%r missing from the REPL controls listing: %s" % (expected, labels)
+
+
+DOUBLE = ("<html><body><button onclick='go()'>Go Back</button>"
+          "<p>other words</p></body></html>")
+
+
+def test_one_element_does_not_say_the_same_thing_twice():
+    """`<button onclick>` is two detections and one control.
+
+    `interactive.buttons` is valued by `_own_name` and
+    `interactive.event_handlers` by `button[onclick]`. They share no tokens,
+    so `_dedupe` keeps both -- correctly, on what a value comparison can see.
+    The duplication appears only when `_render_unit` draws BOTH from
+    `text_at[owner]`, and numpy's docs printed `( Go Back )` twice. 208 lines
+    over the corpus, 203 of them this pair.
+    """
+    drawn = [ln.text for ln in _render(DOUBLE) if "Go Back" in ln.text]
+    assert len(drawn) == 1, "the same control drew %d lines: %r" % (
+        len(drawn), drawn)
+
+
+def test_the_dropped_duplicate_keeps_its_address():
+    """Suppressing a rendering is not licence to discard an address.
+
+    The `onclick` half of that button is what makes it pressable on the live
+    path, so the second detection rides on the surviving line's `inline` --
+    the same lesson `_carry_affordance` records for suppressed anchors.
+    """
+    line = [ln for ln in _render(DOUBLE) if "Go Back" in ln.text][0]
+    tags = {a.tag for a in _all_addresses(line)}
+    assert "interactive.event_handlers" in tags, \
+        "the handler address was dropped with the duplicate line: %s" % tags
