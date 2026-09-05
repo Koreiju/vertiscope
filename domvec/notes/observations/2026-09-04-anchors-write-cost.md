@@ -146,3 +146,47 @@ wrote more rows than a page has and reported 227.8 ms/page where production
 measures 69 and a deduped harness measures 65.5. Its *ratios* stand; its
 absolute figures do not. Cross-check every isolated harness against the
 end-to-end number before quoting it.
+
+---
+
+## 2026-09-05: dedup, and a caution about which pipeline you are looking at
+
+`--corpus` over 135 pages, one verified run (see `analytics/runs.py`):
+
+    collapsed 46,886   under_dedup 11,641   over_dedup 670
+    recall 80.11%   precision 98.59%   correctness 93.77%
+
+**The recall figure is inherited policy, not a regression.** A matched A/B on
+identical pages, labels off vs on, came back byte-identical -- and the arms
+DO differ in output, verified separately, so the label work changes what a
+line SAYS without changing how many lines a lineage draws, which is what
+dedup counts. The 17:1 bias toward noise over loss is what `DedupScore`
+argues for: over-dedup is unrecoverable, under-dedup is survivable.
+
+Raising recall means folding harder, in the direction that once made every
+search-result title vanish. The way out is not a threshold but making
+collapse non-destructive -- carrying absorbed addresses the way `line.inline`
+already does -- so that folding stops meaning losing. Unbuilt.
+
+**`_dedupe` is not where the loss is.** It is element-scoped, so a dropped
+unit's xpath survives on the unit that kept it; navigation is intact. The
+measured `over_dedup` is a LINEAGE collapse -- ancestor/descendant, no line
+surviving at any member's owner -- which comes from the render's suppression
+and consumption rules, not from `_dedupe`.
+
+**The caution.** Chasing the 670, the `over_dedup_sample` showed AP headline
+anchors -- `Western Europe sets new temperature record` -- that were verified
+elsewhere in this session to draw correctly. That looks like a metric
+artifact, and the obvious next step is to reproduce it offline.
+
+Do not. `--corpus` measures the SENSOR path: a live browser, after the page's
+scripts have run. Reproducing with `ContentTagger` measures the TAGGER path:
+a static parse of the saved html. AP's footer is JS-built, so
+`/html/body/footer/div/div/div/div/a` exists in the live DOM and has NOTHING
+beneath it in the static parse. The two disagree for reasons that have
+nothing to do with dedup, and comparing them proves nothing either way.
+
+Diagnosing over_dedup needs the sensor's own rendered set from the live run,
+not a static re-render. Everything else in this file's history is the same
+mistake in a different costume: reasoning about one path from the other
+path's output.
