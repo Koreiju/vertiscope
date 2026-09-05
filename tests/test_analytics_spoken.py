@@ -116,3 +116,50 @@ def test_machine_data_is_out_of_scope():
     assert not _is_reader_text(address("text.metadata", "text"))
     assert not _is_reader_text(address("json_data.ld_json", "json_data"))
     assert not _is_reader_text(address("text.attributes", "text"))
+
+
+def test_a_selector_value_is_not_measured_as_words():
+    """`content_tagger` emits two kinds of interactive detection.
+
+    Three carry the element's words -- inputs, buttons and anchors all pass
+    `_own_name`/`_own_label`. The rest pass a selector: `f'{tag}[role=...]'`,
+    `f'{tag}[contenteditable]'`, `f'{tag}[{attr}]'`. A selector's words are
+    never on the page, so scoring one against the rendered text is arithmetic
+    rather than measurement.
+
+    It read `interactive.inputs|role` at 1,479 mute of 1,618 -- 91% -- and
+    made inputs look like the worst class in the corpus, when the real input
+    labels (`interactive.inputs|text()`) are 7 mute of 3,577.
+    """
+    from domvec.address import ContentAddress
+    from domvec.analytics.spoken import _describes_rather_than_reads
+
+    def address(accessor):
+        return ContentAddress(url="https://x.test/", xpath="/html/body/a",
+                              tag="interactive.inputs", accessor=accessor)
+
+    assert _describes_rather_than_reads(address("role"), "a[role=menuitem]")
+    assert _describes_rather_than_reads(address("contenteditable"),
+                                        "div[contenteditable]")
+    assert _describes_rather_than_reads(address("onclick"), "div[onclick]")
+    assert _describes_rather_than_reads(address("data-wfh-interactive"), "div")
+    # The element's own name is a description too, whatever carried it.
+    assert _describes_rather_than_reads(address(""), "a")
+    # Real words are not.
+    assert not _describes_rather_than_reads(address(""), "Add to basket")
+
+
+def test_role_detections_do_not_dominate_a_clean_page():
+    """The end-to-end shape of the same bug.
+
+    A page whose every word is drawn must score clean even when its controls
+    are found by `role`, which is how a great many modern pages mark them.
+    """
+    html = ("<html><body>"
+            "<div role='menuitem'>Open settings</div>"
+            "<div role='textbox' contenteditable='true'>Type here</div>"
+            "<span onclick='go()'>Run it</span>"
+            "</body></html>")
+    report = _measure(html)
+    assert report["mute"] == 0, \
+        "role/handler detections scored as loss: %s" % report["examples"]

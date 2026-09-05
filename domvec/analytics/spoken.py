@@ -37,21 +37,22 @@ in `interactive.links` and nowhere else.
 
 Over the 136-page corpus at the default window:
 
-    captured  142,525
-    mute        2,970        97.92% said
+    captured  137,427
+    mute          751        99.45% said
 
-    interactive.inputs    1,487
-    interactive.buttons     447
     text.visible            421
-    interactive.forms       240
-    interactive.event_handlers  210
     interactive.links       165
+    interactive.buttons     161
+    interactive.inputs        4
 
-Inputs dominate, and that is the lead this measure was built to produce: a
-field's words are usually its `placeholder`, and a placeholder the render
-never says is a control a reader cannot identify. It is not the class anyone
-would have guessed -- the defect that prompted the measure was in links,
-which now sit last.
+The survivors are real. AP's `Cookie Settings` button is one: a control a
+reader can press whose label the output never says, with `settings` present
+and `cookie` absent.
+
+An earlier reading of this table said `interactive.inputs` dominated at 1,487
+and concluded that placeholders were going missing. That was the measure's
+own scope error, not a defect -- see `_DESCRIPTOR_DETECTORS`. Real input
+labels were never the problem, and they are 4 now.
 
 **Why words and not the string.** The first version asked whether the value
 appeared in the output as a substring, and was almost entirely false
@@ -114,6 +115,38 @@ def _is_reader_text(address) -> bool:
     return tag == "text.visible" or address.category == "interactive"
 
 
+#: Detections whose value DESCRIBES the element rather than reading it.
+#:
+#: `content_tagger` emits two kinds of interactive detection and they look
+#: alike from here. Three carry the element's words -- inputs, buttons and
+#: anchors all pass `_own_name`/`_own_label`. The rest pass a selector:
+#: `f'{tag}[role={role}]'`, `f'{tag}[contenteditable]'`, `f'{tag}[{attr}]'`.
+#:
+#: A selector's words are never on the page, so scoring it against the
+#: rendered text is arithmetic, not measurement: `interactive.inputs|role`
+#: read 1,479 mute of 1,618 captured, 91%, and `interactive.buttons|role`
+#: 277 of 304. Together they were 59% of every loss the measure reported and
+#: made `interactive.inputs` look like the worst class in the corpus. The
+#: real input labels, `interactive.inputs|text()`, are 7 mute of 3,577.
+_DESCRIPTOR_DETECTORS = frozenset({"role", "contenteditable",
+                                   "data-wfh-interactive"})
+
+
+def _describes_rather_than_reads(address, value: str) -> bool:
+    """True when the value names the element instead of quoting the page."""
+    detector = address.detector or ""
+    if detector in _DESCRIPTOR_DETECTORS:
+        return True
+    if detector.startswith("on") and len(detector) > 2:
+        return True                      # onclick, onsubmit, onfocus, ...
+    # `interactive.forms` and `interactive.elements` pass the bare tag, and
+    # `_own_name` falls back to it when an element genuinely has no words.
+    # Both are the element's name, not the page's words, and there is already
+    # a predicate for exactly that question.
+    from ..markdown import _echoes_its_element
+    return _echoes_its_element(address, value)
+
+
 _LETTERS = re.compile(r"[^\W\d_]", re.UNICODE)
 
 #: A value that IS a url, whatever category carries it. `interactive.links`
@@ -169,6 +202,8 @@ def score_page(trie, chunks) -> dict:
         if address is None or address.category in _NOT_WORDS:
             continue
         if not _is_reader_text(address):
+            continue
+        if _describes_rather_than_reads(address, node.value or ""):
             continue
         words = _words_of(node.value or "")
         if not words:
