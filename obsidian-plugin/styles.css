@@ -1,0 +1,76 @@
+/* The surface reads as part of the note, not as an embedded app: it borrows
+   Obsidian's own theme variables so it follows the user's theme rather than
+   imposing a second one. */
+
+.domvec-surface {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  margin: 0.5em 0;
+  overflow: hidden;
+}
+
+.domvec-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  padding: 0.35em 0.6em;
+  background: var(--background-secondary);
+  font-size: var(--font-smaller);
+}
+
+.domvec-cid {
+  font-family: var(--font-monospace);
+  color: var(--text-muted);
+}
+
+.domvec-url {
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+/* Stated in the warning colour: an unreachable sidecar and an empty chunk
+   otherwise render identically, and that ambiguity hides a dead pipeline. */
+.domvec-offline {
+  color: var(--text-warning, var(--text-muted));
+  flex: 1;
+}
+
+.domvec-toggle {
+  margin-left: auto;
+  font-size: var(--font-smaller);
+}
+
+.domvec-body { padding: 0.5em 0.7em; }
+.domvec-line { padding: 0.1em 0; }
+.domvec-text { color: var(--text-normal); }
+
+.domvec-hint,
+.domvec-readout {
+  color: var(--text-muted);
+  font-size: var(--font-smaller);
+}
+
+.domvec-readout {
+  font-family: var(--font-monospace);
+  margin-top: 0.5em;
+  padding-top: 0.4em;
+  border-top: 1px dashed var(--background-modifier-border);
+  word-break: break-all;
+}
+
+/* An affordance looks pressable; the class says which kind it is, so a
+   reader can tell a link from a button without pressing either. */
+.domvec-act {
+  cursor: pointer;
+  text-align: left;
+  font-size: inherit;
+}
+
+.domvec-link   { color: var(--text-accent); }
+.domvec-button { font-weight: 600; }
+.domvec-field  { font-style: italic; }
+
+.domvec-error { color: var(--text-error); }
