@@ -587,6 +587,15 @@ class DedupScore:
     #: already learned this and carries `unseen_sample`; the lesson had not
     #: crossed to the instrument next door.
     over_dedup_sample: List[Tuple[str, str]] = field(default_factory=list)
+    #: The same, for the error that is seventeen times larger.
+    #:
+    #: `over_dedup_sample` was added because "a count alone is
+    #: undiagnosable", and that argument applies with more force here:
+    #: under_dedup is 11,641 against over_dedup's 670, so recall is what the
+    #: aggregate is really reporting and nothing said WHICH lineages still
+    #: draw twice. Carries how many lines survived, since a lineage drawing
+    #: two lines and one drawing nine are different problems.
+    under_dedup_sample: List[Tuple[str, str, int]] = field(default_factory=list)
 
     @property
     def correctness(self) -> float:
@@ -596,6 +605,7 @@ class DedupScore:
 
     def as_dict(self) -> Dict[str, float]:
         return {"redundant_pairs": self.redundant_pairs,
+                "under_dedup_sample": self.under_dedup_sample,
                 "collapsed": self.collapsed,
                 "under_dedup": self.under_dedup,
                 "over_dedup": self.over_dedup,
@@ -743,6 +753,10 @@ def score_dedup(truth: PageTruth,
             score.collapsed += 1
         else:
             score.under_dedup += survivors - 1
+            if len(score.under_dedup_sample) < 12:
+                score.under_dedup_sample.append(
+                    (_owner(members[0].xpath),
+                     (members[0].value or "")[:70], survivors))
 
     # Content with no redundant partner, still present: correctly left alone.
     for unit in truth.units:
