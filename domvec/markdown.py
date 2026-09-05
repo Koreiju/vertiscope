@@ -272,6 +272,25 @@ _CONTROL_TAGS = frozenset({
 })
 
 
+def _echoes_its_element(address: ContentAddress, value: str) -> bool:
+    """Is this value the page's words, or the fold repeating the element name?
+
+    `interactive.links` carries the anchor's own label, and falls back to the
+    tag name when the anchor has none -- `<a name="chap01">`. Telling those
+    apart with `_is_tag_name` does not work: that test is "short and
+    alphabetic", which is right for a media value and wrong here. It ate
+    `Espanol`, `China` and `Europe` -- every one-word nav label on AP's front
+    page, 643 controls across ten corpus pages -- for the same reason the
+    comment on `_CONTROL_TAGS` gives for not using it on a label.
+
+    Compared against the address's OWN last step instead. A closed list would
+    have to track the html spec; this asks whether the value repeats the name
+    of the element it sits on, which is exactly what the fallback produces.
+    """
+    step = (address.xpath or "").rstrip("/").rsplit("/", 1)[-1].split("[")[0]
+    return bool(step) and value.strip().lower() == step.lower()
+
+
 def _media_alt(text: str, value: str) -> str:
     """What an image or a player is *of*, never its file name.
 
@@ -935,7 +954,7 @@ def _render_sized(
         owner = a.xpath.split("/text()")[0]
         if a.category == "text" or a.tag in ("text", "heading"):
             text_at.setdefault(owner, " ".join(v.split()))
-        elif a.tag == "interactive.links" and not _is_tag_name(v):
+        elif a.tag == "interactive.links" and not _echoes_its_element(a, v):
             # A link's own words, carried on its interactive detection.
             #
             # An anchor inside all-inline prose has its text folded into the

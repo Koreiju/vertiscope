@@ -430,6 +430,21 @@ class GraphStore:
         for chunk in chunks:
             for line in chunk.lines:
                 chunk_of[line.address.aid] = chunk.cid
+                # The addresses the line folded into itself count too.
+                #
+                # A link inside a sentence is drawn as part of that sentence,
+                # so its url address rides on `line.inline` and never appears
+                # as a line's own address. Reading only `line.address` here
+                # left those links with no chunk to hang an edge on, and the
+                # link graph emptied out -- `test_link_edges_reach_the_graph`
+                # caught it, which is what it was written for after a
+                # url-matching defect once dropped three quarters of the
+                # resolvable edges unnoticed.
+                #
+                # Same principle as `MarkdownChunk.covered`: the chunk that
+                # drew the line accounts for every address folded into it.
+                for merged in line.inline:
+                    chunk_of[merged.aid] = chunk.cid
 
         # Both sides in the *stored* spelling: the Page node's primary key is
         # the url the page was scanned with, and `canonical_url` does not
