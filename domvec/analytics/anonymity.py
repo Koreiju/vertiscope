@@ -37,6 +37,8 @@ import sys
 import time
 from typing import Dict, List, Optional, Sequence
 
+from .runs import stamp
+
 DEFAULT_ARTIFACT_DIR = pathlib.Path("build_analytics")
 
 #: Each arm is a set of Firefox preferences and a claim about what it buys.
@@ -298,7 +300,7 @@ def write_anonymity_artifact(report: dict,
     path = out_dir / "anonymity.jsonl"
     with path.open("a", encoding="utf-8") as handle:
         for row in report.get("rows", []):
-            record = dict(row)
+            record = stamp(dict(row))
             record["t"] = report.get("t")
             handle.write(json.dumps(record, separators=(",", ":")) + "\n")
     return path

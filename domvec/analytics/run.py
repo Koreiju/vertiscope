@@ -45,6 +45,8 @@ from .groundtruth import read_page_truth
 
 __all__ = ["Phases", "measure_page", "write_artifact"]
 
+from .runs import stamp
+
 DEFAULT_ARTIFACT_DIR = pathlib.Path("build_analytics")
 
 
@@ -374,7 +376,7 @@ def write_artifact(report: AffineReport,
     directory = pathlib.Path(directory or DEFAULT_ARTIFACT_DIR)
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / "affine.jsonl"
-    row = report.as_dict()
+    row = stamp(report.as_dict())
     row["t"] = time.time()
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(row, separators=(",", ":")) + "\n")

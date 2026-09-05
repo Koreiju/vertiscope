@@ -45,6 +45,8 @@ import sys
 import time
 from typing import Dict, List, Sequence
 
+from .runs import stamp
+
 DEFAULT_ARTIFACT_DIR = pathlib.Path("build_analytics")
 
 #: The render classes the sensor presents as interactable, from
@@ -287,7 +289,7 @@ def write_affordance_artifact(report: dict,
     path = out_dir / "affordance.jsonl"
     with path.open("a", encoding="utf-8") as handle:
         for row in report.get("rows", []):
-            record = dict(row)
+            record = stamp(dict(row))
             record["t"] = report.get("t")
             handle.write(json.dumps(record, separators=(",", ":")) + "\n")
     return path
