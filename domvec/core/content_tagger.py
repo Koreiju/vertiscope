@@ -460,6 +460,35 @@ def _own_label(node) -> str:
 	return out.translate(_INVISIBLE_TRANS).strip()
 
 
+#: What a page calls a control when the control has no words of its own.
+#: `placeholder` first: it is what a reader sees in an empty field.
+_NAME_ATTRS = ("placeholder", "aria-label", "title", "alt", "value")
+
+
+def _own_name(node, tag: str) -> str:
+	"""A control's label: its own words, else what an attribute calls it.
+
+	An `<input>` is void -- it has no text to fold -- so `_own_label`
+	returns nothing and the detection fell back to the tag, drawing
+	`[ ] input` on a page whose field says `Search`. The placeholder,
+	`aria-label` or `title` is what the page shows there.
+
+	The tag is the last resort and stays meaningful: `[ ] input` for a
+	field the page genuinely leaves unnamed.
+	"""
+	own = _own_label(node)
+	if own:
+		return own
+	for attr in _NAME_ATTRS:
+		try:
+			value = (node.get_attr(attr) or "").strip()
+		except Exception:  # noqa: BLE001
+			continue
+		if value:
+			return value.translate(_INVISIBLE_TRANS).strip()
+	return tag
+
+
 class ContentTagger:
 	"""
 	Walks a ShadowDOM tree and extracts all contentful xpaths.
@@ -730,7 +759,8 @@ class ContentTagger:
 		is_interactive = node.get_attr('data-wfh-interactive') == 'true'
 		if is_interactive or tag in _INPUT_TAGS or tag in _BUTTON_TAGS or tag == 'a' or tag in _FORM_TAGS:
 			if tag in _INPUT_TAGS:
-				self._add('interactive', 'inputs', xpath, tag, '')
+				self._add('interactive', 'inputs', xpath,
+					_own_name(node, tag), '')
 			elif tag in _BUTTON_TAGS:
 				# The button's own words, for the same reason as the
 				# anchor below: `_render_unit` draws `( shown )` where
@@ -740,7 +770,7 @@ class ContentTagger:
 				# A button with genuinely no words still yields the tag,
 				# which is what `( button )` should mean.
 				self._add('interactive', 'buttons', xpath,
-					_own_label(node) or tag, '')
+					_own_name(node, tag), '')
 			elif tag == 'a':
 				# The link's own words, not the string 'a'.
 				#
