@@ -33,11 +33,11 @@ it, and each loses things for its own reason:
 
 Over the whole corpus, 136 pages and 79,186 captured affordances:
 
-    empty        165   nothing to draw, excused
-    collapsed    786   the page shows words the fold does not address
-    drawn      98.75% of captured, 98.96% of drawable
+    empty        164   nothing to draw, excused
+    collapsed     25   the page shows words the fold does not address
+    drawn      99.50% of captured, 99.71% of drawable
     reachable 100.00%
-    labelled   87.08% of those drawn with words to show
+    labelled   88.44% of those drawn with words to show
 
 `labelled` is the one to read carefully, and any subset of this corpus
 flatters it: the first ten pages score 92.99% because they are link-rich
@@ -50,7 +50,15 @@ step was a defect rather than a tuning:
                77.38 -> 87.08   a one-word label is a label -- the guard had
                                 been `_is_tag_name`, "short and alphabetic",
                                 which discarded `Espanol`, `China`, `Europe`
-    collapsed  1,173 ->    786  the same two changes
+               87.08 -> 88.44   buttons and inputs the same way (a field is
+                                named by its placeholder), and a container is
+                                no longer marked down for declining to repeat
+                                its contents
+    collapsed  1,173 ->    786  the first two changes
+                786 ->     25  a link that is its element's ONLY unit draws
+                                instead of being suppressed -- arxiv's
+                                `Disable MathJax` is an `<a>` with no href and
+                                no handler, so suppression drew it nowhere
 
 Earlier figures in this file's own history read 99.98% drawn and 9.6% drawn,
 both wrong, both from asking with the wrong key. Numbers here are only worth
