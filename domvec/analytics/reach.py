@@ -34,14 +34,27 @@ it, and each loses things for its own reason:
 Over the whole corpus, 136 pages and 79,186 captured affordances:
 
     empty        165   nothing to draw, excused
-    collapsed  1,173   the page shows words the fold does not address
-    drawn      98.29% of captured, 98.50% of drawable
+    collapsed    786   the page shows words the fold does not address
+    drawn      98.75% of captured, 98.96% of drawable
     reachable 100.00%
-    labelled   45.35% of those drawn with words to show
+    labelled   87.08% of those drawn with words to show
 
-`labelled` is the one to read carefully. It is 54.66% over the first 30
-pages, which are link-rich news front pages, so any subset of this corpus
-flatters it by several points. Quote the 136-page figure.
+`labelled` is the one to read carefully, and any subset of this corpus
+flatters it: the first ten pages score 92.99% because they are link-rich
+news front pages. Quote the 136-page figure.
+
+These moved a long way in one session and the history says why, because each
+step was a defect rather than a tuning:
+
+    labelled   45.35 -> 77.38   links carry their own words, not the tag name
+               77.38 -> 87.08   a one-word label is a label -- the guard had
+                                been `_is_tag_name`, "short and alphabetic",
+                                which discarded `Espanol`, `China`, `Europe`
+    collapsed  1,173 ->    786  the same two changes
+
+Earlier figures in this file's own history read 99.98% drawn and 9.6% drawn,
+both wrong, both from asking with the wrong key. Numbers here are only worth
+what the question behind them is worth.
 
 **`drawn` cannot see whether a control arrived with its label**, and that is
 worth stating because it hid a real defect for as long as this file existed.
