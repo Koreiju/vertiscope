@@ -33,9 +33,10 @@ import numpy as np
 
 from .address import ContentAddress
 from .graphstore import GraphStore
-from .markdown import (MarkdownChunk, RenderReport, read_jsonl,
-                       render_trie, write_jsonl)
+from .markdown import (DEFAULT_CONTEXT_WINDOW, MarkdownChunk, RenderReport,
+                       read_jsonl, render_trie, write_jsonl)
 from .privacy import STORE_NAME_RE, redact_url, store_name
+from .tokens import sensor_budget
 from .search import Hit, SearchDiagnostics, ThreeFormIndex
 from .stream import ScanUpdate, StreamingScan
 from .trie import AddressTrie
@@ -79,7 +80,7 @@ class ScanResult:
 class Workspace:
     """A scanned corpus on disk. Use as ``with Workspace(path) as ws:``."""
 
-    def __init__(self, path, *, context_window: int = 1200,
+    def __init__(self, path, *, context_window: int = DEFAULT_CONTEXT_WINDOW,
                  embedder=None) -> None:
         self.path = Path(path)
         self.path.mkdir(parents=True, exist_ok=True)
@@ -551,7 +552,15 @@ class Workspace:
         spine = StreamingScan(url, context_window=self.context_window)
 
         def drive(active) -> None:
-            sensor = Sensor(active, visit, budget=self.context_window,
+            # The sensor's budget is in CHARACTERS -- it pre-splits in the
+            # browser, before anything is rendered to markdown, and a
+            # tokeniser is not something to ship into a page. The window is
+            # in tokens, so it is converted rather than passed through: the
+            # two are meant to cut at the same granularity, and handing a
+            # token count to a character budget makes the browser-side split
+            # three times finer than the renderer's.
+            sensor = Sensor(active, visit,
+                            budget=sensor_budget(self.context_window),
                             variants=variants)
             active.set_page_load_timeout(40)
             active.get(visit)

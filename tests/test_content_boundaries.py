@@ -33,10 +33,19 @@ import statistics
 import pytest
 
 import domvec.markdown as md
+from domvec import tokens
 from domvec.markdown import RenderMemo, RenderReport, render_trie
 from domvec.stream import StreamingScan
 
-WINDOW = 1200
+#: In TOKENS, which is the unit the chunker's window is now stated in. This
+#: was 1200 when the window was characters; 400 tokens is the same physical
+#: size (about 1,200 characters of this fixture's text), which keeps every
+#: figure in this module's docstrings comparable to the ones measured when
+#: they were written. The property under test is about where cuts land
+#: relative to the fixture, so the fixture and the window have to keep their
+#: proportions -- at 1200 tokens a 400-row page makes a third as many chunks
+#: and the non-vacuity check below stops being able to see the defect.
+WINDOW = 400
 
 
 def _rows(pairs):
@@ -160,7 +169,8 @@ def test_the_page_is_still_partitioned(n):
     anchors = [a for c in chunks for a in c.anchors]
     assert len(anchors) == len(set(anchors)), "an address reached two chunks"
     assert anchors, "nothing was chunked"
-    over = [c for c in chunks if c.chars > WINDOW and len(c.lines) > 1]
+    over = [c for c in chunks
+            if tokens.count(c.markdown) > WINDOW and len(c.lines) > 1]
     assert not over, "{} chunk(s) over the window".format(len(over))
 
 

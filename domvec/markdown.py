@@ -50,6 +50,7 @@ import zlib
 from dataclasses import dataclass, field, replace
 from typing import Dict, Iterable, Iterator, List, Optional, Sequence, Tuple
 
+from . import tokens
 from .address import ContentAddress, url_steps
 from .trie import AddressTrie, TrieNode, token_multiset
 
@@ -63,8 +64,22 @@ __all__ = [
     "DEFAULT_CONTEXT_WINDOW",
 ]
 
-DEFAULT_CONTEXT_WINDOW = 1200
-"""Characters per chunk. The same default the shipped chunker uses."""
+DEFAULT_CONTEXT_WINDOW = 2048
+"""One chunk's budget, in whatever unit `tokens.name()` is currently in.
+
+2048 rather than the 1200 this was: 1200 was *characters*, which is about 400
+tokens, and every consumer downstream measures in tokens -- an embedder's
+input limit, a model's context, the budget a retrieval hit has to fit. The
+window was denominated in a unit nothing downstream uses and was therefore
+about a twentieth of any real one; on the fixture corpus the chunks it
+produced filled 8% of a 2048-token window.
+
+2048 is the practical input length of the local embedders (nomic-embed-text
+carries 8192 nominally and degrades well before it) and a round figure for a
+retrieval unit. It is a *ceiling*, not a target: a page with less in it than
+that still emits one chunk holding all of it, which is the point -- the
+chunker cuts where content runs out or the window is reached, whichever comes
+first."""
 
 # Element labels that carry markdown meaning. Everything else is a container
 # and contributes indentation only.
@@ -1344,7 +1359,10 @@ def _render_sized(
                         depth_of=depth_of, base=base)
     rendered = MarkdownChunk(url=url, xpath=xpath,
                              lines=_inline_flow(_join_labels(lines)))
-    sized = (rendered, rendered.chars)
+    # Measured in the window's unit, not in characters. `.chars` is still
+    # `.chars`; this is the number the descent compares against `window`,
+    # and the two are only the same when the unit in force is characters.
+    sized = (rendered, tokens.count(rendered.markdown))
     if key is not None:
         memo.put(key, sized)
     return sized
@@ -1746,7 +1764,11 @@ def _memo_key(node: TrieNode, url: str, kind: str, window: int) -> Optional[tupl
     """
     if not node.exact_hash:
         return None
-    return (kind, url, getattr(node, "_xpath_cache", None), window, node.exact_hash)
+    # The unit is part of the key. A cached size is a number in whichever
+    # unit was in force when it was taken, and serving a character count to a
+    # token window silently makes every chunk three times too big.
+    return (kind, url, getattr(node, "_xpath_cache", None), window,
+            tokens.name(), node.exact_hash)
 
 
 def _absorbed_by_element(trie: AddressTrie,
@@ -2521,7 +2543,11 @@ def _emit_runs(
     run: List[MarkdownLine] = []
     size = 0
     for line in chunk.lines:
-        cost = len(line.text) + 2 * line.depth
+        # The line as it will be written, indentation included, measured the
+        # same way the whole chunk was. Summing a differently-measured
+        # per-line cost against a window set in tokens is how a run ends up
+        # three times the size it was allowed.
+        cost = tokens.count(line.render())
         if run and size + cost + 1 > window:
             out.append(_part_of(chunk, run, len(out)))
             run, size = [], 0

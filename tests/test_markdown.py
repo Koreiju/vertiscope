@@ -15,6 +15,7 @@ import pathlib
 
 import pytest
 
+from domvec import tokens
 from domvec.address import ContentAddress
 from domvec.markdown import (
     DEFAULT_CONTEXT_WINDOW,
@@ -131,11 +132,15 @@ def test_oversized_chunks_are_indivisible_not_lazy(window, rendered):
         chunks = (m["chunks"] if window == DEFAULT_CONTEXT_WINDOW
                   else render_trie(m["trie"], context_window=window))
         for chunk in chunks:
-            if len(chunk.markdown) <= window:
+            # Measured the way the chunker measures. `len` is characters and
+            # the window is tokens: comparing them says a 666-character chunk
+            # overflows a 300-token window when it is 214 tokens and fits.
+            if tokens.count(chunk.markdown) <= window:
                 continue
             roots = {line.address.xpath for line in chunk.lines}
             assert len(roots) == 1, (
-                f"{m['page']}: oversized chunk ({len(chunk.markdown)} chars, "
+                f"{m['page']}: oversized chunk "
+                f"({tokens.count(chunk.markdown)} {tokens.name()}, "
                 f"window {window}) at {chunk.xpath} spans {len(roots)} "
                 f"elements — it could have been split and was not"
             )
@@ -257,7 +262,7 @@ def test_many_units_on_one_element_respect_the_window(rendered):
         counts[window] = len(chunks)
         assert len({c.cid for c in chunks}) == len(chunks), \
             f"window {window}: two chunks share an id"
-        oversized = [c for c in chunks if len(c.markdown) > window
+        oversized = [c for c in chunks if tokens.count(c.markdown) > window
                      and len(c.lines) > 1]
         assert not oversized, (
             f"window {window}: {len(oversized)} multi-line chunk(s) over the "
