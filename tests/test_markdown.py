@@ -350,12 +350,20 @@ def test_the_placeholder_stays_but_stops_inventing_a_target():
     vanishing from the output is exactly what that guard is for.
 
     So the placeholder keeps its line and loses only the invented target.
+
+    It is named for the PICTURE, not for the taxonomy that found it. This
+    asserted `![images]` when the alt on that very element said "A Book" --
+    which is the caption a reader needs and the caption an embedding of this
+    chunk should carry. The property under test is that the placeholder
+    survives and names no target; what it is *called* is a separate question,
+    and answering it "images" was never the intent.
     """
     html = "<html><body><img src='/media/cache/x.jpg' alt='A Book'></body></html>"
     lines = _lines(html)
     assert any("/media/cache/x.jpg" in l for l in lines)
-    assert any(l.strip() == "![images]" for l in lines), lines
+    assert any(l.strip() == "![A Book]" for l in lines), lines
     assert not any("(img)" in l for l in lines)
+    assert not any(l.strip().startswith("![images]") for l in lines), lines
 
 
 def test_a_heading_built_from_parts_is_still_a_heading():

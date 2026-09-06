@@ -35,6 +35,7 @@ from typing import Dict, List, Optional
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from .export import _reflow, link_targets
+from .htmlform import render_lines
 from .layout import build_layout
 
 
@@ -245,6 +246,14 @@ class _Handler(BaseHTTPRequestHandler):
             if payload is None:
                 self._send(404, {"error": "no such chunk", "cid": segments[1]})
             else:
+                # Both forms, from one payload, in one response.
+                #
+                # Two round trips would let the surface hold a markdown form
+                # and an HTML form fetched at different moments, which is two
+                # renderings of possibly two states. They are one
+                # distillation; they travel together.
+                payload["html"] = render_lines(payload["lines"],
+                                               base=payload.get("url", ""))
                 self._send(200, payload)
             return
 

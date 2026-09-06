@@ -484,9 +484,17 @@ def _render_unit(
         # rendered as `![images](svg)`, which reads as an image located at
         # "svg". Associated Press's front page said it 384 times. There is no
         # target to name, so none is named.
+        # The page's own words for the picture, when it gave any. An `<img>`
+        # carries its `alt` as a separate `text.accessible` address at the
+        # same element, which `text_at` already holds -- so "A Light in the
+        # Attic" was sitting there while every picture on the page drew as
+        # `![images]`, named after its taxonomy. `_media_alt` is the existing
+        # rule for choosing between them and it refuses a value that is only
+        # a file path, which is the thing that must not become a caption.
+        alt = _media_alt(text_at_node, "") or address.subcategory
         if _is_tag_name(value):
-            return f"![{address.subcategory}]"
-        return f"![{address.subcategory}]({value})"
+            return f"![{alt}]"
+        return f"![{alt}]({value})"
     if cat == "urls":
         # The words and the destination on ONE line.
         #
@@ -906,7 +914,23 @@ def _join_inline(units: List[Tuple[ContentAddress, str, str, int]]
             #
             # Objects carry their own identity and their own name. Only prose
             # is reassembled.
-            and address.tag not in _OBJECT_CLASSES
+            # Asked of `render_class`, not of the raw tag, because the two
+            # vocabularies spell this differently and only one of them was
+            # covered. `_OBJECT_CLASSES` holds the SENSOR's names -- `image`,
+            # `media` -- while the tagger path names the same element
+            # `media.images`, so this guard did not fire for anything the
+            # tagger found. An `<img>` yields two units at one element: its
+            # tag-name fallback (`img`) and its `src`, same tag, same flow
+            # owner, and the src is a relative path so `_looks_like_url` says
+            # no. They joined. Every tagger-found picture in the corpus drew
+            # as `![images](img media/cache/....jpg)` -- an alt that names the
+            # taxonomy and a target with the element's name glued to the
+            # front, which is not a url and cannot be fetched.
+            #
+            # "Is this an object rather than prose" is exactly what the
+            # eighteen classes answer, which is the case `render_class`'s
+            # docstring says to use it for.
+            and address.render_class not in _OBJECT_CLASSES
             and _flow_owner(prev[0].xpath) == _flow_owner(address.xpath)
             # A block's own text children join, but only inside a flow
             # that holds inline markup -- see `mixed` above.
