@@ -933,6 +933,171 @@ def _render_node(
     return _render_sized(node, url, url_depth, memo)[0]
 
 
+def _draw_lines(kept: List[Tuple[ContentAddress, str, str]],
+                *,
+                text_at: Dict[str, str],
+                href_at: Dict[str, str],
+                depth_of: Dict[str, int],
+                base: int) -> List[MarkdownLine]:
+    """Everything decided AFTER `_dedupe`, and nothing decided before it.
+
+    **`kept` is the only unit list this function receives, and that is the
+    point.** Three defects in one session came from asking a DEFERENCE rule --
+    one where a unit stands down because another will speak for it -- before
+    `_dedupe` had said which units survive:
+
+    * `alone` counted the units COLLECTED at an element, so an anchor whose
+      words had already been collapsed still looked accompanied and suppressed
+      itself: `<a>Disable MathJax</a>` drew nothing at all.
+    * `consumed` was built the same way, so Wikimedia's
+      `<button aria-label="Move Main menu to sidebar">` deferred its text to a
+      button that subsumption had already dropped. That element drew nothing.
+    * the url branch below had it too, and its comment is where the rule was
+      first written down: "taken from `kept`, not from `units`, so the text is
+      only dropped when the line that will speak for it actually survives."
+
+    Three statements of one invariant, none of which stopped the next
+    instance, because a comment is not a constraint. Taking only `kept` makes
+    the wrong version unwriteable: `units` is not in scope here.
+
+    **Which rules belong here.** A deference rule aimed at the SAME element
+    must; one aimed at a DESCENDANT need not. `_dedupe` is element-scoped, so
+    it can remove a competing spelling beside a unit but never the last
+    speaker at a descendant -- which is why `hidden`/`spoken_below`, asking
+    whether anything below speaks, has never had this bug and stays where it
+    is, before `kept` exists and feeding it.
+
+    `text_at` and `href_at` are lookups, not deference. They answer "what
+    words are at this element" about the DOCUMENT, and a control is still
+    named by the page's words even when the text unit carrying them lost its
+    own line, so they are built from the collected units on purpose.
+    """
+    # A control speaks for the text at its element, so the bare repeat goes --
+    # the `( Add to basket ) / Add to basket` duplication. Read from `kept`,
+    # because a control that did not survive cannot consume anything.
+    consumed = {
+        a.xpath for a, _v, _lbl in kept
+        if a.category == "interactive"
+        and a.tag not in _SUPPRESSED_TAGS
+        and text_at.get(a.xpath)
+    }
+    # The same rule in the render-class vocabulary, from the live path.
+    # Recorded by element, because that is where the control is and the text
+    # is one step below it.
+    consumed |= {
+        a.xpath.split("/text()")[0] for a, _v, _lbl in kept
+        if a.tag in _CONSUMING_CLASSES
+        and text_at.get(a.xpath.split("/text()")[0])
+    }
+
+    # A tagger-path link drawing its own words has said them, so the bare
+    # repeat underneath goes -- the `( Add to basket ) / Add to basket`
+    # duplication one vocabulary further on.
+    #
+    # Taken from `kept`, not from `units`, so the text is only dropped when
+    # the line that will speak for it actually survives. This is the trap
+    # `_dedupe` records above: the href hidden because the anchor speaks and
+    # the words consumed because the link would draw them, so on a
+    # search-results page both went and the result had no title at all.
+    # Whichever is dropped, exactly one has to remain, and reading `kept`
+    # is what makes that structural rather than hopeful.
+    consumed |= {a.xpath for a, v, _lbl in kept
+                 if a.category == "urls" and v.strip()
+                 and " ".join((text_at.get(a.xpath) or "").split()) not in
+                 ("", " ".join(v.split()))}
+
+    # How many units still stand at each element, which is a different
+    # question from how many arrived.
+    #
+    # `units_at` above counts what was COLLECTED, and `alone` -- the escape
+    # that lets a suppressed `interactive.links` draw itself when nothing
+    # else speaks for its element -- was asked of that. So an anchor whose
+    # words `_dedupe` had already collapsed still looked accompanied: the
+    # exact-tie branch keeps `interactive.links` and drops the `text.visible`
+    # carrying the same string, then suppression fired on the survivor
+    # because the count said two. Neither drew, and `<a>Disable MathJax</a>`
+    # -- an anchor with no href, the very case the `alone` escape was added
+    # for -- disappeared from the page entirely. Not merely unpressable:
+    # the words were gone.
+    #
+    # This is the trap `consumed` records ten lines down, in the same
+    # function, for the same reason: "taken from `kept`, not from `units`, so
+    # the text is only dropped when the line that will speak for it actually
+    # survives". `alone` needed the same treatment and did not get it.
+    drawn_at: Dict[str, int] = {}
+    for _a, _v, _lbl in kept:
+        if (_v or "").strip():
+            _owner = _a.xpath.split("/text()")[0]
+            drawn_at[_owner] = drawn_at.get(_owner, 0) + 1
+
+    lines = []
+    # (element, drawn text) -> the line that already said it.
+    #
+    # `_dedupe` compares RAW values and cannot see this: a `<button onclick>`
+    # yields an `interactive.buttons` detection valued by `_own_name` and an
+    # `interactive.event_handlers` one valued `button[onclick]`, which share
+    # no tokens, so both survive correctly on what that rule can see. The
+    # duplication only appears here, where `_render_unit` draws BOTH from
+    # `text_at[owner]` and numpy's docs print `( Go Back )` twice.
+    #
+    # This is the same shape as `consumed` -- "the duplication appears later,
+    # when `_render_unit` draws the control using the text unit's value" --
+    # which handles control-against-text and not control-against-control.
+    # 208 lines over the corpus, 203 of them this exact pair.
+    drawn_here: Dict[Tuple[str, str], int] = {}
+    for a, v, lbl in kept:
+        if not v.strip():
+            continue
+        owner = a.xpath.split("/text()")[0]
+        if (a.category == "text" and a.xpath in consumed
+                and " ".join(v.split()) == text_at.get(a.xpath)):
+            continue
+        if (a.tag in ("text", "heading") and owner in consumed
+                and " ".join(v.split()) == text_at.get(owner)):
+            continue
+        target = _target_of(owner, href_at)
+        rendered = _render_unit(a, v, lbl, text_at.get(owner, ""),
+                                target=target,
+                                alone=drawn_at.get(owner, 0) <= 1)
+        if rendered is None:
+            continue
+        # A line drawn as a link is addressed as one.
+        #
+        # The address is what the REPL enacts through, and it finds controls
+        # by render class. A line promoted to the link form because it carries
+        # a target -- Hacker News's `<a href="vote?..."><div title="upvote">`
+        # draws `[upvote](vote?id=...)` -- kept `text` as its class, so it read
+        # as a link and could not be pressed. Visible and inert is worse than
+        # absent: the reader is told an affordance is there and it is not.
+        #
+        # The trie is untouched; this is the class carried *out* of it on the
+        # rendered line, which is the thing the REPL acts on.
+        # Depth is keyed on the *original* address: the tag is part of an
+        # address key, so promoting first loses the lookup.
+        depth = depth_of[a.key()] - base
+        if (target and a.tag in _RENDER_FORM
+                and a.tag not in ("link", "image", "media")):
+            a = replace(a, tag="link")
+
+        # One element does not say the same thing twice. The second detection
+        # keeps its ADDRESS, on the surviving line's `inline`, because it is a
+        # real affordance -- the `onclick` half of that button is what makes
+        # it pressable on the live path -- and dropping the line must not drop
+        # the handle. This is the lesson `_carry_affordance` records one
+        # commit earlier: suppressing a rendering is not licence to discard an
+        # address.
+        here = (owner, rendered)
+        prior = drawn_here.get(here)
+        if prior is not None:
+            was = lines[prior]
+            if a.key() != was.address.key():
+                lines[prior] = replace(was, inline=was.inline + (a,))
+            continue
+        drawn_here[here] = len(lines)
+        lines.append(MarkdownLine(depth=depth, text=rendered, address=a))
+    return lines
+
+
 def _render_sized(
     node: TrieNode,
     url: str,
@@ -1001,13 +1166,6 @@ def _render_sized(
     # kept the link *enactable* and made the markdown lossy -- text carried
     # out of the REPL, into a chunk, into the index, arrived with no idea
     # where it pointed.
-    # How many units sit at each element, so a suppressed unit can tell
-    # whether anything else speaks for it.
-    units_at: Dict[str, int] = {}
-    for a, v, _lbl, _d in units:
-        if (v or "").strip():
-            owner = a.xpath.split("/text()")[0]
-            units_at[owner] = units_at.get(owner, 0) + 1
 
     href_at: Dict[str, str] = {}
     text_at: Dict[str, str] = {}
@@ -1045,54 +1203,6 @@ def _render_sized(
             # and `[a](/x)` would be worse than `</x>`.
             text_at.setdefault(owner, " ".join(v.split()))
 
-    # Elements whose control rendering will *consume* the text below. The
-    # control and its text are two units at one element with unrelated raw
-    # values ("button" and "Add to basket"), so `_dedupe` compares them and
-    # keeps both — correctly, on what it can see. The duplication appears
-    # later, when `_render_unit` draws the control using the text unit's
-    # value, and the page ends up saying
-    #
-    #     ( Add to basket )
-    #     Add to basket
-    #
-    # 19 times on one catalogue page. The control keeps its line, because the
-    # marks are what make it a button in the REPL and what makes it clickable;
-    # the plain repeat goes.
-    # Only a control that will actually be drawn: `interactive.links` and
-    # `interactive.elements` are suppressed, and there the text *is* the
-    # content, so dropping it would lose the line rather than de-duplicate it.
-    consumed = {
-        a.xpath for a, _v, _lbl, _d in units
-        if a.category == "interactive"
-        and a.tag not in _SUPPRESSED_TAGS
-        and text_at.get(a.xpath)
-    }
-    # Kept apart so it can be re-checked against `kept` below: this set names
-    # elements whose text a CONTROL is expected to speak, and that expectation
-    # has to survive `_dedupe`.
-    consumed_by_control = set(consumed)
-    # The same rule for render classes. A control drawn with its own words
-    # has already said them; repeating the bare text underneath is the
-    # `( Add to basket ) / Add to basket` duplication one vocabulary further
-    # on. Recorded by element, because that is where the control is and the
-    # text is one step below it.
-    # Only where the control that would consume the text actually survives.
-    #
-    # The two suppressions each assumed the other unit stayed. An anchor
-    # yields its href and its words; the href is hidden because the anchor
-    # speaks, and the words were consumed because the link would draw them --
-    # so on a search-results page, where every title is an <a> inside an
-    # <h2>, both went and the result had no title at all. Whichever is
-    # dropped, exactly one has to remain.
-    #
-    # `hidden` is computed below and needs `consumed`, so this deliberately
-    # runs after it and only marks owners whose control will be drawn.
-    consuming = {
-        a.xpath.split("/text()")[0]: a
-        for a, _v, _lbl, _d in units
-        if a.tag in _CONSUMING_CLASSES
-        and text_at.get(a.xpath.split("/text()")[0])
-    }
 
     # One anchor, one line.
     #
@@ -1223,145 +1333,15 @@ def _render_sized(
     # words and still be two things a reader needs -- a labelled control and
     # the picture that labels it. A future rule needs a reason beyond
     # "these strings match", and the measurement above is what it has to beat.
-    consumed |= {owner for owner, a in consuming.items()
-                 if a.key() not in hidden}
 
     kept = [t for t in _dedupe([(a, v, lbl) for a, v, lbl, _ in units])
             if t[0].key() not in hidden]
 
-    # A control that did not survive cannot consume anything.
-    #
-    # `consumed` was built from the units COLLECTED, and `_dedupe` runs after
-    # it. Wikimedia's sidebar toggle is
-    #
-    #     <button aria-label="Move Main menu to sidebar">move to sidebar</button>
-    #
-    # which yields three units at one element: the button (`move to sidebar`),
-    # the visible text (the same), and the `aria-label` (a superset of both).
-    # Subsumption keeps the aria-label and drops the other two -- correctly,
-    # it is the fullest spelling. But `consumed` still said "a control will
-    # speak for this element", so the surviving aria-label was skipped in
-    # deference to a button that no longer existed. The element drew NOTHING,
-    # and a page that shows `move to sidebar`, `hide`, `Cookie Settings` said
-    # none of them.
-    #
-    # This is the third time in this function: `alone` had it, the url branch
-    # below records it ("taken from `kept`, not from `units`, so the text is
-    # only dropped when the line that will speak for it actually survives"),
-    # and `_dedupe`'s own docstring warns that two suppressions must never
-    # each assume the other's unit stayed. Any rule that defers to another
-    # unit has to be asked after `_dedupe`, not before.
-    speaks = {a.xpath for a, _v, _lbl in kept
-              if a.category == "interactive" and a.tag not in _SUPPRESSED_TAGS}
-    speaks |= {a.xpath.split("/text()")[0] for a, _v, _lbl in kept
-               if a.tag in _CONSUMING_CLASSES}
-    consumed -= {x for x in consumed_by_control if x not in speaks}
 
-    # How many units still stand at each element, which is a different
-    # question from how many arrived.
-    #
-    # `units_at` above counts what was COLLECTED, and `alone` -- the escape
-    # that lets a suppressed `interactive.links` draw itself when nothing
-    # else speaks for its element -- was asked of that. So an anchor whose
-    # words `_dedupe` had already collapsed still looked accompanied: the
-    # exact-tie branch keeps `interactive.links` and drops the `text.visible`
-    # carrying the same string, then suppression fired on the survivor
-    # because the count said two. Neither drew, and `<a>Disable MathJax</a>`
-    # -- an anchor with no href, the very case the `alone` escape was added
-    # for -- disappeared from the page entirely. Not merely unpressable:
-    # the words were gone.
-    #
-    # This is the trap `consumed` records ten lines down, in the same
-    # function, for the same reason: "taken from `kept`, not from `units`, so
-    # the text is only dropped when the line that will speak for it actually
-    # survives". `alone` needed the same treatment and did not get it.
-    drawn_at: Dict[str, int] = {}
-    for _a, _v, _lbl in kept:
-        if (_v or "").strip():
-            _owner = _a.xpath.split("/text()")[0]
-            drawn_at[_owner] = drawn_at.get(_owner, 0) + 1
 
-    # A tagger-path link drawing its own words has said them, so the bare
-    # repeat underneath goes -- the `( Add to basket ) / Add to basket`
-    # duplication one vocabulary further on.
-    #
-    # Taken from `kept`, not from `units`, so the text is only dropped when
-    # the line that will speak for it actually survives. This is the trap
-    # `_dedupe` records above: the href hidden because the anchor speaks and
-    # the words consumed because the link would draw them, so on a
-    # search-results page both went and the result had no title at all.
-    # Whichever is dropped, exactly one has to remain, and reading `kept`
-    # is what makes that structural rather than hopeful.
-    consumed |= {a.xpath for a, v, _lbl in kept
-                 if a.category == "urls" and v.strip()
-                 and " ".join((text_at.get(a.xpath) or "").split()) not in
-                 ("", " ".join(v.split()))}
 
-    lines = []
-    # (element, drawn text) -> the line that already said it.
-    #
-    # `_dedupe` compares RAW values and cannot see this: a `<button onclick>`
-    # yields an `interactive.buttons` detection valued by `_own_name` and an
-    # `interactive.event_handlers` one valued `button[onclick]`, which share
-    # no tokens, so both survive correctly on what that rule can see. The
-    # duplication only appears here, where `_render_unit` draws BOTH from
-    # `text_at[owner]` and numpy's docs print `( Go Back )` twice.
-    #
-    # This is the same shape as `consumed` -- "the duplication appears later,
-    # when `_render_unit` draws the control using the text unit's value" --
-    # which handles control-against-text and not control-against-control.
-    # 208 lines over the corpus, 203 of them this exact pair.
-    drawn_here: Dict[Tuple[str, str], int] = {}
-    for a, v, lbl in kept:
-        if not v.strip():
-            continue
-        owner = a.xpath.split("/text()")[0]
-        if (a.category == "text" and a.xpath in consumed
-                and " ".join(v.split()) == text_at.get(a.xpath)):
-            continue
-        if (a.tag in ("text", "heading") and owner in consumed
-                and " ".join(v.split()) == text_at.get(owner)):
-            continue
-        target = _target_of(owner, href_at)
-        rendered = _render_unit(a, v, lbl, text_at.get(owner, ""),
-                                target=target,
-                                alone=drawn_at.get(owner, 0) <= 1)
-        if rendered is None:
-            continue
-        # A line drawn as a link is addressed as one.
-        #
-        # The address is what the REPL enacts through, and it finds controls
-        # by render class. A line promoted to the link form because it carries
-        # a target -- Hacker News's `<a href="vote?..."><div title="upvote">`
-        # draws `[upvote](vote?id=...)` -- kept `text` as its class, so it read
-        # as a link and could not be pressed. Visible and inert is worse than
-        # absent: the reader is told an affordance is there and it is not.
-        #
-        # The trie is untouched; this is the class carried *out* of it on the
-        # rendered line, which is the thing the REPL acts on.
-        # Depth is keyed on the *original* address: the tag is part of an
-        # address key, so promoting first loses the lookup.
-        depth = depth_of[a.key()] - base
-        if (target and a.tag in _RENDER_FORM
-                and a.tag not in ("link", "image", "media")):
-            a = replace(a, tag="link")
-
-        # One element does not say the same thing twice. The second detection
-        # keeps its ADDRESS, on the surviving line's `inline`, because it is a
-        # real affordance -- the `onclick` half of that button is what makes
-        # it pressable on the live path -- and dropping the line must not drop
-        # the handle. This is the lesson `_carry_affordance` records one
-        # commit earlier: suppressing a rendering is not licence to discard an
-        # address.
-        here = (owner, rendered)
-        prior = drawn_here.get(here)
-        if prior is not None:
-            was = lines[prior]
-            if a.key() != was.address.key():
-                lines[prior] = replace(was, inline=was.inline + (a,))
-            continue
-        drawn_here[here] = len(lines)
-        lines.append(MarkdownLine(depth=depth, text=rendered, address=a))
+    lines = _draw_lines(kept, text_at=text_at, href_at=href_at,
+                        depth_of=depth_of, base=base)
     rendered = MarkdownChunk(url=url, xpath=xpath,
                              lines=_inline_flow(_join_labels(lines)))
     sized = (rendered, rendered.chars)
@@ -1425,9 +1405,12 @@ def _fold_links_into_prose(lines: List[MarkdownLine]) -> List[MarkdownLine]:
         return lines
 
     folded = {}                     # index -> new MarkdownLine
-    consumed = set()                # indices of link lines to drop
+    folded_away = set()             # indices of link lines to drop
+    # Not `consumed`: that name means the deference set in `_draw_lines`,
+    # and one word for two ideas in one module is how a rule gets checked
+    # in the wrong place.
     for i, line in enumerate(lines):
-        if line.address is None or i in consumed:
+        if line.address is None or i in folded_away:
             continue
         kids = candidates.get(line.address.xpath.rstrip("/"))
         if not kids:
@@ -1437,13 +1420,13 @@ def _fold_links_into_prose(lines: List[MarkdownLine]) -> List[MarkdownLine]:
         # Document order, so two links with the same words land in the order
         # the page has them.
         for j, words, markup, address in sorted(kids):
-            if j == i or j in consumed:
+            if j == i or j in folded_away:
                 continue
             at = text.find(words)
             if at < 0:
                 continue            # the prose does not say it; leave its line
             text = text[:at] + markup + text[at + len(words):]
-            consumed.add(j)
+            folded_away.add(j)
             added.append(address)
         if added:
             folded[i] = MarkdownLine(depth=line.depth, text=text,
@@ -1451,10 +1434,10 @@ def _fold_links_into_prose(lines: List[MarkdownLine]) -> List[MarkdownLine]:
                                      inline=line.inline + tuple(added),
                                      absorbed=line.absorbed)
 
-    if not consumed:
+    if not folded_away:
         return lines
     return [folded.get(i, line) for i, line in enumerate(lines)
-            if i not in consumed]
+            if i not in folded_away]
 
 
 def _inline_flow(lines: List[MarkdownLine]) -> List[MarkdownLine]:
