@@ -446,6 +446,29 @@ class GraphStore:
                 for merged in line.inline:
                     chunk_of[merged.aid] = chunk.cid
 
+        # And the spellings the collapse dropped, which are still THERE.
+        #
+        # `line.absorbed` names the addresses a line speaks for: an
+        # `aria-label` beside the text it duplicates, an `href` hidden
+        # because the anchor says the words. The element is drawn in this
+        # chunk -- only that spelling of it is not -- so a url among them
+        # resolves its edge from here exactly as a merged one does. Reading
+        # only `address` and `inline` left 37,452 addresses over the corpus
+        # with no chunk at all, 8,167 of them urls, and an edge they could
+        # not hang on.
+        #
+        # A SECOND pass, and `setdefault`, for both halves of the reason.
+        # `_name_the_collapse` attaches the absorbed set to EVERY line at an
+        # element rather than the first, so a plain assignment would leave
+        # whichever line came last holding the address -- and which line that
+        # is moves with the context window. Filling gaps only, in document
+        # order, makes the answer the first chunk that drew the element, and
+        # keeps a real line's own address ahead of any spelling it absorbed.
+        for chunk in chunks:
+            for line in chunk.lines:
+                for dropped in line.absorbed:
+                    chunk_of.setdefault(dropped.aid, chunk.cid)
+
         # Both sides in the *stored* spelling: the Page node's primary key is
         # the url the page was scanned with, and `canonical_url` does not
         # always return that. See `resolve_page`.
