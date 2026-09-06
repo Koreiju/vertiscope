@@ -300,3 +300,98 @@ def test_a_picture_the_viewer_could_not_fetch_is_not_reported(tmp_path):
     assert _first_image("no picture here", "https://x.test/") is None
     got = _first_image("![a cover](c.jpg)", "https://x.test/p/")
     assert got == {"src": "https://x.test/p/c.jpg", "alt": "a cover"}
+
+
+# --- reading vectors back is not the same question as being able to make them ---
+
+class _StubEmbedder:
+    """768-dim, deterministic, no model.
+
+    What is under test is whether stored vectors are READ BACK, which is
+    linear algebra and bookkeeping. A real embedder would make this test a
+    minute long and would not exercise one extra line of it.
+    """
+
+    dim = 768
+
+    def embed_texts(self, texts, **_kw):
+        out = np.zeros((len(texts), self.dim), dtype=np.float32)
+        for i, text in enumerate(texts):
+            seed = abs(hash(text)) % (2 ** 32)
+            out[i] = np.random.default_rng(seed).normal(size=self.dim)
+        return out
+
+    def embed_query(self, text):
+        return self.embed_texts([text])[0]
+
+
+def test_a_workspace_opened_to_read_still_sees_its_stored_vectors(tmp_path):
+    """The defect that kept the semantic half dark everywhere.
+
+    `__init__` said `self.embeddings = EmbeddingMatrix() if embedder is not
+    None else None`, which conflates two different questions: whether this
+    process can MAKE vectors, and whether the store already HAS them. Every
+    reader -- the sidecar, the 3D view, any query -- opens without an
+    embedder, so it had no matrix, `_hydrate_embeddings` returned on its
+    first line, and the vectors sat on the Chunk nodes unread.
+
+    What it looked like from outside is the reason this is easy to miss:
+    `build_layout` reported `spaces: ['frequency']` and `equalised: false` on
+    a workspace holding 793 x 768 embeddings -- character for character what
+    a workspace that had never been embedded reports.
+    """
+    from domvec.workspace import Workspace
+
+    pages = {
+        "https://a.test/": "<html><body><main>"
+                           + "".join("<p>alpha beta gamma %d</p>" % i
+                                     for i in range(40))
+                           + "</main></body></html>",
+        "https://b.test/": "<html><body><main>"
+                           + "".join("<p>delta epsilon zeta %d</p>" % i
+                                     for i in range(40))
+                           + "</main></body></html>",
+        "https://c.test/": "<html><body><main>"
+                           + "".join("<p>eta theta iota %d</p>" % i
+                                     for i in range(40))
+                           + "</main></body></html>",
+        "https://d.test/": "<html><body><main>"
+                           + "".join("<p>kappa lambda mu %d</p>" % i
+                                     for i in range(40))
+                           + "</main></body></html>",
+    }
+
+    path = tmp_path / "ws"
+    with Workspace(path, embedder=_StubEmbedder()) as writer:
+        for url, html in pages.items():
+            writer.index_html(html, url)
+        writer.flush_vectors()
+        written = writer.index.embeddings.matrix.shape[0]
+    assert written > 0, "the fixture never wrote a vector"
+
+    # Reopened the way every reader opens it: no embedder.
+    with Workspace(path) as reader:
+        index = reader.index
+        assert index.embeddings is not None, \
+            "a reader cannot see vectors that are on disk"
+        assert index.embeddings.matrix is not None
+        layout = build_layout(reader)
+        assert "semantic" in layout["spaces"], layout["spaces"]
+        assert layout["halves"]["equalised"] is True, layout["halves"]
+
+
+def test_a_workspace_with_no_vectors_still_reports_none(tmp_path):
+    """The guard that keeps the fix from changing anything else.
+
+    An always-present but EMPTY matrix scores every chunk 0 on the semantic
+    axis, and under the strict triple product a zero is a veto -- so search
+    would answer nothing and report it as an absence of matches. The matrix
+    appears because the store HAS vectors, never merely because someone
+    opened the workspace.
+    """
+    from domvec.workspace import Workspace
+
+    with Workspace(tmp_path / "empty") as ws:
+        ws.index_html("<html><body><p>a paragraph</p></body></html>",
+                      "https://none.test/")
+        assert ws.index.embeddings is None

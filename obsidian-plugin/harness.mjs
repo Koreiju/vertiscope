@@ -16,9 +16,23 @@
  */
 
 import assert from "node:assert";
+import { parseHTML } from "linkedom";
 import Module from "node:module";
 
 // --- a DOM element with the helpers Obsidian adds -----------------------------
+
+/** A parsed DOM node, wrapped so `El.all()` and `El.text()` can walk it. */
+function domChildren(node) {
+  return Array.from(node.children).map((child) => {
+    const el = new El(child.tagName.toLowerCase());
+    el.textContent = child.textContent || "";
+    el.children = domChildren(child);
+    for (const attr of Array.from(child.attributes || [])) {
+      el.attrs[attr.name] = attr.value;
+    }
+    return el;
+  });
+}
 
 class El {
   constructor(tag = "div") {
@@ -49,6 +63,33 @@ class El {
   setAttr(k, v) { this.attrs[k] = v; }
   remove() {}
   querySelector() { return null; }
+
+  /**
+   * A REAL element, parsed, when the plugin assigns markup.
+   *
+   * The distilled-HTML surface assigns `innerHTML` and then walks the result
+   * with `querySelectorAll` to strip media and wire addresses -- so a stub
+   * that stores the string and answers `querySelectorAll` with nothing is
+   * not exercising that code, it is skipping it. `linkedom` parses the same
+   * markup a browser would and gives back the same API, which is what makes
+   * this check able to fail.
+   */
+  set innerHTML(markup) {
+    this._html = markup;
+    this._dom = parseHTML(`<body>${markup}</body>`).document.body;
+    // The parsed tree is the children from here on, so `text()` and `all()`
+    // see what was actually drawn.
+    this.children = domChildren(this._dom);
+  }
+  get innerHTML() { return this._html || ""; }
+
+  querySelectorAll(selector) {
+    return this._dom ? Array.from(this._dom.querySelectorAll(selector)) : [];
+  }
+  matches(selector) {
+    return this._dom ? this._dom.matches(selector) : false;
+  }
+  addEventListener() {}
   /** Everything drawn under here, flattened, for assertions. */
   all() {
     return this.children.flatMap((c) => [c, ...c.all()]);
@@ -221,6 +262,17 @@ const DomvecPlugin = mod.default?.default ?? mod.default;
 const plugin = new DomvecPlugin(app);
 await plugin.onload();
 plugin.settings.sidecar = "http://127.0.0.1:8788";
+
+// The first UMAP fit over a real workspace is tens of seconds, and the checks
+// below all start at once. A search issued while the server is inside that fit
+// times out, `Sidecar.get` answers null on any failure by design, and the
+// retrieval check then reports "no suggestions: 0" -- a passing feature
+// failing for a reason that has nothing to do with it. Warmed once, here,
+// where waiting costs nothing and confuses nobody.
+await fetch("http://127.0.0.1:8788/layout")
+  .then((r) => r.json())
+  .then((l) => console.log(`warmed: layout has ${l.n ?? 0} nodes`))
+  .catch((e) => console.log(`warm-up failed: ${e.message}`));
 
 const results = [];
 const check = (name, fn) => results.push(

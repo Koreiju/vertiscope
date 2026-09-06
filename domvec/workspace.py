@@ -816,19 +816,45 @@ class Workspace:
         cost is paid once. Rows already set in this session are left alone.
         """
         counts = {"loaded": 0, "embedded": 0}
-        if self.embeddings is None:
-            return counts
 
+        # The matrix is created HERE when the store turns out to hold vectors,
+        # rather than in `__init__` from whether an embedder was passed.
+        #
+        # Those are two different questions and conflating them cost the
+        # semantic half of everything downstream. `__init__` says
+        # `self.embeddings = EmbeddingMatrix() if embedder is not None else
+        # None`, so a workspace opened to READ -- the sidecar, the 3D view,
+        # any query -- had no matrix at all, and this method returned on its
+        # first line. The vectors were on the Chunk nodes the whole time,
+        # written by a build that did pass an embedder. Reading them back
+        # needs no model.
+        #
+        # What it looked like: `build_layout` reported `spaces:
+        # ['frequency']` and `equalised: false` on a workspace whose store
+        # held 793 x 768 embeddings, and the 3D view said "not equalised" --
+        # indistinguishable from a workspace that had never been embedded.
+        #
+        # Still None when the store holds nothing, which is what keeps the
+        # behaviour for a genuinely unembedded workspace unchanged: an empty
+        # matrix would score every chunk 0 on the semantic axis, and under
+        # the strict triple product a zero is a veto, so search would answer
+        # nothing and call it an absence of matches.
         missing: List = []
         for chunk in self.store.chunks():
-            if self.embeddings.row_of(chunk.cid) is not None:
+            if self.embeddings is not None and                     self.embeddings.row_of(chunk.cid) is not None:
                 continue
             vector = self.store.embedding(chunk.cid)
             if vector and any(vector):
+                if self.embeddings is None:
+                    self.embeddings = EmbeddingMatrix()
                 self.embeddings.set(chunk.cid, np.asarray(vector, dtype=np.float32))
                 counts["loaded"] += 1
             else:
                 missing.append(chunk)
+
+        if self.embeddings is None:
+            # Nothing stored and nothing to backfill into.
+            return counts
 
         if missing and backfill and self.embedder is not None:
             if progress:
