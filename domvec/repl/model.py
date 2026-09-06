@@ -300,7 +300,24 @@ class Document:
                 merged = tuple(getattr(line, "inline", ()) or ())
                 if merged:
                     spans = list(_LINK_SPAN.finditer(line.text))
+                    # Elements this line already offers as something to press.
+                    #
+                    # `inline` used to hold folded links and nothing else, so
+                    # pairing it positionally with the drawn `[words](target)`
+                    # spans was the whole story. It now also carries an
+                    # element's affordance when the render addressed the line
+                    # as something else -- Wikimedia's
+                    # `<button aria-label="...">` draws as `text.accessible`,
+                    # because the aria-label subsumes the button's own words --
+                    # and those have no span to pair with. Zipping simply
+                    # dropped them, so the words were drawn and the button was
+                    # not pressable: visible and inert.
+                    covered = set()
+                    owner = widgets[row].address
+                    if widgets[row].interactive and owner is not None:
+                        covered.add(owner.xpath.split("/text()")[0])
                     for address, hit in zip(merged, spans):
+                        covered.add(address.xpath.split("/text()")[0])
                         inline.setdefault(row, []).append(Widget(
                             line=row, kind=kind_for(address),
                             # The whole rendered form, `[words](target)`,
@@ -314,6 +331,25 @@ class Document:
                             label=hit.group(0),
                             address=address, depth=line.depth,
                             col=hit.start(), end=hit.end(),
+                        ))
+                    # An affordance with no span of its own targets the whole
+                    # line, because that is what a reader would click. Only
+                    # where nothing already offers that element: a sentence
+                    # holding two links carries both their url addresses AND
+                    # both their `interactive.links` ones, and the second pair
+                    # names controls the spans above already cover.
+                    for address in merged:
+                        if not address.is_control:
+                            continue
+                        element = address.xpath.split("/text()")[0]
+                        if element in covered:
+                            continue
+                        covered.add(element)
+                        inline.setdefault(row, []).append(Widget(
+                            line=row, kind=kind_for(address),
+                            label=line.text.strip(),
+                            address=address, depth=line.depth,
+                            col=0, end=len(line.text),
                         ))
                 row += 1
         return cls(lines=widgets, url=url, title=title, inline=inline)

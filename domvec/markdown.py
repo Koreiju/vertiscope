@@ -1800,9 +1800,23 @@ def _absorbed_by_element(trie: AddressTrie,
 
 
 def _suppressed_controls(trie: AddressTrie) -> Dict[str, ContentAddress]:
-    """element -> the affordance address the render suppresses there.
+    """element -> an affordance address the render might not draw there.
 
-    `_SUPPRESSED_TAGS` exists for a rendering reason that is correct: an
+    Every control, not only the suppressed tags. Suppression is one way an
+    affordance address fails to reach a line and it is not the only one:
+    `_dedupe` drops a control whose words another unit at the same element
+    subsumes, and Wikimedia's `<button aria-label="Move Main menu to
+    sidebar">move to sidebar</button>` is exactly that -- the aria-label wins
+    on tokens and the line ends up addressed `text.accessible`. The words are
+    drawn and the button is not pressable. Visible and inert, which this
+    module elsewhere calls worse than absent.
+
+    Whether the address is actually needed is decided by `_carry_affordance`,
+    which only carries an element's control when no line at that element is
+    addressed as one. Collecting them all here and filtering there keeps the
+    reason for carrying in one place.
+
+    `_SUPPRESSED_TAGS` was the original reason and remains the largest: an
     anchor also yields its href and its words, so drawing its
     `interactive.links` unit too would print `[a]` beside them. But
     `_render_unit` returns None to suppress, and a unit that draws no line
@@ -1826,7 +1840,7 @@ def _suppressed_controls(trie: AddressTrie) -> Dict[str, ContentAddress]:
         address = node.address
         if address is None or not (node.value or "").strip():
             continue
-        if address.tag in _SUPPRESSED_TAGS and address.is_control:
+        if address.is_control:
             out.setdefault(address.xpath.split("/text()")[0], address)
     return out
 
@@ -1864,6 +1878,24 @@ def _carry_affordance(chunks: List[MarkdownChunk],
     One element is claimed once, in chunk and line order, because repeating a
     control down every line that mentions it says nothing extra.
     """
+    # Elements the render already addressed as controls. Those need nothing:
+    # a button drawn as `( Add to basket )` says so through its own address,
+    # and adding a second control address beside it would claim two
+    # affordances where the page has one.
+    #
+    # Checked across the whole address set, not just `line.address`, because
+    # the duplicate-line rule already parks a second detection in `inline` --
+    # a `<button onclick>` keeps its handler there, and that element is
+    # served.
+    drew_a_control: set = set()
+    for chunk in chunks:
+        for line in chunk.lines:
+            if line.address is None:
+                continue
+            for held in (line.address,) + tuple(line.inline):
+                if held.is_control:
+                    drew_a_control.add(held.xpath.split("/text()")[0])
+
     claimed: set = set()
     for chunk in chunks:
         for i, line in enumerate(chunk.lines):
@@ -1878,8 +1910,8 @@ def _carry_affordance(chunks: List[MarkdownChunk],
                 control = controls.get(owner)
                 if control is None or owner in claimed:
                     continue
-                if control.key() == carried.key():
-                    continue            # already here under its own name
+                if owner in drew_a_control:
+                    continue            # the render already said it is one
                 claimed.add(owner)
                 added.append(control)
             if added:

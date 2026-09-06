@@ -281,3 +281,60 @@ def test_the_consumed_rule_still_prevents_its_own_duplication():
                      "<p>filler text</p></body></html>")]
     said = [t for t in lines if "Add to basket" in t]
     assert len(said) == 1, "the control and its text both drew: %r" % said
+
+
+def _controls(html, window=900):
+    from domvec.repl.model import Document
+    trie = AddressTrie.from_tagged(
+        ContentTagger(ShadowDOM(html)).tag(), "https://x.test/")
+    doc = Document.from_chunks(render_trie(trie, context_window=window),
+                              url="https://x.test/")
+    return doc.controls()
+
+
+def test_a_control_the_render_addressed_as_prose_is_still_pressable():
+    """Visible and inert is worse than absent -- this module says so.
+
+    Wikimedia's `<button aria-label="Move Main menu to sidebar">` draws as
+    `text.accessible`, because the aria-label subsumes the button's own words.
+    The words reach the page and the affordance did not reach the REPL.
+    """
+    controls = _controls(ARIA_SUPERSET)
+    assert [w.kind.name for w in controls] == ["BUTTON"], \
+        "expected one pressable button, got %s" % [
+            (w.kind.name, w.label) for w in controls]
+
+
+def test_carrying_an_affordance_never_doubles_one():
+    """The widening must not claim two affordances where the page has one.
+
+    A sentence with two links carries both their url addresses AND both their
+    `interactive.links` ones; the spans cover those elements already. A
+    `<button onclick>` is addressed as a button and carries its handler.
+    Neither may list twice.
+    """
+    for html, expected in (
+        ("<html><body><p>See <a href='/n'>next page</a> and "
+         "<a href='/o'>another</a> now.</p></body></html>", 2),
+        ("<html><body><button onclick='go()'>Go Back</button>"
+         "<p>filler</p></body></html>", 1),
+        ("<html><body><button>Add to basket</button>"
+         "<p>filler</p></body></html>", 1),
+    ):
+        controls = _controls(html)
+        assert len(controls) == expected, \
+            "%d controls for %r: %s" % (len(controls), html[:40],
+                                        [(w.kind.name, w.label) for w in controls])
+
+
+def test_every_listed_control_is_addressed_once():
+    """One (line, address) pair per control, corpus-shaped page."""
+    html = ("<html><body>"
+            "<p>See <a href='/n'>next page</a> now.</p>"
+            "<button aria-label='Move Main menu to sidebar'>move to sidebar</button>"
+            "<button onclick='go()'>Go Back</button>"
+            "<input placeholder='Search books'>"
+            "<a>Disable MathJax</a></body></html>")
+    seen = [(w.line, w.address.key() if w.address else "")
+            for w in _controls(html, window=1500)]
+    assert len(seen) == len(set(seen)), "a control was listed twice: %s" % seen
