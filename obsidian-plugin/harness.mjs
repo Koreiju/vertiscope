@@ -99,12 +99,24 @@ const stub = {
   EditorSuggest,
   Notice: class { constructor(msg) { notices.push(String(msg)); } },
   Plugin: class extends Component {
-    constructor(app) { super(); this.app = app; this._blocks = {}; this._cmds = []; this._suggests = []; }
+    constructor(app) {
+      super();
+      this.app = app; this._blocks = {}; this._cmds = [];
+      this._suggests = []; this._views = {};
+    }
     async loadData() { return {}; }
     async saveData() {}
     registerMarkdownCodeBlockProcessor(lang, fn) { this._blocks[lang] = fn; }
     registerEditorSuggest(s) { this._suggests.push(s); }
-    registerView(type, factory) { this._view = { type, factory }; }
+    // A map, not a slot. Registering a second view overwrote the first,
+    // so the harness could only ever see whichever was registered last
+    // -- and would have reported the chunk pane missing while it was
+    // registered perfectly well.
+    registerView(type, factory) {
+      this._views = this._views || {};
+      this._views[type] = factory;
+      this._view = { type, factory };
+    }
     registerEvent() {}
     addCommand(c) { this._cmds.push(c); }
     addRibbonIcon() { return new El(); }
@@ -310,6 +322,56 @@ check("layout answers with placed nodes", async () => {
   assert.strictEqual(bad.length, 0, "non-finite coordinates");
   return `${layout.nodes.length} nodes, ${layout.edges.length} edges, ` +
          `${layout.spaces.join("+")}`;
+});
+
+check("the interactive form is the distilled HTML, with addresses", async () => {
+  // The point of the HTML form: a <button> that exists because the trie said
+  // the element is a control, not because a regex matched a rendering. If the
+  // sidecar stops sending `html` the surface silently falls back to
+  // reconstructing widgets from markdown, which looks almost identical and is
+  // a different claim -- so this asserts on the markup, not on the picture.
+  const cid = vaultFiles[0].front.cid;
+  const payload = await plugin.fetchChunk(cid);
+  assert.ok(payload, "no payload");
+  assert.ok(payload.html && payload.html.length > 20,
+            "sidecar sent no distilled HTML");
+  assert.ok(/data-domvec-address="[^"]+"/.test(payload.html),
+            "no element carries an address");
+  // Nothing executable can have come through. The Python side whitelists and
+  // escapes; this is the client-side check that it actually did, because this
+  // markup goes into an UNSANITISED DOM.
+  assert.ok(!/<script/i.test(payload.html), "script tag in distilled HTML");
+  assert.ok(!/\son[a-z]+=/i.test(payload.html), "event handler in distilled HTML");
+  assert.ok(!/href="javascript:/i.test(payload.html), "javascript: href");
+  const elements = (payload.html.match(/<[a-z]/g) || []).length;
+  return `${elements} elements, ` +
+         `${(payload.html.match(/data-domvec-address/g) || []).length} addressed`;
+});
+
+check("the layout is six-dimensional and colours from the fit", async () => {
+  const layout = await plugin.sidecar.layout();
+  assert.ok(layout, "no layout");
+  assert.strictEqual(layout.hsv, true, "colour is not from the fit");
+  assert.strictEqual(layout.fitted_dims, 6,
+                     `fitted ${layout.fitted_dims} dims, expected 6`);
+  const coloured = layout.nodes.filter(
+    (n) => Array.isArray(n.hsv) && n.hsv.length === 3
+           && n.hsv.every((v) => Number.isFinite(v)));
+  assert.strictEqual(coloured.length, layout.nodes.length,
+                     "some nodes have no colour from the fit");
+  // Non-vacuity: a constant hue would satisfy every assertion above and would
+  // mean the colour carries nothing.
+  const hues = new Set(layout.nodes.map((n) => Math.round(n.hsv[0])));
+  assert.ok(hues.size > 1, "every node got the same hue");
+  return `${layout.nodes.length} nodes, ${hues.size} distinct hues, ` +
+         `${layout.images ?? 0} with a picture`;
+});
+
+check("a node click opens the chunk pane, not the note", async () => {
+  const names = plugin._views ? Object.keys(plugin._views) : [];
+  assert.ok(names.includes("domvec-chunk-view"),
+            "no chunk view registered: " + names.join(", "));
+  return names.join(", ");
 });
 
 check("commands are registered", async () => {

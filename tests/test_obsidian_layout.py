@@ -39,6 +39,34 @@ def ws(tmp_path):
         yield workspace
 
 
+@pytest.fixture()
+def wide(tmp_path):
+    """A workspace with enough distinct chunks to support a six-way fit.
+
+    `ws` is three small pages and cannot: neither UMAP nor PCA returns more
+    components than the data has rank, so asking six of four chunks gets
+    three. That is a real property of the fit, and the layout now reports it
+    rather than padding -- so the tests about what a six-dimensional fit does
+    need a workspace that can produce one.
+    """
+    from domvec.workspace import Workspace
+
+    with Workspace(tmp_path / "wide") as workspace:
+        for i in range(9):
+            workspace.index_html(
+                "<html><body><main>"
+                + "".join(
+                    "<article><h2>Chapter %d.%d</h2><p>%s</p>"
+                    "<a href='https://w.test/p%d'>onward to %d</a></article>"
+                    % (i, j, " ".join(
+                        "topic%d word%d phrase%d" % (i, j, k)
+                        for k in range(40)), j, j)
+                    for j in range(4))
+                + "</main></body></html>",
+                "https://w.test/p%d" % i)
+        yield workspace
+
+
 def _with_embeddings(workspace, dim=768, seed=0):
     """Give every chunk a semantic vector, so the join path can be exercised.
 
@@ -135,3 +163,140 @@ def test_a_workspace_too_small_to_place_says_so(tmp_path):
         report = build_layout(workspace)
         if report["n"] == 0:
             assert report["note"], "an empty layout with no explanation"
+
+
+# --- six dimensions: three to stand in, three to be a colour --------------------
+
+def test_the_fit_is_six_dimensional_and_the_colour_comes_out_of_it(wide):
+    """Three more components of the SAME projection, not a palette.
+
+    Colour was a hash of the host, which is a legend: it said which site a
+    node came from, which the node's own label already said. Fitting six and
+    spending three on hue, saturation and value means the colour carries
+    directions of the joint space the three spatial axes had no room for --
+    so two nodes that look alike are alike in a way the camera cannot show.
+    """
+    layout = build_layout(wide)
+    assert layout["hsv"] is True
+    assert layout["fitted_dims"] == 6
+    assert layout["dims"] == 3
+    for node in layout["nodes"]:
+        assert len(node["pos"]) == 3, "position must stay three-dimensional"
+        h, s, v = node["hsv"]
+        assert 0.0 <= h <= 360.0
+        assert 0.0 <= s <= 1.0
+        assert 0.0 <= v <= 1.0
+        assert all(np.isfinite(x) for x in node["hsv"])
+
+
+def test_the_colour_actually_varies(wide):
+    """Non-vacuity.
+
+    Every assertion above is satisfied by painting every node the same
+    colour, and a constant hue is exactly what a broken normalisation
+    produces -- `_hsv` maps a component with no spread to the middle of its
+    band on purpose, and that path must not be the one every node takes.
+    """
+    layout = build_layout(wide)
+    hues = {round(n["hsv"][0], 1) for n in layout["nodes"]}
+    assert len(hues) > 1, "every node got the same hue"
+
+
+def test_asking_for_no_colour_leaves_the_projection_alone(wide):
+    """The spatial answer must not move because colour was switched off.
+
+    If it did, the position a reader sees would be a function of a display
+    option, and two people looking at the same workspace would be looking at
+    two different pictures.
+    """
+    plain = build_layout(wide, hsv=False)
+    assert plain["hsv"] is False
+    assert plain["fitted_dims"] == 3
+    for node in plain["nodes"]:
+        assert "hsv" not in node
+
+
+def test_a_fit_too_narrow_for_six_says_so_rather_than_inventing_a_colour(ws):
+    """A workspace of four chunks cannot yield six components.
+
+    Neither reducer returns more components than the data has rank. The first
+    version padded the shortfall with zeros and coloured from them, putting
+    every node at hue 180 -- the middle of the band, where `_hsv` sends a
+    component with no spread -- while the report still said `hsv: true`. A
+    constant colour claiming to be a measurement is worse than the host
+    palette, which at least says what it is.
+    """
+    layout = build_layout(ws)
+    assert layout["requested_dims"] == 6
+    if layout["fitted_dims"] < 6:
+        assert layout["hsv"] is False
+        assert all("hsv" not in n for n in layout["nodes"])
+    # Position keeps its three slots either way; a node with two coordinates
+    # is a crash, not a flat layout.
+    assert all(len(n["pos"]) == 3 for n in layout["nodes"])
+
+
+def test_a_flat_component_does_not_become_a_nan(ws):
+    """One NaN in a colour paints a node invisible, and there is no error.
+
+    A component with no spread happens on a workspace too small to fit
+    properly, which is the case where a viewer most needs to see something.
+    """
+    from domvec.obsidian.layout import _hsv
+
+    flat = np.zeros((5, 3), dtype=np.float32)
+    out = _hsv(flat)
+    assert np.isfinite(out).all()
+    # The middle of each band, not zero: a saturation of 0 is grey and a
+    # value of 0 is black, and both read as "this node failed".
+    assert out[0][1] > 0.0 and out[0][2] > 0.0
+
+
+# --- billboards ----------------------------------------------------------------
+
+def test_a_chunk_that_showed_a_picture_reports_it(tmp_path):
+    """So the viewer can billboard the chunk rather than draw a dot for it."""
+    from domvec.workspace import Workspace
+
+    def page(n):
+        return ("<html><body><main>"
+                + "".join(
+                    "<article><h3>Book %d.%d</h3>"
+                    "<img src='media/cache/%d-%d.jpg' alt='Cover of book %d'>"
+                    "<p>%s</p></article>" % (n, i, n, i, i,
+                        " ".join("shelf%d tale%d word%d" % (n, i, k)
+                                 for k in range(40)))
+                    for i in range(4))
+                + "</main></body></html>")
+
+    with Workspace(tmp_path / "ws") as workspace:
+        # Several pages, because one page under a 2048-token window is often
+        # a single chunk and `build_layout` needs three before it places
+        # anything at all.
+        for n in range(6):
+            workspace.index_html(page(n), "https://shelf.test/p%d" % n)
+        layout = build_layout(workspace)
+        assert layout["images"] > 0, "no chunk reported a picture"
+        for node in layout["nodes"]:
+            picture = node.get("image")
+            if picture is None:
+                continue
+            # Absolutised HERE, where the chunk's own url is in hand. A
+            # viewer resolving a relative path would resolve it against the
+            # vault.
+            assert picture["src"].startswith("https://shelf.test/")
+            assert picture["alt"], "a billboard with no caption says nothing"
+
+
+def test_a_picture_the_viewer_could_not_fetch_is_not_reported(tmp_path):
+    """`images` has to count billboards that can actually be drawn.
+
+    Reporting a count the viewer then fails to render makes a dead asset host
+    and an empty corpus look the same from the status bar.
+    """
+    from domvec.obsidian.layout import _first_image
+
+    assert _first_image("![a](data:image/png;base64,AAAA)", "https://x.test/") is None
+    assert _first_image("no picture here", "https://x.test/") is None
+    got = _first_image("![a cover](c.jpg)", "https://x.test/p/")
+    assert got == {"src": "https://x.test/p/c.jpg", "alt": "a cover"}

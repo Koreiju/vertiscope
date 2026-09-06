@@ -28,6 +28,7 @@ import {
   Setting,
 } from "obsidian";
 
+import { CHUNK_VIEW, ChunkView } from "./chunkview";
 import { GRAPH_VIEW, GraphView } from "./graph";
 import { RetrievalSuggest } from "./retrieval";
 import { Sidecar } from "./sidecar";
@@ -102,7 +103,13 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost {
     this.registerView(
       GRAPH_VIEW,
       (leaf: WorkspaceLeaf) =>
-        new GraphView(leaf, this.sidecar, (cid) => this.revealChunk(cid)),
+        new GraphView(leaf, this.sidecar, (cid) => this.openChunk(cid),
+                      () => this.settings.loadRemoteMedia),
+    );
+    this.registerView(
+      CHUNK_VIEW,
+      (leaf: WorkspaceLeaf) =>
+        new ChunkView(leaf, this, (cid) => this.revealChunk(cid)),
     );
     this.addRibbonIcon("git-fork", "domvec 3D graph", () => this.openGraph());
     this.addCommand({
@@ -134,6 +141,31 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost {
     }
     const leaf = this.app.workspace.getLeaf("tab");
     await leaf.setViewState({ type: GRAPH_VIEW, active: true });
+    this.app.workspace.revealLeaf(leaf);
+  }
+
+  /**
+   * Show the chunk a graph node stands for -- and only that chunk.
+   *
+   * A node stands for a chunk, so clicking it shows the chunk, as its
+   * structured markdown or as the interactive HTML. It used to open the
+   * NOTE, which is a page of a vault: frontmatter, the distilled markdown, a
+   * fence, and whatever the reader has since written around it. The note is
+   * still one button away, in the pane's own bar.
+   *
+   * One pane, reused. Opening a tab per click buries the graph you are
+   * clicking in within a few nodes.
+   */
+  private async openChunk(cid: string) {
+    const existing = this.app.workspace.getLeavesOfType(CHUNK_VIEW);
+    const leaf = existing.length
+      ? existing[0]
+      : this.app.workspace.getLeaf("split", "vertical");
+    if (!existing.length) {
+      await leaf.setViewState({ type: CHUNK_VIEW, active: true });
+    }
+    const view = leaf.view as ChunkView;
+    await view.show(cid);
     this.app.workspace.revealLeaf(leaf);
   }
 

@@ -156,3 +156,88 @@
 .domvec-graph-status { flex: 1; }
 
 .domvec-graph-canvas { flex: 1; min-height: 0; }
+
+/* --- the distilled HTML form ----------------------------------------------
+   The other form a chunk has. `htmlform.py` emits a closed set of elements
+   under `dv-*` class names -- a private vocabulary, never the page's, so a
+   scraped stylesheet cannot reach in here and nothing a page calls its
+   classes can collide with Obsidian's.
+
+   Styled to read as a slim page rather than as a form: the point of this form
+   is the interface the page had, so a heading looks like a heading and a
+   button looks pressable, and nothing tries to reproduce the site's design. */
+
+.domvec-html { line-height: 1.5; }
+
+/* One step per nesting LEVEL of the distilled tree, not per DOM ancestor.
+   A site that nests five divs to centre a header costs one step. */
+.domvec-html .dv-n { padding-left: 0.9em; border-left: 1px solid var(--background-modifier-border); }
+
+.domvec-html .dv-p { margin: 0.25em 0; }
+.domvec-html .dv-h { margin: 0.6em 0 0.25em; line-height: 1.25; }
+.domvec-html .dv-ul { margin: 0.1em 0; padding-left: 1.1em; }
+.domvec-html .dv-li { margin: 0.1em 0; }
+.domvec-html .dv-a { color: var(--text-accent); }
+
+/* A control that will NOT act reads as inert, and one that will reads as
+   live. The difference is the server's `enact` flag, never a plugin setting:
+   a button that looks pressable and 403s is worse than one that says it is
+   only showing you an address. */
+.domvec-html .dv-b,
+.domvec-html .dv-f input {
+  font: inherit;
+  color: var(--text-muted);
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  padding: 0.1em 0.5em;
+}
+.domvec-html .dv-b { cursor: default; }
+.domvec-html .domvec-live .dv-b,
+.domvec-html .dv-b.domvec-live,
+.domvec-html .domvec-live input {
+  color: var(--text-normal);
+  border-color: var(--text-accent);
+  cursor: pointer;
+}
+.domvec-html .dv-f { display: inline-flex; align-items: center; gap: 0.4em; }
+.domvec-html .dv-f span { color: var(--text-muted); font-size: var(--font-smaller); }
+
+.domvec-html .dv-form {
+  border: 1px dashed var(--background-modifier-border);
+  border-radius: 4px;
+  padding: 0.1em 0.6em 0.4em;
+  margin: 0.3em 0;
+}
+.domvec-html .dv-form legend { color: var(--text-faint); font-size: var(--font-smaller); }
+
+.domvec-html .dv-fig { margin: 0.4em 0; }
+.domvec-html .dv-img { max-width: 100%; border-radius: 4px; display: block; }
+.domvec-html .dv-figcaption,
+.domvec-html figcaption { color: var(--text-muted); font-size: var(--font-smaller); }
+
+/* Where a picture would be, when the reader has remote media off or the
+   distiller found a picture it could not locate. Never an empty gap: a
+   missing billboard and a page that showed nothing must not look the same. */
+.domvec-html .dv-noimg,
+.dv-noimg {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.2em;
+  min-height: 2.2em;
+  color: var(--text-faint);
+  background: var(--background-secondary);
+  border: 1px dashed var(--background-modifier-border);
+  border-radius: 4px;
+}
+
+/* --- one chunk in its own pane -------------------------------------------- */
+
+.domvec-chunk-pane { padding: 0.6em 0.9em; overflow: auto; height: 100%; }
+
+.domvec-chunk-bar {
+  display: flex;
+  justify-content: flex-end;
+  padding-bottom: 0.4em;
+}

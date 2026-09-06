@@ -72,6 +72,97 @@ export class ChunkSurface extends MarkdownRenderChild {
     else this.drawMarkdown(body);
   }
 
+  /**
+   * The distilled HTML, as elements, with its addresses wired.
+   *
+   * This is the form markdown cannot be. A `<button>` here exists because the
+   * trie says the element at that xpath is a control -- not because a regex
+   * matched `( Add to basket )` in a rendering. The markup arrives already
+   * escaped and whitelisted from `htmlform.py`; what this method adds is the
+   * two things only the client can decide: whether media may be fetched, and
+   * whether a control may actually fire.
+   *
+   * `innerHTML` is deliberate and is the reason the Python side is written
+   * the way it is. Obsidian hands a code-block processor an UNSANITISED
+   * element, so nothing downstream will catch a `<script>` that got this far;
+   * the whitelist and the escaping upstream are the whole defence, and they
+   * are tested against the parsed tree rather than against the string.
+   */
+  private drawDistilledHtml(body: HTMLElement, markup: string) {
+    const holder = body.createDiv({ cls: "domvec-html" });
+    holder.innerHTML = markup;
+
+    if (!this.host.settings.loadRemoteMedia) {
+      // Stripped rather than hidden. A hidden `<img src>` has already been
+      // fetched, which is the exact thing the setting exists to prevent: it
+      // tells the host the page was read again, from a new address.
+      holder.querySelectorAll("img[src]").forEach((node) => {
+        const img = node as HTMLImageElement;
+        const box = document.createElement("div");
+        box.className = "dv-noimg";
+        box.textContent = "▣";
+        box.title = img.getAttribute("src") || "";
+        img.replaceWith(box);
+      });
+    }
+
+    const live = this.host.canEnact();
+    holder.querySelectorAll("[data-domvec-address]").forEach((node) => {
+      const el = node as HTMLElement;
+      const key = el.getAttribute("data-domvec-address") || "";
+      if (!key) return;
+      const control = el.matches("button, input, a, fieldset")
+        || el.querySelector("button, input") !== null;
+      if (!control) return;
+      // Enabled only when the SERVER says it will drive the page. The
+      // elements arrive disabled from Python, which is the safe direction to
+      // be wrong in -- a surface drawn before `/health` answers offers
+      // nothing that 403s.
+      if (live) {
+        el.querySelectorAll("[disabled]").forEach(
+          (d) => d.removeAttribute("disabled"));
+        el.removeAttribute("disabled");
+        el.addClass("domvec-live");
+      }
+      el.addEventListener("click", (event) => {
+        // Always prevented. An `<a href>` in here points at the live web and
+        // clicking it should press the element through the sensor, not
+        // navigate the vault's own webview to a scraped url.
+        event.preventDefault();
+        event.stopPropagation();
+        if (live) this.pressAddress(key, this.labelOf(el));
+        else this.say(`${this.classOf(el)}  ${key}`);
+      });
+    });
+  }
+
+  private labelOf(el: HTMLElement): string {
+    return (el.textContent || "").trim().slice(0, 60);
+  }
+
+  private classOf(el: HTMLElement): string {
+    const cls = (el.getAttribute("class") || "").split(/\s+/)
+      .find((c) => c.startsWith("dv-"));
+    return cls ? cls.slice(3) : el.tagName.toLowerCase();
+  }
+
+  private async pressAddress(key: string, label: string) {
+    this.say(`pressing ${label || key.slice(0, 40)}…`);
+    const result = await this.host.enact(key, "press");
+    if (!result) {
+      this.say("no answer from the sidecar");
+      return;
+    }
+    if (result.error) {
+      // A refusal is not a failure, and the surface must not blur the two:
+      // the never-press set turning something down is the system working.
+      this.say((result.refused ? "refused: " : "error: ") + result.error);
+      return;
+    }
+    this.say(`${result.did || "done"} — ${result.detail || ""} ` +
+             `${result.url ? "→ " + result.url : ""}`.trim());
+  }
+
   private drawBar(bar: HTMLElement) {
     bar.createSpan({ cls: "domvec-cid", text: this.cid.slice(0, 8) });
     if (this.payload) {
@@ -87,12 +178,21 @@ export class ChunkSurface extends MarkdownRenderChild {
     }
     const button = bar.createEl("button", {
       cls: "domvec-toggle",
-      text: this.interactive ? "markdown" : "interactive",
+      text: this.interactive ? "markdown" : "interactive HTML",
     });
     button.onclick = () => this.toggle();
   }
 
   private drawInteractive(body: HTMLElement) {
+    // The distilled HTML when the sidecar sent it. The line-by-line
+    // reconstruction below is the fallback for a sidecar too old to send it,
+    // and for it alone: rebuilding a button from `( Add to basket )` is a
+    // guess about a rendering, where the HTML form is what the trie said.
+    const markup = this.payload!.html;
+    if (markup && markup.trim()) {
+      this.drawDistilledHtml(body, markup);
+      return;
+    }
     for (const line of this.payload!.lines) {
       if (!line.text.trim()) continue;
       const row = body.createDiv({ cls: "domvec-line" });

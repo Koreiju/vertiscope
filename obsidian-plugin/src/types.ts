@@ -37,6 +37,21 @@ export interface ChunkPayload {
   lines: ChunkLine[];
   /** Addresses the chunk anchors; a short chunk and a misaligned one differ. */
   addresses: number;
+  /**
+   * The same chunk as slim distilled HTML, built by `htmlform.py` from these
+   * very lines.
+   *
+   * It travels WITH the lines rather than behind a second route, so a surface
+   * cannot hold a markdown form and an HTML form fetched at different
+   * moments -- two renderings of possibly two states. They are one
+   * distillation.
+   *
+   * Every element in it carries `data-domvec-address`, so a click maps back
+   * through the patricia trie to the element the sensor found. The tag set is
+   * a closed whitelist and every text node is escaped on the Python side;
+   * this is scraped web content going into a real unsanitised DOM.
+   */
+  html?: string;
 }
 
 export interface SearchHit {
