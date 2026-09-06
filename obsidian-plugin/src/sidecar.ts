@@ -10,7 +10,7 @@
  * goes unnoticed.
  */
 
-import { ChunkPayload, SearchResult } from "./types";
+import { ChunkPayload, EnactResult, Health, SearchResult } from "./types";
 
 export class Sidecar {
   constructor(private base: () => string) {}
@@ -78,8 +78,36 @@ export class Sidecar {
     return this.get(`/layout?dims=${dims}`);
   }
 
-  /** Whether the sidecar answers at all. Used only to report status. */
+  /** Whether the sidecar answers at all, and what it will allow. */
+  health(): Promise<Health | null> {
+    return this.get<Health>("/health");
+  }
+
   async alive(): Promise<boolean> {
-    return (await this.get<unknown>("/health")) !== null;
+    return (await this.health()) !== null;
+  }
+
+  /**
+   * Drive the live page. The ONLY write this plugin makes.
+   *
+   * POST, and deliberately not routed through `get`: that retries once on a
+   * thrown error, which is right for reading a chunk and wrong for an action.
+   * A press that failed halfway may already have navigated, and pressing
+   * again is not the same as pressing once.
+   */
+  async enact(address: string, action = "press",
+              text?: string): Promise<EnactResult | null> {
+    const base = this.base().trim().replace(/\/+$/, "");
+    if (!base) return null;
+    try {
+      const res = await fetch(`${base}/enact`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ address, action, text }),
+      });
+      return (await res.json()) as EnactResult;
+    } catch {
+      return null;
+    }
   }
 }

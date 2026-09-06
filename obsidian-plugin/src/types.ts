@@ -47,6 +47,30 @@ export interface SearchHit {
   preview: string;
 }
 
+export interface Health {
+  ok: boolean;
+  pages: number;
+  /**
+   * Whether the SERVER will drive the live page.
+   *
+   * Advertised so the surface can draw a read-only chunk as read-only,
+   * rather than offering a button that turns out to 403. The plugin does not
+   * decide this and must not pretend to: the process that owns the browser
+   * does, via `--enact`.
+   */
+  enact: boolean;
+}
+
+export interface EnactResult {
+  ok?: boolean;
+  did?: string;
+  detail?: string;
+  address?: string;
+  url?: string;
+  error?: string;
+  refused?: boolean;
+}
+
 export interface SearchResult {
   query: string;
   hits: SearchHit[];

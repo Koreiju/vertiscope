@@ -183,13 +183,7 @@ left pointing at the web (targets never scanned), 0 links buried in code.
 
 ## Open, in the order it matters
 
-1. **The Selenium port.** Interactions on the surface drive a real browser.
-   Read-only by default is deliberate: driving a live page must be an
-   explicit choice, never a side effect of opening a note. The surface
-   already reports the address it *would* act on, and both the sidecar and
-   the MCP server are read-only by construction, so this is the one place a
-   write path would have to be added deliberately rather than by extension.
-2. **Embeddings.** The layout runs frequency-only until `flush_vectors` has
+1. **Embeddings.** The layout runs frequency-only until `flush_vectors` has
    run with an embedder; `index.embeddings` is `None` on the workspaces
    built so far, so the equalised join is built and tested but not yet
    exercised on real semantic vectors.
@@ -208,6 +202,59 @@ that established it, and the sidecar serves it at `/links`. The plugin asks.
 the export actually wrote and checks every one it linked to is a chunk
 `link_targets` names, rather than calling the helper twice and comparing it
 with itself.
+
+## The Selenium port
+
+Pressing a control in a note presses it in a real browser. This is the only
+write path in the bridge, and it is built so that "everything else is
+read-only" stays true rather than becoming a thing that used to be true.
+
+**Four gates, each because the one before it is not enough.**
+
+1. **The server flag.** `serve(..., enact=True)`, from `--enact`, off by
+   default. A plugin setting cannot be the gate: that is the client asserting
+   something about itself, and the client is a page renderer inside an app
+   the user installs plugins into. The process that owns the browser decides,
+   and `/health` advertises the answer so the surface draws a read-only chunk
+   as read-only instead of offering a button that 403s.
+2. **The refusal set.** `live._refuse_check`, mirrored from `sensor.js` and
+   tested against it — sign-in, checkout, delete, publish, send, consent. It
+   raises rather than returning a no-op, for the reason recorded there: "a
+   model that cannot tell a refusal from a completed action will believe it
+   signed in."
+3. **The address, not a selector.** A caller names a
+   `url:xpath:taxonomy:content` address the store already holds. No arbitrary
+   JavaScript, no arbitrary selector, no url the workspace never scanned. The
+   patricia trie is the vocabulary of what can be touched.
+4. **The fold, not the live DOM.** The element is found in the fold the vault
+   was shown, via the REPL's own `_find_by_xpath`. A selector resolved fresh
+   against the live DOM can name an element the fold never had — an overlay
+   that appeared since, a consent wall — and then the surface and the action
+   are discussing two different pages.
+
+**Nothing that can be decided from the request alone may have a side effect.**
+The refusal check and the argument validation both run before the driver is
+acquired. An earlier ordering had them after, so refusing a sign-in link still
+opened Firefox and loaded the page it was on — the refusal held and the harm
+it exists to prevent had already happened — and `type` without text booted a
+browser to be told so. `tests/test_obsidian_enact.py` asserts the ORDER, and
+runs in 2.6s with no browser at all; if the ordering regresses those tests
+fail rather than passing slowly.
+
+Verified end to end in the running app: a control in `pages/Travel-632b38.md`
+drove Firefox to the books.toscrape sandbox, found the element by xpath in the
+fold, clicked it, and reported `did: press, detail: clicked` with the landed
+url. The gate was then closed again; the sidecar runs read-only by default.
+
+**One defect only the real app could show.** With the gate shut the plugin
+reported "no answer from the sidecar" while the server was healthy and had
+written a perfectly good 403. Obsidian renders from `app://obsidian.md`, so a
+POST with `Content-Type: application/json` is cross-origin and NOT a simple
+request: the browser sends an `OPTIONS` preflight first,
+`BaseHTTPRequestHandler` answered 501 to a verb it had no handler for, and
+`fetch` rejected before the POST was ever sent. GETs had worked from day one
+because they are simple requests. The Node harness has no origin and no
+preflight, so it could never have caught this.
 
 ## The projection, and why it is fitted in Python
 

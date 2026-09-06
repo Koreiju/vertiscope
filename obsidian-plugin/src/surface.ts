@@ -9,7 +9,8 @@
 
 import { MarkdownRenderChild } from "obsidian";
 
-import { ChunkLine, ChunkPayload, DomvecSettings } from "./types";
+import { ChunkLine, ChunkPayload, DomvecSettings, EnactResult }
+  from "./types";
 
 /** `![alt](src)` as the distiller draws media. */
 const MEDIA = /^!\[([^\]]*)\]\(([^)\s]*)\)/;
@@ -19,6 +20,10 @@ const LINK = /^\[([^\]]*)\]\(([^)\s]*)\)/;
 export interface SurfaceHost {
   settings: DomvecSettings;
   fetchChunk(cid: string): Promise<ChunkPayload | null>;
+  /** Whether the SERVER will drive the live page. Not a plugin setting. */
+  canEnact(): boolean;
+  enact(address: string, action?: string,
+        text?: string): Promise<EnactResult | null>;
 }
 
 export class ChunkSurface extends MarkdownRenderChild {
@@ -156,15 +161,56 @@ export class ChunkSurface extends MarkdownRenderChild {
   }
 
   private drawControl(row: HTMLElement, line: ChunkLine) {
+    const live = this.host.canEnact();
     const el = row.createEl("button", {
-      cls: `domvec-act domvec-${line.cls}`,
+      cls: `domvec-act domvec-${line.cls}` + (live ? " domvec-live" : ""),
       text: this.words(line.text) || line.cls,
     });
-    // Read-only. The click reports the address it WOULD act on rather than
-    // acting: driving the real page belongs behind its own gate, never as a
-    // side effect of opening a note.
-    el.onclick = () => this.announce(line);
+    // Whether a click ACTS is the server's decision, read from `/health`, not
+    // a plugin setting. A plugin setting is this side asserting something
+    // about itself, and this side is a page renderer inside an app the user
+    // installs plugins into.
+    //
+    // With the gate shut the click still reports the address it WOULD act on,
+    // which is what the surface did before there was a write path at all.
+    el.onclick = () => (live ? this.press(line) : this.announce(line));
     el.setAttr("aria-label", line.control_key || line.key);
+    if (live) el.setAttr("title", "presses this in the live browser");
+  }
+
+  /**
+   * Press it for real, and say what came back.
+   *
+   * The address sent is `control_key` when there is one: the affordance's own
+   * address, not the address the LINE happens to be stored under. An anchor's
+   * `interactive.links` address is suppressed by the render, so the line
+   * carries a `urls.*` or `text.visible` address instead, and enacting on
+   * that would name the wrong thing.
+   */
+  private async press(line: ChunkLine) {
+    const key = line.control_key || line.key;
+    if (!key) return;
+    this.say("pressing…");
+    const result = await this.host.enact(key, "press");
+    if (!result) {
+      this.say("no answer from the sidecar");
+      return;
+    }
+    if (result.error) {
+      // A refusal is not a failure, and the surface must not blur the two:
+      // the never-press set turning something down is the system working.
+      this.say((result.refused ? "refused: " : "error: ") + result.error);
+      return;
+    }
+    this.say(`${result.did || "done"} — ${result.detail || ""} ` +
+             `${result.url ? "→ " + result.url : ""}`.trim());
+  }
+
+  private say(text: string) {
+    if (!this.readout) {
+      this.readout = this.containerEl.createDiv({ cls: "domvec-readout" });
+    }
+    this.readout.setText(text);
   }
 
   private drawMarkdown(body: HTMLElement) {
@@ -223,12 +269,8 @@ export class ChunkSurface extends MarkdownRenderChild {
   }
 
   private announce(line: ChunkLine) {
-    if (!this.readout) {
-      this.readout = this.containerEl.createDiv({ cls: "domvec-readout" });
-    }
     const key = line.control_key || line.key;
-    this.readout.setText(
-      `${line.cls}  ${key}` + (line.target ? `  → ${line.target}` : ""),
-    );
+    this.say(`${line.cls}  ${key}` +
+             (line.target ? `  → ${line.target}` : ""));
   }
 }

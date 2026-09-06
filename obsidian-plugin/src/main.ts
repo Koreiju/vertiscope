@@ -32,13 +32,19 @@ import { GRAPH_VIEW, GraphView } from "./graph";
 import { RetrievalSuggest } from "./retrieval";
 import { Sidecar } from "./sidecar";
 import { ChunkSurface, SurfaceHost } from "./surface";
-import { ChunkPayload, DEFAULTS, DomvecSettings } from "./types";
+import { ChunkPayload, DEFAULTS, DomvecSettings, EnactResult }
+  from "./types";
 import { VaultLinks } from "./vaultlinks";
 
 export default class DomvecPlugin extends Plugin implements SurfaceHost {
   settings: DomvecSettings = DEFAULTS;
   sidecar!: Sidecar;
   links!: VaultLinks;
+  /**
+   * What the SERVER last said it allows. Refreshed on load and by the
+   * connection check; never assumed, and never set from a plugin setting.
+   */
+  private serverEnact = false;
   /** Every mounted surface, so the toggle command can reach them all. */
   private surfaces = new Set<ChunkSurface>();
 
@@ -82,9 +88,12 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost {
       id: "domvec-check-sidecar",
       name: "Check sidecar connection",
       callback: async () => {
-        const ok = await this.sidecar.alive();
-        new Notice(ok
-          ? `domvec: sidecar answering at ${this.settings.sidecar}`
+        const health = await this.sidecar.health();
+        this.serverEnact = !!(health && health.enact);
+        new Notice(health
+          ? `domvec: sidecar at ${this.settings.sidecar} — ` +
+            `${health.pages} pages, ` +
+            (health.enact ? "CAN drive the live page" : "read-only")
           : `domvec: no sidecar at ${this.settings.sidecar || "(unset)"} — ` +
             "notes still read offline");
       },
@@ -101,6 +110,11 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost {
       name: "Open the 3D graph",
       callback: () => this.openGraph(),
     });
+
+    // Ask the server what it allows, once, at load. A surface drawn before
+    // the answer arrives is read-only, which is the safe direction to be
+    // wrong in.
+    this.sidecar.health().then((h) => { this.serverEnact = !!(h && h.enact); });
 
     this.addSettingTab(new DomvecSettingTab(this.app, this));
   }
@@ -148,6 +162,15 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost {
 
   fetchChunk(cid: string): Promise<ChunkPayload | null> {
     return this.sidecar.chunk(cid);
+  }
+
+  canEnact(): boolean {
+    return this.serverEnact;
+  }
+
+  enact(address: string, action = "press",
+        text?: string): Promise<EnactResult | null> {
+    return this.sidecar.enact(address, action, text);
   }
 
   private renderChunk(

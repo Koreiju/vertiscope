@@ -39,14 +39,23 @@ def main(argv=None) -> int:
     sv = sub.add_parser("serve", help="loopback read-only window on the store")
     sv.add_argument("--workspace", required=True, type=Path)
     sv.add_argument("--port", type=int, default=8787)
+    sv.add_argument("--enact", action="store_true",
+                    help="let the vault DRIVE the live page: clicking a "
+                         "control in Obsidian presses it in a real browser. "
+                         "Off by default. Every other route is read-only, and "
+                         "this one still refuses the never-press set "
+                         "(sign-in, checkout, delete, publish, send) and only "
+                         "accepts addresses the workspace already holds.")
 
     args = parser.parse_args(argv)
 
     with Workspace(args.workspace) as ws:
         if args.cmd == "serve":
-            print("domvec sidecar on http://127.0.0.1:%d  (%d pages, read-only)"
-                  % (args.port, len(ws.pages())))
-            serve(ws, port=args.port)
+            print("domvec sidecar on http://127.0.0.1:%d  (%d pages, %s)"
+                  % (args.port, len(ws.pages()),
+                     "ENACT ENABLED -- the vault can drive a browser"
+                     if args.enact else "read-only"))
+            serve(ws, port=args.port, enact=args.enact)
             return 0
 
         if not args.url and not args.all_pages:

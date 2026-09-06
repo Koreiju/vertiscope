@@ -11,8 +11,13 @@ It binds 127.0.0.1 and nothing else. The store holds a browsing history --
 the reason `Workspace.mirror_path` names its files by digest -- and a server
 that answered on 0.0.0.0 would publish it to the local network.
 
-It is read-only. There is no route that mutates the workspace, so a page
-rendered in a vault cannot alter the store no matter what it contains.
+It is read-only BY DEFAULT, and the exception is a door with a lock. No GET
+route mutates anything, so a page rendered in a vault cannot alter the store
+or touch the web no matter what it contains. `POST /enact` drives the live
+browser and exists only when the process was started with `enact=True` --
+otherwise it answers 403 and says so. The flag lives on the SERVER because a
+plugin setting is a client asserting something about itself, and the client is
+a page renderer in an app the user installs plugins into.
 
 It sends the line's ADDRESS, not just its text. The address key is the
 `url:xpath:taxonomy:content` identity everything downstream is keyed on, and
@@ -145,6 +150,7 @@ def search_payload(workspace, query: str, k: int = 8) -> Dict:
 
 class _Handler(BaseHTTPRequestHandler):
     workspace = None            # set by serve()
+    enact_allowed = False       # set by serve(); the write path's gate
 
     # Silence the default stderr access log: it prints the requested path, and
     # the path carries the cid of whatever the reader is looking at.
@@ -163,12 +169,75 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(raw)
 
+    def do_OPTIONS(self) -> None:                   # noqa: N802 (stdlib name)
+        """Answer the CORS preflight, or every POST fails before it is sent.
+
+        Obsidian renders from `app://obsidian.md`, so a fetch to loopback is
+        cross-origin. A GET with no custom headers is "simple" and goes
+        straight through -- which is why reading chunks worked from the first
+        day -- but a POST with `Content-Type: application/json` is not, and
+        the browser sends an OPTIONS preflight first. `BaseHTTPRequestHandler`
+        answers 501 to a verb it has no handler for, the preflight fails, and
+        `fetch` REJECTS: the plugin saw a thrown error and reported "no answer
+        from the sidecar" while the server was healthy and the 403 it had
+        written was never read.
+
+        Invisible to the Node harness, which has no origin and no preflight.
+        Only the real app could show it.
+        """
+        self.send_response(204)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Max-Age", "600")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def do_POST(self) -> None:                      # noqa: N802 (stdlib name)
+        """The only write path, and only when the server was asked for one."""
+        parts = urlsplit(self.path)
+        if parts.path.strip("/") != "enact":
+            self._send(404, {"error": "no such route", "path": parts.path})
+            return
+        if not self.enact_allowed:
+            # Named rather than a bare 403: a caller that cannot tell "off" from
+            # "failed" will retry forever, and a reader of the surface deserves
+            # to know the difference between refused and unavailable.
+            self._send(403, {
+                "error": "enact is off",
+                "detail": "start the sidecar with --enact to let the vault "
+                          "drive the live page"})
+            return
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+            body = json.loads(self.rfile.read(length) or b"{}")
+        except Exception as exc:                    # noqa: BLE001
+            self._send(400, {"error": "bad body: %s" % exc})
+            return
+
+        from .enact import EnactError, enact
+        try:
+            self._send(200, enact(self.workspace,
+                                  body.get("address") or "",
+                                  body.get("action") or "press",
+                                  body.get("text")))
+        except EnactError as exc:
+            # A refusal is a 409, not a 500: the request was understood and
+            # deliberately not carried out, and the surface should say which.
+            self._send(409, {"error": str(exc), "refused": True})
+        except Exception as exc:                    # noqa: BLE001
+            self._send(500, {"error": "%s: %s" % (type(exc).__name__, exc)})
+
     def do_GET(self) -> None:                       # noqa: N802 (stdlib name)
         parts = urlsplit(self.path)
         segments = [unquote(s) for s in parts.path.strip("/").split("/") if s]
 
         if not segments or segments[0] == "health":
-            self._send(200, {"ok": True, "pages": len(self.workspace.pages())})
+            # `enact` is advertised so the plugin can draw a read-only
+            # surface as read-only rather than offering a button that 403s.
+            self._send(200, {"ok": True,
+                             "pages": len(self.workspace.pages()),
+                             "enact": bool(self.enact_allowed)})
             return
 
         if segments[0] == "chunk" and len(segments) == 2:
@@ -221,13 +290,15 @@ class _Handler(BaseHTTPRequestHandler):
         self._send(404, {"error": "no such route", "path": parts.path})
 
 
-def serve(workspace, port: int = 8787, *, block: bool = True):
+def serve(workspace, port: int = 8787, *, block: bool = True,
+          enact: bool = False):
     """Answer on loopback until stopped.
 
     Returns the server so a caller that passed ``block=False`` can shut it
     down; a test that leaks one wedges the port for the next run.
     """
-    handler = type("_Bound", (_Handler,), {"workspace": workspace})
+    handler = type("_Bound", (_Handler,),
+                   {"workspace": workspace, "enact_allowed": bool(enact)})
 
     class _Server(ThreadingHTTPServer):
         # A vault opens many chunks at once -- a note with several `domvec`
