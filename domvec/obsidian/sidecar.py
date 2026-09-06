@@ -228,7 +228,23 @@ def serve(workspace, port: int = 8787, *, block: bool = True):
     down; a test that leaks one wedges the port for the next run.
     """
     handler = type("_Bound", (_Handler,), {"workspace": workspace})
-    server = ThreadingHTTPServer(("127.0.0.1", port), handler)
+
+    class _Server(ThreadingHTTPServer):
+        # A vault opens many chunks at once -- a note with several `domvec`
+        # blocks, or the graph view beside a handful of surfaces -- and every
+        # one is its own connection, arriving together.
+        #
+        # `socketserver` defaults `request_queue_size` to 5, so the sixth
+        # connection of a burst is REFUSED rather than queued. Measured with
+        # nine simultaneous requests: exactly one came back ECONNREFUSED and
+        # the rest were fine, which is the worst possible shape -- the plugin
+        # answers null on a failed fetch, the surface then says "sidecar
+        # unreachable", and it stays saying that until the note is edited. One
+        # surface in nine looked broken while the sidecar was healthy.
+        request_queue_size = 128
+        daemon_threads = True
+
+    server = _Server(("127.0.0.1", port), handler)
     if block:
         try:
             server.serve_forever()

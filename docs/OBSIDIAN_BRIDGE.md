@@ -246,6 +246,41 @@ status bar — a layout fitted on frequency alone and one fitted on both are
 different pictures, and a reader who cannot tell them apart will read a
 lexical clustering as a semantic one.
 
+## Running it
+
+The vault is the domvec repo itself, already registered with Obsidian. The
+plugin installs into `.obsidian/plugins/domvec-bridge/` (gitignored) and is
+enabled in `.obsidian/community-plugins.json`.
+
+```
+python -m domvec.obsidian export --workspace build/vaultws --vault .        --folder pages --all-pages
+python -m domvec.obsidian serve  --workspace build/vaultws --port 8787
+```
+
+`obsidian-plugin/harness.mjs` runs the BUILT plugin outside Obsidian against a
+live sidecar: it stubs the `obsidian` module, loads `main.js`, and drives the
+code-block processor, the retrieval gesture and the link rewrite for real.
+`npm run harness`. It cannot check rendering, layout or the WebGL scene --
+those still need the app -- and its stubs are a reading of the docs, so a
+wrong stub hides the bug it was meant to catch.
+
+Three defects it found on its first run, none of which types or the Python
+tests could have seen:
+
+* **Dot-prefixed notes were invisible.** A chunk whose first words are a
+  relative url named itself `.. .. static oscar js bootstrap.min.js`, and
+  Obsidian ignores dot-prefixed files outright. Two of the ninety-eight notes
+  were written, indexed by nothing, and unreachable — while the export
+  reported ninety-eight.
+* **The sidecar refused connections in a burst.** `socketserver` defaults
+  `request_queue_size` to 5, and a vault opens many chunks at once. One
+  request in nine came back `ECONNREFUSED`.
+* **The client gave up on the first failure.** One refused connection made a
+  surface say "sidecar unreachable" and keep saying it, while every other
+  surface on screen worked. It now retries once, and only on a thrown error —
+  a 404 for a cid the store does not have is an answer, and asking twice makes
+  it no truer.
+
 ## Sources
 
 - [Obsidian developer docs](https://github.com/obsidianmd/obsidian-developer-docs)

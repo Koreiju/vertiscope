@@ -14,7 +14,7 @@ import pytest
 
 from markdown_it import MarkdownIt
 
-from domvec.obsidian.export import _reflow, _rewrite_links, _title_of
+from domvec.obsidian.export import _reflow, _rewrite_links, _slug, _title_of
 from domvec.obsidian import export_vault
 from domvec.obsidian.export import link_targets
 
@@ -193,3 +193,36 @@ def test_a_target_resolves_through_frontmatter_the_way_the_plugin_does(ws,
         assert "cid: %s" % target["cid"] in head, \
             "the landing note does not carry the cid the plugin looks up"
         assert 'url: "%s"' % target["url"] in head
+
+
+def test_a_note_name_never_starts_with_a_dot():
+    """Obsidian ignores dot-prefixed files and folders outright.
+
+    Such a note is written, indexed by nothing, invisible in the vault, and
+    any wikilink pointing at it dangles. It is not a corner case: a chunk
+    whose first words are a relative url names itself after them, and
+    `../../static/oscar/js/bootstrap.min.js` becomes
+    `.. .. static oscar js bootstrap.min.js`. Two of the ninety-eight notes in
+    the toscrape export were hidden this way, and the count still read
+    ninety-eight -- the files existed, the vault just never saw them.
+    """
+    assert not _slug("../../static/oscar/js/bootstrap.min.js").startswith(".")
+    assert not _slug("...").startswith(".")
+    assert _slug("...") == "chunk", "a name of only dots must still be a name"
+    # Windows strips trailing dots and spaces, so `page.` and `page` are one
+    # file and the second export overwrites the first.
+    assert not _slug("page.").endswith(".")
+    assert not _slug("page ").endswith(" ")
+
+
+def test_every_exported_note_is_visible_to_the_vault(ws, tmp_path):
+    """End to end: no note the export claims is hidden on disk."""
+    ws.index_html(
+        "<html><body><p><a href='../../static/js/bootstrap.min.js'>"
+        "../../static/js/bootstrap.min.js</a></p>"
+        "<p>ordinary words</p></body></html>", "https://a.test")
+    report = export_vault(ws, tmp_path / "vault", urls=ws.pages())
+    for path in report.notes.values():
+        assert not path.name.startswith("."), \
+            "%s is hidden from Obsidian" % path.name
+        assert path.exists()

@@ -23,13 +23,28 @@ export class Sidecar {
   private async get<T>(path: string): Promise<T | null> {
     const url = this.url(path);
     if (!url) return null;
-    try {
-      const res = await fetch(url);
-      if (!res.ok) return null;
-      return (await res.json()) as T;
-    } catch {
-      return null;
+    // Retried once, and only on a THROWN error.
+    //
+    // A thrown fetch is a connection that never happened -- refused, reset,
+    // the socket gone -- and those are transient here: a vault opens many
+    // chunks at once and a burst can outrun the server's listen backlog. One
+    // refused connection used to make that surface say "sidecar unreachable"
+    // and keep saying it until the note was edited, while every other surface
+    // on screen worked. Measured: one refusal in a burst of nine.
+    //
+    // A RESPONSE that is not ok is not retried. A 404 for a cid the store does
+    // not have is an answer, and asking twice makes it no truer.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const res = await fetch(url);
+        if (!res.ok) return null;
+        return (await res.json()) as T;
+      } catch {
+        if (attempt === 0) continue;
+        return null;
+      }
     }
+    return null;
   }
 
   chunk(cid: string): Promise<ChunkPayload | null> {

@@ -22,3 +22,6 @@ kuzu_db/
 
 # Editor state.
 .obsidian/
+
+# Exported vault notes — regenerable from the store.
+pages/

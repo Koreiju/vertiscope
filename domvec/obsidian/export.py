@@ -53,6 +53,20 @@ def _slug(text: str, limit: int = 48) -> str:
     """
     text = _UNSAFE.sub(" ", (text or "").replace("/", " "))
     text = " ".join(text.split())[:limit].strip()
+    # Never a leading dot. Obsidian ignores dot-prefixed files and folders
+    # outright, so such a note is written, indexed by nothing, invisible in
+    # the vault, and any wikilink pointing at it dangles.
+    #
+    # It is not a corner case: a chunk whose first words are a relative url
+    # names itself after them, and `../../static/oscar/js/bootstrap.min.js`
+    # becomes `.. .. static oscar js bootstrap.min.js`. Two of the ninety-eight
+    # notes in the toscrape export were hidden this way, and the count still
+    # said ninety-eight -- the files existed, the vault just never saw them.
+    #
+    # Trailing dots and spaces go too: Windows silently strips them from a
+    # filename, so `page.` and `page` are one file and the second export
+    # overwrites the first.
+    text = text.lstrip(". ").rstrip(". ")
     return text or "chunk"
 
 
