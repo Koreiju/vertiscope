@@ -29,7 +29,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Dict, List, Optional
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from .export import _reflow
+from .export import _reflow, link_targets
 from .layout import build_layout
 
 
@@ -177,6 +177,13 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send(404, {"error": "no such chunk", "cid": segments[1]})
             else:
                 self._send(200, payload)
+            return
+
+        if segments[0] == "links":
+            # Where a link to each page should land. The gesture needs the
+            # SAME cid the export uses, or the two would write different
+            # edges for one link and the graph would show both.
+            self._send(200, {"targets": link_targets(self.workspace)})
             return
 
         if segments[0] == "layout":

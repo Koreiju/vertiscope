@@ -8,12 +8,15 @@ columns by the distiller's DOM depth, and all seven wikilinks it produced were
 unreachable. Every test here exists to keep that from coming back quietly.
 """
 
+import re
+
 import pytest
 
 from markdown_it import MarkdownIt
 
 from domvec.obsidian.export import _reflow, _rewrite_links, _title_of
 from domvec.obsidian import export_vault
+from domvec.obsidian.export import link_targets
 
 
 COMMONMARK = MarkdownIt("commonmark")
@@ -129,3 +132,64 @@ def test_the_payload_fence_carries_only_the_cid(ws, tmp_path):
     text = path.read_text(encoding="utf-8")
     fence = text.split("```domvec", 1)[1].split("```", 1)[0]
     assert fence.strip() == "cid: %s" % cid
+
+
+# --- the gesture and the export must agree -------------------------------------
+
+def test_link_targets_name_the_same_chunk_the_export_linked_to(ws, tmp_path):
+    """One link, one edge, whichever surface wrote it.
+
+    The `/` retrieval gesture rewrites a passage's links using
+    `link_targets`, and the export rewrites the same links using
+    `_first_chunk_by_page`. If those disagree the graph gets two edges for one
+    link -- one from a passage a reader inserted and one from the exported
+    note -- pointing at two different chunks of the same page.
+
+    So the rule lives in one place and this asserts the two callers land on
+    it. The check is deliberately end-to-end: it reads the notes the export
+    actually wrote rather than calling the helper twice.
+    """
+    ws.index_html(SUB, "https://a.test/sub.html")
+    ws.index_html(HOME, "https://a.test")
+
+    report = export_vault(ws, tmp_path / "vault", urls=ws.pages())
+    targets = {t["cid"] for t in link_targets(ws)}
+    assert targets, "no link targets at all"
+
+    # Every note the export actually linked to, by basename.
+    linked = set()
+    for path in report.notes.values():
+        for match in re.finditer(r"\[\[([^\]|]+)", path.read_text(encoding="utf-8")):
+            linked.add(match.group(1))
+
+    if not linked:
+        pytest.skip("these pages do not link to one another")
+
+    # Each linked-to note is the chunk `link_targets` names for its page.
+    by_name = {p.stem: cid for cid, p in report.notes.items()}
+    for name in linked:
+        assert by_name.get(name) in targets, (
+            "the export linked to %r, which `link_targets` does not name as "
+            "any page's landing chunk" % name)
+
+
+def test_a_target_resolves_through_frontmatter_the_way_the_plugin_does(ws,
+                                                                       tmp_path):
+    """The plugin maps cid -> note by reading frontmatter. Prove it can.
+
+    `VaultLinks` scans the vault for `cid` in frontmatter, because only the
+    vault knows what was exported -- the export may have run to another
+    folder, or not at all. A note written without that field would leave every
+    passage's links pointing at the web with nothing to say why.
+    """
+    ws.index_html(HOME, "https://a.test")
+    report = export_vault(ws, tmp_path / "vault", urls=ws.pages())
+
+    for target in link_targets(ws):
+        path = report.notes.get(target["cid"])
+        if path is None:
+            continue
+        head = path.read_text(encoding="utf-8").split("---", 2)[1]
+        assert "cid: %s" % target["cid"] in head, \
+            "the landing note does not carry the cid the plugin looks up"
+        assert 'url: "%s"' % target["url"] in head

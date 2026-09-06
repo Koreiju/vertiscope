@@ -124,6 +124,15 @@ lesson: four spaces *inside a list* is nesting, and only four spaces
     opens the exported note, matched on the `cid` in frontmatter rather than
     the file name, because the exporter names notes for their first words and
     two chunks can begin the same way.
+  - `vaultlinks.ts` — the passage's links become **vault edges**. Two things
+    have to line up and neither is guessable from the passage: which chunk a
+    link to a page lands on, which the sidecar reports from the exporter's own
+    rule rather than the plugin reimplementing it; and which note holds that
+    chunk, which only the vault knows, so the map is built from the notes
+    themselves keyed on the `cid` the export writes into frontmatter. A target
+    that was never exported is left as a web link — a working web link beats a
+    wikilink to a note that does not exist, which Obsidian draws as a dangling
+    node nobody can open.
   - `main.ts` — wiring, five commands, a ribbon icon, settings.
 
   **Remote media is off by default, and that is a privacy setting rather than
@@ -180,12 +189,25 @@ left pointing at the web (targets never scanned), 0 links buried in code.
    already reports the address it *would* act on, and both the sidecar and
    the MCP server are read-only by construction, so this is the one place a
    write path would have to be added deliberately rather than by extension.
-2. **The gesture's links stay web links.** A passage the `/` gesture inserts
-   keeps its internal links exactly as the distiller drew them. Rewriting
-   them into wikilinks is the exporter's job and it can only do it for pages
-   that were exported, which the gesture has no way to know. Wiring the two
-   together — the exporter's name map, available to the gesture — is the
-   piece that would make retrieval and the graph one surface.
+2. **Embeddings.** The layout runs frequency-only until `flush_vectors` has
+   run with an embedder; `index.embeddings` is `None` on the workspaces
+   built so far, so the equalised join is built and tested but not yet
+   exercised on real semantic vectors.
+
+## One link, one edge
+
+The gesture and the export both rewrite the same links, so they must land on
+the same chunk. If they disagreed, a page linked from an inserted passage and
+from an exported note would draw two edges to two chunks of one page, and the
+graph would say something untrue about the web.
+
+So the rule — a link contributes ONE edge, to the target page's first chunk,
+which is what the store itself does — lives in `export.py` next to the export
+that established it, and the sidecar serves it at `/links`. The plugin asks.
+`test_link_targets_name_the_same_chunk_the_export_linked_to` reads the notes
+the export actually wrote and checks every one it linked to is a chunk
+`link_targets` names, rather than calling the helper twice and comparing it
+with itself.
 
 ## The projection, and why it is fitted in Python
 

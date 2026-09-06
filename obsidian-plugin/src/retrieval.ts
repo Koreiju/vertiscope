@@ -11,6 +11,11 @@
  * part of the note, the note is a file, and every link in it is a link
  * Obsidian's graph already understands. Retrieval that renders into a side
  * panel leaves nothing behind.
+ *
+ * And the passage's own links are rewritten into wikilinks wherever the page
+ * they point at was exported -- see `VaultLinks`. Without that the passage
+ * reads correctly and contributes nothing to the graph, which is exactly the
+ * state the export was in before its first defect was found.
  */
 
 import {
@@ -20,11 +25,13 @@ import {
   EditorSuggest,
   EditorSuggestContext,
   EditorSuggestTriggerInfo,
+  Notice,
   TFile,
 } from "obsidian";
 
 import { Sidecar } from "./sidecar";
 import { ChunkPayload, DomvecSettings, SearchHit } from "./types";
+import { VaultLinks } from "./vaultlinks";
 
 /**
  * `/` at the start of a line, then the query.
@@ -47,6 +54,7 @@ export class RetrievalSuggest extends EditorSuggest<Suggestion> {
     app: App,
     private sidecar: Sidecar,
     private settings: () => DomvecSettings,
+    private links: VaultLinks,
   ) {
     super(app);
     this.setInstructions([
@@ -112,20 +120,32 @@ export class RetrievalSuggest extends EditorSuggest<Suggestion> {
     if (!context) return;
     const hits = item.kind === "all" ? item.hits : [item.hit];
 
+    // Which pages are in the vault, learned once per insertion. The vault
+    // scan is the expensive half, and a note created between two hits of one
+    // gesture is not a case worth a second pass for.
+    await this.links.refresh();
+
     // Fetched one at a time rather than trusting the preview: the preview is
     // the first few lines and this is meant to inset the passage, not a
-    // teaser of it. The sidecar being unreachable mid-gesture is possible, so
-    // a hit that will not load is skipped rather than inserted empty.
+    // teaser of it.
     const blocks: string[] = [];
+    let edges = 0;
     for (const hit of hits) {
       const payload = await this.sidecar.chunk(hit.cid);
-      blocks.push(passage(hit, payload));
+      const raw = passage(hit, payload);
+      const rewritten = this.links.rewrite(raw, hit.url);
+      edges += rewritten.edges;
+      blocks.push(rewritten.text);
     }
 
     const text = [`/${context.query}`, RULE, blocks.join(`\n${RULE}\n`), RULE]
       .join("\n") + "\n";
     context.editor.replaceRange(text, context.start, context.end);
     this.close();
+    if (edges) {
+      new Notice(`domvec: ${edges} link${edges === 1 ? "" : "s"} ` +
+                 "became vault edges");
+    }
   }
 }
 
@@ -141,10 +161,10 @@ function host(url: string): string {
  * One retrieved chunk as markdown a reader can keep.
  *
  * The source line is a real link, so the passage says where it came from and
- * the note keeps a way back to the page. Its own internal links are left
- * exactly as the distiller drew them: rewriting those into wikilinks is the
- * exporter's job, and it can only do it for pages that were exported, which
- * this gesture has no way to know.
+ * the note keeps a way back to the page. It is written as ordinary link
+ * markup like every other link in the body, so `VaultLinks.rewrite` picks it
+ * up too: when the page it names was exported, the provenance line becomes an
+ * edge rather than a footnote.
  */
 function passage(hit: SearchHit, payload: ChunkPayload | null): string {
   const body = payload

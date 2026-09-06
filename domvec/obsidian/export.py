@@ -262,3 +262,30 @@ def _note(chunk, body: str) -> str:
     ]
     fence = "\n\n```domvec\ncid: %s\n```\n" % chunk.cid
     return "\n".join(head) + body.rstrip() + fence
+
+
+def link_targets(workspace, urls: Optional[Sequence[str]] = None) -> List[dict]:
+    """Where a link to each page should land, in both spellings.
+
+    The `/` retrieval gesture inserts a passage into a note, and that passage
+    carries the page's own links. Turning those into vault edges needs exactly
+    what `export_vault` needs -- the cid a link to a page lands on -- and it
+    has to be the SAME cid, or the gesture and the export would write two
+    different edges for one link and the graph would show both.
+
+    So the rule lives here, next to the export that established it, and the
+    plugin asks rather than reimplementing it. `canonical` is sent alongside
+    the stored url because a page is stored under the url it was scanned with
+    and `canonical_url` does not always return that; matching on the stored
+    spelling alone dropped three quarters of the store's own resolvable edges
+    once.
+    """
+    store = workspace.store
+    pages = list(urls) if urls else list(store.page_urls())
+    chunks = [c for url in pages for c in store.chunks(url)]
+    out = []
+    for url, cid in _first_chunk_by_page(chunks).items():
+        out.append({"url": url,
+                    "canonical": canonical_url(url) or url,
+                    "cid": cid})
+    return out

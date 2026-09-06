@@ -33,16 +33,19 @@ import { RetrievalSuggest } from "./retrieval";
 import { Sidecar } from "./sidecar";
 import { ChunkSurface, SurfaceHost } from "./surface";
 import { ChunkPayload, DEFAULTS, DomvecSettings } from "./types";
+import { VaultLinks } from "./vaultlinks";
 
 export default class DomvecPlugin extends Plugin implements SurfaceHost {
   settings: DomvecSettings = DEFAULTS;
   sidecar!: Sidecar;
+  links!: VaultLinks;
   /** Every mounted surface, so the toggle command can reach them all. */
   private surfaces = new Set<ChunkSurface>();
 
   async onload() {
     this.settings = Object.assign({}, DEFAULTS, await this.loadData());
     this.sidecar = new Sidecar(() => this.settings.sidecar);
+    this.links = new VaultLinks(this.app, this.sidecar);
 
     this.registerMarkdownCodeBlockProcessor(
       "domvec",
@@ -50,7 +53,8 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost {
     );
 
     this.registerEditorSuggest(
-      new RetrievalSuggest(this.app, this.sidecar, () => this.settings),
+      new RetrievalSuggest(this.app, this.sidecar, () => this.settings,
+                           this.links),
     );
 
     this.addCommand({

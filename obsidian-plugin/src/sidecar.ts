@@ -43,6 +43,17 @@ export class Sidecar {
   }
 
   /**
+   * Where a link to each stored page should land.
+   *
+   * The rule lives in `export.py` next to the export that established it, so
+   * the gesture and the export write the SAME edge for one link rather than
+   * two implementations drifting apart.
+   */
+  links(): Promise<unknown | null> {
+    return this.get("/links");
+  }
+
+  /**
    * The fitted 3D placement. Seconds on a first call, cached after.
    *
    * Fitted in Python, where the vectors, numpy and UMAP already are. A
