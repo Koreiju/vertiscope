@@ -96,10 +96,33 @@ lesson: four spaces *inside a list* is nesting, and only four spaces
   `/search?q=` is the `/` gesture's backend. The address is sent, not just
   the text, because the address is what lets a click in Obsidian name an
   element in the real page.
-- `obsidian-plugin/` — manifest, build, and `src/main.ts`: the code-block
-  processor, the markdown/interactive toggle, and the settings tab. Offline
-  is a supported mode and says so on the surface rather than rendering as an
-  empty chunk.
+- `obsidian-plugin/` — manifest, build, and ~690 lines of TypeScript:
+
+  - `types.ts` — the contract with `sidecar.py`. One file, because a field
+    renamed on one side and not the other fails silently at runtime with an
+    empty surface.
+  - `sidecar.ts` — the client. Every method answers `null` rather than
+    throwing: offline is a supported mode, and the surface says so instead of
+    rendering as an empty chunk.
+  - `surface.ts` — the chunk as something to look at and press, including
+    **media billboards**. The distiller already draws `![alt](src)` with the
+    page's own alt text, never the file name, so a billboard has a caption
+    without guessing one.
+  - `retrieval.ts` — the **`/` gesture** through `EditorSuggest`. Typing
+    `/some query` offers the workspace's own chunks, ranked by three-form
+    retrieval, and inserts the chosen passages inline with rules between
+    them. What it inserts is ordinary markdown, which is the whole reason for
+    doing it through the editor rather than a panel: the passage becomes part
+    of the note, the note is a file, and its links are links the graph already
+    understands. Retrieval that renders into a side panel leaves nothing
+    behind.
+  - `main.ts` — wiring, three commands, settings.
+
+  **Remote media is off by default, and that is a privacy setting rather than
+  a performance one.** A distilled page carries tracking pixels and per-user
+  asset urls; fetching them from a vault tells those hosts the page was read
+  again, at a new time, from a new address. With it off, media draws as a
+  captioned placeholder that still says what the picture was.
 - `domvec/obsidian/mcp.py` — an MCP server over the same functions, stdio
   JSON-RPC with no SDK dependency. `search`, `chunk`, `affordances`,
   `resolve_address`, `pages`. It deliberately does **not** expose note
@@ -143,18 +166,23 @@ left pointing at the web (targets never scanned), 0 links buried in code.
 
 ## Open, in the order it matters
 
-1. **Media billboards.** Images and video are addressed already; the surface
-   renders them as text.
-2. **The `/` retrieval gesture.** `EditorSuggest` is the hook. The sidecar
-   route and the MCP tool both exist.
-3. **The 3D view.** `3d-force-graph` + `umap-js`, following
+1. **The 3D view.** `3d-force-graph` + `umap-js`, following
    `obsidian-3d-semantic-graph`. The projection the goal asks for is specific:
    bring the frequency vectors to the semantic dimensionality *first*, then
    concatenate, then one final UMAP — so the two spaces contribute equal
    information rather than whichever happens to be wider.
-5. **The Selenium port.** Interactions on the surface drive a real browser.
+2. **The Selenium port.** Interactions on the surface drive a real browser.
    Read-only by default is deliberate: driving a live page must be an
-   explicit choice, never a side effect of opening a note.
+   explicit choice, never a side effect of opening a note. The surface
+   already reports the address it *would* act on, and both the sidecar and
+   the MCP server are read-only by construction, so this is the one place a
+   write path would have to be added deliberately rather than by extension.
+3. **The gesture's links stay web links.** A passage the `/` gesture inserts
+   keeps its internal links exactly as the distiller drew them. Rewriting
+   them into wikilinks is the exporter's job and it can only do it for pages
+   that were exported, which the gesture has no way to know. Wiring the two
+   together — the exporter's name map, available to the gesture — is the
+   piece that would make retrieval and the graph one surface.
 
 ## Sources
 

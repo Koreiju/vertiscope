@@ -29,6 +29,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Dict, List, Optional
 from urllib.parse import unquote, urlsplit
 
+from .export import _reflow
+
 
 def chunk_payload(workspace, cid: str) -> Optional[Dict]:
     """One chunk as the plugin's `ChunkPayload`.
@@ -44,7 +46,19 @@ def chunk_payload(workspace, cid: str) -> Optional[Dict]:
         return None
 
     addresses = workspace.addresses_for(cid)
-    texts = stored.md.splitlines()
+    # Re-indented by nesting LEVEL before anyone sees it.
+    #
+    # The renderer indents by depth in the DOM, so a chunk rooted a few
+    # elements down opens at column 10 -- and both consumers of this payload
+    # put the lines into a markdown note, where four or more leading spaces is
+    # an indented CODE BLOCK. The export learned this the hard way: 82 of 98
+    # notes parsed as code and every wikilink in them was unreachable.
+    #
+    # Done here rather than in each caller so the `/` retrieval gesture, which
+    # inserts these lines into a note directly, cannot reintroduce it.
+    # `_reflow` maps one line to one line, so the positional `anchors`
+    # alignment below is untouched.
+    texts = _reflow(stored.md).splitlines()
 
     # An affordance is usually not the address the line is stored under.
     #
@@ -166,11 +180,20 @@ class _Handler(BaseHTTPRequestHandler):
 
         if segments[0] == "search":
             from urllib.parse import parse_qs
-            query = (parse_qs(parts.query).get("q") or [""])[0]
+            params = parse_qs(parts.query)
+            query = (params.get("q") or [""])[0]
+            # `k` is clamped rather than trusted: the caller is a plugin in
+            # another process and an absent or absurd value must not turn a
+            # keystroke into a full-workspace scan.
+            try:
+                k = int((params.get("k") or ["8"])[0])
+            except ValueError:
+                k = 8
+            k = max(1, min(k, 50))
             if not query:
                 self._send(400, {"error": "missing q"})
             else:
-                self._send(200, search_payload(self.workspace, query))
+                self._send(200, search_payload(self.workspace, query, k))
             return
 
         self._send(404, {"error": "no such route", "path": parts.path})

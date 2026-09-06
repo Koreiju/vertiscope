@@ -15,69 +15,73 @@
  * The native graph view has no plugin API -- the one community plugin that
  * extends it patches undocumented internals and warns that settings can be
  * lost. So this plugin does not touch it. Real wikilinks in real notes make
- * the native graph work for free, and the 3D view (next) owns its own scene.
+ * the native graph work for free.
  */
 
 import {
+  App,
   MarkdownPostProcessorContext,
-  MarkdownRenderChild,
+  Notice,
   Plugin,
   PluginSettingTab,
   Setting,
-  App,
 } from "obsidian";
 
-interface DomvecSettings {
-  /** Where the Python sidecar answers. Empty disables every lookup. */
-  sidecar: string;
-  /** Start in the interactive surface rather than the distilled markdown. */
-  interactiveByDefault: boolean;
-}
+import { RetrievalSuggest } from "./retrieval";
+import { Sidecar } from "./sidecar";
+import { ChunkSurface, SurfaceHost } from "./surface";
+import { ChunkPayload, DEFAULTS, DomvecSettings } from "./types";
 
-const DEFAULTS: DomvecSettings = {
-  sidecar: "http://127.0.0.1:8787",
-  interactiveByDefault: true,
-};
-
-/** One line of a chunk, as the sidecar reports it. */
-interface ChunkLine {
-  text: string;
-  /** `url:xpath:taxonomy:content` -- the patricia trie address. */
-  key: string;
-  /** One of the eighteen render classes: link, button, field, text, ... */
-  cls: string;
-  /** True when the address is an affordance rather than prose. */
-  control: boolean;
-  /** Resolved href/src, when the address carries one. */
-  target?: string;
-}
-
-interface ChunkPayload {
-  cid: string;
-  url: string;
-  xpath: string;
-  lines: ChunkLine[];
-}
-
-export default class DomvecPlugin extends Plugin {
+export default class DomvecPlugin extends Plugin implements SurfaceHost {
   settings: DomvecSettings = DEFAULTS;
+  sidecar!: Sidecar;
   /** Every mounted surface, so the toggle command can reach them all. */
   private surfaces = new Set<ChunkSurface>();
 
   async onload() {
     this.settings = Object.assign({}, DEFAULTS, await this.loadData());
+    this.sidecar = new Sidecar(() => this.settings.sidecar);
 
     this.registerMarkdownCodeBlockProcessor(
       "domvec",
       (source, el, ctx) => this.renderChunk(source, el, ctx),
     );
 
+    this.registerEditorSuggest(
+      new RetrievalSuggest(this.app, this.sidecar, () => this.settings),
+    );
+
     this.addCommand({
       id: "domvec-toggle-surface",
       name: "Toggle distilled markdown / interactive surface",
-      // No default hotkey: Obsidian asks users not to claim one, and a
+      // No default hotkey: Obsidian asks plugins not to claim one, and a
       // conflict is silent -- the command simply stops firing.
       callback: () => this.surfaces.forEach((s) => s.toggle()),
+    });
+
+    this.addCommand({
+      id: "domvec-toggle-media",
+      name: "Toggle loading remote media",
+      callback: async () => {
+        this.settings.loadRemoteMedia = !this.settings.loadRemoteMedia;
+        await this.saveSettings();
+        this.surfaces.forEach((s) => s.toggle());
+        this.surfaces.forEach((s) => s.toggle());   // redraw, same mode
+        new Notice(`domvec: remote media ${
+          this.settings.loadRemoteMedia ? "on" : "off"}`);
+      },
+    });
+
+    this.addCommand({
+      id: "domvec-check-sidecar",
+      name: "Check sidecar connection",
+      callback: async () => {
+        const ok = await this.sidecar.alive();
+        new Notice(ok
+          ? `domvec: sidecar answering at ${this.settings.sidecar}`
+          : `domvec: no sidecar at ${this.settings.sidecar || "(unset)"} — ` +
+            "notes still read offline");
+      },
     });
 
     this.addSettingTab(new DomvecSettingTab(this.app, this));
@@ -89,6 +93,10 @@ export default class DomvecPlugin extends Plugin {
 
   async saveSettings() {
     await this.saveData(this.settings);
+  }
+
+  fetchChunk(cid: string): Promise<ChunkPayload | null> {
+    return this.sidecar.chunk(cid);
   }
 
   private renderChunk(
@@ -112,128 +120,11 @@ export default class DomvecPlugin extends Plugin {
     this.surfaces.add(surface);
     surface.register(() => this.surfaces.delete(surface));
   }
-
-  /** Ask the sidecar for a chunk. Null means "render what the note has". */
-  async fetchChunk(cid: string): Promise<ChunkPayload | null> {
-    const base = this.settings.sidecar.trim().replace(/\/+$/, "");
-    if (!base) return null;
-    try {
-      const res = await fetch(`${base}/chunk/${encodeURIComponent(cid)}`);
-      if (!res.ok) return null;
-      return (await res.json()) as ChunkPayload;
-    } catch {
-      // Offline is a supported mode, not a failure: the vault is meant to
-      // work with no sidecar and no network. The surface says so and falls
-      // back to the note's own prose.
-      return null;
-    }
-  }
 }
 
 function parseCid(source: string): string | null {
   const m = /^\s*cid:\s*([A-Za-z0-9]+)\s*$/m.exec(source);
   return m ? m[1] : null;
-}
-
-/**
- * The rendered surface for one chunk.
- *
- * MarkdownRenderChild rather than a bare element so the fetch, the listeners
- * and the plugin's registry are all released when the section goes away.
- */
-class ChunkSurface extends MarkdownRenderChild {
-  private interactive: boolean;
-  private payload: ChunkPayload | null = null;
-
-  constructor(
-    containerEl: HTMLElement,
-    private cid: string,
-    private plugin: DomvecPlugin,
-  ) {
-    super(containerEl);
-    this.interactive = plugin.settings.interactiveByDefault;
-  }
-
-  async onload() {
-    this.payload = await this.plugin.fetchChunk(this.cid);
-    this.draw();
-  }
-
-  toggle() {
-    this.interactive = !this.interactive;
-    this.draw();
-  }
-
-  private draw() {
-    const root = this.containerEl;
-    root.empty();
-    root.addClass("domvec-surface");
-
-    const bar = root.createDiv({ cls: "domvec-bar" });
-    bar.createSpan({ cls: "domvec-cid", text: this.cid.slice(0, 8) });
-    if (this.payload) {
-      bar.createSpan({ cls: "domvec-url", text: this.payload.url });
-    } else {
-      // Said plainly rather than left to look like an empty chunk. An
-      // unreachable sidecar and a chunk with no content render identically
-      // otherwise, and that ambiguity is how a dead pipeline goes unnoticed.
-      bar.createSpan({
-        cls: "domvec-offline",
-        text: "offline - sidecar unreachable",
-      });
-    }
-    const button = bar.createEl("button", {
-      cls: "domvec-toggle",
-      text: this.interactive ? "markdown" : "interactive",
-    });
-    button.onclick = () => this.toggle();
-
-    const body = root.createDiv({ cls: "domvec-body" });
-    if (!this.payload) {
-      body.createDiv({
-        cls: "domvec-hint",
-        text: "The distilled markdown above this block is the offline reading.",
-      });
-      return;
-    }
-    if (this.interactive) this.drawInteractive(body);
-    else this.drawMarkdown(body);
-  }
-
-  /** Controls as controls; prose as prose. */
-  private drawInteractive(body: HTMLElement) {
-    for (const line of this.payload!.lines) {
-      const row = body.createDiv({ cls: "domvec-line" });
-      if (!line.control) {
-        row.createSpan({ cls: "domvec-text", text: line.text });
-        continue;
-      }
-      const el = row.createEl("button", {
-        cls: `domvec-act domvec-${line.cls}`,
-        text: line.text || line.cls,
-      });
-      // Read-only by default: the click reports the address it would act on
-      // rather than acting. Driving the real page is the Selenium port, and
-      // it must be an explicit choice, never a side effect of opening a note.
-      el.onclick = () => this.announce(line);
-      el.setAttr("aria-label", line.key);
-    }
-  }
-
-  private drawMarkdown(body: HTMLElement) {
-    const pre = body.createEl("pre", { cls: "domvec-md" });
-    pre.createEl("code", {
-      text: this.payload!.lines.map((l) => l.text).join("\n"),
-    });
-  }
-
-  private announce(line: ChunkLine) {
-    const out = this.containerEl.querySelector(".domvec-readout")
-      ?? this.containerEl.createDiv({ cls: "domvec-readout" });
-    out.setText(
-      `${line.cls}  ${line.key}` + (line.target ? `  -> ${line.target}` : ""),
-    );
-  }
 }
 
 class DomvecSettingTab extends PluginSettingTab {
@@ -269,6 +160,37 @@ class DomvecSettingTab extends PluginSettingTab {
           .setValue(this.plugin.settings.interactiveByDefault)
           .onChange(async (v) => {
             this.plugin.settings.interactiveByDefault = v;
+            await this.plugin.saveSettings();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName("Load remote media")
+      .setDesc(
+        "Off by default, and that is a privacy setting rather than a " +
+          "performance one: fetching a page's images from your vault tells " +
+          "those hosts the page was read again, at a new time, from a new " +
+          "address. With it off, media shows as a captioned placeholder.",
+      )
+      .addToggle((t) =>
+        t
+          .setValue(this.plugin.settings.loadRemoteMedia)
+          .onChange(async (v) => {
+            this.plugin.settings.loadRemoteMedia = v;
+            await this.plugin.saveSettings();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName("Retrieval results")
+      .setDesc("How many passages the `/` gesture offers.")
+      .addSlider((s) =>
+        s
+          .setLimits(3, 20, 1)
+          .setDynamicTooltip()
+          .setValue(this.plugin.settings.retrievalLimit)
+          .onChange(async (v) => {
+            this.plugin.settings.retrievalLimit = v;
             await this.plugin.saveSettings();
           }),
       );

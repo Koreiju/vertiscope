@@ -1,0 +1,205 @@
+/**
+ * One chunk, rendered as something a reader can look at and press.
+ *
+ * `MarkdownRenderChild` rather than a bare element so the fetch, the
+ * listeners and the plugin's registry are released when the note section goes
+ * away -- a surface whose fetch resolves into a detached element is the usual
+ * way a code-block processor leaks.
+ */
+
+import { MarkdownRenderChild } from "obsidian";
+
+import { ChunkLine, ChunkPayload, DomvecSettings } from "./types";
+
+/** `![alt](src)` as the distiller draws media. */
+const MEDIA = /^!\[([^\]]*)\]\(([^)\s]*)\)/;
+/** `[words](target)` as it draws a link. */
+const LINK = /^\[([^\]]*)\]\(([^)\s]*)\)/;
+
+export interface SurfaceHost {
+  settings: DomvecSettings;
+  fetchChunk(cid: string): Promise<ChunkPayload | null>;
+}
+
+export class ChunkSurface extends MarkdownRenderChild {
+  private interactive: boolean;
+  private payload: ChunkPayload | null = null;
+  private readout: HTMLElement | null = null;
+
+  constructor(
+    containerEl: HTMLElement,
+    private cid: string,
+    private host: SurfaceHost,
+  ) {
+    super(containerEl);
+    this.interactive = host.settings.interactiveByDefault;
+  }
+
+  async onload() {
+    this.payload = await this.host.fetchChunk(this.cid);
+    this.draw();
+  }
+
+  toggle() {
+    this.interactive = !this.interactive;
+    this.draw();
+  }
+
+  // -- drawing ---------------------------------------------------------------
+
+  private draw() {
+    const root = this.containerEl;
+    root.empty();
+    this.readout = null;
+    root.addClass("domvec-surface");
+
+    this.drawBar(root.createDiv({ cls: "domvec-bar" }));
+
+    const body = root.createDiv({ cls: "domvec-body" });
+    if (!this.payload) {
+      body.createDiv({
+        cls: "domvec-hint",
+        text: "The distilled markdown above this block is the offline reading.",
+      });
+      return;
+    }
+    if (this.interactive) this.drawInteractive(body);
+    else this.drawMarkdown(body);
+  }
+
+  private drawBar(bar: HTMLElement) {
+    bar.createSpan({ cls: "domvec-cid", text: this.cid.slice(0, 8) });
+    if (this.payload) {
+      bar.createSpan({ cls: "domvec-url", text: this.payload.url });
+    } else {
+      // Said plainly. An unreachable sidecar and a chunk with nothing in it
+      // render identically otherwise, and that ambiguity hides a dead
+      // pipeline for as long as nobody happens to check.
+      bar.createSpan({
+        cls: "domvec-offline",
+        text: "offline — sidecar unreachable",
+      });
+    }
+    const button = bar.createEl("button", {
+      cls: "domvec-toggle",
+      text: this.interactive ? "markdown" : "interactive",
+    });
+    button.onclick = () => this.toggle();
+  }
+
+  private drawInteractive(body: HTMLElement) {
+    for (const line of this.payload!.lines) {
+      if (!line.text.trim()) continue;
+      const row = body.createDiv({ cls: "domvec-line" });
+      if (this.drawMedia(row, line)) continue;
+      if (line.control) {
+        this.drawControl(row, line);
+        continue;
+      }
+      row.createSpan({ cls: "domvec-text", text: this.words(line.text) });
+    }
+  }
+
+  /**
+   * An image or a player, as a billboard rather than as its markup.
+   *
+   * The distiller already knows what the media IS -- it draws `![alt](src)`
+   * with the page's own alt text, never the file name -- so the billboard has
+   * a caption without guessing. Whether the picture itself loads is the
+   * reader's choice: see `loadRemoteMedia`, which is off by default because
+   * fetching a page's assets from a vault tells those hosts the page was read
+   * again.
+   */
+  private drawMedia(row: HTMLElement, line: ChunkLine): boolean {
+    const match = MEDIA.exec(line.text.trim());
+    const isMedia = match !== null ||
+      line.cls === "image" || line.cls === "media";
+    if (!isMedia) return false;
+
+    const alt = (match ? match[1] : "").trim();
+    const src = this.absolute((match ? match[2] : "") || line.target || "");
+    const card = row.createDiv({ cls: "domvec-billboard" });
+
+    if (src && this.host.settings.loadRemoteMedia) {
+      const img = card.createEl("img", { cls: "domvec-media" });
+      img.src = src;
+      img.alt = alt || "image";
+      // A broken asset must not leave a silent gap where a picture was.
+      img.onerror = () => {
+        img.remove();
+        this.drawMediaPlaceholder(card, alt, src, "did not load");
+      };
+    } else {
+      this.drawMediaPlaceholder(card, alt, src,
+        src ? "media off" : "no source");
+    }
+
+    const caption = card.createDiv({ cls: "domvec-caption" });
+    caption.createSpan({ text: alt || line.cls });
+    if (src) {
+      const open = caption.createEl("button", {
+        cls: "domvec-act domvec-open", text: "open",
+      });
+      open.onclick = () => window.open(src, "_blank");
+    }
+    if (line.key) card.setAttr("aria-label", line.key);
+    return true;
+  }
+
+  private drawMediaPlaceholder(card: HTMLElement, alt: string,
+                               src: string, why: string) {
+    const box = card.createDiv({ cls: "domvec-media-off" });
+    box.createSpan({ cls: "domvec-media-icon", text: "▣" });
+    box.createSpan({ text: alt || "image" });
+    box.createSpan({ cls: "domvec-media-why", text: `— ${why}` });
+    if (src) box.setAttr("title", src);
+  }
+
+  private drawControl(row: HTMLElement, line: ChunkLine) {
+    const el = row.createEl("button", {
+      cls: `domvec-act domvec-${line.cls}`,
+      text: this.words(line.text) || line.cls,
+    });
+    // Read-only. The click reports the address it WOULD act on rather than
+    // acting: driving the real page belongs behind its own gate, never as a
+    // side effect of opening a note.
+    el.onclick = () => this.announce(line);
+    el.setAttr("aria-label", line.control_key || line.key);
+  }
+
+  private drawMarkdown(body: HTMLElement) {
+    const pre = body.createEl("pre", { cls: "domvec-md" });
+    pre.createEl("code", {
+      text: this.payload!.lines.map((l) => l.text).join("\n"),
+    });
+  }
+
+  // -- helpers ---------------------------------------------------------------
+
+  /** The words a reader sees, with any target stripped off. */
+  private words(text: string): string {
+    const link = LINK.exec(text.trim());
+    if (link) return link[1].trim();
+    return text.trim();
+  }
+
+  /** A page-relative src resolved against the chunk's own url. */
+  private absolute(src: string): string {
+    if (!src) return "";
+    try {
+      return new URL(src, this.payload?.url || undefined).toString();
+    } catch {
+      return "";
+    }
+  }
+
+  private announce(line: ChunkLine) {
+    if (!this.readout) {
+      this.readout = this.containerEl.createDiv({ cls: "domvec-readout" });
+    }
+    const key = line.control_key || line.key;
+    this.readout.setText(
+      `${line.cls}  ${key}` + (line.target ? `  → ${line.target}` : ""),
+    );
+  }
+}

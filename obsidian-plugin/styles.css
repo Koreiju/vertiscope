@@ -74,3 +74,63 @@
 .domvec-field  { font-style: italic; }
 
 .domvec-error { color: var(--text-error); }
+
+/* --- media billboards -----------------------------------------------------
+   The distiller already knows what a picture is OF -- it draws `![alt](src)`
+   with the page's own alt text, never the file name -- so a billboard has a
+   caption without guessing one. */
+
+.domvec-billboard {
+  margin: 0.4em 0;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--background-primary-alt);
+}
+
+.domvec-media {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+/* Shown when media is off, which is the default. A placeholder that still
+   says what the picture is beats a blank space: the reader knows something
+   is there and what it was. */
+.domvec-media-off {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5em;
+  padding: 0.7em 0.8em;
+  color: var(--text-muted);
+  font-size: var(--font-smaller);
+}
+
+.domvec-media-icon { font-size: 1.1em; color: var(--text-faint); }
+.domvec-media-why  { color: var(--text-faint); margin-left: auto; }
+
+.domvec-caption {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  padding: 0.35em 0.8em;
+  border-top: 1px solid var(--background-modifier-border);
+  font-size: var(--font-smaller);
+  color: var(--text-muted);
+}
+
+.domvec-open { margin-left: auto; font-size: var(--font-smaller); }
+
+/* --- the `/` retrieval gesture -------------------------------------------- */
+
+.domvec-suggestion-title {
+  color: var(--text-normal);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.domvec-suggestion-sub {
+  color: var(--text-faint);
+  font-size: var(--font-smaller);
+}
