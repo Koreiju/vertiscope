@@ -311,3 +311,49 @@ def test_a_billboard_and_its_chunk_name_the_same_file():
     html = render_lines([line(md, cls="image")], base=base)
     assert node is not None
     assert 'src="%s"' % node["src"] in html, (node, html)
+
+
+# --- cohesive structures ------------------------------------------------------
+
+def test_a_picture_with_words_beside_it_is_drawn_as_a_card():
+    """"Localized enough ... to render them as their intended cohesive
+    structures."
+
+    A result row is a picture and a title and a snippet and a button that
+    belong together; drawn as four stacked lines, the one thing the page's
+    layout was saying is lost. The group is classified only once its contents
+    are known, which is why the builder holds a tree rather than a string of
+    open and close tags.
+    """
+    html = render_lines([
+        line("Results"),
+        line("  ![Cover of a book](https://x.test/c.jpg)", cls="image"),
+        line("  ### A Light in the Attic"),
+        line("  ( Add to basket )", cls="button", control=True),
+    ], base="https://x.test/")
+    assert "dv-card" in html, html
+
+
+def test_a_run_of_paragraphs_is_not_a_card():
+    """Non-vacuity. A rule that fires on everything says nothing."""
+    html = render_lines([
+        line("Article"),
+        line("  first paragraph of prose"),
+        line("  second paragraph of prose"),
+    ])
+    assert "dv-card" not in html
+
+
+def test_two_pictures_in_one_group_are_not_a_card():
+    """A gallery is a gallery. A card is one picture with words beside it."""
+    html = render_lines([
+        line("Gallery"),
+        line("  ![one](https://x.test/1.jpg)", cls="image"),
+        line("  ![two](https://x.test/2.jpg)", cls="image"),
+    ], base="https://x.test/")
+    assert "dv-card" not in html
+
+
+def test_the_nesting_still_closes_with_the_tree_builder():
+    html = render_lines([line("a"), line("  b"), line("    c"), line("d")])
+    assert html.count("<div") == html.count("</div>")

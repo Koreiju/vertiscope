@@ -64,7 +64,7 @@ __all__ = [
     "DEFAULT_CONTEXT_WINDOW",
 ]
 
-DEFAULT_CONTEXT_WINDOW = 2048
+DEFAULT_CONTEXT_WINDOW = 512
 """One chunk's budget, in whatever unit `tokens.name()` is currently in.
 
 2048 rather than the 1200 this was: 1200 was *characters*, which is about 400
@@ -2269,6 +2269,96 @@ def _content_boundary(piece_hash: int, piece_chars: int, window: int,
     return (piece_hash % window) < piece_chars
 
 
+#: How many same-shaped siblings make a run a record set rather than a
+#: coincidence. Two `<li>` could be anything; three is a list of things.
+RECORD_MIN = 3
+
+#: How much of the run has to share the majority tag. Real lists carry an
+#: odd `<li class="ad">` or a trailing "load more", and demanding uniformity
+#: would miss every list that has one.
+RECORD_SHARE = 0.6
+
+
+#: The smallest a typical record may be and still be worth a chunk of its
+#: own, in the window's own unit.
+#:
+#: A nav bar, a tag cloud and a breadcrumb trail are all repeated composite
+#: shapes -- `<li><a>Home</a></li>` passes every structural test a search
+#: result passes -- and none of them is a record, because nobody retrieves
+#: one. Structure cannot separate them; size can. Without this the rule fired
+#: on every menu in the corpus and took the median chunk from 308 tokens to
+#: 47.
+#:
+#: ABSOLUTE, not a share of the window, and that is the whole point. Expressed
+#: as a fraction, "is this a record" became a function of the hyperparameter:
+#: the same ten 92-token results were records at a window of 512 and were not
+#: at 1024, so the boundary moved with a knob instead of sitting where the
+#: page changes subject. Roughly a sentence's worth of content.
+RECORD_MIN_SIZE = 48
+
+
+def _record_children(sized: Sequence[Tuple[TrieNode, object, int]],
+                     window: int) -> set:      # noqa: ARG001 (see RECORD_MIN_SIZE)
+    """The children of a repeated record structure, by identity.
+
+    The goal asks for "search results as singular chunks", and the window
+    alone cannot deliver that. The window is a *cap*: the merge fills it with
+    whatever adjacent siblings fit, so at 512 tokens five hundred-token
+    results become one chunk, and at 128 one result would be split. Either
+    way the chunk boundary falls where the arithmetic ran out rather than
+    where the page changed subject. A retrieval hit then points at "the third
+    through seventh results", which is not a thing anyone was looking for.
+
+    What makes a search result a unit is not its size, it is that the page
+    repeats a shape. So the rule is about shape:
+
+    * at least `RECORD_MIN` siblings share a tag -- three is a list, two is a
+      coincidence;
+    * most of the run shares it (`RECORD_SHARE`), because real lists carry a
+      stray promo row or a "load more" and demanding uniformity would miss
+      every list that has one;
+    * and those siblings are COMPOSITE -- each holds an element of its own.
+
+    That last clause is what keeps prose out. A run of `<p>` in an article is
+    a repeated tag and must keep merging: paragraphs are not records, and
+    splitting them would give every paragraph its own chunk and bury each
+    one's context. A search result holds a link, a title, a byline; a product
+    card holds a picture, a price, a button. The composite test separates the
+    two without a tag list to maintain.
+
+    And the run has to be worth splitting. A nav bar, a breadcrumb trail and
+    a tag cloud pass every structural test above -- `<li><a>Home</a></li>` is
+    a composite repeated shape -- and none of them is a thing anyone
+    retrieves. The separation that works is size: a record carries a
+    sentence's worth of content, a menu item carries a word. Without
+    `RECORD_MIN_FILL` the rule fired on every menu in the corpus and took the
+    median chunk from 308 tokens to 47.
+
+    Returns identities rather than a boolean so the merge can flush after
+    each record while still merging the run's odd non-record neighbour.
+    """
+    if len(sized) < RECORD_MIN:
+        return set()
+    labels: Dict[str, List[Tuple[TrieNode, object, int]]] = {}
+    for entry in sized:
+        labels.setdefault(_label_of(entry[0].segment), []).append(entry)
+    _label, run = max(labels.items(), key=lambda kv: len(kv[1]))
+    if len(run) < RECORD_MIN or len(run) < RECORD_SHARE * len(sized):
+        return set()
+    composite = [e for e in run
+                 if any(not k.is_leaf and not _is_terminal_pair(k)
+                        for k in e[0].ordered_children())]
+    if len(composite) < RECORD_SHARE * len(run):
+        return set()
+    # The TYPICAL record, not the largest: one long row among twenty short
+    # ones is a menu with an announcement in it, not a result list.
+    sizes = sorted(e[2] for e in composite)
+    typical = sizes[len(sizes) // 2]
+    if typical < RECORD_MIN_SIZE:
+        return set()
+    return {id(e[0]) for e in composite}
+
+
 def _certainly_overflows(child_chars: Sequence[int], window: int) -> bool:
     """True when the children alone are already too big for the window.
 
@@ -2473,9 +2563,26 @@ def _descend(
     own = _own_units_chunk(node, url, url_depth, memo)
     has_own = own is not None and own[0].lines
 
+    # Which of these children are records -- a repeated shape the page uses
+    # for a list of things. Computed from the ELEMENT CHILDREN, not from the
+    # pieces, because it is a property of the page's structure and not of what
+    # happened to fit.
+    #
+    # Asked BEFORE the fits-shortcut below, and that ordering is the rule.
+    # A list of ten results is about nine hundred tokens; at a window of 1024
+    # the whole `<ol>` fits, this node returns one chunk, and the record rule
+    # never runs -- so "one chunk per result" held at 512 and silently stopped
+    # holding at 1024. A boundary that appears and disappears with a
+    # hyperparameter is not a property of the page.
+    records = _record_children(sized, window)
+
     if _certainly_overflows(child_chars, window):
         if memo is not None:
             memo.skipped_fit_tests += 1
+    elif records:
+        # Fits, and is a record set. Fall through to the merge, which emits
+        # one chunk per record.
+        pass
     else:
         chunk, chars = _render_sized(node, url, url_depth, memo)
         if not chunk.lines:
@@ -2503,18 +2610,19 @@ def _descend(
     # holds — which is safe, because `anchors` says exactly which addresses
     # are inside. The direction matters: a chunk that over-claimed would let a
     # retrieval hit point at content it does not contain.
-    pieces: List[Tuple[str, object, int, int]] = []
+    pieces: List[Tuple[str, object, int, int, bool]] = []
     if has_own:
         # No hash: these are the node's own units, always first in the run,
         # and a boundary before anything has accumulated says nothing.
-        pieces.append(("fits", own[0], own[1], _piece_hash(own[0])))
+        pieces.append(("fits", own[0], own[1], _piece_hash(own[0]), False))
     for child, rendered, rendered_chars in sized:
         # `rendered is None` is `_size_of` saying it proved the overflow
         # without drawing anything, which is exactly the case that splits.
         fits = rendered is not None and rendered_chars <= window
         pieces.append(("fits" if fits else "split",
                        rendered if fits else child, rendered_chars,
-                       _piece_hash(rendered) if fits else 0))
+                       _piece_hash(rendered) if fits else 0,
+                       id(child) in records))
 
     buffer: List[MarkdownChunk] = []
     buffered_chars = 0
@@ -2527,10 +2635,19 @@ def _descend(
         buffer.clear()
         buffered_chars = 0
 
-    for kind, piece, piece_chars, piece_hash in pieces:
+    for kind, piece, piece_chars, piece_hash, is_record in pieces:
         if kind == "split":
             flush()
             out.extend(_descend(piece, url, url_depth, window, memo))  # type: ignore[arg-type]
+            continue
+        if is_record:
+            # A record stands alone. Flushed BEFORE as well as after, so a
+            # record never shares a chunk with the heading or the stray promo
+            # row that happened to precede it -- the run is "one chunk per
+            # result", not "one chunk per result except the first".
+            flush()
+            buffer.append(piece)  # type: ignore[arg-type]
+            flush()
             continue
         # +len(buffer) for the newlines _merge inserts between parts. Omitting
         # them let a chunk exceed the window by one character per merged part,

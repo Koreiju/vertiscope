@@ -277,11 +277,24 @@ def _rewrite_links(md: str,
 
 
 def _note(chunk, body: str) -> str:
-    """Frontmatter, the rewritten prose, then the plugin's payload.
+    """Frontmatter, the plugin's payload, then the rewritten prose.
 
-    The fence is last and holds only the cid. Everything the plugin needs in
-    order to render the interactive surface it looks up from the store by that
-    cid, so the note never carries a second copy of state that can drift.
+    The fence holds only the cid. Everything the plugin needs in order to
+    render the surface it looks up from the store by that cid, so the note
+    never carries a second copy of state that can drift.
+
+    The fence comes FIRST, and that is a change. It used to be last, which put
+    the panel below however much prose the chunk held -- and Obsidian renders
+    a reading view's sections lazily, so on a long note the surface did not
+    even mount until someone scrolled to the bottom. At the top it takes the
+    place the properties block used to occupy, which is where the goal asks
+    for the markdown/shadow-DOM switch to live.
+
+    The prose stays below it because that is what Obsidian's own graph reads:
+    links are parsed from the markdown body, not from anything a plugin draws,
+    and the wikilinks in that prose are the vault edges. So the note is the
+    panel first and the plain reading under it, and neither is a copy of the
+    other -- the panel is served from the store, the prose is the file.
     """
     head = [
         "---",
@@ -301,8 +314,8 @@ def _note(chunk, body: str) -> str:
         "---",
         "",
     ]
-    fence = "\n\n```domvec\ncid: %s\n```\n" % chunk.cid
-    return "\n".join(head) + body.rstrip() + fence
+    fence = "```domvec\ncid: %s\n```\n\n" % chunk.cid
+    return "\n".join(head) + fence + body.rstrip() + "\n"
 
 
 def link_targets(workspace, urls: Optional[Sequence[str]] = None) -> List[dict]:

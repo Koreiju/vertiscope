@@ -12,6 +12,81 @@ import { MarkdownRenderChild } from "obsidian";
 import { ChunkLine, ChunkPayload, DomvecSettings, EnactResult }
   from "./types";
 
+/**
+ * The stylesheet that travels INTO the shadow root.
+ *
+ * It has to live here rather than in `styles.css`: a shadow root is exactly
+ * the thing a page-level stylesheet cannot reach. Written against Obsidian's
+ * own custom properties, which do inherit across the boundary, so a control
+ * drawn in here follows the reader's theme instead of announcing that a
+ * plugin drew it.
+ *
+ * The goal asks for the distilled DOM to render "as interactive obsidian
+ * object structures ... as shown by the rendered and interactive fields where
+ * properties is" -- the native property rows are the reference, so the field
+ * and button rules below borrow their shape: a muted label, a bordered
+ * control, an accent when it is live.
+ */
+const SHADOW_CSS = `
+:host { display: block; }
+.domvec-html { line-height: 1.5; font-size: var(--font-ui-small, 13px);
+  color: var(--text-normal, #222); }
+
+/* One step per nesting LEVEL of the distilled tree, not per DOM ancestor. */
+.dv-n { padding-left: 0.75em; border-left: 1px solid
+  var(--background-modifier-border, #ddd); margin: 0.15em 0; }
+
+/* A picture with words beside it: a result row, a product tile, a profile.
+   Drawn as the cohesive thing the page laid out, not as stacked lines. */
+.dv-card { display: grid; grid-template-columns: auto 1fr; gap: 0.6em;
+  align-items: start; padding: 0.5em 0.6em; border-left: none;
+  border: 1px solid var(--background-modifier-border, #ddd);
+  border-radius: var(--radius-m, 6px);
+  background: var(--background-primary-alt, transparent); }
+.dv-card > .dv-fig { grid-row: 1 / span 99; margin: 0; }
+.dv-card .dv-img { max-width: 96px; }
+
+.dv-p { margin: 0.2em 0; }
+.dv-h { margin: 0.35em 0 0.15em; line-height: 1.25;
+  font-weight: var(--font-semibold, 600); }
+h1.dv-h { font-size: 1.35em; } h2.dv-h { font-size: 1.2em; }
+h3.dv-h { font-size: 1.1em; } h4.dv-h, h5.dv-h, h6.dv-h { font-size: 1em; }
+.dv-ul { margin: 0.1em 0; padding-left: 1.1em; }
+.dv-li { margin: 0.1em 0; }
+.dv-a { color: var(--text-accent, #06c); text-decoration: none; }
+.dv-a:hover { text-decoration: underline; }
+.dv-t { color: inherit; }
+
+/* Controls, shaped like Obsidian's own property fields. Inert until the
+   SERVER says it will drive the page -- a button that looks pressable and
+   403s is worse than one that says it is only showing you an address. */
+.dv-b, .dv-f input {
+  font: inherit; color: var(--text-muted, #666);
+  background: var(--background-modifier-form-field, #f6f6f6);
+  border: 1px solid var(--background-modifier-border, #ddd);
+  border-radius: var(--radius-s, 4px); padding: 0.15em 0.55em; }
+.dv-b { cursor: default; }
+.domvec-live { color: var(--text-normal, #111);
+  border-color: var(--interactive-accent, #6a6ae0); cursor: pointer; }
+.dv-f { display: inline-flex; align-items: center; gap: 0.4em; margin: 0.15em 0; }
+.dv-f span { color: var(--text-muted, #666); }
+.dv-form { border: 1px dashed var(--background-modifier-border, #ddd);
+  border-radius: var(--radius-s, 4px); padding: 0 0.6em 0.35em; margin: 0.3em 0; }
+.dv-form legend { color: var(--text-faint, #999); padding: 0 0.3em; }
+
+.dv-fig { margin: 0.35em 0; }
+.dv-img { max-width: 100%; border-radius: var(--radius-s, 4px); display: block; }
+figcaption { color: var(--text-muted, #666); font-size: 0.9em; margin-top: 0.2em; }
+
+/* Never an empty gap: a missing picture and a page that showed none must not
+   look the same. */
+.dv-noimg { display: inline-flex; align-items: center; justify-content: center;
+  min-width: 2.2em; min-height: 2.2em; color: var(--text-faint, #999);
+  background: var(--background-secondary, #f2f2f2);
+  border: 1px dashed var(--background-modifier-border, #ddd);
+  border-radius: var(--radius-s, 4px); }
+`;
+
 /** `![alt](src)` as the distiller draws media. */
 const MEDIA = /^!\[([^\]]*)\]\(([^)\s]*)\)/;
 /** `[words](target)` as it draws a link. */
@@ -89,9 +164,51 @@ export class ChunkSurface extends MarkdownRenderChild {
    * are tested against the parsed tree rather than against the string.
    */
   private drawDistilledHtml(body: HTMLElement, markup: string) {
-    const holder = body.createDiv({ cls: "domvec-html" });
+    const host = body.createDiv({ cls: "domvec-html-host" });
+    // A shadow root, not a plain div.
+    //
+    // This markup is a WEB PAGE's structure, and a note is a styled document:
+    // dropped into the note's own tree it inherits every markdown rule the
+    // theme has -- paragraph spacing, list bullets, link colours, heading
+    // scales -- so a distilled page comes out looking like an essay about
+    // itself rather than like the page. A shadow root ends that in both
+    // directions: the theme cannot reach in, and nothing the page called its
+    // classes can reach out.
+    //
+    // It is also what the Obsidian ecosystem settled on. Of the plugins that
+    // render HTML in notes, the ones that take arbitrary markup sandbox it in
+    // an iframe -- they have to, since arbitrary markup can carry scripts --
+    // and `html-blocks` uses a shadow root per block for exactly the style
+    // reason above. Ours is neither arbitrary nor scripted: `htmlform.py`
+    // emits a closed tag whitelist with every text node escaped. So the
+    // iframe's isolation buys nothing here and costs the two things that
+    // matter -- our listeners could no longer reach the elements to wire
+    // addresses to them, and Obsidian's own CSS variables would not reach in
+    // to make a control look native.
+    //
+    // Custom properties inherit THROUGH a shadow boundary, which is what lets
+    // the sheet below be written in `--text-muted` and friends and still
+    // follow the reader's theme.
+    const shadow = host.attachShadow({ mode: "open" });
+    const sheet = document.createElement("style");
+    sheet.textContent = SHADOW_CSS;
+    shadow.appendChild(sheet);
+    const holder = document.createElement("div");
+    holder.className = "domvec-html";
     holder.innerHTML = markup;
+    shadow.appendChild(holder);
 
+    this.wireDistilled(holder);
+  }
+
+  /**
+   * Media policy and address wiring, over whatever root holds the markup.
+   *
+   * Split out from the draw so the shadow root is the only thing that
+   * changed: `querySelectorAll` inside a shadow root reaches the elements in
+   * it and nothing outside, which is exactly the scope these two passes want.
+   */
+  private wireDistilled(holder: HTMLElement) {
     if (!this.host.settings.loadRemoteMedia) {
       // Stripped rather than hidden. A hidden `<img src>` has already been
       // fetched, which is the exact thing the setting exists to prevent: it
@@ -192,7 +309,10 @@ export class ChunkSurface extends MarkdownRenderChild {
     }
     const button = bar.createEl("button", {
       cls: "domvec-toggle",
-      text: this.interactive ? "markdown" : "interactive HTML",
+      // Named for the two things it actually shows. "interactive" said
+      // what the mode does, not what it is, and the two forms are the
+      // distilled markdown and the distilled DOM.
+      text: this.interactive ? "markdown" : "shadow DOM",
     });
     button.onclick = () => this.toggle();
   }

@@ -84,7 +84,36 @@ class El {
   get innerHTML() { return this._html || ""; }
 
   querySelectorAll(selector) {
+    if (this._shadow) return Array.from(this._shadow.querySelectorAll(selector));
     return this._dom ? Array.from(this._dom.querySelectorAll(selector)) : [];
+  }
+
+  /**
+   * A real shadow root, backed by linkedom.
+   *
+   * The surface renders the distilled HTML into one, so a stub that answered
+   * `attachShadow` with a bag that swallows `appendChild` would skip the
+   * whole path rather than test it -- the same trap `querySelectorAll` was in
+   * before linkedom went in here.
+   *
+   * `mode` is accepted and ignored: an open root is what the plugin asks for
+   * and a closed one would only hide the elements from this file.
+   */
+  attachShadow() {
+    const doc = parseHTML("<body></body>").document;
+    this._shadow = doc.body;
+    const self = this;
+    return {
+      appendChild(node) {
+        // The plugin builds `<style>` and a `<div>` whose innerHTML is the
+        // distilled markup. Only the second carries anything to assert on.
+        if (node && typeof node.innerHTML === "string" && node.innerHTML) {
+          self._shadow.innerHTML += node.innerHTML;
+          self.children = domChildren(self._shadow);
+        }
+        return node;
+      },
+    };
   }
   matches(selector) {
     return this._dom ? this._dom.matches(selector) : false;
@@ -186,6 +215,15 @@ if (!globalThis.navigator?.userAgent) {
   Object.defineProperty(globalThis, "navigator",
                         { value: { userAgent: "node" }, configurable: true });
 }
+/**
+ * `document.createElement`, for real.
+ *
+ * The surface builds a `<style>` and a `<div>` through it and then sets
+ * `innerHTML` on the div, so a node whose innerHTML goes nowhere makes the
+ * shadow path untestable. linkedom gives back something that actually parses.
+ */
+const realDoc = parseHTML("<body></body>").document;
+
 const fakeNode = () => ({
   style: {}, dataset: {}, childNodes: [], firstChild: null,
   getContext: () => null, setAttribute: () => {}, appendChild: () => {},
@@ -195,7 +233,16 @@ globalThis.document = {
   head: fakeNode(),
   body: fakeNode(),
   documentElement: { style: {} },
-  createElement: fakeNode,
+  // Real for the tags the plugin builds by hand (the shadow root and
+  // its stylesheet); the fake node stays for everything three.js pokes
+  // at during import, which only needs to not throw.
+  // Only `div`, which is the one element whose innerHTML the shadow path
+  // actually parses. Making `style` real too broke three.js at import: its
+  // styleInject appends a text node to a detached <style>, and linkedom's
+  // mutation observer wants an ownerDocument that a detached node has not
+  // got. The fake node is fine for that -- nothing reads it back.
+  createElement: (tag) => (/^div$/i.test(tag)
+    ? realDoc.createElement(tag) : fakeNode()),
   createElementNS: fakeNode,
   createTextNode: fakeNode,
   // `3d-force-graph` injects its stylesheet into `document.head` at IMPORT

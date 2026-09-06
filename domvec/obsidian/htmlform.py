@@ -143,32 +143,73 @@ def _attrs(pairs: List[Tuple[str, str]]) -> str:
 
 
 class _Builder:
-    """Accumulates elements, keeping the nesting stack honest.
+    """Accumulates elements as a TREE, keeping the nesting stack honest.
 
     The depth comes from the line's own indentation, which `_reflow` has
     already mapped onto one step per nesting LEVEL. A level that jumps by more
     than one opens the levels between it rather than nesting straight through,
     so the output is well formed however the page nested.
+
+    A tree rather than a flat string of open and close tags, because a group
+    cannot be classified until its contents are known. The goal asks to keep
+    the page's structures "localized enough still such that we can render them
+    as their intended cohesive structures" -- a product card is a picture and
+    a title and a price and a button that belong together, and drawing them as
+    four stacked lines loses the one thing the layout was saying. Deciding
+    that needs the whole group, and a string builder has already emitted the
+    opening tag by then.
     """
 
     def __init__(self) -> None:
-        self.out: List[str] = []
-        self.depth = 0
+        self.root: List = []
+        self.stack: List[List] = [self.root]
+
+    @property
+    def depth(self) -> int:
+        return len(self.stack) - 1
 
     def at(self, depth: int) -> None:
         while self.depth < depth:
-            self.out.append('<div class="dv-n">')
-            self.depth += 1
+            group: List = []
+            self.stack[-1].append(group)
+            self.stack.append(group)
         while self.depth > depth:
-            self.out.append("</div>")
-            self.depth -= 1
+            self.stack.pop()
 
     def add(self, markup: str) -> None:
-        self.out.append(markup)
+        self.stack[-1].append(markup)
 
     def close(self) -> str:
-        self.at(0)
-        return "".join(self.out)
+        return "".join(_serialise(node) for node in self.root)
+
+
+#: What a group needs before it is drawn as a card rather than as a stack.
+#: A picture and something to say about it -- which is what a result row, a
+#: product tile and a profile card all are, and what a run of paragraphs is
+#: not.
+def _is_card(group: List) -> bool:
+    """True when this group is a picture with content beside it."""
+    flat = list(_flatten(group))
+    figures = sum(1 for m in flat if m.startswith("<figure"))
+    others = sum(1 for m in flat if not m.startswith("<figure"))
+    return figures == 1 and others >= 1
+
+
+def _flatten(group: List):
+    for node in group:
+        if isinstance(node, list):
+            for inner in _flatten(node):
+                yield inner
+        else:
+            yield node
+
+
+def _serialise(node) -> str:
+    if not isinstance(node, list):
+        return node
+    inner = "".join(_serialise(child) for child in node)
+    cls = "dv-n dv-card" if _is_card(node) else "dv-n"
+    return '<div class="%s">%s</div>' % (cls, inner)
 
 
 def _address_attrs(line: Dict) -> List[Tuple[str, str]]:
