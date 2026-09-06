@@ -34,6 +34,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Dict, List, Optional
 from urllib.parse import parse_qs, unquote, urlsplit
 
+from .. import tokens
 from .export import _reflow, link_targets
 from .htmlform import render_lines
 from .layout import build_layout
@@ -51,6 +52,7 @@ def chunk_payload(workspace, cid: str) -> Optional[Dict]:
     stored = workspace.store.chunk(cid)
     if stored is None:
         return None
+    self_window = getattr(workspace, "context_window", 0)
 
     addresses = workspace.addresses_for(cid)
     # Re-indented by nesting LEVEL before anyone sees it.
@@ -123,6 +125,12 @@ def chunk_payload(workspace, cid: str) -> Optional[Dict]:
         # Reported so a caller can tell a genuinely short chunk from a
         # misaligned one instead of guessing from the render.
         "addresses": len(addresses),
+        # The chunk's size in the unit its window was measured in, and the
+        # window it was cut against, so a surface can show fill rather than
+        # leaving "are these chunks the right size" a question nobody can
+        # answer from the vault.
+        "tokens": tokens.count(stored.md or ""),
+        "window": int(self_window),
     }
 
 

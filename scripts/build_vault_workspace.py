@@ -66,8 +66,14 @@ def _embedder(kind: str):
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", type=pathlib.Path, required=True)
-    ap.add_argument("--embed", default="cpu",
-                    help="device for the embedder, or 'off'")
+    # gpu, matching `Config.embed_device`. Not a preference: a chunk at the
+    # token window is a full-length forward pass for nomic, and on CPU that
+    # measured 0.83s each against 0.27s on the GPU -- the difference between
+    # half an hour and an hour and a half over this corpus. `flush_vectors`
+    # runs once per completed page by design ("batch, not per-delta"), so the
+    # embedder is on the ingest path and its speed is the build's speed.
+    ap.add_argument("--embed", default="gpu",
+                    help="device for the embedder ('gpu', 'cpu'), or 'off'")
     ap.add_argument("--limit", type=int, default=0, help="0 = every page")
     ap.add_argument("--window", type=int, default=0,
                     help="context window, in tokens; 0 = the default")

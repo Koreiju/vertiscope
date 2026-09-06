@@ -37,6 +37,10 @@ export interface ChunkPayload {
   lines: ChunkLine[];
   /** Addresses the chunk anchors; a short chunk and a misaligned one differ. */
   addresses: number;
+  /** The chunk's size in the unit its window was measured in. */
+  tokens?: number;
+  /** The window it was cut against, so a surface can show fill. */
+  window?: number;
   /**
    * The same chunk as slim distilled HTML, built by `htmlform.py` from these
    * very lines.

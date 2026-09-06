@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Sequence
 from urllib.parse import urlsplit
 
+from .. import tokens
 from ..graphstore import canonical_url
 
 #: ``[words](target)`` as the renderer draws it. The target stops at the first
@@ -289,6 +290,14 @@ def _note(chunk, body: str) -> str:
         'url: "%s"' % chunk.url,
         'xpath: "%s"' % chunk.xpath,
         "part: %d" % chunk.part,
+        # In the unit the chunker's window is stated in, so a reader can see
+        # from the note whether chunks are anywhere near the window they were
+        # cut against. They were not: the window was 1200 CHARACTERS and the
+        # notes it produced held a median of 165 tokens, 8% of a 2048-token
+        # one. A number nobody can see is a number nobody checks.
+        "tokens: %d" % tokens.count(chunk.md if hasattr(chunk, "md")
+                                    else chunk.markdown),
+        "chars: %d" % chunk.chars,
         "---",
         "",
     ]

@@ -75,11 +75,36 @@ def _get_model_lock(model_name: str) -> threading.RLock:
     return lock
 
 # Nomic v1/v1.5 have a 512-token context window. Task-prefix adds ~4 tokens,
-# so we leave generous headroom. 2000 characters is a conservative upper
-# bound (~500 tokens for English). Long inputs have been correlated with
-# an access-violation crash in llmodel_embed; hard-truncating before
-# handing the string to GPT4All keeps the native side happy.
-_MAX_INPUT_CHARS = 2000
+# so we leave generous headroom. Long inputs have been correlated with an
+# access-violation crash in llmodel_embed; hard-truncating before handing the
+# string to GPT4All keeps the native side happy.
+#
+# It was 2000 CHARACTERS, described in the same breath as "~500 tokens", and
+# that is the whole confusion: it is denominated in characters while the thing
+# it bounds -- how much of a chunk gets embedded -- is denominated in tokens.
+# Once the chunker's window became 2048 tokens, which is six to nine thousand
+# characters, every chunk was cut to roughly its first quarter before a vector
+# was taken of it. Nothing raises. The shape is right, the values are finite,
+# cosine similarity still works, and the semantic half of the layout describes
+# a prefix of each chunk while claiming to describe the chunk.
+#
+# Two things were checked before changing it, because it is a guard against a
+# native access violation and not a tuning knob:
+#
+# * Long inputs do NOT fault. 8 distinct inputs at 8k, 16k and 32k characters
+#   all embedded on the GPU, finite, correctly shaped. The crash this guards
+#   against is real but sits far above where the guard was.
+# * The model does NOT cap the input itself. Time scales linearly with length
+#   right through 32k characters, so `Embed4All` is reading all of it rather
+#   than truncating at nomic's nominal 2048 tokens. That makes THIS the
+#   effective limit, which is exactly why it has to admit a whole chunk.
+#
+# Sized as the window in tokens times the most characters a token plausibly
+# runs to. Six, not the 3.03 measured over this repo's own rendered notes:
+# those are dense with link targets, which tokenise badly, and ordinary prose
+# measures about 4.3. A guard set from the average cuts everything above it.
+NOMIC_MAX_TOKENS = 2048
+_MAX_INPUT_CHARS = int(NOMIC_MAX_TOKENS * 6)
 
 
 class _FakeEmbedModel:

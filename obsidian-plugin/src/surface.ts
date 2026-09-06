@@ -167,6 +167,20 @@ export class ChunkSurface extends MarkdownRenderChild {
     bar.createSpan({ cls: "domvec-cid", text: this.cid.slice(0, 8) });
     if (this.payload) {
       bar.createSpan({ cls: "domvec-url", text: this.payload.url });
+      // How full the context window this chunk was cut against actually is.
+      // The window was 1200 CHARACTERS and the chunks it made held a median
+      // of 165 tokens -- 8% of a real one -- and nothing in the vault said
+      // so, because the number was never shown anywhere a reader looks.
+      const size = this.payload.tokens;
+      const window = this.payload.window;
+      if (size) {
+        bar.createSpan({
+          cls: "domvec-size",
+          text: window
+            ? `${size} tok · ${Math.round((100 * size) / window)}% of ${window}`
+            : `${size} tok`,
+        });
+      }
     } else {
       // Said plainly. An unreachable sidecar and a chunk with nothing in it
       // render identically otherwise, and that ambiguity hides a dead

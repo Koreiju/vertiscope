@@ -241,3 +241,8 @@
   justify-content: flex-end;
   padding-bottom: 0.4em;
 }
+
+/* How full the window this chunk was cut against actually is. On the bar
+   because it is the number that says whether the chunker is doing what its
+   knob claims, and a number nobody can see is a number nobody checks. */
+.domvec-size { color: var(--text-faint); font-size: var(--font-smaller); white-space: nowrap; }

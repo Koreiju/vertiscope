@@ -183,10 +183,124 @@ left pointing at the web (targets never scanned), 0 links buried in code.
 
 ## Open, in the order it matters
 
-1. **Embeddings.** The layout runs frequency-only until `flush_vectors` has
-   run with an embedder; `index.embeddings` is `None` on the workspaces
-   built so far, so the equalised join is built and tested but not yet
-   exercised on real semantic vectors.
+1. **Endpoint features offline.** A chunk is a readable, pressable surface,
+   but not a self-contained runnable one: pressing a control still needs the
+   sidecar, and anything live needs a browser. What works with no network at
+   all is reading, retrieval and the graph.
+
+Closed since this list was written:
+
+* **Embeddings.** `index.embeddings` was `None` on every workspace built so
+  far, so the layout ran frequency-only and reported `equalised: false`.
+  Nothing was broken and nothing was missing: `Workspace.__init__` takes
+  `embedder=None`, and nobody had passed one. `scripts/build_vault_workspace.py`
+  does, and `flush_vectors` — the single write-side call, run once per
+  completed page by design — fills the matrix.
+
+  The cost is real and worth writing down. Chunks at the token window are
+  full-length forward passes for nomic: 0.83s each on CPU against 0.27s on the
+  GPU, which over this corpus is the difference between half an hour and an
+  hour and a half. The embedder sits on the ingest path deliberately ("batch,
+  not per-delta"), so the embedder's speed *is* the build's speed.
+
+## The window was measured in the wrong unit
+
+`context_window` was 1200 and nothing said what of. It was **characters** —
+about 400 tokens — while every consumer downstream measures in tokens: an
+embedder's input limit, a model's context, the budget a retrieval hit has to
+fit into. So the knob that decides how much goes in a chunk was denominated in
+a unit nothing downstream uses, and was about a twentieth of any real window.
+
+`domvec/tokens.py` owns the unit now, and the count is over the **markdown
+rendering** — the string the chunk actually becomes, link syntax and
+indentation included — because that is what gets embedded, stored and served.
+A budget enforced on one string and spent on another is not a budget. All
+three measures now come off that same string: the token count, the frequency
+vector (`freq.add(cid, chunk.markdown)`), and the semantic vector.
+
+Three sites had to agree, and the third is the one that would have failed
+quietly: `_render_sized`, `_emit_runs` (whose per-line cost was
+`len(text) + 2 * depth`, a different unit summed against the same window), and
+`_memo_key`, which now carries the unit — a cached character count served to a
+token window makes every chunk three times too big and raises nothing.
+
+`sensor.js` keeps its **character** budget: it pre-splits inside the page, and
+a BPE tokeniser is not something to ship into one. `tokens.sensor_budget`
+converts, so the two cutters still cut at the same granularity.
+
+Measured over 40 corpus pages:
+
+| | chunks | median tokens | fill of a 2048-token window |
+|---|---|---|---|
+| before (chars/1200) | 13,112 | 171 | 8.3% |
+| after (tokens/2048) | 2,119 | 1,236 | 60.4% |
+
+Not 100%, and it should not be: the chunker cuts at element boundaries and at
+content-defined ones, so a chunk ends where its content ends or where the
+window stops it, whichever comes first. What changed is that the window is now
+the thing that stops it.
+
+The note's frontmatter and the chunk payload both carry `tokens`, and the
+surface's bar shows the fill. A number nobody can see is a number nobody
+checks — which is how a window twenty times too small survived this long.
+
+## The other form: distilled HTML
+
+The vault had only the markdown form, so the surface **reconstructed** its
+widgets: a `<button>` existed because a regex matched `( Add to basket )` in a
+rendering. That works, and it is a reconstruction.
+
+`domvec/obsidian/htmlform.py` is the form the goal also asks for — "a more
+pure html extension to render original web content directly but still in
+distilled, organized, and slim minimal-html chunks, where we can keep the
+interactive and the static/media asset components". An `<input>` is an
+`<input>` because the trie says the element at that xpath is a control, and
+every element carries its own `url:xpath:taxonomy:content` address in
+`data-domvec-address` — so a click maps back through the patricia trie to the
+element the sensor found, not to the line the render drew.
+
+**One payload, two forms.** This reads the very lines the markdown surface
+reads, so a chunk cannot say one thing in markdown and another in HTML. They
+travel together in one `/chunk` response for the same reason: two round trips
+would let a surface hold two renderings of possibly two states.
+
+**Untrusted by construction.** The content is scraped from the open web and
+this HTML goes into a real, *unsanitised* DOM — the property the whole design
+turns on, and it cuts both ways. So the tag set is a closed whitelist, every
+text node is escaped, no attribute is copied from the page, and `_safe_url`
+refuses every scheme but http/https/mailto and site-relative paths. The test
+asserts against the **parsed tree**, not the string: `onerror` inside
+`&lt;img src=x onerror=…&gt;` is escaped text a reader sees, not an attribute
+a browser runs, and a substring search cannot tell those apart.
+
+### Two media defects it exposed
+
+Building it made both visible, because both produce markdown that reads fine
+and HTML that cannot work.
+
+`_join_inline`'s "a picture is not a sentence fragment" guard tested the raw
+tag against `_OBJECT_CLASSES`, which holds the **sensor's** spellings (`image`,
+`media`). The tagger names the same element `media.images`, so the guard never
+fired for anything the tagger found — and an `<img>` yields two units at one
+element (its tag-name fallback `img`, and its `src`) which share a tag and a
+flow owner, with a relative `src` that `_looks_like_url` says no to. They
+joined. Every tagger-found picture drew as `![images](img media/cache/….jpg)`:
+a target with the element's name glued to the front, which is not a url and
+cannot be fetched. It is asked of `render_class` now — "is this an object
+rather than prose" is exactly what the eighteen classes answer, which is the
+case that property's own docstring says to use it for.
+
+And the caption named the taxonomy rather than the picture. An `<img>` carries
+its `alt` as a `text.accessible` address at the same element, already sitting
+in `text_at`, so "A Light in the Attic" was there while every picture on the
+page drew as `![images]`.
+
+| | glued/unfetchable src | captions in the page's own words |
+|---|---|---|
+| before | 71 | 0% |
+| after | 0 | 42% |
+
+The remaining 58% are pictures the page gave no alt for.
 
 ## One link, one edge
 
@@ -285,6 +399,53 @@ loud:
 
 `halves.equalised` is asserted from the measured widths, not from the
 intention. The first version reported `True` while doing (3) wrong.
+
+### Six dimensions: three to stand in, three to be a colour
+
+The fit is 6D. Three components place the node; three become hue, saturation
+and value. Colour was a hash of the host, which is a **legend** and not a
+measurement — it said which site a node came from, which the node's own label
+already said. Spending three of the projection's dimensions on it means the
+colour carries directions of the joint space the three spatial axes had no
+room for, so two nodes that look alike are alike in a part of the space the
+camera cannot show.
+
+One fit, not two. A colour from a separate projection would be an unrelated
+picture painted on top of the first, and two nodes sitting together would
+carry unrelated hues for no reason a viewer could read.
+
+Saturation and value are held inside bands (0.35–0.85, 0.45–0.95) rather than
+mapped across their full range: a component landing at zero paints a node
+black or grey — invisible against the pane, and indistinguishable from a node
+the fit failed on. The bands keep **order**, which is what a viewer can read
+off a colour, and give up only the two extremes nobody can see anyway.
+
+Writing the test found the same class of defect this module keeps catching.
+Neither reducer returns more components than the data has rank, so a
+four-chunk workspace yields three however many are asked for — and `_umap`
+padded the shortfall with columns of zeros. Colouring from those put every
+node at hue 180 (the middle of the band, where `_hsv` sends a component with
+no spread) while the report still said `hsv: true`. A constant colour claiming
+to be a measurement is worse than the host palette, which at least says what
+it is. `_umap` no longer pads; `fitted_dims` reports what came back beside
+`requested_dims`; the colour is dropped when the fit could not produce it, and
+the status bar says which of the two the reader is looking at.
+
+Nodes also report their first picture, absolutised against the chunk's own url
+— a viewer resolving a relative path would resolve it against the vault — so
+the 3D view billboards a chunk with the thing it showed instead of drawing a
+dot for it. Only fetched when the reader has remote media on: a graph that
+quietly pulled a few hundred images the moment it opened would be the loudest
+possible version of what that setting exists to prevent.
+
+### Clicking a node
+
+A node stands for a chunk, so clicking it opens **that chunk** — in its own
+pane, as structured markdown or as the interactive HTML. It used to open the
+exported NOTE, which is a page of a vault: frontmatter, the distilled
+markdown, a fence, and whatever the reader has since written around it. The
+note is still one button away, in the pane's own bar. One pane, reused —
+opening a tab per click buries the graph you are clicking within a few nodes.
 
 It runs in Python because the vectors, numpy and UMAP are already there, and
 a projection fitted twice in two languages is two projections. The plugin
