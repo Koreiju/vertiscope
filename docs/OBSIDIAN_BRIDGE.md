@@ -257,6 +257,32 @@ python -m domvec.obsidian export --workspace build/vaultws --vault .        --fo
 python -m domvec.obsidian serve  --workspace build/vaultws --port 8787
 ```
 
+### Driving the real app
+
+`obsidian-plugin/cdp.mjs` evaluates JavaScript inside a running Obsidian.
+Launch it with `--remote-debugging-port=9222` and the renderer -- where `app`
+lives -- is reachable over the Chrome DevTools Protocol. No plugin, no
+dependency: Node has a built-in `WebSocket` and CDP is JSON over one.
+
+```
+node cdp.mjs "app.plugins.enabledPlugins.has('domvec-bridge')"
+node cdp.mjs --file probe.js
+```
+
+This is a far better instrument than a screenshot. A screenshot shows what a
+pane looks like; this says whether the plugin loaded, which commands exist,
+what the view rendered, how many links Obsidian actually resolved, and what
+threw. Screenshots were tried first and abandoned: they answer less and they
+capture whatever else is on the screen.
+
+**Restricted Mode is the thing that blocks an install.** Writing
+`.obsidian/community-plugins.json` is not enough — Obsidian read the manifest,
+listed the plugin as enabled, and still loaded nothing, because community
+plugins were off for the vault. `app.plugins.isEnabled()` reports it and
+`await app.plugins.setEnable(true)` turns it on.
+
+### Running the plugin headless
+
 `obsidian-plugin/harness.mjs` runs the BUILT plugin outside Obsidian against a
 live sidecar: it stubs the `obsidian` module, loads `main.js`, and drives the
 code-block processor, the retrieval gesture and the link rewrite for real.
@@ -280,6 +306,29 @@ tests could have seen:
   surface on screen worked. It now retries once, and only on a thrown error —
   a 404 for a cid the store does not have is an answer, and asking twice makes
   it no truer.
+
+Two more that only the running app could show:
+
+* **Relative links became dangling graph nodes.** Obsidian treats
+  `[words](relative/path)` as an INTERNAL link, so a page's own hrefs arrived
+  as links to vault files that do not exist: **13 real edges and 263 dangling
+  ones**. Some resolved by accident — `docs/index.html` matched
+  `obsidian-plugin/node_modules/polished/docs/index.html`, so a book catalogue
+  linked into a javascript dependency, an edge that is not merely useless but
+  false. Unresolved links are now made absolute; dangling went to **0**.
+* **Render marks leaked into control labels.** A form's button read
+  `=== form ===` and a button would have read `( Add to basket )`. The marks
+  are what the distiller draws to SAY a thing is a control, and the surface
+  re-adds its own; the REPL strips them for the same reason.
+
+### Verified in the running app
+
+```
+pluginLoaded       true          pageNotes       98
+restrictedModeOff  true          resolvedEdges    7   (== the export's count)
+commands              4          danglingLinks    0   (was 263)
+sidecarAlive       true          graph  98 chunks · frequency · not equalised
+```
 
 ## Sources
 

@@ -176,11 +176,40 @@ export class ChunkSurface extends MarkdownRenderChild {
 
   // -- helpers ---------------------------------------------------------------
 
-  /** The words a reader sees, with any target stripped off. */
+  /**
+   * The words a reader sees, with the render's own marks taken back off.
+   *
+   * The distiller draws a control with marks that SAY it is a control --
+   * `( Add to basket )`, `[ ] Search books`, `=== form ===` -- and the surface
+   * re-adds its own affordance by drawing a real button. Leaving the marks in
+   * the label prints them twice: a form's button read `=== form ===` in the
+   * running app, and a button would have read `( Add to basket )`.
+   *
+   * The REPL's `Document.from_chunks` strips the same marks for the same
+   * reason, and its comment records the trap that matters here: the heading
+   * marker comes off FIRST, because a control inside a heading renders as
+   * `##### ( Products )` and every test below, each of which looks at a
+   * LEADING mark, otherwise stops firing.
+   */
   private words(text: string): string {
-    const link = LINK.exec(text.trim());
+    let out = text.trim();
+
+    const heading = /^#{1,6}\s+/.exec(out);
+    if (heading) out = out.slice(heading[0].length).trim();
+
+    const link = LINK.exec(out);
     if (link) return link[1].trim();
-    return text.trim();
+
+    const form = /^===\s*(.*?)\s*===$/.exec(out);
+    if (form) return form[1].trim();
+
+    const button = /^\(\s*(.*?)\s*\)$/.exec(out);
+    if (button) return button[1].trim();
+
+    const field = /^\[[ xX]?\]\s*(.*)$/.exec(out);
+    if (field) return field[1].trim();
+
+    return out;
   }
 
   /** A page-relative src resolved against the chunk's own url. */

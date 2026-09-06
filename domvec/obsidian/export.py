@@ -239,7 +239,25 @@ def _rewrite_links(md: str,
         note = resolve(target)
         if note is None:
             misses += 1
-            return m.group(0)
+            # An unresolved link is made ABSOLUTE rather than left alone.
+            #
+            # Obsidian treats `[words](relative/path)` as an INTERNAL link and
+            # puts it in the graph, so a page's own relative hrefs arrived as
+            # links to vault files that do not exist. Measured in the running
+            # app on the 98-note export: 13 real edges and **263 dangling
+            # ones**, which is the graph view showing a few hundred phantom
+            # nodes around the real ones.
+            #
+            # Worse, some of them RESOLVED by accident. `docs/index.html`
+            # matched `obsidian-plugin/node_modules/polished/docs/index.html`,
+            # so a book catalogue linked into a javascript dependency -- an
+            # edge that is not merely useless but false.
+            #
+            # An absolute url is unambiguous: Obsidian leaves it as an
+            # external link, the reader can still follow it, and it stays out
+            # of the graph, which is the truth -- that page was never scanned.
+            absolute = canonical_url(target, base)
+            return "[%s](%s)" % (words, absolute) if absolute else m.group(0)
         hits += 1
         # `[[note|words]]` keeps the sentence reading as it did while making
         # the edge real. An empty label would draw the raw note name instead.

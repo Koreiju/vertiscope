@@ -226,3 +226,35 @@ def test_every_exported_note_is_visible_to_the_vault(ws, tmp_path):
         assert not path.name.startswith("."), \
             "%s is hidden from Obsidian" % path.name
         assert path.exists()
+
+
+def test_an_unresolved_link_is_made_absolute(ws, tmp_path):
+    """Obsidian treats `[words](relative/path)` as an INTERNAL link.
+
+    A page's own relative hrefs therefore arrived in the vault as links to
+    files that do not exist. Measured in the running app on the 98-note
+    export: 13 real edges and 263 dangling ones — the graph view showing a few
+    hundred phantom nodes around the real ones.
+
+    Worse, some resolved by accident: `docs/index.html` matched
+    `obsidian-plugin/node_modules/polished/docs/index.html`, so a book
+    catalogue linked into a javascript dependency. An edge that is not merely
+    useless but false.
+    """
+    out, hits, misses = _rewrite_links(
+        "see [next](../catalogue/page-2.html) and [gone](/x.html)",
+        "https://a.test/books/index.html", {}, {})
+    assert hits == 0 and misses == 2
+    assert "https://a.test/catalogue/page-2.html" in out, out
+    assert "https://a.test/x.html" in out, out
+    assert "](../" not in out and "](/x" not in out, \
+        "a relative target survived: %s" % out
+
+
+def test_a_resolved_link_still_wins_over_absolutising(ws, tmp_path):
+    """Making unresolved links absolute must not stop the rewrite."""
+    out, hits, _ = _rewrite_links(
+        "read [next](/two.html)", "https://a.test/one.html",
+        {"https://a.test/two.html": "c2"}, {"c2": "Page Two"})
+    assert hits == 1
+    assert "[[Page Two|next]]" in out
