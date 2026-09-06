@@ -23,10 +23,12 @@ import {
   MarkdownPostProcessorContext,
   Notice,
   Plugin,
+  WorkspaceLeaf,
   PluginSettingTab,
   Setting,
 } from "obsidian";
 
+import { GRAPH_VIEW, GraphView } from "./graph";
 import { RetrievalSuggest } from "./retrieval";
 import { Sidecar } from "./sidecar";
 import { ChunkSurface, SurfaceHost } from "./surface";
@@ -84,11 +86,56 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost {
       },
     });
 
+    this.registerView(
+      GRAPH_VIEW,
+      (leaf: WorkspaceLeaf) =>
+        new GraphView(leaf, this.sidecar, (cid) => this.revealChunk(cid)),
+    );
+    this.addRibbonIcon("git-fork", "domvec 3D graph", () => this.openGraph());
+    this.addCommand({
+      id: "domvec-open-graph",
+      name: "Open the 3D graph",
+      callback: () => this.openGraph(),
+    });
+
     this.addSettingTab(new DomvecSettingTab(this.app, this));
   }
 
   onunload() {
     this.surfaces.clear();
+    // The view's own `onClose` releases the WebGL context; detaching leaves
+    // is Obsidian's job and doing it here is explicitly discouraged, because
+    // it destroys layout the user arranged.
+  }
+
+  private async openGraph() {
+    const existing = this.app.workspace.getLeavesOfType(GRAPH_VIEW);
+    if (existing.length) {
+      this.app.workspace.revealLeaf(existing[0]);
+      return;
+    }
+    const leaf = this.app.workspace.getLeaf("tab");
+    await leaf.setViewState({ type: GRAPH_VIEW, active: true });
+    this.app.workspace.revealLeaf(leaf);
+  }
+
+  /**
+   * Open the note a graph node stands for.
+   *
+   * Matched on the `cid` in frontmatter rather than on the file name, because
+   * the exporter names notes for their first words and two chunks can start
+   * the same way. The cid is the identity everything else is keyed on.
+   */
+  private async revealChunk(cid: string) {
+    const file = this.app.vault.getMarkdownFiles().find((f) => {
+      const cache = this.app.metadataCache.getFileCache(f);
+      return cache?.frontmatter?.cid === cid;
+    });
+    if (!file) {
+      new Notice(`domvec: no exported note for ${cid.slice(0, 8)}`);
+      return;
+    }
+    await this.app.workspace.getLeaf(false).openFile(file);
   }
 
   async saveSettings() {

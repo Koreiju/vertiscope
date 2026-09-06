@@ -116,7 +116,15 @@ lesson: four spaces *inside a list* is nesting, and only four spaces
     of the note, the note is a file, and its links are links the graph already
     understands. Retrieval that renders into a side panel leaves nothing
     behind.
-  - `main.ts` — wiring, three commands, settings.
+  - `graph.ts` — the **3D view**, an `ItemView` of its own drawing
+    `3d-force-graph`. Nodes are pinned at the fitted coordinates (`fx/fy/fz`)
+    and the simulation is cooled immediately: running forces on top would
+    drift the points off the embedding and quietly turn a UMAP of two vector
+    spaces into a spring layout that happened to start there. Clicking a node
+    opens the exported note, matched on the `cid` in frontmatter rather than
+    the file name, because the exporter names notes for their first words and
+    two chunks can begin the same way.
+  - `main.ts` — wiring, five commands, a ribbon icon, settings.
 
   **Remote media is off by default, and that is a privacy setting rather than
   a performance one.** A distilled page carries tracking pixels and per-user
@@ -166,23 +174,55 @@ left pointing at the web (targets never scanned), 0 links buried in code.
 
 ## Open, in the order it matters
 
-1. **The 3D view.** `3d-force-graph` + `umap-js`, following
-   `obsidian-3d-semantic-graph`. The projection the goal asks for is specific:
-   bring the frequency vectors to the semantic dimensionality *first*, then
-   concatenate, then one final UMAP — so the two spaces contribute equal
-   information rather than whichever happens to be wider.
-2. **The Selenium port.** Interactions on the surface drive a real browser.
+1. **The Selenium port.** Interactions on the surface drive a real browser.
    Read-only by default is deliberate: driving a live page must be an
    explicit choice, never a side effect of opening a note. The surface
    already reports the address it *would* act on, and both the sidecar and
    the MCP server are read-only by construction, so this is the one place a
    write path would have to be added deliberately rather than by extension.
-3. **The gesture's links stay web links.** A passage the `/` gesture inserts
+2. **The gesture's links stay web links.** A passage the `/` gesture inserts
    keeps its internal links exactly as the distiller drew them. Rewriting
    them into wikilinks is the exporter's job and it can only do it for pages
    that were exported, which the gesture has no way to know. Wiring the two
    together — the exporter's name map, available to the gesture — is the
    piece that would make retrieval and the graph one surface.
+
+## The projection, and why it is fitted in Python
+
+`domvec/obsidian/layout.py`. The goal states it precisely — bring the
+frequency vectors to the semantic dimensionality *first*, concatenate, then
+one final UMAP — and the precision is the point. Tf-idf over a corpus is tens
+of thousands of columns against a 768-wide embedding, so concatenating raw
+hands the distance function to the lexical space by sheer count: the semantic
+half would contribute about one part in fifty of every distance, and the
+result would be a tf-idf layout with a rounding error in it. It would still
+look exactly like a layout.
+
+Three things had to be true, and only the first is what the goal says out
+loud:
+
+1. **Equal dimension.** Both halves reduced to the same width.
+2. **Equal weight.** Equal dimension is not equal weight — a 768-wide tf-idf
+   projection and a 768-wide embedding need not have the same magnitude, so
+   each half is L2-normalised before the join. One line, easy to omit,
+   impossible to notice missing.
+3. **A width both sides can actually reach.** Truncated SVD cannot return
+   more components than the sample count supports. Reducing the lexical side
+   *towards* 768 and calling it equal gave 97 against 768 on a 98-chunk
+   workspace — the same lopsidedness pointing the other way — and asking the
+   embedding for 75 on a three-chunk workspace gave 2 against 75, a third
+   way to get it wrong. The width is the minimum of both sides **and** the
+   rank bound, so both reductions can deliver what they are asked for.
+
+`halves.equalised` is asserted from the measured widths, not from the
+intention. The first version reported `True` while doing (3) wrong.
+
+It runs in Python because the vectors, numpy and UMAP are already there, and
+a projection fitted twice in two languages is two projections. The plugin
+renders; it does not fit. The view names the spaces it was given on its own
+status bar — a layout fitted on frequency alone and one fitted on both are
+different pictures, and a reader who cannot tell them apart will read a
+lexical clustering as a semantic one.
 
 ## Sources
 

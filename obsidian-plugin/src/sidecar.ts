@@ -42,6 +42,16 @@ export class Sidecar {
     );
   }
 
+  /**
+   * The fitted 3D placement. Seconds on a first call, cached after.
+   *
+   * Fitted in Python, where the vectors, numpy and UMAP already are. A
+   * projection fitted twice in two languages is two projections.
+   */
+  layout(dims = 3): Promise<unknown | null> {
+    return this.get(`/layout?dims=${dims}`);
+  }
+
   /** Whether the sidecar answers at all. Used only to report status. */
   async alive(): Promise<boolean> {
     return (await this.get<unknown>("/health")) !== null;

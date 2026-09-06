@@ -134,3 +134,25 @@
   color: var(--text-faint);
   font-size: var(--font-smaller);
 }
+
+/* --- the 3D view ---------------------------------------------------------- */
+
+.domvec-graph-root { display: flex; flex-direction: column; height: 100%; }
+
+.domvec-graph-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.8em;
+  padding: 0.4em 0.8em;
+  border-bottom: 1px solid var(--background-modifier-border);
+  font-size: var(--font-smaller);
+  color: var(--text-muted);
+}
+
+/* Which spaces produced the picture, said on the bar rather than left
+   implicit: a layout fitted on frequency alone and one fitted on both are
+   different pictures, and a reader who cannot tell them apart will read a
+   lexical clustering as a semantic one. */
+.domvec-graph-status { flex: 1; }
+
+.domvec-graph-canvas { flex: 1; min-height: 0; }

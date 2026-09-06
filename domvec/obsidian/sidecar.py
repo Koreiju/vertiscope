@@ -27,9 +27,10 @@ import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Dict, List, Optional
-from urllib.parse import unquote, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 
 from .export import _reflow
+from .layout import build_layout
 
 
 def chunk_payload(workspace, cid: str) -> Optional[Dict]:
@@ -178,8 +179,22 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send(200, payload)
             return
 
+        if segments[0] == "layout":
+            # Cached on the handler CLASS, so every request in this process
+            # shares one fit. UMAP over a real workspace is seconds, and the
+            # 3D view asks on every open; refitting per request would make
+            # opening the pane feel broken. Keyed on the chunk count so an
+            # ingest invalidates it without anyone having to remember to.
+            want = int((parse_qs(parts.query).get("dims") or ["3"])[0])
+            want = 3 if want not in (2, 3) else want
+            fresh = (len(self.workspace.store.chunks()), want)
+            if getattr(type(self), "_layout_key", None) != fresh:
+                type(self)._layout_key = fresh
+                type(self)._layout = build_layout(self.workspace, dims=want)
+            self._send(200, type(self)._layout)
+            return
+
         if segments[0] == "search":
-            from urllib.parse import parse_qs
             params = parse_qs(parts.query)
             query = (params.get("q") or [""])[0]
             # `k` is clamped rather than trusted: the caller is a plugin in
