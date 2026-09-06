@@ -259,7 +259,34 @@ python -m domvec.obsidian serve  --workspace build/vaultws --port 8787
 
 ### Driving the real app
 
-`obsidian-plugin/cdp.mjs` evaluates JavaScript inside a running Obsidian.
+**Never by screenshot.** A screenshot answers less than the app can be asked
+directly -- it shows what a pane looks like, not whether the plugin loaded,
+which commands registered, or how many links the app actually resolved -- and
+it captures whatever else is on the screen. Two of them here took in a private
+browser window before the approach was abandoned.
+
+**The devtool: `obsidian-local-rest-api`.** Installed into
+`.obsidian/plugins/`, enabled, loopback HTTP on 27123 (rather than its
+self-signed HTTPS port, which forces every client to skip verification), and
+registered with Claude Code as an MCP server:
+
+```
+claude mcp add --transport http --scope local obsidian-vault        http://127.0.0.1:27123/mcp --header "Authorization: Bearer <key>"
+```
+
+Local scope, so the key stays out of the repo. It exposes `/vault/`,
+`/commands/` and command EXECUTION over REST, and an MCP endpoint with
+resources and tools.
+
+`obsidian-cli-rest` ("REST and MCP server") was tried first and removed. Its
+`search` tool works, but `execute` shells out to an `obsidian` CLI binary and
+looks only at POSIX paths, so on Windows every call returns
+`spawn obsidian ENOENT` -- and it surfaces that as an error in the GUI. It
+also wants port 27124, which collides with local-rest-api's HTTPS port.
+
+**The fallback: `obsidian-plugin/cdp.mjs`.**
+
+It evaluates JavaScript inside a running Obsidian.
 Launch it with `--remote-debugging-port=9222` and the renderer -- where `app`
 lives -- is reachable over the Chrome DevTools Protocol. No plugin, no
 dependency: Node has a built-in `WebSocket` and CDP is JSON over one.
