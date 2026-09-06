@@ -307,14 +307,24 @@ export class ChunkSurface extends MarkdownRenderChild {
         text: "offline — sidecar unreachable",
       });
     }
-    const button = bar.createEl("button", {
-      cls: "domvec-toggle",
-      // Named for the two things it actually shows. "interactive" said
-      // what the mode does, not what it is, and the two forms are the
-      // distilled markdown and the distilled DOM.
-      text: this.interactive ? "markdown" : "shadow DOM",
-    });
-    button.onclick = () => this.toggle();
+    // A switch showing BOTH states, not a button labelled with the other
+    // one. A lone button reading "markdown" is ambiguous in the way that
+    // matters -- it can equally mean "you are looking at markdown" and "press
+    // to get markdown" -- and the reader cannot tell which form is on screen
+    // without recognising it. Two segments with the live one marked answer
+    // that without being read.
+    const toggle = bar.createDiv({ cls: "domvec-switch" });
+    const seg = (label: string, on: boolean) => {
+      const el = toggle.createEl("button", {
+        cls: "domvec-seg" + (on ? " is-on" : ""),
+        text: label,
+      });
+      el.setAttr("aria-pressed", String(on));
+      el.onclick = () => { if (!on) this.toggle(); };
+      return el;
+    };
+    seg("markdown", !this.interactive);
+    seg("shadow DOM", this.interactive);
   }
 
   private drawInteractive(body: HTMLElement) {

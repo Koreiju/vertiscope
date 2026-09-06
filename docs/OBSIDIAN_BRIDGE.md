@@ -370,6 +370,79 @@ request: the browser sends an `OPTIONS` preflight first,
 because they are simple requests. The Node harness has no origin and no
 preflight, so it could never have caught this.
 
+### Shadow DOM, and why not an iframe
+
+The distilled HTML renders into a **shadow root**, not into the note's own
+tree and not into an iframe.
+
+Not the note's tree, because this markup is a *web page's* structure and a
+note is a styled document. Dropped in plainly it inherits every markdown rule
+the theme has — paragraph spacing, list bullets, link colours, heading scales
+— so a distilled page comes out looking like an essay about itself rather than
+like the page.
+
+Not an iframe, and this is where the ecosystem's answer and ours part company
+for a reason worth recording. Obsidian has several plugins that render HTML in
+notes — HTML Embed, HTML Viewer, HTML Docs, Polyglot Renderer, HTML Preview —
+and they all sandbox in an iframe. They have to: they take *arbitrary* markup
+from the user's vault, and arbitrary markup carries scripts. HTML Blocks is
+the exception and it uses a shadow root per block, for exactly the style
+reason above.
+
+Ours is neither arbitrary nor scripted. `htmlform.py` emits a closed tag
+whitelist with every text node escaped, no attribute copied from the page and
+no scheme but http/https/mailto. So an iframe's isolation buys nothing here
+and costs the two things that matter: our listeners could no longer reach the
+elements to wire trie addresses to them, and Obsidian's own CSS variables
+would not reach in to make a control look native. Custom properties *do*
+inherit across a shadow boundary, which is what lets `SHADOW_CSS` be written
+in `--text-muted` and friends and still follow the reader's theme.
+
+**Completely private, and that is a property of the design rather than a
+setting.** The sidecar is loopback-only, the notes are files, retrieval and
+the graph run against the local store, and the distilled HTML fetches nothing
+— its one outbound request is a picture, off by default. Nothing here needs
+the internet except the scan that produced the corpus and, if the reader turns
+it on, the pictures.
+
+### The panel, and what sits at the top of it
+
+The `domvec` fence is now the **first** thing in a note, where the properties
+block used to be. It was last, which put the panel below however much prose
+the chunk held — and Obsidian renders a reading view's sections lazily, so on
+a long note the surface did not mount at all until someone scrolled to the
+bottom.
+
+The properties block itself is hidden (`propertiesInDocument: hidden`, the
+vault setting Obsidian's own Appearance pane writes). The frontmatter stays —
+`cid` is what the graph, the link map and the chunk pane resolve on — it is
+just not drawn.
+
+At the top of the panel is a two-state switch between **markdown** and
+**shadow DOM**. Both states are shown with the live one marked, rather than
+one button labelled with the other state: a lone button reading "markdown" is
+ambiguous exactly where it matters, since it can equally mean "you are looking
+at markdown" and "press for markdown", and a reader cannot tell which form is
+on screen without recognising it.
+
+### Cohesive structures
+
+A group holding one picture and something to say about it is drawn as a
+**card** rather than as stacked lines. A result row, a product tile and a
+profile are all a picture with a title and a price and a button that belong
+together, and four stacked lines lose the one thing the page's layout was
+saying.
+
+This is why `_Builder` holds a tree rather than a string of open and close
+tags: a group cannot be classified until its contents are known, and a string
+builder has already emitted the opening tag by then.
+
+There is no geometry involved and there could not be — the sensor deliberately
+captures none (`test_no_box_geometry`). What stands in for it is containment:
+the distilled tree's nesting *is* the page's grouping, and the record rule
+above now makes each of those groups a chunk of its own, so a chunk arrives
+already localised to one cohesive thing.
+
 ## The projection, and why it is fitted in Python
 
 `domvec/obsidian/layout.py`. The goal states it precisely — bring the

@@ -246,3 +246,43 @@
    because it is the number that says whether the chunker is doing what its
    knob claims, and a number nobody can see is a number nobody checks. */
 .domvec-size { color: var(--text-faint); font-size: var(--font-smaller); white-space: nowrap; }
+
+/* --- the switch at the top of every panel ---------------------------------
+   Both states shown, the live one marked. A lone button labelled with the
+   OTHER state is ambiguous exactly where it matters: "markdown" can equally
+   mean "you are looking at markdown" and "press for markdown", and the reader
+   cannot tell which form is on screen without recognising it.
+
+   Shaped after Obsidian's own segmented controls so it reads as part of the
+   app rather than as something a plugin bolted on. */
+
+.domvec-switch {
+  display: inline-flex;
+  margin-left: auto;
+  background: var(--background-modifier-form-field);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  overflow: hidden;
+}
+
+.domvec-switch .domvec-seg {
+  font-size: var(--font-smaller);
+  padding: 0.1em 0.6em;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.domvec-switch .domvec-seg.is-on {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  cursor: default;
+}
+
+/* The shadow root's host. The sheet that styles what is INSIDE it travels
+   with the markup -- see SHADOW_CSS in surface.ts -- because a page-level
+   stylesheet is precisely what a shadow boundary keeps out. */
+.domvec-html-host { display: block; }
