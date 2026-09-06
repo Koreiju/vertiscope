@@ -253,3 +253,61 @@ def test_a_chunk_the_store_does_not_have_is_none_not_an_empty_page(tmp_path):
     with Workspace(tmp_path / "ws") as ws:
         assert chunk_html(ws, "no-such-cid") is None
 
+
+
+# --- relative urls resolve against the PAGE, not against the vault -------------
+
+def test_a_relative_image_resolves_against_the_page():
+    """Verified as a real failure in the running app before this existed.
+
+    The distiller writes what the page wrote, which is usually relative. A
+    surface resolving that itself resolves against the document IT lives in,
+    and in Obsidian that is `app://obsidian.md` -- so a note asked the app for
+    a picture it does not have. 1 of 11 images loaded; the ten failures all
+    pointed at `app://obsidian.md/...`.
+    """
+    html = render_lines(
+        [line("![Tamas](user_avatar/tamas/25949_2.png)", cls="image")],
+        base="https://discourse.julialang.org/latest")
+    assert 'src="https://discourse.julialang.org/user_avatar/tamas/25949_2.png"' \
+        in html, html
+
+
+def test_a_relative_link_resolves_against_the_page():
+    html = render_lines([line("[Meta](/c/meta/3)", cls="link")],
+                        base="https://discourse.julialang.org/latest")
+    assert 'href="https://discourse.julialang.org/c/meta/3"' in html, html
+
+
+def test_an_absolute_url_is_left_alone():
+    html = render_lines([line("![x](https://cdn.test/a.png)", cls="image")],
+                        base="https://elsewhere.test/p")
+    assert 'src="https://cdn.test/a.png"' in html
+
+
+def test_absolutising_does_not_smuggle_a_scheme_past_the_refusal():
+    """`_safe_url` runs first, so there is nothing left to resolve.
+
+    Worth asserting rather than assuming: joining a refused value against a
+    base is exactly how a sanitiser gets bypassed when the order is wrong.
+    """
+    html = render_lines([line("[go](javascript:alert(1))", cls="link")],
+                        base="https://ok.test/")
+    assert "javascript:" not in html
+    assert "href" not in html
+
+
+def test_a_billboard_and_its_chunk_name_the_same_file():
+    """The 3D node's picture and the picture inside the chunk must agree.
+
+    They are absolutised in two modules against the same base, and if those
+    ever diverged a node would billboard a file the chunk cannot show.
+    """
+    from domvec.obsidian.layout import _first_image
+
+    base = "https://discourse.julialang.org/latest"
+    md = "![Tamas](user_avatar/tamas/25949_2.png)"
+    node = _first_image(md, base)
+    html = render_lines([line(md, cls="image")], base=base)
+    assert node is not None
+    assert 'src="%s"' % node["src"] in html, (node, html)

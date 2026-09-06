@@ -15,7 +15,7 @@
  * and draws them.
  */
 
-import { ItemView, WorkspaceLeaf } from "obsidian";
+import { ItemView, WorkspaceLeaf, requestUrl } from "obsidian";
 import ForceGraph3D, { ForceGraph3DInstance } from "3d-force-graph";
 import * as THREE from "three";
 
@@ -77,6 +77,63 @@ function colourOf(node: LayoutNode): string {
   return hue(node.url);
 }
 
+/**
+ * The largest picture worth turning into a billboard, in bytes.
+ *
+ * A base64 `data:` url is a third larger than the bytes it carries and is
+ * held in memory for the life of the pane, so a corpus of full-resolution
+ * photographs would be held twice over. Thumbnails and logos -- what a node
+ * actually shows at this size -- are far under this.
+ */
+const MAX_TEXTURE_BYTES = 2 * 1024 * 1024;
+
+/** The type a url implies, when the host did not say. */
+function guessType(src: string): string {
+  const m = /\.(png|jpe?g|gif|webp|svg)($|\?)/i.exec(src);
+  if (!m) return "";
+  const ext = m[1].toLowerCase();
+  if (ext === "svg") return "image/svg+xml";
+  if (ext === "jpg" || ext === "jpeg") return "image/jpeg";
+  return `image/${ext}`;
+}
+
+/**
+ * An SVG as a data url a WebGL texture can actually be made from.
+ *
+ * `TextureLoader` draws through an `<img>` onto a canvas, and an `<img>`
+ * holding an SVG with no width/height has no intrinsic size -- so the draw
+ * produces nothing and the texture never appears. Sites overwhelmingly ship
+ * their logos that way, sizing them in CSS instead. Measured on this corpus:
+ * 43 of the 110 billboards are SVG, which is very nearly the whole of what
+ * was still failing after the CORS problem was solved.
+ *
+ * So a size is given when the file does not carry one, taken from `viewBox`
+ * where there is one so the aspect ratio survives.
+ *
+ * Encoded with `encodeURIComponent` rather than base64: the bytes are text,
+ * and this keeps the url readable when one has to be looked at.
+ *
+ * The markup never reaches the DOM as markup -- it goes into an `<img>`,
+ * where browsers do not run scripts in SVG -- and from there into a texture.
+ */
+function svgDataUrl(markup: string): string | null {
+  const open = /<svg\b[^>]*>/i.exec(markup);
+  if (!open) return null;
+  let tag = open[0];
+  // The word boundaries are load-bearing: without them `stroke-width="2"`
+  // reads as a width, so an SVG that sets a stroke and no size is
+  // judged already sized and still draws nothing.
+  if (!/\bwidth\s*=/i.test(tag) || !/\bheight\s*=/i.test(tag)) {
+    const box = /viewBox\s*=\s*["']\s*[-\d.]+[ ,]+[-\d.]+[ ,]+([\d.]+)[ ,]+([\d.]+)/i
+      .exec(tag);
+    const w = box ? Math.round(parseFloat(box[1])) || 256 : 256;
+    const h = box ? Math.round(parseFloat(box[2])) || 256 : 256;
+    tag = tag.replace(/^<svg/i, `<svg width="${w}" height="${h}"`);
+    markup = markup.replace(open[0], tag);
+  }
+  return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(markup);
+}
+
 /** One colour per host, so a site reads as a region without a legend. */
 function hue(url: string): string {
   let host = url;
@@ -91,6 +148,14 @@ function hue(url: string): string {
 }
 
 export class GraphView extends ItemView {
+  /**
+   * Fetched pictures, shared across every instance of the view.
+   *
+   * Many nodes of one site point at the same avatar or logo, and reopening
+   * the pane refits and rebuilds every sprite. Without this, closing and
+   * reopening the graph re-downloads the corpus's images.
+   */
+  private static textures = new Map<string, string | null>();
   private graph: ForceGraph3DInstance | null = null;
   private onPick: (cid: string) => void;
 
@@ -187,26 +252,89 @@ export class GraphView extends ItemView {
     const size = Math.max(6, Math.min(18, Math.sqrt(node.val) * 4));
     sprite.scale.set(size, size, 1);
 
-    const loader = new THREE.TextureLoader();
-    loader.setCrossOrigin("anonymous");
-    loader.load(
-      src,
-      (texture: any) => {
-        material.map = texture;
-        // White once a picture is on it: the colour was standing in for the
-        // image, and leaving it would tint every photograph.
-        material.color = new THREE.Color(0xffffff);
-        material.needsUpdate = true;
-      },
-      undefined,
-      () => {
-        // Left as the coloured tile it already is, and said in the console
-        // rather than silently: a graph of blank tiles and a graph whose
-        // asset host is refusing look identical from the pane.
-        console.warn("domvec: image did not load", src);
-      },
-    );
+    this.texture(src)
+      .then((dataUrl) => {
+        if (!dataUrl) return;
+        // An `<img>` this method owns, rather than `THREE.TextureLoader`.
+        //
+        // The loader silently declined every SVG: 66 of 110 billboards had a
+        // picture and the 44 without were exactly the 43 SVG sources plus one
+        // video, while the very same data url loaded in an `<img>` at its
+        // right size. Its error callback is a callback nobody was passing, so
+        // the failure had no way to reach anyone.
+        //
+        // Building the texture from an image directly is what the loader does
+        // anyway, and this way the failure path is one we can see.
+        const img = new Image();
+        img.onload = () => {
+          const texture = new THREE.Texture(img);
+          texture.colorSpace = THREE.SRGBColorSpace;
+          texture.needsUpdate = true;
+          material.map = texture;
+          // White once a picture is on it: the colour was standing in for the
+          // image, and leaving it would tint every photograph.
+          material.color = new THREE.Color(0xffffff);
+          material.needsUpdate = true;
+        };
+        img.onerror = () => {
+          console.warn("domvec: billboard image would not decode", src);
+        };
+        img.src = dataUrl;
+      })
+      .catch(() => {
+        // Left as the coloured tile it already is. A dead asset host and an
+        // empty corpus must not look the same from the pane.
+      });
     return sprite;
+  }
+
+  /**
+   * The picture as a `data:` url, fetched the one way that works here.
+   *
+   * A WebGL texture has to be CORS-clean, and most hosts serve images without
+   * an `Access-Control-Allow-Origin` header -- they were never expecting to
+   * be read by a canvas. Measured against this corpus's own hosts: of eight,
+   * two sent CORS and six served the picture happily to an `<img>` and
+   * refused it to a texture. That is why 27 of 110 billboards had a picture
+   * and the rest were coloured tiles, and no amount of retrying would have
+   * fixed it -- the browser is enforcing a rule the host declined to waive.
+   *
+   * `requestUrl` is Obsidian's own HTTP client and runs outside the renderer,
+   * so it is not subject to CORS at all. The bytes come back, become a
+   * `data:` url, and a `data:` url is same-origin -- so the texture is clean
+   * by construction.
+   *
+   * Only reached when the reader has remote media on. This does not widen
+   * what gets fetched; it makes what was already being fetched usable.
+   */
+  private async texture(src: string): Promise<string | null> {
+    const cached = GraphView.textures.get(src);
+    if (cached !== undefined) return cached;
+    let out: string | null = null;
+    try {
+      const res = await requestUrl({ url: src, method: "GET" });
+      const bytes = new Uint8Array(res.arrayBuffer);
+      const type = (res.headers?.["content-type"] || "").split(";")[0]
+        || guessType(src);
+      if (bytes.byteLength && bytes.byteLength <= MAX_TEXTURE_BYTES) {
+        if (type === "image/svg+xml" || /\.svg($|\?)/i.test(src)) {
+          out = svgDataUrl(new TextDecoder().decode(bytes));
+        } else {
+          let binary = "";
+          for (let i = 0; i < bytes.length; i++) {
+            binary += String.fromCharCode(bytes[i]);
+          }
+          out = `data:${type || "image/png"};base64,${btoa(binary)}`;
+        }
+      }
+    } catch {
+      out = null;
+    }
+    // Negative results are cached too. A host that refuses once will refuse
+    // for every node pointing at it, and a graph re-fit would otherwise ask
+    // again for each.
+    GraphView.textures.set(src, out);
+    return out;
   }
 
   private draw(canvas: HTMLElement, layout: Layout) {

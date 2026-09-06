@@ -79,11 +79,15 @@ _NO_IMAGE = "▣"
 def _safe_url(raw: str) -> str:
     """``raw`` if it is safe to put in an href, else empty.
 
-    Relative paths are allowed through as-is: they are resolved against the
-    chunk's own url by the surface, and a path cannot carry a scheme. A value
-    with a colon before its first slash is treated as scheme-bearing and has
-    to be on the list -- deliberately stricter than parsing, because the
-    parsers are where the bypasses live.
+    Relative paths pass, because a path cannot carry a scheme; `_absolute`
+    resolves them against the page afterwards. A value with a colon before its
+    first slash is treated as scheme-bearing and has to be on the list --
+    deliberately stricter than parsing, because the parsers are where the
+    bypasses live.
+
+    This runs BEFORE `_absolute`, and the order is the point: joining a value
+    against a base and *then* asking whether it is safe is how a sanitiser
+    gets walked past.
     """
     value = (raw or "").strip()
     if not value:
@@ -100,6 +104,34 @@ def _safe_url(raw: str) -> str:
     if ":" in head:
         return ""
     return value
+
+
+def _absolute(url: str, base: str) -> str:
+    """``url`` resolved against the chunk's own page.
+
+    The distiller writes what the page wrote, which is usually relative:
+    `user_avatar/discourse.julialang.org/tamas_papp/25/25949_2.png`. Resolved
+    by the surface instead of here, that base is whatever document the surface
+    lives in -- and in Obsidian that is `app://obsidian.md`, so every relative
+    picture in a note asked the *app* for a file it does not have. Verified in
+    the running app: 1 of 11 images loaded, the ten failures all pointing at
+    `app://obsidian.md/...`.
+
+    Done here because this is where the page's url is in hand.
+    `layout._first_image` absolutises for the same reason and against the same
+    base, so a node's billboard and the picture inside its chunk are the same
+    file.
+    """
+    if not url or not base:
+        return url
+    if url.lower().startswith(("http://", "https://", "mailto:")):
+        return url
+    try:
+        from urllib.parse import urljoin
+
+        return urljoin(base, url)
+    except Exception:                                   # noqa: BLE001
+        return url
 
 
 def _esc(text: str) -> str:
@@ -199,11 +231,12 @@ def _element(text: str, line: Dict, base: str) -> str:
 
     media = _MEDIA.match(body)
     if media:
-        return _media(media.group(1), _safe_url(media.group(2) or target),
+        return _media(media.group(1),
+                      _absolute(_safe_url(media.group(2) or target), base),
                       media.group(3), addr)
     placeholder = _MEDIA_BARE.match(body)
     if placeholder:
-        return _media(placeholder.group(1), _safe_url(target),
+        return _media(placeholder.group(1), _absolute(_safe_url(target), base),
                       placeholder.group(2), addr)
 
     bullet = _BULLET.match(body)
@@ -213,7 +246,7 @@ def _element(text: str, line: Dict, base: str) -> str:
 
     inner = _control(body, cls, addr)
     if inner is None:
-        inner = _prose(body, target, addr)
+        inner = _prose(body, target, addr, base)
 
     if level:
         return '<h%d class="dv-h">%s</h%d>' % (level, inner, level)
@@ -246,11 +279,17 @@ def _is_block(markup: str) -> bool:
     return markup.startswith(_BLOCK_TAGS)
 
 
-def _prose(body: str, target: str, addr: List[Tuple[str, str]]) -> str:
-    """A line with no widget in it: a link, a bare url, or words."""
+def _prose(body: str, target: str, addr: List[Tuple[str, str]],
+           base: str = "") -> str:
+    """A line with no widget in it: a link, a bare url, or words.
+
+    Hrefs are absolutised against the page for the same reason media srcs are:
+    a relative one resolves against the document the surface lives in, which
+    in a vault is the app itself.
+    """
     link = _LINK.match(body)
     if link:
-        href = _safe_url(link.group(2) or target)
+        href = _absolute(_safe_url(link.group(2) or target), base)
         words = _esc(link.group(1).strip()) or _esc(href)
         tail = _esc(link.group(3).strip())
         if href:
@@ -264,7 +303,7 @@ def _prose(body: str, target: str, addr: List[Tuple[str, str]]) -> str:
 
     bare = _BARE_URL.match(body)
     if bare:
-        url = _safe_url(bare.group(1))
+        url = _absolute(_safe_url(bare.group(1)), base)
         if url:
             return ('<a class="dv-a" href="%s" rel="noreferrer noopener"%s>%s'
                     '</a>' % (_esc(url), _attrs(addr), _esc(url)))
