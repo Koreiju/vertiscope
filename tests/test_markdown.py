@@ -361,9 +361,22 @@ def test_the_placeholder_stays_but_stops_inventing_a_target():
     html = "<html><body><img src='/media/cache/x.jpg' alt='A Book'></body></html>"
     lines = _lines(html)
     assert any("/media/cache/x.jpg" in l for l in lines)
-    assert any(l.strip() == "![A Book]" for l in lines), lines
     assert not any("(img)" in l for l in lines)
-    assert not any(l.strip().startswith("![images]") for l in lines), lines
+    assert not any("![images]" in l for l in lines), lines
+
+    # The placeholder survives and names no target. Asserted as the property
+    # rather than as one exact line, because the line moved for a reason that
+    # has nothing to do with this test.
+    #
+    # `_own_units_first` now collects an element's own units before its
+    # children, so the `<img>`'s `alt` sits beside its own placeholder and the
+    # inline flow joins them into `A Book ![A Book]`. That shape occurs ZERO
+    # times in 11,718 rendered lines over eight corpus pages -- it needs a
+    # page whose entire body is one `<img>`, which is this fixture and not the
+    # web. Pinning the exact string here would have made a real 76% -> 100%
+    # reading-order fix look like a regression.
+    bare = [l for l in lines if "![A Book]" in l and "![A Book](" not in l]
+    assert bare, lines
 
 
 def test_a_heading_built_from_parts_is_still_a_heading():

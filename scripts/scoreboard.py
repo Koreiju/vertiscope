@@ -46,6 +46,16 @@ sys.path.insert(0, str(REPO / "scripts"))
 CORPUS = REPO / "tests" / "corpus"
 BASELINE = REPO / "docs" / "prd_baseline.json"
 
+#: How far a gated measure may drift before it counts as a regression.
+#:
+#: These numbers are counts and ratios over a corpus that is rebuilt between
+#: runs, and a rebuild is not bit-identical: chunk boundaries shift by one,
+#: a picture host times out. One percentage point is below anything a change
+#: to the code produces here and above the churn a rebuild produces on its
+#: own. `dangling_edges` gets zero, because a single dangling edge is exactly
+#: the thing worth catching and there is no noise floor under it.
+_TOLERANCE = {"dangling_edges": 0.0}
+
 #: Each row: key -> (PRD requirement, bar, direction, tautological?)
 #: `direction` is +1 when higher is better.
 CRITERIA = {
@@ -271,6 +281,7 @@ def main(argv=None) -> int:
         value = now[key]
         was = before.get(key)
         verdict = ""
+        ok = False
         if taut:
             verdict = "tautological -- confirms no bug, proves nothing"
         elif bar is not None:
@@ -279,9 +290,21 @@ def main(argv=None) -> int:
                 req, _fmt(key, bar))
             if ok:
                 met.append(key)
-        if was is not None and isinstance(value, (int, float)):
+        # A regression is a GATED criterion that moved materially the wrong
+        # way and is not already met. The first version flagged any decrease
+        # in any row, and a rebuild that produced one chunk fewer -- 3136 to
+        # 3135 -- reported six: `chunks`, `sprites`, `nodes_with_picture`,
+        # `sprites_textured`, `billboards_textured` and `chunks_over_window`,
+        # the last of which still displayed 1.2% and was still MET.
+        #
+        # Five of those are descriptive counts that gate nothing, and the
+        # sixth was noise. A gate that fires on every rebuild is a gate
+        # nobody reads, which would have cost more than the regressions it
+        # was built to catch.
+        if (was is not None and isinstance(value, (int, float))
+                and bar is not None and not taut and not ok):
             delta = (value - was) * direction
-            if delta < -1e-9:
+            if delta < -_TOLERANCE.get(key, 0.01):
                 verdict += "   REGRESSED"
                 regressed.append(key)
         print("%-24s %10s %10s %10s  %s"
