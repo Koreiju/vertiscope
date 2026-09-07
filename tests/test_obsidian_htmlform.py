@@ -357,3 +357,78 @@ def test_two_pictures_in_one_group_are_not_a_card():
 def test_the_nesting_still_closes_with_the_tree_builder():
     html = render_lines([line("a"), line("  b"), line("    c"), line("d")])
     assert html.count("<div") == html.count("</div>")
+
+
+# --- one element, one picture -------------------------------------------------
+
+def _img(text, accessor, **kw):
+    key = ("https://s.test/p|/html/body/article/img|media.images|%s" % accessor)
+    return line(text, key=key, cls="image", **kw)
+
+
+def test_an_element_with_two_media_addresses_draws_one_picture():
+    """The renderer keeps both addresses; HTML must not draw both.
+
+    An `<img>` yields its `src` and a `text()` whose value falls back to the
+    element's tag name, and `_dedupe` keeps both on purpose -- a url or media
+    address vanishing is the one thing that guard exists to prevent. Markdown
+    pays a line for it because a line is all markdown has. HTML pays a
+    picture: the placeholder draws as a grey tile beside the photograph, so
+    the reader sees the same image twice, once broken.
+    """
+    html = render_lines([
+        _img("![A Book]", "text()"),
+        _img("![A Book](media/c.jpg)", "src"),
+    ], base="https://s.test/p")
+    assert html.count("<figure") == 1, html
+    assert "dv-fig-off" not in html, "the placeholder was drawn as well"
+    assert "<img" in html
+
+
+def test_the_dropped_address_is_still_reachable():
+    """Dropping a line must not drop an address.
+
+    Every address in a chunk has to be reachable from the rendered DOM, or
+    the HTML form quietly holds less than the markdown one and the two stop
+    being the same distillation.
+    """
+    html = render_lines([
+        _img("![A Book]", "text()"),
+        _img("![A Book](media/c.jpg)", "src"),
+    ], base="https://s.test/p")
+    assert "data-domvec-also" in html
+    assert "media.images|text()" in html
+
+
+def test_a_picture_with_no_real_source_anywhere_still_draws():
+    """The placeholder is only dropped when the SAME element has a located one."""
+    html = render_lines([_img("![A Book]", "text()")], base="https://s.test/p")
+    assert "<figure" in html and "dv-fig-off" in html
+    assert "A Book" in html
+
+
+def test_two_different_elements_keep_their_own_pictures():
+    """Collapsing is per element, never across a gallery."""
+    a = line("![one](https://x.test/1.jpg)", cls="image",
+             key="https://x.test/|/html/body/img[1]|media.images|src")
+    b = line("![two](https://x.test/2.jpg)", cls="image",
+             key="https://x.test/|/html/body/img[2]|media.images|src")
+    html = render_lines([a, b], base="https://x.test/")
+    assert html.count("<figure") == 2
+
+
+def test_collapsing_lets_the_card_form():
+    """The two-figure group was why a result row was not recognised as a card.
+
+    Verified in the running app before this was written: a books.toscrape
+    result drew two figures for one `<img>`, so `_is_card` saw two pictures
+    and drew the row as stacked lines.
+    """
+    html = render_lines([
+        line("Results"),
+        _img("  ![A Book]", "text()"),
+        _img("  ![A Book](media/c.jpg)", "src"),
+        line("  ### A Book"),
+        line("  ( Add to basket )", cls="button", control=True),
+    ], base="https://s.test/p")
+    assert "dv-card" in html, html

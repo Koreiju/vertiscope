@@ -228,7 +228,85 @@ def _address_attrs(line: Dict) -> List[Tuple[str, str]]:
     pairs = [("data-domvec-address", key)]
     if own and own != key:
         pairs.append(("data-domvec-line", own))
+    also = str(line.get("also") or "")
+    if also:
+        # Addresses that named the same element and did not get their own
+        # element here -- see `_one_picture_per_element`. Carried so the
+        # rendered DOM still reaches every address the chunk holds.
+        pairs.append(("data-domvec-also", also))
     return pairs
+
+
+def _element_of(key: str) -> str:
+    """The element an address names, without its accessor.
+
+    Addresses are `url|xpath|taxonomy|accessor`, and a single `<img>` carries
+    several: `media.images/src`, `media.images/text()`, `text.accessible/alt`.
+    They differ only past the xpath.
+    """
+    parts = (key or "").split("|")
+    if len(parts) < 2:
+        return key or ""
+    return parts[0] + "|" + parts[1].split("/text()")[0]
+
+
+def _one_picture_per_element(lines: List[Dict]) -> List[Dict]:
+    """Drop the placeholder when the same element also has a real picture.
+
+    An `<img>` yields two media addresses -- its `src`, and a `text()` whose
+    value falls back to the element's own tag name -- and the renderer keeps
+    both on purpose: they are two addresses, and `_dedupe` dropping a url or
+    media address is the one thing its guard exists to prevent. In markdown
+    that costs a line: `![A Book]` above `![A Book](media/….jpg)`.
+
+    In HTML it costs a picture. The placeholder draws as a grey tile and the
+    real one draws as the photograph, so the reader sees the same image twice,
+    once broken -- and the group then holds two figures, so it is not
+    recognised as a card and the layout the page had is lost as well.
+
+    An element is a thing; markdown had to spend a line per address because a
+    line is all it has, and HTML does not. The dropped address is not lost:
+    it rides on the surviving figure as `data-domvec-also`, so every address
+    in the chunk is still reachable from the rendered DOM.
+    """
+    best: Dict[str, int] = {}
+    for i, line in enumerate(lines):
+        text = str(line.get("text") or "").strip()
+        if not _MEDIA.match(text) and not _MEDIA_BARE.match(text):
+            continue
+        element = _element_of(str(line.get("key") or ""))
+        if not element:
+            continue
+        located = bool(_MEDIA.match(text))
+        held = best.get(element)
+        if held is None or (located and not
+                            _MEDIA.match(str(lines[held].get("text") or "").strip())):
+            best[element] = i
+
+    drop: Dict[int, str] = {}
+    for i, line in enumerate(lines):
+        text = str(line.get("text") or "").strip()
+        if not _MEDIA.match(text) and not _MEDIA_BARE.match(text):
+            continue
+        element = _element_of(str(line.get("key") or ""))
+        keeper = best.get(element)
+        if keeper is not None and keeper != i:
+            drop[i] = str(line.get("key") or "")
+
+    if not drop:
+        return lines
+    out: List[Dict] = []
+    carried: Dict[int, List[str]] = {}
+    for i, key in drop.items():
+        element = _element_of(str(lines[i].get("key") or ""))
+        carried.setdefault(best[element], []).append(key)
+    for i, line in enumerate(lines):
+        if i in drop:
+            continue
+        if i in carried:
+            line = dict(line, also=" ".join(carried[i]))
+        out.append(line)
+    return out
 
 
 def render_lines(lines: List[Dict], *, base: str = "") -> str:
@@ -239,7 +317,7 @@ def render_lines(lines: List[Dict], *, base: str = "") -> str:
     addresses, used twice.
     """
     builder = _Builder()
-    for line in lines:
+    for line in _one_picture_per_element(lines):
         raw = str(line.get("text") or "")
         if not raw.strip():
             continue
