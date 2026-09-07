@@ -382,3 +382,136 @@ def test_a_real_wikilink_survives_the_export():
     assert "[[other-note|Other]]" in body, body
     assert r"[\[ 12 \]]" in body, body
     assert hits == 1
+
+
+# --- a label may hold balanced brackets ---------------------------------------
+
+def test_a_label_with_nested_brackets_is_still_a_link():
+    """coinmarketcap writes `[Sun [New] SUN](/currencies/sun-token/)`.
+
+    CommonMark allows balanced brackets in a label. A pattern that cannot
+    hold a raw `]` fails to match ANYWHERE in that string -- so the link was
+    never rewritten, its relative target stayed relative, and Obsidian filed
+    it as an internal edge to a note that does not exist. It was the last
+    dangling edge in the vault.
+    """
+    from domvec.obsidian.export import _LINK
+
+    m = _LINK.search("[Sun [New] SUN](/currencies/sun-token/)")
+    assert m is not None
+    assert m.group(1) == "Sun [New] SUN"
+    assert m.group(2) == "/currencies/sun-token/"
+
+
+def test_the_escaped_form_still_matches():
+    """Non-regression: the citation escape must keep working."""
+    from domvec.obsidian.export import _LINK
+
+    m = _LINK.search(r"[\[ 107 \]](#cite_note-107)")
+    assert m is not None and m.group(2) == "#cite_note-107"
+
+
+def test_a_bracket_never_reaches_a_wikilink_alias():
+    """Obsidian reads a wikilink only as far as the first `]`.
+
+    `[[note|Sun [New] SUN]]` parses as `[[note|Sun [New` and spills ` SUN]]`
+    into the note as loose text -- a broken link and a broken sentence. This
+    case only became reachable once the pattern above started matching labels
+    with brackets in them.
+    """
+    from domvec.graphstore import canonical_url
+    from domvec.obsidian.export import _neutralise, _rewrite_links
+
+    base = "https://coinmarketcap.com/"
+    canon = canonical_url("/currencies/sun-token/", base)
+    body, hits, _ = _rewrite_links(
+        _neutralise("[Sun [New] SUN](/currencies/sun-token/)"),
+        base, {canon: "cid-1"}, {"cid-1": "sun-note"})
+    assert hits == 1, body
+    assert "[[sun-note|Sun New SUN]]" in body, body
+    # The alias holds no bracket and no pipe of its own.
+    alias = body.split("|", 1)[1].split("]]")[0]
+    assert "[" not in alias and "]" not in alias
+
+
+def test_an_unresolvable_nested_label_is_absolutised_not_left_relative():
+    """The failure this fixes: a relative target Obsidian reads as internal."""
+    from domvec.obsidian.export import _neutralise, _rewrite_links
+
+    body, hits, misses = _rewrite_links(
+        _neutralise("[Sun [New] SUN](/currencies/sun-token/)"),
+        "https://coinmarketcap.com/", {}, {})
+    assert hits == 0 and misses == 1
+    assert "https://coinmarketcap.com/currencies/sun-token/" in body, body
+
+
+def test_an_escape_backslash_never_reaches_an_alias():
+    """The regression this test exists for: 1 dangling edge became 102.
+
+    Stripping only the brackets from an escaped citation label leaves a bare
+    backslash on each side, and a trailing backslash before the closing ]]
+    escapes it -- so the wikilink never closes. Every citation link in the
+    corpus broke at once, and the export's own counts did not move. Only the
+    running app showed it.
+    """
+    from domvec.obsidian.export import _ALIAS_UNSAFE
+
+    escaped = "BS[ 16 BS]".replace("BS", chr(92))
+    alias = " ".join(_ALIAS_UNSAFE.sub("", escaped).split())
+    assert alias == "16"
+    assert chr(92) not in alias
+    assert "[" not in alias and "]" not in alias
+
+
+def test_the_alias_never_ends_in_an_escape():
+    """Stated as the property, not as the one input that broke."""
+    from domvec.obsidian.export import _ALIAS_UNSAFE
+
+    cases = ["BS[ 107 BS]", "aBS", "[x]", "a|b", "plain words"]
+    for words in [c.replace("BS", chr(92)) for c in cases]:
+        alias = " ".join(_ALIAS_UNSAFE.sub("", words).split())
+        assert not alias.endswith(chr(92)), words
+        assert "[" not in alias and "]" not in alias, words
+        assert "|" not in alias, words
+
+
+def test_a_label_does_not_swallow_the_links_beside_it():
+    """The regression allowing balanced brackets caused, before it was guarded.
+
+    arxiv writes a row of links inside one bracketed group:
+
+        [17] arXiv:2608.13200 [ [pdf](/pdf/x) , [html](...) , [other](...) ]
+
+    Allowing a balanced pair inside a label let one match run from the `[ `
+    all the way to the last url -- label ` [pdf](/pdf/x) , [html](...) ,
+    [other`, target the LAST link. Three links became one, the relative
+    `/pdf/x` was never absolutised, and Obsidian filed it as an internal edge
+    to a note that does not exist. One dangling edge became a hundred and two.
+    """
+    from domvec.obsidian.export import _LINK
+
+    line = ("- [17] arXiv:2608.13200 [ [pdf](/pdf/2608.13200) , "
+            "[html](https://arxiv.org/html/x) , "
+            "[other](https://arxiv.org/format/x) ]")
+    found = [(m.group(1), m.group(2)) for m in _LINK.finditer(line)]
+    assert found == [
+        ("pdf", "/pdf/2608.13200"),
+        ("html", "https://arxiv.org/html/x"),
+        ("other", "https://arxiv.org/format/x"),
+    ], found
+
+
+def test_a_relative_target_in_a_bracketed_row_is_absolutised():
+    """The consequence, at the level the vault actually sees.
+
+    Obsidian treats `[words](/relative/path)` as an INTERNAL link, so a
+    relative target that survives the rewrite becomes a dangling vault edge.
+    """
+    from domvec.obsidian.export import _neutralise, _rewrite_links
+
+    line = "[ [pdf](/pdf/2608.13200) , [html](https://arxiv.org/html/x) ]"
+    body, _hits, misses = _rewrite_links(
+        _neutralise(line), "https://arxiv.org/list/cs-cl/recent", {}, {})
+    assert misses == 2
+    assert "https://arxiv.org/pdf/2608.13200" in body, body
+    assert "](/pdf/" not in body, body

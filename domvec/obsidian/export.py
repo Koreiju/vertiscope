@@ -37,7 +37,8 @@ from ..graphstore import canonical_url
 
 #: ``[words](target)`` as the renderer draws it. The target stops at the first
 #: whitespace or paren so a trailing markdown title does not join the url.
-#: `[label](target)`, where the LABEL may contain escaped brackets.
+#: `[label](target)`, where the LABEL may contain escaped OR BALANCED
+#: brackets -- which is what CommonMark says a label is.
 #:
 #: `_neutralise` rewrites a page's own `[[ 107 ]](url)` to `[\[ 107 \]](url)`
 #: so Obsidian does not read it as a wikilink -- and a label pattern of
@@ -48,12 +49,50 @@ from ..graphstore import canonical_url
 #: Measured in the running app: escaping fixed 166 phantom edges and left 11
 #: behind, and the 11 were this.
 #:
-#: A label character is now either an escape sequence or an ordinary
-#: non-bracket, which is what CommonMark says a label is.
-_LINK = re.compile(r"\[((?:\\.|[^\]\\])*)\]\(([^)\s]+)\)")
+#: A label character is an escape sequence, a balanced `[...]` pair, or an
+#: ordinary non-bracket.
+#:
+#: The balanced-pair alternative is the second half of the same lesson.
+#: coinmarketcap writes `[Sun [New] SUN](/currencies/sun-token/)`, and a label
+#: pattern that cannot hold a raw `]` fails to match ANYWHERE in that string --
+#: so the link was never rewritten, its relative target stayed relative, and
+#: Obsidian filed the last dangling edge in the vault against it. Not a
+#: doubled bracket, so `_neutralise` never saw it either.
+#:
+#: Two guards keep the balanced-pair alternative from running away, and both
+#: were paid for. Without them a label consumed the REST OF THE LINE:
+#: arxiv writes `[ [pdf](/pdf/x) , [html](...) , [other](...) ]`, and one
+#: match came back with a label of ` [pdf](/pdf/x) , [html](...) , [other`
+#: and the LAST url as its target -- three links swallowed into one, and the
+#: relative `/pdf/x` never absolutised. That is how a fix aimed at one
+#: dangling edge produced a hundred and two.
+#:
+#: * a pair may not be followed by `(`, or `[pdf](` reads as a nested pair
+#:   inside some outer label rather than as the link it is;
+#: * the plain alternative excludes `[`, so a label cannot swallow an
+#:   opening bracket the pair alternative just declined.
+#:
+#: The alternatives start on different characters (`\\`, `[`, anything else),
+#: so the group stays deterministic and cannot backtrack pathologically.
+_LINK = re.compile(
+    r"\[((?:\\.|\[[^\]]*\](?!\()|[^\[\]\\])*)\]\(([^)\s]+)\)")
 
 #: ``<target>`` -- the bare autolink form, used where a link has no words.
 _AUTOLINK = re.compile(r"<((?:https?:)?//[^>\s]+)>")
+
+#: Characters a wikilink alias cannot carry.
+#:
+#: Brackets, because Obsidian reads the link only as far as the first `]`, so
+#: one in the alias truncates it and spills the rest of the label into the
+#: note as loose text. The pipe, because it starts another alias.
+#:
+#: And the BACKSLASH, which was learned the expensive way. Stripping only the
+#: brackets from `\[ 16 \]` leaves `\ 16 \`, and a trailing backslash before
+#: the closing `]]` escapes it -- so the wikilink never closes. That single
+#: omission took the vault from 1 dangling edge to 102 in one export, which is
+#: the whole reason the scoreboard gates on the board and not on the number
+#: being moved.
+_ALIAS_UNSAFE = re.compile(r"[\[\]|\\]")
 
 _UNSAFE = re.compile(r"[^A-Za-z0-9 \-_.]+")
 
@@ -275,7 +314,19 @@ def _rewrite_links(md: str,
         hits += 1
         # `[[note|words]]` keeps the sentence reading as it did while making
         # the edge real. An empty label would draw the raw note name instead.
-        return "[[%s|%s]]" % (note, words) if words.strip() else "[[%s]]" % note
+        #
+        # The alias is stripped of brackets, and it has to be: Obsidian reads
+        # a wikilink as far as the first `]`, so `[[note|Sun [New] SUN]]`
+        # parses as `[[note|Sun [New` and leaves ` SUN]]` behind as text --
+        # a broken link and a broken sentence. Now that the pattern above
+        # matches labels containing balanced brackets, this case reaches here
+        # for the first time.
+        #
+        # Two characters of punctuation, against an edge that otherwise does
+        # not exist. The unmodified label survives in the store, which is what
+        # the panel renders from.
+        alias = " ".join(_ALIAS_UNSAFE.sub("", words).split())
+        return "[[%s|%s]]" % (note, alias) if alias else "[[%s]]" % note
 
     def sub_auto(m: "re.Match") -> str:
         nonlocal hits, misses

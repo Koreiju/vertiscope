@@ -5,7 +5,7 @@
     "chunks": 3136,
     "chunks_over_window": 0.012436224489795918,
     "containment": 1.0,
-    "dangling_edges": 1,
+    "dangling_edges": 0,
     "depth_rho": 1.0,
     "duplicate_chunks": 0.13392857142857142,
     "nodes_with_picture": 253,
