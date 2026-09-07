@@ -258,3 +258,66 @@ def test_a_resolved_link_still_wins_over_absolutising(ws, tmp_path):
         {"https://a.test/two.html": "c2"}, {"c2": "Page Two"})
     assert hits == 1
     assert "[[Page Two|next]]" in out
+
+
+# --- the note reads once ------------------------------------------------------
+
+def test_the_prose_is_folded_rather_than_shown_beside_the_panel():
+    """The note showed the same chunk twice: the panel, then prose under it.
+
+    A callout is a blockquote, so folding costs nothing that made the prose
+    necessary -- links stay parsed, search still finds the words, the file is
+    still a plain-text archive -- and the `-` collapses it by default, so a
+    reader gets one folded line instead of a second copy.
+    """
+    from domvec.obsidian.export import _FOLD, _note
+
+    class Chunk:
+        cid, url, xpath, part, chars = "c1", "https://x.test/", "/html", 0, 12
+        md = markdown = "words"
+
+    note = _note(Chunk(), "a line\n\nanother [[note|line]]\n")
+    body = note.split("---", 2)[-1]
+    assert _FOLD in body
+    for line in body.splitlines():
+        if line.startswith(("```", "---")) or not line.strip():
+            continue
+        if line.startswith("cid:") or line == _FOLD:
+            continue
+        assert line.startswith(">"), \
+            "a prose line escaped the fold and renders below it: %r" % line
+
+
+def test_a_blank_line_does_not_break_the_fold():
+    """A bare blank line ENDS a callout.
+
+    The rest of the prose then falls out of it and renders below the fold,
+    which is the whole thing being fixed -- and it looks fine on a chunk that
+    happens to have no blank line in it.
+    """
+    from domvec.obsidian.export import _folded
+
+    out = _folded("first\n\nsecond\n")
+    assert "\n>\n" in out, out
+    assert not any(l and not l.startswith(">") for l in out.splitlines()[1:])
+
+
+def test_the_wikilinks_survive_the_fold():
+    """The edges the graph is built from are inside the quote now.
+
+    If they did not survive, every vault edge would vanish and the graph would
+    go empty -- silently, since a note with no links is a perfectly ordinary
+    note.
+    """
+    from domvec.obsidian.export import _folded
+
+    out = _folded("see [[other-note|Other]] for more\n")
+    assert "[[other-note|Other]]" in out
+
+
+def test_a_chunk_with_no_prose_gets_no_empty_callout():
+    """An empty fold is a line of chrome standing for nothing."""
+    from domvec.obsidian.export import _folded
+
+    assert _folded("") == ""
+    assert _folded("\n   \n") == ""
