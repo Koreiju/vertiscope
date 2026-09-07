@@ -12,8 +12,8 @@
 .domvec-bar {
   display: flex;
   align-items: center;
-  gap: 0.6em;
-  padding: 0.35em 0.6em;
+  gap: 0.5em;
+  padding: 0.25em 0.45em;
   background: var(--background-secondary);
   font-size: var(--font-smaller);
 }
@@ -43,7 +43,11 @@
   font-size: var(--font-smaller);
 }
 
-.domvec-body { padding: 0.5em 0.7em; }
+/* Tight to the border. The distilled content brings its own structure --
+   cards have a border, groups have a rule -- so a wide gutter around all of
+   it only pushes that structure away from the frame that is already drawing
+   it. */
+.domvec-body { padding: 0.35em 0.45em; }
 .domvec-line { padding: 0.1em 0; }
 .domvec-text { color: var(--text-normal); }
 

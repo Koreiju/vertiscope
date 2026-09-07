@@ -432,3 +432,51 @@ def test_collapsing_lets_the_card_form():
         line("  ( Add to basket )", cls="button", control=True),
     ], base="https://s.test/p")
     assert "dv-card" in html, html
+
+
+# --- chrome that carries no structure -----------------------------------------
+
+def test_a_chain_of_single_child_wrappers_collapses():
+    """A page nests five divs to centre a header; each one drew a border.
+
+    Every level here costs a border, an indent and a margin, and a wrapper
+    with one child expresses no branching -- the indent stands for a
+    distinction that does not exist. `markdown.py::_level_page` already does
+    this on the markdown side; the HTML form was not, which is most of why
+    the panel read as loose.
+    """
+    html = render_lines([
+        line("        buried text"),
+    ])
+    assert html.count('class="dv-n"') <= 1, html
+
+
+def test_collapsing_keeps_real_nesting():
+    """Deeper stays deeper, siblings stay level. Only empty chains go."""
+    html = render_lines([
+        line("top"),
+        line("  branch a"),
+        line("  branch b"),
+        line("    under b"),
+    ])
+    # Two children under one level is a real branch and must survive.
+    assert 'class="dv-n"' in html
+    assert html.count("<div") == html.count("</div>")
+    assert "branch a" in html and "under b" in html
+
+
+def test_a_card_is_never_drawn_inside_a_card():
+    """Two borders and two paddings around one record.
+
+    The inner group is usually the picture and its caption and the outer is
+    the whole row, so both satisfy `_is_card`. Verified in the running app:
+    two `dv-card` elements, the second nested in the first.
+    """
+    html = render_lines([
+        line("Results"),
+        line("  ![A Book](https://s.test/c.jpg)", cls="image"),
+        line("    caption words"),
+        line("  ### A Book"),
+        line("  ( Add to basket )", cls="button", control=True),
+    ], base="https://s.test/")
+    assert html.count("dv-card") == 1, html

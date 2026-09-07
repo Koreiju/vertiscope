@@ -180,7 +180,35 @@ class _Builder:
         self.stack[-1].append(markup)
 
     def close(self) -> str:
-        return "".join(_serialise(node) for node in self.root)
+        return "".join(_serialise(node) for node in _collapse(self.root))
+
+
+def _collapse(nodes: List) -> List:
+    """Drop wrappers that hold one group and nothing else.
+
+    A page nests five divs to centre a header, and every one of those levels
+    arrives here as a group that costs a border, an indent and a margin while
+    saying nothing: a wrapper with a single child expresses no branching, so
+    the indent it draws stands for a distinction that does not exist.
+
+    `markdown.py::_level_page` already does exactly this on the markdown side
+    -- "a chain of five wrappers costs one step instead of five" -- and the
+    HTML form was not doing it, which is most of why the panel read as loose.
+    Nesting RELATIONSHIPS all survive: deeper stays deeper, siblings stay
+    level; what goes is a chain with nothing to tell apart.
+    """
+    out: List = []
+    for node in nodes:
+        if not isinstance(node, list):
+            out.append(node)
+            continue
+        inner = _collapse(node)
+        # Unwrap as long as this level holds exactly one group and nothing
+        # else. `while`, not `if`: a chain of five collapses to one pass.
+        while len(inner) == 1 and isinstance(inner[0], list):
+            inner = inner[0]
+        out.append(inner)
+    return out
 
 
 #: What a group needs before it is drawn as a card rather than as a stack.
@@ -204,11 +232,24 @@ def _flatten(group: List):
             yield node
 
 
-def _serialise(node) -> str:
+def _serialise(node, in_card: bool = False) -> str:
+    """One group as a `<div>`, with the card class on the OUTERMOST card only.
+
+    A card inside a card draws two borders and two paddings around one record.
+    It happens whenever an outer group and the inner group that actually holds
+    the picture both satisfy `_is_card` -- which is the common case, since the
+    inner group is usually the picture and its caption and the outer is the
+    whole row. Verified in the running app: two `dv-card` elements, the second
+    with `nested: true`.
+
+    The outer one wins, so the border sits around the whole record rather than
+    around the picture inside it.
+    """
     if not isinstance(node, list):
         return node
-    inner = "".join(_serialise(child) for child in node)
-    cls = "dv-n dv-card" if _is_card(node) else "dv-n"
+    card = not in_card and _is_card(node)
+    inner = "".join(_serialise(child, in_card or card) for child in node)
+    cls = "dv-n dv-card" if card else "dv-n"
     return '<div class="%s">%s</div>' % (cls, inner)
 
 

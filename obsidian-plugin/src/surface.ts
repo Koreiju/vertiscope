@@ -29,30 +29,44 @@ import { ChunkLine, ChunkPayload, DomvecSettings, EnactResult }
  */
 const SHADOW_CSS = `
 :host { display: block; }
-.domvec-html { line-height: 1.5; font-size: var(--font-ui-small, 13px);
+.domvec-html > :first-child { margin-top: 0; }
+.domvec-html > :last-child { margin-bottom: 0; }
+.domvec-html { line-height: 1.4; font-size: var(--font-ui-small, 13px);
   color: var(--text-normal, #222); }
 
-/* One step per nesting LEVEL of the distilled tree, not per DOM ancestor. */
-.dv-n { padding-left: 0.75em; border-left: 1px solid
-  var(--background-modifier-border, #ddd); margin: 0.15em 0; }
+/* One step per nesting LEVEL of the distilled tree, not per DOM ancestor --
+   and _collapse has already dropped every level that held one child, so a
+   rule that survives to here stands for a real branch and is worth an indent.
+
+   No vertical margin. A margin on the wrapper compounds with the margin on
+   the paragraph inside it, at every level, so a three-deep line paid for four
+   gaps to separate it from one neighbour. Spacing belongs to the content, not
+   to the container it happens to sit in. */
+.dv-n { padding-left: 0.55em; border-left: 1px solid
+  var(--background-modifier-border, #ddd); margin: 0; }
 
 /* A picture with words beside it: a result row, a product tile, a profile.
    Drawn as the cohesive thing the page laid out, not as stacked lines. */
-.dv-card { display: grid; grid-template-columns: auto 1fr; gap: 0.6em;
-  align-items: start; padding: 0.5em 0.6em; border-left: none;
+.dv-card { display: grid; grid-template-columns: auto 1fr; gap: 0.5em;
+  align-items: start; padding: 0.3em 0.45em; border-left: none;
   border: 1px solid var(--background-modifier-border, #ddd);
   border-radius: var(--radius-m, 6px);
-  background: var(--background-primary-alt, transparent); }
+  background: var(--background-primary-alt, transparent);
+  margin: 0.25em 0; }
 .dv-card > .dv-fig { grid-row: 1 / span 99; margin: 0; }
-.dv-card .dv-img { max-width: 96px; }
+.dv-card .dv-img { max-width: 84px; }
+/* The first and last things in a card sit against its padding, not on top of
+   their own margins as well. */
+.dv-card > :first-child { margin-top: 0; }
+.dv-card > :last-child { margin-bottom: 0; }
 
-.dv-p { margin: 0.2em 0; }
-.dv-h { margin: 0.35em 0 0.15em; line-height: 1.25;
+.dv-p { margin: 0.08em 0; }
+.dv-h { margin: 0.25em 0 0.08em; line-height: 1.2;
   font-weight: var(--font-semibold, 600); }
 h1.dv-h { font-size: 1.35em; } h2.dv-h { font-size: 1.2em; }
 h3.dv-h { font-size: 1.1em; } h4.dv-h, h5.dv-h, h6.dv-h { font-size: 1em; }
-.dv-ul { margin: 0.1em 0; padding-left: 1.1em; }
-.dv-li { margin: 0.1em 0; }
+.dv-ul { margin: 0.08em 0; padding-left: 1em; }
+.dv-li { margin: 0.04em 0; }
 .dv-a { color: var(--text-accent, #06c); text-decoration: none; }
 .dv-a:hover { text-decoration: underline; }
 .dv-t { color: inherit; }
@@ -68,15 +82,15 @@ h3.dv-h { font-size: 1.1em; } h4.dv-h, h5.dv-h, h6.dv-h { font-size: 1em; }
 .dv-b { cursor: default; }
 .domvec-live { color: var(--text-normal, #111);
   border-color: var(--interactive-accent, #6a6ae0); cursor: pointer; }
-.dv-f { display: inline-flex; align-items: center; gap: 0.4em; margin: 0.15em 0; }
+.dv-f { display: inline-flex; align-items: center; gap: 0.35em; margin: 0.08em 0; }
 .dv-f span { color: var(--text-muted, #666); }
 .dv-form { border: 1px dashed var(--background-modifier-border, #ddd);
   border-radius: var(--radius-s, 4px); padding: 0 0.6em 0.35em; margin: 0.3em 0; }
 .dv-form legend { color: var(--text-faint, #999); padding: 0 0.3em; }
 
-.dv-fig { margin: 0.35em 0; }
+.dv-fig { margin: 0.2em 0; }
 .dv-img { max-width: 100%; border-radius: var(--radius-s, 4px); display: block; }
-figcaption { color: var(--text-muted, #666); font-size: 0.9em; margin-top: 0.2em; }
+figcaption { color: var(--text-muted, #666); font-size: 0.9em; margin-top: 0.1em; }
 
 /* Never an empty gap: a missing picture and a page that showed none must not
    look the same. */

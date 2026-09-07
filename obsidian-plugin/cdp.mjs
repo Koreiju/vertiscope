@@ -42,6 +42,27 @@ export async function evaluate(expression, { timeout = 180000 } = {}) {
                         { once: true });
   });
 
+  // Render even when the window is covered.
+  //
+  // Chromium suspends layout in an occluded window: `document.visibilityState`
+  // goes "hidden", `innerText` comes back empty and every
+  // `getBoundingClientRect()` is zero. Obsidian is a Chromium renderer, so a
+  // probe that measures anything sees zeros the moment a terminal is in front
+  // of the app -- which, while driving it from a terminal, is most of the
+  // time. It reads exactly like a plugin that failed to load, and it cost two
+  // rounds of chasing before the cause was clear.
+  //
+  // These two are the supported override. `setFocusEmulationEnabled` makes
+  // the page believe it is focused, and `setWebLifecycleState` puts it in the
+  // "active" state; together the renderer keeps laying out and the
+  // measurements are real. Nothing is moved on the user's screen to do it.
+  for (const [id, method, params] of [
+    [90, "Emulation.setFocusEmulationEnabled", { enabled: true }],
+    [91, "Page.setWebLifecycleState", { state: "active" }],
+  ]) {
+    ws.send(JSON.stringify({ id, method, params }));
+  }
+
   const result = await new Promise((resolve, reject) => {
     const timer = setTimeout(
       () => reject(new Error(`evaluate timed out after ${timeout}ms`)), timeout);
