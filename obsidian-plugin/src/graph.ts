@@ -55,6 +55,8 @@ interface Layout {
   fitted_dims?: number;
   hsv?: boolean;
   images?: number;
+  /** Half the width of the cube the coordinates are delivered in. */
+  extent?: number;
   halves: { lexical?: number; semantic?: number; equalised: boolean };
   note?: string;
 }
@@ -148,6 +150,8 @@ function hue(url: string): string {
 }
 
 export class GraphView extends ItemView {
+  /** Put the camera back outside the cloud, looking at the middle. */
+  private reframe: (() => void) | null = null;
   /**
    * Fetched pictures, shared across every instance of the view.
    *
@@ -179,6 +183,8 @@ export class GraphView extends ItemView {
     const status = bar.createSpan({ cls: "domvec-graph-status",
                                     text: "fitting…" });
     const again = bar.createEl("button", { text: "refit" });
+    const recentre = bar.createEl("button", { text: "recentre" });
+    recentre.onclick = () => this.reframe?.();
 
     const canvas = root.createDiv({ cls: "domvec-graph-canvas" });
 
@@ -347,9 +353,15 @@ export class GraphView extends ItemView {
       // projection put it: running the force simulation on top would drift
       // the points off the embedding and quietly turn a UMAP of two vector
       // spaces into a spring layout that happened to start there.
-      fx: n.pos[0] * 40,
-      fy: n.pos[1] * 40,
-      fz: (n.pos[2] ?? 0) * 40,
+      //
+      // Used as delivered. This multiplied by 40, which was a constant chosen
+      // when the coordinates were whatever UMAP happened to emit -- so the
+      // world size of the cloud moved with the corpus. `layout.py` centres
+      // and scales to a known cube now, and a second scale here would only
+      // put the guesswork back.
+      fx: n.pos[0],
+      fy: n.pos[1],
+      fz: n.pos[2] ?? 0,
       val: Math.max(1, Math.sqrt(n.chars)),
       rank: n.rank,
       tokens: n.tokens ?? 0,
@@ -357,10 +369,30 @@ export class GraphView extends ItemView {
       color: colourOf(n),
     }));
 
+    // How big a node should be, from the span it is drawn in and how many
+    // there are -- not from a constant.
+    //
+    // This is why the pane looked empty at 3,136 chunks. Node radius is
+    // `cbrt(val) * nodeRelSize`, `val` comes from a chunk's length, and the
+    // 512-token window made every chunk shorter at the same time as the
+    // record rule made them four times more numerous. So the cloud grew and
+    // each node shrank, twice over: the renderer was drawing 390,000
+    // triangles and lighting 1.5% of the pixels.
+    //
+    // Typical spacing in a cube of `2 * extent` holding n points is
+    // `2 * extent / cbrt(n)`. A node wants to be a small fraction of that --
+    // big enough to see, small enough that the cloud does not become a solid
+    // wall -- and `cbrt(val)` runs about 2 to 4, so the relative size is that
+    // spacing over roughly twelve.
+    const extent = layout.extent ?? 300;
+    const spacing = (2 * extent) / Math.cbrt(Math.max(1, nodes.length));
+    const relSize = Math.max(0.5, spacing / 8);
+
     const graph = new ForceGraph3D(canvas)
       .graphData({ nodes, links: layout.edges.map((e) => ({ ...e })) })
       .nodeLabel((n: any) => `${n.name}<br><small>${n.url}</small>`)
       .nodeColor((n: any) => n.color)
+      .nodeRelSize(relSize)
       .nodeVal((n: any) => n.val)
       .linkOpacity(0.25)
       .linkWidth(0.5)
@@ -385,5 +417,38 @@ export class GraphView extends ItemView {
                            .height(canvas.clientHeight);
     fit();
     this.registerEvent(this.app.workspace.on("resize", fit));
+
+    // Frame the cloud once it exists.
+    //
+    // The camera is PLACED first, then fitted, and the order is the fix.
+    // `zoomToFit` only moves the camera along the direction it is already
+    // looking -- it changes distance, never position relative to the scene --
+    // so a camera that has ended up inside the cloud is "fitted" from inside
+    // it and stays there. Measured: the camera sat at z = -230 with the cloud
+    // spanning +/-249, and fitting again at four different node sizes left it
+    // at -230, -232, -234, -239. From inside a sparse cloud a viewer sees
+    // essentially nothing, which is exactly the report this fixes.
+    //
+    // Placing it on the +z axis at a distance set by the cube the layout
+    // delivers -- which `layout.py` now guarantees -- means the fit always
+    // starts from outside, looking at the centre.
+    window.setTimeout(() => {
+      try {
+        graph.cameraPosition({ x: 0, y: 0, z: extent * 2.6 },
+                             { x: 0, y: 0, z: 0 }, 0);
+        graph.zoomToFit(400, extent * 0.15);
+      } catch {
+        /* an empty scene has nothing to fit; the status bar already says so */
+      }
+    }, 250);
+
+    // The same thing, on demand. A reader who has orbited into the middle of
+    // the cloud has no way back otherwise, and "the graph went blank" is not
+    // a state anyone should have to recognise.
+    this.reframe = () => {
+      graph.cameraPosition({ x: 0, y: 0, z: extent * 2.6 },
+                           { x: 0, y: 0, z: 0 }, 400);
+      window.setTimeout(() => graph.zoomToFit(400, extent * 0.15), 450);
+    };
   }
 }

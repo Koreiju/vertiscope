@@ -395,3 +395,52 @@ def test_a_workspace_with_no_vectors_still_reports_none(tmp_path):
         ws.index_html("<html><body><p>a paragraph</p></body></html>",
                       "https://none.test/")
         assert ws.index.embeddings is None
+
+
+# --- the layout arrives in a cube a viewer can frame ---------------------------
+
+def test_the_projection_is_centred_and_scaled_to_a_known_cube(wide):
+    """UMAP has no natural origin or scale; a viewer cannot guess one.
+
+    Raw, the cloud sits wherever the fit put it at whatever size the point
+    count produced. At 98 chunks that was small and near enough to the origin
+    to look right; at 3,136 it spread far wider while each node stayed the
+    same size, and the pane drew 390,000 triangles while lighting 1.5% of its
+    pixels. Delivered in a known cube, the same camera frames either.
+    """
+    from domvec.obsidian.layout import _EXTENT
+
+    layout = build_layout(wide)
+    assert layout["extent"] == _EXTENT
+    axes = list(zip(*[n["pos"] for n in layout["nodes"]]))
+    widest = max(max(a) - min(a) for a in axes)
+    assert abs(widest - 2 * _EXTENT) < 1.0, \
+        "widest axis spans %.1f, expected %.1f" % (widest, 2 * _EXTENT)
+    for axis in axes:
+        mid = (max(axis) + min(axis)) / 2
+        assert abs(mid) < 1.0, "an axis is off-centre by %.1f" % mid
+
+
+def test_the_colour_is_not_rescaled_with_the_position(wide):
+    """`_framed` touches the spatial columns only.
+
+    Hue is an angle and saturation and value are fractions; scaling them into
+    a spatial cube would make every node the same colour, which is the exact
+    failure `_hsv` guards against at the other end.
+    """
+    layout = build_layout(wide)
+    for node in layout["nodes"]:
+        h, s, v = node["hsv"]
+        assert 0.0 <= h <= 360.0 and 0.0 <= s <= 1.0 and 0.0 <= v <= 1.0
+
+
+def test_a_collapsed_axis_does_not_divide_by_nothing(wide):
+    """Every point identical on one axis is a real outcome of a poor fit."""
+    import numpy as np
+
+    from domvec.obsidian.layout import _framed
+
+    flat = np.zeros((6, 6), dtype=np.float32)
+    flat[:, 0] = np.arange(6)          # one axis varies, two do not
+    out = _framed(flat, 3)
+    assert np.isfinite(out).all()

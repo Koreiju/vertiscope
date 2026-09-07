@@ -350,6 +350,277 @@ def _one_picture_per_element(lines: List[Dict]) -> List[Dict]:
     return out
 
 
+def _xpath_of(key: str) -> str:
+    """The element part of an address, without the accessor."""
+    parts = (key or "").split("|")
+    if len(parts) < 2:
+        return ""
+    return parts[1].split("/text()")[0]
+
+
+def _related(a: str, b: str) -> bool:
+    """True when two elements are on one ancestor chain.
+
+    A descendant's xpath IS its ancestors' with more on the end, so this is
+    exact rather than heuristic. The guard matters: two lines can carry the
+    same words and be two different things -- a list of people who share a
+    name -- and folding those would lose one of them. On one chain they are
+    the same thing described from two heights.
+    """
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    longer, shorter = (a, b) if len(a) > len(b) else (b, a)
+    return longer.startswith(shorter + "/")
+
+
+#: What a rendering carries, most to least. A line that names where it goes or
+#: what it shows outranks one that only repeats the words, so folding keeps
+#: the richest form of the thing rather than whichever came first.
+def _rank(text: str, line: Dict) -> int:
+    """What this rendering carries, most to least.
+
+    The heading mark comes off FIRST, and that is the whole subtlety. A
+    heading that links -- `### [Title](url)` -- is a heading AND a
+    destination, but tested with the hashes still on it, `_LINK` cannot match
+    and it scores as a bare heading. It then tied with the same title drawn
+    from the anchor's `title` attribute, the tie went to whichever came
+    first, and the version WITH the destination was the one folded away: the
+    card's product name stopped linking to the product.
+
+    That is the same trap `surface.ts::words` and `_element` record, for the
+    same reason, in the third place in this codebase: a leading mark hides
+    every other leading mark behind it.
+    """
+    stripped = text.strip()
+    heading = _HEADING.match(stripped)
+    inner = heading.group(2).strip() if heading else stripped
+
+    if _MEDIA.match(inner):
+        return 5                      # a picture with a source
+    if _LINK.match(inner):
+        return 4                      # words and a destination
+    if heading:
+        return 3
+    if _control(inner, str(line.get("cls") or ""), []):
+        return 3                      # a real control
+    if _MEDIA_BARE.match(inner) or _BARE_URL.match(inner):
+        return 1                      # a placeholder, or a naked url
+    return 2
+
+
+def _words(text: str) -> str:
+    """The line's words, marks off and normalised FOR COMPARISON.
+
+    Lowercased, so two spellings of one title match. Never use the result as
+    a label: `_visible` is the same stripping without the case folding, and
+    reusing this one printed a product called "1,000 places to see before you
+    die".
+    """
+    out = text.strip()
+    heading = _HEADING.match(out)
+    if heading:
+        out = heading.group(2).strip()
+    for pattern in (_MEDIA, _LINK):
+        hit = pattern.match(out)
+        if hit:
+            out = hit.group(1).strip()
+            break
+    else:
+        bare = _MEDIA_BARE.match(out)
+        if bare:
+            out = bare.group(1).strip()
+    for pattern in (_FORM, _BUTTON):
+        hit = pattern.match(out)
+        if hit:
+            out = hit.group(1).strip()
+            break
+    field = _FIELD.match(out)
+    if field:
+        out = field.group(2).strip()
+    return " ".join(out.split()).lower()
+
+
+def _visible(text: str) -> str:
+    """The same words `_words` compares, in the page's own casing."""
+    out = text.strip()
+    heading = _HEADING.match(out)
+    if heading:
+        out = heading.group(2).strip()
+    for pattern in (_MEDIA, _LINK):
+        hit = pattern.match(out)
+        if hit:
+            out = hit.group(1).strip()
+            break
+    else:
+        bare = _MEDIA_BARE.match(out)
+        if bare:
+            out = bare.group(1).strip()
+    for pattern in (_FORM, _BUTTON):
+        hit = pattern.match(out)
+        if hit:
+            out = hit.group(1).strip()
+            break
+    field = _FIELD.match(out)
+    if field:
+        out = field.group(2).strip()
+    return " ".join(out.split())
+
+
+def _tokens(words: str) -> frozenset:
+    """The words as a set, with a truncation mark taken off.
+
+    A page writes a full title in an anchor's `title` and a shortened one in
+    the heading it draws -- "1,000 Places to See Before You Die" against
+    "1,000 Places to See ...". Those are one thing, and an equality test says
+    they are two.
+    """
+    out = set()
+    for token in words.split():
+        token = token.strip(".,;:!?()[]{}\u2026").strip()
+        if token and token != "...":
+            out.add(token)
+    return frozenset(out)
+
+
+def _target_of_line(line: Dict, text: str) -> str:
+    """Where this line points, if anywhere."""
+    stripped = text.strip()
+    heading = _HEADING.match(stripped)
+    if heading:
+        stripped = heading.group(2).strip()
+    hit = _LINK.match(stripped) or _BARE_URL.match(stripped)
+    if hit:
+        return (hit.group(2) if hit.re is _LINK else hit.group(1)).strip()
+    return str(line.get("target") or "").strip()
+
+
+def _fold_repeats(lines: List[Dict]) -> List[Dict]:
+    """Draw one element per thing, not one per address.
+
+    A page's `<img>` inside an `<a>` inside a `<div>` yields the same words
+    five times over: the image's alt, the picture's own caption, the wrapping
+    div's visible text, the anchor's `title`, and the heading that links to
+    it. Every one is a real address, and the markdown form has to spend a line
+    on each because a line is all markdown has. Measured on one
+    books.toscrape product card: eleven lines, seven distinct, the title five
+    times.
+
+    HTML does not have to. An element can hold several addresses, so the
+    richest rendering survives -- the picture over its placeholder, the link
+    over the bare words -- and the rest ride along in `data-domvec-also`, so
+    every address stays reachable from the rendered DOM.
+
+    Three ways one thing shows up twice, and all three are folded:
+
+    * **The same words**, at two heights of one chain.
+    * **Subsumed words.** A shortened label and its full form are one thing;
+      an equality test says they are two. The fuller wording wins even when
+      the shorter line is the one that survives, because the survivor is
+      chosen for what it CARRIES -- a destination, a picture -- and there is
+      no reason to keep its truncation as well.
+    * **The same destination.** Two lines pointing at one url inside a single
+      record are one link, even when they sit on unrelated branches: a card
+      writes its href on the image's anchor and again on the heading's. A url
+      is an identity, so this one does not need the chain test -- and since
+      the record rule made a chunk a single record, "inside one chunk" is a
+      tight enough scope for that to be true.
+
+    Everything else is folded ALONG AN ANCESTOR CHAIN only. Two lines with
+    the same words at unrelated elements are two things that happen to read
+    alike, and merging those would lose one.
+    """
+    def key_of(i):
+        return str(lines[i].get("key") or "")
+
+    def text_of(i):
+        return str(lines[i].get("text") or "")
+
+    def words_of(i):
+        return _words(text_of(i))
+
+    def rank_of(i):
+        return _rank(text_of(i), lines[i])
+
+    n = len(lines)
+    tokens = [_tokens(words_of(i)) for i in range(n)]
+    targets = [_target_of_line(lines[i], text_of(i)) for i in range(n)]
+
+    dropped = set()
+    carried: Dict[int, List[str]] = {}
+    label: Dict[int, str] = {}
+
+    def fold(loser: int, keeper: int) -> None:
+        dropped.add(loser)
+        carried.setdefault(keeper, []).append(key_of(loser))
+        # Keep the fuller wording. The survivor was chosen for what it
+        # carries, not for how much of the title it printed.
+        if tokens[loser] > tokens[keeper]:
+            label[keeper] = _visible(text_of(loser))
+
+    for i in range(n):
+        if i in dropped or not tokens[i]:
+            continue
+        for j in range(i + 1, n):
+            if j in dropped or not tokens[j]:
+                continue
+            same_thing = (
+                (tokens[i] == tokens[j]
+                 or tokens[i] < tokens[j] or tokens[j] < tokens[i])
+                and _related(_xpath_of(key_of(i)), _xpath_of(key_of(j)))
+            ) or (targets[i] and targets[i] == targets[j])
+            if not same_thing:
+                continue
+            if rank_of(j) > rank_of(i):
+                fold(i, j)
+                break
+            fold(j, i)
+
+    out: List[Dict] = []
+    for i, line in enumerate(lines):
+        if i in dropped:
+            continue
+        extra = carried.get(i)
+        if extra:
+            line = dict(line,
+                        also=" ".join(
+                            [str(line.get("also") or "")] + extra).strip())
+        fuller = label.get(i)
+        if fuller:
+            line = dict(line, text=_relabel(text_of(i), fuller))
+        out.append(line)
+    return out
+
+
+def _relabel(text: str, words: str) -> str:
+    """``text`` with its visible words replaced, structure untouched.
+
+    Only the label moves. The mark that says what the line IS -- a heading's
+    hashes, a link's target, a control's brackets -- is what the render
+    decided, and rewriting that here would be this module overruling the
+    renderer rather than tidying it.
+    """
+    stripped = text.strip()
+    indent = text[:len(text) - len(text.lstrip(" "))]
+    heading = _HEADING.match(stripped)
+    prefix = ""
+    if heading:
+        prefix = heading.group(1) + " "
+        stripped = heading.group(2).strip()
+
+    link = _LINK.match(stripped)
+    if link:
+        return "%s%s[%s](%s)" % (indent, prefix, words, link.group(2))
+    media = _MEDIA.match(stripped)
+    if media:
+        return "%s%s![%s](%s)" % (indent, prefix, words, media.group(2))
+    button = _BUTTON.match(stripped)
+    if button:
+        return "%s%s( %s )" % (indent, prefix, words)
+    return "%s%s%s" % (indent, prefix, words)
+
+
 def render_lines(lines: List[Dict], *, base: str = "") -> str:
     """The distilled elements for one chunk's payload lines.
 
@@ -358,7 +629,7 @@ def render_lines(lines: List[Dict], *, base: str = "") -> str:
     addresses, used twice.
     """
     builder = _Builder()
-    for line in _one_picture_per_element(lines):
+    for line in _fold_repeats(_one_picture_per_element(lines)):
         raw = str(line.get("text") or "")
         if not raw.strip():
             continue

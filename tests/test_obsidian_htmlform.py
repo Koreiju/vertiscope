@@ -160,7 +160,11 @@ _ALLOWED_TAGS = {"div", "p", "span", "a", "h1", "h2", "h3", "h4", "h5", "h6",
                  "figure", "figcaption", "img"}
 _ALLOWED_ATTRS = {"class", "href", "rel", "type", "disabled", "checked",
                   "placeholder", "src", "alt", "loading", "referrerpolicy",
-                  "data-domvec-address", "data-domvec-line"}
+                  "data-domvec-address", "data-domvec-line",
+                  # Addresses whose line was folded into this element -- see
+                  # _fold_repeats. Listed so the whitelist stays the whole
+                  # truth rather than the part the fixtures happen to reach.
+                  "data-domvec-also"}
 
 
 def _parsed(html):
@@ -480,3 +484,142 @@ def test_a_card_is_never_drawn_inside_a_card():
         line("  ( Add to basket )", cls="button", control=True),
     ], base="https://s.test/")
     assert html.count("dv-card") == 1, html
+
+
+# --- one thing, drawn once ----------------------------------------------------
+
+def _at(xpath, accessor, text, **kw):
+    key = "https://s.test/q|%s|%s|%s" % (xpath, kw.pop("tag", "text.visible"),
+                                         accessor)
+    return line(text, key=key, **kw)
+
+
+#: One books.toscrape product card, exactly as `chunk_payload` reports it.
+#: Eleven lines, seven distinct, the title on five of them -- each a real
+#: address at a different height of one chain.
+CARD = [
+    _at("/a/ol/li/article/div[1]/a/img", "text()",
+        "    ![1,000 Places to See Before You Die]", tag="media.images",
+        cls="image"),
+    _at("/a/ol/li/article/div[1]/a/img", "src",
+        "    ![1,000 Places to See Before You Die](../../media/c.jpg)",
+        tag="media.images", cls="image"),
+    _at("/a/ol/li/article/div[1]/a/img", "alt",
+        "    1,000 Places to See Before You Die", tag="text.accessible"),
+    _at("/a/ol/li/article/div[1]/a", "href",
+        "  <../../1000-places_1/index.html>", tag="urls.internal"),
+    _at("/a/ol/li/article/div[1]", "text()",
+        "1,000 Places to See Before You Die"),
+    _at("/a/ol/li/article/h3/a", "title",
+        "  ### 1,000 Places to See Before You Die", tag="text.accessible"),
+    _at("/a/ol/li/article/h3", "text()",
+        "### [1,000 Places to See ...](../../1000-places_1/index.html)"),
+    _at("/a/ol/li/article/div[2]/p[1]", "text()", "  £26.08"),
+    _at("/a/ol/li/article/div[2]/p[2]", "text()", "  In stock"),
+    _at("/a/ol/li/article/div[2]/form/button", "text()",
+        "    ( Add to basket )", tag="interactive.buttons", cls="button",
+        control=True),
+    _at("/a/ol/li/article/div[2]/form", "text()", "  === form ===",
+        tag="interactive.forms", cls="group"),
+]
+
+
+def _folded(lines):
+    from domvec.obsidian.htmlform import _fold_repeats, _one_picture_per_element
+
+    return _fold_repeats(_one_picture_per_element(lines))
+
+
+def test_a_card_draws_each_thing_once():
+    """The panel showed a product's title five times.
+
+    Every one is a real address -- the image's alt, the picture's caption, the
+    wrapping div's visible text, the anchor's `title`, and the heading that
+    links to it -- and markdown has to spend a line on each because a line is
+    all markdown has. HTML can hang several addresses on one element.
+    """
+    out = _folded(CARD)
+    titles = [l for l in out
+              if "1,000 places" in l["text"].lower()]
+    assert len(titles) == 2, [l["text"] for l in titles]
+    # The picture, and the heading. Nothing else.
+    assert any(t["text"].strip().startswith("![") for t in titles)
+    assert any(t["text"].strip().startswith("###") for t in titles)
+
+
+def test_the_heading_keeps_its_destination():
+    """The bug this caught: the linked title was the copy that got folded.
+
+    `_rank` tested `_LINK` against text that still had its `###` on the
+    front, so a heading that links scored as a bare heading, tied with the
+    same title drawn from the anchor's `title` attribute, and lost the tie.
+    The card's product name stopped linking to the product. Same trap as
+    `surface.ts::words` and `_element`: a leading mark hides the one behind it.
+    """
+    out = _folded(CARD)
+    heading = next(l for l in out if l["text"].strip().startswith("###"))
+    assert "](" in heading["text"], heading["text"]
+    assert "1000-places_1/index.html" in heading["text"]
+
+
+def test_the_fuller_wording_survives_the_fold():
+    """A shortened label and its full form are one thing.
+
+    The heading is kept because it carries a destination; there is no reason
+    to keep its truncation as well when the same element chain spelled the
+    title out.
+    """
+    out = _folded(CARD)
+    heading = next(l for l in out if l["text"].strip().startswith("###"))
+    assert "1,000 Places to See Before You Die" in heading["text"]
+    assert "..." not in heading["text"]
+
+
+def test_the_label_keeps_the_page_casing():
+    """`_words` lowercases to compare; a label must not be built from it."""
+    out = _folded(CARD)
+    heading = next(l for l in out if l["text"].strip().startswith("###"))
+    assert "1,000 Places to See Before You Die" in heading["text"]
+    assert "1,000 places to see" not in heading["text"]
+
+
+def test_a_bare_url_folds_into_the_link_that_goes_there():
+    """Two lines naming one destination inside one record are one link.
+
+    Not chain-scoped, and deliberately: a card writes its href on the image's
+    anchor and again on the heading's, which are siblings. A url is an
+    identity, and the record rule made a chunk a single record, so "inside
+    one chunk" is a tight enough scope for that to hold.
+    """
+    out = _folded(CARD)
+    bare = [l for l in out if l["text"].strip().startswith("<")]
+    assert not bare, [l["text"] for l in bare]
+
+
+def test_no_address_is_lost_when_lines_are_folded():
+    """The invariant that keeps both forms the same distillation.
+
+    A folded line's address rides on the survivor. If it did not, the HTML
+    form would quietly hold less than the markdown one.
+    """
+    out = _folded(CARD)
+    before = {l["key"] for l in CARD if l.get("key")}
+    after = set()
+    for l in out:
+        if l.get("key"):
+            after.add(l["key"])
+        after.update((l.get("also") or "").split())
+    assert before <= after, before - after
+
+
+def test_the_same_words_at_unrelated_elements_are_two_things():
+    """Non-vacuity, and the guard that stops the fold eating real content.
+
+    Two people with one name are two people. Folding is along an ancestor
+    chain, where the two lines are one thing described from two heights.
+    """
+    lines = [
+        _at("/a/ul/li[1]/span", "text()", "Alex Chen"),
+        _at("/a/ul/li[2]/span", "text()", "Alex Chen"),
+    ]
+    assert len(_folded(lines)) == 2

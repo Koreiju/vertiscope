@@ -43,6 +43,22 @@ _MEDIA_RE = re.compile(r"!\[([^\]]*)\]\(([^)\s]+)\)")
 #: is just a sane reduction before UMAP.
 _LONE_TARGET = 128
 
+#: Half the width of the cube the layout is delivered in. The projection is
+#: centred on the origin and scaled so its widest axis spans `2 * _EXTENT`.
+#:
+#: UMAP's output has no natural origin or scale -- it is whatever the fit
+#: happened to produce -- so a viewer receiving it raw gets a cloud sitting
+#: somewhere off-axis at a size that depends on how many points went in. That
+#: is exactly what went wrong: at 98 chunks the cloud was small and near
+#: enough to the origin to look right, and at 3,136 it spread far wider while
+#: each node stayed the same size, so the pane rendered 390,000 triangles and
+#: still looked empty -- 1.5% of pixels lit, every node a speck.
+#:
+#: Delivered in a known cube instead, the picture is self-similar: the same
+#: camera frames 98 nodes and 3,136 nodes alike, and the viewer can size a
+#: node against a span it knows.
+_EXTENT = 300.0
+
 
 def _unit_rows(matrix: np.ndarray) -> np.ndarray:
     """L2-normalise each row, leaving all-zero rows alone.
@@ -187,6 +203,7 @@ def build_layout(workspace,
     # intention.
     got = int(coords.shape[1])
     colours = _hsv(coords[:, dims:dims + 3]) if (hsv and got >= want) else None
+    coords = _framed(coords, dims)
     if got < dims:
         # Position must have its three slots whatever the fit managed. A flat
         # layout is visible; a node with two coordinates is a crash.
@@ -239,6 +256,10 @@ def build_layout(workspace,
         "fitted_dims": int(min(got, want)),
         "requested_dims": int(want),
         "hsv": bool(colours is not None),
+        # The cube the coordinates are delivered in, so a viewer can size a
+        # node against a span it knows rather than against a constant that
+        # was right for one corpus.
+        "extent": _EXTENT,
         "images": sum(1 for n in nodes if n.get("image")),
         # Stated so a reader of the picture knows what produced it, and
         # `equalised` is asserted from the widths rather than from the
@@ -319,6 +340,36 @@ def _first_image(md: str, base: str) -> Optional[Dict]:
         # report counts pictures that can actually be drawn.
         return None
     return {"src": src, "alt": alt}
+
+
+def _framed(coords: np.ndarray, dims: int) -> np.ndarray:
+    """Centre the spatial axes on the origin and scale them to a known cube.
+
+    The MIDPOINT of the bounding box, not the mean: what a camera has to
+    frame is the extent, and a dense clump beside a few outliers has a mean
+    that sits in the clump and a midpoint that sits where the picture
+    actually is.
+
+    Only the spatial columns are touched. The colour columns are normalised
+    separately by `_hsv`, per component, because a hue and a position want
+    different treatment -- and this runs after `_hsv` has read them, so the
+    two cannot interfere.
+
+    A degenerate axis -- every point identical, which happens when the fit
+    collapses -- keeps its zeros rather than dividing by nothing.
+    """
+    if coords.size == 0:
+        return coords
+    out = np.array(coords, dtype=np.float32, copy=True)
+    block = out[:, :dims]
+    low = block.min(axis=0)
+    high = block.max(axis=0)
+    block -= (low + high) / 2.0
+    widest = float(np.max(high - low))
+    if widest > 1e-9:
+        block *= (2.0 * _EXTENT) / widest
+    out[:, :dims] = block
+    return out
 
 
 def _umap(features: np.ndarray, *, dims: int, seed: int,
