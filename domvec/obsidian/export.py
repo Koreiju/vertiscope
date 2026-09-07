@@ -37,7 +37,20 @@ from ..graphstore import canonical_url
 
 #: ``[words](target)`` as the renderer draws it. The target stops at the first
 #: whitespace or paren so a trailing markdown title does not join the url.
-_LINK = re.compile(r"\[([^\]]*)\]\(([^)\s]+)\)")
+#: `[label](target)`, where the LABEL may contain escaped brackets.
+#:
+#: `_neutralise` rewrites a page's own `[[ 107 ]](url)` to `[\[ 107 \]](url)`
+#: so Obsidian does not read it as a wikilink -- and a label pattern of
+#: `[^\]]*` then stops at the first `]` of `\]`, fails to reach the `(`, and
+#: the link stops matching at all. Which meant those links were never
+#: rewritten and never absolutised, so their relative targets stayed relative
+#: and Obsidian filed each one as an edge to a vault note that does not exist.
+#: Measured in the running app: escaping fixed 166 phantom edges and left 11
+#: behind, and the 11 were this.
+#:
+#: A label character is now either an escape sequence or an ordinary
+#: non-bracket, which is what CommonMark says a label is.
+_LINK = re.compile(r"\[((?:\\.|[^\]\\])*)\]\(([^)\s]+)\)")
 
 #: ``<target>`` -- the bare autolink form, used where a link has no words.
 _AUTOLINK = re.compile(r"<((?:https?:)?//[^>\s]+)>")
@@ -201,7 +214,7 @@ def export_vault(workspace,
     folder_path.mkdir(parents=True, exist_ok=True)
 
     for c in chunks:
-        body, hits, misses = _rewrite_links(_reflow(c.md), c.url,
+        body, hits, misses = _rewrite_links(_neutralise(_reflow(c.md)), c.url,
                                             by_canonical, names)
         out.wikilinks += hits
         out.unresolved += misses
@@ -274,6 +287,32 @@ def _rewrite_links(md: str,
         return "[[%s]]" % note
 
     return _AUTOLINK.sub(sub_auto, _LINK.sub(sub_link, md or "")), hits, misses
+
+
+def _neutralise(md: str) -> str:
+    r"""Escape a doubled bracket the PAGE wrote, before this file makes any.
+
+    Wikipedia renders a citation marker as `[107]`, so the distiller draws the
+    link around it as `[[ 107 ]](#cite_note-moore2011-107)` -- a perfectly
+    ordinary markdown link whose LABEL happens to be `[ 107 ]`. Obsidian reads
+    the leading `[[` as a wikilink and files an edge to a note called "107".
+
+    Measured in the running app: 153 distinct phantom targets over 180
+    occurrences -- `107`, `108`, `لغات أخرى` -- every one of them a link label
+    rather than anything anybody wrote a note about. They show in the graph as
+    broken links, which is worse than an absent edge: an absent edge is
+    nothing, and a broken one says the vault is missing a page it never had.
+
+    Run BEFORE `_rewrite_links`, and that ordering is the whole trick. At this
+    point the text is the distilled markdown and contains no wikilinks at all,
+    so every `[[` in it is the page's; afterwards the only ones are the
+    export's own and escaping them would break the graph instead of fixing it.
+
+    `[[ 107 ]](url)` becomes `[\[ 107 \]](url)`, which CommonMark renders as
+    a link labelled `[ 107 ]` -- what the page showed -- and Obsidian does not
+    read as a wikilink.
+    """
+    return md.replace("[[", "[\\[").replace("]]", "\\]]")
 
 
 def _note(chunk, body: str) -> str:

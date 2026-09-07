@@ -321,3 +321,64 @@ def test_a_chunk_with_no_prose_gets_no_empty_callout():
 
     assert _folded("") == ""
     assert _folded("\n   \n") == ""
+
+
+# --- the page's own brackets are not wikilinks --------------------------------
+
+def test_a_citation_marker_does_not_become_a_wikilink():
+    """Wikipedia renders a citation as `[107]`.
+
+    The distiller draws the link around it as `[[ 107 ]](#cite_note-...)` -- an
+    ordinary markdown link whose LABEL is `[ 107 ]` -- and Obsidian reads the
+    leading `[[` as a wikilink to a note called "107". Measured in the running
+    app: 153 distinct phantom targets over 180 occurrences.
+
+    A broken edge is worse than an absent one. An absent edge is nothing; a
+    broken edge says the vault is missing a page it never had.
+    """
+    from domvec.obsidian.export import _neutralise
+
+    out = _neutralise("[[ 107 ]](#cite_note-moore2011-107)")
+    assert out == r"[\[ 107 \]](#cite_note-moore2011-107)"
+    assert "[[" not in out
+
+
+def test_an_ordinary_link_is_untouched():
+    from domvec.obsidian.export import _neutralise
+
+    assert _neutralise("[words](url)") == "[words](url)"
+    assert _neutralise("plain prose") == "plain prose"
+
+
+def test_the_escape_runs_before_the_export_makes_its_own_links():
+    """The ordering IS the rule.
+
+    Before `_rewrite_links` the text is distilled markdown and holds no
+    wikilinks, so every `[[` in it is the page's. Afterwards the only ones are
+    the export's own, and escaping those would empty the graph rather than fix
+    it.
+    """
+    import inspect
+
+    from domvec.obsidian import export
+
+    source = inspect.getsource(export.export_vault)
+    assert "_rewrite_links(_neutralise(" in source, \
+        "the escape must wrap the text going INTO the rewrite"
+
+
+def test_a_real_wikilink_survives_the_export():
+    """Non-vacuity: the escape must not eat the edges it sits next to."""
+    from domvec.obsidian.export import _neutralise, _rewrite_links
+    from domvec.graphstore import canonical_url
+
+    target = "https://o.test/"
+    canon = canonical_url(target, "https://x.test/")
+    body, hits, _misses = _rewrite_links(
+        _neutralise("see [Other](%s) and [[ 12 ]](#c)" % target),
+        "https://x.test/",
+        {canon: "cid-1"},
+        {"cid-1": "other-note"})
+    assert "[[other-note|Other]]" in body, body
+    assert r"[\[ 12 \]]" in body, body
+    assert hits == 1

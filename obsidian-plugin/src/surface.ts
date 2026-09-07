@@ -47,7 +47,12 @@ const SHADOW_CSS = `
 
 /* A picture with words beside it: a result row, a product tile, a profile.
    Drawn as the cohesive thing the page laid out, not as stacked lines. */
-.dv-card { display: grid; grid-template-columns: auto 1fr; gap: 0.5em;
+/* Row gap ZERO, and that is not a style choice. The figure spans the card
+   with grid-row: 1 / span 99, which brings 99 rows into being; a symmetric
+   gap then applies between all of them, so 95 empty rows cost 95 gaps.
+   Measured in the running app: a card 123px of picture tall rendered 762px,
+   and the panel came to 813px for five lines of text. */
+.dv-card { display: grid; grid-template-columns: auto 1fr; gap: 0 0.5em;
   align-items: start; padding: 0.3em 0.45em; border-left: none;
   border: 1px solid var(--background-modifier-border, #ddd);
   border-radius: var(--radius-m, 6px);

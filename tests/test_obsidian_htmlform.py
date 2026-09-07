@@ -349,11 +349,19 @@ def test_a_run_of_paragraphs_is_not_a_card():
 
 
 def test_two_pictures_in_one_group_are_not_a_card():
-    """A gallery is a gallery. A card is one picture with words beside it."""
+    """A gallery is a gallery. A card is one picture with words beside it.
+
+    Distinct keys, and they matter: the default `line()` helper gives every
+    line one address, and two pictures at one element are the same picture.
+    `_one_picture_per_element` folds them, quite correctly, and the fixture
+    then tests nothing it means to.
+    """
     html = render_lines([
-        line("Gallery"),
-        line("  ![one](https://x.test/1.jpg)", cls="image"),
-        line("  ![two](https://x.test/2.jpg)", cls="image"),
+        line("Gallery", key="u|/html/body/h2|text.visible|text()"),
+        line("  ![one](https://x.test/1.jpg)", cls="image",
+             key="u|/html/body/img[1]|media.images|src"),
+        line("  ![two](https://x.test/2.jpg)", cls="image",
+             key="u|/html/body/img[2]|media.images|src"),
     ], base="https://x.test/")
     assert "dv-card" not in html
 

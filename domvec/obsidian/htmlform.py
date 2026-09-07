@@ -180,7 +180,18 @@ class _Builder:
         self.stack[-1].append(markup)
 
     def close(self) -> str:
-        return "".join(_serialise(node) for node in _collapse(self.root))
+        """The chunk, with the whole of it drawn as a card when it is one.
+
+        The record rule made a chunk a single record -- one search result, one
+        product, one row -- so the thing a card should be drawn around is
+        usually the chunk itself, and there is no group wrapping it to hang
+        that on. Asked here instead, of the root.
+        """
+        root = _collapse(self.root)
+        if _is_card(root):
+            return '<div class="dv-n dv-card">%s</div>' % "".join(
+                _serialise(node, True) for node in root)
+        return "".join(_serialise(node) for node in root)
 
 
 def _collapse(nodes: List) -> List:
@@ -203,11 +214,26 @@ def _collapse(nodes: List) -> List:
             out.append(node)
             continue
         inner = _collapse(node)
-        # Unwrap as long as this level holds exactly one group and nothing
-        # else. `while`, not `if`: a chain of five collapses to one pass.
-        while len(inner) == 1 and isinstance(inner[0], list):
-            inner = inner[0]
-        out.append(inner)
+        # Unwrap as long as this level holds exactly ONE thing, whatever that
+        # thing is. `while`, not `if`: a chain of five collapses in one pass.
+        #
+        # It used to unwrap only when the single child was another group,
+        # which left a wrapper around a lone element standing -- and that
+        # wrapper does more than draw a needless border. It puts the element
+        # in a group of its own, so a product card's picture was a sibling of
+        # nothing while its title and price sat in the group next door, and
+        # `_is_card` saw one figure with no words beside it. The card stopped
+        # forming, and the grid that puts the picture in the left column
+        # cannot reach a figure that is not a direct child.
+        while len(inner) == 1:
+            if isinstance(inner[0], list):
+                inner = inner[0]
+                continue
+            out.extend(inner)         # a lone element belongs to its parent
+            inner = None
+            break
+        if inner is not None:
+            out.append(inner)
     return out
 
 
@@ -621,6 +647,29 @@ def _relabel(text: str, words: str) -> str:
     return "%s%s%s" % (indent, prefix, words)
 
 
+def _captions_to_drop(lines: List[Dict]) -> set:
+    """Alt texts that some other line in this chunk already says.
+
+    A product card names itself twice over: the picture is captioned with the
+    `alt`, and the heading beside it carries the same words. Both are real and
+    neither is redundant in the markdown form, where a caption is the only
+    place the alt can go -- but drawn side by side in a card, it is the same
+    sentence printed twice.
+
+    The picture keeps its `alt`, so nothing is lost to a screen reader or to
+    an image that fails to load; only the visible caption goes.
+    """
+    said = set()
+    for line in lines:
+        text = str(line.get("text") or "").strip()
+        if _MEDIA.match(text) or _MEDIA_BARE.match(text):
+            continue
+        words = _words(text)
+        if words:
+            said.add(words)
+    return said
+
+
 def render_lines(lines: List[Dict], *, base: str = "") -> str:
     """The distilled elements for one chunk's payload lines.
 
@@ -629,17 +678,20 @@ def render_lines(lines: List[Dict], *, base: str = "") -> str:
     addresses, used twice.
     """
     builder = _Builder()
-    for line in _fold_repeats(_one_picture_per_element(lines)):
+    kept = _fold_repeats(_one_picture_per_element(lines))
+    said = _captions_to_drop(kept)
+    for line in kept:
         raw = str(line.get("text") or "")
         if not raw.strip():
             continue
         depth = (len(raw) - len(raw.lstrip(" "))) // 2
         builder.at(depth)
-        builder.add(_element(raw.strip(), line, base))
+        builder.add(_element(raw.strip(), line, base, said))
     return builder.close()
 
 
-def _element(text: str, line: Dict, base: str) -> str:
+def _element(text: str, line: Dict, base: str,
+             said: Optional[set] = None) -> str:
     """One distilled line as one element.
 
     The shape is decided by the render's mark, not by the taxonomy, and that
@@ -664,11 +716,11 @@ def _element(text: str, line: Dict, base: str) -> str:
     if media:
         return _media(media.group(1),
                       _absolute(_safe_url(media.group(2) or target), base),
-                      media.group(3), addr)
+                      media.group(3), addr, said)
     placeholder = _MEDIA_BARE.match(body)
     if placeholder:
         return _media(placeholder.group(1), _absolute(_safe_url(target), base),
-                      placeholder.group(2), addr)
+                      placeholder.group(2), addr, said)
 
     bullet = _BULLET.match(body)
     listed = bullet is not None
@@ -784,7 +836,7 @@ def _control(body: str, cls: str, addr: List[Tuple[str, str]]) -> Optional[str]:
 
 
 def _media(alt: str, src: str, rest: str,
-           addr: List[Tuple[str, str]]) -> str:
+           addr: List[Tuple[str, str]], said: Optional[set] = None) -> str:
     """A picture or a player, as a figure that keeps its caption.
 
     The `src` is emitted; whether it is FETCHED is settled by the surface,
@@ -792,16 +844,22 @@ def _media(alt: str, src: str, rest: str,
     from inside a vault tells those hosts the page was read again, and that is
     the reader's decision to make, not this module's.
     """
+    # A caption the chunk already says elsewhere is the same sentence printed
+    # twice once the two are drawn side by side in a card. The `alt` stays on
+    # the image either way, so nothing is lost to a screen reader or to a
+    # picture that fails to load.
+    repeated = bool(said and alt and " ".join(alt.split()).lower() in said)
     caption = _esc(alt or "image")
     tail = (" " + _esc(rest.strip())) if rest.strip() else ""
     if not src:
         return ('<figure class="dv-fig dv-fig-off"%s><div class="dv-noimg">%s'
                 '</div><figcaption>%s%s</figcaption></figure>'
                 % (_attrs(addr), _NO_IMAGE, caption, tail))
+    figcaption = ("" if repeated and not tail.strip()
+                  else '<figcaption>%s%s</figcaption>' % (caption, tail))
     return ('<figure class="dv-fig"%s><img class="dv-img" src="%s" alt="%s" '
-            'loading="lazy" referrerpolicy="no-referrer">'
-            '<figcaption>%s%s</figcaption></figure>'
-            % (_attrs(addr), _esc(src), caption, caption, tail))
+            'loading="lazy" referrerpolicy="no-referrer">%s</figure>'
+            % (_attrs(addr), _esc(src), caption, figcaption))
 
 
 def chunk_html(workspace, cid: str) -> Optional[str]:
