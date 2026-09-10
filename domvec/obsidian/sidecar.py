@@ -101,6 +101,10 @@ def chunk_payload(workspace, cid: str) -> Optional[Dict]:
         if i < len(addresses):
             address, value = addresses[i]
             entry["key"] = address.key()
+            # The template this line belongs to, beside the address that
+            # identifies it. Two result rows share a shape and never share an
+            # address, which is the whole point of carrying both.
+            entry["shape"] = address.shape
             entry["cls"] = address.render_class
             entry["control"] = bool(address.is_control)
             if address.is_url:

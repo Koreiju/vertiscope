@@ -285,6 +285,9 @@ _CLASS_BY_CATEGORY: Dict[str, str] = {
 }
 
 
+#: A positional index in an xpath step: the `[11]` of `li[11]`.
+_INDEX = re.compile(r"\[\d+\]")
+
 @dataclass(frozen=True)
 class ContentAddress:
     """One detected content unit's address. Immutable, hashable, ordered."""
@@ -295,6 +298,40 @@ class ContentAddress:
     accessor: str   # 'srcset[1]' — detector with its intrinsic sub-path
 
     # -- derived forms -----------------------------------------------------
+    @property
+    def shape(self) -> str:
+        """The xpath with its positions dropped: the template, not the instance.
+
+        `.../ol/li[11]/article/h3` becomes `.../ol/li/article/h3`, so every
+        repeat of one template -- a search result, a menu item, a paragraph
+        in a run -- collapses onto one string. That is what makes it useful:
+        it groups repeats, it names a template for retrieval ("every result
+        row"), and it survives an inserted sibling, which shifts every index
+        below it and no shape at all.
+
+        **It is not an identity, and it must never be used as one.** The
+        goal asked whether the address itself could go index-agnostic, and
+        the corpus answers no. Measured over 23,654 addresses:
+
+            distinct with indices   23,654
+            distinct by shape        2,831   (88.0% fewer)
+            shapes covering >1        1,290   median 5, p90 31, max 1511
+            of those, covering elements with DIFFERENT content
+                                      1,022   (79.2%)
+
+        Four shapes in five cover elements that say different things --
+        `/html/head/script` alone covers three unrelated script urls. An
+        address is a POINTER: `enact` presses it, the REPL resolves it
+        against a live DOM, the store keys chunks on it. A shape cannot
+        point at either of two siblings, so it sits BESIDE the xpath and
+        never replaces it.
+
+        Derived, never stored, for the same reason `render_class` is: the
+        xpath stays exactly what the pipeline emitted, so no key changes and
+        no row migrates.
+        """
+        return _INDEX.sub("", self.xpath or "")
+
     @property
     def category(self) -> str:
         return self.tag.split(".", 1)[0]

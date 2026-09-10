@@ -164,7 +164,7 @@ _ALLOWED_ATTRS = {"class", "href", "rel", "type", "disabled", "checked",
                   # Addresses whose line was folded into this element -- see
                   # _fold_repeats. Listed so the whitelist stays the whole
                   # truth rather than the part the fixtures happen to reach.
-                  "data-domvec-also"}
+                  "data-domvec-also", "data-domvec-shape"}
 
 
 def _parsed(html):
