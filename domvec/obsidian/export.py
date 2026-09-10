@@ -29,7 +29,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence, Tuple
 from urllib.parse import urlsplit
 
 from .. import tokens
@@ -210,6 +210,68 @@ def _first_chunk_by_page(chunks: Sequence) -> Dict[str, str]:
     return {url: cid for url, (_, cid) in best.items()}
 
 
+#: A note's place in its element's series: (index, total, prev cid, next cid).
+_Place = Tuple[int, int, str, str]
+
+
+def _series(chunks: Sequence) -> Dict[str, _Place]:
+    """cid -> where this note sits among the parts of its own element.
+
+    A control the page draws once can hold more content than a context window
+    takes. data.gov.uk's publisher filter is one `<select>` of 1,511 options,
+    which is thirty chunks -- and every one of them carried the SAME
+    frontmatter xpath, because that xpath is the chunk ROOT and the root is
+    the select. Thirty notes claiming one location, told apart only by an
+    ordinal that says nothing about the page.
+
+    So the parts are linked to each other instead. The content is not made to
+    fit by cutting it and it is not left as one oversized note: it stays cut
+    at the window, and the cut is made navigable, which is the only one of the
+    three that is both honest and readable.
+
+    Keyed on `(url, xpath)` -- the element -- and ordered by `part`, which is
+    the field that exists to distinguish chunks sharing a root.
+    """
+    grouped: Dict[Tuple[str, str], List] = {}
+    for c in chunks:
+        grouped.setdefault((c.url, c.xpath), []).append(c)
+
+    place: Dict[str, _Place] = {}
+    for members in grouped.values():
+        if len(members) < 2:
+            continue
+        members.sort(key=lambda c: c.part)
+        for i, c in enumerate(members):
+            place[c.cid] = (
+                i + 1, len(members),
+                members[i - 1].cid if i else "",
+                members[i + 1].cid if i + 1 < len(members) else "")
+    return place
+
+
+def _continuation(place: Optional[_Place], names: Dict[str, str]) -> str:
+    """The line that says which slice this is, and where the rest is.
+
+    Emitted OUTSIDE the folded callout, so it is the one thing visible on a
+    collapsed note besides the fold itself -- a reader who opens part 17 of 30
+    should not have to unfold anything to find out that is what they have.
+
+    Written as wikilinks, so Obsidian resolves them into real graph edges and
+    the series shows up in the graph view as the chain it is.
+    """
+    if not place:
+        return ""
+    index, total, prev, after = place
+    links = []
+    if prev and prev in names:
+        links.append("[[%s|← part %d]]" % (names[prev], index - 1))
+    if after and after in names:
+        links.append("[[%s|part %d →]]" % (names[after], index + 1))
+    if not links:
+        return ""
+    return "\n*part %d of %d — %s*\n" % (index, total, " · ".join(links))
+
+
 def export_vault(workspace,
                  root: Path,
                  *,
@@ -228,6 +290,7 @@ def export_vault(workspace,
 
     chunks = [c for url in pages for c in store.chunks(url)]
     target_cid = _first_chunk_by_page(chunks)
+    place = _series(chunks)
 
     # Canonical spelling -> the cid a link lands on. Targets are canonicalised
     # before comparison because a page is stored under the url it was scanned
@@ -258,7 +321,10 @@ def export_vault(workspace,
         out.wikilinks += hits
         out.unresolved += misses
         path = folder_path / ("%s.md" % names[c.cid])
-        path.write_text(_note(c, body), encoding="utf-8")
+        tail = _continuation(place.get(c.cid), names)
+        out.wikilinks += tail.count("[[")
+        path.write_text(_note(c, body, place.get(c.cid)) + tail,
+                        encoding="utf-8")
         out.notes[c.cid] = path
 
     return out
@@ -366,7 +432,7 @@ def _neutralise(md: str) -> str:
     return md.replace("[[", "[\\[").replace("]]", "\\]]")
 
 
-def _note(chunk, body: str) -> str:
+def _note(chunk, body: str, place: Optional[_Place] = None) -> str:
     """Frontmatter, the plugin's payload, then the rewritten prose.
 
     The fence holds only the cid. Everything the plugin needs in order to
@@ -416,6 +482,13 @@ def _note(chunk, body: str) -> str:
         "tokens: %d" % tokens.count(chunk.md if hasattr(chunk, "md")
                                     else chunk.markdown),
         "chars: %d" % chunk.chars,
+    ]
+    if place:
+        # The slice this note holds, in the frontmatter as well as in the
+        # visible line, so a query can find "the parts of one control" without
+        # parsing prose.
+        head += ["of: %d" % place[1], "index: %d" % place[0]]
+    head += [
         "---",
         "",
     ]

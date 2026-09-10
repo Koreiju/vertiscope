@@ -295,6 +295,13 @@ def _address_attrs(line: Dict) -> List[Tuple[str, str]]:
     pairs = [("data-domvec-address", key)]
     if own and own != key:
         pairs.append(("data-domvec-line", own))
+    shape = str(line.get("shape") or "")
+    if shape:
+        # So a reader -- or a query -- can select every element the page drew
+        # from one template, which an address cannot express: each repeat has
+        # its own. `[data-domvec-shape="..."]` is one selector for all of
+        # them.
+        pairs.append(("data-domvec-shape", shape))
     also = str(line.get("also") or "")
     if also:
         # Addresses that named the same element and did not get their own
@@ -670,6 +677,93 @@ def _captions_to_drop(lines: List[Dict]) -> set:
     return said
 
 
+#: The xpath step of an element whose siblings belong to one control.
+_OPTION_STEP = re.compile(r"/(option|optgroup)(\[\d+\])?$")
+
+
+def _xpath_of(key: str) -> str:
+    """The xpath out of an `url|xpath|taxonomy|accessor` address."""
+    parts = (key or "").split("|")
+    return parts[1] if len(parts) > 1 else ""
+
+
+def _owning_listbox(key: str) -> str:
+    """The xpath of the control this option belongs to, or "".
+
+    The parent of an `<option>` is a real element with a real address -- the
+    `<select>` the page drew -- which is what makes gathering the options
+    under one node different from gathering arbitrary siblings under an
+    invented `<ul>`. The rule this module follows everywhere else is that a
+    shared parent must not claim an address that is nobody's; here it claims
+    the one the page already has.
+    """
+    xpath = _xpath_of(key)
+    if not _OPTION_STEP.search(xpath):
+        return ""
+    return xpath[:xpath.rfind("/")]
+
+
+def _listbox_runs(lines: List[Dict]) -> List[object]:
+    """Consecutive options of one control, gathered; everything else as is.
+
+    An `<option>` drawn on its own came out as `<input type="text" disabled
+    placeholder="...">` -- a text field, which is not what an option is, and
+    on a page that aggregates it produced a column of 1,509 fake text boxes
+    where the page has one dropdown. The markdown form has no way to say
+    "listbox" and this one does, which is the whole reason it exists beside
+    it.
+
+    Only CONSECUTIVE options of the SAME parent are gathered, so a chunk
+    holding two selects draws two, and the reading order the lines arrived in
+    is preserved.
+    """
+    out: List[object] = []
+    run: List[Dict] = []
+    owner = ""
+    for line in lines:
+        key = str(line.get("control_key") or line.get("key") or "")
+        this = _owning_listbox(key)
+        if this and this == owner:
+            run.append(line)
+            continue
+        if run:
+            out.append((owner, run))
+        run, owner = ([line], this) if this else ([], "")
+        if not this:
+            out.append(line)
+    if run:
+        out.append((owner, run))
+    return out
+
+
+def _listbox(owner: str, run: List[Dict], base: str) -> str:
+    """One `<select>` holding one `<option>` per line.
+
+    `disabled` like every other widget here: the page is not present, and the
+    surface enables what the enact gate allows. `size` opens it to its own
+    height rather than collapsing it to one row, because the chunk's content
+    IS the options -- a closed dropdown would draw a chunk as a single empty
+    box.
+
+    Each option keeps its own address, so pressing one still names exactly
+    the element it came from, and the `<select>` carries the parent's.
+    """
+    url = str(run[0].get("key") or "").split("|")[0]
+    parts = []
+    for line in run:
+        text = str(line.get("text") or "").strip()
+        field = _FIELD.match(text)
+        label = (field.group(2).strip() if field else text)
+        attrs = _attrs(_address_attrs(line))
+        parts.append('<option class="dv-opt"%s>%s</option>'
+                     % (attrs, _esc(label)))
+    holder = _attrs([("data-domvec-address",
+                      "%s|%s|interactive.inputs|text()" % (url, owner))]) \
+        if url and owner else ""
+    return ('<select class="dv-select" disabled size="%d"%s>%s</select>'
+            % (min(len(parts), 12), holder, "".join(parts)))
+
+
 def render_lines(lines: List[Dict], *, base: str = "") -> str:
     """The distilled elements for one chunk's payload lines.
 
@@ -680,13 +774,20 @@ def render_lines(lines: List[Dict], *, base: str = "") -> str:
     builder = _Builder()
     kept = _fold_repeats(_one_picture_per_element(lines))
     said = _captions_to_drop(kept)
-    for line in kept:
-        raw = str(line.get("text") or "")
+    for item in _listbox_runs(kept):
+        if isinstance(item, tuple):
+            owner, run = item
+            raw = str(run[0].get("text") or "")
+            builder.at((len(raw) - len(raw.lstrip(" "))) // 2)
+            builder.add('<div class="dv-p">%s</div>'
+                        % _listbox(owner, run, base))
+            continue
+        raw = str(item.get("text") or "")
         if not raw.strip():
             continue
         depth = (len(raw) - len(raw.lstrip(" "))) // 2
         builder.at(depth)
-        builder.add(_element(raw.strip(), line, base, said))
+        builder.add(_element(raw.strip(), item, base, said))
     return builder.close()
 
 

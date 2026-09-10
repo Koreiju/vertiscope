@@ -92,6 +92,13 @@ h3.dv-h { font-size: 1.1em; } h4.dv-h, h5.dv-h, h6.dv-h { font-size: 1em; }
 .dv-form { border: 1px dashed var(--background-modifier-border, #ddd);
   border-radius: var(--radius-s, 4px); padding: 0 0.6em 0.35em; margin: 0.3em 0; }
 .dv-form legend { color: var(--text-faint, #999); padding: 0 0.3em; }
+.dv-select {
+  font: inherit; color: var(--text-muted, #666); width: 100%;
+  background: var(--background-modifier-form-field, #f6f6f6);
+  border: 1px solid var(--background-modifier-border, #ddd);
+  border-radius: var(--radius-s, 4px); padding: 0.15em 0; margin: 0.2em 0; }
+.dv-opt { padding: 0.1em 0.55em; }
+.dv-opt:checked { background: var(--background-modifier-hover, #eee); }
 
 .dv-fig { margin: 0.2em 0; }
 .dv-img { max-width: 100%; border-radius: var(--radius-s, 4px); display: block; }
@@ -247,8 +254,8 @@ export class ChunkSurface extends MarkdownRenderChild {
       const el = node as HTMLElement;
       const key = el.getAttribute("data-domvec-address") || "";
       if (!key) return;
-      const control = el.matches("button, input, a, fieldset")
-        || el.querySelector("button, input") !== null;
+      const control = el.matches("button, input, a, fieldset, select, option")
+        || el.querySelector("button, input, select") !== null;
       if (!control) return;
       // Enabled only when the SERVER says it will drive the page. The
       // elements arrive disabled from Python, which is the safe direction to
@@ -258,6 +265,11 @@ export class ChunkSurface extends MarkdownRenderChild {
         el.querySelectorAll("[disabled]").forEach(
           (d) => d.removeAttribute("disabled"));
         el.removeAttribute("disabled");
+        // An `<option>` carries no `disabled` of its own: the attribute is on
+        // the `<select>` around it, which is neither this element nor inside
+        // it. Enabling only downward left every option unclickable inside a
+        // control that was still off.
+        el.closest("select")?.removeAttribute("disabled");
         el.addClass("domvec-live");
       }
       el.addEventListener("click", (event) => {
