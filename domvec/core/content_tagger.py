@@ -464,6 +464,54 @@ def _own_label(node) -> str:
 #: `placeholder` first: it is what a reader sees in an empty field.
 _NAME_ATTRS = ("placeholder", "aria-label", "title", "alt", "value")
 
+#: Controls whose descendants are their OPTIONS, not their words.
+#:
+#: `_own_label` walks every descendant, which is right for a button wrapping
+#: a span and wrong here: a `<select>` holds one option per choice, each of
+#: which this tagger already emits as its own `interactive.inputs` detection
+#: at its own xpath. Reading the descendants as the select's label therefore
+#: records the whole option list a second time, as one value.
+#:
+#: Measured on the frozen corpus: data.gov.uk's publisher filter has 1,511
+#: options, and its select's own value came out at 43,542 characters --
+#: 7,745 tokens against a 512-token window, fifteen times over, in a chunk
+#: whose single line no reader can navigate and whose content is already
+#: covered by the 1,509 option chunks beside it. A user found it by opening
+#: the note and called it under-chunking, which is exactly what it is.
+#:
+#: The browser is the authority on what these draw. `select.value` is the
+#: SELECTED option, and a collapsed select paints that one label -- the rule
+#: `analytics/groundtruth.py` already states ("a <select> draws the one value
+#: it holds"). This makes the tagger agree with it.
+_LISTBOX_TAGS = frozenset({"select", "datalist", "optgroup"})
+
+
+def _chosen_option(node) -> str:
+    """The one option a collapsed listbox shows.
+
+    Only an option that claims `selected`. Falling back to the first option
+    was tried and is a fabrication: data.gov.uk's publisher filter opens on
+    an empty `<option value="">`, so the box a reader sees is blank, and
+    naming it after the first real entry would report a filter as applied
+    when it is not. "" instead, and `_own_name` falls through to the naming
+    attributes -- the control stays detected, and the `<label for=publisher>`
+    beside it is tagged separately and still says `Publisher`.
+    """
+    try:
+        options = [d for d in node.iter_descendants()
+                   if (d.tag or "").lower() == "option"]
+    except Exception:  # noqa: BLE001
+        return ""
+    for option in options:
+        try:
+            chosen = option.has_attr("selected")
+        except Exception:  # noqa: BLE001
+            chosen = False
+        if not chosen:
+            continue
+        return _own_label(option) or (option.get_attr("value") or "").strip()
+    return ""
+
 
 def _own_name(node, tag: str) -> str:
 	"""A control's label: its own words, else what an attribute calls it.
@@ -475,8 +523,14 @@ def _own_name(node, tag: str) -> str:
 
 	The tag is the last resort and stays meaningful: `[ ] input` for a
 	field the page genuinely leaves unnamed.
+
+	A listbox is the exception and takes `_chosen_option` instead: its
+	descendants are its options, each already detected separately, so
+	`_own_label` would record the entire list as one value. See
+	`_LISTBOX_TAGS`.
 	"""
-	own = _own_label(node)
+	own = (_chosen_option(node) if tag in _LISTBOX_TAGS
+	       else _own_label(node))
 	if own:
 		return own
 	for attr in _NAME_ATTRS:
