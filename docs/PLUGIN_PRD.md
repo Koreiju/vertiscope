@@ -657,9 +657,44 @@ nameless forms, 84 links whose href is `#`. Those are upstream -- a media
 detection with no alt and no src describes nothing, and the question is
 whether the tagger should emit it at all.
 
-Acceptance: contentless lines <= 900 by the element-scoped rule, with
-`covered` unchanged and the window-invariance test still green; then a
-separate answer for the remainder.
+**And the renderer cannot be where this is fixed.** `_dedupe`'s drops land in
+`absorbed`, which `covered` excludes by design, so dropping 782 lines drops
+782 covered addresses. "Contentless = 0 with `covered` unchanged" is not
+achievable by dropping a line at all -- the line and the address are the same
+thing at that point. There is also a reverted attempt on record at the
+`_dedupe` call site: a containment-chain rule that hid repeated names, costing
+"about a point of deduplication for four units of *loss*", with the verdict
+"a rule that trades coverage for tidiness is the wrong trade at any exchange
+rate". This one is different in kind -- it drops renderings that carry no
+words at all, which is the "reason beyond `these strings match`" that comment
+asks a future rule to have -- but the coverage arithmetic is the same and
+rules the renderer out.
+
+**Upstream, the detection itself is redundant.** Over 40 corpus pages, 1,634
+of 4,404 media addresses (37.1%) have neither a source nor an alt, and their
+value is literally the element's tag name. Counting every media `text()`
+detection valued at its own tag: **2,245**, on `svg` x732, `img` x376,
+`source` x370, `picture` x91, `video` x63.
+
+`srcset` is NOT the gap -- the tagger already splits it into indexed
+candidates, so a `<source>`'s real URLs exist as their own addresses. The
+contentless thing is a SECOND detection at the same element whose accessor is
+`text()`, on an element that has no text, falling back to the tag.
+
+| | detections | |
+|---|---|---|
+| element keeps another address without it | **1,368** | 60.9% |
+| element would lose its only address | 877 | 39.1% |
+
+The 877 are `<svg>` x725, `<picture>` x91, `<video>` x60 -- an inline SVG
+genuinely is a graphic with no source, and its address is the only thing
+saying one is there.
+
+Acceptance: drop a media `text()` detection valued at its own tag name **only
+where the element retains another address** -- 1,368 of 2,245, no element
+orphaned, and the test is a property of the trie rather than of the cut, so it
+holds at every window. Verify against the full board, since a tagger change is
+upstream of reach, dedup and coverage alike.
 
 **R-K2b is not a defect and is not mine to decide.** 88% of the repetition is
 in the page. Rendering it is *faithful*; suppressing it makes the artifact
