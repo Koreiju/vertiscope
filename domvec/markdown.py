@@ -491,7 +491,12 @@ def _render_unit(
         # `![images]`, named after its taxonomy. `_media_alt` is the existing
         # rule for choosing between them and it refuses a value that is only
         # a file path, which is the thing that must not become a caption.
-        alt = _media_alt(text_at_node, "") or address.subcategory
+        # And NOTHING when the page gave none. `address.subcategory` was the
+        # fallback, which draws the TAXONOMY as the caption: a page with
+        # fifteen unnamed icons rendered `![images]` fifteen times, telling a
+        # reader nothing except which detector fired. `![]` is the honest
+        # form and markdown's own for an image whose alt is absent.
+        alt = _media_alt(text_at_node, "")
         if _is_tag_name(value):
             return f"![{alt}]"
         return f"![{alt}]({value})"
@@ -526,6 +531,24 @@ def _render_unit(
         # the element's own text where it has one, since the detection's value
         # is only the tag name.
         shown = text_at_node or value
+        # ... unless that value is only the element's own tag name.
+        #
+        # `_own_name` falls back to the tag when a page leaves a control
+        # unnamed, so `shown` became the taxonomy's word for the element and
+        # the render drew `[ ] input`, `( button )`, `=== form ===`. Measured
+        # over the 3,135 exported notes: 136 lines named after their tag,
+        # `form` x78, `label` x34, `input` x20.
+        #
+        # The mark already says a control is here. Adding the tag says it a
+        # second time in the vocabulary of the detector rather than of the
+        # page, which is exactly what the goal's quality bar rules out. The
+        # bare mark under-claims, which is this renderer's standing direction.
+        #
+        # `_echoes_its_element` is the existing predicate for this question --
+        # it compares the value against the address's own last step, so it
+        # needs no list of tags to maintain.
+        if _echoes_its_element(address, shown):
+            shown = ""
         sub = address.subcategory
         # A control that *is* a heading keeps both facts. 34% of the corpus's
         # headings contain a control or a link, and where the control's own
@@ -535,7 +558,7 @@ def _render_unit(
         # a button; the line can say so.
         mark = "#" * _HEADINGS[label] + " " if label in _HEADINGS else ""
         if sub == "inputs":
-            return f"{mark}[ ] {shown}"
+            return f"{mark}[ ] {shown}".rstrip()
         if sub in ("buttons", "event_handlers"):
             # An element carrying an `onclick` is a button in every way that
             # matters here: `kind_for` classifies it as one, and the REPL

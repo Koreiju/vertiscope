@@ -17,7 +17,7 @@ yet, and its closing section lists exactly which.
 over CDP, never by screenshot (see R-I1). `Partial` means built with a
 measured shortfall, and the shortfall is stated. `Open` means not started.
 
-**47 requirements: 32 done, 8 partial, 7 open.**
+**47 requirements: 33 done, 8 partial, 6 open.**
 
 Counted from the tables below, which are the authority. An earlier tally of
 "41: 29 / 9 / 3" was given in conversation and was arithmetic error, not a
@@ -564,7 +564,7 @@ opens, not the renderer in isolation.
 |---|---|---|
 | R-K1 | No intermediated hierarchical fields: a level of indentation holds more than one child, or it does not exist | **Open** — 39.0% of chunks carry one |
 | R-K2 | No dedups: a chunk does not say the same thing twice | **Open** — 15.9% of chunks repeat a line |
-| R-K3 | A control's name is the page's word for it, never the taxonomy's | **Open** — 136 lines |
+| R-K3 | A control's name is the page's word for it, never the taxonomy's | Done — 1,556 → 2 lines |
 
 **R-K1 — 39.0% of chunks, and the cause is that the collapse is global where
 the property is local.**
@@ -598,10 +598,39 @@ Acceptance: chunks with a repeated line <= 2%.
 
 **R-K3 — the taxonomy word standing in for a name.**
 
-136 lines draw the category as the label: `form` x78, `label` x34, `input`
-x20, `button` x3. `![images]` is the same defect in the media path --
-`address.subcategory` used as an alt. A reader learns nothing from `[ ] input`
-that `[ ]` did not already say, and it is the direct cause of most of R-K2.
+Lines drew the category as the label: `[ ] input`, `( button )`,
+`=== form ===`, and in the media path `![images]` from `address.subcategory`
+used as an alt. A reader learns nothing from `[ ] input` that `[ ]` did not
+already say — the mark states the affordance, and the tag repeats it in the
+detector's vocabulary instead of the page's.
+
+`_echoes_its_element` already answered the question ("is this value only the
+element's own tag name") and was used in two places, neither of them the
+render. Applying it there, and dropping the `subcategory` fallback on the
+media alt:
+
+| over 40 corpus pages | before | after |
+|---|---|---|
+| category-as-name lines | **1,556** | **2** |
+| lines | 73,675 | 73,675 |
+| covered addresses | 118,387 | 118,387 |
+| chunks | 10,013 | 10,014 |
+| chunks with a repeated line | 14.31% | **14.36%** |
+
+*(The corpus-wide figure of 136 quoted earlier came from the 24 exported pages
+and a narrower match that missed the `![images]` / `![video]` forms; 1,556 is
+the same measurement done properly.)*
+
+**And it made R-K2 marginally worse, which corrects a claim made here.** This
+was recorded as "the direct cause of most of R-K2". It is not: removing a
+false name does not remove the duplication underneath it. Fifteen unnamed
+icons were fifteen identical `![images]` lines and are now fifteen identical
+`![]` lines, and a few `![images]`/`![video]` pairs that differed only by
+their category now collide — +0.05 points. The gain is 778x on the target and
+the cost is 0.05 points on a neighbour, so it ships, but the two are not the
+same defect and fixing one does not fix the other. R-K2 needs its own answer:
+a unit with neither words nor a target carries nothing, and drawing it at all
+is the actual duplication.
 
 Also found, and small: 133 lines (0.56%) say one phrase twice --
 `=== Toggle Table of Contents Toggle Table of Contents ===`, `( Change theme
