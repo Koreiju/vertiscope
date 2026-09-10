@@ -616,7 +616,50 @@ address, which is the failure `_suppressed_controls` exists for -- 89.8% of
 anchor affordances were lost that way once. The line goes and the address
 rides on `absorbed`, the mechanism already built for exactly this.
 
-Acceptance: contentless lines = 0, with `covered` unchanged.
+Measured over 40 corpus pages: **1,671 contentless lines, 2.27% of all
+lines** -- `![]` x1,377, `===  ===` x159, `<#>` x85, `[ ]` x28, and a tail of
+`![] ![]`, `</>`, `(  )` where two placeholders were inline-merged.
+
+They split on whether dropping one costs an address:
+
+| | lines | |
+|---|---|---|
+| another line survives at the same element | 782 | 46.8% |
+| the only line at its element | 889 | 53.2% |
+
+**And the obvious implementation is forbidden, which is the finding.** The
+natural pass is chunk-level: walk a chunk's lines, drop a bare mark when
+another line in that chunk shares its xpath, and hang the address on the
+survivor. Two things kill it.
+
+`absorbed` is deliberately NOT counted by `covered` -- its own comment says
+why: "coverage must not move with the context window ... counting a collapse
+as covered therefore made the set window-dependent by four addresses at
+window 200, twice". So moving an address there LOWERS `covered`, which is the
+opposite of the acceptance criterion.
+
+Worse, the test itself is window-dependent. Whether another line at the same
+element is in the same chunk is a fact about where the chunker cut. A rule
+keyed on that would drop a line at one window and keep it at another, and
+`test_no_address_is_lost_when_the_window_changes` exists for precisely that.
+
+This codebase has made the same correction twice already, and written it
+down: "a pass whose result must not depend on the descent belongs outside it"
+(`_absorbed_by_element`), and the same reasoning in `_suppressed_controls`.
+So the rule has to be **element-scoped over the trie**, where `_dedupe`
+already lives: a unit that renders to a bare mark is dropped when another
+unit AT THAT ELEMENT renders with words -- a property of the document, true
+at every window.
+
+That still only reaches the 46.8%. The remaining 889 are elements whose only
+rendering is a mark: 643 images with neither an alt nor a source, 113
+nameless forms, 84 links whose href is `#`. Those are upstream -- a media
+detection with no alt and no src describes nothing, and the question is
+whether the tagger should emit it at all.
+
+Acceptance: contentless lines <= 900 by the element-scoped rule, with
+`covered` unchanged and the window-invariance test still green; then a
+separate answer for the remainder.
 
 **R-K2b is not a defect and is not mine to decide.** 88% of the repetition is
 in the page. Rendering it is *faithful*; suppressing it makes the artifact
