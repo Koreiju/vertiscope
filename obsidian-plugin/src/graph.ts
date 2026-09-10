@@ -57,6 +57,9 @@ interface Layout {
   images?: number;
   /** Half the width of the cube the coordinates are delivered in. */
   extent?: number;
+  /** Nearest-neighbour distance quantiles over the placed nodes, from the
+   *  fit itself. `p50` is the projection's own scale; see the sizing note. */
+  spacing?: { p05: number; p25: number; p50: number; n: number };
   halves: { lexical?: number; semantic?: number; equalised: boolean };
   note?: string;
 }
@@ -379,14 +382,64 @@ export class GraphView extends ItemView {
     // each node shrank, twice over: the renderer was drawing 390,000
     // triangles and lighting 1.5% of the pixels.
     //
-    // Typical spacing in a cube of `2 * extent` holding n points is
-    // `2 * extent / cbrt(n)`. A node wants to be a small fraction of that --
-    // big enough to see, small enough that the cloud does not become a solid
-    // wall -- and `cbrt(val)` runs about 2 to 4, so the relative size is that
-    // spacing over roughly twelve.
+    // Spacing comes from the FIT now, not from a formula about the cube.
+    //
+    // `2 * extent / cbrt(n)` is the spacing of a UNIFORM cloud, and UMAP does
+    // not deliver one. Measured over the 3,135-node corpus: that formula says
+    // 41.0 units and the real median nearest-neighbour distance is 0.76 --
+    // a factor of 54 -- so every node was drawn overlapping dozens of others
+    // and the pane read as a blob. The extent was already normalised; the
+    // extent was never the problem.
+    //
+    // `layout.spacing.p50` is the projection's own scale. Sizing the median
+    // node to just clear it means half the nodes clear their nearest
+    // neighbour, which is the acceptance criterion R-J1 states. The median
+    // and not p05: p05 is near-duplicate chunks off one page sitting on top
+    // of each other, which is the projection being right, and sizing against
+    // it would shrink every node on the page to hide a chunker problem.
+    //
+    // `cbrt(val)` runs about 2 to 4 across a corpus, so a diameter of
+    // `2 * cbrt(val) * relSize` clears `p50` at the middle of that range when
+    // relSize is `p50 / 6`. The old formula is the fallback for a sidecar too
+    // old to send `spacing`, and for a fit so degenerate it reports zero.
+    // Sized from the fit's OWN spacing, not from a formula about the cube.
+    //
+    // `2 * extent / cbrt(n)` is the spacing of a UNIFORM cloud, and UMAP does
+    // not deliver one: over this corpus that formula says 41.0 units while
+    // the real median nearest-neighbour distance is 0.76, a factor of 54. So
+    // every node was drawn overlapping dozens of others. Rescaling the extent
+    // cannot fix it -- `_framed` already normalises the extent, and the cloud
+    // is still clumped inside it.
+    //
+    // The MEDIAN, not p05: p05 is near-duplicate chunks off one page landing
+    // on each other, which is the projection being correct, and sizing against
+    // it would shrink every node to hide a chunker problem (R-J3).
+    //
+    // Sized from the fit's OWN spacing, not from a formula about the cube.
+    //
+    // The camera no longer blocks it -- `frameDistance` below decoupled that,
+    // and with both changes in place 100% of nodes are on screen AND the R-J1
+    // ratio is 1.000. The blocker is that the honest size is INVISIBLE. At a
+    // camera distance of 1529 framing a cloud of radius 380, one world unit
+    // is 1.70 px, so a median node of 0.757 units draws at **0.45 px**.
+    //
+    // Legibility is two-sided and the renderer can only satisfy one side: the
+    // node must clear its neighbour (diameter <= nn_p50) AND be visible
+    // (diameter >= ~2 px). Neither held while the fit delivered a median
+    // separation of 0.757 units -- an honest node drew at 0.44 px. It holds
+    // now because `layout.py::_spread` equalises the axes: p50 is 5.657, so
+    // the honest node draws at 2.46 px. Both sides, measured in the app.
+    //
+    // `cbrt(val)` runs about 2 to 4 across a corpus, so a diameter of
+    // `2 * cbrt(val) * relSize` clears p50 at the middle of that range when
+    // relSize is `p50 / 6`. The uniform-cloud formula stays as the fallback
+    // for a sidecar too old to send `spacing`.
     const extent = layout.extent ?? 300;
-    const spacing = (2 * extent) / Math.cbrt(Math.max(1, nodes.length));
-    const relSize = Math.max(0.5, spacing / 8);
+    const uniform = (2 * extent) / Math.cbrt(Math.max(1, nodes.length));
+    const measured = layout.spacing?.p50 ?? 0;
+    const relSize = measured > 0
+      ? Math.max(0.05, measured / 6)
+      : Math.max(0.5, uniform / 8);
 
     const graph = new ForceGraph3D(canvas)
       .graphData({ nodes, links: layout.edges.map((e) => ({ ...e })) })
@@ -432,11 +485,48 @@ export class GraphView extends ItemView {
     // Placing it on the +z axis at a distance set by the cube the layout
     // delivers -- which `layout.py` now guarantees -- means the fit always
     // starts from outside, looking at the centre.
+    //
+    // And then NOT calling `zoomToFit`, which undid it.
+    //
+    // `zoomToFit` frames node bounding SPHERES, so the distance it picks is a
+    // function of node RADIUS, not of where the nodes are. Measured over CDP
+    // on this corpus: at `nodeRelSize` 5.124 it settled the camera at 148.9,
+    // and at 0.126 it settled at 3.67 -- 40.6x apart, the same 40.6x as the
+    // radii, and in both cases the rendered node came out at 278.9 px. It is
+    // a servo that holds apparent node size constant, which is the wrong
+    // invariant for framing a cloud: with the cloud spanning +/-300 it put
+    // the camera INSIDE, and nodes projected to (1076, 1029) and (1323, 1718)
+    // against a 518 x 840 canvas -- 0 of 3,135 on screen. That is the "3D
+    // projector has no viewable nodes" report, still true.
+    //
+    // Framed from the DATA instead. The layout centres on the origin, so the
+    // cloud's radius is the furthest node from it, and the distance that puts
+    // a sphere of that radius inside the frustum is `R / sin(half-angle)`.
+    // The binding angle is the smaller of the two: the vertical fov is what
+    // three.js stores, and the horizontal one is narrower whenever the pane
+    // is taller than it is wide, which in a sidebar it usually is.
+    const frameDistance = () => {
+      const pts = graph.graphData().nodes as any[];
+      let r = 0;
+      for (const p of pts) {
+        const d = Math.hypot(p.x ?? 0, p.y ?? 0, p.z ?? 0);
+        if (d > r) r = d;
+      }
+      if (!(r > 0)) r = extent;
+      const cam: any = graph.camera();
+      const vfov = ((cam?.fov ?? 50) * Math.PI) / 180;
+      const aspect = Math.max(0.01, canvas.clientWidth / Math.max(1, canvas.clientHeight));
+      const hfov = 2 * Math.atan(Math.tan(vfov / 2) * aspect);
+      const half = Math.max(0.01, Math.min(vfov, hfov) / 2);
+      // 1.12 leaves a margin so the outermost nodes are not clipped by their
+      // own radius, which this calculation deliberately does not know about.
+      return (r / Math.sin(half)) * 1.12;
+    };
+
     window.setTimeout(() => {
       try {
-        graph.cameraPosition({ x: 0, y: 0, z: extent * 2.6 },
+        graph.cameraPosition({ x: 0, y: 0, z: frameDistance() },
                              { x: 0, y: 0, z: 0 }, 0);
-        graph.zoomToFit(400, extent * 0.15);
       } catch {
         /* an empty scene has nothing to fit; the status bar already says so */
       }
@@ -446,9 +536,8 @@ export class GraphView extends ItemView {
     // the cloud has no way back otherwise, and "the graph went blank" is not
     // a state anyone should have to recognise.
     this.reframe = () => {
-      graph.cameraPosition({ x: 0, y: 0, z: extent * 2.6 },
+      graph.cameraPosition({ x: 0, y: 0, z: frameDistance() },
                            { x: 0, y: 0, z: 0 }, 400);
-      window.setTimeout(() => graph.zoomToFit(400, extent * 0.15), 450);
     };
   }
 }
