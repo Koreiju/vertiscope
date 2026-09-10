@@ -17,7 +17,7 @@ yet, and its closing section lists exactly which.
 over CDP, never by screenshot (see R-I1). `Partial` means built with a
 measured shortfall, and the shortfall is stated. `Open` means not started.
 
-**47 requirements: 33 done, 8 partial, 6 open.**
+**48 requirements: 33 done, 8 partial, 7 open.**
 
 Counted from the tables below, which are the authority. An earlier tally of
 "41: 29 / 9 / 3" was given in conversation and was arithmetic error, not a
@@ -563,7 +563,8 @@ opens, not the renderer in isolation.
 | id | requirement | status |
 |---|---|---|
 | R-K1 | No intermediated hierarchical fields: a level of indentation holds more than one child, or it does not exist | **Open** — 39.0% of chunks carry one |
-| R-K2 | No dedups: a chunk does not say the same thing twice | **Open** — 15.9% of chunks repeat a line |
+| R-K2a | No contentless lines: a unit with neither words nor a target is not drawn | **Open** — 703 repeats, 2.79% of chunks |
+| R-K2b | A chunk showing what the page itself repeats — faithful, or noise? | **Open** — a decision, 88% of the repeats |
 | R-K3 | A control's name is the page's word for it, never the taxonomy's | Done — 1,556 → 2 lines |
 
 **R-K1 — 39.0% of chunks, and the cause is that the collapse is global where
@@ -586,15 +587,48 @@ already doing the job, which is the belief this measurement corrects.
 Acceptance: pass-through levels <= 2% of chunks, with `reading_order`,
 `containment` and `depth_rho` unmoved.
 
-**R-K2 — 15.9% of chunks repeat a line.**
+**R-K2 — split, because the measurement says it is two things and the bar
+can only be asked of one of them.**
 
-985 repeated lines out of 23,662 (4.2%). The worst are manufactured by the
-renderer rather than present in the page: `![images]` fifteen times in one
-note, `=== label ===` five times in another. When an element has no name the
-renderer substitutes a constant, so N unnamed elements become N identical
-lines -- duplication the page does not contain.
+The criterion first written here -- "chunks with a repeated line <= 2%" -- was
+set before the repeats were looked at. Over 40 corpus pages, 1,438 of 10,014
+chunks (14.36%) hold a repeat, and those repeats decompose:
 
-Acceptance: chunks with a repeated line <= 2%.
+| | lines | share |
+|---|---|---|
+| the page genuinely says it twice | **5,161** | **88.0%** |
+| contentless -- mark only, no words | 703 | 12.0% |
+
+So 2% is not reachable by removing renderer artifacts. Suppressing every
+contentless line takes the figure from 14.36% to about 11.6%, and the rest is
+the document repeating itself: a nav label in the header and again in the
+footer, inside one chunk.
+
+**R-K2a is the renderer's, and is a defect.** 703 lines carry a mark and
+nothing else -- `![]` x551, `<#>` x72, `===  ===` x39, `[ ]` x11, and `![]
+![]` x7 where two placeholders were inline-merged. A media unit with no alt
+and no source, a link whose href is `#`, a form with no name: each says only
+"a detector fired here", and drawing it fifteen times says it fifteen times.
+279 chunks have no other kind of repeat, so this alone is 2.79% of all chunks.
+
+The fix is not simply to drop them: a unit that draws no line leaves no
+address, which is the failure `_suppressed_controls` exists for -- 89.8% of
+anchor affordances were lost that way once. The line goes and the address
+rides on `absorbed`, the mechanism already built for exactly this.
+
+Acceptance: contentless lines = 0, with `covered` unchanged.
+
+**R-K2b is not a defect and is not mine to decide.** 88% of the repetition is
+in the page. Rendering it is *faithful*; suppressing it makes the artifact
+cleaner than the thing it distils. The goal says "no dedups" in a list about
+elegance, which reads as "the panel should not show the same thing twice" --
+but this renderer's standing direction is the opposite, tuned "17:1 toward
+leaving noise rather than risking loss", and `_dedupe` is element-scoped on
+purpose. Cross-element dedup inside a chunk would drop addresses that name
+real, distinct elements.
+
+The question for the user: when a page puts the same words in its header and
+its footer, should one chunk show them once or twice?
 
 **R-K3 — the taxonomy word standing in for a name.**
 
