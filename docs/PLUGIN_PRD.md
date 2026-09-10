@@ -17,7 +17,7 @@ yet, and its closing section lists exactly which.
 over CDP, never by screenshot (see R-I1). `Partial` means built with a
 measured shortfall, and the shortfall is stated. `Open` means not started.
 
-**44 requirements: 32 done, 8 partial, 4 open.**
+**47 requirements: 32 done, 8 partial, 7 open.**
 
 Counted from the tables below, which are the authority. An earlier tally of
 "41: 29 / 9 / 3" was given in conversation and was arithmetic error, not a
@@ -546,6 +546,69 @@ ratio is **0.037** (0.757 units against a 20.5-unit diameter). R-J2 is the
 half that closes it: a diameter taken from the layout's own `nn_p50` satisfies
 this by construction, and means half of all nodes clear their nearest
 neighbour instead of the renderer guessing a spacing the data never had.
+
+## K. The markdown half, against the stated bar
+
+`PLUGIN_GOAL.md` names the Milkdown playground's left pane as the quality
+standard and gives its negative form, which is the testable half:
+
+> *"no dedups, headers and structures within markdown structures are
+> appropriately and most simply matched without things like intermediated
+> hierarchical fields when a singular path node of some form of structure like
+> that is rendered from its shadow DOM and interactive browser half"*
+
+Measured over all 3,135 exported notes -- the artifacts a reader actually
+opens, not the renderer in isolation.
+
+| id | requirement | status |
+|---|---|---|
+| R-K1 | No intermediated hierarchical fields: a level of indentation holds more than one child, or it does not exist | **Open** — 39.0% of chunks carry one |
+| R-K2 | No dedups: a chunk does not say the same thing twice | **Open** — 15.9% of chunks repeat a line |
+| R-K3 | A control's name is the page's word for it, never the taxonomy's | **Open** — 136 lines |
+
+**R-K1 — 39.0% of chunks, and the cause is that the collapse is global where
+the property is local.**
+
+| | |
+|---|---|
+| chunks with a pass-through level | 1,223 of 3,135 (**39.0%**) |
+| such levels | 3,212 (1.02 per chunk) |
+
+`_level_page` maps the set of depths that OCCUR ON A PAGE onto consecutive
+integers, so "a chain of five wrappers costs one step instead of five" holds
+only when those depths appear nowhere else on that page. On a real page they
+do: the same depth carries genuine branching in another chunk, survives the
+compaction, and still spends an indent in the chunk where it holds a single
+child. `htmlform.py::_collapse` does not have this problem because it works on
+the node tree locally -- and its own docstring credits `_level_page` with
+already doing the job, which is the belief this measurement corrects.
+
+Acceptance: pass-through levels <= 2% of chunks, with `reading_order`,
+`containment` and `depth_rho` unmoved.
+
+**R-K2 — 15.9% of chunks repeat a line.**
+
+985 repeated lines out of 23,662 (4.2%). The worst are manufactured by the
+renderer rather than present in the page: `![images]` fifteen times in one
+note, `=== label ===` five times in another. When an element has no name the
+renderer substitutes a constant, so N unnamed elements become N identical
+lines -- duplication the page does not contain.
+
+Acceptance: chunks with a repeated line <= 2%.
+
+**R-K3 — the taxonomy word standing in for a name.**
+
+136 lines draw the category as the label: `form` x78, `label` x34, `input`
+x20, `button` x3. `![images]` is the same defect in the media path --
+`address.subcategory` used as an alt. A reader learns nothing from `[ ] input`
+that `[ ]` did not already say, and it is the direct cause of most of R-K2.
+
+Also found, and small: 133 lines (0.56%) say one phrase twice --
+`=== Toggle Table of Contents Toggle Table of Contents ===`, `( Change theme
+Change theme )` -- from `_own_label` concatenating an element's own text with
+a nested element repeating it.
+
+Acceptance: category-as-name lines = 0; doubled-phrase lines <= 0.05%.
 
 ## What "fully realized" means
 
