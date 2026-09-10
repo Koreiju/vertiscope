@@ -690,11 +690,40 @@ The 877 are `<svg>` x725, `<picture>` x91, `<video>` x60 -- an inline SVG
 genuinely is a graphic with no source, and its address is the only thing
 saying one is there.
 
-Acceptance: drop a media `text()` detection valued at its own tag name **only
-where the element retains another address** -- 1,368 of 2,245, no element
-orphaned, and the test is a property of the trie rather than of the cut, so it
-holds at every window. Verify against the full board, since a tagger change is
-upstream of reach, dedup and coverage alike.
+**Built, measured, reverted.** The rule was implemented in the tagger exactly
+as specified -- drop only where the element retains another address -- and it
+did what it promised on its own terms, over 40 corpus pages:
+
+| | before | after |
+|---|---|---|
+| addresses | 140,395 | 139,027 (**-1,368**, the predicted count) |
+| distinct elements | 65,943 | **65,943** -- nothing orphaned |
+| contentless lines | 1,671 | **949** (-43.2%) |
+| chunks with a repeat | 14.36% | **12.71%** |
+| **covered addresses** | 118,387 | 116,484 (**-1,903**) |
+
+Coverage fell by 535 MORE than the addresses removed. Diffing the covered sets
+over 12 pages: 589 addresses removed from the trie, 929 lost coverage, so
+**340 addresses that still exist stopped being accounted for** -- 265
+`media.images` and 75 `text.accessible`.
+
+That is the trade `markdown.py` refuses at its `_dedupe` call site in exactly
+these words: *"a rule that trades coverage for tidiness is the wrong trade at
+any exchange rate."* 722 fewer contentless lines for 340 lost addresses is
+that trade. Reverted.
+
+**The mechanism is not understood, and two explanations have been wrong.**
+The first guess was that the `![]` line is a carrier -- that the element's real
+`src` and `alt` ride on it as `inline` -- which would make it contentless only
+in appearance. Checked: all 819 `![]` lines carry **zero** inline addresses.
+So that is not it either. Removing a detection also moved 105 chunk boundaries
+and 2,177 lines, far more than the 1,368 detections removed, so something
+downstream of the trie is reacting to the removal in a way neither guess
+predicted.
+
+Acceptance is unchanged in intent, but no further attempt should be made until
+that mechanism is identified: a change that reduces coverage by an amount its
+author cannot explain is not ready regardless of what it improves.
 
 **R-K2b is not a defect and is not mine to decide.** 88% of the repetition is
 in the page. Rendering it is *faithful*; suppressing it makes the artifact
