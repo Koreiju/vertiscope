@@ -5,6 +5,10 @@ project's purpose.** The percentage detection rates (search 64.4%, pagers 44.2%
 over 1,721 pages) are not the objective and were never the objective; they are
 a property of one subsystem.
 
+`PLUGIN_GOAL.md` is the plugin-side companion to this file, binding in the
+same way and covering the panel browser, notebooks, and the language-model
+interface.
+
 ## The user's statement, verbatim
 
 > The main goal here, remember, is for this 'sensor' to be a generalized map of

@@ -1,5 +1,8 @@
 # Object model
 
+`PLUGIN_GOAL.md` binds this model to a wider trie than the web alone: the
+local vault and every installed Python package are addressed in it too.
+
 The trie is the ontology and the data. One address names a detected thing; its
 leaf holds what was extracted. Chunks are a *window* over that trie, sized by
 budget — not a unit of change. Markdown is a *rendering* of a chunk's subtree,

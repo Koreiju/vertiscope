@@ -1,5 +1,9 @@
 # The callable interface: the Python REPL is the browser
 
+`PLUGIN_GOAL.md` supersedes the framing here with the chained single-hop
+toolspace: one generated system prompt per hop, outputs instructing the next
+link, and a final aggregate pass.
+
 ## 0. The requirement, verbatim
 
 > Not much improvement. How about this, perhaps we analyze this from the most

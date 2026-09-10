@@ -4,6 +4,10 @@ Distilled web chunks as notes in a vault: readable as markdown, clickable as
 a surface, and linked to each other by the page's own links so the graph view
 shows the web graph.
 
+`PLUGIN_GOAL.md` is the binding statement of what this bridge is ultimately
+for — a live minimal browser in the panel, delta-streamed to graph and
+database alike — and it wins wherever this design record disagrees with it.
+
 This document records what was verified, the two constraints that shape the
 design, and what is built so far.
 

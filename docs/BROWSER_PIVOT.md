@@ -1,5 +1,9 @@
 # The REPL is the browser, not a classifier
 
+`PLUGIN_GOAL.md` carries this pivot into the plugin: the panel's browser half
+renders as a browser would and dispatches interactions to the live page when
+there is a connection.
+
 ## 1. What the measurements forced
 
 Detection was rebuilt twice — a vocabulary bank with negative rejects, then

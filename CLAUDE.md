@@ -4,6 +4,10 @@
 holds the binding goal in the user's own words. This file is the short form;
 that file wins wherever they differ.
 
+**For the Obsidian plugin specifically, read `docs/PLUGIN_GOAL.md`** — the
+user's verbatim statement of what the plugin is, which binds the same way and
+is broader than the numbered requirements in `docs/PLUGIN_PRD.md`.
+
 ## The goal, in one paragraph
 
 The sensor is a **generalized map of shadow DOMs**. The rendering is a full
@@ -129,6 +133,9 @@ denominator is what this component is answerable for.
 ## Where things are
 
 - `docs/AFFINE_MAP_GOAL.md` — the binding goal, verbatim, plus the metric theory.
+- `docs/PLUGIN_GOAL.md` — the plugin's binding goal, verbatim: the streaming
+  panel-browser, the `[]()` retrieval gesture, notebooks and terminals, the
+  site-packages corpus, and the chained single-hop LLM interface.
 - `domvec/analytics/` — the affine-map confusion matrix, ground truth, phase
   timings. Run: `python -m domvec.analytics <url>`. Two scaling harnesses:
   `--delta` (live, a real insertion in a real browser) and `--projection`
