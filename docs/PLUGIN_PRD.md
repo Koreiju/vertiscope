@@ -780,6 +780,60 @@ a nested element repeating it.
 
 Acceptance: category-as-name lines = 0; doubled-phrase lines <= 0.05%.
 
+## L. What coverage means — the gate every cleanup collided with
+
+Five iterations of markdown cleanup ran aground on the same number, so the
+number was examined instead of the changes.
+
+**`covered` answers "what did the render draw". It was being read as "what
+does the system account for".** Those differ by `absorbed` — the spellings a
+collapse dropped, an `aria-label` beside the text it duplicates, an `href`
+hidden because the anchor says the words.
+
+**The store never had the confusion.** `graphstore` maps an address to a
+chunk from `address`, then `inline`, then a THIRD pass over `absorbed`, and
+says why: reading only the first two "left 37,452 addresses over the corpus
+with no chunk at all, 8,167 of them urls, and an edge they could not hang on".
+An absorbed address has a chunk, hangs its edge, is findable. `covered` calls
+it lost.
+
+Measured over twelve corpus pages:
+
+| | share of the trie's addresses | moved by re-chunking at 128 vs 512 |
+|---|---|---|
+| `covered` (address + inline) | 89.4% | 46 |
+| `accounted` (+ absorbed) | **95.9%** | 227 |
+
+**What this cost.** The nameless-media change (R-K2a) was reverted because
+`covered` fell by 340 addresses that still existed. Re-measured against
+accounting, it fell by **94**. The gate overstated the damage 3.6x, and a
+change was reverted substantially on that.
+
+**And the invariant everyone reasons from is weaker than believed.**
+`covered` is not window-invariant either: 46 addresses move between window 512
+and window 128 on twelve pages. `test_no_address_is_lost_when_the_window_
+changes` passes because it runs on a SINGLE fixture page. Every argument in
+this repo of the form "that would make the covered set window-dependent" rests
+on a property that does not hold at corpus scale — including two reverts of a
+value splitter earlier in this work.
+
+**The settlement.**
+
+* `covered` keeps its definition and its meaning narrows to what it always
+  measured: lines drawn.
+* `MarkdownChunk.accounted` is added — `address` + `inline` + `absorbed`,
+  mirroring the store's three passes exactly, so the metric and the store
+  cannot drift.
+* **Cleanups are gated on `accounted`.** Gating on `covered` forbids the whole
+  class by construction: drawing fewer redundant lines lowers it, because
+  that is what such a change means.
+* The window-invariance test should be re-pointed at page-level `accounted`
+  and run over the corpus rather than one page. It currently certifies a
+  property it does not check.
+
+R-K1, R-K2a and R-E3a were all blocked by this and are unblocked by it —
+under the correct gate, each still has to prove it costs no accounting.
+
 ## What "fully realized" means
 
 The pivot is realized when:
