@@ -65,6 +65,18 @@ CRITERIA = {
     "depth_rho":             ("R-C2", None, +1, True),
     "shape_field_exists":    ("R-C4", 1.0, +1, False),
     "chunks_over_window":    ("R-C5", 0.02, -1, False),
+    # How far the WORST chunk is over, as a multiple of the window.
+    #
+    # `chunks_over_window` counts how many exceed and never by how much, so a
+    # single chunk fifteen times the window read 1.2% and MET. A user found
+    # it by opening the note. data.gov.uk renders a `<select>` of every UK
+    # public body, and its aggregated label is one line of 43,546 characters
+    # -- 7,745 tokens against a window of 512.
+    #
+    # A ratio of 1.0 is the requirement as stated. 1.5 is the bar because a
+    # single indivisible unit may legitimately overrun a little; fifteen
+    # times is not a little.
+    "worst_overflow_ratio":  ("R-C5", 1.5, -1, False),
     "billboards_textured":   ("R-E3", 0.95, +1, False),
     "scroll_port_exists":    ("R-G2", 1.0, +1, False),
     "dangling_edges":        ("R-D2", 0.0, -1, False),
@@ -102,6 +114,8 @@ def _offline(workspace: pathlib.Path, pages: int) -> Dict[str, object]:
         out["chunk_tokens_median"] = statistics.median(toks) if toks else 0
         out["chunks_over_window"] = (
             sum(1 for t in toks if t > window) / len(toks)) if toks else 0.0
+        out["worst_overflow_ratio"] = (max(toks) / window) if toks else 0.0
+        out["worst_chunk_tokens"] = max(toks) if toks else 0
 
         # Duplicate chunks, by rendered markdown.
         seen = Counter(" ".join((c.md or "").split()) for c in chunks
@@ -229,8 +243,11 @@ def _fmt(key: str, value) -> str:
     if value is None:
         return "-"
     if key in ("chunks", "chunk_tokens_median", "nodes_with_picture",
-               "dangling_edges", "resolved_edges", "sprites", "sprites_textured"):
+               "dangling_edges", "resolved_edges", "sprites",
+               "sprites_textured", "worst_chunk_tokens"):
         return str(int(value))
+    if key == "worst_overflow_ratio":
+        return "%.1fx" % float(value)
     if key in ("shape_field_exists", "scroll_port_exists"):
         return "yes" if value else "no"
     return "%.1f%%" % (100 * float(value))
