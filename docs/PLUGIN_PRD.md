@@ -28,7 +28,7 @@ Those ids are retired as requirements and retained as anchors.
 | D-3 | The panel draws a read-only surface inside a code block | *"retrofitted to show their **base and original** markdown editors"* — the native, editable Obsidian editor | **Defect** |
 | D-4 | `markdown.py` is tuned "17:1 toward leaving noise rather than risking loss" and `_dedupe` is element-scoped | *"full deduplication of repeat substrings that are essentially structural redundancies of the web pages themselves"* | **Defect** |
 | D-5 | Markdown renders no tables at all | *"a hierarchically-header-structured markdown document with tables, images, web links"* | **Defect** |
-| D-6 | The delta path re-admits a chunk it should have reassigned or popped, so the store holds two addresses where the page has one | Addendum II: *"duplicate chunks (as in reassignment and diff-based index pop updates don't land straightforwardly)"* | **Defect** |
+| ~~D-6~~ | ~~The delta path re-admits a chunk it should have reassigned or popped~~ | **WITHDRAWN 2026-09-12 — not demonstrated.** The evidence for it was a metric that could not tell two real siblings from one re-addressed node. `--resolvable`: 0 unresolvable of 719. `--drift --kind insert`: 0 stale, 0 lost over ~190 moved addresses ×3. See §M.3 for what remains untested | — |
 | ~~D-7~~ | ~~A media element with no alt text renders as a bare `![images]`~~ | **WITHDRAWN 2026-09-12 — not a defect.** Already fixed by `499fd6d` (M-9). Filed against `vaultws512`, built 34 minutes BEFORE that commit. On the 256 re-cut: **0 bare placeholders, 1,073 named**. See §M.0 | — |
 
 **D-1 is FIXED** (2026-09-12, `layout: the projector fits on semantic alone`).
@@ -39,13 +39,10 @@ across 3,135 nodes. `halves` and `equalised` are gone with the machinery they
 described. 19 tests, including a non-vacuity arm that fails if the embeddings
 are ignored.
 
-**D-6 is new.** It came out of the flagged observation — "duplicate chunks
-AND duplicate content in the panel renderings" — split into its two layers,
-because measuring them together produces a single number that moves when
-either is fixed and credits neither. Re-measured on the **256 re-cut** after
-the first attempt was found to have been taken against stale code (§M.0).
-D-6 is now the dominant duplication: **99 of 105 duplicate-chunk groups**
-differ only by a positional index.
+**Both D-6 and D-7 were withdrawn the same day they were filed**, and the two
+failures had one cause: a metric invented for the occasion instead of the
+instrument the repo already had. §M.0 and §M.3 record them, because the method
+error is more reusable than either finding would have been.
 
 ### 0b. Resolutions by recency
 
@@ -126,7 +123,7 @@ probes first.
 | T-7 | Semantic vectors **and** hard graph links in the **same database** | Partial |
 | T-8 | The trie is streamed to the panels' interactive side | Open |
 | T-9 | The xpath **shape** exists as a second address dimension, never as the identity | Done |
-| T-10 | A delta that moves content must **retire the address it left**. A sibling insertion shifts every later index, and re-admitting at the new address without popping the old one leaves the trie holding an address the page does not have | **Defect D-6** — 36 of 147 duplicate-chunk groups differ only by a positional index (§M.1) |
+| T-10 | A delta that moves content must **retire the address it left** — the trie must not hold an address the page does not have | **Holds, on what has been tested** — `--drift --kind insert` repaired ~190 moved addresses with 0 stale and 0 lost, 3 of 3 exact; `--resolvable` 0 of 719 unresolvable. Not yet tested on a live/mutating page (§M.3) |
 
 ### M. Markdown distillation
 
@@ -1141,39 +1138,45 @@ Two further caveats on the numbers below, both stated rather than buried:
   product is effectively a pair product. Any retrieval figure taken on these
   stores understates what `G-3` describes.
 
-### M.1 — duplicate CHUNKS: the store holds two addresses for one content
+### M.1 — duplicate CHUNKS: how many, and what they are
 
 Identical rendered markdown at more than one address. **Measured on
 `build/vaultws256` (5,337 chunks, 23 pages), current code**, read-only.
 
-| | 256 (valid) | 512 (stale code — for reference only) |
+| | 256 (valid) | 512 (stale code — reference only) |
 |---|---|---|
 | duplicate groups | **105** | 147 |
 | redundant chunks | **246 of 5,337 — 4.6%** | 163 of 3,135 — 5.2% |
-| of which differ ONLY by a positional index | **99 — 94%** | 36 — 24% |
-| of which the page genuinely repeats itself | **6** | 111 |
+| groups whose addresses are siblings in one parent | **99** | 36 |
+| groups in structurally unrelated places | **6** | 111 |
 
-**This is the finding.** On current code, **94% of duplicate-chunk groups are
-index shifts** — the two addresses share a skeleton once `[n]` is blanked:
+**The duplicates are real; the first diagnosis of them was not.** That middle
+row was initially read as an index-shift defect and filed as `D-6`. It is not:
+sibling addresses are what a repeated list looks like, and §M.3 shows why the
+test could not tell the two cases apart. All 105 groups currently read as
+`D-4`/`M-8` — **the page repeating itself** — which Addendum II puts in scope:
+*"full deduplication of repeat substrings that are essentially structural
+redundancies of the web pages themselves."*
 
-```
-/html/body/div[2]/div/bsp-header/div/div
-/html/body/div[2]/div[3]/bsp-header/div/div
-```
+Which pages carry them:
 
-That is the flagged mechanism precisely: *"reassignment and diff-based index
-pop updates don't land straightforwardly"*. A sibling arrived or left, every
-later sibling's index shifted, the content was re-admitted at its new address
-and the old one was never popped. **This is `D-6` / `T-10`**, it is a
-trie/index defect upstream of every projection, and it is now nearly the whole
-of the duplicate-chunk problem rather than a quarter of it.
+| url | groups |
+|---|---|
+| developer.mozilla.org/en-US/docs/Web/CSS | 37 |
+| archive.org/details/texts | 19 |
+| discourse.julialang.org/latest | 17 |
+| arxiv.org/abs/1706.03762 | 10 |
+| ar.wikipedia.org — Physics | 7 |
 
-The `D-4` share collapsed from 111 groups to 6. Read carefully: this is **not**
-evidence that page-level repetition went away. A 256-token window cuts more
-often, so a nav block appearing twice on a page is less likely to produce two
-*byte-identical* chunks — the repetition is still there and this metric stopped
-seeing it. `D-4`/`M-8` needs a window-independent measure (§M.3), exactly as
-`D-7` did.
+That distribution is itself the argument for `D-4`: a CSS property index, a
+reference list and a forum's latest-topics page are documents whose *structure*
+is repetition. A defect in the delta path would not concentrate there.
+
+The `512 → 256` shift in the last two rows is **not** a change in the page.
+A 256-token window cuts more often, so which repetitions come out
+byte-identical changes with the window. Both columns are window-conditioned,
+which is why §M.3 ends by asking for a measure over content hashes rather than
+over chunk boundaries.
 
 ### M.2 — duplicate CONTENT: one chunk's render repeats itself
 
@@ -1194,24 +1197,105 @@ What remains is **621 lines with no identified cause**, and that is the honest
 state: a residue, not a diagnosis. It is smaller than the flag implied and it
 has not been explained.
 
-### M.3 — what to measure next, and why the current measures cannot answer it
+### M.3 — D-6 withdrawn: the metric could not tell two siblings from one move
 
-Three gaps, in the order they block things:
+The evidence for `D-6` was: *"N% of duplicate-chunk groups differ only by a
+positional index in the xpath"*, computed by blanking every `[n]` and seeing
+whether the addresses collapsed to one skeleton.
 
-1. **`D-4` needs a window-independent measure.** Counting byte-identical
-   chunks makes a smaller window look like a fix. The question is *does the
-   page repeat itself*, which is a property of the page, so the measure has to
-   be over the trie's content hashes, not over chunk boundaries.
-2. **Neither figure has a null arm.** `CLAUDE.md`: a score against a moving
-   page is the page's motion plus ours. `python -m domvec.analytics
-   --stability --corpus` gives the per-page floor; the 99 index-shift groups
-   must be checked against two maps of the same page seconds apart before any
-   of them is attributed to the sensor.
-3. **The 621 unexplained repeated lines want a cause**, by the same method
-   that found the first two: group them, name the largest class, check whether
-   the class is a defect or a page.
+**That test cannot distinguish the two cases it was built to separate.** Any
+two siblings share a skeleton once their ordinals are blanked. Looking at what
+it actually matched:
 
-Nothing here becomes an acceptance criterion until 1 and 2 are done (`X-4`).
+```
+…/section[12]/div[2]/div/div/ol/li[41]/span[2]/span[3]
+…/section[12]/div[2]/div/div/ol/li[69]/span[2]/span[3]
+…/section[12]/div[2]/div/div/ol/li[125]/span[2]/span[3]
+```
+
+Those are entries 41, 69 and 125 of an Arabic Wikipedia reference list. They
+exist *simultaneously* and carry identical text. The page repeats itself —
+`D-4` — and the test called it an index shift.
+
+**The `div` vs `div[3]` case that looked decisive was also misread.**
+`sensing.py::_name_test` emits a bare tag when the ordinal is 1:
+
+```python
+return f"{tag}[{ordinal}]" if ordinal > 1 else tag
+```
+
+So `div` *is* `div[1]`, and `/…/div[2]/div/bsp-header` against
+`/…/div[2]/div[3]/bsp-header` names the first and third children — two real
+containers, each holding a header. Addresses are ordinal-stable by
+construction; the sensor's `stepFor` always emits an explicit ordinal and only
+the formatter elides `[1]`.
+
+### The instruments that actually answer the question
+
+Both already existed. Neither was used before the defect was filed.
+
+**`--resolvable`** — *"ask the page whether every address in the trie names a
+node it has"*. It is the only oracle independent of both the fold and the
+walk, which is exactly the independence a claim about phantom addresses needs.
+
+| | |
+|---|---|
+| pages | 2 (books.toscrape.com, danluu.com) |
+| addresses asked | 719 |
+| **unresolvable** | **0** — names nothing in the page |
+| **mismatched** | **0** — resolves, holds something else |
+
+**`--drift --kind insert`** — mutate, repair, score the repaired trie against a
+fresh full map. This is the delta path, which is what Addendum II's phrase is
+about.
+
+| page | mutations | recall | **stale** | **lost** | wrong | moved |
+|---|---|---|---|---|---|---|
+| books.toscrape.com | 1 | 100.0% | **0** | **0** | 0 | 190 |
+| books.toscrape.com | 3 | 100.0% | **0** | **0** | 0 | 192 |
+| books.toscrape.com | 5 | 100.0% | **0** | **0** | 0 | 194 |
+
+3 of 3 exact. An insertion moved ~190 addresses and **not one went stale** —
+`stale` being precisely *"addresses the trie holds and the page does not"*,
+which is the defect as stated.
+
+### What this does NOT establish
+
+Stated plainly, because a withdrawal that overclaims is the same error
+inverted:
+
+- **One page carried it.** danluu.com was excluded — *"no drawn repeated
+  group"*, a page that could not fail. Two pages asked, one scored.
+- **Both pages are static.** The flag may well be about pages that move on
+  their own, and coinmarketcap's ticker is the known hard case. `--drift` on a
+  moving page needs its `--kind none` null arm first.
+- **Only `insert` was run.** `delete` and `relocate` are the gestures where a
+  pop is most likely to be missed, and `relocate` is the one that matches
+  *"reassignment"* most literally.
+- **The store-side observation was real even though the diagnosis was not.**
+  105 duplicate-chunk groups exist on the 256 store. They now read as `D-4`,
+  the page repeating itself, which `M-8` already covers and which Addendum II
+  puts in scope. The duplicate chunks the user saw are real; what was wrong
+  was attributing them to the index path.
+
+So `D-6` is withdrawn as *not demonstrated*, not as *disproved*. The next run
+is `--kind delete` and `--kind relocate`, each against its own `--kind none`
+arm, on a corpus that includes a page known to move.
+
+### M.4 — the standing lesson
+
+Two defects filed and both withdrawn within hours, with one shared cause:
+**a metric invented for the occasion, when the repo already had an
+instrument.** `D-7` was measured against a store older than its own fix; `D-6`
+was measured with a discriminator that could not discriminate. `--resolvable`
+and `--drift` existed the whole time, and both were built precisely because
+this project has made this class of error before.
+
+`CLAUDE.md` gains the first lesson (compare the store's mtime to the module's
+last commit). The second belongs beside it: **before writing a measurement,
+check whether `domvec.analytics` already answers the question.** A fresh metric
+has no non-vacuity arm, no null arm, and no history of having been wrong in a
+known way — the existing harness has all three.
 
 ---
 

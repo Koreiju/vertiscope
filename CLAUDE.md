@@ -134,6 +134,18 @@ Two rules earned the hard way here, both binding:
   against `git log -1 --format=%ad` for the module whose output is being
   scored, before quoting a number.
 
+- **Before writing a measurement, check whether `domvec.analytics` already
+  answers the question.** Two defects were filed and withdrawn within hours of
+  each other on one shared cause: a metric invented for the occasion. One was
+  scored against a store older than its own fix; the other used a
+  discriminator that could not discriminate — blanking `[n]` from two xpaths
+  and calling the collapse an index shift, when any two siblings collapse that
+  way. `--resolvable` (does the PAGE hold every address the trie has) and
+  `--drift` (mutate, repair, score against a fresh map) existed the whole time
+  and were built for exactly these questions. A fresh metric has no
+  non-vacuity arm, no null arm, and no history of having been wrong in a known
+  way; the harness has all three.
+
 And the specific trap this project keeps falling into: **a coverage number is
 a claim about the renderer AND a claim about the denominator, and only one of
 them tends to get checked.** Four separate times a correct renderer read as
