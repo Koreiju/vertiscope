@@ -1,0 +1,251 @@
+# The notebook kernel panel — design
+
+Addendum II puts this before the hovering SLM bar and asks that it be nailed
+down *first*: *"we move onward to the notebook kernel panel design first to nail
+it down correctly. This is where we bring in our electron sensor when ready,
+exposing the chunk scanning and selection highlighting for markdown rendering
+in the alternative panel by the user to annotate the context fed to our small
+language model."*
+
+This is the design, stated against the requirements it answers — `P-N1..P-N10`,
+`P-M1..P-M5`, `T-5`, `X-6`/`X-7` — and against the one constraint that decides
+most of it.
+
+---
+
+## 0. The constraint that decides the architecture
+
+`CLAUDE.md`, hard constraint 1: **describe every change in terms of the
+patricia trie**. A change that cannot be stated as reading from or writing to
+the trie has left the map.
+
+So the question is not "how do we run code in Obsidian". Three plugins already
+do that. The question is: **where does a cell's output live such that it is
+trie content?** `P-N5` and `P-N6` answer it as requirements — notebooks are
+*"dynamically recursively chunked like webpages"* and *"continuously
+diff-updated to the db, re-vectorized and re-assigned to chunks"* — and those
+two sentences rule out most of the design space before any code is written.
+
+A notebook whose outputs live anywhere but in the markdown cannot satisfy them
+without a second ingest path.
+
+## 1. Prior art, read before designing (X-1)
+
+Two architectures exist and they differ exactly where it matters.
+
+| | [obsidian-markdown-notebook](https://github.com/lextoumbourou/obsidian-markdown-notebook) | [JupyMD](https://github.com/d-eniz/jupymd) |
+|---|---|---|
+| where outputs live | **in the `.md`**, inside HTML comment markers | in a paired `.ipynb`, synced by Jupytext |
+| kernel | persistent **subprocess** per language, per note | real Jupyter kernels via `jupyter_client` |
+| cell identity | **SHA-256 of the cell source** in the marker | notebook cell ids |
+| external deps | the interpreter only | Python + Jupytext + jupyter_client + ipykernel |
+| invisible to renderers | yes — comments survive PDF, GitHub, reading view | n/a |
+
+Also surveyed: [tillahoffmann/obsidian-jupyter](https://github.com/tillahoffmann/obsidian-jupyter)
+(`jupyter` fences executed as notebooks), [MaelImhof/obsidian-jupyter](https://github.com/MaelImhof/obsidian-jupyter)
+(opens `.ipynb` in an embedded Jupyter Lab), and the `Notebooks` community
+plugin (embeds a `jupyter lab` server in a pane).
+
+### The choice, and why it is not close
+
+**Outputs live in the markdown, in comment markers. Kernels are subprocesses
+first, with the Jupyter protocol as a later switch behind `P-N2`.**
+
+Three reasons, in order of weight:
+
+1. **It is the only option that makes `P-N5`/`P-N6` free rather than new
+   work.** Output in the `.md` *is* markdown the trie already holds. The
+   existing recursive chunker reads it, the existing vectoriser embeds it,
+   and `T-5` (the vault in the trie) covers a notebook the moment it covers a
+   note. A `.ipynb` sidecar needs a second parser, a second chunker, and a
+   second answer to "what address is this output at".
+2. **A sidecar file is two sources of truth for one document**, which is the
+   objection `domvec/obsidian/mcp.py` already makes in its own docstring about
+   note editing — *"a second one would be two sources of truth for the same
+   files"*. Jupytext's bidirectional sync is a merge problem we would own
+   forever, and it fights `S-12`'s uniform delta stream: a change would arrive
+   twice, from the `.md` watcher and from the `.ipynb` watcher, and the trie
+   would have to guess which was the edit.
+3. **Fewer moving parts under `S-14`** — *"staying slim on web interfaces"* is
+   said of the browser, but the reasoning carries: the subprocess route needs
+   the interpreter and nothing else, where the Jupyter route needs four
+   packages before a cell runs.
+
+What we take from JupyMD anyway: **kernel discovery**. `P-N2` wants switching
+between Jupyter kernels and PowerShell terminals, and enumerating installed
+kernels is the right way to populate that list even when we execute via
+subprocess.
+
+## 2. The panel, as an object
+
+`P-N` is not a peer of `P-M` — `X-6` settles that: *P-N is P-M grown*, and the
+native markdown panel survives beside it. So there is no new view type. There
+is a **native Obsidian markdown editor** with three things added to it:
+
+```
+┌─ native markdown editor (P-M1) ───────────────────────────────┐
+│                                                               │
+│   # Analysis                                                  │
+│   Some prose, edited natively. Nothing intercepts this.       │
+│                                                               │
+│   ```python                                    [▶ run] [P-N3] │
+│   df.describe()                                               │
+│   ```                                                         │
+│   <!-- nb-output hash=a91f… format=html -->                   │
+│   | col | mean |                        ← trie content (P-N5) │
+│   | --- | ---- |                                              │
+│   <!-- /nb-output -->                                         │
+│                                                               │
+│   [[]]  ← retrieval gesture, unchanged (P-M2, R-1)            │
+│                                                               │
+│  ─────────────────────────────────────────────  P-M4: bottom  │
+│   [+ code]  [+ terminal]  [+ browser cell]                    │
+└───────────────────────────────────────────────────────────────┘
+┌─ terminal, directly below (P-C2 / P-N3) ──────────────────────┐
+│  kernel: python3 ▾   │ pwsh ▾            ← P-N2 switch        │
+│  >>>                                                          │
+└───────────────────────────────────────────────────────────────┘
+```
+
+Three claims in that sketch are load-bearing:
+
+- **The output block is markdown**, so the chunker sees a table as a table.
+  This is where `D-5` (no tables rendered) stops being only a web-scraping
+  defect: a notebook that computes a dataframe emits a markdown table, and if
+  the projection drops tables the panel loses its own output.
+- **The buttons are at the very bottom** (`P-M4`), not floating per-cell.
+- **The terminal is directly below the artifact, always** (`P-C2`). Not a
+  toggle, not a tab.
+
+## 3. Addresses: what a notebook looks like in the trie
+
+The trie is keyed `domain / url-tail / xpath / markdown / content-detection`
+(`T-1`, currently a `D-2` defect at four levels). A vault note has no domain
+and no xpath, so the scheme has to be stated rather than assumed:
+
+| level | a web page | a vault notebook |
+|---|---|---|
+| domain | `apnews.com` | `vault` |
+| url-tail | `/article/x` | the vault-relative path, `notes/analysis.md` |
+| xpath | `/html/body/div[2]/p` | the **heading path** plus the block's ordinal, `#Analysis/3` |
+| markdown | the rendered form | the same |
+| content-detection | `paragraph`, `nav`, … | `prose`, `code`, `output`, `terminal` |
+
+Two consequences worth stating because they are easy to get wrong:
+
+- **A cell's output is its own address, not part of the cell's.** They have
+  different `content-detection` classes and they change independently — an
+  output changes when the cell *runs*, the cell changes when it is *edited*.
+  Folding them into one address makes the re-run of an unedited cell look like
+  an edit.
+- **The heading path is a `subtree_hash` question and the ordinal is an
+  `exact_hash` one.** `CLAUDE.md` 5b: the projection memo must key on
+  `exact_hash` because it prints values verbatim. And `CLAUDE.md` 5c applies
+  directly — a cell's ordinal is a function of its *siblings*, so inserting a
+  cell renumbers every later one, and the invalidation has to reach them.
+  **That is `D-6` in a new location**: §M.1 found 36 duplicate-chunk groups
+  differing only by a positional index because a shifted sibling's old address
+  was never popped. A notebook is a document where the user inserts siblings
+  constantly. Fix `D-6` before this ships, or reproduce it here.
+
+## 4. Execution, and the two hashes
+
+The marker carries a digest of the cell source, and *which* digest matters:
+
+- `exact_hash` semantics — the exact source text. A cell whose whitespace
+  changed *is* a different cell for execution purposes, because the user may
+  have changed a string literal.
+- Never `subtree_hash` semantics. That hash is deliberately blind to exact
+  values so `apply` can recognise moved content, and a cell marked clean on a
+  content-blind hash would serve a stale output after any edit that a token
+  multiset cannot see.
+
+State is **per note**, as in obsidian-markdown-notebook: variables shared
+between cells in one note, isolated across notes. Two reasons — a note is the
+unit a reader thinks in, and it makes the kernel's lifetime match a leaf's.
+
+Status lives in the marker (`running`, `error`, `timeout`) so a crash mid-cell
+leaves a document that says so rather than one that looks finished.
+
+## 5. The sensor, the chunk overlay, and the SLM selection
+
+This is the part with no prior art, and it is `P-N8`/`P-N9`/`P-N10`.
+
+*"Exposing the chunk scanning and selection highlighting for markdown
+rendering in the alternative panel by the user to annotate the context fed to
+our small language model."*
+
+Read as three separate mechanisms:
+
+1. **`P-N8` — chunk boundaries are visible.** The panel draws where the
+   chunker cut. Not decoration: it is the only way a reader can tell why
+   retrieval returned half a section, and at a 256-token window the cuts are
+   frequent enough to matter. Rendered as a gutter mark, keyed on the chunk's
+   address, read straight from the trie.
+2. **`P-N9` — selection over rendered markdown.** In the *alternative* panel —
+   the rendered side, not the editor — because a selection over source text
+   would select markers and fences, and the reader is selecting **content**.
+3. **`P-N10` — the selection is the SLM's context.** The reader marks what the
+   model gets. This inverts the usual default: the model does not take the
+   panel, it takes what was handed to it.
+
+`P-N10` needs a decision the goal does not make, so it is flagged rather than
+assumed: **a selection is a set of trie addresses, not a string.** Addresses
+survive the page changing under them and can be re-resolved later, which is
+what makes an annotation durable and what lets the same mechanism work over a
+browser cell whose page moved. A string would be a snapshot with no way back
+to what it referred to.
+
+The Electron sensor (`S-13`) enters *here* and not before — the verbatim says
+*"when ready"*. What it is needed for is the browser cell's chunk overlay
+(`P-B7`), where the boundaries must be drawn over a live page's own cartesian
+layout. A markdown notebook's chunk overlay needs no browser at all, which is
+why this panel can be nailed down first.
+
+## 6. Build order inside this panel
+
+Each step ends somewhere verifiable over CDP (`X-2`), never a screenshot.
+
+| # | step | done when |
+|---|---|---|
+| 1 | Note addressing: a vault note enters the trie under the §3 scheme | `T-5`; a note's chunks resolve by address |
+| 2 | Fence detection + `▶ run` in both views | a button appears per fence, in reading *and* live preview |
+| 3 | Subprocess kernel, python only, per-note state | two cells share a variable; two notes do not |
+| 4 | Output markers written, read, re-rendered | output survives a restart and renders in reading view |
+| 5 | Outputs are chunked and vectorised (`P-N5`/`P-N6`) | an output is *retrievable* by `[[]]` — the proof that it is trie content |
+| 6 | Terminal below, `P-N2` switch, kernel discovery | pwsh and python3 both reachable; discovery lists installed kernels |
+| 7 | `P-N8` chunk overlay | gutter marks match `/chunk` addresses from the sidecar |
+| 8 | `P-N9`/`P-N10` selection → address set → SLM context | the SLM's prompt contains exactly the selected addresses' content |
+
+**Step 5 is the acceptance gate for the whole design.** If an output is not
+retrievable, the markdown-marker choice bought nothing and the architecture in
+§1 was decided wrongly. That is the test to write first and the one that would
+send us back to JupyMD's sidecar if it fails.
+
+## 7. What this design does not do
+
+Named so the omissions are not read as oversights. `PLUGIN_GOAL.md` Addendum I
+defers by name: *"cell and code navigation, running things in the terminal, and
+writing updates back to notebooks are explicitly 'later on'"*. Accordingly:
+
+- No cell reordering, folding, or navigation UI.
+- No writing back into `.ipynb` files.
+- No interactive components inside browser cells (`P-B9` — deferred to tool
+  calls in much later iterations).
+- The hovering SLM bar is the *next* deliverable (`X-7` step 5), not this one.
+  This design only has to hand it a context: an address set from `P-N10`.
+
+## 8. Open questions for the user
+
+1. **`P-N2` — what does "switchable" switch?** One terminal pane that changes
+   interpreter, or a kernel pane and a shell pane side by side? `P-N3` says a
+   toggle on a code block may open *"possibly both at once"*, which suggests
+   two panes, but it is not decisive.
+2. **Does a notebook output belong in retrieval by default?** Making outputs
+   trie content (§1) means a `[[]]` query can return a dataframe the reader
+   computed. That is either the best feature here or noise in every result set,
+   and it should be chosen rather than discovered.
+3. **Which interpreter is the default kernel?** The repo runs Python 3.13 from
+   the Windows Store package; a notebook inheriting that environment gets
+   `domvec` itself on its path, which is useful and also a way to hold the
+   kuzu lock from inside a note.

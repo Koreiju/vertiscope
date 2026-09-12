@@ -136,6 +136,11 @@ denominator is what this component is answerable for.
 - `docs/PLUGIN_GOAL.md` — the plugin's binding goal, verbatim: two statements,
   the second (2026-09-12) overriding the first on the projector's embedding
   space, on deduplication, and on the panel types.
+- `docs/NOTEBOOK_PANEL_DESIGN.md` — the notebook kernel panel, designed
+  against `P-N`/`P-M` before code, per Addendum II's "nail it down
+  correctly". Decides outputs-in-markdown over an `.ipynb` sidecar, and
+  states the vault-note addressing scheme. Its §8 holds three open
+  questions for the user.
 - `docs/PLUGIN_PRD.md` — their decomposition, 123 numbered requirements. Part
   I is the contract; Part II is the measured evidence it cites. Read section 0
   first: five of them are DEFECTS, shipped code that contradicts the goal.
