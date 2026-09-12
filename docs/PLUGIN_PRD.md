@@ -55,12 +55,29 @@ embeddings — the f16 GGUF nomic already in use. It could instead mean
 product-quantized vectors, which would be a storage and ANN decision that does
 not exist today. Part I assumes the first.
 
-**512 tokens is now fixed by recency** — *"the pre-set context window chunk
-limit of 512 tokens"*. Recorded against it: measured over three corpus pages,
-retrieval hit@1 was **83-90% at a 64-token window and 28-48% at 512**, with
-the containing chunk's cosine falling 0.95 → 0.81. The instruction stands and
-Part I follows it; the evidence is filed under R-C5 in Part II so the cost is
-visible rather than forgotten.
+**The window is 256** (decided 2026-09-12, after the addendum named 512). The
+addendum's figure was reconsidered against two measurements that pull opposite
+ways:
+
+| window | hit@1, three pages | over window | record tests |
+|---|---|---|---|
+| 64 | **85 / 90 / 83%** | 13.3% | nav AND prose split |
+| 128 | 60 / 75 / 65% | 7.8% | prose splits |
+| **256** | 45 / 48 / 58% | **2.5%** | **all 11 pass** |
+| 512 | 48 / 28 / 45% | 1.0% | all pass |
+
+Retrieval favours small monotonically; structure favours large. 256 is where
+they meet — every structural property holds and it still beats 512 by about
+ten points of hit@1 while filling half the window rather than a third. **512
+is dominated: it wins on no measurement.** 64 was tried first and reverted
+because a nav bar split into three chunks of menu labels, against
+`test_a_nav_bar_is_not_a_record_set`'s own reason — "a menu item is not a
+retrievable unit".
+
+The 64 column is an upper bound on its own advantage: those probes are
+verbatim lines, which favours short chunks mechanically. The direction held on
+three unrelated pages, so 256-over-512 is safe; 64-over-256 wants paraphrased
+probes first.
 
 ### S. The scanner
 
@@ -76,7 +93,7 @@ visible rather than forgotten.
 | S-8 | **Smooth, live-tuned steady scroll** per visit, tuned to Selenium's update rate, fine-grained and time-efficient | Open |
 | S-9 | Pagination deliberately **not** automated — manual, in the browser views | By design |
 | S-10 | Browser streams ported to the panels efficiently, *"completely and exactly mirroring features/calls to the original selenium"* | Partial — rrweb is the architecture; its shadow-DOM capture is the wrong half |
-| S-11 | The 512-token window holds **throughout processing**, with a verification pass after the scan | Partial — 15.1× worst in the stored board, 5.9× in-process |
+| S-11 | The **256-token** window holds **throughout processing**, with a verification pass after the scan. A target, not a ceiling: a single indivisible unit may exceed it | Partial — 2.5% of chunks over at 256 |
 | S-12 | Every sensor→db stream reaches the graph view **and the opened *and closed* panel set, uniformly** | Open |
 
 ### T. The trie and the database

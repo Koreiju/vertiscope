@@ -299,6 +299,15 @@ perhaps with double-checks and balances after the initial shadow DOM selenium
 scanning sensor"* — a verification pass after the scan, not only a cut at
 render time.
 
+> **Follow-up decision, 2026-09-12: the window is 256, not 512.** Taken in
+> conversation after this statement, so it supersedes the figure above while
+> leaving the requirement around it intact. 64 was chosen first and reverted:
+> it splits a nav bar into three chunks of menu labels. 256 is the smallest
+> window at which every structural property holds, and it beats 512 on
+> retrieval by about ten points. See `PLUGIN_PRD.md` section 0b for the table.
+> Also settled there: "quantized" means the f16 GGUF nomic already running,
+> not product-quantized vectors.
+
 **Deferred by name, so it is not an omission.** Cell and code navigation,
 running things in the terminal, and writing updates back to notebooks are
 explicitly "later on". Interactive components inside browser cells are "for

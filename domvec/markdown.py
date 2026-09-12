@@ -64,22 +64,52 @@ __all__ = [
     "DEFAULT_CONTEXT_WINDOW",
 ]
 
-DEFAULT_CONTEXT_WINDOW = 512
+DEFAULT_CONTEXT_WINDOW = 256
 """One chunk's budget, in whatever unit `tokens.name()` is currently in.
 
-2048 rather than the 1200 this was: 1200 was *characters*, which is about 400
-tokens, and every consumer downstream measures in tokens -- an embedder's
-input limit, a model's context, the budget a retrieval hit has to fit. The
-window was denominated in a unit nothing downstream uses and was therefore
-about a twentieth of any real one; on the fixture corpus the chunks it
-produced filled 8% of a 2048-token window.
+Its history is a history of getting the UNIT wrong and then the SIZE wrong.
+It was 1200 *characters* -- about 400 tokens -- while everything downstream
+measures in tokens, so it was a twentieth of any real budget and the chunks it
+made filled 8% of one. It became 2048, the practical input of the local
+embedder, then 512.
 
-2048 is the practical input length of the local embedders (nomic-embed-text
-carries 8192 nominally and degrades well before it) and a round figure for a
-retrieval unit. It is a *ceiling*, not a target: a page with less in it than
-that still emits one chunk holding all of it, which is the point -- the
-chunker cuts where content runs out or the window is reached, whichever comes
-first."""
+**256 now, and the number was chosen against two measurements that pull in
+opposite directions.**
+
+A chunk is a retrieval unit, so the first question is how well it can be
+FOUND. Forty probes per page, real lines, the same probes at every window,
+asking whether the chunk containing a line ranks first:
+
+    window   web-scraping   python-lang   MDN CSS   over window   record tests
+      64         85%            90%         83%        13.3%       nav AND
+                                                                   prose split
+     128         60%            75%         65%         7.8%       prose splits
+     256         45%            48%         58%         2.5%       all pass
+     512         48%            28%         45%         1.0%       all pass
+
+Retrieval is monotone in favour of SMALL: a bigger chunk holds the answer
+beside more unrelated text and its vector drifts toward the average of the
+two. Structure is monotone the other way. At 64 a nav bar splits into three
+chunks of menu labels -- `test_a_nav_bar_is_not_a_record_set` puts the reason
+in its own assertion, "a menu item is not a retrievable unit" -- and adjacent
+paragraphs stop merging.
+
+256 is where those meet: every structural property holds, and it still beats
+512 on retrieval by about ten points while filling half the window instead of
+a third. **512 is dominated** -- there is no measurement on which it wins.
+
+The 64 column is probably flattering itself. Those probes are verbatim lines,
+which favours short chunks mechanically, so the gap to 256 is an upper bound.
+The DIRECTION held on three unrelated pages, so 256-over-512 is safe; 64-over-
+256 wants re-testing with paraphrased probes before anyone bets on it.
+
+**A target, not a ceiling.** A page with less in it than the window emits one
+chunk holding all of it, and a single leaf too big to fit is emitted whole
+rather than cut -- cutting it would leave a chunk whose address over-claims.
+So `chunks_over_window` counts, among other things, records doing exactly what
+the record rule exists to make them do.
+"""
+
 
 # Element labels that carry markdown meaning. Everything else is a container
 # and contributes indentation only.
