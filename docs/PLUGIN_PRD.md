@@ -106,8 +106,8 @@ probes first.
 | S-10 | Browser streams ported to the panels efficiently, *"completely and exactly mirroring features/calls to the original selenium"* | Partial — rrweb is the architecture; its shadow-DOM capture is the wrong half |
 | S-11 | The **256-token** window holds **throughout processing**, with a verification pass after the scan. A target, not a ceiling: a single indivisible unit may exceed it | Partial — **0.4%** over on the 256 re-cut (21 of 5,337; max 370, mean 103). Better than the 2.5% previously recorded. The *verification pass* is still absent, which is what keeps this Partial |
 | S-12 | Every sensor→db stream reaches the graph view **and the opened *and closed* panel set, uniformly** | Open |
-| S-13 | **Investigate** whether Electron can be driven directly to give "the same sensor-like functionality" as Selenium — deliverable is a capability verdict with evidence, NOT a migration | Open |
-| S-14 | Whatever hosts the sensor must keep **profile control "from their base"** and stay "slim on web interfaces" | Open |
+| S-13 | **Investigate** whether Electron can be driven directly to give "the same sensor-like functionality" as Selenium — deliverable is a capability verdict with evidence, NOT a migration | **Verdict delivered (§N)** — yes: `BrowserWindow`/`WebContentsView` + `session.fromPartition` + `preload` + `webContents.debugger`, all reachable from plugin code; MutationObserver attaches; and Electron loaded apnews.com in 26.4 s where geckodriver timed out at 40 s. Migration NOT decided — §N.4 lists what is untested |
+| S-14 | Whatever hosts the sensor must keep **profile control "from their base"** and stay "slim on web interfaces" | **Available on the Electron host** — `session.fromPartition('persist:…')` gives an isolated persistent profile, verified (§N.2). Counter-cost in §N.4: Chromium's version becomes Obsidian's, not ours |
 | S-15 | One page's failure must not end a corpus run; every failure is named and the exit code is non-zero | **Done** — `cmd_scan` collects per-page failures; a 24-page re-cut had been aborted by apnews.com alone |
 
 ### T. The trie and the database
@@ -223,7 +223,7 @@ axes: **structure, content, organizedness, completeness**.
 |---|---|---|
 | P-B1 | A **fully-fledged regular browser view** in the cell — NOT constrained to a chunk | Open |
 | P-B2 | Navigate exactly as in a normal browser, while scanning continues on the live page | Open |
-| P-B3 | **Embed the native Selenium session view** in the cell if possible | Open |
+| P-B3 | **Embed the native Selenium session view** in the cell if possible | Open — **build on `WebContentsView`, not `<webview>`**: Electron advises against the webview tag, and `remote.WebContentsView` is reachable from plugin code (§N.1) |
 | P-B4 | **Resizing the cell resizes the Selenium window** | Open |
 | P-B5 | The passive MutationObserver sensor fires throughout — scroll, hover, interact — diffing DOM → DB in O(delta) ms | Open |
 | P-B6 | **Left click** behaves exactly as in Firefox under Selenium | Open |
@@ -1296,6 +1296,111 @@ last commit). The second belongs beside it: **before writing a measurement,
 check whether `domvec.analytics` already answers the question.** A fresh metric
 has no non-vacuity arm, no null arm, and no history of having been wrong in a
 known way — the existing harness has all three.
+
+---
+
+## N. S-13 — can Electron host the sensor? Measured, in the running Obsidian
+
+Addendum II asks this as an investigation: *"there are still selenium-like
+interfaces that can perhaps overtake a firefox browser telling an electron
+browser what to see. Perhaps, instead, we explore any selenium-like links with
+electron itself such that we obtain the same sensor-like functionality while
+staying slim on web interfaces and able to control profiles from their base."*
+
+`S-13`'s deliverable is a capability verdict with evidence. This is it, taken
+over CDP against the live Obsidian (`X-2`), not from documentation.
+
+### N.1 — what the renderer actually reaches
+
+Obsidian 1.13.7 runs **Electron 39.8.3 / Chromium 142 / Node 22.22.1**, with
+`nodeIntegration` on and `@electron/remote` exposed to plugins. From plugin
+code:
+
+| via `require('electron').remote` | |
+|---|---|
+| `BrowserWindow` | function |
+| `WebContentsView` | function |
+| `BrowserView` | function (deprecated by Electron) |
+| `session` + `session.fromPartition` | object / function |
+| `app`, `webContents`, `webFrameMain` | available |
+| `getCurrentWebContents().debugger` | **present — CDP from inside** |
+
+`<webview>` is also available, but **Electron now advises against it**:
+*"Chromium's webview is undergoing dramatic architectural changes... consider
+alternatives, like iframe, a WebContentsView, or an architecture that avoids
+embedded content altogether."* So `P-B3`/`P-B4` should be built on
+`WebContentsView`, not the `<webview>` tag. That is a correction to the
+obvious reading of those rows.
+
+### N.2 — the verdict: yes, and it is demonstrated
+
+Driven from plugin code in the running app, with **no Firefox and no
+geckodriver**:
+
+| step | result |
+|---|---|
+| isolated persistent session `persist:domvec-probe` | obtained — this is *"profiles from their base"* |
+| hidden `BrowserWindow` on that partition | created |
+| navigate to `https://books.toscrape.com` | loaded |
+| `executeJavaScript` in the page | title, **542** DOM nodes, **94** anchors |
+| **`MutationObserver` attached to `document.body`, subtree** | **true** — the fold's own primitive works |
+| `webContents.debugger` | available |
+| teardown | destroyed |
+
+`preload` is the injection point the sensor needs: it runs *before* page
+scripts, which is required for a fold that must not miss the first mutation.
+`executeJavaScript` on `dom-ready` is the fallback for re-injection.
+
+### N.3 — the finding that is not about tidiness
+
+**Electron loaded a page Firefox cannot.** `apnews.com` refuses automation: it
+returns 403 to curl and timed out the Selenium/geckodriver scan at 40,000 ms,
+which is why the 256 re-cut holds 23 pages and not 24.
+
+| | Firefox + geckodriver | Electron `BrowserWindow` |
+|---|---|---|
+| `https://apnews.com` | **TimeoutException at 40,000 ms** | **loaded in 26,350 ms** |
+| DOM nodes | — | 10,161 |
+| anchors | — | 1,772 |
+| body text | — | 22,340 chars |
+
+That is not a performance argument, it is a **coverage** argument: the corpus
+is currently missing a page because of the host, and the alternative host
+reaches it.
+
+### N.4 — what this does not settle
+
+The verdict is *the capability exists and one real advantage is measured*. It
+is not yet a decision to migrate, and Addendum II did not ask for one.
+
+- **26.4 s is not fast.** It is inside Firefox's timeout but not comfortably.
+  One load, one page; no distribution behind it.
+- **`sensor.js` was not run.** `MutationObserver` attaching proves the
+  primitive; it does not prove the fold, the taxonomy, or `repairMs`.
+- **O(delta) is unmeasured on this host.** Every timing in
+  `build_analytics/` was taken under Gecko. They are not transferable, and
+  re-taking them is the real cost of this migration.
+- **Closed shadow roots stay closed** (hard constraint 6). Electron changes
+  nothing here and must not be presented as a way in.
+- **`shadowRootsReachable: 0`** in the probe is a property of
+  books.toscrape.com, not a shadow-traversal result. Untested.
+- **Chromium version is Obsidian's, not ours.** Today it is 142. We ship
+  `geckodriver.exe` and control that; an Electron host inherits whatever
+  Obsidian ships and upgrades when Obsidian does. That is a real loss of
+  control traded for one fewer binary.
+- **Single-engine risk.** `invariants.a1` and `c1` compare composed-tree walks,
+  and the addressing convention was developed against Gecko. Moving to Blink
+  changes DOM edge cases; the invariants have to be re-run, not assumed.
+- **Detectability.** apnews admitting Electron where it refused geckodriver is
+  today's behaviour of one site's bot detection, not a property. It can change
+  and it is not a guarantee for other pages.
+
+### N.5 — the cheap next step
+
+Run the existing sensor against an Electron-hosted page and compare the map to
+the Gecko one for the *same url*, address by address. `invariants.a1` already
+does this comparison; it needs a second host, not a new measure — which is
+`M.4`'s lesson applied before making the same mistake a third time.
 
 ---
 
