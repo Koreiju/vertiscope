@@ -1,27 +1,30 @@
-"""A 3D placement for the chunks, from both vector spaces at once.
+"""A 3D placement for the chunks, from the semantic space.
 
-The goal states the projection precisely, and the precision is the point:
-bring the frequency vectors to the semantic dimensionality FIRST, concatenate,
-then run one final UMAP. Not two layouts blended, and not a UMAP of whichever
-space happens to be wider.
+The goal settles which space: "quantized semantic (and not pre-umapped
+frequency) vectors are the primary embeddings space for the *projector*, while
+we still apply triple-retrieval with frequency-quantized-pagerank searches".
+So frequency is one of three ranked signals in RETRIEVAL and is not in the
+picture at all.
 
-Why it has to be done that way. Tf-idf over a corpus is tens of thousands of
-columns and a nomic embedding is 768, so concatenating them raw hands the
-distance function to the lexical space by sheer count -- the semantic half
-would contribute about one part in fifty of every distance, and the result
-would be a tf-idf layout with a rounding error in it. Reducing the frequency
-side to the same width makes the two halves equal in DIMENSION.
+This module used to fit both. It brought tf-idf down to the embedding's width,
+L2-normalised each half so neither dominated the distance by magnitude, and
+ran one UMAP over the concatenation -- and the reasoning was right about the
+arithmetic. Tf-idf raw is tens of thousands of columns against nomic's 768, so
+an unreduced join hands the distance function to the lexical space by sheer
+count. All of that machinery answered a question the goal has now answered
+differently, and it is gone rather than disabled: `halves` and `equalised`
+reported whether two spaces had been equalised, and there is one space.
 
-Equal dimension is not yet equal weight, because a 768-wide tf-idf projection
-and a 768-wide embedding need not have the same magnitude. So each half is
-L2-normalised before the join: after that both contribute a unit vector, and
-a cosine distance over the concatenation is the mean of the two cosines. That
-is what "equal information dimensions" has to mean operationally, and it is
-one line that is easy to leave out and impossible to notice missing -- the
-layout still looks like a layout.
+What the two jobs wanted was never the same. A projection asks what a chunk
+MEANS; tf-idf answers which words it contains, and on a corpus of web pages
+that clusters site furniture as readily as subject matter. Retrieval can hold
+both answers and rank them against each other. A picture has to pick one.
 
-This runs in Python rather than in the plugin because the vectors, numpy and
-UMAP are all already here. The plugin renders; it does not fit.
+Frequency survives as the FALLBACK for a workspace with no embeddings, where
+the alternative is no layout at all -- and `fitted_on.semantic` says which
+happened, so a caller can tell the goal's projection from a stand-in.
+
+The plugin renders; it does not fit.
 """
 
 from __future__ import annotations
@@ -38,9 +41,8 @@ from .. import tokens
 #: both.
 _MEDIA_RE = re.compile(r"!\[([^\]]*)\]\(([^)\s]+)\)")
 
-#: Width of each half when there is nothing to match. Only reached when the
-#: workspace has no embeddings at all, where "equal halves" is moot and this
-#: is just a sane reduction before UMAP.
+#: The width a space is brought down to before UMAP. A sane reduction, not a
+#: matching exercise -- there is one space to fit now.
 _LONE_TARGET = 128
 
 #: Half the width of the cube the layout is delivered in. The projection is
@@ -136,41 +138,48 @@ def build_layout(workspace,
         if all(r is not None for r in wanted):
             semantic = np.asarray(embeddings.matrix[wanted], dtype=np.float32)
 
-    spaces = ["frequency"]
-    target = semantic.shape[1] if semantic is not None else _LONE_TARGET
-    left = _reduce(lexical, target, seed)
-    widths = {"lexical": int(left.shape[1])}
+    # The projector fits on the SEMANTIC space alone.
+    #
+    # It used to fit both, reduced to a common width and concatenated, and
+    # this module argued the case at length: a joint fit, "not two layouts
+    # blended, and not a UMAP of whichever space happens to be wider". The
+    # argument was sound and the premise was not ours to choose -- the goal
+    # settles it: "quantized semantic (and not pre-umapped frequency) vectors
+    # are the primary embeddings space for the *projector*, while we still
+    # apply triple-retrieval with frequency-quantized-pagerank searches".
+    #
+    # So frequency leaves the PICTURE and keeps its place in RETRIEVAL, where
+    # it is one of three ranked signals. The two jobs wanted different things
+    # from it and were sharing one answer: a projection is asking what a chunk
+    # MEANS, and tf-idf answers what words it happens to contain, which on a
+    # corpus of web pages clusters by site furniture as readily as by subject.
+    #
+    # Everything the equalising machinery existed for goes with it -- there is
+    # no second half to be lopsided against. `_reduce` is still used, but only
+    # to bring one space down to a width UMAP is comfortable with.
+    spaces: List[str] = []
+    widths: Dict[str, int] = {}
 
     if semantic is not None:
         spaces.append("semantic")
-        # Meet in the middle, rather than reducing one side to the other's
-        # nominal width and calling it equal.
-        #
-        # Truncated SVD cannot produce more components than the data has rank,
-        # so on a 98-chunk workspace the lexical side comes back 97 wide
-        # however high the target was set. Concatenating that with a 768-wide
-        # embedding gives the semantic space an eight-to-one say -- the same
-        # defect this module exists to prevent, with the imbalance pointing
-        # the other way, and the first version of this code reported
-        # `equalised: True` while doing exactly that.
-        #
-        # So both halves come down to whatever width the narrower one can
-        # actually reach.
-        #
-        # The cap is `n - 1` as well as the narrower side. Truncated SVD
-        # cannot return more components than the sample count supports, so
-        # asking a 768-wide embedding for 75 on a three-chunk workspace gets
-        # 2 back -- and the halves end up 75 against 2, which is the same
-        # lopsidedness a third way. Taking the rank bound into the width up
-        # front means both calls can actually deliver what they are asked for.
-        width = int(min(left.shape[1], semantic.shape[1],
-                        max(2, lexical.shape[0] - 1)))
-        left = _reduce(left, width, seed)
+        # Rank still caps the reduction: truncated SVD cannot return more
+        # components than the sample count supports, so a three-chunk
+        # workspace asking a 768-wide embedding for 128 gets 2 back. Asking
+        # for a width the data can actually deliver keeps the call honest.
+        width = int(min(semantic.shape[1], max(2, semantic.shape[0] - 1),
+                        _LONE_TARGET))
         right = _reduce(semantic, width, seed)
-        widths = {"lexical": int(left.shape[1]),
-                  "semantic": int(right.shape[1])}
-        features = np.hstack([_unit_rows(left), _unit_rows(right)])
+        widths = {"semantic": int(right.shape[1])}
+        features = _unit_rows(right)
     else:
+        # No embeddings, so no semantic space to fit. Frequency is the
+        # FALLBACK now rather than half the picture, and `spaces` says so --
+        # a caller that reads "frequency" here is being told the projection
+        # is not the one the goal asks for, not that it is half of it.
+        spaces.append("frequency")
+        width = int(min(_LONE_TARGET, max(2, lexical.shape[0] - 1)))
+        left = _reduce(lexical, width, seed)
+        widths = {"lexical": int(left.shape[1])}
         features = _unit_rows(left)
 
     # Six components, not three: three to stand in space and three to be a
@@ -199,9 +208,9 @@ def build_layout(workspace,
     # is where `_hsv` sends a component with no spread -- while the report
     # still said `hsv: true`. A constant colour claiming to be a measurement
     # is worse than the host palette, because the host palette says what it
-    # is. So the colour is dropped and the viewer is told, exactly as
-    # `equalised` is asserted from the measured widths rather than from the
-    # intention.
+    # is. So the colour is dropped and the viewer is told -- asserted from
+    # the measured components rather than from the intention, which is the
+    # rule every field in this report follows.
     got = int(coords.shape[1])
     colours = _hsv(coords[:, dims:dims + 3]) if (hsv and got >= want) else None
     if spread_axes:
@@ -277,14 +286,17 @@ def build_layout(workspace,
         # over coordinates already in hand.
         "spacing": _spacing(coords, dims),
         "images": sum(1 for n in nodes if n.get("image")),
-        # Stated so a reader of the picture knows what produced it, and
-        # `equalised` is asserted from the widths rather than from the
-        # intention: it means the two halves ARE the same size, not that the
-        # code tried to make them so.
-        "halves": dict(widths,
-                       equalised=(semantic is not None
-                                  and widths.get("lexical")
-                                  == widths.get("semantic"))),
+        # What the fit actually ran on. `halves` and `equalised` lived here
+        # and described a join that no longer happens -- they reported whether
+        # two spaces had been brought to the same width, and there is one
+        # space now. A field that can only ever say the same thing tells a
+        # reader nothing, and a field that describes machinery which has been
+        # removed tells them something false.
+        #
+        # `semantic` is the answer a caller needs: True means this is the
+        # projection the goal asks for, False means the workspace had no
+        # embeddings and the picture fell back to frequency.
+        "fitted_on": dict(widths, semantic=semantic is not None),
     }
 
 

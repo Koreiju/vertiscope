@@ -83,30 +83,43 @@ def _with_embeddings(workspace, dim=768, seed=0):
     return workspace
 
 
-# --- the equalisation -----------------------------------------------------------
+# --- which space the picture is of ------------------------------------------
 
-def test_the_two_halves_are_the_same_width(ws):
-    """Equal DIMENSION, asserted from the widths and not from the intention.
+def test_the_projection_is_semantic_alone(ws):
+    """The goal names the space: "quantized semantic (and not pre-umapped
+    frequency) vectors are the primary embeddings space for the *projector*".
 
-    The first version reduced the lexical side towards the embedding's
-    nominal 768 and reported success. But truncated SVD cannot produce more
-    components than the data has rank, so on a small workspace it came back
-    far narrower -- and the concatenation then gave the SEMANTIC space the
-    lopsided say, the same defect pointing the other way, while the report
-    said `equalised: True`.
+    This module used to fit both, equalised by width -- and argued the case
+    well. The arithmetic was right; the premise was not ours. Frequency keeps
+    its place in retrieval, where it is one of three ranked signals, and
+    leaves the picture.
     """
     report = build_layout(_with_embeddings(ws))
-    halves = report["halves"]
-    assert halves["equalised"] is True
-    assert halves["lexical"] == halves["semantic"], halves
+    assert report["spaces"] == ["semantic"], report["spaces"]
+    assert report["fitted_on"]["semantic"] is True
+    assert "lexical" not in report["fitted_on"], report["fitted_on"]
 
 
-def test_each_half_is_unit_length_before_the_join():
-    """Equal dimension is not yet equal weight.
+def test_frequency_is_the_fallback_and_says_so(ws):
+    """A workspace with no embeddings still gets a picture, and is told.
 
-    A 768-wide tf-idf projection and a 768-wide embedding need not have the
-    same magnitude, and without normalising, whichever is larger dominates the
-    distance. One line, easy to leave out, impossible to notice missing.
+    The alternative to falling back is no layout at all, which helps nobody.
+    What matters is that a caller can tell the goal's projection from a
+    stand-in, so `fitted_on.semantic` is False and `spaces` says frequency.
+    """
+    report = build_layout(ws)
+    assert report["spaces"] == ["frequency"], report["spaces"]
+    assert report["fitted_on"]["semantic"] is False
+    assert report["nodes"], "the fallback must still place the chunks"
+
+
+def test_rows_are_unit_length_before_the_fit():
+    """Magnitude must not decide distance.
+
+    Kept from the two-space version, where it stopped whichever half was
+    larger from dominating. It still matters with one space: UMAP on cosine
+    wants unit rows, and the zero-row guard is what keeps one empty chunk
+    from collapsing the whole layout.
     """
     raw = np.array([[3.0, 4.0], [0.0, 0.0], [1.0, 0.0]], dtype=np.float32)
     unit = _unit_rows(raw)
@@ -125,7 +138,7 @@ def test_the_semantic_space_actually_moves_the_picture(ws):
     both = build_layout(_with_embeddings(ws), seed=1)
 
     assert lexical_only["spaces"] == ["frequency"]
-    assert both["spaces"] == ["frequency", "semantic"]
+    assert both["spaces"] == ["semantic"]
 
     a = {n["cid"]: n["pos"] for n in lexical_only["nodes"]}
     b = {n["cid"]: n["pos"] for n in both["nodes"]}
@@ -377,7 +390,7 @@ def test_a_workspace_opened_to_read_still_sees_its_stored_vectors(tmp_path):
         assert index.embeddings.matrix is not None
         layout = build_layout(reader)
         assert "semantic" in layout["spaces"], layout["spaces"]
-        assert layout["halves"]["equalised"] is True, layout["halves"]
+        assert layout["fitted_on"]["semantic"] is True, layout["fitted_on"]
 
 
 def test_a_workspace_with_no_vectors_still_reports_none(tmp_path):
