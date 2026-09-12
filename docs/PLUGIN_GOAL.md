@@ -148,6 +148,165 @@ Read this first, then that.
 
 ---
 
+## Addendum, 2026-09-12 — the projector, the panels, the scanner
+
+**Also binding, and it OVERRIDES the statement above where the two differ.**
+Two overrides are explicit and one settles a question the first statement left
+ambiguous; they are listed under "What the addendum changes" below.
+
+> [...] The UMAP 3D graph view with patricia trie and markdown rerieval-based
+> links shown, as well as module dependencies for codebases and python
+> modules, including those in local pypi packages. The full skeleton structure
+> of linked data that comes from both web, the local project vault, and pypi,
+> all their semantic vectors and hard graph-based links stored in the same
+> database. For the time being, and this directly replaces any verbatim
+> statements on this, we can consider that quantized semantic (and not
+> pre-umapped frequency) vectors are the primary embeddings space for the
+> *projector*, while we still apply triple-retrieval with
+> frequency-quantized-pagerank searches. Chunk embeddings, since they are from
+> the same model, can be UMAPped to the per-document source in batch. However,
+> that which generates these chunk embeddings is very important, and discussed
+> in the next point.
+>
+> The per-chunk panel view that is specialized for the interactive components
+> of webpages (and the full and milkdown playground demo level quality of
+> structure, content, organizedness, and completeness, however remaining
+> within the pre-set context window chunk limit of 512 tokens throughout
+> processing, perhaps with double-checks and balances after the initial shadow
+> DOM selenium scanning sensor). The code artifact panel views with a terminal
+> below them as well. Then, a third type of panel that is a
+> retrieval-enhanced jupyter notebook kernel that can switch between jupyter
+> kernels and powershell terminals.
+>
+> The scanner itself, using mutationobservers, content detection,
+> deduplication efficiently in O(delta)-millisecond time with a queue that
+> maps the distilled page's markdown structures in their chunk-batches to the
+> vectorization steps (tfidf is global, though, to the full db corpus). This
+> is where the quality of the markdown generated aligning itself to the
+> milkdown playground standard of content (image, links, embedded links,
+> headers, tables, etc) is most important. Not only do shadow DOM nodes need
+> to be localized properly to their ancestors in the patricia trie for
+> structural guarantees on the distilled HTML that retains these quality-based
+> properties of the markdown output. they need to retain this high-quality
+> markdown structure at the interactive chunk level so that semantic and
+> frequency embeddings are most accurately representative. This also
+> emphasizes the requirement for full structural preservation along content
+> links in nested shadow DOM nodes, while also behooving the requirement for
+> full deduplication of repeat substrings that are essentially structural
+> redundancies of the web pages themselves.
+>
+> In all cases, web searches on github codebases and examples that work are
+> the most important drivers of success at every step of the work's dynamic
+> directions.
+
+### The minimal embedded chat, and the panel types it lives on
+
+> We will add back the quantized chat feature as something much smaller and
+> minimal, and make it an embedded tool within the jupyter notebook panels; at
+> the bottom of the cell that has been selected, either markdown, code, or the
+> terminal/kernel, the context window for the small language model then starts
+> at this "last-most viewable cell within current selection/focus" as the
+> terminal point and re-winds backwards within the notebook in its *current
+> state* (including terminal or kernel output display, where for intermediate
+> cells this is the norm for where to rewind the context window from). The
+> chat prompt and response panel is a *hovering one* that follows the user's
+> scrolls and does not apply a new re-wind over the context window until the
+> user has selected/interacted with a new cell (essentially apply a new
+> re-wind whenever the cursor lands on a new cell, and this is injected into
+> the user prompt as the effective contextual history, where the user prompt
+> decides how many remaining chunks of tokens to rewind backwards for. Here,
+> our jupyter notebooks are dynamically recursively chunked similarly to our
+> webpages and continuously diff-updated to the db (including re-vectorization
+> and chunk assignment). Since we may inject new re-winds intermittently but
+> want to keep the sessions the same without compacting or re-starting with
+> one-shot, the token limit for our re-winds are within a safety factor of the
+> maximum token limit for an input prompt. We will keep this simple and as-is
+> for now. Later on, we will return to add more things like cell and code
+> navigation, running things in the terminal, writing updates to the
+> notebooks, and so on.
+>
+> I should also note the requirement to keep the original obsidian markdown
+> panels in their native form as well, which are different form the
+> retrieval-enhanced notebook kernels. However, to add to the native markdown
+> default with obsidian, we include similar retrieval as well. Then we build
+> on this native form to include code, kernel, and terminal options. We also
+> add the hovering chat ontop of the native obsidian markdown panels too. The
+> buttons for adding the completely new structural cells are at the very
+> bottom of the obsidian markdown, while the hovering chat is always below the
+> boundary of the scrollable markdown window. So, we essentially build the
+> native obsidian markdown out into this more fully fledged interactive panel.
+> I think the final step would then be to add interactive web browser chunk
+> cells as well to this set. However, the way browser interactions and dual
+> panel views work is slightly different, and particularly so.
+>
+> The way the browser notebook cells with dual view would work in this
+> instance would keep all the same scanning and O(delta) streaming properties
+> the same. But, instead of constraining the browser views to their chunks, we
+> apply a fully-fledged and regular web browser view to the cell. So, we can
+> navigate the webpage exactly as we would in a regular browser, but the view
+> of the browser port is such that we apply scanning while the live browser
+> itself is being navigated. If there's a way to embed the native selenuium
+> session view within the cell and allow the resizing of the notebook cells to
+> affect the window size of the selenium browser, that would be best. So,
+> similar to how we navigate code-spaces in jupyter code cells, our web
+> browser view gives us access to the web itself but constrained to the
+> notebook view. As we navigate the page (scrolling, hovering, interacting
+> more generally), our passive mutationobserver sensor is always firing and
+> tracing along the O(delta) millisecond *diff* updates from DOM to DB with
+> the patricia trie. As this is happening, the chunk deltas are diffed to our
+> projector view, where we can view the per-chunk browser and markdowns as
+> dual panels from there as well. However, we can also use web browser
+> notebook cells as well to navigate the web from this plugin. Left clicks in
+> the browser do the same things as a regular firefox with selenium open.
+> Hovering over the page, though, includes an overlay that highlights the
+> chunk structures overtop of the page's native cartesian displays to show the
+> effective chunks embedded within the page. Right clicks, then, would locally
+> index chunks to their dual-view markdown panels within the browser cell,
+> which is what feeds the SLM context. This includes the full type set we've
+> tracked so far (but only the static things and not the interactive
+> components that are meant for tool calls in much later iterations).
+>
+> Also, please don't forget about how docstrings are vectorized for codebases,
+> and code docs more broadly speaking.
+
+### What the addendum changes
+
+**The projector's embedding space.** *"Quantized semantic (and not
+pre-umapped frequency) vectors are the primary embeddings space for the
+projector."* This replaces the joint fit `layout.py` performs today — tf-idf
+and semantic each reduced to equal width, unit-normalised, concatenated, one
+UMAP over both, with `equalised` reported from the widths. Frequency leaves
+the PROJECTION and stays in retrieval. `halves` / `equalised` stop meaning
+anything and go with it.
+
+**Chunks and documents share one fit.** *"Chunk embeddings, since they are
+from the same model, can be UMAPped to the per-document source in batch."*
+Two node kinds in one space, fitted together — not two projections overlaid.
+
+**"No dedups" is settled, and it means deduplicate.** The first statement's
+"no dedups" sat in a list about elegance and could be read either way; it was
+raised as an open question and this answers it: *"full deduplication of repeat
+substrings that are essentially structural redundancies of the web pages
+themselves."* When a page repeats itself structurally, the chunk shows it
+once. This overrides `markdown.py`'s deliberate tuning "17:1 toward leaving
+noise rather than risking loss" for the structural-redundancy case
+specifically -- 88% of measured in-chunk repetition is the page repeating
+itself, and it is now in scope.
+
+**The window is enforced throughout processing.** *"Remaining within the
+pre-set context window chunk limit of 512 tokens throughout processing,
+perhaps with double-checks and balances after the initial shadow DOM selenium
+scanning sensor"* — a verification pass after the scan, not only a cut at
+render time.
+
+**Deferred by name, so it is not an omission.** Cell and code navigation,
+running things in the terminal, and writing updates back to notebooks are
+explicitly "later on". Interactive components inside browser cells are "for
+tool calls in much later iterations" — browser-cell right-click indexing
+covers the static type set only.
+
+---
+
 ## Standing instructions carried in the verbatim
 
 Two of these are process rules, not features, and they bind every future

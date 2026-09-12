@@ -1,61 +1,218 @@
 # The Obsidian plugin — product requirements
 
-Every requirement here is traced to something the user actually asked for, and
-each one carries the user's own wording. Where a requirement is paraphrased it
-is marked as such; where it is quoted, the quote is exact.
-
-This is the *what*. `OBSIDIAN_BRIDGE.md` is the *how* and *why* — the design
-record, the defects found, and the reasoning behind each mechanism. When the
-two disagree, this file says what was asked for and that one says what was
-built; the disagreement is the bug.
-
-`PLUGIN_GOAL.md` holds the user's verbatim statement of the whole plugin and
-outranks this file: several things it asks for have no requirement number here
-yet, and its closing section lists exactly which.
+`PLUGIN_GOAL.md` holds the user's two binding statements word for word and
+outranks this file. This is their decomposition: every requirement traced to a
+phrase in one of them, numbered so it can be argued about and measured.
 
 **Status vocabulary.** `Done` means built *and* verified in the running app
-over CDP, never by screenshot (see R-I1). `Partial` means built with a
-measured shortfall, and the shortfall is stated. `Open` means not started.
+over CDP, never by screenshot (X-2). `Partial` means built with a measured
+shortfall, and the shortfall is stated. `Open` means not started. **`Defect`**
+means something is built and CONTRADICTS the goal — those are not gaps to fill
+but code to change, and they are listed first because they are the only
+category where doing nothing makes things worse.
 
-**48 requirements: 33 done, 8 partial, 7 open.**
-
-Counted from the tables below, which are the authority. An earlier tally of
-"41: 29 / 9 / 3" was given in conversation and was arithmetic error, not a
-different reading — no requirement was added or dropped between the two.
+**Part I** is the decomposition. **Part II** keeps the measured findings from
+the work so far, under their original `R-*` ids, as the evidence Part I cites.
+Those ids are retired as requirements and retained as anchors.
 
 ---
 
-## Measured baseline
+## Part I — the decomposition
 
-These are the numbers the partial requirements are short against, all taken on
-`build/vaultws512` — 24 pages of the frozen corpus, 3,136 chunks, a 512-token
-window, real nomic embeddings.
+### 0. Defects: shipped code that contradicts the goal
 
-| measure | value | what it means |
+| id | what is built | what the goal says | |
+|---|---|---|---|
+| D-1 | `layout.py` fits the projector on tf-idf **and** semantic jointly, equalised by width | *"quantized semantic (and not pre-umapped frequency) vectors are the primary embeddings space for the projector"* | **Defect** |
+| D-2 | The trie is keyed `url : xpath : taxonomy : content` | *"a unified patricia trie of domain/url-tail/xpath/markdown/content-detection"* — five levels, and markdown is one of them | **Defect** |
+| D-3 | The panel draws a read-only surface inside a code block | *"retrofitted to show their **base and original** markdown editors"* — the native, editable Obsidian editor | **Defect** |
+| D-4 | `markdown.py` is tuned "17:1 toward leaving noise rather than risking loss" and `_dedupe` is element-scoped | *"full deduplication of repeat substrings that are essentially structural redundancies of the web pages themselves"* | **Defect** |
+| D-5 | Markdown renders no tables at all | *"a hierarchically-header-structured markdown document with tables, images, web links"* | **Defect** |
+
+D-1 is the cheapest and the most invalidating: dropping frequency from the fit
+is a small change to `build_layout`, and it changes every stored position and
+every hue. Do it before more projector work, not after.
+
+### S. The scanner
+
+| id | requirement | status |
 |---|---|---|
-| structural reach | 35.2% mean, 18.5% median | share of a page's visible, non-wrapper elements under a chunk root that the chunk addresses |
-| reading order | 76% | chunks whose addressed elements appear in document order |
-| containment | 831/831 (100%) | ancestor pairs still nested after distillation |
-| depth correlation | 1.00 | page nesting order vs drawn nesting order |
-| duplicate chunks | 420 of 3,136 (13.4%) | markdown identical to another chunk |
-| billboards | 187 of 253 textured (74%) | nodes carrying a picture that renders |
-| resolved graph edges | 613, 1 dangling | vault edges from exported notes |
-| chunks over window | 39 (1.2%) | single indivisible units |
-| chunk size | median 199 tokens, p90 452 | against a 512-token window |
+| S-1 | Shadow DOM elements linked in **millisecond O(delta)** time | Partial |
+| S-2 | MutationObservers on every chunk root *and* every nested shadow root | Partial — a shadow root attached after the walk is unobserved |
+| S-3 | Content detection across the full taxonomy | Done |
+| S-4 | Deduplication, efficient, in the same O(delta) budget | Open |
+| S-5 | A **queue** mapping distilled markdown structures, in chunk-batches, to the vectorization steps | Open — `flush_vectors` is a separate per-page pass |
+| S-6 | **tf-idf is global** to the full DB corpus, not per page | Verify |
+| S-7 | Every page interaction is mutation-observed and persisted through the panel's browser half to db, vectors and trie | Open |
+| S-8 | **Smooth, live-tuned steady scroll** per visit, tuned to Selenium's update rate, fine-grained and time-efficient | Open |
+| S-9 | Pagination deliberately **not** automated — manual, in the browser views | By design |
+| S-10 | Browser streams ported to the panels efficiently, *"completely and exactly mirroring features/calls to the original selenium"* | Partial — rrweb is the architecture; its shadow-DOM capture is the wrong half |
+| S-11 | The 512-token window holds **throughout processing**, with a verification pass after the scan | Partial — 15.1× worst in the stored board, 5.9× in-process |
 
-Two of these are **near-tautological and must not be read as design quality**:
-`containment` and `depth correlation` come out perfect because the render
-indents by trie depth and trie depth mirrors DOM depth. They confirm the
-absence of a bug. They are not evidence that structure is preserved — `reach`
-and `reading order` are, and those are the two that are short.
+### T. The trie and the database
 
-Reproduce with:
+| id | requirement | status |
+|---|---|---|
+| T-1 | One trie keyed domain / url-tail / xpath / markdown / content-detection | **Defect D-2** |
+| T-2 | It reconstructs the **full digital trace** of the page, not only its content | Partial |
+| T-3 | Shadow DOM nodes localized to their **ancestors in the trie**, giving structural guarantees on the distilled HTML | Partial |
+| T-4 | Intermediate trie paths reflected as **intermediate chunk-node linkages** | Open |
+| T-5 | The **local vault** is in the trie | Open |
+| T-6 | **Installed Python packages** are in the trie, per-package partitioned with main-DB links | Open |
+| T-7 | Semantic vectors **and** hard graph links in the **same database** | Partial |
+| T-8 | The trie is streamed to the panels' interactive side | Open |
+| T-9 | The xpath **shape** exists as a second address dimension, never as the identity | Done |
 
-    python scripts/structural_fidelity.py --workspace build/vaultws512
-    python scripts/xpath_shape_analysis.py --workspace build/vaultws512
-    node obsidian-plugin/cdp.mjs --file obsidian-plugin/probes/graph-edges.js
+### M. Markdown distillation
+
+The quality bar is the Milkdown playground's left editable pane, on four named
+axes: **structure, content, organizedness, completeness**.
+
+| id | requirement | status |
+|---|---|---|
+| M-1 | The **full content** of the original in-browser HTML survives | Partial — reach 37.1% |
+| M-2 | **Hierarchically header-structured** | Partial |
+| M-3 | **Tables** | **Defect D-5** |
+| M-4 | Images, web links, embedded links | Partial |
+| M-5 | **Markdown panel links** to other panels | Partial — continuation links done, retrieval links absent |
+| M-6 | Renders in regular / normal / **minified** form | Partial |
+| M-7 | **No intermediated hierarchical fields** where a single trie path node was collapsed | Open — 39.0% of chunks carry one |
+| M-8 | **Full deduplication of structural redundancy** | **Defect D-4** — 88% of in-chunk repetition is the page repeating itself |
+| M-9 | A control is named by the page, never by the taxonomy | Done — 1,556 lines → 2 |
+| M-10 | **Full structural preservation along content links in nested shadow DOM nodes** | Open |
+| M-11 | Quality holds **at the interactive chunk level**, because the chunk is what gets embedded and its structure decides how representative the vectors are | Open |
+| M-12 | Reading order matches the document | Done — 100% |
+
+### G. The projector and the graph
+
+| id | requirement | status |
+|---|---|---|
+| G-1 | Projector fitted on **quantized semantic vectors only** | **Defect D-1** |
+| G-2 | Chunk embeddings batch-UMAPped **with their per-document source** — two node kinds, one fit | Open |
+| G-3 | Retrieval stays **triple**: frequency × quantized-semantic × pagerank | Done |
+| G-4 | **Inter-spatial normalization** — nodes discernible | Done — nn p50 0.757 → 5.657 |
+| G-5 | Nodes visible at the default camera | Done — 0 → 3,135 of 3,135 on screen |
+| G-6 | **Patricia-trie links drawn** | Open |
+| G-7 | **Markdown retrieval links drawn** | Open |
+| G-8 | **Module dependency links** for codebases and Python modules | Open |
+| G-9 | …including modules inside **local PyPI packages** | Open |
+| G-10 | **Vault directory** drawn as links | Open |
+| G-11 | Three sources in one skeleton: web, vault, PyPI | Open |
+| G-12 | **UMAP embeddings persisted to the db** and queried straight into the graph view | Open |
+| G-13 | Re-projection **batched in a queue whose latency adapts** to the projection's own cost | Open |
+| G-14 | **Graph linkage completeness** across trie, web links, markdown links | Partial — dangling edges 0; trie axis absent |
+| G-15 | **Media present in the projector**, not only the panels | Partial — 73.8% textured |
+| G-16 | Chunk deltas diffed **into the projector view** live | Open |
+
+### P. The panels
+
+**P-W — the per-chunk web panel**
+
+| id | requirement | status |
+|---|---|---|
+| P-W1 | Specialized for the **interactive components** of webpages | Partial |
+| P-W2 | The **native, editable** Obsidian markdown editor as one half | **Defect D-3** |
+| P-W3 | The interactive HTML card as the other, one per chunk, boundary set by the sensor | Done |
+| P-W4 | A **minimal form of the original browser** — not raw HTML, not a browser re-render; same content, structure and affordances | Partial |
+| P-W5 | Interactable **against the database, offline** | Partial |
+| P-W6 | **And** dispatched to the live page when online | Partial — `enact` exists, gated off |
+| P-W7 | **Media in both halves** | Partial |
+| P-W8 | A switch between the two halves | Done |
+
+**P-C — the code artifact panel**
+
+| id | requirement | status |
+|---|---|---|
+| P-C1 | Full code artifacts **viewable and editable standalone** | Open |
+| P-C2 | **A terminal always directly below** the artifact | Open |
+| P-C3 | Artifacts vectorized **by their comments and docstrings** | Open |
+| P-C4 | **Docstrings and code docs more broadly** are the vectorized surface for codebases | Open |
+| P-C5 | **Live delta updates to modules** in both halves and in the 3D view | Open |
+
+**P-N — the retrieval-enhanced notebook panel**
+
+| id | requirement | status |
+|---|---|---|
+| P-N1 | A **Jupyter kernel** panel, retrieval-enhanced | Open |
+| P-N2 | **Switchable** between Jupyter kernels and PowerShell terminals | Open |
+| P-N3 | A **toggle on a code block** opens terminal or kernel — possibly both at once | Open |
+| P-N4 | A facade over Obsidian's vault interface exposing local kernels to the filestructure | Open |
+| P-N5 | Notebooks are **dynamically recursively chunked** like webpages | Open |
+| P-N6 | …and **continuously diff-updated to the db**, re-vectorized and re-assigned to chunks | Open |
+
+**P-M — the native markdown panel, built outward**
+
+| id | requirement | status |
+|---|---|---|
+| P-M1 | The **original Obsidian markdown panel survives in native form**, distinct from the notebook panel | Open |
+| P-M2 | The same retrieval is added to the native default | Open |
+| P-M3 | Code, kernel and terminal options are built **on top of** the native form | Open |
+| P-M4 | Buttons that add new structural cells sit at the **very bottom** of the markdown | Open |
+| P-M5 | The hovering chat sits **below the boundary of the scrollable markdown window** | Open |
+
+**P-B — the browser notebook cell**
+
+| id | requirement | status |
+|---|---|---|
+| P-B1 | A **fully-fledged regular browser view** in the cell — NOT constrained to a chunk | Open |
+| P-B2 | Navigate exactly as in a normal browser, while scanning continues on the live page | Open |
+| P-B3 | **Embed the native Selenium session view** in the cell if possible | Open |
+| P-B4 | **Resizing the cell resizes the Selenium window** | Open |
+| P-B5 | The passive MutationObserver sensor fires throughout — scroll, hover, interact — diffing DOM → DB in O(delta) ms | Open |
+| P-B6 | **Left click** behaves exactly as in Firefox under Selenium | Open |
+| P-B7 | **Hover** overlays the chunk structure on the page's own cartesian layout, showing the chunks embedded in it | Open |
+| P-B8 | **Right click** locally indexes a chunk to its dual-view markdown panel inside the cell — this is what feeds the SLM context | Open |
+| P-B9 | Right-click indexing covers the **static type set only**; interactive components are deferred to tool calls in much later iterations | By design |
+| P-B10 | Dual per-chunk browser + markdown panels are reachable **from the projector** too | Open |
+
+### R. Retrieval — the `[]()` gesture
+
+| id | requirement | status |
+|---|---|---|
+| R-1 | Typing the four symbols makes the bracket contents a **semantic retrieval query** | Open |
+| R-2 | Results in **scrollable whitespace immediately below the line** | Open |
+| R-3 | The remaining editable lines stay **uninterrupted** — the panel is one cohesive unit. `EditorSuggest` overlays; a CM6 **block widget** reflows | Open |
+| R-4 | Clicking a result **infills the link between the parentheses** | Open |
+| R-5 | **All retrieval comes through this one interface** — web, vault, packages alike | Open |
+| R-6 | Package retrieval applies a **vector-centroid pre-filter**, then partition-wise retrieval; the filter must not become a second interface | Open |
+| R-7 | The docs are updated to match this gesture wherever they disagree | Open |
+
+### L. The minimal embedded chat
+
+Deliberately small. Everything below is the whole of it; the chained
+single-hop architecture from the first statement is **not** in scope here.
+
+| id | requirement | status |
+|---|---|---|
+| L-1 | A **quantized** small model — Nous Hermes 2 DPO 7B on local CUDA | Open |
+| L-2 | Embedded **within the notebook panels**, at the bottom of the selected cell — markdown, code, or terminal/kernel | Open |
+| L-3 | Context **begins at the last-most viewable cell in the current selection** and **rewinds backwards** through the notebook | Open |
+| L-4 | It rewinds over the notebook **in its current state**, including terminal and kernel output — which is the norm for intermediate cells | Open |
+| L-5 | The prompt/response panel **hovers and follows the scroll** | Open |
+| L-6 | A **new rewind only when the cursor lands on a new cell**, not on scroll | Open |
+| L-7 | The rewind is **injected into the user prompt** as the effective contextual history | Open |
+| L-8 | The **user prompt decides how many further chunks** to rewind | Open |
+| L-9 | Rewind size stays within a **safety factor of the max input token limit**, so sessions continue without compaction or one-shot restart | Open |
+| L-10 | Also available **hovering over the native markdown panels** | Open |
+| L-11 | Deferred by name: cell/code navigation, running things in the terminal, writing updates back to notebooks | Deferred |
+
+### X. How the work is done
+
+| id | requirement | status |
+|---|---|---|
+| X-1 | **Search GitHub for working codebases and examples at every step** — *"the most important drivers of success"* — so the code the model uses to touch the interface is visible | Standing |
+| X-2 | Verify in the running app over devtools, **never by screenshot** | Standing |
+| X-3 | Where a document contradicts the goal, the **document** changes | Standing |
+| X-4 | Measure the distribution **before** writing an acceptance criterion | Standing — four criteria here were written first and all four were wrong |
+| X-5 | Cleanups gate on **`accounted`**, not `covered` | Standing |
 
 ---
+
+## Part II — measured findings
+
+Everything below is evidence for Part I, kept under the `R-*` ids it was
+recorded against. Those ids no longer number requirements; they anchor
+measurements. Where Part I cites a number, it comes from here.
 
 ## A. The panel — the artifact view
 
