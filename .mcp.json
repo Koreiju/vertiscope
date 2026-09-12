@@ -6,7 +6,7 @@
         "-m",
         "domvec.obsidian.mcp",
         "--workspace",
-        "build/vaultws512"
+        "build/vaultws256"
       ],
       "env": {}
     }

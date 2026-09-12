@@ -49,11 +49,15 @@ def main(argv=None) -> int:
 
     args = parser.parse_args(argv)
 
-    # `serve` reads; `enact` drives a browser and writes what it sees back.
-    # So the sidecar takes the weaker lock in its normal mode, which is what
-    # lets an MCP server (or a second reader) open the same workspace. An
-    # --enact run is a writer and excludes them, correctly.
-    read_only = args.cmd == "serve" and not getattr(args, "enact", False)
+    # Both subcommands READ the workspace. `serve` answers questions about it;
+    # `export` reads chunks and writes markdown into the VAULT, never into the
+    # store. So both take the weaker lock, which is what lets an MCP server or
+    # a second reader open the same workspace at the same time.
+    #
+    # `--enact` is the exception and the only one: it drives a real browser and
+    # writes back what it sees, so it is a writer and excludes other openers,
+    # correctly.
+    read_only = not getattr(args, "enact", False)
     with Workspace(args.workspace, read_only=read_only) as ws:
         if args.cmd == "serve":
             print("domvec sidecar on http://127.0.0.1:%d  (%d pages, %s)"
