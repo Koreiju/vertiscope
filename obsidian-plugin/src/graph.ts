@@ -60,7 +60,10 @@ interface Layout {
   /** Nearest-neighbour distance quantiles over the placed nodes, from the
    *  fit itself. `p50` is the projection's own scale; see the sizing note. */
   spacing?: { p05: number; p25: number; p50: number; n: number };
-  halves: { lexical?: number; semantic?: number; equalised: boolean };
+  /** Which space the fit actually used. `semantic: false` means the workspace
+   *  had no embeddings and the frequency FALLBACK drew this picture, which is
+   *  not the projection the goal asks for — so the bar has to say so. */
+  fitted_on?: { semantic: boolean };
   note?: string;
 }
 
@@ -203,13 +206,33 @@ export class GraphView extends ItemView {
         return;
       }
       this.draw(canvas, layout);
-      // The spaces are named on the bar rather than left implicit. A layout
-      // fitted on frequency alone and one fitted on both are different
-      // pictures, and a reader who cannot tell them apart will read a lexical
-      // clustering as a semantic one.
-      const halves = layout.halves.equalised
-        ? `equal halves of ${layout.halves.lexical}`
-        : "not equalised";
+      // Composing the LABEL must not be able to break the PANE.
+      //
+      // The picture is already on screen by this line. Everything below is a
+      // caption, and a caption that throws used to leave the status on
+      // "fitting…" forever -- a working graph that read as a hung one. Each
+      // field below is also read defensively, but the guard is what makes that
+      // a belt rather than the only thing holding it up: the next field the
+      // backend renames should cost a word of the caption, not the pane.
+      try {
+      // `fitted_on.semantic` rather than the space name alone. The projector
+      // fits on the semantic space (D-1), and frequency survives only as the
+      // fallback for a workspace with no embeddings. Those two produce
+      // different pictures and look identical from the pane, so the pane says
+      // which one it is looking at.
+      //
+      // Read defensively: this pane reads a report from a separately-running
+      // sidecar, which may be an older build than the plugin. It previously
+      // read `layout.halves.equalised` unguarded, and when the backend stopped
+      // reporting `halves` the throw landed AFTER `draw()` -- so the canvas
+      // painted, the status stayed on "fitting…" forever, and the pane looked
+      // hung while working. A missing field must degrade to a weaker label,
+      // never to an exception.
+      const fit = layout.fitted_on
+        ? (layout.fitted_on.semantic
+            ? "semantic fit"
+            : "FREQUENCY FALLBACK — no embeddings")
+        : "fit unreported";
       // `fitted_dims`, not an assumption: a viewer colouring by hue is
       // showing three more dimensions of the projection, and one falling back
       // to a per-host palette is showing a legend. The two look identical
@@ -220,8 +243,14 @@ export class GraphView extends ItemView {
       const pictures = layout.images
         ? ` · ${layout.images} with a picture` : "";
       status.setText(
-        `${layout.n} chunks · ${layout.spaces.join(" + ")} · ${halves} · ` +
+        `${layout.n} chunks · ${(layout.spaces ?? []).join(" + ")} · ${fit} · ` +
         `${colour}${pictures}`);
+      } catch (err) {
+        // Say the count, which is the one thing a reader needs to know the
+        // pane is alive, and name the failure rather than swallowing it.
+        status.setText(`${layout.nodes.length} chunks · caption failed: ` +
+                       `${err instanceof Error ? err.message : String(err)}`);
+      }
     };
 
     again.onclick = () => load();
