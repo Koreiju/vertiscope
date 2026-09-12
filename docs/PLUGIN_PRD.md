@@ -107,7 +107,7 @@ probes first.
 | S-8 | **Smooth, live-tuned steady scroll** per visit, tuned to Selenium's update rate, fine-grained and time-efficient | Open |
 | S-9 | Pagination deliberately **not** automated — manual, in the browser views | By design |
 | S-10 | Browser streams ported to the panels efficiently, *"completely and exactly mirroring features/calls to the original selenium"* | Partial — rrweb is the architecture; its shadow-DOM capture is the wrong half |
-| S-11 | The **256-token** window holds **throughout processing**, with a verification pass after the scan. A target, not a ceiling: a single indivisible unit may exceed it | Partial — 2.5% of chunks over at 256 |
+| S-11 | The **256-token** window holds **throughout processing**, with a verification pass after the scan. A target, not a ceiling: a single indivisible unit may exceed it | Partial — **0.4%** over on the 256 re-cut (21 of 5,337; max 370, mean 103). Better than the 2.5% previously recorded. The *verification pass* is still absent, which is what keeps this Partial |
 | S-12 | Every sensor→db stream reaches the graph view **and the opened *and closed* panel set, uniformly** | Open |
 | S-13 | **Investigate** whether Electron can be driven directly to give "the same sensor-like functionality" as Selenium — deliverable is a capability verdict with evidence, NOT a migration | Open |
 | S-14 | Whatever hosts the sensor must keep **profile control "from their base"** and stay "slim on web interfaces" | Open |
