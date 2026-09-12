@@ -316,6 +316,83 @@ covers the static type set only.
 
 ---
 
+## Addendum II, 2026-09-12 (later the same day) — the sensor's host, two duplications, and the order
+
+**Also binding.** Taken in conversation after Addendum I, so it wins over both
+statements above where they differ. It settles the browser substrate, opens a
+line of investigation that is NOT yet a commitment, names a defect class that
+had no requirement, and fixes the near-term order.
+
+> Let's straddle the shipped core web viewer and take ownership of electron as
+> we go, granted that there are still selenium-like interfaces that can perhaps
+> overtake a firefox browser telling an electron browser what to see. Perhaps,
+> instead, we explore any selenium-like links with electron itself such that we
+> obtain the same sensor-like functionality while staying slim on web
+> interfaces and able to control profiles from their base. This will also help
+> with interactive interfaces that link to our O(delta) diff recursive chunking
+> algorithm. One issue I'm flagging now is that we see a lot of both duplicate
+> chunks (as in reassignment and diff-based index pop updates don't land
+> straightforwardly) and also duplicate content within the markdown panel
+> renderings. Repeat fields and such. Perhaps another part of what we will now
+> take note of and at least verify the capabilities of to explore. Then, we
+> move onward to the notebook kernel panel design first to nail it down
+> correctly. This is where we bring in our electron sensor when ready, exposing
+> the chunk scanning and selection highlighting for markdown rendering in the
+> alternative panel by the user to annotate the context fed to our small
+> language model. Then, we go for the hovering SLM bar itself and work out the
+> details.
+
+And, on the window, in the same exchange: **re-cut the corpus at 256 now**,
+before the panel work, rather than building against the 512-token store.
+
+### What Addendum II changes
+
+**The browser substrate is "straddle", not "pick".** Obsidian ships a core
+`webviewer` (disabled in this vault as of today) and it is to be used *and*
+outgrown: take ownership of Electron as the work proceeds. This supersedes any
+reading of P-B3 as "embed Selenium's own window or nothing".
+
+**Selenium's ROLE is now an open question, not a fixture.** The verbatim asks
+whether driving Electron directly can give "the same sensor-like
+functionality" — with a named benefit, "staying slim on web interfaces and
+able to control profiles from their base", and a named consequence, that it
+"will also help with interactive interfaces that link to our O(delta) diff
+recursive chunking algorithm". Note the framing: *"perhaps"*, *"explore"*,
+*"at least verify the capabilities of"*. **This is a capability investigation
+with a deliverable, not a decision to rip out Selenium.** A requirement that
+records it as settled would be overstating the instruction.
+
+**Duplication is two defects, not one, and they are at different layers.**
+The verbatim separates them explicitly:
+
+1. *"duplicate chunks (as in reassignment and diff-based index pop updates
+   don't land straightforwardly)"* — a **trie/index** defect. The delta path
+   re-admits a chunk it should have reassigned or popped, so the store holds
+   two addresses where the page has one. This is upstream of any rendering.
+2. *"duplicate content within the markdown panel renderings. Repeat fields and
+   such."* — a **projection** defect, inside one chunk's render. This is the
+   D-4 / M-8 structural-redundancy family, seen from the panel.
+
+They must be measured apart. A single "duplication" number would mix an index
+that double-counts with a renderer that repeats itself, and fixing either one
+would move it — which is the denominator trap in `CLAUDE.md` exactly.
+
+**The near-term order is given.** Re-cut at 256 → verify the duplication
+capabilities → **notebook kernel panel design, nailed down first** → bring the
+Electron sensor in *when ready*, exposing chunk scanning and selection
+highlighting → **then** the hovering SLM bar. Note this REFINES X-6 rather
+than replacing it: the notebook panel still grows from the native markdown
+substrate, and browser cells still come last.
+
+**Selection highlighting is a new gesture with a stated purpose.** *"Exposing
+the chunk scanning and selection highlighting for markdown rendering in the
+alternative panel by the user to annotate the context fed to our small
+language model."* The user selects in the rendered markdown; the selection
+annotates what the SLM is given. No requirement covered this — the panels
+section had no notion of the reader marking context for the model.
+
+---
+
 ## Standing instructions carried in the verbatim
 
 Two of these are process rules, not features, and they bind every future
@@ -347,48 +424,28 @@ headers in the markdown.
 
 ## What this asks for that the PRD does not yet number
 
-Recorded here so the gap is visible rather than implied. None of the
-following exist as requirements in `PLUGIN_PRD.md`:
+Recorded here so the gap is visible rather than implied. **Most of what this
+section once listed has since been numbered** — Nous Hermes is `L-1`, the
+Jupyter/PowerShell panel `P-N1`/`P-N2`, the minimal browser `P-W4` and `P-B1`,
+the `[]()` gesture `R-1..R-7`, persisted UMAP `G-12`, adaptive re-projection
+`G-13`, inter-spatial normalization `G-4`, the PyPI corpus `T-6`/`G-9`, the
+vault in the trie `T-5`, trie-faithful chunk linkage `T-4`, live-tuned scroll
+`S-8`, uniform delta streaming `S-12`, and code artifacts `P-C1..P-C5`. A list
+that keeps claiming a gap that has closed is worse than no list, because it
+invites the same work twice.
 
-- The panel's browser half as a **real minimal browser**, not a distilled
-  static rendering — with interactions dispatched to the live page when
-  online, and served from the database when not.
-- The `[]()` **retrieval gesture** — typing into the brackets runs semantic
-  retrieval, results render in scrollable space below the line without
-  breaking the surrounding editor, and clicking one infills the parentheses.
-- **Live delta streaming to the graph view and to every open panel**,
-  uniformly, from the same stream that reaches the database.
-- **Adaptive UMAP re-projection queueing**, with the batching latency tuned to
-  the observed cost of the projection.
-- **Inter-spatial normalization** of UMAP nodes — the current projection
-  compresses nodes too tightly to distinguish.
-- **UMAP embeddings persisted to the database** and queried straight into the
-  graph view.
-- **Trie-faithful chunk linkage**: intermediate paths in the patricia trie
-  appear as intermediate links between chunk nodes.
-- **Smooth live-tuned scroll** on every page visit, tuned against Selenium's
-  own update rate; pagination deliberately excluded and left to the per-chunk
-  browser views.
-- **Jupyter notebook panels** with kernel terminals, plus PowerShell
-  terminals, toggled from a code block.
-- **Code artifacts** as first-class panels — standalone, editable, each
-  always accompanied by a terminal directly below it.
-- **The vault inside the patricia trie**, with module dependencies and the
-  directory tree drawn as links in the UMAP.
-- **Installed Python packages as a corpus**: per-package database
-  partitioning, main-DB links for lookup, and a vector-centroid pre-filter
-  ahead of partition-wise retrieval — all reached through the one `[]()`
-  interface.
-- **Nous Hermes 2 DPO 7B, quantized, on local CUDA.**
-- **The chained single-hop prompt architecture**: one system prompt per hop,
+What genuinely remains unnumbered, and why:
+
+- **The chained single-hop prompt architecture** — one system prompt per hop,
   each generated from the workspace layout at that hop; the previous link's
   output instructing the next link's input; per-hop sub-context windows that
   persist while a model stays put; and a final aggregate pass that synthesises
-  the leaf outputs back into the main chat.
-- **Structured tests on chain input/output quality** — named in the verbatim
-  as a deliverable, not an afterthought.
-
----
+  the leaf outputs back into the main chat. Deferred by `PLUGIN_PRD.md` §0b,
+  not dropped: Addendum I's *"put the LLM complexities aside"* scopes it out
+  of the minimal chat, and nothing contradicts it.
+- **Structured tests on chain input/output quality** — named in the first
+  statement as a deliverable. It belongs with the architecture above and is
+  deferred with it.
 
 ## Research log
 

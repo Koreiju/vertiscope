@@ -11,7 +11,7 @@ means something is built and CONTRADICTS the goal — those are not gaps to fill
 but code to change, and they are listed first because they are the only
 category where doing nothing makes things worse.
 
-**Part I** is the decomposition: 112 numbered requirements, plus section 0b recording every judgment where the two statements disagreed. **Part II** keeps the measured findings from
+**Part I** is the decomposition: 123 numbered requirements, plus section 0b recording every judgment where the two statements disagreed. **Part II** keeps the measured findings from
 the work so far, under their original `R-*` ids, as the evidence Part I cites.
 Those ids are retired as requirements and retained as anchors.
 
@@ -28,10 +28,23 @@ Those ids are retired as requirements and retained as anchors.
 | D-3 | The panel draws a read-only surface inside a code block | *"retrofitted to show their **base and original** markdown editors"* — the native, editable Obsidian editor | **Defect** |
 | D-4 | `markdown.py` is tuned "17:1 toward leaving noise rather than risking loss" and `_dedupe` is element-scoped | *"full deduplication of repeat substrings that are essentially structural redundancies of the web pages themselves"* | **Defect** |
 | D-5 | Markdown renders no tables at all | *"a hierarchically-header-structured markdown document with tables, images, web links"* | **Defect** |
+| D-6 | The delta path re-admits a chunk it should have reassigned or popped, so the store holds two addresses where the page has one | Addendum II: *"duplicate chunks (as in reassignment and diff-based index pop updates don't land straightforwardly)"* | **Defect** |
+| D-7 | A media element with no alt text renders as a bare `![images]`, so N images in a chunk become N identical lines | *"image, links, embedded links, headers, tables, etc"* at the Milkdown bar — a placeholder that names nothing is not that standard | **Defect** |
 
-D-1 is the cheapest and the most invalidating: dropping frequency from the fit
-is a small change to `build_layout`, and it changes every stored position and
-every hue. Do it before more projector work, not after.
+**D-1 is FIXED** (2026-09-12, `layout: the projector fits on semantic alone`).
+`build_layout` fits the semantic space alone; frequency is demoted to the
+no-embeddings fallback and `fitted_on.semantic` names which happened. Verified
+against the running plugin over CDP: `/layout` reports `spaces: ["semantic"]`
+across 3,135 nodes. `halves` and `equalised` are gone with the machinery they
+described. 19 tests, including a non-vacuity arm that fails if the embeddings
+are ignored.
+
+**D-6 and D-7 are new, and they came out of one flagged observation split by
+measurement.** The flag was "duplicate chunks AND duplicate content in the
+panel renderings". Those are two layers, and measuring them together would
+have produced a single number that moves when either is fixed — the
+denominator trap in `CLAUDE.md`. Measured separately, on `vaultws512`
+(3,135 chunks, 24 pages), read-only, in §M below.
 
 ### 0b. Resolutions by recency
 
@@ -95,6 +108,9 @@ probes first.
 | S-10 | Browser streams ported to the panels efficiently, *"completely and exactly mirroring features/calls to the original selenium"* | Partial — rrweb is the architecture; its shadow-DOM capture is the wrong half |
 | S-11 | The **256-token** window holds **throughout processing**, with a verification pass after the scan. A target, not a ceiling: a single indivisible unit may exceed it | Partial — 2.5% of chunks over at 256 |
 | S-12 | Every sensor→db stream reaches the graph view **and the opened *and closed* panel set, uniformly** | Open |
+| S-13 | **Investigate** whether Electron can be driven directly to give "the same sensor-like functionality" as Selenium — deliverable is a capability verdict with evidence, NOT a migration | Open |
+| S-14 | Whatever hosts the sensor must keep **profile control "from their base"** and stay "slim on web interfaces" | Open |
+| S-15 | One page's failure must not end a corpus run; every failure is named and the exit code is non-zero | **Done** — `cmd_scan` collects per-page failures; a 24-page re-cut had been aborted by apnews.com alone |
 
 ### T. The trie and the database
 
@@ -109,6 +125,7 @@ probes first.
 | T-7 | Semantic vectors **and** hard graph links in the **same database** | Partial |
 | T-8 | The trie is streamed to the panels' interactive side | Open |
 | T-9 | The xpath **shape** exists as a second address dimension, never as the identity | Done |
+| T-10 | A delta that moves content must **retire the address it left**. A sibling insertion shifts every later index, and re-admitting at the new address without popping the old one leaves the trie holding an address the page does not have | **Defect D-6** — 36 of 147 duplicate-chunk groups differ only by a positional index (§M.1) |
 
 ### M. Markdown distillation
 
@@ -129,6 +146,7 @@ axes: **structure, content, organizedness, completeness**.
 | M-10 | **Full structural preservation along content links in nested shadow DOM nodes** | Open |
 | M-11 | Quality holds **at the interactive chunk level**, because the chunk is what gets embedded and its structure decides how representative the vectors are | Open |
 | M-12 | Reading order matches the document | Done — 100% |
+| M-13 | A media element renders with something that **distinguishes it** — alt text, a filename, a source. A placeholder naming nothing turns N images into N identical lines | **Defect D-7** — `![images]` ×211 and `![video]` ×171 are 40% of all in-chunk repetition (§M.2) |
 
 ### G. The projector and the graph
 
@@ -187,6 +205,9 @@ axes: **structure, content, organizedness, completeness**.
 | P-N5 | Notebooks are **dynamically recursively chunked** like webpages | Open |
 | P-N6 | …and **continuously diff-updated to the db**, re-vectorized and re-assigned to chunks | Open |
 | P-N7 | **One interface** centralizing retrieval and code research | Open |
+| P-N8 | **Chunk scanning is exposed in the panel** — the reader can see the chunk boundaries the sensor drew | Open |
+| P-N9 | **Selection highlighting over the rendered markdown**, in the alternative panel | Open |
+| P-N10 | That selection **annotates the context fed to the SLM** — the reader marks what the model is given, rather than the model taking the whole panel | Open |
 
 **P-M — the native markdown panel, built outward**
 
@@ -212,6 +233,7 @@ axes: **structure, content, organizedness, completeness**.
 | P-B8 | **Right click** locally indexes a chunk to its dual-view markdown panel inside the cell — this is what feeds the SLM context | Open |
 | P-B9 | Right-click indexing covers the **static type set only**; interactive components are deferred to tool calls in much later iterations | By design |
 | P-B10 | Dual per-chunk browser + markdown panels are reachable **from the projector** too | Open |
+| P-B11 | **Straddle the shipped core `webviewer`** and take ownership of Electron as the work proceeds — use it, then outgrow it. (It is currently *disabled* in this vault's `core-plugins.json`.) | Open |
 
 ### R. Retrieval — the `[]()` gesture
 
@@ -271,6 +293,24 @@ P-M and P-N are therefore not peer panel types: P-N is P-M grown, and the
 native form survives alongside it. P-B is last because *"the way browser
 interactions and dual panel views work is slightly different, and particularly
 so."*
+
+**X-7 — Addendum II refines that order for the near term.** It does not
+replace X-6; the notebook panel still grows from the native substrate and
+browser cells still come last.
+
+1. **Re-cut the corpus at 256** — done first so nothing downstream is measured
+   against a window the goal no longer names.
+2. **Verify the duplication capabilities** — §M.1 and §M.2 above; *"at least
+   verify the capabilities of to explore"*.
+3. **Notebook kernel panel design, nailed down first** — *"we move onward to
+   the notebook kernel panel design first to nail it down correctly"*.
+4. **Bring the Electron sensor in when ready** — the phrase is *"when ready"*,
+   so S-13's verdict gates this rather than a date.
+5. **Then the hovering SLM bar** — *"then, we go for the hovering SLM bar
+   itself and work out the details"*.
+
+Note what moved: the hovering chat was item 4 of X-6 and is item 5 here,
+behind the notebook panel. Nothing was dropped.
 
 ---
 
@@ -1056,6 +1096,100 @@ value splitter earlier in this work.
 
 R-K1, R-K2a and R-E3a were all blocked by this and are unblocked by it —
 under the correct gate, each still has to prove it costs no accounting.
+
+## M. The two duplications, measured apart
+
+Addendum II flags *"a lot of both duplicate chunks ... and also duplicate
+content within the markdown panel renderings"*. Those are two layers, and the
+first thing to do with them is refuse to add them together. A single
+"duplication" figure would move when either one is fixed, and neither fix
+could be credited — the denominator trap in `CLAUDE.md`, arriving on schedule.
+
+Measured 2026-09-12 against `build/vaultws512` (3,135 chunks, 24 pages),
+read-only, while the sidecar served the same store.
+
+### M.1 — duplicate CHUNKS: the store holds two addresses for one content
+
+Identical rendered markdown appearing at more than one address.
+
+| | |
+|---|---|
+| groups of identical chunks | 147 |
+| redundant chunks | **163 of 3,135 — 5.2%** |
+| groups confined to one url | 127 |
+| groups spanning urls | 20 |
+
+**24% of the groups differ only by a positional index in the xpath** — the two
+addresses have the same skeleton once `[n]` is blanked. The clearest form:
+
+```
+/html/body/div[2]/div/bsp-header/div/div
+/html/body/div[2]/div[3]/bsp-header/div/div
+```
+
+That is the flagged mechanism exactly: *"reassignment and diff-based index pop
+updates don't land straightforwardly"*. A sibling arrived or left, every later
+sibling's index shifted, the content was re-admitted at its new address and
+the old one was never popped. **This is `D-6`**, and it is a trie/index defect
+sitting upstream of every projection.
+
+The other 76% are identical content at structurally *different* addresses — a
+nav block that genuinely appears in a header and again in a footer. That is
+the page repeating itself, which is `D-4`/`M-8`, and it is a different fix.
+The denominator for D-6 is therefore **36 groups**, not 147, and quoting 5.2%
+as the index defect would overstate it by roughly four times.
+
+### M.2 — duplicate CONTENT: one chunk's render repeats itself
+
+Repeated non-blank lines *within* a single chunk's markdown.
+
+| | |
+|---|---|
+| chunks with ≥1 repeated line | **492 of 3,135 — 15.7%** |
+| repeated lines | **980 of 23,662 — 4.1%** |
+| worst single chunk | 17 repeated lines |
+| of those 980, pure separators (`---`, `|`) | **0** |
+
+The separator check matters: a rule repeating is not a defect, and had it been
+most of the count the figure would have meant nothing. It is none of it.
+
+**But the 980 are not one defect either.** By cause:
+
+| cause | extra copies | share |
+|---|---|---|
+| bare media placeholders — `![images]`, `![video]` | 389 | **40%** |
+| a label echoed at both ends of its own line | 91 | 9% |
+| everything else | 500 | 51% |
+
+The largest cause is not repetition at all. `![images]` appears 211 times and
+`![video]` 171 — a media element with no alt text renders as a placeholder
+that names nothing, so N images in a chunk become N identical lines. Dedup
+would "fix" this by deleting pictures. **The actual defect is the information
+loss, which is `D-7`**, and it belongs with `M-4`, not with `M-8`.
+
+The 9% echo class is genuine structural redundancy of the kind `M-7`
+describes — a badge whose label is in both the text and an attribute:
+
+```
+Experimental. Expect behavior to change in the future. Experimental
+Deprecated. Not for use in new websites. Deprecated
+```
+
+So `D-4`'s share of the flagged observation is the remaining 51% plus the 76%
+of M.1, and both figures were unavailable until the causes were separated.
+
+### M.3 — what to measure next
+
+- Neither figure has a **null arm** yet. Per `CLAUDE.md`, a duplication score
+  on a corpus scanned once is not separable from a page that repeats itself
+  between passes. The 256 re-cut gives a second scan of the same 24 urls; the
+  index-shift count across the two is the arm.
+- `vaultws512` was cut at a **512-token window** and the decided window is
+  **256**. Chunk boundaries move with the window, so every figure above is
+  window-conditioned and must be re-taken on the 256 store before any of it
+  becomes an acceptance criterion (`X-4`).
+
+---
 
 ## What "fully realized" means
 

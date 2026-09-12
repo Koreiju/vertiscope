@@ -44,7 +44,7 @@ import sys
 import textwrap
 import time
 from pathlib import Path
-from typing import List, Optional, Sequence
+from typing import List, Optional, Sequence, Tuple
 
 from .config import load_config
 from .ingest import ingest
@@ -224,27 +224,52 @@ def cmd_scan(args: argparse.Namespace) -> int:
         else:
             print(dim(detail))
 
+    # One unreachable page must not end a corpus run.
+    #
+    # The `--legacy` branch below has always caught per-page failures and
+    # carried on; the live `sense` and `crawl` paths did not, so a single
+    # navigation timeout aborted every remaining url. A 24-page re-cut died on
+    # its first page -- apnews.com, which refuses automation (403 to curl, a
+    # 40s nav timeout under Selenium) -- and wrote nothing for the other 23.
+    # The superseded path was the robust one.
+    #
+    # Failures are collected rather than swallowed. A scan that skipped a
+    # third of its corpus and then printed a tidy stats table is exactly the
+    # quiet degradation this project refuses, so the summary at the end names
+    # every url with its reason and the exit code is non-zero.
+    failures: List[Tuple[str, str]] = []
+
     with _open_workspace(args) as ws:
         common = dict(duration=args.duration, pause=args.pause,
                       passes=args.passes, incremental=not args.full_transport)
         for url in args.urls:
             if not getattr(args, "legacy", False) and not args.follow:
                 print(bold(f"\n{url}"))
-                result = ws.sense(
-                    url, config=cfg, scrolls=args.passes,
-                    pause=args.pause, headless=not args.headful,
-                    variants=_variants(getattr(args, "variant", "base")),
-                    progress=report)
+                try:
+                    result = ws.sense(
+                        url, config=cfg, scrolls=args.passes,
+                        pause=args.pause, headless=not args.headful,
+                        variants=_variants(getattr(args, "variant", "base")),
+                        progress=report)
+                except Exception as exc:  # noqa: BLE001
+                    print(red(f"  {type(exc).__name__}: {exc}"))
+                    failures.append((url, f"{type(exc).__name__}: {exc}"))
+                    continue
                 show(result)
                 continue
             if args.follow:
-                results = ws.crawl(
-                    url, max_pages=args.follow + 1, depth=args.depth,
-                    same_host=not args.any_host, config=cfg,
-                    headless=not args.headful,
-                    legacy=getattr(args, "legacy", False),
-                    variants=_variants(getattr(args, "variant", "base")),
-                    progress=report, **common)
+                try:
+                    results = ws.crawl(
+                        url, max_pages=args.follow + 1, depth=args.depth,
+                        same_host=not args.any_host, config=cfg,
+                        headless=not args.headful,
+                        legacy=getattr(args, "legacy", False),
+                        variants=_variants(getattr(args, "variant", "base")),
+                        progress=report, **common)
+                except Exception as exc:  # noqa: BLE001
+                    print(red(f"  {type(exc).__name__}: {exc}"))
+                    failures.append((url, f"{type(exc).__name__}: {exc}"))
+                    continue
                 print(f"\n  crawled {green(str(len(results)))} page(s)")
                 for result in results:
                     show(result)
@@ -257,10 +282,20 @@ def cmd_scan(args: argparse.Namespace) -> int:
                                  progress=report, **common)
             except Exception as exc:  # noqa: BLE001
                 print(red(f"  {type(exc).__name__}: {exc}"))
+                failures.append((url, f"{type(exc).__name__}: {exc}"))
                 continue
             show(result)
         print()
         _print_stats(ws.stats())
+
+    if failures:
+        # After the stats, not before. The stats say what the workspace got;
+        # this says what it did NOT get, which is otherwise a number the
+        # reader has to infer from a url count they never saw.
+        print(red(f"\n  {len(failures)} of {len(args.urls)} page(s) failed:"))
+        for url, why in failures:
+            print(red(f"    {url}  --  {why}"))
+        return 1
     return 0
 
 
