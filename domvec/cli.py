@@ -47,6 +47,7 @@ from pathlib import Path
 from typing import List, Optional, Sequence, Tuple
 
 from .config import load_config
+from .markdown import DEFAULT_CONTEXT_WINDOW
 from .ingest import ingest
 from .pipeline import run_pipeline, scrape_url
 from .retrieve import Hit, Retriever, SemanticUnavailable
@@ -172,8 +173,15 @@ def _open_workspace(args: argparse.Namespace, *, must_exist: bool = False):
 
         embedder = get_default_service()
         print(dim(f"embedder: {embedder.status()}"))
+    # `DEFAULT_CONTEXT_WINDOW`, not a literal. The window is a DECISION
+    # (PLUGIN_PRD 0b: 256, where every structural property holds and retrieval
+    # still beats 512 by ten points of hit@1), and a second copy of it here as
+    # `1200` meant `domvec scan <url>` chunked at 1200 while the library, the
+    # docs and every measurement said 256. A re-cut was only correct because
+    # --window was passed explicitly.
     return Workspace(args.workspace,
-                     context_window=getattr(args, "window", 1200),
+                     context_window=getattr(args, "window",
+                                            DEFAULT_CONTEXT_WINDOW),
                      embedder=embedder)
 
 
@@ -321,6 +329,66 @@ def cmd_index(args: argparse.Namespace) -> int:
                   f"{result.chunks:5d} chunks {result.lines:6d} lines")
         print()
         _print_stats(ws.stats())
+    return 0
+
+
+def cmd_notes(args: argparse.Namespace) -> int:
+    """Offline: index vault notes into the same workspace (`T-5`).
+
+    The sibling of `cmd_index`: no browser, one document at a time, into the
+    trie the scan writes. A directory is walked recursively, because a vault is
+    a tree of folders and indexing only its top level would silently cover a
+    fraction of it.
+
+    `.obsidian/` is skipped. It holds the app's own JSON -- settings, workspace
+    layout, plugin data -- which is not the user's notes and would put this
+    session's pane geometry in a retrieval index.
+    """
+    from .vault import note_url
+
+    targets: List[Tuple[Path, str, str]] = []   # (file, vault name, rel path)
+    for raw in args.paths:
+        path = Path(raw)
+        if path.is_dir():
+            vault = args.vault or path.resolve().name
+            for md in sorted(path.rglob("*.md")):
+                if ".obsidian" in md.relative_to(path).parts:
+                    continue
+                targets.append((md, vault, str(md.relative_to(path))))
+        else:
+            vault = args.vault or path.resolve().parent.name
+            targets.append((path, vault, path.name))
+
+    if not targets:
+        print(red("  no .md files found"))
+        return 2
+
+    failures: List[Tuple[str, str]] = []
+    with _open_workspace(args) as ws:
+        for file, vault, rel in targets:
+            if not file.exists():
+                print(red(f"  missing: {file}"))
+                failures.append((str(file), "missing"))
+                continue
+            try:
+                text = file.read_text(encoding="utf-8", errors="replace")
+                result = ws.index_note(text, rel, vault=vault)
+            except Exception as exc:                # noqa: BLE001
+                # Per-note, for the reason `cmd_scan` learned: one unreadable
+                # note in a vault of thousands must not end the run.
+                print(red(f"  {rel[:44]:44s} {type(exc).__name__}: {exc}"))
+                failures.append((rel, f"{type(exc).__name__}: {exc}"))
+                continue
+            print(f"  {rel[:44]:44s} {result.addresses:6d} addr "
+                  f"{result.chunks:5d} chunks {result.lines:6d} lines")
+        print()
+        _print_stats(ws.stats())
+
+    if failures:
+        print(red(f"\n  {len(failures)} of {len(targets)} note(s) failed:"))
+        for rel, why in failures:
+            print(red(f"    {rel}  --  {why}"))
+        return 1
     return 0
 
 
@@ -814,7 +882,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--pause", type=float, default=1.2)
     sp.add_argument("--passes", type=int, default=6,
                     help="maximum snapshots per page")
-    sp.add_argument("--window", type=int, default=1200,
+    sp.add_argument("--window", type=int, default=DEFAULT_CONTEXT_WINDOW,
                     help="context window: the chunking hyperparameter")
     sp.add_argument("--headful", action="store_true")
     # The sensor is the scan path, not an opt-in. Detection, recursion,
@@ -847,9 +915,20 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("paths", nargs="+")
     sp.add_argument("-w", "--workspace", default="build")
     sp.add_argument("--url", help="url to attribute a single file to")
-    sp.add_argument("--window", type=int, default=1200)
+    sp.add_argument("--window", type=int, default=DEFAULT_CONTEXT_WINDOW)
     sp.add_argument("--semantic", action="store_true")
     sp.set_defaults(func=cmd_index)
+
+    sp = sub.add_parser("notes", help="index vault note(s) into the trie, no browser")
+    sp.add_argument("paths", nargs="+",
+                    help="a .md file, or a vault directory to walk")
+    sp.add_argument("-w", "--workspace", default="build")
+    sp.add_argument("--vault", default="",
+                    help="the vault's name, which becomes the url origin "
+                         "(default: the directory's own name)")
+    sp.add_argument("--window", type=int, default=DEFAULT_CONTEXT_WINDOW)
+    sp.add_argument("--semantic", action="store_true")
+    sp.set_defaults(func=cmd_notes)
 
     sp = sub.add_parser("find", help="three-form retrieval over a workspace")
     sp.add_argument("query", nargs="+")

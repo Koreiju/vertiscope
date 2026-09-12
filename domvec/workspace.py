@@ -26,7 +26,7 @@ from __future__ import annotations
 import shutil
 import time
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
@@ -461,6 +461,42 @@ class Workspace:
             url=url, addresses=len(trie), chunks=len(chunks),
             lines=sum(len(c.lines) for c in chunks), passes=1,
             wire_bytes=len(html), document_bytes=len(html), report=report,
+        )
+
+    def index_note(self, text: str, rel_path: str, *, vault: str = "vault",
+                   title: str = "") -> ScanResult:
+        """A vault note into the trie — no browser, no DOM (`T-5`).
+
+        The same three steps as `index_html`, with the first one swapped:
+        markdown is parsed to addressed detections by `domvec.vault` instead of
+        HTML being parsed and tagged. Everything after that — `from_tags`,
+        `ingest`, the chunker, the frequency rows, the graph — is the page path
+        untouched, which is the whole reason the addressing was defined to look
+        like a page's (see `domvec/vault.py`).
+
+        `redact_url` is deliberately NOT applied. It strips campaign tags,
+        userinfo and credential-shaped query values from *web* urls; a note url
+        has no query and no userinfo, and putting a local path through a
+        web-url redactor is how a path with a `?` in its name would quietly
+        become a different note.
+        """
+        from .vault import note_url, tag_note
+
+        url = note_url(vault, rel_path)
+        tags = tag_note(text)
+        trie = AddressTrie.from_tags(tags, url)
+        report = RenderReport()
+        chunks, _counts = self.ingest(url, trie, report=report,
+                                      title=title or PurePosixPath(
+                                          str(rel_path).replace("\\", "/")).stem)
+        return ScanResult(
+            url=url, addresses=len(trie), chunks=len(chunks),
+            lines=sum(len(c.lines) for c in chunks), passes=1,
+            # A note is not fetched, so there is no wire to compare against the
+            # document. Reporting the document size for both says "nothing was
+            # saved because nothing was sent", which is true, rather than
+            # leaving `wire_saving` to divide by zero into a fake 0%.
+            wire_bytes=len(text), document_bytes=len(text), report=report,
         )
 
     def scan(

@@ -133,11 +133,64 @@ and no xpath, so the scheme has to be stated rather than assumed:
 
 | level | a web page | a vault notebook |
 |---|---|---|
-| domain | `apnews.com` | `vault` |
+| domain | `apnews.com` | `vault://<vault>` |
 | url-tail | `/article/x` | the vault-relative path, `notes/analysis.md` |
-| xpath | `/html/body/div[2]/p` | the **heading path** plus the block's ordinal, `#Analysis/3` |
+| xpath | `/html/body/div[2]/p` | `/section[1]/section[2]/p[1]` — see below |
 | markdown | the rendered form | the same |
-| content-detection | `paragraph`, `nav`, … | `prose`, `code`, `output`, `terminal` |
+| content-detection | `paragraph`, `nav`, … | `text.visible`, `text.code`, `text.metadata`, `urls.*`, `media.images` |
+
+**Built 2026-09-12** as `domvec/vault.py` + `Workspace.index_note` +
+`domvec notes`. Two rows above changed under contact with the code, and both
+changes are the interesting part.
+
+**The xpath is not "the heading path plus an ordinal".** That was this
+document's guess and it is wrong. Hanging blocks under the heading step —
+`/h1[1]/p[1]` — renders **every paragraph as a heading**, because
+`markdown.py`'s walk carries a heading's label down to its children:
+
+```python
+if is_element and label in _HEADINGS and child_label not in _HEADINGS:
+    child_label = label
+```
+
+That rule is correct, for HTML: `<h3><div>Technology</div></h3>` means the div
+*is* heading text, and 124 of the Guardian's 181 headings depend on it. But
+markdown's heading does not **contain** the section it opens — it **names** it.
+The two models disagree, HTML's is the one the trie implements, and the guess
+asserted containment markdown never meant.
+
+The fix is HTML5's own answer: an explicit **`section` wrapper**, with the
+heading and its blocks as *siblings* inside it.
+
+```
+# Analysis        ->  /section[1]/h1[1]
+prose             ->  /section[1]/p[1]
+## Method         ->  /section[1]/section[1]/h2[1]
+prose             ->  /section[1]/section[1]/p[1]
+```
+
+Measured before and after on one note: prose drawn as `# Prose about…` at every
+level, versus prose drawn as prose. `tests/test_vault_addressing.py::
+test_prose_is_not_drawn_as_a_heading` is the non-vacuity arm — it asserts
+against the real renderer's output and fails on the obvious scheme, while every
+structural test still passes. Remove the wrapper as a simplification and only
+that test notices.
+
+**Inline links get their own element step** (`…/p[1]/a[1]`) for the same
+reason: an anchor is an element with its own xpath in HTML, and a `urls.*`
+detection sharing its block's address made the renderer consume the whole
+paragraph as one link label — `[see [[Vortex Lattice]]](Vortex Lattice)`.
+
+**The taxonomy uses existing categories only.** `address._CLASS_BY_CATEGORY`
+classifies by *category*, so a new subcategory (`text.code`) degrades correctly
+and a new category would not. One imperfection recorded rather than papered
+over: `text.code` gets class `text`, because `_CANONICAL_CLASS` reaches class
+`code` only through `json_data`.
+
+**Verified against the real vault**: `domvec notes docs/` indexed 18 documents
+into 786 chunks / 2,697 addresses, and retrieval answers from them —
+"notebook kernel panel" returns this PRD's own X-7 build order, "closed shadow
+roots" returns `CONTENT_EXTRACTION_RULES` §8.4.
 
 Two consequences worth stating because they are easy to get wrong:
 
@@ -260,7 +313,7 @@ Each step ends somewhere verifiable over CDP (`X-2`), never a screenshot.
 
 | # | step | done when |
 |---|---|---|
-| 1 | Note addressing: a vault note enters the trie under the §3 scheme | `T-5`; a note's chunks resolve by address |
+| 1 | ~~Note addressing~~ **DONE** — `domvec/vault.py`, `Workspace.index_note`, `domvec notes` | `T-5`: 18 docs -> 786 chunks / 2,697 addresses, and retrieval answers from them. 13 tests, one of them the renderer arm |
 | 2 | Fence detection + `▶ run` in both views | a button appears per fence, in reading *and* live preview |
 | 3 | Subprocess kernel, python only, per-note state | two cells share a variable; two notes do not |
 | 4 | Output markers written, read, re-rendered | output survives a restart and renders in reading view |

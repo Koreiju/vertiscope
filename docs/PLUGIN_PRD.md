@@ -118,7 +118,7 @@ probes first.
 | T-2 | It reconstructs the **full digital trace** of the page, not only its content | Partial |
 | T-3 | Shadow DOM nodes localized to their **ancestors in the trie**, giving structural guarantees on the distilled HTML | Partial |
 | T-4 | Intermediate trie paths reflected as **intermediate chunk-node linkages** | Open |
-| T-5 | The **local vault** is in the trie | Open |
+| T-5 | The **local vault** is in the trie | **Done** — `domvec/vault.py` + `Workspace.index_note` + `domvec notes <dir>`. Addressed `vault://<vault>/<path>` with markdown's tree as `section`-wrapped xpath steps; 18 docs indexed to 786 chunks / 2,697 addresses and retrievable. Module dependencies and the directory tree as UMAP links (`G-8`/`G-10`) are still Open |
 | T-6 | **Installed Python packages** are in the trie, per-package partitioned with main-DB links | Open |
 | T-7 | Semantic vectors **and** hard graph links in the **same database** | Partial |
 | T-8 | The trie is streamed to the panels' interactive side | Open |
