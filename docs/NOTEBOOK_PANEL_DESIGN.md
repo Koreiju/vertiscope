@@ -101,9 +101,15 @@ is a **native Obsidian markdown editor** with three things added to it:
 │  ─────────────────────────────────────────────  P-M4: bottom  │
 │   [+ code]  [+ terminal]  [+ browser cell]                    │
 └───────────────────────────────────────────────────────────────┘
-┌─ terminal, directly below (P-C2 / P-N3) ──────────────────────┐
-│  kernel: python3 ▾   │ pwsh ▾            ← P-N2 switch        │
-│  >>>                                                          │
+┌─ kernel RUN surface, directly below (P-C2) ───────────────────┐
+│  kernel: python3 ▾      ← interpreter only, NOT a             │
+│  [cell 3] ok  0.4s        shell-vs-kernel chooser (§4a)       │
+└───────────────────────────────────────────────────────────────┘
+
+        ...and a command terminal is a SEPARATE PANE (§4a):
+
+┌─ separate pane ───────────────────────────────────────────────┐
+│  PS domvec>                                                   │
 └───────────────────────────────────────────────────────────────┘
 ```
 
@@ -114,8 +120,10 @@ Three claims in that sketch are load-bearing:
   defect: a notebook that computes a dataframe emits a markdown table, and if
   the projection drops tables the panel loses its own output.
 - **The buttons are at the very bottom** (`P-M4`), not floating per-cell.
-- **The terminal is directly below the artifact, always** (`P-C2`). Not a
-  toggle, not a tab.
+- **The kernel's run surface is directly below the artifact, always**
+  (`P-C2`) — not a toggle, not a tab. It is a run-and-output region, *not* a
+  shell prompt; a command terminal is a separate pane (§4a), which is why
+  `[+ terminal]` at the bottom opens one rather than growing this strip.
 
 ## 3. Addresses: what a notebook looks like in the trie
 
@@ -167,6 +175,50 @@ unit a reader thinks in, and it makes the kernel's lifetime match a leaf's.
 Status lives in the marker (`running`, `error`, `timeout`) so a crash mid-cell
 leaves a document that says so rather than one that looks finished.
 
+## 4a. What the switch switches — kernel here, terminal there
+
+Answered by the user, 2026-09-12: *"A switch to a kernel run and then a command
+terminal when switching to a separate pane."*
+
+So `P-N2` is **not a dropdown over interpreters**, and it is not two panes side
+by side by default. The two modes are distinguished by **where the thing
+lives**:
+
+| where | what it is | what it is for |
+|---|---|---|
+| **in the panel**, below the artifact | a **kernel run** — the cell executes, output lands in the markdown per §4 | the edit-run loop, inside the document |
+| **a separate pane** | a **command terminal** | shell work that is not a cell — PowerShell, a build, a git command |
+
+The switch's first position is therefore the kernel, and the terminal is what
+you get by taking it out of the document.
+
+**What this settles that was open.** §2's sketch drew a persistent terminal
+strip under the editor with a `kernel / pwsh` selector in it. That was the
+dropdown reading and it is wrong. The strip under the artifact is the kernel's
+run surface — `P-C2`'s *"terminal always directly below"* in the sense of a run
+and output region, not a shell prompt. A shell prompt is a separate pane.
+
+**And it reconciles `P-N3`.** *"A toggle on a code block opens terminal or
+kernel — possibly both at once"* now has a coherent reading: both at once is
+the notebook panel running its kernel **while** a separate pane holds a command
+terminal. They are not competing for one region, so "both" needs no special
+layout — it is two panes, which Obsidian already does.
+
+**Consequence for §3's addressing.** A kernel run writes into the document, so
+its output is trie content under the note's address (`content-detection:
+output`). **A command terminal in a separate pane is not in a document, and so
+by default it has no address.** That is a decision rather than an oversight: a
+shell session is a stream, not a leaf, and giving it a trie address would put
+untracked command history into a store whose point is addressable page content.
+If terminal transcripts should be retrievable, that is a separate requirement
+needing its own `content-detection` class — it does not arrive with this one.
+
+**Kernel discovery is still borrowed from JupyMD**, but it now populates a
+*smaller* control: which interpreter the in-panel kernel runs, not a chooser
+between a kernel and a shell.
+
+---
+
 ## 5. The sensor, the chunk overlay, and the SLM selection
 
 This is the part with no prior art, and it is `P-N8`/`P-N9`/`P-N10`.
@@ -213,7 +265,7 @@ Each step ends somewhere verifiable over CDP (`X-2`), never a screenshot.
 | 3 | Subprocess kernel, python only, per-note state | two cells share a variable; two notes do not |
 | 4 | Output markers written, read, re-rendered | output survives a restart and renders in reading view |
 | 5 | Outputs are chunked and vectorised (`P-N5`/`P-N6`) | an output is *retrievable* by `[[]]` — the proof that it is trie content |
-| 6 | Terminal below, `P-N2` switch, kernel discovery | pwsh and python3 both reachable; discovery lists installed kernels |
+| 6 | Kernel run surface below the artifact; command terminal in a *separate pane* (§4a); interpreter discovery | a cell runs in-panel AND a separate pane gives a pwsh prompt; discovery lists installed kernels |
 | 7 | `P-N8` chunk overlay | gutter marks match `/chunk` addresses from the sidecar |
 | 8 | `P-N9`/`P-N10` selection → address set → SLM context | the SLM's prompt contains exactly the selected addresses' content |
 
@@ -237,10 +289,9 @@ writing updates back to notebooks are explicitly 'later on'"*. Accordingly:
 
 ## 8. Open questions for the user
 
-1. **`P-N2` — what does "switchable" switch?** One terminal pane that changes
-   interpreter, or a kernel pane and a shell pane side by side? `P-N3` says a
-   toggle on a code block may open *"possibly both at once"*, which suggests
-   two panes, but it is not decisive.
+1. ~~`P-N2` — what does "switchable" switch?~~ **Answered** — see §4a. The
+   switch selects a kernel run in place; a command terminal is what a
+   *separate pane* holds.
 2. **Does a notebook output belong in retrieval by default?** Making outputs
    trie content (§1) means a `[[]]` query can return a dataframe the reader
    computed. That is either the best feature here or noise in every result set,

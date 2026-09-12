@@ -123,6 +123,17 @@ Two rules earned the hard way here, both binding:
   reachable?* -- only what the page draws. One filter for both took missed from
   279 to 2,066 in one direction and phantoms from 8 to 8,701 in the other.
 
+- **A rendering claim must be measured against a corpus rendered by the code
+  under test.** A store is not neutral evidence; it is a recording of what some
+  past version of the renderer did, and its mtime is part of its meaning.
+  `vaultws512` was written 34 minutes BEFORE the commit that fixed the very
+  defect it was then used to report — `![images]` was filed as a fresh defect
+  three days after `499fd6d` deleted it. The existing rules cover the page
+  moving and the denominator being wrong; neither covers the INSTRUMENT having
+  changed since the corpus was written. Cheap guard: compare the store's mtime
+  against `git log -1 --format=%ad` for the module whose output is being
+  scored, before quoting a number.
+
 And the specific trap this project keeps falling into: **a coverage number is
 a claim about the renderer AND a claim about the denominator, and only one of
 them tends to get checked.** Four separate times a correct renderer read as

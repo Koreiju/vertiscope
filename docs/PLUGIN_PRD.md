@@ -29,7 +29,7 @@ Those ids are retired as requirements and retained as anchors.
 | D-4 | `markdown.py` is tuned "17:1 toward leaving noise rather than risking loss" and `_dedupe` is element-scoped | *"full deduplication of repeat substrings that are essentially structural redundancies of the web pages themselves"* | **Defect** |
 | D-5 | Markdown renders no tables at all | *"a hierarchically-header-structured markdown document with tables, images, web links"* | **Defect** |
 | D-6 | The delta path re-admits a chunk it should have reassigned or popped, so the store holds two addresses where the page has one | Addendum II: *"duplicate chunks (as in reassignment and diff-based index pop updates don't land straightforwardly)"* | **Defect** |
-| D-7 | A media element with no alt text renders as a bare `![images]`, so N images in a chunk become N identical lines | *"image, links, embedded links, headers, tables, etc"* at the Milkdown bar — a placeholder that names nothing is not that standard | **Defect** |
+| ~~D-7~~ | ~~A media element with no alt text renders as a bare `![images]`~~ | **WITHDRAWN 2026-09-12 — not a defect.** Already fixed by `499fd6d` (M-9). Filed against `vaultws512`, built 34 minutes BEFORE that commit. On the 256 re-cut: **0 bare placeholders, 1,073 named**. See §M.0 | — |
 
 **D-1 is FIXED** (2026-09-12, `layout: the projector fits on semantic alone`).
 `build_layout` fits the semantic space alone; frequency is demoted to the
@@ -39,12 +39,13 @@ across 3,135 nodes. `halves` and `equalised` are gone with the machinery they
 described. 19 tests, including a non-vacuity arm that fails if the embeddings
 are ignored.
 
-**D-6 and D-7 are new, and they came out of one flagged observation split by
-measurement.** The flag was "duplicate chunks AND duplicate content in the
-panel renderings". Those are two layers, and measuring them together would
-have produced a single number that moves when either is fixed — the
-denominator trap in `CLAUDE.md`. Measured separately, on `vaultws512`
-(3,135 chunks, 24 pages), read-only, in §M below.
+**D-6 is new.** It came out of the flagged observation — "duplicate chunks
+AND duplicate content in the panel renderings" — split into its two layers,
+because measuring them together produces a single number that moves when
+either is fixed and credits neither. Re-measured on the **256 re-cut** after
+the first attempt was found to have been taken against stale code (§M.0).
+D-6 is now the dominant duplication: **99 of 105 duplicate-chunk groups**
+differ only by a positional index.
 
 ### 0b. Resolutions by recency
 
@@ -146,7 +147,7 @@ axes: **structure, content, organizedness, completeness**.
 | M-10 | **Full structural preservation along content links in nested shadow DOM nodes** | Open |
 | M-11 | Quality holds **at the interactive chunk level**, because the chunk is what gets embedded and its structure decides how representative the vectors are | Open |
 | M-12 | Reading order matches the document | Done — 100% |
-| M-13 | A media element renders with something that **distinguishes it** — alt text, a filename, a source. A placeholder naming nothing turns N images into N identical lines | **Defect D-7** — `![images]` ×211 and `![video]` ×171 are 40% of all in-chunk repetition (§M.2) |
+| M-13 | A media element renders with something that **distinguishes it** — alt text, a filename, or `![]`, never the taxonomy | **Done** — `499fd6d`; on the 256 re-cut 0 of 1,073 media render as a taxonomy placeholder. Filed briefly as D-7 against a stale store and withdrawn (§M.0) |
 
 ### G. The projector and the graph
 
@@ -189,7 +190,7 @@ axes: **structure, content, organizedness, completeness**.
 | id | requirement | status |
 |---|---|---|
 | P-C1 | Full code artifacts **viewable and editable standalone** | Open |
-| P-C2 | **A terminal always directly below** the artifact | Open |
+| P-C2 | **A terminal always directly below** the artifact — a kernel *run-and-output surface*, not a shell prompt (P-N2 §4a) | Open |
 | P-C3 | Artifacts vectorized **by their comments and docstrings** | Open |
 | P-C4 | **Docstrings and code docs more broadly** are the vectorized surface for codebases | Open |
 | P-C5 | **Live delta updates to modules** in both halves and in the 3D view | Open |
@@ -199,8 +200,8 @@ axes: **structure, content, organizedness, completeness**.
 | id | requirement | status |
 |---|---|---|
 | P-N1 | A **Jupyter kernel** panel, retrieval-enhanced | Open |
-| P-N2 | **Switchable** between Jupyter kernels and PowerShell terminals | Open |
-| P-N3 | A **toggle on a code block** opens terminal or kernel — possibly both at once | Open |
+| P-N2 | **Switchable** between Jupyter kernels and PowerShell terminals. **Resolved 2026-09-12**: the switch selects a *kernel run in place*; a *command terminal* is what a **separate pane** holds. Not a shell-vs-kernel dropdown. See `NOTEBOOK_PANEL_DESIGN.md` §4a | Open |
+| P-N3 | A **toggle on a code block** opens terminal or kernel — possibly both at once. Under P-N2's resolution "both" is the panel running its kernel *while* a separate pane holds a terminal: two panes, no special layout | Open |
 | P-N4 | A facade over Obsidian's vault interface exposing local kernels to the filestructure | Open |
 | P-N5 | Notebooks are **dynamically recursively chunked** like webpages | Open |
 | P-N6 | …and **continuously diff-updated to the db**, re-vectorized and re-assigned to chunks | Open |
@@ -1101,93 +1102,116 @@ under the correct gate, each still has to prove it costs no accounting.
 
 Addendum II flags *"a lot of both duplicate chunks ... and also duplicate
 content within the markdown panel renderings"*. Those are two layers, and the
-first thing to do with them is refuse to add them together. A single
-"duplication" figure would move when either one is fixed, and neither fix
-could be credited — the denominator trap in `CLAUDE.md`, arriving on schedule.
+first thing to do with them is refuse to add them together.
 
-Measured 2026-09-12 against `build/vaultws512` (3,135 chunks, 24 pages),
-read-only, while the sidecar served the same store.
+### M.0 — the first measurement was wrong, and how
+
+It was taken against `build/vaultws512`. That store was written **2026-09-09
+22:38:46**; commit `499fd6d` — *"markdown: the taxonomy is not a name — 1,556
+lines → 2"*, which is `M-9` — landed **23:12:36 the same evening, 34 minutes
+later**. The corpus had been rendered by pre-fix code.
+
+What that produced: `![images]` appeared 1,575 times and 40% of all in-chunk
+repetition was traced to it, so it was filed as **D-7**. On the 256 re-cut,
+rendered by current code, **0 of 1,073 media carry a taxonomy placeholder**.
+The defect had been fixed three days before it was reported, and `499fd6d`'s
+own comment describes the exact symptom: *"a page with fifteen unnamed icons
+rendered `![images]` fifteen times, telling a reader nothing except which
+detector fired"*. D-7 is withdrawn.
+
+**The rule this adds to `CLAUDE.md`'s list.** *A rendering claim must be
+measured against a corpus rendered by the code under test.* The existing rules
+cover the page moving (`--drift --kind none`) and the denominator being wrong;
+neither covers the **instrument having changed since the corpus was written**.
+A store is not neutral evidence — it is a recording of what some past version
+of the renderer did, and its mtime is part of its meaning.
+
+The cheap guard: compare the store's mtime against `git log -1 --format=%ad`
+for the module whose output is being scored, before quoting a number.
+
+Two further caveats on the numbers below, both stated rather than buried:
+
+- **The corpora differ by one page.** apnews.com refuses automation (403 to
+  curl, a 40s navigation timeout) and is absent from the 256 store. It was the
+  single largest contributor to every duplication figure on the 512 store —
+  removing it alone took bare media from 1,575 to 675 — so no 512↔256 delta
+  below is a clean window comparison.
+- **Neither store has a link graph** (`links`: 3 and 0). Both were scanned
+  without `--follow`, so the pagerank factor is near-uniform and the triple
+  product is effectively a pair product. Any retrieval figure taken on these
+  stores understates what `G-3` describes.
 
 ### M.1 — duplicate CHUNKS: the store holds two addresses for one content
 
-Identical rendered markdown appearing at more than one address.
+Identical rendered markdown at more than one address. **Measured on
+`build/vaultws256` (5,337 chunks, 23 pages), current code**, read-only.
 
-| | |
-|---|---|
-| groups of identical chunks | 147 |
-| redundant chunks | **163 of 3,135 — 5.2%** |
-| groups confined to one url | 127 |
-| groups spanning urls | 20 |
+| | 256 (valid) | 512 (stale code — for reference only) |
+|---|---|---|
+| duplicate groups | **105** | 147 |
+| redundant chunks | **246 of 5,337 — 4.6%** | 163 of 3,135 — 5.2% |
+| of which differ ONLY by a positional index | **99 — 94%** | 36 — 24% |
+| of which the page genuinely repeats itself | **6** | 111 |
 
-**24% of the groups differ only by a positional index in the xpath** — the two
-addresses have the same skeleton once `[n]` is blanked. The clearest form:
+**This is the finding.** On current code, **94% of duplicate-chunk groups are
+index shifts** — the two addresses share a skeleton once `[n]` is blanked:
 
 ```
 /html/body/div[2]/div/bsp-header/div/div
 /html/body/div[2]/div[3]/bsp-header/div/div
 ```
 
-That is the flagged mechanism exactly: *"reassignment and diff-based index pop
-updates don't land straightforwardly"*. A sibling arrived or left, every later
-sibling's index shifted, the content was re-admitted at its new address and
-the old one was never popped. **This is `D-6`**, and it is a trie/index defect
-sitting upstream of every projection.
+That is the flagged mechanism precisely: *"reassignment and diff-based index
+pop updates don't land straightforwardly"*. A sibling arrived or left, every
+later sibling's index shifted, the content was re-admitted at its new address
+and the old one was never popped. **This is `D-6` / `T-10`**, it is a
+trie/index defect upstream of every projection, and it is now nearly the whole
+of the duplicate-chunk problem rather than a quarter of it.
 
-The other 76% are identical content at structurally *different* addresses — a
-nav block that genuinely appears in a header and again in a footer. That is
-the page repeating itself, which is `D-4`/`M-8`, and it is a different fix.
-The denominator for D-6 is therefore **36 groups**, not 147, and quoting 5.2%
-as the index defect would overstate it by roughly four times.
+The `D-4` share collapsed from 111 groups to 6. Read carefully: this is **not**
+evidence that page-level repetition went away. A 256-token window cuts more
+often, so a nav block appearing twice on a page is less likely to produce two
+*byte-identical* chunks — the repetition is still there and this metric stopped
+seeing it. `D-4`/`M-8` needs a window-independent measure (§M.3), exactly as
+`D-7` did.
 
 ### M.2 — duplicate CONTENT: one chunk's render repeats itself
 
-Repeated non-blank lines *within* a single chunk's markdown.
+Repeated non-blank lines *within* a single chunk, on the 256 store.
 
-| | |
-|---|---|
-| chunks with ≥1 repeated line | **492 of 3,135 — 15.7%** |
-| repeated lines | **980 of 23,662 — 4.1%** |
-| worst single chunk | 17 repeated lines |
-| of those 980, pure separators (`---`, `|`) | **0** |
-
-The separator check matters: a rule repeating is not a defect, and had it been
-most of the count the figure would have meant nothing. It is none of it.
-
-**But the 980 are not one defect either.** By cause:
-
-| cause | extra copies | share |
+| | 256 (valid) | 512 (stale code) |
 |---|---|---|
-| bare media placeholders — `![images]`, `![video]` | 389 | **40%** |
-| a label echoed at both ends of its own line | 91 | 9% |
-| everything else | 500 | 51% |
+| chunks with ≥1 repeated line | **211 of 5,337 — 4.0%** | 492 of 3,135 — 15.7% |
+| repeated lines | **621 of ~40k — 2.9%** | 980 — 4.1% |
+| of those, bare media placeholders | **0** | 389 — 40% |
+| of those, a label echoed at both ends | **0** | 91 — 9% |
 
-The largest cause is not repetition at all. `![images]` appears 211 times and
-`![video]` 171 — a media element with no alt text renders as a placeholder
-that names nothing, so N images in a chunk become N identical lines. Dedup
-would "fix" this by deleting pictures. **The actual defect is the information
-loss, which is `D-7`**, and it belongs with `M-4`, not with `M-8`.
+Both named causes are gone: the first with `499fd6d` (§M.0), the second with
+it, since `Deprecated. Not for use in new websites. Deprecated` was the
+taxonomy echoing a label it should never have drawn.
 
-The 9% echo class is genuine structural redundancy of the kind `M-7`
-describes — a badge whose label is in both the text and an attribute:
+What remains is **621 lines with no identified cause**, and that is the honest
+state: a residue, not a diagnosis. It is smaller than the flag implied and it
+has not been explained.
 
-```
-Experimental. Expect behavior to change in the future. Experimental
-Deprecated. Not for use in new websites. Deprecated
-```
+### M.3 — what to measure next, and why the current measures cannot answer it
 
-So `D-4`'s share of the flagged observation is the remaining 51% plus the 76%
-of M.1, and both figures were unavailable until the causes were separated.
+Three gaps, in the order they block things:
 
-### M.3 — what to measure next
+1. **`D-4` needs a window-independent measure.** Counting byte-identical
+   chunks makes a smaller window look like a fix. The question is *does the
+   page repeat itself*, which is a property of the page, so the measure has to
+   be over the trie's content hashes, not over chunk boundaries.
+2. **Neither figure has a null arm.** `CLAUDE.md`: a score against a moving
+   page is the page's motion plus ours. `python -m domvec.analytics
+   --stability --corpus` gives the per-page floor; the 99 index-shift groups
+   must be checked against two maps of the same page seconds apart before any
+   of them is attributed to the sensor.
+3. **The 621 unexplained repeated lines want a cause**, by the same method
+   that found the first two: group them, name the largest class, check whether
+   the class is a defect or a page.
 
-- Neither figure has a **null arm** yet. Per `CLAUDE.md`, a duplication score
-  on a corpus scanned once is not separable from a page that repeats itself
-  between passes. The 256 re-cut gives a second scan of the same 24 urls; the
-  index-shift count across the two is the arm.
-- `vaultws512` was cut at a **512-token window** and the decided window is
-  **256**. Chunk boundaries move with the window, so every figure above is
-  window-conditioned and must be re-taken on the 256 store before any of it
-  becomes an acceptance criterion (`X-4`).
+Nothing here becomes an acceptance criterion until 1 and 2 are done (`X-4`).
 
 ---
 
