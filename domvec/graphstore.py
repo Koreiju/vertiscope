@@ -125,30 +125,47 @@ class StoredChunk:
 class GraphStore:
     """Kuzu-backed unified store. Use as ``with GraphStore(path) as gs:``."""
 
-    def __init__(self, path) -> None:
+    def __init__(self, path, *, read_only: bool = False) -> None:
         import kuzu
 
         self.path = Path(path)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.read_only = bool(read_only)
+        if not self.read_only:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
         # A second holder of this directory is a *conflict*, not a wait.
         # Kuzu takes an OS lock on the store, so two sweeps pointed at one
         # workspace would otherwise fail deep inside the first query with a
         # message that names neither the workspace nor the other holder.
         # Say which path, and say it at open time.
+        #
+        # `read_only` is what lets the sidecar and the MCP server look at one
+        # workspace at the same time. Kuzu admits MANY readers or ONE writer:
+        # measured, two read-only processes share a store and a single writer
+        # excludes every other opener, read-only included. Both of those
+        # servers are read-only in intent and were opening read-write, so the
+        # first one started locked the second out of its own workspace.
+        # Asking for the weaker mode is therefore not a precaution here; it
+        # is the thing that makes them coexist.
         try:
-            self.db = kuzu.Database(str(self.path))
+            self.db = kuzu.Database(str(self.path), read_only=self.read_only)
         except Exception as exc:  # noqa: BLE001
             if "lock" in str(exc).lower():
                 raise RuntimeError(
                     f"workspace {self.path} is held by another process — "
-                    "close it, or give this run its own store "
-                    "(--build <dir> for the repl, --workspace <dir> for the "
-                    "cli)"
+                    + ("a WRITER excludes readers too, so check for a scan or "
+                       "an --enact sidecar on this store"
+                       if self.read_only else
+                       "close it, or give this run its own store "
+                       "(--build <dir> for the repl, --workspace <dir> for "
+                       "the cli)")
                 ) from exc
             raise
         self.conn = kuzu.Connection(self.db)
-        for statement in _SCHEMA:
-            self.conn.execute(statement)
+        # DDL is a write. A read-only open of an existing store has nothing to
+        # create, and running it would turn a shared read into a lock error.
+        if not self.read_only:
+            for statement in _SCHEMA:
+                self.conn.execute(statement)
 
     def __enter__(self) -> "GraphStore":
         return self

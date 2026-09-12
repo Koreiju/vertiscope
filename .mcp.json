@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "domvec": {
+      "command": "python",
+      "args": [
+        "-m",
+        "domvec.obsidian.mcp",
+        "--workspace",
+        "build/vaultws512"
+      ],
+      "env": {}
+    }
+  }
+}

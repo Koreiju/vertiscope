@@ -81,14 +81,27 @@ class Workspace:
     """A scanned corpus on disk. Use as ``with Workspace(path) as ws:``."""
 
     def __init__(self, path, *, context_window: int = DEFAULT_CONTEXT_WINDOW,
-                 embedder=None) -> None:
+                 embedder=None, read_only: bool = False) -> None:
         self.path = Path(path)
-        self.path.mkdir(parents=True, exist_ok=True)
+        self.read_only = bool(read_only)
+        if self.read_only:
+            # A read-only open must not CREATE the thing it claims to read.
+            # Creating it would hand back an empty workspace that answers
+            # every query with nothing, which reads as "the corpus is gone"
+            # rather than "that path is wrong".
+            if not self.path.is_dir():
+                raise FileNotFoundError(
+                    f"no workspace at {self.path} (opened read-only, so it "
+                    "will not be created)")
+        else:
+            self.path.mkdir(parents=True, exist_ok=True)
         self.chunks_dir = self.path / "chunks"
-        self.chunks_dir.mkdir(exist_ok=True)
+        if not self.read_only:
+            self.chunks_dir.mkdir(exist_ok=True)
         self.context_window = context_window
 
-        self._store = GraphStore(self.path / "graph.kuzu")
+        self._store = GraphStore(self.path / "graph.kuzu",
+                                 read_only=self.read_only)
         #: Graph writes queued by `ingest(..., defer=True)`, in order.
         #: Drained by `settle()`, which every reader goes through.
         self._pending: List[dict] = []
@@ -98,7 +111,14 @@ class Workspace:
         # other process is writing these files -- which is what makes it safe
         # to rename them. A workspace someone else holds raises above and is
         # never touched.
-        self._retire_readable_names()
+        # Skipped when read-only, and the reason is the comment above: the
+        # exclusive lock was the PROOF that no one else is writing these
+        # files, and that proof is what made renaming them safe. A read-only
+        # open shares the store with other readers and possibly a writer, so
+        # it no longer holds. The migration is idempotent and the next
+        # writable open runs it.
+        if not self.read_only:
+            self._retire_readable_names()
         self.freq = FreqMatrix.load(self.path / "freq")
         self.embeddings = EmbeddingMatrix() if embedder is not None else None
         self.embedder = embedder

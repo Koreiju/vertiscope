@@ -263,7 +263,10 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
 
     from ..workspace import Workspace
-    with Workspace(args.workspace) as ws:
+    # Read-only is the whole point of this server, and asking kuzu for
+    # it is what lets the server run BESIDE a sidecar on one workspace
+    # rather than losing a race to whichever started first.
+    with Workspace(args.workspace, read_only=True) as ws:
         print("domvec MCP: %d pages, read-only" % len(ws.pages()),
               file=sys.stderr)
         serve_stdio(ws)
