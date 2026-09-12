@@ -517,8 +517,65 @@ executes against a configured interpreter.
 [Notebooks](https://community.obsidian.md/plugins/notebooks) embeds a real
 Jupyter UI in a pane.
 
+### Electron as the sensor's host — searched, then measured (2026-09-12)
+
+Addendum II's S-13 question. The search said it was possible; the measurement
+said by how much. Findings are in `PLUGIN_PRD.md` §N; what the *search* gave:
+
+- **Playwright drives Electron over CDP**, and can attach to an already-running
+  instance launched with `--remote-debugging-port` — the same mechanism
+  `obsidian-plugin/cdp.mjs` already uses against Obsidian on 9222.
+  [ElectronApplication](https://playwright.dev/docs/api/class-electronapplication),
+  [electron-agent-tools](https://github.com/svvysh/electron-agent-tools),
+  [electron-test-mcp](https://github.com/lazy-dinosaur/electron-test-mcp).
+- **`<webview>` is deprecated in advice if not yet in API.** Electron's own
+  docs: *"Chromium's webview is undergoing dramatic architectural changes...
+  consider alternatives, like iframe, a WebContentsView, or an architecture
+  that avoids embedded content altogether."* This changes what `P-B3`/`P-B4`
+  should be built on.
+- **`preload` is the sensor's injection point**, not `executeJavaScript`: it
+  runs before page scripts, and a fold that must not miss the first mutation
+  needs that ordering. `executeJavaScript` on `dom-ready` is re-injection.
+- **`session.fromPartition('persist:…')`** is *"profiles from their base"*,
+  exactly — an isolated persistent profile per partition string.
+
+### The `[]()` retrieval gesture — the closest prior art (2026-09-12)
+
+[**bbawj/obsidian-semantic-search**](https://github.com/bbawj/obsidian-semantic-search)
+is `R-1`/`R-4` already built, with a different trigger: a `LinkSuggest` class
+extending Obsidian's `EditorSuggest`, fired by a `{{...}}` pattern, running
+semantic search over the text inside the braces and **inserting a formatted
+markdown link on selection**.
+
+What that settles and what it leaves: `EditorSuggest` gets the *trigger* and
+the *infill* for free, so `R-1` and `R-4` are a known quantity. The work is
+`R-2` and `R-3` — results in *scrollable whitespace immediately below the
+line*, with the surrounding editor uninterrupted. `EditorSuggest` overlays a
+popup; it does not reflow the document to make room, which is what the
+requirement describes. The PRD already records that tension in `R-3`; this
+confirms the split rather than resolving it.
+
+Also in this space, all embedding-backed inline suggesters worth reading for
+the popup mechanics: [semantic-backlinks](https://github.com/brightwav3/semantic-backlinks)
+(lexical hits instantly, semantic hits below, snippet preview), the
+`Inline Link Suggestions` community plugin (underlines plain-text mentions,
+opt-in semantic), and `Smart Connections`.
+
+### Local models inside Obsidian (2026-09-12)
+
+Surveyed for `L-1`, and the conclusion is that none of it is needed as a
+dependency: the workspace already runs GPT4All + nomic on CUDA in Python behind
+the sidecar, so the plugin's job is to call a local HTTP endpoint, not to host
+a model. Read for UI patterns only — `Lantern` (desktop-only, llama.cpp-class
+models, a grounded *cited* chat over your notes, which is the closest thing to
+`P-N10`'s annotated context), [vault-llama](https://github.com/tomhan518/vault-llama),
+[obsidian-local-llm-helper](https://github.com/manimohans/obsidian-local-llm-helper),
+`Local LLM Hub`.
+
 ### Still unsearched
 
 UMAP inter-spatial normalization; per-package vector partitioning with a
-centroid pre-filter; terminal plugins; whether any package mirrors Selenium's
-call surface into a remote panel.
+centroid pre-filter; terminal plugins (`P-N2`'s separate pane needs a pty —
+nothing read yet); whether any package mirrors Selenium's call surface into a
+remote panel (`S-10`) — though §N makes that question smaller, since an
+Electron host would not need the mirror at all.
