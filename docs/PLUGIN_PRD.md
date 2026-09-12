@@ -11,7 +11,7 @@ means something is built and CONTRADICTS the goal — those are not gaps to fill
 but code to change, and they are listed first because they are the only
 category where doing nothing makes things worse.
 
-**Part I** is the decomposition. **Part II** keeps the measured findings from
+**Part I** is the decomposition: 112 numbered requirements, plus section 0b recording every judgment where the two statements disagreed. **Part II** keeps the measured findings from
 the work so far, under their original `R-*` ids, as the evidence Part I cites.
 Those ids are retired as requirements and retained as anchors.
 
@@ -33,6 +33,35 @@ D-1 is the cheapest and the most invalidating: dropping frequency from the fit
 is a small change to `build_layout`, and it changes every stored position and
 every hue. Do it before more projector work, not after.
 
+### 0b. Resolutions by recency
+
+Where the two statements disagree the later one wins. These are the judgments
+that produced Part I, written down so they can be overturned rather than
+inherited:
+
+| the first statement asks for | the addendum says | resolution |
+|---|---|---|
+| chat contexts localized to a panel; **pull chunk panels into a new chat and aggregate**; chat within-chunk | *"add back the quantized chat feature as something **much smaller and minimal**"* | **Deferred, not dropped.** L-1..L-11 are the whole of the chat now: a rewind over the current notebook. Aggregation and cross-panel chat are out of this scope and survive as future work. |
+| the **chained single-hop prompt architecture** — one generated system prompt per hop, outputs instructing the next, a final aggregate pass | *"put the LLM complexities aside"*, then a minimal embedded chat | **Deferred, not dropped.** Nothing in the addendum contradicts it; it is simply not this scope. It stays in `PLUGIN_GOAL.md` unnumbered. |
+| *"no dedups"*, inside a list about elegance | *"full deduplication of repeat substrings that are essentially structural redundancies"* | **Deduplicate.** This is D-4, and it reverses how the phrase was read for most of the work so far. |
+| the projector fitted on frequency **and** semantic | *"quantized semantic (and not pre-umapped frequency) vectors are the primary embeddings space for the projector"* | **Semantic only.** D-1. Frequency stays in retrieval (G-3). |
+| panels "retrofitted to show their base and original markdown editors" | *"keep the original obsidian markdown panels in their native form as well"* | **No conflict** — both name the native editor. D-3 stands. |
+
+### Two readings that are still ambiguous
+
+**"Quantized"** is used as the name of the semantic axis
+(*"frequency-quantized-pagerank"*), which reads as *the quantized model's*
+embeddings — the f16 GGUF nomic already in use. It could instead mean
+product-quantized vectors, which would be a storage and ANN decision that does
+not exist today. Part I assumes the first.
+
+**512 tokens is now fixed by recency** — *"the pre-set context window chunk
+limit of 512 tokens"*. Recorded against it: measured over three corpus pages,
+retrieval hit@1 was **83-90% at a 64-token window and 28-48% at 512**, with
+the containing chunk's cosine falling 0.95 → 0.81. The instruction stands and
+Part I follows it; the evidence is filed under R-C5 in Part II so the cost is
+visible rather than forgotten.
+
 ### S. The scanner
 
 | id | requirement | status |
@@ -48,6 +77,7 @@ every hue. Do it before more projector work, not after.
 | S-9 | Pagination deliberately **not** automated — manual, in the browser views | By design |
 | S-10 | Browser streams ported to the panels efficiently, *"completely and exactly mirroring features/calls to the original selenium"* | Partial — rrweb is the architecture; its shadow-DOM capture is the wrong half |
 | S-11 | The 512-token window holds **throughout processing**, with a verification pass after the scan | Partial — 15.1× worst in the stored board, 5.9× in-process |
+| S-12 | Every sensor→db stream reaches the graph view **and the opened *and closed* panel set, uniformly** | Open |
 
 ### T. The trie and the database
 
@@ -139,6 +169,7 @@ axes: **structure, content, organizedness, completeness**.
 | P-N4 | A facade over Obsidian's vault interface exposing local kernels to the filestructure | Open |
 | P-N5 | Notebooks are **dynamically recursively chunked** like webpages | Open |
 | P-N6 | …and **continuously diff-updated to the db**, re-vectorized and re-assigned to chunks | Open |
+| P-N7 | **One interface** centralizing retrieval and code research | Open |
 
 **P-M — the native markdown panel, built outward**
 
@@ -205,6 +236,24 @@ single-hop architecture from the first statement is **not** in scope here.
 | X-3 | Where a document contradicts the goal, the **document** changes | Standing |
 | X-4 | Measure the distribution **before** writing an acceptance criterion | Standing — four criteria here were written first and all four were wrong |
 | X-5 | Cleanups gate on **`accounted`**, not `covered` | Standing |
+
+**X-6 — the build order is given, and it is not the order of these tables.**
+
+The addendum states it as a sequence, so it is a requirement and not a
+suggestion: the **native Obsidian markdown panel is the substrate**, and
+everything is grown from it — *"we essentially build the native obsidian
+markdown out into this more fully fledged interactive panel"*.
+
+1. native markdown panel, kept in native form (P-M1)
+2. + the same retrieval (P-M2)
+3. + code, kernel and terminal options (P-M3, P-N)
+4. + the hovering chat (L-10)
+5. + **interactive web browser cells — explicitly "the final step"** (P-B)
+
+P-M and P-N are therefore not peer panel types: P-N is P-M grown, and the
+native form survives alongside it. P-B is last because *"the way browser
+interactions and dual panel views work is slightly different, and particularly
+so."*
 
 ---
 
