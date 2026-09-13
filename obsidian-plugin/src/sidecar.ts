@@ -10,7 +10,8 @@
  * goes unnoticed.
  */
 
-import { ChunkPayload, ChunkPreview, EnactResult, Health, Interpreters,
+import { CaptureResult, ChunkPayload, ChunkPreview, EnactResult, Health,
+         Interpreters,
          KernelReply, SearchResult, ShellReply } from "./types";
 
 export class Sidecar {
@@ -135,6 +136,51 @@ export class Sidecar {
       return (await res.json()) as ChunkPreview;
     } catch {
       return null;
+    }
+  }
+
+  /**
+   * The sensor source, read from the one file the Selenium path reads.
+   *
+   * Fetched rather than bundled on purpose. A copy compiled into the plugin
+   * is a SECOND sensor, and the moment the two differ every comparison
+   * between a browser-cell capture and a corpus scan measures the drift
+   * rather than the page.
+   */
+  sensor(): Promise<{ source: string } | null> {
+    return this.get<{ source: string }>("/sensor");
+  }
+
+  /**
+   * Hand the sidecar one drain from the page the browser cell is showing.
+   *
+   * A session, not a one-shot: the sensor keeps the fold in the page and each
+   * drain carries only what changed, so the sidecar holds the decoder state
+   * between calls. `settle: true` closes the page out with one complete write
+   * from the finished trie.
+   *
+   * POST and not retried: it writes the workspace, and a half-written page
+   * re-sent is not the same as one sent once -- the same reasoning as
+   * `enact` and `runCommand`.
+   */
+  async capture(url: string,
+                what: { payload?: unknown; settle?: boolean;
+                        restart?: boolean; title?: string },
+               ): Promise<CaptureResult | null> {
+    const base = this.base().trim().replace(/\/+$/, "");
+    if (!base) return null;
+    try {
+      const res = await fetch(`${base}/capture`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url, ...what }),
+      });
+      const body = await res.json();
+      if (!res.ok) return { error: body.error || `HTTP ${res.status}` } as
+        CaptureResult;
+      return body as CaptureResult;
+    } catch (e) {
+      return { error: String(e) } as CaptureResult;
     }
   }
 

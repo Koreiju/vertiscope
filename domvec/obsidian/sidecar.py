@@ -29,6 +29,7 @@ a handle on it.
 from __future__ import annotations
 
 import json
+import time
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Dict, List, Optional
@@ -38,6 +39,14 @@ from .. import tokens
 from .export import _reflow, link_targets
 from .htmlform import render_lines
 from .layout import build_layout
+
+
+#: Capture sessions, keyed by url: the stateful decoder and the trie spine
+#: for a page the browser cell is scanning. Held for the life of the server
+#: rather than evicted -- a drain's dictionary is append-only, so a session
+#: dropped mid-page could not resolve the next drain's interned segments and
+#: would fail in a way that looks like a page suddenly going empty.
+_capture_sessions: Dict[str, Dict] = {}
 
 
 def chunk_payload(workspace, cid: str) -> Optional[Dict]:
@@ -167,6 +176,10 @@ def search_payload(workspace, query: str, k: int = 8) -> Dict:
 class _Handler(BaseHTTPRequestHandler):
     workspace = None            # set by serve()
     enact_allowed = False       # set by serve(); the write path's gate
+    #: Set by `serve()`. Separate from `enact_allowed` because they are
+    #: different permissions: enact presses controls on live pages, capture
+    #: only writes down what the browser cell read.
+    capture_allowed = False
     kernel_pool = None          # set by serve(); None means --kernel was off
     shell_pool = None           # set by serve(); shares --kernel's gate
 
@@ -224,6 +237,29 @@ class _Handler(BaseHTTPRequestHandler):
         route = parts.path.strip("/")
         if route == "chunk_preview":
             self._post_chunk_preview()
+            return
+
+        # The browser cell handing over what it captured (`G-47`).
+        #
+        # Ungated for the same reason `chunk_preview` is: it writes only the
+        # workspace, runs no process, and presses nothing on any page. It is
+        # the scan the reader is watching, arriving from the pane they are
+        # watching it in.
+        if route == "capture":
+            if not self.capture_allowed:
+                # Named, because the alternative is what actually happened:
+                # a raw "Cannot execute write operations in a read-only
+                # database" from kuzu, which tells a reader about a lock and
+                # nothing about a permission they can grant.
+                self._send(403, {
+                    "error": "capture is off",
+                    "why": "the sidecar holds this workspace read-only. "
+                           "Start it with --capture to let the browser cell "
+                           "scan into it; that takes the store's writer lock "
+                           "and excludes other readers.",
+                })
+                return
+            self._post_capture()
             return
 
         if route not in ("enact", "kernel", "shell"):
@@ -422,6 +458,111 @@ class _Handler(BaseHTTPRequestHandler):
         except Exception as exc:                    # noqa: BLE001
             self._send(500, {"error": "%s: %s" % (type(exc).__name__, exc)})
 
+    def _post_capture(self) -> None:
+        """Take one drain from the browser cell into the trie (`G-47`).
+
+        The scan migrates from Selenium to the Electron browser the reader is
+        watching, and what crosses this boundary is what crossed the Selenium
+        one: **a drain payload**, not a serialisation. The sensor maintains
+        the fold in the page and emits, per drain, only what changed -- which
+        is the O(delta) contract, and the reason this is a SESSION rather than
+        a one-shot post.
+
+        The decoder is stateful and has to be. The payload's dictionary and
+        shape table are append-only: a drain carries only the entries added
+        since the last one, so a decoder that forgot between calls would fail
+        to resolve every interned segment from the first drain onward. That
+        state lives in `Sensor`, so `Sensor(None, url)` is constructed here as
+        a decoder -- it stores the driver and never touches it unless asked to
+        boot, and booting is the browser cell's job now.
+
+        `settle` asks for the one complete write from the finished trie. The
+        per-drain writes keep the store current while the reader is still on
+        the page, but they are deltas and never retire a chunk that
+        re-partitioning replaced -- the Selenium path settles at the same
+        point, for the same reason.
+
+        Ungated, like `chunk_preview`: it writes the workspace, runs no
+        process, and presses nothing on any page.
+        """
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+            body = json.loads(self.rfile.read(length) or b"{}")
+        except Exception as exc:                    # noqa: BLE001
+            self._send(400, {"error": "bad body: %s" % exc})
+            return
+
+        url = (body.get("url") or "").strip()
+        if not url:
+            self._send(400, {"error": "capture needs a url"})
+            return
+        if self.workspace is None:
+            self._send(503, {"error": "no workspace"})
+            return
+
+        from ..sensing import Sensor
+        from ..stream import StreamingScan
+
+        sessions = _capture_sessions
+        session = sessions.get(url)
+        if session is None or body.get("restart"):
+            session = {
+                "sensor": Sensor(None, url),
+                "spine": StreamingScan(
+                    url, context_window=self.workspace.context_window),
+                "passno": 0,
+            }
+            sessions[url] = session
+
+        started = time.perf_counter()
+        try:
+            if body.get("settle"):
+                spine = session["spine"]
+                if spine.trie is not None and len(spine.trie):
+                    self.workspace.ingest(url, spine.trie,
+                                          title=(body.get("title") or ""))
+                stored = list(self.workspace.store.chunks(url))
+                sessions.pop(url, None)
+                self._send(200, {
+                    "settled": True, "url": url,
+                    "addresses": len(spine.trie) if spine.trie else 0,
+                    "chunks": len(stored),
+                    "ms": round((time.perf_counter() - started) * 1000, 1),
+                })
+                return
+
+            payload = body.get("payload") or {}
+            if not payload:
+                self._send(400, {"error": "capture needs a drain payload"})
+                return
+            passno = int(session["passno"])
+            session["passno"] = passno + 1
+            sense = session["sensor"]._as_pass(payload, 0.0, 0.0, passno)
+            spine = session["spine"]
+            update = spine.absorb(sense.units, sense.passno,
+                                  removed=sense.removed_addresses,
+                                  moved=sense.moved_addresses)
+            dirty = spine.dirty_chunks(update)
+            if dirty:
+                self.workspace.ingest_chunks(url, dirty, complete=False)
+        except Exception as exc:                    # noqa: BLE001
+            # Named rather than swallowed. A capture that fails quietly is
+            # indistinguishable from a page with nothing in it, and that
+            # confusion has cost this project whole measurement runs.
+            self._send(500, {"error": "%s: %s" % (type(exc).__name__, exc)})
+            return
+
+        self._send(200, {
+            "url": url,
+            "passno": passno,
+            "addresses": sense.addresses,
+            "lines": sense.lines,
+            "changed": sense.changed,
+            "dirty": len(dirty),
+            "wire_bytes": sense.wire_bytes,
+            "ms": round((time.perf_counter() - started) * 1000, 1),
+        })
+
     def do_GET(self) -> None:                       # noqa: N802 (stdlib name)
         parts = urlsplit(self.path)
         segments = [unquote(s) for s in parts.path.strip("/").split("/") if s]
@@ -432,6 +573,7 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(200, {"ok": True,
                              "pages": len(self.workspace.pages()),
                              "enact": bool(self.enact_allowed),
+                             "capture": bool(self.capture_allowed),
                              # Advertised so the panel can draw a run button as
                              # disabled rather than offering one that 403s --
                              # the same reason `enact` is advertised.
@@ -452,6 +594,21 @@ class _Handler(BaseHTTPRequestHandler):
                 payload["html"] = render_lines(payload["lines"],
                                                base=payload.get("url", ""))
                 self._send(200, payload)
+            return
+
+        if segments[0] == "sensor":
+            # The browser cell runs the SAME sensor the Selenium path runs,
+            # read from the same file at request time. Bundling a copy into
+            # the plugin would create a second sensor that drifts from the
+            # first, and every capture comparison after that would be
+            # measuring the drift instead of the page.
+            from .. import sensing
+            try:
+                source = sensing._JS.read_text(encoding="utf-8")
+            except Exception as exc:                # noqa: BLE001
+                self._send(500, {"error": "sensor unreadable: %s" % exc})
+                return
+            self._send(200, {"source": source})
             return
 
         if segments[0] == "links":
@@ -522,7 +679,7 @@ class _Handler(BaseHTTPRequestHandler):
 
 
 def serve(workspace, port: int = 8787, *, block: bool = True,
-          enact: bool = False, kernel: bool = False,
+          enact: bool = False, capture: bool = False, kernel: bool = False,
           kernel_timeout: Optional[float] = None):
     """Answer on loopback until stopped.
 
@@ -547,6 +704,7 @@ def serve(workspace, port: int = 8787, *, block: bool = True,
 
     handler = type("_Bound", (_Handler,),
                    {"workspace": workspace, "enact_allowed": bool(enact),
+                    "capture_allowed": bool(capture),
                     "kernel_pool": pool, "shell_pool": shells})
 
     class _Server(ThreadingHTTPServer):

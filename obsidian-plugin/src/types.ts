@@ -193,3 +193,21 @@ export interface ChunkPreview {
     over_window: boolean;
   }[];
 }
+
+/** What `POST /capture` says the browser cell's scan produced (`G-47`). */
+export interface CaptureResult {
+  url?: string;
+  passno?: number;
+  addresses?: number;
+  chunks?: number;
+  lines?: number;
+  /** Chunks this drain actually rewrote -- the O(delta) number. */
+  dirty?: number;
+  changed?: number;
+  wire_bytes?: number;
+  settled?: boolean;
+  ms?: number;
+  /** Set instead of the rest when the capture did not land. A capture that
+   *  fails quietly is indistinguishable from a page with nothing in it. */
+  error?: string;
+}

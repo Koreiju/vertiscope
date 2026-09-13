@@ -46,6 +46,14 @@ def main(argv=None) -> int:
                          "code with this process's privileges -- a LARGER "
                          "permission than --enact, and gated separately for "
                          "that reason.")
+    sv.add_argument("--capture", action="store_true",
+                    help="let the BROWSER CELL scan into this workspace: the "
+                         "Electron pane folds the page it is showing and the "
+                         "sidecar writes what it read. Off by default, and "
+                         "not because it is dangerous -- it presses nothing "
+                         "and runs no process -- but because writing takes "
+                         "the store's WRITER lock, which excludes every other "
+                         "reader, an MCP server included.")
     sv.add_argument("--kernel-timeout", type=float, default=None,
                     help="seconds one cell may run before its kernel is "
                          "killed (default 60)")
@@ -64,10 +72,17 @@ def main(argv=None) -> int:
     # store. So both take the weaker lock, which is what lets an MCP server or
     # a second reader open the same workspace at the same time.
     #
-    # `--enact` is the exception and the only one: it drives a real browser and
-    # writes back what it sees, so it is a writer and excludes other openers,
-    # correctly.
-    read_only = not getattr(args, "enact", False)
+    # Two exceptions, and they are DIFFERENT permissions that happened to
+    # share a flag. `--enact` drives a real browser and presses things on live
+    # pages. `--capture` writes what the browser cell READ -- it presses
+    # nothing and runs nothing. Deriving the lock from `--enact` alone meant
+    # the browser cell's scan failed with a raw kuzu "Cannot execute write
+    # operations in a read-only database", which names the symptom and not
+    # the permission.
+    #
+    # Both still take the writer lock, so both exclude other openers.
+    read_only = not (getattr(args, "enact", False)
+                     or getattr(args, "capture", False))
     with Workspace(args.workspace, read_only=read_only) as ws:
         if args.cmd == "serve":
             # Both capabilities are named at startup, and loudly. A reader who
@@ -77,12 +92,16 @@ def main(argv=None) -> int:
             powers = []
             if args.enact:
                 powers.append("ENACT -- the vault can drive a browser")
+            if args.capture:
+                powers.append("CAPTURE -- the browser cell can scan into this "
+                              "workspace")
             if args.kernel:
                 powers.append("KERNEL -- the vault can RUN PYTHON here")
             print("domvec sidecar on http://127.0.0.1:%d  (%d pages, %s)"
                   % (args.port, len(ws.pages()),
                      " + ".join(powers) if powers else "read-only"))
             serve(ws, port=args.port, enact=args.enact,
+                  capture=args.capture,
                   kernel=args.kernel, kernel_timeout=args.kernel_timeout)
             return 0
 

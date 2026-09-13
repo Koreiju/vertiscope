@@ -43,10 +43,33 @@ export const BROWSER_VIEW = "domvec-browser-view";
  */
 const PARTITION = "persist:domvec";
 
+/**
+ * Where the sensor's drain handle lives on the page's `window`.
+ *
+ * Fixed rather than randomised, unlike the Selenium path, which picks a fresh
+ * name per scan so a page cannot learn to look for it. Here the reader is
+ * driving their own browser at a page they chose, and a stable name is what
+ * lets a second scan of the same page reuse the fold instead of rebuilding
+ * it -- which is the whole point of an O(delta) sensor.
+ */
+const HANDLE = "__domvecSensor";
+
+/** How many times to scroll and drain again. The Selenium path sweeps a page
+ *  the same way: a document that loads on scroll has not finished being
+ *  itself when it first paints. */
+const SCROLLS = 6;
+
+/** Long enough for a lazy loader to have run, short enough that a reader
+ *  watching the pane does not think it has hung. */
+const PAUSE_MS = 700;
+
 /** Which face of the panel is showing. */
 type Face = "browser" | "markdown";
 
 export class BrowserView extends ItemView {
+  /** Fetched once per app run and shared: it is one file on disk and it does
+   *  not change under a running plugin. */
+  private static sensorSource = "";
   private webview: any = null;
   private face: Face = "browser";
   private address!: HTMLInputElement;
@@ -75,6 +98,7 @@ export class BrowserView extends ItemView {
     this.address = bar.createEl("input", { cls: "domvec-browser-url" });
     this.address.type = "text";
     this.address.placeholder = "url";
+    const scan = bar.createEl("button", { text: "scan" });
     this.toggle = bar.createEl("button", { text: "markdown" });
 
     this.browserWrap = root.createDiv({ cls: "domvec-browser-page" });
@@ -117,6 +141,7 @@ export class BrowserView extends ItemView {
     });
     this.toggle.onclick = () => this.show(
       this.face === "browser" ? "markdown" : "browser");
+    scan.onclick = () => this.scan();
 
     this.say("ready");
   }
@@ -143,6 +168,95 @@ export class BrowserView extends ItemView {
     this.address.value = url;
     this.webview.loadURL(url);
     this.show("browser");
+  }
+
+  /**
+   * Scan the page the reader is looking at (`G-47`).
+   *
+   * The same sensor the Selenium path runs, fetched from the sidecar rather
+   * than bundled -- a copy compiled in here would be a second sensor, and
+   * every comparison between a browser-cell capture and a corpus scan would
+   * then be measuring the drift between them instead of the page.
+   *
+   * It READS. The sensor walks the composed tree, including shadow roots,
+   * and hands back one serialisation; nothing is written into the document
+   * (constraint 7). The handle it installs is a property on `window`, which
+   * is the same thing the Selenium path does and the one concession -- the
+   * alternative is re-walking the page from scratch on every drain.
+   */
+  async scan(): Promise<void> {
+    const wv = this.webview;
+    if (!wv) return;
+    const url = wv.getURL();
+    if (!url || url === "about:blank") { this.say("nothing to scan"); return; }
+
+    if (!BrowserView.sensorSource) {
+      this.say("fetching the sensor…");
+      const got = await this.sidecar.sensor();
+      if (!got || !got.source) { this.say("no sensor from the sidecar"); return; }
+      BrowserView.sensorSource = got.source;
+    }
+
+    // Boot once per page, then drain. The handle is checked rather than
+    // re-installed, because re-booting would throw away the fold and make
+    // every pass a full read -- which is the opposite of what the sensor is.
+    this.say("folding the page…");
+    let booted = false;
+    try {
+      booted = await wv.executeJavaScript(`(function () {
+        if (window[${JSON.stringify(HANDLE)}]) return true;
+        var h = (${BrowserView.sensorSource})(
+          {budget: 0, debounce: 80, variants: {}, known: []});
+        Object.defineProperty(window, ${JSON.stringify(HANDLE)},
+          {value: h, enumerable: false, configurable: false});
+        return typeof h.drain === "function";
+      })()`);
+    } catch (e) {
+      this.say(`the sensor did not run: ${String(e).slice(0, 120)}`);
+      return;
+    }
+    if (!booted) { this.say("the sensor installed no drain handle"); return; }
+
+    // Several passes, scrolling between them, because a page that loads on
+    // scroll has not finished being itself when it first paints. Scrolling
+    // is what the Selenium path does too; it is the reader's own browser, so
+    // it is their scroll position that moves and then comes back.
+    let total = 0, addresses = 0;
+    for (let pass = 0; pass <= SCROLLS; pass++) {
+      if (pass) {
+        await wv.executeJavaScript(
+          "window.scrollBy(0, window.innerHeight * 0.9); true");
+        await new Promise((r) => setTimeout(r, PAUSE_MS));
+      }
+      let payload: any = null;
+      try {
+        payload = await wv.executeJavaScript(
+          `window[${JSON.stringify(HANDLE)}].drain()`);
+      } catch (e) {
+        this.say(`drain ${pass} failed: ${String(e).slice(0, 100)}`);
+        return;
+      }
+      const reply = await this.sidecar.capture(url, { payload });
+      if (!reply || reply.error) {
+        this.say(`capture failed: ${reply ? reply.error : "no reply"}`);
+        return;
+      }
+      total += reply.dirty || 0;
+      addresses = Math.max(addresses, reply.addresses || 0);
+      this.say(`pass ${pass}: ${reply.addresses} addresses, ` +
+               `${reply.dirty} chunks rewritten, ${reply.ms} ms`);
+    }
+
+    // One complete write from the settled trie. The per-drain writes are
+    // deltas and never retire a chunk that re-partitioning replaced.
+    const done = await this.sidecar.capture(url, {
+      settle: true, title: wv.getTitle() || "" });
+    if (!done || done.error) {
+      this.say(`settle failed: ${done ? done.error : "no reply"}`);
+      return;
+    }
+    this.say(`scanned · ${done.addresses} addresses · ${done.chunks} chunks ` +
+             `· ${total} rewrites over ${SCROLLS + 1} passes`);
   }
 
   private say(text: string): void {
