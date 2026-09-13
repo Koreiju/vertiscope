@@ -167,6 +167,30 @@ export class Sidecar {
     }
   }
 
+  /**
+   * Drop a note's kernel. The next cell starts a fresh one.
+   *
+   * Called when the note is deleted or renamed, because at that moment the
+   * kernel is unreachable: it is keyed by path, and no path reaches it any
+   * more. Without this it waits for the LRU while holding an interpreter --
+   * the same leak the terminal had until a closed pane began releasing its
+   * shell.
+   */
+  async restartKernel(note: string): Promise<boolean> {
+    const base = this.base().trim().replace(/\/+$/, "");
+    if (!base) return false;
+    try {
+      const res = await fetch(`${base}/kernel`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ note, op: "restart" }),
+      });
+      return !!(await res.json()).restarted;
+    } catch {
+      return false;
+    }
+  }
+
   /** Drop a pane's shell. The next command starts a fresh one. */
   async restartShell(pane: string): Promise<boolean> {
     const base = this.base().trim().replace(/\/+$/, "");

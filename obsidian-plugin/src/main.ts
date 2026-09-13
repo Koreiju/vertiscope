@@ -84,6 +84,20 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     this.registerEvent(this.app.workspace.on("editor-change",
                                              () => this.scheduleChunkMarks()));
 
+    // A note's kernel is keyed by its PATH, so deleting or renaming the note
+    // leaves a running interpreter nothing can reach -- it would sit until the
+    // LRU evicted it. The same leak the terminal had until a closed pane began
+    // releasing its shell; fixed the same way, at the moment the key stops
+    // being valid.
+    this.registerEvent(this.app.vault.on("delete", (f) => {
+      if (f.path.endsWith(".md")) void this.sidecar.restartKernel(f.path);
+    }));
+    this.registerEvent(this.app.vault.on("rename", (f, oldPath) => {
+      // The OLD path, not the new one: the kernel is filed under where the note
+      // used to be, and the note under its new name has no kernel yet.
+      if (oldPath.endsWith(".md")) void this.sidecar.restartKernel(oldPath);
+    }));
+
     this.registerMarkdownPostProcessor(readingViewRunButtons(this));
     this.registerEditorExtension(
       livePreviewRunButtons(this, () => this.app.workspace.getActiveFile()?.path ?? ""),
