@@ -11,7 +11,7 @@ means something is built and CONTRADICTS the goal — those are not gaps to fill
 but code to change, and they are listed first because they are the only
 category where doing nothing makes things worse.
 
-**Part I** is the decomposition: 123 numbered requirements, plus section 0b recording every judgment where the two statements disagreed. **Part II** keeps the measured findings from
+**Part I** is the decomposition: 128 numbered requirements, plus section 0b recording every judgment where the two statements disagreed. **Part II** keeps the measured findings from
 the work so far, under their original `R-*` ids, as the evidence Part I cites.
 Those ids are retired as requirements and retained as anchors.
 
@@ -29,6 +29,8 @@ Those ids are retired as requirements and retained as anchors.
 | D-4 | `markdown.py` is tuned "17:1 toward leaving noise rather than risking loss" and `_dedupe` is element-scoped | *"full deduplication of repeat substrings that are essentially structural redundancies of the web pages themselves"* | **Defect** |
 | D-5 | Markdown renders no tables at all | *"a hierarchically-header-structured markdown document with tables, images, web links"* | **Defect** |
 | ~~D-6~~ | ~~The delta path re-admits a chunk it should have reassigned or popped~~ | **WITHDRAWN 2026-09-12 — not demonstrated.** The evidence for it was a metric that could not tell two real siblings from one re-addressed node. `--resolvable`: 0 unresolvable of 719. `--drift --kind insert`: 0 stale, 0 lost over ~190 moved addresses ×3. See §M.3 for what remains untested | — |
+| D-8 | A `src` detection and an `alt` detection at one `<img>` are drawn as TWO media lines, so the url and its caption are separate and the url's line has no text | *"image, links, embedded links"* at the Milkdown bar, and `M-11`'s chunk-level quality | **Defect** — 365 of 835 media-bearing chunks (§M.5.1) |
+| D-9 | A chunk rooted at a `<tr>` carries its cells' VALUES and none of their names, though the header at the same `td[n]` position is in the trie | `M-10` full structural preservation; `M-11` the chunk is what gets embedded | **Defect** — 44 of 79 row chunks (§M.5.2) |
 | ~~D-7~~ | ~~A media element with no alt text renders as a bare `![images]`~~ | **WITHDRAWN 2026-09-12 — not a defect.** Already fixed by `499fd6d` (M-9). Filed against `vaultws512`, built 34 minutes BEFORE that commit. On the 256 re-cut: **0 bare placeholders, 1,073 named**. See §M.0 | — |
 
 **D-1 is FIXED** (2026-09-12, `layout: the projector fits on semantic alone`).
@@ -166,6 +168,11 @@ axes: **structure, content, organizedness, completeness**.
 | G-14 | **Graph linkage completeness** across trie, web links, markdown links | Partial — dangling edges 0; trie axis absent |
 | G-15 | **Media present in the projector**, not only the panels | Partial — 73.8% textured |
 | G-16 | Chunk deltas diffed **into the projector view** live | Open |
+| G-17 | The projection's **output space is spherical**, fitted with an angular metric rather than rescaled into a cube afterwards | Open — Addendum III |
+| G-18 | Points are **quaternions and the distance between them is the quaternion distance** — the geodesic angle on the unit 3-sphere, `2·arccos(\|⟨p,q⟩\|)`, absolute because `q` and `−q` are one rotation | Open — Addendum III. umap-learn ships no such metric; it is a custom `output_metric`, a numba function returning the distance AND its gradient |
+| G-19 | The view is **centred on the origin** | Open — Addendum III. A sphere of radius 1 about the origin makes `recentre` unnecessary by construction: the camera cannot end up inside the cloud, which is the failure `graph.ts` records a camera at z = −230 inside a cloud spanning ±249 |
+| G-20 | **Force-directed relaxation seeded from the UMAP embedding** — UMAP initialises, the simulation converges | Open — Addendum III. This OVERTURNS `graph.ts`'s current `d3AlphaDecay(1).d3VelocityDecay(1)`, which freezes the simulation on the stated ground that "the coordinates are already the answer" |
+| G-21 | **Nodes never overlap**: spherical colliders, with a **quarter-distance safety factor** on the radius | Open — Addendum III. `d3-force-3d`'s `forceCollide` is already present beneath `3d-force-graph` and separates nodes to at least `radius(a) + radius(b)`; the safety factor is ours on top |
 
 ### P. The panels
 
@@ -1282,7 +1289,86 @@ So `D-6` is withdrawn as *not demonstrated*, not as *disproved*. The next run
 is `--kind delete` and `--kind relocate`, each against its own `--kind none`
 arm, on a corpus that includes a page known to move.
 
-### M.4 — the standing lesson
+### M.5 — three reported 2026-09-13, then measured
+
+Reported from the app against chunk `98b0c576` of `coinmarketcap.com`, whose
+root is `…/table/tbody/tr[91]` — **a table row**, which turns out to explain two
+of the three. Measured on `build/vaultws256` (5,337 chunks, current code) before
+anything was filed, because `D-6` and `D-7` were both filed from bad
+measurements and both withdrawn within hours.
+
+#### M.5.1 — one image, two lines
+
+| | |
+|---|---|
+| chunks containing media | 835 of 5,337 |
+| **same url with an empty alt AND a named alt** | **365** — 44% of them |
+| url appearing with only an empty alt | 348 |
+
+**Cause, from the addresses rather than the picture.** Two detections sit at one
+`<img>`, and the renderer draws each as its own line:
+
+```
+line 0   image | src|media.tag/img   …/td[3]/div/div/a/span/img   ![](…34466.png)
+line 1   image | alt|media.tag/img   …/td[3]/div/div/a/span/img   ![PENGU logo](…34466.png)
+```
+
+Identical xpath, different accessor. That is not an indexing fault —
+`ContentTag`'s own docstring makes `(xpath, category, subcategory, source_attr,
+sub)` the key, so `src` and `alt` are legitimately two detections of one
+element. **The defect is in the projection**: a url and its caption are one
+image, and drawing them as two lines both doubles the media and produces the
+"empty image with no text" that was reported, because the line carrying the url
+is the one WITHOUT the alt.
+
+This is adjacent to `D-7`, which was withdrawn correctly — `499fd6d` stopped the
+taxonomy being drawn as a caption. It did not merge the two accessors, and that
+is the part still outstanding.
+
+#### M.5.2 — naked fields: a row without its headers
+
+| | |
+|---|---|
+| chunks rooted at a `<tr>` | 79 |
+| **rows carrying ≥3 unlabelled values** | **44** |
+
+`90`, `0.14%`, `0.78%`, `16.00%`, `$455.28M`, `62.86B PENGU`, `-4.07` — every
+one a value with no name. The names are real and in the page; they are in the
+table's header row, which is not in this chunk because the chunk is the row.
+
+**And the names are recoverable, which is what makes this a defect rather than a
+limit.** The addresses carry the column:
+
+```
+cell | text()[0] | table.*   …/tr[91]/td[2]/p/text()[1]      90
+cell | text()[0] | table.*   …/tr[91]/td[4]/div/span/text()[1]  $0.007242
+cell | text()[0] | table.*   …/tr[91]/td[5]/span/text()[1]   0.14%
+```
+
+`td[n]` is the column index, and the header for column *n* is the table's
+`th[n]`. So a cell can be named by the header at its own position, from the trie,
+with no new detection.
+
+Why it matters beyond looking wrong: `M-11` says quality must hold *at the
+interactive chunk level, because the chunk is what gets embedded and its
+structure decides how representative the vectors are.* A row of bare numbers
+embeds as almost nothing — `0.14% 0.78% 16.00%` has no subject — so these 44
+chunks are close to unretrievable by meaning, whatever the retrieval stack does.
+
+#### M.5.3 — duplicate chunks, still
+
+Reported as still present. §M.1 counted 105 duplicate-content groups on this
+same store and attributed them to `D-4`, the page repeating itself; nothing has
+been done about `D-4`, so the report is consistent with that and with the two
+findings above, which produce visible duplication inside a single chunk without
+producing duplicate chunks.
+
+**Not separated yet.** What is missing is whether the duplicates being seen are
+§M.1's 105 groups or the 365 within-chunk image pairs — the two look identical
+from the panel and have different fixes. Next: re-take §M.1's count and compare
+group-for-group, not count-for-count.
+
+### M.4 — the standing lesson### M.4 — the standing lesson
 
 Two defects filed and both withdrawn within hours, with one shared cause:
 **a metric invented for the occasion, when the repo already had an

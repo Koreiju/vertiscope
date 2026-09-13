@@ -393,6 +393,64 @@ section had no notion of the reader marking context for the model.
 
 ---
 
+## Addendum III, 2026-09-13 — the projector's coordinates
+
+**Also binding.** Taken in conversation, so it wins over the statements above
+where they differ. It concerns the projector only, and it is the third time that
+surface has been re-specified — `D-1` moved it to the semantic space alone, and
+this moves the space it is projected *into*.
+
+> Also, for our UMAP, we'll use spherical/quaternion coordinates and quaternion
+> distances between points where we center our focus on the origin.
+
+### What it changes
+
+**The output space is a sphere, not a cube.** `layout.py` fits into Euclidean
+ℝ³ and then rescales into a cube of half-width `extent`. This asks for the
+embedding itself to live on a sphere — UMAP calls that an `output_metric`, and
+it changes the *fit*, not a transform applied after one.
+
+**The metric between points becomes angular, not straight-line.** Two chunks are
+near each other when the angle between them is small. That is a different
+question from "how far apart are they in the box", and it is the one a sphere
+makes natural.
+
+**The origin is the centre, and that is a claim about the camera too.** `recentre`
+exists in the graph view because a Euclidean cloud has an arbitrary centre and
+the camera can end up *inside* it — the view's own comment records a camera at
+z = −230 inside a cloud spanning ±249. On a sphere centred at the origin that
+cannot happen: every point is at radius 1, so any camera outside the unit sphere
+sees the whole of it. `TrackballControls`' target is already `(0,0,0)`.
+
+### What it does not yet decide, and must
+
+**"Spherical" and "quaternion" are two different embeddings**, and the phrase
+gives both. Recorded as a question rather than resolved by picking one:
+
+* **S² — the ordinary sphere.** `output_metric="haversine"`, two components read
+  as latitude and longitude, mapped to a point on the unit sphere for drawing.
+  It ships with gradients in umap-learn 0.5.9 and is the documented path.
+* **S³ — unit quaternions.** Four components, normalised; the distance between
+  two is the geodesic angle `2·arccos(|⟨p,q⟩|)`, with the absolute value there
+  because `q` and `−q` are the same rotation. This is what "quaternion distances"
+  says literally. umap-learn ships no such metric, so it is a custom
+  `output_metric`: a numba function returning the distance **and its gradient**,
+  which the optimiser requires.
+
+**And the colour axis is unresolved by either.** The fit is six-dimensional
+today: three components place a node and three colour it as HSV, which is the
+whole point of `fitted_dims: 6` — hue MEASURES a direction the camera has no
+room for. S² gives two components and S³ gives four; neither leaves three over.
+So a choice is forced: fit more components than the position needs and colour
+from the remainder, or derive colour from the quaternion itself (a rotation has
+a natural three-parameter reading), or drop the claim that colour measures
+anything and let it become a legend again — which `D-1`'s reasoning argues
+against.
+
+Until that is settled, any implementation would be choosing it silently.
+
+---
+
 ## Standing instructions carried in the verbatim
 
 Two of these are process rules, not features, and they bind every future

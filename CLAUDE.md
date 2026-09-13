@@ -164,7 +164,7 @@ denominator is what this component is answerable for.
   correctly". Decides outputs-in-markdown over an `.ipynb` sidecar, and
   states the vault-note addressing scheme. Its §8 holds three open
   questions for the user.
-- `docs/PLUGIN_PRD.md` — their decomposition, 123 numbered requirements. Part
+- `docs/PLUGIN_PRD.md` — their decomposition, 128 numbered requirements. Part
   I is the contract; Part II is the measured evidence it cites. Read section 0
   first: five of them are DEFECTS, shipped code that contradicts the goal.
 - `domvec/analytics/` — the affine-map confusion matrix, ground truth, phase
