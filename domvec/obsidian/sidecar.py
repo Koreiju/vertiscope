@@ -165,6 +165,7 @@ class _Handler(BaseHTTPRequestHandler):
     workspace = None            # set by serve()
     enact_allowed = False       # set by serve(); the write path's gate
     kernel_pool = None          # set by serve(); None means --kernel was off
+    shell_pool = None           # set by serve(); shares --kernel's gate
 
     # Silence the default stderr access log: it prints the requested path, and
     # the path carries the cid of whatever the reader is looking at.
@@ -218,12 +219,16 @@ class _Handler(BaseHTTPRequestHandler):
         """
         parts = urlsplit(self.path)
         route = parts.path.strip("/")
-        if route not in ("enact", "kernel"):
+        if route not in ("enact", "kernel", "shell"):
             self._send(404, {"error": "no such route", "path": parts.path})
             return
 
         if route == "kernel":
             self._post_kernel()
+            return
+
+        if route == "shell":
+            self._post_shell()
             return
 
         if not self.enact_allowed:
@@ -317,6 +322,57 @@ class _Handler(BaseHTTPRequestHandler):
         except Exception as exc:                    # noqa: BLE001
             self._send(500, {"error": "%s: %s" % (type(exc).__name__, exc)})
 
+    def _post_shell(self) -> None:
+        """Run one command in a pane's shell.
+
+        Body: ``{"pane": "<id>", "command": "...", "shell": "pwsh"?, "cwd": ""?,
+        "op": "restart"?}``.
+
+        Gated on the KERNEL's flag, deliberately and not by oversight. A second
+        flag would imply a distinction that does not exist: a Python kernel can
+        already call `subprocess.run`, so a reader who turned that on has shell
+        access whether or not a terminal pane exists. A permission that looks
+        meaningful and is not is worse than no permission.
+        """
+        if self.shell_pool is None:
+            self._send(403, {
+                "error": "shell is off",
+                "detail": "start the sidecar with --kernel; the terminal shares "
+                          "that gate because a python kernel already grants "
+                          "shell access."})
+            return
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+            body = json.loads(self.rfile.read(length) or b"{}")
+        except Exception as exc:                    # noqa: BLE001
+            self._send(400, {"error": "bad body: %s" % exc})
+            return
+
+        pane = (body.get("pane") or "").strip()
+        if not pane:
+            # As with the kernel's note: the pane IS the session boundary, and
+            # defaulting it would put every terminal in the vault into one
+            # shell -- one reader's `cd` moving another reader's prompt.
+            self._send(400, {"error": "missing pane",
+                             "detail": "the pane id is the session boundary"})
+            return
+
+        if body.get("op") == "restart":
+            self._send(200, {"restarted": self.shell_pool.restart(pane),
+                             "pane": pane})
+            return
+
+        command = body.get("command")
+        if not isinstance(command, str) or not command.strip():
+            self._send(400, {"error": "missing command"})
+            return
+        try:
+            self._send(200, self.shell_pool.run(
+                pane, command, shell=(body.get("shell") or ""),
+                cwd=(body.get("cwd") or "")))
+        except Exception as exc:                    # noqa: BLE001
+            self._send(500, {"error": "%s: %s" % (type(exc).__name__, exc)})
+
     def do_GET(self) -> None:                       # noqa: N802 (stdlib name)
         parts = urlsplit(self.path)
         segments = [unquote(s) for s in parts.path.strip("/").split("/") if s]
@@ -380,6 +436,22 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send(200, dict(self.kernel_pool.status(), enabled=True))
             return
 
+        if segments[0] == "shell":
+            if self.shell_pool is None:
+                self._send(200, {"enabled": False, "shells": []})
+            else:
+                self._send(200, dict(self.shell_pool.status(), enabled=True))
+            return
+
+        if segments[0] == "interpreters":
+            # Discovery, not a fixed list: what can be run is a property of the
+            # machine, and a hardcoded list is wrong on every machine but the
+            # author\'s. Answered whether or not the kernel is on, because a
+            # panel should be able to say what WOULD be available.
+            from .shell import interpreters
+            self._send(200, interpreters())
+            return
+
         if segments[0] == "search":
             params = parse_qs(parts.query)
             query = (params.get("q") or [""])[0]
@@ -415,13 +487,18 @@ def serve(workspace, port: int = 8787, *, block: bool = True,
     notebook did not thereby ask for a vault that can drive the web.
     """
     pool = None
+    shells = None
     if kernel:
         from .kernel import DEFAULT_TIMEOUT, KernelPool
+        from .shell import ShellPool
         pool = KernelPool(timeout=kernel_timeout or DEFAULT_TIMEOUT)
+        # One flag for both: see `_post_shell` for why a second would be a
+        # permission that looks meaningful and is not.
+        shells = ShellPool()
 
     handler = type("_Bound", (_Handler,),
                    {"workspace": workspace, "enact_allowed": bool(enact),
-                    "kernel_pool": pool})
+                    "kernel_pool": pool, "shell_pool": shells})
 
     class _Server(ThreadingHTTPServer):
         # A vault opens many chunks at once -- a note with several `domvec`
@@ -442,6 +519,7 @@ def serve(workspace, port: int = 8787, *, block: bool = True,
     # The pool hangs off the server so a `block=False` caller can reach it, and
     # so nothing else has to remember it exists.
     server.kernel_pool = pool
+    server.shell_pool = shells
     if block:
         try:
             server.serve_forever()
@@ -454,6 +532,8 @@ def serve(workspace, port: int = 8787, *, block: bool = True,
             # nothing on screen explains.
             if pool is not None:
                 pool.shutdown()
+            if shells is not None:
+                shells.shutdown()
             server.server_close()
         return server
     threading.Thread(target=server.serve_forever, daemon=True).start()

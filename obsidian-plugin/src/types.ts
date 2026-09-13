@@ -150,3 +150,31 @@ export const DEFAULTS: DomvecSettings = {
   loadRemoteMedia: false,
   retrievalLimit: 8,
 };
+
+/** One command's result, from `POST /shell`. */
+export interface ShellReply {
+  ok?: boolean;
+  output?: string;
+  count?: number;
+  /** Which shell ran it, by display name. */
+  interpreter?: string;
+  /** Said when the session is not the one the last command left. */
+  shell?: string;
+  /** Which pane's session was retired to make room. */
+  evicted?: string;
+  error?: string;
+  detail?: string;
+  /** True when the command was declined without touching the session -- a TUI
+   *  program, which this runner has no terminal for. Distinct from `error`,
+   *  because a refusal leaves the reader's `cd` and environment intact. */
+  refused?: boolean;
+}
+
+/** What `GET /interpreters` found on this machine. */
+export interface Interpreters {
+  python: { name: string; path: string; version: string; runnable: boolean }[];
+  shells: { name: string; exe: string; path: string; runnable: boolean }[];
+  /** Installed, and NOT runnable by this sidecar -- it drives a subprocess,
+   *  not the Jupyter protocol. Reported so the reader sees what exists. */
+  jupyter_kernels: { name: string; key: string; runnable: boolean }[];
+}

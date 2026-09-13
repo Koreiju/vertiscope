@@ -30,6 +30,7 @@ import {
 } from "obsidian";
 
 import { CHUNK_VIEW, ChunkView } from "./chunkview";
+import { TERMINAL_VIEW, TerminalView } from "./terminal";
 import {
   RunHost, RunRequest, livePreviewRunButtons, readingViewRunButtons,
 } from "./runbutton";
@@ -126,6 +127,18 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
       (leaf: WorkspaceLeaf) =>
         new ChunkView(leaf, this, (cid) => this.revealChunk(cid)),
     );
+    // The terminal is a SEPARATE PANE, per NOTEBOOK_PANEL_DESIGN §4a: the
+    // in-panel switch selects a kernel run, and shell work lives out here.
+    this.registerView(
+      TERMINAL_VIEW,
+      (leaf: WorkspaceLeaf) => new TerminalView(leaf, this.sidecar),
+    );
+    this.addCommand({
+      id: "domvec-open-terminal",
+      name: "Open a command terminal",
+      callback: () => this.openTerminal(),
+    });
+
     this.addRibbonIcon("git-fork", "domvec 3D graph", () => this.openGraph());
     this.addCommand({
       id: "domvec-open-graph",
@@ -258,6 +271,20 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     // The view's own `onClose` releases the WebGL context; detaching leaves
     // is Obsidian's job and doing it here is explicitly discouraged, because
     // it destroys layout the user arranged.
+  }
+
+  /**
+   * A terminal pane, and a NEW one each time it is asked for.
+   *
+   * The graph reuses its leaf because there is one graph; terminals are the
+   * opposite -- two of them is the ordinary case (a build in one, git in the
+   * other), and each is its own session. Reusing a leaf would make the second
+   * request silently steal the first's pane.
+   */
+  private async openTerminal() {
+    const leaf = this.app.workspace.getLeaf("split", "horizontal");
+    await leaf.setViewState({ type: TERMINAL_VIEW, active: true });
+    this.app.workspace.revealLeaf(leaf);
   }
 
   private async openGraph() {

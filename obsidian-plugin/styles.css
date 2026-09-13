@@ -353,3 +353,70 @@ button.domvec-run-fence:hover {
   margin-left: 0.6em;
   vertical-align: middle;
 }
+
+/* --- the command terminal, step 6 -------------------------------------------
+ *
+ * A `<pre>` and an `<input>`, not an emulator. The output IS text and xterm.js
+ * would be ~50MB to render text a `<pre>` already renders; what it would buy --
+ * cursor control and TUI programs -- needs a pty the sidecar does not provide,
+ * so the cost would buy nothing here. See src/terminal.ts.
+ */
+.domvec-terminal {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 8px;
+  gap: 6px;
+}
+
+.domvec-terminal-bar {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
+.domvec-terminal-log {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  margin: 0;
+  padding: 8px;
+  white-space: pre-wrap;
+  /* Wrapping long paths rather than scrolling sideways: a build log is read
+   * down, and a horizontal scrollbar hides the end of every line that has one. */
+  word-break: break-word;
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-smaller);
+  background: var(--background-primary-alt);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  color: var(--text-normal);
+}
+
+.domvec-terminal-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
+.domvec-terminal-prompt {
+  font-family: var(--font-monospace);
+  color: var(--text-accent);
+}
+
+.domvec-terminal-input {
+  flex: 1 1 auto;
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-smaller);
+}
+
+/* The standing caveat, on the bar rather than in the scrollback.
+ * `margin-left:auto` parks it at the far end so it never competes with the
+ * controls, and it is muted because it is a fact about the pane, not output. */
+.domvec-terminal-note {
+  margin-left: auto;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-faint);
+  cursor: help;
+}

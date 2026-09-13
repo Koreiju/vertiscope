@@ -10,8 +10,8 @@
  * goes unnoticed.
  */
 
-import { ChunkPayload, EnactResult, Health, KernelReply, SearchResult }
-  from "./types";
+import { ChunkPayload, EnactResult, Health, Interpreters, KernelReply,
+         SearchResult, ShellReply } from "./types";
 
 export class Sidecar {
   constructor(private base: () => string) {}
@@ -109,6 +109,51 @@ export class Sidecar {
       return (await res.json()) as EnactResult;
     } catch {
       return null;
+    }
+  }
+
+  /** What this machine can run. A GET, so the retry in `get` is right here:
+   *  discovery is idempotent and a burst can outrun the listen backlog. */
+  interpreters(): Promise<Interpreters | null> {
+    return this.get<Interpreters>("/interpreters");
+  }
+
+  /**
+   * Run one command in a pane's shell.
+   *
+   * POST and not retried, for the reason `enact` is not: a command that failed
+   * halfway may already have written a file or pushed a branch, and running it
+   * again is not the same as running it once.
+   */
+  async runCommand(pane: string, command: string,
+                   shell = ""): Promise<ShellReply | null> {
+    const base = this.base().trim().replace(/\/+$/, "");
+    if (!base) return null;
+    try {
+      const res = await fetch(`${base}/shell`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pane, command, shell }),
+      });
+      return (await res.json()) as ShellReply;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Drop a pane's shell. The next command starts a fresh one. */
+  async restartShell(pane: string): Promise<boolean> {
+    const base = this.base().trim().replace(/\/+$/, "");
+    if (!base) return false;
+    try {
+      const res = await fetch(`${base}/shell`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pane, op: "restart" }),
+      });
+      return !!(await res.json()).restarted;
+    } catch {
+      return false;
     }
   }
 

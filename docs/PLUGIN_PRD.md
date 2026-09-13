@@ -197,7 +197,7 @@ axes: **structure, content, organizedness, completeness**.
 | id | requirement | status |
 |---|---|---|
 | P-N1 | A **Jupyter kernel** panel, retrieval-enhanced | **Partial** — a python kernel runs cells per note, gated behind `--kernel`, via `POST /kernel`; the button is live in both rendering paths. NOT Jupyter-protocol (subprocess; see `NOTEBOOK_PANEL_DESIGN` §1) and not yet retrieval-enhanced |
-| P-N2 | **Switchable** between Jupyter kernels and PowerShell terminals. **Resolved 2026-09-12**: the switch selects a *kernel run in place*; a *command terminal* is what a **separate pane** holds. Not a shell-vs-kernel dropdown. See `NOTEBOOK_PANEL_DESIGN.md` §4a | Open |
+| P-N2 | **Switchable** between Jupyter kernels and PowerShell terminals. Resolved §4a: a *kernel run in place*, a *command terminal* in a **separate pane** | **Partial** — shells switchable from discovery (`GET /interpreters`) and running per pane; Jupyter kernels are *listed* but not driven — the sidecar runs a subprocess, not the protocol |
 | P-N3 | A **toggle on a code block** opens terminal or kernel — possibly both at once. Under P-N2's resolution "both" is the panel running its kernel *while* a separate pane holds a terminal: two panes, no special layout | Open |
 | P-N4 | A facade over Obsidian's vault interface exposing local kernels to the filestructure | Open |
 | P-N5 | Notebooks are **dynamically recursively chunked** like webpages | **Partial** — a note and its stored cell outputs chunk through the same recursive descent a page does (`domvec notes`); outputs are addressed `…/output[n]` and retrievable. Not yet *dynamic*: re-indexing is a command, not a diff on save (`P-N6`) |

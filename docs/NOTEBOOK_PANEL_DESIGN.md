@@ -318,9 +318,64 @@ Each step ends somewhere verifiable over CDP (`X-2`), never a screenshot.
 | 3 | ~~Subprocess kernel, python only, per-note state~~ **DONE** — `domvec/obsidian/kernel.py`, `_kernel_driver.py`, `POST /kernel` | two cells share a variable and two notes do not, asserted through the button in the running app. 14 pytest + `probes/kernel-run.js` (6 checks) |
 | 4 | ~~Output markers written, read, re-rendered~~ **DONE** — `src/outputs.ts` | written after the fence, replaced on re-run, markers invisible in reading view, survives a close and re-read. `probes/cell-outputs.js`, 11 checks |
 | 5 | Outputs are chunked and vectorised (`P-N5`/`P-N6`) | **GATE PASSED** — a stored output is addressed `…/output[n]` and retrieves on its own words; the markers do NOT (§4b). Live `[[]]` wiring still to do |
-| 6 | Kernel run surface below the artifact; command terminal in a *separate pane* (§4a); interpreter discovery | a cell runs in-panel AND a separate pane gives a pwsh prompt; discovery lists installed kernels |
+| 6 | ~~Kernel run surface; command terminal in a *separate pane* (§4a); interpreter discovery~~ **DONE** — `domvec/obsidian/shell.py`, `src/terminal.ts`, `POST /shell`, `GET /interpreters` | a pwsh prompt in its own pane, `cd` persisting per pane and isolated across them, picker filled from discovery. 11 pytest + `probes/terminal-pane.js` (7 checks) |
 | 7 | `P-N8` chunk overlay | gutter marks match `/chunk` addresses from the sidecar |
 | 8 | `P-N9`/`P-N10` selection → address set → SLM context | the SLM's prompt contains exactly the selected addresses' content |
+
+**What step 6 settled that the design had not.**
+
+- **It is a command RUNNER, not a pty, and that is a choice with a price.** A
+  real terminal means ConPTY — `pywinpty` in Python, or `node-pty` plus ~50MB of
+  xterm.js in the plugin, which is what every Obsidian terminal plugin carries.
+  §4a asks for *"shell work that is not a cell — PowerShell, a build, a git
+  command"*, and a persistent shell behind pipes does that with no new
+  dependency on a project that guards a four-package runtime list. What it costs
+  is stated in `shell.py` rather than left to be met: no cursor control, so a
+  progress bar arrives as many lines; no interactive prompts, so `git commit`
+  without `-m` waits for input that cannot come; no TUI. `pywinpty` is the
+  upgrade path and nothing is shaped to block it — a pty replaces `_Shell`'s
+  pipes and keeps the pool and the routes.
+- **A sentinel the shell echoes is what says a command finished.** There is no
+  other end-of-output signal on a pipe: the process does not close its stdout,
+  and a quiet moment is not the same as being done — a slow command would be
+  truncated the first time it paused.
+- **Refusing is not dying, and the first version conflated them.** The
+  `needs-a-terminal` check was raised as `ShellError` from inside the shell's
+  own `run()`; the pool treats every `ShellError` as a dead shell, so asking for
+  `vim` silently threw away a session holding the reader's `cd`. The check moved
+  to the pool, before the command reaches a shell, and returns `refused: true`
+  with the session untouched.
+- **One gate for the kernel and the terminal, deliberately.** A second flag
+  would imply a distinction that does not exist: a Python kernel can already
+  call `subprocess.run`, so a reader who enabled it has shell access whether or
+  not a terminal pane exists. A permission that looks meaningful and is not is
+  worse than no permission.
+- **Discovery, never a fixed list.** What can be run is a property of the
+  machine, and a hardcoded list is wrong on every machine but the author's —
+  wrong *silently*, offering a shell that is not installed and failing at the
+  first command. `GET /interpreters` answers even when the kernel is off, so a
+  panel can say what *would* be available rather than making "off" and "empty"
+  look the same. Jupyter kernels are reported when installed and marked
+  `runnable: false`, because this sidecar drives a subprocess and not the
+  Jupyter protocol — which is the claim `P-N1` is still `Partial` for.
+- **The pane is the session boundary**, as the note is the kernel's. Two
+  terminals are two shells and neither moves the other's prompt.
+- **A closed pane releases its shell**, and the comment that said otherwise was
+  false. `pane` is a fresh random id per view instance, so a reopened pane asks
+  for a session that never existed while the old one waits on the LRU — four
+  idle PowerShells accumulated across one afternoon. Either the id survives a
+  close or the shell does not; releasing is honest about what closing a pane
+  means.
+- **A standing caveat does not belong in scrollback.** The "no pty" note began
+  as a three-line banner in the log, and in a narrow bottom split that is most
+  of the viewport: it wrapped, the log overflowed on the first command, and
+  every scroll left a half-line against an edge — which reads as a rendering
+  fault rather than as scrolled text. It now sits on the bar and on the input's
+  tooltip, where it cannot scroll away. Measured after: `scrollHeight` equals
+  `clientHeight` in the same pane that overflowed by 10px before.
+- **Follow the tail only when already at it.** A reader scrolled up is reading
+  something, and yanking them down because a build printed a line takes it away
+  mid-sentence.
 
 **What step 4 settled that the design had not — including the gate.**
 
