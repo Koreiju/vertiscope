@@ -171,8 +171,8 @@ axes: **structure, content, organizedness, completeness**.
 | G-17 | The projection's **output space is spherical**, fitted with an angular metric rather than rescaled into a cube afterwards | Open — Addendum III |
 | G-18 | Points are **quaternions and the distance between them is the quaternion distance** — the geodesic angle on the unit 3-sphere, `2·arccos(\|⟨p,q⟩\|)`, absolute because `q` and `−q` are one rotation | Open — Addendum III. umap-learn ships no such metric; it is a custom `output_metric`, a numba function returning the distance AND its gradient |
 | G-19 | The view is **centred on the origin** | Open — Addendum III. A sphere of radius 1 about the origin makes `recentre` unnecessary by construction: the camera cannot end up inside the cloud, which is the failure `graph.ts` records a camera at z = −230 inside a cloud spanning ±249 |
-| G-20 | **Force-directed relaxation seeded from the UMAP embedding** — UMAP initialises, the simulation converges | Open — Addendum III. This OVERTURNS `graph.ts`'s current `d3AlphaDecay(1).d3VelocityDecay(1)`, which freezes the simulation on the stated ground that "the coordinates are already the answer" |
-| G-21 | **Nodes never overlap**: spherical colliders, with a **quarter-distance safety factor** on the radius | Open — Addendum III. `d3-force-3d`'s `forceCollide` is already present beneath `3d-force-graph` and separates nodes to at least `radius(a) + radius(b)`; the safety factor is ours on top |
+| G-20 | **Force-directed relaxation seeded from the UMAP embedding** — UMAP initialises, the simulation converges | **Done** — `graph.ts`. Nodes carry `x/y/z` from the fit instead of `fx/fy/fz`, and `fitX/fitY/fitZ` alongside so drift is measured rather than assumed. `charge` and `center` are removed and `link` is kept at **zero strength**, not removed: `forceLink` is also d3's id resolver, and dropping it left all 2,961 edges holding their endpoints as strings, so every patricia and inter-note link stopped drawing with nothing reporting an error. Measured cold: 2,302 of 5,337 nodes sit exactly where the fit put them, which is the proof no force but collision runs |
+| G-21 | **Nodes never overlap**: spherical colliders, with a **quarter-distance safety factor** on the radius | **Done** — `graph.ts`, probe `probes/collider.js`. `forceCollide` at `drawnRadius × 1.25`. Measured cold on a 1,200-node sample: **0 overlapping pairs of 719,400 and 0 inside the clearance band**, from 750 before. The radius is **not one formula**: 827 of 5,337 chunks draw as square picture panels, not spheres, and sizing them as spheres left 96 overlapping pairs — 66 panel-on-panel, 30 panel-on-sphere, **0 sphere-on-sphere** — because the collider reserved 1.93 units where the panel drew at 12.73. A billboard turns to face the camera, so its collider is the sphere that circumscribes it: the half-**diagonal**, `edge/√2` |
 
 ### P. The panels
 
@@ -1427,6 +1427,54 @@ has no non-vacuity arm, no null arm, and no history of having been wrong in a
 known way — the existing harness has all three.
 
 ---
+
+### M.6 — what a picture panel costs the embedding, measured
+
+`G-20` and `G-21` pull against each other and the PRD said nothing about the
+exchange rate. A panel has to be given room, so the collider evicts whatever
+the fit put beside it; the bigger the panel, the more of the embedding is spent
+buying it. Displacement cannot score this — a uniform inflation moves every
+node a long way and changes nothing about who is near whom — so the measure is
+**neighbourhood retention**: of a node's ten nearest neighbours in the fit, how
+many are still its ten nearest once the simulation stops. Scored live over a
+300-node sample of the 5,337-chunk corpus.
+
+The **null arm** shuffles the final positions between nodes: the same cloud,
+the same shape, no correspondence. It scores **0.001–0.004**, so retention is
+being read against a measured floor rather than a hoped-for one.
+
+| panel gain | edge (world) | retention, panels | retention, spheres | extent | overlapping |
+|---|---|---|---|---|---|
+| 1.00 | 2.73 | 0.841 | 0.937 | 305 | 0 |
+| **1.75 — shipped** | **4.77** | **0.690** | **0.925** | **309** | **0** |
+| 2.50 | 6.82 | 0.547 | 0.914 | 328 | 0 |
+| 4.00 | 10.90 | 0.355 | 0.879 | 429 | 0 |
+| 18.0 — as shipped before | 18.00 | 0.214 | 0.810 | 781 | 0 |
+
+Three things this settles.
+
+**The gain does not buy `G-21`.** Every row reaches zero overlapping pairs. The
+panel size buys picture size and pays in embedding, and nothing else.
+
+**The old size was not a choice, it was a stale constant.** `clamp(√val·4, 6,
+18)` is an absolute world size that knows nothing about the corpus it draws.
+`nodeRelSize` was 5.124 when those numbers were picked and is 0.699 now, so a
+panel had grown to roughly 26× the sphere it stood in for, and the clamp had
+flattened them — nearly every panel sat at the ceiling of 18, the same size
+whatever the chunk. This is the identical defect `relSize` already documents
+for spheres, left standing one function away. Panels are sized from the fit
+now, as a multiple of the sphere they replace.
+
+**Oversized panels were displacing plain nodes too.** The last column moves
+0.810 → 0.925: the fix returns 0.11 of retention to the 4,510 chunks that never
+showed a picture at all.
+
+1.75 puts a panel's edge at 4.77 against this fit's median node spacing of
+4.19 — a panel is as wide as the room the embedding allotted a node, and no
+wider. The honest caveat: at the pane's default framing that panel draws at
+**3.3 px**, and the old 18-unit panel drew at 12.5 px. Neither is a legible
+thumbnail; the reader zooms either way. The old size was paying 0.21 retention
+for legibility it never delivered.
 
 ## N. S-13 — can Electron host the sensor? Measured, in the running Obsidian
 

@@ -17,6 +17,10 @@
 
 import { ItemView, WorkspaceLeaf, requestUrl } from "obsidian";
 import ForceGraph3D, { ForceGraph3DInstance } from "3d-force-graph";
+// `d3-force-3d` is what `3d-force-graph` runs its simulation on, so this is
+// the same module instance the graph already uses -- not a second copy whose
+// forces the graph would ignore.
+import { forceCollide } from "d3-force-3d";
 import * as THREE from "three";
 
 import { Sidecar } from "./sidecar";
@@ -155,6 +159,94 @@ function hue(url: string): string {
   return `hsl(${Math.abs(h) % 360}, 65%, 62%)`;
 }
 
+/**
+ * Clearance beyond the drawn sphere, as a fraction of its radius (`G-21`).
+ *
+ * "a quarter distance safety factor". A collider exactly the size of the
+ * sphere lets two nodes rest in contact, which draws as a single shape; the
+ * margin keeps a visible gap between things the projection calls distinct.
+ */
+const COLLIDER_SAFETY = 1.25;
+
+/**
+ * How much wider a picture panel may be than the sphere it replaces (`G-21`).
+ *
+ * This is the one real trade in the relaxation, and it was measured rather
+ * than chosen. A panel has to be given room, so the collider evicts whatever
+ * the fit had put next to it; the bigger the panel, the more of the
+ * embedding is spent buying it. Scored live as neighbourhood retention --
+ * of a node's ten nearest neighbours in the fit, how many are still its ten
+ * nearest afterwards -- over a 300-node sample, against a null arm that
+ * shuffles the final positions between nodes and scores 0.001:
+ *
+ *     gain   edge   panels   spheres   extent
+ *     1.00   2.73    0.841     0.937      305
+ *     1.75   4.77    0.690     0.925      309
+ *     2.50   6.82    0.547     0.914      328
+ *     4.00  10.90    0.355     0.879      429
+ *
+ * Every one of those reaches zero overlapping pairs, so the gain does not buy
+ * the `G-20` guarantee -- it buys picture size, and pays in embedding.
+ *
+ * 1.75 puts a panel's edge at 4.77 against this fit's median node spacing of
+ * 4.19: a panel is as wide as the room the embedding allotted a node, and no
+ * wider. Past that it is taking territory that belongs to other chunks, and
+ * the reader can zoom for detail. Note the last column of the sphere score:
+ * an oversized panel was displacing plain nodes too, and this wins 0.11 back
+ * for the 4,510 chunks that never showed a picture at all.
+ */
+const PANEL_GAIN = 1.75;
+
+/**
+ * The edge of the square panel a picture node draws on, in world units.
+ *
+ * Sized from the fit, like `nodeRelSize` and for the same reason. This was
+ * `clamp(sqrt(val) * 4, 6, 18)` -- an absolute world size that knew nothing
+ * about the corpus it was drawing. `nodeRelSize` was 5.124 when those numbers
+ * were picked and is 0.699 now, so every panel had grown to roughly 26 times
+ * the sphere it stood in for, and the clamp had flattened them: nearly every
+ * panel sat at the ceiling of 18, the same size whatever the chunk. That is
+ * precisely the defect `relSize` already documents for spheres, left standing
+ * one function away.
+ *
+ * A function rather than the same expression written at each place that needs
+ * it. `billboard()` scales the sprite by this and the collider sizes its
+ * sphere from it, and the two silently disagreeing is exactly the defect the
+ * branch below exists to fix.
+ */
+function billboardEdge(node: { val?: number }, relSize: number): number {
+  const sphere = Math.cbrt(Math.max(node.val ?? 1, 1e-9)) * relSize;
+  // `* sqrt(2)` turns the circumradius the gain names back into an edge: the
+  // panel's bounding sphere is what has to be `PANEL_GAIN` times the node's.
+  return sphere * PANEL_GAIN * Math.SQRT2;
+}
+
+/**
+ * The radius a node actually occupies -- which is not one formula, because
+ * the pane does not draw one shape.
+ *
+ * A plain chunk is a sphere of `cbrt(val) * nodeRelSize`. A chunk that showed
+ * a picture is a square PANEL instead, and a panel differs in both size and
+ * kind: it is a `THREE.Sprite`, so it turns to face the camera, and across an
+ * orbit it sweeps the sphere that circumscribes it. That radius is the
+ * half-DIAGONAL, `edge / sqrt(2)` -- taking the half-edge would let two
+ * panels rest corner into corner at every angle but the one facing them.
+ *
+ * Sizing every node as a sphere is not a small error here. Measured in the
+ * app with the single-formula collider, on a 1,200-node sample: 96
+ * overlapping pairs, and every one of them involved a panel -- 66
+ * panel-on-panel, 30 panel-on-sphere, 0 sphere-on-sphere. The collider was
+ * reserving 1.93 units for a node drawing at 12.73, a factor of 6.6, so the
+ * simulation believed it had resolved a corpus it had never measured. The
+ * sphere arm was already correct and stays untouched.
+ */
+function drawnRadius(node: any, relSize: number, media: boolean): number {
+  if (media && node?.image?.src) {
+    return billboardEdge(node, relSize) * Math.SQRT1_2;
+  }
+  return Math.cbrt(Math.max(node.val ?? 1, 1e-9)) * relSize;
+}
+
 export class GraphView extends ItemView {
   /** Put the camera back outside the cloud, looking at the middle. */
   private reframe: (() => void) | null = null;
@@ -288,7 +380,7 @@ export class GraphView extends ItemView {
    * that never loads leaves a tile rather than an invisible node, so a dead
    * asset host cannot silently empty the graph.
    */
-  private billboard(node: any): any {
+  private billboard(node: any, relSize: number): any {
     const src = node?.image?.src;
     if (!src) return null;
     const material = new THREE.SpriteMaterial({
@@ -297,7 +389,7 @@ export class GraphView extends ItemView {
       opacity: 0.95,
     });
     const sprite = new THREE.Sprite(material);
-    const size = Math.max(6, Math.min(18, Math.sqrt(node.val) * 4));
+    const size = billboardEdge(node, relSize);
     sprite.scale.set(size, size, 1);
 
     this.texture(src)
@@ -391,19 +483,32 @@ export class GraphView extends ItemView {
       id: n.cid,
       name: n.title || n.url,
       url: n.url,
-      // The fitted position, held fixed. `fx/fy/fz` pin a node where the
-      // projection put it: running the force simulation on top would drift
-      // the points off the embedding and quietly turn a UMAP of two vector
-      // spaces into a spring layout that happened to start there.
+      // The fitted position as a SEEDING, not a pin (`G-20`).
+      //
+      // These were `fx/fy/fz`, which hold a node exactly where the projection
+      // put it, and the reason given was sound: "running the force simulation
+      // on top would drift the points off the embedding and quietly turn a
+      // UMAP of two vector spaces into a spring layout that happened to start
+      // there." That danger is real and it is not what the simulation here
+      // does. Every force that WOULD do it -- charge, links, centring -- is
+      // removed below, leaving collision alone. A node with no neighbour
+      // inside its radius feels nothing and does not move, so the embedding
+      // survives everywhere it is not degenerate, and the only places it gives
+      // is where two points were drawn on top of each other anyway.
       //
       // Used as delivered. This multiplied by 40, which was a constant chosen
       // when the coordinates were whatever UMAP happened to emit -- so the
       // world size of the cloud moved with the corpus. `layout.py` centres
       // and scales to a known cube now, and a second scale here would only
       // put the guesswork back.
-      fx: n.pos[0],
-      fy: n.pos[1],
-      fz: n.pos[2] ?? 0,
+      x: n.pos[0],
+      y: n.pos[1],
+      z: n.pos[2] ?? 0,
+      //: Where the FIT put this node, kept so drift off the embedding can be
+      //: measured rather than assumed. Nothing reads it to draw.
+      fitX: n.pos[0],
+      fitY: n.pos[1],
+      fitZ: n.pos[2] ?? 0,
       val: Math.max(1, Math.sqrt(n.chars)),
       rank: n.rank,
       tokens: n.tokens ?? 0,
@@ -498,11 +603,64 @@ export class GraphView extends ItemView {
     // hosts the page was read again, at a new time, from a new address.
     // A graph that quietly fetched a few hundred images the moment it
     // opened would be the loudest version of that.
-    if (this.media()) graph.nodeThreeObject((n: any) => this.billboard(n));
+    //: Read once and shared with the collider below. Asking twice invites the
+    //: two to answer differently -- and a collider sizing spheres while the
+    //: renderer draws panels is the defect `drawnRadius` documents.
+    const media = this.media();
+    if (media) graph.nodeThreeObject((n: any) => this.billboard(n, relSize));
 
-    // Cooling the simulation immediately: the coordinates are already the
-    // answer, and the only job left is layout of the camera.
-    graph.d3AlphaDecay(1).d3VelocityDecay(1);
+    // Relax overlaps, and nothing else (`G-20`, `G-21`).
+    //
+    // This used to freeze the simulation outright -- `d3AlphaDecay(1)` with
+    // `d3VelocityDecay(1)` -- on the ground that "the coordinates are already
+    // the answer". They are, and they can still put two nodes in the same
+    // place: a projection has no notion of how big a node is drawn, so any
+    // embedding will overlap somewhere. Measured before this change, on a
+    // 1,200-node sample of the live graph: 750 overlapping pairs, the worst
+    // pair penetrating 3.72 world units and the closest two centres 0.195
+    // apart when their radii together needed 2.6.
+    //
+    // The forces that would REWRITE the embedding are switched off rather
+    // than tuned down. `charge` pushes every node from every other and would
+    // inflate the cloud; `link` pulls edge-joined nodes together and would
+    // draw a spring layout; `center` drags the whole cloud at once. With all
+    // three contributing nothing the only force left is collision, which acts
+    // on a node only when something is inside its radius -- so a node with
+    // room keeps exactly the coordinates the fit gave it.
+    graph.d3Force("charge", null);
+    graph.d3Force("center", null);
+
+    // The link force is NEUTERED, not removed -- and the difference is the
+    // whole of whether edges draw at all.
+    //
+    // `d3-force-3d` documents link endpoints as "resolved to node object
+    // references when the force is initialized", which makes `forceLink` the
+    // id resolver as well as the spring. Removing it left all 2,961 links
+    // holding their source and target as the strings the sidecar sent, so the
+    // renderer had no coordinates to draw between and put zero line objects in
+    // the scene: every patricia edge and every inter-note link silently
+    // vanished, with no error anywhere, because nothing failed -- a string is
+    // a perfectly good value to hold.
+    //
+    // Zero strength is the spring the goal forbids, turned off, while
+    // initialization still runs and still resolves the endpoints.
+    graph.d3Force("link")?.strength(0);
+    graph.d3Force("collide", forceCollide()
+      // `G-21`: the drawn radius, plus a quarter of it as clearance. A
+      // collider exactly the size of the sphere lets two nodes rest touching,
+      // which reads as one shape; the margin makes a gap a reader can see
+      // between things the projection says are distinct.
+      .radius((n: any) => drawnRadius(n, relSize, media) * COLLIDER_SAFETY)
+      // Soft and iterated rather than hard and once. `d3-force-3d` documents
+      // collision as "by default a soft constraint with a configurable
+      // strength and iteration count" to reduce jitter; a hard shove would
+      // trade overlap for nodes visibly vibrating against each other.
+      .strength(0.7)
+      .iterations(2));
+
+    // It has to be allowed to run, having been frozen. These are d3's own
+    // defaults: the simulation cools over a few hundred ticks and stops.
+    graph.d3AlphaDecay(0.0228).d3VelocityDecay(0.4);
     this.graph = graph;
 
     // Resizing the RENDERER is not resizing the CONTROLS, and missing the

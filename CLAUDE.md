@@ -134,6 +134,16 @@ Two rules earned the hard way here, both binding:
   against `git log -1 --format=%ad` for the module whose output is being
   scored, before quoting a number.
 
+- **A probe scores the instrument that is LOADED, not the one on disk.** The
+  collider probe passed with its own target defect planted, and returned
+  numbers identical to the clean run down to a random shuffle landing on 0.004
+  twice. It reopened the pane but never reloaded the plugin, so `npm run build`
+  had replaced a file nobody was running. The tell was the impossible
+  coincidence, not the green. Any probe run against a live app has to reload
+  the code under test as its first act, and the cheap audit for one that does
+  not is to plant its defect and check the numbers actually MOVE — a pass is
+  not evidence, and neither is a fail that reports the same figures.
+
 - **Before writing a measurement, check whether `domvec.analytics` already
   answers the question.** Two defects were filed and withdrawn within hours of
   each other on one shared cause: a metric invented for the occasion. One was
