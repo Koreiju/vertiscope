@@ -106,6 +106,17 @@ _QUOTE = re.compile(r"^\s*>\s?(.*)$")
 #: A table row: starts and ends with a pipe, loosely.
 _TABLE = re.compile(r"^\s*\|.*\|\s*$")
 
+#: An HTML comment, opening and closing. Markdown hides these and so does
+#: Obsidian, so they are not content -- see `tag_note`.
+_COMMENT_OPEN = re.compile(r"^\s*<!--")
+_COMMENT_CLOSE = re.compile(r"-->\s*$")
+
+#: A stored cell output's opening marker (`outputs.ts`). Recognised by
+#: name, because its content is an OUTPUT and not prose or source -- see
+#: `tag_note`.
+_NB_OUTPUT = re.compile(r"^\s*<!--\s*nb-output\b")
+_NB_OUTPUT_CLOSE = re.compile(r"^\s*<!--\s*/nb-output\b")
+
 #: Inline image, then inline link. Image first: `![a](b)` also matches the link
 #: pattern, and taking links first would address every image as a link and
 #: lose the media class.
@@ -255,6 +266,9 @@ def tag_note(text: str) -> List[ContentTag]:
             i = j + 1
 
     para: List[str] = []
+    #: True between a stored output's markers, so the fence inside one is
+    #: labelled `output` rather than `code`. See the comment branch below.
+    in_output = False
 
     def flush() -> None:
         """Emit the buffered paragraph, if any."""
@@ -290,10 +304,12 @@ def tag_note(text: str) -> List[ContentTag]:
                     break
                 body.append(lines[j])
                 j += 1
-            xpath = addr.step("code")
-            out.append(ContentTag(xpath=xpath, category="text",
-                                  subcategory="code", value="\n".join(body),
-                                  source_attr=info or "code"))
+            xpath = addr.step("output" if in_output else "code")
+            out.append(ContentTag(
+                xpath=xpath, category="text",
+                subcategory="output" if in_output else "code",
+                value="\n".join(body),
+                source_attr="nb-output" if in_output else (info or "code")))
             i = j + 1
             continue
 
@@ -308,6 +324,63 @@ def tag_note(text: str) -> List[ContentTag]:
                                   source_attr="heading"))
             _inline(head.group(2), xpath, addr, out)
             i += 1
+            continue
+
+        if _COMMENT_OPEN.match(line):
+            # An HTML comment is not content, and skipping it is not tidiness.
+            #
+            # Every markdown renderer hides these, Obsidian included, so by the
+            # affine-map rule -- what you see is what you get -- a comment is
+            # not something the reader sees and must not become visible text.
+            # It arrived as a real problem rather than a principle: step 4
+            # stores a cell's output between `<!-- nb-output … -->` markers, and
+            # tagging those as paragraphs put `hash=…`, `count=…`, `status=ok`
+            # into the chunk's own text. Measured on one note: a search for
+            # "nb-output hash status" retrieved it, and every notebook note's
+            # vector carried the same bookkeeping tokens, which is exactly the
+            # in-chunk quality `M-11` says decides how representative the
+            # embedding is.
+            #
+            # The output's CONTENT is untouched -- it sits between the markers,
+            # not inside them. And nothing is lost: `vault.py`'s addresses are
+            # resolvable by re-parsing the note, so a caller wanting `hash` or
+            # `status` reads the file, rather than the index carrying a second
+            # copy of it.
+            flush()
+            # A cell's OUTPUT is neither prose nor source, and saying which it
+            # is turned out to be necessary rather than decorative.
+            #
+            # Dropping the markers made the output's fence an immediate `code`
+            # sibling of the cell's own fence, and `markdown.py` merges adjacent
+            # same-label runs -- so the source and the result came out as ONE
+            # line: `print("…") critical current density 4.2e6 A/cm2`. The
+            # markers had been separators as well as metadata. A distinct label
+            # restores the separation AND names the thing: §3 of
+            # NOTEBOOK_PANEL_DESIGN lists `output` among a note's content
+            # classes, and this is one.
+            if _NB_OUTPUT.match(line):
+                in_output = True
+            elif _NB_OUTPUT_CLOSE.match(line):
+                in_output = False
+            j = i
+            while j < n and not _COMMENT_CLOSE.search(lines[j]):
+                j += 1
+            if j >= n:
+                # Unclosed. Skip THIS LINE only, and let the rest of the note be
+                # read as content.
+                #
+                # Consuming to the end is the tempting reading of "a comment runs
+                # until it closes", and it costs the whole document: a truncated
+                # write or a hand-edit that lost a `-->` would silently delete
+                # every address below it from the trie, so the note would be
+                # indexed as its first paragraph and nothing else. `outputs.ts`
+                # takes the same view of an unclosed block for the same reason.
+                # An unclosed marker is a defect in one line; it must not be
+                # allowed to be a defect in the note.
+                in_output = False
+                i += 1
+                continue
+            i = (j + 1) if j < n else n
             continue
 
         item = _ITEM.match(line)

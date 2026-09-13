@@ -246,3 +246,90 @@ def test_a_note_is_retrievable_after_indexing():
                            for h in ws.search("kubernetes helm chart", k=3))
         finally:
             ws.close()
+
+
+# --- stored cell outputs (step 4's side of the trie) ------------------------
+
+
+OUTPUT_NOTE = """# Measurements
+
+```python
+print("critical current density")
+```
+<!-- nb-output hash=deadbeef count=1 status=ok format=text -->
+````text
+critical current density 4.2e6
+````
+<!-- /nb-output -->
+"""
+
+
+def test_an_html_comment_is_not_visible_text():
+    """Every renderer hides these, so by the affine-map rule they are not seen.
+
+    It arrived as a real defect, not a principle: tagging the markers as
+    paragraphs put `hash=`, `count=` and `status=ok` into the chunk's own text,
+    so a search for "nb-output hash status" retrieved the note and every
+    notebook note's vector carried the same bookkeeping tokens.
+    """
+    values = [t.value for t in tag_note(OUTPUT_NOTE)]
+    assert not any("nb-output" in v for v in values), values
+    assert not any("hash=" in v for v in values), values
+
+
+def test_a_stored_output_is_still_addressed():
+    """Skipping the MARKERS must not skip the output.
+
+    The non-vacuity partner of the test above: dropping the whole block would
+    satisfy it and lose the thing the block exists to carry. §1 chose
+    outputs-in-markdown so that an output is trie content; if it is not
+    addressed, that choice bought nothing.
+    """
+    tags = {t.xpath: t for t in tag_note(OUTPUT_NOTE)}
+    outputs = [t for t in tags.values() if t.subcategory == "output"]
+    assert len(outputs) == 1, tags
+    assert "4.2e6" in outputs[0].value, outputs[0].value
+
+
+def test_an_output_is_labelled_apart_from_the_cell_that_made_it():
+    """`output`, not `code`, and the reason is the renderer.
+
+    `markdown.py` merges adjacent same-label runs. With both labelled `code`,
+    the cell's source and its result came out as ONE line --
+    `print("…") critical current density 4.2e6` -- so a reader could not tell
+    what was run from what came back.
+    """
+    tags = {t.xpath: t for t in tag_note(OUTPUT_NOTE)}
+    assert "/section[1]/code[1]" in tags, tags
+    assert "/section[1]/output[1]" in tags, tags
+    assert tags["/section[1]/code[1]"].subcategory == "code"
+    assert tags["/section[1]/output[1]"].subcategory == "output"
+
+
+def test_the_output_renders_on_its_own_line():
+    """Asserted against `markdown.py`, because the label exists for its sake."""
+    import pathlib
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as td:
+        from domvec.workspace import Workspace
+        ws = Workspace(pathlib.Path(td) / "ws")
+        try:
+            ws.index_note(OUTPUT_NOTE, "m.md", vault="v")
+            rendered = "\n".join(c.md for c in ws.store.chunks())
+        finally:
+            ws.close()
+
+    lines = [l.strip() for l in rendered.splitlines() if l.strip()]
+    source = [l for l in lines if "print(" in l]
+    output = [l for l in lines if "4.2e6" in l]
+    assert source and output, lines
+    assert source[0] != output[0], f"source and output merged: {lines}"
+    assert "nb-output" not in rendered, rendered
+
+
+def test_an_unclosed_comment_does_not_swallow_the_note():
+    """A truncated write must cost the comment, not the rest of the document."""
+    tags = tag_note("# T\n\n<!-- nb-output hash=x\n\nprose after\n")
+    values = [t.value for t in tags]
+    assert any("prose after" == v for v in values), values

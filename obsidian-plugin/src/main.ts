@@ -23,6 +23,7 @@ import {
   MarkdownPostProcessorContext,
   Notice,
   Plugin,
+  TFile,
   WorkspaceLeaf,
   PluginSettingTab,
   Setting,
@@ -32,11 +33,13 @@ import { CHUNK_VIEW, ChunkView } from "./chunkview";
 import {
   RunHost, RunRequest, livePreviewRunButtons, readingViewRunButtons,
 } from "./runbutton";
+import { cellSource, findFences } from "./fences";
+import { hashCell, renderOutput, withOutput } from "./outputs";
 import { GRAPH_VIEW, GraphView } from "./graph";
 import { RetrievalSuggest } from "./retrieval";
 import { Sidecar } from "./sidecar";
 import { ChunkSurface, SurfaceHost } from "./surface";
-import { ChunkPayload, DEFAULTS, DomvecSettings, EnactResult }
+import { ChunkPayload, DEFAULTS, DomvecSettings, EnactResult, KernelReply }
   from "./types";
 import { VaultLinks } from "./vaultlinks";
 
@@ -148,9 +151,12 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
    * would put every cell in the vault into one namespace, which surfaces as a
    * mysterious collision between unrelated notes.
    *
-   * Step 4 writes the result into the note as an output block. Until then it is
-   * a Notice, which is honest about being transient rather than looking like
-   * persistence that failed.
+   * The result is written into the note as an output block (`outputs.ts`) and
+   * ALSO shown as a Notice. Both, because they answer different questions: the
+   * note is the durable record a later reader and the trie both see, and the
+   * Notice is what tells the person who just clicked that anything happened at
+   * all — an output block scrolled off screen is indistinguishable from a button
+   * that did nothing.
    */
   async onRunFence(req: RunRequest): Promise<void> {
     const note = req.path || this.app.workspace.getActiveFile()?.path || "";
@@ -188,17 +194,63 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     if (reply.kernel) notes.push(reply.kernel);
     if (reply.evicted) notes.push(`retired ${reply.evicted}'s kernel`);
 
-    if (!reply.ok) {
-      const last = (reply.error || "").trim().split("\n").pop() || "failed";
-      new Notice(`domvec [${reply.count ?? "?"}] ${last}` +
-                 (notes.length ? ` (${notes.join("; ")})` : ""), 9000);
-      return;
-    }
-    const shown = [reply.stdout, reply.stderr, reply.value ?? ""]
-      .filter((s) => s && s.trim()).join("\n").trim();
-    new Notice(`domvec [${reply.count ?? "?"}] ` +
-               (shown || "ok, no output") +
+    const stored = await this.storeOutput(note, req, reply);
+    if (stored) notes.push(stored);
+
+    const last = (reply.error || "").trim().split("\n").pop();
+    const shown = reply.ok
+      ? ([reply.stdout, reply.stderr, reply.value ?? ""]
+          .filter((s) => s && s.trim()).join("\n").trim() || "ok, no output")
+      : (last || "failed");
+    new Notice(`domvec [${reply.count ?? "?"}] ${shown}` +
                (notes.length ? `\n(${notes.join("; ")})` : ""), 8000);
+  }
+
+  /**
+   * Write a cell's result into the note, after its closing fence.
+   *
+   * Returns a note for the Notice when something the reader should hear happened,
+   * and `""` when the write was ordinary.
+   *
+   * The cell is re-found from the file's CURRENT text rather than trusted from
+   * the click. A cell can take a minute, and the reader is free to keep typing
+   * while it does; `req.line` was true when the button was pressed and may name
+   * a different fence by the time the answer arrives. Re-reading and matching on
+   * the source is what stops an output landing under the wrong cell.
+   */
+  private async storeOutput(note: string, req: RunRequest,
+                            reply: KernelReply): Promise<string> {
+    const file = this.app.vault.getAbstractFileByPath(note);
+    if (!(file instanceof TFile)) return "";
+    const hash = await hashCell(req.code);
+    let outcome = "";
+    try {
+      // `process` is read-modify-write under one lock. `read` then `modify`
+      // would drop whatever the reader typed in between, which for a slow cell
+      // is a real window and loses THEIR work rather than ours.
+      await this.app.vault.process(file, (text) => {
+        const fences = findFences(text);
+        // Prefer the fence still at the clicked line; fall back to the only
+        // fence with this exact source. If neither is unambiguous, write
+        // nothing -- a misplaced output is worse than an absent one, because
+        // the reader would trust it.
+        let target = fences.find((f) => f.openLine === req.line
+                                     && cellSource(f.body) === req.code);
+        if (!target) {
+          const same = fences.filter((f) => cellSource(f.body) === req.code);
+          if (same.length === 1) target = same[0];
+        }
+        if (!target) {
+          outcome = "output not stored: the cell moved or changed";
+          return text;
+        }
+        return withOutput(text, target.closeLine, renderOutput(reply, hash));
+      });
+    } catch (err) {
+      outcome = `output not stored: ${
+        err instanceof Error ? err.message : String(err)}`;
+    }
+    return outcome;
   }
 
   onunload() {

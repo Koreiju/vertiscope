@@ -200,7 +200,7 @@ axes: **structure, content, organizedness, completeness**.
 | P-N2 | **Switchable** between Jupyter kernels and PowerShell terminals. **Resolved 2026-09-12**: the switch selects a *kernel run in place*; a *command terminal* is what a **separate pane** holds. Not a shell-vs-kernel dropdown. See `NOTEBOOK_PANEL_DESIGN.md` §4a | Open |
 | P-N3 | A **toggle on a code block** opens terminal or kernel — possibly both at once. Under P-N2's resolution "both" is the panel running its kernel *while* a separate pane holds a terminal: two panes, no special layout | Open |
 | P-N4 | A facade over Obsidian's vault interface exposing local kernels to the filestructure | Open |
-| P-N5 | Notebooks are **dynamically recursively chunked** like webpages | Open |
+| P-N5 | Notebooks are **dynamically recursively chunked** like webpages | **Partial** — a note and its stored cell outputs chunk through the same recursive descent a page does (`domvec notes`); outputs are addressed `…/output[n]` and retrievable. Not yet *dynamic*: re-indexing is a command, not a diff on save (`P-N6`) |
 | P-N6 | …and **continuously diff-updated to the db**, re-vectorized and re-assigned to chunks | Open |
 | P-N7 | **One interface** centralizing retrieval and code research | Open |
 | P-N8 | **Chunk scanning is exposed in the panel** — the reader can see the chunk boundaries the sensor drew | Open |

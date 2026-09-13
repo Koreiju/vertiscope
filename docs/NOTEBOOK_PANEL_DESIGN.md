@@ -316,11 +316,73 @@ Each step ends somewhere verifiable over CDP (`X-2`), never a screenshot.
 | 1 | ~~Note addressing~~ **DONE** — `domvec/vault.py`, `Workspace.index_note`, `domvec notes` | `T-5`: 18 docs -> 786 chunks / 2,697 addresses, and retrieval answers from them. 13 tests, one of them the renderer arm |
 | 2 | ~~Fence detection + `▶ run` in both views~~ **DONE** — `src/fences.ts`, `src/runbutton.ts` | both paths draw one button per runnable fence and none on a `json` fence; both fire with the same lang, line and byte-identical source. `probes/run-buttons.js`, 9 checks |
 | 3 | ~~Subprocess kernel, python only, per-note state~~ **DONE** — `domvec/obsidian/kernel.py`, `_kernel_driver.py`, `POST /kernel` | two cells share a variable and two notes do not, asserted through the button in the running app. 14 pytest + `probes/kernel-run.js` (6 checks) |
-| 4 | Output markers written, read, re-rendered | output survives a restart and renders in reading view |
-| 5 | Outputs are chunked and vectorised (`P-N5`/`P-N6`) | an output is *retrievable* by `[[]]` — the proof that it is trie content |
+| 4 | ~~Output markers written, read, re-rendered~~ **DONE** — `src/outputs.ts` | written after the fence, replaced on re-run, markers invisible in reading view, survives a close and re-read. `probes/cell-outputs.js`, 11 checks |
+| 5 | Outputs are chunked and vectorised (`P-N5`/`P-N6`) | **GATE PASSED** — a stored output is addressed `…/output[n]` and retrieves on its own words; the markers do NOT (§4b). Live `[[]]` wiring still to do |
 | 6 | Kernel run surface below the artifact; command terminal in a *separate pane* (§4a); interpreter discovery | a cell runs in-panel AND a separate pane gives a pwsh prompt; discovery lists installed kernels |
 | 7 | `P-N8` chunk overlay | gutter marks match `/chunk` addresses from the sidecar |
 | 8 | `P-N9`/`P-N10` selection → address set → SLM context | the SLM's prompt contains exactly the selected addresses' content |
+
+**What step 4 settled that the design had not — including the gate.**
+
+The gate first, because it is what step 4 was for. §1 chose outputs-in-markdown
+over an `.ipynb` sidecar on the argument that an output written into the `.md`
+*is* trie content. Tested rather than assumed, on a note carrying a stored
+output:
+
+```
+/section[1]/h1[1]      text.visible   'Superconductivity notes'
+/section[1]/p[1]       text.visible   'Flux pinning measurements.'
+/section[1]/code[1]    text.code      'print("critical current density 4.2e6")'
+/section[1]/output[1]  text.output    'critical current density 4.2e6'
+```
+
+and `domvec find "critical current density"` retrieves the note at 0.534.
+**§1 was decided correctly.** An `.ipynb` sidecar would have needed a second
+parser, a second chunker and a second answer to what address an output has.
+
+- **The markers must be HTML comments, and it was verified before being built
+  on.** Obsidian hides them in reading view while rendering what sits between,
+  so a note shows its output and not its bookkeeping — and so does GitHub, and a
+  PDF export. That property is the whole reason this shape is possible.
+- **But comments are not content, and tagging them as prose poisoned the index.**
+  The first pass made each marker a paragraph, so `hash=`, `count=` and
+  `status=ok` entered the chunk's own text: a search for `"nb-output hash
+  status"` retrieved the note, and every notebook note's vector carried the same
+  bookkeeping tokens — exactly the in-chunk quality `M-11` says decides how
+  representative an embedding is. `vault.py` now skips comments. The output's
+  score *rose* from 0.429 to 0.534 once they stopped diluting it.
+- **Skipping them then went too far, and the renderer said so.** With the markers
+  gone, the output's fence became an immediate `code` sibling of the cell's own
+  fence, and `markdown.py` merges adjacent same-label runs — so source and result
+  came out as ONE line: `` `print("…") critical current density 4.2e6` ``. The
+  markers had been separators as well as metadata. The fix is the label §3
+  already named: an output is `text.output` at `…/output[n]`, which separates it
+  *and* says what it is, so a reader and an SLM can tell what was run from what
+  came back.
+- **An unclosed marker costs its line, not the note.** Consuming to the end of
+  the document is the tempting reading and it would silently delete every
+  address below a truncated write — the note indexed as its first paragraph and
+  nothing else. `outputs.ts` takes the same view of an unclosed block.
+- **`hash` is `exact_hash`, not `subtree_hash`** (`CLAUDE.md` 5b). An output is a
+  projection and prints values verbatim, so it keys on the exact source; a
+  content-blind digest would serve the old output for a cell whose string
+  literal changed. This is why step 2 had to make both rendering paths agree on
+  `cellSource` byte for byte — that agreement is what makes the digest mean one
+  thing.
+- **The cell is re-found from the file at write time, not trusted from the
+  click.** A cell can run for a minute and the reader keeps typing; `req.line`
+  was true when the button was pressed. Re-reading under `Vault.process` — one
+  read-modify-write lock — is what stops an output landing under the wrong cell
+  and what stops a slow cell eating a keystroke.
+- **`format=text` is written even though nothing varies it yet**, so a richer
+  format arrives without migrating notes already on disk. `text` is also the
+  right default rather than a placeholder: stdout is preformatted, and a cell
+  printing aligned columns must not have them reflowed.
+
+**Known limitation, stated rather than discovered later:** a cell that prints
+markdown gets it stored as `format=text` and shown preformatted, so a dataframe
+rendered as a markdown table appears as a table's *source*. Rich formats are
+what the `format` field is for.
 
 **What step 3 settled that the design had not.**
 
