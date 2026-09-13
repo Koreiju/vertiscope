@@ -38,6 +38,7 @@ import {
 import { cellSource, findFences } from "./fences";
 import { ChunkSpan, chunkGutter, setChunkSpans } from "./chunkgutter";
 import { hashCell, renderOutput, withOutput } from "./outputs";
+import { BROWSER_VIEW, BrowserView } from "./browser";
 import { GRAPH_VIEW, GraphView } from "./graph";
 import { RetrievalSuggest } from "./retrieval";
 import { Sidecar } from "./sidecar";
@@ -160,6 +161,18 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
       id: "domvec-open-terminal",
       name: "Open a command terminal",
       callback: () => this.openTerminal(),
+    });
+
+    // The browser cell (`G-36`). A pane now; the same component becomes a
+    // notebook cell, with the standalone being the expanded view.
+    this.registerView(
+      BROWSER_VIEW,
+      (leaf: WorkspaceLeaf) => new BrowserView(leaf, this.sidecar),
+    );
+    this.addCommand({
+      id: "domvec-open-browser",
+      name: "Open the browser cell",
+      callback: () => this.openBrowser(),
     });
 
     this.addRibbonIcon("git-fork", "domvec 3D graph", () => this.openGraph());
@@ -342,6 +355,18 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
    * other), and each is its own session. Reusing a leaf would make the second
    * request silently steal the first's pane.
    */
+
+  /** Put a browser cell in a pane, reusing one if it is already open. */
+  async openBrowser(): Promise<void> {
+    const existing = this.app.workspace.getLeavesOfType(BROWSER_VIEW);
+    if (existing.length) {
+      this.app.workspace.revealLeaf(existing[0]);
+      return;
+    }
+    const leaf = this.app.workspace.getLeaf("split", "vertical");
+    await leaf.setViewState({ type: BROWSER_VIEW, active: true });
+    this.app.workspace.revealLeaf(leaf);
+  }
   private async openTerminal() {
     const leaf = this.app.workspace.getLeaf("split", "horizontal");
     await leaf.setViewState({ type: TERMINAL_VIEW, active: true });

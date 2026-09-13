@@ -464,3 +464,47 @@ button.domvec-run-fence:hover {
   color: var(--text-warning, var(--color-orange));
   opacity: 0.95;
 }
+
+/* The browser cell (`G-36`). The page fills what the panel gives it, which
+   is the whole reason this is a `<webview>` and not a `BrowserView`. */
+.domvec-browser {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 0;
+}
+.domvec-browser-bar {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  flex: 0 0 auto;
+}
+.domvec-browser-url {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12px;
+}
+.domvec-browser-page,
+.domvec-browser-md {
+  flex: 1 1 auto;
+  min-height: 0;      /* or the webview pushes the flex parent open */
+  overflow: auto;
+}
+.domvec-browser-page webview { display: flex; }
+.domvec-browser-md { padding: 8px 12px; }
+.domvec-browser-empty {
+  color: var(--text-faint);
+  font-size: 12px;
+}
+.domvec-browser-status {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+  border-top: 1px solid var(--background-modifier-border);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
