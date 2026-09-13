@@ -167,6 +167,11 @@ export class GraphView extends ItemView {
    */
   private static textures = new Map<string, string | null>();
   private graph: ForceGraph3DInstance | null = null;
+  /** Watches the canvas's box so the controls are recalibrated whenever
+   *  it actually changes. Disconnected in `onClose`: an observer left on a
+   *  detached canvas keeps the view, its WebGL context and its 5,337 node
+   *  objects alive for as long as the app runs. */
+  private resizeObserver: ResizeObserver | null = null;
   private onPick: (cid: string) => void;
 
   constructor(leaf: WorkspaceLeaf, private sidecar: Sidecar,
@@ -261,6 +266,11 @@ export class GraphView extends ItemView {
     // `_destructor` releases the WebGL context. Without it, reopening the
     // pane a few times exhausts the browser's context limit and every graph
     // after that renders black.
+    // Before `_destructor`: the observer's callback touches `graph`, and a
+    // resize landing between the teardown and the disconnect would call into a
+    // destroyed renderer.
+    this.resizeObserver?.disconnect();
+    this.resizeObserver = null;
     this.graph?._destructor?.();
     this.graph = null;
   }
@@ -495,10 +505,61 @@ export class GraphView extends ItemView {
     graph.d3AlphaDecay(1).d3VelocityDecay(1);
     this.graph = graph;
 
-    const fit = () => graph.width(canvas.clientWidth)
-                           .height(canvas.clientHeight);
+    // Resizing the RENDERER is not resizing the CONTROLS, and missing the
+    // second one leaves the graph unrotatable.
+    //
+    // `width`/`height` resize the canvas, the renderer and the camera frustum,
+    // and that is all they do. `TrackballControls` keeps its own `screen` --
+    // the box it maps pointer positions into -- captured when it was
+    // constructed, which here is before the pane has been laid out at full
+    // size. Measured on load: the canvas was 915x856 and `controls().screen`
+    // was 450x225.
+    //
+    // The consequence is not a miscalibration, it is a dead control. The
+    // trackball maps a pointer to a point on a unit circle by
+    // `(x - screen.width/2 - screen.left) / (screen.width/2)`; with the width
+    // roughly half of true, both ends of a drag map outside that circle and the
+    // rotation between them comes out as nothing. Proved both ways against the
+    // live view: with `screen` corrected a drag emitted 62 `change` events and
+    // moved the camera from (-595,192,151) to (485,-135,401); with the stale
+    // value planted back, the same drag emitted ZERO and the camera did not
+    // move at all.
+    //
+    // So `handleResize` belongs in `fit`, where every other size-dependent
+    // thing already is.
+    // `controls()` is typed `object` by 3d-force-graph, because which control
+    // class it returns depends on the `controlType` the graph was built with.
+    // Narrowed to the one method needed, and guarded, rather than cast to
+    // `any`: a future `controlType` without `handleResize` should skip it, not
+    // throw on every resize.
+    const trackball = () =>
+      graph.controls() as { handleResize?: () => void };
+
+    const fit = () => {
+      graph.width(canvas.clientWidth).height(canvas.clientHeight);
+      trackball().handleResize?.();
+    };
     fit();
     this.registerEvent(this.app.workspace.on("resize", fit));
+
+    // A `ResizeObserver` on the canvas, because `fit()` at construction is too
+    // EARLY and the workspace event is too narrow.
+    //
+    // Called from here the first time, `handleResize` measures a canvas the
+    // pane has not laid out yet: it read 1707x1019 against a box that settled
+    // at 903x844 a moment later, so the controls were calibrated to the window
+    // rather than to the canvas and rotation was dead for the same reason the
+    // 450x225 value killed it. Calling it again later fixes it -- which is the
+    // proof that the value is right and the MOMENT was wrong.
+    //
+    // `workspace.on("resize")` does not close the gap either. It fires for the
+    // window, not for the things that actually change this canvas most often:
+    // collapsing a sidebar, splitting a pane, dragging the divider between two
+    // leaves. A ResizeObserver fires on the box itself, including the first
+    // time it gets one, which is exactly the event that was missing.
+    const observer = new ResizeObserver(() => fit());
+    observer.observe(canvas);
+    this.resizeObserver = observer;
 
     // Frame the cloud once it exists.
     //
