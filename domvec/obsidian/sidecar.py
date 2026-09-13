@@ -38,7 +38,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 from .. import tokens
 from .export import _reflow, link_targets
 from .htmlform import render_lines
-from .layout import build_layout
+from .layout import build_layout, place_into
 
 
 #: Capture sessions, keyed by url: the stateful decoder and the trie spine
@@ -245,6 +245,26 @@ class _Handler(BaseHTTPRequestHandler):
         # workspace, runs no process, and presses nothing on any page. It is
         # the scan the reader is watching, arriving from the pane they are
         # watching it in.
+        # Where the chunks a live capture produced belong in the picture
+        # already on screen (`G-34`). Read-only: it fits nothing and stores
+        # nothing, it asks the existing fit where a point lands.
+        if route == "place":
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(length) or b"{}")
+            except Exception as exc:                # noqa: BLE001
+                self._send(400, {"error": "bad body: %s" % exc})
+                return
+            if self.workspace is None:
+                self._send(503, {"error": "no workspace"})
+                return
+            try:
+                self._send(200, place_into(self.workspace,
+                                           body.get("cids") or []))
+            except Exception as exc:                # noqa: BLE001
+                self._send(500, {"error": "%s: %s" % (type(exc).__name__, exc)})
+            return
+
         if route == "capture":
             if not self.capture_allowed:
                 # Named, because the alternative is what actually happened:
@@ -545,6 +565,10 @@ class _Handler(BaseHTTPRequestHandler):
             dirty = spine.dirty_chunks(update)
             if dirty:
                 self.workspace.ingest_chunks(url, dirty, complete=False)
+            # Named, not counted. The pane asks `place` about exactly these,
+            # and a count would leave it re-fetching the whole layout to find
+            # out which three nodes moved.
+            dirty_cids = [c.cid for c in dirty]
         except Exception as exc:                    # noqa: BLE001
             # Named rather than swallowed. A capture that fails quietly is
             # indistinguishable from a page with nothing in it, and that
@@ -559,6 +583,7 @@ class _Handler(BaseHTTPRequestHandler):
             "lines": sense.lines,
             "changed": sense.changed,
             "dirty": len(dirty),
+            "dirty_cids": dirty_cids,
             "wire_bytes": sense.wire_bytes,
             "ms": round((time.perf_counter() - started) * 1000, 1),
         })

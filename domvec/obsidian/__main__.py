@@ -46,6 +46,12 @@ def main(argv=None) -> int:
                          "code with this process's privileges -- a LARGER "
                          "permission than --enact, and gated separately for "
                          "that reason.")
+    sv.add_argument("--semantic", action="store_true",
+                    help="load the embedder, so chunks the browser cell "
+                         "captures can be VECTORISED and therefore placed in "
+                         "the projector. Without it a live capture stores its "
+                         "chunks and the pane reports them as awaiting a "
+                         "vector, which is honest but not much use.")
     sv.add_argument("--capture", action="store_true",
                     help="let the BROWSER CELL scan into this workspace: the "
                          "Electron pane folds the page it is showing and the "
@@ -83,7 +89,14 @@ def main(argv=None) -> int:
     # Both still take the writer lock, so both exclude other openers.
     read_only = not (getattr(args, "enact", False)
                      or getattr(args, "capture", False))
-    with Workspace(args.workspace, read_only=read_only) as ws:
+    embedder = None
+    if getattr(args, "semantic", False):
+        from ..core.embedding_service import get_default_service
+
+        embedder = get_default_service()
+        print("embedder: %s" % embedder.status())
+    with Workspace(args.workspace, read_only=read_only,
+                   embedder=embedder) as ws:
         if args.cmd == "serve":
             # Both capabilities are named at startup, and loudly. A reader who
             # cannot see from the terminal what this process is allowed to do
@@ -95,6 +108,8 @@ def main(argv=None) -> int:
             if args.capture:
                 powers.append("CAPTURE -- the browser cell can scan into this "
                               "workspace")
+            if args.semantic:
+                powers.append("SEMANTIC -- captured chunks get vectors")
             if args.kernel:
                 powers.append("KERNEL -- the vault can RUN PYTHON here")
             print("domvec sidecar on http://127.0.0.1:%d  (%d pages, %s)"

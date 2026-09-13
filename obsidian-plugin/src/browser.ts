@@ -29,6 +29,7 @@
 
 import { ItemView, WorkspaceLeaf } from "obsidian";
 
+import { LayoutNode } from "./graph";
 import { Sidecar } from "./sidecar";
 
 export const BROWSER_VIEW = "domvec-browser-view";
@@ -63,6 +64,18 @@ const SCROLLS = 6;
  *  watching the pane does not think it has hung. */
 const PAUSE_MS = 700;
 
+/**
+ * How often the live sensor drains while the reader browses.
+ *
+ * The sensor debounces its own fold at 80ms and a drain returns only what
+ * changed since the last one, so this is not a sampling rate for the page --
+ * it is how often the picture catches up. Just over a second is slow enough
+ * that a page settling after load is drained two or three times rather than
+ * thirty, and fast enough that a reader scrolling sees nodes appear while
+ * they are still looking at what produced them.
+ */
+const LIVE_MS = 1200;
+
 /** Which face of the panel is showing. */
 type Face = "browser" | "markdown";
 
@@ -78,7 +91,18 @@ export class BrowserView extends ItemView {
   private markdownWrap!: HTMLElement;
   private toggle!: HTMLElement;
 
-  constructor(leaf: WorkspaceLeaf, private sidecar: Sidecar) {
+  /** True while a drain is in flight, so a slow one cannot be lapped. */
+  private draining = false;
+  /** Live capture on? The reader's switch, and it starts on. */
+  private live = true;
+  /** The url the current capture session belongs to. A navigation ends one
+   *  session and begins another, and the old one has to be settled first or
+   *  its last delta never becomes a complete write. */
+  private session = "";
+  private liveButton!: HTMLElement;
+
+  constructor(leaf: WorkspaceLeaf, private sidecar: Sidecar,
+              private onChunks: (nodes: LayoutNode[]) => void = () => {}) {
     super(leaf);
   }
 
@@ -99,6 +123,7 @@ export class BrowserView extends ItemView {
     this.address.type = "text";
     this.address.placeholder = "url";
     const scan = bar.createEl("button", { text: "scan" });
+    this.liveButton = bar.createEl("button", { text: "live ●" });
     this.toggle = bar.createEl("button", { text: "markdown" });
 
     this.browserWrap = root.createDiv({ cls: "domvec-browser-page" });
@@ -126,6 +151,21 @@ export class BrowserView extends ItemView {
     view.addEventListener("did-stop-loading", () => {
       this.address.value = view.getURL();
       this.say(view.getTitle() || view.getURL());
+      // A load finishing is when a page becomes worth reading. Booting here
+      // rather than on `did-navigate` means the sensor folds a document that
+      // exists, instead of one still being parsed.
+      void this.pageChanged(view.getURL());
+    });
+    // An in-page navigation -- a route change in a single-page app -- leaves
+    // the document and the sensor's handle intact but makes the address a
+    // lie. The sensor reports the page's own url in every payload for this
+    // reason; the SESSION still has to move, or the new route's chunks are
+    // filed under the old one.
+    view.addEventListener("did-navigate-in-page", (e: any) => {
+      if (e && e.isMainFrame) {
+        this.address.value = view.getURL();
+        void this.pageChanged(view.getURL());
+      }
     });
     view.addEventListener("did-fail-load", (e: any) => {
       // -3 is ABORTED, which is what a redirect away from a page reports.
@@ -142,13 +182,28 @@ export class BrowserView extends ItemView {
     this.toggle.onclick = () => this.show(
       this.face === "browser" ? "markdown" : "browser");
     scan.onclick = () => this.scan();
+    this.liveButton.onclick = () => this.setLive(!this.live);
+
+    // One timer for the life of the pane, registered so Obsidian stops it
+    // when the view closes. A timer per navigation would leak one per page a
+    // reader visits, and they would all still be draining.
+    this.registerInterval(window.setInterval(() => { void this.tick(); },
+                                             LIVE_MS));
 
     this.say("ready");
   }
 
   async onClose(): Promise<void> {
-    // The element goes with the DOM; the SESSION is deliberately left alone,
-    // since it is shared and persistent by design.
+    // Settle whatever page was being captured. Per-drain writes are deltas;
+    // a pane closed mid-page would leave the store holding the last delta
+    // rather than the finished trie.
+    if (this.session) {
+      const leaving = this.session;
+      this.session = "";
+      void this.sidecar.capture(leaving, { settle: true });
+    }
+    // The element goes with the DOM; the browsing SESSION is deliberately
+    // left alone, since it is shared and persistent by design.
     this.webview = null;
   }
 
@@ -168,6 +223,96 @@ export class BrowserView extends ItemView {
     this.address.value = url;
     this.webview.loadURL(url);
     this.show("browser");
+  }
+
+  /** Turn live capture on or off, and say which it is. */
+  private setLive(on: boolean): void {
+    this.live = on;
+    this.liveButton.setText(on ? "live ●" : "live ○");
+    this.say(on ? "live capture on" : "live capture off");
+  }
+
+  /**
+   * The page changed under the sensor.
+   *
+   * The previous session is SETTLED before the new one starts. Per-drain
+   * writes are deltas and never retire a chunk that re-partitioning replaced,
+   * so a page left without settling keeps whatever its last delta happened to
+   * leave in the store -- which is a page half-rewritten by the one after it.
+   */
+  private async pageChanged(url: string): Promise<void> {
+    if (!url || url === "about:blank") { this.session = ""; return; }
+    if (url === this.session) return;
+    const leaving = this.session;
+    this.session = url;
+    if (leaving) {
+      await this.sidecar.capture(leaving, { settle: true });
+    }
+    if (this.live) this.say(`live · ${url}`);
+  }
+
+  /**
+   * One turn of the live loop: fold what changed, store it, place it.
+   *
+   * Guarded rather than queued. A drain that has not come back is a page
+   * still being folded, and starting a second one would hand the sidecar two
+   * deltas whose order it cannot recover -- the decoder's dictionary is
+   * append-only, so out-of-order drains do not merely arrive late, they
+   * arrive unreadable.
+   */
+  private async tick(): Promise<void> {
+    if (!this.live || this.draining || !this.webview) return;
+    const wv = this.webview;
+    const url = wv.getURL();
+    if (!url || url === "about:blank" || wv.isLoading()) return;
+    if (url !== this.session) { await this.pageChanged(url); return; }
+
+    this.draining = true;
+    try {
+      if (!BrowserView.sensorSource) {
+        const got = await this.sidecar.sensor();
+        if (!got || !got.source) return;
+        BrowserView.sensorSource = got.source;
+      }
+      const payload = await wv.executeJavaScript(`(function () {
+        if (!window[${JSON.stringify(HANDLE)}]) {
+          var h = (${BrowserView.sensorSource})(
+            {budget: 0, debounce: 80, variants: {}, known: []});
+          Object.defineProperty(window, ${JSON.stringify(HANDLE)},
+            {value: h, enumerable: false, configurable: false});
+        }
+        return window[${JSON.stringify(HANDLE)}].drain();
+      })()`);
+
+      // Nothing changed. Not posted: an empty delta costs a round trip, a
+      // decode and a store write to say "no", and a reader idling on a static
+      // page would pay it once a second forever.
+      if (!payload || !(payload.chunks || []).length) return;
+
+      const reply = await this.sidecar.capture(url, { payload });
+      if (!reply || reply.error) {
+        this.say(`capture: ${reply ? reply.error : "no reply"}`);
+        return;
+      }
+      const cids = (reply.dirty_cids || []) as string[];
+      if (!cids.length) {
+        this.say(`live · ${reply.addresses} addresses`);
+        return;
+      }
+      const placed = await this.sidecar.place(cids);
+      const nodes = (placed && (placed.nodes as LayoutNode[])) || [];
+      if (nodes.length) this.onChunks(nodes);
+      const waiting = placed && placed.unplaced ? placed.unplaced.length : 0;
+      this.say(`live · ${cids.length} chunks · ${nodes.length} placed` +
+               (waiting ? ` · ${waiting} awaiting a vector` : "") +
+               (placed && placed.stale ? " · fit is stale, refit" : ""));
+    } catch (e) {
+      // The realm goes away on navigation and the handle with it. That is
+      // ordinary, not an error: the next tick reboots into the new document.
+      this.say(`live · ${String(e).slice(0, 80)}`);
+    } finally {
+      this.draining = false;
+    }
   }
 
   /**

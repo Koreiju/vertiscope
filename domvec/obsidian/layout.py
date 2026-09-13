@@ -62,6 +62,35 @@ _LONE_TARGET = 128
 _EXTENT = 300.0
 
 
+#: Where each fitted stage leaves its parameters, for `Projection.of` to
+#: collect the moment `build_layout` finishes.
+#:
+#: A module-level shelf rather than threaded return values, because every one
+#: of these stages is called from one place, in one order, in one thread, and
+#: widening five signatures to carry a second value would touch every caller
+#: and every test for a fact that only `build_layout` consumes. It is written
+#: during a fit and read immediately after; nothing else reads it.
+#: How many queued chunks one live placement will embed before answering.
+#:
+#: A bound, not a batch size. A reader who opens a page with nine hundred new
+#: chunks should see the first few hundred appear and the rest arrive on the
+#: next tick, rather than watch the pane hang while the whole page is
+#: embedded. The unplaced remainder is reported, so nothing is lost quietly.
+_LIVE_EMBED_LIMIT = 256
+
+_LAST_FIT: Dict[str, object] = {}
+
+#: The most recent fit, kept so live captures can be placed into it.
+#: `None` until a layout has been built, and after a build that could not
+#: produce a transformable reducer.
+_LAST_PROJECTION: Optional["Projection"] = None
+
+
+def live_projection() -> Optional["Projection"]:
+    """The fit the pane is currently showing, or None."""
+    return _LAST_PROJECTION
+
+
 def _unit_rows(matrix: np.ndarray) -> np.ndarray:
     """L2-normalise each row, leaving all-zero rows alone.
 
@@ -93,7 +122,15 @@ def _reduce(dense: np.ndarray, target: int, seed: int) -> np.ndarray:
     k = int(min(target, dense.shape[0] - 1, dense.shape[1] - 1))
     if k < 2:
         return dense
-    return TruncatedSVD(n_components=k, random_state=seed).fit_transform(dense)
+    svd = TruncatedSVD(n_components=k, random_state=seed)
+    out = svd.fit_transform(dense)
+    # The FITTED transformer travels with its output. A chunk captured after
+    # the fit has to pass through this exact projection, not a new one fitted
+    # to a different sample -- two SVDs of overlapping data do not agree on
+    # the sign or the order of their components, so a newcomer put through a
+    # fresh one lands somewhere unrelated to the cloud it belongs in.
+    _LAST_FIT["svd"] = svd
+    return out
 
 
 def build_layout(workspace,
@@ -106,12 +143,17 @@ def build_layout(workspace,
                  spread_axes: bool = True) -> Dict:
     """Every live chunk placed in `dims` dimensions, with the graph's edges.
 
+    Leaves its fitted stages on `_LAST_FIT` and assembles them into
+    `_LAST_PROJECTION`, which is what lets a later capture join this picture
+    without refitting it.
+
     The report says which spaces it used. A layout fitted on frequency alone
     and one fitted on both are different pictures, and a caller that cannot
     tell them apart will read a lexical clustering as a semantic one.
     """
     index = workspace.index
     freq = index.freq
+    _LAST_FIT.clear()
     embeddings = index.embeddings
 
     tfidf = freq.tfidf()
@@ -274,6 +316,14 @@ def build_layout(workspace,
              for a, b in workspace.store.edges()
              if a in known and b in known and a != b]
 
+    # Keep the fit, so a chunk captured a minute from now can be placed into
+    # this picture rather than forcing a new one. Set even when it comes back
+    # None -- a stale projection from the previous corpus would place
+    # newcomers against a cloud that is no longer on screen.
+    global _LAST_PROJECTION
+    _LAST_PROJECTION = Projection.of(dims=dims, hsv=colours is not None,
+                                     fitted_n=len(cids))
+
     return {
         "nodes": nodes,
         "edges": edges,
@@ -349,9 +399,11 @@ def _hsv(block: np.ndarray) -> np.ndarray:
     colour string and paint the node invisible.
     """
     out = np.zeros((block.shape[0], 3), dtype=np.float32)
+    bands = []
     for j in range(3):
         column = block[:, j].astype(np.float32)
         low, high = float(column.min()), float(column.max())
+        bands.append((low, high))
         unit = (np.full_like(column, 0.5) if high - low < 1e-9
                 else (column - low) / (high - low))
         if j == 0:
@@ -360,6 +412,7 @@ def _hsv(block: np.ndarray) -> np.ndarray:
             out[:, 1] = _SAT_BAND[0] + unit * (_SAT_BAND[1] - _SAT_BAND[0])
         else:
             out[:, 2] = _VAL_BAND[0] + unit * (_VAL_BAND[1] - _VAL_BAND[0])
+    _LAST_FIT["hsv_bands"] = bands
     return out
 
 
@@ -430,12 +483,19 @@ def _spread(coords: np.ndarray, dims: int) -> np.ndarray:
         return coords
     out = np.array(coords, dtype=np.float32, copy=True)
     n = out.shape[0]
+    cdf: Dict[int, np.ndarray] = {}
     for axis in range(min(dims, out.shape[1])):
         column = out[:, axis]
         if float(column.max() - column.min()) == 0.0:
             continue                       # a collapsed axis stays collapsed
         rank = np.argsort(np.argsort(column))
         out[:, axis] = (rank / (n - 1)).astype(np.float32)
+        # The sorted column IS the empirical CDF. Kept so a newcomer can be
+        # placed at its own rank among the points already drawn -- a
+        # `searchsorted` -- instead of re-ranking the corpus, which would
+        # move every existing node a little on every capture.
+        cdf[axis] = np.sort(column.astype(np.float32))
+    _LAST_FIT["spread_cdf"] = cdf
     return out
 
 
@@ -492,9 +552,11 @@ def _framed(coords: np.ndarray, dims: int) -> np.ndarray:
     high = block.max(axis=0)
     block -= (low + high) / 2.0
     widest = float(np.max(high - low))
+    scale = (2.0 * _EXTENT) / widest if widest > 1e-9 else 1.0
     if widest > 1e-9:
-        block *= (2.0 * _EXTENT) / widest
+        block *= scale
     out[:, :dims] = block
+    _LAST_FIT["frame"] = ((low + high) / 2.0, scale)
     return out
 
 
@@ -513,7 +575,13 @@ def _umap(features: np.ndarray, *, dims: int, seed: int,
 
         reducer = umap.UMAP(n_components=dims, n_neighbors=k,
                             min_dist=min_dist, random_state=seed)
-        return np.asarray(reducer.fit_transform(features), dtype=np.float32)
+        out = np.asarray(reducer.fit_transform(features), dtype=np.float32)
+        # Kept so a later batch can be `transform`ed into this same fit rather
+        # than forcing a refit of the whole corpus. That is what makes live
+        # capture affordable: a page scanned while the reader browses places
+        # its chunks against the cloud that is already on screen.
+        _LAST_FIT["reducer"] = reducer
+        return out
     except Exception:
         # Not silent: the caller is told which spaces were used, and a PCA of
         # the same features is still an honest projection of them -- it is
@@ -527,7 +595,12 @@ def _umap(features: np.ndarray, *, dims: int, seed: int,
         # coloured nodes from columns of zeros and reported the colour as
         # fitted. The caller handles the narrow case; it cannot handle a case
         # it is not told about.
-        out = PCA(n_components=k, random_state=seed).fit_transform(features)
+        pca = PCA(n_components=k, random_state=seed)
+        out = pca.fit_transform(features)
+        # The fallback is `transform`-able too, so live placement keeps
+        # working on a workspace too small for UMAP rather than silently
+        # becoming the one case that cannot stream.
+        _LAST_FIT["reducer"] = pca
         return np.asarray(out, dtype=np.float32)
 
 
@@ -537,3 +610,218 @@ def _title(md: str) -> str:
         if line:
             return line[:80]
     return ""
+
+
+# --- placing what arrives after the fit --------------------------------------
+
+
+def _hsv_apply(block: np.ndarray, bands) -> np.ndarray:
+    """`_hsv`, against the bands the fit measured rather than this batch's."""
+    out = np.zeros((block.shape[0], 3), dtype=np.float32)
+    for j in range(3):
+        low, high = bands[j]
+        column = block[:, j].astype(np.float32)
+        unit = (np.full_like(column, 0.5) if high - low < 1e-9
+                else (column - low) / (high - low))
+        # Clipped, because a newcomer CAN fall outside the range the fit saw
+        # and a hue of 400 degrees is not a colour. Clipping puts it at the
+        # end of the band, which is where it belongs.
+        unit = np.clip(unit, 0.0, 1.0)
+        if j == 0:
+            out[:, 0] = unit * 360.0
+        elif j == 1:
+            out[:, 1] = _SAT_BAND[0] + unit * (_SAT_BAND[1] - _SAT_BAND[0])
+        else:
+            out[:, 2] = _VAL_BAND[0] + unit * (_VAL_BAND[1] - _VAL_BAND[0])
+    return out
+
+
+def _spread_apply(coords: np.ndarray, dims: int, cdf) -> np.ndarray:
+    """`_spread`, by looking a newcomer up in the fit's own distribution.
+
+    The fit mapped each axis through its empirical CDF. A point arriving
+    later is placed at ITS rank among those values -- `searchsorted` -- so it
+    lands between the neighbours it belongs between and nothing already drawn
+    moves. Re-ranking the corpus instead would shift every existing node a
+    little on every capture, which is a picture that will not hold still
+    while a reader is looking at it.
+    """
+    out = np.array(coords, dtype=np.float32, copy=True)
+    for axis in range(min(dims, out.shape[1])):
+        sorted_column = cdf.get(axis)
+        if sorted_column is None or len(sorted_column) < 2:
+            continue
+        pos = np.searchsorted(sorted_column, out[:, axis])
+        out[:, axis] = (pos / (len(sorted_column) - 1)).astype(np.float32)
+    return out
+
+
+def _frame_apply(coords: np.ndarray, dims: int, mid, scale: float
+                 ) -> np.ndarray:
+    """`_framed`, against the box the fit measured."""
+    out = np.array(coords, dtype=np.float32, copy=True)
+    out[:, :dims] = (out[:, :dims] - mid) * scale
+    return out
+
+
+class Projection:
+    """A fit, kept so that what arrives later can join it.
+
+    The reason this exists at all: a reader browsing with the sensor running
+    produces chunks continuously, and refitting UMAP over the whole corpus on
+    each one is not affordable -- nor is it right, because a refit moves every
+    node, and a picture that rearranges itself while someone is reading it is
+    not a picture of anything.
+
+    UMAP fits a model and can `transform` new points into it. So can the SVD
+    in front of it and the PCA that stands in when there are too few points to
+    fit. Every stage between them is a normalisation with parameters, and the
+    parameters are what `_LAST_FIT` collected -- so the whole pipeline replays.
+
+    **Refit on DOUBLING.** A transform is only as good as the fit behind it,
+    and a fit stops describing a corpus that has grown well past it. Refitting
+    when the chunk count doubles bounds the staleness at a factor of two and
+    makes the refits amortised O(1): 5k, 10k, 20k, not one per capture.
+    """
+
+    def __init__(self, *, svd, reducer, dims: int, hsv: bool,
+                 hsv_bands, spread_cdf, frame, fitted_n: int) -> None:
+        self.svd = svd
+        self.reducer = reducer
+        self.dims = dims
+        self.hsv = hsv
+        self.hsv_bands = hsv_bands
+        self.spread_cdf = spread_cdf or {}
+        self.frame_mid, self.frame_scale = frame if frame else (0.0, 1.0)
+        self.fitted_n = int(fitted_n)
+
+    @classmethod
+    def of(cls, *, dims: int, hsv: bool, fitted_n: int
+           ) -> Optional["Projection"]:
+        """Collect what the fit just left on the shelf."""
+        reducer = _LAST_FIT.get("reducer")
+        if reducer is None or not hasattr(reducer, "transform"):
+            return None
+        return cls(svd=_LAST_FIT.get("svd"), reducer=reducer, dims=dims,
+                   hsv=hsv, hsv_bands=_LAST_FIT.get("hsv_bands"),
+                   spread_cdf=_LAST_FIT.get("spread_cdf"),
+                   frame=_LAST_FIT.get("frame"), fitted_n=fitted_n)
+
+    def stale(self, n: int) -> bool:
+        """True once the corpus has doubled since this was fitted."""
+        return self.fitted_n > 0 and n >= 2 * self.fitted_n
+
+    def place(self, semantic: np.ndarray):
+        """Rows of the raw semantic space -> (positions, colours-or-None).
+
+        Returns ``(None, None)`` rather than raising when the transform
+        cannot run. A pane that failed to place three new chunks should say
+        so and keep the picture it has; it should not go blank.
+        """
+        if semantic is None or not len(semantic):
+            return None, None
+        try:
+            features = (self.svd.transform(semantic)
+                        if self.svd is not None else semantic)
+            features = _unit_rows(np.asarray(features, dtype=np.float32))
+            coords = np.asarray(self.reducer.transform(features),
+                                dtype=np.float32)
+        except Exception:                           # noqa: BLE001
+            return None, None
+        colours = None
+        if self.hsv and coords.shape[1] >= self.dims + 3:
+            colours = _hsv_apply(coords[:, self.dims:self.dims + 3],
+                                 self.hsv_bands)
+        coords = _spread_apply(coords, self.dims, self.spread_cdf)
+        coords = _frame_apply(coords, self.dims, self.frame_mid,
+                              self.frame_scale)
+        return coords[:, :self.dims], colours
+
+
+def place_into(workspace, cids) -> Dict:
+    """Place chunks captured after the fit, into the fit (`G-34`).
+
+    What the browser cell produces while a reader browses: a handful of new
+    or rewritten chunks, wanted on screen now, against a cloud of thousands
+    that must not move to accommodate them.
+
+    Returns the same node shape `build_layout` returns, plus `stale`, which
+    says the corpus has doubled since the fit and the pane should ask for a
+    real one. Nodes the projection cannot place are reported in `unplaced`
+    rather than dropped: a chunk that was captured and cannot be drawn is a
+    fact the pane should be able to say out loud.
+    """
+    projection = live_projection()
+    wanted = [c for c in dict.fromkeys(cids or []) if c]
+    if projection is None:
+        return {"nodes": [], "unplaced": wanted, "stale": True,
+                "why": "no fit to place into yet"}
+    if not wanted:
+        return {"nodes": [], "unplaced": [], "stale": False}
+
+    # Embed what is waiting, now, because this IS the moment someone asked.
+    #
+    # `flush_vectors` exists to make vectorisation "a function of settled
+    # change rather than of delta count" -- a chunk rewritten on every frame
+    # of a scroll is embedded once. A live capture drains several times a
+    # second, so embedding per drain would be exactly the waste that design
+    # avoids; embedding when the pane asks where to draw them is the same
+    # rule, reached from the other side.
+    if getattr(workspace, "embedder", None) is not None:
+        try:
+            workspace.flush_vectors(limit=_LIVE_EMBED_LIMIT)
+        except Exception:                           # noqa: BLE001
+            # A failed flush leaves the chunks unembedded and they are
+            # reported as awaiting a vector, which is what they are. It must
+            # not take the pane down with it.
+            pass
+
+    rows, meta, missing = [], [], []
+    for cid in wanted:
+        chunk = workspace.store.chunk(cid)
+        if chunk is None or chunk.redundant:
+            # A redundant chunk is deliberately not drawn -- `G-25` -- so it
+            # is not "unplaced", it is placed as the copy it is.
+            continue
+        vector = workspace.store.embedding(cid)
+        if not vector or not any(vector):
+            # Captured but not yet embedded. The embedding phase is
+            # asynchronous by design (the goal says so), so this is the
+            # normal state for a chunk seconds old, not a failure.
+            missing.append(cid)
+            continue
+        rows.append(vector)
+        meta.append(chunk)
+
+    nodes = []
+    if rows:
+        coords, colours = projection.place(
+            np.asarray(rows, dtype=np.float32))
+        if coords is None:
+            return {"nodes": [], "unplaced": wanted, "stale": True,
+                    "why": "the fit could not transform these"}
+        for i, chunk in enumerate(meta):
+            node = {
+                "cid": chunk.cid,
+                "url": chunk.url,
+                "title": _title(chunk.md),
+                "rank": 0.0,
+                "chars": chunk.chars,
+                "tokens": tokens.budget(chunk.md or ""),
+                "copies": chunk.dup_n,
+                "pos": [float(v) for v in coords[i]],
+                #: Placed by `transform`, not by the fit itself. The pane may
+                #: want to say so, and a measurement certainly does.
+                "placed": True,
+            }
+            if colours is not None:
+                node["hsv"] = [float(v) for v in colours[i]]
+            picture = _first_image(chunk.md, chunk.url)
+            if picture is not None:
+                node["image"] = picture
+            nodes.append(node)
+
+    total = len(workspace.store.chunks())
+    return {"nodes": nodes, "unplaced": missing,
+            "stale": projection.stale(total),
+            "fitted_n": projection.fitted_n, "n": total}

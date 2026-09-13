@@ -203,6 +203,9 @@ export interface CaptureResult {
   lines?: number;
   /** Chunks this drain actually rewrote -- the O(delta) number. */
   dirty?: number;
+  /** Which ones, named. A count would leave the pane refetching the
+   *  whole layout to find out which three nodes moved. */
+  dirty_cids?: string[];
   changed?: number;
   wire_bytes?: number;
   settled?: boolean;
@@ -210,4 +213,18 @@ export interface CaptureResult {
   /** Set instead of the rest when the capture did not land. A capture that
    *  fails quietly is indistinguishable from a page with nothing in it. */
   error?: string;
+}
+
+/** What `POST /place` says about chunks captured after the fit (`G-34`). */
+export interface PlaceResult {
+  /** Nodes in the same shape `/layout` returns, placed by `transform`. */
+  nodes?: unknown[];
+  /** Captured but not yet embedded -- the normal state for a chunk seconds
+   *  old, since the embedding phase is asynchronous by design. */
+  unplaced?: string[];
+  /** The corpus has doubled since the fit; the pane should refit. */
+  stale?: boolean;
+  fitted_n?: number;
+  n?: number;
+  why?: string;
 }

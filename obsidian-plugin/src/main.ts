@@ -167,7 +167,18 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     // notebook cell, with the standalone being the expanded view.
     this.registerView(
       BROWSER_VIEW,
-      (leaf: WorkspaceLeaf) => new BrowserView(leaf, this.sidecar),
+      (leaf: WorkspaceLeaf) => new BrowserView(
+        leaf, this.sidecar,
+        // Live capture reaches the projector through the plugin rather than
+        // by one view holding the other: a graph pane that is closed, or has
+        // not been opened yet, must not stop the browser cell from scanning.
+        (nodes) => {
+          const leaves = this.app.workspace.getLeavesOfType(GRAPH_VIEW);
+          for (const l of leaves) {
+            const view = l.view as GraphView;
+            if (view && typeof view.absorb === "function") view.absorb(nodes);
+          }
+        }),
     );
     this.addCommand({
       id: "domvec-open-browser",

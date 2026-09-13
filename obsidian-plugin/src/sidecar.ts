@@ -11,6 +11,7 @@
  */
 
 import { CaptureResult, ChunkPayload, ChunkPreview, EnactResult, Health,
+         PlaceResult,
          Interpreters,
          KernelReply, SearchResult, ShellReply } from "./types";
 
@@ -149,6 +150,29 @@ export class Sidecar {
    */
   sensor(): Promise<{ source: string } | null> {
     return this.get<{ source: string }>("/sensor");
+  }
+
+  /**
+   * Where chunks captured after the fit belong in the picture on screen.
+   *
+   * Read-only: it fits nothing and stores nothing, it asks the existing fit
+   * where these points land. `stale` coming back true means the corpus has
+   * doubled since that fit and the pane should ask for a real layout.
+   */
+  async place(cids: string[]): Promise<PlaceResult | null> {
+    const base = this.base().trim().replace(/\/+$/, "");
+    if (!base || !cids.length) return null;
+    try {
+      const res = await fetch(`${base}/place`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cids }),
+      });
+      if (!res.ok) return null;
+      return (await res.json()) as PlaceResult;
+    } catch {
+      return null;
+    }
   }
 
   /**

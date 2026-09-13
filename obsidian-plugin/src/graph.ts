@@ -27,7 +27,7 @@ import { Sidecar } from "./sidecar";
 
 export const GRAPH_VIEW = "domvec-graph-view";
 
-interface LayoutNode {
+export interface LayoutNode {
   cid: string;
   url: string;
   title: string;
@@ -477,9 +477,74 @@ export class GraphView extends ItemView {
     return out;
   }
 
-  private draw(canvas: HTMLElement, layout: Layout) {
-    canvas.empty();
-    const nodes = layout.nodes.map((n) => ({
+  /**
+   * Take chunks captured after the fit into the picture already on screen.
+   *
+   * `G-34`: a reader browsing with the sensor running produces chunks
+   * continuously, and the pane has to show them without rebuilding. The
+   * sidecar places them with `Projection.transform` -- the same fit, not a
+   * new one -- so what arrives here is already in this cloud's coordinates.
+   *
+   * **Reheating is cheap here, and that is a property of the design rather
+   * than luck.** Collision is the only force running (`G-20`), and collision
+   * acts on a node only when something is inside its radius. Measured cold:
+   * 2,302 of 5,337 nodes sit exactly where the fit put them, feeling nothing.
+   * So a reheat after three new nodes arrive settles those three and their
+   * immediate neighbours, and leaves the rest of the cloud untouched -- where
+   * a charge or a link force would have shaken all 5,337.
+   *
+   * A chunk that was REWRITTEN moves. Its text changed, so its embedding
+   * changed, so the fit puts it somewhere else, and pretending otherwise
+   * would leave a node standing where its old meaning used to be.
+   */
+  absorb(incoming: LayoutNode[]): { added: number; moved: number } {
+    const out = { added: 0, moved: 0 };
+    if (!this.graph || !incoming || !incoming.length) return out;
+    const data: any = this.graph.graphData();
+    const byId = new Map<string, any>(data.nodes.map((n: any) => [n.id, n]));
+
+    for (const node of incoming) {
+      if (!node || !node.cid || !node.pos) continue;
+      const built = this.nodeFrom(node);
+      const existing = byId.get(node.cid);
+      if (existing) {
+        // Fields the render reads, and the fit's own coordinates. `x/y/z` is
+        // set too: the simulation owns those, but a chunk whose meaning moved
+        // should not be left drawing at its old meaning's address.
+        Object.assign(existing, {
+          name: built.name, url: built.url, val: built.val,
+          tokens: built.tokens, image: built.image, color: built.color,
+          fitX: built.fitX, fitY: built.fitY, fitZ: built.fitZ,
+          x: built.x, y: built.y, z: built.z,
+        });
+        out.moved++;
+      } else {
+        data.nodes.push(built);
+        byId.set(node.cid, built);
+        out.added++;
+      }
+    }
+    if (!out.added && !out.moved) return out;
+    // The links array is handed back unchanged. `forceLink` resolved its
+    // endpoints in place at boot, so rebuilding it here would hand d3 a list
+    // of node OBJECTS where it expects to re-resolve, and the edges would
+    // stop drawing -- which is exactly the failure that removing the link
+    // force caused.
+    this.graph.graphData(data);
+    this.graph.d3ReheatSimulation();
+    return out;
+  }
+
+  /**
+   * One layout node as the object the renderer holds.
+   *
+   * Factored out because live capture needs the SAME mapping: a node placed
+   * by `transform` a minute after the fit has to arrive identical in shape to
+   * one the fit produced, or the two kinds of node drift apart and the
+   * collider starts sizing half the cloud differently from the other half.
+   */
+  private nodeFrom(n: LayoutNode): any {
+    return {
       id: n.cid,
       name: n.title || n.url,
       url: n.url,
@@ -514,7 +579,12 @@ export class GraphView extends ItemView {
       tokens: n.tokens ?? 0,
       image: n.image,
       color: colourOf(n),
-    }));
+    };
+  }
+
+  private draw(canvas: HTMLElement, layout: Layout) {
+    canvas.empty();
+    const nodes = layout.nodes.map((n) => this.nodeFrom(n));
 
     // How big a node should be, from the span it is drawn in and how many
     // there are -- not from a constant.
