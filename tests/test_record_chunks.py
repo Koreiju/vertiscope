@@ -148,7 +148,7 @@ def test_a_record_still_respects_the_window():
                 "a record was emitted over the window without being split"
 
 
-@pytest.mark.parametrize("window", [128, 256, 512, 768, 900])
+@pytest.mark.parametrize("window", [128, 256, 512, 700])
 def test_the_split_does_not_move_with_the_window(window):
     """A record is a record across the whole range of useful windows.
 
@@ -158,13 +158,20 @@ def test_the_split_does_not_move_with_the_window(window):
 
     The range has a real top and it is stated rather than hidden. The rule
     fires at the node whose children are the records, and the descent only
-    reaches that node if its ancestors did not fit the window first. This
+    reaches that node if its ancestors did not fit the window first. So the
+    honest boundary is: **one chunk per record holds whenever the record
+    set's ancestors do not fit the window** -- which on any page bigger than
+    the window is always. A window larger than the page returning the page is
+    not a failure of this rule.
+
+    The top of the range is **measured, and it moved**. It used to read "this
     fixture's `<main>` is about a thousand tokens, so at 1024 `<main>` is
-    emitted whole, the `<ol>` is never reached, and the ten results come back
-    as one chunk. That is the honest boundary: **one chunk per record holds
-    whenever the record set's ancestors do not fit the window** -- which at
-    512, and on any page bigger than the window, is always. A window larger
-    than the page returning the page is not a failure of this rule.
+    emitted whole". `<main>` renders to 844 tokens and spends **714** of the
+    window, because the fixture is built from `href='/r/N'` links and the
+    budget stopped counting link targets. So the ceiling came down from above
+    1024 to between 700 and 768, and measured across the range the split holds
+    at 128/256/512/700 and collapses to one chunk at 768. Nothing about the
+    rule changed; the fixture simply got smaller in the unit that decides.
     """
     holding = [c for c in _chunks(window) if _results_in(c)]
     assert len(holding) == 10, \

@@ -546,9 +546,9 @@ def chunk_preview(text: str, rel_path: str, *, vault: str = "vault",
             "end_line": max(b for _, b in spans),
             "xpath": chunk.xpath,
             "part": chunk.part,
-            "tokens": _tokens.count(body),
+            "tokens": _tokens.budget(body),
             "window": window,
-            "over_window": _tokens.count(body) > window,
+            "over_window": _tokens.budget(body) > window,
         })
     # By first line, because that is the order a reader meets them in -- the
     # chunker emits by trie descent, which is not the same thing.

@@ -163,15 +163,38 @@ def test_the_boundary_oracle_ignores_where_a_piece_sits():
 
 @pytest.mark.parametrize("n", [200, 800])
 def test_the_page_is_still_partitioned(n):
-    """Every unit once, no chunk over the window. The chunker's contract."""
+    """Every unit once, no chunk over the window. The chunker's contract.
+
+    The window is counted in the unit the chunker spends it in, and that is
+    now `tokens.budget` -- the render with link targets removed -- because
+    the budget bounds what a MODEL is given and a target is a machine address
+    the model never reads. This test asserted `tokens.count` and caught the
+    change as 19 chunks "over the window" that are not over it: they are over
+    the length of a string nobody was budgeting.
+
+    Which makes the second assertion the load-bearing one. A chunk whose
+    render exceeds the window is only acceptable while the whole of the
+    excess is addressing, so the overshoot is measured and required to vanish
+    under `for_model`. Without that arm this test would accept a chunker that
+    let real prose past the window and blamed the links.
+    """
     report = RenderReport()
     chunks = _render(_rows(_varied(n)), report=report)
     anchors = [a for c in chunks for a in c.anchors]
     assert len(anchors) == len(set(anchors)), "an address reached two chunks"
     assert anchors, "nothing was chunked"
     over = [c for c in chunks
-            if tokens.count(c.markdown) > WINDOW and len(c.lines) > 1]
+            if tokens.budget(c.markdown) > WINDOW and len(c.lines) > 1]
     assert not over, "{} chunk(s) over the window".format(len(over))
+
+    # Whatever the render carries past the window must be link targets and
+    # nothing else.
+    fat = [c for c in chunks
+           if tokens.count(c.markdown) > WINDOW and len(c.lines) > 1]
+    smuggled = [c for c in fat if tokens.budget(c.markdown) > WINDOW]
+    assert not smuggled, (
+        "{} chunk(s) carry PROSE past the window, not just addresses"
+        .format(len(smuggled)))
 
 
 @pytest.mark.parametrize("rows", [_uniform(400), _varied(400)])

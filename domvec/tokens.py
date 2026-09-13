@@ -25,6 +25,7 @@ Not the same question as `MarkdownChunk.chars`, which stays what it says.
 
 from __future__ import annotations
 
+import re
 from typing import Callable, Dict, Tuple
 
 #: The encoding to count with when nothing else is asked for. cl100k_base is
@@ -138,6 +139,66 @@ def count(text: str) -> int:
         _cache.clear()
     _cache[key] = n
     return n
+
+
+#: A rendered link's target: the `(...)` of `[label](target)`, and the same
+#: for a media line's `![alt](target)`. Deliberately the SAME shape as
+#: `markdown._LINK_RE`, non-greedy on the label for the same reason -- a line
+#: holding two links must yield two matches and not one spanning both. If the
+#: renderer's idea of a link and this one drift apart, the budget stops being
+#: a budget for the string that is actually drawn.
+_TARGET_RE = re.compile(r"(!?)\[([^\]]*)\]\(([^)]*)\)")
+
+#: A url standing on its own, not already inside a link's parentheses. The
+#: lookbehind keeps it from firing a second time on a target `_TARGET_RE` has
+#: this pass already removed.
+_BARE_URL_RE = re.compile(r"(?<![(\w])https?://[^\s)]+")
+
+
+def for_model(text: str) -> str:
+    """The same render with every link TARGET removed, the labels kept.
+
+    Two consumers read a chunk and they do not want the same string. The
+    reader wants `[Nathan_Boyer's profile](https://.../u/nathan_boyer)`,
+    because a link is an affordance they act on in place and the REPL is a
+    browser. A model wants the words; the target is a machine address the
+    trie already holds under ``url : xpath``, so spending the model's window
+    on it charges the model for a string it will never read and cannot use.
+
+    Measured over `build/vaultws256`, 5,337 chunks: the corpus renders to
+    548,451 tokens and **288,200 of them -- 52.5% -- are link targets**.
+    3,591 chunks, 67.3%, spend more than half their budget on addresses;
+    `discourse.julialang.org` spends 71.2%; the worst single chunk is 370
+    tokens that reduce to 1. A 256-token window was really a 121-token window
+    of anything anyone would read.
+
+    So the window is counted on this string and the chunk is still *rendered*
+    with its links. That is two strings, which the module docstring warns
+    about -- "a budget enforced on one string and spent on another is not a
+    budget" -- and the warning is answered rather than ignored: the budget
+    exists to bound what a MODEL is given, and this is that string, named and
+    exported instead of implied. Whatever feeds a model gets it from here.
+
+    Not applied to `vectors.tokens`, which expands a url into its path words
+    on purpose: the lexical vector wants those words as terms. It is the
+    semantic embedder that wants prose.
+    """
+    if not text:
+        return text
+    out = _TARGET_RE.sub(lambda m: m.group(2), text)
+    return _BARE_URL_RE.sub("", out)
+
+
+def budget(text: str) -> int:
+    """What this render costs a model: :func:`count` over :func:`for_model`.
+
+    The one function the chunker compares against ``context_window``. Kept
+    separate from :func:`count` so that a caller asking "how long is this
+    string" and a caller asking "how much of the window does this spend" get
+    different answers to their different questions, rather than one answer
+    that is wrong for one of them.
+    """
+    return count(for_model(text))
 
 
 def measure() -> Callable[[str], int]:

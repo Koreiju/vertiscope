@@ -1588,10 +1588,14 @@ def _render_sized(
                         depth_of=depth_of, base=base)
     rendered = MarkdownChunk(url=url, xpath=xpath,
                              lines=_inline_flow(_join_labels(_join_media(lines))))
-    # Measured in the window's unit, not in characters. `.chars` is still
-    # `.chars`; this is the number the descent compares against `window`,
-    # and the two are only the same when the unit in force is characters.
-    sized = (rendered, tokens.count(rendered.markdown))
+    # Measured in the window's unit, not in characters, and over the string
+    # a MODEL is given rather than the one a reader is served. `.chars` is
+    # still `.chars`; this is the number the descent compares against
+    # `window`, and the two are only the same when the unit in force is
+    # characters. `tokens.budget` drops link targets first: 52.5% of this
+    # corpus's rendered tokens are addresses, so counting them made a
+    # 256-token window a 121-token one for anything anyone would read.
+    sized = (rendered, tokens.budget(rendered.markdown))
     if key is not None:
         memo.put(key, sized)
     return sized
@@ -2890,10 +2894,12 @@ def _emit_runs(
     size = 0
     for line in chunk.lines:
         # The line as it will be written, indentation included, measured the
-        # same way the whole chunk was. Summing a differently-measured
-        # per-line cost against a window set in tokens is how a run ends up
-        # three times the size it was allowed.
-        cost = tokens.count(line.render())
+        # same way the whole chunk was -- `budget`, not `count`, because the
+        # descent above sized the whole chunk that way. Summing a
+        # differently-measured per-line cost against a window set in tokens is
+        # how a run ends up three times the size it was allowed, and mixing
+        # the two counters here would do it again in the other direction.
+        cost = tokens.budget(line.render())
         if run and size + cost + 1 > window:
             out.append(_part_of(chunk, run, len(out)))
             run, size = [], 0

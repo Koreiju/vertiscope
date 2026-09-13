@@ -479,8 +479,8 @@ def _note(chunk, body: str, place: Optional[_Place] = None) -> str:
         # cut against. They were not: the window was 1200 CHARACTERS and the
         # notes it produced held a median of 165 tokens, 8% of a 2048-token
         # one. A number nobody can see is a number nobody checks.
-        "tokens: %d" % tokens.count(chunk.md if hasattr(chunk, "md")
-                                    else chunk.markdown),
+        "tokens: %d" % tokens.budget(chunk.md if hasattr(chunk, "md")
+                                     else chunk.markdown),
         "chars: %d" % chunk.chars,
     ]
     if place:

@@ -133,7 +133,10 @@ def chunk_payload(workspace, cid: str) -> Optional[Dict]:
         # window it was cut against, so a surface can show fill rather than
         # leaving "are these chunks the right size" a question nobody can
         # answer from the vault.
-        "tokens": tokens.count(stored.md or ""),
+        # What the chunk spends of the WINDOW, which is what the badge
+        # beside it is a fraction of. `count` here would report a number the
+        # window was never compared against.
+        "tokens": tokens.budget(stored.md or ""),
         "window": int(self_window),
     }
 

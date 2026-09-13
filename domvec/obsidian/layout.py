@@ -234,7 +234,7 @@ def build_layout(workspace,
             "title": _title(chunk.md),
             "rank": float(ranks[row]) if row < len(ranks) else 0.0,
             "chars": chunk.chars,
-            "tokens": tokens.count(chunk.md or ""),
+            "tokens": tokens.budget(chunk.md or ""),
             "pos": [float(v) for v in coords[i][:dims]],
         }
         if colours is not None:

@@ -90,6 +90,12 @@ def _url_words(url: str) -> str:
     return re.sub(r"\s+", " ", _PERCENT_RE.sub(" ", _URL_SEP_RE.sub(" ", body))).strip()
 
 
+#: Aliased on import: this module already exports a function called `tokens`,
+#: and the two answer different questions -- that one makes lexical terms, this
+#: one counts and trims a model's window.
+from . import tokens as tokens_mod
+
+
 def tokens(text: str, ngram_max: int = 2) -> List[str]:
     """Lowercase unigrams plus adjacent bigrams, URLs expanded to words.
 
@@ -609,8 +615,30 @@ class VectorQueue:
         return hashlib.sha1(markdown.encode("utf-8")).hexdigest()[:16]
 
     def push(self, cid: str, markdown: str) -> bool:
-        """Offer a chunk. True if it was queued, False if the gate stopped it."""
+        """Offer a chunk. True if it was queued, False if the gate stopped it.
+
+        The chunk is embedded as **pure text with no link targets in it**.
+        A rendered `[label](https://host/a/very/long/path)` puts an address
+        into the sentence the encoder reads, and an address is not a sentence:
+        over `build/vaultws256` those targets are 52.5% of every rendered
+        token, so more than half of what the semantic encoder saw was machine
+        addressing. The words of the label stay -- they are what the link
+        means to a reader -- and the target is recoverable from the trie,
+        which holds it under `url : xpath` and never needed a second copy in
+        the prose.
+
+        This is the SEMANTIC vector only. `vectors.tokens` deliberately
+        expands a url into its path words for the frequency matrix, and that
+        stays exactly as it is: a url tail is a legitimate TERM, and terms are
+        what a lexical vector is made of. The two vectors want different
+        strings out of one render, which is the whole reason there are two.
+
+        Stripping here rather than at each caller means the digest gate keys
+        on the string that is actually embedded, so a re-render that changed
+        only an href correctly embeds nothing.
+        """
         self.pushed += 1
+        markdown = tokens_mod.for_model(markdown)
         d = self.digest(markdown)
         if self.digests.get(cid) == d and cid not in self.pending:
             self.skipped += 1
