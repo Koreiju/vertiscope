@@ -10,7 +10,8 @@
  * goes unnoticed.
  */
 
-import { ChunkPayload, EnactResult, Health, SearchResult } from "./types";
+import { ChunkPayload, EnactResult, Health, KernelReply, SearchResult }
+  from "./types";
 
 export class Sidecar {
   constructor(private base: () => string) {}
@@ -106,6 +107,36 @@ export class Sidecar {
         body: JSON.stringify({ address, action, text }),
       });
       return (await res.json()) as EnactResult;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Run one notebook cell in its note's kernel.
+   *
+   * POST, and for the same reason `enact` is not routed through `get`: that
+   * retries once on a thrown error, which is right for reading a chunk and
+   * wrong for an ACTION. A cell that failed halfway may already have written a
+   * file or mutated state, and running it again is not the same as running it
+   * once.
+   *
+   * A non-ok response is returned rather than swallowed. The server answers 403
+   * when the kernel is off and 400 when the request is wrong, and both carry a
+   * `detail` the reader needs -- turning either into `null` would make "not
+   * enabled" indistinguishable from "no sidecar".
+   */
+  async runCell(note: string, code: string,
+                lang = "python"): Promise<KernelReply | null> {
+    const base = this.base().trim().replace(/\/+$/, "");
+    if (!base) return null;
+    try {
+      const res = await fetch(`${base}/kernel`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ note, code, lang }),
+      });
+      return (await res.json()) as KernelReply;
     } catch {
       return null;
     }

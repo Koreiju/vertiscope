@@ -164,6 +164,7 @@ def search_payload(workspace, query: str, k: int = 8) -> Dict:
 class _Handler(BaseHTTPRequestHandler):
     workspace = None            # set by serve()
     enact_allowed = False       # set by serve(); the write path's gate
+    kernel_pool = None          # set by serve(); None means --kernel was off
 
     # Silence the default stderr access log: it prints the requested path, and
     # the path carries the cid of whatever the reader is looking at.
@@ -207,11 +208,24 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_POST(self) -> None:                      # noqa: N802 (stdlib name)
-        """The only write path, and only when the server was asked for one."""
+        """The acting routes, each only when the server was asked for one.
+
+        Two now, and they are gated separately on purpose. `enact` presses a
+        control in a real browser; `kernel` runs arbitrary Python with this
+        process's privileges. Those are different sizes of permission and a
+        reader who wanted a notebook did not thereby ask for a vault that can
+        drive the web, nor the reverse.
+        """
         parts = urlsplit(self.path)
-        if parts.path.strip("/") != "enact":
+        route = parts.path.strip("/")
+        if route not in ("enact", "kernel"):
             self._send(404, {"error": "no such route", "path": parts.path})
             return
+
+        if route == "kernel":
+            self._post_kernel()
+            return
+
         if not self.enact_allowed:
             # Named rather than a bare 403: a caller that cannot tell "off" from
             # "failed" will retry forever, and a reader of the surface deserves
@@ -241,6 +255,68 @@ class _Handler(BaseHTTPRequestHandler):
         except Exception as exc:                    # noqa: BLE001
             self._send(500, {"error": "%s: %s" % (type(exc).__name__, exc)})
 
+    def _post_kernel(self) -> None:
+        """Run one cell in its note's kernel.
+
+        Body: ``{"note": "<vault path>", "code": "...", "op": "restart"?}``.
+
+        `note` is required and is not defaulted. It is the isolation boundary —
+        `NOTEBOOK_PANEL_DESIGN` §4, variables shared within a note and isolated
+        across notes — so a missing one would silently put every cell in the
+        vault into one shared namespace, which is the failure this design exists
+        to avoid and would look like a mysterious name collision rather than a
+        missing field.
+        """
+        if self.kernel_pool is None:
+            # Named, not a bare 403: a caller that cannot tell "off" from
+            # "failed" retries forever, and the panel should be able to draw the
+            # button as unavailable rather than broken.
+            self._send(403, {
+                "error": "kernel is off",
+                "detail": "start the sidecar with --kernel to run cells from "
+                          "the vault. It executes arbitrary Python with this "
+                          "process's privileges, so it is off by default."})
+            return
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+            body = json.loads(self.rfile.read(length) or b"{}")
+        except Exception as exc:                    # noqa: BLE001
+            self._send(400, {"error": "bad body: %s" % exc})
+            return
+
+        note = (body.get("note") or "").strip()
+        if not note:
+            self._send(400, {"error": "missing note",
+                             "detail": "the note path is the isolation "
+                                       "boundary; without it every cell would "
+                                       "share one namespace"})
+            return
+
+        if body.get("op") == "restart":
+            self._send(200, {"restarted": self.kernel_pool.restart(note),
+                             "note": note})
+            return
+
+        code = body.get("code")
+        if not isinstance(code, str) or not code.strip():
+            self._send(400, {"error": "missing code"})
+            return
+
+        lang = (body.get("lang") or "python").lower()
+        if lang not in ("python", "py", "python3"):
+            # Step 3 is python only, and says so rather than running python and
+            # pretending it ran bash.
+            self._send(400, {
+                "error": f"unsupported language {lang!r}",
+                "detail": "this kernel runs python; a shell is P-N2's separate "
+                          "pane and is not built yet"})
+            return
+
+        try:
+            self._send(200, self.kernel_pool.run(note, code))
+        except Exception as exc:                    # noqa: BLE001
+            self._send(500, {"error": "%s: %s" % (type(exc).__name__, exc)})
+
     def do_GET(self) -> None:                       # noqa: N802 (stdlib name)
         parts = urlsplit(self.path)
         segments = [unquote(s) for s in parts.path.strip("/").split("/") if s]
@@ -250,7 +326,11 @@ class _Handler(BaseHTTPRequestHandler):
             # surface as read-only rather than offering a button that 403s.
             self._send(200, {"ok": True,
                              "pages": len(self.workspace.pages()),
-                             "enact": bool(self.enact_allowed)})
+                             "enact": bool(self.enact_allowed),
+                             # Advertised so the panel can draw a run button as
+                             # disabled rather than offering one that 403s --
+                             # the same reason `enact` is advertised.
+                             "kernel": self.kernel_pool is not None})
             return
 
         if segments[0] == "chunk" and len(segments) == 2:
@@ -291,6 +371,15 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(200, type(self)._layout)
             return
 
+        if segments[0] == "kernel":
+            # What is running, so a reader can tell a lost namespace from a
+            # kernel that never started.
+            if self.kernel_pool is None:
+                self._send(200, {"enabled": False, "kernels": []})
+            else:
+                self._send(200, dict(self.kernel_pool.status(), enabled=True))
+            return
+
         if segments[0] == "search":
             params = parse_qs(parts.query)
             query = (params.get("q") or [""])[0]
@@ -312,14 +401,27 @@ class _Handler(BaseHTTPRequestHandler):
 
 
 def serve(workspace, port: int = 8787, *, block: bool = True,
-          enact: bool = False):
+          enact: bool = False, kernel: bool = False,
+          kernel_timeout: Optional[float] = None):
     """Answer on loopback until stopped.
 
     Returns the server so a caller that passed ``block=False`` can shut it
     down; a test that leaks one wedges the port for the next run.
+
+    ``kernel`` starts a pool of per-note Python subprocesses and opens
+    ``POST /kernel``. It is off by default because it runs arbitrary code with
+    this process's privileges, which is a larger permission than anything else
+    here, and it is a SEPARATE flag from ``enact`` because a reader who wanted a
+    notebook did not thereby ask for a vault that can drive the web.
     """
+    pool = None
+    if kernel:
+        from .kernel import DEFAULT_TIMEOUT, KernelPool
+        pool = KernelPool(timeout=kernel_timeout or DEFAULT_TIMEOUT)
+
     handler = type("_Bound", (_Handler,),
-                   {"workspace": workspace, "enact_allowed": bool(enact)})
+                   {"workspace": workspace, "enact_allowed": bool(enact),
+                    "kernel_pool": pool})
 
     class _Server(ThreadingHTTPServer):
         # A vault opens many chunks at once -- a note with several `domvec`
@@ -337,12 +439,21 @@ def serve(workspace, port: int = 8787, *, block: bool = True,
         daemon_threads = True
 
     server = _Server(("127.0.0.1", port), handler)
+    # The pool hangs off the server so a `block=False` caller can reach it, and
+    # so nothing else has to remember it exists.
+    server.kernel_pool = pool
     if block:
         try:
             server.serve_forever()
         except KeyboardInterrupt:
             pass
         finally:
+            # Kernels are child PROCESSES, and they go before the socket does.
+            # A Ctrl-C that left them running would leak an interpreter per
+            # note, and the next run would find the machine slower for reasons
+            # nothing on screen explains.
+            if pool is not None:
+                pool.shutdown()
             server.server_close()
         return server
     threading.Thread(target=server.serve_forever, daemon=True).start()

@@ -315,12 +315,49 @@ Each step ends somewhere verifiable over CDP (`X-2`), never a screenshot.
 |---|---|---|
 | 1 | ~~Note addressing~~ **DONE** — `domvec/vault.py`, `Workspace.index_note`, `domvec notes` | `T-5`: 18 docs -> 786 chunks / 2,697 addresses, and retrieval answers from them. 13 tests, one of them the renderer arm |
 | 2 | ~~Fence detection + `▶ run` in both views~~ **DONE** — `src/fences.ts`, `src/runbutton.ts` | both paths draw one button per runnable fence and none on a `json` fence; both fire with the same lang, line and byte-identical source. `probes/run-buttons.js`, 9 checks |
-| 3 | Subprocess kernel, python only, per-note state | two cells share a variable; two notes do not |
+| 3 | ~~Subprocess kernel, python only, per-note state~~ **DONE** — `domvec/obsidian/kernel.py`, `_kernel_driver.py`, `POST /kernel` | two cells share a variable and two notes do not, asserted through the button in the running app. 14 pytest + `probes/kernel-run.js` (6 checks) |
 | 4 | Output markers written, read, re-rendered | output survives a restart and renders in reading view |
 | 5 | Outputs are chunked and vectorised (`P-N5`/`P-N6`) | an output is *retrievable* by `[[]]` — the proof that it is trie content |
 | 6 | Kernel run surface below the artifact; command terminal in a *separate pane* (§4a); interpreter discovery | a cell runs in-panel AND a separate pane gives a pwsh prompt; discovery lists installed kernels |
 | 7 | `P-N8` chunk overlay | gutter marks match `/chunk` addresses from the sidecar |
 | 8 | `P-N9`/`P-N10` selection → address set → SLM context | the SLM's prompt contains exactly the selected addresses' content |
+
+**What step 3 settled that the design had not.**
+
+- **The kernel lives in the sidecar, and that was the user's call.** The
+  alternative was the plugin spawning processes, which means they outlive a
+  pane, a plugin reload leaks them, and nothing holds a list of what is running.
+  The sidecar is already the one long-lived process, already has a gate for its
+  dangerous route, and already answers only on loopback — one door instead of
+  two. `GET /kernel` is that list.
+- **Two permissions, gated separately.** `--enact` presses a control in a real
+  browser; `--kernel` runs arbitrary Python with the sidecar's privileges. One
+  flag for both would grant whichever the reader did not want, so there are two,
+  both off by default, both advertised on `/health` so the panel can draw a
+  button unavailable rather than offering one that 403s. Startup names whichever
+  is on, loudly.
+- **A blocking `readline` cannot enforce a timeout.** The first version checked
+  the clock between reads, and `while True: pass` produces exactly one read that
+  never returns — it hung indefinitely with a 2s limit set. `select` does not
+  take pipes on Windows, so a watchdog thread kills the process instead, which is
+  what we wanted anyway: the cell has to die, and killing it makes `readline`
+  return EOF. Two events, not one, because a single flag cannot tell a timeout's
+  EOF from a cell that called `os._exit`.
+- **A killed sidecar does not orphan kernels**, and the reason is the driver
+  reading stdin to EOF: the pipe closes with the parent and the loop ends.
+  Measured — four live kernels, `Stop-Process -Force`, zero four seconds later.
+  This is why the driver must not block on a socket or poll a queue instead.
+- **Replies are marked, because they share stdout with the cell.** `print` is the
+  point of a notebook, so a reply on the same stream could not be told from user
+  output. Every reply carries a unit-separator prefix and unmarked lines are
+  dropped as noise — without that, a cell writing to `sys.__stdout__` kills the
+  kernel.
+- **Whenever the namespace is not the one the last cell left, the reply says so**
+  — started, died, killed on timeout, or evicted, naming which note's kernel was
+  retired. A silently-empty variable reads as a bug in the reader's own code.
+- **The note is required and never defaulted.** It is the isolation boundary, so
+  a default would put every cell in the vault into one namespace — surfacing as a
+  mysterious collision between unrelated notes rather than as a missing field.
 
 **What step 2 settled that the design had not.**
 

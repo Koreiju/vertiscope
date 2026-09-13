@@ -40,7 +40,9 @@ export interface RunRequest {
 }
 
 export interface RunHost {
-  onRunFence(req: RunRequest): void;
+  /** Async, and the return is not awaited by the caller: a click must not
+   *  block the editor while a cell runs. */
+  onRunFence(req: RunRequest): void | Promise<void>;
 }
 
 /** The shared button, so the two paths cannot drift in label or class. */

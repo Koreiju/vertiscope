@@ -139,21 +139,66 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
   }
 
   /**
-   * A fence's run button was pressed.
+   * A fence's run button was pressed: run it in the note's kernel.
    *
-   * Step 2 draws the button; step 3 gives it a kernel. Until then this SAYS so,
-   * with the cell it would have run. A button that quietly did nothing is the
-   * phantom affordance `PLUGIN_PRD` scores against, and one that claimed to
-   * have run would be worse than either.
+   * The NOTE is sent, not the cell, because the note is the isolation boundary
+   * (`NOTEBOOK_PANEL_DESIGN` §4): variables are shared between cells of one note
+   * and isolated across notes. Without a path there is no boundary to name, so
+   * this refuses rather than letting the server default one — a defaulted note
+   * would put every cell in the vault into one namespace, which surfaces as a
+   * mysterious collision between unrelated notes.
+   *
+   * Step 4 writes the result into the note as an output block. Until then it is
+   * a Notice, which is honest about being transient rather than looking like
+   * persistence that failed.
    */
-  onRunFence(req: RunRequest): void {
-    const where = req.line >= 0 ? `line ${req.line + 1}` : "unknown line";
-    new Notice(
-      `domvec: no kernel yet — would run ${req.lang} ` +
-      `(${req.code.split("\n").length} line(s)) at ${where}` +
-      (req.path ? ` of ${req.path}` : ""),
-      6000,
-    );
+  async onRunFence(req: RunRequest): Promise<void> {
+    const note = req.path || this.app.workspace.getActiveFile()?.path || "";
+    if (!note) {
+      new Notice("domvec: cannot run a cell outside a note — " +
+                 "the note is the kernel's isolation boundary", 6000);
+      return;
+    }
+
+    const running = new Notice(`domvec: running ${req.lang}…`, 0);
+    let reply;
+    try {
+      reply = await this.sidecar.runCell(note, req.code, req.lang);
+    } finally {
+      running.hide();
+    }
+
+    if (!reply) {
+      new Notice(`domvec: no sidecar at ${this.settings.sidecar || "(unset)"} ` +
+                 "— cannot run cells", 6000);
+      return;
+    }
+    if (reply.error && reply.ok === undefined) {
+      // The server refused rather than the cell failing: 403 when the kernel is
+      // off, 400 when the request was wrong. Both carry a `detail` that says
+      // what to do, and showing it is the difference between "off" and "broken".
+      new Notice(`domvec: ${reply.error}` +
+                 (reply.detail ? ` — ${reply.detail}` : ""), 9000);
+      return;
+    }
+
+    // Whenever the namespace is not the one the previous cell left, say so. A
+    // silently-empty variable reads as a bug in the reader's own code.
+    const notes: string[] = [];
+    if (reply.kernel) notes.push(reply.kernel);
+    if (reply.evicted) notes.push(`retired ${reply.evicted}'s kernel`);
+
+    if (!reply.ok) {
+      const last = (reply.error || "").trim().split("\n").pop() || "failed";
+      new Notice(`domvec [${reply.count ?? "?"}] ${last}` +
+                 (notes.length ? ` (${notes.join("; ")})` : ""), 9000);
+      return;
+    }
+    const shown = [reply.stdout, reply.stderr, reply.value ?? ""]
+      .filter((s) => s && s.trim()).join("\n").trim();
+    new Notice(`domvec [${reply.count ?? "?"}] ` +
+               (shown || "ok, no output") +
+               (notes.length ? `\n(${notes.join("; ")})` : ""), 8000);
   }
 
   onunload() {

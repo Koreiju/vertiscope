@@ -78,6 +78,36 @@ export interface Health {
    * does, via `--enact`.
    */
   enact: boolean;
+  /**
+   * Whether the SERVER will run notebook cells.
+   *
+   * Advertised for the same reason `enact` is, and gated separately: running
+   * code from a note is a larger permission than pressing a button in a
+   * browser, and a reader who wanted one did not thereby ask for the other.
+   * Absent from an older sidecar, so read it as optional and treat missing as
+   * off -- the safe direction to be wrong in.
+   */
+  kernel?: boolean;
+}
+
+/** One cell's result, from `POST /kernel`. */
+export interface KernelReply {
+  ok?: boolean;
+  stdout?: string;
+  stderr?: string;
+  /** `repr()` of a trailing expression, absent when the cell ended in a
+   *  statement. `None` is deliberately not reported. */
+  value?: string | null;
+  /** A formatted traceback when the cell raised, or the server's own refusal. */
+  error?: string;
+  detail?: string;
+  /** How many cells this kernel has run, which is the execution count. */
+  count?: number;
+  /** Said when the kernel was started, or died, or was killed on a timeout --
+   *  i.e. whenever the namespace is not the one the previous cell left. */
+  kernel?: string;
+  /** Which note's kernel was retired to make room for this one. */
+  evicted?: string;
 }
 
 export interface EnactResult {

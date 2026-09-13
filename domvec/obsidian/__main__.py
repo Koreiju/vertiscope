@@ -39,6 +39,16 @@ def main(argv=None) -> int:
     sv = sub.add_parser("serve", help="loopback read-only window on the store")
     sv.add_argument("--workspace", required=True, type=Path)
     sv.add_argument("--port", type=int, default=8787)
+    sv.add_argument("--kernel", action="store_true",
+                    help="run notebook cells from the vault: opens "
+                         "POST /kernel, one persistent Python subprocess per "
+                         "note. Off by default because it executes arbitrary "
+                         "code with this process's privileges -- a LARGER "
+                         "permission than --enact, and gated separately for "
+                         "that reason.")
+    sv.add_argument("--kernel-timeout", type=float, default=None,
+                    help="seconds one cell may run before its kernel is "
+                         "killed (default 60)")
     sv.add_argument("--enact", action="store_true",
                     help="let the vault DRIVE the live page: clicking a "
                          "control in Obsidian presses it in a real browser. "
@@ -60,11 +70,20 @@ def main(argv=None) -> int:
     read_only = not getattr(args, "enact", False)
     with Workspace(args.workspace, read_only=read_only) as ws:
         if args.cmd == "serve":
+            # Both capabilities are named at startup, and loudly. A reader who
+            # cannot see from the terminal what this process is allowed to do
+            # has to read the command line to find out, and the command line is
+            # the thing they may have got wrong.
+            powers = []
+            if args.enact:
+                powers.append("ENACT -- the vault can drive a browser")
+            if args.kernel:
+                powers.append("KERNEL -- the vault can RUN PYTHON here")
             print("domvec sidecar on http://127.0.0.1:%d  (%d pages, %s)"
                   % (args.port, len(ws.pages()),
-                     "ENACT ENABLED -- the vault can drive a browser"
-                     if args.enact else "read-only"))
-            serve(ws, port=args.port, enact=args.enact)
+                     " + ".join(powers) if powers else "read-only"))
+            serve(ws, port=args.port, enact=args.enact,
+                  kernel=args.kernel, kernel_timeout=args.kernel_timeout)
             return 0
 
         if not args.url and not args.all_pages:
