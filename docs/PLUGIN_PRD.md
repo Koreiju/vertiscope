@@ -29,7 +29,7 @@ Those ids are retired as requirements and retained as anchors.
 | D-4 | `markdown.py` is tuned "17:1 toward leaving noise rather than risking loss" and `_dedupe` is element-scoped | *"full deduplication of repeat substrings that are essentially structural redundancies of the web pages themselves"* | **Defect** |
 | D-5 | Markdown renders no tables at all | *"a hierarchically-header-structured markdown document with tables, images, web links"* | **Defect** |
 | ~~D-6~~ | ~~The delta path re-admits a chunk it should have reassigned or popped~~ | **WITHDRAWN 2026-09-12 — not demonstrated.** The evidence for it was a metric that could not tell two real siblings from one re-addressed node. `--resolvable`: 0 unresolvable of 719. `--drift --kind insert`: 0 stale, 0 lost over ~190 moved addresses ×3. See §M.3 for what remains untested | — |
-| D-8 | A `src` detection and an `alt` detection at one `<img>` are drawn as TWO media lines, so the url and its caption are separate and the url's line has no text | *"image, links, embedded links"* at the Milkdown bar, and `M-11`'s chunk-level quality | **Defect** — 365 of 835 media-bearing chunks (§M.5.1) |
+| ~~D-8~~ | ~~A `src` detection and an `alt` detection at one `<img>` are drawn as TWO media lines~~ | **FIXED 2026-09-13** — `markdown._join_media` merges the pair at one element, keeping the url's address and absorbing the alt's. A fresh live scan of the reporting site: **0 pairs**, against 365 before. §M.5.1 | — |
 | D-9 | A chunk rooted at a `<tr>` carries its cells' VALUES and none of their names, though the header at the same `td[n]` position is in the trie | `M-10` full structural preservation; `M-11` the chunk is what gets embedded | **Defect** — 44 of 79 row chunks (§M.5.2) |
 | ~~D-7~~ | ~~A media element with no alt text renders as a bare `![images]`~~ | **WITHDRAWN 2026-09-12 — not a defect.** Already fixed by `499fd6d` (M-9). Filed against `vaultws512`, built 34 minutes BEFORE that commit. On the 256 re-cut: **0 bare placeholders, 1,073 named**. See §M.0 | — |
 
@@ -1321,9 +1321,52 @@ image, and drawing them as two lines both doubles the media and produces the
 "empty image with no text" that was reported, because the line carrying the url
 is the one WITHOUT the alt.
 
-This is adjacent to `D-7`, which was withdrawn correctly — `499fd6d` stopped the
-taxonomy being drawn as a caption. It did not merge the two accessors, and that
-is the part still outstanding.
+**And it is a LIVE-SENSOR defect only, which is the sharper finding.** The two
+taggers disagree about what an `alt` IS:
+
+| at one `<img>` | `src` | `alt` |
+|---|---|---|
+| offline `ContentTagger` | `media.images` | **`text.accessible`** |
+| live `sensor.js` | `image` | **`image`** |
+
+The offline path calls the alt TEXT, and the existing element-scoped `_dedupe`
+absorbs it into the image's line as a caption. The live path calls it an IMAGE,
+so `_RENDER["image"]` draws a second `![…]`. That is why no fixture reproduces
+this and why a test built on `index_html` would have passed against the bug —
+the bug cannot occur on that path.
+
+This is the recurring class in `CLAUDE.md`'s own terms: **one taxonomy with two
+spellings, sensor and tagger.** The projection fix below is correct and
+sufficient for the rendering; making the two taggers agree about `alt` is a
+separate and deeper question, and is NOT done.
+
+**Fixed** by `markdown._join_media`, a line pass beside `_join_labels`. It merges
+two media lines at one element, keeps the address carrying the URL — the url is
+the media's identity, what `is_url` reports and a reader clicks — and records the
+dropped address in `absorbed`, which exists for exactly this: *"other spellings
+of the same fact at the same element… what it needs is to remain findable."*
+
+`_dedupe` could not have done it and should not be asked to. It collapses by
+token subsumption and states the rule: *"URLs never collapse against prose…a
+link and its label are different data even when the strings coincide."* A url and
+its alt ARE a link and its label; they survive that rule by design, and are one
+picture all the same — a fact about media, not about tokens.
+
+Two things it deliberately does not merge, each with a test: two different
+elements (the reason `_dedupe` is element-scoped — a chunk-scoped version
+"collapsed every card in a grid sharing a placeholder image down to one"), and
+two different urls at one element, which is a `<picture>` and its sources.
+
+**Verified on a fresh live scan of the reporting site**: 0 same-url pairs
+against 365 in the store scanned before the fix.
+
+**What is NOT fixed, stated so it is not read as fixed.** 74 of that scan's 187
+media lines still carry an empty alt. Those are images the page gave no alt
+for, where `![]` is markdown's own honest form and `499fd6d`'s reasoning says
+drawing anything else would be inventing a caption. The report is answered where
+a caption EXISTED; where the page supplies none, there is nothing to attach and
+the question becomes whether nearby text should be associated with it — which is
+`M-4`/`M-10` and not this.
 
 #### M.5.2 — naked fields: a row without its headers
 

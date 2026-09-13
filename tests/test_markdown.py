@@ -341,15 +341,18 @@ def test_a_media_placeholder_does_not_invent_a_target():
 
 
 def test_the_placeholder_stays_but_stops_inventing_a_target():
-    """An `<img>` yields `![images](img)` and `![images](media/…)`.
+    """An `<img>` yields two detections, and draws one line.
 
-    Dropping the first looks obviously right — one image, described twice —
-    and it was tried. `test_suppressed_units_are_a_deliberate_choice_not_a_
-    leak` failed on 20 units and was correct to: those are two *addresses*
+    Dropping one of them outright looks obviously right — one image, described
+    twice — and it was tried. `test_suppressed_units_are_a_deliberate_choice_
+    not_a_leak` failed on 20 units and was correct to: those are two *addresses*
     with different accessors (`text()` and `src`), and a url/media address
     vanishing from the output is exactly what that guard is for.
 
-    So the placeholder keeps its line and loses only the invented target.
+    The answer is to MERGE rather than to drop (`_join_media`, D-8): one line
+    carrying both the caption and the target, with the second address recorded
+    as `inline` because its words are visibly in that line. The leak guard
+    passes, because nothing vanished.
 
     It is named for the PICTURE, not for the taxonomy that found it. This
     asserted `![images]` when the alt on that very element said "A Book" --
@@ -364,19 +367,28 @@ def test_the_placeholder_stays_but_stops_inventing_a_target():
     assert not any("(img)" in l for l in lines)
     assert not any("![images]" in l for l in lines), lines
 
-    # The placeholder survives and names no target. Asserted as the property
-    # rather than as one exact line, because the line moved for a reason that
-    # has nothing to do with this test.
+    # One image is ONE line, and it carries both the caption and the target.
     #
-    # `_own_units_first` now collects an element's own units before its
-    # children, so the `<img>`'s `alt` sits beside its own placeholder and the
-    # inline flow joins them into `A Book ![A Book]`. That shape occurs ZERO
-    # times in 11,718 rendered lines over eight corpus pages -- it needs a
-    # page whose entire body is one `<img>`, which is this fixture and not the
-    # web. Pinning the exact string here would have made a real 76% -> 100%
-    # reading-order fix look like a regression.
-    bare = [l for l in lines if "![A Book]" in l and "![A Book](" not in l]
-    assert bare, lines
+    # This used to require a BARE `![A Book]` beside the targeted line -- two
+    # lines for one `<img>` -- and the reason given was that dropping one loses
+    # an address: `test_suppressed_units_are_a_deliberate_choice_not_a_leak`
+    # failed on 20 units when it was tried, and was right to.
+    #
+    # `_join_media` (D-8) merges them instead, and the address is not lost: the
+    # alt's words are visibly in the merged line, so it is recorded as `inline`
+    # -- which is what `covered` counts, and what that leak guard asks with. The
+    # guard passes. So the property the old shape was protecting still holds,
+    # by a mechanism that does not make a reader read one picture twice.
+    #
+    # Why the old shape had to go: on a live-scanned page BOTH detections at an
+    # `<img>` are tagged `image`, so the two lines were `![](url)` and
+    # `![alt](url)` -- the same url twice, with the caption on one line and the
+    # link on the other. 365 of 835 media-bearing chunks carried such a pair,
+    # and the line a reader could click was the one with no words on it.
+    merged = [l for l in lines if "![A Book](/media/cache/x.jpg)" in l]
+    assert merged, lines
+    # And exactly one line draws this picture.
+    assert len([l for l in lines if "![A Book]" in l]) == 1, lines
 
 
 def test_a_heading_built_from_parts_is_still_a_heading():

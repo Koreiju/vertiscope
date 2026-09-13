@@ -774,6 +774,99 @@ def _join_labels(lines: List[MarkdownLine]) -> List[MarkdownLine]:
     return out
 
 
+#: An image line, as `_RENDER["image"]` draws it: `![alt](url)` or `![alt]`.
+_MEDIA_LINE = re.compile(r"^!\[(?P<alt>[^\]]*)\](?:\((?P<url>[^)]*)\))?$")
+
+
+def _join_media(lines: List[MarkdownLine]) -> List[MarkdownLine]:
+    """One `<img>` is one line, not one line per accessor.
+
+    An image element yields TWO detections -- `src` and `alt` -- and that is
+    correct at the index: `ContentTag`'s key is
+    `(xpath, category, subcategory, source_attr, sub)`, so an attribute is part
+    of what is being addressed and the two are genuinely different findings.
+    The fault is in the projection, which drew each as its own line:
+
+        ![](https://s2.coinmarketcap.com/.../34466.png)      <- from `src`
+        ![PENGU logo](https://s2.coinmarketcap.com/.../34466.png)
+
+    Measured on `vaultws256`: 365 of 835 media-bearing chunks carried a pair
+    like that, and the harm is not only doubling. The line holding the URL is
+    the one WITHOUT the caption, so an image whose page gave a perfectly good
+    alt still reaches a reader as a bare url -- which is what "empty images
+    with no text" was reporting.
+
+    `_dedupe` cannot do this and should not be asked to. It collapses by token
+    subsumption and says so: *"URLs never collapse against prose and dedupe
+    only on exact equality: a link and its label are different data even when
+    the strings coincide."* That rule is right -- and a url and its alt are
+    exactly a link and its label, so the pair survives it by design. They are
+    one PICTURE all the same, and that is a fact about media rather than about
+    tokens.
+
+    Scoped to a single ELEMENT, like `_dedupe` and for the same recorded
+    reason: a chunk-scoped version "collapsed every card in a grid sharing a
+    placeholder image down to one, taking each card's address with it". Two
+    images are merged only when they are the same element, so a grid of cards
+    keeps one line each.
+
+    The surviving address is the one carrying the URL. The url is the media's
+    identity -- it is what `is_url` reports, what a `target` is read from, and
+    what a reader clicks -- where the alt is a caption of it. The dropped
+    address goes into `absorbed`, which exists for precisely this: *"other
+    spellings of the same fact at the same element... what it needs is to
+    remain findable."*
+    """
+    out: List[MarkdownLine] = []
+    i = 0
+    while i < len(lines):
+        cur = lines[i]
+        nxt = lines[i + 1] if i + 1 < len(lines) else None
+        merged = None
+        if nxt is not None and cur.address.xpath and \
+                cur.address.xpath == nxt.address.xpath:
+            a, b = _MEDIA_LINE.match(cur.text.strip()), \
+                   _MEDIA_LINE.match(nxt.text.strip())
+            if a and b:
+                url = (a.group("url") or "") or (b.group("url") or "")
+                alt = (a.group("alt") or "").strip() or \
+                      (b.group("alt") or "").strip()
+                # Only when they are the same picture. Two DIFFERENT urls at
+                # one element is a `<picture>` with its sources, and keeping
+                # one would drop a file the page might actually serve.
+                same = not (a.group("url") and b.group("url")
+                            and a.group("url") != b.group("url"))
+                if url and same:
+                    keeps_url = cur if a.group("url") else nxt
+                    other = nxt if keeps_url is cur else cur
+                    # `inline`, not `absorbed`, and the difference is not
+                    # bookkeeping. `MarkdownLine` defines absorbed as an
+                    # address whose "words are not separately visible" and
+                    # inline as one "MERGED -- its words are visibly in this
+                    # line and a reader can act on it there". The alt's words
+                    # ARE in the merged line: it reads `![PENGU logo](url)`.
+                    #
+                    # It also decides whether the render is honest about
+                    # itself. `covered` -- what the render DREW -- counts
+                    # inline and not absorbed, and
+                    # `test_suppressed_units_are_a_deliberate_choice_not_a_leak`
+                    # asks with `covered`. Filing a visibly-drawn address as
+                    # absorbed made 20 units read as vanished when their text
+                    # was on screen the whole time.
+                    merged = MarkdownLine(
+                        cur.depth, f"![{alt}]({url})", keeps_url.address,
+                        inline=keeps_url.inline + other.inline
+                               + (other.address,),
+                        absorbed=keeps_url.absorbed + other.absorbed)
+        if merged is not None:
+            out.append(merged)
+            i += 2
+            continue
+        out.append(cur)
+        i += 1
+    return out
+
+
 def _dedupe(units: List[Tuple[ContentAddress, str, str]],
             dropped_out: Optional[Dict[str, List[ContentAddress]]] = None
             ) -> List[Tuple[ContentAddress, str, str]]:
@@ -1494,7 +1587,7 @@ def _render_sized(
     lines = _draw_lines(kept, text_at=text_at, href_at=href_at,
                         depth_of=depth_of, base=base)
     rendered = MarkdownChunk(url=url, xpath=xpath,
-                             lines=_inline_flow(_join_labels(lines)))
+                             lines=_inline_flow(_join_labels(_join_media(lines))))
     # Measured in the window's unit, not in characters. `.chars` is still
     # `.chars`; this is the number the descent compares against `window`,
     # and the two are only the same when the unit in force is characters.
