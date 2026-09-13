@@ -57,7 +57,7 @@ _SCHEMA = [
     f"""CREATE NODE TABLE IF NOT EXISTS Chunk(
         cid STRING, url STRING, xpath STRING, part INT64, md STRING,
         chars INT64, line_count INT64, row INT64, embedding FLOAT[{EMBED_DIM}],
-        dup_of STRING, dup_n INT64,
+        dup_of STRING, dup_n INT64, group_of STRING, group_n INT64,
         PRIMARY KEY(cid))""",
     """CREATE NODE TABLE IF NOT EXISTS Address(
         aid STRING, akey STRING, url STRING, xpath STRING, tag STRING,
@@ -76,6 +76,8 @@ _SCHEMA = [
 _MIGRATIONS = [
     "ALTER TABLE Chunk ADD dup_of STRING",
     "ALTER TABLE Chunk ADD dup_n INT64",
+    "ALTER TABLE Chunk ADD group_of STRING",
+    "ALTER TABLE Chunk ADD group_n INT64",
 ]
 
 
@@ -133,6 +135,12 @@ class StoredChunk:
     #: How many chunks on the page draw this content, counting this one. 1
     #: unless this is the chunk the copies point at.
     dup_n: int = 1
+    #: The cid leading the merge group this chunk belongs to (`G-26`), or ""
+    #: when it belongs to none. Unlike `dup_of` this is NOT a claim that the
+    #: chunks are the same -- it is a claim that they read as one thing.
+    group_of: str = ""
+    #: How many chunks are in that group, carried on the lead.
+    group_n: int = 1
 
     @property
     def markdown(self) -> str:
@@ -142,6 +150,11 @@ class StoredChunk:
     def redundant(self) -> bool:
         """True when another chunk on this page already draws this."""
         return bool(self.dup_of)
+
+    @property
+    def leads_group(self) -> bool:
+        """True when this chunk is the one a merge group is filed under."""
+        return self.group_of == self.cid and self.group_n > 1
 
 
 def _same_content(chunks) -> tuple:
@@ -659,23 +672,81 @@ class GraphStore:
     def chunk(self, cid: str) -> Optional[StoredChunk]:
         rows = self._rows(
             "MATCH (c:Chunk {cid: $cid}) RETURN c.cid, c.url, c.xpath, "
-            "c.part, c.md, c.chars, c.line_count, c.row", {"cid": cid})
-        return StoredChunk(*rows[0]) if rows else None
+            "c.part, c.md, c.chars, c.line_count, c.row, c.dup_of, "
+            "c.dup_n, c.group_of, c.group_n", {"cid": cid})
+        if not rows:
+            return None
+        r = rows[0]
+        return StoredChunk(*r[:8], r[8] or "", r[9] or 1,
+                           r[10] or "", r[11] or 1)
+
+    def set_groups(self, url: str, groups) -> int:
+        """Record stage two's verdict for one page (`G-26`).
+
+        Marked, exactly as `G-24` marks exact duplicates, and for the same
+        reason one level up: the 256-token chunks and their vectors stay
+        underneath and remain what a retrieval hit resolves to. What a group
+        adds is a fact ABOUT them -- that these read as one thing -- and the
+        merged rendering is ASSEMBLED from the members in document order
+        rather than stored a second time, so a member rewritten by the next
+        drain cannot leave a stale copy of itself inside a merged chunk.
+
+        Every chunk on the page is cleared first. A group that no longer holds
+        after a re-scan must stop being claimed, and leaving the old marks in
+        place would let a page accumulate groups it no longer has -- the same
+        defect `_reconcile` exists to prevent for anchors.
+        """
+        self.conn.execute(
+            "MATCH (p:Page {url: $url})-[:HasChunk]->(c:Chunk) "
+            "SET c.group_of = '', c.group_n = 1", {"url": url})
+        rows = []
+        for group in groups or []:
+            members = list(getattr(group, "members", group))
+            if len(members) < 2:
+                continue
+            lead = getattr(group, "lead", members[0])
+            for cid in members:
+                rows.append({"cid": cid, "lead": lead,
+                             "n": len(members) if cid == lead else 1})
+        if rows:
+            self._batch(
+                "UNWIND $rows AS r MATCH (c:Chunk {cid: r.cid}) "
+                "SET c.group_of = r.lead, c.group_n = r.n", rows)
+        return len(rows)
+
+    def group_members(self, lead: str) -> List[StoredChunk]:
+        """A merge group's chunks, in document order.
+
+        Ordered by `(xpath, part)` rather than by insertion: a merged chunk
+        that reads out of order is not the page, and the store is the only
+        place that still knows what the page's order was.
+        """
+        rows = self._rows(
+            "MATCH (c:Chunk {group_of: $lead}) RETURN c.cid, c.url, c.xpath, "
+            "c.part, c.md, c.chars, c.line_count, c.row, c.dup_of, c.dup_n, "
+            "c.group_of, c.group_n", {"lead": lead})
+        out = [StoredChunk(*r[:8], r[8] or "", r[9] or 1,
+                           r[10] or "", r[11] or 1) for r in rows]
+        out.sort(key=lambda c: (c.xpath, c.part))
+        return out
 
     def chunks(self, url: str = "") -> List[StoredChunk]:
         if url:
             rows = self._rows(
                 "MATCH (p:Page {url: $url})-[:HasChunk]->(c:Chunk) "
                 "RETURN c.cid, c.url, c.xpath, c.part, c.md, c.chars, "
-                "c.line_count, c.row, c.dup_of, c.dup_n", {"url": url})
+                "c.line_count, c.row, c.dup_of, c.dup_n, "
+                "c.group_of, c.group_n", {"url": url})
         else:
             rows = self._rows(
                 "MATCH (c:Chunk) RETURN c.cid, c.url, c.xpath, c.part, "
-                "c.md, c.chars, c.line_count, c.row, c.dup_of, c.dup_n")
+                "c.md, c.chars, c.line_count, c.row, c.dup_of, c.dup_n, "
+                "c.group_of, c.group_n")
         # `or` rather than a default: a store written before these columns
         # existed answers NULL for both, and a NULL count would make every
         # chunk in it look like a copy of nothing with no copies.
-        return [StoredChunk(*r[:8], r[8] or "", r[9] or 1) for r in rows]
+        return [StoredChunk(*r[:8], r[8] or "", r[9] or 1,
+                            r[10] or "", r[11] or 1) for r in rows]
 
     def embedding(self, cid: str) -> Optional[List[float]]:
         rows = self._rows(

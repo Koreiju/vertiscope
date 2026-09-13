@@ -825,6 +825,55 @@ class Workspace:
         return results
 
     # -- vectorisation ----------------------------------------------------
+    def aggregate(self, url: str, **options):
+        """Stage two of chunking for one page (`G-26`, `G-31`).
+
+        Runs after the vectors exist, because it is decided on them. Exact
+        duplicates are excluded first: `G-24` already resolved those in the
+        database with no threshold, and feeding them in would let a page's
+        repeated furniture dominate its own merge radius.
+
+        Coarse-to-fine and localised to one shadow DOM, which is the design
+        rather than a shortcut -- a corpus-wide clustering would merge a
+        paragraph on one site with a paragraph on another and call the result
+        a chunk of nothing.
+
+        Returns the `Aggregation`, whose `skipped` says so when the page was
+        under the significance gate. Writes nothing in that case: a page with
+        nineteen chunks has nineteen nearest-neighbour distances, and a radius
+        derived from their maximum is a radius derived from one number.
+        """
+        from .aggregate import aggregate_page
+
+        stored = [c for c in self.store.chunks(url) if not c.redundant]
+        # Document order, the same key `group_members` reads back by.
+        stored.sort(key=lambda c: (c.xpath, c.part))
+        cids, mds, vectors = [], [], []
+        for chunk in stored:
+            vector = self.store.embedding(chunk.cid)
+            if not vector or not any(vector):
+                continue
+            cids.append(chunk.cid)
+            mds.append(chunk.md or "")
+            vectors.append(vector)
+
+        result = aggregate_page(cids, vectors, mds, url, **options)
+        if not result.skipped:
+            self.store.set_groups(url, result.groups)
+        return result
+
+    def merged_markdown(self, lead: str) -> str:
+        """A merge group rendered as one chunk, assembled not stored.
+
+        The members joined in document order. Assembled on read so that a
+        member rewritten by the next drain cannot leave a stale copy of itself
+        inside a merged chunk -- the same reason the projections read from the
+        trie instead of caching their own text.
+        """
+        members = self.store.group_members(lead)
+        separator = chr(10) + chr(10)
+        return separator.join(c.md for c in members if c.md)
+
     def flush_vectors(self, *, limit: Optional[int] = None,
                       progress: Optional[ProgressFn] = None) -> Dict[str, int]:
         """Embed everything queued, in batches, and write the vectors back.
