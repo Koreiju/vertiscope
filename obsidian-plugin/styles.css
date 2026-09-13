@@ -290,3 +290,66 @@
    with the markup -- see SHADOW_CSS in surface.ts -- because a page-level
    stylesheet is precisely what a shadow boundary keeps out. */
 .domvec-html-host { display: block; }
+
+/* --- the run button, step 2 -------------------------------------------------
+ *
+ * One rule set for both rendering paths, because a button that looked
+ * different in reading view and live preview would read as two features.
+ *
+ * Reading view puts it inside the `<pre>`, which is `position: relative` here
+ * so the button can sit in the corner without being part of the code's text
+ * flow -- appending it inline would put "▶ run" into anything the reader
+ * copies out of the block.
+ */
+pre.domvec-has-run {
+  position: relative;
+}
+
+button.domvec-run-fence {
+  font-size: var(--font-ui-smaller);
+  font-family: var(--font-interface);
+  line-height: 1;
+  padding: 2px 7px;
+  border-radius: var(--radius-s);
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  cursor: pointer;
+  /* Not in the tab order. The button is an affordance ON a block, and a reader
+   * tabbing through a note of thirty cells would hit thirty of these before
+   * reaching the prose. Step 3 gives running a command, which is where a
+   * keyboard route belongs. */
+  user-select: none;
+}
+
+pre.domvec-has-run > button.domvec-run-fence {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  /* Above the code, below Obsidian's own copy button, which sits at the same
+   * corner and is added after ours. */
+  z-index: 1;
+  opacity: 0;
+  transition: opacity 90ms ease-in;
+}
+
+/* Revealed on hover or focus rather than always drawn: a note of many cells
+ * otherwise carries a column of buttons competing with the code for attention.
+ * Focus is included so the keyboard route still reaches it once step 3 exists. */
+pre.domvec-has-run:hover > button.domvec-run-fence,
+pre.domvec-has-run > button.domvec-run-fence:focus-visible {
+  opacity: 1;
+}
+
+button.domvec-run-fence:hover {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
+
+/* Live preview: the widget sits at the end of the opening fence line, so it is
+ * inline and needs its own breathing room rather than absolute placement. */
+.domvec-run-fence-wrap {
+  display: inline-block;
+  margin-left: 0.6em;
+  vertical-align: middle;
+}

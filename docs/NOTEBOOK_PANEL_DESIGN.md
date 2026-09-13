@@ -314,13 +314,49 @@ Each step ends somewhere verifiable over CDP (`X-2`), never a screenshot.
 | # | step | done when |
 |---|---|---|
 | 1 | ~~Note addressing~~ **DONE** — `domvec/vault.py`, `Workspace.index_note`, `domvec notes` | `T-5`: 18 docs -> 786 chunks / 2,697 addresses, and retrieval answers from them. 13 tests, one of them the renderer arm |
-| 2 | Fence detection + `▶ run` in both views | a button appears per fence, in reading *and* live preview |
+| 2 | ~~Fence detection + `▶ run` in both views~~ **DONE** — `src/fences.ts`, `src/runbutton.ts` | both paths draw one button per runnable fence and none on a `json` fence; both fire with the same lang, line and byte-identical source. `probes/run-buttons.js`, 9 checks |
 | 3 | Subprocess kernel, python only, per-note state | two cells share a variable; two notes do not |
 | 4 | Output markers written, read, re-rendered | output survives a restart and renders in reading view |
 | 5 | Outputs are chunked and vectorised (`P-N5`/`P-N6`) | an output is *retrievable* by `[[]]` — the proof that it is trie content |
 | 6 | Kernel run surface below the artifact; command terminal in a *separate pane* (§4a); interpreter discovery | a cell runs in-panel AND a separate pane gives a pwsh prompt; discovery lists installed kernels |
 | 7 | `P-N8` chunk overlay | gutter marks match `/chunk` addresses from the sidecar |
 | 8 | `P-N9`/`P-N10` selection → address set → SLM context | the SLM's prompt contains exactly the selected addresses' content |
+
+**What step 2 settled that the design had not.**
+
+- **Two renderers, two implementations, one shared rule.** Reading view gets a
+  `MarkdownPostProcessor`; live preview is CodeMirror 6 and needs a widget
+  decoration from a `ViewPlugin`. Only *where the fences are* can be shared, and
+  it lives in `fences.ts` — mirroring `domvec/vault.py`'s `_FENCE` by hand, so
+  the editor and the trie cannot disagree about what a fence is. Two spellings
+  of one rule is a known defect class here; it is accepted because one side is
+  Python in a backend and the other TypeScript in a renderer, and each is stated
+  in exactly one place with a comment naming the other.
+- **CodeMirror must be `external` in the bundle.** `@codemirror/state` and
+  `/view` are obsidian's peer dependencies, so esbuild will happily inline them
+  — producing a second CM6 instance whose `Decoration` objects the editor
+  silently ignores. No error, no warning, a `ViewPlugin` that never draws.
+  `esbuild.config.mjs` now externalises the whole CM6 family, not just the two
+  imported today.
+- **`syntaxTree` was not used**, because `@codemirror/language` is not among
+  obsidian's peer deps and adding a CM6 package of our own is the exact thing
+  the externals list exists to prevent. A text scan needs no dependency and
+  agrees with the backend by construction.
+- **The run button is an allow-list, not a deny-list.** A button on a `json`
+  fence promises execution that cannot happen, which is the phantom affordance
+  `PLUGIN_PRD` scores against. `domvec` fences are excluded by name too: that
+  fence already renders an interactive surface.
+- **One normalisation of the cell source, found by measurement.** Reading view
+  reads `code.textContent` and gets a trailing newline; the live-preview scanner
+  joins body lines and does not. The same cell came back `"x = 1
+print(x)
+"`
+  through one path and `"x = 1
+print(x)"` through the other. Step 4 keys a
+  stored output on a digest of the source, so two spellings mean **switching
+  view modes silently invalidates the output and re-runs the cell**. `cellSource`
+  is that one spelling, and the probe asserts the two paths agree byte for byte
+  rather than merely both firing.
 
 **Step 5 is the acceptance gate for the whole design.** If an output is not
 retrievable, the markdown-marker choice bought nothing and the architecture in

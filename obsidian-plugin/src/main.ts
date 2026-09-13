@@ -29,6 +29,9 @@ import {
 } from "obsidian";
 
 import { CHUNK_VIEW, ChunkView } from "./chunkview";
+import {
+  RunHost, RunRequest, livePreviewRunButtons, readingViewRunButtons,
+} from "./runbutton";
 import { GRAPH_VIEW, GraphView } from "./graph";
 import { RetrievalSuggest } from "./retrieval";
 import { Sidecar } from "./sidecar";
@@ -37,7 +40,7 @@ import { ChunkPayload, DEFAULTS, DomvecSettings, EnactResult }
   from "./types";
 import { VaultLinks } from "./vaultlinks";
 
-export default class DomvecPlugin extends Plugin implements SurfaceHost {
+export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost {
   settings: DomvecSettings = DEFAULTS;
   sidecar!: Sidecar;
   links!: VaultLinks;
@@ -62,6 +65,15 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost {
     this.registerEditorSuggest(
       new RetrievalSuggest(this.app, this.sidecar, () => this.settings,
                            this.links),
+    );
+
+    // A run button per fence, in BOTH rendering paths. They are separate
+    // renderers in Obsidian and neither covers the other: reading view builds
+    // DOM a post-processor can append to, live preview is CodeMirror and needs
+    // a widget decoration. See `runbutton.ts`.
+    this.registerMarkdownPostProcessor(readingViewRunButtons(this));
+    this.registerEditorExtension(
+      livePreviewRunButtons(this, () => this.app.workspace.getActiveFile()?.path ?? ""),
     );
 
     this.addCommand({
@@ -124,6 +136,24 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost {
     this.sidecar.health().then((h) => { this.serverEnact = !!(h && h.enact); });
 
     this.addSettingTab(new DomvecSettingTab(this.app, this));
+  }
+
+  /**
+   * A fence's run button was pressed.
+   *
+   * Step 2 draws the button; step 3 gives it a kernel. Until then this SAYS so,
+   * with the cell it would have run. A button that quietly did nothing is the
+   * phantom affordance `PLUGIN_PRD` scores against, and one that claimed to
+   * have run would be worse than either.
+   */
+  onRunFence(req: RunRequest): void {
+    const where = req.line >= 0 ? `line ${req.line + 1}` : "unknown line";
+    new Notice(
+      `domvec: no kernel yet — would run ${req.lang} ` +
+      `(${req.code.split("\n").length} line(s)) at ${where}` +
+      (req.path ? ` of ${req.path}` : ""),
+      6000,
+    );
   }
 
   onunload() {

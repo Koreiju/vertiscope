@@ -85,10 +85,30 @@ async function deploy() {
   }
 }
 
+/**
+ * CodeMirror must come from OBSIDIAN's instance, never from a bundled copy.
+ *
+ * `@codemirror/state` and `@codemirror/view` are obsidian's peerDependencies,
+ * so they resolve in node_modules and esbuild will happily inline them. That
+ * produces a SECOND CM6 instance, and a `Decoration` built by one instance is
+ * silently ignored by the other's editor — no error, no warning, a ViewPlugin
+ * that simply never draws. Marking them external makes the bundle `require()`
+ * them at runtime, where Obsidian hands back the instance its own editor uses.
+ *
+ * Listed in full rather than as the two we import today, so the next one to be
+ * imported does not reintroduce the bug.
+ */
+const CODEMIRROR = [
+  "@codemirror/autocomplete", "@codemirror/collab", "@codemirror/commands",
+  "@codemirror/language", "@codemirror/lint", "@codemirror/search",
+  "@codemirror/state", "@codemirror/view",
+  "@lezer/common", "@lezer/highlight", "@lezer/lr",
+];
+
 const ctx = await esbuild.context({
   entryPoints: ["src/main.ts"],
   bundle: true,
-  external: ["obsidian", "electron", ...builtins],
+  external: ["obsidian", "electron", ...CODEMIRROR, ...builtins],
   format: "cjs",
   target: "es2018",
   logLevel: "info",
