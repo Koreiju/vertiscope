@@ -200,6 +200,10 @@ axes: **structure, content, organizedness, completeness**.
 | G-46 | **Interactive fields in the shadow-DOM view act on the real page** through the trie, when a connection exists | Open — §N.2, and it is constraint 2 of `CLAUDE.md`: a field is acted on in place |
 | G-47 | **Scanning migrates from Selenium to the Electron browser** that hosts the cell, and that is where scanning then happens | Open — §N.2, `S-13` |
 | G-48 | **Headers, fields and formatting are part of the text that gets vectorised** — the crypto-panel case is the standing example of what is lost when they are not | Open — §N.1. Link-free markdown for the quantized embedding keeps structure; it drops only addresses |
+| G-49 | **The local codebase, the vault, and locally-installed PyPI packages are in the trie too**, alongside the web scans | Open — §N.3. `vault://` addressing already exists (`domvec/vault.py`); this extends the same scheme to source and to site-packages |
+| G-50 | **The scanning code is itself a visible chunk.** A reader can see the script that runs the browser scan, in the graph, while watching that scan happen in the browser panel | Open — §N.3. This is the point of `G-49`: the sensor stops being a thing that happens to the corpus and becomes part of it |
+| G-51 | **Dependencies are tracked throughout** — imports and package requirements are edges in the same graph as page links | Open — §N.3 |
+| G-52 | **Source is vectorised by its COMMENTS AND DOCSTRINGS ONLY, never the code itself** | Open — §N.3, and it is `G-23` again one domain over: an identifier is not a sentence, the way a url is not. The code stays in the render and in the trie; it is kept out of the quantized semantic embedding |
 
 ### P. The panels
 
@@ -1649,6 +1653,40 @@ they append to the selected cell with the rewind rules unchanged.
 
 This is also where scanning moves (`G-47`): the Electron browser that hosts the
 cell becomes the sensor's host, replacing Selenium.
+
+### N.3 — the codebase in the trie
+
+`G-49`..`G-52`. The corpus is web pages; the thing reading them is not in it.
+So a reader can watch a scan run in the browser panel and cannot look at the
+code that is running — which is the one gap that keeps the map from closing
+on itself.
+
+Three sources, one addressing scheme. `vault://<vault>/<path>` already exists
+and works (`domvec/vault.py`, `T-5`): a note becomes trie addresses with
+`section[n]` wrappers, and headings and blocks are siblings. Source files want
+the same treatment with a different authority — the repository, and the
+installed environment's `site-packages` — so that an import edge can point
+from one to the other.
+
+**Dependencies are edges.** An import in a module, a requirement in a package's
+metadata: the same kind of thing as a link between two pages, and they belong
+in the same graph so that `LinksTo` answers both questions. That is what makes
+"which code ran this scan, and what does it rest on" a query rather than a
+separate tool.
+
+**Vectorised by comments and docstrings only.** This is `G-23` one domain
+over. A url is not a sentence and neither is an identifier: `_certainly_
+overflows(child_chars, window)` tokenises into fragments that mean nothing to
+a sentence encoder, and a file of them would embed to the centroid of "source
+code" rather than to what the code is for. The prose in a codebase is its
+comments and its docstrings, and in this repository that prose is where the
+reasoning actually lives. The code itself stays in the render and in the trie,
+exactly as a link target stays in the markdown — it is kept out of the
+quantized semantic embedding, not out of the map.
+
+The frequency vector is the other half of the same split: identifiers *are*
+legitimate lexical terms, the way a url tail is, so the lexical side keeps
+them and retrieval by symbol name still works.
 
 ## N. S-13 — can Electron host the sensor? Measured, in the running Obsidian
 
