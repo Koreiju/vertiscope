@@ -1618,7 +1618,23 @@ to π leaves it no room. Scaling the angle by eight moved the median radius
 from 10.8 to 49.8 — the collapse is real and that is its cause — and left
 retention where it was.
 
-So what remains unexplained is the retention itself, and it is recorded as
+**A fourth explanation was tested after the fact and is also wrong: the
+display map is not hiding anything.** The retention above is scored on drawn
+3D coordinates with Euclidean distance, and `to_ball` is a logarithmic map —
+two points far from the origin are not separated by their rotation angle once
+it has run — so the number looked like it might be charging the metric for the
+map's distortion. Scored instead in the metric the optimiser actually worked
+in, the rotation angle between the quaternions the angles generate:
+
+| | retention |
+|---|---|
+| S3, fit, in the rotation metric | **0.185** |
+| S3, picture, in drawn 3D | 0.186 |
+
+They agree to a thousandth. The fit itself preserves 0.185, and the display
+map costs nothing. So the residue is in the embedding, not in the drawing.
+
+What remains unexplained is the retention itself, and it is recorded as
 unexplained. The flag exists (`build_layout(spherical_space=True)`), the
 report says which space it fitted, and the number above is what has to move
 before it becomes the default. Shipping it as the default now would be
