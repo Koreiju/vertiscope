@@ -35,6 +35,7 @@ from typing import Dict, List, Optional
 import numpy as np
 
 from .. import tokens
+from .spherical import to_ball as spherical_to_ball
 
 #: `![alt](src)` as the distiller draws media. Non-greedy on the alt so a
 #: chunk holding two pictures yields the first rather than one match spanning
@@ -79,6 +80,11 @@ _EXTENT = 300.0
 _LIVE_EMBED_LIMIT = 256
 
 _LAST_FIT: Dict[str, object] = {}
+
+#: An embedding to start the spherical fit from, when a caller
+#: has one. Set by the measurement harness while the warm start
+#: is being evaluated; None in ordinary use.
+_WARM_INIT = None
 
 #: The most recent fit, kept so live captures can be placed into it.
 #: `None` until a layout has been built, and after a build that could not
@@ -140,7 +146,8 @@ def build_layout(workspace,
                  seed: int = 0,
                  neighbors: int = 15,
                  min_dist: float = 0.25,
-                 spread_axes: bool = True) -> Dict:
+                 spread_axes: bool = True,
+                 spherical_space: bool = False) -> Dict:
     """Every live chunk placed in `dims` dimensions, with the graph's edges.
 
     Leaves its fitted stages on `_LAST_FIT` and assembles them into
@@ -285,8 +292,59 @@ def build_layout(workspace,
     # no room for -- so two nodes that look alike ARE alike in the part of the
     # space the camera cannot show.
     want = dims + (3 if hsv else 0)
+    # The projector's embedding space (`G-17`..`G-19`). Three of the six
+    # components are hyperspherical ANGLES generating a unit quaternion, and
+    # the metric between two points is the angle between the rotations they
+    # name; the other three stay Euclidean and carry the colour, under a
+    # product metric, so the colour still comes from the same fit as the
+    # position.
+    #
+    # Only when the shape is the one the metric assumes: three spatial
+    # components and three colour ones. A workspace too small to fit six is
+    # laid out the old way and the report says so, which is the same rule
+    # every other fallback in this module follows.
+    #
+    # **Off by default, on the measurement, and this is a finding rather than
+    # a preference.** Scored as neighbourhood retention against the space the
+    # fit is OF -- of a chunk's ten nearest neighbours by cosine over the
+    # encoder's vectors, how many are still among its ten nearest in the
+    # picture -- on 4,985 nodes of `build/vaultws256`:
+    #
+    #     euclidean                       0.375 - 0.400
+    #     S3, colour weight 1.0           0.188
+    #     S3, colour weight 0.1           0.189
+    #     S3, warm-started from euclidean 0.186
+    #     S3, angle scaled x8             0.166 - 0.186
+    #
+    # Three explanations were tested and all three are wrong. It is not the
+    # product metric being unbalanced: 1.0 and 0.1 give the same answer. It is
+    # not the angle parameterisation's singularity at the identity: starting
+    # the fit from a layout that already has structure gives the same answer.
+    # It is not only the metric's bounded range against UMAP's `a`/`b` curve:
+    # scaling the angle by eight moved the median radius from 10.8 to 49.8 and
+    # left retention where it was.
+    #
+    # So the metric is implemented, gradient-checked against finite
+    # differences, and available -- and on this corpus it draws a picture that
+    # keeps less than half as many of the encoder's neighbourhoods as the
+    # Euclidean one. Shipping that as the default would be shipping a
+    # regression in the one property a projection is answerable for. The flag
+    # is how `G-18` gets exercised and swept; the number above is what has to
+    # move before it becomes the default.
+    metric = None
+    spherical_fit = bool(spherical_space and hsv and dims == 3)
+    if spherical_fit:
+        from .spherical import output_metric as _spherical_metric
+
+        metric = _spherical_metric()
+        spherical_fit = metric is not None
     coords = _umap(features, dims=want, seed=seed,
-                   neighbors=neighbors, min_dist=min_dist)
+                   neighbors=neighbors, min_dist=min_dist,
+                   output_metric=metric,
+                   init=(_WARM_INIT if (spherical_fit
+                                        and _WARM_INIT is not None
+                                        and len(_WARM_INIT) == len(cids))
+                         else None))
 
     # Only if the fit actually PRODUCED six components.
     #
@@ -302,9 +360,24 @@ def build_layout(workspace,
     # rule every field in this report follows.
     got = int(coords.shape[1])
     colours = _hsv(coords[:, dims:dims + 3]) if (hsv and got >= want) else None
-    if spread_axes:
-        coords = _spread(coords, dims)
-    coords = _framed(coords, dims)
+    if spherical_fit and got >= want:
+        # The spatial components are ANGLES, so they are not rescaled -- they
+        # are mapped. `to_ball` sends the identity rotation to the origin and
+        # makes the rotation angle the radius, which centres the cloud by
+        # construction (`G-19`) instead of by measuring an extent and
+        # subtracting it.
+        #
+        # `_spread` and `_framed` are skipped rather than reordered. Both are
+        # rescalings of unconstrained coordinates, and an angle is not one: an
+        # empirical CDF over φ₁ would destroy the very geometry the metric was
+        # chosen to impose, and re-framing a ball that is already centred and
+        # bounded could only move it off the origin.
+        coords = np.hstack([spherical_to_ball(coords[:, :dims]),
+                            coords[:, dims:]])
+    else:
+        if spread_axes:
+            coords = _spread(coords, dims)
+        coords = _framed(coords, dims)
     if got < dims:
         # Position must have its three slots whatever the fit managed. A flat
         # layout is visible; a node with two coordinates is a crash.
@@ -363,7 +436,8 @@ def build_layout(workspace,
     # newcomers against a cloud that is no longer on screen.
     global _LAST_PROJECTION
     _LAST_PROJECTION = Projection.of(dims=dims, hsv=colours is not None,
-                                     fitted_n=len(cids))
+                                     fitted_n=len(cids),
+                                     spherical=spherical_fit)
 
     return {
         "nodes": nodes,
@@ -379,6 +453,11 @@ def build_layout(workspace,
         #: equals the store's chunk count, and the difference now has two
         #: causes a reader has to be able to tell apart.
         "grouped": grouped,
+        #: The geometry the points were laid out IN (`G-18`). "S3" means the
+        #: quaternion metric ran; "euclidean" means it did not, and a reader
+        #: of the picture has to be able to tell, because the two are
+        #: different pictures of the same data.
+        "space": "S3" if spherical_fit else "euclidean",
         "dims": dims,
         # Six when the colour comes from the fit. Reported because a viewer
         # that colours by hue is showing three more dimensions of the same
@@ -607,7 +686,8 @@ def _framed(coords: np.ndarray, dims: int) -> np.ndarray:
 
 
 def _umap(features: np.ndarray, *, dims: int, seed: int,
-          neighbors: int, min_dist: float) -> np.ndarray:
+          neighbors: int, min_dist: float, output_metric=None,
+          init=None) -> np.ndarray:
     """The final projection, or a PCA when there is too little to fit.
 
     UMAP needs more points than neighbours; a small workspace has fewer
@@ -619,8 +699,19 @@ def _umap(features: np.ndarray, *, dims: int, seed: int,
     try:
         import umap
 
+        kwargs = {}
+        if output_metric is not None:
+            # The embedding space itself, not the input metric (`G-18`). The
+            # input is still cosine over the encoder's vectors; what changes
+            # is the geometry the points are laid out IN.
+            kwargs["output_metric"] = output_metric
+        if init is not None:
+            # A warm start, not a preference. Left to its own initialisation
+            # the spherical fit lands on the identity rotation, where the
+            # angle parameterisation is singular; see `spherical.from_ball`.
+            kwargs["init"] = init
         reducer = umap.UMAP(n_components=dims, n_neighbors=k,
-                            min_dist=min_dist, random_state=seed)
+                            min_dist=min_dist, random_state=seed, **kwargs)
         out = np.asarray(reducer.fit_transform(features), dtype=np.float32)
         # Kept so a later batch can be `transform`ed into this same fit rather
         # than forcing a refit of the whole corpus. That is what makes live
@@ -731,7 +822,12 @@ class Projection:
     """
 
     def __init__(self, *, svd, reducer, dims: int, hsv: bool,
-                 hsv_bands, spread_cdf, frame, fitted_n: int) -> None:
+                 hsv_bands, spread_cdf, frame, fitted_n: int,
+                 spherical: bool = False) -> None:
+        #: Fitted on S³, so a newcomer is MAPPED to the ball rather than
+        #: rescaled. Replaying `_spread` and `_framed` on angles would put it
+        #: somewhere the fit never placed anything.
+        self.spherical = bool(spherical)
         self.svd = svd
         self.reducer = reducer
         self.dims = dims
@@ -742,8 +838,8 @@ class Projection:
         self.fitted_n = int(fitted_n)
 
     @classmethod
-    def of(cls, *, dims: int, hsv: bool, fitted_n: int
-           ) -> Optional["Projection"]:
+    def of(cls, *, dims: int, hsv: bool, fitted_n: int,
+           spherical: bool = False) -> Optional["Projection"]:
         """Collect what the fit just left on the shelf."""
         reducer = _LAST_FIT.get("reducer")
         if reducer is None or not hasattr(reducer, "transform"):
@@ -751,7 +847,8 @@ class Projection:
         return cls(svd=_LAST_FIT.get("svd"), reducer=reducer, dims=dims,
                    hsv=hsv, hsv_bands=_LAST_FIT.get("hsv_bands"),
                    spread_cdf=_LAST_FIT.get("spread_cdf"),
-                   frame=_LAST_FIT.get("frame"), fitted_n=fitted_n)
+                   frame=_LAST_FIT.get("frame"), fitted_n=fitted_n,
+                   spherical=spherical)
 
     def stale(self, n: int) -> bool:
         """True once the corpus has doubled since this was fitted."""
@@ -778,6 +875,11 @@ class Projection:
         if self.hsv and coords.shape[1] >= self.dims + 3:
             colours = _hsv_apply(coords[:, self.dims:self.dims + 3],
                                  self.hsv_bands)
+        if self.spherical:
+            # The same map the fit used, and for the same reason: these are
+            # angles. `_spread_apply` looks a value up in a distribution of
+            # unconstrained coordinates, which φ₁ is not.
+            return spherical_to_ball(coords[:, :self.dims]), colours
         coords = _spread_apply(coords, self.dims, self.spread_cdf)
         coords = _frame_apply(coords, self.dims, self.frame_mid,
                               self.frame_scale)

@@ -169,8 +169,8 @@ axes: **structure, content, organizedness, completeness**.
 | G-15 | **Media present in the projector**, not only the panels | Partial — 73.8% textured |
 | G-16 | Chunk deltas diffed **into the projector view** live | Open |
 | G-17 | The projection's **output space is spherical**, fitted with an angular metric rather than rescaled into a cube afterwards | Open — Addendum III |
-| G-18 | Points are **quaternions and the distance between them is the quaternion distance** — the geodesic angle on the unit 3-sphere, `2·arccos(\|⟨p,q⟩\|)`, absolute because `q` and `−q` are one rotation | Open — Addendum III. umap-learn ships no such metric; it is a custom `output_metric`, a numba function returning the distance AND its gradient |
-| G-19 | The view is **centred on the origin** | Open — Addendum III. A sphere of radius 1 about the origin makes `recentre` unnecessary by construction: the camera cannot end up inside the cloud, which is the failure `graph.ts` records a camera at z = −230 inside a cloud spanning ±249 |
+| G-18 | Points are **quaternions and the distance between them is the quaternion distance** — the geodesic angle on the unit 3-sphere, `2·arccos(\|⟨p,q⟩\|)`, absolute because `q` and `−q` are one rotation | **Built, measured, not default** — `domvec/obsidian/spherical.py`, §M.9. A numba `output_metric` over three hyperspherical angles (umap-learn's own advice: parameterise without coordinate constraints), gradient-checked against finite differences. It keeps **0.19** of the encoder's 10-NN neighbourhoods against the Euclidean fit's **0.38** |
+| G-19 | The view is **centred on the origin** | **Done, in the spherical map** — `spherical.to_ball` sends the identity rotation to the origin and makes the rotation angle the radius, so the cloud is centred by construction rather than by measuring an extent and subtracting it. Reached only when `G-18` is on |
 | G-20 | **Force-directed relaxation seeded from the UMAP embedding** — UMAP initialises, the simulation converges | **Done** — `graph.ts`. Nodes carry `x/y/z` from the fit instead of `fx/fy/fz`, and `fitX/fitY/fitZ` alongside so drift is measured rather than assumed. `charge` and `center` are removed and `link` is kept at **zero strength**, not removed: `forceLink` is also d3's id resolver, and dropping it left all 2,961 edges holding their endpoints as strings, so every patricia and inter-note link stopped drawing with nothing reporting an error. Measured cold: 2,302 of 5,337 nodes sit exactly where the fit put them, which is the proof no force but collision runs |
 | G-21 | **Nodes never overlap**: spherical colliders, with a **quarter-distance safety factor** on the radius | **Done** — `graph.ts`, probe `probes/collider.js`. `forceCollide` at `drawnRadius × 1.25`. Measured cold on a 1,200-node sample: **0 overlapping pairs of 719,400 and 0 inside the clearance band**, from 750 before. The radius is **not one formula**: 827 of 5,337 chunks draw as square picture panels, not spheres, and sizing them as spheres left 96 overlapping pairs — 66 panel-on-panel, 30 panel-on-sphere, **0 sphere-on-sphere** — because the collider reserved 1.93 units where the panel drew at 12.73. A billboard turns to face the camera, so its collider is the sphere that circumscribes it: the half-**diagonal**, `edge/√2` |
 | G-22 | **The chunking window counts only what a model reads.** Link targets — `href`, `src`, bare urls — are excluded from the token budget; the render keeps them | **Done** — `tokens.for_model`/`tokens.budget`, §M.7. 52.5% of the corpus's rendered tokens were addresses |
@@ -1582,6 +1582,54 @@ Byte-exact and page-scoped on purpose: no threshold, no embedding, and two
 pages sharing a cookie banner stay two documents. The near-duplicate case —
 the same thing said differently — is `G-26` and needs the embeddings, so it
 does not hold this up.
+
+### M.9 — the quaternion fit, measured
+
+`G-18` is implemented, gradient-checked, and **worse than what it replaces**
+on the one property a projection is answerable for.
+
+The measure is neighbourhood retention against the space the fit is OF: of a
+chunk's ten nearest neighbours by cosine over the encoder's vectors, how many
+are still among its ten nearest in the picture. 4,985 nodes of
+`build/vaultws256`.
+
+| fit | retention | radius p50 (of 300) |
+|---|---|---|
+| **euclidean** | **0.375 – 0.400** | 288.7 |
+| S3, colour weight 1.0 | 0.188 | 10.8 |
+| S3, colour weight 0.1 | 0.189 | 10.8 |
+| S3, warm-started from the euclidean fit | 0.186 | 12.1 |
+| S3, angle scaled ×8 | 0.166 – 0.186 | 49.8 |
+
+**Three explanations were tested and all three are wrong.**
+
+*Not the product metric being unbalanced.* The angle term is bounded by π and
+the colour term is unconstrained Euclidean, so the colour half looked likely
+to swamp the position half. Weights 1.0 and 0.1 give 0.188 and 0.189.
+
+*Not the parameterisation's singularity.* Hyperspherical angles are degenerate
+at φ₁ = 0, exactly where the identity rotation sits, and the cloud collapsed
+onto it — a median radius of 10.8 out of 300. Warm-starting the fit from a
+Euclidean layout that already has structure gives 0.186.
+
+*Not only the metric's range against UMAP's `a`/`b` curve.* That curve is
+fitted for unbounded Euclidean distances, and a metric whose whole range is 0
+to π leaves it no room. Scaling the angle by eight moved the median radius
+from 10.8 to 49.8 — the collapse is real and that is its cause — and left
+retention where it was.
+
+So what remains unexplained is the retention itself, and it is recorded as
+unexplained. The flag exists (`build_layout(spherical_space=True)`), the
+report says which space it fitted, and the number above is what has to move
+before it becomes the default. Shipping it as the default now would be
+shipping a halving of neighbourhood fidelity in exchange for a geometry
+nobody has yet shown a benefit from.
+
+What the spherical map DOES deliver is `G-19` exactly: `to_ball` puts the
+identity rotation at the origin and makes the rotation angle the radius, so
+the cloud is centred by construction and `recentre` becomes unnecessary —
+rather than centred by measuring an extent and subtracting it, which is what
+`_framed` does today.
 
 ### N.1 — two-stage chunking: recursive descent, then embedding aggregation
 
