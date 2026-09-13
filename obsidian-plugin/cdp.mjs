@@ -179,6 +179,207 @@ export async function screenshot(outPath, selector = "") {
   }
 }
 
+/**
+ * A CDP session, so several commands can share one socket.
+ *
+ * `evaluate` and `screenshot` each open and close their own, which is fine for
+ * one shot and wrong for a walk: the accessibility tree is one command per
+ * depth-limited fetch plus one per box, and paying a WebSocket handshake for
+ * each turns a snapshot into a visible pause.
+ */
+async function session() {
+  const ws = new WebSocket(await pageTarget());
+  await new Promise((ok, no) => {
+    ws.addEventListener("open", ok, { once: true });
+    ws.addEventListener("error", () => no(new Error("CDP socket failed")),
+                        { once: true });
+  });
+  let next = 100;
+  const send = (method, params = {}) => new Promise((resolve, reject) => {
+    const id = next++;
+    const onMessage = (event) => {
+      const msg = JSON.parse(event.data);
+      if (msg.id !== id) return;
+      ws.removeEventListener("message", onMessage);
+      if (msg.error) return reject(new Error(method + ": " + JSON.stringify(msg.error)));
+      resolve(msg.result);
+    };
+    ws.addEventListener("message", onMessage);
+    ws.send(JSON.stringify({ id, method, params }));
+  });
+  // The occlusion override, for the same reason `evaluate` needs it: a covered
+  // renderer stops laying out, and an accessibility tree taken then is a tree
+  // of zero-sized nodes with no names.
+  await send("Emulation.setFocusEmulationEnabled", { enabled: true });
+  await send("Page.setWebLifecycleState", { state: "active" });
+  return { send, close: () => ws.close() };
+}
+
+/**
+ * The interface as TEXT: roles, names and values, in tree order.
+ *
+ *   node cdp.mjs --ax
+ *   node cdp.mjs --ax ".workspace-leaf-content[data-type='domvec-chunk-view']"
+ *   node cdp.mjs --ax --boxes
+ *
+ * This is the image-free way to see a pane, and it is a better instrument than
+ * a screenshot for almost everything a screenshot gets used for. The
+ * accessibility tree is what a screen reader consumes: every meaningful element
+ * reduced to a ROLE and its ACCESSIBLE NAME. So it says what a control IS and
+ * what it is called, which a picture only implies and which `innerText` loses
+ * entirely -- a button and a div full of text read the same in `innerText` and
+ * differently here.
+ *
+ * The shape follows Playwright's aria-snapshot, deliberately: `role "name"`,
+ * one per line, indented by depth, with an optional `boxes` mode appending
+ * geometry. That format exists because it is the one people already read, and
+ * inventing a second spelling of it would make every example on the internet
+ * not apply.
+ *
+ * `--boxes` is what closes the last gap a text tree leaves: a panel whose text
+ * is right while it overlaps its neighbour is invisible to roles and names, and
+ * obvious in four numbers.
+ */
+export async function axTree(selector = "", { boxes = false, depth = 0 } = {}) {
+  const s = await session();
+  try {
+    await s.send("Accessibility.enable");
+    let rootId = null;
+    if (selector) {
+      const { root } = await s.send("DOM.getDocument", { depth: -1, pierce: true });
+      const found = await s.send("DOM.querySelector",
+                                 { nodeId: root.nodeId, selector });
+      if (!found.nodeId) throw new Error("no element matches " + selector);
+      const described = await s.send("DOM.describeNode", { nodeId: found.nodeId });
+      rootId = described.node.backendNodeId;
+    }
+
+    // Always the FULL tree, then scoped by walking down to the selector's node.
+    //
+    // `getPartialAXTree` looks like the scoped call and is not: with
+    // `fetchRelatives:false` it returns the one node, and with it true it
+    // returns ancestors as well as descendants. Either way the caller has to
+    // rebuild a subtree, so it is simpler to take the whole thing once and
+    // start the walk somewhere else in it.
+    const { nodes } = await s.send("Accessibility.getFullAXTree",
+                                   depth ? { depth } : {});
+
+    const byId = new Map(nodes.map((n) => [n.nodeId, n]));
+    const children = new Set();
+    for (const n of nodes) for (const c of n.childIds || []) children.add(c);
+    let roots = nodes.filter((n) => !children.has(n.nodeId));
+    if (rootId !== null) {
+      const scoped = nodes.find((n) => n.backendDOMNodeId === rootId);
+      if (!scoped) {
+        throw new Error(selector + " has no accessibility node " +
+                        "(aria-hidden, or not rendered)");
+      }
+      roots = [scoped];
+    }
+
+    const box = async (n) => {
+      if (!boxes || !n.backendDOMNodeId) return "";
+      try {
+        const { model } = await s.send("DOM.getBoxModel",
+                                       { backendNodeId: n.backendDOMNodeId });
+        const q = model.border;                     // x1,y1 x2,y2 x3,y3 x4,y4
+        return `  [${Math.round(q[0])},${Math.round(q[1])} ${
+          Math.round(q[2] - q[0])}x${Math.round(q[5] - q[1])}]`;
+      } catch {
+        // A node with no box is display:none or detached. That is information,
+        // not an error: it is exactly the "present but not drawn" case a text
+        // tree is otherwise blind to.
+        return "  [not drawn]";
+      }
+    };
+
+    const out = [];
+    const walk = async (node, indent) => {
+      if (!node) return;
+      // `ignored` nodes are in the tree but hidden from assistive tech --
+      // presentational wrappers, aria-hidden subtrees. Skipping them is what
+      // keeps this readable; their CHILDREN are still walked, because Obsidian
+      // wraps real controls in presentational divs several deep.
+      const role = node.role?.value || "";
+      const name = node.name?.value || "";
+      const value = node.value?.value;
+      // `InlineTextBox` is the layout box UNDER a `StaticText` and carries the
+      // same string, so printing both doubles every word in the tree. The
+      // parent is the meaningful node; this is its geometry.
+      if (!node.ignored && role && role !== "none" && role !== "generic"
+          && role !== "InlineTextBox") {
+        out.push("  ".repeat(indent) + role +
+                 (name ? ` "${name}"` : "") +
+                 (value !== undefined && value !== "" ? ` = ${JSON.stringify(value)}` : "") +
+                 await box(node));
+        indent += 1;
+      }
+      for (const id of node.childIds || []) await walk(byId.get(id), indent);
+    };
+    for (const r of roots) await walk(r, 0);
+    return out.join("\n");
+  } finally {
+    s.close();
+  }
+}
+
+/**
+ * Real input events, the kind the renderer marks trusted.
+ *
+ *   node cdp.mjs --click 771 787
+ *   node cdp.mjs --drag 700 500 900 600
+ *
+ * `Input.dispatchMouseEvent` does NOT build a DOM MouseEvent and call
+ * `dispatchEvent`. It hands the browser a `WebInputEvent` -- the same internal
+ * representation the OS produces for a real mouse -- which enters the pipeline
+ * UPSTREAM of where the renderer decides trust. So the resulting DOM events
+ * carry `isTrusted: true`, where anything dispatched from page script carries
+ * `false`.
+ *
+ * That difference is not cosmetic here. A `.click()` from script skips hover
+ * state, skips the pointer capture a drag needs, and is refused outright by any
+ * handler that checks `isTrusted`. It is why a script click can pick a node in
+ * the 3D graph (the raycaster only reads coordinates) and yet cannot ORBIT it
+ * (the camera controller tracks a real pointer across moves).
+ */
+export async function mouse(actions) {
+  const s = await session();
+  try {
+    for (const a of actions) {
+      await s.send("Input.dispatchMouseEvent", {
+        type: a.type, x: a.x, y: a.y,
+        button: a.button ?? "left",
+        buttons: a.buttons ?? (a.type === "mouseMoved" ? 0 : 1),
+        clickCount: a.clickCount ?? (a.type === "mousePressed" ? 1 : 0),
+      });
+      if (a.pause) await new Promise((r) => setTimeout(r, a.pause));
+    }
+    return "ok";
+  } finally {
+    s.close();
+  }
+}
+
+/** A trusted click: move there first, so hover state is real. */
+export const click = (x, y) => mouse([
+  { type: "mouseMoved", x, y, buttons: 0, pause: 60 },
+  { type: "mousePressed", x, y },
+  { type: "mouseReleased", x, y, buttons: 0 },
+]);
+
+/** A trusted drag, in steps, because a controller reading one jump is a click. */
+export const drag = (x1, y1, x2, y2, steps = 12) => {
+  const path = [{ type: "mouseMoved", x: x1, y: y1, buttons: 0, pause: 40 },
+                { type: "mousePressed", x: x1, y: y1, pause: 40 }];
+  for (let i = 1; i <= steps; i++) {
+    path.push({ type: "mouseMoved", pause: 16,
+                x: Math.round(x1 + (x2 - x1) * i / steps),
+                y: Math.round(y1 + (y2 - y1) * i / steps) });
+  }
+  path.push({ type: "mouseReleased", x: x2, y: y2, buttons: 0 });
+  return mouse(path);
+};
+
 // `pathToFileURL` rather than string-building: on Windows the argv path is
 // `C:\...`, and hand-rolling `file://` + that yields two slashes where Node
 // produces three. The guard never matched, so every invocation exited 0 with
@@ -187,6 +388,19 @@ export async function screenshot(outPath, selector = "") {
 if (process.argv[1] &&
     import.meta.url === pathToFileURL(process.argv[1]).href) {
   const args = process.argv.slice(2);
+  if (args[0] === "--ax") {
+    const rest = args.slice(1).filter((a) => a !== "--boxes");
+    console.log(await axTree(rest[0] || "",
+                             { boxes: args.includes("--boxes") }));
+    process.exit(0);
+  }
+  if (args[0] === "--click" || args[0] === "--drag") {
+    const n = args.slice(1).map(Number);
+    await (args[0] === "--click" ? click(n[0], n[1])
+                                 : drag(n[0], n[1], n[2], n[3]));
+    console.log("ok");
+    process.exit(0);
+  }
   if (args[0] === "--shot") {
     try {
       const where = await screenshot(args[1], args[2] || "");
