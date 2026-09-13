@@ -205,7 +205,7 @@ axes: **structure, content, organizedness, completeness**.
 | G-51 | **Dependencies are tracked throughout** — imports and package requirements are edges in the same graph as page links | Open — §O.3 |
 | G-52 | **Source is vectorised by its COMMENTS AND DOCSTRINGS ONLY, never the code itself** | Open — §O.3, and it is `G-23` again one domain over: an identifier is not a sentence, the way a url is not. The code stays in the render and in the trie; it is kept out of the quantized semantic embedding |
 | G-53 | **The projector draws PAGES by default, not chunks.** One node per shadow DOM; a page unfolds into its chunks on demand | Open — §O.4, §M.10. 12,820 chunk nodes hold **3.3 fps** because each node and each link is its own draw call: **20,309 per frame**. 94 pages is 94 |
-| G-54 | **Dynamic unfolding over the patricia trie.** A click, or a retrieval hit, expands a page one level at a time — the trie is already the structure that says what is inside what | Open — §O.4 |
+| G-54 | **Dynamic unfolding over the patricia trie** — an UNRAVELLING along a chunk's own single path, root to leaf, not an expansion of a subtree | Open — §O.4. The distinction is the whole cost argument: a path is O(depth) and a subtree is O(everything under it). The trie already holds exactly that path, because the path IS the address |
 | G-55 | **Unfolding depth follows the reader.** How far a page unfolds is a function of how many results they have continuously scrolled through in the browser's retrieval overlay | Open — §O.4. Depth is a consequence of attention, not a control to set |
 | G-56 | **Only the chunks matching the most recent debounced retrieval query are drawn live**, inside their unfolded page | Open — §O.4 |
 | G-57 | **Clicking a node opens its shadow-DOM panel as a BILLBOARD inside the 3D view** — draggable, in the projector, not a separate Obsidian pane | Open — §O.5. The panel already exists and is already generated to the store; what changes is where it opens |
@@ -220,6 +220,9 @@ axes: **structure, content, organizedness, completeness**.
 | G-66 | **The O(delta) budget is stated per phase and measured**: fold, dedup, vectorise, aggregate, re-vectorise, transform | Open — §O.4. "Millisecond range" is the goal's own word and it has never been broken down |
 | G-67 | **UMAP transforms go through an async batched queue** — a diff does not wait for a projection, and a projection does not run per chunk | Open — §O.4 |
 | G-68 | **Interactive fields in the billboarded shadow DOM act on the live Electron page** through the trie | Open — §O.5, and it is `G-46` at the surface a reader actually touches |
+| G-69 | **Retrieval is continuous scrolling over a ranked list, not top-k.** Top-k is what a click expansion uses; the overlay itself keeps going | Open — §O.6. Rank is a total order over the corpus; a cutoff is a decision the reader makes by stopping |
+| G-70 | **Clicking a shadow-DOM node SCOPES the query to that url**, however the global ranking placed it. Right-clicking restores global scope | Open — §O.6. The query in force is the last one the in-view Electron browser was interacted with |
+| G-71 | **Scoped results unfold by the same mechanics as the overlay's** — one behaviour, two places | Open — §O.6 |
 
 ### P. The panels
 
@@ -1763,6 +1766,79 @@ which is why the 256 re-cut holds 23 pages and not 24.
 That is not a performance argument, it is a **coverage** argument: the corpus
 is currently missing a page because of the host, and the alternative host
 reaches it.
+
+### M.11 — where a capture's 22 seconds went
+
+`G-66` asked for the phases separately before anyone optimised anything. Three
+pages, captured live through the browser cell, times in milliseconds:
+
+| page | dirty chunks | decode | absorb | render | store | total |
+|---|---|---|---|---|---|---|
+| quotes.toscrape | 14 | 1.5 | 5.6 | 113.2 | 515.6 | 636 |
+| books.toscrape | 26 | 3.7 | 13.4 | 55.9 | 1,482.6 | 1,556 |
+| MDN CSS index | 191 | 57.9 | 197.8 | 579.7 | **21,437.6** | **22,273** |
+
+**The store was 96% of it**, and the trie and the projections were never the
+problem: MDN's whole markdown projection over 952 chunks is 580ms. Breaking
+the store down further:
+
+| statement | ms |
+|---|---|
+| reconcile | 408.7 |
+| addresses | 1,301.4 |
+| chunks | 66.2 |
+| **anchors** | **19,121.6** |
+| contains | 75.0 |
+
+**One wrong guess, recorded because it was wrong.** `_reconcile` deletes every
+anchor on the chunks being written and the write then used `MERGE` on the
+relationship, so the existence check could never find anything. Changing it to
+`CREATE` — which also required `_reconcile` to clear by the *written* set
+rather than the *page's* set, so that emptiness is a postcondition — moved the
+number from 19,121.6 to 19,065.9. Nothing. The check was not the cost.
+
+**What it actually was.** The anchor write asked for two nodes in one pattern:
+
+| statement, per row | ms |
+|---|---|
+| `MATCH (c:Chunk {cid})` alone | 0.045 |
+| `MATCH (a:Address {aid})` alone | 0.80 |
+| **both in one comma pattern** | **6.60** |
+
+Eight times the sum of its parts — the planner stops treating it as two key
+lookups. And the Address table has **329,712** rows, so even the lone lookup
+is expensive. 2,924 anchors × 6.6ms is the 19.3 seconds, exactly.
+
+Three spellings, measured on the same rows:
+
+| | total | per row |
+|---|---|---|
+| comma MATCH, as shipped | 19,136 ms | 6.54 |
+| two separate MATCH clauses | 10,964 ms | 3.75 |
+| **fused into the address MERGE** | **1,448 ms** | **0.50** |
+
+The fix is the third: the address write already does `MERGE (a:Address {aid})`
+and therefore already has the node bound, so carrying the chunk id and the
+ordinal on the address row lets one statement write the node and hang the edge
+off it — with no second lookup at all. Only the Chunk is matched, at 0.045ms.
+
+Sound because the pairing is one-to-one: a line carries one address, and an
+address reaching two chunks is the defect `test_the_page_is_still_partitioned`
+forbids. An anchor whose address this write does not carry falls through to
+the two-clause form rather than being dropped.
+
+**Verified live, end to end, on the same page:**
+
+| phase | before | after |
+|---|---|---|
+| anchors | 19,121.6 | **1,476.6** |
+| addresses | 1,301.4 | 11.2 |
+| render | 631.5 | 626.5 |
+| **capture, total** | **22,041** | **3,068** |
+
+7.2× on the worst page in the corpus. What is left is 2.2s of store against
+0.86s of fold-and-render, so the store is still the majority and `reconcile`
+and `anchors` are the two to take next.
 
 ### N.4 — what this does not settle
 

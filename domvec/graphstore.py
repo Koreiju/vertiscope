@@ -328,8 +328,11 @@ class GraphStore:
         # rest of this method only ever adds. Doing it first means a chunk's
         # stale anchors are gone before its new ones are merged, which is the
         # ordering the alignment depends on.
+        _t = time.perf_counter()
         counts.update(self._reconcile(url, chunks, addresses,
                                       complete=complete))
+        counts["ms_reconcile"] = round((time.perf_counter() - _t) * 1000, 1)
+        _t = time.perf_counter()
 
         self.conn.execute(
             "MERGE (p:Page {url: $url}) SET p.title = $title, "
@@ -350,15 +353,17 @@ class GraphStore:
              "ch": ch}
             for a, v, ch in addresses
         ]
-        if address_rows:
-            self._batch(
-                "UNWIND $rows AS r MERGE (a:Address {aid: r.aid}) "
-                "SET a.akey = r.akey, a.url = r.url, a.xpath = r.xp, "
-                "a.tag = r.tag, a.accessor = r.acc, a.value = r.val, "
-                "a.content_hash = r.ch",
-                address_rows,
-            )
-            counts["addresses"] = len(address_rows)
+        # Which chunk line anchors each address, so the address write can
+        # create the edge while it still has the node bound. See the fused
+        # statement below for why that is worth arranging.
+        anchor_of = {}
+        for chunk in chunks:
+            for ordinal, line in enumerate(chunk.lines):
+                if line.address is not None:
+                    anchor_of[line.address.aid] = (chunk.cid, ordinal)
+        counts["addresses"] = len(address_rows)
+        counts["ms_addresses"] = round((time.perf_counter() - _t) * 1000, 1)
+        _t = time.perf_counter()
 
         # A vector is written only when there is one to write.
         #
@@ -407,23 +412,97 @@ class GraphStore:
                 [{"url": url, "cid": c.cid} for c in chunks],
             )
             counts["chunks"] = len(chunk_rows)
+        counts["ms_chunks"] = round((time.perf_counter() - _t) * 1000, 1)
+        _t = time.perf_counter()
 
+        # Addresses and their anchors, in ONE statement.
+        #
+        # These were two: `MERGE (a:Address {aid})` to write the node, then
+        # `MATCH (a:Address {aid})` moments later to hang an edge off it. The
+        # second lookup is against a table with 329,712 rows in it and costs
+        # 0.8ms every time -- and asking for the Chunk and the Address in one
+        # pattern costs 6.5ms, eight times the sum of asking for each alone,
+        # because the planner stops treating it as two key lookups.
+        #
+        # Measured on MDN's CSS index, 2,924 anchors over 191 dirty chunks:
+        #
+        #     comma MATCH, as shipped          19,136 ms   6.54 ms/row
+        #     two MATCH clauses                10,964 ms   3.75 ms/row
+        #     fused with the address MERGE      1,448 ms   0.50 ms/row
+        #
+        # The MERGE has already bound the node, so the fused form does not
+        # look the address up at all. Only the Chunk is matched, and a Chunk
+        # lookup is 0.045ms.
+        #
+        # Sound because the pairing is one to one: a line carries one address
+        # and an address reaching two chunks is the defect
+        # `test_the_page_is_still_partitioned` forbids. An anchor whose
+        # address is not in this write -- which a caller passing a narrowed
+        # address list can produce -- falls through to the two-lookup form
+        # rather than being dropped.
+        fused_rows, plain_rows = [], []
+        for row in address_rows:
+            hit = anchor_of.pop(row["aid"], None)
+            if hit is None:
+                plain_rows.append(row)
+            else:
+                fused_rows.append(dict(row, cid=hit[0], ord=hit[1]))
+
+        if fused_rows:
+            self._batch(
+                "UNWIND $rows AS r MERGE (a:Address {aid: r.aid}) "
+                "SET a.akey = r.akey, a.url = r.url, a.xpath = r.xp, "
+                "a.tag = r.tag, a.accessor = r.acc, a.value = r.val, "
+                "a.content_hash = r.ch "
+                "WITH a, r MATCH (c:Chunk {cid: r.cid}) "
+                "CREATE (c)-[:Anchors {ord: r.ord}]->(a)",
+                fused_rows,
+            )
+        if plain_rows:
+            self._batch(
+                "UNWIND $rows AS r MERGE (a:Address {aid: r.aid}) "
+                "SET a.akey = r.akey, a.url = r.url, a.xpath = r.xp, "
+                "a.tag = r.tag, a.accessor = r.acc, a.value = r.val, "
+                "a.content_hash = r.ch",
+                plain_rows,
+            )
+
+        # Whatever is left in `anchor_of` is an anchor whose address this
+        # write did not carry. Rare, and it still has to be created.
         anchor_rows = [
-            {"cid": chunk.cid, "aid": line.address.aid, "ord": ordinal}
-            for chunk in chunks
-            for ordinal, line in enumerate(chunk.lines)
+            {"cid": cid, "aid": aid, "ord": ordinal}
+            for aid, (cid, ordinal) in anchor_of.items()
         ]
         if anchor_rows:
+            # CREATE, not MERGE, and `_reconcile` is what makes that sound:
+            # it has just cleared every anchor on every chunk in this batch,
+            # so no edge can exist for MERGE to find. The check was not free
+            # -- 19.1 seconds of a 22-second capture on a 191-chunk delta --
+            # because a relationship MERGE scans the edges a node already has,
+            # and a chunk on a reference page has hundreds.
+            #
+            # The safety here is the postcondition, not the statement. If the
+            # delete above ever stops covering the written set, this starts
+            # producing duplicate anchors, and duplicate anchors misattribute
+            # every line after the first -- which is the failure
+            # `ingest_chunks` was written to prevent. The two belong together
+            # and this comment is the tie.
             self._batch(
-                "UNWIND $rows AS r MATCH (c:Chunk {cid: r.cid}), "
-                "(a:Address {aid: r.aid}) MERGE (c)-[e:Anchors]->(a) "
-                "SET e.ord = r.ord",
+                "UNWIND $rows AS r MATCH (c:Chunk {cid: r.cid}) "
+                "MATCH (a:Address {aid: r.aid}) "
+                "CREATE (c)-[:Anchors {ord: r.ord}]->(a)",
                 anchor_rows,
             )
             counts["anchors"] = len(anchor_rows)
+        counts["anchors"] = counts.get("anchors", 0) + len(fused_rows)
+        counts["ms_anchors"] = round((time.perf_counter() - _t) * 1000, 1)
+        _t = time.perf_counter()
 
         counts["contains"] = self._link_containment(chunks)
+        counts["ms_contains"] = round((time.perf_counter() - _t) * 1000, 1)
+        _t = time.perf_counter()
         counts["links"] = self._link_hyperlinks(url, addresses, chunks)
+        counts["ms_links"] = round((time.perf_counter() - _t) * 1000, 1)
         return counts
 
     def _reconcile(
@@ -462,14 +541,28 @@ class GraphStore:
         if not complete:
             existing = [cid for cid in existing if cid in keep_chunks]
 
-        # Every chunk this page currently has loses its anchors: the ones
-        # being rewritten are about to get fresh ones, and the ones being
-        # dropped are going away entirely.
-        if existing:
+        # Every chunk BEING WRITTEN loses its anchors, whether or not this
+        # page currently claims it.
+        #
+        # This cleared `existing` -- the chunks the page is known to have --
+        # which is the same set in every ordinary case and not in one that
+        # matters: a chunk arriving for the first time is not in `existing`,
+        # so nothing guaranteed it was anchor-free. `ingest` then had to
+        # `MERGE` its anchors rather than `CREATE` them, and a MERGE on a
+        # relationship pays an existence check per row against edges the
+        # delete had already removed. Measured on MDN's CSS index, 191 dirty
+        # chunks: 19.1 seconds of a 22-second capture, 87% of the whole
+        # thing, spent proving edges absent that had just been deleted.
+        #
+        # Clearing by the written set makes "these chunks have no anchors" a
+        # postcondition of this method, which is what lets the write CREATE.
+        # Chunks being DROPPED are handled below by `DETACH DELETE`, which
+        # takes their edges with them.
+        if keep_chunks:
             self._batch(
                 "UNWIND $rows AS r MATCH (:Chunk {cid: r.cid})-[e:Anchors]->() "
                 "DELETE e",
-                [{"cid": cid} for cid in existing],
+                [{"cid": cid} for cid in keep_chunks],
             )
 
         gone = ([cid for cid in existing if cid not in keep_chunks]

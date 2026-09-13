@@ -648,18 +648,50 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             passno = int(session["passno"])
             session["passno"] = passno + 1
+
+            # Every phase timed separately (`G-66`, and constraint 4 of
+            # CLAUDE.md, which has said so all along for the fold and the
+            # projections and was never extended to this path).
+            #
+            # A capture was one number -- 2.16 seconds -- covering decode,
+            # absorb, render and store, and a single number cannot say which
+            # of them to fix. Guessing which phase dominates is the mistake
+            # this project keeps making; these four fields are what stops it
+            # being guessed again.
+            phases = {}
+            mark = time.perf_counter()
+
             sense = session["sensor"]._as_pass(payload, 0.0, 0.0, passno)
+            phases["decode"] = round((time.perf_counter() - mark) * 1000, 1)
+            mark = time.perf_counter()
+
             spine = session["spine"]
             update = spine.absorb(sense.units, sense.passno,
                                   removed=sense.removed_addresses,
                                   moved=sense.moved_addresses)
+            phases["absorb"] = round((time.perf_counter() - mark) * 1000, 1)
+            mark = time.perf_counter()
+
+            # `dirty_chunks` is where `render_trie` runs, so this is the
+            # markdown projection's cost on the delta -- named as `render`
+            # because that is what it is, whatever the method is called.
             dirty = spine.dirty_chunks(update)
+            phases["render"] = round((time.perf_counter() - mark) * 1000, 1)
+            mark = time.perf_counter()
+
             if dirty:
                 with _WORK_LOCK:
-                    self.workspace.ingest_chunks(url, dirty, complete=False)
+                    _written, counts = self.workspace.ingest_chunks(
+                        url, dirty, complete=False)
+                # The store's own breakdown, carried up. `store` was 96% of a
+                # capture and one number cannot say which statement it is.
+                if isinstance(counts, dict):
+                    phases.update({k: v for k, v in counts.items()
+                                   if str(k).startswith("ms_")})
                 # There are chunks without vectors now. The worker embeds
                 # them; this request does not wait for it.
                 _EMBED_WANTED.set()
+            phases["store"] = round((time.perf_counter() - mark) * 1000, 1)
             # Named, not counted. The pane asks `place` about exactly these,
             # and a count would leave it re-fetching the whole layout to find
             # out which three nodes moved.
@@ -680,6 +712,7 @@ class _Handler(BaseHTTPRequestHandler):
             "dirty": len(dirty),
             "dirty_cids": dirty_cids,
             "wire_bytes": sense.wire_bytes,
+            "phases": phases,
         }
 
         # Placed HERE, in the same reply, when the caller asks.
@@ -695,6 +728,7 @@ class _Handler(BaseHTTPRequestHandler):
         # `POST /place` stays, because "where would these go" is a real
         # question on its own -- a pane that already has cids from somewhere
         # else has no drain to attach them to.
+        place_mark = time.perf_counter()
         if body.get("place"):
             # Everything this drain touched, PLUS everything an earlier drain
             # could not place yet. A chunk embedded in the background while
@@ -712,6 +746,7 @@ class _Handler(BaseHTTPRequestHandler):
                 # caller as failing to capture them.
                 reply["place_error"] = "%s: %s" % (type(exc).__name__, exc)
 
+        phases["place"] = round((time.perf_counter() - place_mark) * 1000, 1)
         reply["ms"] = round((time.perf_counter() - started) * 1000, 1)
         self._send(200, reply)
 
