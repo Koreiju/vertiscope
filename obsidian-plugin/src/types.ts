@@ -224,6 +224,16 @@ export interface CaptureResult {
   /** Which ones, named. A count would leave the pane refetching the
    *  whole layout to find out which three nodes moved. */
   dirty_cids?: string[];
+  /** Placed nodes, when the capture was asked to place them -- the same
+   *  shape `/layout` returns. Present instead of a second round trip. */
+  nodes?: unknown[];
+  /** Captured but not yet embedded; normal for a chunk seconds old. */
+  unplaced?: string[];
+  /** The corpus has doubled since the fit; the pane should refit. */
+  stale?: boolean;
+  /** Set when storing succeeded and placing did not. The two are reported
+   *  apart because a capture that landed must not read as one that did not. */
+  place_error?: string;
   changed?: number;
   wire_bytes?: number;
   settled?: boolean;

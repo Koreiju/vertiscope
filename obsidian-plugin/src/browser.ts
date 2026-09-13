@@ -289,7 +289,10 @@ export class BrowserView extends ItemView {
       // page would pay it once a second forever.
       if (!payload || !(payload.chunks || []).length) return;
 
-      const reply = await this.sidecar.capture(url, { payload });
+      // One round trip: fold, store, and place, because per drain they are
+      // one question. The second call carried a list of cids the server had
+      // just computed and was handing straight back.
+      const reply = await this.sidecar.capture(url, { payload, place: true });
       if (!reply || reply.error) {
         this.say(`capture: ${reply ? reply.error : "no reply"}`);
         return;
@@ -299,13 +302,14 @@ export class BrowserView extends ItemView {
         this.say(`live · ${reply.addresses} addresses`);
         return;
       }
-      const placed = await this.sidecar.place(cids);
-      const nodes = (placed && (placed.nodes as LayoutNode[])) || [];
+      const nodes = (reply.nodes as LayoutNode[]) || [];
       if (nodes.length) this.onChunks(nodes);
-      const waiting = placed && placed.unplaced ? placed.unplaced.length : 0;
+      const waiting = reply.unplaced ? reply.unplaced.length : 0;
       this.say(`live · ${cids.length} chunks · ${nodes.length} placed` +
                (waiting ? ` · ${waiting} awaiting a vector` : "") +
-               (placed && placed.stale ? " · fit is stale, refit" : ""));
+               (reply.place_error ? ` · ${reply.place_error}` : "") +
+               (reply.stale ? " · fit is stale, refit" : "") +
+               ` · ${reply.ms} ms`);
     } catch (e) {
       // The realm goes away on navigation and the handle with it. That is
       // ordinary, not an error: the next tick reboots into the new document.

@@ -183,13 +183,18 @@ export class Sidecar {
    * between calls. `settle: true` closes the page out with one complete write
    * from the finished trie.
    *
+   * `place: true` asks for the placed nodes in the SAME reply. Fold, store
+   * and place are one question per drain, and asking them separately spent a
+   * round trip carrying a list of cids the server had just computed.
+   *
    * POST and not retried: it writes the workspace, and a half-written page
    * re-sent is not the same as one sent once -- the same reasoning as
    * `enact` and `runCommand`.
    */
   async capture(url: string,
                 what: { payload?: unknown; settle?: boolean;
-                        restart?: boolean; title?: string },
+                        restart?: boolean; title?: string;
+                        place?: boolean },
                ): Promise<CaptureResult | null> {
     const base = this.base().trim().replace(/\/+$/, "");
     if (!base) return null;

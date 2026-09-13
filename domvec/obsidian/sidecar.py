@@ -598,7 +598,7 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(500, {"error": "%s: %s" % (type(exc).__name__, exc)})
             return
 
-        self._send(200, {
+        reply = {
             "url": url,
             "passno": passno,
             "addresses": sense.addresses,
@@ -607,8 +607,32 @@ class _Handler(BaseHTTPRequestHandler):
             "dirty": len(dirty),
             "dirty_cids": dirty_cids,
             "wire_bytes": sense.wire_bytes,
-            "ms": round((time.perf_counter() - started) * 1000, 1),
-        })
+        }
+
+        # Placed HERE, in the same reply, when the caller asks.
+        #
+        # The browser cell wants three things per drain and they are one
+        # question: fold the page, store what changed, and say where the
+        # changed chunks go. Asking them separately cost a round trip whose
+        # only content was a list of cids the server had just computed and
+        # was about to be handed back -- and each trip is a fetch from a
+        # renderer, a thread from the pool, and a kuzu read that has to
+        # re-find the same chunks.
+        #
+        # `POST /place` stays, because "where would these go" is a real
+        # question on its own -- a pane that already has cids from somewhere
+        # else has no drain to attach them to.
+        if body.get("place") and dirty_cids:
+            try:
+                reply.update(place_into(self.workspace, dirty_cids))
+            except Exception as exc:                # noqa: BLE001
+                # Named and non-fatal. The capture succeeded and is stored;
+                # failing to say where the chunks go must not read to the
+                # caller as failing to capture them.
+                reply["place_error"] = "%s: %s" % (type(exc).__name__, exc)
+
+        reply["ms"] = round((time.perf_counter() - started) * 1000, 1)
+        self._send(200, reply)
 
     def do_GET(self) -> None:                       # noqa: N802 (stdlib name)
         parts = urlsplit(self.path)
