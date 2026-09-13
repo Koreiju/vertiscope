@@ -121,8 +121,27 @@ def build_layout(workspace,
     # matrix so nothing is renumbered, and it describes no chunk.
     cids: List[str] = []
     rows: List[int] = []
+    redundant = 0
     for row, cid in enumerate(freq.rows):
         if cid and cid in meta:
+            # One node per distinct rendering, not one per address.
+            #
+            # archive.org's search page renders each result as a
+            # `<tile-dispatcher>` with its own shadow root, and every one of
+            # those roots carries the same accessibility hint -- so the pane
+            # drew a cluster of 125 nodes all reading "Press Down Arrow to
+            # preview item details". They are 125 real addresses and the trie
+            # is right to hold them; what they are not is 125 things to look
+            # at. The store decides this at ingest (`_same_content`), on exact
+            # bytes and within one page, so nothing here is a heuristic.
+            #
+            # Dropped before the fit, not after: a duplicate embeds to the
+            # same vector, so leaving them in spends the projector's
+            # neighbourhood budget on a point it already has and pulls the
+            # layout toward whichever page repeats itself most.
+            if meta[cid].redundant:
+                redundant += 1
+                continue
             cids.append(cid)
             rows.append(row)
 
@@ -232,6 +251,9 @@ def build_layout(workspace,
             "cid": cid,
             "url": chunk.url,
             "title": _title(chunk.md),
+            #: How many addresses on the page draw this, so the pane can say
+            #: "125 copies" instead of silently standing for 125 things.
+            "copies": chunk.dup_n,
             "rank": float(ranks[row]) if row < len(ranks) else 0.0,
             "chars": chunk.chars,
             "tokens": tokens.budget(chunk.md or ""),
@@ -257,6 +279,10 @@ def build_layout(workspace,
         "edges": edges,
         "spaces": spaces,
         "n": len(nodes),
+        #: Chunks the page draws more than once, left out of the fit. Reported
+        #: rather than silently subtracted: `n` no longer equals the store's
+        #: chunk count, and a reader comparing the two needs to see why.
+        "redundant": redundant,
         "dims": dims,
         # Six when the colour comes from the fit. Reported because a viewer
         # that colours by hue is showing three more dimensions of the same

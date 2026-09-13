@@ -57,6 +57,7 @@ _SCHEMA = [
     f"""CREATE NODE TABLE IF NOT EXISTS Chunk(
         cid STRING, url STRING, xpath STRING, part INT64, md STRING,
         chars INT64, line_count INT64, row INT64, embedding FLOAT[{EMBED_DIM}],
+        dup_of STRING, dup_n INT64,
         PRIMARY KEY(cid))""",
     """CREATE NODE TABLE IF NOT EXISTS Address(
         aid STRING, akey STRING, url STRING, xpath STRING, tag STRING,
@@ -66,6 +67,15 @@ _SCHEMA = [
     "CREATE REL TABLE IF NOT EXISTS Anchors(FROM Chunk TO Address, ord INT64)",
     "CREATE REL TABLE IF NOT EXISTS Contains(FROM Chunk TO Chunk)",
     "CREATE REL TABLE IF NOT EXISTS LinksTo(FROM Chunk TO Page)",
+]
+
+#: Columns added after stores already existed. Kuzu has no
+#: `ADD COLUMN IF NOT EXISTS`, so these are run individually and their
+#: "already exists" is swallowed -- the alternative is a store written
+#: yesterday failing to open today.
+_MIGRATIONS = [
+    "ALTER TABLE Chunk ADD dup_of STRING",
+    "ALTER TABLE Chunk ADD dup_n INT64",
 ]
 
 
@@ -116,10 +126,76 @@ class StoredChunk:
     chars: int
     line_count: int
     row: int
+    #: The cid of the chunk this one draws a byte-identical copy of, on the
+    #: same page; empty when this chunk is the one that keeps the content.
+    #: See `_same_content`.
+    dup_of: str = ""
+    #: How many chunks on the page draw this content, counting this one. 1
+    #: unless this is the chunk the copies point at.
+    dup_n: int = 1
 
     @property
     def markdown(self) -> str:
         return self.md
+
+    @property
+    def redundant(self) -> bool:
+        """True when another chunk on this page already draws this."""
+        return bool(self.dup_of)
+
+
+def _same_content(chunks) -> tuple:
+    """Which chunks on this page draw exactly what another chunk draws.
+
+    Returns ``(canonical, copies)``: for every redundant chunk, the cid of the
+    one chunk that keeps the content; and for every canonical chunk, how many
+    chunks in total draw it. A chunk that is nobody's copy maps to ``""`` and
+    to a count of 1.
+
+    **Marked, not merged, and the anchors are why.** `Anchors {ord}` pairs a
+    chunk's markdown lines with its addresses BY POSITION -- the docstring on
+    `ingest_chunks` records what happened the last time that alignment slipped
+    -- so one chunk holding 125 tiles' addresses would attribute one line to
+    125 elements and the address-to-document link, the single guarantee the
+    scheme exists to provide, would point at 124 wrong elements. Every chunk
+    keeps its own node, its own anchors and its own addresses; the trie is
+    untouched and still holds `url : xpath : markdown : content` for all of
+    them. What is added is a fact ABOUT the chunks, which consumers may then
+    ask for: draw one node instead of 125, embed one string instead of 125.
+
+    Scoped to one page, because that is where redundancy means redundancy.
+    Two pages sharing a cookie banner are two documents that happen to have
+    the same sentence in them, and collapsing across pages would make a hit on
+    one page point into another.
+
+    Exact bytes, deliberately. This is the arm that needs no embeddings and no
+    threshold, and it is not small: measured on `build/vaultws256`, 38 groups
+    and 176 redundant chunks of 5,337, of which ONE group is 125 copies of
+    "Press Down Arrow to preview item details" -- archive.org renders each
+    search result as a `<tile-dispatcher>` custom element with its own shadow
+    root, and every one of those roots carries the same accessibility hint.
+    They are 125 distinct addresses drawing one string, which is exactly what
+    `_dedupe` cannot see: it is element-scoped, grouping units by `addr.xpath`
+    and comparing only within a group, so identical content at DIFFERENT
+    xpaths has never been compared to itself.
+
+    The near-duplicate case -- the same thing said slightly differently -- is
+    a separate stage and needs the embeddings. This one does not, so it does
+    not wait for them.
+    """
+    first: dict = {}
+    canonical: dict = {}
+    counts: dict = {}
+    for chunk in chunks:
+        key = chunk.markdown
+        head = first.get(key)
+        if head is None:
+            first[key] = chunk.cid
+            counts[chunk.cid] = 1
+        else:
+            canonical[chunk.cid] = head
+            counts[head] = counts.get(head, 1) + 1
+    return canonical, {cid: n for cid, n in counts.items() if n > 1}
 
 
 class GraphStore:
@@ -166,6 +242,11 @@ class GraphStore:
         if not self.read_only:
             for statement in _SCHEMA:
                 self.conn.execute(statement)
+            for statement in _MIGRATIONS:
+                try:
+                    self.conn.execute(statement)
+                except RuntimeError:
+                    pass    # already there
 
     def __enter__(self) -> "GraphStore":
         return self
@@ -280,12 +361,15 @@ class GraphStore:
         # which an all-zero vector already qualified. `embedding()` gains the
         # NULL guard, since `list(None)` raises.
         has_vectors = bool(embeddings)
+        canonical, copies = _same_content(chunks)
         chunk_rows = []
         for chunk in chunks:
             row = {
                 "cid": chunk.cid, "url": chunk.url, "xp": chunk.xpath,
                 "part": chunk.part, "md": chunk.markdown, "chars": chunk.chars,
                 "lines": len(chunk.lines), "row": int(rows.get(chunk.cid, -1)),
+                "dup": canonical.get(chunk.cid, ""),
+                "dupn": copies.get(chunk.cid, 1),
             }
             if has_vectors:
                 vector = list(embeddings.get(chunk.cid) or [])[:EMBED_DIM]
@@ -298,6 +382,7 @@ class GraphStore:
                 "UNWIND $rows AS r MERGE (c:Chunk {cid: r.cid}) "
                 "SET c.url = r.url, c.xpath = r.xp, c.part = r.part, "
                 "c.md = r.md, c.chars = r.chars, c.line_count = r.lines, "
+                "c.dup_of = r.dup, c.dup_n = r.dupn, "
                 "c.row = r.row" + (", c.embedding = r.emb" if has_vectors else ""),
                 chunk_rows,
             )
@@ -582,12 +667,15 @@ class GraphStore:
             rows = self._rows(
                 "MATCH (p:Page {url: $url})-[:HasChunk]->(c:Chunk) "
                 "RETURN c.cid, c.url, c.xpath, c.part, c.md, c.chars, "
-                "c.line_count, c.row", {"url": url})
+                "c.line_count, c.row, c.dup_of, c.dup_n", {"url": url})
         else:
             rows = self._rows(
                 "MATCH (c:Chunk) RETURN c.cid, c.url, c.xpath, c.part, "
-                "c.md, c.chars, c.line_count, c.row")
-        return [StoredChunk(*r) for r in rows]
+                "c.md, c.chars, c.line_count, c.row, c.dup_of, c.dup_n")
+        # `or` rather than a default: a store written before these columns
+        # existed answers NULL for both, and a NULL count would make every
+        # chunk in it look like a copy of nothing with no copies.
+        return [StoredChunk(*r[:8], r[8] or "", r[9] or 1) for r in rows]
 
     def embedding(self, cid: str) -> Optional[List[float]]:
         rows = self._rows(

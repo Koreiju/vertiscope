@@ -173,6 +173,33 @@ axes: **structure, content, organizedness, completeness**.
 | G-19 | The view is **centred on the origin** | Open — Addendum III. A sphere of radius 1 about the origin makes `recentre` unnecessary by construction: the camera cannot end up inside the cloud, which is the failure `graph.ts` records a camera at z = −230 inside a cloud spanning ±249 |
 | G-20 | **Force-directed relaxation seeded from the UMAP embedding** — UMAP initialises, the simulation converges | **Done** — `graph.ts`. Nodes carry `x/y/z` from the fit instead of `fx/fy/fz`, and `fitX/fitY/fitZ` alongside so drift is measured rather than assumed. `charge` and `center` are removed and `link` is kept at **zero strength**, not removed: `forceLink` is also d3's id resolver, and dropping it left all 2,961 edges holding their endpoints as strings, so every patricia and inter-note link stopped drawing with nothing reporting an error. Measured cold: 2,302 of 5,337 nodes sit exactly where the fit put them, which is the proof no force but collision runs |
 | G-21 | **Nodes never overlap**: spherical colliders, with a **quarter-distance safety factor** on the radius | **Done** — `graph.ts`, probe `probes/collider.js`. `forceCollide` at `drawnRadius × 1.25`. Measured cold on a 1,200-node sample: **0 overlapping pairs of 719,400 and 0 inside the clearance band**, from 750 before. The radius is **not one formula**: 827 of 5,337 chunks draw as square picture panels, not spheres, and sizing them as spheres left 96 overlapping pairs — 66 panel-on-panel, 30 panel-on-sphere, **0 sphere-on-sphere** — because the collider reserved 1.93 units where the panel drew at 12.73. A billboard turns to face the camera, so its collider is the sphere that circumscribes it: the half-**diagonal**, `edge/√2` |
+| G-22 | **The chunking window counts only what a model reads.** Link targets — `href`, `src`, bare urls — are excluded from the token budget; the render keeps them | **Done** — `tokens.for_model`/`tokens.budget`, §M.7. 52.5% of the corpus's rendered tokens were addresses |
+| G-23 | **Two vectors, two strings.** The quantized semantic embedding is given link-free markdown; the frequency matrix keeps url path words as lexical terms | **Done** — `vectors.VectorQueue.push` strips; `vectors.tokens` does not. An address is not a sentence; a url tail *is* a term |
+| G-24 | **Exact duplicates are resolved in the database, over the aggregate DOM chunks, before any embedding is consulted** — page-scoped, byte-exact, no threshold | **Done** — `graphstore._same_content`, §M.8. Marked, not merged: `Anchors {ord}` pairs lines to addresses by position, so collapsing the nodes would misattribute every line |
+| G-25 | **One node per distinct rendering in the projector**, with the copy count carried, not one node per address | **Done** — `layout.py`. archive.org drew a cluster of **125** identical nodes; dropped before the fit, because a duplicate embeds to the same vector and spends the projector's neighbourhood budget on a point it already has |
+| G-26 | **Stage two: near-duplicate aggregation over the quantized semantic embeddings.** DBSCAN (or a nearest-neighbour feature aggregation in its place) merges chunks that are the same thing said differently, which exact bytes cannot reach | Open — §N.1 |
+| G-27 | **The merge layer indexes; the 256-token chunks remain the retrieval unit.** A merged chunk is what is structured and presented, up to the 512-token display context; the originals and their embeddings stay underneath and are still what a hit resolves to | Open — §N.1. 256 was chosen on hit@1 and that choice is not reopened |
+| G-28 | **The window is a staging device, not a hard constraint.** Stage one cuts conservatively at a window that is a strict subset of the display context; stage two merges back up | Open — §N.1 |
+| G-29 | **"Exact duplicate" and "should be merged" are different verdicts and are decided separately.** Substring matching is explicitly rejected for the second | Open — §N.1. Proposed first cut: a *relative* nearest-neighbour criterion — within X% of the closest-neighbour distance, scaled by the max closest-neighbour distance over the page — so the threshold is a property of the page, not a constant |
+| G-30 | **Frequency vectors verify the merge, as their own step, after dedup** — not mixed into the first pass | Open — §N.1 |
+| G-31 | **Aggregation is localised to a shadow DOM, not run over the corpus.** It is a second stage of *chunking*, inside the scan, coarse-to-fine — not a separate offline pass | Open — §N.1 |
+| G-32 | **A significance gate**: stage two runs only once a page has yielded enough chunks from the recursive text-only window for the pairwise distances to discriminate | Open — §N.1. The gate is N, measured, not assumed |
+| G-33 | **Structure enters the pairwise metric.** Either pagerank over the soft adjacency of the shadow DOM in its current state, or an LCA path metric over the patricia paths | Open — §N.1. Pagerank solves an eigenvalue problem over linked relevance, which suits *linked* aggregation; LCA suits *spatial* co-location. Start with quantized embeddings alone and measure what each adds |
+| G-34 | **Online aggregation.** The similarity structure is maintained diff-efficiently across a continuous scan: a merge or split re-vectorises only the chunks it touched, and the UMAP update is batch-minimal | Open — §N.1. This is the O(delta) constraint reaching the second stage |
+| G-35 | **The projector's force-directed relaxation and picture billboards survive every aggregation update** | Open — `G-20`/`G-21` are not to be regressed by `G-34`'s incremental updates |
+| G-36 | **The browser cell is an Electron browser**, and it is one component with two hosts: standalone panel, or a cell inside the notebook. Same functionality in both; one is a collapsed view of the other | Open — §N.2 |
+| G-37 | **One panel, two toggleable views**: the live Electron browser, and the same content as a **native Obsidian markdown panel** rendering the full markdown — not a reduced one | Open — §N.2. The markdown view is the panel already shipped; what is new is that it is the browser panel's other face |
+| G-38 | **Hovering a chunk in the browser highlights it minimally**, and highlights the corresponding node in the 3D projector. No banner, no chunk details — they are already on screen | Open — §N.2. This is also the validation surface for `G-24`–`G-33`: a reader can see what the aggregation decided |
+| G-39 | **Right-click ports the full-content markdown to the other view** in the same panel | Open — §N.2 |
+| G-40 | **Clicking a node in the 3D projector navigates the browser to that chunk** — same session, scrolled into view, rather than a new rendering of it | Open — §N.2. This collapses three candidate representations into one |
+| G-41 | **Nothing is injected into the page.** The retrieval overlay and the highlight are a layer *above* Electron, linked to the store, never script written into the document | Open — §N.2, and it is constraint 7 of `CLAUDE.md` reaching the browser cell |
+| G-42 | **A retrieval panel above the browser, results overlaid**, selecting one navigates to its url and chunk | Open — §N.2. Same component in the notebook cell. Distinct from the markdown panel's retrieval gesture, which inserts chunks directly |
+| G-43 | **A hoverable chat panel on the browser**, whose context is exactly the right-clicked full markdowns, **each sent at most once** — the context window is updated by delta the way the scan is | Open — §N.2 |
+| G-44 | **The chat is continuous markdown**: outputs land below the selected markdown, in conversational structure, and inside a notebook they append to the selected cell with the rewind rules unchanged | Open — §N.2 |
+| G-45 | **The selection gesture is the delta.** The right-clicked elements since the last response are what is pre-injected into the next prompt — there is no separate context box | Open — §N.2 |
+| G-46 | **Interactive fields in the shadow-DOM view act on the real page** through the trie, when a connection exists | Open — §N.2, and it is constraint 2 of `CLAUDE.md`: a field is acted on in place |
+| G-47 | **Scanning migrates from Selenium to the Electron browser** that hosts the cell, and that is where scanning then happens | Open — §N.2, `S-13` |
+| G-48 | **Headers, fields and formatting are part of the text that gets vectorised** — the crypto-panel case is the standing example of what is lost when they are not | Open — §N.1. Link-free markdown for the quantized embedding keeps structure; it drops only addresses |
 
 ### P. The panels
 
@@ -1475,6 +1502,153 @@ wider. The honest caveat: at the pane's default framing that panel draws at
 **3.3 px**, and the old 18-unit panel drew at 12.5 px. Neither is a legible
 thumbnail; the reader zooms either way. The old size was paying 0.21 retention
 for legibility it never delivered.
+
+### M.7 — the window was counting addresses, not words
+
+Measured with the real encoder over `build/vaultws256`, 5,337 chunks, before
+the change:
+
+| | tokens |
+|---|---|
+| the corpus, as rendered | 548,451 |
+| of those, **link targets** | **288,200 — 52.5%** |
+| chunks spending more than half their budget on addresses | **3,591 of 5,337 — 67.3%** |
+
+By page, the share that is link target: discourse.julialang.org 71.2%,
+commons.wikimedia.org 68.9%, developer.mozilla.org 61.9%, arxiv.org 53.5%.
+The worst single chunk is 370 tokens that reduce to **1**. So a 256-token
+window was a ~121-token window of anything a reader or a model would read,
+and the chunker had been cutting pages to fit machine addressing.
+
+Three chunks read off the live pane, which is what the defect looks like from
+the reader's side rather than in aggregate:
+
+| chunk | badge | what is in it |
+|---|---|---|
+| `d52f569d` | 238 tok, 93% of 256 | a paper title and eight author names, each name followed by a full `arxiv.org/search?searchtype=author&query=` target |
+| `f8c995ac` | 206 tok, 80% of 256 | two link lines and two `![]()` image urls |
+| `d5511a40` | 104 tok, 41% of 256 | one avatar, one profile link, and the word "image" |
+
+The fix counts `tokens.budget` — `count` over `for_model`, which drops targets
+and keeps labels. The render is untouched, because a link is an affordance the
+reader acts on in place. The quantized semantic embedding is given the same
+link-free string, since an address is not a sentence; the frequency matrix
+keeps expanding urls into path words, because a url tail is a legitimate
+lexical term. That is `G-22` and `G-23`, and it is the reason there are two
+vectors.
+
+### M.8 — the duplicate cluster, diagnosed and closed without embeddings
+
+`build/vaultws256`, grouping by (page, exact rendered markdown):
+
+| | |
+|---|---|
+| duplicate groups within a page | 38 |
+| redundant chunks | **176 of 5,337 — 3.3%** |
+| the largest single group | **125** |
+
+The 125 are one string — `Press Down Arrow to preview item details` — at 125
+distinct addresses on `archive.org/search`:
+
+```
+/section/infinite-scroller/#shadow-root/.../article
+    /tile-dispatcher/#shadow-root/div/div
+ [2]/tile-dispatcher/#shadow-root/div/div
+ [3]/tile-dispatcher/#shadow-root/div/div      … ×125
+```
+
+Each search result is a `<tile-dispatcher>` custom element with **its own
+shadow root**, and every one of those roots carries the same accessibility
+hint. The trie is right to hold 125 addresses; the projector was wrong to draw
+125 nodes, and the reader saw a cluster of identical dots.
+
+**Why `_dedupe` could not see it.** It is element-scoped by design: it groups
+units by `addr.xpath` and compares only within a group. Identical content at
+*different* xpaths has never been compared to itself, and 125 tiles are 125
+different xpaths.
+
+**Marked, not merged.** `Anchors {ord}` pairs a chunk's markdown lines with its
+addresses by position — `ingest_chunks` records what happened the last time
+that alignment slipped — so one chunk holding 125 tiles' addresses would
+attribute one line to 125 elements. Every chunk keeps its node, its anchors and
+its addresses; `dup_of` and `dup_n` are a fact *about* them that consumers may
+act on. The projector drops copies before the fit and carries the count.
+
+Byte-exact and page-scoped on purpose: no threshold, no embedding, and two
+pages sharing a cookie banner stay two documents. The near-duplicate case —
+the same thing said differently — is `G-26` and needs the embeddings, so it
+does not hold this up.
+
+### N.1 — two-stage chunking: recursive descent, then embedding aggregation
+
+The design the user set out, recorded before it is built.
+
+**Stage one** is what exists: recursive descent to a window counted in
+link-free text (`G-22`). The window is *staging*, not a ceiling — it is chosen
+as a strict subset of the display context so that stage two has room to merge
+back up. 256 stays, because it was chosen on hit@1 and that is not reopened.
+
+**Stage 1b** is `G-24`: exact duplicates resolved DB-side, over the aggregate
+DOM chunks, before any embedding is consulted. Shipped; see §M.8.
+
+**Stage two** is aggregation over the **quantized semantic embeddings only**.
+Frequency vectors are not dimension-efficient and exist for fine-grained
+retrieval, so they do not drive the merge — they verify it, afterwards, as
+their own step (`G-30`).
+
+Open questions the build has to answer with measurements, not choices:
+
+1. **What separates "duplicate" from "should be merged"?** Substring matching
+   is rejected. The proposed first cut is *relative*: within X% of the closest
+   neighbour's distance, scaled by the maximum closest-neighbour distance on
+   the page, so the criterion is a property of the page rather than a
+   constant. Establish duplicate-links first, merge second.
+2. **When is there enough to discriminate?** Stage two runs only past a sample
+   size N of chunks from one shadow DOM (`G-32`). N is to be measured by
+   sweeping it against aggregate accuracy, not assumed.
+3. **What structural term belongs in the pairwise metric?** Pagerank solves an
+   eigenvalue problem over linked relevance and suits *linked* aggregation;
+   an LCA path metric over patricia paths suits *spatially* co-located
+   subchunks. Start with the embeddings alone and measure what each adds.
+4. **Sinkhorn / annealing** to localise the aggregation to its page structure,
+   given a pairwise matrix carrying both the coarse and fine encodings and the
+   structural term.
+5. **Online.** A continuous scan must maintain this diff-efficiently: a merge
+   or split re-vectorises only what it touched, and the projector's update
+   stays batch-minimal (`G-34`) without regressing the force-directed layout
+   or the picture billboards (`G-35`).
+
+The merged layer is what is indexed, structured and presented; the 256-token
+chunks and their embeddings stay underneath and remain what a hit resolves to
+(`G-27`). Merged chunks are scored in the same unit as everything else —
+link-free markdown tokens.
+
+### N.2 — the browser cell
+
+One component, two hosts: a standalone panel, or a cell in the notebook. The
+functionality is identical; the standalone is the expanded view.
+
+The panel has **two toggleable faces**: the live Electron browser, and the
+full markdown rendered as a native Obsidian panel. Hovering a chunk in the
+browser highlights it minimally and lights the same chunk in the 3D projector
+— no banner, because the content is already on screen. Right-click ports that
+chunk's full markdown to the other face. Clicking a node in the projector
+drives the same browser session to that url and scrolls the chunk into view,
+which is what collapses "browser", "shadow-DOM view" and "chunk view" into one
+thing.
+
+Above the browser sits retrieval, drawn as an **overlay** — a layer above
+Electron linked to the store, never script written into the page (`G-41`).
+Selecting a result navigates to its url and chunk.
+
+The chat is hoverable on the browser and its context is exactly the
+right-clicked markdowns, **each sent at most once**: the selection gesture
+*is* the delta, so there is no separate context box. Outputs land below the
+selected markdown as continuous conversational markdown, and inside a notebook
+they append to the selected cell with the rewind rules unchanged.
+
+This is also where scanning moves (`G-47`): the Electron browser that hosts the
+cell becomes the sensor's host, replacing Selenium.
 
 ## N. S-13 — can Electron host the sensor? Measured, in the running Obsidian
 
