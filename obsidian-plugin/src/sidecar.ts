@@ -10,8 +10,8 @@
  * goes unnoticed.
  */
 
-import { ChunkPayload, EnactResult, Health, Interpreters, KernelReply,
-         SearchResult, ShellReply } from "./types";
+import { ChunkPayload, ChunkPreview, EnactResult, Health, Interpreters,
+         KernelReply, SearchResult, ShellReply } from "./types";
 
 export class Sidecar {
   constructor(private base: () => string) {}
@@ -107,6 +107,32 @@ export class Sidecar {
         body: JSON.stringify({ address, action, text }),
       });
       return (await res.json()) as EnactResult;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Where the chunker would cut this text (`P-N8`).
+   *
+   * A POST because the body IS the note: newlines, and tens of kilobytes on a
+   * long one, neither of which belongs in a query string. Not retried, not
+   * because it acts -- it is a pure function of the text -- but because the
+   * caller re-asks on the next idle anyway, and a retry would only delay a
+   * mark the reader has already outrun by typing.
+   */
+  async chunkPreview(text: string, path: string,
+                     vault = "vault"): Promise<ChunkPreview | null> {
+    const base = this.base().trim().replace(/\/+$/, "");
+    if (!base) return null;
+    try {
+      const res = await fetch(`${base}/chunk_preview`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, path, vault }),
+      });
+      if (!res.ok) return null;
+      return (await res.json()) as ChunkPreview;
     } catch {
       return null;
     }

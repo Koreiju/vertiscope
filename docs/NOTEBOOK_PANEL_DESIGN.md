@@ -319,8 +319,51 @@ Each step ends somewhere verifiable over CDP (`X-2`), never a screenshot.
 | 4 | ~~Output markers written, read, re-rendered~~ **DONE** — `src/outputs.ts` | written after the fence, replaced on re-run, markers invisible in reading view, survives a close and re-read. `probes/cell-outputs.js`, 11 checks |
 | 5 | Outputs are chunked and vectorised (`P-N5`/`P-N6`) | **GATE PASSED** — a stored output is addressed `…/output[n]` and retrieves on its own words; the markers do NOT (§4b). Live `[[]]` wiring still to do |
 | 6 | ~~Kernel run surface; command terminal in a *separate pane* (§4a); interpreter discovery~~ **DONE** — `domvec/obsidian/shell.py`, `src/terminal.ts`, `POST /shell`, `GET /interpreters` | a pwsh prompt in its own pane, `cd` persisting per pane and isolated across them, picker filled from discovery. 11 pytest + `probes/terminal-pane.js` (7 checks) |
-| 7 | `P-N8` chunk overlay | gutter marks match `/chunk` addresses from the sidecar |
+| 7 | ~~`P-N8` chunk overlay~~ **DONE** — `vault.chunk_preview`, `POST /chunk_preview`, `src/chunkgutter.ts` | marks match the sidecar's own answer for the same text, and the preview matches what indexing STORES (39 = 39, identical address sets). 5 pytest + `probes/chunk-gutter.js` (6 checks) |
 | 8 | `P-N9`/`P-N10` selection → address set → SLM context | the SLM's prompt contains exactly the selected addresses' content |
+
+**What step 7 settled that the design had not.**
+
+- **§5 said "read straight from the trie", and that is wrong for the note on
+  screen.** A stored boundary is stale from the first keystroke, and a mark
+  confidently in the wrong place answers *"why did my section split"* with last
+  week's answer — worse than no mark. So `chunk_preview` computes from the text
+  in hand. What makes that safe is that it is the SAME pipeline
+  `Workspace.index_note` runs — `tag_note`, `AddressTrie.from_tags`,
+  `render_trie` — with the store write left out, so the two agree by
+  construction. `test_preview_agrees_with_what_indexing_stores` is the arm that
+  holds it there; measured on this document, 39 chunks each side with identical
+  `(xpath, part)` sets.
+- **A chunk knows its addresses and not its lines.** Only the parse knows both,
+  because only the parse is looking at the text — so `tag_note` gained an
+  optional `lines_at` out-parameter rather than a second return value, which
+  leaves every existing caller unchanged. A paragraph is the one block whose
+  extent is unknown when it starts, so its first line is carried rather than
+  derived.
+- **An inline address has no line of its own.** `…/p[1]/a[1]` is a link written
+  inside a paragraph; only blocks are marked. The lookup walks UP a step at a
+  time rather than giving up, or every chunk whose first line happened to be a
+  link would be dropped.
+- **`/chunk_preview` is ungated, deliberately.** Every other POST here acts on
+  the world; this one is a pure function of the text it was handed — no write,
+  no workspace, no process. Gating it behind `--kernel` would mean a reader
+  could not see why their note splits unless they had first enabled code
+  execution, a permission with nothing to do with the question.
+- **A CM6 gutter renders only the VIEWPORT, and that cost a wrong failure.**
+  Counting gutter elements counts what is on screen, not what the editor knows:
+  6 starts visible against 9 chunks, with the viewport covering 4,515 of 7,715
+  characters, and scrolling changed the count to 5. The probe filters the
+  sidecar's chunks to the visible line range before comparing. Nothing was wrong
+  with the code.
+- **`editor-change` is a reader typing, not a file changing.** The probe's
+  "marks follow the text" arm first edited through `vault.modify`, saw nothing
+  move, and reported a failure against code behaving correctly for the path it
+  is wired to. A note changed on disk by something else does NOT refresh its
+  marks — recorded here as a real limitation rather than fixed by widening the
+  trigger, since the reader in front of the note is who the gutter is for.
+- **Debounced to the pause between words, not throttled.** The boundaries are a
+  round trip and a full re-chunk; a throttle would answer *during* typing, which
+  is exactly when the answer is worth least.
 
 **What step 6 settled that the design had not.**
 

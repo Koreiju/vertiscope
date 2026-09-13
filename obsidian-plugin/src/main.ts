@@ -21,6 +21,7 @@
 import {
   App,
   MarkdownPostProcessorContext,
+  MarkdownView,
   Notice,
   Plugin,
   TFile,
@@ -35,6 +36,7 @@ import {
   RunHost, RunRequest, livePreviewRunButtons, readingViewRunButtons,
 } from "./runbutton";
 import { cellSource, findFences } from "./fences";
+import { ChunkSpan, chunkGutter, setChunkSpans } from "./chunkgutter";
 import { hashCell, renderOutput, withOutput } from "./outputs";
 import { GRAPH_VIEW, GraphView } from "./graph";
 import { RetrievalSuggest } from "./retrieval";
@@ -75,6 +77,13 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     // renderers in Obsidian and neither covers the other: reading view builds
     // DOM a post-processor can append to, live preview is CodeMirror and needs
     // a widget decoration. See `runbutton.ts`.
+    // Where the chunker cut, in the editor's gutter (`P-N8`).
+    this.registerEditorExtension(chunkGutter());
+    this.registerEvent(this.app.workspace.on("active-leaf-change",
+                                             () => this.refreshChunkMarks()));
+    this.registerEvent(this.app.workspace.on("editor-change",
+                                             () => this.scheduleChunkMarks()));
+
     this.registerMarkdownPostProcessor(readingViewRunButtons(this));
     this.registerEditorExtension(
       livePreviewRunButtons(this, () => this.app.workspace.getActiveFile()?.path ?? ""),
@@ -152,6 +161,44 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     this.sidecar.health().then((h) => { this.serverEnact = !!(h && h.enact); });
 
     this.addSettingTab(new DomvecSettingTab(this.app, this));
+  }
+
+  /** Pending chunk-mark refresh, so typing does not ask once per keystroke. */
+  private chunkTimer: number | null = null;
+
+  /**
+   * Ask again, but not on every keystroke.
+   *
+   * The boundaries are a round trip and a full re-chunk of the note, and while
+   * a reader is typing the answer is stale before it arrives. Debounced to the
+   * pause between words rather than throttled: a throttle would answer DURING
+   * the typing, which is exactly when the answer is worth least.
+   */
+  private scheduleChunkMarks() {
+    if (this.chunkTimer !== null) window.clearTimeout(this.chunkTimer);
+    this.chunkTimer = window.setTimeout(() => {
+      this.chunkTimer = null;
+      void this.refreshChunkMarks();
+    }, 700);
+  }
+
+  /** Re-ask the sidecar where this note's chunks fall, and redraw the gutter. */
+  private async refreshChunkMarks() {
+    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    // @ts-ignore -- `editor.cm` is the CM6 EditorView; Obsidian does not type it.
+    const cm = view?.editor?.cm as { state: unknown; dispatch: Function } | undefined;
+    if (!view || !cm) return;
+    const preview = await this.sidecar.chunkPreview(
+      view.editor.getValue(), view.file?.path ?? "untitled.md");
+    if (!preview) return;
+    // The editor may have changed under the request -- a reader keeps typing.
+    // Dispatching anyway is right: the marks are approximate between
+    // keystrokes by nature, and the next debounce corrects them. What would
+    // NOT be right is dispatching into a different note, so the path is
+    // re-checked.
+    const still = this.app.workspace.getActiveViewOfType(MarkdownView);
+    if (still?.file?.path !== view.file?.path) return;
+    cm.dispatch({ effects: setChunkSpans.of(preview.chunks as ChunkSpan[]) });
   }
 
   /**

@@ -178,3 +178,18 @@ export interface Interpreters {
    *  not the Jupyter protocol. Reported so the reader sees what exists. */
   jupyter_kernels: { name: string; key: string; runnable: boolean }[];
 }
+
+/** `POST /chunk_preview`: where the chunker would cut the text sent. */
+export interface ChunkPreview {
+  path?: string;
+  chunks: {
+    index: number;
+    start_line: number;
+    end_line: number;
+    xpath: string;
+    part: number;
+    tokens: number;
+    window: number;
+    over_window: boolean;
+  }[];
+}

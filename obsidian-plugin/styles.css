@@ -420,3 +420,47 @@ button.domvec-run-fence:hover {
   color: var(--text-faint);
   cursor: help;
 }
+
+/* --- the chunk gutter, step 7 -----------------------------------------------
+ *
+ * Beside the text, never in it: marking the lines themselves would compete with
+ * Obsidian's own highlighting for the same pixels, and a reader would have to
+ * learn which colour meant what. See src/chunkgutter.ts.
+ */
+.domvec-chunk-gutter {
+  min-width: 2.6em;
+  /* Right-aligned so the token counts form a column that can be read down,
+   * rather than a ragged edge that has to be read one number at a time. */
+  text-align: right;
+  padding-right: 4px;
+}
+
+.domvec-chunk-mark {
+  font-size: 0.7em;
+  line-height: inherit;
+  color: var(--text-faint);
+  /* The bar is the boundary; the number is incidental. A left border drawn on
+   * every line of the span makes the EXTENT visible, which is the thing being
+   * communicated -- where one chunk ends and the next begins. */
+  border-left: 2px solid var(--text-faint);
+  padding-left: 4px;
+  opacity: 0.55;
+}
+
+/* The first line of a chunk carries its token count and a heavier cap, so the
+ * eye can find a boundary without counting. */
+.domvec-chunk-start {
+  border-top: 1px solid var(--text-faint);
+  color: var(--text-muted);
+  opacity: 0.85;
+}
+
+.domvec-chunk-end { border-bottom: 1px solid var(--text-faint); }
+
+/* Over the window is the one state worth a colour: it is the case S-11 is
+ * Partial for, and a reader seeing it can act on it by splitting the block. */
+.domvec-chunk-over {
+  border-left-color: var(--text-warning, var(--color-orange));
+  color: var(--text-warning, var(--color-orange));
+  opacity: 0.95;
+}

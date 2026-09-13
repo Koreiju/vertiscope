@@ -81,7 +81,8 @@ from typing import Dict, List, Optional, Tuple
 
 from .core.content_tagger import ContentTag
 
-__all__ = ["note_url", "note_path_of", "tag_note", "VAULT_SCHEME"]
+__all__ = ["note_url", "note_path_of", "tag_note", "chunk_preview",
+           "VAULT_SCHEME"]
 
 #: The scheme that says "this came from the vault, not the web".
 VAULT_SCHEME = "vault"
@@ -236,18 +237,34 @@ def _inline(text: str, block: str, addr: "_Addresser",
                               source_attr="md_wikilink", sub=f"[{i}]"))
 
 
-def tag_note(text: str) -> List[ContentTag]:
+def tag_note(text: str, *,
+             lines_at: Optional[Dict[str, Tuple[int, int]]] = None,
+             ) -> List[ContentTag]:
     """Block-level parse of one note into addressed detections.
 
     Returns tags in document order. The order is the contract `from_tags`
     relies on when no `doc_pos` map is supplied: it records arrival, and
     arrival is document order here because this is a single forward pass.
+
+    ``lines_at``, when given, is filled with ``xpath -> (first_line,
+    last_line)``, both 0-based and inclusive. It is an OUT-PARAMETER rather
+    than a second return value so that every existing caller keeps working
+    unchanged; the map is wanted by exactly one of them.
+
+    What it is for: `P-N8` asks the panel to show where the chunker cut, and a
+    chunk knows its addresses but not the source lines they came from. Only
+    this pass knows both, because only this pass is looking at the text.
     """
     lines = text.splitlines()
     addr = _Addresser()
     out: List[ContentTag] = []
     i = 0
     n = len(lines)
+
+    def mark(xpath: str, first: int, last: int) -> None:
+        """Record a block's line span, if anyone asked for the map."""
+        if lines_at is not None:
+            lines_at[xpath] = (first, last)
 
     # YAML frontmatter, when it opens on the very first line. Addressed as
     # metadata rather than skipped: it holds tags and aliases that retrieval
@@ -260,25 +277,38 @@ def tag_note(text: str) -> List[ContentTag]:
         if j < n:                                # closed; an unclosed `---` is a rule
             body = "\n".join(lines[i + 1:j]).strip()
             if body:
-                out.append(ContentTag(xpath=addr.step("frontmatter"),
+                xpath = addr.step("frontmatter")
+                mark(xpath, i, j)
+                out.append(ContentTag(xpath=xpath,
                                       category="text", subcategory="metadata",
                                       value=body, source_attr="yaml"))
             i = j + 1
 
     para: List[str] = []
+    #: Source line the buffered paragraph began on. A paragraph is the one
+    #: block whose extent is not known when it starts, so its start is carried
+    #: rather than derived.
+    para_from = 0
     #: True between a stored output's markers, so the fence inside one is
     #: labelled `output` rather than `code`. See the comment branch below.
     in_output = False
 
-    def flush() -> None:
-        """Emit the buffered paragraph, if any."""
+    def flush(upto: int = -1) -> None:
+        """Emit the buffered paragraph, if any.
+
+        `upto` is the line AFTER the paragraph, so the span ends at `upto - 1`;
+        callers pass the index they are about to dispatch.
+        """
         if not para:
             return
         value = "\n".join(para).strip()
+        held = len(para)
         para.clear()
         if not value:
             return
         xpath = addr.step("p")
+        end = (upto - 1) if upto >= 0 else (para_from + held - 1)
+        mark(xpath, para_from, max(para_from, end))
         out.append(ContentTag(xpath=xpath, category="text",
                               subcategory="visible", value=value,
                               source_attr=""))
@@ -293,7 +323,7 @@ def tag_note(text: str) -> List[ContentTag]:
             # Scanned rather than split on the next fence-looking line, because
             # the content of a code block is verbatim and a `#` inside it is
             # not a heading.
-            flush()
+            flush(i)
             marker, info = fence.group(2), fence.group(3)
             j = i + 1
             body: List[str] = []
@@ -305,6 +335,7 @@ def tag_note(text: str) -> List[ContentTag]:
                 body.append(lines[j])
                 j += 1
             xpath = addr.step("output" if in_output else "code")
+            mark(xpath, i, min(j, n - 1))
             out.append(ContentTag(
                 xpath=xpath, category="text",
                 subcategory="output" if in_output else "code",
@@ -315,10 +346,11 @@ def tag_note(text: str) -> List[ContentTag]:
 
         head = _HEADING.match(line)
         if head:
-            flush()
+            flush(i)
             level = len(head.group(1))
             addr.open_section(level)
             xpath = addr.step(f"h{level}")
+            mark(xpath, i, i)
             out.append(ContentTag(xpath=xpath, category="text",
                                   subcategory="visible", value=head.group(2),
                                   source_attr="heading"))
@@ -346,7 +378,7 @@ def tag_note(text: str) -> List[ContentTag]:
             # resolvable by re-parsing the note, so a caller wanting `hash` or
             # `status` reads the file, rather than the index carrying a second
             # copy of it.
-            flush()
+            flush(i)
             # A cell's OUTPUT is neither prose nor source, and saying which it
             # is turned out to be necessary rather than decorative.
             #
@@ -385,8 +417,9 @@ def tag_note(text: str) -> List[ContentTag]:
 
         item = _ITEM.match(line)
         if item:
-            flush()
+            flush(i)
             xpath = addr.step("li")
+            mark(xpath, i, i)
             out.append(ContentTag(xpath=xpath, category="text",
                                   subcategory="visible", value=item.group(3),
                                   source_attr="list_item"))
@@ -395,13 +428,14 @@ def tag_note(text: str) -> List[ContentTag]:
             continue
 
         if _TABLE.match(line):
-            flush()
+            flush(i)
             j = i
             rows: List[str] = []
             while j < n and _TABLE.match(lines[j]):
                 rows.append(lines[j].strip())
                 j += 1
             xpath = addr.step("table")
+            mark(xpath, i, max(i, j - 1))
             value = "\n".join(rows)
             out.append(ContentTag(xpath=xpath, category="text",
                                   subcategory="visible", value=value,
@@ -412,13 +446,14 @@ def tag_note(text: str) -> List[ContentTag]:
 
         quote = _QUOTE.match(line)
         if quote:
-            flush()
+            flush(i)
             j = i
             body = []
             while j < n and (m := _QUOTE.match(lines[j])):
                 body.append(m.group(1))
                 j += 1
             xpath = addr.step("blockquote")
+            mark(xpath, i, max(i, j - 1))
             value = "\n".join(body).strip()
             out.append(ContentTag(xpath=xpath, category="text",
                                   subcategory="visible", value=value,
@@ -428,12 +463,94 @@ def tag_note(text: str) -> List[ContentTag]:
             continue
 
         if not line.strip():
-            flush()
+            flush(i)
             i += 1
             continue
 
+        if not para:
+            para_from = i
         para.append(line)
         i += 1
 
     flush()
+    return out
+
+
+def chunk_preview(text: str, rel_path: str, *, vault: str = "vault",
+                  context_window: Optional[int] = None) -> List[Dict]:
+    """Where the chunker WOULD cut this text, as source line spans.
+
+    `P-N8`: *the panel draws where the chunker cut.* Not decoration -- at a
+    256-token window the cuts are frequent, and they are the only explanation a
+    reader has for why retrieval returned half a section.
+
+    **Computed from the text in hand, not read back from the store**, and that
+    is the deliberate half. The design said "read straight from the trie", which
+    is right for a note nobody is editing and wrong for the one on screen: a
+    stored boundary is stale from the first keystroke, and a gutter mark that
+    is confidently in the wrong place is worse than an absent one -- it answers
+    "why did my section split" with last week's answer.
+
+    What makes that safe is that this is the SAME pipeline `Workspace.index_note`
+    runs -- `tag_note`, `AddressTrie.from_tags`, `render_trie` -- with the store
+    write left out. So the preview agrees with what indexing would produce by
+    construction rather than by intention, and
+    `test_preview_agrees_with_what_indexing_stores` is the arm that keeps it
+    that way.
+
+    Returns one entry per chunk: its index, its 0-based inclusive line span, its
+    token count against the window, and the address of its root.
+    """
+    from .markdown import DEFAULT_CONTEXT_WINDOW, render_trie
+    from .trie import AddressTrie
+    from . import tokens as _tokens
+
+    window = context_window or DEFAULT_CONTEXT_WINDOW
+    lines_at: Dict[str, Tuple[int, int]] = {}
+    tags = tag_note(text, lines_at=lines_at)
+    url = note_url(vault, rel_path)
+    chunks = render_trie(AddressTrie.from_tags(tags, url),
+                         context_window=window)
+
+    def span(xpath: str) -> Optional[Tuple[int, int]]:
+        """The lines an address covers, walking UP when it is an inline one.
+
+        `…/p[1]/a[1]` is a link inside a paragraph and has no line of its own --
+        only blocks are marked. Its parent is where it is written, so the walk
+        trims one step at a time rather than giving up, which would drop every
+        chunk whose first line happens to be a link.
+        """
+        at = xpath
+        while at:
+            if at in lines_at:
+                return lines_at[at]
+            cut = at.rfind("/")
+            if cut <= 0:
+                return None
+            at = at[:cut]
+        return None
+
+    out: List[Dict] = []
+    for index, chunk in enumerate(chunks):
+        spans = [s for s in (span(line.address.xpath) for line in chunk.lines)
+                 if s is not None]
+        if not spans:
+            # A chunk whose every address is unmappable would draw a mark
+            # nowhere. Skipped rather than clamped to line 0, where it would sit
+            # on top of the note's first line and claim to explain it.
+            continue
+        body = chunk.markdown
+        out.append({
+            "index": index,
+            "start_line": min(a for a, _ in spans),
+            "end_line": max(b for _, b in spans),
+            "xpath": chunk.xpath,
+            "part": chunk.part,
+            "tokens": _tokens.count(body),
+            "window": window,
+            "over_window": _tokens.count(body) > window,
+        })
+    # By first line, because that is the order a reader meets them in -- the
+    # chunker emits by trie descent, which is not the same thing.
+    out.sort(key=lambda c: (c["start_line"], c["end_line"]))
     return out

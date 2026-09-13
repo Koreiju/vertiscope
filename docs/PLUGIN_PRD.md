@@ -203,7 +203,7 @@ axes: **structure, content, organizedness, completeness**.
 | P-N5 | Notebooks are **dynamically recursively chunked** like webpages | **Partial** — a note and its stored cell outputs chunk through the same recursive descent a page does (`domvec notes`); outputs are addressed `…/output[n]` and retrievable. Not yet *dynamic*: re-indexing is a command, not a diff on save (`P-N6`) |
 | P-N6 | …and **continuously diff-updated to the db**, re-vectorized and re-assigned to chunks | Open |
 | P-N7 | **One interface** centralizing retrieval and code research | Open |
-| P-N8 | **Chunk scanning is exposed in the panel** — the reader can see the chunk boundaries the sensor drew | Open |
+| P-N8 | **Chunk scanning is exposed in the panel** — the reader can see the chunk boundaries the sensor drew | **Done** — a CM6 gutter marks every chunk's extent with its token count and flags any over the window, computed live by `POST /chunk_preview` through the same pipeline indexing uses. Editor only; reading view has no gutter |
 | P-N9 | **Selection highlighting over the rendered markdown**, in the alternative panel | Open |
 | P-N10 | That selection **annotates the context fed to the SLM** — the reader marks what the model is given, rather than the model taking the whole panel | Open |
 

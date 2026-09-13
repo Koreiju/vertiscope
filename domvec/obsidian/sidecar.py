@@ -219,6 +219,10 @@ class _Handler(BaseHTTPRequestHandler):
         """
         parts = urlsplit(self.path)
         route = parts.path.strip("/")
+        if route == "chunk_preview":
+            self._post_chunk_preview()
+            return
+
         if route not in ("enact", "kernel", "shell"):
             self._send(404, {"error": "no such route", "path": parts.path})
             return
@@ -319,6 +323,48 @@ class _Handler(BaseHTTPRequestHandler):
 
         try:
             self._send(200, self.kernel_pool.run(note, code))
+        except Exception as exc:                    # noqa: BLE001
+            self._send(500, {"error": "%s: %s" % (type(exc).__name__, exc)})
+
+    def _post_chunk_preview(self) -> None:
+        """Where the chunker would cut this text (`P-N8`).
+
+        A POST because the BODY is the note, and a note is not a query string;
+        it carries newlines, and on a long one it is tens of kilobytes.
+
+        **Ungated, and that is not an oversight.** Every other POST here acts on
+        the world -- `enact` presses a control in a real browser, `kernel` and
+        `shell` run code. This one is a pure function of the text it was handed:
+        it writes nothing, reads no workspace, and touches no process. Gating it
+        behind `--kernel` would mean a reader could not see why their note
+        splits unless they had first enabled code execution, which is a
+        permission that has nothing to do with the question.
+        """
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+            body = json.loads(self.rfile.read(length) or b"{}")
+        except Exception as exc:                    # noqa: BLE001
+            self._send(400, {"error": "bad body: %s" % exc})
+            return
+
+        text = body.get("text")
+        if not isinstance(text, str):
+            self._send(400, {"error": "missing text"})
+            return
+        try:
+            from ..vault import chunk_preview
+            window = body.get("window")
+            self._send(200, {
+                "path": body.get("path") or "",
+                "chunks": chunk_preview(
+                    text, body.get("path") or "untitled.md",
+                    vault=(body.get("vault") or "vault"),
+                    # The WORKSPACE's window when the caller did not name one,
+                    # so a preview cannot disagree with the store about how big
+                    # a chunk is -- which is the one way this could mislead.
+                    context_window=int(window) if window else getattr(
+                        self.workspace, "context_window", None)),
+            })
         except Exception as exc:                    # noqa: BLE001
             self._send(500, {"error": "%s: %s" % (type(exc).__name__, exc)})
 

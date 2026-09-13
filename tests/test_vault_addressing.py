@@ -333,3 +333,107 @@ def test_an_unclosed_comment_does_not_swallow_the_note():
     tags = tag_note("# T\n\n<!-- nb-output hash=x\n\nprose after\n")
     values = [t.value for t in tags]
     assert any("prose after" == v for v in values), values
+
+
+# --- where the chunker cut (P-N8, step 7) -----------------------------------
+
+
+def _long_note(sections=4, paras=3):
+    """A note that certainly exceeds a 256-token window several times."""
+    body = ("flux pinning in a type II superconductor carries current without "
+            "resistance below its critical temperature, and the vortex lattice "
+            "is what holds it there. ") * 4
+    lines = ["# Long note", ""]
+    for s in range(1, sections + 1):
+        lines += [f"## Section {s}", ""]
+        for p in range(1, paras + 1):
+            lines += [f"Paragraph {s}.{p}. {body}", ""]
+    return "\n".join(lines)
+
+
+def test_the_line_map_spans_the_block_it_addresses():
+    """`tag_note`'s out-parameter, which is the whole basis of the gutter.
+
+    Only this pass knows both the address and the source line; a chunk knows its
+    addresses and nothing about where they were written.
+    """
+    text = "# H\n\nfirst\nsecond\n\n## S\n\n```py\na\nb\n```\n"
+    at = {}
+    tag_note(text, lines_at=at)
+    assert at["/section[1]/h1[1]"] == (0, 0)
+    # A paragraph is the one block whose extent is unknown when it starts.
+    assert at["/section[1]/p[1]"] == (2, 3), at
+    assert at["/section[1]/section[1]/h2[1]"] == (5, 5)
+    # A fence spans its own delimiters.
+    assert at["/section[1]/section[1]/code[1]"] == (7, 10), at
+
+
+def test_preview_agrees_with_what_indexing_stores():
+    """The load-bearing assertion for step 7.
+
+    The gutter shows boundaries computed from the text on screen rather than
+    read back from the store, because a stored boundary is stale from the first
+    keystroke. That is only safe because it is the SAME pipeline -- `tag_note`,
+    `from_tags`, `render_trie` -- with the store write left out. If the two ever
+    disagree, the gutter is confidently telling the reader something untrue
+    about their own note, which is worse than showing nothing.
+    """
+    from domvec.vault import chunk_preview
+
+    text = _long_note()
+    preview = chunk_preview(text, "n.md", vault="v")
+
+    with tempfile.TemporaryDirectory() as td:
+        from domvec.workspace import Workspace
+        ws = Workspace(pathlib.Path(td) / "ws")
+        try:
+            ws.index_note(text, "n.md", vault="v")
+            stored = ws.store.chunks()
+        finally:
+            ws.close()
+
+    assert len(preview) > 1, "the fixture must actually split, or this proves nothing"
+    assert sorted((c["xpath"], c["part"]) for c in preview) == \
+           sorted((c.xpath, c.part) for c in stored)
+
+
+def test_every_previewed_span_is_inside_the_note_and_ordered():
+    """A span off the end would put a mark on a line that is not there.
+
+    Ordered by first line, because that is the order a reader meets them in --
+    the chunker emits by trie descent, which is not the same thing.
+    """
+    from domvec.vault import chunk_preview
+
+    text = _long_note()
+    last = len(text.splitlines()) - 1
+    spans = chunk_preview(text, "n.md")
+    for c in spans:
+        assert 0 <= c["start_line"] <= c["end_line"] <= last, c
+    assert spans == sorted(spans, key=lambda c: (c["start_line"], c["end_line"]))
+
+
+def test_spans_do_not_overlap():
+    """Two chunks claiming one line would draw two marks on it.
+
+    Worse than cosmetic: the gutter's whole claim is that a mark says which
+    chunk a line belongs to, and a line in two chunks has no answer.
+    """
+    from domvec.vault import chunk_preview
+
+    spans = chunk_preview(_long_note(), "n.md")
+    for a, b in zip(spans, spans[1:]):
+        assert a["end_line"] < b["start_line"], (a, b)
+
+
+def test_the_window_is_reported_and_over_window_is_flagged():
+    """`S-11` is Partial for exactly this case, so the reader should see it."""
+    from domvec.vault import chunk_preview
+
+    spans = chunk_preview(_long_note(), "n.md", context_window=64)
+    assert all(c["window"] == 64 for c in spans)
+    # At 64 tokens a paragraph of this size cannot fit, so something must be
+    # flagged -- otherwise the flag is never exercised and cannot be trusted.
+    assert any(c["over_window"] for c in spans), spans[:3]
+    for c in spans:
+        assert c["over_window"] == (c["tokens"] > 64), c
