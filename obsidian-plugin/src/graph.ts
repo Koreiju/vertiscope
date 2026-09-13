@@ -29,6 +29,9 @@ export const GRAPH_VIEW = "domvec-graph-view";
 
 export interface LayoutNode {
   cid: string;
+  /** How many chunks this node stands for, when stage two merged it with
+   *  others (`G-26`). 1 for an ordinary chunk. */
+  members?: number;
   url: string;
   title: string;
   rank: number;
@@ -546,6 +549,7 @@ export class GraphView extends ItemView {
   private nodeFrom(n: LayoutNode): any {
     return {
       id: n.cid,
+      members: n.members ?? 1,
       name: n.title || n.url,
       url: n.url,
       // The fitted position as a SEEDING, not a pin (`G-20`).
@@ -657,7 +661,14 @@ export class GraphView extends ItemView {
 
     const graph = new ForceGraph3D(canvas)
       .graphData({ nodes, links: layout.edges.map((e) => ({ ...e })) })
-      .nodeLabel((n: any) => `${n.name}<br><small>${n.url}</small>`)
+      .nodeLabel((n: any) => {
+        // A merged node says how many chunks it stands for. Without it the
+        // pane silently shows one node where the store holds eight, and a
+        // reader comparing the two counts has no way to account for the
+        // difference.
+        const parts = n.members > 1 ? ` · ${n.members} chunks merged` : "";
+        return `${n.name}${parts}<br><small>${n.url}</small>`;
+      })
       .nodeColor((n: any) => n.color)
       .nodeRelSize(relSize)
       .nodeVal((n: any) => n.val)

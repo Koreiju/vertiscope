@@ -508,3 +508,31 @@ button.domvec-run-fence:hover {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* The merge layer (`G-26`, `G-27`). A chunk says it is part of a group and
+   can show the group; it is still served as itself. */
+.domvec-group {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  border: 1px solid var(--background-modifier-border);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.domvec-group.is-on {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border-color: var(--interactive-accent);
+}
+.domvec-merged-note {
+  font-size: 11px;
+  color: var(--text-faint);
+  margin-bottom: 6px;
+}
+.domvec-merged pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+  margin: 0;
+}

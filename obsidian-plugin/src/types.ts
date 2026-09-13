@@ -42,6 +42,24 @@ export interface ChunkPayload {
   /** The window it was cut against, so a surface can show fill. */
   window?: number;
   /**
+   * The merge group this chunk belongs to, or null (`G-26`, `G-27`).
+   *
+   * The chunk is still served as ITSELF -- it is what a retrieval hit
+   * resolves to and its addresses are its own. The group travels beside it so
+   * a surface can offer the merged reading without pretending the parts are
+   * gone.
+   */
+  group?: {
+    lead: string;
+    members: string[];
+    /** This chunk's place in the group, 1-based, for "3 of 8". */
+    position: number;
+    /** Assembled from the members in document order, never stored. */
+    markdown: string;
+    /** The merged text's size, counted link-free like everything else. */
+    tokens: number;
+  } | null;
+  /**
    * The same chunk as slim distilled HTML, built by `htmlform.py` from these
    * very lines.
    *

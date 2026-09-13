@@ -425,6 +425,20 @@ class Workspace:
         # the line the prohibition actually draws: batch, not per-delta.
         if complete:
             self.flush_vectors()
+            # Stage two, at the settle (`G-31`). This is the one point where
+            # the page is finished AND its vectors exist, which is what
+            # aggregation needs -- a delta is neither. Putting it here rather
+            # than in each caller is why the live scan, the browser cell's
+            # capture and the offline `index_html` all get it without three
+            # copies of the decision.
+            #
+            # Non-fatal on purpose. A page whose clustering failed is a page
+            # with no merge groups, which is the state every page starts in;
+            # it is not a reason to lose the write that just succeeded.
+            try:
+                self.aggregate(url)
+            except Exception:                       # noqa: BLE001
+                pass
         return chunks, counts
 
     def page_url(self, url: str) -> str:
@@ -860,7 +874,61 @@ class Workspace:
         result = aggregate_page(cids, vectors, mds, url, **options)
         if not result.skipped:
             self.store.set_groups(url, result.groups)
+            self._vectorise_groups(result.groups)
         return result
+
+    def _vectorise_groups(self, groups) -> int:
+        """Give each merge group a vector for what it SAYS.
+
+        A group's node in the projector stands for the merged text, so its
+        position has to come from the merged text. Using the lead member's own
+        vector would place a node for eight chunks wherever the first of them
+        happened to land, which is not where the thing it draws belongs.
+
+        **Re-vectorised when there is an embedder, averaged when there is
+        not.** The assembled markdown is a real string and the encoder is the
+        only thing that can say what it means -- an average of the members is
+        a point in the convex hull of what they meant separately, which is
+        close but is not the same claim, and on a group whose members are two
+        halves of one sentence it is not even close. The average is kept as
+        the fallback rather than dropping the group, because a workspace
+        opened without an embedder should still draw its groups somewhere
+        defensible.
+
+        The members' own vectors are untouched. They remain what retrieval
+        resolves to at 256 (`G-27`).
+        """
+        done = 0
+        for group in groups or []:
+            members = list(getattr(group, "members", group))
+            lead = getattr(group, "lead", members[0] if members else "")
+            if not lead or len(members) < 2:
+                continue
+            vector = None
+            if self.embedder is not None:
+                text = self.merged_markdown(lead)
+                if text:
+                    try:
+                        # `embed_texts`, the method the rest of this file
+                        # and `vectors.flush` both call. `embed` is not it.
+                        vector = list(self.embedder.embed_texts([text])[0])
+                    except Exception:               # noqa: BLE001
+                        vector = None
+            if vector is None:
+                rows = [self.store.embedding(c) for c in members]
+                rows = [r for r in rows if r and any(r)]
+                if not rows:
+                    continue
+                block = np.asarray(rows, dtype=np.float32)
+                mean = block.mean(axis=0)
+                norm = float(np.linalg.norm(mean))
+                # Re-normalised: the members are unit vectors and their mean
+                # is not, and a shorter vector would read as a weaker one
+                # everywhere a cosine is taken.
+                vector = (mean / norm).tolist() if norm > 1e-9 else mean.tolist()
+            self.store.set_group_embedding(lead, vector)
+            done += 1
+        return done
 
     def merged_markdown(self, lead: str) -> str:
         """A merge group rendered as one chunk, assembled not stored.

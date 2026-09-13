@@ -253,3 +253,71 @@ def test_a_page_with_a_low_tail_is_accepted():
     assert not out.skipped, out.skipped
     assert out.structure_ratio < aggregate.STRUCTURE_RATIO
     assert out.groups
+
+
+# --- the merge layer is the PICTURE, not the retrieval unit -------------------
+
+
+def test_a_group_is_placed_by_what_it_says_not_by_its_first_member():
+    """`G-27`: the projector shows aggregated vectors; retrieval keeps 256.
+
+    A lead is still a 256-token chunk with its own vector, and that is what a
+    hit resolves to. The group's vector is a SECOND quantity, of the assembled
+    text, and it exists because a node standing for eight chunks placed at its
+    first member's coordinates is not where the thing it draws belongs.
+
+    One column for both would have made the projector and the retriever
+    disagree about what a lead is, silently, in a way no view would show.
+    """
+    import numpy as np
+
+    from domvec.graphstore import EMBED_DIM, GraphStore
+    import tempfile, shutil, pathlib
+
+    tmp = tempfile.mkdtemp()
+    try:
+        store = GraphStore(pathlib.Path(tmp) / "g.kuzu")
+        store.conn.execute(
+            "CREATE (c:Chunk {cid: 'lead', url: 'u', xpath: '/x', part: 0, "
+            "md: 'text', chars: 4, line_count: 1, row: 0})")
+        own = [0.0] * EMBED_DIM
+        own[0] = 1.0
+        store.conn.execute(
+            "MATCH (c:Chunk {cid: 'lead'}) SET c.embedding = $v", {"v": own})
+        merged = [0.0] * EMBED_DIM
+        merged[1] = 1.0
+        store.set_group_embedding("lead", merged)
+
+        assert store.embedding("lead")[0] == pytest.approx(1.0), \
+            "the group vector overwrote the chunk's own"
+        assert store.embedding("lead")[1] == pytest.approx(0.0)
+        got = store.group_embedding("lead")
+        assert got[1] == pytest.approx(1.0), "the group vector did not stick"
+        assert got[0] == pytest.approx(0.0)
+        store.close()
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_the_merge_window_is_counted_in_link_free_tokens():
+    """512 of TEXT, not of addressing.
+
+    A merged chunk full of `[label](https://very/long/target)` would otherwise
+    fit the window on a count that is more than half machine addresses --
+    which is the defect `tokens.budget` exists to end, reappearing one stage
+    later.
+    """
+    from domvec import tokens
+    from domvec.aggregate import MERGE_WINDOW
+
+    linky = "[a](https://example.com/a/very/long/path/indeed) " * 40
+    assert tokens.count(linky) > MERGE_WINDOW, "the fixture is not long enough"
+    assert tokens.budget(linky) < MERGE_WINDOW, \
+        "budget is counting the targets"
+
+    cids = ["c%03d" % i for i in range(60)]
+    rows, _ = _blobs(2, 15, spread=0.005, seed=12, loners=30)
+    out = aggregate_page(cids[:len(rows)], rows, [linky] * len(rows),
+                         "https://test/links", window=MERGE_WINDOW)
+    for group in out.groups:
+        assert group.tokens <= MERGE_WINDOW

@@ -130,11 +130,33 @@ def chunk_payload(workspace, cid: str) -> Optional[Dict]:
                     entry["cls"] = found.render_class
         lines.append(entry)
 
+    # The merge layer (`G-27`). A chunk that belongs to a group is still
+    # served as itself -- it is what a retrieval hit resolves to, and its
+    # addresses are its own -- with the group named beside it so the surface
+    # can offer the merged reading without pretending the parts are gone.
+    group: Optional[Dict] = None
+    if stored.group_of:
+        members = workspace.store.group_members(stored.group_of)
+        if len(members) > 1:
+            group = {
+                "lead": stored.group_of,
+                "members": [m.cid for m in members],
+                "position": [m.cid for m in members].index(stored.cid) + 1,
+                # Assembled, never stored: a member rewritten by the next
+                # drain would otherwise leave a stale copy of itself inside
+                # the merged text.
+                "markdown": _reflow(workspace.merged_markdown(stored.group_of)),
+                "tokens": tokens.budget(
+                    workspace.merged_markdown(stored.group_of)),
+            }
+
     return {
         "cid": stored.cid,
         "url": stored.url,
         "xpath": stored.xpath,
         "lines": lines,
+        #: Null unless stage two put this chunk with others (`G-26`).
+        "group": group,
         # Reported so a caller can tell a genuinely short chunk from a
         # misaligned one instead of guessing from the render.
         "addresses": len(addresses),

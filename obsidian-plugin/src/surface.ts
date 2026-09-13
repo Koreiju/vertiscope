@@ -130,6 +130,9 @@ export interface SurfaceHost {
 export class ChunkSurface extends MarkdownRenderChild {
   private interactive: boolean;
   private payload: ChunkPayload | null = null;
+  /** Showing the merged group rather than this chunk alone (`G-27`).
+   *  Off by default: the chunk a reader asked for is the chunk they get. */
+  private showMerged = false;
   private readout: HTMLElement | null = null;
 
   constructor(
@@ -167,6 +170,22 @@ export class ChunkSurface extends MarkdownRenderChild {
         cls: "domvec-hint",
         text: "The distilled markdown above this block is the offline reading.",
       });
+      return;
+    }
+    const group = this.payload.group;
+    if (this.showMerged && group && group.markdown) {
+      // The merged reading: the members' markdown assembled in document
+      // order. Plain text, with no per-line addresses, and deliberately so --
+      // the addresses belong to the individual chunks, and attaching them to
+      // an assembled string would invite a click to enact against a line the
+      // trie never placed there.
+      const merged = body.createDiv({ cls: "domvec-merged" });
+      merged.createDiv({
+        cls: "domvec-merged-note",
+        text: `${group.members.length} chunks, merged by similarity. `
+              + `Retrieval still resolves to each of them separately.`,
+      });
+      merged.createEl("pre").setText(group.markdown);
       return;
     }
     if (this.interactive) this.drawInteractive(body);
@@ -319,6 +338,25 @@ export class ChunkSurface extends MarkdownRenderChild {
       // The window was 1200 CHARACTERS and the chunks it made held a median
       // of 165 tokens -- 8% of a real one -- and nothing in the vault said
       // so, because the number was never shown anywhere a reader looks.
+      // A merged chunk says so, and says where in the group this part sits.
+      // Without it the pane shows one of eight chunks with no sign the other
+      // seven exist, and the 3D graph -- which draws the GROUP -- and this
+      // panel would be describing different things under one cid.
+      const group = this.payload.group;
+      if (group && group.members.length > 1) {
+        const merged = bar.createEl("button", {
+          cls: "domvec-group" + (this.showMerged ? " is-on" : ""),
+          text: `${group.position}/${group.members.length} merged · `
+                + `${group.tokens} tok`,
+        });
+        merged.title = this.showMerged
+          ? "showing the merged group; press for this chunk alone"
+          : "showing this chunk alone; press for the merged group";
+        merged.onclick = () => {
+          this.showMerged = !this.showMerged;
+          this.draw();
+        };
+      }
       const size = this.payload.tokens;
       const window = this.payload.window;
       if (size) {

@@ -164,6 +164,7 @@ def build_layout(workspace,
     cids: List[str] = []
     rows: List[int] = []
     redundant = 0
+    grouped = 0
     for row, cid in enumerate(freq.rows):
         if cid and cid in meta:
             # One node per distinct rendering, not one per address.
@@ -184,6 +185,19 @@ def build_layout(workspace,
             if meta[cid].redundant:
                 redundant += 1
                 continue
+            # One node per merge GROUP, not per member (`G-27`). The members
+            # keep their chunks, their vectors and their addresses -- they are
+            # still what a retrieval hit resolves to -- but the picture shows
+            # the thing they add up to, because that is what the merge layer
+            # is for. The group's lead carries it; the others are not drawn.
+            #
+            # Dropped before the fit for the same reason duplicates are: the
+            # members sit inside one DBSCAN radius of each other, so drawing
+            # all of them spends the projector's neighbourhood budget on a
+            # region it has already described.
+            if meta[cid].group_of and meta[cid].group_of != cid:
+                grouped += 1
+                continue
             cids.append(cid)
             rows.append(row)
 
@@ -198,6 +212,20 @@ def build_layout(workspace,
         wanted = [embeddings.row_of(cid) for cid in cids]
         if all(r is not None for r in wanted):
             semantic = np.asarray(embeddings.matrix[wanted], dtype=np.float32)
+            # A merge group's node stands for the merged text, so it is placed
+            # by the vector of that text -- re-vectorised at aggregation time,
+            # or the members' mean when no embedder was loaded. Using the lead
+            # member's own vector would put a node for eight chunks wherever
+            # the first of them happened to land.
+            #
+            # Substituted here rather than in the matrix, because the matrix
+            # is retrieval's and the lead is still a 256-token chunk there
+            # (`G-27`). Only the PICTURE asks this question.
+            for i, cid in enumerate(cids):
+                if meta[cid].group_n > 1:
+                    merged = workspace.store.group_embedding(cid)
+                    if merged:
+                        semantic[i] = np.asarray(merged, dtype=np.float32)
 
     # The projector fits on the SEMANTIC space alone.
     #
@@ -289,16 +317,29 @@ def build_layout(workspace,
     for i, cid in enumerate(cids):
         chunk = meta[cid]
         row = rows[i]
+        # A lead speaks for its group, so its label and its size are the
+        # group's. Assembled rather than stored, like everywhere else, so a
+        # member rewritten by the next drain cannot leave a stale copy of
+        # itself in what the node says.
+        text = chunk.md
+        if chunk.group_n > 1:
+            try:
+                text = workspace.merged_markdown(cid) or chunk.md
+            except Exception:                       # noqa: BLE001
+                text = chunk.md
         node = {
             "cid": cid,
             "url": chunk.url,
-            "title": _title(chunk.md),
+            "title": _title(text),
             #: How many addresses on the page draw this, so the pane can say
             #: "125 copies" instead of silently standing for 125 things.
             "copies": chunk.dup_n,
+            #: How many chunks this node stands for (`G-26`). 1 unless stage
+            #: two merged it with others.
+            "members": chunk.group_n,
             "rank": float(ranks[row]) if row < len(ranks) else 0.0,
             "chars": chunk.chars,
-            "tokens": tokens.budget(chunk.md or ""),
+            "tokens": tokens.budget(text or ""),
             "pos": [float(v) for v in coords[i][:dims]],
         }
         if colours is not None:
@@ -333,6 +374,11 @@ def build_layout(workspace,
         #: rather than silently subtracted: `n` no longer equals the store's
         #: chunk count, and a reader comparing the two needs to see why.
         "redundant": redundant,
+        #: Chunks folded into a merge group and therefore not drawn on their
+        #: own. Reported for the same reason `redundant` is: `n` no longer
+        #: equals the store's chunk count, and the difference now has two
+        #: causes a reader has to be able to tell apart.
+        "grouped": grouped,
         "dims": dims,
         # Six when the colour comes from the fit. Reported because a viewer
         # that colours by hue is showing three more dimensions of the same
@@ -783,7 +829,16 @@ def place_into(workspace, cids) -> Dict:
             # A redundant chunk is deliberately not drawn -- `G-25` -- so it
             # is not "unplaced", it is placed as the copy it is.
             continue
-        vector = workspace.store.embedding(cid)
+        if chunk.group_of and chunk.group_of != cid:
+            # Likewise a member of a merge group: drawn as its lead (`G-27`),
+            # not missing.
+            continue
+        # The same substitution the fit makes: a group is placed by what it
+        # says, not by what its first member says.
+        vector = (workspace.store.group_embedding(cid)
+                  if chunk.group_n > 1 else None)
+        if not vector:
+            vector = workspace.store.embedding(cid)
         if not vector or not any(vector):
             # Captured but not yet embedded. The embedding phase is
             # asynchronous by design (the goal says so), so this is the
@@ -809,6 +864,7 @@ def place_into(workspace, cids) -> Dict:
                 "chars": chunk.chars,
                 "tokens": tokens.budget(chunk.md or ""),
                 "copies": chunk.dup_n,
+                "members": chunk.group_n,
                 "pos": [float(v) for v in coords[i]],
                 #: Placed by `transform`, not by the fit itself. The pane may
                 #: want to say so, and a measurement certainly does.

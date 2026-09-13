@@ -58,6 +58,7 @@ _SCHEMA = [
         cid STRING, url STRING, xpath STRING, part INT64, md STRING,
         chars INT64, line_count INT64, row INT64, embedding FLOAT[{EMBED_DIM}],
         dup_of STRING, dup_n INT64, group_of STRING, group_n INT64,
+        group_embedding FLOAT[{EMBED_DIM}],
         PRIMARY KEY(cid))""",
     """CREATE NODE TABLE IF NOT EXISTS Address(
         aid STRING, akey STRING, url STRING, xpath STRING, tag STRING,
@@ -78,6 +79,7 @@ _MIGRATIONS = [
     "ALTER TABLE Chunk ADD dup_n INT64",
     "ALTER TABLE Chunk ADD group_of STRING",
     "ALTER TABLE Chunk ADD group_n INT64",
+    f"ALTER TABLE Chunk ADD group_embedding FLOAT[{EMBED_DIM}]",
 ]
 
 
@@ -713,6 +715,32 @@ class GraphStore:
                 "UNWIND $rows AS r MATCH (c:Chunk {cid: r.cid}) "
                 "SET c.group_of = r.lead, c.group_n = r.n", rows)
         return len(rows)
+
+    def set_group_embedding(self, lead: str, vector) -> None:
+        """The vector for what a merge group SAYS, stored on its lead.
+
+        Separate from `embedding` and not a replacement for it. The lead is
+        still a 256-token chunk with its own vector, and that is what
+        retrieval resolves to (`G-27`); this is the vector of the assembled
+        text, which is a different string and means something different. One
+        column would have made the projector and the retriever disagree about
+        what the lead is.
+        """
+        row = list(vector or [])[:EMBED_DIM]
+        if len(row) < EMBED_DIM:
+            row = row + [0.0] * (EMBED_DIM - len(row))
+        self.conn.execute(
+            "MATCH (c:Chunk {cid: $cid}) SET c.group_embedding = $v",
+            {"cid": lead, "v": [float(x) for x in row]})
+
+    def group_embedding(self, lead: str) -> Optional[List[float]]:
+        rows = self._rows(
+            "MATCH (c:Chunk {cid: $cid}) RETURN c.group_embedding",
+            {"cid": lead})
+        if not rows or rows[0][0] is None:
+            return None
+        out = list(rows[0][0])
+        return out if any(out) else None
 
     def group_members(self, lead: str) -> List[StoredChunk]:
         """A merge group's chunks, in document order.
