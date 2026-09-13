@@ -71,14 +71,6 @@ _EXTENT = 300.0
 #: widening five signatures to carry a second value would touch every caller
 #: and every test for a fact that only `build_layout` consumes. It is written
 #: during a fit and read immediately after; nothing else reads it.
-#: How many queued chunks one live placement will embed before answering.
-#:
-#: A bound, not a batch size. A reader who opens a page with nine hundred new
-#: chunks should see the first few hundred appear and the rest arrive on the
-#: next tick, rather than watch the pane hang while the whole page is
-#: embedded. The unplaced remainder is reported, so nothing is lost quietly.
-_LIVE_EMBED_LIMIT = 256
-
 _LAST_FIT: Dict[str, object] = {}
 
 #: An embedding to start the spherical fit from, when a caller
@@ -166,14 +158,29 @@ def build_layout(workspace,
     tfidf = freq.tfidf()
     meta = {c.cid: c for c in workspace.store.chunks()}
 
-    # Live rows only, in a fixed order. A retired row keeps its slot in the
-    # matrix so nothing is renumbered, and it describes no chunk.
+    # Every live chunk, in a fixed order -- taken from the STORE.
+    #
+    # This enumerated `freq.rows` and that was a real hole. The projector
+    # fits on the semantic space alone, by the goal's own instruction, and
+    # then took its membership from the LEXICAL one: a chunk with a perfectly
+    # good vector but no frequency row simply did not exist as far as the
+    # picture was concerned. Measured on `build/corpus123`: 13,999 chunks,
+    # 13,999 stored vectors, 13,999 embedding rows -- and 6,174 frequency
+    # rows. Nine thousand chunks were in the workspace and not in the map,
+    # with nothing anywhere saying so.
+    #
+    # The frequency row is still looked up, because pagerank is indexed by it
+    # and the lexical fallback needs it, but a chunk without one is now placed
+    # by the space the fit actually uses and simply carries rank 0.
     cids: List[str] = []
     rows: List[int] = []
     redundant = 0
     grouped = 0
-    for row, cid in enumerate(freq.rows):
-        if cid and cid in meta:
+    no_vector = 0
+    freq_row = {cid: row for row, cid in enumerate(freq.rows) if cid}
+    has_semantic = embeddings is not None and embeddings.matrix is not None
+    for cid in sorted(meta):
+        if cid:
             # One node per distinct rendering, not one per address.
             #
             # archive.org's search page renders each result as a
@@ -205,14 +212,33 @@ def build_layout(workspace,
             if meta[cid].group_of and meta[cid].group_of != cid:
                 grouped += 1
                 continue
+            # Placed by the space the fit will actually run on, which is
+            # not always the semantic one. With embeddings present a chunk
+            # needs a vector; without them the fit falls back to frequency
+            # and a chunk needs a ROW. Requiring a vector unconditionally
+            # emptied the fallback entirely -- a workspace with no embedder
+            # drew nothing, and the report said "no chunks" rather than "no
+            # embedder", which is the wrong thing to tell a reader.
+            if has_semantic:
+                if embeddings.row_of(cid) is None:
+                    no_vector += 1
+                    continue
+            elif cid not in freq_row:
+                no_vector += 1
+                continue
             cids.append(cid)
-            rows.append(row)
+            rows.append(freq_row.get(cid, -1))
 
     if len(cids) < 3:
         return {"nodes": [], "edges": [], "spaces": [], "n": len(cids),
                 "note": "too few chunks to place"}
 
-    lexical = np.asarray(tfidf[rows].todense(), dtype=np.float32)
+    # Only the chunks that HAVE a frequency row contribute one; the rest are
+    # zero there and are carried by the semantic space, which is what the fit
+    # uses anyway.
+    known = [r for r in rows if r >= 0]
+    lexical = (np.asarray(tfidf[known].todense(), dtype=np.float32)
+               if known else np.zeros((0, 1), dtype=np.float32))
 
     semantic: Optional[np.ndarray] = None
     if embeddings is not None and embeddings.matrix is not None:
@@ -410,7 +436,7 @@ def build_layout(workspace,
             #: How many chunks this node stands for (`G-26`). 1 unless stage
             #: two merged it with others.
             "members": chunk.group_n,
-            "rank": float(ranks[row]) if row < len(ranks) else 0.0,
+            "rank": (float(ranks[row]) if 0 <= row < len(ranks) else 0.0),
             "chars": chunk.chars,
             "tokens": tokens.budget(text or ""),
             "pos": [float(v) for v in coords[i][:dims]],
@@ -453,6 +479,9 @@ def build_layout(workspace,
         #: equals the store's chunk count, and the difference now has two
         #: causes a reader has to be able to tell apart.
         "grouped": grouped,
+        #: Chunks the store holds that have no semantic vector, so the fit
+        #: cannot place them. Reported rather than silently dropped.
+        "no_vector": no_vector,
         #: The geometry the points were laid out IN (`G-18`). "S3" means the
         #: quaternion metric ran; "euclidean" means it did not, and a reader
         #: of the picture has to be able to tell, because the two are
@@ -907,23 +936,20 @@ def place_into(workspace, cids) -> Dict:
     if not wanted:
         return {"nodes": [], "unplaced": [], "stale": False}
 
-    # Embed what is waiting, now, because this IS the moment someone asked.
+    # Placement does NOT embed, and that is the change that makes live
+    # capture feel live.
     #
-    # `flush_vectors` exists to make vectorisation "a function of settled
-    # change rather than of delta count" -- a chunk rewritten on every frame
-    # of a scroll is embedded once. A live capture drains several times a
-    # second, so embedding per drain would be exactly the waste that design
-    # avoids; embedding when the pane asks where to draw them is the same
-    # rule, reached from the other side.
-    if getattr(workspace, "embedder", None) is not None:
-        try:
-            workspace.flush_vectors(limit=_LIVE_EMBED_LIMIT)
-        except Exception:                           # noqa: BLE001
-            # A failed flush leaves the chunks unembedded and they are
-            # reported as awaiting a vector, which is what they are. It must
-            # not take the pane down with it.
-            pass
-
+    # It used to call `flush_vectors` here, on the grounds that a reader
+    # asking where to draw a chunk is the moment someone asked for its
+    # vector. True, and it made the first drain of a page block for 13.9
+    # seconds while up to 256 chunks went through the encoder -- during which
+    # the pane showed nothing at all, because the answer it was waiting for
+    # carried every node or none.
+    #
+    # So the vectors are computed by a worker and this places what is ready.
+    # A chunk with no vector yet comes back in `unplaced`, which is what it
+    # is, and lands in the picture on a later tick. The caller is responsible
+    # for starting that worker; `layout` has no business owning a thread.
     rows, meta, missing = [], [], []
     for cid in wanted:
         chunk = workspace.store.chunk(cid)
@@ -979,7 +1005,8 @@ def place_into(workspace, cids) -> Dict:
                 node["image"] = picture
             nodes.append(node)
 
-    total = len(workspace.store.chunks())
+    # A count, not the chunks. See `GraphStore.chunk_count`.
+    total = workspace.store.chunk_count()
     return {"nodes": nodes, "unplaced": missing,
             "stale": projection.stale(total),
             "fitted_n": projection.fitted_n, "n": total}

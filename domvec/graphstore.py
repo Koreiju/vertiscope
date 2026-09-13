@@ -716,6 +716,23 @@ class GraphStore:
                 "SET c.group_of = r.lead, c.group_n = r.n", rows)
         return len(rows)
 
+    def chunk_count(self, url: str = "") -> int:
+        """How many chunks, without reading any of them.
+
+        `len(store.chunks())` materialises every `StoredChunk` -- markdown
+        included -- to produce one integer. On a 14,000-chunk store that is
+        most of the database, and `place_into` was doing it on EVERY live
+        capture to decide whether the fit had gone stale: measured at 9.0
+        seconds to place eight chunks, essentially none of it the encoder.
+        """
+        if url:
+            rows = self._rows(
+                "MATCH (p:Page {url: $url})-[:HasChunk]->(c:Chunk) "
+                "RETURN count(c)", {"url": url})
+        else:
+            rows = self._rows("MATCH (c:Chunk) RETURN count(c)")
+        return int(rows[0][0]) if rows else 0
+
     def set_group_embedding(self, lead: str, vector) -> None:
         """The vector for what a merge group SAYS, stored on its lead.
 

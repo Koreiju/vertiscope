@@ -262,6 +262,10 @@ export class GraphView extends ItemView {
    */
   private static textures = new Map<string, string | null>();
   private graph: ForceGraph3DInstance | null = null;
+  /** Which embedding space to ask the fit for: "" for the Euclidean one,
+   *  "S3" for the quaternion metric (`G-18`). Empty by default, on the
+   *  measurement recorded in `layout.py`. */
+  private space = "";
   /** Watches the canvas's box so the controls are recalibrated whenever
    *  it actually changes. Disconnected in `onClose`: an observer left on a
    *  detached canvas keeps the view, its WebGL context and its 5,337 node
@@ -291,12 +295,24 @@ export class GraphView extends ItemView {
     const again = bar.createEl("button", { text: "refit" });
     const recentre = bar.createEl("button", { text: "recentre" });
     recentre.onclick = () => this.reframe?.();
+    // Which geometry the fit runs in (`G-18`). A switch rather than a
+    // setting, because the two are a thing to compare: the quaternion fit
+    // keeps about half as many of the encoder's neighbourhoods on the corpus
+    // measured so far, and the only way that number moves is if someone can
+    // look at both pictures of the same data.
+    const geometry = bar.createEl("button", { text: "euclidean" });
+    geometry.onclick = () => {
+      this.space = this.space ? "" : "S3";
+      geometry.setText(this.space ? "S³" : "euclidean");
+      void load();
+    };
 
     const canvas = root.createDiv({ cls: "domvec-graph-canvas" });
 
     const load = async () => {
       status.setText("fitting…");
-      const layout = (await this.sidecar.layout()) as Layout | null;
+      const asked = this.space;
+      const layout = (await this.sidecar.layout(3, asked)) as Layout | null;
       if (!layout) {
         status.setText("no sidecar — start it to see the graph");
         return;

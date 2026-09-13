@@ -29,8 +29,8 @@ a handle on it.
 from __future__ import annotations
 
 import json
-import time
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Dict, List, Optional
 from urllib.parse import parse_qs, unquote, urlsplit
@@ -47,6 +47,68 @@ from .layout import build_layout, place_into
 #: dropped mid-page could not resolve the next drain's interned segments and
 #: would fail in a way that looks like a page suddenly going empty.
 _capture_sessions: Dict[str, Dict] = {}
+
+#: Serialises everything that WRITES the workspace.
+#:
+#: The server is already threaded -- a vault opens many chunks at once -- and
+#: adding a background embedder makes a writer concurrent with those readers
+#: for the first time. A kuzu connection is not built to be used from several
+#: threads at once, so every mutation goes through here. It is an `RLock`
+#: because `ingest` reaches `flush_vectors`, which would otherwise deadlock
+#: against itself.
+_WORK_LOCK = threading.RLock()
+
+#: Raised when there are chunks waiting for vectors.
+_EMBED_WANTED = threading.Event()
+
+#: The background embedder, started by `serve()` when a workspace has an
+#: embedder to run. One thread, not a pool: the encoder is the bottleneck and
+#: two of them would contend for the same GPU.
+_EMBED_THREAD = None
+
+
+def _embed_forever(workspace, stop: threading.Event) -> None:
+    """Embed what is queued, off the request path.
+
+    In batches with the lock RELEASED between them. Holding it for a whole
+    page would make the background worker exactly as blocking as the
+    synchronous flush it replaces, just further from the caller -- a request
+    arriving mid-flush would wait the same 13.9 seconds and have no way to
+    know why.
+    """
+    while not stop.is_set():
+        if not _EMBED_WANTED.wait(timeout=0.5):
+            continue
+        _EMBED_WANTED.clear()
+        while not stop.is_set():
+            try:
+                with _WORK_LOCK:
+                    workspace.flush_vectors(limit=_EMBED_BATCH)
+                    # The QUEUE's length, not the flush's return value.
+                    # `flush_vectors` answers with `vectors.report()`, which
+                    # is a set of cumulative counters -- pushed, queued,
+                    # skipped, embedded -- and they are non-zero forever after
+                    # the first flush. Reading them as "work done this call"
+                    # gives a loop that never exits: a thread spinning on the
+                    # encoder, taking and dropping the lock, starving every
+                    # request behind it.
+                    remaining = len(workspace.vectors)
+            except Exception:                       # noqa: BLE001
+                # A failed batch leaves its chunks queued and unembedded,
+                # which the pane already reports as awaiting a vector. It must
+                # not kill the worker: the next capture would queue into a
+                # thread that is gone, and nothing would ever be embedded
+                # again with no error anywhere to say so.
+                break
+            if not remaining:
+                break
+
+
+#: How many chunks one background batch embeds before yielding the lock.
+#:
+#: Small enough that a request arriving mid-flush waits for a batch and not a
+#: page. 64 chunks is well under a second on this machine's GPU.
+_EMBED_BATCH = 64
 
 
 def chunk_payload(workspace, cid: str) -> Optional[Dict]:
@@ -553,6 +615,12 @@ class _Handler(BaseHTTPRequestHandler):
                 "spine": StreamingScan(
                     url, context_window=self.workspace.context_window),
                 "passno": 0,
+                # Chunks captured but not yet vectorised. Retried on every
+                # later drain, so a chunk whose vector arrives while the
+                # reader keeps browsing lands in the picture on its own --
+                # the pane does not have to remember to ask again, and a
+                # chunk cannot be lost between "captured" and "placed".
+                "pending": [],
             }
             sessions[url] = session
 
@@ -561,8 +629,9 @@ class _Handler(BaseHTTPRequestHandler):
             if body.get("settle"):
                 spine = session["spine"]
                 if spine.trie is not None and len(spine.trie):
-                    self.workspace.ingest(url, spine.trie,
-                                          title=(body.get("title") or ""))
+                    with _WORK_LOCK:
+                        self.workspace.ingest(
+                            url, spine.trie, title=(body.get("title") or ""))
                 stored = list(self.workspace.store.chunks(url))
                 sessions.pop(url, None)
                 self._send(200, {
@@ -586,7 +655,11 @@ class _Handler(BaseHTTPRequestHandler):
                                   moved=sense.moved_addresses)
             dirty = spine.dirty_chunks(update)
             if dirty:
-                self.workspace.ingest_chunks(url, dirty, complete=False)
+                with _WORK_LOCK:
+                    self.workspace.ingest_chunks(url, dirty, complete=False)
+                # There are chunks without vectors now. The worker embeds
+                # them; this request does not wait for it.
+                _EMBED_WANTED.set()
             # Named, not counted. The pane asks `place` about exactly these,
             # and a count would leave it re-fetching the whole layout to find
             # out which three nodes moved.
@@ -622,9 +695,17 @@ class _Handler(BaseHTTPRequestHandler):
         # `POST /place` stays, because "where would these go" is a real
         # question on its own -- a pane that already has cids from somewhere
         # else has no drain to attach them to.
-        if body.get("place") and dirty_cids:
+        if body.get("place"):
+            # Everything this drain touched, PLUS everything an earlier drain
+            # could not place yet. A chunk embedded in the background while
+            # the reader scrolled belongs on screen now, and this is the only
+            # moment anyone asks.
+            wanted = list(dict.fromkeys(
+                list(session.get("pending") or []) + dirty_cids))
             try:
-                reply.update(place_into(self.workspace, dirty_cids))
+                placed = place_into(self.workspace, wanted) if wanted else {}
+                reply.update(placed)
+                session["pending"] = list(placed.get("unplaced") or [])
             except Exception as exc:                # noqa: BLE001
                 # Named and non-fatal. The capture succeeded and is stored;
                 # failing to say where the chunks go must not read to the
@@ -695,12 +776,23 @@ class _Handler(BaseHTTPRequestHandler):
             # 3D view asks on every open; refitting per request would make
             # opening the pane feel broken. Keyed on the chunk count so an
             # ingest invalidates it without anyone having to remember to.
-            want = int((parse_qs(parts.query).get("dims") or ["3"])[0])
+            query = parse_qs(parts.query)
+            want = int((query.get("dims") or ["3"])[0])
             want = 3 if want not in (2, 3) else want
-            fresh = (len(self.workspace.store.chunks()), want)
+            # `?space=S3` asks for the quaternion embedding (`G-18`). A query
+            # parameter rather than a startup flag, because the two fits are
+            # a thing to COMPARE -- the pane can ask for either without
+            # restarting the server, and the reply says which it got.
+            spherical = (query.get("space") or [""])[0].lower() in (
+                "s3", "spherical", "quaternion")
+            # A count, not every chunk: this runs on each `/layout`
+            # request purely to decide whether the cache is stale.
+            fresh = (self.workspace.store.chunk_count(), want,
+                     spherical)
             if getattr(type(self), "_layout_key", None) != fresh:
                 type(self)._layout_key = fresh
-                type(self)._layout = build_layout(self.workspace, dims=want)
+                type(self)._layout = build_layout(
+                    self.workspace, dims=want, spherical_space=spherical)
             self._send(200, type(self)._layout)
             return
 
@@ -772,6 +864,17 @@ def serve(workspace, port: int = 8787, *, block: bool = True,
         # One flag for both: see `_post_shell` for why a second would be a
         # permission that looks meaningful and is not.
         shells = ShellPool()
+
+    # The background embedder. Started only when there is an embedder to
+    # run, so a read-only workspace does not carry a thread that can never
+    # have anything to do.
+    global _EMBED_THREAD
+    stop = threading.Event()
+    if getattr(workspace, "embedder", None) is not None:
+        _EMBED_THREAD = threading.Thread(
+            target=_embed_forever, args=(workspace, stop),
+            name="domvec-embed", daemon=True)
+        _EMBED_THREAD.start()
 
     handler = type("_Bound", (_Handler,),
                    {"workspace": workspace, "enact_allowed": bool(enact),

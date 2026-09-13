@@ -77,8 +77,12 @@ export class Sidecar {
    * Fitted in Python, where the vectors, numpy and UMAP already are. A
    * projection fitted twice in two languages is two projections.
    */
-  layout(dims = 3): Promise<unknown | null> {
-    return this.get(`/layout?dims=${dims}`);
+  layout(dims = 3, space = ""): Promise<unknown | null> {
+    // `space=S3` asks for the quaternion embedding (`G-18`). The two fits
+    // are a thing to compare rather than a setting to choose once, so the
+    // pane can ask for either and the reply says which it got.
+    const which = space ? `&space=${encodeURIComponent(space)}` : "";
+    return this.get(`/layout?dims=${dims}${which}`);
   }
 
   /** Whether the sidecar answers at all, and what it will allow. */
