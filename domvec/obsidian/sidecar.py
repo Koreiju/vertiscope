@@ -284,27 +284,105 @@ def chunk_payload(workspace, cid: str) -> Optional[Dict]:
     }
 
 
-def search_payload(workspace, query: str, k: int = 8) -> Dict:
-    """The `/` retrieval gesture's answer: ranked chunks, with their notes.
+def search_payload(workspace, query: str, k: int = 8, *,
+                   offset: int = 0, url: str = "",
+                   coarse: bool = True, budget: int = 0) -> Dict:
+    """Ranked chunks for the overlay (`G-63`, `G-64`, `G-69`, `G-70`).
 
-    Ranking is the store's own three-form retrieval; this adds nothing to it.
+    Ranking is the store's own three-form retrieval; this adds nothing to it
+    and reshapes what comes back.
+
+    **A window over a ranked list, not a top-k.** `G-69`: rank is a total
+    order over the corpus and the cutoff is a decision the reader makes by
+    stopping. So the caller asks for a slice and keeps asking as it scrolls.
+    The rank is recomputed for `offset + k` and sliced, because the index
+    ranks rather than paginates -- which is honest but means a deep scroll
+    costs more than a shallow one, and the cap is what keeps that bounded.
+
+    **Scoped, or not** (`G-70`). `url` restricts to one shadow DOM, which is
+    what clicking a page node means; without it the ranking is the corpus's.
+
+    **Coarse first** (`G-63`). A merge group is represented by its LEAD and
+    its members are suppressed, because the group is what the merge layer
+    indexes and a reader scrolling results does not want the same passage
+    eight times. `coarse=False` drops that and ranks the members themselves,
+    which is what a click expansion inside one page wants.
+
+    **Inside a budget** (`G-64`). `budget` in link-free tokens: results are
+    taken until the next one would not fit, so a list handed to a model is a
+    list that can be handed to a model.
     """
-    hits = workspace.search(query, k=k)
+    want = max(1, offset + k)
+    if url:
+        # Scoped means ranked WITHIN the page, and the filter alone does not
+        # do that: applied to a global top-k it returns whatever of that
+        # handful happened to be on the page, which for three results is
+        # usually nothing. Measured before this: `k=3` scoped to MDN's
+        # Headers index returned 0 hits while the page has hundreds of
+        # chunks about exactly the query.
+        #
+        # The index ranks rather than filters, so the depth is widened until
+        # the page is certainly inside it. Bounded, because a scope on a
+        # 1,173-chunk page must not become a request that ranks the corpus
+        # end to end.
+        want = max(want, min(4000, workspace.store.chunk_count(url) * 3))
+    hits = workspace.search(query, k=want)
     out = []
+    spent = 0
+    seen_groups = set()
     for hit in hits:
         cid = getattr(hit, "cid", None) or getattr(hit, "chunk", "")
         stored = workspace.store.chunk(cid) if cid else None
         if stored is None:
             continue
+        if url and stored.url != url:
+            continue
+        if stored.redundant:
+            # `G-24` settled this one: it draws what another chunk draws.
+            continue
+        if coarse:
+            if stored.group_of and stored.group_of != stored.cid:
+                # A member speaks through its lead, which ranks on its own.
+                continue
+            if stored.group_of in seen_groups:
+                continue
+            if stored.group_of:
+                seen_groups.add(stored.group_of)
         out.append({
             "cid": stored.cid,
             "url": stored.url,
+            "xpath": stored.xpath,
             "score": float(getattr(hit, "score", 0.0) or 0.0),
+            # The three factors, not just their product. The product is a
+            # multiplication of three small numbers and lands around 1e-5,
+            # which reads as zero at any sane precision and tells a reader
+            # nothing about WHY a result ranked -- whether the words matched,
+            # the meaning did, or the page is simply well linked.
+            "lexical": float(getattr(hit, "lexical", 0.0) or 0.0),
+            "semantic": float(getattr(hit, "semantic", 0.0) or 0.0),
+            "pagerank": float(getattr(hit, "rank", 0.0) or 0.0),
+            "members": stored.group_n,
+            "tokens": tokens.budget(stored.md or ""),
             # The first lines only. The panel renders a preview and asks for
             # the rest when a reader opens it.
-            "preview": "\n".join(stored.md.splitlines()[:6]),
+            "preview": "\n".join((stored.md or "").splitlines()[:6]),
         })
-    return {"query": query, "hits": out}
+
+    out = out[offset:offset + k]
+    if budget:
+        kept = []
+        for row in out:
+            if spent + row["tokens"] > budget and kept:
+                break
+            kept.append(row)
+            spent += row["tokens"]
+        out = kept
+    return {"query": query, "hits": out, "offset": offset,
+            "scope": url or "", "coarse": bool(coarse),
+            "tokens": spent if budget else sum(r["tokens"] for r in out),
+            #: True while the ranking still had more to give at this depth,
+            #: so a scrolling overlay knows whether to keep asking.
+            "more": len(hits) >= want}
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -958,10 +1036,25 @@ class _Handler(BaseHTTPRequestHandler):
             except ValueError:
                 k = 8
             k = max(1, min(k, 50))
+            try:
+                offset = int((params.get("offset") or ["0"])[0])
+            except ValueError:
+                offset = 0
+            # Bounded, for the reason `k` is: a scroll that never stops must
+            # not become a request that ranks the whole corpus twice.
+            offset = max(0, min(offset, 2000))
+            scope = (params.get("url") or [""])[0]
+            coarse = (params.get("coarse") or ["1"])[0] != "0"
+            try:
+                budget = int((params.get("budget") or ["0"])[0])
+            except ValueError:
+                budget = 0
             if not query:
                 self._send(400, {"error": "missing q"})
             else:
-                self._send(200, search_payload(self.workspace, query, k))
+                self._send(200, search_payload(
+                    self.workspace, query, k, offset=offset,
+                    url=scope, coarse=coarse, budget=budget))
             return
 
         self._send(404, {"error": "no such route", "path": parts.path})

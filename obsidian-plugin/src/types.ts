@@ -82,6 +82,20 @@ export interface SearchHit {
   score: number;
   /** The first few lines, for the suggestion list. */
   preview: string;
+  /** Everything below is present on the overlay's richer payload and absent
+   *  on the `/` gesture's, so it is optional rather than a second interface.
+   *  Two interfaces of this name MERGE silently in TypeScript, which is how
+   *  a second one sat here without an error and made every field of it
+   *  mandatory on both surfaces. */
+  xpath?: string;
+  /** The three ranking factors. Their product lands near 1e-5 and reads as
+   *  zero; which of them fired is what says WHY a result ranked. */
+  lexical?: number;
+  semantic?: number;
+  pagerank?: number;
+  /** How many chunks the result stands for, when it is a merge group. */
+  members?: number;
+  tokens?: number;
 }
 
 export interface Health {
@@ -245,6 +259,17 @@ export interface CaptureResult {
   /** Set instead of the rest when the capture did not land. A capture that
    *  fails quietly is indistinguishable from a page with nothing in it. */
   error?: string;
+}
+
+/** A window over the ranked list (`G-69`). */
+export interface SearchResults extends SearchResult {
+  offset: number;
+  /** The url the ranking was scoped to, or "" for the corpus. */
+  scope: string;
+  coarse: boolean;
+  tokens: number;
+  /** The ranking still had more at this depth, so scrolling should ask. */
+  more: boolean;
 }
 
 /** One step of unravelling a page's patricia path (`G-54`). */

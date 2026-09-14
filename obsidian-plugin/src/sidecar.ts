@@ -11,7 +11,7 @@
  */
 
 import { CaptureResult, ChunkPayload, ChunkPreview, EnactResult, Health,
-         UnfoldResult,
+         SearchResults, UnfoldResult,
          PlaceResult,
          Interpreters,
          KernelReply, SearchResult, ShellReply } from "./types";
@@ -53,12 +53,6 @@ export class Sidecar {
 
   chunk(cid: string): Promise<ChunkPayload | null> {
     return this.get<ChunkPayload>(`/chunk/${encodeURIComponent(cid)}`);
-  }
-
-  search(query: string, limit: number): Promise<SearchResult | null> {
-    return this.get<SearchResult>(
-      `/search?q=${encodeURIComponent(query)}&k=${limit}`,
-    );
   }
 
   /**
@@ -158,6 +152,28 @@ export class Sidecar {
    */
   sensor(): Promise<{ source: string } | null> {
     return this.get<{ source: string }>("/sensor");
+  }
+
+  /**
+   * Ranked chunks for the browser's overlay (`G-63`, `G-69`, `G-70`).
+   *
+   * A window over a ranked list rather than a top-k: `offset` is what a
+   * continuous scroll moves, and `more` says whether the ranking still had
+   * something at that depth. `url` scopes to one shadow DOM; `coarse` false
+   * ranks a merge group's members instead of the group.
+   */
+  async search(query: string, options: {
+    k?: number; offset?: number; url?: string;
+    coarse?: boolean; budget?: number;
+  } = {}): Promise<SearchResults | null> {
+    if (!query.trim()) return null;
+    const q = new URLSearchParams({ q: query });
+    if (options.k) q.set("k", String(options.k));
+    if (options.offset) q.set("offset", String(options.offset));
+    if (options.url) q.set("url", options.url);
+    if (options.coarse === false) q.set("coarse", "0");
+    if (options.budget) q.set("budget", String(options.budget));
+    return this.get<SearchResults>(`/search?${q.toString()}`);
   }
 
   /**

@@ -31,6 +31,7 @@ import { ItemView, WorkspaceLeaf } from "obsidian";
 
 import { LayoutNode } from "./graph";
 import { Sidecar } from "./sidecar";
+import { SearchHit } from "./types";
 
 export const BROWSER_VIEW = "domvec-browser-view";
 
@@ -76,6 +77,9 @@ const PAUSE_MS = 700;
  */
 const LIVE_MS = 1200;
 
+/** How many results one window of the ranking carries (`G-69`). */
+const PAGE_SIZE = 12;
+
 /** Which face of the panel is showing. */
 type Face = "browser" | "markdown";
 
@@ -100,6 +104,23 @@ export class BrowserView extends ItemView {
    *  its last delta never becomes a complete write. */
   private session = "";
   private liveButton!: HTMLElement;
+
+  // --- the retrieval overlay (`G-42`, `G-63`, `G-69`, `G-70`) ------------
+  private overlay!: HTMLElement;
+  private results!: HTMLElement;
+  private scopeButton!: HTMLElement;
+  private queryInput!: HTMLInputElement;
+  /** Which shadow DOM the ranking is restricted to, or "" for the corpus.
+   *  Named `rankScope` because `ItemView` already has a `scope`, and it is a
+   *  keymap. */
+  private rankScope = "";
+  private hits: SearchHit[] = [];
+  /** How deep the reader has scrolled the ranking. `G-69`: the cutoff is a
+   *  decision they make by stopping, so this only ever grows. */
+  private offset = 0;
+  private more = false;
+  private fetching = false;
+  private debounce = 0;
 
   constructor(leaf: WorkspaceLeaf, private sidecar: Sidecar,
               private onChunks: (nodes: LayoutNode[]) => void = () => {}) {
@@ -126,7 +147,23 @@ export class BrowserView extends ItemView {
     this.liveButton = bar.createEl("button", { text: "live ●" });
     this.toggle = bar.createEl("button", { text: "markdown" });
 
+    // The overlay, above the page and never inside it (`G-41`). This is
+    // Obsidian's own DOM drawn over the webview, not script written into the
+    // document -- the distinction the constraint exists for.
+    const search = root.createDiv({ cls: "domvec-browser-search" });
+    this.queryInput = search.createEl("input", { cls: "domvec-query" });
+    this.queryInput.type = "text";
+    this.queryInput.placeholder = "search the corpus";
+    this.scopeButton = search.createEl("button", { text: "everywhere" });
+    this.scopeButton.onclick = () => this.setScope(this.rankScope
+      ? "" : (this.webview ? this.webview.getURL() : ""));
+    const clear = search.createEl("button", { text: "×" });
+    clear.onclick = () => { this.queryInput.value = ""; this.showResults([]); };
+
     this.browserWrap = root.createDiv({ cls: "domvec-browser-page" });
+    this.overlay = this.browserWrap.createDiv({ cls: "domvec-overlay" });
+    this.results = this.overlay.createDiv({ cls: "domvec-overlay-list" });
+    this.overlay.hide();
     this.markdownWrap = root.createDiv({ cls: "domvec-browser-md" });
     this.markdownWrap.hide();
     this.markdownWrap.createDiv({ cls: "domvec-browser-empty" }).setText(
@@ -182,6 +219,23 @@ export class BrowserView extends ItemView {
     this.toggle.onclick = () => this.show(
       this.face === "browser" ? "markdown" : "browser");
     scan.onclick = () => this.scan();
+
+    // Debounced, because a ranking runs over the corpus and a keystroke is
+    // not a question. 250ms is long enough that typing a word costs one
+    // query and short enough that the list feels attached to the keyboard.
+    this.queryInput.addEventListener("input", () => {
+      window.clearTimeout(this.debounce);
+      this.debounce = window.setTimeout(() => { void this.runQuery(); }, 250);
+    });
+    // Continuous scrolling, not a page of top-k (`G-69`). The ranking is a
+    // total order and the reader ends it by stopping, so nearing the bottom
+    // asks for more rather than offering a "next" button.
+    this.results.addEventListener("scroll", () => {
+      const box = this.results;
+      if (box.scrollTop + box.clientHeight > box.scrollHeight - 120) {
+        void this.runQuery(true);
+      }
+    });
     this.liveButton.onclick = () => this.setLive(!this.live);
 
     // One timer for the life of the pane, registered so Obsidian stops it
@@ -223,6 +277,110 @@ export class BrowserView extends ItemView {
     this.address.value = url;
     this.webview.loadURL(url);
     this.show("browser");
+  }
+
+  /** Restrict the ranking to one shadow DOM, or release it (`G-70`). */
+  setScope(url: string): void {
+    this.rankScope = url || "";
+    this.scopeButton.setText(this.rankScope ? "this page" : "everywhere");
+    this.scopeButton.title = this.rankScope || "ranked over the whole corpus";
+    void this.runQuery();
+  }
+
+  /**
+   * Ask for the next window of the ranking (`G-69`).
+   *
+   * `more === true` asks for the slice after what is already shown; anything
+   * else starts again from the top. Guarded against re-entry, because the
+   * scroll handler fires on every frame of a flick and each one would
+   * otherwise launch a ranking.
+   */
+  private async runQuery(more = false): Promise<void> {
+    const query = this.queryInput.value.trim();
+    if (!query) { this.showResults([]); return; }
+    if (this.fetching) return;
+    if (more && !this.more) return;
+    this.fetching = true;
+    try {
+      const offset = more ? this.offset : 0;
+      const got = await this.sidecar.search(query, {
+        k: PAGE_SIZE, offset, url: this.rankScope || undefined });
+      if (!got) { this.say("no sidecar"); return; }
+      this.more = !!got.more;
+      this.offset = offset + got.hits.length;
+      this.showResults(more ? this.hits.concat(got.hits) : got.hits);
+      this.say(`${this.hits.length} of the ranking` +
+               (this.rankScope ? " · this page" : "") +
+               ` · ${got.tokens} tok`);
+    } finally {
+      this.fetching = false;
+    }
+  }
+
+  /** Draw the ranking. */
+  private showResults(hits: SearchHit[]): void {
+    this.hits = hits;
+    this.results.empty();
+    this.overlay.toggle(hits.length > 0);
+    hits.forEach((hit, i) => {
+      const row = this.results.createDiv({ cls: "domvec-hit" });
+      const head = row.createDiv({ cls: "domvec-hit-head" });
+      head.createSpan({ cls: "domvec-hit-rank", text: String(i + 1) });
+      head.createSpan({ cls: "domvec-hit-url", text: hit.url });
+      if ((hit.members ?? 1) > 1) {
+        head.createSpan({ cls: "domvec-hit-tag",
+                          text: `${hit.members} merged` });
+      }
+      head.createSpan({ cls: "domvec-hit-tag",
+                        text: `${hit.tokens ?? 0} tok` });
+      // Which factor fired, not the product. The product of three small
+      // numbers reads as zero and says nothing about why this ranked.
+      head.createSpan({
+        cls: "domvec-hit-score",
+        text: `lex ${(hit.lexical ?? 0).toFixed(2)} · ` +
+              `sem ${(hit.semantic ?? 0).toFixed(2)}`,
+      });
+      row.createDiv({ cls: "domvec-hit-preview", text: hit.preview });
+      row.onclick = () => { void this.goToHit(hit); };
+    });
+  }
+
+  /**
+   * Take the browser to a result (`G-42`).
+   *
+   * Navigate if it is elsewhere, then bring the chunk into view. The scroll
+   * is done by evaluating the chunk's xpath and calling `scrollIntoView` --
+   * a READ of the document and a movement of the viewport, not a write into
+   * it. Nothing about the page changes; what changes is which part of it the
+   * reader is looking at, which is what they asked for.
+   */
+  private async goToHit(hit: SearchHit): Promise<void> {
+    const wv = this.webview;
+    if (!wv) return;
+    if (wv.getURL() !== hit.url) {
+      this.go(hit.url);
+      for (let i = 0; i < 40; i++) {
+        await new Promise((r) => setTimeout(r, 400));
+        if (!wv.isLoading()) break;
+      }
+    }
+    if (!hit.xpath) return;
+    try {
+      const found = await wv.executeJavaScript(`(function () {
+        var r = document.evaluate(${JSON.stringify(hit.xpath)}, document,
+          null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+        var n = r.singleNodeValue;
+        if (!n) return false;
+        if (n.nodeType === 3) n = n.parentElement;
+        if (!n) return false;
+        n.scrollIntoView({block: "center"});
+        return true;
+      })()`);
+      this.say(found ? `at ${hit.xpath}`
+                     : `the page no longer has ${hit.xpath}`);
+    } catch (e) {
+      this.say(`could not reach it: ${String(e).slice(0, 80)}`);
+    }
   }
 
   /** Turn live capture on or off, and say which it is. */

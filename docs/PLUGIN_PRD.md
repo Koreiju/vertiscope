@@ -193,7 +193,7 @@ axes: **structure, content, organizedness, completeness**.
 | G-39 | **Right-click ports the full-content markdown to the other view** in the same panel | Open — §O.2 |
 | G-40 | **Clicking a node in the 3D projector navigates the browser to that chunk** — same session, scrolled into view, rather than a new rendering of it | Open — §O.2. This collapses three candidate representations into one |
 | G-41 | **Nothing is injected into the page.** The retrieval overlay and the highlight are a layer *above* Electron, linked to the store, never script written into the document | Open — §O.2, and it is constraint 7 of `CLAUDE.md` reaching the browser cell |
-| G-42 | **A retrieval panel above the browser, results overlaid**, selecting one navigates to its url and chunk | Open — §O.2. Same component in the notebook cell. Distinct from the markdown panel's retrieval gesture, which inserts chunks directly |
+| G-42 | **A retrieval panel above the browser, results overlaid**, selecting one navigates to its url and chunk | **Done** — `browser.ts`, `GET /search`. Obsidian's own DOM drawn over the webview and verified to paint above it; selecting navigates and brings the chunk into view by evaluating its xpath and calling `scrollIntoView`, which reads the document and moves the viewport without writing anything into it |
 | G-43 | **A hoverable chat panel on the browser**, whose context is exactly the right-clicked full markdowns, **each sent at most once** — the context window is updated by delta the way the scan is | Open — §O.2 |
 | G-44 | **The chat is continuous markdown**: outputs land below the selected markdown, in conversational structure, and inside a notebook they append to the selected cell with the rewind rules unchanged | Open — §O.2 |
 | G-45 | **The selection gesture is the delta.** The right-clicked elements since the last response are what is pre-injected into the next prompt — there is no separate context box | Open — §O.2 |
@@ -214,14 +214,14 @@ axes: **structure, content, organizedness, completeness**.
 | G-60 | **A toggle saves the full page as the Electron browser presents it live**, for offline use | Open — §O.5. Saved as presented, not as fetched: the composed tree the reader saw, scripts already run |
 | G-61 | **A saved page whose source does not carry its layout is INFILLED from the traced chunks** | Open — §O.5. The trie holds `url : xpath : markdown : content` for every address; a saved source missing its render is exactly what that can repair |
 | G-62 | **With no connection, the page is reconstructed fully rendered and scrollable from the scan trace alone** | Open — §O.5. The strongest form of the affine map: the trace IS the page |
-| G-63 | **Retrieval overlay above the Electron browser, coarse-to-fine**: merged chunks first, then within-shadow-DOM top-k | Open — §O.6. `G-42` said where it sits; this says what it does |
-| G-64 | **Cross-page ranking fits the 256 pure-text window** — the most relevant parts of different shadow DOMs, inside one budget | Open — §O.6 |
+| G-63 | **Retrieval overlay above the Electron browser, coarse-to-fine**: merged chunks first, then within-shadow-DOM top-k | **Done** — `search_payload`. Coarse suppresses a merge group's members so the lead stands for them, because a reader scrolling a ranking does not want the same passage eight times; `coarse=0` ranks the members, which is what a click expansion inside one page wants |
+| G-64 | **Cross-page ranking fits the 256 pure-text window** — the most relevant parts of different shadow DOMs, inside one budget | **Done** — `?budget=`. Results are taken until the next would not fit, counted in `tokens.budget`, so a list handed to a model is a list that can be handed to a model |
 | G-65 | **Aggregation runs on the DIFF STREAM, not only at the settle.** A chunk rewritten while the reader browses rejoins or leaves its merge group as it changes | **Done** — §M.12. Queued per page on every capture, debounced 1.5s so it lands when the reader pauses, and run on the embedding worker so it is ordered after the vectors it needs. Verified live: a 128-chunk page the corpus had never seen went from 0 to **23 merge groups in 2 seconds**, with nothing asking |
 | G-66 | **The O(delta) budget is stated per phase and measured**: fold, dedup, vectorise, aggregate, re-vectorise, transform | Open — §O.4. "Millisecond range" is the goal's own word and it has never been broken down |
 | G-67 | **UMAP transforms go through an async batched queue** — a diff does not wait for a projection, and a projection does not run per chunk | Open — §O.4 |
 | G-68 | **Interactive fields in the billboarded shadow DOM act on the live Electron page** through the trie | Open — §O.5, and it is `G-46` at the surface a reader actually touches |
-| G-69 | **Retrieval is continuous scrolling over a ranked list, not top-k.** Top-k is what a click expansion uses; the overlay itself keeps going | Open — §O.6. Rank is a total order over the corpus; a cutoff is a decision the reader makes by stopping |
-| G-70 | **Clicking a shadow-DOM node SCOPES the query to that url**, however the global ranking placed it. Right-clicking restores global scope | Open — §O.6. The query in force is the last one the in-view Electron browser was interacted with |
+| G-69 | **Retrieval is continuous scrolling over a ranked list, not top-k.** Top-k is what a click expansion uses; the overlay itself keeps going | **Done** — `?offset=`, and the list asks for more as it nears its own bottom. Measured: 12 results on typing, 48 after three scrolls |
+| G-70 | **Clicking a shadow-DOM node SCOPES the query to that url**, however the global ranking placed it. Right-clicking restores global scope | **Partly** — `?url=` works and the overlay has the switch; the projector click that sets it is not wired yet. §M.13 records the defect this exposed: a scope applied as a FILTER over a global top-k returns nothing |
 | G-71 | **Scoped results unfold by the same mechanics as the overlay's** — one behaviour, two places | Open — §O.6 |
 
 ### P. The panels
@@ -1931,6 +1931,53 @@ there is no FIT to place into, and the pane rendered that as "awaiting a
 vector" — two different states under one word, which sent me hunting a working
 component. The reply carries `why` for the fit case now and the pane says
 which of the two it is.
+
+### M.13 — the overlay, and the scope that returned nothing
+
+**Scoping is not filtering, and the first version was.** `?url=` restricted
+the results *after* the index had ranked a global top-k, so a scoped query for
+three results returned whatever of that handful happened to be on the page —
+which for MDN's Headers index, a page with hundreds of chunks about exactly
+the query, was **zero**. The index ranks rather than filters, so a scoped
+request now widens its depth until the page is certainly inside it, bounded at
+4,000 so a scope on a 1,173-chunk page cannot become a ranking of the corpus
+end to end.
+
+| request | hits | ms |
+|---|---|---|
+| global, k=4 | 4 | 186 |
+| scoped, k=4 | 3 | 107 |
+| scoped, fine | 3 | 113 |
+| scoped, offset 4 | 2 | 117 |
+
+**The score is a product of three small numbers and reads as zero.** `score`
+comes back around 1e-5 — rank × lexical × semantic — which at any sane
+precision is `0.000` and says nothing about *why* a result ranked. The payload
+carries the three factors separately now and the overlay shows two of them, so
+a reader can see whether the words matched or the meaning did:
+
+    lex 0.0686   sem 0.5546   pagerank 0.00039
+
+**Driven as a reader would**, on MDN's Headers index:
+
+| step | results | |
+|---|---|---|
+| typed a query | 12 | overlay visible over the page |
+| scrolled three times | **48** | `G-69`: it keeps going |
+| scoped to this page | 19 | 12, then 7, then exhausted |
+| clicked a result | — | `at /html/body/div[2]/…/section[5]/dl/dd[5]` |
+
+**The overlay paints above the webview**, which was not a given: a `<webview>`
+is composited and can draw over ordinary DOM siblings. Verified visually
+rather than assumed, and the page stays visible underneath because the
+overlay is capped at 62% of the pane — a list that covers what it is ranking
+is a list with no context.
+
+**A duplicate that TypeScript hid.** A second `interface SearchHit` was added
+beside the existing one and the compiler said nothing, because interfaces of
+the same name MERGE. The merge silently made every new field mandatory on the
+`/` gesture's payload too. One interface now, with the overlay's extra fields
+optional.
 
 ### N.4 — what this does not settle
 

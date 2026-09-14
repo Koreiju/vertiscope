@@ -536,3 +536,70 @@ button.domvec-run-fence:hover {
   font-size: 12px;
   margin: 0;
 }
+
+/* The retrieval overlay (`G-42`, `G-63`, `G-69`). Obsidian's own DOM drawn
+   OVER the webview -- never script written into the page. */
+.domvec-browser-search {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  flex: 0 0 auto;
+}
+.domvec-query {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12px;
+}
+.domvec-browser-page { position: relative; }
+.domvec-overlay {
+  position: absolute;
+  inset: 0 0 auto 0;
+  /* Bounded, so the page stays visible underneath: an overlay that covers
+     what it is ranking is a list with no context. */
+  max-height: 62%;
+  display: flex;
+  z-index: 20;
+  background: var(--background-primary);
+  border-bottom: 1px solid var(--background-modifier-border);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+}
+.domvec-overlay-list {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+.domvec-hit {
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  cursor: pointer;
+}
+.domvec-hit:hover { background: var(--background-modifier-hover); }
+.domvec-hit-head {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.domvec-hit-rank { color: var(--text-faint); min-width: 1.4em; }
+.domvec-hit-url {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.domvec-hit-tag {
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--background-modifier-border);
+}
+.domvec-hit-score { color: var(--text-faint); white-space: nowrap; }
+.domvec-hit-preview {
+  font-size: 12px;
+  margin-top: 2px;
+  white-space: pre-wrap;
+  max-height: 3.4em;
+  overflow: hidden;
+}

@@ -83,7 +83,7 @@ export class RetrievalSuggest extends EditorSuggest<Suggestion> {
 
   async getSuggestions(context: EditorSuggestContext): Promise<Suggestion[]> {
     const limit = this.settings().retrievalLimit;
-    const result = await this.sidecar.search(context.query, limit);
+    const result = await this.sidecar.search(context.query, { k: limit });
     if (!result || !result.hits.length) return [];
     const hits = result.hits.slice(0, limit);
     // The "all" entry first, because the shape this gesture is for is a
