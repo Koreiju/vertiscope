@@ -304,9 +304,15 @@ export class BrowserView extends ItemView {
       }
       const nodes = (reply.nodes as LayoutNode[]) || [];
       if (nodes.length) this.onChunks(nodes);
+      // "Unplaced" has two causes and they are not the same news: a chunk
+      // seconds old has no vector yet and will get one, while a workspace
+      // with no fit has nowhere to put anything and will not until it is
+      // asked for a layout. Reporting both as "awaiting a vector" sent me
+      // looking for a broken embedder that was working perfectly.
       const waiting = reply.unplaced ? reply.unplaced.length : 0;
       this.say(`live · ${cids.length} chunks · ${nodes.length} placed` +
-               (waiting ? ` · ${waiting} awaiting a vector` : "") +
+               (reply.why ? ` · ${reply.why}`
+                : waiting ? ` · ${waiting} awaiting a vector` : "") +
                (reply.place_error ? ` · ${reply.place_error}` : "") +
                (reply.stale ? " · fit is stale, refit" : "") +
                ` · ${reply.ms} ms`);

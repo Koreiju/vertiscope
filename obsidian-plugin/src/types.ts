@@ -231,6 +231,10 @@ export interface CaptureResult {
   unplaced?: string[];
   /** The corpus has doubled since the fit; the pane should refit. */
   stale?: boolean;
+  /** Why nothing could be placed, when that is a fact about the FIT rather
+   *  than about the chunks -- "no fit to place into yet". Distinct from
+   *  `unplaced`, which means the chunks have no vector yet. */
+  why?: string;
   /** Set when storing succeeded and placing did not. The two are reported
    *  apart because a capture that landed must not read as one that did not. */
   place_error?: string;

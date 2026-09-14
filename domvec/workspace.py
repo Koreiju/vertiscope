@@ -862,10 +862,13 @@ class Workspace:
         stored = [c for c in self.store.chunks(url) if not c.redundant]
         # Document order, the same key `group_members` reads back by.
         stored.sort(key=lambda c: (c.xpath, c.part))
+        # One query for the page's vectors, not one per chunk. The N+1 read
+        # was most of what stage two cost -- see `embeddings_for`.
+        vectors_by_cid = self.store.embeddings_for(url)
         cids, mds, vectors = [], [], []
         for chunk in stored:
-            vector = self.store.embedding(chunk.cid)
-            if not vector or not any(vector):
+            vector = vectors_by_cid.get(chunk.cid)
+            if not vector:
                 continue
             cids.append(chunk.cid)
             mds.append(chunk.md or "")

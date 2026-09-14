@@ -809,6 +809,46 @@ class GraphStore:
                 "SET c.group_of = r.lead, c.group_n = r.n", rows)
         return len(rows)
 
+    def embeddings_for(self, url: str) -> Dict[str, List[float]]:
+        """Every vector on one page, in one query.
+
+        `aggregate` read them one at a time -- `store.embedding(cid)` per
+        chunk -- which is a query per chunk and the reason stage two looked
+        expensive. Measured on `build/corpus123`: a 835-chunk page spent
+        330ms reading and 78ms clustering, so the clustering was never the
+        cost and an incremental DBSCAN would have been machinery bought to
+        speed up the wrong half.
+
+        Only chunks that HAVE a vector come back. A missing one is normal for
+        a chunk seconds old, since embedding is asynchronous by design, and
+        the caller already treats absence as "not yet".
+        """
+        rows = self._rows(
+            "MATCH (p:Page {url: $url})-[:HasChunk]->(c:Chunk) "
+            "RETURN c.cid, c.embedding", {"url": url})
+        out: Dict[str, List[float]] = {}
+        for cid, vector in rows:
+            if vector is None:
+                continue
+            values = list(vector)
+            if any(values):
+                out[cid] = values
+        return out
+
+    def group_count(self, url: str) -> int:
+        """How many merge groups this page currently has (`G-65`).
+
+        Counted rather than listed, and reported on every capture, because
+        live aggregation is otherwise invisible: stage two runs on a
+        background thread after the reader pauses, and without a number
+        moving there is no way to tell it ran from outside the process.
+        """
+        rows = self._rows(
+            "MATCH (p:Page {url: $url})-[:HasChunk]->(c:Chunk) "
+            "WHERE c.group_of = c.cid AND c.group_n > 1 RETURN count(c)",
+            {"url": url})
+        return int(rows[0][0]) if rows else 0
+
     def chunk_count(self, url: str = "") -> int:
         """How many chunks, without reading any of them.
 

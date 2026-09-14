@@ -216,7 +216,7 @@ axes: **structure, content, organizedness, completeness**.
 | G-62 | **With no connection, the page is reconstructed fully rendered and scrollable from the scan trace alone** | Open — §O.5. The strongest form of the affine map: the trace IS the page |
 | G-63 | **Retrieval overlay above the Electron browser, coarse-to-fine**: merged chunks first, then within-shadow-DOM top-k | Open — §O.6. `G-42` said where it sits; this says what it does |
 | G-64 | **Cross-page ranking fits the 256 pure-text window** — the most relevant parts of different shadow DOMs, inside one budget | Open — §O.6 |
-| G-65 | **Aggregation runs on the DIFF STREAM, not only at the settle.** A chunk rewritten while the reader browses rejoins or leaves its merge group as it changes | Open — §O.4. Today `ingest(complete=True)` is the only trigger, so a live capture's groups are whatever the last settle decided |
+| G-65 | **Aggregation runs on the DIFF STREAM, not only at the settle.** A chunk rewritten while the reader browses rejoins or leaves its merge group as it changes | **Done** — §M.12. Queued per page on every capture, debounced 1.5s so it lands when the reader pauses, and run on the embedding worker so it is ordered after the vectors it needs. Verified live: a 128-chunk page the corpus had never seen went from 0 to **23 merge groups in 2 seconds**, with nothing asking |
 | G-66 | **The O(delta) budget is stated per phase and measured**: fold, dedup, vectorise, aggregate, re-vectorise, transform | Open — §O.4. "Millisecond range" is the goal's own word and it has never been broken down |
 | G-67 | **UMAP transforms go through an async batched queue** — a diff does not wait for a projection, and a projection does not run per chunk | Open — §O.4 |
 | G-68 | **Interactive fields in the billboarded shadow DOM act on the live Electron page** through the trie | Open — §O.5, and it is `G-46` at the surface a reader actually touches |
@@ -1839,6 +1839,66 @@ the two-clause form rather than being dropped.
 7.2× on the worst page in the corpus. What is left is 2.2s of store against
 0.86s of fold-and-render, so the store is still the majority and `reconcile`
 and `anchors` are the two to take next.
+
+### M.12 — live aggregation, and the machinery that was not built
+
+`G-65` wanted stage two on the diff stream. The obvious design was an
+incremental DBSCAN: `min_samples=2` makes it connected components of the
+eps-graph, so a union-find maintains them, a new chunk unions with whatever
+lies inside `eps`, and a changed chunk forces its component to be recomputed.
+That is a real algorithm and it was not built, because measuring first said it
+would have been machinery bought to speed up the wrong half.
+
+**What a page actually costs.**
+
+| chunks | read ms | cluster ms |
+|---|---|---|
+| 1,097 | 476.5 | 737.5 |
+| 863 | 374.4 | 102.9 |
+| 835 | 330.2 | 77.9 |
+| 801 | 406.1 | 71.6 |
+| 54 | 30.9 | 7.4 |
+
+The clustering was never the cost. The read was — and it was an N+1:
+`aggregate` fetched each chunk's vector with its own query,
+`store.embedding(cid)`, once per chunk. One query for the page instead:
+
+| | before | after |
+|---|---|---|
+| 835 chunks | 330.2 ms | **32.8 ms** |
+| 863 chunks | 374.4 ms | **37.2 ms** |
+
+So a whole page re-clusters in roughly 110ms, which is cheap enough to run on
+every pause with no incremental structure at all. The union-find is recorded
+here as designed-and-declined rather than built, because an optimisation aimed
+at 78ms while 330ms sat beside it would have been the wrong work done well.
+
+**How it runs.** Every capture that stores dirty chunks queues its page with a
+deadline 1.5s out; each further drain pushes the deadline back, so the work
+lands when the reader pauses rather than while they scroll. The queue is
+drained on the embedding worker, after a flush, because the two are ordered —
+a page clustered before its new chunks have vectors clusters the chunks it had
+a moment ago. Nothing on the request path waits for any of it.
+
+**Verified live**, on a 128-chunk page the corpus had never seen:
+
+| t | dirty | placed | groups |
+|---|---|---|---|
+| 0s | 124 | 0 | **0** |
+| 2s | 0 | 72 | **23** |
+| 4–12s | 0 | 0 | 23 |
+
+124 dirty chunks became 72 drawn nodes and 23 merge groups, unprompted, two
+seconds after the capture. The 52 difference is the group members, which
+`G-27` folds into their leads.
+
+**And a confusion worth keeping.** The first run of this check reported six
+chunks "awaiting a vector" forever, and the embedder looked broken. It was
+not: all six had vectors. `place_into` reports everything as `unplaced` when
+there is no FIT to place into, and the pane rendered that as "awaiting a
+vector" — two different states under one word, which sent me hunting a working
+component. The reply carries `why` for the fit case now and the pane says
+which of the two it is.
 
 ### N.4 — what this does not settle
 

@@ -67,6 +67,28 @@ _EMBED_WANTED = threading.Event()
 _EMBED_THREAD = None
 
 
+def _aggregate_due(workspace) -> None:
+    """Re-cluster the pages that have gone quiet (`G-65`).
+
+    Runs on the embedding worker, after a flush, because the two are ordered:
+    a page clustered before its new chunks have vectors would cluster the
+    chunks it had a moment ago. Off the request path either way -- a capture
+    returns without waiting for this, and the groups appear on the next one.
+    """
+    now = time.monotonic()
+    due = [url for url, when in list(_AGGREGATE_AFTER.items()) if when <= now]
+    for url in due:
+        _AGGREGATE_AFTER.pop(url, None)
+        try:
+            with _WORK_LOCK:
+                workspace.aggregate(url)
+        except Exception:                           # noqa: BLE001
+            # A page that failed to cluster is a page with the groups it had.
+            # It must not stop the worker, or nothing would ever be embedded
+            # again either -- they share this thread.
+            pass
+
+
 def _embed_forever(workspace, stop: threading.Event) -> None:
     """Embed what is queued, off the request path.
 
@@ -78,6 +100,9 @@ def _embed_forever(workspace, stop: threading.Event) -> None:
     """
     while not stop.is_set():
         if not _EMBED_WANTED.wait(timeout=0.5):
+            # Nothing to embed, but a page may still be due to re-cluster --
+            # the last drain of a visit queues one and then no more arrive.
+            _aggregate_due(workspace)
             continue
         _EMBED_WANTED.clear()
         while not stop.is_set():
@@ -102,6 +127,7 @@ def _embed_forever(workspace, stop: threading.Event) -> None:
                 break
             if not remaining:
                 break
+        _aggregate_due(workspace)
 
 
 #: How many chunks one background batch embeds before yielding the lock.
@@ -109,6 +135,29 @@ def _embed_forever(workspace, stop: threading.Event) -> None:
 #: Small enough that a request arriving mid-flush waits for a batch and not a
 #: page. 64 chunks is well under a second on this machine's GPU.
 _EMBED_BATCH = 64
+
+#: Pages whose chunks changed, and the earliest moment to re-cluster each.
+#:
+#: `G-65`: stage two ran only at the settle, so while a reader browsed, the
+#: merge groups on screen described a page that had moved on.
+_AGGREGATE_AFTER: Dict[str, float] = {}
+
+#: How long a page must be quiet before it is re-clustered.
+#:
+#: Every drain pushes the deadline out, so this runs when the reader pauses
+#: rather than while they scroll -- which is the behaviour wanted, because a
+#: page mid-scroll is not a page anyone has finished looking at. A full page
+#: aggregation is about 110ms now (33ms to read the vectors in one query,
+#: ~80ms to cluster), so the debounce exists to avoid pointless work rather
+#: than to hide an expensive one.
+#:
+#: NOT incremental, and deliberately not. An incremental DBSCAN -- union-find
+#: over the eps-graph with component splits on change -- was designed and then
+#: not built, because measuring first showed the clustering was never the
+#: cost: an 835-chunk page spent 330ms reading its vectors one query at a time
+#: and 78ms clustering them. Fixing the read made the whole thing cheap enough
+#: that the machinery would have been bought to speed up the wrong half.
+_AGGREGATE_DEBOUNCE = 1.5
 
 
 def chunk_payload(workspace, cid: str) -> Optional[Dict]:
@@ -691,6 +740,10 @@ class _Handler(BaseHTTPRequestHandler):
                 # There are chunks without vectors now. The worker embeds
                 # them; this request does not wait for it.
                 _EMBED_WANTED.set()
+                # And the page's merge groups are now out of date (`G-65`).
+                # Each drain pushes the deadline out, so this lands when the
+                # reader pauses rather than while they are still scrolling.
+                _AGGREGATE_AFTER[url] = time.monotonic() + _AGGREGATE_DEBOUNCE
             phases["store"] = round((time.perf_counter() - mark) * 1000, 1)
             # Named, not counted. The pane asks `place` about exactly these,
             # and a count would leave it re-fetching the whole layout to find
@@ -746,6 +799,13 @@ class _Handler(BaseHTTPRequestHandler):
                 # caller as failing to capture them.
                 reply["place_error"] = "%s: %s" % (type(exc).__name__, exc)
 
+        # What stage two currently makes of this page. It moves on its own,
+        # after the reader pauses, so a pane watching this number is watching
+        # live aggregation happen (`G-65`).
+        try:
+            reply["groups"] = self.workspace.store.group_count(url)
+        except Exception:                           # noqa: BLE001
+            pass
         phases["place"] = round((time.perf_counter() - place_mark) * 1000, 1)
         reply["ms"] = round((time.perf_counter() - started) * 1000, 1)
         self._send(200, reply)
