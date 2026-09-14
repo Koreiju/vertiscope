@@ -1072,6 +1072,41 @@ class Projection:
         return coords[:, :self.dims], colours
 
 
+def _edges_among(workspace, url: str, meta) -> List[Dict]:
+    """The containment edges between whatever an unfolding just produced.
+
+    Unfolded nodes arrived with no edges at all, so a page opened into a
+    scatter of unconnected dots and the patricia structure the trie holds --
+    which is the reason the trie exists -- was the one thing the picture did
+    not show.
+
+    A branch node stands for every chunk beneath it, so an edge is drawn
+    between two emitted nodes when any chunk under one contains a chunk under
+    the other. Self-edges are dropped: containment inside a single branch is
+    what that branch already IS, and drawing it would be the node pointing at
+    itself.
+    """
+    covers: Dict[str, str] = {}
+    for info in meta:
+        node_id = info["cid"]
+        for cid in info.get("covers") or [info["cid"]]:
+            covers[cid] = node_id
+    if not covers:
+        return []
+    seen = set()
+    out: List[Dict] = []
+    for a, b in workspace.store.contains_within(url):
+        source, target = covers.get(a), covers.get(b)
+        if not source or not target or source == target:
+            continue
+        key = (source, target)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({"source": source, "target": target})
+    return out
+
+
 def _segments(xpath: str):
     return [s for s in (xpath or "").split("/") if s]
 
@@ -1157,6 +1192,10 @@ def unfold(workspace, url: str, path: str = "") -> Dict:
             "level": "chunk" if single else "path",
             "path": "/" + "/".join(parts),
             "md": first.md if single else "",
+            #: Every chunk this node stands for, so `_edges_among` can map a
+            #: containment edge between two chunks onto the two nodes that
+            #: are actually drawn.
+            "covers": [c.cid for c in members],
         })
 
     for chunk in leaves:
@@ -1170,6 +1209,7 @@ def unfold(workspace, url: str, path: str = "") -> Dict:
             "chars": chunk.chars,
             "tokens": tokens.budget(chunk.md or ""),
             "level": "chunk", "path": chunk.xpath, "md": chunk.md,
+            "covers": [chunk.cid],
         })
 
     if not rows:
@@ -1188,6 +1228,7 @@ def unfold(workspace, url: str, path: str = "") -> Dict:
     for i, info in enumerate(meta):
         node = dict(info)
         node.pop("md", None)
+        node.pop("covers", None)
         node["rank"] = 0.0
         node["copies"] = 1
         node["pos"] = [float(v) for v in coords[i]]
@@ -1198,7 +1239,9 @@ def unfold(workspace, url: str, path: str = "") -> Dict:
             node["image"] = picture
         nodes.append(node)
 
-    return {"nodes": nodes, "url": url,
+    return {"nodes": nodes,
+            "edges": _edges_among(workspace, url, meta),
+            "url": url,
             "path": "/" + "/".join(_segments(path)) if prefix else "",
             "depth": depth, "branches": len(branches), "leaves": len(leaves)}
 
@@ -1294,7 +1337,17 @@ def place_into(workspace, cids) -> Dict:
             nodes.append(node)
 
     # A count, not the chunks. See `GraphStore.chunk_count`.
+    # The containment edges among what was just placed (`G-6`). Chunks
+    # arriving from a capture or a scoped ranking had none, so they drew as
+    # loose dots with the structure the trie holds left undrawn.
+    placed_edges: List[Dict] = []
+    drawn = {n["cid"] for n in nodes}
+    for page in {n["url"] for n in nodes}:
+        for a, b in workspace.store.contains_within(page):
+            if a in drawn and b in drawn and a != b:
+                placed_edges.append({"source": a, "target": b})
+
     total = workspace.store.chunk_count()
-    return {"nodes": nodes, "unplaced": missing,
+    return {"nodes": nodes, "edges": placed_edges, "unplaced": missing,
             "stale": projection.stale(total),
             "fitted_n": projection.fitted_n, "n": total}

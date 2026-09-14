@@ -241,6 +241,8 @@ export interface CaptureResult {
   /** Placed nodes, when the capture was asked to place them -- the same
    *  shape `/layout` returns. Present instead of a second round trip. */
   nodes?: unknown[];
+  /** Containment edges among them (`G-6`). */
+  edges?: { source: string; target: string }[];
   /** Captured but not yet embedded; normal for a chunk seconds old. */
   unplaced?: string[];
   /** The corpus has doubled since the fit; the pane should refit. */
@@ -275,6 +277,8 @@ export interface SearchResults extends SearchResult {
 /** One step of unravelling a page's patricia path (`G-54`). */
 export interface UnfoldResult {
   nodes?: unknown[];
+  /** Containment edges among the emitted nodes (`G-6`). */
+  edges?: { source: string; target: string }[];
   url?: string;
   /** The path that was unravelled TO, after descending past single children. */
   path?: string;
@@ -287,6 +291,9 @@ export interface UnfoldResult {
 export interface PlaceResult {
   /** Nodes in the same shape `/layout` returns, placed by `transform`. */
   nodes?: unknown[];
+  /** Containment edges among those nodes (`G-6`). Without them a page opens
+   *  as a scatter of unconnected dots. */
+  edges?: { source: string; target: string }[];
   /** Captured but not yet embedded -- the normal state for a chunk seconds
    *  old, since the embedding phase is asynchronous by design. */
   unplaced?: string[];

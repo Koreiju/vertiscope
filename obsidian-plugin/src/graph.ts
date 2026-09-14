@@ -534,6 +534,34 @@ export class GraphView extends ItemView {
   }
 
   /**
+   * Add edges the server supplied, resolving their endpoints ourselves.
+   *
+   * `forceLink` rewrites `source`/`target` from ids to node objects when it
+   * initialises, and it has already initialised by the time anything is
+   * added live -- so an edge handed in as a pair of strings after that is
+   * never resolved and never drawn. Looking the nodes up here is what makes
+   * a late edge behave like one that was there at boot.
+   */
+  private addEdges(data: any, edges?: { source: string; target: string }[]) {
+    if (!edges || !edges.length) return 0;
+    const byId = new Map<string, any>(data.nodes.map((n: any) => [n.id, n]));
+    const have = new Set(data.links.map(
+      (l: any) => `${l.source?.id ?? l.source} ${l.target?.id ?? l.target}`));
+    let added = 0;
+    for (const edge of edges) {
+      const source = byId.get(edge.source);
+      const target = byId.get(edge.target);
+      if (!source || !target || source === target) continue;
+      const key = `${edge.source} ${edge.target}`;
+      if (have.has(key)) continue;
+      have.add(key);
+      data.links.push({ source, target });
+      added++;
+    }
+    return added;
+  }
+
+  /**
    * Open a page to exactly what the reader has scrolled to (`G-55`, `G-56`).
    *
    * The two requirements are one mechanism. `G-56` says only the chunks
@@ -571,6 +599,7 @@ export class GraphView extends ItemView {
       if (!node || !node.cid || have.has(node.cid)) continue;
       fresh.nodes.push(this.nodeFrom(node));
     }
+    this.addEdges(fresh, placed?.edges as { source: string; target: string }[]);
     this.graph.graphData(fresh);
     this.graph.d3ReheatSimulation();
   }
@@ -601,6 +630,7 @@ export class GraphView extends ItemView {
       if (!incoming || !incoming.cid || known.has(incoming.cid)) continue;
       data.nodes.push(this.nodeFrom(incoming));
     }
+    this.addEdges(data, got?.edges);
     this.graph.graphData(data);
     this.graph.d3ReheatSimulation();
   }

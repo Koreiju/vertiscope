@@ -328,9 +328,68 @@ class GraphStore:
         # rest of this method only ever adds. Doing it first means a chunk's
         # stale anchors are gone before its new ones are merged, which is the
         # ordering the alignment depends on.
+        # How much of this write is actually NEW.
+        #
+        # A delta rewrites whole chunks, but a chunk that changed in one line
+        # keeps every other line's address and ordinal. If most anchors come
+        # out identical to what is already stored, then deleting and
+        # recreating them is work done to reach the state already held -- and
+        # that delete plus recreate is 1.9 seconds of a 3.1 second capture.
+        #
+        # Counted BEFORE `_reconcile`, which is the thing that deletes them.
+        # Placed after it the first time, where it faithfully reported zero
+        # unchanged anchors on every page, because they had just been removed.
+        stale_anchors = []
+        fresh_anchors = set()
+        if chunks:
+            before = {
+                (cid, aid, int(ordinal))
+                for cid, aid, ordinal in self._rows(
+                    "MATCH (c:Chunk)-[e:Anchors]->(a:Address) "
+                    "WHERE list_contains($cids, c.cid) "
+                    "RETURN c.cid, a.aid, e.ord",
+                    {"cids": [c.cid for c in chunks]})}
+            incoming = {
+                (chunk.cid, line.address.aid, ordinal)
+                for chunk in chunks
+                for ordinal, line in enumerate(chunk.lines)
+                if line.address is not None}
+            counts["anchors_unchanged"] = len(before & incoming)
+            counts["anchors_incoming"] = len(incoming)
+            # Only what actually moved. Re-indexing an unchanged page found
+            # 5,841 of 5,841 anchors identical to what was stored, so the
+            # delete-and-recreate was reaching a state already held.
+            stale_anchors = [{"cid": cid, "aid": aid}
+                             for cid, aid, _o in (before - incoming)]
+            fresh_anchors = incoming - before
+
+        # The same question for the addresses, which are the larger half of
+        # the cost: the MERGE and its seven SETs is ~1,300ms of a 1,477ms
+        # anchor phase. An address whose content hash has not moved is a row
+        # being written to the value it already has.
+        if addresses:
+            wanted = {a.aid: ch for a, _v, ch in addresses}
+            held = {aid: ch for aid, ch in self._rows(
+                "MATCH (a:Address) WHERE list_contains($aids, a.aid) "
+                "RETURN a.aid, a.content_hash",
+                {"aids": list(wanted)})}
+            counts["addresses_incoming"] = len(wanted)
+            counts["addresses_unchanged"] = sum(
+                1 for aid, ch in wanted.items()
+                if aid in held and held[aid] == ch)
+            # An address whose content hash has not moved is already written
+            # to the value it would be written to. 11,474 of 11,474 on a
+            # re-index of ar.wikipedia.
+            unchanged_addresses = {
+                aid for aid, ch in wanted.items()
+                if aid in held and held[aid] == ch}
+        else:
+            unchanged_addresses = set()
+
         _t = time.perf_counter()
         counts.update(self._reconcile(url, chunks, addresses,
-                                      complete=complete))
+                                      complete=complete,
+                                      stale_anchors=stale_anchors))
         counts["ms_reconcile"] = round((time.perf_counter() - _t) * 1000, 1)
         _t = time.perf_counter()
 
@@ -440,13 +499,27 @@ class GraphStore:
         # address is not in this write -- which a caller passing a narrowed
         # address list can produce -- falls through to the two-lookup form
         # rather than being dropped.
-        fused_rows, plain_rows = [], []
+        # Three questions per row, and each may be answered "nothing to do":
+        # does this address's VALUE need writing, and does its anchor need
+        # creating? An unchanged page answers no to both for every row, which
+        # is why it used to cost as much as a new one.
+        fused_rows, plain_rows, edge_rows = [], [], []
         for row in address_rows:
             hit = anchor_of.pop(row["aid"], None)
-            if hit is None:
-                plain_rows.append(row)
-            else:
+            needs_value = row["aid"] not in unchanged_addresses
+            needs_edge = hit is not None and (
+                (hit[0], row["aid"], hit[1]) in fresh_anchors)
+            if needs_value and needs_edge:
                 fused_rows.append(dict(row, cid=hit[0], ord=hit[1]))
+            elif needs_value:
+                plain_rows.append(row)
+            elif needs_edge:
+                # The address is current and only the edge is missing, so
+                # there is nothing to MERGE -- just the two lookups. Rare, and
+                # the expensive shape, which is why it is the last case rather
+                # than the general one.
+                edge_rows.append({"cid": hit[0], "aid": row["aid"],
+                                  "ord": hit[1]})
 
         if fused_rows:
             self._batch(
@@ -467,11 +540,20 @@ class GraphStore:
                 plain_rows,
             )
 
+        if edge_rows:
+            self._batch(
+                "UNWIND $rows AS r MATCH (c:Chunk {cid: r.cid}) "
+                "MATCH (a:Address {aid: r.aid}) "
+                "CREATE (c)-[:Anchors {ord: r.ord}]->(a)",
+                edge_rows,
+            )
+
         # Whatever is left in `anchor_of` is an anchor whose address this
         # write did not carry. Rare, and it still has to be created.
         anchor_rows = [
             {"cid": cid, "aid": aid, "ord": ordinal}
             for aid, (cid, ordinal) in anchor_of.items()
+            if (cid, aid, ordinal) in fresh_anchors
         ]
         if anchor_rows:
             # CREATE, not MERGE, and `_reconcile` is what makes that sound:
@@ -494,7 +576,8 @@ class GraphStore:
                 anchor_rows,
             )
             counts["anchors"] = len(anchor_rows)
-        counts["anchors"] = counts.get("anchors", 0) + len(fused_rows)
+        counts["anchors"] = (counts.get("anchors", 0)
+                             + len(fused_rows) + len(edge_rows))
         counts["ms_anchors"] = round((time.perf_counter() - _t) * 1000, 1)
         _t = time.perf_counter()
 
@@ -511,6 +594,7 @@ class GraphStore:
         chunks: Sequence[MarkdownChunk],
         addresses: Sequence[Tuple[ContentAddress, str, str]],
         complete: bool = True,
+        stale_anchors: Optional[Sequence[dict]] = None,
     ) -> Dict[str, int]:
         """Remove what this page used to have and no longer does.
 
@@ -558,11 +642,20 @@ class GraphStore:
         # postcondition of this method, which is what lets the write CREATE.
         # Chunks being DROPPED are handled below by `DETACH DELETE`, which
         # takes their edges with them.
-        if keep_chunks:
+        # Only the anchors that actually moved, which the caller worked out
+        # by diffing what is stored against what is arriving.
+        #
+        # This cleared every anchor on every chunk being written, so the write
+        # then had to recreate all of them. On an unchanged page that is 5,841
+        # deletes and 5,841 creates to arrive back where it started, and the
+        # two together were most of a capture. `stale_anchors` is usually
+        # empty; when it is not, it is small.
+        if stale_anchors:
             self._batch(
-                "UNWIND $rows AS r MATCH (:Chunk {cid: r.cid})-[e:Anchors]->() "
+                "UNWIND $rows AS r "
+                "MATCH (:Chunk {cid: r.cid})-[e:Anchors]->(:Address {aid: r.aid}) "
                 "DELETE e",
-                [{"cid": cid} for cid in keep_chunks],
+                list(stale_anchors),
             )
 
         gone = ([cid for cid in existing if cid not in keep_chunks]
@@ -834,6 +927,18 @@ class GraphStore:
             if any(values):
                 out[cid] = values
         return out
+
+    def contains_within(self, url: str):
+        """The containment edges among one page's chunks, as (cid, cid).
+
+        The patricia structure, restricted to a page (`G-6`). `edges()`
+        answers the same question for the whole corpus and routes hyperlinks
+        as well, which is what PageRank wants and not what a pane unfolding
+        one page wants.
+        """
+        return [(a, b) for a, b in self._rows(
+            "MATCH (a:Chunk {url: $url})-[:Contains]->(b:Chunk {url: $url}) "
+            "RETURN a.cid, b.cid", {"url": url}) if a and b]
 
     def page_vectors(self):
         """Everything the page-level fit needs, in ONE query.
