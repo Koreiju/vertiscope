@@ -1040,6 +1040,137 @@ class Projection:
         return coords[:, :self.dims], colours
 
 
+def _segments(xpath: str):
+    return [s for s in (xpath or "").split("/") if s]
+
+
+def unfold(workspace, url: str, path: str = "") -> Dict:
+    """One step of unravelling a page's patricia path (`G-54`).
+
+    Not an expansion of a subtree. The reader's word for this is
+    *unravelling*, and the distinction is the whole cost argument: a path is
+    O(depth) and a subtree is O(everything under it). A page with 1,173 chunks
+    expanded whole is the 12,820-node picture again, one page at a time.
+
+    So a step descends the shared path until it BRANCHES, and shows the
+    branches. That is patricia compression and it is already the shape of the
+    trie: a run of single-child wrappers is one edge, because a chain of divs
+    that nobody chose is not a decision anyone needs to click through.
+
+    A branch holding one chunk comes back as that chunk, with its own cid --
+    there is nothing left to unravel and making the reader click again to
+    reach it would be a level of the tree that exists only in this function.
+
+    Positions come from `Projection.place`, so what appears lands in the
+    picture already on screen rather than in a second, unrelated one.
+    """
+    projection = live_projection()
+    stored = [c for c in workspace.store.chunks(url) if not c.redundant]
+    stored = [c for c in stored
+              if not (c.group_of and c.group_of != c.cid)]
+    prefix = _segments(path)
+    under = [c for c in stored
+             if _segments(c.xpath)[:len(prefix)] == prefix]
+    if not under:
+        return {"nodes": [], "path": path, "url": url,
+                "why": "nothing under that path"}
+
+    # Descend while there is only one way to go. This is where the "chain of
+    # five wrappers costs one step" property comes from.
+    depth = len(prefix)
+    while True:
+        nexts = {tuple(_segments(c.xpath)[:depth + 1]) for c in under
+                 if len(_segments(c.xpath)) > depth}
+        if len(nexts) != 1:
+            break
+        depth += 1
+
+    branches: Dict[tuple, list] = {}
+    leaves = []
+    for chunk in under:
+        parts = _segments(chunk.xpath)
+        if len(parts) <= depth:
+            leaves.append(chunk)                    # the node itself, here
+        else:
+            branches.setdefault(tuple(parts[:depth + 1]), []).append(chunk)
+
+    vectors = workspace.store.embeddings_for(url)
+    rows, meta = [], []
+
+    def vector_of(chunk):
+        if chunk.group_n > 1:
+            got = workspace.store.group_embedding(chunk.cid)
+            if got:
+                return got
+        return vectors.get(chunk.cid)
+
+    for parts, members in sorted(branches.items()):
+        block = [vector_of(c) for c in members]
+        block = [v for v in block if v]
+        if not block:
+            continue
+        mean = np.asarray(block, dtype=np.float32).mean(axis=0)
+        norm = float(np.linalg.norm(mean))
+        rows.append(mean / norm if norm > 1e-9 else mean)
+        first = min(members, key=lambda c: (c.xpath, c.part))
+        single = len(members) == 1
+        meta.append({
+            "cid": (first.cid if single
+                    else "path:%s#/%s" % (url, "/".join(parts))),
+            "url": url,
+            "title": _title(first.md) or "/" + parts[-1],
+            "members": len(members),
+            "chars": first.chars if single else 0,
+            "tokens": (tokens.budget(first.md or "") if single else 0),
+            "level": "chunk" if single else "path",
+            "path": "/" + "/".join(parts),
+            "md": first.md if single else "",
+        })
+
+    for chunk in leaves:
+        got = vector_of(chunk)
+        if not got:
+            continue
+        rows.append(np.asarray(got, dtype=np.float32))
+        meta.append({
+            "cid": chunk.cid, "url": url,
+            "title": _title(chunk.md), "members": chunk.group_n,
+            "chars": chunk.chars,
+            "tokens": tokens.budget(chunk.md or ""),
+            "level": "chunk", "path": chunk.xpath, "md": chunk.md,
+        })
+
+    if not rows:
+        return {"nodes": [], "path": path, "url": url,
+                "why": "nothing under that path has a vector"}
+    if projection is None:
+        return {"nodes": [], "path": path, "url": url,
+                "why": "no fit to place into yet"}
+
+    coords, colours = projection.place(np.asarray(rows, dtype=np.float32))
+    if coords is None:
+        return {"nodes": [], "path": path, "url": url,
+                "why": "the fit could not transform these"}
+
+    nodes = []
+    for i, info in enumerate(meta):
+        node = dict(info)
+        node.pop("md", None)
+        node["rank"] = 0.0
+        node["copies"] = 1
+        node["pos"] = [float(v) for v in coords[i]]
+        if colours is not None:
+            node["hsv"] = [float(v) for v in colours[i]]
+        picture = _first_image(info.get("md") or "", url)
+        if picture is not None:
+            node["image"] = picture
+        nodes.append(node)
+
+    return {"nodes": nodes, "url": url,
+            "path": "/" + "/".join(_segments(path)) if prefix else "",
+            "depth": depth, "branches": len(branches), "leaves": len(leaves)}
+
+
 def place_into(workspace, cids) -> Dict:
     """Place chunks captured after the fit, into the fit (`G-34`).
 

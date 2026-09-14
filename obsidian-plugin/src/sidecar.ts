@@ -11,6 +11,7 @@
  */
 
 import { CaptureResult, ChunkPayload, ChunkPreview, EnactResult, Health,
+         UnfoldResult,
          PlaceResult,
          Interpreters,
          KernelReply, SearchResult, ShellReply } from "./types";
@@ -157,6 +158,29 @@ export class Sidecar {
    */
   sensor(): Promise<{ source: string } | null> {
     return this.get<{ source: string }>("/sensor");
+  }
+
+  /**
+   * One step of unravelling a page's patricia path (`G-54`).
+   *
+   * A step, not an expansion: the server descends the shared path until it
+   * branches and returns the branches, so a 1,173-chunk page opens as 31
+   * nodes rather than as 1,173.
+   */
+  async unfold(url: string, path = ""): Promise<UnfoldResult | null> {
+    const base = this.base().trim().replace(/\/+$/, "");
+    if (!base || !url) return null;
+    try {
+      const res = await fetch(`${base}/unfold`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url, path }),
+      });
+      if (!res.ok) return null;
+      return (await res.json()) as UnfoldResult;
+    } catch {
+      return null;
+    }
   }
 
   /**

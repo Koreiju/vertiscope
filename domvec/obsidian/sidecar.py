@@ -38,7 +38,8 @@ from urllib.parse import parse_qs, unquote, urlsplit
 from .. import tokens
 from .export import _reflow, link_targets
 from .htmlform import render_lines
-from .layout import build_layout, build_page_layout, place_into
+from .layout import (build_layout, build_page_layout, place_into,
+                     unfold as unfold_path)
 
 
 #: Capture sessions, keyed by url: the stateful decoder and the trie spine
@@ -381,6 +382,26 @@ class _Handler(BaseHTTPRequestHandler):
         # Where the chunks a live capture produced belong in the picture
         # already on screen (`G-34`). Read-only: it fits nothing and stores
         # nothing, it asks the existing fit where a point lands.
+        # One step of unravelling a page's path (`G-54`). Read-only: it
+        # fits nothing and stores nothing.
+        if route == "unfold":
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(length) or b"{}")
+            except Exception as exc:                # noqa: BLE001
+                self._send(400, {"error": "bad body: %s" % exc})
+                return
+            if self.workspace is None:
+                self._send(503, {"error": "no workspace"})
+                return
+            try:
+                self._send(200, unfold_path(self.workspace,
+                                            body.get("url") or "",
+                                            body.get("path") or ""))
+            except Exception as exc:                # noqa: BLE001
+                self._send(500, {"error": "%s: %s" % (type(exc).__name__, exc)})
+            return
+
         if route == "place":
             try:
                 length = int(self.headers.get("Content-Length") or 0)

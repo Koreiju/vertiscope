@@ -29,6 +29,11 @@ export const GRAPH_VIEW = "domvec-graph-view";
 
 export interface LayoutNode {
   cid: string;
+  /** What this node stands for: "page", "path" (a branch part-way down a
+   *  page's trie), or a chunk when absent. Decides what a click does. */
+  level?: string;
+  /** The xpath this node sits at, for the next unravelling step. */
+  path?: string;
   /** How many chunks this node stands for, when stage two merged it with
    *  others (`G-26`). 1 for an ordinary chunk. */
   members?: number;
@@ -511,6 +516,36 @@ export class GraphView extends ItemView {
   }
 
   /**
+   * Unravel one node, replacing it with what is under it (`G-54`).
+   *
+   * The clicked node is REMOVED, because it no longer stands for anything a
+   * reader cannot see -- leaving it would draw a page on top of its own
+   * contents and make the count in the bar a lie.
+   */
+  private async unfoldNode(node: any): Promise<void> {
+    if (!this.graph || !node || !node.url) return;
+    const got = await this.sidecar.unfold(node.url, node.path || "");
+    const nodes = (got && (got.nodes as LayoutNode[])) || [];
+    if (!nodes.length) return;
+
+    const data: any = this.graph.graphData();
+    data.nodes = data.nodes.filter((n: any) => n.id !== node.id);
+    // Links touching the node that is going away go with it. `forceLink`
+    // resolved its endpoints to objects at boot, so a link left pointing at a
+    // removed node keeps it alive and draws to nowhere.
+    data.links = data.links.filter(
+      (l: any) => (l.source?.id ?? l.source) !== node.id
+               && (l.target?.id ?? l.target) !== node.id);
+    const known = new Set(data.nodes.map((n: any) => n.id));
+    for (const incoming of nodes) {
+      if (!incoming || !incoming.cid || known.has(incoming.cid)) continue;
+      data.nodes.push(this.nodeFrom(incoming));
+    }
+    this.graph.graphData(data);
+    this.graph.d3ReheatSimulation();
+  }
+
+  /**
    * Take chunks captured after the fit into the picture already on screen.
    *
    * `G-34`: a reader browsing with the sensor running produces chunks
@@ -580,6 +615,8 @@ export class GraphView extends ItemView {
     return {
       id: n.cid,
       members: n.members ?? 1,
+      level: n.level ?? "chunk",
+      path: n.path ?? "",
       name: n.title || n.url,
       url: n.url,
       // The fitted position as a SEEDING, not a pin (`G-20`).
@@ -705,7 +742,16 @@ export class GraphView extends ItemView {
       .linkOpacity(0.25)
       .linkWidth(0.5)
       .backgroundColor("rgba(0,0,0,0)")
-      .onNodeClick((n: any) => this.onPick(n.id));
+      .onNodeClick((n: any) => {
+        // A page or a branch unravels; a chunk opens (`G-54`). One gesture,
+        // and which it means is a property of the node rather than of a mode
+        // the reader has to remember they are in.
+        if (n.level === "page" || n.level === "path") {
+          void this.unfoldNode(n);
+          return;
+        }
+        this.onPick(n.id);
+      });
 
     // A chunk that showed a picture looks like the thing it showed.
     //

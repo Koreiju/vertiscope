@@ -247,6 +247,17 @@ export interface CaptureResult {
   error?: string;
 }
 
+/** One step of unravelling a page's patricia path (`G-54`). */
+export interface UnfoldResult {
+  nodes?: unknown[];
+  url?: string;
+  /** The path that was unravelled TO, after descending past single children. */
+  path?: string;
+  branches?: number;
+  leaves?: number;
+  why?: string;
+}
+
 /** What `POST /place` says about chunks captured after the fit (`G-34`). */
 export interface PlaceResult {
   /** Nodes in the same shape `/layout` returns, placed by `transform`. */
