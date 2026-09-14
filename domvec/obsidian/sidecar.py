@@ -363,9 +363,15 @@ def search_payload(workspace, query: str, k: int = 8, *,
             "pagerank": float(getattr(hit, "rank", 0.0) or 0.0),
             "members": stored.group_n,
             "tokens": tokens.budget(stored.md or ""),
-            # The first lines only. The panel renders a preview and asks for
-            # the rest when a reader opens it.
-            "preview": "\n".join((stored.md or "").splitlines()[:6]),
+            # The first lines, LINK-FREE. The stored markdown is 52.5%
+            # machine addressing by token (M.7), and a preview of it
+            # reads as the same long path twice inside one `[](...)`,
+            # filling the row and pushing the words that would say what
+            # the result IS off the end. `for_model` is the string the
+            # encoder ranked on, so a preview of it previews what
+            # actually matched.
+            "preview": "\n".join(
+                tokens.for_model(stored.md or "").splitlines()[:6]),
         })
 
     out = out[offset:offset + k]

@@ -214,6 +214,16 @@ def build_page_layout(workspace,
     _LAST_PROJECTION = Projection.of(dims=dims, hsv=colours is not None,
                                      fitted_n=len(urls))
 
+    # One picture per page: the first that any of its chunks showed. Read
+    # from the chunks' markdown, which is where `_first_image` looks anyway.
+    pictures: Dict[str, Dict] = {}
+    for chunk in workspace.store.chunks():
+        if chunk.url in pictures or chunk.url not in by_page:
+            continue
+        found = _first_image(chunk.md or "", chunk.url)
+        if found is not None:
+            pictures[chunk.url] = found
+
     nodes = []
     for i, url in enumerate(urls):
         node = {
@@ -231,10 +241,25 @@ def build_page_layout(workspace,
             #: stands for and what unfolding will reveal.
             "members": meta[i]["chunks"],
             "level": "page",
+            #: The size the renderer draws it at, and it has to MEAN
+            #: something. Without this every page drew identically -- a
+            #: 1,173-chunk reference index the same dot as a 15-chunk stub --
+            #: and the map lost the one thing a collapsed view is for. Square
+            #: root rather than the count, because `3d-force-graph` sizes a
+            #: sphere as `cbrt(val)`, and a raw count would make the largest
+            #: page eighty times the radius of the smallest.
+            "val": float(max(1.0, meta[i]["chunks"] ** 0.5)),
             "pos": [float(v) for v in coords[i][:dims]],
         }
         if colours is not None:
             node["hsv"] = [float(v) for v in colours[i]]
+        picture = pictures.get(url)
+        if picture is not None:
+            #: A page that showed pictures looks like one of them. The
+            #: collapsed view lost every billboard when it stopped drawing
+            #: chunks, and a map of ninety-six identical spheres is a map
+            #: nobody can navigate by sight.
+            node["image"] = picture
         nodes.append(node)
 
     known = {u: "page:" + u for u in urls}
@@ -253,6 +278,13 @@ def build_page_layout(workspace,
         "hsv": colours is not None,
         "fitted_dims": int(min(got, want)),
         "chunks": sum(m["chunks"] for m in meta),
+        # The fields the pane's caption reads. Omitting them made it say
+        # "96 chunks · · fit unreported" over a picture of 96 PAGES fitted on
+        # the semantic space -- three wrong statements in one line, from a
+        # report that simply did not answer the questions being asked of it.
+        "fitted_on": {"semantic": True},
+        "spacing": _spacing(coords, dims),
+        "images": sum(1 for n in nodes if n.get("image")),
     }
 
 

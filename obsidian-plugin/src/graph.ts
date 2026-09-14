@@ -34,6 +34,9 @@ export interface LayoutNode {
   level?: string;
   /** The xpath this node sits at, for the next unravelling step. */
   path?: string;
+  /** The size the renderer should draw it at, when the layout has an
+   *  opinion -- a page's is its chunk count, not its character count. */
+  val?: number;
   /** How many chunks this node stands for, when stage two merged it with
    *  others (`G-26`). 1 for an ordinary chunk. */
   members?: number;
@@ -76,6 +79,10 @@ interface Layout {
    *  had no embeddings and the frequency FALLBACK drew this picture, which is
    *  not the projection the goal asks for — so the bar has to say so. */
   fitted_on?: { semantic: boolean };
+  /** "page" when the fit is the collapsed view (`G-53`). */
+  level?: string;
+  /** How many chunks stand behind the pages, at page level. */
+  chunks?: number;
   note?: string;
 }
 
@@ -381,13 +388,20 @@ export class GraphView extends ItemView {
         : "3D · colour by host";
       const pictures = layout.images
         ? ` · ${layout.images} with a picture` : "";
+      // What the nodes ARE, not "chunks" regardless. The collapsed view drew
+      // 96 pages over 14,169 chunks and the caption said "96 chunks", which
+      // is the one number on screen a reader would use to check the pane
+      // against the store -- and it disagreed with both.
+      const unit = layout.level === "page"
+        ? `${layout.n} pages · ${layout.chunks ?? "?"} chunks`
+        : `${layout.n} chunks`;
       status.setText(
-        `${layout.n} chunks · ${(layout.spaces ?? []).join(" + ")} · ${fit} · ` +
+        `${unit} · ${(layout.spaces ?? []).join(" + ")} · ${fit} · ` +
         `${colour}${pictures}`);
       } catch (err) {
         // Say the count, which is the one thing a reader needs to know the
         // pane is alive, and name the failure rather than swallowing it.
-        status.setText(`${layout.nodes.length} chunks · caption failed: ` +
+        status.setText(`${layout.nodes.length} nodes · caption failed: ` +
                        `${err instanceof Error ? err.message : String(err)}`);
       }
     };
@@ -691,7 +705,12 @@ export class GraphView extends ItemView {
       fitX: n.pos[0],
       fitY: n.pos[1],
       fitZ: n.pos[2] ?? 0,
-      val: Math.max(1, Math.sqrt(n.chars)),
+      // The payload's own `val` when it has one, because a page node's size
+      // is its CHUNK COUNT and it has no characters of its own. Deriving it
+      // from `chars` gave every one of 96 pages the same radius -- a
+      // 1,173-chunk reference index drawn as the same dot as a one-chunk
+      // stub -- and the `val` the layout computed was simply discarded here.
+      val: n.val ?? Math.max(1, Math.sqrt(n.chars)),
       rank: n.rank,
       tokens: n.tokens ?? 0,
       image: n.image,
@@ -925,7 +944,36 @@ export class GraphView extends ItemView {
     // collapsing a sidebar, splitting a pane, dragging the divider between two
     // leaves. A ResizeObserver fires on the box itself, including the first
     // time it gets one, which is exactly the event that was missing.
-    const observer = new ResizeObserver(() => fit());
+    // Where the camera was last PUT, as opposed to where it is. The
+    // difference is how the observer below tells "this pane has not been
+    // looked at yet" from "the reader has orbited somewhere".
+    let placed: { x: number; y: number; z: number } | null = null;
+    const place = () => {
+      try {
+        const z = frameDistance();
+        graph.cameraPosition({ x: 0, y: 0, z }, { x: 0, y: 0, z: 0 }, 0);
+        placed = { x: 0, y: 0, z };
+      } catch {
+        /* an empty scene has nothing to fit */
+      }
+    };
+    const untouched = () => {
+      if (!placed) return true;
+      const c: any = graph.cameraPosition();
+      return Math.abs((c?.x ?? 0) - placed.x) < 1
+          && Math.abs((c?.y ?? 0) - placed.y) < 1
+          && Math.abs((c?.z ?? 0) - placed.z) < 1;
+    };
+
+    const observer = new ResizeObserver(() => {
+      fit();
+      // Re-frame, but only while the reader has not moved the camera. The
+      // first placement runs on a timer against a canvas the pane may not
+      // have laid out, so the box that matters usually arrives AFTER it --
+      // and re-framing a view someone has orbited into would take their
+      // position away every time a sidebar moved.
+      if (untouched()) place();
+    });
     observer.observe(canvas);
     this.resizeObserver = observer;
 
@@ -965,35 +1013,59 @@ export class GraphView extends ItemView {
     // is taller than it is wide, which in a sidebar it usually is.
     const frameDistance = () => {
       const pts = graph.graphData().nodes as any[];
-      let r = 0;
+      // The bounding BOX, not the bounding sphere.
+      //
+      // This measured `hypot(x, y, z)` -- the radius of the sphere that
+      // contains everything -- and placed the camera to fit that sphere. It
+      // is correct and it wastes most of the frame: a cloud filling a cube of
+      // half-width 316 has a bounding sphere of radius 511, √3 larger, so the
+      // picture occupied about a third of the pane by area and read as a
+      // small clump in a large empty canvas.
+      //
+      // The box fits by axis instead. A point at (x, y, z) seen from (0, 0, d)
+      // is `d - z` along the view axis, so it is inside horizontally when
+      // `|x| <= (d - z)·tan(hfov/2)`. Taking the worst case on each axis
+      // gives the distance below, which cannot clip and does not over-frame.
+      let mx = 0;
+      let my = 0;
+      let mz = 0;
       for (const p of pts) {
-        const d = Math.hypot(p.x ?? 0, p.y ?? 0, p.z ?? 0);
-        if (d > r) r = d;
+        mx = Math.max(mx, Math.abs(p.x ?? 0));
+        my = Math.max(my, Math.abs(p.y ?? 0));
+        mz = Math.max(mz, Math.abs(p.z ?? 0));
       }
-      if (!(r > 0)) r = extent;
+      let r = Math.max(mx, my, mz);
+      if (!(r > 0)) { r = extent; mx = my = mz = extent; }
       const cam: any = graph.camera();
       const vfov = ((cam?.fov ?? 50) * Math.PI) / 180;
       const aspect = Math.max(0.01, canvas.clientWidth / Math.max(1, canvas.clientHeight));
       const hfov = 2 * Math.atan(Math.tan(vfov / 2) * aspect);
-      const half = Math.max(0.01, Math.min(vfov, hfov) / 2);
+      // A canvas with no size yet gives a degenerate aspect, and a
+      // degenerate aspect gives a tiny horizontal fov, and a tiny fov puts
+      // the camera absurdly far away. Measured: a cloud of radius 317 framed
+      // at 1,989 -- six times the right distance -- because the placement ran
+      // 250ms after construction, before the pane had laid the canvas out.
+      // Below a usable box the aspect is treated as square, which is wrong by
+      // a little rather than by a factor of six, and the observer below
+      // re-frames as soon as the real box arrives.
+      const usable = canvas.clientWidth > 2 && canvas.clientHeight > 2;
+      const half = usable
+        ? Math.max(0.01, Math.min(vfov, hfov) / 2)
+        : Math.max(0.01, vfov / 2);
       // 1.12 leaves a margin so the outermost nodes are not clipped by their
       // own radius, which this calculation deliberately does not know about.
-      return (r / Math.sin(half)) * 1.12;
+      const horizontal = mx / Math.tan(usable ? hfov / 2 : vfov / 2);
+      const vertical = my / Math.tan(vfov / 2);
+      return (Math.max(horizontal, vertical) + mz) * 1.12;
     };
 
-    window.setTimeout(() => {
-      try {
-        graph.cameraPosition({ x: 0, y: 0, z: frameDistance() },
-                             { x: 0, y: 0, z: 0 }, 0);
-      } catch {
-        /* an empty scene has nothing to fit; the status bar already says so */
-      }
-    }, 250);
+    window.setTimeout(place, 250);
 
     // The same thing, on demand. A reader who has orbited into the middle of
     // the cloud has no way back otherwise, and "the graph went blank" is not
     // a state anyone should have to recognise.
     this.reframe = () => {
+      placed = null;              // an explicit reframe is always wanted
       graph.cameraPosition({ x: 0, y: 0, z: frameDistance() },
                            { x: 0, y: 0, z: 0 }, 400);
     };
