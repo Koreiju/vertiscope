@@ -204,7 +204,7 @@ axes: **structure, content, organizedness, completeness**.
 | G-50 | **The scanning code is itself a visible chunk.** A reader can see the script that runs the browser scan, in the graph, while watching that scan happen in the browser panel | Open — §O.3. This is the point of `G-49`: the sensor stops being a thing that happens to the corpus and becomes part of it |
 | G-51 | **Dependencies are tracked throughout** — imports and package requirements are edges in the same graph as page links | Open — §O.3 |
 | G-52 | **Source is vectorised by its COMMENTS AND DOCSTRINGS ONLY, never the code itself** | Open — §O.3, and it is `G-23` again one domain over: an identifier is not a sentence, the way a url is not. The code stays in the render and in the trie; it is kept out of the quantized semantic embedding |
-| G-53 | **The projector draws PAGES by default, not chunks.** One node per shadow DOM; a page unfolds into its chunks on demand | Open — §O.4, §M.10. 12,820 chunk nodes hold **3.3 fps** because each node and each link is its own draw call: **20,309 per frame**. 94 pages is 94 |
+| G-53 | **The projector draws PAGES by default, not chunks.** One node per shadow DOM; a page unfolds into its chunks on demand | **Done** — `layout.build_page_layout`, `?level=page`. 96 pages over 14,169 chunks, **20,309 draw calls become 94**, and the fit takes 8.8s where the chunk-level one takes 95. A page's vector is the mean of its chunks', renormalised, and the fit is ON the pages — which is what lets a chunk be `transform`ed into the same picture when its page unfolds |
 | G-54 | **Dynamic unfolding over the patricia trie** — an UNRAVELLING along a chunk's own single path, root to leaf, not an expansion of a subtree | Open — §O.4. The distinction is the whole cost argument: a path is O(depth) and a subtree is O(everything under it). The trie already holds exactly that path, because the path IS the address |
 | G-55 | **Unfolding depth follows the reader.** How far a page unfolds is a function of how many results they have continuously scrolled through in the browser's retrieval overlay | Open — §O.4. Depth is a consequence of attention, not a control to set |
 | G-56 | **Only the chunks matching the most recent debounced retrieval query are drawn live**, inside their unfolded page | Open — §O.4 |
@@ -1679,18 +1679,50 @@ Measured in the pane on `build/corpus123`:
 | triangles | 1,404,712 |
 | geometries / textures | 2,306 / 1,102 |
 
+**The frame rate above is against the wrong ceiling, and the null arm is what
+showed it.** An Obsidian with NOTHING open answers `requestAnimationFrame` at
+**9.3 fps** in this session — the window is driven over CDP and nobody is
+looking at it, and Chromium throttles rAF for a window that is not focused. So
+3.3 was never "3.3 out of 60". Read against what the app can actually do:
+
+| | fps | share of the ceiling |
+|---|---|---|
+| ceiling, nothing open | 9.3 | — |
+| 12,820 chunk nodes | 3.3 | **35%** |
+| 96 page nodes | 8.7 | **94%** |
+
+The chunk view really was costing two thirds of the app's available frames,
+and the collapsed view really does give them back. But no absolute frame rate
+in this document was measured with a focused window, and none should be quoted
+as one. This is the "measure the page before blaming the sensor" rule reaching
+a rendering measurement: a score against a throttled compositor is the
+throttle plus the scene, and they only separate if the empty app is measured
+first.
+
 **It is not the triangles.** 1.4 million is unremarkable for any GPU made this
 decade, and the frame rate does not move between sitting still and rotating,
 which is what a fill-rate or vertex-bound scene would do. It is the draw
 calls: `3d-force-graph` gives every node its own `THREE.Mesh` and every link
 its own, so the count is `nodes + links + sprites` and each one is a separate
-instruction to the driver. Twenty thousand of those cannot fit in 16ms.
+instruction to the driver.
+
+**Measured after the collapse: 20,309 draw calls become 94.** That is the
+durable number here, because it does not depend on who is looking at the
+window.
 
 Two ways out, and they are not alternatives.
 
 The rendering answer is instancing — one `InstancedMesh` for all the spheres,
 one merged geometry for all the links — which is a change inside `graph.ts`
 and would take the count from 20,309 to single digits.
+
+**And the page graph is nearly edgeless, which is worth saying.** The corpus
+has **2** `LinksTo` edges across 98 pages: `_link_hyperlinks` only records a
+link whose target was also scanned, and this corpus is a broad sample of
+different hosts rather than a crawl. The 7,889 links the chunk view drew were
+`Contains` edges — structure inside one page — which collapse to self-loops at
+page level and are dropped. A page-level map of a crawled corpus would have
+edges; this one has almost none, and that is a property of the corpus.
 
 The design answer is `G-53`: **draw pages, not chunks**. 94 shadow DOMs
 instead of 12,820 chunks, unfolding on click and on retrieval. That is the

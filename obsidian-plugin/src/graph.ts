@@ -266,6 +266,9 @@ export class GraphView extends ItemView {
    *  "S3" for the quaternion metric (`G-18`). Empty by default, on the
    *  measurement recorded in `layout.py`. */
   private space = "";
+  /** Which unit the fit draws: "" for the server's default, which is pages
+   *  (`G-53`), or "chunk" for every chunk. */
+  private level = "";
   /** Watches the canvas's box so the controls are recalibrated whenever
    *  it actually changes. Disconnected in `onClose`: an observer left on a
    *  detached canvas keeps the view, its WebGL context and its 5,337 node
@@ -300,6 +303,15 @@ export class GraphView extends ItemView {
     // keeps about half as many of the encoder's neighbourhoods on the corpus
     // measured so far, and the only way that number moves is if someone can
     // look at both pictures of the same data.
+    // Pages or chunks (`G-53`). A switch, because the collapsed view is the
+    // one a reader can hold and the expanded one is where the detail is, and
+    // neither is a setting you choose once.
+    const unit = bar.createEl("button", { text: "pages" });
+    unit.onclick = () => {
+      this.level = this.level === "chunk" ? "" : "chunk";
+      unit.setText(this.level === "chunk" ? "chunks" : "pages");
+      void load();
+    };
     const geometry = bar.createEl("button", { text: "euclidean" });
     geometry.onclick = () => {
       this.space = this.space ? "" : "S3";
@@ -312,7 +324,9 @@ export class GraphView extends ItemView {
     const load = async () => {
       status.setText("fitting…");
       const asked = this.space;
-      const layout = (await this.sidecar.layout(3, asked)) as Layout | null;
+      const asking = this.level;
+      const layout = (await this.sidecar.layout(3, asked, asking)) as
+        Layout | null;
       if (!layout) {
         status.setText("no sidecar — start it to see the graph");
         return;

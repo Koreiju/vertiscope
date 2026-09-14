@@ -131,6 +131,131 @@ def _reduce(dense: np.ndarray, target: int, seed: int) -> np.ndarray:
     return out
 
 
+def build_page_layout(workspace,
+                      *,
+                      dims: int = 3,
+                      hsv: bool = True,
+                      seed: int = 0,
+                      neighbors: int = 15,
+                      min_dist: float = 0.25,
+                      spread_axes: bool = True) -> Dict:
+    """One node per PAGE, not per chunk (`G-53`).
+
+    **The reason is the frame rate, and it is not a small one.** Measured on
+    `build/corpus123`: 12,820 chunk nodes hold 3.3 fps, and it is not the 1.4
+    million triangles -- the rate does not move between sitting still and
+    rotating, which a fill-bound scene would. It is 20,309 draw calls, one per
+    node and one per link, because `3d-force-graph` gives each its own mesh.
+    94 pages is 94.
+
+    And it is not only cheaper, it is legible: a map of 12,820 chunks is not a
+    map of anything a reader can hold.
+
+    **A page's vector is the mean of its chunks', renormalised.** The coarse
+    layer of `G-63`'s coarse-to-fine: what a page MEANS is the centre of what
+    its chunks mean. A merge group contributes its group vector, because that
+    is what the group says and the members are inside it.
+
+    **Fitted on the pages themselves**, which is what makes unfolding
+    coherent: `Projection.place` then transforms a chunk's own vector into
+    this same fit, so a page's chunks land around where the page node was
+    rather than in a second, unrelated picture.
+
+    It is also seconds faster. A chunk-level fit over 12,820 points takes
+    about 95s; 94 points takes under one.
+    """
+    _LAST_FIT.clear()
+    titles = workspace.store.page_titles()
+    # One query for the whole corpus. See `page_vectors` for what assembling
+    # this piecemeal cost.
+    by_page, chunk_counts = workspace.store.page_vectors()
+
+    urls, features, meta = [], [], []
+    for url in sorted(by_page):
+        rows = by_page[url]
+        if not rows:
+            continue
+        block = np.asarray(rows, dtype=np.float32)
+        mean = block.mean(axis=0)
+        norm = float(np.linalg.norm(mean))
+        # Renormalised: the members are unit vectors and their mean is not,
+        # and a shorter vector reads as a weaker one wherever a cosine is
+        # taken -- the same correction `_vectorise_groups` makes one level
+        # down.
+        features.append(mean / norm if norm > 1e-9 else mean)
+        urls.append(url)
+        meta.append({"chunks": chunk_counts.get(url, len(rows)),
+                     "drawn": len(rows)})
+
+    if len(urls) < 3:
+        return {"nodes": [], "edges": [], "spaces": [], "n": len(urls),
+                "level": "page", "note": "too few pages to place"}
+
+    want = dims + (3 if hsv else 0)
+    features = _unit_rows(np.asarray(features, dtype=np.float32))
+    width = int(min(features.shape[1], max(2, features.shape[0] - 1),
+                    _LONE_TARGET))
+    reduced = _unit_rows(_reduce(features, width, seed))
+    coords = _umap(reduced, dims=want, seed=seed,
+                   neighbors=min(neighbors, max(2, len(urls) - 1)),
+                   min_dist=min_dist)
+
+    got = int(coords.shape[1])
+    colours = _hsv(coords[:, dims:dims + 3]) if (hsv and got >= want) else None
+    if spread_axes:
+        coords = _spread(coords, dims)
+    coords = _framed(coords, dims)
+    if got < dims:
+        coords = np.hstack([coords,
+                            np.zeros((coords.shape[0], dims - got),
+                                     dtype=np.float32)])
+
+    global _LAST_PROJECTION
+    _LAST_PROJECTION = Projection.of(dims=dims, hsv=colours is not None,
+                                     fitted_n=len(urls))
+
+    nodes = []
+    for i, url in enumerate(urls):
+        node = {
+            #: The url IS the id at this level. A page has no cid, and
+            #: inventing one would make the pane's "which node is this"
+            #: answer differ by level.
+            "cid": "page:" + url,
+            "url": url,
+            "title": titles.get(url) or url,
+            "rank": 0.0,
+            "chars": 0,
+            "tokens": 0,
+            "copies": 1,
+            #: How many chunks this page holds, which is what the node
+            #: stands for and what unfolding will reveal.
+            "members": meta[i]["chunks"],
+            "level": "page",
+            "pos": [float(v) for v in coords[i][:dims]],
+        }
+        if colours is not None:
+            node["hsv"] = [float(v) for v in colours[i]]
+        nodes.append(node)
+
+    known = {u: "page:" + u for u in urls}
+    edges = []
+    for source, target in workspace.store.page_links():
+        if source in known and target in known and source != target:
+            edges.append({"source": known[source], "target": known[target]})
+
+    return {
+        "nodes": nodes,
+        "edges": edges,
+        "spaces": ["semantic"],
+        "n": len(nodes),
+        "level": "page",
+        "dims": dims,
+        "hsv": colours is not None,
+        "fitted_dims": int(min(got, want)),
+        "chunks": sum(m["chunks"] for m in meta),
+    }
+
+
 def build_layout(workspace,
                  *,
                  dims: int = 3,

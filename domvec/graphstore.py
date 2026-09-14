@@ -835,6 +835,54 @@ class GraphStore:
                 out[cid] = values
         return out
 
+    def page_vectors(self):
+        """Everything the page-level fit needs, in ONE query.
+
+        Assembling it from `chunks()` plus `embeddings_for()` per page plus
+        `group_embedding()` per lead took 15.5 seconds over 98 pages -- most
+        of it loading 14,000 chunks' MARKDOWN, which the fit never looks at,
+        and a lookup per merge-group lead on top. This asks for the columns
+        that matter and nothing else.
+
+        Returns ``(by_page, counts)``: url -> the vectors that speak for that
+        page, and url -> how many chunks it holds. A merge group contributes
+        its group vector once and its members contribute nothing, because the
+        members are inside what the group says (`G-27`).
+        """
+        by_page: Dict[str, List[List[float]]] = {}
+        counts: Dict[str, int] = {}
+        rows = self._rows(
+            "MATCH (p:Page)-[:HasChunk]->(c:Chunk) "
+            "RETURN c.url, c.cid, c.dup_of, c.group_of, c.group_n, "
+            "c.embedding, c.group_embedding")
+        for url, cid, dup, group_of, group_n, emb, gemb in rows:
+            if not url:
+                continue
+            counts[url] = counts.get(url, 0) + 1
+            if dup:
+                continue                    # `G-24` resolved it already
+            if group_of and group_of != cid:
+                continue                    # a member speaks through its lead
+            vector = None
+            if group_n and int(group_n) > 1 and gemb is not None:
+                values = list(gemb)
+                if any(values):
+                    vector = values
+            if vector is None and emb is not None:
+                values = list(emb)
+                if any(values):
+                    vector = values
+            if vector is not None:
+                by_page.setdefault(url, []).append(vector)
+        return by_page, counts
+
+    def page_titles(self) -> Dict[str, str]:
+        """Every page's title, in one query."""
+        out = {}
+        for url, title in self._rows("MATCH (p:Page) RETURN p.url, p.title"):
+            out[url] = title or ""
+        return out
+
     def group_count(self, url: str) -> int:
         """How many merge groups this page currently has (`G-65`).
 
@@ -976,6 +1024,18 @@ class GraphStore:
         rows = self._rows(query + "RETURN a.akey, a.value ORDER BY a.akey",
                           params)
         return [(ContentAddress.parse(key), value) for key, value in rows]
+
+    def page_links(self) -> List[Tuple[str, str]]:
+        """Page-to-page links, as (source url, target url).
+
+        The edge set the collapsed view draws (`G-53`). `edges()` routes a
+        hyperlink to the target page's FIRST chunk so that one link is one
+        edge for PageRank; at page level there is nothing to route, because
+        the page is the node.
+        """
+        return [(a, b) for a, b in self._rows(
+            "MATCH (c:Chunk)-[:LinksTo]->(p:Page) RETURN c.url, p.url")
+            if a and b]
 
     def edges(self) -> List[Tuple[str, str]]:
         """Chunk-to-chunk edges for PageRank, as (source cid, target cid).

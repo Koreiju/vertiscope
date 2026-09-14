@@ -38,7 +38,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 from .. import tokens
 from .export import _reflow, link_targets
 from .htmlform import render_lines
-from .layout import build_layout, place_into
+from .layout import build_layout, build_page_layout, place_into
 
 
 #: Capture sessions, keyed by url: the stateful decoder and the trie spine
@@ -880,14 +880,24 @@ class _Handler(BaseHTTPRequestHandler):
             # restarting the server, and the reply says which it got.
             spherical = (query.get("space") or [""])[0].lower() in (
                 "s3", "spherical", "quaternion")
+            # PAGES by default (`G-53`). 12,820 chunk nodes hold 3.3 fps
+            # because each node and each link is its own draw call; 96 pages
+            # is 96. `?level=chunk` still asks for every chunk, because the
+            # two are a thing to compare and a small workspace has no reason
+            # to collapse.
+            level = (query.get("level") or ["page"])[0].lower()
+            level = "chunk" if level == "chunk" else "page"
             # A count, not every chunk: this runs on each `/layout`
             # request purely to decide whether the cache is stale.
             fresh = (self.workspace.store.chunk_count(), want,
-                     spherical)
+                     spherical, level)
             if getattr(type(self), "_layout_key", None) != fresh:
                 type(self)._layout_key = fresh
-                type(self)._layout = build_layout(
-                    self.workspace, dims=want, spherical_space=spherical)
+                type(self)._layout = (
+                    build_page_layout(self.workspace, dims=want)
+                    if level == "page"
+                    else build_layout(self.workspace, dims=want,
+                                      spherical_space=spherical))
             self._send(200, type(self)._layout)
             return
 
