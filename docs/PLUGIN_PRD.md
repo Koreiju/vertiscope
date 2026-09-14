@@ -206,8 +206,8 @@ axes: **structure, content, organizedness, completeness**.
 | G-52 | **Source is vectorised by its COMMENTS AND DOCSTRINGS ONLY, never the code itself** | Open — §O.3, and it is `G-23` again one domain over: an identifier is not a sentence, the way a url is not. The code stays in the render and in the trie; it is kept out of the quantized semantic embedding |
 | G-53 | **The projector draws PAGES by default, not chunks.** One node per shadow DOM; a page unfolds into its chunks on demand | **Done** — `layout.build_page_layout`, `?level=page`. 96 pages over 14,169 chunks, **20,309 draw calls become 94**, and the fit takes 8.8s where the chunk-level one takes 95. A page's vector is the mean of its chunks', renormalised, and the fit is ON the pages — which is what lets a chunk be `transform`ed into the same picture when its page unfolds |
 | G-54 | **Dynamic unfolding over the patricia trie** — an UNRAVELLING along a chunk's own single path, root to leaf, not an expansion of a subtree | **Done** — `layout.unfold`, `POST /unfold`, click in the pane. A step descends the shared path until it BRANCHES and shows the branches, which is patricia compression and is why a chain of wrappers nobody chose costs one step rather than five. Measured on the 1,173-chunk RFC 9110: the page opens as **31 nodes**, a 47-chunk branch as 7, and the next step is fully unravelled. In the pane: 96 nodes → 126 → 134, with the clicked node removed each time |
-| G-55 | **Unfolding depth follows the reader.** How far a page unfolds is a function of how many results they have continuously scrolled through in the browser's retrieval overlay | Open — §O.4. Depth is a consequence of attention, not a control to set |
-| G-56 | **Only the chunks matching the most recent debounced retrieval query are drawn live**, inside their unfolded page | Open — §O.4 |
+| G-55 | **Unfolding depth follows the reader.** How far a page unfolds is a function of how many results they have continuously scrolled through in the browser's retrieval overlay | **Done** — §M.14. The overlay's hit list IS the depth: it grows as they scroll and the projector opens the page to exactly it. Measured: 10 chunks drawn, then 30 after three scrolls, 96 nodes to 125 |
+| G-56 | **Only the chunks matching the most recent debounced retrieval query are drawn live**, inside their unfolded page | **Done** — §M.14. Clicking MDN's Headers index drew its **10 matching chunks**, not its hundreds, and the page node was removed |
 | G-57 | **Clicking a node opens its shadow-DOM panel as a BILLBOARD inside the 3D view** — draggable, in the projector, not a separate Obsidian pane | Open — §O.5. The panel already exists and is already generated to the store; what changes is where it opens |
 | G-58 | **In tandem, the Electron browser navigates and scrolls that chunk into view**, and the browser is the primary panel representation | Open — §O.5, and it is `G-40` reaching its conclusion: one representation, not three |
 | G-59 | **The Obsidian-native chunk panels become the OFFLINE FALLBACK format** — the shape the structures take when there is no live page to point at | Open — §O.5 |
@@ -221,7 +221,7 @@ axes: **structure, content, organizedness, completeness**.
 | G-67 | **UMAP transforms go through an async batched queue** — a diff does not wait for a projection, and a projection does not run per chunk | Open — §O.4 |
 | G-68 | **Interactive fields in the billboarded shadow DOM act on the live Electron page** through the trie | Open — §O.5, and it is `G-46` at the surface a reader actually touches |
 | G-69 | **Retrieval is continuous scrolling over a ranked list, not top-k.** Top-k is what a click expansion uses; the overlay itself keeps going | **Done** — `?offset=`, and the list asks for more as it nears its own bottom. Measured: 12 results on typing, 48 after three scrolls |
-| G-70 | **Clicking a shadow-DOM node SCOPES the query to that url**, however the global ranking placed it. Right-clicking restores global scope | **Partly** — `?url=` works and the overlay has the switch; the projector click that sets it is not wired yet. §M.13 records the defect this exposed: a scope applied as a FILTER over a global top-k returns nothing |
+| G-70 | **Clicking a shadow-DOM node SCOPES the query to that url**, however the global ranking placed it. Right-clicking restores global scope | **Done** — the projector click sets the overlay's scope through the plugin, and a right-click on any node releases it. Brokered rather than held by either pane, because neither may require the other to be open |
 | G-71 | **Scoped results unfold by the same mechanics as the overlay's** — one behaviour, two places | Open — §O.6 |
 
 ### P. The panels
@@ -1978,6 +1978,46 @@ beside the existing one and the compiler said nothing, because interfaces of
 the same name MERGE. The merge silently made every new field mandatory on the
 `/` gesture's payload too. One interface now, with the overlay's extra fields
 optional.
+
+### M.14 — the map opens where the reading went
+
+`G-55` and `G-56` read as two requirements and are one mechanism. The
+overlay's hit list is simultaneously *the set of chunks matching the query*
+and *how far the reader has got*, because it grows as they scroll. So the
+projector opening a page to exactly that list satisfies both, and neither
+needs a depth counter of its own.
+
+Driven in the app, on MDN's Headers index:
+
+| step | nodes | results | scope |
+|---|---|---|---|
+| start | 96 | — | everywhere |
+| query typed | 96 | 12 | everywhere |
+| **page clicked** | **105** | 10 | **this page** |
+| **scrolled ×3** | **125** | 30 | this page |
+| right-click | 125 | 24 | everywhere |
+
+Clicking the page drew its **10 matching chunks** rather than its hundreds,
+and removed the page node. Three scrolls took the ranking to 30 and the map
+to 125 nodes — in step, because they are the same list.
+
+**Reported only when the ranking is SCOPED.** A corpus-wide query touches
+most pages, and opening every one of them is the 12,820-node picture again,
+arrived at from the other direction. Scoping is what makes "open to the
+results" a bounded instruction.
+
+**A confusion that cost a run, and is the same shape as the last one.** The
+first attempt returned zero results at every step, and the overlay looked
+broken. It was not: `rankScope` was left pointing at `about:blank` from an
+earlier probe, so every query was scoped to a page with no chunks in it. The
+reply was correct at every layer — a scoped ranking over an empty page IS
+empty — and nothing said which of "no matches" and "no such page" had
+happened. The same word covering two states, twice in two features.
+
+**Releasing the scope does not re-collapse the page**, and that is left as it
+is deliberately rather than overlooked: the reader opened those nodes, and a
+map that shuts itself when a filter is released takes work back that someone
+did. Whether that is right is a judgment for use to settle.
 
 ### N.4 — what this does not settle
 

@@ -280,6 +280,10 @@ export class GraphView extends ItemView {
    *  objects alive for as long as the app runs. */
   private resizeObserver: ResizeObserver | null = null;
   private onPick: (cid: string) => void;
+  /** Ask the browser's overlay to restrict its ranking to one page, or to
+   *  release it (`G-70`). Set by the plugin, because a graph pane must work
+   *  with no browser open. */
+  onScope: (url: string) => void = () => {};
 
   constructor(leaf: WorkspaceLeaf, private sidecar: Sidecar,
               onPick: (cid: string) => void,
@@ -516,6 +520,48 @@ export class GraphView extends ItemView {
   }
 
   /**
+   * Open a page to exactly what the reader has scrolled to (`G-55`, `G-56`).
+   *
+   * The two requirements are one mechanism. `G-56` says only the chunks
+   * matching the latest debounced query are drawn live inside their unfolded
+   * page; `G-55` says how far a page unfolds follows how many results the
+   * reader has scrolled through. The overlay's hit list is both of those
+   * things at once -- it IS the matching set, and it grows as they scroll --
+   * so the map opens where attention actually went rather than where someone
+   * clicked once.
+   *
+   * Structural unravelling (`G-54`) is what a click does with no query
+   * running. This is what it does with one.
+   */
+  async showHits(url: string, cids: string[]): Promise<void> {
+    if (!this.graph || !url) return;
+    const data: any = this.graph.graphData();
+    const known = new Set(data.nodes.map((n: any) => n.id));
+    const wanted = cids.filter((cid) => cid && !known.has(cid));
+    if (!wanted.length) return;
+
+    const placed = await this.sidecar.place(wanted);
+    const nodes = (placed && (placed.nodes as LayoutNode[])) || [];
+    if (!nodes.length) return;
+
+    const fresh: any = this.graph.graphData();
+    // The page node goes, because its contents are now on screen -- the same
+    // rule `unfoldNode` follows, for the same reason.
+    const pageId = "page:" + url;
+    fresh.nodes = fresh.nodes.filter((n: any) => n.id !== pageId);
+    fresh.links = fresh.links.filter(
+      (l: any) => (l.source?.id ?? l.source) !== pageId
+               && (l.target?.id ?? l.target) !== pageId);
+    const have = new Set(fresh.nodes.map((n: any) => n.id));
+    for (const node of nodes) {
+      if (!node || !node.cid || have.has(node.cid)) continue;
+      fresh.nodes.push(this.nodeFrom(node));
+    }
+    this.graph.graphData(fresh);
+    this.graph.d3ReheatSimulation();
+  }
+
+  /**
    * Unravel one node, replacing it with what is under it (`G-54`).
    *
    * The clicked node is REMOVED, because it no longer stands for anything a
@@ -747,11 +793,18 @@ export class GraphView extends ItemView {
         // and which it means is a property of the node rather than of a mode
         // the reader has to remember they are in.
         if (n.level === "page" || n.level === "path") {
+          // And it scopes the ranking to that shadow DOM (`G-70`). Clicking
+          // a page is a statement about where the reader is looking, and the
+          // overlay is the other half of that statement.
+          if (n.level === "page" && n.url) this.onScope(n.url);
           void this.unfoldNode(n);
           return;
         }
         this.onPick(n.id);
-      });
+      })
+      // Right-click releases the scope (`G-70`): back to the corpus, from
+      // wherever the reader had narrowed to.
+      .onNodeRightClick(() => this.onScope(""));
 
     // A chunk that showed a picture looks like the thing it showed.
     //

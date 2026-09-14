@@ -142,9 +142,23 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
 
     this.registerView(
       GRAPH_VIEW,
-      (leaf: WorkspaceLeaf) =>
-        new GraphView(leaf, this.sidecar, (cid) => this.openChunk(cid),
-                      () => this.settings.loadRemoteMedia),
+      (leaf: WorkspaceLeaf) => {
+        const view = new GraphView(
+          leaf, this.sidecar, (cid) => this.openChunk(cid),
+          () => this.settings.loadRemoteMedia);
+        // Clicking a page in the projector narrows the browser's ranking to
+        // it, and right-clicking releases that (`G-70`). Brokered here for
+        // the same reason capture is: neither pane may require the other.
+        view.onScope = (url: string) => {
+          for (const l of this.app.workspace.getLeavesOfType(BROWSER_VIEW)) {
+            const browser = l.view as BrowserView;
+            if (browser && typeof browser.setScope === "function") {
+              browser.setScope(url);
+            }
+          }
+        };
+        return view;
+      },
     );
     this.registerView(
       CHUNK_VIEW,
@@ -172,13 +186,10 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
         // Live capture reaches the projector through the plugin rather than
         // by one view holding the other: a graph pane that is closed, or has
         // not been opened yet, must not stop the browser cell from scanning.
-        (nodes) => {
-          const leaves = this.app.workspace.getLeavesOfType(GRAPH_VIEW);
-          for (const l of leaves) {
-            const view = l.view as GraphView;
-            if (view && typeof view.absorb === "function") view.absorb(nodes);
-          }
-        }),
+        (nodes) => this.eachGraph((view) => view.absorb(nodes)),
+        // And so does the ranking (`G-55`, `G-56`): what the reader has
+        // scrolled to is what the projector opens the page to.
+        (url, cids) => this.eachGraph((view) => void view.showHits(url, cids))),
     );
     this.addCommand({
       id: "domvec-open-browser",
@@ -366,6 +377,14 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
    * other), and each is its own session. Reusing a leaf would make the second
    * request silently steal the first's pane.
    */
+
+  /** Do something to every open projector, if any is open at all. */
+  private eachGraph(fn: (view: GraphView) => void): void {
+    for (const leaf of this.app.workspace.getLeavesOfType(GRAPH_VIEW)) {
+      const view = leaf.view as GraphView;
+      if (view) fn(view);
+    }
+  }
 
   /** Put a browser cell in a pane, reusing one if it is already open. */
   async openBrowser(): Promise<void> {

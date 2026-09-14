@@ -123,7 +123,11 @@ export class BrowserView extends ItemView {
   private debounce = 0;
 
   constructor(leaf: WorkspaceLeaf, private sidecar: Sidecar,
-              private onChunks: (nodes: LayoutNode[]) => void = () => {}) {
+              private onChunks: (nodes: LayoutNode[]) => void = () => {},
+              //: What the reader has scrolled to, for the projector to
+              //: open the page to (`G-55`, `G-56`).
+              private onHits: (url: string, cids: string[]) => void =
+                () => {}) {
     super(leaf);
   }
 
@@ -309,6 +313,13 @@ export class BrowserView extends ItemView {
       this.more = !!got.more;
       this.offset = offset + got.hits.length;
       this.showResults(more ? this.hits.concat(got.hits) : got.hits);
+      // Tell the projector what the reader has reached. Only when the
+      // ranking is scoped to a page: opening every page a corpus-wide
+      // ranking touched is the 12,820-node picture again, arrived at from
+      // the other direction.
+      if (this.rankScope) {
+        this.onHits(this.rankScope, this.hits.map((h) => h.cid));
+      }
       this.say(`${this.hits.length} of the ranking` +
                (this.rankScope ? " · this page" : "") +
                ` · ${got.tokens} tok`);
