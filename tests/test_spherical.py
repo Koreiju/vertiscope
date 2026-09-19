@@ -166,3 +166,41 @@ def test_a_rotation_and_its_negation_draw_at_one_place():
     positions = spherical.to_ball(a)
     assert np.isfinite(positions).all(), "the sign fix produced a NaN"
     assert np.abs(flipped).max() <= 1.0
+
+
+# --- D-11: the request reaches the default level, or it does not --------------
+
+
+def test_the_page_level_fit_can_be_asked_for_the_spherical_space():
+    """`D-11`, held open deliberately.
+
+    `G-53` made PAGES the default level, and `build_page_layout` takes no
+    `spherical_space` argument -- so `?space=S3` is accepted, folded into
+    `/layout`'s cache key as though it changed something, and dropped. The
+    pane asks for the quaternion fit, is told nothing went wrong, and gets
+    the Euclidean one.
+
+    That is the gap between `G-18` ("built, measured") and the instruction
+    behind it: *"apply the updates to our UMAP metric THROUGHOUT our current
+    projector chunks"* (2026-09-13 21:23), reaffirmed at 22:00 after the drop
+    was rescinded. A fit nothing can reach is not applied throughout.
+
+    `strict=True`: the day the parameter is threaded through, this fails
+    until the marker comes off. Asserted on the SIGNATURE rather than on a
+    built layout because the defect is that the argument has nowhere to go --
+    a behavioural assertion would need a fitted workspace to say the same
+    thing, and would then also fail for want of umap-learn.
+    """
+    import inspect
+
+    from domvec.obsidian import layout
+
+    params = inspect.signature(layout.build_page_layout).parameters
+    assert "spherical_space" in params, (
+        "build_page_layout takes %s -- `?space=S3` has nowhere to land at "
+        "the default level" % ", ".join(params))
+
+
+test_the_page_level_fit_can_be_asked_for_the_spherical_space = pytest.mark.xfail(
+    strict=True, reason="D-11")(
+        test_the_page_level_fit_can_be_asked_for_the_spherical_space)

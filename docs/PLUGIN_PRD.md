@@ -23,7 +23,7 @@ Those ids are retired as requirements and retained as anchors.
 
 | id | what is built | what the goal says | |
 |---|---|---|---|
-| D-1 | `layout.py` fits the projector on tf-idf **and** semantic jointly, equalised by width | *"quantized semantic (and not pre-umapped frequency) vectors are the primary embeddings space for the projector"* | **Defect** |
+| D-1 | `layout.py` fits the projector on tf-idf **and** semantic jointly, equalised by width | *"quantized semantic (and not pre-umapped frequency) vectors are the primary embeddings space for the projector"* | **Done 2026-09-12** — see below. The row read **Defect** for a week after the fix landed, which is the drift `design_state.py` exists to catch |
 | D-2 | The trie is keyed `url : xpath : taxonomy : content` | *"a unified patricia trie of domain/url-tail/xpath/markdown/content-detection"* — five levels, and markdown is one of them | **Defect** |
 | D-3 | The panel draws a read-only surface inside a code block | *"retrofitted to show their **base and original** markdown editors"* — the native, editable Obsidian editor | **Defect** |
 | D-4 | `markdown.py` is tuned "17:1 toward leaving noise rather than risking loss" and `_dedupe` is element-scoped | *"full deduplication of repeat substrings that are essentially structural redundancies of the web pages themselves"* | **Defect** |
@@ -31,6 +31,8 @@ Those ids are retired as requirements and retained as anchors.
 | ~~D-6~~ | ~~The delta path re-admits a chunk it should have reassigned or popped~~ | **WITHDRAWN 2026-09-12 — not demonstrated.** The evidence for it was a metric that could not tell two real siblings from one re-addressed node. `--resolvable`: 0 unresolvable of 719. `--drift --kind insert`: 0 stale, 0 lost over ~190 moved addresses ×3. See §M.3 for what remains untested | — |
 | ~~D-8~~ | ~~A `src` detection and an `alt` detection at one `<img>` are drawn as TWO media lines~~ | **FIXED 2026-09-13** — `markdown._join_media` merges the pair at one element, keeping the url's address and absorbing the alt's. A fresh live scan of the reporting site: **0 pairs**, against 365 before. §M.5.1 | — |
 | D-9 | A chunk rooted at a `<tr>` carries its cells' VALUES and none of their names, though the header at the same `td[n]` position is in the trie | `M-10` full structural preservation; `M-11` the chunk is what gets embedded | **Defect** — 44 of 79 row chunks (§M.5.2) |
+| D-10 | One ar.wikipedia `<tr>` renders **302 tokens against a 300-token window while still holding twelve splittable children** — a chunk over the window that is not indivisible | `M-12` the window is enforced; `test_oversized_chunks_are_indivisible_not_lazy` states the rule | **Defect** — NEW under `G-22`. `tokens.budget` is smaller than `tokens.count`, so the descent stops at a node it used to split through. Held by `strict=True` xfail at two windows in `tests/test_markdown.py` so the day it is fixed the marker has to come off. Five candidate causes ruled out by measurement, each named in that file; the growth is between `_descend`'s return and the page-global passes |
+| D-11 | `?space=S3` is accepted, cached as honoured, and **silently ignored at the default level**. `build_page_layout` takes no `spherical_space` argument and its reply carries no `space` field, so since `G-53` made pages the default the quaternion fit is unreachable from the pane and nothing says so | *"we should apply the updates to our UMAP metric **throughout** our current projector chunks with the quaternion distance and spherical coordinates"* (2026-09-13 21:23), reaffirmed at 22:00 | **Defect** — found by re-deriving against Addendum IV, not by a test. The `/layout` cache key records `spherical` so two identical Euclidean fits are built and reported as different |
 | ~~D-7~~ | ~~A media element with no alt text renders as a bare `![images]`~~ | **WITHDRAWN 2026-09-12 — not a defect.** Already fixed by `499fd6d` (M-9). Filed against `vaultws512`, built 34 minutes BEFORE that commit. On the 256 re-cut: **0 bare placeholders, 1,073 named**. See §M.0 | — |
 
 **D-1 is FIXED** (2026-09-12, `layout: the projector fits on semantic alone`).
@@ -59,6 +61,8 @@ inherited:
 | *"no dedups"*, inside a list about elegance | *"full deduplication of repeat substrings that are essentially structural redundancies"* | **Deduplicate.** This is D-4, and it reverses how the phrase was read for most of the work so far. |
 | the projector fitted on frequency **and** semantic | *"quantized semantic (and not pre-umapped frequency) vectors are the primary embeddings space for the projector"* | **Semantic only.** D-1. Frequency stays in retrieval (G-3). |
 | panels "retrofitted to show their base and original markdown editors" | *"keep the original obsidian markdown panels in their native form as well"* | **No conflict** — both name the native editor. D-3 stands. |
+| the window is **256**, and 512 loses on every measurement | *"512 max context window for text-only tokens. The projector shows the aggregated vectors while the retrieval still runs on the 256 chunks"* (Addendum IV, 21:17) | **Both, for different jobs.** 512 is the display and merge context (`G-27`, `G-28`); 256 stays the retrieval unit. The measurement below compared them for the SAME job and is still why retrieval is 256. |
+| the spherical/quaternion fit is dropped — *"We'll drop the spherical and quaternion stuff"* (21:39) | *"If spherical UMAP works, and our aggregation is wired, please show that it works by processing everything we currently have in our DB"* (22:00) | **Rescinded after twenty-one minutes; the fit STANDS.** `G-18` is not an experiment held in reserve. Only the colour axis (`G-17`) is still open, and D-10 is the fit not reaching the default level. |
 
 ### Two readings that are still ambiguous
 
@@ -68,9 +72,18 @@ embeddings — the f16 GGUF nomic already in use. It could instead mean
 product-quantized vectors, which would be a storage and ANN decision that does
 not exist today. Part I assumes the first.
 
-**The window is 256** (decided 2026-09-12, after the addendum named 512). The
-addendum's figure was reconsidered against two measurements that pull opposite
-ways:
+**The window question is SETTLED, and it was settled by being split.**
+This section used to carry it as an ambiguity between 256 and 512.
+Addendum IV (2026-09-13 21:17) answers it by giving each number a different
+job: *"512 max context window for text-only tokens. The projector shows the
+aggregated vectors while the retrieval still runs on the 256 chunks."* So 512
+is the display and merge context (`G-27`, `G-28`) and 256 is the retrieval unit,
+and stage one cutting at half of stage two's ceiling is what makes a merge of
+two neighbours fit by construction.
+
+The measurement below is what decided 256 **for retrieval**, on 2026-09-12,
+and it stands unchanged. It compared the two numbers competing for ONE job;
+the resolution gives them two.
 
 | window | hit@1, three pages | over window | record tests |
 |---|---|---|---|
@@ -82,7 +95,8 @@ ways:
 Retrieval favours small monotonically; structure favours large. 256 is where
 they meet — every structural property holds and it still beats 512 by about
 ten points of hit@1 while filling half the window rather than a third. **512
-is dominated: it wins on no measurement.** 64 was tried first and reverted
+is dominated *as a retrieval unit*: for that job it wins on no measurement.**
+As the merge and display ceiling it is not competing here at all. 64 was tried first and reverted
 because a nav bar split into three chunks of menu labels, against
 `test_a_nav_bar_is_not_a_record_set`'s own reason — "a menu item is not a
 retrievable unit".
@@ -152,7 +166,7 @@ axes: **structure, content, organizedness, completeness**.
 
 | id | requirement | status |
 |---|---|---|
-| G-1 | Projector fitted on **quantized semantic vectors only** | **Defect D-1** |
+| G-1 | Projector fitted on **quantized semantic vectors only** | **Done** — `D-1` fixed 2026-09-12. `build_layout` and `build_page_layout` both report `spaces: ["semantic"]`; frequency is the no-embeddings fallback only |
 | G-2 | Chunk embeddings batch-UMAPped **with their per-document source** — two node kinds, one fit | Open |
 | G-3 | Retrieval stays **triple**: frequency × quantized-semantic × pagerank | Done |
 | G-4 | **Inter-spatial normalization** — nodes discernible | Done — nn p50 0.757 → 5.657 |
@@ -168,8 +182,8 @@ axes: **structure, content, organizedness, completeness**.
 | G-14 | **Graph linkage completeness** across trie, web links, markdown links | Partial — dangling edges 0; trie axis absent |
 | G-15 | **Media present in the projector**, not only the panels | Partial — 73.8% textured |
 | G-16 | Chunk deltas diffed **into the projector view** live | Open |
-| G-17 | The projection's **output space is spherical**, fitted with an angular metric rather than rescaled into a cube afterwards | Open — Addendum III |
-| G-18 | Points are **quaternions and the distance between them is the quaternion distance** — the geodesic angle on the unit 3-sphere, `2·arccos(\|⟨p,q⟩\|)`, absolute because `q` and `−q` are one rotation | **Built, measured, not default** — `domvec/obsidian/spherical.py`, §M.9. A numba `output_metric` over three hyperspherical angles (umap-learn's own advice: parameterise without coordinate constraints), gradient-checked against finite differences. It keeps **0.19** of the encoder's 10-NN neighbourhoods against the Euclidean fit's **0.38** |
+| G-17 | The projection's **output space is spherical**, fitted with an angular metric rather than rescaled into a cube afterwards | **Built (`G-18`); what is Open is the COLOUR axis only.** Addendum III asked whether the third angle is spent on colour (S³) or the fit is S² and colour becomes a legend; that is still unanswered. The metric itself was dropped at 21:39 and rescinded at 22:00 — see Addendum IV, "Addendum III, dropped and then restored" |
+| G-18 | Points are **quaternions and the distance between them is the quaternion distance** — the geodesic angle on the unit 3-sphere, `2·arccos(\|⟨p,q⟩\|)`, absolute because `q` and `−q` are one rotation | **Built, measured, not default** — `domvec/obsidian/spherical.py`, §M.9. A numba `output_metric` over three hyperspherical angles (umap-learn's own advice: parameterise without coordinate constraints), gradient-checked against finite differences. It keeps **0.19** of the encoder's 10-NN neighbourhoods against the Euclidean fit's **0.38**. **"Not default" understates it: see D-11** — at the default page level `?space=S3` is accepted and ignored, so the user's *"apply the updates throughout"* (21:23) is not met by the surface they actually open |
 | G-19 | The view is **centred on the origin** | **Done, in the spherical map** — `spherical.to_ball` sends the identity rotation to the origin and makes the rotation angle the radius, so the cloud is centred by construction rather than by measuring an extent and subtracting it. Reached only when `G-18` is on |
 | G-20 | **Force-directed relaxation seeded from the UMAP embedding** — UMAP initialises, the simulation converges | **Done** — `graph.ts`. Nodes carry `x/y/z` from the fit instead of `fx/fy/fz`, and `fitX/fitY/fitZ` alongside so drift is measured rather than assumed. `charge` and `center` are removed and `link` is kept at **zero strength**, not removed: `forceLink` is also d3's id resolver, and dropping it left all 2,961 edges holding their endpoints as strings, so every patricia and inter-note link stopped drawing with nothing reporting an error. Measured cold: 2,302 of 5,337 nodes sit exactly where the fit put them, which is the proof no force but collision runs |
 | G-21 | **Nodes never overlap**: spherical colliders, with a **quarter-distance safety factor** on the radius | **Done** — `graph.ts`, probe `probes/collider.js`. `forceCollide` at `drawnRadius × 1.25`. Measured cold on a 1,200-node sample: **0 overlapping pairs of 719,400 and 0 inside the clearance band**, from 750 before. The radius is **not one formula**: 827 of 5,337 chunks draw as square picture panels, not spheres, and sizing them as spheres left 96 overlapping pairs — 66 panel-on-panel, 30 panel-on-sphere, **0 sphere-on-sphere** — because the collider reserved 1.93 units where the panel drew at 12.73. A billboard turns to face the camera, so its collider is the sphere that circumscribes it: the half-**diagonal**, `edge/√2` |
@@ -198,7 +212,7 @@ axes: **structure, content, organizedness, completeness**.
 | G-44 | **The chat is continuous markdown**: outputs land below the selected markdown, in conversational structure, and inside a notebook they append to the selected cell with the rewind rules unchanged | Open — §O.2 |
 | G-45 | **The selection gesture is the delta.** The right-clicked elements since the last response are what is pre-injected into the next prompt — there is no separate context box | Open — §O.2 |
 | G-46 | **Interactive fields in the shadow-DOM view act on the real page** through the trie, when a connection exists | Open — §O.2, and it is constraint 2 of `CLAUDE.md`: a field is acted on in place |
-| G-47 | **Scanning migrates from Selenium to the Electron browser** that hosts the cell, and that is where scanning then happens | **Done** — the browser cell folds the page it is showing and hands drains to `POST /capture`. Verified against the scanner it replaces on the same page: 176 addresses, 14 chunks, 7 passes, identical |
+| G-47 | **Scanning migrates from Selenium to the Electron browser** that hosts the cell, and that is where scanning then happens | **Done** — the browser cell folds the page it is showing and hands drains to `POST /capture`. Verified against the scanner it replaces on the same page: 176 addresses, 14 chunks, 7 passes, identical. Reported first as *"I don't see the scans running in the new browser panel like I would hope for our work"* (2026-09-13 20:34), which left no requirement at the time: the panel existed and Selenium was still doing the scanning behind it |
 | G-48 | **Headers, fields and formatting are part of the text that gets vectorised** — the crypto-panel case is the standing example of what is lost when they are not | **Partly** — link-free markdown keeps headers, fields and formatting and drops only addresses, so the structure reaches the encoder. The crypto-panel case that motivated it has not been re-measured |
 | G-49 | **The local codebase, the vault, and locally-installed PyPI packages are in the trie too**, alongside the web scans | Open — §O.3. `vault://` addressing already exists (`domvec/vault.py`); this extends the same scheme to source and to site-packages |
 | G-50 | **The scanning code is itself a visible chunk.** A reader can see the script that runs the browser scan, in the graph, while watching that scan happen in the browser panel | Open — §O.3. This is the point of `G-49`: the sensor stops being a thing that happens to the corpus and becomes part of it |
@@ -210,14 +224,14 @@ axes: **structure, content, organizedness, completeness**.
 | G-56 | **Only the chunks matching the most recent debounced retrieval query are drawn live**, inside their unfolded page | **Done** — §M.14. Clicking MDN's Headers index drew its **10 matching chunks**, not its hundreds, and the page node was removed |
 | G-57 | **Clicking a node opens its shadow-DOM panel as a BILLBOARD inside the 3D view** — draggable, in the projector, not a separate Obsidian pane | Open — §O.5. The panel already exists and is already generated to the store; what changes is where it opens |
 | G-58 | **In tandem, the Electron browser navigates and scrolls that chunk into view**, and the browser is the primary panel representation | Open — §O.5, and it is `G-40` reaching its conclusion: one representation, not three |
-| G-59 | **The Obsidian-native chunk panels become the OFFLINE FALLBACK format** — the shape the structures take when there is no live page to point at | Open — §O.5 |
+| G-59 | **The Obsidian-native chunk panels become the OFFLINE FALLBACK format** — the shape the structures take when there is no live page to point at, and **offline the billboard is a main Obsidian panel rather than a projector billboard** | Open — §O.5. The second clause is verbatim and is the one distinction from `G-57`: *"seeing still the billboarded panel that we currently have as a more 'main' panel within obsidian rather than in the UMAP projector"*. Online the panel opens in the 3D view; offline it takes the pane |
 | G-60 | **A toggle saves the full page as the Electron browser presents it live**, for offline use | Open — §O.5. Saved as presented, not as fetched: the composed tree the reader saw, scripts already run |
 | G-61 | **A saved page whose source does not carry its layout is INFILLED from the traced chunks** | Open — §O.5. The trie holds `url : xpath : markdown : content` for every address; a saved source missing its render is exactly what that can repair |
 | G-62 | **With no connection, the page is reconstructed fully rendered and scrollable from the scan trace alone** | Open — §O.5. The strongest form of the affine map: the trace IS the page |
 | G-63 | **Retrieval overlay above the Electron browser, coarse-to-fine**: merged chunks first, then within-shadow-DOM top-k | **Done** — `search_payload`. Coarse suppresses a merge group's members so the lead stands for them, because a reader scrolling a ranking does not want the same passage eight times; `coarse=0` ranks the members, which is what a click expansion inside one page wants |
 | G-64 | **Cross-page ranking fits the 256 pure-text window** — the most relevant parts of different shadow DOMs, inside one budget | **Done** — `?budget=`. Results are taken until the next would not fit, counted in `tokens.budget`, so a list handed to a model is a list that can be handed to a model |
 | G-65 | **Aggregation runs on the DIFF STREAM, not only at the settle.** A chunk rewritten while the reader browses rejoins or leaves its merge group as it changes | **Done** — §M.12. Queued per page on every capture, debounced 1.5s so it lands when the reader pauses, and run on the embedding worker so it is ordered after the vectors it needs. Verified live: a 128-chunk page the corpus had never seen went from 0 to **23 merge groups in 2 seconds**, with nothing asking |
-| G-66 | **The O(delta) budget is stated per phase and measured**: fold, dedup, vectorise, aggregate, re-vectorise, transform | **Done** — every phase of a capture is timed separately and reported: decode, absorb, render, store, place, plus the store's own five statements. §M.11 is what that found |
+| G-66 | **The O(delta) budget is stated per phase and measured**: fold, then the verbatim's own sequence — *"dedup-vectorize-dedup-aggregate-vectorize, and projections through the async batched queue of UMAP transforms"*. **Two dedups, not one, and the second is not the merge**: `G-24` on bytes before any vector; then vectorise; then the embedding pass that *establishes* near-duplicate links (*"we first establish duplicate-links and **then** merge"*, 18:54) — which `G-29` says is a separate verdict from merging; then aggregate (`G-26`); then re-vectorise the group (`G-27`'s `group_embedding`); then transform. Timed as six phases, not five | **Done** — every phase of a capture is timed separately and reported: decode, absorb, render, store, place, plus the store's own five statements. §M.11 is what that found |
 | G-67 | **UMAP transforms go through an async batched queue** — a diff does not wait for a projection, and a projection does not run per chunk | Open — placement is 27ms and runs inline, which is affordable now and stops being so when a drain touches hundreds of chunks. Not yet queued |
 | G-68 | **Interactive fields in the billboarded shadow DOM act on the live Electron page** through the trie | Open — §O.5, and it is `G-46` at the surface a reader actually touches |
 | G-69 | **Retrieval is continuous scrolling over a ranked list, not top-k.** Top-k is what a click expansion uses; the overlay itself keeps going | **Done** — `?offset=`, and the list asks for more as it nears its own bottom. Measured: 12 results on typing, 48 after three scrolls |
@@ -2218,6 +2232,22 @@ chunks, because `Projection.place` is a matrix operation whose cost is in the
 batch. Queued and batched, a burst of drains produces one transform; inline,
 it produces one per drain.
 
+### O.4b — the one question in Addendum IV nobody has answered
+
+From the 23:17 statement, and it is the only sentence in either long
+statement that produced no requirement:
+
+> Also unsure of the loading... portion of the current open panel and
+> whether or no this is a panel interactions thing or if we can somehow
+> instead explore deeper interactive mappings in our patricia trie and
+> our electron browser.
+
+It reads as a question about whether the panel's loading state is a
+*panel* concern at all, or whether what looks like loading is really the
+absence of the trie-to-browser mapping that `G-46`/`G-68` describe. It is
+recorded here unnumbered rather than guessed at, because the two readings
+lead to different work: one is a progress indicator, the other is `G-68`.
+
 ### O.5 — three representations, collapsed into one
 
 The reader currently has a chunk panel in Obsidian, a browser cell, and a 3D
@@ -2236,7 +2266,11 @@ through the trie (`G-68`).
 
 **The Obsidian-native panels become the offline fallback** (`G-59`). They are
 what the structures look like when there is no live page to point at, which
-is a real mode and not a degraded one.
+is a real mode and not a degraded one. **And offline the billboard moves**:
+the verbatim puts it "as a more 'main' panel within obsidian rather than in
+the UMAP projector", which is the exact inverse of `G-57`. Online the panel
+opens in the 3D view beside its node; offline it takes the pane, because
+there is no live page for it to sit alongside.
 
 **Offline is a first-class path, in three degrees** (`G-60`..`G-62`):
 
