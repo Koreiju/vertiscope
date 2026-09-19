@@ -157,7 +157,7 @@ axes: **structure, content, organizedness, completeness**.
 | G-3 | Retrieval stays **triple**: frequency × quantized-semantic × pagerank | Done |
 | G-4 | **Inter-spatial normalization** — nodes discernible | Done — nn p50 0.757 → 5.657 |
 | G-5 | Nodes visible at the default camera | Done — 0 → 3,135 of 3,135 on screen |
-| G-6 | **Patricia-trie links drawn** | Open |
+| G-6 | **Patricia-trie links drawn** | **Confirm** — `layout.unfold` and `place_into` return the containment edges among the nodes they emit, and `graph.ts` resolves the endpoints itself because `forceLink` has already initialised by then. Verified at the server: RFC 9110 opens as 31 nodes and 30 edges, a branch as 7 and 6. NOT yet seen in the pane — the debug port is closed |
 | G-7 | **Markdown retrieval links drawn** | Open |
 | G-8 | **Module dependency links** for codebases and Python modules | Open |
 | G-9 | …including modules inside **local PyPI packages** | Open |

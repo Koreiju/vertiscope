@@ -187,6 +187,37 @@ denominator is what this component is answerable for.
 - `domvec/invariants.py` — `a1` (AAM tables agree), `c1` (three composed-tree
   walks agree), `c2` (the fold reads no layout).
 
+## How a change is shown
+
+Every change ends the same way, so that both sides are looking at one thing:
+
+1. **Commit**, with the measurement in the message.
+2. **Regenerate** `build_analytics/design_state.md`:
+   `python build_sweep/design_state.py`
+3. **The diff of that file is the report.** It says which requirements moved,
+   what evidence moved them, and what is still waiting.
+
+The status column is COMPUTED from the PRD, never hand-kept. It was hand-kept
+and it drifted sixteen rows in one week -- forty-seven read "Open" while
+thirty-one of them had shipped. The cost of computing it is that a verdict has
+to say where its evidence is: a file, a probe, a test, or a measurement
+section. `design_state.md` lists every "Done" that cites nothing, which is the
+only pressure that makes the citation get written. It was 58 of 76 at the
+first run.
+
+**Five states, and `Confirm` is the one that was missing.** `Open`, `Partly`,
+`Done`, `Defect` -- and `Confirm`, for a row that is built and verified by
+test or probe but that no human has seen work in the running app. That gap
+existed and was being filled with silence. Nothing leaves `Confirm` except a
+person saying so.
+
+**A requirement is only as good as the verbatim behind it.** `PLUGIN_GOAL.md`
+and `AFFINE_MAP_GOAL.md` hold the user's own words; every numbered row is a
+decomposition of those. Where the verbatim record stops, the rows below it are
+interpretation with nothing to be checked against -- so new direction is
+transcribed into a dated addendum BEFORE it is decomposed into requirements,
+and `design_state.md` prints where each record ends.
+
 ## Verification
 
 `python -m pytest -q` from the repo root. Live-gated tests need
