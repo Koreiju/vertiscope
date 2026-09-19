@@ -5,11 +5,17 @@
 word for word. Where any other document disagrees with this one, this one
 wins and the other document is the thing to change.
 
-`PLUGIN_PRD.md` decomposes the earlier prompts into 40 numbered, measurable
-requirements. It is not superseded — it is *incomplete against this*. Several
-of the sections below (the Jupyter/LLM half, the site-packages corpus, the
-chained single-hop prompt architecture) have no requirement number at all yet.
-Read this first, then that.
+`PLUGIN_PRD.md` decomposes these prompts into numbered, measurable
+requirements -- 223 rows as of Addendum IV. It is not superseded — it is
+*incomplete against this*. Several of the statements below (the Jupyter/LLM
+half, the chained single-hop prompt architecture) still have no requirement
+number at all. Read this first, then that.
+
+**And the order matters.** Addenda I through III were written before their
+direction was decomposed; Addendum IV was written six days after, which meant
+`G-22`..`G-71` spent that week citing conversation nobody could read. The rule
+is now in `CLAUDE.md`: new direction is transcribed here BEFORE it becomes a
+numbered row.
 
 ---
 
@@ -448,6 +454,511 @@ anything and let it become a legend again — which `D-1`'s reasoning argues
 against.
 
 Until that is settled, any implementation would be choosing it silently.
+
+**Read Addendum IV's "Addendum III, dropped and then restored" before
+acting on this section.** On 2026-09-13 the spherical metric was dropped
+and then rescinded twenty-one minutes later; it is shipped and applied to
+the whole store. Only the COLOUR question above is still open, and it is
+narrower than this section reads on its own.
+
+---
+
+## Addendum IV, 2026-09-13/14 - the second chunking stage, the browser cell
+
+**Also binding.** Two days of direction taken in conversation, recovered from
+the session record and kept word for word.
+
+**It was written six days late, and that is the defect this addendum also
+records.** `G-22`..`G-71` were decomposed from these prompts on the 13th and
+14th; the transcription happened on the 19th. For those six days seventy
+numbered rows cited conversation nobody could read, and reconstructing them
+turned up two prompts that had left no requirement at all and one that
+REVERSED Addendum III. `CLAUDE.md` now carries the rule: the transcription
+comes first.
+
+Ordered as it was given, with the clock. The prose inside the quotes is the
+user's throughout; the headings and the notes under them are not.
+
+---
+
+### The projector's nodes are not all the same shape
+
+> Note that billboards must get their own diameters because they're larger
+> square panels and not small nodes too
+
+> Like billboard panels, not markdown panels
+
+*`G-21`'s collider radius. 827 of 5,337 chunks draw as square panels and
+were being given a sphere's: 1.93 units reserved for a thing drawing at
+12.73. The second line corrects my first reading -- I had taken "panels"
+to mean the Obsidian markdown panels.*
+
+### Links are missing from the picture
+
+> Force direction works, but I don't see the patricia and inter-markdown
+> and other links anywhere
+
+> Nodes aren't linked in the 3D GUI when clicking to unfold.
+
+*Two reports a day apart, of the same absence in two places, both correct.
+The first was a regression I had just caused -- removing d3's link force
+also removes its id resolver, and 2,961 edges silently held strings
+instead of nodes. The second was never built at all: `unfold` returned
+nodes and no edges. `G-6`.*
+
+### The duplications, and what a token is
+
+> I'm also seeing a lot of content duplicate style errors throughout
+> (repeat chunks, repeat content within, repeat images, etc)
+
+> Literally just exclude from the counting part but keep everything else
+> the same
+
+> url tails can contribute to frequency vectors but not quantized semantic
+> embeddings, which get the pure text without links at all.
+
+*`G-22`, `G-23`, `G-24`, `G-25`. The middle line narrowed my proposal: the
+render keeps its links and only the COUNT changes. The third splits the
+two vectors -- lexical keeps url path words as terms, the encoder gets
+prose alone. Measured afterwards: 52.5% of every rendered token in the
+corpus was a link target.*
+
+### The long statement - two-stage chunking, the browser cell, retrieval
+
+Sent 18:54 with five screenshots: two chunks selected far apart in the
+projector, a chunk panel reading "104 tok - 41% of 256" whose content was
+one avatar and one link, a cluster of visually identical nodes, and that
+cluster's chunk showing eight words of plain text. Re-sent at 20:30 with
+"Run the scan over 100 new pages now. I'll also repeat our focus, which is
+progressing well so far:" in front of it, unchanged otherwise.
+
+> You can also see in the two images, I've selected one chunk further up
+> (green) and one chunk way further down (green also). I would suspect one
+> piece of evidence to hold onto here is the fact that these chunks, once
+> stripped to text only, would affect the partitioning count to be more
+> conservative with its sub-chunking problems, which may also help with
+> deduplication as well. Perhaps we could inform dedup with intra-
+> embedding metrics on a DOM page? And for that matter, an algorithm that
+> can also intelligently sinkhorn/anneal the chunks that are actually the
+> same thing, but just outside of our existing metrics and heuristics that
+> constrain the context windows. I would suggest the context windows
+> aren't necessarily hard constraints, but obviously necessary and worth
+> staging first with embedding dedup and merging second, since then we can
+> begin with an appropriate window that is in fact still a subset of the
+> max context window (remember, we chose 256 because of the hit@1).
+> Perhaps this is where DBSCAN comes in, but to a more nearest-neighbors
+> feature-metric aggregation kind of thing. I've also attached a couple
+> more images of the same example chunk; most of the tokens are, in fact,
+> link text that does not count towards the overall chunk window limit,
+> since this new limit assumes only the bare text (alts, etc). Worth
+> consideration to build and test for.
+>
+> One thing to mention about the dedup; it should happen over the db-side
+> representation of the aggregate DOM chunks first and foremost since
+> we're still getting duplicate chunks in a lot of cases currently. The
+> embedding-side aggregation (dbscan etc) would enable a more intelligent
+> partitioning of per-page chunks that begins recursively, and then
+> bridges to embeddings with DBSCAN. Since we are focused on coarse-to-
+> fine localized to shadow DOMs, we're not doing this for all shadow DOMs
+> at a time, so we can make this a second stage to the *chunking* process
+> which is not necessarily a completely new thing that happens outside of
+> the scanning process itself. We can likely get away with DBSCAN on the
+> quantized semantic chunks only, since frequency vectors are not
+> dimension efficient and simply are there for the fine-grained
+> preservation in retrieval, while larger-scale chunking and dedup merges
+> can happen as a second stage after our 256 vectorization. We can keep
+> the original 256-style chunks and their embeddings underneath, but a
+> merge layer would be what actually indexes the overall high-level chunks
+> that can then still be retrieved as 256, but represented, structured,
+> and presented as the similarity-merged ones. There would have to be some
+> careful determination between what counts as more or less 'exact'
+> duplicates and what counts as 'should be merged as a larger chunk'. I
+> don't think substring matching would work as well here, so it would have
+> to be a careful metric thing. Perhaps if there is no other
+> straightforward way, we include frequency vectors in dedup but as their
+> own steps in the process. It could be that we first establish duplicate-
+> links and *then* merge. If we can clearly see a "within this percent
+> distance of the closest neighbor compared to the max of the closest
+> neighbor distances" for just quantized encoder embeddings for the first
+> stage, then good. Then, we *could* use frequency vectors post-dedup to
+> double-check the deduped chunks that can be merged. Now that i think
+> about it a little more though, it sounds like if we only used embeddings
+> to dedup for merges and tried to establish structure, then we would also
+> make good use of the overall retrieval mechanism that includes pagerank.
+> Perhaps if we just applied this overall retrieval metric to the soft
+> adjacency matrix of the shadow DOM in its current state, or otherwise
+> when we exceed some N samples of DOM chunks from the recursive text-only
+> token window, that says that 'this is when we get statistically
+> significant discriminative value on dedup and triple-retrieval chunk
+> matching'. Since our pairwise distance matrix is established with
+> structural queues from pagerank as well as coarse and fine encodings
+> from our quantized and frequency vectors, then our sinkhorn/annealing
+> embedding-chunking could localize to their page structures. We may,
+> though, have use for other tree-based structural metrics on our patricia
+> paths instead of pagerank since the domain of the problem is focused on
+> embedding-based locality. However, if pagerank solves an eigenvalue
+> problem of relevance metrics, then it would be more appropriate a metric
+> for structural-based linked aggregation. I would suggest starting with
+> just the quantized nous embeddings to start and seeing/experimenting
+> with sample sizes and effects on overall aggregate accuracy. It could be
+> also that LCA path metrics could be more appropriate for inter-
+> structural similarity to aggregate spatially-like subchunks with higher
+> embedding similarity. Let's add this to the PRD and perhaps focus on
+> this for now. Then, we can return to our original designs on
+> notebook+terminal+chat+webbrowser panels. Remember that the webbrowser
+> notebook cells should be actual electron browser cells, resizable within
+> the notebook, as well as allowing it to resize along with the rest of
+> the notebook within its panel window. And again, this is where our
+> scanning will really be happening once this component is complete. Since
+> all of these are centered on the browser cell, let's get to work on this
+> one next. Perhaps to start you can open the actual Electron browser
+> if/since you found that it works. See if there are MCP tools on github
+> that can help out with development specifically on this as we migrate
+> our existing sensor scanning and our new embedding-based aggregation
+> (along with our regular text-only subchunk window updates). Then you can
+> add the 'highlight hovered chunk' feature which will also validate our
+> structural-dual-embedding aggregation/dedup step after the primary
+> scanning processes are ready and have vectorize the text-components of
+> the chunks properly (again, link tokens still count in frequency vectors
+> but quantized semantic embeddings get text-only from the page). We
+> should still be very careful about headers, fields, and formatting like
+> the previous crypto stock panel that showed a good example (so we
+> include these fields and formattings in our text vectorizations as well.
+> I could suggest link-free markdown for quantized embeddings while
+> keeping the pure and full markdowns as their original representations of
+> the webpage in our obsidian panels as they currently are in the images I
+> provided. I would suspect online dedup-aggregation/annealing would be an
+> important aspect of deduping continuous scan streams in our O(delta)
+> millisecond *diff updates* to our current patricia-structured scans. If
+> there is a memory-efficient way of tracking/tracing the similarity
+> matrix over time that is diff-efficient (so re-vectorizing only the
+> affected chunks either in merging or splitting), that will help with
+> continuous real-time streaming and UMAP projection batch minimization
+> when updating our obsidian 3D graph GUI. However, these updates can't
+> break our new force-directed features, which are highly appreciated and
+> work with billboard image panels just fine. Thank you. The fifth image
+> attached shows the value in focusing on dedup integrations as we migrate
+> scanning sensors to electron. An entire cluster can be clearly seen of
+> the *exact same chunk* which means we're still getting dedup leakage
+> from somewhere. If you can find an efficient fix to this one without
+> needing any embeddings (while still ensuring that these new features are
+> delivered as well), then excellent! I'd also like to note the strange
+> fact that the chunk of the fifth image is just text (shown in sixth
+> image). This shows that it's a *real* dedup and chunk leakage problem.
+> We will ensure work on our current scanning sensor heuristics try their
+> best first, and then we will also add these embedding-based merges since
+> they can help us with aggregating chunks to our original max context of
+> 512 tokens anyways for display and all intents and purposes. Scoring the
+> merged chunks takes the same token counting strategy as per our
+> quantized semantic embeddings (markdown, but pure-text only that is
+> link-free). Also, to the "Press Down Arrow" thing; I would imaging
+> interactive components here are leaking as well. One of our design
+> requirements is that we have interactive components in shadow DOM
+> representations of browser chunks that has a lot deeper ties to
+> interactions with their actual page if an internet connection exists. As
+> in, through the patricia-trie, we can click on interactive components in
+> the shadow DOM view and see effects in the browser. I would almost say
+> that this work is actually still largely focusing on the actual Electron
+> browser itself that would then selectively just render the sub-chunk
+> browser views that have links to the remainder of the page underneath
+> the hood for all chunks we click in the 3D graph view. However, this
+> should not be mistaken for browser cells themselves. It might even be
+> simpler to scroll to the chunk view in a standalone browser cell that
+> has scanned chunk correspondences, essentially keeping the same browser
+> session open and navigating to the different pages (scrolling into view)
+> when the chunks are clicked in the GUI. So perhaps we simplify the
+> browser cell (as a standalone electron) and this collapses the three
+> different representations to one, really, and then the key distinction
+> between the two different instances being whether or not the browser
+> cell is part of a notebook or its own standalone thing. I would think
+> the feature for hovering over chunks in the browser and seeing them
+> highlighted as the same chunks in the overall 3D GUI representation with
+> all of our embedding-related dedup second-stage updates to our scanner,
+> as well as the migration to electron from selenium, would go hand-in-
+> hand as the same move over sections in the PRD. Of course, the
+> bookkeeping for these things has to happen in the database. When I say
+> "browser cell panel" I mean the electron browser in one
+> switchable/toggleable view and the right-click selected markdown (full
+> markdown, essentially the same full markdown but actually rendered as a
+> native obsidian panel in a switchable second view). So we can track the
+> chunks scanned and O(delta) diff rendered in our 3D umap projector
+> (staying batch-efficient as previously stated) through our electron
+> browser GUI as well. I should only see a minimal highlight on the
+> hovered electron chunks with 3D GUI correspondence without banners on
+> the chunk details since they are already visible. The right click
+> gesture ports the full-content markdown to the other view within the
+> same panel. This obsidian-native markdown panel on the other side of the
+> same standalone browser cell is also the same for when this panel is a
+> cell within a notebook kernel panel as well. One gives a more collapsed
+> view of the other, but the completeness of functionalities are the same.
+> I also think we could get away with a hoverable chat panel on the
+> standalone browser window as well that collects the right-click selected
+> *full* markdowns as context efficiently so that the same chunks are
+> *never* re-sent to the context window, meaning the delta-diff updates to
+> the context window of the chat works similar. This is only for the
+> browser component, and so re-wind logic in a notebook kernel overall
+> stays the same. Chat outputs would be in a panel below the web-selected
+> markdown, and essentially aim to follow the standard conversational
+> structure of the chat, all in markdown. Perhaps the delta diff selection
+> thing here really actually means isn't a box at all, and simply the
+> right-clicked elements after the most previous response are included in
+> the very next prompt (pre-injected into the markdown obsidian panel, and
+> then injected into the prompt during conversations). In all cases, the
+> aim would be to keep the continuous chat-based markdown styling and
+> injection for conversations with language models that are shown in the
+> notebook panel clearly as well as one continuous interactive *thing*
+> that respects the context injection and rewind rules still. I think this
+> would work if outputs and conversations were simply added to existing
+> notebook cells that are selected. I would almost imagine, as well, a
+> natural extension of the browser side would be a more persistent
+> retrieval panel above the electron browser itself. Retrieval results
+> would be *overlaid* within the browser, with selected results navigating
+> to the pages. Note this should not mean script injection into the
+> standard electron pages, but be a layer above as its own link to our 3D
+> graph gui via the database under the hood, but still sends interactions
+> to navigate to the url and chunk location in the electron browser. Since
+> this is part of the standalone browser panel, it should be the exact
+> same for the notebook cell. This is different from the retrieval
+> interface and gesture within obsidian-native markdown panels, where
+> chunks are inserted directly. However, if that retrieval feature works,
+> then I'm sure we could also rig it as an overlay to the electron
+> browser.
+
+*Decomposed as `G-26`..`G-35` (the second stage) and `G-36`..`G-48` (the
+browser cell, the chat, the overlay, the Selenium migration). "within this
+percent distance of the closest neighbor compared to the max of the
+closest neighbor distances" is `aggregate.py`'s merge radius verbatim;
+`MERGE_WINDOW` 512 comes from "aggregating chunks to our original max
+context of 512 tokens anyways".*
+
+### The scan is not visible where it is supposed to be
+
+> I don't see the scans running in the new browser panel like I would hope
+> for our work
+
+*Not decomposed at the time, and it should have been: the Electron panel
+existed and the scanning still ran through Selenium behind it. It became
+`G-47` only during the next session's streaming work.*
+
+### The codebase is part of the corpus
+
+> One other thing I think was mentioned earlier; including the codebase
+> and not just web scans (as in our local codebase and our vault, as well
+> as generally PyPi packages locally installed) is what enables us to see
+> the scanning scripts that are running in our browser panel. So, we can
+> see the code that runs the browser scans and also see it happen in the
+> browser panel itself. Remember this means dependencies are tracked
+> throughout.
+
+> And also remember what I said on only vectorizing comments and
+> docstrings and not the actual code itself.
+
+*`G-49`..`G-52`, all four still open. Both prompts say "remember" -- they
+are restatements of direction given earlier and lost, which is itself the
+argument for this file.*
+
+### The order of the aggregation work
+
+> Let's make the next pass about a continuous sensor scanning over shadow
+> DOMs as I navigate the browser manually and see all the chunk updates
+> streamed live to the GUI. Afterwards, if not done yet, we add the
+> embedding similarity aggregation with pagerank or LCA distance matching.
+
+> Now add the embedding similarity aggregation with DBSCAN
+
+> Now wire aggregation into the scan and capture settle and showing merged
+> chunk panels
+
+*`G-47`, `G-65`, `G-26`, `G-34`. "as I navigate the browser manually" is
+the requirement and not a setting for it: not a batch scan that happens to
+be watchable, but the reader's own browsing AS the scan.*
+
+### The two windows, and what each is for
+
+> With merged chunk embeddings for UMAP, let's take an averaging approach,
+> or better yet, re-vectorize.
+
+> That being said, 512 max context window for text-only tokens. The
+> projector shows the aggregated vectors while the retrieval still runs on
+> the 256 chunks.
+
+*`G-27`, and the store's `group_embedding` column -- a merge group holds a
+second vector of its own rather than borrowing its lead's, which is the
+"better yet" branch. The 512/256 split is the shape of the two stages: the
+projector draws merged groups, retrieval ranks 256-token chunks.*
+
+### UMAP is transformed, not refitted
+
+> UMAP when pre-fitted has a projection-like transform function for
+> batches so we don't have to re-fit every time, but incrementally every
+> time the number of total shadow DOMs scanned (per url tails) doubles.
+
+*`G-67`. `Projection.transform` and the doubling schedule in `layout.py`
+are this sentence.*
+
+### Addendum III, dropped and then restored
+
+This is the exchange Addendum III does not have, and without it that addendum
+reads as an open question when the metric half of it is settled. In order,
+over thirty-seven minutes:
+
+> Also, we should apply the updates to our UMAP metric throughout our
+> current projector chunks with the quaternion distance and spherical
+> coordinates, as well as the full aggregation steps for the chunks that
+> are currently in db that need this too
+
+> We'll drop the spherical and quaternion stuff. Let's focus more on
+> faster streaming and feedback for scanning and seeing the updates in the
+> projector.
+
+Then, on being shown the fitted spherical metric actually running:
+
+> Wait.. back up... It works?
+
+> If spherical UMAP works, and our aggregation is wired, please show that
+> it works by processing everything we currently have in our DB with these
+> parts of the scanning pipeline. You can also make processing
+> asynchronous.
+
+*So: the drop at 21:39 was rescinded at 22:00, and spherical UMAP with
+quaternion distance STANDS -- `domvec/obsidian/spherical.py`, applied to
+the whole store. What Addendum III left open was narrower than the metric
+and is still open: whether the third angle is spent on a colour axis (S3)
+or the fit is S2 and colour becomes a legend again. Nothing here answers
+that. `G-17`, `G-18`, `G-19`.*
+
+### The second long statement - the collapsed view, offline, the overlay
+
+Sent 23:17, after the streaming pass landed. This is the source of
+`G-53`..`G-67`, and until the 19th it had no verbatim record at all.
+
+> Let's return to faster O(delta) diff chunk streaming with semantic
+> aggregation while I live-navigate the browser manually and see streaming
+> updates to the graph layout per diff-based updates to the overall full-
+> structure chunks from our embedding methods... Actually there; perhaps
+> we develop on this part next; integrating live aggregation and refining
+> our O(delta) diff streams to our projector through updates to our db.
+> Note also that the current panels that open should be a fallback format
+> offline for the regular electron browser in how we display these
+> structures. Also unsure of the loading... portion of the current open
+> panel and whether or no this is a panel interactions thing or if we can
+> somehow instead explore deeper interactive mappings in our patricia trie
+> and our electron browser. The thing here is ideally, we could toggle the
+> option to save the full webpage as it is presented live in the electron
+> browser for offline use. I also don't see any work yet on the in-browser
+> retrieval overlay so we could also touch on that next as a way of
+> exploring the full vs primitive chunk vectors and how they are
+> interacted with. We could apply a retrieval mechanism that goes coarse-
+> to-fine on full chunks as they are shown in the graph editor, then
+> obtaining within-shadow-DOM retrieval for top-k, efficiently ranking the
+> most relevant parts from different shadow DOM pages within our 256 pure-
+> text window limit. I'm almost thinking that we keep the current shadow
+> DOM chunk node display panels as a latent thing still generated to the
+> DB and use it as a billboard panel that opens within the 3D gui when the
+> node is clicked (and still draggable etc). Then, alongside in tandem,
+> the main electron selenium sensor opens and scrolls to the chunk to be
+> the 'panel' based representation. I'm almost tempted to say that we
+> infill offline-saved pages with what we have traced when saving the page
+> source with our traced chunks (should saved offline page sources not
+> provide their full layout), or if internet is disabled, instead opening
+> the fully rendered scrollable page reconstructed from the scan trace,
+> seeing still the billboarded panel that we currently have as a more
+> 'main' panel within obsidian rather than in the UMAP projector. Also,
+> the fps on the current editor with so many pages is quite slow. Perhaps
+> a collapsed view of just the shadow DOM pages with unfolding expanding
+> views over clicks and retrievals could be implemented. It could also
+> correspond to showing the fine-grained retrieval results of full chunk
+> panels selectively only displaying the chunks live with the most recent
+> debounced retrieval query in the electron retrieval overlay. The thing
+> about the current panels as well (as you see opened) is that they aren't
+> interactive with the original electron page either, so bringing the
+> current shadow DOM panels over to the 3D GUI and keeping things wired to
+> the original electron browser, while applying *dynamic unfolding* over
+> the current patricia trie to show clicks and fine-grained-only retrieval
+> results. For unfolding, we'll keep it tracked with how many results have
+> been continuously scrolled through on the electron browser overlay. Make
+> sure the PRD gets TLC on this. Though, diff O(delta) streaming
+> throughout needs a lot more PRD too to see how close to the millisecond
+> level we can get from sensor-scanning in the electron browser, dedup-
+> vectorize-dedup-aggregate-vectorize, and projections through the async
+> batched queue of UMAP transforms.
+
+*`G-53` (draw pages, not chunks) and `G-54` (dynamic unfolding) come from
+the FPS sentence; `G-56` from "most recent debounced retrieval query";
+`G-57`/`G-58` from the billboard-and-browser-in-tandem passage;
+`G-59`..`G-62` from the offline-fallback passage, including the infill
+rule for a saved source that does not carry its layout; `G-63`/`G-64` from
+coarse-to-fine within the 256 pure-text window; `G-66` from "how close to
+the millisecond level"; `G-67` from "the async batched queue of UMAP
+transforms". "Make sure the PRD gets TLC on this" appears here for the
+second time.*
+
+### Retrieval is scrolled, and clicking scopes it
+
+> I'll also mention that continuous scrolling over ranked retrieval is
+> more appropriate than top-k, but top-k in click expansions is still
+> useful. Perhaps clicking is always linked with the query in the current
+> electron browser that was last interacted with and in-view. So, despite
+> global ranks, clicking a full shadow DOM node would be scoped to the
+> shadow DOM url, and then when the node is right-clicked, the scope to
+> global re-applies, and we have the scoping retrieval results also follow
+> the exact same mechanics of unfolding in the overlay. When I say
+> "unfolding" it's more of an unraveling over the chunk's singular
+> patricia trie path.
+
+*`G-69`, `G-70`, `G-71`, and the sharpening of `G-54`. The last sentence is
+the whole cost argument, and the reason `unfold` walks a path rather than
+a subtree: a path is O(depth), a subtree is O(everything beneath it).*
+
+### The order taken after that
+
+> Let's do the collapsed page view and unfolding
+
+> Let's do the retrieval overlay next
+
+> Wire the projector click to scope, then G-55 and G-56
+
+*`G-53`..`G-56`, then `G-63`, then `G-70` before `G-55`/`G-56`. Recorded
+because the ORDER was chosen by the user each time, not by the numbering.*
+
+### A defect report with no detail, and why it is kept
+
+> Seeing a lot of degradation in the GUI that wasn't there before. Please
+> see for yourself
+
+*Four regressions, every one mine, all introduced by the collapse to pages:
+the caption said "96 chunks" over 96 pages, every page drew at one size,
+the billboards were gone, and the overlay previews had become raw
+markdown. Kept verbatim because a report this general is the signal that a
+surface stopped being looked at, which is information the four individual
+fixes do not carry.*
+
+---
+
+### Addendum IV's own occasion
+
+The prompt that caused this file to be written. It is about method rather than
+the product, and it binds how the work is shown:
+
+> How should we work from our current design state with what we have in
+> our application in a way that I can see what improvements and updates
+> are being made, and in a way that you can also do just the same as you
+> build in the remaining design items, of which there are quite many from
+> my own prompt history from previous and current conversations. We should
+> likely organize all the remaining items and requirements and open
+> questions for both your own ability to see and effect change and for my
+> ability to confirm on my side, as well as for the open design items per
+> the interpretations of my original prompts, and very carefully so tested
+> against what is currently recorded as design features. Please account
+> for the totality of the contexts in which updates to design items are
+> made and persist throughout.
+
+*"tested against what is currently recorded as design features" is the
+operative clause, and it cannot be met while the record stops six days
+short. It produced `build_sweep/design_state.py` (a computed status
+column, because the maintained one drifted sixteen rows in a week), the
+`Confirm` state for work measured but not yet seen by a person, and this
+addendum.*
 
 ---
 

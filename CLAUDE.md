@@ -166,9 +166,12 @@ denominator is what this component is answerable for.
 ## Where things are
 
 - `docs/AFFINE_MAP_GOAL.md` — the binding goal, verbatim, plus the metric theory.
-- `docs/PLUGIN_GOAL.md` — the plugin's binding goal, verbatim: two statements,
-  the second (2026-09-12) overriding the first on the projector's embedding
-  space, on deduplication, and on the panel types.
+- `docs/PLUGIN_GOAL.md` — the plugin's binding goal, verbatim: the opening
+  statement plus four dated addenda. II (2026-09-12) overrides I on the
+  projector's embedding space, on deduplication and on the panel types; III
+  (2026-09-13) poses the S²/S³ colour question and leaves it OPEN; IV
+  (2026-09-13/14) adds the second chunking stage, the Electron browser cell,
+  the retrieval overlay and the codebase corpus.
 - `docs/NOTEBOOK_PANEL_DESIGN.md` — the notebook kernel panel, designed
   against `P-N`/`P-M` before code, per Addendum II's "nail it down
   correctly". Decides outputs-in-markdown over an `.ipynb` sidecar, and
