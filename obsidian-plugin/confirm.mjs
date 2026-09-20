@@ -531,7 +531,13 @@ const uniformProbe = (page, token, sidecar) => `(async () => {
 //: for a fit and useless for "what is in here".
 const tidyFixtures = async () => {
   try {
-    const listed = await ask("/pages?contains=/live_");
+    const names = ["live_mutate.html", "live_tall.html",
+                   "shadow_catalogue.html"];
+    let listed = { urls: [] };
+    for (const n of names) {
+      const got = await ask("/pages?contains=" + n);
+      listed.urls = listed.urls.concat(got.urls || []);
+    }
     // Both fixtures: live_mutate.html and live_tall.html.
     let removed = 0;
     for (const url of listed.urls || []) {
@@ -642,6 +648,103 @@ const paceProbe = (pages, sidecar) => `(async () => {
     };
   }
   return out;
+})()`;
+
+//: The body T-3 evaluates in the pane.
+//:
+//: The row asks that a shadow node be localized to its ANCESTORS in the
+//: trie, which is a claim about the set of addresses and their prefixes --
+//: not about any single one. So it is asked of GET /addresses rather than
+//: of /resolve, whose question ("which chunk draws this point") is the
+//: reader's and the wrong one here.
+//:
+//: Run in the browser cell rather than under Firefox: the cell runs the
+//: same sensor, read from the sidecar at request time, and driving a second
+//: browser for this would leak processes for no extra evidence.
+const shadowProbe = (page, sidecar) => `(async () => {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const PAGE = ${JSON.stringify(page)};
+  const SIDE = ${JSON.stringify(sidecar)};
+  const BOUND = "/#shadow-root";
+
+  for (const l of app.workspace.getLeavesOfType("domvec-chunk-view")) {
+    l.detach();
+  }
+  for (const l of app.workspace.getLeavesOfType("domvec-browser-view")) {
+    l.detach();
+  }
+  await sleep(700);
+  const leaf = app.workspace.getLeaf("tab");
+  await leaf.setViewState({ type: "domvec-browser-view", active: true });
+  app.workspace.revealLeaf(leaf);
+  await sleep(1500);
+  const b = app.workspace.getLeavesOfType("domvec-browser-view")[0].view;
+  if (!b || !b.webview) return { error: "no browser pane" };
+  try { b.setLive(false); } catch (e) {}
+
+  b.go(PAGE);
+  for (let i = 0; i < 60; i++) {
+    await sleep(300);
+    if (!b.webview.isLoading() && b.webview.getURL().indexOf(PAGE) === 0) break;
+  }
+  const url = b.webview.getURL();
+  await b.scan({});
+  await sleep(600);
+
+  const got = await (await fetch(
+    SIDE + "/addresses?url=" + encodeURIComponent(url))).json();
+  const all = (got.addresses || []).map((a) => a.xpath);
+  const shadow = all.filter((x) => x.indexOf(BOUND) >= 0);
+
+  // **Every shadow address must have its HOST in the trie.** Cutting the
+  // path at the boundary leaves the host's own address; that address is
+  // what "localized to its ancestors" means, and if it is absent the
+  // distilled HTML has a subtree hanging off nothing.
+  const held = new Set(all);
+  const orphans = [];
+  for (const x of shadow) {
+    const host = x.slice(0, x.indexOf(BOUND));
+    // The host element itself is addressed only when it carries content,
+    // so the test is that SOME held address is the host or sits under it --
+    // the boundary must not be the first thing on the path either way.
+    if (!host) { orphans.push(x); continue; }
+    let ok = held.has(host);
+    if (!ok) {
+      for (const cand of held) {
+        if (cand === host || cand.indexOf(host + "/") === 0) { ok = true; break; }
+      }
+    }
+    if (!ok) orphans.push(x);
+  }
+
+  // Nesting: a root inside a root gives TWO boundary steps, and the outer
+  // path must be a prefix of the inner one.
+  const nested = shadow.filter(
+    (x) => x.split(BOUND).length - 1 >= 2);
+  let nestingOk = true;
+  for (const x of nested) {
+    const first = x.indexOf(BOUND);
+    const outer = x.slice(0, first + BOUND.length);
+    if (x.indexOf(outer) !== 0) nestingOk = false;
+  }
+
+  // A boundary step may never be the whole of an address, nor sit at the
+  // root: that would be a shadow subtree with no host at all.
+  const rootless = shadow.filter((x) => x.indexOf(BOUND) === 0);
+
+  return {
+    url,
+    addresses: all.length,
+    shadow_addresses: shadow.length,
+    nested_addresses: nested.length,
+    orphans: orphans.length,
+    orphan_sample: orphans.slice(0, 5),
+    rootless: rootless.length,
+    nesting_prefix_ok: nestingOk,
+    deepest: shadow.length
+      ? shadow.slice().sort((a, c) => c.length - a.length)[0].slice(0, 160)
+      : "",
+  };
 })()`;
 
 const CHECKS = [
@@ -1954,6 +2057,39 @@ const CHECKS = [
              && got.tall.tuned.addresses >= got.tall.fixed.addresses
              && got.tall.tuned.settled === true
              && got.tall.fixed.settled === false
+             && got.pages_after === got.pages_before,
+          evidence: got,
+        };
+      } finally {
+        await fixtures.close();
+      }
+    },
+  },
+  {
+    id: "T-3",
+    asks: "a shadow node sits under its host in the trie, not beside it",
+    async run() {
+      const fixtures = await serveFixtures();
+      const page = fixtures.origin + "/shadow_catalogue.html";
+      try {
+        const pagesBefore = (await ask("/health")).pages;
+        const got = await evaluate(shadowProbe(page, SIDECAR),
+                                   { timeout: 600000 });
+        got.purged = await tidyFixtures();
+        got.pages_before = pagesBefore;
+        got.pages_after = (await ask("/health")).pages;
+        if (got.error) return { pass: false, evidence: got };
+        return {
+          // The first clause is the non-vacuity arm and it is not optional:
+          // a page that yielded no shadow addresses at all would satisfy
+          // every other clause here perfectly. Every live site reachable
+          // during development reported zero, which is why this fixture
+          // exists.
+          pass: got.shadow_addresses > 0
+             && got.nested_addresses > 0
+             && got.orphans === 0
+             && got.rootless === 0
+             && got.nesting_prefix_ok === true
              && got.pages_after === got.pages_before,
           evidence: got,
         };

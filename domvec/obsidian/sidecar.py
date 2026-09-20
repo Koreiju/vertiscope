@@ -1104,6 +1104,40 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(200, {"urls": urls, "n": len(urls)})
             return
 
+        if segments[0] == "addresses":
+            # The xpaths one page holds, for a claim about STRUCTURE.
+            #
+            # `/resolve` answers "which chunk draws this point", which is the
+            # reader's question and the wrong one here: a structural claim --
+            # that a node inside a shadow root sits under its host in the
+            # trie -- is about the set of addresses and their prefixes, not
+            # about any one of them. `/pages` is its sibling for the same
+            # reason.
+            #
+            # Read-only, like every other GET. `?contains=` filters by
+            # substring, which is how a caller asks only for the shadow ones.
+            query = parse_qs(parts.query)
+            url = (query.get("url") or [""])[0]
+            if not url:
+                self._send(400, {"error": "no url"})
+                return
+            needle = (query.get("contains") or [""])[0]
+            limit = int((query.get("limit") or ["4000"])[0])
+            rows = self.workspace.store._rows(
+                "MATCH (a:Address {url: $u}) RETURN a.xpath, a.tag "
+                "ORDER BY a.xpath", {"u": url})
+            out = []
+            for xpath, tag in rows:
+                if not xpath:
+                    continue
+                if needle and needle not in xpath:
+                    continue
+                out.append({"xpath": xpath, "tag": tag or ""})
+                if len(out) >= limit:
+                    break
+            self._send(200, {"url": url, "n": len(out), "addresses": out})
+            return
+
         if segments[0] == "links":
             # Where a link to each page should land. The gesture needs the
             # SAME cid the export uses, or the two would write different
