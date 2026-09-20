@@ -1239,8 +1239,26 @@ def unfold(workspace, url: str, path: str = "") -> Dict:
             node["image"] = picture
         nodes.append(node)
 
+    # The node being unfolded is the HUB of what comes back, and without it
+    # there is nothing for a containment edge to attach to (`G-6`).
+    #
+    # `_edges_among` alone cannot draw one at this step, and that is a
+    # property of the trie rather than a bug in it: containment runs parent
+    # to child, the branches are disjoint subtrees, so every edge it finds
+    # lies INSIDE one branch and is dropped as a self-edge. Measured on RFC
+    # 9110: 1,072 containment edges on the page, 662 with both endpoints
+    # surviving, and **0** crossing two branches. The star from the parent to
+    # each branch is the containment this step actually reveals, and it is
+    # the 30 edges over 31 nodes the PRD recorded before the parent started
+    # being removed.
+    parent_id = ("page:" + url if not prefix
+                 else "path:%s#/%s" % (url, "/".join(prefix)))
+    edges = [{"source": parent_id, "target": info["cid"]} for info in meta]
+    edges.extend(_edges_among(workspace, url, meta))
+
     return {"nodes": nodes,
-            "edges": _edges_among(workspace, url, meta),
+            "edges": edges,
+            "parent": parent_id,
             "url": url,
             "path": "/" + "/".join(_segments(path)) if prefix else "",
             "depth": depth, "branches": len(branches), "leaves": len(leaves)}

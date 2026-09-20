@@ -274,6 +274,13 @@ export class GraphView extends ItemView {
    */
   private static textures = new Map<string, string | null>();
   private graph: ForceGraph3DInstance | null = null;
+  //: The caption is written on load and the picture changes afterwards.
+  //  Unfolding took 96 nodes to 122 and the bar still said "96 pages", which
+  //  is the one number on screen a reader uses to check the pane against the
+  //  store. Keep the element and the invariant half of the text so the
+  //  counts can be restated whenever the graph is mutated.
+  private statusEl: HTMLElement | null = null;
+  private captionTail = "";
   /** Which embedding space to ask the fit for: "" for the Euclidean one,
    *  "S3" for the quaternion metric (`G-18`). Empty by default, on the
    *  measurement recorded in `layout.py`. */
@@ -395,9 +402,10 @@ export class GraphView extends ItemView {
       const unit = layout.level === "page"
         ? `${layout.n} pages · ${layout.chunks ?? "?"} chunks`
         : `${layout.n} chunks`;
-      status.setText(
-        `${unit} · ${(layout.spaces ?? []).join(" + ")} · ${fit} · ` +
-        `${colour}${pictures}`);
+      this.statusEl = status;
+      this.captionTail =
+        `${(layout.spaces ?? []).join(" + ")} · ${fit} · ${colour}${pictures}`;
+      status.setText(`${unit} · ${this.captionTail}`);
       } catch (err) {
         // Say the count, which is the one thing a reader needs to know the
         // pane is alive, and name the failure rather than swallowing it.
@@ -542,6 +550,23 @@ export class GraphView extends ItemView {
    * never resolved and never drawn. Looking the nodes up here is what makes
    * a late edge behave like one that was there at boot.
    */
+  /**
+   * Say what is on screen NOW, after the picture has been mutated.
+   *
+   * The load-time caption describes the fit, which does not change; the
+   * counts do, on every unfold, every hit list and every live capture. A bar
+   * that keeps reporting the load-time numbers is worse than one with no
+   * numbers, because it is the thing a reader checks the pane against.
+   */
+  private sayCounts(): void {
+    if (!this.statusEl || !this.graph) return;
+    const d: any = this.graph.graphData();
+    const opened = d.nodes.filter((n: any) => n.unfolded).length;
+    const parts = [`${d.nodes.length} nodes`, `${d.links.length} links`];
+    if (opened) parts.push(`${opened} opened`);
+    this.statusEl.setText(`${parts.join(" · ")} · ${this.captionTail}`);
+  }
+
   private addEdges(data: any, edges?: { source: string; target: string }[]) {
     if (!edges || !edges.length) return 0;
     const byId = new Map<string, any>(data.nodes.map((n: any) => [n.id, n]));
@@ -587,29 +612,47 @@ export class GraphView extends ItemView {
     if (!nodes.length) return;
 
     const fresh: any = this.graph.graphData();
-    // The page node goes, because its contents are now on screen -- the same
-    // rule `unfoldNode` follows, for the same reason.
+    // The page node STAYS, and for the same reason `unfoldNode` keeps its
+    // hub: it is what the hits hang from. Removing it left the matching
+    // chunks as an unconnected scatter with no way to see which page they
+    // came out of.
     const pageId = "page:" + url;
-    fresh.nodes = fresh.nodes.filter((n: any) => n.id !== pageId);
-    fresh.links = fresh.links.filter(
-      (l: any) => (l.source?.id ?? l.source) !== pageId
-               && (l.target?.id ?? l.target) !== pageId);
+    const hub = fresh.nodes.find((n: any) => n.id === pageId);
+    if (hub) hub.unfolded = true;
     const have = new Set(fresh.nodes.map((n: any) => n.id));
+    const drawn: string[] = [];
     for (const node of nodes) {
       if (!node || !node.cid || have.has(node.cid)) continue;
       fresh.nodes.push(this.nodeFrom(node));
+      drawn.push(node.cid);
     }
-    this.addEdges(fresh, placed?.edges as { source: string; target: string }[]);
+    const star = hub
+      ? drawn.map((cid) => ({ source: pageId, target: cid }))
+      : [];
+    this.addEdges(fresh, [
+      ...star,
+      ...((placed?.edges as { source: string; target: string }[]) || []),
+    ]);
     this.graph.graphData(fresh);
     this.graph.d3ReheatSimulation();
+    this.sayCounts();
   }
 
   /**
-   * Unravel one node, replacing it with what is under it (`G-54`).
+   * Unravel one node into what is under it (`G-54`), KEEPING it (`G-6`).
    *
-   * The clicked node is REMOVED, because it no longer stands for anything a
-   * reader cannot see -- leaving it would draw a page on top of its own
-   * contents and make the count in the bar a lie.
+   * It used to be removed, on the reasoning that it no longer stood for
+   * anything a reader could not see. That reasoning cost the picture every
+   * edge it had. Containment runs parent to child and the branches an
+   * unfolding returns are disjoint subtrees, so the only containment edges
+   * this step reveals are the ones from the parent to each branch -- and
+   * removing the parent deletes all of them. Measured on RFC 9110 with the
+   * parent gone: 26 nodes, **0 edges**, against the 31 and 30 the PRD
+   * recorded when it was still there.
+   *
+   * So the unfolded node stays as the HUB of what it opened into. It is
+   * marked `unfolded` so it draws as an opened container rather than as a
+   * page still claiming to stand for its contents.
    */
   private async unfoldNode(node: any): Promise<void> {
     if (!this.graph || !node || !node.url) return;
@@ -618,21 +661,35 @@ export class GraphView extends ItemView {
     if (!nodes.length) return;
 
     const data: any = this.graph.graphData();
-    data.nodes = data.nodes.filter((n: any) => n.id !== node.id);
-    // Links touching the node that is going away go with it. `forceLink`
-    // resolved its endpoints to objects at boot, so a link left pointing at a
-    // removed node keeps it alive and draws to nowhere.
-    data.links = data.links.filter(
-      (l: any) => (l.source?.id ?? l.source) !== node.id
-               && (l.target?.id ?? l.target) !== node.id);
+    const hub = data.nodes.find((n: any) => n.id === node.id);
     const known = new Set(data.nodes.map((n: any) => n.id));
+    const opened: any[] = [];
     for (const incoming of nodes) {
       if (!incoming || !incoming.cid || known.has(incoming.cid)) continue;
-      data.nodes.push(this.nodeFrom(incoming));
+      const built = this.nodeFrom(incoming);
+      data.nodes.push(built);
+      opened.push(built);
+    }
+    // An opened container is subordinate to what it opened into. A page node
+    // is sized by the chunks it stands for, so RFC 9110 arrived at `members`
+    // 1,173 and drew as a sphere that swallowed all 26 of its own branches.
+    // Once it is open it no longer stands for them -- they are on screen --
+    // so it shrinks to the smallest thing it revealed and becomes a hub
+    // rather than a lid.
+    if (hub) {
+      hub.unfolded = true;
+      if (hub.valFull === undefined) hub.valFull = hub.val;
+      const smallest = opened.reduce(
+        (m: number, n: any) => Math.min(m, n.val ?? 1), Infinity);
+      hub.val = Number.isFinite(smallest) ? Math.max(smallest, 1) : 1;
+      // Its picture goes with its size: a billboard is drawn at the panel
+      // edge, not at `val`, so leaving the image would leave the lid.
+      delete hub.image;
     }
     this.addEdges(data, got?.edges);
     this.graph.graphData(data);
     this.graph.d3ReheatSimulation();
+    this.sayCounts();
   }
 
   /**
@@ -690,6 +747,7 @@ export class GraphView extends ItemView {
     // force caused.
     this.graph.graphData(data);
     this.graph.d3ReheatSimulation();
+    this.sayCounts();
     return out;
   }
 
