@@ -47,8 +47,21 @@ const inPane = (body) => evaluate(`(async () => {
   ${body}
 })()`);
 
+//: A sidecar that goes away must not hang the suite.
+//
+//: `fetch` has no default timeout, so a request issued just before the
+//: sidecar restarted waited forever -- the run sat on one check for 39
+//: minutes with the server already back up and answering in 9ms. A harness
+//: that can hang is a harness nobody trusts to leave running.
+//:
+//: Generous rather than tight: a cold chunk-level fit is 95 seconds over
+//: this corpus, and a timeout shorter than the work is just a different
+//: way to report a failure that is not there.
+const ASK_TIMEOUT_MS = Number(process.env.DOMVEC_ASK_TIMEOUT_MS || 300000);
+
 const ask = async (path) => {
-  const res = await fetch(`${SIDECAR}${path}`);
+  const res = await fetch(`${SIDECAR}${path}`,
+                          { signal: AbortSignal.timeout(ASK_TIMEOUT_MS) });
   if (!res.ok) throw new Error(`${path} -> ${res.status}`);
   return res.json();
 };
@@ -154,6 +167,7 @@ const CHECKS = [
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url: biggest.url, path: "" }),
+        signal: AbortSignal.timeout(ASK_TIMEOUT_MS),
       });
       const d = await res.json();
       // WHERE they land, not only how many. D-17 put every placed node on a
@@ -732,11 +746,27 @@ const CHECKS = [
         await sleep(400);
         const page = v.graph.graphData().nodes
           .filter(n => n.url).sort((a, b) => (b.members||0) - (a.members||0))[0];
-        await v.unfoldNode(page);
-        await sleep(1200);
-        const chunk = v.graph.graphData().nodes
-          .find(n => n.level === "chunk" && n.id && !n.unfolded);
-        if (!chunk) return { error: "the unfold produced no chunk node" };
+        // DESCEND until a chunk appears, the way a reader does.
+        //
+        // One step does not reach one. An unravelling shows BRANCHES, and a
+        // large page's first step is all branches -- ar.wikipedia's 801
+        // chunks open as five path nodes. This check assumed the first step
+        // produced a leaf and passed only while the biggest page happened
+        // to be a shallow one; D-19 changed which page that is.
+        let chunk = null;
+        let hops = 0;
+        let open_ = page;
+        for (; hops < 6 && open_; hops++) {
+          await v.unfoldNode(open_);
+          await sleep(900);
+          const nodes = v.graph.graphData().nodes;
+          chunk = nodes.find(n => n.level === "chunk" && n.id && !n.unfolded);
+          if (chunk) break;
+          open_ = nodes.filter(n => n.level === "path" && !n.unfolded)
+            .sort((a, b) => (b.members || 0) - (a.members || 0))[0];
+        }
+        if (!chunk) return { error: "no chunk node after descending",
+                             hops, page: String(page.url).slice(0, 48) };
 
         const handler = v.graph.onNodeClick();
         handler(chunk);
@@ -792,6 +822,7 @@ const CHECKS = [
 
         return {
           node: String(chunk.id).slice(0, 24),
+          hops_to_a_chunk: hops + 1,
           lines, anchored_off_by_px: offBy,
           in_canvas: !!(layer && layer.parentElement
                         && layer.parentElement.classList.contains("domvec-graph-canvas")),
@@ -897,6 +928,15 @@ const CHECKS = [
         const cids = (d.hits || []).map(h => h.cid);
         if (!cids.length) return { error: "no scoped hits for that page", url,
                                    asked: words.slice(0, 5).join(" ") };
+        // Ask the sidecar DIRECTLY first, so a failure says which half broke.
+        // showHits returns early on two different conditions -- every hit
+        // already drawn, or the fit placing none of them -- and reporting
+        // only "0 drawn" cannot tell them apart.
+        const already = v.graph.graphData().nodes.filter(
+          n => cids.includes(n.id)).length;
+        const placed = await v.sidecar.place(cids);
+        const placedCount = (placed && placed.nodes || []).length;
+        const unplaced = (placed && placed.unplaced || []).length;
         await v.showHits(url, cids);
         await sleep(1200);
         const after = v.graph.graphData();
@@ -904,6 +944,8 @@ const CHECKS = [
         const hub = after.nodes.find(n => n.id === "page:" + url);
         return {
           page: url.slice(0, 50), scoped_hits: cids.length,
+          already_drawn: already, placed_by_sidecar: placedCount,
+          unplaced: unplaced, place_why: (placed && placed.why) || null,
           nodes_before: before, nodes_after: after.nodes.length,
           hits_drawn: drawn,
           hub_kept: !!hub, hub_marked_open: !!(hub && hub.unfolded),
