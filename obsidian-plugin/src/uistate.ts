@@ -1,0 +1,244 @@
+/**
+ * The interface, as a data structure.
+ *
+ * **Why this exists.** Every live check in `confirm.mjs` read JavaScript
+ * properties: `graphData().nodes.length`, `n.fitX`, `el.style.left`. Those
+ * describe what the backend INTENDED. They passed -- G-4 "nodes are
+ * discernible, not a clump", G-21 "nodes never overlap", G-5 "every node is
+ * on screen" -- while the pane showed 558 nodes piled into the bottom-left
+ * quadrant with a fifth of them off the canvas entirely. A fit can be
+ * perfectly spread in fit space and still project to a blob.
+ *
+ * So the plugin reports its own surfaces, in the terms a READER meets them:
+ * screen pixels, visibility, and what is actually drawn. It lives in the
+ * plugin rather than in the harness for three reasons:
+ *
+ *   * the views know their own state, and the harness would have to guess
+ *     at private fields to reconstruct it;
+ *   * it stays version-controlled beside the UI it describes, so a renamed
+ *     field breaks the build rather than silently reporting `undefined`;
+ *   * it is ONE round trip. The harness was making a dozen `evaluate` calls
+ *     per check and paying for each one.
+ *
+ * Exposed on `window.__domvecUI` so anything that can reach the renderer --
+ * `cdp.mjs`, `confirm.mjs`, an MCP server on the debug port -- can ask the
+ * same question and get the same answer.
+ */
+
+import type { App } from "obsidian";
+
+export const GRAPH_VIEW = "domvec-graph-view";
+export const BROWSER_VIEW = "domvec-browser-view";
+export const CHUNK_VIEW = "domvec-chunk-view";
+export const TERMINAL_VIEW = "domvec-terminal-view";
+
+/** Is this element actually drawn, and where? */
+function drawn(el: HTMLElement | null | undefined) {
+  if (!el) return { exists: false as const };
+  const r = el.getBoundingClientRect();
+  const cs = getComputedStyle(el);
+  const win = el.ownerDocument?.defaultView;
+  const vw = win?.innerWidth ?? 0;
+  const vh = win?.innerHeight ?? 0;
+  return {
+    exists: true as const,
+    // Rounded: a sub-pixel difference is not a fact anyone is asking about,
+    // and it makes two snapshots comparable.
+    rect: [Math.round(r.left), Math.round(r.top),
+           Math.round(r.width), Math.round(r.height)] as number[],
+    display: cs.display,
+    visibility: cs.visibility,
+    opacity: Number(cs.opacity),
+    // **Drawn is not the same as present.** A leaf in a background tab has
+    // a box of 0x0; a detached one has none at all. Both read as "exists"
+    // to anything looking at the object graph.
+    drawn: r.width > 1 && r.height > 1 &&
+           cs.display !== "none" && cs.visibility !== "hidden" &&
+           Number(cs.opacity) > 0.01 &&
+           r.right > 0 && r.bottom > 0 && r.left < vw && r.top < vh,
+  };
+}
+
+/**
+ * The projector, measured where the reader sees it: SCREEN PIXELS.
+ *
+ * `fitX/fitY/fitZ` is the fit's own space and says nothing about the
+ * picture; the renderer relaxes with forces into `x/y/z` and then projects
+ * through a camera. This reports the end of that pipeline, and keeps the
+ * fit-space drift beside it so the two can be told apart -- a clump whose
+ * drift is zero is a bad FIT, and a clump whose drift is large is a bad
+ * RELAXATION, and they need different fixes.
+ */
+function graphState(view: any) {
+  const g = view?.graph;
+  if (!g) return { open: true, fitted: false };
+
+  const nodes = g.graphData().nodes as any[];
+  const links = g.graphData().links as any[];
+  const w = g.width(), h = g.height();
+  const rel = g.nodeRelSize();
+
+  const pts: { x: number; y: number; on: boolean; r: number }[] = [];
+  let noCoords = 0;
+  for (const n of nodes) {
+    let p: any = null;
+    try { p = g.graph2ScreenCoords(n.x, n.y, n.z); } catch { /* not projectable */ }
+    if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.y)) { noCoords++; continue; }
+    // The drawn radius, from the application's own sizing. Reimplementing it
+    // is how G-21 once invented 49 overlapping pairs.
+    const sphere = Math.cbrt(Math.max(n.val ?? 1, 1e-9)) * rel;
+    pts.push({
+      x: p.x, y: p.y,
+      on: p.x >= 0 && p.y >= 0 && p.x < w && p.y < h,
+      r: (n.image && n.image.src) ? sphere * 1.75 : sphere,
+    });
+  }
+
+  const on = pts.filter((p) => p.on);
+  const xs = on.map((p) => p.x), ys = on.map((p) => p.y);
+  const box = on.length
+    ? [Math.round(Math.min(...xs)), Math.round(Math.min(...ys)),
+       Math.round(Math.max(...xs)), Math.round(Math.max(...ys))]
+    : null;
+
+  // Nearest neighbour in pixels, over a sample. O(n^2) is fine at 400 and
+  // the median is what tells a cloud from a clump.
+  const sample = on.slice(0, 400);
+  const gaps: number[] = [];
+  let touching = 0;
+  for (let i = 0; i < sample.length; i++) {
+    let best = Infinity;
+    for (let j = 0; j < sample.length; j++) {
+      if (i === j) continue;
+      const d = Math.hypot(sample[i].x - sample[j].x, sample[i].y - sample[j].y);
+      if (d < best) best = d;
+    }
+    if (Number.isFinite(best)) {
+      gaps.push(best);
+      // Closer than the sum of their radii is an overlap a reader sees as
+      // one object.
+      if (best < sample[i].r) touching++;
+    }
+  }
+  gaps.sort((a, b) => a - b);
+  const at = (q: number) => gaps.length
+    ? Math.round(gaps[Math.min(gaps.length - 1, Math.floor(gaps.length * q))] * 10) / 10
+    : null;
+
+  const drift: number[] = [];
+  for (const n of nodes) {
+    if (n.fitX === undefined) continue;
+    drift.push(Math.hypot(n.x - n.fitX, n.y - n.fitY, n.z - n.fitZ));
+  }
+  drift.sort((a, b) => a - b);
+
+  const status = view.containerEl?.querySelector(".domvec-graph-status");
+  return {
+    open: true,
+    fitted: true,
+    canvas: [w, h],
+    nodes: nodes.length,
+    links: links.length,
+    on_screen: on.length,
+    off_screen: pts.length - on.length,
+    unprojectable: noCoords,
+    // The cloud's bounding box as a share of the canvas. A picture using a
+    // third of its pane is not "normalized so nodes are discernible".
+    spread_pct: box
+      ? Math.round(((box[2] - box[0]) * (box[3] - box[1])) / (w * h) * 1000) / 10
+      : 0,
+    bbox: box,
+    gap_px_p10: at(0.10),
+    gap_px_p50: at(0.50),
+    overlapping: touching,
+    sampled: sample.length,
+    // Zero drift with a clumped picture means the FIT is the clump.
+    fit_drift_p50: drift.length ? Math.round(drift[Math.floor(drift.length / 2)]) : null,
+    fit_drift_max: drift.length ? Math.round(drift[drift.length - 1]) : null,
+    status: status ? (status.textContent || "").trim() : null,
+    billboards: view.containerEl
+      ? view.containerEl.querySelectorAll(".domvec-billboard").length : 0,
+  };
+}
+
+function browserState(view: any) {
+  let url = "", guest: number[] | null = null;
+  try { url = view.webview.getURL(); } catch { url = "not ready"; }
+  return {
+    open: true,
+    url,
+    live: !!view.live,
+    face: view.markdownWrap && view.markdownWrap.style.display !== "none"
+      ? "markdown" : "browser",
+    webview: drawn(view.webview),
+    guest_viewport: guest,
+    last_scan: view.lastScan || null,
+    status: view.status ? (view.status.textContent || "").trim() : null,
+  };
+}
+
+function chunkPanelState(view: any) {
+  const root = view?.containerEl as HTMLElement | undefined;
+  const host = root?.querySelector(".domvec-html-host") as any;
+  const sr = host?.shadowRoot;
+  const inner = sr?.querySelector(".domvec-html");
+  const pre = root?.querySelector(".domvec-md");
+  return {
+    open: true,
+    cid: view?.cid || "",
+    // Which FACE is drawn. "The panel updated" does not say which.
+    surface: host ? "interactive" : (pre ? "markdown" : "none"),
+    // Reached through the plugin's OWN shadow root, which is open. The
+    // chunk's text is not in `containerEl.textContent` at all.
+    rendered_chars: inner
+      ? (inner.textContent || "").trim().length
+      : (pre ? (pre.textContent || "").trim().length : 0),
+    host: drawn(host),
+  };
+}
+
+/** Everything a reader could be looking at, in one object. */
+export function uiState(app: App) {
+  const leavesOf = (type: string) => app.workspace.getLeavesOfType(type);
+  const paneOf = (type: string) => {
+    const leaf: any = leavesOf(type)[0];
+    if (!leaf) return { open: false, deferred: false };
+    return {
+      open: true,
+      // A deferred leaf hands back a STUB with none of the view's methods.
+      // Nine checks once failed with "cannot read graphData of undefined"
+      // and it was this, not a broken projector.
+      deferred: !!leaf.isDeferred,
+      active: app.workspace.getActiveViewOfType?.(leaf.view?.constructor) === leaf.view,
+      container: drawn(leaf.view?.containerEl),
+    };
+  };
+
+  const out: Record<string, any> = {
+    at: Date.now(),
+    window: [window.innerWidth, window.innerHeight],
+    panes: {
+      graph: paneOf(GRAPH_VIEW),
+      browser: paneOf(BROWSER_VIEW),
+      chunk: paneOf(CHUNK_VIEW),
+      terminal: paneOf(TERMINAL_VIEW),
+    },
+  };
+
+  const g: any = leavesOf(GRAPH_VIEW)[0];
+  if (g && !g.isDeferred && g.view) {
+    try { out.graph = graphState(g.view); }
+    catch (e) { out.graph = { open: true, error: String(e).slice(0, 160) }; }
+  }
+  const b: any = leavesOf(BROWSER_VIEW)[0];
+  if (b && !b.isDeferred && b.view?.webview) {
+    try { out.browser = browserState(b.view); }
+    catch (e) { out.browser = { open: true, error: String(e).slice(0, 160) }; }
+  }
+  const c: any = leavesOf(CHUNK_VIEW)[0];
+  if (c && !c.isDeferred && c.view) {
+    try { out.chunk = chunkPanelState(c.view); }
+    catch (e) { out.chunk = { open: true, error: String(e).slice(0, 160) }; }
+  }
+  return out;
+}

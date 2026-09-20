@@ -31,6 +31,7 @@ import {
 } from "obsidian";
 
 import { CHUNK_VIEW, ChunkView } from "./chunkview";
+import { installHarness } from "./harness";
 import { TERMINAL_VIEW, TerminalView } from "./terminal";
 import {
   RunHost, RunRequest, livePreviewRunButtons, readingViewRunButtons,
@@ -60,6 +61,17 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
   private surfaces = new Set<ChunkSurface>();
 
   async onload() {
+
+    // **The harness: one wrapper over the UI layer (`D-24`).**
+    //
+    // `__domvec.ui()` is the interface as a data structure in SCREEN
+    // pixels; `__domvec.trace` captures every sidecar call at the fetch
+    // boundary; `__domvec.act()` runs a gesture through the application's
+    // own paths and returns the UI before, the UI after, and the backend
+    // work it caused. The checks used to read JavaScript properties, which
+    // is how three of them passed while the pane showed a clump.
+    installHarness(this.app, () => this.settings.sidecar);
+
     this.settings = Object.assign({}, DEFAULTS, await this.loadData());
     this.sidecar = new Sidecar(() => this.settings.sidecar);
     this.links = new VaultLinks(this.app, this.sidecar);
