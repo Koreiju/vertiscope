@@ -622,7 +622,7 @@ Obsidian's CSS variables reaching in.
 |---|---|---|
 | R-E1 | "equivalent-dimensional pre-UMAP concatenations of the frequency vectors to the same dimensionality as the semantic ones, and then a final-stage concatenated UMAP with equal information dimensions" | Done |
 | R-E2 | "some HSV dimensions as well to the UMAP to make it 6D" | Done |
-| R-E3 | "Image and media billboards for distilled HTML" / "images should show in the 3D viewer" | **Partial** — 187/253 |
+| R-E3 | "Image and media billboards for distilled HTML" / "images should show in the 3D viewer" | **Done — seen live 2026-09-19** — `G-15` (media present in the projector) and `G-21` (a billboard is COLLIDED as a panel, half-diagonal, not as a sphere — sizing them as spheres left 96 overlapping pairs) |
 | R-E4 | "For each 3D node … when I click, I should only see the chunk itself as either structured markdown or interactive HTML" | Done |
 | R-E5 | "3D projector has no viewable nodes" — the view must show its nodes | Done — **re-broken and re-fixed**, see R-J4 |
 
@@ -678,7 +678,7 @@ until the user says which of those two directions matters.
 | # | Requirement | Status |
 |---|---|---|
 | R-G1 | "Selenium navigations ported from interactions with the shadow DOM distilled in its Obsidian form" | Done |
-| R-G2 | "so the user scrolls and interacts in Obsidian while the Selenium remote browser does the real scanning and endpoint interactions" | **Partial** — no scroll |
+| R-G2 | "so the user scrolls and interacts in Obsidian while the Selenium remote browser does the real scanning" | **Superseded** — answered the other way and better: the reader scrolls and interacts in a browser that is INSIDE Obsidian, and the same surface does the scanning (`G-47`, `P-B2` — `live_capture_on` true while navigating). There is no remote browser to drive, which removes the round trip this row was designing around |
 | R-G3 | "or the graph RAG database purely when offline" | Done |
 
 **R-G1** is the one write path in the bridge and it is off by default, behind
@@ -749,10 +749,10 @@ anything discernable."*
 
 | id | requirement | status |
 |---|---|---|
-| R-J1 | Adjacent nodes must be visually separable: the **median** nearest-neighbour distance is at least one rendered node diameter | **Open** — measured at 0.037x |
+| R-J1 | Adjacent nodes must be **visually separable**: the median nearest-neighbour distance is at least one rendered node diameter | **Done — seen live 2026-09-20** (`confirm.mjs`). Measured on the drawn picture: median gap **86.25** against a median diameter of 66.01, **ratio 1.31**. And the number underneath it: **0.86 before collision** — the FIT alone does not satisfy this row, the collider does, which is what `G-20`/`G-21` exist for and had never been scored against this criterion. Measuring `fitX/fitY/fitZ` instead reports 0.86 and reads as a failure of the picture a reader never sees |
 | R-J3 | The tightest crowding is duplicate content, not projection, and is answerable to `duplicate_chunks` — not to a spatial fix | **Open** |
 | R-J4 | The camera frames the cloud from the DATA, never from node radius | Done — 0% → 100% of nodes on screen |
-| R-J2 | Node size follows the layout's real local density, not an assumed uniform spacing | **Open** |
+| R-J2 | Node size follows the layout's **real local density**, not an assumed uniform spacing | **Partly** — size VARIES rather than being uniform (spread 90.2 across the page nodes, `confirm.mjs` under `R-J1`), and that much is the defect this row was written against. But it varies by CONTENT — `val` is the chunk count a node stands for — not by the density around it. A node in a crowded region and a node alone in space draw the same size for the same content, so the second half of the row is not built |
 
 **R-J1 — measured, and it is not one bug but two assumptions 27x apart.**
 

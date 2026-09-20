@@ -1186,6 +1186,81 @@ const CHECKS = [
     },
   },
   {
+    id: "R-J1",
+    asks: "adjacent nodes are separable -- median gap >= one node diameter",
+    async run() {
+      const got = await inPane(`
+        for (let i = 0; i < 60 && !(v.graph && v.graph.graphData().nodes.length); i++) await sleep(500);
+        // A clean page-level picture: this is a claim about the LAYOUT, and
+        // an unfolded ball of chunks is a different population.
+        const fresh = await (await fetch(${JSON.stringify(SIDECAR)} + "/layout?level=page")).json();
+        v.graph.graphData({ nodes: fresh.nodes.map(n => v.nodeFrom(n)), links: [] });
+        // Let the collider settle. This row is about what a reader SEES,
+        // and the fit positions are not that: collision moves nodes apart
+        // afterwards, so measuring fitX/fitY/fitZ scores the layout before
+        // the one force that exists to separate it. Measured both ways --
+        // 0.86 on the fit, which is the number this check first reported as
+        // a failure of the picture.
+        v.graph.d3ReheatSimulation();
+        await sleep(6000);
+        const d = v.graph.graphData();
+        const rel = v.graph.nodeRelSize();
+        const PANEL_GAIN = 1.75;
+        const sphereOf = (n) => Math.cbrt(Math.max(n.val ?? 1, 1e-9)) * rel;
+        const radius = (n) => (n.image && n.image.src)
+          ? sphereOf(n) * PANEL_GAIN : sphereOf(n);
+        const ns = d.nodes.filter(n => Number.isFinite(n.x));
+        const nn = [];
+        const fitNn = [];
+        const sizes = [];
+        for (let i = 0; i < ns.length; i++) {
+          let best = Infinity, bestFit = Infinity;
+          for (let j = 0; j < ns.length; j++) {
+            if (i === j) continue;
+            const a = ns[i], b = ns[j];
+            const dd = Math.hypot(a.x-b.x, a.y-b.y, a.z-b.z);
+            if (dd < best) best = dd;
+            const ff = Math.hypot(a.fitX-b.fitX, a.fitY-b.fitY, a.fitZ-b.fitZ);
+            if (ff < bestFit) bestFit = ff;
+          }
+          if (Number.isFinite(best)) {
+            nn.push(best); sizes.push(radius(ns[i]) * 2);
+          }
+          if (Number.isFinite(bestFit)) fitNn.push(bestFit);
+        }
+        fitNn.sort((a, b) => a - b);
+        nn.sort((a, b) => a - b);
+        const sorted = sizes.slice().sort((a, b) => a - b);
+        const p50 = nn[Math.floor(nn.length / 2)];
+        const diameter = sorted[Math.floor(sorted.length / 2)];
+        // R-J2: size must VARY. A uniform size is an assumption about
+        // density rather than a reading of it.
+        const spread = sorted.length
+          ? sorted[sorted.length - 1] - sorted[0] : 0;
+        return {
+          nodes: ns.length,
+          nn_median: Math.round(p50 * 100) / 100,
+          median_diameter: Math.round(diameter * 100) / 100,
+          ratio: Math.round((p50 / Math.max(diameter, 1e-9)) * 100) / 100,
+          ratio_before_collision: fitNn.length
+            ? Math.round((fitNn[Math.floor(fitNn.length/2)]
+                          / Math.max(diameter, 1e-9)) * 100) / 100 : null,
+          size_spread: Math.round(spread * 100) / 100,
+          coincident: nn.filter(x => x < 1e-6).length,
+        };
+      `);
+      if (got.error) return { pass: false, evidence: got };
+      return {
+        // The row's own criterion, plus the two arms that make it mean
+        // something: nothing coincident, and sizes that actually differ.
+        pass: got.nn_median >= got.median_diameter
+           && got.coincident === 0
+           && got.size_spread > 0,
+        evidence: got,
+      };
+    },
+  },
+  {
     id: "G-69",
     asks: "retrieval is a scrolled ranking, not top-k",
     async run() {
