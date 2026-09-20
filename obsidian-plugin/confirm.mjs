@@ -400,6 +400,17 @@ const uniformProbe = (page, token, sidecar) => `(async () => {
                      : (sr ? (sr.textContent || "") : "")));
   };
 
+  // Which of the surface's two faces was actually drawn (T-8). The
+  // interactive one renders the distilled DOM as elements into a shadow
+  // root; the other is a pre of markdown text. Reporting "the panel
+  // updated" without saying which would leave T-8 inferred.
+  const surfaceMode = (view) => {
+    const root = view.containerEl;
+    if (root.querySelector(".domvec-html-host")) return "interactive";
+    if (root.querySelector(".domvec-md")) return "markdown";
+    return "none";
+  };
+
   const opened = await openPanel();
   const panelBefore = panelText(opened.view);
 
@@ -493,6 +504,8 @@ const uniformProbe = (page, token, sidecar) => `(async () => {
   return {
     landed, cid,
     trigger, mutated_in_page: mutated,
+    surface_mode: surfaceMode(opened.view),
+    reopened_surface_mode: surfaceMode(reopened.view),
     db_has_token: dbHas,
     panel_open_before_had_token: panelBefore.indexOf(TOKEN) >= 0,
     open_panel_has_token: panelAfter.indexOf(TOKEN) >= 0,

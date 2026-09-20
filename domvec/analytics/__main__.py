@@ -111,9 +111,32 @@ def main(argv=None) -> int:
                         metavar="N",
                         help="measure each page N times and report the "
                              "instrument's own spread instead of a score")
+    parser.add_argument("--window-check", action="store_true",
+                        help="S-11's verification pass: does the token window "
+                             "still hold AFTER the scan, for chunks and for "
+                             "the merge groups assembled from them")
+    parser.add_argument("--workspace", default="build/corpus123",
+                        help="with --window-check, the store to verify")
+    parser.add_argument("--plant", action="store_true",
+                        help="with --window-check, inject one record that is "
+                             "certainly over, so a zero cannot be vacuous")
     args = parser.parse_args(argv)
 
     sizes = tuple(int(s) for s in args.sizes.split(",") if s.strip())
+
+    if args.window_check:
+        # Browser-free, and outside the session for the same reason
+        # `--projection` is: this reads a store that has already been
+        # written, and opening a browser to ask it would add a variable.
+        from .window import (measure_window, render_window_table,
+                             write_window_artifact)
+        report = measure_window(args.workspace, window=args.window,
+                                plant=args.plant, limit=args.limit)
+        print(render_window_table(report), flush=True)
+        print(f"  written: "
+              f"{write_window_artifact(report, pathlib.Path(args.out))}",
+              flush=True)
+        return 0
 
     if args.projection:
         # Browser-free, and so deliberately outside the session below: the

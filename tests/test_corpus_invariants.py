@@ -206,3 +206,59 @@ def test_the_queue_leaves_in_batches_not_one_call_per_chunk():
     assert max(embedder.calls) <= 16, "a batch exceeded its width"
     assert len(embedder.calls) == 3, \
         "40 chunks at 16 took %d calls" % len(embedder.calls)
+
+
+# --------------------------------------------------------------------------
+# `S-11`: the verification pass, and the arm that keeps it honest.
+# --------------------------------------------------------------------------
+
+def test_the_window_pass_separates_a_leaf_from_an_uncut_chunk(ws, tmp_path):
+    """`S-11`. Two denominators, because there are two questions.
+
+    The row says the window is a target rather than a ceiling and that a
+    single indivisible unit may exceed it. So a one-line chunk over the
+    window is the record rule working, and a multi-line one is a cut that
+    did not happen. One number over both populations would either excuse
+    the second or condemn the first.
+    """
+    from domvec.analytics.window import measure_window
+
+    ws.index_html(PAGE_A, "https://a.test/one")
+    root = ws.path
+    ws.close()
+
+    report = measure_window(str(root), window=256, plant=True)
+
+    # The planted record is multi-line, so it must land in the CUTTABLE
+    # bucket -- the one that is supposed to be empty.
+    assert report["plant_caught"] is True, report
+    assert report["plant_cost"] > 256, report["plant_cost"]
+    assert report["chunks"]["divisible"]["over"] >= 1, report["chunks"]
+
+    # And without the planting, the same pass over the same store must not
+    # report that over. A check that cannot fail is not measuring.
+    clean = measure_window(str(root), window=256, plant=False)
+    assert clean["chunks"]["divisible"]["over"] \
+        < report["chunks"]["divisible"]["over"], (clean, report)
+    assert "plant_caught" not in clean
+
+
+def test_the_window_pass_scores_merge_groups_not_only_chunks(ws, tmp_path):
+    """`S-11`. The stage that had never been checked.
+
+    A merge group's assembled markdown is a NEW string, longer than any
+    member by construction, and it is what a reader is shown and what
+    re-vectorisation embeds. A pass that scored only the chunks would
+    report a window holding while the string that reaches a model does not.
+    """
+    from domvec.analytics.window import measure_window
+
+    ws.index_html(PAGE_A, "https://a.test/one")
+    root = ws.path
+    ws.close()
+
+    report = measure_window(str(root), window=256)
+    assert "groups" in report, report.keys()
+    # The population is reported even when it is empty, so a store with no
+    # groups reads as "nothing to score" rather than silently as a pass.
+    assert set(report["groups"]) >= {"n", "over", "pct_over", "max"}
