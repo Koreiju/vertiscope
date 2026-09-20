@@ -1322,11 +1322,38 @@ export class GraphView extends ItemView {
       const half = usable
         ? Math.max(0.01, Math.min(vfov, hfov) / 2)
         : Math.max(0.01, vfov / 2);
-      // 1.12 leaves a margin so the outermost nodes are not clipped by their
+      // **Per NODE, not per axis.**
+      //
+      // This took `max|x|`, `max|y|` and `max|z|` independently and framed
+      // their combination -- the worst case of three nodes that need not be
+      // the same node, and usually are not. Then it added the whole depth
+      // `mz` on top, pushing the camera back by the cloud's full thickness
+      // as though the widest node were also the nearest one.
+      //
+      // For a roughly round cloud of radius R that lands at about 3.5R when
+      // 2.1R would do, and the picture shrinks by the square of the error:
+      // measured through the harness, the cloud occupied **23.8% of the
+      // canvas** at page level with more than half its nodes overlapping,
+      // which is the "clump" the requirement forbids and the checks could
+      // not see.
+      //
+      // The exact condition is per node: a point at (x, y, z) seen from
+      // (0, 0, d) is inside when `|x| <= (d - z)·tan(h/2)`, so it needs
+      // `d >= z + |x|/tan(h/2)`, and the camera must satisfy the largest
+      // such demand. Using each node's OWN z is what stops a deep cloud
+      // paying twice for its depth.
+      const th = Math.tan(usable ? hfov / 2 : vfov / 2);
+      const tv = Math.tan(vfov / 2);
+      let need = 0;
+      for (const p of pts) {
+        const x = Math.abs(p.x ?? 0), y = Math.abs(p.y ?? 0), z = p.z ?? 0;
+        need = Math.max(need, z + x / th, z + y / tv);
+      }
+      if (!(need > 0)) need = Math.max(mx / th, my / tv) + mz;
+      // 1.06 leaves a margin so the outermost nodes are not clipped by their
       // own radius, which this calculation deliberately does not know about.
-      const horizontal = mx / Math.tan(usable ? hfov / 2 : vfov / 2);
-      const vertical = my / Math.tan(vfov / 2);
-      return (Math.max(horizontal, vertical) + mz) * 1.12;
+      // It was 1.12 on top of a distance already too large by half.
+      return need * 1.06;
     };
 
     window.setTimeout(place, 250);
