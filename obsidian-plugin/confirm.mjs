@@ -1014,7 +1014,7 @@ const CHECKS = [
         // The vectors are computed by a worker, so the nodes arrive after
         // the write. Wait for the picture to change rather than for a timer.
         let after = before;
-        for (let i = 0; i < 60; i++) {
+        for (let i = 0; i < 25; i++) {
           await sleep(1000);
           after = v.graph.graphData().nodes.length;
           if (after !== before) break;
@@ -1032,11 +1032,23 @@ const CHECKS = [
         // there is no delta the PLACEMENT path is exercised directly: the
         // same place-and-absorb a drain would have used.
         let arm = "delta";
+        let asked = null, scopedHits = null;
         if (!fresh.length) {
           arm = "placement";
-          const r = await fetch(SIDECAR_URL + "/search?q=book&k=8&url="
+          // The page's OWN words. Asking for "book" returned 0 hits on a
+          // page about books -- the third time a guessed query has read as
+          // a broken feature (G-63, G-71). Take them from the chunks.
+          const cr = await fetch(SIDECAR_URL + "/layout?level=chunk");
+          const mine = ((await cr.json()).nodes || [])
+            .filter(n => n.url === want).slice(0, 4);
+          const words = mine.map(n => String(n.title || ""))
+            .join(" ").match(/[A-Za-z][A-Za-z-]{4,}/g) || [];
+          const q = encodeURIComponent(words.slice(0, 5).join(" ") || "the");
+          const r = await fetch(SIDECAR_URL + "/search?q=" + q + "&k=8&url="
                                 + encodeURIComponent(want));
           const hits = ((await r.json()).hits || []).map(h => h.cid);
+          asked = words.slice(0, 5).join(" ");
+          scopedHits = hits.length;
           if (hits.length) {
             await v.showHits(want, hits);
             await sleep(1200);
@@ -1056,12 +1068,12 @@ const CHECKS = [
         return {
           url: want,
           nodes_before: before, nodes_after: d.nodes.length,
-          arm,
+          arm, asked, scoped_hits: scopedHits,
           arrived: fresh.length, with_a_position: placed.length,
           on_the_frame: onFrame,
           status: b.status ? b.status.textContent : null,
         };
-      })()`);
+      })()`, { timeout: 900000 });
       if (got.error) return { pass: false, evidence: got };
       return {
         // Something arrived, it has a position, and it is not on the frame
