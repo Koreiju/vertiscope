@@ -841,20 +841,28 @@ export class GraphView extends ItemView {
       data.nodes.push(built);
       opened.push(built);
     }
-    // An opened container is subordinate to what it opened into. A page node
-    // is sized by the chunks it stands for, so RFC 9110 arrived at `members`
-    // 1,173 and drew as a sphere that swallowed all 26 of its own branches.
-    // Once it is open it no longer stands for them -- they are on screen --
-    // so it shrinks to the smallest thing it revealed and becomes a hub
-    // rather than a lid.
+    // An opened container is still a CONTAINER, and this used to shrink it
+    // to the smallest thing it revealed.
+    //
+    // The reasoning was that an open page no longer stands for its chunks
+    // because they are on screen, so a full-size sphere would be a lid over
+    // them. True of the lid; false of the size. Measured in the live pane
+    // with two pages open: the hubs sat at `val` 1, a drawn radius of
+    // **5.78** world units, while the chunks they had just opened into drew
+    // at **17.24** at the median -- three times larger. The container was
+    // the smallest object in its own neighbourhood, which is the nesting
+    // the goal asks for turned inside out.
+    //
+    // So the lid is what goes, not the size: `image` is dropped, and the
+    // branches now arrive sized in the page's OWN unit (sqrt of the chunks
+    // each stands for, see `layout._room_around`), so a branch cannot
+    // exceed the page it came out of -- `members <= chunks` is a property
+    // of the trie, not a number anyone tuned.
     if (hub) {
       hub.unfolded = true;
       if (hub.valFull === undefined) hub.valFull = hub.val;
-      const smallest = opened.reduce(
-        (m: number, n: any) => Math.min(m, n.val ?? 1), Infinity);
-      hub.val = Number.isFinite(smallest) ? Math.max(smallest, 1) : 1;
-      // Its picture goes with its size: a billboard is drawn at the panel
-      // edge, not at `val`, so leaving the image would leave the lid.
+      // A billboard is drawn at the panel edge rather than at `val`, so
+      // leaving the image would leave exactly the lid this removes.
       delete hub.image;
     }
     this.addEdges(data, got?.edges);

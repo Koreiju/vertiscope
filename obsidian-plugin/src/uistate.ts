@@ -333,6 +333,25 @@ export function uiState(app: App) {
   const out: Record<string, any> = {
     at: Date.now(),
     window: [window.innerWidth, window.innerHeight],
+    /**
+     * **Whether the window was even awake when this was taken.**
+     *
+     * A minimised Obsidian throttles `requestAnimationFrame` to about one
+     * tick every two seconds, so every liveness reading taken through it is
+     * a reading of the window manager. Measured on the same pane, seconds
+     * apart: **0 rendered frames in 2 s** while hidden, **407** once
+     * `Emulation.setFocusEmulationEnabled` woke it. Without this field that
+     * first number reads as a dead render loop, and it was very nearly
+     * filed as one.
+     *
+     * Geometry is unaffected -- node positions are real either way -- so
+     * this qualifies the rates and the frame counts, not the census.
+     */
+    awake: {
+      hidden: document.hidden,
+      visibility: document.visibilityState,
+      focused: document.hasFocus(),
+    },
     panes: {
       graph: paneOf(GRAPH_VIEW),
       browser: paneOf(BROWSER_VIEW),

@@ -1263,7 +1263,51 @@ def remember_page_positions(payload, spherical: bool = False) -> int:
 
 
 
-def _local_positions(rows: np.ndarray, anchor, *, seed: int = 0):
+def _room_around(url: str, space: str, anchor) -> float:
+    """How much room a page actually has, before its unfolding covers a
+    neighbour.
+
+    **Why this is not a constant, which is what it was.** `UNFOLD_RADIUS`
+    was 90 world units for every page in every corpus. Measured against the
+    layer it has to fit inside -- 97 page nodes in the live pane -- the
+    nearest-neighbour spacing between pages is **71 units at the median**
+    (49 at p10, 104 at p90). So the ball a page opened into was LARGER than
+    the gap to the page beside it, and **67 of the 97** had at least one
+    other page inside that ball, up to five. Unfolding did not open a page;
+    it spilled its chunks over whatever was next to it, and the two layers
+    stopped being two layers.
+
+    Half the nearest-neighbour distance is the largest radius that cannot
+    reach a neighbour's centre; 0.45 of it leaves a visible seam between two
+    open pages. Both numbers are read from `_PAGE_POS`, which is the layer-1
+    layout itself, so this tracks a corpus that spreads or tightens instead
+    of being re-tuned when it does.
+
+    In trie terms: layer 1 gives every root a territory, and a patricia step
+    down from that root has to draw inside it.
+    """
+    table = _PAGE_POS.get(space) or {}
+    here = np.asarray(anchor, dtype=np.float32).reshape(3)
+    nearest = np.inf
+    for other, pos in table.items():
+        if other == url or not pos or len(pos) < 3:
+            continue
+        gap = float(np.linalg.norm(
+            np.asarray(pos[:3], dtype=np.float32) - here))
+        if 1e-6 < gap < nearest:
+            nearest = gap
+    if not np.isfinite(nearest):
+        # One page, or a space with no table yet: nothing to collide with,
+        # so the old constant is as good an answer as any.
+        return UNFOLD_RADIUS
+    # Floored so a pair of near-coincident pages does not collapse their
+    # unfoldings to a point, capped so a lone outlier does not open into a
+    # ball the size of the corpus.
+    return float(min(UNFOLD_RADIUS, max(UNFOLD_RADIUS * 0.15, nearest * 0.45)))
+
+
+def _local_positions(rows: np.ndarray, anchor, *, seed: int = 0,
+                     radius: float = UNFOLD_RADIUS):
     """A fit over the page's OWN chunks, placed around `anchor`.
 
     **Why not the global transform, which is what this replaces.** The
@@ -1301,7 +1345,7 @@ def _local_positions(rows: np.ndarray, anchor, *, seed: int = 0):
         for i in range(n):
             angle = 2.0 * np.pi * i / max(n, 1)
             out[i] = (np.cos(angle), np.sin(angle), 0.0)
-        local = out * (UNFOLD_RADIUS * 0.5)
+        local = out * (radius * 0.5)
     else:
         fitted = _umap(block, dims=3, seed=seed,
                        neighbors=min(15, max(2, n - 1)), min_dist=0.25)
@@ -1309,7 +1353,7 @@ def _local_positions(rows: np.ndarray, anchor, *, seed: int = 0):
         local = local - local.mean(axis=0, keepdims=True)
         longest = float(np.linalg.norm(local, axis=1).max())
         if longest > 1e-9:
-            local = local * (UNFOLD_RADIUS / longest)
+            local = local * (radius / longest)
     at = np.asarray(anchor, dtype=np.float32).reshape(1, 3)
     return (local + at).astype(np.float32)
 
@@ -1455,6 +1499,10 @@ def unfold(workspace, url: str, path: str = "", space: str = "") -> Dict:
             "chars": first.chars if single else 0,
             "tokens": (tokens.budget(first.md or "") if single else 0),
             "level": "chunk" if single else "path",
+            #: Sized like a page node and in the SAME unit: the square root
+            #: of how many chunks it stands for. See `_room_around` for why
+            #: this is not a tuning choice.
+            "val": float(max(1.0, len(members) ** 0.5)),
             "path": "/" + "/".join(parts),
             "md": first.md if single else "",
             #: Every chunk this node stands for, so `_edges_among` can map a
@@ -1474,6 +1522,7 @@ def unfold(workspace, url: str, path: str = "", space: str = "") -> Dict:
             "chars": chunk.chars,
             "tokens": tokens.budget(chunk.md or ""),
             "level": "chunk", "path": chunk.xpath, "md": chunk.md,
+            "val": float(max(1.0, max(chunk.group_n, 1) ** 0.5)),
             "covers": [chunk.cid],
         })
 
@@ -1517,7 +1566,8 @@ def unfold(workspace, url: str, path: str = "", space: str = "") -> Dict:
             anchor = where[0]
     if anchor is None:
         anchor = coords.mean(axis=0)
-    local = _local_positions(block, anchor, seed=0)
+    local = _local_positions(block, anchor, seed=0,
+                             radius=_room_around(url, wanted, anchor))
     if local is not None and len(local) == len(coords):
         coords = local
 
@@ -1643,9 +1693,10 @@ def place_into(workspace, cids) -> Dict:
         # Whichever space has anchors; live capture has no toggle of its own
         # and follows the fit the pane last asked for.
         table: Dict[str, List[float]] = {}
+        space_name = ""
         for _name, got in _PAGE_POS.items():
             if got:
-                table = got
+                table, space_name = got, _name
                 break
         by_url: Dict[str, List[int]] = {}
         for i, chunk in enumerate(meta):
@@ -1653,7 +1704,12 @@ def place_into(workspace, cids) -> Dict:
                 by_url.setdefault(chunk.url, []).append(i)
         for page_url, idx in by_url.items():
             anchor = np.asarray(table[page_url][:3], dtype=np.float32)
-            local = _local_positions(block[idx], anchor, seed=0)
+            # The same territory an unfolding gets, for the same reason: a
+            # chunk arriving from a live scan belongs inside its page, not
+            # 90 units away on top of the page next to it.
+            local = _local_positions(
+                block[idx], anchor, seed=0,
+                radius=_room_around(page_url, space_name, anchor))
             if local is not None and len(local) == len(idx):
                 for slot, row in zip(idx, local):
                     coords[slot] = row
@@ -1667,6 +1723,13 @@ def place_into(workspace, cids) -> Dict:
                 "tokens": tokens.budget(chunk.md or ""),
                 "copies": chunk.dup_n,
                 "members": chunk.group_n,
+                #: In the page node's unit -- how many chunks it stands for
+                #: -- not `sqrt(chars)`. Without this the pane fell back to
+                #: character count and a live-captured chunk drew at a world
+                #: radius of 17.2 against a median PAGE at 11.4: the second
+                #: layer covering the first instead of nesting inside it.
+                "val": float(max(1.0, max(chunk.group_n, 1) ** 0.5)),
+                "level": "chunk",
                 "pos": [float(v) for v in coords[i]],
                 #: Placed by `transform`, not by the fit itself. The pane may
                 #: want to say so, and a measurement certainly does.
