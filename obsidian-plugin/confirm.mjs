@@ -747,6 +747,129 @@ const shadowProbe = (page, sidecar) => `(async () => {
   };
 })()`;
 
+//: The body S-1 evaluates in the pane.
+//:
+//: **The shape of an O(delta) claim is a constant delta against a growing
+//: page.** Timing one mutation once says the fold is fast; it does not say
+//: the cost follows the CHANGE rather than the document. So the fixture's
+//: own pager is pressed repeatedly: each press appends six result-cards --
+//: each with its own nested shadow root -- into a shadow root, so the
+//: delta is the same size every round while the page it lands in doubles,
+//: then trebles. If repairMs tracked the page, it would climb.
+//:
+//: `repairMs` is the sensor's own number for the in-page fold, reported in
+//: the drain payload. Measured here rather than re-derived: a check that
+//: reimplements what it measures can be wrong in either direction.
+//:
+//: The 2026-08-29 delta artifacts cannot answer this -- sensor.js changed
+//: on 08-31, two days AFTER they were written, and a store is a recording
+//: of what some past version did.
+const deltaProbe = (page, sidecar) => `(async () => {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const PAGE = ${JSON.stringify(page)};
+  const SIDE = ${JSON.stringify(sidecar)};
+  const HANDLE = "__domvecSensor";
+
+  for (const l of app.workspace.getLeavesOfType("domvec-chunk-view")) {
+    l.detach();
+  }
+  for (const l of app.workspace.getLeavesOfType("domvec-browser-view")) {
+    l.detach();
+  }
+  await sleep(700);
+  const leaf = app.workspace.getLeaf("tab");
+  await leaf.setViewState({ type: "domvec-browser-view", active: true });
+  app.workspace.revealLeaf(leaf);
+  await sleep(1500);
+  const b = app.workspace.getLeavesOfType("domvec-browser-view")[0].view;
+  if (!b || !b.webview) return { error: "no browser pane" };
+  try { b.setLive(false); } catch (e) {}
+
+  b.go(PAGE);
+  for (let i = 0; i < 60; i++) {
+    await sleep(300);
+    if (!b.webview.isLoading() && b.webview.getURL().indexOf(PAGE) === 0) break;
+  }
+  const url = b.webview.getURL();
+  await b.scan({});
+  await sleep(500);
+
+  const drain = () => b.webview.executeJavaScript(
+    "(function(){var h=window[" + JSON.stringify(HANDLE) + "];" +
+    "if(!h) return null; var p=h.drain();" +
+    "return {repairMs:(p&&p.stats&&p.stats.repairMs)||0," +
+    "chunks:(p&&p.chunks?p.chunks.length:0)," +
+    "addresses:(p&&p.stats?(p.stats.addresses||0):0)};})()");
+
+  // How many cards the page is holding, counted through the open roots the
+  // fixture uses -- the same boundary the sensor crosses.
+  const cardCount = () => b.webview.executeJavaScript(
+    "(function(){var l=document.querySelector('result-list');" +
+    "if(!l||!l.shadowRoot) return -1;" +
+    "return l.shadowRoot.querySelectorAll('result-card').length;})()");
+
+  const press = () => b.webview.executeJavaScript(
+    "(function(){var l=document.querySelector('result-list');" +
+    "if(!l||!l.shadowRoot) return false;" +
+    "var n=l.shadowRoot.getElementById('next');" +
+    "if(!n) return false; n.click(); return true;})()");
+
+  // **repairMs is CUMULATIVE and drain() does not reset it.** The sensor
+  // does stats.repairMs = (stats.repairMs || 0) + (t1 - t0), and drain
+  // clears front, removedIds and moves but not the timer. Read as a
+  // per-delta cost it gives a monotonically rising series -- 15.5, 18.7,
+  // 21.9, 25.4 -- which looks like a fold getting steadily more expensive
+  // and is actually a running total of four cheap ones. The first version
+  // of this check PASSED on that series, which is a green that was not
+  // proof: the ratio it computed was one lifetime total over another.
+  let prev = 0;
+  const first = await drain();
+  prev = first ? first.repairMs : 0;
+
+  // ---- the null arm: a drain with nothing changed. ----
+  await sleep(400);
+  const nullDrain = await drain();
+  const nullMs = (nullDrain ? nullDrain.repairMs : 0) - prev;
+  prev = nullDrain ? nullDrain.repairMs : prev;
+
+  // ---- constant delta, growing page. ----
+  const rounds = [];
+  for (let r = 0; r < 4; r++) {
+    const before = await cardCount();
+    const ok = await press();
+    if (!ok) return { error: "the pager is not reachable", url };
+    await sleep(500);
+    const got = await drain();
+    const after = await cardCount();
+    const total = got ? got.repairMs : prev;
+    rounds.push({
+      cards_before: before, cards_after: after,
+      added: after - before,
+      // The DIFFERENCE, which is this delta's own fold.
+      repair_ms: Math.round((total - prev) * 100) / 100,
+      cumulative_ms: Math.round(total * 100) / 100,
+      chunks: got ? got.chunks : 0,
+    });
+    prev = total;
+  }
+
+  const ms = rounds.map((r) => r.repair_ms);
+  const grew = rounds[rounds.length - 1].cards_after / (rounds[0].cards_before || 1);
+  return {
+    url,
+    null_repair_ms: Math.round(nullMs * 100) / 100,
+    null_chunks: nullDrain ? nullDrain.chunks : -1,
+    rounds,
+    page_grew_by: Math.round(grew * 100) / 100,
+    first_ms: ms[0], last_ms: ms[ms.length - 1],
+    worst_ms: Math.max.apply(null, ms),
+    // How the LAST delta's cost compares to the first, over a page that
+    // has grown by page_grew_by. This is the O(delta) statement: an
+    // identically-sized change costing the same in a much larger document.
+    cost_ratio: Math.round((ms[ms.length - 1] / Math.max(ms[0], 0.01)) * 100) / 100,
+  };
+})()`;
+
 const CHECKS = [
   {
     id: "G-53",
@@ -2090,6 +2213,42 @@ const CHECKS = [
              && got.orphans === 0
              && got.rootless === 0
              && got.nesting_prefix_ok === true
+             && got.pages_after === got.pages_before,
+          evidence: got,
+        };
+      } finally {
+        await fixtures.close();
+      }
+    },
+  },
+  {
+    id: "S-1",
+    asks: "a shadow delta folds in milliseconds, and in O(delta)",
+    async run() {
+      const fixtures = await serveFixtures();
+      const page = fixtures.origin + "/shadow_catalogue.html";
+      try {
+        const pagesBefore = (await ask("/health")).pages;
+        const got = await evaluate(deltaProbe(page, SIDECAR),
+                                   { timeout: 600000 });
+        got.purged = await tidyFixtures();
+        got.pages_before = pagesBefore;
+        got.pages_after = (await ask("/health")).pages;
+        if (got.error) return { pass: false, evidence: got };
+        return {
+          // Millisecond: the worst fold stays under 50ms.
+          // O(delta): the page at least doubled while the cost of an
+          // identically-sized delta did not.
+          // And the null arm must be cheap AND empty, or the drains are
+          // measuring a page that moves on its own.
+          pass: got.worst_ms < 50
+             && got.page_grew_by >= 2
+             && got.cost_ratio < 2
+             && got.null_chunks === 0
+             // The null arm must be CHEAP as well as empty. A page that
+             // folds for 10ms while nothing happens is a page whose own
+             // motion is inside every other number here.
+             && got.null_repair_ms < 2
              && got.pages_after === got.pages_before,
           evidence: got,
         };
