@@ -185,11 +185,17 @@ def test_the_page_level_fit_can_be_asked_for_the_spherical_space():
     projector chunks"* (2026-09-13 21:23), reaffirmed at 22:00 after the drop
     was rescinded. A fit nothing can reach is not applied throughout.
 
-    `strict=True`: the day the parameter is threaded through, this fails
-    until the marker comes off. Asserted on the SIGNATURE rather than on a
-    built layout because the defect is that the argument has nowhere to go --
-    a behavioural assertion would need a fitted workspace to say the same
-    thing, and would then also fail for want of umap-learn.
+    **Fixed 2026-09-19**, and the marker is off. Asserted on the SIGNATURE
+    rather than on a built layout because the defect was that the argument
+    had nowhere to go; a behavioural assertion would need a fitted workspace
+    to say the same thing and would then also fail for want of umap-learn.
+    The behaviour is confirmed against the running sidecar instead --
+    `?space=S3&level=page` reports `space: "S3"` where it used to report no
+    `space` field at all.
+
+    The second assertion is the half of `D-11` that made the first one
+    invisible: a pane that asks for S3 and is handed Euclidean had no field
+    to read that would have told it.
     """
     import inspect
 
@@ -200,7 +206,7 @@ def test_the_page_level_fit_can_be_asked_for_the_spherical_space():
         "build_page_layout takes %s -- `?space=S3` has nowhere to land at "
         "the default level" % ", ".join(params))
 
-
-test_the_page_level_fit_can_be_asked_for_the_spherical_space = pytest.mark.xfail(
-    strict=True, reason="D-11")(
-        test_the_page_level_fit_can_be_asked_for_the_spherical_space)
+    source = inspect.getsource(layout.build_page_layout)
+    assert '"space"' in source, (
+        "the page-level reply names no output space, so a caller cannot tell "
+        "which fit it got")

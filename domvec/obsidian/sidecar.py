@@ -999,7 +999,8 @@ class _Handler(BaseHTTPRequestHandler):
             if getattr(type(self), "_layout_key", None) != fresh:
                 type(self)._layout_key = fresh
                 type(self)._layout = (
-                    build_page_layout(self.workspace, dims=want)
+                    build_page_layout(self.workspace, dims=want,
+                                      spherical_space=spherical)
                     if level == "page"
                     else build_layout(self.workspace, dims=want,
                                       spherical_space=spherical))

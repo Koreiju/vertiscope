@@ -35,6 +35,8 @@ from typing import Dict, List, Optional
 import numpy as np
 
 from .. import tokens
+from .spherical import DISPLAY_RADIUS as _BALL_RADIUS
+from .spherical import from_ball as spherical_from_ball
 from .spherical import to_ball as spherical_to_ball
 
 #: `![alt](src)` as the distiller draws media. Non-greedy on the alt so a
@@ -76,7 +78,8 @@ _LAST_FIT: Dict[str, object] = {}
 #: An embedding to start the spherical fit from, when a caller
 #: has one. Set by the measurement harness while the warm start
 #: is being evaluated; None in ordinary use.
-_WARM_INIT = None
+#: Removed: it was bound to `None` here and assigned nowhere, so the
+#: warm start it guarded never ran. `_spherical_init` computes one.
 
 #: The most recent fit, kept so live captures can be placed into it.
 #: `None` until a layout has been built, and after a build that could not
@@ -138,7 +141,8 @@ def build_page_layout(workspace,
                       seed: int = 0,
                       neighbors: int = 15,
                       min_dist: float = 0.25,
-                      spread_axes: bool = True) -> Dict:
+                      spread_axes: bool = True,
+                      spherical_space: bool = False) -> Dict:
     """One node per PAGE, not per chunk (`G-53`).
 
     **The reason is the frame rate, and it is not a small one.** Measured on
@@ -196,15 +200,46 @@ def build_page_layout(workspace,
     width = int(min(features.shape[1], max(2, features.shape[0] - 1),
                     _LONE_TARGET))
     reduced = _unit_rows(_reduce(features, width, seed))
+    # `D-11`: the page level honours `?space=S3` too.
+    #
+    # It did not, and nothing said so. `G-53` made pages the default and this
+    # function took no `spherical_space` at all, so the request was accepted,
+    # folded into `/layout`'s cache key as though it had changed something,
+    # and dropped -- leaving the quaternion fit reachable only from a level
+    # nobody opens by default. "Apply the updates to our UMAP metric
+    # THROUGHOUT" is not met by a fit that the default surface cannot ask
+    # for.
+    metric = None
+    spherical_fit = bool(spherical_space and hsv and dims == 3)
+    if spherical_fit:
+        from .spherical import output_metric as _spherical_metric
+
+        metric = _spherical_metric()
+        spherical_fit = metric is not None
+    page_neighbors = min(neighbors, max(2, len(urls) - 1))
     coords = _umap(reduced, dims=want, seed=seed,
-                   neighbors=min(neighbors, max(2, len(urls) - 1)),
-                   min_dist=min_dist)
+                   neighbors=page_neighbors,
+                   min_dist=min_dist,
+                   output_metric=metric,
+                   init=(_spherical_init(reduced, dims=dims, want=want,
+                                         seed=seed, neighbors=page_neighbors,
+                                         min_dist=min_dist)
+                         if spherical_fit else None))
 
     got = int(coords.shape[1])
     colours = _hsv(coords[:, dims:dims + 3]) if (hsv and got >= want) else None
-    if spread_axes:
-        coords = _spread(coords, dims)
-    coords = _framed(coords, dims)
+    if spherical_fit and got >= want:
+        # Angles are MAPPED, not rescaled -- `_spread` is an empirical CDF
+        # and would destroy the geometry the metric was chosen to impose,
+        # and `_framed` could only move an already-centred ball off the
+        # origin. Same reasoning as the chunk-level fit, and the same
+        # `G-19` centring by construction.
+        coords = np.hstack([spherical_to_ball(coords[:, :dims]),
+                            coords[:, dims:]])
+    else:
+        if spread_axes:
+            coords = _spread(coords, dims)
+        coords = _framed(coords, dims)
     if got < dims:
         coords = np.hstack([coords,
                             np.zeros((coords.shape[0], dims - got),
@@ -212,7 +247,8 @@ def build_page_layout(workspace,
 
     global _LAST_PROJECTION
     _LAST_PROJECTION = Projection.of(dims=dims, hsv=colours is not None,
-                                     fitted_n=len(urls))
+                                     fitted_n=len(urls),
+                                     spherical=spherical_fit)
 
     # One picture per page: the first that any of its chunks showed. Read
     # from the chunks' markdown, which is where `_first_image` looks anyway.
@@ -272,6 +308,10 @@ def build_page_layout(workspace,
         "nodes": nodes,
         "edges": edges,
         "spaces": ["semantic"],
+        #: Which output space this actually IS. Its absence was half of
+        #: `D-11`: a pane asking for S3 got Euclidean and had no field to
+        #: read that would have told it.
+        "space": "S3" if spherical_fit else "euclidean",
         "n": len(nodes),
         "level": "page",
         "dims": dims,
@@ -524,10 +564,10 @@ def build_layout(workspace,
     coords = _umap(features, dims=want, seed=seed,
                    neighbors=neighbors, min_dist=min_dist,
                    output_metric=metric,
-                   init=(_WARM_INIT if (spherical_fit
-                                        and _WARM_INIT is not None
-                                        and len(_WARM_INIT) == len(cids))
-                         else None))
+                   init=(_spherical_init(features, dims=dims, want=want,
+                                         seed=seed, neighbors=neighbors,
+                                         min_dist=min_dist)
+                         if spherical_fit else None))
 
     # Only if the fit actually PRODUCED six components.
     #
@@ -869,6 +909,49 @@ def _framed(coords: np.ndarray, dims: int) -> np.ndarray:
     out[:, :dims] = block
     _LAST_FIT["frame"] = ((low + high) / 2.0, scale)
     return out
+
+
+def _spherical_init(features: np.ndarray, *, dims: int, want: int,
+                    seed: int, neighbors: int, min_dist: float):
+    """The warm start the spherical fit was written for and never had.
+
+    `spherical.from_ball` exists solely to produce this, and it had **zero
+    callers**: `_WARM_INIT` was bound to `None` at module scope and never
+    assigned, so the guard around it could not pass and every spherical fit
+    ever measured ran from UMAP's own initialisation -- the exact condition
+    `from_ball`'s docstring says collapses, because hyperspherical angles are
+    singular at the identity and a fit starting near there optimises in
+    ill-conditioned coordinates.
+
+    Measured collapse, page level, no warm start: all 96 pages inside a cone
+    of **15.3 degrees** about their mean direction (median 6.1) out of the
+    180 available, at radius 50-135 and never near the origin. So the
+    origin-centred view the goal asks for framed an empty middle with the
+    corpus as a blob off to one side.
+
+    The Euclidean fit is run first and mapped through `from_ball`. It is
+    CENTRED before mapping, which is what puts the cloud's middle at the
+    identity rotation rather than at an arbitrary offset -- "we center our
+    focus on the origin" is a statement about where the data goes, not only
+    about where the camera looks.
+
+    Costs one extra UMAP fit. Stated rather than hidden: the spherical fit is
+    roughly twice the Euclidean one, and it is off by default.
+    """
+    euclid = _umap(features, dims=want, seed=seed,
+                   neighbors=neighbors, min_dist=min_dist)
+    if int(euclid.shape[1]) < want:
+        return None
+    spatial = np.asarray(euclid[:, :dims], dtype=np.float64)
+    spatial = spatial - spatial.mean(axis=0, keepdims=True)
+    longest = float(np.linalg.norm(spatial, axis=1).max())
+    if not (longest > 1e-9):
+        return None
+    # 0.9 of the ball, not 1.0: `from_ball` clips at the radius, and a point
+    # that saturates lands at theta = pi where the map is singular again.
+    spatial = spatial * (float(_BALL_RADIUS) * 0.9 / longest)
+    angles = spherical_from_ball(spatial)
+    return np.hstack([angles, euclid[:, dims:want]]).astype(np.float32)
 
 
 def _umap(features: np.ndarray, *, dims: int, seed: int,
