@@ -115,6 +115,48 @@ function graphState(view: any) {
     });
   }
 
+  // **In front of the camera, and inside the frustum.**
+  //
+  // `graph2ScreenCoords` projects happily through the camera plane: a node
+  // BEHIND the viewer comes back with ordinary-looking pixel coordinates,
+  // so `on_screen` counted 97 of 97 while the pane was blank. Normalised
+  // device coordinates do not have that hole -- everything visible lands
+  // in the unit cube, and z outside [-1, 1] is beyond the near or far
+  // plane, which is exactly what "the camera ended up inside the cloud"
+  // looks like in numbers.
+  //
+  // Done with the camera's own matrices rather than `THREE.Vector3`:
+  // 3d-force-graph bundles three.js, so there is no global to construct
+  // from and the tidy version reported -1 for "cannot tell".
+  let inFrustum = 0;
+  let behind = 0;
+  try {
+    const camera: any = g.camera();
+    camera.updateMatrixWorld?.();
+    const proj = camera.projectionMatrix?.elements;
+    const view = camera.matrixWorldInverse?.elements;
+    if (!proj || !view) throw new Error("no matrices");
+    // Column-major, as three.js stores them: m[col * 4 + row].
+    const mul = (m: number[], v: number[]) => [
+      m[0]*v[0] + m[4]*v[1] + m[8]*v[2] + m[12]*v[3],
+      m[1]*v[0] + m[5]*v[1] + m[9]*v[2] + m[13]*v[3],
+      m[2]*v[0] + m[6]*v[1] + m[10]*v[2] + m[14]*v[3],
+      m[3]*v[0] + m[7]*v[1] + m[11]*v[2] + m[15]*v[3],
+    ];
+    for (const n of nodes) {
+      const eye = mul(view, [n.x ?? 0, n.y ?? 0, n.z ?? 0, 1]);
+      const clip = mul(proj, eye);
+      const w = clip[3];
+      // w <= 0 is the whole point: the node is at or behind the camera,
+      // and a screen projection still hands back tidy-looking pixels.
+      if (!(w > 0)) { behind += 1; continue; }
+      const x = clip[0] / w, y = clip[1] / w, z = clip[2] / w;
+      if (Math.abs(x) <= 1 && Math.abs(y) <= 1 && z >= -1 && z <= 1) {
+        inFrustum += 1;
+      }
+    }
+  } catch { inFrustum = -1; behind = -1; }
+
   const on = pts.filter((p) => p.on);
   const xs = on.map((p) => p.x), ys = on.map((p) => p.y);
   const box = on.length
@@ -154,6 +196,51 @@ function graphState(view: any) {
   }
   drift.sort((a, b) => a - b);
 
+  // **Ground truth: what the renderer actually drew.**
+  //
+  // Everything above is computed from node coordinates, and
+  // `graph2ScreenCoords` answers for nodes that are never rendered -- it
+  // reported 97 of 97 "on screen" while the canvas was empty, which is the
+  // same mistake as reading `fitX`, one level further in. Two independent
+  // checks, because either alone can lie:
+  //
+  //   * the SCENE: how many objects three.js is actually carrying and how
+  //     many are flagged visible. A layout that never built meshes shows up
+  //     here as zero and nowhere else.
+  //   * the PIXELS: a coarse sample of the drawn canvas. A scene full of
+  //     meshes that the camera cannot see still paints nothing, and only
+  //     the framebuffer knows.
+  let scene_objects: number | null = null;
+  let scene_visible: number | null = null;
+  try {
+    const root = g.scene ? g.scene() : null;
+    if (root) {
+      let total = 0, shown = 0;
+      root.traverse((o: any) => {
+        // Meshes, sprites and lines: the things a reader can see. Groups
+        // and the scene itself are scaffolding.
+        if (o.isMesh || o.isSprite || o.isLine || o.isPoints) {
+          total += 1;
+          if (o.visible !== false) shown += 1;
+        }
+      });
+      scene_objects = total;
+      scene_visible = shown;
+    }
+  } catch { /* no scene access in this build */ }
+
+  // **Not the framebuffer.** Sampling the canvas was the obvious ground
+  // truth and it does not work: a WebGL drawing buffer is not preserved
+  // after presentation unless the context was created with
+  // `preserveDrawingBuffer`, so `readPixels` returns zeroes on a pane that
+  // is visibly full of nodes. It read 0% painted against a screenshot
+  // showing 97 of them, which would have been a worse lie than the one it
+  // was meant to catch.
+  //
+  // The frustum test below is the honest substitute, and it catches the
+  // case that actually happened: a camera placed inside the cloud, with
+  // nodes BEHIND it still getting plausible pixel coordinates.
+
   const status = view.containerEl?.querySelector(".domvec-graph-status");
   return {
     open: true,
@@ -181,6 +268,9 @@ function graphState(view: any) {
     // Zero drift with a clumped picture means the FIT is the clump.
     fit_drift_p50: drift.length ? Math.round(drift[Math.floor(drift.length / 2)]) : null,
     fit_drift_max: drift.length ? Math.round(drift[drift.length - 1]) : null,
+    // Computed-vs-drawn. When `on_screen` is high and these are zero, the
+    // arithmetic is fine and the reader is looking at nothing.
+    scene_objects, scene_visible, in_frustum: inFrustum, behind_camera: behind,
     status: status ? (status.textContent || "").trim() : null,
     billboards: view.containerEl
       ? view.containerEl.querySelectorAll(".domvec-billboard").length : 0,
