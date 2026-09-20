@@ -1556,11 +1556,32 @@ def place_into(workspace, cids) -> Dict:
 
     nodes = []
     if rows:
-        coords, colours = projection.place(
-            np.asarray(rows, dtype=np.float32))
+        block = np.asarray(rows, dtype=np.float32)
+        coords, colours = projection.place(block)
         if coords is None:
             return {"nodes": [], "unplaced": wanted, "stale": True,
                     "why": "the fit could not transform these"}
+
+        # Beside their page, for the same reason an unfolding is (`D-17`'s
+        # neighbour, and `_local_positions` has the numbers). Transforming a
+        # chunk into a fit made of page-MEANS keeps 0.078 of its 8-NN
+        # neighbourhoods against a random baseline of 0.030, so a reader
+        # browsing with the sensor on watched new chunks arrive in places
+        # unrelated to anything -- including to the page they had just
+        # opened.
+        #
+        # Grouped by url, because a drain can carry chunks from more than one
+        # page and each belongs at its own.
+        by_url: Dict[str, List[int]] = {}
+        for i, chunk in enumerate(meta):
+            if _PAGE_POS.get(chunk.url) is not None:
+                by_url.setdefault(chunk.url, []).append(i)
+        for page_url, idx in by_url.items():
+            anchor = np.asarray(_PAGE_POS[page_url][:3], dtype=np.float32)
+            local = _local_positions(block[idx], anchor, seed=0)
+            if local is not None and len(local) == len(idx):
+                for slot, row in zip(idx, local):
+                    coords[slot] = row
         for i, chunk in enumerate(meta):
             node = {
                 "cid": chunk.cid,
