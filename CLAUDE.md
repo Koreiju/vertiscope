@@ -195,10 +195,13 @@ denominator is what this component is answerable for.
 Every change ends the same way, so that both sides are looking at one thing:
 
 1. **Commit**, with the measurement in the message.
-2. **Regenerate** `build_analytics/design_state.md`:
-   `python build_sweep/design_state.py`
-3. **The diff of that file is the report.** It says which requirements moved,
-   what evidence moved them, and what is still waiting.
+2. **Confirm it live**, against the running plugin and sidecar:
+   `node obsidian-plugin/confirm.mjs`
+3. **Regenerate** `build_analytics/design_state.md`:
+   `python -m domvec.analytics.design_state`
+4. **The diff of that file is the report.** It says which requirements moved,
+   what evidence moved them, what has been SEEN working, and what is still
+   waiting.
 
 The status column is COMPUTED from the PRD, never hand-kept. It was hand-kept
 and it drifted sixteen rows in one week -- forty-seven read "Open" while
@@ -213,6 +216,26 @@ first run.
 test or probe but that no human has seen work in the running app. That gap
 existed and was being filled with silence. Nothing leaves `Confirm` except a
 person saying so.
+
+**A status column can only drift from the DOCUMENT; the drift that matters
+is from the APPLICATION.** `obsidian-plugin/confirm.mjs` holds live checks
+keyed by requirement id and writes `build_analytics/live_confirmations.md`,
+which `design_state.md` folds in. `G-6` sat in `Confirm` citing "31 nodes and
+30 edges" for as long as the debug port was shut; live it was 26 and **0**.
+A row absent from that file has not been seen working, whatever its status
+says -- 75 done rows are in exactly that position, and the generated state
+prints the number.
+
+Two traps this cost, both worth knowing before writing a check:
+
+- **A check that reimplements what it measures can be wrong in either
+  direction.** `G-21`'s wrote `drawnRadius` as `sphere * 1.75 * sqrt(2)`
+  where the pane uses `sphere * 1.75`, and invented 49 overlapping pairs.
+  Call the application's own function.
+- **`graphData()` hands back the graph's LIVE arrays, not a snapshot.**
+  Holding the object and reading `.length` afterwards reads the after-state
+  through it, which reported a working unfold as 122 nodes before and 122
+  after. Take counts eagerly.
 
 **A requirement is only as good as the verbatim behind it.** `PLUGIN_GOAL.md`
 and `AFFINE_MAP_GOAL.md` hold the user's own words; every numbered row is a
