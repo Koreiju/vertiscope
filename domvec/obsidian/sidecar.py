@@ -1167,9 +1167,19 @@ class _Handler(BaseHTTPRequestHandler):
             # to collapse.
             level = (query.get("level") or ["page"])[0].lower()
             level = "chunk" if level == "chunk" else "page"
-            # A count, not every chunk: this runs on each `/layout`
-            # request purely to decide whether the cache is stale.
-            fresh = (self.workspace.store.chunk_count(), want,
+            # **Which corpus, not how big it is (`D-22`).**
+            #
+            # This was keyed on `chunk_count()` alone, and a count is not an
+            # identity: purge twenty pages, capture twenty chunks elsewhere,
+            # and the key is unchanged while the corpus is not. A stored fit
+            # then comes back for documents it never saw -- measured, a
+            # served page layout still held nodes for purged fixtures, and
+            # unfolding anchored 643 units from the page against a ball of
+            # radius 90.
+            #
+            # `corpus_fingerprint` is one ordered scan of the Page table,
+            # hashed, on the same path that already pays for the count.
+            fresh = (self.workspace.store.corpus_fingerprint(), want,
                      spherical, level)
             # A few slots, not one.
             #

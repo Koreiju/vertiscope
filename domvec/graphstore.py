@@ -37,6 +37,7 @@ by the integer `row` stored here. See that module for the full argument.
 from __future__ import annotations
 
 import time
+import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
@@ -1052,6 +1053,39 @@ class GraphStore:
             "WHERE c.group_of = c.cid AND c.group_n > 1 RETURN count(c)",
             {"url": url})
         return int(rows[0][0]) if rows else 0
+
+    def corpus_fingerprint(self) -> str:
+        """Which pages this store holds, not how many chunks -- `D-22`.
+
+        **A count is not an identity.** The layout cache and the persisted
+        fit were keyed on `chunk_count()`, on the reasoning that a fit is a
+        function of the chunks it saw. It is, but a count does not name
+        them: delete twenty pages and capture twenty chunks elsewhere and
+        the key is unchanged, so a stored fit comes back for a corpus it
+        never saw. Measured live -- a page layout served from the store
+        still carried nodes for `live_mutate.html` fixtures that had been
+        purged, and unfolding one of its pages anchored **643 units** away
+        against a ball of radius 90, because the page had been drawn by a
+        fit over a different set of documents.
+
+        This is the same shape as the other discriminators this repo has
+        had to fix: `[n]` blanked from two xpaths, a cumulative `repairMs`
+        read as a per-delta cost. A number that two different states share
+        cannot tell them apart.
+
+        Cheap enough to run per request: one indexed scan of the Page
+        table, 99 rows on this corpus, hashed. `chunk_count` is already
+        paid on the same path.
+        """
+        rows = self._rows(
+            "MATCH (p:Page) RETURN p.url, p.chunk_count ORDER BY p.url")
+        digest = hashlib.blake2b(digest_size=16)
+        for url, n in rows:
+            digest.update(str(url).encode("utf-8", "replace"))
+            digest.update(b"\x00")
+            digest.update(str(int(n or 0)).encode("ascii"))
+            digest.update(b"\x00")
+        return digest.hexdigest()
 
     def chunk_count(self, url: str = "") -> int:
         """How many chunks, without reading any of them.

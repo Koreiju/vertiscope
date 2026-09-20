@@ -262,3 +262,53 @@ def test_the_window_pass_scores_merge_groups_not_only_chunks(ws, tmp_path):
     # The population is reported even when it is empty, so a store with no
     # groups reads as "nothing to score" rather than silently as a pass.
     assert set(report["groups"]) >= {"n", "over", "pct_over", "max"}
+
+
+# --------------------------------------------------------------------------
+# `D-22`: a layout key must name the corpus, not measure it.
+# --------------------------------------------------------------------------
+
+def test_two_different_corpora_do_not_share_a_layout_key(ws):
+    """A count is not an identity.
+
+    The layout cache and the persisted fit were keyed on `chunk_count()`.
+    Delete one page and add another of the same size and the count is
+    unchanged while the corpus is not -- so a stored fit comes back for
+    documents it never saw. Measured live before the fix: a served page
+    layout still carried nodes for purged fixture pages, and unfolding one
+    of its pages anchored 643 units away against a ball of radius 90.
+    """
+    ws.index_html(PAGE_A, "https://a.test/one")
+    ws.index_html(PAGE_B, "https://b.test/two")
+    before_count = ws.store.chunk_count()
+    before_print = ws.store.corpus_fingerprint()
+
+    # Swap one page for a different one of the same chunk count.
+    ws.store.purge_page("https://b.test/two")
+    ws.index_html(PAGE_B, "https://c.test/three")
+
+    assert ws.store.chunk_count() == before_count, \
+        "the arm needs the COUNT to be unchanged, or it proves nothing"
+    assert ws.store.corpus_fingerprint() != before_print, \
+        "two different corpora share a fingerprint"
+
+
+def test_the_fingerprint_is_stable_for_an_unchanged_corpus(ws):
+    """The other direction: it must not churn, or nothing is ever cached.
+
+    A fingerprint that changed on every call would invalidate the fit on
+    every request and turn a 95-second chunk-level layout into something
+    paid per page load. Non-vacuity for the test above.
+    """
+    ws.index_html(PAGE_A, "https://a.test/one")
+    ws.index_html(PAGE_B, "https://b.test/two")
+    first = ws.store.corpus_fingerprint()
+    assert ws.store.corpus_fingerprint() == first
+    assert ws.store.corpus_fingerprint() == first
+
+    # And it MOVES when a page's own chunk count changes, not only when
+    # pages come and go.
+    ws.index_html(
+        "<html><body>" + "<p>alpha beta gamma delta epsilon</p>" * 80
+        + "</body></html>", "https://a.test/one")
+    assert ws.store.corpus_fingerprint() != first

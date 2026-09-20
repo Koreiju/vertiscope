@@ -41,12 +41,62 @@ const SIDECAR = process.env.DOMVEC_SIDECAR || "http://127.0.0.1:8788";
 
 const GRAPH_VIEW = "domvec-graph-view";
 
-/** Evaluate in the pane, with the graph view already resolved as `v`. */
+/**
+ * Evaluate in the pane, with the graph view already resolved as `v`.
+ *
+ * **It opens the pane and WAITS for the fit, rather than assuming both.**
+ * Every check below reads `v.graph`, and that object does not exist until a
+ * layout has been fetched and `ForceGraph3D` constructed -- which is
+ * seconds after the view opens, on a real corpus. That was invisible for as
+ * long as nothing reloaded the plugin: the pane had been open since
+ * whenever, so the graph was always already there. Adding the reload step
+ * turned an implicit precondition into nine checks failing with
+ * "Cannot read properties of undefined (reading 'graphData')", which reads
+ * like a broken projector and was a harness not waiting.
+ *
+ * This is the file's own rule applied to itself: a check that needs a
+ * particular state establishes that state.
+ */
 const inPane = (body) => evaluate(`(async () => {
-  const leaves = app.workspace.getLeavesOfType(${JSON.stringify(GRAPH_VIEW)});
-  const v = leaves[0] && leaves[0].view;
-  if (!v) return { error: "graph pane not open" };
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const TYPE = ${JSON.stringify(GRAPH_VIEW)};
+  if (!app.workspace.getLeavesOfType(TYPE).length) {
+    await app.commands.executeCommandById("domvec-open-graph");
+    await sleep(1500);
+  }
+  // **A leaf in a BACKGROUND tab hands back a deferred stub, not the view.**
+  //
+  // Obsidian defers a view until its leaf is shown, so leaf.view is a
+  // placeholder with none of the methods on it. That is why nine checks
+  // read "Cannot read properties of undefined (reading 'graphData')" and
+  // G-39 read "view.highlightChunk is not a function" -- not a broken
+  // projector, a stub. It only started happening because the new checks in
+  // this file open their own tab, which pushes the graph pane into the
+  // background where it had never been before.
+  const leaf0 = app.workspace.getLeavesOfType(TYPE)[0];
+  if (leaf0) {
+    app.workspace.revealLeaf(leaf0);
+    if (leaf0.loadIfDeferred) await leaf0.loadIfDeferred();
+    await sleep(600);
+  }
+
+  let v = null;
+  // Generous: a cold chunk-level fit over this corpus is tens of seconds,
+  // and a timeout shorter than the work is just a different way of
+  // reporting a failure that is not there.
+  for (let i = 0; i < 120; i++) {
+    const leaf = app.workspace.getLeavesOfType(TYPE)[0];
+    if (leaf && leaf.loadIfDeferred) await leaf.loadIfDeferred();
+    v = leaf && leaf.view;
+    if (v && v.graph) break;
+    await sleep(500);
+  }
+  if (!v) return { error: "graph pane would not open" };
+  if (!v.graph) {
+    return { error: "the graph pane never finished its fit",
+             deferred: !!(app.workspace.getLeavesOfType(TYPE)[0] || {}).isDeferred,
+             viewType: v.getViewType ? v.getViewType() : typeof v };
+  }
   ${body}
 })()`);
 
@@ -142,6 +192,16 @@ const mutateProbe = (page, token, sidecar) => `(async () => {
   await bleafFresh.setViewState({ type: "domvec-browser-view", active: true });
   app.workspace.revealLeaf(bleafFresh);
   await sleep(1800);
+  // A leaf in a background tab hands back a DEFERRED stub with none of
+  // the view's methods on it. Fronting the projector backgrounds the
+  // browser cell, so this has to be forced before .view is read --
+  // otherwise b.webview is undefined and it reads as no browser pane.
+  for (const l of app.workspace.getLeavesOfType("domvec-browser-view")) {
+    if (l.loadIfDeferred) await l.loadIfDeferred();
+  }
+  for (const l of app.workspace.getLeavesOfType("domvec-graph-view")) {
+    if (l.loadIfDeferred) await l.loadIfDeferred();
+  }
   const bv = app.workspace.getLeavesOfType("domvec-browser-view")[0];
   const b = bv && bv.view;
   if (!b || !b.webview) return { error: "no browser pane" };
@@ -335,6 +395,16 @@ const uniformProbe = (page, token, sidecar) => `(async () => {
   await bleafFresh.setViewState({ type: "domvec-browser-view", active: true });
   app.workspace.revealLeaf(bleafFresh);
   await sleep(1500);
+  // A leaf in a background tab hands back a DEFERRED stub with none of
+  // the view's methods on it. Fronting the projector backgrounds the
+  // browser cell, so this has to be forced before .view is read --
+  // otherwise b.webview is undefined and it reads as no browser pane.
+  for (const l of app.workspace.getLeavesOfType("domvec-browser-view")) {
+    if (l.loadIfDeferred) await l.loadIfDeferred();
+  }
+  for (const l of app.workspace.getLeavesOfType("domvec-graph-view")) {
+    if (l.loadIfDeferred) await l.loadIfDeferred();
+  }
   const bv = app.workspace.getLeavesOfType("domvec-browser-view")[0];
   const b = bv && bv.view;
   if (!b || !b.webview) return { error: "no browser pane" };
@@ -870,6 +940,32 @@ const deltaProbe = (page, sidecar) => `(async () => {
   };
 })()`;
 
+/**
+ * Bring the projector to the front and make sure it is really loaded.
+ *
+ * For the checks that do not go through `inPane` but still end up touching
+ * the graph view -- `G-39` reaches it through the plugin's own `eachGraph`,
+ * which iterates leaves and calls methods on whatever `.view` is. A
+ * deferred stub has no methods, so that read as the feature being missing.
+ */
+const wakeProjector = () => evaluate(`(async () => {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const TYPE = ${JSON.stringify(GRAPH_VIEW)};
+  if (!app.workspace.getLeavesOfType(TYPE).length) {
+    await app.commands.executeCommandById("domvec-open-graph");
+    await sleep(1500);
+  }
+  const leaf = app.workspace.getLeavesOfType(TYPE)[0];
+  if (!leaf) return { ok: false };
+  app.workspace.revealLeaf(leaf);
+  if (leaf.loadIfDeferred) await leaf.loadIfDeferred();
+  for (let i = 0; i < 120; i++) {
+    if (leaf.view && leaf.view.graph) return { ok: true, waited: i * 0.5 };
+    await sleep(500);
+  }
+  return { ok: false, deferred: !!leaf.isDeferred };
+})()`);
+
 const CHECKS = [
   {
     id: "G-53",
@@ -1100,6 +1196,45 @@ const CHECKS = [
         await app.commands.executeCommandById("domvec-open-browser");
         await app.commands.executeCommandById("domvec-open-graph");
         await sleep(2500);
+        // A leaf in a background tab hands back a DEFERRED stub with none of
+        // the view's methods on it. Fronting the projector backgrounds the
+        // browser cell, so this has to be forced before .view is read --
+        // otherwise b.webview is undefined and it reads as no browser pane.
+        for (const l of app.workspace.getLeavesOfType("domvec-browser-view")) {
+          if (l.loadIfDeferred) await l.loadIfDeferred();
+        }
+        for (const l of app.workspace.getLeavesOfType("domvec-graph-view")) {
+          if (l.loadIfDeferred) await l.loadIfDeferred();
+        }
+        // Loaded is not the same as USABLE. loadIfDeferred resolves before
+        // the guest emits dom-ready, and every webview method then throws
+        // "The WebView must be attached to the DOM and the dom-ready event
+        // emitted". Poll the cheapest one until it stops throwing.
+        for (let i = 0; i < 80; i++) {
+          const l0 = app.workspace.getLeavesOfType("domvec-browser-view")[0];
+          const w = l0 && l0.view && l0.view.webview;
+          if (!w) break;
+          try { w.getURL(); break; } catch (e) { await sleep(250); }
+        }
+        // And usable is still not VISIBLE. A leaf in a background tab has no
+        // layout, so the guest reports innerWidth/innerHeight of 0 and every
+        // click coordinate computed from a rect is meaningless -- the aim
+        // came out at (15, 319) in a 0x0 viewport and read as the link not
+        // being followed. Front the cell and wait for it to have a size.
+        {
+          const l0 = app.workspace.getLeavesOfType("domvec-browser-view")[0];
+          if (l0) {
+            app.workspace.revealLeaf(l0);
+            for (let i = 0; i < 60; i++) {
+              await sleep(250);
+              try {
+                const size = await l0.view.webview.executeJavaScript(
+                  "[window.innerWidth, window.innerHeight]");
+                if (size && size[0] > 50 && size[1] > 50) break;
+              } catch (e) { /* not ready yet */ }
+            }
+          }
+        }
         const gv = app.workspace.getLeavesOfType("domvec-graph-view")[0];
         const bv = app.workspace.getLeavesOfType("domvec-browser-view")[0];
         const v = gv && gv.view, b = bv && bv.view;
@@ -1206,6 +1341,45 @@ const CHECKS = [
         await app.commands.executeCommandById("domvec-open-browser");
         await app.commands.executeCommandById("domvec-open-graph");
         await sleep(2000);
+        // A leaf in a background tab hands back a DEFERRED stub with none of
+        // the view's methods on it. Fronting the projector backgrounds the
+        // browser cell, so this has to be forced before .view is read --
+        // otherwise b.webview is undefined and it reads as no browser pane.
+        for (const l of app.workspace.getLeavesOfType("domvec-browser-view")) {
+          if (l.loadIfDeferred) await l.loadIfDeferred();
+        }
+        for (const l of app.workspace.getLeavesOfType("domvec-graph-view")) {
+          if (l.loadIfDeferred) await l.loadIfDeferred();
+        }
+        // Loaded is not the same as USABLE. loadIfDeferred resolves before
+        // the guest emits dom-ready, and every webview method then throws
+        // "The WebView must be attached to the DOM and the dom-ready event
+        // emitted". Poll the cheapest one until it stops throwing.
+        for (let i = 0; i < 80; i++) {
+          const l0 = app.workspace.getLeavesOfType("domvec-browser-view")[0];
+          const w = l0 && l0.view && l0.view.webview;
+          if (!w) break;
+          try { w.getURL(); break; } catch (e) { await sleep(250); }
+        }
+        // And usable is still not VISIBLE. A leaf in a background tab has no
+        // layout, so the guest reports innerWidth/innerHeight of 0 and every
+        // click coordinate computed from a rect is meaningless -- the aim
+        // came out at (15, 319) in a 0x0 viewport and read as the link not
+        // being followed. Front the cell and wait for it to have a size.
+        {
+          const l0 = app.workspace.getLeavesOfType("domvec-browser-view")[0];
+          if (l0) {
+            app.workspace.revealLeaf(l0);
+            for (let i = 0; i < 60; i++) {
+              await sleep(250);
+              try {
+                const size = await l0.view.webview.executeJavaScript(
+                  "[window.innerWidth, window.innerHeight]");
+                if (size && size[0] > 50 && size[1] > 50) break;
+              } catch (e) { /* not ready yet */ }
+            }
+          }
+        }
         const bv = app.workspace.getLeavesOfType("domvec-browser-view")[0];
         const gv = app.workspace.getLeavesOfType("domvec-graph-view")[0];
         const b = bv && bv.view, v = gv && gv.view;
@@ -1222,17 +1396,36 @@ const CHECKS = [
         await sleep(800);
         // A real element's centre, read from the page. Picking coordinates
         // by hand would test whatever happened to be at 200,300.
-        const at = await b.webview.executeJavaScript(
-          "(function(){var e=document.querySelector('article.product_pod h3 a');" +
-          "if(!e) return null;" +
-          // Into view FIRST. The element sat at y=1779 on an unscrolled
-          // page and elementFromPoint answers null outside the viewport,
-          // which is a position a real right-click cannot be made from.
-          "e.scrollIntoView({block:'center'});" +
-          "var r=e.getBoundingClientRect();" +
-          "return {x:Math.round(r.left+r.width/2), y:Math.round(r.top+r.height/2)," +
-          "text:(e.textContent||'').slice(0,40)};})()");
+        // Into view FIRST, then SETTLE, then read the rect.
+        //
+        // elementFromPoint answers null outside the viewport, which is a
+        // position a real right-click cannot be made from. But reading the
+        // rect in the same call as the scroll reads it BEFORE the scroll has
+        // applied: with the cell left at scrollY 5000 by an earlier check,
+        // this pointed at y=-5359 and reported "nothing under the cursor" --
+        // a check blaming the feature for its own arithmetic.
+        const SEL = "article.product_pod h3 a";
+        await b.webview.executeJavaScript(
+          "(function(){var e=document.querySelector('" + SEL + "');" +
+          "if(e) e.scrollIntoView({block:'center',behavior:'instant'});" +
+          "return true;})()");
+        let at = null;
+        for (let i = 0; i < 20; i++) {
+          await sleep(250);
+          at = await b.webview.executeJavaScript(
+            "(function(){var e=document.querySelector('" + SEL + "');" +
+            "if(!e) return null;" +
+            "var r=e.getBoundingClientRect();" +
+            "return {x:Math.round(r.left+r.width/2)," +
+            "y:Math.round(r.top+r.height/2)," +
+            "vw:window.innerWidth, vh:window.innerHeight," +
+            "text:(e.textContent||'').slice(0,40)};})()");
+          if (at && at.y >= 0 && at.y < at.vh && at.x >= 0 && at.x < at.vw) break;
+        }
         if (!at) return { error: "the page has no product link to point at" };
+        if (!(at.y >= 0 && at.y < at.vh && at.x >= 0 && at.x < at.vw)) {
+          return { error: "the aim never came on screen", at };
+        }
         b.show("browser");
         await b.portMarkdown(at.x, at.y);
         await sleep(1200);
@@ -1460,6 +1653,45 @@ const CHECKS = [
         const sleep = (ms) => new Promise(r => setTimeout(r, ms));
         await app.commands.executeCommandById("domvec-open-browser");
         await sleep(1200);
+        // A leaf in a background tab hands back a DEFERRED stub with none of
+        // the view's methods on it. Fronting the projector backgrounds the
+        // browser cell, so this has to be forced before .view is read --
+        // otherwise b.webview is undefined and it reads as no browser pane.
+        for (const l of app.workspace.getLeavesOfType("domvec-browser-view")) {
+          if (l.loadIfDeferred) await l.loadIfDeferred();
+        }
+        for (const l of app.workspace.getLeavesOfType("domvec-graph-view")) {
+          if (l.loadIfDeferred) await l.loadIfDeferred();
+        }
+        // Loaded is not the same as USABLE. loadIfDeferred resolves before
+        // the guest emits dom-ready, and every webview method then throws
+        // "The WebView must be attached to the DOM and the dom-ready event
+        // emitted". Poll the cheapest one until it stops throwing.
+        for (let i = 0; i < 80; i++) {
+          const l0 = app.workspace.getLeavesOfType("domvec-browser-view")[0];
+          const w = l0 && l0.view && l0.view.webview;
+          if (!w) break;
+          try { w.getURL(); break; } catch (e) { await sleep(250); }
+        }
+        // And usable is still not VISIBLE. A leaf in a background tab has no
+        // layout, so the guest reports innerWidth/innerHeight of 0 and every
+        // click coordinate computed from a rect is meaningless -- the aim
+        // came out at (15, 319) in a 0x0 viewport and read as the link not
+        // being followed. Front the cell and wait for it to have a size.
+        {
+          const l0 = app.workspace.getLeavesOfType("domvec-browser-view")[0];
+          if (l0) {
+            app.workspace.revealLeaf(l0);
+            for (let i = 0; i < 60; i++) {
+              await sleep(250);
+              try {
+                const size = await l0.view.webview.executeJavaScript(
+                  "[window.innerWidth, window.innerHeight]");
+                if (size && size[0] > 50 && size[1] > 50) break;
+              } catch (e) { /* not ready yet */ }
+            }
+          }
+        }
         const bv = app.workspace.getLeavesOfType("domvec-browser-view")[0];
         const b = bv && bv.view;
         if (!b || !b.webview) return { error: "no browser pane" };
@@ -1784,6 +2016,45 @@ const CHECKS = [
         await app.commands.executeCommandById("domvec-open-browser");
         await app.commands.executeCommandById("domvec-open-graph");
         await sleep(2500);
+        // A leaf in a background tab hands back a DEFERRED stub with none of
+        // the view's methods on it. Fronting the projector backgrounds the
+        // browser cell, so this has to be forced before .view is read --
+        // otherwise b.webview is undefined and it reads as no browser pane.
+        for (const l of app.workspace.getLeavesOfType("domvec-browser-view")) {
+          if (l.loadIfDeferred) await l.loadIfDeferred();
+        }
+        for (const l of app.workspace.getLeavesOfType("domvec-graph-view")) {
+          if (l.loadIfDeferred) await l.loadIfDeferred();
+        }
+        // Loaded is not the same as USABLE. loadIfDeferred resolves before
+        // the guest emits dom-ready, and every webview method then throws
+        // "The WebView must be attached to the DOM and the dom-ready event
+        // emitted". Poll the cheapest one until it stops throwing.
+        for (let i = 0; i < 80; i++) {
+          const l0 = app.workspace.getLeavesOfType("domvec-browser-view")[0];
+          const w = l0 && l0.view && l0.view.webview;
+          if (!w) break;
+          try { w.getURL(); break; } catch (e) { await sleep(250); }
+        }
+        // And usable is still not VISIBLE. A leaf in a background tab has no
+        // layout, so the guest reports innerWidth/innerHeight of 0 and every
+        // click coordinate computed from a rect is meaningless -- the aim
+        // came out at (15, 319) in a 0x0 viewport and read as the link not
+        // being followed. Front the cell and wait for it to have a size.
+        {
+          const l0 = app.workspace.getLeavesOfType("domvec-browser-view")[0];
+          if (l0) {
+            app.workspace.revealLeaf(l0);
+            for (let i = 0; i < 60; i++) {
+              await sleep(250);
+              try {
+                const size = await l0.view.webview.executeJavaScript(
+                  "[window.innerWidth, window.innerHeight]");
+                if (size && size[0] > 50 && size[1] > 50) break;
+              } catch (e) { /* not ready yet */ }
+            }
+          }
+        }
         const bv = app.workspace.getLeavesOfType("domvec-browser-view")[0];
         const gv = app.workspace.getLeavesOfType("domvec-graph-view")[0];
         const b = bv && bv.view, v = gv && gv.view;
@@ -1865,14 +2136,41 @@ const CHECKS = [
         // extremes sit at exactly +/-300 by construction -- ten page nodes
         // do, correctly. Judging fitted nodes by this rule would fail the
         // check on the projector working as designed.
+        //
+        // **And the tolerance has to match the defect, not the neighbourhood.**
+        // A PLACED chunk is extrapolated past the ends of a fit taken over
+        // page means, so falling outside +/-300 is the ordinary case, not an
+        // edge one: measured here, six placed nodes spanned -181 to -349.
+        // Against that population a +/-0.5 window round 300 is a coin toss,
+        // and it flagged a node at -300.40 whose neighbours sat at -289 and
+        // -295. That is a detector reporting arithmetic, not a clamp.
+        //
+        // D-17's signature was EXACTNESS and PILE-UP: every node framed to
+        // exactly -300 or +300, 26 of them at one point. So the test is
+        // exactness, and the pile-up is counted beside it.
+        const CLAMPED = 1e-3;
         const onFrame = fresh.filter(n => [n.fitX, n.fitY, n.fitZ]
-          .some(c => Math.abs(Math.abs(c) - 300) < 0.5)).length;
+          .some(c => Math.abs(Math.abs(c) - 300) < CLAMPED)).length;
+        const seen = new Map();
+        for (const n of fresh) {
+          const key = [n.fitX, n.fitY, n.fitZ].map(
+            c => Math.round(c * 100) / 100).join(",");
+          seen.set(key, (seen.get(key) || 0) + 1);
+        }
+        const coincident = Array.from(seen.values())
+          .filter(c => c > 1).reduce((a, c) => a + c, 0);
         return {
           url: want,
           nodes_before: before, nodes_after: d.nodes.length,
           arm, asked, scoped_hits: scopedHits,
           arrived: fresh.length, with_a_position: placed.length,
-          on_the_frame: onFrame,
+          on_the_frame: onFrame, coincident,
+          fit_span: fresh.length
+            ? [Math.round(Math.min(...fresh.flatMap(
+                 n => [n.fitX, n.fitY, n.fitZ]))),
+               Math.round(Math.max(...fresh.flatMap(
+                 n => [n.fitX, n.fitY, n.fitZ])))]
+            : null,
           status: b.status ? b.status.textContent : null,
         };
       })()`, { timeout: 900000 });
@@ -1883,7 +2181,9 @@ const CHECKS = [
         // right).
         pass: got.arrived > 0
            && got.with_a_position === got.arrived
-           && got.on_the_frame === 0,
+           && got.on_the_frame === 0
+           // The other half of D-17: 26 chunks at one point.
+           && got.coincident === 0,
         evidence: got,
       };
     },
@@ -1924,6 +2224,45 @@ const CHECKS = [
         const sleep = (ms) => new Promise(r => setTimeout(r, ms));
         await app.commands.executeCommandById("domvec-open-browser");
         await sleep(1800);
+        // A leaf in a background tab hands back a DEFERRED stub with none of
+        // the view's methods on it. Fronting the projector backgrounds the
+        // browser cell, so this has to be forced before .view is read --
+        // otherwise b.webview is undefined and it reads as no browser pane.
+        for (const l of app.workspace.getLeavesOfType("domvec-browser-view")) {
+          if (l.loadIfDeferred) await l.loadIfDeferred();
+        }
+        for (const l of app.workspace.getLeavesOfType("domvec-graph-view")) {
+          if (l.loadIfDeferred) await l.loadIfDeferred();
+        }
+        // Loaded is not the same as USABLE. loadIfDeferred resolves before
+        // the guest emits dom-ready, and every webview method then throws
+        // "The WebView must be attached to the DOM and the dom-ready event
+        // emitted". Poll the cheapest one until it stops throwing.
+        for (let i = 0; i < 80; i++) {
+          const l0 = app.workspace.getLeavesOfType("domvec-browser-view")[0];
+          const w = l0 && l0.view && l0.view.webview;
+          if (!w) break;
+          try { w.getURL(); break; } catch (e) { await sleep(250); }
+        }
+        // And usable is still not VISIBLE. A leaf in a background tab has no
+        // layout, so the guest reports innerWidth/innerHeight of 0 and every
+        // click coordinate computed from a rect is meaningless -- the aim
+        // came out at (15, 319) in a 0x0 viewport and read as the link not
+        // being followed. Front the cell and wait for it to have a size.
+        {
+          const l0 = app.workspace.getLeavesOfType("domvec-browser-view")[0];
+          if (l0) {
+            app.workspace.revealLeaf(l0);
+            for (let i = 0; i < 60; i++) {
+              await sleep(250);
+              try {
+                const size = await l0.view.webview.executeJavaScript(
+                  "[window.innerWidth, window.innerHeight]");
+                if (size && size[0] > 50 && size[1] > 50) break;
+              } catch (e) { /* not ready yet */ }
+            }
+          }
+        }
         const bv = app.workspace.getLeavesOfType("domvec-browser-view")[0];
         const b = bv && bv.view;
         if (!b || !b.webview) return { error: "no browser pane" };
@@ -1941,13 +2280,52 @@ const CHECKS = [
         //
         // Dispatched as a real input event to the guest, not by setting
         // location: the claim is that clicking behaves like clicking.
-        const at = await b.webview.executeJavaScript(
-          "(function(){var a=document.querySelector('article.product_pod h3 a');" +
-          "if(!a) return null; a.scrollIntoView({block:'center'});" +
-          "var r=a.getBoundingClientRect();" +
-          "return {x:Math.round(r.left+r.width/2), y:Math.round(r.top+r.height/2)," +
-          "href:a.href};})()");
+        // Scroll, settle, then read -- and check the aim is on screen.
+        // A synthetic click is delivered at a VIEWPORT coordinate, so a
+        // target left below the fold by an earlier check is a click on
+        // nothing, which reads as the link not being followed.
+        const SEL = "article.product_pod h3 a";
+        await b.webview.executeJavaScript(
+          "(function(){var a=document.querySelector('" + SEL + "');" +
+          "if(a) a.scrollIntoView({block:'center',behavior:'instant'});" +
+          "return true;})()");
+        let at = null;
+        for (let i = 0; i < 20; i++) {
+          await sleep(250);
+          at = await b.webview.executeJavaScript(
+            "(function(){var a=document.querySelector('" + SEL + "');" +
+            "if(!a) return null;" +
+            "var r=a.getBoundingClientRect();" +
+            "return {x:Math.round(r.left+r.width/2)," +
+            "y:Math.round(r.top+r.height/2)," +
+            "vw:window.innerWidth, vh:window.innerHeight," +
+            "href:a.href};})()");
+          if (at && at.y >= 0 && at.y < at.vh && at.x >= 0 && at.x < at.vw) break;
+        }
         if (!at) return { error: "no link to click" };
+        if (!(at.y >= 0 && at.y < at.vh && at.x >= 0 && at.x < at.vw)) {
+          return { error: "the aim never came on screen", at };
+        }
+        // The cell has two FACES, and an earlier check leaves it on the
+        // other one: G-39 ports markdown into the panel, and a click aimed
+        // at a webview that is not the face on display lands on nothing.
+        // This is the state P-B1 needs, so P-B1 establishes it.
+        try { b.show("browser"); } catch (e) {}
+        await sleep(500);
+        try { b.webview.focus(); } catch (e) {}
+        await sleep(300);
+
+        // Re-read the rect immediately before dispatching. Between the aim
+        // loop and the click the page can still be settling -- lazy images
+        // on this page shift the grid down as they arrive -- and a
+        // coordinate a second old points at whatever moved into its place.
+        const now = await b.webview.executeJavaScript(
+          "(function(){var a=document.querySelector('" + SEL + "');" +
+          "if(!a) return null; var r=a.getBoundingClientRect();" +
+          "return {x:Math.round(r.left+r.width/2)," +
+          "y:Math.round(r.top+r.height/2)," +
+          "vw:window.innerWidth, vh:window.innerHeight, href:a.href};})()");
+        if (now && now.y >= 0 && now.y < now.vh) { at = now; }
         for (const type of ["mouseDown", "mouseUp"]) {
           b.webview.sendInputEvent({ type, x: at.x, y: at.y,
                                      button: "left", clickCount: 1 });
@@ -1973,7 +2351,7 @@ const CHECKS = [
           landed, clicked_href: at.href, after_click: moved, after_back: returned,
           // The scanning loop is still armed while all of that happened
           // (P-B2: navigate while scanning continues).
-          live_capture_on: liveWhileBrowsing,
+          live_capture_on: !!b.live,
         };
       })()`, { timeout: 600000 });
       if (got.error) return { pass: false, evidence: got };
@@ -2315,6 +2693,39 @@ console.log(reload.reloaded
   ? `reloaded the plugin (enabled=${reload.enabled})`
   : `NOT reloaded: ${reload.error || "DOMVEC_NO_RELOAD=1"}`);
 
+const woke = await wakeProjector().catch(
+  (e) => ({ ok: false, error: String(e).slice(0, 120) }));
+console.log(woke.ok
+  ? "projector is loaded and fronted"
+  : `projector NOT ready: ${JSON.stringify(woke)}`);
+
+/**
+ * Is the sidecar still there?
+ *
+ * **Because when it is not, every check fails for one reason and the run
+ * looks like a catastrophe.** The sidecar has segfaulted twice under a full
+ * suite -- a native crash inside the fitting, no Python traceback -- and
+ * the run that followed reported 28 failures with "fetch failed" and
+ * "the graph pane never finished its fit", which reads as a broken
+ * projector and was a dead process. Naming it costs one request.
+ */
+const sidecarAlive = async () => {
+  try {
+    const res = await fetch(`${SIDECAR}/health`,
+                            { signal: AbortSignal.timeout(10000) });
+    return res.ok;
+  } catch {
+    return false;
+  }
+};
+
+if (!(await sidecarAlive())) {
+  console.log(`the sidecar at ${SIDECAR} is not answering -- start it with`);
+  console.log("  python -m domvec.obsidian serve --workspace build/corpus123"
+              + " --port 8788 --semantic --capture");
+  process.exit(2);
+}
+
 const results = [];
 for (const check of chosen) {
   let got;
@@ -2322,6 +2733,16 @@ for (const check of chosen) {
     got = await check.run();
   } catch (err) {
     got = { pass: false, evidence: { threw: String(err && err.message || err) } };
+  }
+  // A failure with the sidecar gone is not evidence about this row.
+  if (!got.pass && !(await sidecarAlive())) {
+    console.log(`\nthe sidecar died during ${check.id} -- stopping.`);
+    console.log("Everything after this point would fail for that reason,");
+    console.log("and a run that reports 28 broken features when one process");
+    console.log("went away is worse than no run at all.");
+    got.evidence = { ...(got.evidence || {}), sidecar: "died mid-check" };
+    results.push({ id: check.id, asks: check.asks, ...got });
+    break;
   }
   results.push({ id: check.id, asks: check.asks, ...got });
   const mark = got.pass ? "PASS" : "FAIL";
