@@ -884,9 +884,55 @@ class Workspace:
 
         result = aggregate_page(cids, vectors, mds, url, **options)
         if not result.skipped:
+            self._lexically_verify(result)
             self.store.set_groups(url, result.groups)
             self._vectorise_groups(result.groups)
         return result
+
+    def _lexically_verify(self, result) -> int:
+        """The frequency side's second opinion on each merge (`G-30`).
+
+        A separate step after the semantic decision, never mixed into it.
+        Two chunks the encoder called close that share almost no vocabulary
+        are worth a second look -- and the look is all this is: the merge
+        STANDS and the doubt is recorded, because tf-idf is the wrong
+        instrument to overrule a meaning judgement with.
+
+        **Restricted to each group's own nonzero columns.** The tf-idf matrix
+        is sparse over a corpus-wide vocabulary and densifying a page of it
+        would be hundreds of megabytes; cosine is unchanged by dropping
+        columns that are zero in every row being compared, so the small dense
+        block is exact rather than approximate.
+        """
+        from .aggregate import verify_with_lexical
+
+        if not result.groups:
+            return 0
+        try:
+            tfidf = self.freq.tfidf()
+        except Exception:                               # noqa: BLE001
+            return 0
+        flagged = 0
+        for group in result.groups:
+            rows, keep = [], set()
+            for cid in group.members:
+                r = self.freq.row_of(cid)
+                if r is None or r >= tfidf.shape[0]:
+                    rows = []
+                    break
+                row = tfidf.getrow(r)
+                rows.append(row)
+                keep.update(row.indices.tolist())
+            if len(rows) < 2 or not keep:
+                continue
+            cols = sorted(keep)
+            block = {cid: np.asarray(row[:, cols].todense()).ravel()
+                     for cid, row in zip(group.members, rows)}
+            reason = verify_with_lexical(group, block)
+            if reason:
+                result.lexical_warnings.append((group.lead, reason))
+                flagged += 1
+        return flagged
 
     def _vectorise_groups(self, groups) -> int:
         """Give each merge group a vector for what it SAYS.

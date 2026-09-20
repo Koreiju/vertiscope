@@ -157,6 +157,12 @@ class Aggregation:
     #: The tenth percentile of the neighbour distances over the ninetieth.
     #: Low means the page has clusters; near one means it has none.
     structure_ratio: float = 1.0
+    #: `(lead, reason)` for every group the LEXICAL second opinion doubts
+    #: (`G-30`). Its own step, after the semantic decision and never mixed
+    #: into it: a page's furniture shares words with everything on it, which
+    #: is exactly why frequency must not be what decides a merge. Recorded
+    #: rather than acted on -- the merge stands and the doubt is visible.
+    lexical_warnings: List[Tuple[str, str]] = field(default_factory=list)
     #: Set when the page was under `MIN_CHUNKS` and nothing was attempted.
     skipped: str = ""
     #: Clusters found but refused, with the reason. Reported rather than

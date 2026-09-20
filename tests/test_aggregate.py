@@ -321,3 +321,101 @@ def test_the_merge_window_is_counted_in_link_free_tokens():
                          "https://test/links", window=MERGE_WINDOW)
     for group in out.groups:
         assert group.tokens <= MERGE_WINDOW
+
+
+# --- G-30: the wiring, not just the function ---------------------------------
+
+
+def test_the_pipeline_actually_asks_for_the_lexical_second_opinion():
+    """`verify_with_lexical` had unit coverage and NO CALLER.
+
+    The PRD's own verdict said so: "exists and looks for the opposite
+    signal... not yet wired into the pipeline, so no merge has been checked
+    by it." A function with tests and no caller passes every suite there is
+    and does nothing, which is the shape `spherical.from_ball` was in too.
+
+    Both arms here, because either alone is vacuous: a group whose members
+    share no vocabulary must be flagged, and one whose members share plenty
+    must not be. A verifier that flagged everything would satisfy the first.
+    """
+    import pathlib
+    import shutil
+    import tempfile
+
+    from domvec.aggregate import Aggregation, Group
+    from domvec.workspace import Workspace
+
+    tmp = tempfile.mkdtemp()
+    try:
+        with Workspace(pathlib.Path(tmp) / "ws") as ws:
+            # Long enough to chunk APART. Three short paragraphs came back
+            # as one chunk -- correctly, they fit the window -- and the test
+            # then had one row to compare against itself.
+            physics = ("quantum chromodynamics gluon hadron lattice "
+                       "renormalisation " * 40)
+            baking = ("sourdough bakery flour yeast proving basket "
+                      "fermentation " * 40)
+            more_physics = ("quantum chromodynamics gluon hadron "
+                            "confinement lattice " * 40)
+            ws.index_html(
+                "<html><body>"
+                "<div><p>" + physics + "</p></div>"
+                "<div><p>" + baking + "</p></div>"
+                "<div><p>" + more_physics + "</p></div>"
+                "</body></html>",
+                "https://fixture.test/lexical")
+            chunks = [c for c in ws.store.chunks("https://fixture.test/lexical")
+                      if ws.freq.row_of(c.cid) is not None]
+            by_text = {}
+            for c in chunks:
+                md = c.md or ""
+                if "sourdough" in md:
+                    by_text.setdefault("sourdough", c.cid)
+                elif "confinement" in md:
+                    by_text.setdefault("confinement", c.cid)
+                elif "chromodynamics" in md:
+                    by_text.setdefault("chromodynamics", c.cid)
+            if len(by_text) < 3:
+                import pytest
+                pytest.skip("the fixture did not chunk into three parts")
+
+            # THE WIRING, asserted on the SOURCE, and that is a weaker
+            # claim than it looks -- said plainly rather than dressed up.
+            #
+            # Calling the method directly tests the method: with `aggregate`'s
+            # call to it deleted, the two behavioural arms below still
+            # passed. The obvious fix, a spy on a real `aggregate()` run,
+            # cannot reach the call either -- this workspace has no embedder,
+            # so the page has no vectors, so aggregation returns `skipped`
+            # before it gets there. Standing up an embedder for one assertion
+            # would make a fast test slow and flaky.
+            #
+            # So: the call exists, checked in the source, and the corpus run
+            # recorded in the PRD is what says it fires -- 19 pages, 748
+            # groups, 14 flagged.
+            import inspect
+
+            assert "_lexically_verify" in inspect.getsource(type(ws).aggregate),                 "aggregate() does not ask for the lexical second opinion"
+
+            # Disjoint vocabulary: physics merged with baking.
+            wrong = Aggregation(url="https://fixture.test/lexical")
+            wrong.groups = [Group(lead=by_text["chromodynamics"],
+                                  members=[by_text["chromodynamics"],
+                                           by_text["sourdough"]],
+                                  tokens=20)]
+            ws._lexically_verify(wrong)
+            assert wrong.lexical_warnings, \
+                "physics merged with baking drew no lexical doubt"
+
+            # Shared vocabulary: two physics sentences.
+            right = Aggregation(url="https://fixture.test/lexical")
+            right.groups = [Group(lead=by_text["chromodynamics"],
+                                  members=[by_text["chromodynamics"],
+                                           by_text["confinement"]],
+                                  tokens=20)]
+            ws._lexically_verify(right)
+            assert not right.lexical_warnings, \
+                "two sentences sharing four terms were doubted: %r" % (
+                    right.lexical_warnings,)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
