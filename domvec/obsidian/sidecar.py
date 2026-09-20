@@ -1073,12 +1073,40 @@ class _Handler(BaseHTTPRequestHandler):
             if cache is None:
                 cache = type(self)._layouts = {}
             if fresh not in cache:
+                # `G-12`: the store may already hold this exact fit. Keyed
+                # on everything the fit is a function of, so a stored answer
+                # comes back only to the question it answered. The
+                # chunk-level fit is 95 seconds over this corpus and the
+                # page-level one under a second, so what this buys is the
+                # expensive picture surviving a restart.
+                stored_key = "|".join(str(v) for v in fresh)
+                kept = None
+                try:
+                    kept = self.workspace.store.load_layout(stored_key)
+                except Exception:                   # noqa: BLE001
+                    kept = None
+                if kept:
+                    try:
+                        got = json.loads(kept)
+                        got["from_store"] = True
+                        cache[fresh] = got
+                    except Exception:               # noqa: BLE001
+                        pass
+            if fresh not in cache:
                 cache[fresh] = (
                     build_page_layout(self.workspace, dims=want,
                                       spherical_space=spherical)
                     if level == "page"
                     else build_layout(self.workspace, dims=want,
                                       spherical_space=spherical))
+                try:
+                    self.workspace.store.save_layout(
+                        stored_key, json.dumps(cache[fresh]),
+                        n=int(cache[fresh].get("n") or 0))
+                except Exception:                   # noqa: BLE001
+                    # A fit that cannot be saved is still a fit: this store
+                    # is opened read-only by most callers.
+                    pass
                 # Bounded, and evicting the OLDEST rather than the largest:
                 # the chunk-level fits are the expensive ones and are exactly
                 # what a reader toggling `pages` wants back.

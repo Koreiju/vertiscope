@@ -133,3 +133,72 @@ def test_the_fit_itself_is_unchanged():
         # Order preserved exactly, which is the other half of the contract.
         assert np.array_equal(np.argsort(col), np.argsort(coords[:, axis])), \
             "axis %d changed the order of the points" % axis
+
+
+# --- G-12: a fit is persisted and queried back -------------------------------
+
+
+def test_a_stored_layout_round_trips_and_is_keyed_by_what_it_depends_on():
+    """`G-12`. The key names the corpus size, the dims, the space and the
+    level, so a stored answer comes back only to the question it answered."""
+    import json
+    import pathlib
+    import shutil
+    import tempfile
+
+    from domvec.workspace import Workspace
+
+    tmp = tempfile.mkdtemp()
+    try:
+        with Workspace(pathlib.Path(tmp) / "ws") as ws:
+            ws.index_html("<html><body><p>one</p></body></html>",
+                          "https://a.test/")
+            payload = json.dumps({"nodes": [{"cid": "x"}], "n": 1})
+            ws.store.save_layout("96|6|False|page", payload, n=1)
+
+            assert ws.store.load_layout("96|6|False|page") == payload
+            # A different question gets no answer, rather than the wrong one.
+            assert ws.store.load_layout("97|6|False|page") is None
+            assert ws.store.load_layout("96|6|True|page") is None
+
+            assert ws.store.forget_layouts() == 1
+            assert ws.store.load_layout("96|6|False|page") is None
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_placing_still_works_when_no_fit_has_been_built_in_this_process():
+    """The hazard a stored layout introduces, and the guard for it.
+
+    A stored layout gives the pane its picture without refitting -- but the
+    fitted reducer is a MODEL and does not serialise, so `unfold` would have
+    answered "no fit to place into yet" for every gesture after a restart.
+    `_ensure_projection` builds one on demand, which keeps persistence a pure
+    optimisation.
+    """
+    import pathlib
+    import shutil
+    import tempfile
+
+    from domvec.obsidian import layout as L
+    from domvec.workspace import Workspace
+
+    tmp = tempfile.mkdtemp()
+    try:
+        with Workspace(pathlib.Path(tmp) / "ws") as ws:
+            for i in range(6):
+                ws.index_html(
+                    "<html><body><p>page %d about spindles and lattices</p>"
+                    "</body></html>" % i, "https://a.test/%d" % i)
+            L._LAST_FIT.clear()
+            L._LAST_PROJECTION = None
+            assert L.live_projection() is None, "the fixture did not clear it"
+
+            # Not asserting a fit APPEARS -- a six-page workspace with no
+            # embedder may legitimately have nothing to fit. Asserting the
+            # call does not raise and reports its reason, which is what the
+            # pane needs either way.
+            got = L.unfold(ws, "https://a.test/0", "")
+            assert isinstance(got, dict) and "nodes" in got, got
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)

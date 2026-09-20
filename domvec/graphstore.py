@@ -68,6 +68,14 @@ _SCHEMA = [
     "CREATE REL TABLE IF NOT EXISTS Anchors(FROM Chunk TO Address, ord INT64)",
     "CREATE REL TABLE IF NOT EXISTS Contains(FROM Chunk TO Chunk)",
     "CREATE REL TABLE IF NOT EXISTS LinksTo(FROM Chunk TO Page)",
+    # `G-12`: a fitted layout, kept so the pane can ask for one
+    # instead of paying for it. A TABLE rather than columns on
+    # `Chunk`: the payload belongs to a fit, not to a chunk, and two
+    # fits of the same corpus (page and chunk level, euclidean and
+    # S3) are four answers that would not fit in one column each.
+    """CREATE NODE TABLE IF NOT EXISTS Layout(
+        key STRING, payload STRING, fitted_at DOUBLE,
+        n INT64, PRIMARY KEY(key))""",
 ]
 
 #: Columns added after stores already existed. Kuzu has no
@@ -1161,6 +1169,47 @@ class GraphStore:
         rows = self._rows(query + "RETURN a.akey, a.value ORDER BY a.akey",
                           params)
         return [(ContentAddress.parse(key), value) for key, value in rows]
+
+    def save_layout(self, key: str, payload: str, n: int = 0) -> None:
+        """Keep a fitted layout under `key` (`G-12`).
+
+        The key names everything the fit is a function of -- the corpus size,
+        the dimensions, the space and the level -- so a stored answer is
+        returned only to the question it answered. That is the same
+        discipline `Projection.stale` applies in memory, written down.
+        """
+        import time
+
+        self.conn.execute(
+            "MERGE (l:Layout {key: $key}) "
+            "SET l.payload = $payload, l.fitted_at = $at, l.n = $n",
+            {"key": key, "payload": payload, "at": time.time(), "n": int(n)})
+
+    def load_layout(self, key: str) -> Optional[str]:
+        """The stored layout for `key`, or None.
+
+        None is the ordinary answer for a corpus that has changed, and the
+        caller refits. Nothing here decides whether a fit is stale: the key
+        does, by naming what the fit depends on.
+        """
+        rows = self._rows(
+            "MATCH (l:Layout {key: $key}) RETURN l.payload", {"key": key})
+        if not rows or not rows[0][0]:
+            return None
+        return str(rows[0][0])
+
+    def forget_layouts(self) -> int:
+        """Drop every stored fit. Returns how many.
+
+        For a caller that changed something the KEY does not name -- a
+        different seed, a new `min_dist`, a changed vector space. A key that
+        named those too would be honest and unusable, since nothing calling
+        `/layout` knows them.
+        """
+        rows = self._rows("MATCH (l:Layout) RETURN count(l)")
+        n = int(rows[0][0]) if rows and rows[0] else 0
+        self.conn.execute("MATCH (l:Layout) DETACH DELETE l")
+        return n
 
     def relink(self) -> Dict[str, int]:
         """Re-resolve every url address against the pages held NOW.

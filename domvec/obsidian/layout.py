@@ -1330,6 +1330,29 @@ def _segments(xpath: str):
     return [s for s in (xpath or "").split("/") if s]
 
 
+def _ensure_projection(workspace):
+    """The live fit, built on demand if there is not one yet (`G-12`).
+
+    A stored layout gives the pane its PICTURE without refitting, and that is
+    the whole point of persisting one -- but a picture is not a fit. The
+    fitted reducer is a model, it does not serialise to JSON, and `unfold`
+    and `place_into` need it to put a NEWCOMER where it belongs.
+
+    Without this, serving a stored layout after a restart left every
+    unfolding answering "no fit to place into yet": the feature would have
+    paid for itself in startup time and charged for it in the one gesture a
+    reader makes most. Building here keeps persistence a pure optimisation.
+    """
+    projection = live_projection()
+    if projection is not None:
+        return projection
+    try:
+        build_page_layout(workspace, dims=3)
+    except Exception:                               # noqa: BLE001
+        return None
+    return live_projection()
+
+
 def unfold(workspace, url: str, path: str = "", space: str = "") -> Dict:
     """One step of unravelling a page's patricia path (`G-54`).
 
@@ -1350,7 +1373,7 @@ def unfold(workspace, url: str, path: str = "", space: str = "") -> Dict:
     Positions come from `Projection.place`, so what appears lands in the
     picture already on screen rather than in a second, unrelated one.
     """
-    projection = live_projection()
+    projection = _ensure_projection(workspace)
     stored = [c for c in workspace.store.chunks(url) if not c.redundant]
     stored = [c for c in stored
               if not (c.group_of and c.group_of != c.cid)]
@@ -1527,7 +1550,7 @@ def place_into(workspace, cids) -> Dict:
     rather than dropped: a chunk that was captured and cannot be drawn is a
     fact the pane should be able to say out loud.
     """
-    projection = live_projection()
+    projection = _ensure_projection(workspace)
     wanted = [c for c in dict.fromkeys(cids or []) if c]
     if projection is None:
         return {"nodes": [], "unplaced": wanted, "stale": True,
