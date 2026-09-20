@@ -193,35 +193,85 @@ class DomvecMCP:
 
     # --- tools ---------------------------------------------------------------
 
+    # **Through the sidecar when there is no store, which is the usual
+    # case.** `--workspace` was made optional so this server could stop
+    # fighting the plugin for kuzu's writer lock, and these five handlers
+    # were left calling a workspace that is now None -- every one of them
+    # answered "'NoneType' object has no attribute ...". The sidecar already
+    # serves each of these questions over HTTP, from the store the plugin is
+    # actually using, which is the one worth asking about.
+
     def _search(self, args: Dict) -> Dict:
-        return search_payload(self.ws, args["query"], int(args.get("k") or 8))
+        query, k = args["query"], int(args.get("k") or 8)
+        if self.ws is not None:
+            return search_payload(self.ws, query, k)
+        from urllib.parse import quote
+        got = self.live().get("/search?q=%s&k=%d" % (quote(query), k))
+        # The sidecar answers with full chunk payloads; a search result is a
+        # ranked list and a preview, not a transcript.
+        # The sidecar already sends a `preview`; rebuilding one from a
+        # `lines` key it does not send produced an empty string on every hit.
+        hits = []
+        for h in (got.get("hits") or []):
+            hits.append({
+                "cid": h.get("cid"), "url": h.get("url"),
+                "xpath": h.get("xpath"),
+                "score": h.get("score"),
+                "lexical": h.get("lexical"), "semantic": h.get("semantic"),
+                "pagerank": h.get("pagerank"),
+                "preview": (h.get("preview") or "")[:240],
+            })
+        return {"query": query, "hits": hits, "count": len(hits)}
 
     def _chunk(self, args: Dict) -> Dict:
-        payload = chunk_payload(self.ws, args["cid"])
-        if payload is None:
-            raise KeyError("no chunk %s" % args["cid"])
-        return payload
+        if self.ws is not None:
+            payload = chunk_payload(self.ws, args["cid"])
+            if payload is None:
+                raise KeyError("no chunk %s" % args["cid"])
+            return payload
+        from urllib.parse import quote
+        return self.live().get("/chunk/%s" % quote(str(args["cid"])))
 
     def _affordances(self, args: Dict) -> Dict:
-        payload = chunk_payload(self.ws, args["cid"])
-        if payload is None:
-            raise KeyError("no chunk %s" % args["cid"])
-        acts = [ln for ln in payload["lines"] if ln.get("control")]
-        return {"cid": payload["cid"], "url": payload["url"],
+        payload = self._chunk(args)
+        acts = [ln for ln in (payload.get("lines") or []) if ln.get("control")]
+        return {"cid": payload.get("cid"), "url": payload.get("url"),
                 "affordances": acts, "count": len(acts)}
 
     def _resolve(self, args: Dict) -> Dict:
         from ..address import ContentAddress
         address = ContentAddress.parse(args["address"])
-        stored = self.ws.store.chunk_for_address(address.aid)
-        if stored is None:
-            return {"address": args["address"], "chunk": None}
+        if self.ws is not None:
+            stored = self.ws.store.chunk_for_address(address.aid)
+            if stored is None:
+                return {"address": args["address"], "chunk": None}
+            return {"address": args["address"], "chunk": {
+                "cid": stored.cid, "url": stored.url, "xpath": stored.xpath,
+                "preview": "\n".join(stored.md.splitlines()[:6])}}
+        # `/resolve` walks UP from an address to the nearest chunk the trie
+        # holds, which is the same question this tool asks.
+        from urllib.parse import quote
+        try:
+            got = self.live().get(
+                "/resolve?url=%s&xpath=%s"
+                % (quote(address.url), quote(address.xpath)))
+        except Exception as exc:                    # noqa: BLE001
+            return {"address": args["address"], "chunk": None,
+                    "why": str(exc)[:160]}
+        lines = got.get("lines") or []
         return {"address": args["address"], "chunk": {
-            "cid": stored.cid, "url": stored.url, "xpath": stored.xpath,
-            "preview": "\n".join(stored.md.splitlines()[:6])}}
+            "cid": got.get("cid"), "url": got.get("url"),
+            "xpath": got.get("xpath"),
+            "matched_xpath": got.get("matched_xpath"),
+            "ancestors_walked": got.get("ancestors_walked"),
+            "preview": "\n".join(
+                str(ln.get("text", "")) for ln in lines[:6])}}
 
     def _pages(self, args: Dict) -> Dict:
-        return {"pages": list(self.ws.pages())}
+        if self.ws is not None:
+            return {"pages": list(self.ws.pages())}
+        got = self.live().get("/pages")
+        return {"pages": got.get("urls") or [], "count": got.get("n")}
 
     # --- protocol ------------------------------------------------------------
 

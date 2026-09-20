@@ -1280,12 +1280,35 @@ class GraphStore:
             return None
         return list(rows[0][0])
 
+    #: Address rows whose key could not be parsed, since the store opened.
+    #:
+    #: Counted rather than raised. One malformed row used to take the whole
+    #: chunk with it: `ContentAddress.parse('')` throws, `addresses_of`
+    #: propagated it, and `GET /chunk/<cid>` answered with a dead connection
+    #: -- so the chunk panel, the markdown face and the affordance list all
+    #: showed nothing for that chunk, with the cause visible only in the
+    #: sidecar's stderr. A chunk that cannot be fetched cannot surface in
+    #: the UI at all, which is the most expensive way for one bad row to
+    #: fail.
+    unreadable_addresses: int = 0
+
     def addresses_of(self, cid: str) -> List[Tuple[ContentAddress, str]]:
-        """The addresses a chunk anchors, in line order."""
+        """The addresses a chunk anchors, in line order.
+
+        Rows that will not parse are SKIPPED and counted. Dropping a line's
+        address costs that line its handle on the page; dropping the whole
+        chunk costs the reader the chunk.
+        """
         rows = self._rows(
             "MATCH (c:Chunk {cid: $cid})-[r:Anchors]->(a:Address) "
             "RETURN r.ord, a.akey, a.value ORDER BY r.ord", {"cid": cid})
-        return [(ContentAddress.parse(key), value) for _, key, value in rows]
+        out: List[Tuple[ContentAddress, str]] = []
+        for _, key, value in rows:
+            try:
+                out.append((ContentAddress.parse(key), value))
+            except Exception:                       # noqa: BLE001
+                GraphStore.unreadable_addresses += 1
+        return out
 
     def chunk_for_address(self, aid: str) -> Optional[StoredChunk]:
         """The navigational requirement: address -> its chunk and embedding."""
