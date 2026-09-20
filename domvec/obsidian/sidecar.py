@@ -913,6 +913,15 @@ class _Handler(BaseHTTPRequestHandler):
         reply["ms"] = round((time.perf_counter() - started) * 1000, 1)
         self._send(200, reply)
 
+    def _layout_count(self) -> int:
+        """Stored fits, or 0 if the store cannot answer."""
+        try:
+            rows = self.workspace.store._rows(
+                "MATCH (l:Layout) RETURN count(l)")
+            return int(rows[0][0]) if rows and rows[0] else 0
+        except Exception:                           # noqa: BLE001
+            return 0
+
     def do_GET(self) -> None:                       # noqa: N802 (stdlib name)
         parts = urlsplit(self.path)
         segments = [unquote(s) for s in parts.path.strip("/").split("/") if s]
@@ -927,7 +936,13 @@ class _Handler(BaseHTTPRequestHandler):
                              # Advertised so the panel can draw a run button as
                              # disabled rather than offering one that 403s --
                              # the same reason `enact` is advertised.
-                             "kernel": self.kernel_pool is not None})
+                             "kernel": self.kernel_pool is not None,
+                             # `G-12`: how many fits the store is holding.
+                             # Advertised for the same reason `enact` and
+                             # `kernel` are -- a feature nothing can observe
+                             # is a feature nobody can confirm, and this one
+                             # is invisible by design when it works.
+                             "layouts": self._layout_count()})
             return
 
         if segments[0] == "chunk" and len(segments) == 2:

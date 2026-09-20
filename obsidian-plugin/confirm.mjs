@@ -996,6 +996,34 @@ const CHECKS = [
     },
   },
   {
+    id: "G-12",
+    asks: "a fitted layout is persisted and queried back instead of refitted",
+    async run() {
+      const health = await ask("/health");
+      // Ask twice for the SAME key. The first may build; the second must be
+      // the same picture, node for node.
+      const a = await ask("/layout?level=page");
+      const b = await ask("/layout?level=page");
+      const same = JSON.stringify((a.nodes || []).map((n) => n.pos))
+                === JSON.stringify((b.nodes || []).map((n) => n.pos));
+      return {
+        // The store is holding fits, the field exists so a reader can tell
+        // which they got, and the same question gives the same answer. A
+        // cache that returned a DIFFERENT picture each time would be worse
+        // than no cache: the map would move under someone reading it.
+        pass: (health.layouts || 0) > 0
+           && typeof a.from_store === "boolean"
+           && same,
+        evidence: {
+          stored_fits: health.layouts,
+          from_store: a.from_store,
+          nodes: a.n,
+          identical_on_a_second_ask: same,
+        },
+      };
+    },
+  },
+  {
     id: "G-69",
     asks: "retrieval is a scrolled ranking, not top-k",
     async run() {

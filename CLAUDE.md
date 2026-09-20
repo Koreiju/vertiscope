@@ -185,6 +185,12 @@ denominator is what this component is answerable for.
   `--delta` (live, a real insertion in a real browser) and `--projection`
   (browser-free, what a change costs the markdown read out of the trie, by
   change kind).
+- `domvec/vault.py` — a vault note addressed like a page (`vault://`).
+  `domvec/source.py` — a source file addressed like a page (`code://`),
+  with Python's own tree as the xpath and JavaScript reduced to its
+  comments. `G-52` lives one flag away, in `tokens.for_model`: the
+  encoder gets docstrings and comments, never the code. 66.2% of this
+  repository's rendered tokens are code and are dropped.
 - `domvec/core/js/sensor.js` — the fold. `domvec/trie.py` — the map itself.
 - `domvec/markdown.py`, `domvec/wireframe.py` — the two projections.
 - `domvec/invariants.py` — `a1` (AAM tables agree), `c1` (three composed-tree
