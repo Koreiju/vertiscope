@@ -201,6 +201,18 @@ class Workspace:
         self.close()
 
     def close(self) -> None:
+        # **A READ-ONLY workspace writes nothing, including here.**
+        #
+        # This saved `freq.npz` unconditionally, so every reader rewrote it
+        # on exit -- the sidecar, an MCP server, a diagnostic script. Found
+        # by noticing that `freq.npz` was dated today on a store last written
+        # six days ago, and every one of those dates was a reader closing.
+        # Nothing observed was corrupted by it, and that is luck rather than
+        # design: anything that pruned the matrix in memory would have been
+        # persisted by a process that had promised not to write.
+        if self.read_only:
+            self.store.close()
+            return
         # The queue is in memory, so anything still in it at close is work
         # that would be lost — and lost invisibly, because hydration only
         # backfills chunks with *no* vector and would leave a changed chunk
@@ -213,6 +225,34 @@ class Workspace:
             self.freq.save(self.path / "freq")
         finally:
             self.store.close()
+
+    def rebuild_lexical(self, *, progress=None) -> Dict[str, int]:
+        """Give every stored chunk a frequency row (`G-3`).
+
+        **Why this is needed at all.** 7,955 of 14,129 chunks in
+        `build/corpus123` had an embedding and NO lexical row -- 56.3% of the
+        corpus, and 28 of 96 pages with no coverage whatever, RFC 9110 and
+        the Rust `Vec` docs among them. Retrieval is a strict triple product,
+        so a zero on the lexical factor is a veto: those chunks could not be
+        returned by any query, scoped or global. Scoping to RFC 9110 answered
+        0 hits for every query put to it, which is how this was found.
+
+        The rows are derivable from the markdown the store already holds, so
+        this is a repair and not a re-scan.
+        """
+        added = skipped = 0
+        for chunk in self.store.chunks():
+            if self.freq.row_of(chunk.cid) is not None:
+                skipped += 1
+                continue
+            self.freq.add(chunk.cid, chunk.md or "")
+            added += 1
+            if progress and added % 2000 == 0:
+                progress("lexical", "%d rows added" % added)
+        if added:
+            self.freq.save(self.path / "freq")
+        self._index = None          # the ranking is stale by construction
+        return {"added": added, "already_had_one": skipped}
 
     # -- writing ----------------------------------------------------------
     @property

@@ -448,12 +448,32 @@ const CHECKS = [
         const vs = hits.map((h) => h[f]).filter((v) => typeof v === "number");
         return vs.length ? Math.max(...vs) - Math.min(...vs) : 0;
       };
+      // **And the arm this check was missing.** It asserted that the hits
+      // it got carried all three factors -- which only chunks that CAN be
+      // returned ever do. 7,955 of 14,129 chunks had no lexical row at all,
+      // so under the strict product they were vetoed out of every ranking,
+      // and 28 of 96 pages answered nothing to any query. The check passed
+      // the whole time. So: sample pages and require each to be reachable.
+      const layout = await ask("/layout?level=page");
+      const pages = (layout.nodes || [])
+        .slice().sort((a, b) => (b.members || 0) - (a.members || 0))
+        .slice(0, 6);
+      const unreachable = [];
+      for (const pg of pages) {
+        const words = String(pg.title || pg.url)
+          .match(/[A-Za-z][A-Za-z-]{4,}/g) || [];
+        const q = encodeURIComponent((words.slice(0, 4).join(" ") || "the"));
+        const r = await ask(
+          `/search?q=${q}&k=5&url=${encodeURIComponent(pg.url)}`);
+        if (!(r.hits || []).length) unreachable.push(pg.url.slice(0, 48));
+      }
       return {
         pass: hits.length > 1
            && has("lexical") === hits.length
            && has("semantic") === hits.length
            && has("pagerank") === hits.length
-           && spread("lexical") > 0 && spread("semantic") > 0,
+           && spread("lexical") > 0 && spread("semantic") > 0
+           && unreachable.length === 0,
         evidence: {
           hits: hits.length,
           carried: { lexical: has("lexical"), semantic: has("semantic"),
@@ -461,6 +481,7 @@ const CHECKS = [
           spread: { lexical: +spread("lexical").toFixed(4),
                     semantic: +spread("semantic").toFixed(4),
                     pagerank: +spread("pagerank").toFixed(6) },
+          pages_probed: pages.length, unreachable,
         },
       };
     },
@@ -764,6 +785,115 @@ const CHECKS = [
            && got.followed_camera === true
            && got.pinned_after_drag === true
            && got.closed === true,
+        evidence: got,
+      };
+    },
+  },
+  {
+    id: "G-4",
+    asks: "inter-spatial normalization -- nodes are discernible, not a clump",
+    async run() {
+      const d = await ask("/layout?level=chunk");
+      const ns = (d.nodes || []).filter((n) => Array.isArray(n.pos));
+      if (ns.length < 50) {
+        return { pass: false, evidence: { why: "too few placed nodes", n: ns.length } };
+      }
+      // Nearest-neighbour distance over a sample. The defect this guards is
+      // a cloud whose points sit on top of each other, which reads as one
+      // blob however well the fit separated them in six dimensions.
+      const sample = ns.slice(0, 400);
+      const nn = [];
+      for (let i = 0; i < sample.length; i++) {
+        let best = Infinity;
+        for (let j = 0; j < sample.length; j++) {
+          if (i === j) continue;
+          const a = sample[i].pos, b = sample[j].pos;
+          const dd = Math.hypot(a[0]-b[0], a[1]-b[1], a[2]-b[2]);
+          if (dd < best) best = dd;
+        }
+        if (Number.isFinite(best)) nn.push(best);
+      }
+      nn.sort((a, b) => a - b);
+      const p50 = nn[Math.floor(nn.length / 2)];
+      const zero = nn.filter((x) => x < 1e-6).length;
+      return {
+        // A median neighbour distance of ~0 is the clump; exact zeros are
+        // two nodes at one point, which `G-25` says should not exist.
+        pass: p50 > 1 && zero === 0,
+        evidence: { sampled: sample.length, nn_p50: +p50.toFixed(3),
+                    nn_min: +nn[0].toFixed(3), coincident: zero },
+      };
+    },
+  },
+  {
+    id: "G-15",
+    asks: "media is present in the PROJECTOR, not only in the panels",
+    async run() {
+      const d = await ask("/layout?level=chunk");
+      const ns = d.nodes || [];
+      const withPicture = ns.filter((n) => n.image && n.image.src).length;
+      return {
+        pass: ns.length > 0 && withPicture > 0,
+        evidence: {
+          nodes: ns.length, with_a_picture: withPicture,
+          share: +(100 * withPicture / Math.max(ns.length, 1)).toFixed(1),
+          reported_by_layout: d.images ?? null,
+        },
+      };
+    },
+  },
+  {
+    id: "G-71",
+    asks: "scoped results unfold by the same mechanics as the overlay's",
+    async run() {
+      const got = await inPane(`
+        for (let i = 0; i < 60 && !(v.graph && v.graph.graphData().nodes.length); i++) await sleep(500);
+        const fresh = await (await fetch(${JSON.stringify(SIDECAR)} + "/layout?level=page")).json();
+        v.graph.graphData({ nodes: fresh.nodes.map(n => v.nodeFrom(n)), links: [] });
+        await sleep(400);
+        const before = v.graph.graphData().nodes.length;
+        // Ask the sidecar for a page's own hits, then hand them to the same
+        // showHits the overlay uses. One behaviour, two callers.
+        const page = v.graph.graphData().nodes
+          .filter(n => n.url).sort((a,b) => (b.members||0)-(a.members||0))[0];
+        const url = page.url;
+        // The page's OWN words. Asking for "the" returned nothing: it is a
+        // stopword, so the lexical factor is ~0, and under the strict triple
+        // product a zero is a veto. The same lesson G-63 already paid for.
+        const c = await (await fetch(${JSON.stringify(SIDECAR)}
+          + "/layout?level=chunk")).json();
+        const mine = (c.nodes || []).filter(n => n.url === url).slice(0, 3);
+        const words = mine.map(n => String(n.title || ""))
+          .join(" ").match(/[A-Za-z][A-Za-z-]{4,}/g) || [];
+        if (!words.length) return { error: "no words to ask about", url };
+        const q = encodeURIComponent(words.slice(0, 5).join(" "));
+        const r = await fetch(${JSON.stringify(SIDECAR)}
+          + "/search?q=" + q + "&k=12&url=" + encodeURIComponent(url));
+        const d = await r.json();
+        const cids = (d.hits || []).map(h => h.cid);
+        if (!cids.length) return { error: "no scoped hits for that page", url,
+                                   asked: words.slice(0, 5).join(" ") };
+        await v.showHits(url, cids);
+        await sleep(1200);
+        const after = v.graph.graphData();
+        const drawn = cids.filter(c => after.nodes.some(n => n.id === c)).length;
+        const hub = after.nodes.find(n => n.id === "page:" + url);
+        return {
+          page: url.slice(0, 50), scoped_hits: cids.length,
+          nodes_before: before, nodes_after: after.nodes.length,
+          hits_drawn: drawn,
+          hub_kept: !!hub, hub_marked_open: !!(hub && hub.unfolded),
+          links: after.links.length,
+        };
+      `);
+      if (got.error) return { pass: false, evidence: got };
+      return {
+        // The hits are drawn, the page they came from is kept as their hub,
+        // and it is marked open -- the same shape `G-6` asserts for a click.
+        pass: got.hits_drawn > 0
+           && got.nodes_after > got.nodes_before
+           && got.hub_kept === true && got.hub_marked_open === true
+           && got.links > 0,
         evidence: got,
       };
     },

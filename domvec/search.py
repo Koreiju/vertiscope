@@ -161,6 +161,7 @@ class ThreeFormIndex:
         include_markdown: bool = True,
         collapse: bool = True,
         fuse: str = "product",
+        scope_url: str = "",
     ) -> List[Hit]:
         """Rank chunks by the triple product.
 
@@ -223,6 +224,23 @@ class ThreeFormIndex:
         # the floor makes their factors look like.
         score = score * _fit(self._live if self._live is not None
                              else np.ones(rows, dtype=np.float32), rows)
+
+        # `scope_url` ranks WITHIN a page, which a filter cannot do.
+        #
+        # Scoping used to be a post-filter over a global top-k, widened to
+        # `chunk_count(url) * 3` and bounded at 4,000 so that scoping a large
+        # page did not rank the corpus end to end. On a 14,169-chunk corpus
+        # that bound is the defect: RFC 9110's 1,173 chunks rank below 3,519
+        # globally, so scoping to it returned **0 hits for every query**
+        # while the page is the largest in the store. Masking the score
+        # instead is exact and costs one pass -- the ranking is over the
+        # page's own chunks, which is what "scoped" means.
+        if scope_url:
+            mask = np.zeros(rows, dtype=np.float32)
+            for row, meta in self._meta.items():
+                if meta and meta[1] == scope_url and 0 <= int(row) < rows:
+                    mask[int(row)] = 1.0
+            score = score * mask
 
         diag.survivors = int(np.sum(score > 0))
         if diag.survivors == 0:

@@ -313,20 +313,13 @@ def search_payload(workspace, query: str, k: int = 8, *,
     list that can be handed to a model.
     """
     want = max(1, offset + k)
-    if url:
-        # Scoped means ranked WITHIN the page, and the filter alone does not
-        # do that: applied to a global top-k it returns whatever of that
-        # handful happened to be on the page, which for three results is
-        # usually nothing. Measured before this: `k=3` scoped to MDN's
-        # Headers index returned 0 hits while the page has hundreds of
-        # chunks about exactly the query.
-        #
-        # The index ranks rather than filters, so the depth is widened until
-        # the page is certainly inside it. Bounded, because a scope on a
-        # 1,173-chunk page must not become a request that ranks the corpus
-        # end to end.
-        want = max(want, min(4000, workspace.store.chunk_count(url) * 3))
-    hits = workspace.search(query, k=want)
+    # Scoped means ranked WITHIN the page, and the index does that itself now
+    # (`scope_url`). It used to be a post-filter over a widened global top-k,
+    # bounded so that scoping a large page did not rank the corpus end to
+    # end -- and that bound was the defect: RFC 9110's 1,173 chunks rank
+    # below the bound globally, so scoping to the largest page in the store
+    # returned 0 hits for every query.
+    hits = workspace.search(query, k=want, scope_url=url or "")
     out = []
     spent = 0
     seen_groups = set()
