@@ -169,17 +169,45 @@ export function installHarness(app: App, sidecarBase: () => string) {
 
   const leaf = (type: string) => (app.workspace.getLeavesOfType(type)[0] as any);
 
+  /**
+   * A leaf that is loaded, laid out, and usable.
+   *
+   * **Three states, and only the first is obvious.** A leaf in a background
+   * tab hands back a DEFERRED stub with none of the view's methods;
+   * `loadIfDeferred` resolves BEFORE the guest emits `dom-ready`, and every
+   * webview method then throws "The WebView must be attached to the DOM and
+   * the dom-ready event emitted"; and a loaded, ready pane in a background
+   * tab still has a 0x0 box, so any coordinate taken from it is meaningless.
+   * A gesture that skips these reports the application as broken when it is
+   * merely behind another tab -- which is what `navigate` did.
+   */
   const ready = async (type: string, ms = 30000) => {
     const until = Date.now() + ms;
+    let l: any = null;
     while (Date.now() < until) {
-      const l = leaf(type);
+      l = leaf(type);
       if (l) {
         if (l.loadIfDeferred) await l.loadIfDeferred();
-        if (l.view) return l;
+        if (l.view) break;
       }
       await sleep(250);
     }
-    return leaf(type);
+    if (!l || !l.view) return l;
+    // Laid out: a background tab has no box, and the guest has no viewport.
+    app.workspace.revealLeaf(l);
+    const wv = l.view.webview;
+    if (wv) {
+      while (Date.now() < until) {
+        try { wv.getURL(); break; } catch { await sleep(200); }
+      }
+      // And a real size, or a click lands nowhere.
+      while (Date.now() < until) {
+        const r = l.view.containerEl?.getBoundingClientRect?.();
+        if (r && r.width > 50 && r.height > 50) break;
+        await sleep(200);
+      }
+    }
+    return l;
   };
 
   async function gesture(name: string, arg?: any): Promise<any> {

@@ -985,8 +985,29 @@ class _Handler(BaseHTTPRequestHandler):
         if not segments or segments[0] == "health":
             # `enact` is advertised so the plugin can draw a read-only
             # surface as read-only rather than offering a button that 403s.
+            # **Is the trie actually ANCHORED?**
+            #
+            # Addresses and anchors are different things and only one of them
+            # was ever counted. A capture reported 320 addresses written for
+            # a page while every line of every chunk on it came back with
+            # `key: ""`, because the Anchors edges that bind a LINE to an
+            # ADDRESS were not there. The address key is the identity
+            # everything downstream is keyed on -- the retrieval gesture, the
+            # affordance list, the click that names an element in the real
+            # page -- so a store full of addresses and empty of anchors is a
+            # store whose chunks cannot be acted on at all. Counting both,
+            # cheaply, is what makes that visible instead of silent.
+            def _one(q):
+                try:
+                    return self.workspace.store._rows(q)[0][0]
+                except Exception:               # noqa: BLE001
+                    return None
             self._send(200, {"ok": True,
                              "pages": len(self.workspace.pages()),
+                             "addresses": _one(
+                                 "MATCH (a:Address) RETURN count(a)"),
+                             "anchors": _one(
+                                 "MATCH ()-[r:Anchors]->() RETURN count(r)"),
                              "enact": bool(self.enact_allowed),
                              "capture": bool(self.capture_allowed),
                              # Advertised so the panel can draw a run button as
@@ -1140,18 +1161,27 @@ class _Handler(BaseHTTPRequestHandler):
             needle = (query.get("contains") or [""])[0]
             limit = int((query.get("limit") or ["4000"])[0])
             rows = self.workspace.store._rows(
-                "MATCH (a:Address {url: $u}) RETURN a.xpath, a.tag "
+                "MATCH (a:Address {url: $u}) RETURN a.xpath, a.tag, a.akey "
                 "ORDER BY a.xpath", {"u": url})
             out = []
-            for xpath, tag in rows:
+            blank_keys = 0
+            for xpath, tag, akey in rows:
+                if not akey:
+                    blank_keys += 1
                 if not xpath:
                     continue
                 if needle and needle not in xpath:
                     continue
-                out.append({"xpath": xpath, "tag": tag or ""})
+                # The KEY is the identity everything downstream is anchored
+                # on. A row with a blank one cannot be parsed back, so the
+                # line that points at it loses its handle on the page.
+                out.append({"xpath": xpath, "tag": tag or "",
+                            "akey": akey or ""})
                 if len(out) >= limit:
                     break
-            self._send(200, {"url": url, "n": len(out), "addresses": out})
+            self._send(200, {"url": url, "n": len(out),
+                             "rows_total": len(rows),
+                             "blank_akeys": blank_keys, "addresses": out})
             return
 
         if segments[0] == "links":
