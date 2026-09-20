@@ -923,6 +923,79 @@ const CHECKS = [
     },
   },
   {
+    id: "G-16",
+    asks: "a live scan's chunks reach the PROJECTOR while the reader browses",
+    async run() {
+      // Needs the sidecar started with --capture. Says so rather than
+      // failing obscurely: a writer lock is a deliberate choice, and a
+      // reader-only sidecar is the ordinary state.
+      const health = await ask("/health");
+      if (!health.capture) {
+        return { pass: false, evidence: {
+          why: "sidecar has no --capture; this check needs the writer lock" } };
+      }
+      const got = await evaluate(`(async () => {
+        const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+        await app.commands.executeCommandById("domvec-open-browser");
+        await app.commands.executeCommandById("domvec-open-graph");
+        await sleep(2500);
+        const bv = app.workspace.getLeavesOfType("domvec-browser-view")[0];
+        const gv = app.workspace.getLeavesOfType("domvec-graph-view")[0];
+        const b = bv && bv.view, v = gv && gv.view;
+        if (!b || !v || !b.webview) return { error: "panes not open" };
+        for (let i = 0; i < 60 && !(v.graph && v.graph.graphData().nodes.length); i++) await sleep(500);
+
+        // A page the corpus already holds, so scanning re-writes rather
+        // than grows it -- this is someone's real workspace.
+        const want = "https://books.toscrape.com/";
+        if (b.webview.getURL() !== want) {
+          b.go(want);
+          for (let i = 0; i < 40; i++) {
+            await sleep(400);
+            if (!b.webview.isLoading() && b.webview.getURL() === want) break;
+          }
+        }
+        await sleep(1200);
+        const before = v.graph.graphData().nodes.length;
+        const beforeIds = new Set(v.graph.graphData().nodes.map(n => n.id));
+
+        // Scan it, the way the button does.
+        await b.scan();
+        // The vectors are computed by a worker, so the nodes arrive after
+        // the write. Wait for the picture to change rather than for a timer.
+        let after = before;
+        for (let i = 0; i < 60; i++) {
+          await sleep(1000);
+          after = v.graph.graphData().nodes.length;
+          if (after !== before) break;
+        }
+        await sleep(1500);
+        const d = v.graph.graphData();
+        const fresh = d.nodes.filter(n => !beforeIds.has(n.id));
+        const placed = fresh.filter(n => n.pos || Number.isFinite(n.fitX));
+        const onFrame = fresh.filter(n => [n.fitX, n.fitY, n.fitZ]
+          .some(c => Math.abs(Math.abs(c) - 300) < 0.5)).length;
+        return {
+          url: want,
+          nodes_before: before, nodes_after: d.nodes.length,
+          arrived: fresh.length, with_a_position: placed.length,
+          on_the_frame: onFrame,
+          status: b.status ? b.status.textContent : null,
+        };
+      })()`);
+      if (got.error) return { pass: false, evidence: got };
+      return {
+        // Something arrived, it has a position, and it is not on the frame
+        // (`D-17` put every placed node there and every count still looked
+        // right).
+        pass: got.arrived > 0
+           && got.with_a_position === got.arrived
+           && got.on_the_frame === 0,
+        evidence: got,
+      };
+    },
+  },
+  {
     id: "G-69",
     asks: "retrieval is a scrolled ranking, not top-k",
     async run() {
