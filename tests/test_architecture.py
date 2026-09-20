@@ -149,3 +149,39 @@ def test_chunkgroup_kept_its_dataclass_decorator():
     from domvec.core.signal_detect import ChunkGroup
 
     assert hasattr(ChunkGroup, "__dataclass_fields__")
+
+
+def test_no_test_binds_a_fixed_port():
+    """A fixed port is a shared resource, and a flake generator.
+
+    `tests/test_obsidian_{kernel,shell,enact}.py` bound 8811..8834 by hand.
+    Two of them failed in a full run while passing in isolation, because a
+    sidecar was restarting beside the suite; the third was missed when the
+    other two were fixed, because it passes its port POSITIONALLY and a grep
+    for ``port=88NN`` does not see ``_serve(ws, 8811)``.
+
+    So this is a test rather than a grep. It is scanned from the AST, which
+    does not care whether the argument was named or positional -- any integer
+    literal in the 1024..65535 range handed to a `serve`-shaped call is a
+    bound port, and the only safe one is 0.
+    """
+    offenders = []
+    for path in sorted((ROOT / "tests").glob("test_*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            name = getattr(node.func, "id", "") or getattr(node.func, "attr", "")
+            if "serve" not in name:
+                continue
+            args = list(node.args) + [kw.value for kw in node.keywords
+                                      if kw.arg == "port"]
+            for arg in args:
+                if (isinstance(arg, ast.Constant)
+                        and isinstance(arg.value, int)
+                        and 1024 <= arg.value <= 65535):
+                    offenders.append("%s:%d -> %s(port=%d)"
+                                     % (path.name, node.lineno, name, arg.value))
+    assert not offenders, (
+        "a test binds a fixed port; ask the OS for one with port=0 and read "
+        "back server.server_address[1]:\n  " + "\n  ".join(offenders))

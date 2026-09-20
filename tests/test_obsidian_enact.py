@@ -34,13 +34,49 @@ def ws(tmp_path):
         yield workspace
 
 
+#: Port 0, so the OS picks, and a retry for a dropped LOOPBACK connection.
+#:
+#: Both for the reason the other two sidecar test files carry them: a fixed
+#: port is a shared resource, and under a full suite running beside a sidecar
+#: and a live browser these failed with `ConnectionAbortedError: [WinError
+#: 10053]` -- aborted by the host, not answered by the server.
+#:
+#: This file was missed when the other two were fixed, because it passes its
+#: port POSITIONALLY: a grep for `port=88NN` does not see `_serve(ws, 8811)`.
+#:
+#: What the retry does NOT hide is an HTTP status. A 403 is returned rather
+#: than retried, so every assertion about a refusal still has to hold.
+def _port(server):
+    return server.server_address[1]
+
+
+def _with_retry(call, attempts=3):
+    import time
+    last = None
+    for attempt in range(attempts):
+        try:
+            return call()
+        except urllib.error.HTTPError:
+            raise
+        except (ConnectionError, OSError) as exc:
+            last = exc
+            time.sleep(0.25 * (attempt + 1))
+    raise last
+
+
+def _health(server, timeout=10):
+    return json.load(_with_retry(lambda: urllib.request.urlopen(
+        "http://127.0.0.1:%d/health" % _port(server), timeout=timeout)))
+
+
 def _post(port, body):
     req = urllib.request.Request(
         "http://127.0.0.1:%d/enact" % port, method="POST",
         data=json.dumps(body).encode(),
         headers={"Content-Type": "application/json"})
     try:
-        return 200, json.load(urllib.request.urlopen(req, timeout=15))
+        return 200, json.load(_with_retry(
+            lambda: urllib.request.urlopen(req, timeout=15)))
     except urllib.error.HTTPError as exc:
         return exc.code, json.loads(exc.read().decode())
 
@@ -58,12 +94,11 @@ def test_enact_is_off_unless_the_server_was_asked_for_it(ws):
     page renderer inside an app the user installs plugins into. The process
     that owns the browser decides.
     """
-    server = _serve(ws, 8811)
+    server = _serve(ws, 0)
     try:
-        health = json.load(urllib.request.urlopen(
-            "http://127.0.0.1:8811/health", timeout=10))
+        health = _health(server)
         assert health["enact"] is False
-        code, body = _post(8811, {"address": "anything"})
+        code, body = _post(_port(server), {"address": "anything"})
         assert code == 403
         # Named, not a bare 403: a caller that cannot tell "off" from "failed"
         # will retry forever.
@@ -75,10 +110,9 @@ def test_enact_is_off_unless_the_server_was_asked_for_it(ws):
 
 def test_the_flag_is_advertised_so_a_surface_can_stay_read_only(ws):
     """Otherwise the plugin offers a button that 403s."""
-    server = _serve(ws, 8812, enact=True)
+    server = _serve(ws, 0, enact=True)
     try:
-        health = json.load(urllib.request.urlopen(
-            "http://127.0.0.1:8812/health", timeout=10))
+        health = _health(server)
         assert health["enact"] is True
     finally:
         server.shutdown(); server.server_close()
