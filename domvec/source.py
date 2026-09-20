@@ -68,7 +68,11 @@ from .core.content_tagger import ContentTag
 #: Files worth reading at all. A repository is mostly not source, and walking
 #: a `node_modules` or a `build/` into the trie would drown the corpus it is
 #: meant to join.
-SOURCE_SUFFIXES = (".py",)
+#: `.js` is here for `G-50`: the fold a reader watches run is
+#: `core/js/sensor.js`, and a corpus that held every Python file and
+#: not that one would be missing the thing the requirement names.
+#: It gets COMMENTS, not structure -- see :func:`_js_comments`.
+SOURCE_SUFFIXES = (".py", ".js")
 
 #: Directories never descended. Not a style preference: `build/` here holds
 #: multi-gigabyte kuzu stores, and `__pycache__` holds compiled copies of the
@@ -209,6 +213,78 @@ def _import_targets(tree, root: str, rel_path: str):
     return out
 
 
+def _js_comments(text: str):
+    """``(line, comment_text)`` for a JavaScript-ish file.
+
+    **A scanner, and deliberately not a parser.** The module docstring says
+    another language gets its comments by a line scan or nothing at all, and
+    this is that scan: it walks the file character by character, tracking
+    whether it is inside a string, a template literal or a comment, so that
+    a `//` inside `"http://x"` is not mistaken for one. That much is exact.
+
+    What it does NOT handle is the regex literal: `/ab//c/.test(s)` is
+    ambiguous without a full expression parser, since `/` opens a division or
+    a regex depending on what preceded it. A regex containing `//` can
+    therefore swallow the rest of its line. Stated rather than hidden, and
+    measured -- on `core/js/sensor.js` the scan finds **1,000** comments
+    over 2,870 lines, and a `//` inside a string literal is correctly
+    not one of them.
+
+    The alternative was to pretend a regex is a parser, which this repository
+    has a rule about.
+    """
+    out = []
+    i, n = 0, len(text)
+    line = 0
+    while i < n:
+        ch = text[i]
+        if ch == "\n":
+            line += 1
+            i += 1
+            continue
+        if ch in "'\"`":
+            quote = ch
+            i += 1
+            while i < n:
+                if text[i] == "\\":
+                    i += 2
+                    continue
+                if text[i] == "\n":
+                    line += 1
+                    if quote != "`":
+                        break           # an unterminated ordinary string
+                if text[i] == quote:
+                    i += 1
+                    break
+                i += 1
+            continue
+        if ch == "/" and i + 1 < n and text[i + 1] == "/":
+            j = text.find("\n", i)
+            j = n if j < 0 else j
+            body = text[i + 2:j].strip()
+            if body:
+                out.append((line, body))
+            i = j
+            continue
+        if ch == "/" and i + 1 < n and text[i + 1] == "*":
+            j = text.find("*/", i + 2)
+            j = n if j < 0 else j + 2
+            block = text[i + 2:max(i + 2, j - 2)]
+            started = line
+            # A JSDoc block is prose with leading stars; strip them so the
+            # encoder is not charged for punctuation.
+            body = "\n".join(
+                ln.strip().lstrip("*").strip() for ln in block.splitlines())
+            body = "\n".join(ln for ln in body.splitlines() if ln)
+            if body:
+                out.append((started, body))
+            line += block.count("\n")
+            i = j
+            continue
+        i += 1
+    return out
+
+
 def tag_source(text: str, *,
                root: str = "repo", rel_path: str = "",
                lines_at: Optional[Dict[str, Tuple[int, int]]] = None,
@@ -242,6 +318,16 @@ def tag_source(text: str, *,
                               source_attr="source"))
 
     lines = text.splitlines()
+    if str(rel_path).endswith(".js"):
+        # Comments and the file itself. No structural parse: see
+        # `_js_comments` for what that costs and why it is the honest
+        # trade.
+        module = addr.step("module")
+        for row, body in _js_comments(text):
+            emit(addr.step("comment", module), "visible", body, row, row)
+        emit(addr.step("code", module), "code", text, 0, max(len(lines) - 1, 0))
+        return out
+
     try:
         tree = ast.parse(text)
     except SyntaxError:

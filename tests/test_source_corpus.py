@@ -218,3 +218,52 @@ def test_a_dependency_on_a_module_indexed_LATER_is_repaired(ws):
     got = ws.store.relink()
     assert got["resolvable"] >= 1, got
     assert want in set(ws.store.page_links()), "relink did not repair it"
+
+
+# --- G-50: the fold itself is JavaScript -------------------------------------
+
+
+def test_a_comment_marker_inside_a_string_is_not_a_comment():
+    """The one thing a line-based scan gets wrong, and this one does not.
+
+    `sensor.js` is full of urls in string literals, so a scan that counted
+    every `//` would report hundreds of comments that are not there and feed
+    the encoder fragments of urls.
+    """
+    from domvec.source import _js_comments
+
+    src = 'const u = "http://example.com/x";  // the real one\n'
+    got = _js_comments(src)
+    assert [body for _row, body in got] == ["the real one"], got
+
+
+def test_a_template_literal_spanning_lines_does_not_swallow_comments():
+    from domvec.source import _js_comments
+
+    src = "const t = `a\nb`;\n// after the template\n"
+    assert [b for _r, b in _js_comments(src)] == ["after the template"]
+
+
+def test_a_jsdoc_block_loses_its_leading_stars():
+    """The encoder should be charged for the prose, not the punctuation."""
+    from domvec.source import _js_comments
+
+    src = "/**\n * A factory expression.\n * Not a self-invocation.\n */\n"
+    got = [b for _r, b in _js_comments(src)]
+    assert got == ["A factory expression.\nNot a self-invocation."], got
+
+
+def test_javascript_gives_its_comments_to_the_encoder_and_not_its_code(ws):
+    """`G-50`: the script that runs the scan is a chunk like any other."""
+    src = ('// the fold reads no layout\n'
+           'function fold(node) {\n'
+           '  const seen = new Set();\n'
+           '  return seen;\n'
+           '}\n')
+    got = ws.index_source(src, "core/js/sensor.js", root="repo")
+    rendered = "\n".join(c.md or "" for c in ws.store.chunks(got.url))
+    seen = tokens.for_model(rendered, drop_code=True)
+
+    assert "the fold reads no layout" in seen, "the comment was lost"
+    assert "new Set()" in rendered
+    assert "new Set()" not in seen, "code reached the encoder"
