@@ -58,6 +58,16 @@ def _get(port, path):
         "http://127.0.0.1:%d%s" % (port, path), timeout=30))
 
 
+#: **Port 0, so the OS picks.** These bound 8821..8834 by hand, and a
+#: fixed port is a shared resource: two of them failed in a full run
+#: while passing in isolation, because a sidecar was restarting beside
+#: the suite. A flaky test is worse than a missing one -- it trains a
+#: reader to scroll past red. `serve` returns the server, and
+#: `server.server_address[1]` is the port it actually got.
+def _port(server):
+    return server.server_address[1]
+
+
 def _stop(server):
     server.shutdown()
     for attr in ("kernel_pool", "shell_pool"):
@@ -193,9 +203,9 @@ def test_the_terminal_is_off_unless_the_server_was_asked_for_a_kernel(ws):
     access whether or not a terminal pane exists. A permission that looks
     meaningful and is not is worse than no permission at all.
     """
-    server = serve(ws, port=8831, block=False)
+    server = serve(ws, port=0, block=False)
     try:
-        code, body = _post(8831, {"pane": "p1", "command": "echo hi"})
+        code, body = _post(_port(server), {"pane": "p1", "command": "echo hi"})
         assert code == 403
         assert body["error"] == "shell is off"
         assert "--kernel" in body["detail"]
@@ -205,9 +215,9 @@ def test_the_terminal_is_off_unless_the_server_was_asked_for_a_kernel(ws):
 
 @needs_shell
 def test_the_kernel_flag_opens_the_terminal_too(ws):
-    server = serve(ws, port=8832, block=False, kernel=True)
+    server = serve(ws, port=0, block=False, kernel=True)
     try:
-        ok, body = _post(8832, {"pane": "p1", "command": "echo hello-terminal"})
+        ok, body = _post(_port(server), {"pane": "p1", "command": "echo hello-terminal"})
         assert ok == 200 and body["ok"], body
         assert "hello-terminal" in body["output"], body
     finally:
@@ -215,9 +225,9 @@ def test_the_kernel_flag_opens_the_terminal_too(ws):
 
 
 def test_the_pane_is_required_because_it_is_the_boundary(ws):
-    server = serve(ws, port=8833, block=False, kernel=True)
+    server = serve(ws, port=0, block=False, kernel=True)
     try:
-        code, body = _post(8833, {"command": "echo hi"})
+        code, body = _post(_port(server), {"command": "echo hi"})
         assert code == 400 and body["error"] == "missing pane"
     finally:
         _stop(server)
@@ -229,9 +239,9 @@ def test_interpreters_answer_even_when_the_kernel_is_off(ws):
     Gating discovery behind the flag would make an off kernel and an empty
     machine look the same from the pane.
     """
-    server = serve(ws, port=8834, block=False)
+    server = serve(ws, port=0, block=False)
     try:
-        found = _get(8834, "/interpreters")
+        found = _get(_port(server), "/interpreters")
         assert found["python"], found
     finally:
         _stop(server)

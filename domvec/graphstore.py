@@ -1152,6 +1152,74 @@ class GraphStore:
                           params)
         return [(ContentAddress.parse(key), value) for key, value in rows]
 
+    def relink(self) -> Dict[str, int]:
+        """Re-resolve every url address against the pages held NOW.
+
+        **A link is resolved once, at ingest, against the pages the store
+        happened to hold at that moment.** A corpus scanned page by page
+        therefore ends with almost no link edges: when the first page was
+        written, none of the others existed to point at. Measured on
+        `build/corpus123` -- 96 pages, 14,129 chunks, 29,186 url-valued
+        addresses, and **2** `LinksTo` edges in the whole store.
+
+        Nothing is re-fetched or re-rendered. The addresses already hold the
+        targets; what was missing is a second look once the corpus stopped
+        growing. 103 of those 29,186 point at a page this corpus actually
+        holds, over 13 distinct pages -- the ceiling is low because these are
+        mostly unrelated pages rather than a crawl, and the ceiling is the
+        point: the axis is sparse, and it should be sparse rather than empty.
+
+        Returns what it found, so a caller can see the ceiling as well as the
+        gain.
+        """
+        stored = self.page_urls()
+        exact = set(stored)
+        by_canonical: Dict[str, str] = {}
+        for candidate in stored:
+            by_canonical.setdefault(canonical_url(candidate) or candidate,
+                                    candidate)
+
+        # Which chunk draws which address, for the whole store this time.
+        chunk_of: Dict[str, str] = {}
+        for cid, aid in self._rows(
+                "MATCH (c:Chunk)-[:Anchors]->(a:Address) RETURN c.cid, a.aid"):
+            if cid and aid:
+                chunk_of.setdefault(aid, cid)
+
+        seen: set = set()
+        pairs = []
+        considered = 0
+        for aid, src, value in self._rows(
+                "MATCH (a:Address) WHERE starts_with(a.value, 'http') "
+                "RETURN a.aid, a.url, a.value"):
+            if not value:
+                continue
+            considered += 1
+            target = canonical_url(value, src or "")
+            if not target:
+                continue
+            resolved = target if target in exact else by_canonical.get(target)
+            if resolved is None or resolved == src:
+                continue
+            cid = chunk_of.get(aid)
+            if cid is None or (cid, resolved) in seen:
+                continue
+            seen.add((cid, resolved))
+            pairs.append({"cid": cid, "url": resolved})
+
+        before = self._rows("MATCH ()-[r:LinksTo]->() RETURN count(r)")[0][0]
+        if pairs:
+            self._batch(
+                "UNWIND $rows AS r MATCH (c:Chunk {cid: r.cid}), "
+                "(p:Page {url: r.url}) MERGE (c)-[:LinksTo]->(p)",
+                pairs,
+            )
+        after = self._rows("MATCH ()-[r:LinksTo]->() RETURN count(r)")[0][0]
+        return {"url_addresses": considered,
+                "resolvable": len(pairs),
+                "edges_before": int(before),
+                "edges_after": int(after)}
+
     def page_links(self) -> List[Tuple[str, str]]:
         """Page-to-page links, as (source url, target url).
 

@@ -59,6 +59,16 @@ def _get(port, path):
         "http://127.0.0.1:%d%s" % (port, path), timeout=30))
 
 
+#: **Port 0, so the OS picks.** These bound 8821..8834 by hand, and a
+#: fixed port is a shared resource: two of them failed in a full run
+#: while passing in isolation, because a sidecar was restarting beside
+#: the suite. A flaky test is worse than a missing one -- it trains a
+#: reader to scroll past red. `serve` returns the server, and
+#: `server.server_address[1]` is the port it actually got.
+def _port(server):
+    return server.server_address[1]
+
+
 def _stop(server):
     server.shutdown()
     if getattr(server, "kernel_pool", None) is not None:
@@ -195,10 +205,10 @@ def test_the_kernel_is_off_unless_the_server_was_asked_for_it(ws):
     cannot be the gate: that is a client asserting something about itself, and
     the client is a page renderer in an app the user installs plugins into.
     """
-    server = serve(ws, port=8821, block=False)
+    server = serve(ws, port=0, block=False)
     try:
-        assert _get(8821, "/health")["kernel"] is False
-        code, body = _post(8821, {"note": "a.md", "code": "1 + 1"})
+        assert _get(_port(server), "/health")["kernel"] is False
+        code, body = _post(_port(server), {"note": "a.md", "code": "1 + 1"})
         assert code == 403
         # Named, not bare: a caller that cannot tell "off" from "failed" retries
         # forever, and the panel should draw the button unavailable, not broken.
@@ -209,10 +219,10 @@ def test_the_kernel_is_off_unless_the_server_was_asked_for_it(ws):
 
 
 def test_health_advertises_the_kernel_when_it_is_on(ws):
-    server = serve(ws, port=8822, block=False, kernel=True, kernel_timeout=6)
+    server = serve(ws, port=0, block=False, kernel=True, kernel_timeout=6)
     try:
-        assert _get(8822, "/health")["kernel"] is True
-        ok, body = _post(8822, {"note": "a.md", "code": "6 * 7"})
+        assert _get(_port(server), "/health")["kernel"] is True
+        ok, body = _post(_port(server), {"note": "a.md", "code": "6 * 7"})
         assert ok == 200 and body["value"] == "42", body
     finally:
         _stop(server)
@@ -225,12 +235,12 @@ def test_enact_and_kernel_are_separate_permissions(ws):
     drive the web, and a reader who wanted click-through did not ask for code
     execution. Gating both on one flag would grant whichever they did not want.
     """
-    server = serve(ws, port=8823, block=False, kernel=True)
+    server = serve(ws, port=0, block=False, kernel=True)
     try:
-        health = _get(8823, "/health")
+        health = _get(_port(server), "/health")
         assert health["kernel"] is True and health["enact"] is False
         # `enact` is still shut, on a server whose kernel is open.
-        code, body = _post(8823, {"address": "x", "action": "press"},
+        code, body = _post(_port(server), {"address": "x", "action": "press"},
                            path="/enact")
         assert code == 403 and body["error"] == "enact is off"
     finally:
@@ -244,9 +254,9 @@ def test_the_note_is_required_because_it_is_the_boundary(ws):
     mysterious name collision between unrelated notes rather than as a missing
     field.
     """
-    server = serve(ws, port=8824, block=False, kernel=True)
+    server = serve(ws, port=0, block=False, kernel=True)
     try:
-        code, body = _post(8824, {"code": "1"})
+        code, body = _post(_port(server), {"code": "1"})
         assert code == 400 and body["error"] == "missing note"
     finally:
         _stop(server)
@@ -255,9 +265,9 @@ def test_the_note_is_required_because_it_is_the_boundary(ws):
 def test_a_non_python_language_is_refused_by_name(ws):
     """Step 3 is python. Running python and calling it bash would be worse than
     refusing, because the reader would debug the wrong interpreter."""
-    server = serve(ws, port=8825, block=False, kernel=True)
+    server = serve(ws, port=0, block=False, kernel=True)
     try:
-        code, body = _post(8825, {"note": "a.md", "code": "echo hi",
+        code, body = _post(_port(server), {"note": "a.md", "code": "echo hi",
                                   "lang": "bash"})
         assert code == 400 and "bash" in body["error"], body
     finally:
