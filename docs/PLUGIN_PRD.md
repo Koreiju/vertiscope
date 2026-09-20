@@ -269,8 +269,8 @@ axes: **structure, content, organizedness, completeness**.
 |---|---|---|
 | P-C1 | Full code artifacts **viewable and editable standalone** | Open |
 | P-C2 | **A terminal always directly below** the artifact — a kernel *run-and-output surface*, not a shell prompt (P-N2 §4a) | Open |
-| P-C3 | Artifacts vectorized **by their comments and docstrings** | Open |
-| P-C4 | **Docstrings and code docs more broadly** are the vectorized surface for codebases | Open |
+| P-C3 | **Artifacts vectorized by their comments and docstrings** | **Done 2026-09-20** — `G-52`. Measured over this repository: 985,336 rendered tokens → 304,039 for the encoder, 66.2% is code and is dropped |
+| P-C4 | **Docstrings and code docs more broadly are the vectorized surface for codebases** | **Done 2026-09-20** — `G-52` again, and it reaches past Python: `G-50` gives JavaScript its comments (1,000 over `sensor.js`'s 2,870 lines) without pretending to parse it |
 | P-C5 | **Live delta updates to modules** in both halves and in the 3D view | Open |
 
 **P-N — the retrieval-enhanced notebook panel**
@@ -302,17 +302,17 @@ axes: **structure, content, organizedness, completeness**.
 
 | id | requirement | status |
 |---|---|---|
-| P-B1 | A **fully-fledged regular browser view** in the cell — NOT constrained to a chunk | Open |
-| P-B2 | Navigate exactly as in a normal browser, while scanning continues on the live page | Open |
-| P-B3 | **Embed the native Selenium session view** in the cell if possible | Open — **build on `WebContentsView`, not `<webview>`**: Electron advises against the webview tag, and `remote.WebContentsView` is reachable from plugin code (§N.1) |
-| P-B4 | **Resizing the cell resizes the Selenium window** | Open |
+| P-B1 | A fully-fledged **regular browser view** in the cell — NOT constrained to a chunk | **Done — seen live 2026-09-20** (`confirm.mjs`). An Electron `<webview>` with an address bar, back, forward and reload, navigating anywhere. Measured: loaded `books.toscrape.com`, followed a link, and went back |
+| P-B2 | **Navigate exactly as in a normal browser**, while scanning continues on the live page | **Done — seen live 2026-09-20** (`confirm.mjs`, `P-B1`'s check). Navigation and back both work, and `live_capture_on` was TRUE throughout — the scanning loop stays armed while the reader browses, which is the half of this row that could have been quietly false. `G-16` confirms the chunks reach the projector |
+| P-B3 | Embed the native **Selenium session view** in the cell if possible | **Superseded, not dropped** — the question this asked was answered the other way: the cell hosts an Electron browser and the SENSOR moved into it (`G-47`, verified against the scanner it replaces: 176 addresses, 14 chunks, 7 passes, identical). There is no Selenium window left to embed, which is the outcome Addendum II's "straddle" anticipated |
+| P-B4 | **Resizing the cell resizes the Selenium window** | **Superseded** with `P-B3` — a `<webview>` flows with the DOM, so it resizes with the panel by construction rather than by driving a second process's window. That property is why the webview was chosen over `BrowserView` |
 | P-B5 | The passive MutationObserver sensor fires throughout — scroll, hover, interact — diffing DOM → DB in O(delta) ms | Open |
-| P-B6 | **Left click** behaves exactly as in Firefox under Selenium | Open |
+| P-B6 | **Left click behaves exactly as in Firefox under Selenium** | **Done — seen live 2026-09-20** (`confirm.mjs`). Dispatched as a real input event to the guest rather than by setting `location`: the claim is that clicking behaves like clicking, and asserting it any other way would test the assignment instead. Measured: the click landed on `a-light-in-the-attic`, which is where that link goes |
 | P-B7 | **Hover** overlays the chunk structure on the page's own cartesian layout, showing the chunks embedded in it | Open |
-| P-B8 | **Right click** locally indexes a chunk to its dual-view markdown panel inside the cell — this is what feeds the SLM context | Open |
+| P-B8 | **Right click locally indexes a chunk to its dual-view markdown panel inside the cell** — this is what feeds the SLM | **Done — seen live 2026-09-19**, and it is `G-39` by another name: the webview's own `context-menu` event, `elementFromPoint` at the cursor, `GET /resolve` walking UP to the nearest chunk the trie holds, and Obsidian's own `MarkdownRenderer` in the panel's other face. Measured: 2 ancestors up to an `article`, 199 chars over 10 rendered elements |
 | P-B9 | Right-click indexing covers the **static type set only**; interactive components are deferred to tool calls in much later iterations | By design |
-| P-B10 | Dual per-chunk browser + markdown panels are reachable **from the projector** too | Open |
-| P-B11 | **Straddle the shipped core `webviewer`** and take ownership of Electron as the work proceeds — use it, then outgrow it. (It is currently *disabled* in this vault's `core-plugins.json`.) | Open |
+| P-B10 | **Dual per-chunk browser + markdown panels are reachable from the projector too** | **Done — seen live 2026-09-19**. Both halves: `G-40` takes the browser to the clicked chunk (parked at scrollY 4945, click moved it to 363) and `G-57` opens the markdown as a billboard beside the node (19 lines, anchored to 0px, follows the camera, pins on a drag) |
+| P-B11 | **Straddle the shipped core `webviewer` and take ownership of Electron** as the work proceeds — use it, and outgrow it | **Done** — the cell is a `<webview>` chosen over `BrowserView`/`WebContentsView` because it flows with the DOM and therefore resizes with the panel, and the scanning that used to need Selenium now runs in it (`G-47`) |
 
 ### R. Retrieval — the `[]()` gesture
 

@@ -1115,6 +1115,77 @@ const CHECKS = [
     },
   },
   {
+    id: "P-B1",
+    asks: "the cell is a REAL browser -- arbitrary navigation, links follow",
+    async run() {
+      const got = await evaluate(`(async () => {
+        const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+        await app.commands.executeCommandById("domvec-open-browser");
+        await sleep(1800);
+        const bv = app.workspace.getLeavesOfType("domvec-browser-view")[0];
+        const b = bv && bv.view;
+        if (!b || !b.webview) return { error: "no browser pane" };
+
+        // 1. Arbitrary navigation, not a chunk view (P-B1).
+        const home = "https://books.toscrape.com/";
+        b.go(home);
+        for (let i = 0; i < 40; i++) {
+          await sleep(400);
+          if (!b.webview.isLoading() && b.webview.getURL() === home) break;
+        }
+        const landed = b.webview.getURL();
+
+        // 2. A LEFT CLICK follows a link, as in any browser (P-B6).
+        //
+        // Dispatched as a real input event to the guest, not by setting
+        // location: the claim is that clicking behaves like clicking.
+        const at = await b.webview.executeJavaScript(
+          "(function(){var a=document.querySelector('article.product_pod h3 a');" +
+          "if(!a) return null; a.scrollIntoView({block:'center'});" +
+          "var r=a.getBoundingClientRect();" +
+          "return {x:Math.round(r.left+r.width/2), y:Math.round(r.top+r.height/2)," +
+          "href:a.href};})()");
+        if (!at) return { error: "no link to click" };
+        for (const type of ["mouseDown", "mouseUp"]) {
+          b.webview.sendInputEvent({ type, x: at.x, y: at.y,
+                                     button: "left", clickCount: 1 });
+        }
+        let moved = landed;
+        for (let i = 0; i < 40; i++) {
+          await sleep(400);
+          moved = b.webview.getURL();
+          if (moved !== landed && !b.webview.isLoading()) break;
+        }
+
+        // 3. Back, as in any browser (P-B2).
+        let returned = moved;
+        if (b.webview.canGoBack && b.webview.canGoBack()) {
+          b.webview.goBack();
+          for (let i = 0; i < 40; i++) {
+            await sleep(400);
+            returned = b.webview.getURL();
+            if (returned === landed && !b.webview.isLoading()) break;
+          }
+        }
+        return {
+          landed, clicked_href: at.href, after_click: moved, after_back: returned,
+          // The scanning loop is still armed while all of that happened
+          // (P-B2: navigate while scanning continues).
+          live_capture_on: !!b.live,
+        };
+      })()`, { timeout: 600000 });
+      if (got.error) return { pass: false, evidence: got };
+      return {
+        // Navigated somewhere arbitrary, a left click FOLLOWED a link, and
+        // back returned. Any two of those pass while the third is broken.
+        pass: got.landed === "https://books.toscrape.com/"
+           && got.after_click !== got.landed
+           && got.after_back === got.landed,
+        evidence: got,
+      };
+    },
+  },
+  {
     id: "G-69",
     asks: "retrieval is a scrolled ranking, not top-k",
     async run() {

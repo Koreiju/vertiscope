@@ -66,6 +66,12 @@ ROW = re.compile(r"^\|\s*([A-Z]+-[A-Z]?\d+)\s*\|(.*?)\|(.*)\|\s*$")
 #: `**Done 2026-09-12**`, which is how four fixed rows sat in "cannot read"
 #: while reading perfectly well to a person.
 STATUSES = [
+    #: A requirement answered the OTHER way. `P-B3` asked to embed a
+    #: Selenium window and the sensor moved into Electron instead, so there
+    #: is no window left to embed. Neither done nor open: counting it open
+    #: would keep asking for work nobody should do, and counting it done
+    #: would claim something that was never built.
+    ("superseded", ("**Superseded", "Superseded")),
     ("standing", ("Standing", "**Standing")),
     ("defect", ("**Defect", "Defect")),
     ("done", ("**Done", "Done", "**FIXED", "FIXED", "**Fixed", "Fixed",
@@ -82,7 +88,11 @@ STATUSES = [
 #: Things a verdict can point at, in descending order of how checkable they
 #: are. A path either exists or it does not; a section reference can be
 #: resolved in the document; prose can be neither.
-CITES = re.compile(r"`([^`]+\.(?:py|ts|js|md|json))`|§([MNO]\.\d+)"
+#: `.mjs` was missing, so every citation of `confirm.mjs` -- the file that
+#: holds the live checks -- read as "cites nothing". The count of unevidenced
+#: rows is the one number this file exists to apply pressure with, and it was
+#: overstating itself by the whole live-confirmation surface.
+CITES = re.compile(r"`([^`]+\.(?:py|ts|js|mjs|md|json))`|§([MNO]\.\d+)"
                    r"|\b(probes/[\w.-]+\.js)\b|\b(tests/test_[\w.-]+\.py)\b")
 
 
@@ -199,19 +209,20 @@ def main() -> int:
     add("")
     add("| | rows |")
     add("|---|---|")
-    for name in ("done", "confirm", "partly", "open", "defect", "standing",
-                 "unstated"):
+    for name in ("done", "confirm", "partly", "open", "defect", "superseded",
+                 "standing", "unstated"):
         if by_status.get(name):
             add("| %s | %d |" % (name, by_status[name]))
     add("| **total** | **%d** |" % len(rows))
     add("")
-    add("| family | done | confirm | partly | open | defect | standing | unstated |")
-    add("|---|---|---|---|---|---|---|---|")
+    add("| family | done | confirm | partly | open | defect | superseded | "
+        "standing | unstated |")
+    add("|---|---|---|---|---|---|---|---|---|")
     for prefix in sorted(by_prefix):
         c = by_prefix[prefix]
-        add("| %s-* | %d | %d | %d | %d | %d | %d | %d |"
+        add("| %s-* | %d | %d | %d | %d | %d | %d | %d | %d |"
             % (prefix, c["done"], c["confirm"], c["partly"], c["open"],
-               c["defect"], c["standing"], c["unstated"]))
+               c["defect"], c["superseded"], c["standing"], c["unstated"]))
     add("")
 
     defects = [r for r in rows if r["status"] == "defect"]
