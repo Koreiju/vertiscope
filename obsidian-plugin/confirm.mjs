@@ -156,16 +156,40 @@ const CHECKS = [
         body: JSON.stringify({ url: biggest.url, path: "" }),
       });
       const d = await res.json();
+      // WHERE they land, not only how many. D-17 put every placed node on a
+      // frame corner -- 26 chunks at one point, 762 units from their own
+      // page -- and every check here passed throughout, because none of them
+      // looked at a coordinate.
+      const pos = d.nodes.map((n) => n.pos).filter(Array.isArray);
+      const onFrame = pos.reduce(
+        (a, p) => a + p.filter((c) => Math.abs(Math.abs(c) - 300) < 0.5).length, 0);
+      const here = (biggest.pos || [0, 0, 0]);
+      const away = pos.map((p) => Math.hypot(
+        p[0] - here[0], p[1] - here[1], p[2] - here[2]));
+      let closest = Infinity;
+      for (let i = 0; i < pos.length; i++) {
+        for (let j = i + 1; j < pos.length; j++) {
+          closest = Math.min(closest, Math.hypot(
+            pos[i][0]-pos[j][0], pos[i][1]-pos[j][1], pos[i][2]-pos[j][2]));
+        }
+      }
+      const far = away.length ? Math.max(...away) : 0;
       return {
-        // The whole cost argument: a page of 1,173 chunks must not open into
-        // 1,173 nodes. If it ever does, the unravelling has become an
-        // expansion and `G-53`'s frame rate goes with it.
-        pass: d.nodes.length > 0 && d.nodes.length < biggest.members / 4,
+        pass: d.nodes.length > 0 && d.nodes.length < biggest.members / 4
+           // Not piled on the frame.
+           && onFrame === 0
+           // Anchored at the page they came out of, inside the unfold ball.
+           && far <= 120
+           // And distinguishable from each other.
+           && (pos.length < 2 || closest > 1),
         evidence: {
           page_members: biggest.members,
           opened_to: d.nodes.length,
           edges: (d.edges || []).length,
           depth: d.depth, branches: d.branches, leaves: d.leaves,
+          on_the_frame: onFrame,
+          furthest_from_its_page: Math.round(far),
+          closest_pair: Number.isFinite(closest) ? Math.round(closest * 10) / 10 : null,
         },
       };
     },

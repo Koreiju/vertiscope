@@ -260,8 +260,10 @@ def build_page_layout(workspace,
         if found is not None:
             pictures[chunk.url] = found
 
+    _PAGE_POS.clear()
     nodes = []
     for i, url in enumerate(urls):
+        _PAGE_POS[url] = [float(v) for v in coords[i][:dims]]
         node = {
             #: The url IS the id at this level. A page has no cid, and
             #: inventing one would make the pane's "which node is this"
@@ -841,7 +843,19 @@ def _spread(coords: np.ndarray, dims: int) -> np.ndarray:
     n = out.shape[0]
     cdf: Dict[int, np.ndarray] = {}
     for axis in range(min(dims, out.shape[1])):
-        column = out[:, axis]
+        # **COPIED, and the copy is the whole correctness of `place`.**
+        #
+        # `out[:, axis]` is a VIEW. The assignment two lines down overwrote
+        # it in place, so the "sorted column" kept below was the RANKED
+        # values, 0..1 -- not the raw coordinates a newcomer has to be
+        # ranked against. `_spread_apply` then compared a raw UMAP
+        # coordinate (measured: -3.42 .. 5.39) against a distribution
+        # spanning 0 .. 1, so every placed point fell entirely below or
+        # entirely above it, ranked to 0 or 1, and framed to exactly -300 or
+        # +300: a corner. Every unfold, every live capture, every hit list
+        # put its nodes there. Measured on RFC 9110: 26 chunks, all at one
+        # point, 762 units from their own page node.
+        column = np.array(out[:, axis], dtype=np.float32, copy=True)
         if float(column.max() - column.min()) == 0.0:
             continue                       # a collapsed axis stays collapsed
         rank = np.argsort(np.argsort(column))
@@ -850,7 +864,7 @@ def _spread(coords: np.ndarray, dims: int) -> np.ndarray:
         # placed at its own rank among the points already drawn -- a
         # `searchsorted` -- instead of re-ranking the corpus, which would
         # move every existing node a little on every capture.
-        cdf[axis] = np.sort(column.astype(np.float32))
+        cdf[axis] = np.sort(column)
     _LAST_FIT["spread_cdf"] = cdf
     return out
 
@@ -1059,11 +1073,48 @@ def _spread_apply(coords: np.ndarray, dims: int, cdf) -> np.ndarray:
     """
     out = np.array(coords, dtype=np.float32, copy=True)
     for axis in range(min(dims, out.shape[1])):
-        sorted_column = cdf.get(axis)
+        sorted_column = np.asarray(cdf.get(axis), dtype=np.float32) \
+            if cdf.get(axis) is not None else None
         if sorted_column is None or len(sorted_column) < 2:
             continue
-        pos = np.searchsorted(sorted_column, out[:, axis])
-        out[:, axis] = (pos / (len(sorted_column) - 1)).astype(np.float32)
+        n = len(sorted_column)
+        ranks = np.arange(n, dtype=np.float32) / (n - 1)
+        value = out[:, axis].astype(np.float32)
+
+        # BETWEEN its neighbours, not ON one of them.
+        #
+        # `searchsorted` answers an integer rank, so every newcomer landed
+        # exactly where an existing point already was; interpolating puts it
+        # at its true position between them, which is what this function
+        # promises.
+        placed = np.interp(value, sorted_column, ranks).astype(np.float32)
+
+        # And PAST the ends, keeping the order.
+        #
+        # `np.interp` clamps outside the support, so every point beyond the
+        # fit's range collapsed onto the boundary -- 101 of 200 chunks on one
+        # axis of one page, all at the same coordinate, which is the very
+        # thing `_spread` exists to prevent. The fit is over 96 page-means
+        # and the chunks it places are individual, so falling outside is the
+        # ORDINARY case and not an edge one.
+        #
+        # The tail slope is taken across the outer decile rather than the
+        # last pair: one gap between two extreme points is noise, and a
+        # slope read off noise sends a newcomer an arbitrary distance away.
+        edge = max(1, n // 10)
+        lo_span = float(sorted_column[edge] - sorted_column[0])
+        hi_span = float(sorted_column[-1] - sorted_column[-1 - edge])
+        below = value < sorted_column[0]
+        above = value > sorted_column[-1]
+        if np.any(below) and lo_span > 1e-9:
+            slope = float(ranks[edge] - ranks[0]) / lo_span
+            placed[below] = (ranks[0]
+                             + (value[below] - sorted_column[0]) * slope)
+        if np.any(above) and hi_span > 1e-9:
+            slope = float(ranks[-1] - ranks[-1 - edge]) / hi_span
+            placed[above] = (ranks[-1]
+                             + (value[above] - sorted_column[-1]) * slope)
+        out[:, axis] = placed
     return out
 
 
@@ -1158,6 +1209,73 @@ class Projection:
         coords = _frame_apply(coords, self.dims, self.frame_mid,
                               self.frame_scale)
         return coords[:, :self.dims], colours
+
+
+#: How far an unfolded page's chunks spread around their page's position.
+#: The page cloud spans about +/-300, so a page opening into a ball of this
+#: radius reads as "these belong to that node" rather than as a second cloud
+#: competing with the first.
+UNFOLD_RADIUS = 90.0
+
+#: Where `build_page_layout` actually DREW each page.
+#:
+#: An unfolding anchors on this rather than re-deriving the page's
+#: position with `place(page_mean)`. UMAP's `transform` does not
+#: reproduce its own `fit_transform` output for the same point, so
+#: re-deriving put the ball of chunks a median 129 units from the node
+#: it was supposed to hang off -- further than the ball's own radius.
+_PAGE_POS: Dict[str, List[float]] = {}
+
+
+def _local_positions(rows: np.ndarray, anchor, *, seed: int = 0):
+    """A fit over the page's OWN chunks, placed around `anchor`.
+
+    **Why not the global transform, which is what this replaces.** The
+    default fit is over 96 page-MEANS, and transforming individual chunks
+    into it keeps almost nothing of their structure. Measured on RFC 9110,
+    300 chunks, 10-NN neighbourhoods kept:
+
+        into the page-level fit     0.086     <- what shipped
+        a fit made on these chunks  0.507
+        random positions            0.035
+
+    0.086 against a random baseline of 0.035 is not a projection of anything;
+    it is why a reader unfolding a few pages saw the chunks land jumbled. A
+    page's mean cannot stand in for its chunks, because the mean is exactly
+    the direction they all share and the differences between them are what
+    is left over after it is removed.
+
+    So the local structure comes from a local fit and the global position
+    comes from the page node, which already carries it. The two claims stay
+    separate: where the page is, is the corpus's business; how its chunks sit
+    inside it, is the page's.
+
+    Colour is NOT taken from here. It stays the global fit's six-dimensional
+    statement so that two chunks on different pages that look alike still
+    look alike (`D-1`).
+    """
+    block = _unit_rows(np.asarray(rows, dtype=np.float32))
+    n = len(block)
+    if n == 0:
+        return None
+    if n < 4:
+        # Too few to fit anything meaningful. Spread them on a small ring so
+        # they are distinguishable, rather than inventing structure.
+        out = np.zeros((n, 3), dtype=np.float32)
+        for i in range(n):
+            angle = 2.0 * np.pi * i / max(n, 1)
+            out[i] = (np.cos(angle), np.sin(angle), 0.0)
+        local = out * (UNFOLD_RADIUS * 0.5)
+    else:
+        fitted = _umap(block, dims=3, seed=seed,
+                       neighbors=min(15, max(2, n - 1)), min_dist=0.25)
+        local = np.asarray(fitted, dtype=np.float32)[:, :3]
+        local = local - local.mean(axis=0, keepdims=True)
+        longest = float(np.linalg.norm(local, axis=1).max())
+        if longest > 1e-9:
+            local = local * (UNFOLD_RADIUS / longest)
+    at = np.asarray(anchor, dtype=np.float32).reshape(1, 3)
+    return (local + at).astype(np.float32)
 
 
 def _edges_among(workspace, url: str, meta) -> List[Dict]:
@@ -1307,10 +1425,33 @@ def unfold(workspace, url: str, path: str = "") -> Dict:
         return {"nodes": [], "path": path, "url": url,
                 "why": "no fit to place into yet"}
 
-    coords, colours = projection.place(np.asarray(rows, dtype=np.float32))
+    block = np.asarray(rows, dtype=np.float32)
+    coords, colours = projection.place(block)
     if coords is None:
         return {"nodes": [], "path": path, "url": url,
                 "why": "the fit could not transform these"}
+
+    # Position from a LOCAL fit, anchored where this page sits (see
+    # `_local_positions`). Colour stays the global fit's, so two chunks on
+    # different pages that mean the same thing still look the same.
+    anchor = None
+    drawn = _PAGE_POS.get(url)
+    if drawn and len(drawn) >= 3:
+        anchor = np.asarray(drawn[:3], dtype=np.float32)
+    page_rows = ([] if anchor is not None else
+                 [v for v in workspace.store.embeddings_for(url).values() if v])
+    if page_rows:
+        mean = np.asarray(page_rows, dtype=np.float32).mean(axis=0)
+        norm = float(np.linalg.norm(mean))
+        where, _ = projection.place(
+            (mean / norm if norm > 1e-9 else mean).reshape(1, -1))
+        if where is not None and len(where):
+            anchor = where[0]
+    if anchor is None:
+        anchor = coords.mean(axis=0)
+    local = _local_positions(block, anchor, seed=0)
+    if local is not None and len(local) == len(coords):
+        coords = local
 
     nodes = []
     for i, info in enumerate(meta):
