@@ -114,6 +114,22 @@ export class BrowserView extends ItemView {
    *  Named `rankScope` because `ItemView` already has a `scope`, and it is a
    *  keymap. */
   private rankScope = "";
+  //: `G-38` asks for HOVER and this is a RIGHT-CLICK, which is a real gap
+  //  and not a shortcut. Measured, before settling for it:
+  //
+  //    * the host never sees the cursor. A `mousemove` listener on the
+  //      `<webview>` element caught 0 events while the pointer crossed it;
+  //      the guest swallows them.
+  //    * `Overlay.setInspectMode` attaches and paints -- `Overlay.highlightNode`
+  //      was seen to shade a product card, drawn by Chromium with nothing
+  //      added to the document -- but it reported no node for synthetic
+  //      input, on hover OR click: three `Input.dispatchMouseEvent` moves
+  //      and a full press/release yielded only `DOM.setChildNodes`.
+  //
+  //  So the only way to the literal requirement is a `mousemove` listener
+  //  inside the page, and constraint 7 forbids writing into the page. That
+  //  is the user's call to make, not this file's. What is built is the
+  //  correspondence itself, on the gesture that does work.
   private hits: SearchHit[] = [];
   /** How deep the reader has scrolled the ranking. `G-69`: the cutoff is a
    *  decision they make by stopping, so this only ever grows. */
@@ -294,6 +310,10 @@ export class BrowserView extends ItemView {
   }
 
   /** Restrict the ranking to one shadow DOM, or release it (`G-70`). */
+  //: Told the plugin, which tells the projector (`G-38`). Brokered, like
+  //  every other cross-pane signal here: neither pane may require the other.
+  onHover: (cid: string, url: string) => void = () => {};
+
   setScope(url: string): void {
     this.rankScope = url || "";
     this.scopeButton.setText(this.rankScope ? "this page" : "everywhere");
@@ -494,6 +514,10 @@ export class BrowserView extends ItemView {
     // content as an Obsidian markdown panel, rendering the full markdown.
     await MarkdownRenderer.render(this.app, markdown, body, "",
                                   this as unknown as Component);
+    // The projector rings the same chunk (`G-38`, as far as it goes). One
+    // gesture, both surfaces: the reader points once and the map says where
+    // that is.
+    this.onHover(String(got.cid || ""), String(got.url || url || ""));
     this.show("markdown");
     this.say(`${got.cid} · ${markdown.split("\n").length} lines`);
   }

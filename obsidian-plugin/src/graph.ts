@@ -659,6 +659,36 @@ export class GraphView extends ItemView {
    * marked `unfolded` so it draws as an opened container rather than as a
    * page still claiming to stand for its contents.
    */
+  /**
+   * Show which node the reader is hovering in the browser (`G-38`).
+   *
+   * A ring, not a recolour: colour is the fit's own six-dimensional
+   * statement about the chunk (`D-1`), and overwriting it to signal a
+   * transient hover would be destroying a measurement to draw a cursor. The
+   * previous highlight is always cleared first, so the state is "at most one
+   * node is hovered" rather than a trail of them.
+   */
+  highlightChunk(cid: string, url = ""): void {
+    if (!this.graph) return;
+    const data: any = this.graph.graphData();
+    // The chunk's own node if it is drawn; otherwise the PAGE node standing
+    // for it. At the default level the picture is 96 pages and no chunk node
+    // exists at all, so ringing only exact ids would light nothing up for
+    // every hover until the reader had already unfolded that page -- which
+    // is the one case they least need the correspondence drawn.
+    let target = cid ? data.nodes.find((n: any) => n.id === cid) : null;
+    if (!target && cid && url) {
+      target = data.nodes.find(
+        (n: any) => n.level === "page" && n.url === url);
+    }
+    let changed = false;
+    for (const n of data.nodes) {
+      const want = !!target && n === target;
+      if (!!n.hovered !== want) { n.hovered = want; changed = true; }
+    }
+    if (changed) this.graph.nodeColor(this.graph.nodeColor());
+  }
+
   private async unfoldNode(node: any): Promise<void> {
     if (!this.graph || !node || !node.url) return;
     const got = await this.sidecar.unfold(node.url, node.path || "");
@@ -894,7 +924,10 @@ export class GraphView extends ItemView {
         const parts = n.members > 1 ? ` · ${n.members} chunks merged` : "";
         return `${n.name}${parts}<br><small>${n.url}</small>`;
       })
-      .nodeColor((n: any) => n.color)
+      // A hovered node is ringed white and keeps its own colour
+      // underneath (`G-38`): the colour is a measurement, not a slot
+      // to put a cursor in.
+      .nodeColor((n: any) => (n.hovered ? "#ffffff" : n.color))
       .nodeRelSize(relSize)
       .nodeVal((n: any) => n.val)
       .linkOpacity(0.25)

@@ -193,7 +193,8 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     // notebook cell, with the standalone being the expanded view.
     this.registerView(
       BROWSER_VIEW,
-      (leaf: WorkspaceLeaf) => new BrowserView(
+      (leaf: WorkspaceLeaf) => {
+        const browser = new BrowserView(
         leaf, this.sidecar,
         // Live capture reaches the projector through the plugin rather than
         // by one view holding the other: a graph pane that is closed, or has
@@ -201,7 +202,13 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
         (nodes) => this.eachGraph((view) => view.absorb(nodes)),
         // And so does the ranking (`G-55`, `G-56`): what the reader has
         // scrolled to is what the projector opens the page to.
-        (url, cids) => this.eachGraph((view) => void view.showHits(url, cids))),
+        (url, cids) => this.eachGraph((view) => void view.showHits(url, cids)));
+        // Hovering a chunk in the browser rings its node in the projector
+        // (`G-38`). Brokered like everything else across the two panes.
+        browser.onHover = (cid: string, url: string) =>
+          this.eachGraph((view) => view.highlightChunk(cid, url));
+        return browser;
+      },
     );
     this.addCommand({
       id: "domvec-open-browser",

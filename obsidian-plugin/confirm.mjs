@@ -359,15 +359,18 @@ const CHECKS = [
   },
   {
     id: "G-39",
-    asks: "right-click ports the chunk's full markdown to the other face",
+    asks: "right-click ports the markdown AND rings the node in the projector",
     async run() {
       const got = await evaluate(`(async () => {
         const sleep = (ms) => new Promise(r => setTimeout(r, ms));
         await app.commands.executeCommandById("domvec-open-browser");
-        await sleep(1500);
+        await app.commands.executeCommandById("domvec-open-graph");
+        await sleep(2000);
         const bv = app.workspace.getLeavesOfType("domvec-browser-view")[0];
-        const b = bv && bv.view;
+        const gv = app.workspace.getLeavesOfType("domvec-graph-view")[0];
+        const b = bv && bv.view, v = gv && gv.view;
         if (!b || !b.webview) return { error: "no browser pane" };
+        if (v) { for (let i = 0; i < 60 && !(v.graph && v.graph.graphData().nodes.length); i++) await sleep(500); }
         const want = "https://books.toscrape.com/";
         if (b.webview.getURL() !== want) {
           b.go(want);
@@ -409,6 +412,12 @@ const CHECKS = [
             .map(e => e.getAttribute("href") || e.getAttribute("src"))
             .slice(0, 4) : [],
           status: b.status ? b.status.textContent : null,
+          // The other half of the correspondence (G-38, as far as it is
+          // built): the same chunk is ringed in the projector.
+          ringed: v ? v.graph.graphData().nodes.filter(n => n.hovered).length : null,
+          ringed_level: v
+            ? (v.graph.graphData().nodes.find(n => n.hovered) || {}).level || null
+            : null,
         };
       })()`);
       if (got.error) return { pass: false, evidence: got };
@@ -419,7 +428,8 @@ const CHECKS = [
            && !!got.heading && got.heading.startsWith("/html")
            && got.rendered_chars > 0 && got.rendered_elements > 0
            && (got.links || []).every(
-                (u) => !u || /^[a-z][a-z0-9+.-]*:/i.test(u)),
+                (u) => !u || /^[a-z][a-z0-9+.-]*:/i.test(u))
+           && got.ringed === 1,
         evidence: got,
       };
     },
