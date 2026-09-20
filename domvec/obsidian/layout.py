@@ -626,6 +626,11 @@ def build_layout(workspace,
         node = {
             "cid": cid,
             "url": chunk.url,
+            #: The address, so clicking this node can take the BROWSER to it
+            #: (`G-40`). `unfold`'s nodes have carried it all along; these
+            #: did not, so a chunk clicked in the chunk-level view had a url
+            #: and no place on the page to scroll to.
+            "path": chunk.xpath,
             "title": _title(text),
             #: How many addresses on the page draw this, so the pane can say
             #: "125 copies" instead of silently standing for 125 things.

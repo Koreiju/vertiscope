@@ -298,6 +298,11 @@ export class GraphView extends ItemView {
    *  release it (`G-70`). Set by the plugin, because a graph pane must work
    *  with no browser open. */
   onScope: (url: string) => void = () => {};
+  //: Clicking a node takes the BROWSER to it (`G-40`). Set by the
+  //  plugin, which is what knows whether a browser pane is open --
+  //  neither pane may require the other, so this is brokered rather
+  //  than held by either.
+  onReveal: (url: string, xpath: string) => void = () => {};
 
   constructor(leaf: WorkspaceLeaf, private sidecar: Sidecar,
               onPick: (cid: string) => void,
@@ -904,9 +909,13 @@ export class GraphView extends ItemView {
           // a page is a statement about where the reader is looking, and the
           // overlay is the other half of that statement.
           if (n.level === "page" && n.url) this.onScope(n.url);
+          // And the browser follows the click (`G-40`, `G-58`). A page node
+          // navigates; a branch or chunk node also scrolls to its address.
+          if (n.url) this.onReveal(n.url, n.path || "");
           void this.unfoldNode(n);
           return;
         }
+        if (n.url) this.onReveal(n.url, n.path || "");
         this.onPick(n.id);
       })
       // Right-click releases the scope (`G-70`): back to the corpus, from

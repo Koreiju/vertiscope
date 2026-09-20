@@ -365,6 +365,21 @@ export class BrowserView extends ItemView {
    * it. Nothing about the page changes; what changes is which part of it the
    * reader is looking at, which is what they asked for.
    */
+  /**
+   * Show an address, from wherever the ask came from (`G-40`, `G-58`).
+   *
+   * Clicking a node in the projector drives the browser to that chunk: the
+   * SAME session the reader was already in, scrolled to the place, rather
+   * than a second rendering of the page beside the first. That is the whole
+   * of §O.5 -- three representations collapsing into one -- and the
+   * machinery for it was already here and private, reachable only from the
+   * overlay's own result rows.
+   */
+  async reveal(url: string, xpath = ""): Promise<void> {
+    if (!url) return;
+    await this.goToHit({ cid: "", url, xpath } as SearchHit);
+  }
+
   private async goToHit(hit: SearchHit): Promise<void> {
     const wv = this.webview;
     if (!wv) return;

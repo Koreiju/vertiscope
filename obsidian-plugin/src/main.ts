@@ -157,6 +157,18 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
             }
           }
         };
+        // And the browser goes where the reader clicked (`G-40`, `G-58`):
+        // same session, scrolled to the chunk, rather than a second
+        // rendering of the page beside the first. Brokered for the same
+        // reason -- a projector with no browser open must still work.
+        view.onReveal = (url: string, xpath: string) => {
+          for (const l of this.app.workspace.getLeavesOfType(BROWSER_VIEW)) {
+            const browser = l.view as BrowserView;
+            if (browser && typeof browser.reveal === "function") {
+              void browser.reveal(url, xpath);
+            }
+          }
+        };
         return view;
       },
     );

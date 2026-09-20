@@ -252,6 +252,112 @@ const CHECKS = [
     },
   },
   {
+    id: "G-40",
+    asks: "clicking a node takes the BROWSER to that chunk, same session",
+    async run() {
+      const got = await evaluate(`(async () => {
+        const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+        await app.commands.executeCommandById("domvec-open-browser");
+        await app.commands.executeCommandById("domvec-open-graph");
+        await sleep(2500);
+        const gv = app.workspace.getLeavesOfType("domvec-graph-view")[0];
+        const bv = app.workspace.getLeavesOfType("domvec-browser-view")[0];
+        const v = gv && gv.view, b = bv && bv.view;
+        if (!v || !b) return { error: "panes not open",
+                               types: app.workspace.getLeavesOfType("domvec-browser-view").length };
+        for (let i = 0; i < 60 && !(v.graph && v.graph.graphData().nodes.length); i++) await sleep(500);
+
+        // A node with a real address to scroll to, from a page that is
+        // cheap to load. Unfold once so chunk-level nodes exist at all.
+        const page = v.graph.graphData().nodes
+          .filter(n => n.url && n.url.startsWith("https://books.toscrape.com/"))
+          .sort((a, b) => (b.members||0) - (a.members||0))[0];
+        if (!page) return { error: "no books.toscrape page in the corpus" };
+        await v.unfoldNode(page);
+        await sleep(1200);
+        // The DEEPEST address, not the first. /html/body/div is the whole
+        // page and is trivially in view, so a check that accepted it would
+        // pass on a browser that scrolled nowhere at all.
+        // (No backticks in here: this comment lives inside a template
+        // literal, and one backtick closes it.)
+        const target = v.graph.graphData().nodes
+          .filter(n => n.url === page.url && n.path && n.path !== "" && !n.unfolded)
+          .sort((a, b) => String(b.path).split("/").length
+                        - String(a.path).split("/").length)[0];
+        if (!target) return { error: "unfold produced no addressed node" };
+
+        // The real click path, not a direct call to the callback: whatever
+        // the pane does when a reader clicks is what is under test.
+        const handler = v.graph.onNodeClick();
+        if (typeof handler !== "function") return { error: "no click handler" };
+        const urlBefore = b.webview ? b.webview.getURL() : null;
+        // Start from a deliberately WRONG place, so the scroll has to happen.
+        //
+        // Without this the check was vacuous: the addressed node is a page
+        // container 3,000px tall, so its box spans the viewport and reads
+        // "in view" at any scroll position, including none. Park the page at
+        // the bottom first and the click has to move it.
+        let parked = null;
+        if (urlBefore === target.url) {
+          try {
+            parked = await b.webview.executeJavaScript(
+              "(function(){window.scrollTo(0, document.body.scrollHeight);" +
+              "return Math.round(window.scrollY);})()");
+            await sleep(400);
+          } catch (e) { parked = null; }
+        }
+        handler(target);
+        for (let i = 0; i < 60; i++) {
+          await sleep(500);
+          if (b.webview && b.webview.getURL() === target.url && !b.webview.isLoading()) break;
+        }
+        await sleep(1500);
+        // Measured in the PAGE, not read off a status string. The status bar
+        // is shared with the live-capture loop, which overwrites it about
+        // once a second -- asserting on it tested which message won the race.
+        let seen = null;
+        try {
+          // Built by concatenation on purpose. This was a template literal
+          // nested inside the one evaluate already wraps everything in,
+          // and the escaping collapsed: the xpath interpolated as bare
+          // html, and the page answered 'html is not defined'.
+          const xp = JSON.stringify(target.path);
+          seen = await b.webview.executeJavaScript(
+            "(function(){var r=document.evaluate(" + xp + ",document,null," +
+            "XPathResult.FIRST_ORDERED_NODE_TYPE,null);" +
+            "var n=r.singleNodeValue; if(!n) return {found:false};" +
+            "if(n.nodeType===3) n=n.parentElement; if(!n) return {found:false};" +
+            "var box=n.getBoundingClientRect();" +
+            "return {found:true, top:Math.round(box.top)," +
+            "height:Math.round(window.innerHeight)," +
+            "in_view: box.top < window.innerHeight && box.bottom > 0," +
+            "page_scrolled: Math.round(window.scrollY)};})()");
+        } catch (e) { seen = { threw: String(e).slice(0, 80) }; }
+        return {
+          clicked: { url: target.url.slice(0, 60), xpath: String(target.path).slice(0, 60) },
+          url_before: urlBefore,
+          url_after: b.webview ? b.webview.getURL() : null,
+          parked_at: parked,
+          element: seen,
+        };
+      })()`);
+      if (got.error) return { pass: false, evidence: got };
+      const el = got.element || {};
+      // Three things, because any two of them pass while broken:
+      //   the browser is on the right page,
+      //   the addressed element is in the viewport,
+      //   and the viewport MOVED off where it was parked.
+      const moved = got.parked_at === null || got.parked_at === undefined
+        ? true                                   // it had to navigate anyway
+        : el.page_scrolled !== got.parked_at;
+      return {
+        pass: got.url_after === got.clicked.url
+           && !!(el.found && el.in_view) && moved,
+        evidence: got,
+      };
+    },
+  },
+  {
     id: "G-69",
     asks: "retrieval is a scrolled ranking, not top-k",
     async run() {
