@@ -472,9 +472,14 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send(503, {"error": "no workspace"})
                 return
             try:
+                # `space` so the anchors come from the fit the reader is
+                # actually looking at. Without it an unfolding taken while
+                # the pane showed S3 hung its chunks off euclidean page
+                # positions, 378 units from the node they belong to.
                 self._send(200, unfold_path(self.workspace,
                                             body.get("url") or "",
-                                            body.get("path") or ""))
+                                            body.get("path") or "",
+                                            space=str(body.get("space") or "")))
             except Exception as exc:                # noqa: BLE001
                 self._send(500, {"error": "%s: %s" % (type(exc).__name__, exc)})
             return

@@ -260,10 +260,11 @@ def build_page_layout(workspace,
         if found is not None:
             pictures[chunk.url] = found
 
-    _PAGE_POS.clear()
+    here = _PAGE_POS.setdefault(_space_name(spherical_fit), {})
+    here.clear()
     nodes = []
     for i, url in enumerate(urls):
-        _PAGE_POS[url] = [float(v) for v in coords[i][:dims]]
+        here[url] = [float(v) for v in coords[i][:dims]]
         node = {
             #: The url IS the id at this level. A page has no cid, and
             #: inventing one would make the pane's "which node is this"
@@ -1217,14 +1218,26 @@ class Projection:
 #: competing with the first.
 UNFOLD_RADIUS = 90.0
 
-#: Where `build_page_layout` actually DREW each page.
+#: Where `build_page_layout` actually DREW each page, PER SPACE.
 #:
-#: An unfolding anchors on this rather than re-deriving the page's
-#: position with `place(page_mean)`. UMAP's `transform` does not
-#: reproduce its own `fit_transform` output for the same point, so
-#: re-deriving put the ball of chunks a median 129 units from the node
-#: it was supposed to hang off -- further than the ball's own radius.
-_PAGE_POS: Dict[str, List[float]] = {}
+#: An unfolding anchors on this rather than re-deriving the page's position
+#: with `place(page_mean)`. UMAP's `transform` does not reproduce its own
+#: `fit_transform` output for the same point, so re-deriving put the ball of
+#: chunks a median 129 units from the node it was supposed to hang off --
+#: further than the ball's own radius.
+#:
+#: **Keyed by space, because one dict was wrong the moment both existed.**
+#: Asking for `?space=S3&level=page` re-runs the page fit and would overwrite
+#: euclidean anchors with spherical ones, while the pane is still being
+#: served the euclidean layout out of the cache. Measured by `G-54`'s live
+#: check: a page's chunks landed 378 units from it, against a ball of radius
+#: 90. The pane says which space it is in and gets the anchors for that one.
+_PAGE_POS: Dict[str, Dict[str, List[float]]] = {}
+
+
+def _space_name(spherical: bool) -> str:
+    return "S3" if spherical else "euclidean"
+
 
 
 def _local_positions(rows: np.ndarray, anchor, *, seed: int = 0):
@@ -1317,7 +1330,7 @@ def _segments(xpath: str):
     return [s for s in (xpath or "").split("/") if s]
 
 
-def unfold(workspace, url: str, path: str = "") -> Dict:
+def unfold(workspace, url: str, path: str = "", space: str = "") -> Dict:
     """One step of unravelling a page's patricia path (`G-54`).
 
     Not an expansion of a subtree. The reader's word for this is
@@ -1435,7 +1448,15 @@ def unfold(workspace, url: str, path: str = "") -> Dict:
     # `_local_positions`). Colour stays the global fit's, so two chunks on
     # different pages that mean the same thing still look the same.
     anchor = None
-    drawn = _PAGE_POS.get(url)
+    # The anchors for the space the READER is in, not whichever fit ran last.
+    wanted = _space_name(bool(space) and space.lower() in ("s3", "spherical"))
+    drawn = (_PAGE_POS.get(wanted) or {}).get(url)
+    if drawn is None:
+        # Only one space has ever been fitted; use it rather than refusing.
+        for _name, table in _PAGE_POS.items():
+            if url in table:
+                drawn = table[url]
+                break
     if drawn and len(drawn) >= 3:
         anchor = np.asarray(drawn[:3], dtype=np.float32)
     page_rows = ([] if anchor is not None else
@@ -1572,12 +1593,19 @@ def place_into(workspace, cids) -> Dict:
         #
         # Grouped by url, because a drain can carry chunks from more than one
         # page and each belongs at its own.
+        # Whichever space has anchors; live capture has no toggle of its own
+        # and follows the fit the pane last asked for.
+        table: Dict[str, List[float]] = {}
+        for _name, got in _PAGE_POS.items():
+            if got:
+                table = got
+                break
         by_url: Dict[str, List[int]] = {}
         for i, chunk in enumerate(meta):
-            if _PAGE_POS.get(chunk.url) is not None:
+            if table.get(chunk.url) is not None:
                 by_url.setdefault(chunk.url, []).append(i)
         for page_url, idx in by_url.items():
-            anchor = np.asarray(_PAGE_POS[page_url][:3], dtype=np.float32)
+            anchor = np.asarray(table[page_url][:3], dtype=np.float32)
             local = _local_positions(block[idx], anchor, seed=0)
             if local is not None and len(local) == len(idx):
                 for slot, row in zip(idx, local):

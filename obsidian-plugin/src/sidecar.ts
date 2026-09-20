@@ -183,14 +183,17 @@ export class Sidecar {
    * branches and returns the branches, so a 1,173-chunk page opens as 31
    * nodes rather than as 1,173.
    */
-  async unfold(url: string, path = ""): Promise<UnfoldResult | null> {
+  async unfold(url: string, path = "", space = ""): Promise<UnfoldResult | null> {
     const base = this.base().trim().replace(/\/+$/, "");
     if (!base || !url) return null;
     try {
       const res = await fetch(`${base}/unfold`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url, path }),
+        // Which space the pane is drawing. The anchors an unfolding hangs
+        // off are per space, and a euclidean page sits nowhere near where
+        // the S3 fit puts the same page.
+        body: JSON.stringify({ url, path, space }),
       });
       if (!res.ok) return null;
       return (await res.json()) as UnfoldResult;

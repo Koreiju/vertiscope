@@ -827,7 +827,7 @@ export class GraphView extends ItemView {
 
   private async unfoldNode(node: any): Promise<void> {
     if (!this.graph || !node || !node.url) return;
-    const got = await this.sidecar.unfold(node.url, node.path || "");
+    const got = await this.sidecar.unfold(node.url, node.path || "", this.space);
     const nodes = (got && (got.nodes as LayoutNode[])) || [];
     if (!nodes.length) return;
 
