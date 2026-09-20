@@ -561,6 +561,42 @@ class Workspace:
             wire_bytes=len(text), document_bytes=len(text), report=report,
         )
 
+    def index_source(self, text: str, rel_path: str, *,
+                     root: str = "repo", title: str = "") -> ScanResult:
+        """A source file into the trie — no browser, no DOM (`G-49`).
+
+        The same three steps as `index_note`, with the first one swapped:
+        Python is parsed to addressed detections by `domvec.source` instead
+        of markdown being parsed by `domvec.vault`. Everything after that —
+        `from_tags`, `ingest`, the chunker, the frequency rows, the graph — is
+        the page path untouched, which is the whole reason the addressing was
+        defined to look like a page's.
+
+        What separates this from a note is only what reaches the ENCODER:
+        `G-52` gives it the comments and docstrings and not the code, and
+        that happens in `vectors.VectorQueue.push` off the `code://` scheme,
+        not here. The trie holds the code either way, and so does the chunk a
+        reader opens.
+        """
+        from .source import source_url, tag_source
+
+        url = source_url(root, rel_path)
+        tags = tag_source(text)
+        trie = AddressTrie.from_tags(tags, url)
+        report = RenderReport()
+        chunks, _counts = self.ingest(
+            url, trie, report=report,
+            title=title or PurePosixPath(
+                str(rel_path).replace("\\", "/")).name)
+        return ScanResult(
+            url=url, addresses=len(trie), chunks=len(chunks),
+            lines=sum(len(c.lines) for c in chunks), passes=1,
+            # Nothing was fetched, so nothing was saved: the same honest zero
+            # `index_note` reports rather than dividing by a wire that does
+            # not exist.
+            wire_bytes=len(text), document_bytes=len(text), report=report,
+        )
+
     def scan(
         self,
         url: str,

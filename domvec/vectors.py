@@ -626,7 +626,7 @@ class VectorQueue:
     def digest(markdown: str) -> str:
         return hashlib.sha1(markdown.encode("utf-8")).hexdigest()[:16]
 
-    def push(self, cid: str, markdown: str) -> bool:
+    def push(self, cid: str, markdown: str, *, url: str = "") -> bool:
         """Offer a chunk. True if it was queued, False if the gate stopped it.
 
         The chunk is embedded as **pure text with no link targets in it**.
@@ -650,7 +650,12 @@ class VectorQueue:
         only an href correctly embeds nothing.
         """
         self.pushed += 1
-        markdown = tokens_mod.for_model(markdown)
+        # `G-52`: a ``code://`` chunk gives the encoder its comments and
+        # docstrings and not its code. `domvec.source` renders the file so
+        # that this is a property of the render -- prose outside fences, code
+        # inside -- so the whole of the requirement here is one flag.
+        markdown = tokens_mod.for_model(
+            markdown, drop_code=str(url or "").startswith("code://"))
         d = self.digest(markdown)
         if self.digests.get(cid) == d and cid not in self.pending:
             self.skipped += 1
@@ -664,7 +669,9 @@ class VectorQueue:
 
     def extend(self, chunks: Iterable) -> int:
         """Offer many chunks. Returns how many were queued."""
-        return sum(1 for c in chunks if self.push(c.cid, c.markdown))
+        return sum(1 for c in chunks
+                   if self.push(c.cid, c.markdown,
+                                url=getattr(c, "url", "")))
 
     def forget(self, cids: Iterable[str]) -> None:
         """Drop retired chunks, so a removed chunk is never embedded."""

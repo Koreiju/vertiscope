@@ -1,0 +1,176 @@
+"""The local codebase in the trie, and what may be vectorised out of it.
+
+`G-49` asks for the codebase beside the web scans and the vault. `G-52` says
+what reaches the encoder: *"only vectorizing comments and docstrings and not
+the actual code itself"*.
+
+The separation is a property of the RENDER, not of a second parse:
+`domvec.source` emits docstrings, comments and names as prose and code as a
+code span, so honouring `G-52` is one flag on `tokens.for_model`. That design
+is what makes it testable at all -- there is one string the encoder gets, and
+it can be asked what is in it.
+
+**The arm that matters is the leak arm.** A stripper that removed everything
+would satisfy "no code reaches the encoder" perfectly and be useless, so
+every test here also asserts that the PROSE survived. The first version of
+the stripper knew only about fenced blocks, removed 0% of a real source file,
+and reported success -- `markdown.py` renders a code detection as an inline
+span, not a fence.
+"""
+
+import pathlib
+import shutil
+import tempfile
+
+import pytest
+
+from domvec import tokens
+from domvec.source import SKIP_DIRS, source_path_of, source_url, tag_source
+from domvec.workspace import Workspace
+
+SAMPLE = '''"""A module that explains itself."""
+
+import os
+
+
+class Widget:
+    """A widget holds a spindle."""
+
+    def spin(self, revolutions):
+        """Turn the spindle."""
+        # the spindle is fragile above ten thousand
+        return revolutions * 2
+'''
+
+
+@pytest.fixture()
+def ws():
+    tmp = tempfile.mkdtemp()
+    try:
+        with Workspace(pathlib.Path(tmp) / "ws") as got:
+            yield got
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+# --- addressing --------------------------------------------------------------
+
+
+def test_the_url_round_trips():
+    url = source_url("domvec", "domvec/aggregate.py")
+    assert url == "code://domvec/domvec/aggregate.py"
+    assert source_path_of(url) == ("domvec", "domvec/aggregate.py")
+    assert source_path_of("https://example.com/") is None
+
+
+def test_windows_separators_become_one_spelling():
+    """A path spelled two ways is two addresses, which is two of everything."""
+    assert source_url("r", "a\\b\\c.py") == source_url("r", "a/b/c.py")
+
+
+def test_the_xpath_is_the_module_s_own_tree():
+    tags = tag_source(SAMPLE)
+    paths = [t.xpath for t in tags]
+    assert "/module[1]/docstring[1]" in paths
+    # A class CONTAINS its methods -- unlike a markdown heading, which only
+    # names the section it opens (see `domvec/vault.py`'s section wrapper).
+    assert any(p.startswith("/module[1]/class[1]/function[1]/") for p in paths)
+    assert "/module[1]/class[1]/docstring[1]" in paths
+
+
+def test_a_file_that_does_not_parse_still_yields_its_comments():
+    """A syntax error is an ordinary state for a file being edited.
+
+    Refusing it would make the corpus a function of whether the working tree
+    happens to compile.
+    """
+    broken = "# a standing comment\ndef oops(:\n    pass\n"
+    tags = tag_source(broken)
+    assert any("a standing comment" in (t.value or "") for t in tags)
+
+
+# --- G-52 --------------------------------------------------------------------
+
+
+def test_code_does_not_reach_the_encoder_and_prose_does(ws):
+    """Both arms, because either alone is satisfied by a broken stripper."""
+    got = ws.index_source(SAMPLE, "pkg/widget.py", root="repo")
+    assert got.url.startswith("code://")
+    rendered = "\n".join(c.md or "" for c in ws.store.chunks(got.url))
+    assert rendered.strip(), "nothing was rendered"
+
+    seen = tokens.for_model(rendered, drop_code=True)
+
+    # The code is in the chunk a reader opens...
+    assert "revolutions * 2" in rendered
+    # ...and not in the string the encoder is charged for.
+    assert "revolutions * 2" not in seen, "code reached the encoder"
+    assert "import os" not in seen
+
+    # And the prose did survive. Without this a stripper that returned ""
+    # would pass every assertion above.
+    assert "A widget holds a spindle" in seen
+    assert "Turn the spindle" in seen
+    assert "the spindle is fragile" in seen, "a comment was dropped"
+
+
+def test_the_flag_is_off_for_everything_that_is_not_source():
+    """A web page's code sample is part of what that page says.
+
+    Dropping it by default would change every existing embedding in the
+    corpus to serve a requirement about source files.
+    """
+    page = "Here is how you call it: `client.connect()` and then wait."
+    assert "client.connect()" in tokens.for_model(page)
+    assert "client.connect()" not in tokens.for_model(page, drop_code=True)
+
+
+def test_the_budget_counts_the_string_the_encoder_gets(ws):
+    """`G-22`'s argument, restated one domain over.
+
+    A budget enforced on one string and spent on another is not a budget.
+    """
+    rendered = "prose about it\n\n`def f(x): return x + 1`\n\nmore prose"
+    plain = tokens.budget_for(rendered, "https://example.com/")
+    code = tokens.budget_for(rendered, "code://repo/f.py")
+    assert code < plain, "the code:// budget counted the code anyway"
+
+
+def test_the_stripper_is_not_simply_deleting_everything():
+    """The non-vacuity arm for the stripper itself."""
+    prose = "One merged chunk holds the cids it is made of, in document order."
+    assert tokens.for_model(prose, drop_code=True).strip() == prose
+
+
+# --- the walk ----------------------------------------------------------------
+
+
+def test_the_skip_list_keeps_the_corpus_out_of_its_own_artifacts():
+    """`build/` here holds multi-gigabyte stores and `__pycache__` holds
+    compiled copies of the very files being indexed."""
+    for name in ("build", "__pycache__", ".git", "node_modules"):
+        assert name in SKIP_DIRS
+
+
+def test_web_vault_and_code_share_one_trie(ws):
+    """`G-11`: three sources in one skeleton, not three pipelines.
+
+    The whole reason `domvec.source` defines its addressing to LOOK like a
+    page's is so that everything downstream -- `from_tags`, the chunker, the
+    frequency rows, the graph -- is reused rather than duplicated. The proof
+    of that is one store holding all of them, keyed the same way.
+    """
+    ws.index_html("<html><body><p>a page about spindles</p></body></html>",
+                  "https://example.test/spindles")
+    ws.index_note("# A note\n\nProse about the spindle.\n", "notes/spindle.md")
+    ws.index_source(SAMPLE, "pkg/widget.py", root="repo")
+    ws.index_source(SAMPLE, "numpy/_util.py", root="pypi/numpy")
+
+    schemes = {u.split("://")[0] for u in
+               {c.url for c in ws.store.chunks()}}
+    assert schemes == {"https", "vault", "code"}, schemes
+
+    # And the addresses are one trie, not four -- every chunk resolves the
+    # same way whatever it came from.
+    for chunk in ws.store.chunks():
+        assert chunk.xpath.startswith("/"), chunk.url

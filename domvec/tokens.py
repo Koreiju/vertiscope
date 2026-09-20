@@ -155,7 +155,7 @@ _TARGET_RE = re.compile(r"(!?)\[([^\]]*)\]\(([^)]*)\)")
 _BARE_URL_RE = re.compile(r"(?<![(\w])https?://[^\s)]+")
 
 
-def for_model(text: str) -> str:
+def for_model(text: str, *, drop_code: bool = False) -> str:
     """The same render with every link TARGET removed, the labels kept.
 
     Two consumers read a chunk and they do not want the same string. The
@@ -182,11 +182,64 @@ def for_model(text: str) -> str:
     Not applied to `vectors.tokens`, which expands a url into its path words
     on purpose: the lexical vector wants those words as terms. It is the
     semantic embedder that wants prose.
+
+    ``drop_code`` additionally removes fenced code BODIES (`G-52`). Off by
+    default, and deliberately so: a web page's code sample is part of what
+    that page says, and silently dropping it would change every existing
+    embedding in the corpus to serve a requirement about source files. It is
+    turned on for ``code://`` chunks, where the requirement is explicit --
+    *"only vectorizing comments and docstrings and not the actual code
+    itself"*.
     """
     if not text:
         return text
     out = _TARGET_RE.sub(lambda m: m.group(2), text)
-    return _BARE_URL_RE.sub("", out)
+    out = _BARE_URL_RE.sub("", out)
+    if drop_code:
+        out = _strip_fences(out)
+    return out
+
+
+#: A fenced block, body and all. Non-greedy so two fences in one render are
+#: two matches rather than one match swallowing the prose between them.
+_FENCE_RE = re.compile(r"^[ \t]*```[^\n]*\n.*?^[ \t]*```[ \t]*$",
+                       re.M | re.S)
+#: An unterminated fence: everything from the marker to the end. A chunk is a
+#: WINDOW over a render, so the window can close between a fence's two
+#: markers and leave the opener without its partner. Without this the body
+#: would survive in exactly the chunks a long function produces.
+_OPEN_FENCE_RE = re.compile(r"^[ \t]*```[^\n]*\n.*\Z", re.M | re.S)
+
+
+#: An inline code span. **This is the one that matters**, not the fence.
+#:
+#: `markdown.py` renders a `text/code` detection as a single INLINE span:
+#: measured on `domvec/aggregate.py`, every code block came back on one
+#: line inside backticks, not in a fenced block. A stripper that knew
+#: only about fences therefore removed 0% of a source file and reported
+#: success -- the shape of defect this repo calls a check that cannot
+#: fail.
+_INLINE_CODE_RE = re.compile(r'`{1,2}[^`\n]+`{1,2}')
+
+
+def _strip_fences(text: str) -> str:
+    """Remove fenced code bodies, keeping everything around them.
+
+    `G-52`: *"only vectorizing comments and docstrings and not the actual
+    code itself"*. `domvec.source` renders a file so that this separation is
+    a property of the RENDER rather than of a second parse -- docstrings,
+    comments and names are prose, and code is fenced -- so honouring the
+    requirement here is removing the fences and nothing else.
+
+    The same argument as the link targets above, one domain over: an
+    identifier is not a sentence, the way a url is not. The code stays in the
+    chunk the reader sees and in the trie that addresses it; what changes is
+    what the encoder is charged for.
+    """
+    out = _FENCE_RE.sub("", text)
+    out = _OPEN_FENCE_RE.sub("", out)
+    out = _INLINE_CODE_RE.sub("", out)
+    return "\n".join(line for line in out.splitlines() if line.strip())
 
 
 def budget(text: str) -> int:
@@ -199,6 +252,16 @@ def budget(text: str) -> int:
     that is wrong for one of them.
     """
     return count(for_model(text))
+
+
+def budget_for(text: str, url: str = "") -> int:
+    """`budget`, told where the text came from.
+
+    A ``code://`` chunk is counted on the string the encoder actually gets,
+    which is the point of `G-22`'s argument restated for `G-52`: a budget
+    enforced on one string and spent on another is not a budget.
+    """
+    return count(for_model(text, drop_code=str(url).startswith("code://")))
 
 
 def measure() -> Callable[[str], int]:
