@@ -48,6 +48,43 @@ SERVER = {
 
 TOOLS: List[Dict] = [
     {
+        "name": "ui_state",
+        "description":
+            "The plugin's interface as a data structure, in SCREEN pixels: "
+            "which panes are open and actually DRAWN (not merely present), "
+            "and for the projector a node census on screen -- how many are "
+            "off the canvas, how many overlap at the drawn radius, what "
+            "share of the canvas the cloud uses, and how far the render "
+            "drifted from the fit. Use this instead of a screenshot.",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "ui_act",
+        "description":
+            "Perform a gesture through the application's own code paths and "
+            "return the UI before, the UI after, and the BACKEND calls it "
+            "caused, with timings by route. Gestures: open (graph|browser|"
+            "terminal), reveal, navigate <url>, scan, level (page|chunk).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "gesture": {"type": "string"},
+                "arg": {},
+                "full": {"type": "boolean",
+                         "description": "every captured call, not the shape"},
+            },
+            "required": ["gesture"],
+        },
+    },
+    {
+        "name": "live_health",
+        "description":
+            "Is the sidecar answering, is the plugin's harness installed, "
+            "and which panes are open. Either half can be the problem and "
+            "this says which.",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
         "name": "search",
         "title": "Search distilled chunks",
         "description": "Rank stored web chunks against a query using the "
@@ -116,15 +153,43 @@ TOOLS: List[Dict] = [
 class DomvecMCP:
     """Dispatch for the handful of methods a tools-only server must answer."""
 
-    def __init__(self, workspace):
+    def __init__(self, workspace=None, sidecar_url="http://127.0.0.1:8788", cdp_url="http://127.0.0.1:9222"):
         self.ws = workspace
+        # Where the running system is. Defaults match the plugin's own.
+        self.sidecar_url = sidecar_url
+        self.cdp_url = cdp_url
         self.handlers: Dict[str, Callable] = {
             "search": self._search,
             "chunk": self._chunk,
             "affordances": self._affordances,
             "resolve_address": self._resolve,
             "pages": self._pages,
+            "ui_state": self._ui_state,
+            "ui_act": self._ui_act,
+            "live_health": self._live_health,
         }
+        # Built lazily: the live endpoints may not be up, and a server that
+        # refuses to start because the app is closed is useless for finding
+        # out that the app is closed.
+        self._live = None
+
+    # --- the running system --------------------------------------------------
+
+    def live(self):
+        if self._live is None:
+            from .live import Live
+            self._live = Live(sidecar=self.sidecar_url, cdp=self.cdp_url)
+        return self._live
+
+    def _ui_state(self, args: Dict) -> Dict:
+        return self.live().ui()
+
+    def _ui_act(self, args: Dict) -> Dict:
+        return self.live().act(args["gesture"], args.get("arg"),
+                               bool(args.get("full")))
+
+    def _live_health(self, args: Dict) -> Dict:
+        return self.live().health()
 
     # --- tools ---------------------------------------------------------------
 
@@ -232,9 +297,9 @@ def _error(mid, code: int, message: str) -> Dict:
             "error": {"code": code, "message": message}}
 
 
-def serve_stdio(workspace, stdin=None, stdout=None) -> None:
+def serve_stdio(workspace=None, stdin=None, stdout=None, *, sidecar_url="http://127.0.0.1:8788", cdp_url="http://127.0.0.1:9222") -> None:
     """Read line-delimited JSON-RPC until stdin closes."""
-    server = DomvecMCP(workspace)
+    server = DomvecMCP(workspace, sidecar_url=sidecar_url, cdp_url=cdp_url)
     stdin = stdin or sys.stdin
     stdout = stdout or sys.stdout
 
@@ -259,17 +324,38 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m domvec.obsidian.mcp",
         description="MCP server over a domvec workspace (stdio, read-only).")
-    parser.add_argument("--workspace", required=True, type=Path)
+    parser.add_argument("--workspace", type=Path, default=None,
+                        help="optional: open a store DIRECTLY for the "
+                             "backend tools. Usually wrong -- the sidecar "
+                             "holds the live workspace and a kuzu writer "
+                             "excludes readers, so this loses the race or "
+                             "takes the lock the plugin needs. Left unset, "
+                             "the backend tools ask the sidecar instead.")
+    parser.add_argument("--sidecar", default="http://127.0.0.1:8788")
+    parser.add_argument("--cdp", default="http://127.0.0.1:9222")
     args = parser.parse_args(argv)
 
-    from ..workspace import Workspace
-    # Read-only is the whole point of this server, and asking kuzu for
-    # it is what lets the server run BESIDE a sidecar on one workspace
-    # rather than losing a race to whichever started first.
-    with Workspace(args.workspace, read_only=True) as ws:
-        print("domvec MCP: %d pages, read-only" % len(ws.pages()),
-              file=sys.stderr)
-        serve_stdio(ws)
+    ws = None
+    if args.workspace is not None:
+        from ..workspace import Workspace
+        try:
+            ws = Workspace(args.workspace, read_only=True)
+        except Exception as exc:                    # noqa: BLE001
+            # A corrupt freq matrix used to kill this server at import time
+            # and the only symptom the client showed was CONNECTION_CLOSED.
+            # Degrade to the live tools and SAY so.
+            print("domvec MCP: no store (%s); live tools only"
+                  % str(exc)[:120], file=sys.stderr)
+            ws = None
+
+    print("domvec MCP: sidecar %s, app %s%s"
+          % (args.sidecar, args.cdp, ", store open" if ws else ""),
+          file=sys.stderr)
+    try:
+        serve_stdio(ws, sidecar_url=args.sidecar, cdp_url=args.cdp)
+    finally:
+        if ws is not None:
+            ws.close()
     return 0
 
 

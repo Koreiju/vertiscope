@@ -5,8 +5,10 @@
       "args": [
         "-m",
         "domvec.obsidian.mcp",
-        "--workspace",
-        "build/vaultws256"
+        "--sidecar",
+        "http://127.0.0.1:8788",
+        "--cdp",
+        "http://127.0.0.1:9222"
       ],
       "env": {}
     }
