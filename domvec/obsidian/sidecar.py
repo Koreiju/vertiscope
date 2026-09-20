@@ -501,6 +501,46 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send(500, {"error": "%s: %s" % (type(exc).__name__, exc)})
             return
 
+        if route == "purge":
+            # Drop one page, its chunks and its addresses (`store.purge_page`).
+            #
+            # **This exists so that a live check can clean up after itself.**
+            # `S-7` serves a fixture, drives a real interaction in the browser
+            # cell and reads the result back out of the trie -- which means it
+            # captures a page into the reader's own corpus every time it runs,
+            # on a fresh ephemeral port each time. A confirmation harness that
+            # grows the corpus it is measuring is an instrument that changes
+            # its own denominator, and this file already carries four separate
+            # cases of a denominator being the thing that was wrong.
+            #
+            # Gated with `capture`, not with `enact`: it writes the workspace
+            # and presses nothing on any page, which is the same size of
+            # permission `capture` is.
+            if not self.capture_allowed:
+                self._send(403, {
+                    "error": "purge is off",
+                    "why": "the sidecar holds this workspace read-only. "
+                           "Start it with --capture to let it be written.",
+                })
+                return
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(length) or b"{}")
+            except Exception as exc:                # noqa: BLE001
+                self._send(400, {"error": "bad body: %s" % exc})
+                return
+            url = (body or {}).get("url") or ""
+            if not url:
+                self._send(400, {"error": "no url"})
+                return
+            try:
+                removed = self.workspace.store.purge_page(url)
+            except Exception as exc:                # noqa: BLE001
+                self._send(500, {"error": "%s: %s" % (type(exc).__name__, exc)})
+                return
+            self._send(200, {"url": url, "chunks_removed": removed})
+            return
+
         if route == "capture":
             if not self.capture_allowed:
                 # Named, because the alternative is what actually happened:
@@ -1039,6 +1079,29 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send(500, {"error": "sensor unreadable: %s" % exc})
                 return
             self._send(200, {"source": source})
+            return
+
+        if segments[0] == "pages":
+            # Every page url the store holds, straight from the Page table.
+            #
+            # **Not the same question as /layout.** That one is a cached FIT,
+            # keyed on chunk count and shared across requests so the 3D view
+            # does not refit on every open -- it answered 98 nodes while the
+            # store held 119 pages, which is correct for a fit and useless
+            # for "what is in here". Cleanup after a live check needs the
+            # second question, and asking the first was how 20 fixture pages
+            # went unnoticed.
+            #
+            # Read-only, like every other GET here. `?contains=` filters by
+            # substring, which is what a caller tidying up after itself has.
+            query = parse_qs(parts.query)
+            needle = (query.get("contains") or [""])[0]
+            rows = self.workspace.store._rows(
+                "MATCH (p:Page) RETURN p.url ORDER BY p.url")
+            urls = [r[0] for r in rows if r and r[0]]
+            if needle:
+                urls = [u for u in urls if needle in u]
+            self._send(200, {"urls": urls, "n": len(urls)})
             return
 
         if segments[0] == "links":

@@ -52,6 +52,33 @@ export class ChunkView extends ItemView {
     // reader is already looking.
   }
 
+  /**
+   * Re-read this chunk when a capture has just rewritten it (`S-12`).
+   *
+   * **In trie terms**: a capture writes the dirty chunks to the trie, and an
+   * open panel is a reader of one address in it. It read that address once,
+   * when it was opened, and nothing told it to read again -- so a write to
+   * the very address it is displaying never reached it. Measured: a click
+   * that appended a list item landed in the store and in a panel opened
+   * afterwards (539 chars, token present) while the panel that was already
+   * open sat unchanged at 448 characters.
+   *
+   * `show` cannot be what fixes this: it takes a cid and returns early when
+   * the cid has not changed, which is correct for its own job -- re-rendering
+   * on every graph click would throw away the reader's scroll position. What
+   * changed here is the CONTENT at an unchanged cid, so the re-read is a
+   * separate entry point with a separate trigger.
+   */
+  async refreshIf(cids: Iterable<string>): Promise<void> {
+    if (!this.cid) return;
+    for (const cid of cids) {
+      if (cid === this.cid) {
+        await this.render();
+        return;
+      }
+    }
+  }
+
   async onOpen() {
     await this.render();
   }

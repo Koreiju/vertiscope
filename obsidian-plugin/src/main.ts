@@ -199,7 +199,16 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
         // Live capture reaches the projector through the plugin rather than
         // by one view holding the other: a graph pane that is closed, or has
         // not been opened yet, must not stop the browser cell from scanning.
-        (nodes) => this.eachGraph((view) => view.absorb(nodes)),
+        // And to the PANELS, not only the projector (`S-12`). The row asks
+        // that one capture reach the graph and the open and closed panel
+        // sets uniformly; a panel opened after the change reads the store
+        // fresh and could hardly be wrong, and that is exactly what hid the
+        // one that was already open being stale.
+        (nodes) => {
+          this.eachGraph((view) => view.absorb(nodes));
+          const cids = nodes.map((n) => n.cid);
+          this.eachChunkPanel((view) => void view.refreshIf(cids));
+        },
         // And so does the ranking (`G-55`, `G-56`): what the reader has
         // scrolled to is what the projector opens the page to.
         (url, cids) => this.eachGraph((view) => void view.showHits(url, cids)));
@@ -398,6 +407,15 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
    */
 
   /** Do something to every open projector, if any is open at all. */
+  /** Every open chunk panel. The mirror of `eachGraph`, and for the same
+   *  reason: a panel that is closed must not stop a capture from landing. */
+  private eachChunkPanel(fn: (view: ChunkView) => void): void {
+    for (const leaf of this.app.workspace.getLeavesOfType(CHUNK_VIEW)) {
+      const view = leaf.view as ChunkView;
+      if (view) fn(view);
+    }
+  }
+
   private eachGraph(fn: (view: GraphView) => void): void {
     for (const leaf of this.app.workspace.getLeavesOfType(GRAPH_VIEW)) {
       const view = leaf.view as GraphView;

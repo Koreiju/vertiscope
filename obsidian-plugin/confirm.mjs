@@ -18,9 +18,12 @@
  *
  * Two rules every check follows:
  *
- *  - **It reloads nothing and assumes nothing about order.** Checks run
- *    against whatever state the pane is in, and any that needs a particular
- *    state establishes it itself.
+ *  - **The plugin is reloaded before anything is measured**, and nothing
+ *    else is assumed about order. Checks run against whatever state the pane
+ *    is in, and any that needs a particular state establishes it itself.
+ *    The reload is not optional politeness: a probe scores the instrument
+ *    that is LOADED, and the collider probe once passed with its own target
+ *    defect planted because a build had replaced a file nobody was running.
  *  - **It reports EVIDENCE, not a boolean.** `pass` is derived from numbers
  *    that are written out, so a reader can disagree with the verdict without
  *    re-running anything.
@@ -67,6 +70,470 @@ const ask = async (path) => {
 };
 
 // --------------------------------------------------------------------------
+
+//: **A page whose only motion is the motion the check causes.**
+//:
+//: Every gesture score needs a null arm, and on a live site the null arm is
+//: never empty: coinmarketcap scored 10 wrong values under a delete and the
+//: same 10 under nothing, because the frozen snapshot still runs a clock.
+//: Serving a fixture puts that floor at exactly zero, so what the arms
+//: disagree about is the interaction and nothing else.
+//:
+//: Port 0, per the architecture guard: a check that binds a fixed port
+//: fails the moment two of them overlap.
+const serveFixtures = async () => {
+  const http = await import("node:http");
+  const { readFile } = await import("node:fs/promises");
+  const dir = join(ROOT, "tests", "fixtures");
+  const server = http.createServer(async (req, res) => {
+    const name = decodeURIComponent((req.url || "/").split("?")[0])
+      .replace(/^\/+/, "").replace(/\.\./g, "");
+    try {
+      const body = await readFile(join(dir, name));
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      res.end(body);
+    } catch {
+      res.writeHead(404).end("no such fixture");
+    }
+  });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  const port = server.address().port;
+  return {
+    origin: "http://127.0.0.1:" + port,
+    close: () => new Promise((r) => server.close(r)),
+  };
+};
+
+//: The body S-7 evaluates in the pane.
+//:
+//: Built as a string rather than written inline because it is long and it
+//: has to name three values the harness picked: the fixture url, the token
+//: the click will write, and where the sidecar is.
+//:
+//: **The instrument is the chunk's MARKDOWN, read back through /resolve.**
+//: Not a count. A count moves for reasons that have nothing to do with the
+//: click -- a lazy image, a second capture pass -- whereas the markdown of
+//: the chunk that draws this list either contains the clicked-in sentence
+//: or it does not. That is the affine map stated as a test: what you see in
+//: the page is what you get out of the trie.
+const mutateProbe = (page, token, sidecar) => `(async () => {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const PAGE = ${JSON.stringify(page)};
+  const TOKEN = ${JSON.stringify(token)};
+  const SIDE = ${JSON.stringify(sidecar)};
+
+  // **Establish a cell wide enough to click in.**
+  //
+  // The open-browser command REUSES whatever browser leaf exists, at whatever
+  // size earlier work left it. A previous check's vertical split had
+  // squeezed it to 3 pixels wide, and every synthetic click then landed
+  // outside the guest's viewport -- which read for four runs as the page
+  // refusing to mutate and the sensor being at fault. So the old panes are
+  // dropped and a fresh full-width TAB is opened, which is state this check
+  // needs and therefore state it establishes itself.
+  for (const l of app.workspace.getLeavesOfType("domvec-chunk-view")) {
+    l.detach();
+  }
+  for (const l of app.workspace.getLeavesOfType("domvec-browser-view")) {
+    l.detach();
+  }
+  await sleep(700);
+  const bleafFresh = app.workspace.getLeaf("tab");
+  await bleafFresh.setViewState({ type: "domvec-browser-view", active: true });
+  app.workspace.revealLeaf(bleafFresh);
+  await sleep(1800);
+  const bv = app.workspace.getLeavesOfType("domvec-browser-view")[0];
+  const b = bv && bv.view;
+  if (!b || !b.webview) return { error: "no browser pane" };
+
+  b.go(PAGE);
+  for (let i = 0; i < 60; i++) {
+    await sleep(400);
+    if (!b.webview.isLoading() && b.webview.getURL().indexOf(PAGE) === 0) break;
+  }
+  const landed = b.webview.getURL();
+
+  // The token is handed to the page rather than hardcoded in it, so each
+  // run looks for a string no previous run can have left behind.
+  await b.webview.executeJavaScript(
+    "window.__domvecToken = " + JSON.stringify(TOKEN) + "; true");
+
+  const LIST = "/html/body/ul";
+  const resolve = async () => {
+    const r = await fetch(SIDE + "/resolve?url=" + encodeURIComponent(landed)
+                          + "&xpath=" + encodeURIComponent(LIST));
+    if (!r.ok) return null;
+    const j = await r.json();
+    // The payload is a ChunkPayload: aligned LINES, not a markdown string.
+    // Asking it for .markdown returns undefined, which read as "the page
+    // never reached the trie" for a page that had reached it perfectly.
+    if (!j || !Array.isArray(j.lines)) return null;
+    // String.fromCharCode(10) rather than an escape: this string is
+    // built by a template literal and then parsed again in the pane,
+    // and a newline escape does not survive both layers -- it arrived
+    // as a real newline inside a quoted string, which is a SyntaxError
+    // where it lands and legal where it was written.
+    return j.lines.map((l) => l.text).join(String.fromCharCode(10));
+  };
+
+  // Wait for the FIRST capture to put this page in the trie at all. Without
+  // this the null arm would be measuring a page that had not arrived yet,
+  // and "nothing changed" would be true for the wrong reason.
+  let before = null;
+  for (let i = 0; i < 75; i++) {
+    before = await resolve();
+    if (before) break;
+    await sleep(800);
+  }
+  if (!before) {
+    return { error: "the page never reached the trie", landed };
+  }
+
+  // ---- NULL ARM: the same wait, no interaction. ----
+  await sleep(5000);
+  const still = await resolve();
+  const nullArmChanged = still !== before;
+
+  // ---- The interaction, as a real input event to the guest. ----
+  //
+  // **Focus is part of the state this check needs, so it establishes it.**
+  // A real input event only lands while the browser leaf has focus, and any
+  // earlier check that opened a panel has taken it -- S-12 does exactly
+  // that. Run alone this passed; run after S-12 it reported the page
+  // refusing to mutate, which is an order dependency and not a finding.
+  // No DOM-click fallback here, deliberately: S-7's whole claim is that a
+  // REAL interaction is observed, and a fallback would let the claim pass
+  // without it.
+  // A chunk panel left open by an earlier check sits in a split beside the
+  // cell and holds the focus a real input event needs. S-7 is not about
+  // panels, so it closes them rather than working around them.
+  for (const l of app.workspace.getLeavesOfType("domvec-chunk-view")) {
+    l.detach();
+  }
+  await sleep(600);
+  try { b.webview.focus(); } catch (e) {}
+  await sleep(500);
+
+  // **Aim inside the viewport, and prove it.**
+  //
+  // A synthetic mouse event is delivered at a VIEWPORT coordinate, so a
+  // target below the fold is a click on nothing. This failed for four runs
+  // reading as "the page refuses to mutate": the cell had been made narrow
+  // by a split, the intro paragraph wrapped to many more lines, and the
+  // button sat at y=1420 in a viewport 801 tall. Nothing was wrong with the
+  // sensor, the focus or the event -- the coordinate was off the screen.
+  //
+  // So: scroll it in, re-read the rect AFTER the scroll, and report the aim
+  // with the viewport beside it. A click that misses now says it missed.
+  const at = await b.webview.executeJavaScript(
+    "(function(){var e=document.getElementById('add');" +
+    "if(!e) return null;" +
+    "e.scrollIntoView({block:'center'});" +
+    "var r=e.getBoundingClientRect();" +
+    "return {x:Math.round(r.left+r.width/2)," +
+    "y:Math.round(r.top+r.height/2)," +
+    "vw:window.innerWidth, vh:window.innerHeight," +
+    "focused:document.hasFocus()};})()");
+  if (!at) return { error: "no button to press", landed };
+  const itemCount = () => b.webview.executeJavaScript(
+    "document.getElementById('items').children.length");
+  const wasItems = await itemCount();
+  for (const type of ["mouseDown", "mouseUp"]) {
+    b.webview.sendInputEvent({ type, x: at.x, y: at.y,
+                               button: "left", clickCount: 1 });
+  }
+  await sleep(1200);
+  const itemsNow = await itemCount();
+
+  // The page must actually have mutated, or this is measuring the click
+  // rather than the sensor.
+  const inPage = await b.webview.executeJavaScript(
+    "document.getElementById('items').textContent.indexOf("
+    + JSON.stringify(TOKEN) + ") >= 0");
+
+  // ---- Did the fold carry it through? The live loop ticks at 1200ms. ----
+  let after = before, ticks = 0;
+  for (let i = 0; i < 40; i++) {
+    await sleep(800);
+    ticks += 1;
+    const now = await resolve();
+    if (now && now.indexOf(TOKEN) >= 0) { after = now; break; }
+    if (now) after = now;
+  }
+
+  // Sampled BEFORE the park below turns it off, or the field reads false
+  // on every run and says nothing about whether capture was armed while
+  // the reader was browsing -- which is the half of this the row cares
+  // about. It read false on a passing run, which is a field that had
+  // quietly stopped measuring anything.
+  const liveWhileBrowsing = !!b.live;
+
+  // **Park the cell before the page is purged, or the purge is undone.**
+  //
+  // The live loop ticks every 1200ms against whatever the cell is showing.
+  // Purging the fixture while the cell still had it open simply let the next
+  // tick capture it again: the corpus went from 99 pages to 118 across these
+  // runs with every single purge reporting success. Turning capture off and
+  // parking on about:blank first makes the cleanup stick.
+  try { b.setLive(false); } catch (e) {}
+  try { b.go("about:blank"); } catch (e) {}
+  await sleep(2000);
+
+  return {
+    landed,
+    resolved_before: true,
+    // The floor: what this page does on its own over the same interval.
+    null_arm_changed: nullArmChanged,
+    mutated_in_page: inPage === true,
+    items_before: wasItems, items_after: itemsNow,
+    guest_focused: at.focused === true,
+    aimed_at: [at.x, at.y], viewport: [at.vw, at.vh],
+    aim_on_screen: at.x >= 0 && at.y >= 0 && at.x < at.vw && at.y < at.vh,
+    token_in_trie: after.indexOf(TOKEN) >= 0,
+    waited_s: Math.round(ticks * 0.8),
+    live_capture_on: liveWhileBrowsing,
+    md_before_chars: before.length,
+    md_after_chars: after.length,
+  };
+})()`;
+
+//: The body S-12 evaluates in the pane.
+//:
+//: S-7 asked whether an interaction reaches the store. This asks the
+//: separate question of whether it reaches every SURFACE uniformly: the
+//: graph, a panel that was already open when the change landed, and a panel
+//: that was closed then and is opened afterwards.
+//:
+//: The three are listed separately in the row because they fail separately.
+//: A panel opened after the fact reads the store fresh and can hardly be
+//: wrong; a panel already open has to be told. Reporting them as one number
+//: would let the second hide behind the first.
+const uniformProbe = (page, token, sidecar) => `(async () => {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const PAGE = ${JSON.stringify(page)};
+  const TOKEN = ${JSON.stringify(token)};
+  const SIDE = ${JSON.stringify(sidecar)};
+  const CHUNK_VIEW = "domvec-chunk-view";
+
+  // **Establish a cell wide enough to click in.**
+  //
+  // The open-browser command REUSES whatever browser leaf exists, at whatever
+  // size earlier work left it. A previous check's vertical split had
+  // squeezed it to 3 pixels wide, and every synthetic click then landed
+  // outside the guest's viewport -- which read for four runs as the page
+  // refusing to mutate and the sensor being at fault. So the old panes are
+  // dropped and a fresh full-width TAB is opened, which is state this check
+  // needs and therefore state it establishes itself.
+  for (const l of app.workspace.getLeavesOfType("domvec-chunk-view")) {
+    l.detach();
+  }
+  for (const l of app.workspace.getLeavesOfType("domvec-browser-view")) {
+    l.detach();
+  }
+  await sleep(700);
+  const bleafFresh = app.workspace.getLeaf("tab");
+  await bleafFresh.setViewState({ type: "domvec-browser-view", active: true });
+  app.workspace.revealLeaf(bleafFresh);
+  await sleep(1500);
+  const bv = app.workspace.getLeavesOfType("domvec-browser-view")[0];
+  const b = bv && bv.view;
+  if (!b || !b.webview) return { error: "no browser pane" };
+
+  b.go(PAGE);
+  for (let i = 0; i < 60; i++) {
+    await sleep(400);
+    if (!b.webview.isLoading() && b.webview.getURL().indexOf(PAGE) === 0) break;
+  }
+  const landed = b.webview.getURL();
+  await b.webview.executeJavaScript(
+    "window.__domvecToken = " + JSON.stringify(TOKEN) + "; true");
+
+  const LIST = "/html/body/ul";
+  const resolve = async () => {
+    const r = await fetch(SIDE + "/resolve?url=" + encodeURIComponent(landed)
+                          + "&xpath=" + encodeURIComponent(LIST));
+    if (!r.ok) return null;
+    const j = await r.json();
+    if (!j || !Array.isArray(j.lines)) return null;
+    return { cid: j.cid,
+             md: j.lines.map((l) => l.text).join(String.fromCharCode(10)) };
+  };
+
+  let first = null;
+  for (let i = 0; i < 75; i++) {
+    first = await resolve();
+    if (first) break;
+    await sleep(800);
+  }
+  if (!first) return { error: "the page never reached the trie", landed };
+  const cid = first.cid;
+
+  // ---- A panel OPEN before the change lands. ----
+  const openPanel = async () => {
+    let leaves = app.workspace.getLeavesOfType(CHUNK_VIEW);
+    let leaf = leaves[0];
+    if (!leaf) {
+      leaf = app.workspace.getLeaf("split", "vertical");
+      await leaf.setViewState({ type: CHUNK_VIEW, active: true });
+    }
+    const view = leaf.view;
+    await view.show(cid);
+    await sleep(900);
+    return { leaf, view };
+  };
+  // **Where a chunk panel's text actually is.**
+  //
+  // Not in containerEl.textContent. The surface renders the distilled HTML
+  // into a .domvec-html-host that carries its own SHADOW ROOT, so the pane
+  // reads as 109 characters of toolbar with the chunk apparently empty --
+  // which is what "the panel never updated" looked like for two runs. This
+  // is the plugin's own shadow root, not a page's, so reading it is not the
+  // thing constraint 6 refuses.
+  const panelText = (view) => {
+    const root = view.containerEl;
+    const host = root.querySelector(".domvec-html-host");
+    const sr = host && host.shadowRoot;
+    const inner = sr && sr.querySelector(".domvec-html");
+    return ((root.textContent || "")
+            + String.fromCharCode(10)
+            + (inner ? (inner.textContent || "")
+                     : (sr ? (sr.textContent || "") : "")));
+  };
+
+  const opened = await openPanel();
+  const panelBefore = panelText(opened.view);
+
+  // ---- The interaction. ----
+  const at = await b.webview.executeJavaScript(
+    "(function(){var e=document.getElementById('add');" +
+    "if(!e) return null; e.scrollIntoView({block:'center'});" +
+    "var r=e.getBoundingClientRect();" +
+    "return {x:Math.round(r.left+r.width/2)," +
+    "y:Math.round(r.top+r.height/2)};})()");
+  if (!at) return { error: "no button to press", landed };
+
+  // **Which path made the page move, reported rather than assumed.**
+  //
+  // A real input event is the honest trigger and S-7 proves it works -- but
+  // it only lands while the browser leaf has focus, and this check has just
+  // opened a chunk panel, which takes it. So: activate the browser leaf and
+  // try the real event; if the page did not move, fall back to the DOM's own
+  // click and SAY SO. What S-12 is about is where the resulting stream goes,
+  // not how the mutation was started, and hiding the fallback would let a
+  // silent focus failure read as a pass.
+  const bleaf = app.workspace.getLeavesOfType("domvec-browser-view")[0];
+  try { app.workspace.setActiveLeaf(bleaf, { focus: true }); } catch (e) {}
+  await sleep(700);
+  try { b.webview.focus(); } catch (e) {}
+  await sleep(300);
+
+  const itemCount = () => b.webview.executeJavaScript(
+    "document.getElementById('items').children.length");
+  const wasItems = await itemCount();
+  for (const type of ["mouseDown", "mouseUp"]) {
+    b.webview.sendInputEvent({ type, x: at.x, y: at.y,
+                               button: "left", clickCount: 1 });
+  }
+  await sleep(1500);
+  let trigger = "input-event";
+  if ((await itemCount()) === wasItems) {
+    trigger = "dom-click";
+    await b.webview.executeJavaScript(
+      "document.getElementById('add').click(); true");
+    await sleep(800);
+  }
+  const mutated = (await itemCount()) > wasItems;
+
+  // ---- Wait for the STORE, which is the precondition for all three. ----
+  let dbHas = false;
+  for (let i = 0; i < 40; i++) {
+    await sleep(800);
+    const now = await resolve();
+    if (now && now.md.indexOf(TOKEN) >= 0) { dbHas = true; break; }
+  }
+
+  await sleep(2500);
+  const panelAfter = panelText(opened.view);
+
+  // ---- The CLOSED arm: detach, then open a fresh panel on the same cid. ----
+  opened.leaf.detach();
+  await sleep(700);
+  const reopened = await openPanel();
+  await sleep(1200);
+  const panelReopened = panelText(reopened.view);
+
+  // ---- The graph. Counts taken EAGERLY: graphData hands back the live
+  //: arrays, and holding the object to read it later reads the after-state.
+  const gl = app.workspace.getLeavesOfType("domvec-graph-view")[0];
+  const g = gl && gl.view;
+  let graphHasNode = null;
+  if (g && g.graph) {
+    const ids = g.graph.graphData().nodes.map((n) => n.id);
+    graphHasNode = ids.indexOf(cid) >= 0;
+  }
+
+  // Sampled BEFORE the park below turns it off, or the field reads false
+  // on every run and says nothing about whether capture was armed while
+  // the reader was browsing -- which is the half of this the row cares
+  // about. It read false on a passing run, which is a field that had
+  // quietly stopped measuring anything.
+  const liveWhileBrowsing = !!b.live;
+
+  // **Park the cell before the page is purged, or the purge is undone.**
+  //
+  // The live loop ticks every 1200ms against whatever the cell is showing.
+  // Purging the fixture while the cell still had it open simply let the next
+  // tick capture it again: the corpus went from 99 pages to 118 across these
+  // runs with every single purge reporting success. Turning capture off and
+  // parking on about:blank first makes the cleanup stick.
+  try { b.setLive(false); } catch (e) {}
+  try { b.go("about:blank"); } catch (e) {}
+  await sleep(2000);
+
+  return {
+    landed, cid,
+    trigger, mutated_in_page: mutated,
+    db_has_token: dbHas,
+    panel_open_before_had_token: panelBefore.indexOf(TOKEN) >= 0,
+    open_panel_has_token: panelAfter.indexOf(TOKEN) >= 0,
+    reopened_panel_has_token: panelReopened.indexOf(TOKEN) >= 0,
+    graph_has_node: graphHasNode,
+    panel_before_chars: panelBefore.length,
+    panel_after_chars: panelAfter.length,
+    panel_reopened_chars: panelReopened.length,
+  };
+})()`;
+
+//: Leave the corpus exactly as it was found.
+//:
+//: Belt and braces rather than one purge of the url the probe reports. The
+//: live loop ticks every 1200ms against whatever the cell is showing, so a
+//: purge issued while the fixture was still open was simply undone by the
+//: next tick -- the corpus drifted from 99 pages to 119 with every purge
+//: reporting success. The probes now park the cell first; this sweeps up
+//: regardless, including after a probe that threw before it could park.
+//:
+//: Asks `GET /pages`, not `/layout`: the latter is a CACHED FIT keyed on
+//: chunk count and answered 98 while the store held 119, which is correct
+//: for a fit and useless for "what is in here".
+const tidyFixtures = async () => {
+  try {
+    const listed = await ask("/pages?contains=live_mutate");
+    let removed = 0;
+    for (const url of listed.urls || []) {
+      const res = await fetch(`${SIDECAR}/purge`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ url }),
+        signal: AbortSignal.timeout(ASK_TIMEOUT_MS),
+      });
+      if (res.ok) removed += 1;
+    }
+    return removed;
+  } catch {
+    return -1;
+  }
+};
 
 const CHECKS = [
   {
@@ -1171,7 +1638,7 @@ const CHECKS = [
           landed, clicked_href: at.href, after_click: moved, after_back: returned,
           // The scanning loop is still armed while all of that happened
           // (P-B2: navigate while scanning continues).
-          live_capture_on: !!b.live,
+          live_capture_on: liveWhileBrowsing,
         };
       })()`, { timeout: 600000 });
       if (got.error) return { pass: false, evidence: got };
@@ -1278,6 +1745,73 @@ const CHECKS = [
     },
   },
   {
+    id: "S-7",
+    asks: "a page interaction is observed and persisted to db and trie",
+    async run() {
+      const fixtures = await serveFixtures();
+      const token = "domvecprobe" + Date.now().toString(36);
+      const pagesBefore = (await ask("/health")).pages;
+      const page = fixtures.origin + "/live_mutate.html";
+      try {
+        const got = await evaluate(mutateProbe(page, token, SIDECAR),
+                                   { timeout: 600000 });
+        // Leave the corpus as it was found. A confirmation harness that adds
+        // a page per run is an instrument changing its own denominator.
+        got.purged = await tidyFixtures();
+        got.pages_before = pagesBefore;
+        got.pages_after = (await ask("/health")).pages;
+        if (got.error) return { pass: false, evidence: got };
+        return {
+          // Three things, and any two can hold while the third is broken:
+          // the trie held the page before the click, the NULL ARM moved
+          // nothing, and the click's own text arrived in the chunk the trie
+          // draws that list from.
+          pass: got.resolved_before === true
+             && got.null_arm_changed === false
+             && got.aim_on_screen === true
+             && got.mutated_in_page === true
+             && got.token_in_trie === true
+             && got.pages_after === got.pages_before,
+          evidence: got,
+        };
+      } finally {
+        await fixtures.close();
+      }
+    },
+  },
+  {
+    id: "S-12",
+    asks: "one capture reaches the graph and BOTH panel sets, uniformly",
+    async run() {
+      const fixtures = await serveFixtures();
+      const token = "domvecuniform" + Date.now().toString(36);
+      const pagesBefore = (await ask("/health")).pages;
+      const page = fixtures.origin + "/live_mutate.html";
+      try {
+        const got = await evaluate(uniformProbe(page, token, SIDECAR),
+                                   { timeout: 600000 });
+        got.purged = await tidyFixtures();
+        got.pages_before = pagesBefore;
+        got.pages_after = (await ask("/health")).pages;
+        if (got.error) return { pass: false, evidence: got };
+        return {
+          // "Uniformly" is the whole row, so every surface has to carry it,
+          // and the arm below stops the token being there all along.
+          pass: got.panel_open_before_had_token === false
+             && got.mutated_in_page === true
+             && got.db_has_token === true
+             && got.open_panel_has_token === true
+             && got.reopened_panel_has_token === true
+             && got.graph_has_node === true
+             && got.pages_after === got.pages_before,
+          evidence: got,
+        };
+      } finally {
+        await fixtures.close();
+      }
+    },
+  },
+  {
     id: "G-64",
     asks: "a cross-page ranking fits the 256 pure-text window",
     async run() {
@@ -1297,6 +1831,43 @@ const wanted = process.argv.slice(2);
 const chosen = wanted.length
   ? CHECKS.filter((c) => wanted.includes(c.id))
   : CHECKS;
+
+/**
+ * Reload the plugin before anything is measured.
+ *
+ * **A probe scores the instrument that is LOADED, not the one on disk.** The
+ * collider probe passed with its own target defect planted and returned
+ * numbers identical to the clean run down to a random shuffle landing on
+ * 0.004 twice -- because it reopened the pane but never reloaded the plugin,
+ * so `npm run build` had replaced a file nobody was running. The tell was the
+ * impossible coincidence, not the green.
+ *
+ * This file's header used to say it reloads nothing. That was a claim about
+ * not disturbing pane STATE, which each check establishes for itself anyway,
+ * and it read as licence to score a build that was never loaded.
+ *
+ * Skippable with DOMVEC_NO_RELOAD=1, for confirming what is running right
+ * now rather than what was just built.
+ */
+const reloadPlugin = async () => {
+  if (process.env.DOMVEC_NO_RELOAD === "1") return { reloaded: false };
+  const got = await evaluate(`(async () => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const id = "domvec-bridge";
+    await app.plugins.disablePlugin(id);
+    await sleep(800);
+    await app.plugins.enablePlugin(id);
+    await sleep(2500);
+    return { enabled: !!app.plugins.getPlugin(id) };
+  })()`, { timeout: 120000 });
+  return { reloaded: true, ...got };
+};
+
+const reload = await reloadPlugin().catch(
+  (e) => ({ reloaded: false, error: String(e).slice(0, 120) }));
+console.log(reload.reloaded
+  ? `reloaded the plugin (enabled=${reload.enabled})`
+  : `NOT reloaded: ${reload.error || "DOMVEC_NO_RELOAD=1"}`);
 
 const results = [];
 for (const check of chosen) {
