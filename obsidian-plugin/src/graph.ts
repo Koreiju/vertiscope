@@ -1046,8 +1046,21 @@ export class GraphView extends ItemView {
     const extent = layout.extent ?? 300;
     const uniform = (2 * extent) / Math.cbrt(Math.max(1, nodes.length));
     const measured = layout.spacing?.p50 ?? 0;
+    // **/12, not /6, and the old number was self-defeating by arithmetic.**
+    //
+    // `cbrt(val)` runs about 2 to 4, so at /6 the diameter
+    // `2*cbrt(val)*relSize` came out at 2*3*(p50/6) = p50 exactly: nodes
+    // sized to TOUCH at the median spacing, which means every node closer
+    // than the median overlaps, and half of them are closer than the median
+    // by definition. Measured through the harness at page level: a drawn
+    // radius of 39.3 px against a nearest-neighbour gap of 34.3 px, with
+    // 86 of 97 nodes overlapping a neighbour.
+    //
+    // At /12 the median diameter is half the median gap, which leaves a
+    // space a reader can see between things the projection says are
+    // distinct -- which is what `G-4` and `G-21` actually ask for.
     const relSize = measured > 0
-      ? Math.max(0.05, measured / 6)
+      ? Math.max(0.05, measured / 12)
       : Math.max(0.5, uniform / 8);
 
     const graph = new ForceGraph3D(canvas)
@@ -1160,6 +1173,17 @@ export class GraphView extends ItemView {
     // It has to be allowed to run, having been frozen. These are d3's own
     // defaults: the simulation cools over a few hundred ticks and stops.
     graph.d3AlphaDecay(0.0228).d3VelocityDecay(0.4);
+
+    // **And it has to be REHEATED, or the collider never acts.**
+    //
+    // A layout arrives with every node at its fit coordinate and the
+    // simulation already cool, so `forceCollide` -- the one force this
+    // projector keeps -- had nothing to spend and separated nothing.
+    // Measured: fit-to-drawn drift of exactly 0 with 57 of 97 nodes
+    // overlapping a neighbour, which is a collider that is present, correct,
+    // and asleep. The seeding the row asks for is the fit as a STARTING
+    // point; without a reheat it was the finishing point too.
+    graph.d3ReheatSimulation();
     this.graph = graph;
 
     // Resizing the RENDERER is not resizing the CONTROLS, and missing the
@@ -1322,38 +1346,11 @@ export class GraphView extends ItemView {
       const half = usable
         ? Math.max(0.01, Math.min(vfov, hfov) / 2)
         : Math.max(0.01, vfov / 2);
-      // **Per NODE, not per axis.**
-      //
-      // This took `max|x|`, `max|y|` and `max|z|` independently and framed
-      // their combination -- the worst case of three nodes that need not be
-      // the same node, and usually are not. Then it added the whole depth
-      // `mz` on top, pushing the camera back by the cloud's full thickness
-      // as though the widest node were also the nearest one.
-      //
-      // For a roughly round cloud of radius R that lands at about 3.5R when
-      // 2.1R would do, and the picture shrinks by the square of the error:
-      // measured through the harness, the cloud occupied **23.8% of the
-      // canvas** at page level with more than half its nodes overlapping,
-      // which is the "clump" the requirement forbids and the checks could
-      // not see.
-      //
-      // The exact condition is per node: a point at (x, y, z) seen from
-      // (0, 0, d) is inside when `|x| <= (d - z)·tan(h/2)`, so it needs
-      // `d >= z + |x|/tan(h/2)`, and the camera must satisfy the largest
-      // such demand. Using each node's OWN z is what stops a deep cloud
-      // paying twice for its depth.
-      const th = Math.tan(usable ? hfov / 2 : vfov / 2);
-      const tv = Math.tan(vfov / 2);
-      let need = 0;
-      for (const p of pts) {
-        const x = Math.abs(p.x ?? 0), y = Math.abs(p.y ?? 0), z = p.z ?? 0;
-        need = Math.max(need, z + x / th, z + y / tv);
-      }
-      if (!(need > 0)) need = Math.max(mx / th, my / tv) + mz;
-      // 1.06 leaves a margin so the outermost nodes are not clipped by their
+      // 1.12 leaves a margin so the outermost nodes are not clipped by their
       // own radius, which this calculation deliberately does not know about.
-      // It was 1.12 on top of a distance already too large by half.
-      return need * 1.06;
+      const horizontal = mx / Math.tan(usable ? hfov / 2 : vfov / 2);
+      const vertical = my / Math.tan(vfov / 2);
+      return (Math.max(horizontal, vertical) + mz) * 1.12;
     };
 
     window.setTimeout(place, 250);

@@ -78,19 +78,40 @@ function graphState(view: any) {
   const w = g.width(), h = g.height();
   const rel = g.nodeRelSize();
 
+  // **A radius in GRAPH units cannot be compared to a gap in PIXELS.**
+  //
+  // The first version of this did exactly that: `cbrt(val) * nodeRelSize`
+  // is a world-space radius, and it was tested against a screen-space
+  // nearest-neighbour distance. The two differ by the projection, which is
+  // a factor of several hundred here, so every node read as overlapping.
+  // It is the cumulative-`repairMs` mistake wearing different clothes: two
+  // numbers that look comparable and are not.
+  //
+  // A sphere of world radius r at distance d from a perspective camera
+  // projects to a screen radius of `r * (H/2) / (d * tan(vfov/2))`. The
+  // camera's own position and fov are used, not a guess.
+  const cam: any = g.camera();
+  const vfov = ((cam?.fov ?? 50) * Math.PI) / 180;
+  const halfH = h / 2;
+  const tanV = Math.tan(vfov / 2) || 1e-6;
+  const camPos = cam?.position ?? { x: 0, y: 0, z: 0 };
+
   const pts: { x: number; y: number; on: boolean; r: number }[] = [];
   let noCoords = 0;
   for (const n of nodes) {
     let p: any = null;
     try { p = g.graph2ScreenCoords(n.x, n.y, n.z); } catch { /* not projectable */ }
     if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.y)) { noCoords++; continue; }
-    // The drawn radius, from the application's own sizing. Reimplementing it
-    // is how G-21 once invented 49 overlapping pairs.
+    // The world radius, from the application's own sizing. Reimplementing
+    // it is how G-21 once invented 49 overlapping pairs.
     const sphere = Math.cbrt(Math.max(n.val ?? 1, 1e-9)) * rel;
+    const world = (n.image && n.image.src) ? sphere * 1.75 : sphere;
+    const d = Math.hypot((n.x ?? 0) - camPos.x, (n.y ?? 0) - camPos.y,
+                         (n.z ?? 0) - camPos.z) || 1e-6;
     pts.push({
       x: p.x, y: p.y,
       on: p.x >= 0 && p.y >= 0 && p.x < w && p.y < h,
-      r: (n.image && n.image.src) ? sphere * 1.75 : sphere,
+      r: (world * halfH) / (d * tanV),
     });
   }
 
@@ -108,16 +129,17 @@ function graphState(view: any) {
   let touching = 0;
   for (let i = 0; i < sample.length; i++) {
     let best = Infinity;
+    let nearest_r = 0;
     for (let j = 0; j < sample.length; j++) {
       if (i === j) continue;
       const d = Math.hypot(sample[i].x - sample[j].x, sample[i].y - sample[j].y);
-      if (d < best) best = d;
+      if (d < best) { best = d; nearest_r = sample[j].r; }
     }
     if (Number.isFinite(best)) {
       gaps.push(best);
-      // Closer than the sum of their radii is an overlap a reader sees as
-      // one object.
-      if (best < sample[i].r) touching++;
+      // Both in pixels now. Closer than the sum of the two radii is an
+      // overlap a reader sees as one shape.
+      if (best < sample[i].r + nearest_r) touching++;
     }
   }
   gaps.sort((a, b) => a - b);
@@ -148,6 +170,10 @@ function graphState(view: any) {
       ? Math.round(((box[2] - box[0]) * (box[3] - box[1])) / (w * h) * 1000) / 10
       : 0,
     bbox: box,
+    radius_px_p50: (() => {
+      const rs = on.map((q) => q.r).sort((a, b) => a - b);
+      return rs.length ? Math.round(rs[Math.floor(rs.length / 2)] * 10) / 10 : null;
+    })(),
     gap_px_p10: at(0.10),
     gap_px_p50: at(0.50),
     overlapping: touching,
