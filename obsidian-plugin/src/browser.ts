@@ -27,7 +27,7 @@
  * that has never seen the site (`G-40`).
  */
 
-import { ItemView, WorkspaceLeaf } from "obsidian";
+import { Component, ItemView, MarkdownRenderer, WorkspaceLeaf } from "obsidian";
 
 import { LayoutNode } from "./graph";
 import { Sidecar } from "./sidecar";
@@ -208,6 +208,16 @@ export class BrowserView extends ItemView {
         void this.pageChanged(view.getURL());
       }
     });
+    // Right-click ports the chunk's full markdown to the other face
+    // (`G-39`). The event is the WEBVIEW's, raised in the host -- nothing is
+    // listening inside the page, and nothing is written into it. The one
+    // read it does take is `elementFromPoint` at the cursor, on demand.
+    view.addEventListener("context-menu", (e: any) => {
+      const p = e && e.params;
+      if (!p) return;
+      void this.portMarkdown(Number(p.x) || 0, Number(p.y) || 0);
+    });
+
     view.addEventListener("did-fail-load", (e: any) => {
       // -3 is ABORTED, which is what a redirect away from a page reports.
       // Showing it as a failure would make every redirect look broken.
@@ -407,6 +417,85 @@ export class BrowserView extends ItemView {
     } catch (e) {
       this.say(`could not reach it: ${String(e).slice(0, 80)}`);
     }
+  }
+
+  /**
+   * What is under the cursor -> its chunk -> the markdown face (`G-39`).
+   *
+   * Three steps, and the middle one is the interesting one. The xpath is
+   * built in the page with the SAME convention the trie uses -- the index is
+   * omitted for the first sibling of its tag and present for the rest, so
+   * `li/a` and `li[10]/a` are different addresses and `li[1]/a` is not an
+   * address at all. Getting that wrong resolves nothing, silently.
+   *
+   * Then the sidecar walks UP from there, because a reader points at a span
+   * inside a paragraph inside a section and only one of those is a thing the
+   * trie holds. `ancestors_walked` says how far it went, so "this is not
+   * quite what you clicked" is visible rather than implied.
+   */
+  private async portMarkdown(x: number, y: number): Promise<void> {
+    const wv = this.webview;
+    if (!wv) return;
+    const url = wv.getURL();
+    let xpath = "";
+    try {
+      xpath = await wv.executeJavaScript(
+        "(function(){var el=document.elementFromPoint(" + x + "," + y + ");" +
+        "if(!el) return '';var parts=[];" +
+        "while(el && el.nodeType===1 && el.tagName){" +
+        "var tag=el.tagName.toLowerCase(),i=1,sib=el.previousElementSibling;" +
+        "while(sib){if(sib.tagName===el.tagName)i++;sib=sib.previousElementSibling;}" +
+        "parts.unshift(i>1?tag+'['+i+']':tag);el=el.parentElement;}" +
+        "return '/'+parts.join('/');})()");
+    } catch (err) {
+      this.say(`could not read the page: ${String(err).slice(0, 70)}`);
+      return;
+    }
+    if (!xpath) { this.say("nothing under the cursor"); return; }
+
+    const got = await this.sidecar.resolve(url, xpath);
+    if (!got || !got.lines) {
+      this.say(`no chunk draws ${xpath.slice(-48)}`);
+      return;
+    }
+    let markdown = (got.lines as { text: string }[])
+      .map((l) => l.text).join("\n");
+    // Relative targets are resolved against the PAGE, not the vault.
+    //
+    // The distiller keeps a link as the document wrote it, which is usually
+    // relative -- so media/cache/2c/da/....jpg rendered here asked Obsidian
+    // for a VAULT file of that name and got "could not be found". The chunk
+    // knows the url it came from, which is exactly the base a browser would
+    // have used to fetch it.
+    const base = String(got.url || url || "");
+    if (base) {
+      markdown = markdown.replace(
+        /(!?\[[^\]]*\]\()([^)\s]+)/g,
+        (whole: string, head: string, target: string) => {
+          // Absolute, protocol-relative and in-page anchors are left alone.
+          if (/^[a-z][a-z0-9+.-]*:/i.test(target)
+              || target.startsWith("//") || target.startsWith("#")) {
+            return whole;
+          }
+          try {
+            return head + new URL(target, base).href;
+          } catch {
+            return whole;
+          }
+        });
+    }
+    this.markdownWrap.empty();
+    const head = this.markdownWrap.createDiv({ cls: "domvec-browser-mdhead" });
+    head.setText(got.ancestors_walked
+      ? `${got.matched_xpath} · ${got.ancestors_walked} above what you clicked`
+      : String(got.matched_xpath || xpath));
+    const body = this.markdownWrap.createDiv({ cls: "domvec-browser-mdbody" });
+    // The NATIVE renderer, not a code block: `G-37` asks for the same
+    // content as an Obsidian markdown panel, rendering the full markdown.
+    await MarkdownRenderer.render(this.app, markdown, body, "",
+                                  this as unknown as Component);
+    this.show("markdown");
+    this.say(`${got.cid} · ${markdown.split("\n").length} lines`);
   }
 
   /** Turn live capture on or off, and say which it is. */

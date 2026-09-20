@@ -358,6 +358,73 @@ const CHECKS = [
     },
   },
   {
+    id: "G-39",
+    asks: "right-click ports the chunk's full markdown to the other face",
+    async run() {
+      const got = await evaluate(`(async () => {
+        const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+        await app.commands.executeCommandById("domvec-open-browser");
+        await sleep(1500);
+        const bv = app.workspace.getLeavesOfType("domvec-browser-view")[0];
+        const b = bv && bv.view;
+        if (!b || !b.webview) return { error: "no browser pane" };
+        const want = "https://books.toscrape.com/";
+        if (b.webview.getURL() !== want) {
+          b.go(want);
+          for (let i = 0; i < 40; i++) {
+            await sleep(400);
+            if (!b.webview.isLoading() && b.webview.getURL() === want) break;
+          }
+        }
+        await sleep(800);
+        // A real element's centre, read from the page. Picking coordinates
+        // by hand would test whatever happened to be at 200,300.
+        const at = await b.webview.executeJavaScript(
+          "(function(){var e=document.querySelector('article.product_pod h3 a');" +
+          "if(!e) return null;" +
+          // Into view FIRST. The element sat at y=1779 on an unscrolled
+          // page and elementFromPoint answers null outside the viewport,
+          // which is a position a real right-click cannot be made from.
+          "e.scrollIntoView({block:'center'});" +
+          "var r=e.getBoundingClientRect();" +
+          "return {x:Math.round(r.left+r.width/2), y:Math.round(r.top+r.height/2)," +
+          "text:(e.textContent||'').slice(0,40)};})()");
+        if (!at) return { error: "the page has no product link to point at" };
+        b.show("browser");
+        await b.portMarkdown(at.x, at.y);
+        await sleep(1200);
+        const body = b.markdownWrap.querySelector(".domvec-browser-mdbody");
+        const head = b.markdownWrap.querySelector(".domvec-browser-mdhead");
+        return {
+          pointed_at: at,
+          face: b.face,
+          heading: head ? head.textContent : null,
+          rendered_chars: body ? (body.innerText || "").length : 0,
+          // Rendered, not dumped: a code block would have no elements.
+          rendered_elements: body ? body.querySelectorAll("*").length : 0,
+          // Relative targets must have been resolved against the PAGE.
+          // Rendered as-written they ask Obsidian for a vault file and
+          // come back "could not be found".
+          links: body ? Array.from(body.querySelectorAll("a[href], img[src]"))
+            .map(e => e.getAttribute("href") || e.getAttribute("src"))
+            .slice(0, 4) : [],
+          status: b.status ? b.status.textContent : null,
+        };
+      })()`);
+      if (got.error) return { pass: false, evidence: got };
+      return {
+        // Switched face, resolved to an address, and produced RENDERED
+        // markdown -- not a placeholder and not a blob of source text.
+        pass: got.face === "markdown"
+           && !!got.heading && got.heading.startsWith("/html")
+           && got.rendered_chars > 0 && got.rendered_elements > 0
+           && (got.links || []).every(
+                (u) => !u || /^[a-z][a-z0-9+.-]*:/i.test(u)),
+        evidence: got,
+      };
+    },
+  },
+  {
     id: "G-69",
     asks: "retrieval is a scrolled ranking, not top-k",
     async run() {

@@ -948,6 +948,71 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send(200, payload)
             return
 
+        if segments[0] == "resolve":
+            # An address on a live page -> the chunk that draws it (`G-39`).
+            #
+            # **Walking UP, and that is the whole difficulty.** The element
+            # under a reader's cursor is almost never a chunk root -- it is a
+            # span inside a paragraph inside a section, and only one of those
+            # ancestors is a thing the trie holds. So the exact xpath is
+            # tried, then each ancestor in turn, and the FIRST hit wins:
+            # the nearest chunk containing what was pointed at, which is what
+            # "this thing here" means to the person pointing.
+            query = parse_qs(parts.query)
+            xpath = (query.get("xpath") or [""])[0]
+            url = (query.get("url") or [""])[0]
+            if not xpath:
+                self._send(400, {"error": "no xpath"})
+                return
+            #: A PREFIX match, not an equality one, and that is not an
+            #: optimisation -- it is what the data requires. Chunks anchor to
+            #: TEXT nodes: the element `.../ul/li/a` has no anchor and
+            #: `.../ul/li/a/text()[1]` does. An equality test on what the
+            #: cursor is over therefore finds nothing on almost every page.
+            #:
+            #: (`addresses_at` is the wrong instrument here for a second
+            #: reason: it returns `(address, VALUE)`, not `(address, aid)`,
+            #: so feeding its second element to `chunk_for_address` hands it
+            #: an href and gets None every time.)
+            steps = [s for s in xpath.split("/") if s]
+            found = None
+            walked = 0
+            tried = []
+            while steps and found is None:
+                candidate = "/" + "/".join(steps)
+                tried.append(candidate)
+                rows = self.workspace.store._rows(
+                    "MATCH (c:Chunk)-[:Anchors]->(a:Address) "
+                    "WHERE c.url = $u AND (a.xpath = $x "
+                    "OR starts_with(a.xpath, $p)) "
+                    "RETURN c.cid LIMIT 1",
+                    {"u": url, "x": candidate, "p": candidate + "/"})
+                if rows and rows[0] and rows[0][0]:
+                    chunk = self.workspace.store.chunk(rows[0][0])
+                    if chunk is not None:
+                        found = (candidate, chunk)
+                if found is None:
+                    steps.pop()
+                    walked += 1
+            if found is None:
+                # Say what was tried. A bare "not found" over a walk of
+                # seven candidates is not a diagnosis.
+                self._send(404, {"error": "no chunk draws that address",
+                                 "xpath": xpath, "url": url,
+                                 "tried": tried})
+                return
+            at, chunk = found
+            payload = chunk_payload(self.workspace, chunk.cid) or {}
+            payload["matched_xpath"] = at
+            #: How far up the document the answer was found. 0 means the
+            #: reader pointed straight at a chunk root; a large number means
+            #: they pointed at something deep inside one, and both are
+            #: ordinary.
+            payload["ancestors_walked"] = walked
+            payload["asked_xpath"] = xpath
+            self._send(200, payload)
+            return
+
         if segments[0] == "sensor":
             # The browser cell runs the SAME sensor the Selenium path runs,
             # read from the same file at request time. Bundling a copy into

@@ -200,6 +200,28 @@ export class Sidecar {
   }
 
   /**
+   * An address on a live page -> the chunk that draws it (`G-39`).
+   *
+   * The sidecar walks UP from the xpath, so what comes back is the nearest
+   * chunk CONTAINING what was pointed at; `ancestors_walked` says how far it
+   * had to go. Null on any failure, like every other call here: a browser
+   * pane with no sidecar is a browser, not a broken plugin.
+   */
+  async resolve(url: string, xpath: string): Promise<any | null> {
+    const base = this.base().trim().replace(/\/+$/, "");
+    if (!base || !xpath) return null;
+    try {
+      const q = `url=${encodeURIComponent(url)}`
+              + `&xpath=${encodeURIComponent(xpath)}`;
+      const res = await fetch(`${base}/resolve?${q}`);
+      if (!res.ok) return null;
+      return await res.json();
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Where chunks captured after the fit belong in the picture on screen.
    *
    * Read-only: it fits nothing and stores nothing, it asks the existing fit
