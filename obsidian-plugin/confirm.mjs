@@ -435,6 +435,236 @@ const CHECKS = [
     },
   },
   {
+    id: "G-3",
+    asks: "retrieval stays TRIPLE: frequency x quantized-semantic x pagerank",
+    async run() {
+      const d = await ask("/search?q=http+header+field&k=10");
+      const hits = d.hits || [];
+      const has = (f) => hits.filter((h) => typeof h[f] === "number").length;
+      // Present is not enough: a component that is always zero is a veto
+      // that never vetoes, and a component that is always the same number
+      // is not ranking anything. Both arms.
+      const spread = (f) => {
+        const vs = hits.map((h) => h[f]).filter((v) => typeof v === "number");
+        return vs.length ? Math.max(...vs) - Math.min(...vs) : 0;
+      };
+      return {
+        pass: hits.length > 1
+           && has("lexical") === hits.length
+           && has("semantic") === hits.length
+           && has("pagerank") === hits.length
+           && spread("lexical") > 0 && spread("semantic") > 0,
+        evidence: {
+          hits: hits.length,
+          carried: { lexical: has("lexical"), semantic: has("semantic"),
+                     pagerank: has("pagerank") },
+          spread: { lexical: +spread("lexical").toFixed(4),
+                    semantic: +spread("semantic").toFixed(4),
+                    pagerank: +spread("pagerank").toFixed(6) },
+        },
+      };
+    },
+  },
+  {
+    id: "G-70",
+    asks: "scoping a query to one url returns only that url's chunks",
+    async run() {
+      const global_ = await ask("/search?q=header&k=20");
+      const urls = [...new Set((global_.hits || []).map((h) => h.url))];
+      if (urls.length < 2) {
+        return { pass: false, evidence: { why: "global ranking spanned one page",
+                                          urls } };
+      }
+      const scoped = await ask(
+        `/search?q=header&k=20&url=${encodeURIComponent(urls[0])}`);
+      const scopedUrls = [...new Set((scoped.hits || []).map((h) => h.url))];
+      return {
+        // Scoped to exactly one page, and it returns SOMETHING -- an empty
+        // scoped result would satisfy "only that url" vacuously, which is
+        // the shape this defect actually took once before.
+        pass: (scoped.hits || []).length > 0
+           && scopedUrls.length === 1 && scopedUrls[0] === urls[0],
+        evidence: {
+          global_hits: (global_.hits || []).length, global_pages: urls.length,
+          scoped_to: urls[0].slice(0, 54),
+          scoped_hits: (scoped.hits || []).length, scoped_pages: scopedUrls.length,
+        },
+      };
+    },
+  },
+  {
+    id: "G-63",
+    asks: "coarse ranking suppresses a merge group's members; fine does not",
+    async run() {
+      // **The query is CHOSEN, not guessed.** Asking for "header" returned
+      // twenty-five hits of which none belonged to a merge group, so coarse
+      // and fine agreed -- correctly -- and the check read that agreement as
+      // a failure. Find a real group first and ask about its own words.
+      const layout = await ask("/layout?level=chunk");
+      const groups = (layout.nodes || [])
+        .filter((n) => (n.members || 1) > 1)
+        .sort((a, b) => b.members - a.members);
+      if (!groups.length) {
+        return { pass: false, evidence: { why: "no merge group in the store" } };
+      }
+      const lead = groups[0];
+      const chunk = await ask(`/chunk/${encodeURIComponent(lead.cid)}`);
+      const words = ((chunk.lines || []).map((l) => l.text).join(" ")
+        .match(/[A-Za-z][A-Za-z-]{4,}/g) || []).slice(0, 6);
+      if (words.length < 2) {
+        return { pass: false, evidence: { why: "the group's lead has no words",
+                                          lead: lead.cid } };
+      }
+      const q = encodeURIComponent(words.join(" "));
+      const coarse = await ask(`/search?q=${q}&k=25&coarse=1`);
+      const fine = await ask(`/search?q=${q}&k=25&coarse=0`);
+      const cids = (d) => (d.hits || []).map((h) => h.cid);
+      const members = new Set();
+      for (const h of fine.hits || []) {
+        if ((h.members || 1) > 1) members.add(h.cid);
+      }
+      const coarseGroups = (coarse.hits || [])
+        .filter((h) => (h.members || 1) > 1).length;
+      return {
+        // The group has to be REACHED (otherwise the comparison is empty),
+        // and the two rankings have to differ once it is.
+        pass: (coarse.hits || []).length > 0
+           && coarseGroups > 0
+           && JSON.stringify(cids(coarse)) !== JSON.stringify(cids(fine)),
+        evidence: {
+          asked_about: lead.cid, group_size: lead.members,
+          query: words.join(" ").slice(0, 60),
+          coarse_hits: (coarse.hits || []).length,
+          fine_hits: (fine.hits || []).length,
+          coarse_speaking_for_groups: coarseGroups,
+          identical: JSON.stringify(cids(coarse)) === JSON.stringify(cids(fine)),
+        },
+      };
+    },
+  },
+  {
+    id: "G-25",
+    asks: "one node per distinct rendering, with the copy count carried",
+    async run() {
+      const d = await ask("/layout?level=chunk");
+      const nodes = d.nodes || [];
+      const copies = nodes.map((n) => n.copies || 1);
+      const seen = new Map();
+      for (const n of nodes) seen.set(n.cid, (seen.get(n.cid) || 0) + 1);
+      const duplicated = [...seen.values()].filter((v) => v > 1).length;
+      return {
+        pass: nodes.length > 0 && duplicated === 0
+           && Math.max(...copies) > 1,
+        evidence: {
+          nodes: nodes.length,
+          repeated_cids: duplicated,
+          most_copies: Math.max(...copies),
+          nodes_standing_for_several: copies.filter((c) => c > 1).length,
+        },
+      };
+    },
+  },
+  {
+    id: "G-27",
+    asks: "the merge layer indexes and the 256-token chunks stay underneath",
+    async run() {
+      const d = await ask("/layout?level=chunk");
+      const nodes = d.nodes || [];
+      const groups = nodes.filter((n) => (n.members || 1) > 1);
+      if (!groups.length) {
+        return { pass: false, evidence: { why: "no merge group in the layout",
+                                          nodes: nodes.length } };
+      }
+      // A group lead must still resolve to a real chunk -- the originals
+      // stay underneath and are what a hit resolves to.
+      const lead = groups[0];
+      const chunk = await ask(`/chunk/${encodeURIComponent(lead.cid)}`);
+      return {
+        pass: !!chunk && !!chunk.cid && Array.isArray(chunk.lines)
+           && chunk.lines.length > 0,
+        evidence: {
+          nodes: nodes.length, groups: groups.length,
+          biggest_group: Math.max(...groups.map((g) => g.members)),
+          lead_resolves: !!(chunk && chunk.cid),
+          lead_lines: chunk && chunk.lines ? chunk.lines.length : 0,
+        },
+      };
+    },
+  },
+  {
+    id: "G-41",
+    asks: "nothing is injected into the page the browser is showing",
+    async run() {
+      const got = await evaluate(`(async () => {
+        const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+        await app.commands.executeCommandById("domvec-open-browser");
+        await sleep(1200);
+        const bv = app.workspace.getLeavesOfType("domvec-browser-view")[0];
+        const b = bv && bv.view;
+        if (!b || !b.webview) return { error: "no browser pane" };
+        const want = "https://books.toscrape.com/";
+        if (b.webview.getURL() !== want) {
+          b.go(want);
+          for (let i = 0; i < 40; i++) {
+            await sleep(400);
+            if (!b.webview.isLoading() && b.webview.getURL() === want) break;
+          }
+        }
+        await sleep(600);
+        // Asked of the PAGE: does it carry anything of ours?
+        return await b.webview.executeJavaScript(
+          "(function(){" +
+          "var marks=document.querySelectorAll('[class*=domvec],[id*=domvec],[data-domvec]');" +
+          "var styles=Array.prototype.filter.call(document.styleSheets,function(s){" +
+          "try{return s.ownerNode && !s.href && /domvec/i.test(s.ownerNode.textContent||'');}" +
+          "catch(e){return false;}});" +
+          "var scripts=Array.prototype.filter.call(document.scripts,function(s){" +
+          "return /domvec/i.test(s.textContent||'')||/domvec/i.test(s.src||'');});" +
+          "return {marked:marks.length, styles:styles.length, scripts:scripts.length," +
+          "title:document.title.slice(0,40)};})()");
+      })()`);
+      if (got.error) return { pass: false, evidence: got };
+      return {
+        pass: got.marked === 0 && got.styles === 0 && got.scripts === 0,
+        evidence: got,
+      };
+    },
+  },
+  {
+    id: "G-5",
+    asks: "every node is on screen at the default camera",
+    async run() {
+      const got = await inPane(`
+        for (let i = 0; i < 60 && !(v.graph && v.graph.graphData().nodes.length); i++) await sleep(500);
+        if (v.reframe) { v.reframe(); await sleep(1200); }
+        const cam = v.graph.camera();
+        const THREE = v.graph.constructor;
+        const d = v.graph.graphData();
+        // Projected into normalised device coordinates: |x|,|y| <= 1 and
+        // 0 < z < 1 is "inside the frustum". Counting nodes rather than
+        // trusting the framing arithmetic that put them there.
+        cam.updateMatrixWorld();
+        const m = cam.projectionMatrix.clone().multiply(cam.matrixWorldInverse);
+        let onScreen = 0, behind = 0;
+        for (const n of d.nodes) {
+          const x = n.x, y = n.y, z = n.z;
+          const e = m.elements;
+          const cw = e[3]*x + e[7]*y + e[11]*z + e[15];
+          if (cw <= 0) { behind++; continue; }
+          const cx = (e[0]*x + e[4]*y + e[8]*z + e[12]) / cw;
+          const cy = (e[1]*x + e[5]*y + e[9]*z + e[13]) / cw;
+          if (Math.abs(cx) <= 1 && Math.abs(cy) <= 1) onScreen++;
+        }
+        return { nodes: d.nodes.length, onScreen, behind };
+      `);
+      if (got.error) return { pass: false, evidence: got };
+      return {
+        pass: got.nodes > 0 && got.onScreen === got.nodes && got.behind === 0,
+        evidence: got,
+      };
+    },
+  },
+  {
     id: "G-69",
     asks: "retrieval is a scrolled ranking, not top-k",
     async run() {
