@@ -613,7 +613,7 @@ class GraphStore:
 
         keep_chunks = {c.cid for c in chunks}
         existing = [r[0] for r in self._rows(
-            "MATCH (:Page {url: $url})-[:HasChunk]->(c:Chunk) RETURN c.cid",
+            "MATCH (c:Chunk {url: $url}) RETURN c.cid",
             {"url": url})]
 
         # A partial write describes some of the page, not all of it. Only the
@@ -885,7 +885,7 @@ class GraphStore:
         defect `_reconcile` exists to prevent for anchors.
         """
         self.conn.execute(
-            "MATCH (p:Page {url: $url})-[:HasChunk]->(c:Chunk) "
+            "MATCH (c:Chunk {url: $url}) "
             "SET c.group_of = '', c.group_n = 1", {"url": url})
         rows = []
         for group in groups or []:
@@ -905,6 +905,12 @@ class GraphStore:
     def embeddings_for(self, url: str) -> Dict[str, List[float]]:
         """Every vector on one page, in one query.
 
+        Keyed on `c.url`, like every other per-page read here. Going
+        through `(:Page {url})-[:HasChunk]->` missed 3,033 of 14,169
+        edges, because a Page node does not always carry the same url
+        its chunks do -- percent-encoding on the wikipedia pages, a
+        trailing slash on five others. See `chunks`.
+
         `aggregate` read them one at a time -- `store.embedding(cid)` per
         chunk -- which is a query per chunk and the reason stage two looked
         expensive. Measured on `build/corpus123`: a 835-chunk page spent
@@ -917,7 +923,7 @@ class GraphStore:
         the caller already treats absence as "not yet".
         """
         rows = self._rows(
-            "MATCH (p:Page {url: $url})-[:HasChunk]->(c:Chunk) "
+            "MATCH (c:Chunk {url: $url}) "
             "RETURN c.cid, c.embedding", {"url": url})
         out: Dict[str, List[float]] = {}
         for cid, vector in rows:
@@ -997,7 +1003,7 @@ class GraphStore:
         moving there is no way to tell it ran from outside the process.
         """
         rows = self._rows(
-            "MATCH (p:Page {url: $url})-[:HasChunk]->(c:Chunk) "
+            "MATCH (c:Chunk {url: $url}) "
             "WHERE c.group_of = c.cid AND c.group_n > 1 RETURN count(c)",
             {"url": url})
         return int(rows[0][0]) if rows else 0
@@ -1013,7 +1019,7 @@ class GraphStore:
         """
         if url:
             rows = self._rows(
-                "MATCH (p:Page {url: $url})-[:HasChunk]->(c:Chunk) "
+                "MATCH (c:Chunk {url: $url}) "
                 "RETURN count(c)", {"url": url})
         else:
             rows = self._rows("MATCH (c:Chunk) RETURN count(c)")
@@ -1062,9 +1068,25 @@ class GraphStore:
         return out
 
     def chunks(self, url: str = "") -> List[StoredChunk]:
+        """A page's chunks, matched on the CHUNK's url.
+
+        **Not through the `Page` node, which does not always agree with it.**
+        Measured on `build/corpus123`: 3,033 of 14,169 `HasChunk` edges join
+        a page to chunks carrying a different url, over 8 pages, in two
+        classes -- percent-encoding (`ar.wikipedia.org/wiki/<arabic>` on the
+        page, `%D9%81...` on the chunks) and a trailing slash
+        (`https://books.toscrape.com` against `https://books.toscrape.com/`).
+
+        Matching through the page therefore returned ZERO chunks for the
+        largest page in the corpus, 801 of them, so unfolding it drew nothing
+        and aggregating it was skipped as under the gate. The chunk carries
+        its own url and is what every other read here keys on --
+        `embeddings_for`, `contains_within`, `page_vectors` all use `c.url`
+        -- so this one now agrees with them.
+        """
         if url:
             rows = self._rows(
-                "MATCH (p:Page {url: $url})-[:HasChunk]->(c:Chunk) "
+                "MATCH (c:Chunk {url: $url}) "
                 "RETURN c.cid, c.url, c.xpath, c.part, c.md, c.chars, "
                 "c.line_count, c.row, c.dup_of, c.dup_n, "
                 "c.group_of, c.group_n", {"url": url})
@@ -1178,7 +1200,7 @@ class GraphStore:
     def purge_page(self, url: str) -> int:
         """Remove a page, its chunks and its addresses. Returns chunks removed."""
         cids = [r[0] for r in self._rows(
-            "MATCH (p:Page {url: $url})-[:HasChunk]->(c:Chunk) RETURN c.cid",
+            "MATCH (c:Chunk {url: $url}) RETURN c.cid",
             {"url": url})]
         self.conn.execute(
             "MATCH (a:Address {url: $url}) DETACH DELETE a", {"url": url})
