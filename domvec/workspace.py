@@ -29,6 +29,8 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
+import threading
+
 import numpy as np
 
 from .address import ContentAddress
@@ -126,6 +128,12 @@ class Workspace:
         # nothing on the write path calls the embedder directly.
         self.vectors = VectorQueue()
         self._index: Optional[ThreeFormIndex] = None
+        #: `index` is a LAZY property read from request threads of a
+        #: `ThreadingHTTPServer`. Two concurrent searches both found
+        #: it None, both hydrated into one shared `EmbeddingMatrix`,
+        #: and the growth raced -- every `/search` died on an
+        #: `IndexError` out of `vectors.set`. Built once, here.
+        self._index_lock = threading.RLock()
 
     # -- on-disk naming ---------------------------------------------------
     def mirror_path(self, url: str) -> Path:
@@ -1051,17 +1059,31 @@ class Workspace:
 
     @property
     def index(self) -> ThreeFormIndex:
-        """The query surface, rebuilt when the graph has changed under it."""
-        if self._index is None:
-            # Flush before hydrating: the queue holds chunks whose markdown
-            # moved, and hydration only fills in chunks that have no vector at
-            # all. Without this a *changed* chunk would keep answering with
-            # the vector of what it used to say.
-            self.flush_vectors()
-            self._hydrate_embeddings()
-            self._index = ThreeFormIndex(
-                self.store, self.freq, self.embeddings, embedder=self.embedder
-            ).build()
+        """The query surface, rebuilt when the graph has changed under it.
+
+        **Built under a lock, because this is a lazy property in a threaded
+        server.** Two concurrent `/search` requests both saw `None` here and
+        both ran the hydration, which writes into one shared
+        `EmbeddingMatrix`; the growth raced and search died with an
+        `IndexError` out of `vectors.set`. The matrix is now safe on its own
+        account, and this stops the expensive build happening twice as well.
+        """
+        if self._index is not None:
+            return self._index
+        with self._index_lock:
+            # Re-checked inside: the thread that waited here wants the index
+            # the first one built, not a second one.
+            if self._index is None:
+                # Flush before hydrating: the queue holds chunks whose
+                # markdown moved, and hydration only fills in chunks that
+                # have no vector at all. Without this a *changed* chunk would
+                # keep answering with the vector of what it used to say.
+                self.flush_vectors()
+                self._hydrate_embeddings()
+                self._index = ThreeFormIndex(
+                    self.store, self.freq, self.embeddings,
+                    embedder=self.embedder,
+                ).build()
         return self._index
 
     def search(self, query: str, k: int = 10, **kwargs) -> List[Hit]:

@@ -44,6 +44,8 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 from urllib.parse import urlsplit
 
+import threading
+
 import numpy as np
 from scipy import sparse
 
@@ -485,19 +487,29 @@ class EmbeddingMatrix:
     rows: List[str] = field(default_factory=list)
     _row_of: Dict[str, int] = field(default_factory=dict)
     _matrix: Optional[np.ndarray] = None
+    #: Row allocation and growth are a read-modify-write over shared state,
+    #: and the sidecar is a `ThreadingHTTPServer` with an embedding worker
+    #: beside it. Unlocked, two threads each grew a copy of the SAME stale
+    #: matrix and the smaller assignment landed last, so the next write went
+    #: past the end: `IndexError: index 13397 is out of bounds for axis 0
+    #: with size 13397`, which took every `/search` down with it. Not
+    #: hypothetical -- that is the traceback this lock was added for.
+    _lock: "threading.RLock" = field(
+        default_factory=threading.RLock, repr=False, compare=False)
 
     def set(self, cid: str, vector: np.ndarray) -> int:
-        row = self._row_of.get(cid)
-        if row is None:
-            row = len(self.rows)
-            self.rows.append(cid)
-            self._row_of[cid] = row
-        self._grow(row + 1)
         vec = np.asarray(vector, dtype=np.float32).ravel()[: self.dim]
         norm = float(np.linalg.norm(vec))
-        # Stored normalised so similarity is a plain dot product and a zero
-        # vector (an un-embedded chunk) scores 0 rather than NaN.
-        self._matrix[row, : vec.shape[0]] = vec / norm if norm else vec
+        with self._lock:
+            row = self._row_of.get(cid)
+            if row is None:
+                row = len(self.rows)
+                self.rows.append(cid)
+                self._row_of[cid] = row
+            self._grow(row + 1)
+            # Stored normalised so similarity is a plain dot product and a
+            # zero vector (an un-embedded chunk) scores 0 rather than NaN.
+            self._matrix[row, : vec.shape[0]] = vec / norm if norm else vec
         return row
 
     def _grow(self, n_rows: int) -> None:

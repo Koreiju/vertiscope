@@ -996,15 +996,32 @@ class _Handler(BaseHTTPRequestHandler):
             # request purely to decide whether the cache is stale.
             fresh = (self.workspace.store.chunk_count(), want,
                      spherical, level)
-            if getattr(type(self), "_layout_key", None) != fresh:
-                type(self)._layout_key = fresh
-                type(self)._layout = (
+            # A few slots, not one.
+            #
+            # A single slot is right when there is one question; there are
+            # four here (page/chunk x euclidean/S3) and the pane has a button
+            # for each axis. With one slot, toggling the space refit the
+            # WHOLE corpus, then toggling back refit it again -- and the S3
+            # fit is two UMAP runs since the warm start was wired, so a
+            # reader pressing a button twice paid for four fits to see two
+            # pictures it had already computed. Keyed identically; only the
+            # number of remembered answers changes.
+            cache = getattr(type(self), "_layouts", None)
+            if cache is None:
+                cache = type(self)._layouts = {}
+            if fresh not in cache:
+                cache[fresh] = (
                     build_page_layout(self.workspace, dims=want,
                                       spherical_space=spherical)
                     if level == "page"
                     else build_layout(self.workspace, dims=want,
                                       spherical_space=spherical))
-            self._send(200, type(self)._layout)
+                # Bounded, and evicting the OLDEST rather than the largest:
+                # the chunk-level fits are the expensive ones and are exactly
+                # what a reader toggling `pages` wants back.
+                while len(cache) > 4:
+                    cache.pop(next(iter(cache)))
+            self._send(200, cache[fresh])
             return
 
         if segments[0] == "kernel":
