@@ -61,6 +61,53 @@ const HANDLE = "__domvecSensor";
  *  itself when it first paints. */
 const SCROLLS = 6;
 
+/** How far one scroll step moves, as a fraction of the viewport (`S-8`).
+ *
+ *  Finer than the 0.9 it replaces. A lazy loader keyed on an element nearing
+ *  the fold fires once per step, so a coarse jump can carry a trigger past
+ *  the viewport before anything is asked for -- the pass then drains a page
+ *  that has not started loading yet, and reads as settled.
+ *
+ *  **Tuned, like the pause, and for a measured reason.** A flat 0.5 turned
+ *  one page into 15 passes against the old cadence's 8, and since every
+ *  pass costs a drain and a capture round trip the scan came out SLOWER
+ *  (7.9s against 6.2s) for exactly the same 26 addresses. Fine steps are
+ *  worth their cost only where the page is actually producing, so the step
+ *  grows while drains come back empty and collapses back the moment one
+ *  does not. The row asks for fine-grained AND time-efficient, and a fixed
+ *  step can only be one of them. */
+const SCROLL_STEP = 0.5;
+const SCROLL_STEP_MAX = 1.6;
+
+/** The tuned pause between a scroll and the drain that follows it.
+ *
+ *  **Tuned per visit rather than fixed, which is the whole of `S-8`.** The
+ *  700ms constant was a guess every page paid: a static page waited 4.9
+ *  seconds to be told six times that nothing had changed, and a page that
+ *  loads slowly was drained before it had loaded. The loop multiplies the
+ *  pause up while drains keep producing dirty chunks and down while they
+ *  come back empty, which is the page's own update rate measured rather
+ *  than assumed.
+ *
+ *  In trie terms nothing about WHAT is written changes -- each drain still
+ *  carries one delta into the trie. What is tuned is WHEN the next delta is
+ *  asked for, and when to stop asking. */
+const PAUSE_START_MS = 400;
+const PAUSE_MIN_MS = 120;
+const PAUSE_MAX_MS = 1500;
+
+/** Consecutive empty drains AT THE BOTTOM before a page is called settled.
+ *
+ *  Two, not one: a single empty drain is also what a page in the middle of
+ *  a fetch looks like. */
+const QUIET_PASSES = 2;
+
+/** Hard stops, so a page that never settles still terminates. A ticker or
+ *  a carousel rewrites forever and would otherwise scroll for as long as
+ *  the reader allowed. */
+const MAX_PASSES = 40;
+const MAX_SCAN_MS = 25000;
+
 /** Long enough for a lazy loader to have run, short enough that a reader
  *  watching the pane does not think it has hung. */
 const PAUSE_MS = 700;
@@ -99,6 +146,15 @@ export class BrowserView extends ItemView {
   private draining = false;
   /** Live capture on? The reader's switch, and it starts on. */
   private live = true;
+  /** What the last `scan` cost and how it paced itself (`S-8`). Public so a
+   *  live check can read the pacing rather than re-deriving it: a check that
+   *  reimplements what it measures can be wrong in either direction. */
+  lastScan: {
+    passes: number; elapsedMs: number; rewrites: number; addresses: number;
+    pauses: number[]; steps: number[]; settled: boolean;
+    meanPauseMs: number; mode: string;
+  } = { passes: 0, elapsedMs: 0, rewrites: 0, addresses: 0,
+        pauses: [], steps: [], settled: false, meanPauseMs: 0, mode: "" };
   /** The url the current capture session belongs to. A navigation ends one
    *  session and begins another, and the old one has to be settled first or
    *  its last delta never becomes a complete write. */
@@ -636,7 +692,17 @@ export class BrowserView extends ItemView {
    * is the same thing the Selenium path does and the one concession -- the
    * alternative is re-walking the page from scratch on every drain.
    */
-  async scan(): Promise<void> {
+  /**
+   * ``fixed`` reproduces the cadence this replaced: `SCROLLS` + 1 passes at
+   * `PAUSE_MS`, stepping 0.9 of a viewport, no early stop.
+   *
+   * **It exists so that `S-8` has something to be measured against.** A
+   * tuned scan that is merely fast is not an improvement -- it is only an
+   * improvement if it captures no less. Keeping the old schedule callable
+   * makes that an A/B on one page in one session rather than a comparison
+   * between two numbers recorded on different days by different code.
+   */
+  async scan(opts: { fixed?: boolean } = {}): Promise<void> {
     const wv = this.webview;
     if (!wv) return;
     const url = wv.getURL();
@@ -673,19 +739,40 @@ export class BrowserView extends ItemView {
     // scroll has not finished being itself when it first paints. Scrolling
     // is what the Selenium path does too; it is the reader's own browser, so
     // it is their scroll position that moves and then comes back.
+    //
+    // **Live-tuned rather than counted out (`S-8`).** The loop runs until
+    // the page has been seen to the bottom AND the trie has stopped
+    // changing, with the pause between a scroll and its drain following the
+    // page's own update rate. Six fixed passes at 700ms was both too much
+    // for a static page and too little for a slow one.
+    const startedAt = Date.now();
+    const where0 = await wv.executeJavaScript("window.scrollY");
     let total = 0, addresses = 0;
-    for (let pass = 0; pass <= SCROLLS; pass++) {
-      if (pass) {
-        await wv.executeJavaScript(
-          "window.scrollBy(0, window.innerHeight * 0.9); true");
-        await new Promise((r) => setTimeout(r, PAUSE_MS));
+    let pause = PAUSE_START_MS;
+    let quiet = 0, passes = 0, atBottom = false;
+    const pauses: number[] = [];
+    const steps: number[] = [];
+
+    const cap = opts.fixed ? SCROLLS + 1 : MAX_PASSES;
+    let step = opts.fixed ? 0.9 : SCROLL_STEP;
+    if (opts.fixed) pause = PAUSE_MS;
+
+    for (passes = 0; passes < cap; passes++) {
+      if (passes) {
+        atBottom = await wv.executeJavaScript(
+          "(function(){var before=window.scrollY;" +
+          "window.scrollBy(0, window.innerHeight * " + step + ");" +
+          "return window.scrollY <= before + 1;})()");
+        pauses.push(pause);
+        steps.push(Math.round(step * 100) / 100);
+        await new Promise((r) => setTimeout(r, pause));
       }
       let payload: any = null;
       try {
         payload = await wv.executeJavaScript(
           `window[${JSON.stringify(HANDLE)}].drain()`);
       } catch (e) {
-        this.say(`drain ${pass} failed: ${String(e).slice(0, 100)}`);
+        this.say(`drain ${passes} failed: ${String(e).slice(0, 100)}`);
         return;
       }
       const reply = await this.sidecar.capture(url, { payload });
@@ -693,11 +780,48 @@ export class BrowserView extends ItemView {
         this.say(`capture failed: ${reply ? reply.error : "no reply"}`);
         return;
       }
-      total += reply.dirty || 0;
+      const dirty = reply.dirty || 0;
+      total += dirty;
       addresses = Math.max(addresses, reply.addresses || 0);
-      this.say(`pass ${pass}: ${reply.addresses} addresses, ` +
-               `${reply.dirty} chunks rewritten, ${reply.ms} ms`);
+
+      // The tuning itself. Productive drains mean the page is still
+      // arriving and the next one should wait longer; empty ones mean it is
+      // ahead of us and the next can come sooner.
+      if (!opts.fixed) {
+        pause = dirty
+          ? Math.min(Math.round(pause * 1.4), PAUSE_MAX_MS)
+          : Math.max(Math.round(pause * 0.6), PAUSE_MIN_MS);
+        // Cover ground fast where nothing is arriving, slow down the
+        // instant something does.
+        step = dirty
+          ? SCROLL_STEP
+          : Math.min(step * 1.5, SCROLL_STEP_MAX);
+      }
+      quiet = dirty ? 0 : quiet + 1;
+
+      this.say(`pass ${passes}: ${reply.addresses} addresses, ` +
+               `${dirty} rewritten, ${reply.ms} ms, next in ${pause} ms`);
+
+      // Settled: seen to the bottom, and the trie has stopped changing.
+      // The fixed arm counts its passes out regardless, which is the
+      // behaviour being compared against.
+      if (!opts.fixed && atBottom && quiet >= QUIET_PASSES) break;
+      if (Date.now() - startedAt > MAX_SCAN_MS) break;
     }
+
+    // Put the reader back where they were. The comment above has always
+    // said their scroll position "comes back"; nothing was bringing it.
+    await wv.executeJavaScript(
+      "window.scrollTo(0, " + (Number(where0) || 0) + "); true");
+
+    const elapsedMs = Date.now() - startedAt;
+    this.lastScan = {
+      passes: passes + 1, elapsedMs, rewrites: total, addresses,
+      pauses, steps, settled: atBottom && quiet >= QUIET_PASSES,
+      mode: opts.fixed ? "fixed" : "tuned",
+      meanPauseMs: pauses.length
+        ? Math.round(pauses.reduce((a, b) => a + b, 0) / pauses.length) : 0,
+    };
 
     // One complete write from the settled trie. The per-drain writes are
     // deltas and never retire a chunk that re-partitioning replaced.
@@ -708,7 +832,9 @@ export class BrowserView extends ItemView {
       return;
     }
     this.say(`scanned · ${done.addresses} addresses · ${done.chunks} chunks ` +
-             `· ${total} rewrites over ${SCROLLS + 1} passes`);
+             `· ${total} rewrites over ${passes + 1} passes ` +
+             `· ${(elapsedMs / 1000).toFixed(1)}s` +
+             (this.lastScan.settled ? " · settled" : " · capped"));
   }
 
   private say(text: string): void {

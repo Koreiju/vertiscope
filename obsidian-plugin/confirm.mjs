@@ -531,7 +531,8 @@ const uniformProbe = (page, token, sidecar) => `(async () => {
 //: for a fit and useless for "what is in here".
 const tidyFixtures = async () => {
   try {
-    const listed = await ask("/pages?contains=live_mutate");
+    const listed = await ask("/pages?contains=/live_");
+    // Both fixtures: live_mutate.html and live_tall.html.
     let removed = 0;
     for (const url of listed.urls || []) {
       const res = await fetch(`${SIDECAR}/purge`, {
@@ -547,6 +548,101 @@ const tidyFixtures = async () => {
     return -1;
   }
 };
+
+//: The body S-8 evaluates in the pane: the tuned scan against the fixed one.
+//:
+//: **A tuned scan that is merely faster is not an improvement.** It is only
+//: an improvement if it captures no less, so both arms run on the same page
+//: in the same session and the addresses are compared, not just the clock.
+//:
+//: **The tuned arm goes FIRST, deliberately.** Running it second would hand
+//: it a warm HTTP cache and a warm layout, which biases in favour of the
+//: thing being argued for. Any advantage left over from ordering now falls
+//: to the arm this check is trying to beat.
+//:
+//: **The url is purged between arms.** A re-scan of a page the trie already
+//: holds drains nothing, and the tuned arm stops when the trie stops
+//: changing -- so without the purge it would "win" by measuring nothing.
+const paceProbe = (pages, sidecar) => `(async () => {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const PAGES = ${JSON.stringify(pages)};
+  const SIDE = ${JSON.stringify(sidecar)};
+
+  for (const l of app.workspace.getLeavesOfType("domvec-chunk-view")) {
+    l.detach();
+  }
+  for (const l of app.workspace.getLeavesOfType("domvec-browser-view")) {
+    l.detach();
+  }
+  await sleep(700);
+  const leaf = app.workspace.getLeaf("tab");
+  await leaf.setViewState({ type: "domvec-browser-view", active: true });
+  app.workspace.revealLeaf(leaf);
+  await sleep(1500);
+  const b = app.workspace.getLeavesOfType("domvec-browser-view")[0].view;
+  if (!b || !b.webview) return { error: "no browser pane" };
+
+  // Live capture off for the whole comparison: a background drain every
+  // 1200ms would be a third scan running through both arms.
+  try { b.setLive(false); } catch (e) {}
+
+  const purge = async (url) => {
+    try {
+      await fetch(SIDE + "/purge", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ url }),
+      });
+    } catch (e) {}
+  };
+
+  const arm = async (PAGE, fixed) => {
+    b.go("about:blank");
+    await sleep(700);
+    b.go(PAGE);
+    for (let i = 0; i < 60; i++) {
+      await sleep(300);
+      if (!b.webview.isLoading() && b.webview.getURL().indexOf(PAGE) === 0) {
+        break;
+      }
+    }
+    const url = b.webview.getURL();
+    await purge(url);
+    await sleep(400);
+    await b.scan(fixed ? { fixed: true } : {});
+    const got = b.lastScan;
+    return {
+      mode: got.mode, passes: got.passes, ms: got.elapsedMs,
+      addresses: got.addresses, rewrites: got.rewrites,
+      mean_pause_ms: got.meanPauseMs, settled: got.settled,
+      pauses: got.pauses.slice(0, 12),
+      steps: (got.steps || []).slice(0, 12),
+    };
+  };
+
+  // **Two pages, because the row makes two claims that separate here.**
+  //
+  // A SHORT page is where "time-efficient" is visible: the tuned scan stops
+  // as soon as it is at the bottom and the trie has stopped changing, while
+  // the fixed one counts out seven passes at 700ms regardless -- 4.2
+  // seconds spent being told six times that nothing has changed.
+  //
+  // A TALL page with lazy blocks is where "fine-grained" and "tuned to the
+  // update rate" are visible, and where the fixed cadence is revealed not
+  // to finish at all.
+  const out = {};
+  for (const key of Object.keys(PAGES)) {
+    const page = PAGES[key];
+    const tuned = await arm(page, false);
+    const fixed = await arm(page, true);
+    await purge(b.webview.getURL());
+    out[key] = {
+      tuned, fixed,
+      faster_by_ms: fixed.ms - tuned.ms,
+      addresses_delta: tuned.addresses - fixed.addresses,
+    };
+  }
+  return out;
+})()`;
 
 const CHECKS = [
   {
@@ -1816,6 +1912,48 @@ const CHECKS = [
              && got.open_panel_has_token === true
              && got.reopened_panel_has_token === true
              && got.graph_has_node === true
+             && got.pages_after === got.pages_before,
+          evidence: got,
+        };
+      } finally {
+        await fixtures.close();
+      }
+    },
+  },
+  {
+    id: "S-8",
+    asks: "the scroll is tuned to the page, and captures no less for it",
+    async run() {
+      const fixtures = await serveFixtures();
+      const pages = {
+        short: fixtures.origin + "/live_mutate.html",
+        tall: fixtures.origin + "/live_tall.html",
+      };
+      try {
+        const pagesBefore = (await ask("/health")).pages;
+        const got = await evaluate(paceProbe(pages, SIDECAR),
+                                   { timeout: 900000 });
+        got.purged = await tidyFixtures();
+        got.pages_before = pagesBefore;
+        got.pages_after = (await ask("/health")).pages;
+        if (got.error) return { pass: false, evidence: got };
+        return {
+          // **Different criteria per page, because they answer different
+          // halves of the row, and one criterion for both would be wrong
+          // for one of them.**
+          //
+          // Short page -- time-efficient: strictly faster, same coverage.
+          // Tall page -- fine-grained and tuned: it must actually SETTLE
+          // where the fixed cadence does not, and must not buy that with
+          // coverage. Not required to be faster there: reaching the bottom
+          // of a page the other arm never finished is more work, and
+          // scoring it on the clock alone would credit not finishing.
+          pass: got.short.tuned.addresses >= got.short.fixed.addresses
+             && got.short.tuned.ms < got.short.fixed.ms
+             && got.short.tuned.settled === true
+             && got.tall.tuned.addresses >= got.tall.fixed.addresses
+             && got.tall.tuned.settled === true
+             && got.tall.fixed.settled === false
              && got.pages_after === got.pages_before,
           evidence: got,
         };
