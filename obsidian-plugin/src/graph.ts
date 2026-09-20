@@ -1261,6 +1261,34 @@ export class GraphView extends ItemView {
 
     const observer = new ResizeObserver(() => {
       fit();
+      // **Restart the animation loop, or the pane stays on its last frame.**
+      //
+      // Obsidian gives a background tab a 0x0 box, and the renderer's loop
+      // does not come back when the box does: measured through the harness,
+      // `renderer.info.render.frame` sat at 1 across 1.5 seconds -- zero
+      // frames -- on a pane reporting 97 nodes on screen, 97 in frustum and
+      // 98 visible scene objects. A render forced by hand drew all of them,
+      // 98 calls and 1,758 triangles, so the scene and the camera were
+      // never the problem. The canvas was simply never painted again after
+      // being resized to nothing and back, which is the blank projector.
+      //
+      // It is also why `forceCollide` never separated anything: d3's tick
+      // runs inside this same loop, so a dead loop is a frozen simulation,
+      // and the drift off the fit measured exactly 0 every time.
+      // `resumeAnimation()` ALONE IS A NO-OP here: the library still
+      // believes its cycle is running and returns without scheduling one.
+      // Pausing first gives the resume something to undo. Measured through
+      // the harness -- frames 1 -> 1 over 1.5s with resume alone, and
+      // 1 -> 208 with the pair.
+      try {
+        const gg = graph as any;
+        gg.pauseAnimation?.();
+        gg.resumeAnimation?.();
+        // And the simulation cooled to nothing while the loop was dead, so
+        // the collider has no energy to spend separating anything. This is
+        // what made `fit_drift` measure exactly 0 on every sample.
+        gg.d3ReheatSimulation?.();
+      } catch { /* older build */ }
       // Re-frame, but only while the reader has not moved the camera. The
       // first placement runs on a timer against a canvas the pane may not
       // have laid out, so the box that matters usually arrives AFTER it --
