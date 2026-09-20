@@ -665,6 +665,110 @@ const CHECKS = [
     },
   },
   {
+    id: "G-57",
+    asks: "a chunk's panel opens as a draggable billboard IN the projector",
+    async run() {
+      const got = await inPane(`
+        for (let i = 0; i < 60 && !(v.graph && v.graph.graphData().nodes.length); i++) await sleep(500);
+        // Clear the decks. Earlier checks click nodes, and a click now opens
+        // a billboard -- and openBillboard TOGGLES, so running second this
+        // check was closing one instead of opening one and reporting that
+        // none appeared. Establish the state rather than inherit it.
+        const stale = Array.from(v.contentEl.querySelectorAll(".domvec-bb"));
+        for (const el of stale) {
+          const x = el.querySelector(".domvec-bb-close");
+          if (x) x.click();
+        }
+        if (v.billboards) v.billboards.clear();
+        await sleep(300);
+        // A clean page-level picture, then one unfold, so chunk nodes exist.
+        const fresh = await (await fetch(${JSON.stringify(SIDECAR)} + "/layout?level=page")).json();
+        v.graph.graphData({ nodes: fresh.nodes.map(n => v.nodeFrom(n)), links: [] });
+        await sleep(400);
+        const page = v.graph.graphData().nodes
+          .filter(n => n.url).sort((a, b) => (b.members||0) - (a.members||0))[0];
+        await v.unfoldNode(page);
+        await sleep(1200);
+        const chunk = v.graph.graphData().nodes
+          .find(n => n.level === "chunk" && n.id && !n.unfolded);
+        if (!chunk) return { error: "the unfold produced no chunk node" };
+
+        const handler = v.graph.onNodeClick();
+        handler(chunk);
+        // The panel fetches its lines; give it a moment.
+        for (let i = 0; i < 40; i++) {
+          await sleep(250);
+          const b = v.contentEl.querySelector(".domvec-bb-body");
+          if (b && b.childElementCount) break;
+        }
+        const all = v.contentEl.querySelectorAll(".domvec-bb");
+        const el = all[all.length - 1];
+        if (!el) return { error: "no billboard appeared",
+                          open_count: all.length,
+                          tracked: v.billboards ? v.billboards.size : null,
+                          clicked: String(chunk.id).slice(0, 24) };
+        const layer = v.contentEl.querySelector(".domvec-bb-layer");
+        const body = el.querySelector(".domvec-bb-body");
+        const lines = body ? body.childElementCount : 0;
+
+        // Anchored: it must be near where the node PROJECTS to.
+        const at = v.graph.graph2ScreenCoords(chunk.x, chunk.y, chunk.z);
+        const box = el.getBoundingClientRect();
+        const host = layer.getBoundingClientRect();
+        const offBy = Math.round(Math.hypot(
+          (box.left - host.left) - (at.x + 12), (box.top - host.top) - (at.y + 12)));
+
+        // It FOLLOWS: move the camera and it must move with the node.
+        const before = el.style.left;
+        const cam = v.graph.cameraPosition();
+        v.graph.cameraPosition({ x: cam.x * 0.6 + 40, y: cam.y + 30, z: cam.z * 0.6 }, undefined, 0);
+        await sleep(900);
+        const followed = el.style.left !== before;
+
+        // Dragging PINS it: after a drag it must ignore the camera.
+        const head = el.querySelector(".domvec-bb-head");
+        const r = el.getBoundingClientRect();
+        const send = (type, x, y) => head.dispatchEvent(new PointerEvent(type, {
+          pointerId: 1, bubbles: true, cancelable: true, clientX: x, clientY: y }));
+        head.setPointerCapture = () => {};
+        send("pointerdown", r.left + 10, r.top + 6);
+        send("pointermove", r.left + 90, r.top + 70);
+        send("pointerup", r.left + 90, r.top + 70);
+        const parked = el.style.left;
+        const cam2 = v.graph.cameraPosition();
+        v.graph.cameraPosition({ x: cam2.x + 60, y: cam2.y - 25, z: cam2.z }, undefined, 0);
+        await sleep(900);
+        const stayed = el.style.left === parked;
+
+        // And it closes.
+        el.querySelector(".domvec-bb-close").click();
+        await sleep(300);
+        const gone = !v.contentEl.querySelector(".domvec-bb");
+
+        return {
+          node: String(chunk.id).slice(0, 24),
+          lines, anchored_off_by_px: offBy,
+          in_canvas: !!(layer && layer.parentElement
+                        && layer.parentElement.classList.contains("domvec-graph-canvas")),
+          followed_camera: followed, pinned_after_drag: stayed, closed: gone,
+        };
+      `);
+      if (got.error) return { pass: false, evidence: got };
+      return {
+        // Five properties, and each of the last three is the one that a
+        // plausible-looking implementation gets wrong: a panel that never
+        // follows, one that never stops following, one that cannot be shut.
+        pass: got.lines > 0
+           && got.in_canvas === true
+           && got.anchored_off_by_px <= 2
+           && got.followed_camera === true
+           && got.pinned_after_drag === true
+           && got.closed === true,
+        evidence: got,
+      };
+    },
+  },
+  {
     id: "G-69",
     asks: "retrieval is a scrolled ranking, not top-k",
     async run() {

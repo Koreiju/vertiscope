@@ -280,6 +280,15 @@ export class GraphView extends ItemView {
   //  store. Keep the element and the invariant half of the text so the
   //  counts can be restated whenever the graph is mutated.
   private statusEl: HTMLElement | null = null;
+  //: `G-57`. The chunk panel opens HERE, beside the node it belongs to,
+  //  rather than taking over an Obsidian pane. Keyed by cid so clicking the
+  //  same node twice does not stack two of them.
+  private billboards = new Map<string, {
+    el: HTMLElement; node: any; pinned: boolean;
+  }>();
+  private billboardFrame = 0;
+  private billboardLayer: HTMLElement | null = null;
+  private canvasEl: HTMLElement | null = null;
   private captionTail = "";
   /** Which embedding space to ask the fit for: "" for the Euclidean one,
    *  "S3" for the quaternion metric (`G-18`). Empty by default, on the
@@ -348,6 +357,11 @@ export class GraphView extends ItemView {
     };
 
     const canvas = root.createDiv({ cls: "domvec-graph-canvas" });
+    // The billboards hang off the CANVAS, not the pane.
+    // `graph2ScreenCoords` answers in the canvas's own coordinates,
+    // and the caption bar sits above it -- anchoring to the pane would
+    // have drawn every panel one bar-height below its node.
+    this.canvasEl = canvas;
 
     const load = async () => {
       status.setText("fitting…");
@@ -689,6 +703,128 @@ export class GraphView extends ItemView {
     if (changed) this.graph.nodeColor(this.graph.nodeColor());
   }
 
+  /**
+   * Open a chunk's panel as a billboard IN the projector (`G-57`).
+   *
+   * The panel is already generated and already in the store; what changes is
+   * where it opens. Taking over an Obsidian pane put the thing a reader
+   * clicked on the far side of the workspace from the picture they clicked
+   * it in, and made the two representations compete for the same screen.
+   *
+   * **Anchored, then pinned.** It follows its node while the camera moves --
+   * that is what makes it a billboard rather than a dialog -- until the
+   * reader drags it, after which it stays where they put it. Dragging is how
+   * a reader says "keep this where I can see it", and a panel that snapped
+   * back would be arguing with them.
+   */
+  async openBillboard(node: any): Promise<void> {
+    if (!node || !node.id || !this.graph) return;
+    const existing = this.billboards.get(node.id);
+    if (existing) {                       // a second click closes it
+      existing.el.remove();
+      this.billboards.delete(node.id);
+      this.stopBillboardLoop();
+      return;
+    }
+    if (!this.billboardLayer) {
+      const host = this.canvasEl || this.contentEl;
+      this.billboardLayer = host.createDiv({ cls: "domvec-bb-layer" });
+    }
+    const el = this.billboardLayer.createDiv({ cls: "domvec-bb" });
+    const head = el.createDiv({ cls: "domvec-bb-head" });
+    head.setText(String(node.name || node.id).slice(0, 44));
+    const close = head.createSpan({ cls: "domvec-bb-close" });
+    close.setText("\u00d7");
+    close.onclick = (e: MouseEvent) => {
+      e.stopPropagation();
+      el.remove();
+      this.billboards.delete(node.id);
+      this.stopBillboardLoop();
+    };
+    const body = el.createDiv({ cls: "domvec-bb-body" });
+    body.setText("\u2026");
+
+    const entry = { el, node, pinned: false };
+    this.billboards.set(node.id, entry);
+    this.positionBillboard(entry);
+    this.startBillboardLoop();
+
+    // Dragging pins it. Pointer events rather than mouse, so a drag that
+    // leaves the pane still ends.
+    head.onpointerdown = (down: PointerEvent) => {
+      down.preventDefault();
+      head.setPointerCapture(down.pointerId);
+      const box = el.getBoundingClientRect();
+      const host = (this.billboardLayer as HTMLElement).getBoundingClientRect();
+      const dx = down.clientX - box.left;
+      const dy = down.clientY - box.top;
+      const move = (m: PointerEvent) => {
+        entry.pinned = true;
+        el.style.left = `${m.clientX - host.left - dx}px`;
+        el.style.top = `${m.clientY - host.top - dy}px`;
+      };
+      const up = () => {
+        head.removeEventListener("pointermove", move);
+        head.removeEventListener("pointerup", up);
+      };
+      head.addEventListener("pointermove", move);
+      head.addEventListener("pointerup", up);
+    };
+
+    // The content, from the store -- the same panel, in a different place.
+    const got = await this.sidecar.chunk(node.id);
+    const lines = (got && (got.lines as { text: string }[])) || [];
+    body.empty();
+    if (!lines.length) {
+      body.setText(node.level === "page" || node.level === "path"
+        ? "a page stands for its chunks -- click to unravel it"
+        : "no panel for this node");
+      return;
+    }
+    for (const line of lines.slice(0, 40)) {
+      body.createDiv({ cls: "domvec-bb-line" }).setText(line.text);
+    }
+    if (lines.length > 40) {
+      body.createDiv({ cls: "domvec-bb-more" })
+        .setText(`\u2026 ${lines.length - 40} more lines`);
+    }
+  }
+
+  /** Put a billboard where its node is, in screen coordinates. */
+  private positionBillboard(entry: { el: HTMLElement; node: any; pinned: boolean }): void {
+    if (entry.pinned || !this.graph) return;
+    const n = entry.node;
+    if (!Number.isFinite(n.x)) return;
+    const at: any = (this.graph as any).graph2ScreenCoords(n.x, n.y, n.z);
+    if (!at) return;
+    entry.el.style.left = `${Math.round(at.x) + 12}px`;
+    entry.el.style.top = `${Math.round(at.y) + 12}px`;
+  }
+
+  /**
+   * Follow the nodes while anything is open.
+   *
+   * Its own frame loop rather than `onEngineTick`: the simulation stops
+   * ticking as soon as it settles, and the camera keeps moving after that --
+   * so a panel anchored on ticks alone detaches from its node the moment the
+   * reader orbits, which is exactly when they are looking at it.
+   */
+  private startBillboardLoop(): void {
+    if (this.billboardFrame) return;
+    const step = () => {
+      if (!this.billboards.size) { this.billboardFrame = 0; return; }
+      for (const entry of this.billboards.values()) this.positionBillboard(entry);
+      this.billboardFrame = window.requestAnimationFrame(step);
+    };
+    this.billboardFrame = window.requestAnimationFrame(step);
+  }
+
+  private stopBillboardLoop(): void {
+    if (this.billboards.size || !this.billboardFrame) return;
+    window.cancelAnimationFrame(this.billboardFrame);
+    this.billboardFrame = 0;
+  }
+
   private async unfoldNode(node: any): Promise<void> {
     if (!this.graph || !node || !node.url) return;
     const got = await this.sidecar.unfold(node.url, node.path || "");
@@ -949,7 +1085,11 @@ export class GraphView extends ItemView {
           return;
         }
         if (n.url) this.onReveal(n.url, n.path || "");
-        this.onPick(n.id);
+        // `G-57`: the panel opens HERE, beside the node, rather than taking
+        // over an Obsidian pane. The pane remains what the structures look
+        // like offline (`G-59`); it is no longer what a click in the
+        // projector reaches for.
+        void this.openBillboard(n);
       })
       // Right-click releases the scope (`G-70`): back to the corpus, from
       // wherever the reader had narrowed to.

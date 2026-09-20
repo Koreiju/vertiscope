@@ -159,7 +159,11 @@
    lexical clustering as a semantic one. */
 .domvec-graph-status { flex: 1; }
 
-.domvec-graph-canvas { flex: 1; min-height: 0; }
+/* `position: relative` so the billboard layer (`G-57`) is placed
+   against the CANVAS, which is the frame `graph2ScreenCoords`
+   answers in. Without it the panels escape to the nearest
+   positioned ancestor and land a caption-bar below their nodes. */
+.domvec-graph-canvas { flex: 1; min-height: 0; position: relative; }
 
 /* --- the distilled HTML form ----------------------------------------------
    The other form a chunk has. `htmlform.py` emits a closed set of elements
@@ -603,3 +607,44 @@ button.domvec-run-fence:hover {
   max-height: 3.4em;
   overflow: hidden;
 }
+
+
+/* `G-57`: a chunk's panel, drawn in the projector beside its node.
+   The layer does not take pointer events; the panels themselves do, so
+   orbiting the graph still works everywhere a panel is not. */
+.domvec-bb-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.domvec-bb {
+  position: absolute;
+  pointer-events: auto;
+  max-width: 320px;
+  max-height: 260px;
+  display: flex;
+  flex-direction: column;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+  font-size: var(--font-ui-smaller);
+  z-index: 20;
+}
+.domvec-bb-head {
+  cursor: grab;
+  padding: 4px 8px;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  color: var(--text-muted);
+  user-select: none;
+}
+.domvec-bb-head:active { cursor: grabbing; }
+.domvec-bb-close { cursor: pointer; opacity: 0.7; }
+.domvec-bb-close:hover { opacity: 1; }
+.domvec-bb-body { overflow: auto; padding: 6px 8px; }
+.domvec-bb-line { white-space: pre-wrap; }
+.domvec-bb-more { color: var(--text-faint); padding-top: 4px; }
