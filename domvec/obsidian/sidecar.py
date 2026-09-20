@@ -39,7 +39,7 @@ from .. import tokens
 from .export import _reflow, link_targets
 from .htmlform import render_lines
 from .layout import (build_layout, build_page_layout, place_into,
-                     unfold as unfold_path)
+                     remember_page_positions, unfold as unfold_path)
 
 
 #: Capture sessions, keyed by url: the stateful decoder and the trie spine
@@ -1105,6 +1105,12 @@ class _Handler(BaseHTTPRequestHandler):
                         got = json.loads(kept)
                         got["from_store"] = True
                         cache[fresh] = got
+                        # A stored layout skips `build_page_layout`, and with
+                        # it the side effect that records where each page was
+                        # drawn. Restore it, or an unfolding anchors on
+                        # nothing (`D-21`).
+                        if level == "page":
+                            remember_page_positions(got, spherical)
                     except Exception:               # noqa: BLE001
                         pass
             if fresh not in cache:

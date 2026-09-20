@@ -1239,6 +1239,29 @@ def _space_name(spherical: bool) -> str:
     return "S3" if spherical else "euclidean"
 
 
+def remember_page_positions(payload, spherical: bool = False) -> int:
+    """Restore `_PAGE_POS` from a layout that was NOT built in this process.
+
+    `G-12` serves a stored fit without calling `build_page_layout`, so the
+    side effect that records where each page was drawn never happens -- and
+    an unfolding then has no anchor for the space it is in. Measured when
+    this was missing: chunks landed **378 units** from their page against a
+    ball of radius 90, which is `D-20` again by a different route.
+
+    Returns how many pages it remembered, so a caller can tell a restored
+    layout from an empty one.
+    """
+    nodes = (payload or {}).get("nodes") or []
+    here = _PAGE_POS.setdefault(_space_name(spherical), {})
+    here.clear()
+    for node in nodes:
+        url = node.get("url")
+        pos = node.get("pos")
+        if url and isinstance(pos, (list, tuple)) and len(pos) >= 3:
+            here[url] = [float(v) for v in pos[:3]]
+    return len(here)
+
+
 
 def _local_positions(rows: np.ndarray, anchor, *, seed: int = 0):
     """A fit over the page's OWN chunks, placed around `anchor`.
@@ -1474,12 +1497,13 @@ def unfold(workspace, url: str, path: str = "", space: str = "") -> Dict:
     # The anchors for the space the READER is in, not whichever fit ran last.
     wanted = _space_name(bool(space) and space.lower() in ("s3", "spherical"))
     drawn = (_PAGE_POS.get(wanted) or {}).get(url)
-    if drawn is None:
-        # Only one space has ever been fitted; use it rather than refusing.
-        for _name, table in _PAGE_POS.items():
-            if url in table:
-                drawn = table[url]
-                break
+    # **No borrowing from another space.** This used to fall back to
+    # whichever table had the url, on the reasoning that one fitted space is
+    # better than none. It is not: a euclidean page and its S3 twin are
+    # nowhere near each other, so the fallback turned a MISSING anchor into
+    # a WRONG one -- 378 units from the node it hangs off, silently. If this
+    # space has no anchor, the code below derives one from the live fit,
+    # which is at least the space the reader is in.
     if drawn and len(drawn) >= 3:
         anchor = np.asarray(drawn[:3], dtype=np.float32)
     page_rows = ([] if anchor is not None else
