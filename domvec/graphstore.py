@@ -38,6 +38,8 @@ from __future__ import annotations
 
 import time
 import hashlib
+import os
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
@@ -50,6 +52,29 @@ from .privacy import redact_url
 __all__ = ["GraphStore", "StoredChunk", "canonical_url"]
 
 EMBED_DIM = 768
+
+#: How much memory kuzu may hold for its buffer pool, in bytes (`D-23`).
+#:
+#: **Bounded, because the default is a share of PHYSICAL memory** and this
+#: process is not alone on the machine: Obsidian and its Electron guest, an
+#: encoder, and UMAP fits that are themselves gigabytes. Left at the default
+#: the sidecar segfaulted six times under a full confirmation suite, always
+#: inside `Connection.execute` on a write, and always with the same shape --
+#:
+#:     15:01:55  sidecar 1935 MB
+#:     15:02:05  sidecar 2199 MB
+#:     15:02:16  sidecar 4767 MB
+#:     15:02:26  SIDECAR GONE
+#:
+#: -- a step of two and a half gigabytes in one statement. The parameter
+#: list was not the cause: the slice was already down to 200 rows, about
+#: 600 KB of floats, and the step was unchanged.
+#:
+#: Overridable, because the right number depends on the machine and on what
+#: else is running. 2 GiB is comfortable for a 4.9 GB store at this access
+#: pattern and leaves the encoder and the fits their room.
+_BUFFER_POOL = int(os.environ.get("DOMVEC_KUZU_BUFFER_BYTES",
+                                  str(2 * 1024 * 1024 * 1024)))
 
 _SCHEMA = [
     """CREATE NODE TABLE IF NOT EXISTS Page(
@@ -284,7 +309,9 @@ class GraphStore:
         # Asking for the weaker mode is therefore not a precaution here; it
         # is the thing that makes them coexist.
         try:
-            self.db = kuzu.Database(str(self.path), read_only=self.read_only)
+            self.db = kuzu.Database(str(self.path),
+                                    read_only=self.read_only,
+                                    buffer_pool_size=_BUFFER_POOL)
         except Exception as exc:  # noqa: BLE001
             if "lock" in str(exc).lower():
                 raise RuntimeError(
@@ -297,15 +324,28 @@ class GraphStore:
                        "the cli)")
                 ) from exc
             raise
+        #: **One connection, many request threads (`D-23`).**
+        #:
+        #: A kuzu connection is not built to be used from several
+        #: threads at once, and the sidecar is a `ThreadingHTTPServer`.
+        #: `_WORK_LOCK` there serialises WRITES, which left every read
+        #: free to run against a connection mid-write: the process
+        #: segfaulted four times under a full confirmation suite --
+        #: native, no Python traceback, and at a different check each
+        #: time (G-71, G-16, G-12), which is what a data race looks
+        #: like rather than a bug in any one of them.
+        #:
+        #: Re-entrant, because the read paths call each other.
+        self._db_lock = threading.RLock()
         self.conn = kuzu.Connection(self.db)
         # DDL is a write. A read-only open of an existing store has nothing to
         # create, and running it would turn a shared read into a lock error.
         if not self.read_only:
             for statement in _SCHEMA:
-                self.conn.execute(statement)
+                self._execute(statement)
             for statement in _MIGRATIONS:
                 try:
-                    self.conn.execute(statement)
+                    self._execute(statement)
                 except RuntimeError:
                     pass    # already there
 
@@ -439,7 +479,7 @@ class GraphStore:
         counts["ms_reconcile"] = round((time.perf_counter() - _t) * 1000, 1)
         _t = time.perf_counter()
 
-        self.conn.execute(
+        self._execute(
             "MERGE (p:Page {url: $url}) SET p.title = $title, "
             "p.scanned_at = $ts, p.root_hash = $rh, p.chunk_count = $nc, "
             "p.address_count = $na",
@@ -852,22 +892,72 @@ class GraphStore:
             )
         return len(pairs)
 
+    #: How many rows go in one UNWIND when a row carries an EMBEDDING.
+    #:
+    #: **A slice size is a memory budget, and 5,000 is one only for light
+    #: rows.** A chunk row with a `FLOAT[768]` vector is about two orders of
+    #: magnitude heavier than one without, and the parameter list is
+    #: materialised twice -- once in Python, once in the query plan. At
+    #: 5,000 rows that is roughly 3.8 million floats per statement, twice
+    #: over, and the process died:
+    #:
+    #:     14:56:34  sidecar 1843 MB
+    #:     14:56:55  sidecar 1908 MB
+    #:     14:57:06  sidecar 2640 MB
+    #:     14:57:17  sidecar 4662 MB
+    #:     14:57:27  SIDECAR GONE
+    #:
+    #: Five segfaults under a full confirmation suite, native and with no
+    #: Python traceback, until `-X faulthandler` named the frame: kuzu's
+    #: `execute`, under `_batch`, under `ingest`, under a live capture. Two
+    #: earlier guesses -- concurrent UMAP, then a connection race -- were
+    #: both wrong, and both locks stayed because they guard real hazards;
+    #: neither was this one.
+    _HEAVY_BATCH = 200
+
+    #: What counts as heavy: a list-valued field this long or longer.
+    _HEAVY_WIDTH = 64
+
     def _batch(self, query: str, rows: Sequence[dict], size: int = 5000) -> None:
         """Run an UNWIND statement in slices.
 
         Sliced because the whole parameter list is materialised in the query
         plan: a single 100,000-row UNWIND holds every string twice, once in
         Python and once in the plan, and pages of markdown are not small.
+
+        The slice SHRINKS for rows carrying a vector, measured rather than
+        declared per call site: a caller that adds embeddings to a payload
+        should not have to remember to change a number somewhere else.
         """
+        if rows:
+            first = rows[0]
+            if isinstance(first, dict) and any(
+                    isinstance(v, (list, tuple)) and len(v) >= self._HEAVY_WIDTH
+                    for v in first.values()):
+                size = min(size, self._HEAVY_BATCH)
         for start in range(0, len(rows), size):
-            self.conn.execute(query, {"rows": list(rows[start:start + size])})
+            self._execute(query, {"rows": list(rows[start:start + size])})
 
     # -- reads -------------------------------------------------------------
+    def _execute(self, query: str, params: Optional[dict] = None):
+        """Every statement this store runs, serialised (`D-23`).
+
+        The one place the connection is touched, so that "is this safe from
+        another thread" has a single answer instead of twelve.
+        """
+        with self._db_lock:
+            return self.conn.execute(query, params or {})
+
     def _rows(self, query: str, params: Optional[dict] = None) -> List[list]:
-        result = self.conn.execute(query, params or {})
-        out = []
-        while result.has_next():
-            out.append(result.get_next())
+        # The result is drained INSIDE the lock. A kuzu QueryResult is a
+        # cursor over the connection, so iterating it after releasing lets
+        # another thread execute against the connection being read -- which
+        # is the same race by a longer route.
+        with self._db_lock:
+            result = self.conn.execute(query, params or {})
+            out = []
+            while result.has_next():
+                out.append(result.get_next())
         return out
 
     def resolve_page(self, url: str) -> str:
@@ -930,7 +1020,7 @@ class GraphStore:
         place would let a page accumulate groups it no longer has -- the same
         defect `_reconcile` exists to prevent for anchors.
         """
-        self.conn.execute(
+        self._execute(
             "MATCH (c:Chunk {url: $url}) "
             "SET c.group_of = '', c.group_n = 1", {"url": url})
         rows = []
@@ -1117,7 +1207,7 @@ class GraphStore:
         row = list(vector or [])[:EMBED_DIM]
         if len(row) < EMBED_DIM:
             row = row + [0.0] * (EMBED_DIM - len(row))
-        self.conn.execute(
+        self._execute(
             "MATCH (c:Chunk {cid: $cid}) SET c.group_embedding = $v",
             {"cid": lead, "v": [float(x) for x in row]})
 
@@ -1241,7 +1331,7 @@ class GraphStore:
         """
         import time
 
-        self.conn.execute(
+        self._execute(
             "MERGE (l:Layout {key: $key}) "
             "SET l.payload = $payload, l.fitted_at = $at, l.n = $n",
             {"key": key, "payload": payload, "at": time.time(), "n": int(n)})
@@ -1269,7 +1359,7 @@ class GraphStore:
         """
         rows = self._rows("MATCH (l:Layout) RETURN count(l)")
         n = int(rows[0][0]) if rows and rows[0] else 0
-        self.conn.execute("MATCH (l:Layout) DETACH DELETE l")
+        self._execute("MATCH (l:Layout) DETACH DELETE l")
         return n
 
     def relink(self) -> Dict[str, int]:
@@ -1409,10 +1499,10 @@ class GraphStore:
         cids = [r[0] for r in self._rows(
             "MATCH (c:Chunk {url: $url}) RETURN c.cid",
             {"url": url})]
-        self.conn.execute(
+        self._execute(
             "MATCH (a:Address {url: $url}) DETACH DELETE a", {"url": url})
-        self.conn.execute(
+        self._execute(
             "MATCH (c:Chunk {url: $url}) DETACH DELETE c", {"url": url})
-        self.conn.execute(
+        self._execute(
             "MATCH (p:Page {url: $url}) DETACH DELETE p", {"url": url})
         return len(cids)

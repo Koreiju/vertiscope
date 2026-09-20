@@ -59,6 +59,22 @@ _capture_sessions: Dict[str, Dict] = {}
 #: against itself.
 _WORK_LOCK = threading.RLock()
 
+#: Serialises LAYOUT FITTING, which `_WORK_LOCK` does not cover.
+#:
+#: `_WORK_LOCK` guards writes. A fit is a read, so it was taking nothing --
+#: and this is a `ThreadingHTTPServer`, so two `/layout` requests arriving
+#: together each ran UMAP on its own thread. The process segfaulted three
+#: times under a full confirmation suite: native, no Python traceback,
+#: always while layouts were being fitted and always with the pane and a
+#: probe both asking. UMAP's numba kernels are not built to be entered
+#: concurrently from one process.
+#:
+#: A separate lock rather than `_WORK_LOCK`, deliberately. A cold
+#: chunk-level fit is 95 seconds, and holding the write lock for it would
+#: stall every live capture behind it: fits wait for fits, captures do not
+#: wait for fits.
+_FIT_LOCK = threading.Lock()
+
 #: Raised when there are chunks waiting for vectors.
 _EMBED_WANTED = threading.Event()
 
@@ -1221,25 +1237,29 @@ class _Handler(BaseHTTPRequestHandler):
                     except Exception:               # noqa: BLE001
                         pass
             if fresh not in cache:
-                cache[fresh] = (
-                    build_page_layout(self.workspace, dims=want,
-                                      spherical_space=spherical)
-                    if level == "page"
-                    else build_layout(self.workspace, dims=want,
-                                      spherical_space=spherical))
-                # Always present, true or false. It was set only when the
-                # answer CAME from the store, so a freshly built one had no
-                # such key -- and a caller asking "which did I get?" could
-                # not tell "built" from "this build does not report it".
-                cache[fresh]["from_store"] = False
-                try:
-                    self.workspace.store.save_layout(
-                        stored_key, json.dumps(cache[fresh]),
-                        n=int(cache[fresh].get("n") or 0))
-                except Exception:                   # noqa: BLE001
-                    # A fit that cannot be saved is still a fit: this store
-                    # is opened read-only by most callers.
-                    pass
+              # Checked again INSIDE the lock: two threads can both miss,
+              # and the point is that only one of them fits.
+              with _FIT_LOCK:
+                if fresh not in cache:
+                    cache[fresh] = (
+                        build_page_layout(self.workspace, dims=want,
+                                          spherical_space=spherical)
+                        if level == "page"
+                        else build_layout(self.workspace, dims=want,
+                                          spherical_space=spherical))
+                    # Always present, true or false. It was set only when
+                    # the answer CAME from the store, so a freshly built one
+                    # had no such key -- and a caller asking "which did I
+                    # get?" could not tell "built" from "not reported".
+                    cache[fresh]["from_store"] = False
+                    try:
+                        self.workspace.store.save_layout(
+                            stored_key, json.dumps(cache[fresh]),
+                            n=int(cache[fresh].get("n") or 0))
+                    except Exception:               # noqa: BLE001
+                        # A fit that cannot be saved is still a fit: this
+                        # store is opened read-only by most callers.
+                        pass
                 # Bounded, and evicting the OLDEST rather than the largest:
                 # the chunk-level fits are the expensive ones and are exactly
                 # what a reader toggling `pages` wants back.

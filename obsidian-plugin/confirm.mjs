@@ -1111,6 +1111,20 @@ const CHECKS = [
     asks: "force-directed relaxation is SEEDED from the fit, not replacing it",
     async run() {
       const got = await inPane(`
+        // **The picture this row is a claim about, established here.**
+        //
+        // "Seeded from the fit, not replacing it" is about the default
+        // page-level view. Run against whatever an earlier check left on
+        // screen it measured 1,192 chunk nodes under collision, where
+        // everything is nudged by construction -- a different population
+        // answering a different question.
+        const SIDECAR_URL = ${JSON.stringify(SIDECAR)};
+        const clean = await (await fetch(
+          SIDECAR_URL + "/layout?level=page")).json();
+        v.graph.graphData({ nodes: clean.nodes.map(n => v.nodeFrom(n)),
+                            links: [] });
+        await sleep(1500);
+
         const d = v.graph.graphData();
         let unmoved = 0, drift = [];
         for (const n of d.nodes) {
@@ -1127,6 +1141,7 @@ const CHECKS = [
           nodes: d.nodes.length, unmoved,
           drift_p50: drift.length ? drift[Math.floor(drift.length * 0.5)] : null,
           drift_max: drift.length ? drift[drift.length - 1] : null,
+          extent: clean.extent || null,
           forces,
         };
       `);
@@ -1828,11 +1843,27 @@ const CHECKS = [
           (box.left - host.left) - (at.x + 12), (box.top - host.top) - (at.y + 12)));
 
         // It FOLLOWS: move the camera and it must move with the node.
-        const before = el.style.left;
+        //
+        // **Measured in pixels, not as a CSS string, and moved decisively.**
+        // The old move was x*0.6+40, y+30, z*0.6: with the camera
+        // near the origin that is a small nudge, and a billboard whose node
+        // sits near the centre of the screen can project to the same
+        // rounded left either side of it. The check then read "the
+        // billboard does not follow the camera" from a camera that had
+        // barely moved. Orbit a long way instead and require real pixels.
+        const px = () => [parseFloat(el.style.left) || 0,
+                          parseFloat(el.style.top) || 0];
+        const before = px();
         const cam = v.graph.cameraPosition();
-        v.graph.cameraPosition({ x: cam.x * 0.6 + 40, y: cam.y + 30, z: cam.z * 0.6 }, undefined, 0);
-        await sleep(900);
-        const followed = el.style.left !== before;
+        const dist = Math.hypot(cam.x, cam.y, cam.z) || 300;
+        v.graph.cameraPosition(
+          { x: cam.z * 0.9 + dist * 0.5, y: cam.y + dist * 0.4,
+            z: -cam.x * 0.9 - dist * 0.3 }, undefined, 0);
+        await sleep(1200);
+        const after = px();
+        const movedPx = Math.round(
+          Math.hypot(after[0] - before[0], after[1] - before[1]));
+        const followed = movedPx > 2;
 
         // Dragging PINS it: after a drag it must ignore the camera.
         const head = el.querySelector(".domvec-bb-head");
@@ -1860,7 +1891,8 @@ const CHECKS = [
           lines, anchored_off_by_px: offBy,
           in_canvas: !!(layer && layer.parentElement
                         && layer.parentElement.classList.contains("domvec-graph-canvas")),
-          followed_camera: followed, pinned_after_drag: stayed, closed: gone,
+          followed_camera: followed, followed_by_px: movedPx,
+          pinned_after_drag: stayed, closed: gone,
         };
       `);
       if (got.error) return { pass: false, evidence: got };
@@ -2267,6 +2299,16 @@ const CHECKS = [
         const b = bv && bv.view;
         if (!b || !b.webview) return { error: "no browser pane" };
 
+        // **Arm capture here rather than hoping it is armed.**
+        //
+        // P-B2's claim is that scanning CONTINUES while the reader browses,
+        // and the field read false because an earlier check had switched it
+        // off -- so the run was asserting something about leftover state.
+        // Switching it on makes the assertion at the end mean what the row
+        // says: it was armed, the reader navigated, and it is armed still.
+        try { if (!b.live) b.setLive(true); } catch (e) {}
+        await sleep(400);
+
         // 1. Arbitrary navigation, not a chunk view (P-B1).
         const home = "https://books.toscrape.com/";
         b.go(home);
@@ -2336,6 +2378,34 @@ const CHECKS = [
           moved = b.webview.getURL();
           if (moved !== landed && !b.webview.isLoading()) break;
         }
+        // One retry, re-aimed. A synthetic click can miss for reasons that
+        // have nothing to do with the browser being real -- the grid on
+        // this page reflows as its cover images arrive, and a coordinate
+        // read a second earlier then points between two tiles. Reported,
+        // so a pass that needed the retry says so.
+        let retried = false;
+        if (moved === landed) {
+          retried = true;
+          const again = await b.webview.executeJavaScript(
+            "(function(){var a=document.querySelector('" + SEL + "');" +
+            "if(!a) return null; a.scrollIntoView({block:'center'," +
+            "behavior:'instant'}); var r=a.getBoundingClientRect();" +
+            "return {x:Math.round(r.left+r.width/2)," +
+            "y:Math.round(r.top+r.height/2)};})()");
+          if (again) {
+            try { b.webview.focus(); } catch (e) {}
+            await sleep(300);
+            for (const type of ["mouseDown", "mouseUp"]) {
+              b.webview.sendInputEvent({ type, x: again.x, y: again.y,
+                                         button: "left", clickCount: 1 });
+            }
+            for (let i = 0; i < 40; i++) {
+              await sleep(400);
+              moved = b.webview.getURL();
+              if (moved !== landed && !b.webview.isLoading()) break;
+            }
+          }
+        }
 
         // 3. Back, as in any browser (P-B2).
         let returned = moved;
@@ -2351,7 +2421,7 @@ const CHECKS = [
           landed, clicked_href: at.href, after_click: moved, after_back: returned,
           // The scanning loop is still armed while all of that happened
           // (P-B2: navigate while scanning continues).
-          live_capture_on: !!b.live,
+          live_capture_on: !!b.live, needed_a_retry: retried,
         };
       })()`, { timeout: 600000 });
       if (got.error) return { pass: false, evidence: got };
