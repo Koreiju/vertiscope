@@ -267,3 +267,48 @@ def test_javascript_gives_its_comments_to_the_encoder_and_not_its_code(ws):
     assert "the fold reads no layout" in seen, "the comment was lost"
     assert "new Set()" in rendered
     assert "new Set()" not in seen, "code reached the encoder"
+
+
+# --- G-10: the vault has edges too -------------------------------------------
+
+
+def test_a_relative_link_resolves_under_a_local_scheme():
+    """`urljoin` refuses to do this, and silently.
+
+    It only performs relative resolution for schemes it knows, so
+    `urljoin("vault://v/a.md", "b.md")` hands back `"b.md"` unchanged -- not
+    an error, just the input. Every vault link therefore resolved to nothing
+    and the vault had no edges at all.
+    """
+    from domvec.graphstore import canonical_url
+
+    assert canonical_url("Lattice.md", "vault://vault/Spindle.md") \
+        == "vault://vault/Lattice.md"
+    assert canonical_url("../Other.md", "vault://vault/a/b.md") \
+        == "vault://vault/Other.md"
+    assert canonical_url("lib.py", "code://repo/pkg/app.py") \
+        == "code://repo/pkg/lib.py"
+    # And the web path is untouched.
+    assert canonical_url("/x", "https://a.test/y") == "https://a.test/x"
+
+
+def test_a_wikilink_alone_becomes_an_edge(ws):
+    """`[[Lattice]]` names a NOTE; the note is a file.
+
+    Offering the `.md` spelling is the only vault-specific rule here -- the
+    store's own rule still decides, so a wikilink to a note nobody has
+    indexed stays an address and does not become an edge.
+    """
+    ws.index_note("# Lattice\n\nProse about lattices.\n", "Lattice.md")
+    ws.index_note("# Spindle\n\nOnly a wikilink: [[Lattice]].\n", "Spindle.md")
+    ws.store.relink()
+
+    pairs = set(ws.store.page_links())
+    assert ("vault://vault/Spindle.md", "vault://vault/Lattice.md") in pairs, pairs
+
+
+def test_a_wikilink_to_a_note_that_is_not_indexed_stays_an_address(ws):
+    """The non-vacuity arm: the `.md` rule must not invent a target."""
+    ws.index_note("# Spindle\n\nA link to [[Nowhere]].\n", "Spindle.md")
+    ws.store.relink()
+    assert not [p for p in ws.store.page_links() if "Nowhere" in p[1]]

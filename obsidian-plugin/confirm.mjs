@@ -112,9 +112,9 @@ const CHECKS = [
         v.graph.graphData({ nodes: fresh.nodes.map(n => v.nodeFrom(n)), links: [] });
         await sleep(400);
         const before = v.graph.graphData();
-        // **Counts, taken NOW.** \`graphData()\` hands back the graph's own
-        // live arrays, not a snapshot, so holding \`before\` and reading
-        // \`.length\` after the unfold reads the AFTER state through it --
+        // **Counts, taken NOW.** \graphData()\ hands back the graph's own
+        // live arrays, not a snapshot, so holding \before\ and reading
+        // \.length\ after the unfold reads the AFTER state through it --
         // this check reported 122 nodes before and 122 after, and called a
         // working unfold a failure.
         const nodesBefore = before.nodes.length;
@@ -251,7 +251,7 @@ const CHECKS = [
         const d = v.graph.graphData();
         const rel = v.graph.nodeRelSize();
         // The pane's own arithmetic, not a paraphrase of it. Written out by
-        // hand this read \`sphere * 1.75 * sqrt(2)\` -- 41% too large -- and
+        // hand this read \sphere * 1.75 * sqrt(2)\ -- 41% too large -- and
         // invented 49 overlapping pairs that were not there. A check that
         // reimplements what it measures can fail in either direction.
         //   billboardEdge = sphere * PANEL_GAIN * SQRT2
@@ -977,6 +977,7 @@ const CHECKS = [
           why: "sidecar has no --capture; this check needs the writer lock" } };
       }
       const got = await evaluate(`(async () => {
+        const SIDECAR_URL = ${JSON.stringify(SIDECAR)};
         const sleep = (ms) => new Promise(r => setTimeout(r, ms));
         await app.commands.executeCommandById("domvec-open-browser");
         await app.commands.executeCommandById("domvec-open-graph");
@@ -998,6 +999,13 @@ const CHECKS = [
           }
         }
         await sleep(1200);
+        // Establish the state. Earlier checks unfold pages and draw hit
+        // lists, and this one ran eighth: it reported 1,059 nodes arriving
+        // from a 26-chunk scan, because it counted every node the SUITE had
+        // added rather than the ones this scan did.
+        const clean = await (await fetch(SIDECAR_URL + "/layout?level=page")).json();
+        v.graph.graphData({ nodes: clean.nodes.map(n => v.nodeFrom(n)), links: [] });
+        await sleep(500);
         const before = v.graph.graphData().nodes.length;
         const beforeIds = new Set(v.graph.graphData().nodes.map(n => n.id));
 
@@ -1012,14 +1020,43 @@ const CHECKS = [
           if (after !== before) break;
         }
         await sleep(1500);
-        const d = v.graph.graphData();
-        const fresh = d.nodes.filter(n => !beforeIds.has(n.id));
+        let d = v.graph.graphData();
+        let fresh = d.nodes.filter(n => !beforeIds.has(n.id));
+        // **Two arms, because a page that has not changed has no delta.**
+        //
+        // The write diff is working when a re-scan of an unchanged page
+        // reports 0 rewrites -- that is D-nothing, not a failure -- and a
+        // check that needed a delta then measured 0 arrivals and called the
+        // feature broken. Mutating the page to force one is forbidden
+        // (constraint 7) and adding a page grows someone's corpus, so when
+        // there is no delta the PLACEMENT path is exercised directly: the
+        // same place-and-absorb a drain would have used.
+        let arm = "delta";
+        if (!fresh.length) {
+          arm = "placement";
+          const r = await fetch(SIDECAR_URL + "/search?q=book&k=8&url="
+                                + encodeURIComponent(want));
+          const hits = ((await r.json()).hits || []).map(h => h.cid);
+          if (hits.length) {
+            await v.showHits(want, hits);
+            await sleep(1200);
+            d = v.graph.graphData();
+            fresh = d.nodes.filter(n => !beforeIds.has(n.id));
+          }
+        }
         const placed = fresh.filter(n => n.pos || Number.isFinite(n.fitX));
+        // On the frame is the D-17 signature for a PLACED node only.
+        //
+        // A node the FIT drew is mapped into the box by _framed, so the
+        // extremes sit at exactly +/-300 by construction -- ten page nodes
+        // do, correctly. Judging fitted nodes by this rule would fail the
+        // check on the projector working as designed.
         const onFrame = fresh.filter(n => [n.fitX, n.fitY, n.fitZ]
           .some(c => Math.abs(Math.abs(c) - 300) < 0.5)).length;
         return {
           url: want,
           nodes_before: before, nodes_after: d.nodes.length,
+          arm,
           arrived: fresh.length, with_a_position: placed.length,
           on_the_frame: onFrame,
           status: b.status ? b.status.textContent : null,
@@ -1028,7 +1065,7 @@ const CHECKS = [
       if (got.error) return { pass: false, evidence: got };
       return {
         // Something arrived, it has a position, and it is not on the frame
-        // (`D-17` put every placed node there and every count still looked
+        // (D-17 put every placed node there and every count still looked
         // right).
         pass: got.arrived > 0
            && got.with_a_position === got.arrived

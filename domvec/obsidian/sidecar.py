@@ -1120,6 +1120,11 @@ class _Handler(BaseHTTPRequestHandler):
                     if level == "page"
                     else build_layout(self.workspace, dims=want,
                                       spherical_space=spherical))
+                # Always present, true or false. It was set only when the
+                # answer CAME from the store, so a freshly built one had no
+                # such key -- and a caller asking "which did I get?" could
+                # not tell "built" from "this build does not report it".
+                cache[fresh]["from_store"] = False
                 try:
                     self.workspace.store.save_layout(
                         stored_key, json.dumps(cache[fresh]),

@@ -91,6 +91,28 @@ _MIGRATIONS = [
 ]
 
 
+#: Schemes this store invents for things that are not fetched. `urljoin`
+#: refuses to do relative resolution for a scheme it does not know -- it
+#: hands back `Lattice.md` unchanged against a `vault://` base -- so these
+#: are joined by hand. Without it a note that links to another note produced
+#: an address that resolved to nothing, and the vault had no edges at all.
+_LOCAL_SCHEMES = ("vault://", "code://")
+
+
+def _join_local(base: str, rel: str) -> str:
+    """Resolve `rel` against a `vault://` or `code://` base, POSIX-style."""
+    import posixpath
+
+    head, _, tail = base.partition("://")
+    origin, _, path = tail.partition("/")
+    if rel.startswith("/"):
+        joined = rel
+    else:
+        joined = posixpath.join(posixpath.dirname("/" + path), rel)
+    joined = posixpath.normpath(joined).lstrip("/")
+    return "%s://%s/%s" % (head, origin, joined)
+
+
 def canonical_url(url: str, base: str = "") -> str:
     """Absolutise, redact, and strip the fragment, so link targets can match.
 
@@ -114,7 +136,12 @@ def canonical_url(url: str, base: str = "") -> str:
     password on it.
     """
     if base:
-        url = urljoin(base, url)
+        low = base.lower()
+        if any(low.startswith(scheme) for scheme in _LOCAL_SCHEMES) \
+                and "://" not in url:
+            url = _join_local(base, url)
+        else:
+            url = urljoin(base, url)
     url = redact_url(url)
     try:
         parts = urlsplit(url)
@@ -1257,6 +1284,10 @@ class GraphStore:
                 "MATCH (a:Address) WHERE starts_with(a.value, 'http') "
                 "OR starts_with(a.value, 'code://') "
                 "OR starts_with(a.value, 'vault://') "
+                # A link inside a NOTE is relative -- `Lattice.md`, or a
+                # wikilink with no extension at all -- so it carries no
+                # prefix to match on. Selected by where it LIVES instead.
+                "OR starts_with(a.url, 'vault://') "
                 "RETURN a.aid, a.url, a.value"):
             if not value:
                 continue
@@ -1265,6 +1296,14 @@ class GraphStore:
             if not target:
                 continue
             resolved = target if target in exact else by_canonical.get(target)
+            if resolved is None and not target.endswith(".md") \
+                    and str(src or "").startswith("vault://"):
+                # `[[Lattice]]` names a NOTE, and the note is a file. The
+                # store's own rule still decides -- this only offers the
+                # spelling a vault uses.
+                with_md = target + ".md"
+                resolved = (with_md if with_md in exact
+                            else by_canonical.get(with_md))
             if resolved is None or resolved == src:
                 continue
             cid = chunk_of.get(aid)
