@@ -112,6 +112,16 @@ def canonical_url(url: str, base: str = "") -> str:
         parts = urlsplit(url)
     except ValueError:
         return url
+    if parts.scheme in ("code", "vault"):
+        # **Identity, not rejection.** A local address has no query, no
+        # fragment and no userinfo, so there is nothing to canonicalise --
+        # but returning "" here meant `_link_pages` skipped every one of
+        # them, and an IMPORT is a link the same way a hyperlink is
+        # (`G-8`, `G-51`). Passing it through is what lets the existing
+        # resolver, `edges()` and PageRank treat a dependency as an edge
+        # without learning a second vocabulary.
+        return urlunsplit((parts.scheme, parts.netloc, parts.path or "/",
+                           "", ""))
     if parts.scheme not in ("http", "https"):
         return ""
     return urlunsplit((parts.scheme, parts.netloc, parts.path or "/",
@@ -1189,8 +1199,15 @@ class GraphStore:
         seen: set = set()
         pairs = []
         considered = 0
+        # Every LINK-shaped value, not only the web ones. An import is a
+        # link (`G-8`, `G-51`) and carries a `code://` target, so an
+        # http-only filter silently made `relink` a no-op for the whole
+        # codebase corpus -- it reported `url_addresses: 0` over a store
+        # holding 102 modules.
         for aid, src, value in self._rows(
                 "MATCH (a:Address) WHERE starts_with(a.value, 'http') "
+                "OR starts_with(a.value, 'code://') "
+                "OR starts_with(a.value, 'vault://') "
                 "RETURN a.aid, a.url, a.value"):
             if not value:
                 continue

@@ -581,7 +581,7 @@ class Workspace:
         from .source import source_url, tag_source
 
         url = source_url(root, rel_path)
-        tags = tag_source(text)
+        tags = tag_source(text, root=root, rel_path=str(rel_path))
         trie = AddressTrie.from_tags(tags, url)
         report = RenderReport()
         chunks, _counts = self.ingest(

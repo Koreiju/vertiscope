@@ -174,3 +174,47 @@ def test_web_vault_and_code_share_one_trie(ws):
     # same way whatever it came from.
     for chunk in ws.store.chunks():
         assert chunk.xpath.startswith("/"), chunk.url
+
+
+# --- G-8 / G-51: an import is a link -----------------------------------------
+
+
+def test_an_import_becomes_an_edge_through_the_hyperlink_path(ws):
+    """`G-8`, `G-51`: *"dependencies are tracked throughout"*.
+
+    Not a second graph. An import is categorised as a link, so
+    `ContentAddress.is_url` says so, the store's existing `_link_pages`
+    resolver picks it up, `edges()` routes it and PageRank counts it -- the
+    same treatment a hyperlink gets. That reuse is the whole reason for
+    spending an address on it rather than keeping a side table.
+    """
+    lib = '"""A library."""\n\n\ndef helper():\n    """Help."""\n    return 1\n'
+    app = ('"""An app."""\n\nfrom pkg import lib\n\n\n'
+           'def main():\n    """Run it."""\n    return lib.helper()\n')
+    ws.index_source(lib, "pkg/lib.py", root="repo")
+    ws.index_source(app, "pkg/app.py", root="repo")
+
+    pairs = set(ws.store.page_links())
+    assert ("code://repo/pkg/app.py", "code://repo/pkg/lib.py") in pairs, pairs
+
+
+def test_a_dependency_on_a_module_indexed_LATER_is_repaired(ws):
+    """The ingest-order limitation, and why `relink` exists.
+
+    A link resolves once, against the pages the store held at that moment.
+    Index the importer first and the edge cannot be written, because its
+    target does not exist yet. Measured on `domvec/` itself: 96 edges at
+    ingest, 223 after `relink` -- more than double.
+    """
+    app = '"""An app."""\n\nfrom pkg import lib\n\n\ndef main():\n    """Go."""\n    return 1\n'
+    lib = '"""A library."""\n\n\ndef helper():\n    """Help."""\n    return 1\n'
+    ws.index_source(app, "pkg/app.py", root="repo")     # importer FIRST
+    ws.index_source(lib, "pkg/lib.py", root="repo")
+
+    want = ("code://repo/pkg/app.py", "code://repo/pkg/lib.py")
+    assert want not in set(ws.store.page_links()), \
+        "the edge existed before relink, so this proves nothing"
+
+    got = ws.store.relink()
+    assert got["resolvable"] >= 1, got
+    assert want in set(ws.store.page_links()), "relink did not repair it"

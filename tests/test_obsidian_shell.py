@@ -42,20 +42,46 @@ def pool():
         p.shutdown()
 
 
+#: Retry a dropped LOOPBACK connection, and nothing else.
+#:
+#: Under a full suite running beside a sidecar and a live browser these
+#: failed with `ConnectionAbortedError: [WinError 10053]` -- the connection
+#: aborted by the host, not by the server. The subject of these tests is a
+#: permission decision, not the reliability of a socket, and a flake here
+#: trains a reader to scroll past red.
+#:
+#: What it does NOT hide: an HTTP status. A 403 is returned, not retried, so
+#: every assertion about a refusal still has to hold.
+def _with_retry(call, attempts=3):
+    import time
+    last = None
+    for attempt in range(attempts):
+        try:
+            return call()
+        except urllib.error.HTTPError:
+            raise                       # a status is an answer, not a failure
+        except (ConnectionError, OSError) as exc:
+            last = exc
+            time.sleep(0.25 * (attempt + 1))
+    raise last
+
+
 def _post(port, body, path="/shell"):
     req = urllib.request.Request(
         "http://127.0.0.1:%d%s" % (port, path), method="POST",
         data=json.dumps(body).encode(),
         headers={"Content-Type": "application/json"})
     try:
-        return 200, json.load(urllib.request.urlopen(req, timeout=60))
+        return 200, json.load(_with_retry(
+            lambda: urllib.request.urlopen(req, timeout=60)))
     except urllib.error.HTTPError as exc:
         return exc.code, json.loads(exc.read().decode())
 
 
 def _get(port, path):
-    return json.load(urllib.request.urlopen(
-        "http://127.0.0.1:%d%s" % (port, path), timeout=30))
+    return json.load(_with_retry(
+        lambda: urllib.request.urlopen(
+            "http://127.0.0.1:%d%s" % (port, path), timeout=30)))
 
 
 #: **Port 0, so the OS picks.** These bound 8821..8834 by hand, and a

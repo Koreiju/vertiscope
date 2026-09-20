@@ -154,7 +154,63 @@ def _kind_of(node) -> Optional[str]:
     return None
 
 
+def _import_targets(tree, root: str, rel_path: str):
+    """Each `import` in the module, as (module_name, code:// url).
+
+    **Resolved inside the same root only.** `import numpy` could mean
+    the installed package, but which one depends on an interpreter and
+    a path, and guessing wrong writes an edge to a file that is not
+    the one imported. A relative or same-root module resolves to a
+    path this root actually contains; anything else is still EMITTED,
+    with the url it would have, and the store's existing rule takes
+    over: a link becomes an edge only when its target is a page we
+    hold. So indexing numpy later turns those edges on with no
+    re-parse, which is exactly how a hyperlink to an unscanned page
+    behaves.
+    """
+    here = PurePosixPath(rel_path)
+    package = here.parent
+    out = []
+
+    def add(name: str, level: int = 0) -> None:
+        if not name:
+            return
+        parts = name.split('.')
+        if level:
+            base = package
+            for _ in range(level - 1):
+                base = base.parent
+            target = base.joinpath(*parts)
+        else:
+            target = PurePosixPath(*parts)
+        # A package imports as its `__init__`, a module as itself.
+        # Both spellings are offered so whichever the store holds
+        # matches; the resolver drops the one it does not have.
+        out.append((name, source_url(root, str(target) + '.py')))
+        out.append((name, source_url(root, str(target / '__init__.py'))))
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                add(alias.name)
+        elif isinstance(node, ast.ImportFrom):
+            # BOTH spellings. `from pkg import lib` may import a submodule
+            # `pkg.lib` or a name defined in `pkg`, and which one it is
+            # cannot be known without importing it. Each candidate is
+            # offered and the store's own rule decides: a link becomes an
+            # edge only when its target is a page we hold. The same strategy
+            # as `.py` against `/__init__.py` above, for the same reason.
+            base = node.module or ''
+            add(base, node.level or 0)
+            for alias in node.names:
+                if alias.name and alias.name != '*':
+                    add((base + '.' + alias.name) if base else alias.name,
+                        node.level or 0)
+    return out
+
+
 def tag_source(text: str, *,
+               root: str = "repo", rel_path: str = "",
                lines_at: Optional[Dict[str, Tuple[int, int]]] = None,
                ) -> List[ContentTag]:
     """One Python file into addressed detections, in document order.
@@ -231,6 +287,23 @@ def tag_source(text: str, *,
                 walk(child, here)
 
         walk(tree, module)
+
+    if tree is not None and rel_path:
+        # An import is a LINK, categorised so that `ContentAddress.is_url`
+        # says so and the store's existing `_link_pages` resolver picks it
+        # up (`G-8`, `G-51`). Nothing new resolves it, nothing new ranks it:
+        # `edges()` routes it and PageRank counts it, the same as a
+        # hyperlink, which is the whole point of spending an address on it.
+        seen_imports = set()
+        for name, target in _import_targets(tree, root, rel_path):
+            if target in seen_imports:
+                continue
+            seen_imports.add(target)
+            xpath = addr.step("import", module)
+            mark(xpath, 0, 0)
+            out.append(ContentTag(xpath=xpath, category="urls",
+                                  subcategory="import", value=target,
+                                  source_attr="import"))
 
     # Comments, from the tokeniser rather than a regex: a `#` inside a string
     # is not a comment, and only a tokeniser knows the difference.
