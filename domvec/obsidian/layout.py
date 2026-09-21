@@ -1566,8 +1566,8 @@ def unfold(workspace, url: str, path: str = "", space: str = "") -> Dict:
             anchor = where[0]
     if anchor is None:
         anchor = coords.mean(axis=0)
-    local = _local_positions(block, anchor, seed=0,
-                             radius=_room_around(url, wanted, anchor))
+    room = _room_around(url, wanted, anchor)
+    local = _local_positions(block, anchor, seed=0, radius=room)
     if local is not None and len(local) == len(coords):
         coords = local
 
@@ -1578,6 +1578,13 @@ def unfold(workspace, url: str, path: str = "", space: str = "") -> Dict:
         node.pop("covers", None)
         node["rank"] = 0.0
         node["copies"] = 1
+        #: The territory this branch must stay inside, and the point it is
+        #: measured from. Placement alone was not enough: the pane relaxes
+        #: after placing, and a 31-branch unfolding was pushed from a
+        #: 33-unit ball out to 102 units inside a 74-unit gap. The boundary
+        #: has to travel with the node so the force can honour it.
+        node["room"] = float(room)
+        node["anchor"] = [float(v) for v in anchor]
         node["pos"] = [float(v) for v in coords[i]]
         if colours is not None:
             node["hsv"] = [float(v) for v in colours[i]]

@@ -46,6 +46,12 @@ export interface TraceCall {
   reply?: Record<string, unknown>;
 }
 
+/**
+ * Bumped whenever the `fetch` wrapper below changes, so a reloaded plugin
+ * replaces the previous instance's closure instead of deferring to it.
+ */
+const HARNESS_WRAPPER = 2;
+
 /** Reply fields worth keeping. Everything else is bulk. */
 const KEEP = [
   "ms", "dirty", "addresses", "chunks", "n", "level", "space", "from_store",
@@ -120,21 +126,39 @@ export function installHarness(app: App, sidecarBase: () => string) {
 
   // ---- the boundary ----
   const w = window as any;
-  if (!w.__domvecFetchWrapped) {
+  // **The guard holds the TRACE, not a boolean.**
+  //
+  // A plain `__domvecFetchWrapped` flag survived a plugin reload while the
+  // closure it guarded did not: the old wrapper stayed installed, writing
+  // into the previous instance's `Trace`, and every gesture after a reload
+  // reported `calls: 0` for work that plainly happened. Keeping the live
+  // trace on the window and re-pointing it makes the wrapper outlive the
+  // instance on purpose rather than by accident.
+  w.__domvecTrace = trace;
+  // **Versioned, because a boolean guard cannot be re-earned.**
+  //
+  // `__domvecFetchWrapped = true` stayed true across a plugin reload while
+  // the closure it guarded belonged to the previous instance, so a build
+  // that changed the wrapper could never install it and every gesture after
+  // a reload reported `calls: 0` for work that plainly happened. Bumping
+  // this constant is how a new wrapper says it is new; the old one is left
+  // in the chain and simply delegates.
+  if (w.__domvecFetchWrapped !== HARNESS_WRAPPER) {
     const real = w.fetch.bind(w);
     w.fetch = async (input: any, init?: any) => {
       const url = typeof input === "string" ? input
         : (input && input.url) ? input.url : String(input);
       const base = (sidecarBase() || "").trim().replace(/\/+$/, "");
       const ours = base && url.startsWith(base);
-      if (!ours || !trace.recording) return real(input, init);
+      const live = w.__domvecTrace || trace;
+      if (!ours || !live.recording) return real(input, init);
 
       const t0 = performance.now();
       let res: Response;
       try {
         res = await real(input, init);
       } catch (e) {
-        trace.add({
+        (w.__domvecTrace || trace).add({
           method: (init && init.method) || "GET",
           route: url.slice(base.length).split("?")[0],
           ms: Math.round(performance.now() - t0),
@@ -154,14 +178,14 @@ export function installHarness(app: App, sidecarBase: () => string) {
       if (type.includes("json") && (len === null || len < 65536)) {
         try { reply = summarise(await res.clone().json()); } catch { /* not json */ }
       }
-      trace.add({
+      (w.__domvecTrace || trace).add({
         method: (init && init.method) || "GET",
         route: url.slice(base.length).split("?")[0],
         ms, status: res.status, bytes: len, reply,
       });
       return res;
     };
-    w.__domvecFetchWrapped = true;
+    w.__domvecFetchWrapped = HARNESS_WRAPPER;
   }
 
   // ---- gestures, through the application's own paths ----
@@ -248,6 +272,133 @@ export function installHarness(app: App, sidecarBase: () => string) {
           } catch { /* not ready */ }
         }
         return { url: l.view.webview.getURL() };
+      }
+      /**
+       * Unravel a page one patricia step (`G-54`), through the projector's
+       * own `unfoldNode`.
+       *
+       * `arg` is a url, or omitted to open the page with the most chunks.
+       * The reply carries what the step revealed -- branch count, reach,
+       * and the gap to the nearest other page -- because "it unfolded" and
+       * "it unfolded INSIDE its own territory" are different claims and
+       * only the second one is the requirement.
+       */
+      case "unfold": {
+        const l = await ready("domvec-graph-view");
+        const view: any = l?.view;
+        const proj: any = view?.projector || view;
+        if (!proj?.graph) return { error: "no projector" };
+        const data: any = proj.graph.graphData();
+        const pages = data.nodes.filter((n: any) => n.level === "page");
+        const hub = arg
+          ? pages.find((n: any) => n.url === arg || n.id === "page:" + arg)
+          : pages.slice().sort(
+              (a: any, b: any) => (b.members ?? 0) - (a.members ?? 0))[0];
+        if (!hub) return { error: "no such page: " + arg };
+        const before = data.nodes.length;
+        await proj.unfoldNode(hub);
+        await sleep(1200);
+        const after: any = proj.graph.graphData();
+        const by = new Map<string, any>(after.nodes.map((n: any) => [n.id, n]));
+        const dist = (a: any, b: any) =>
+          Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
+        // Branches only: an inter-page link leaves the same hub, and
+        // counting one as a branch once read as a spill that was not one.
+        const kids = after.links
+          .filter((e: any) => ((e.source?.id ?? e.source) === hub.id))
+          .map((e: any) => by.get(e.target?.id ?? e.target))
+          .filter((k: any) => k && k.level !== "page" && k.url === hub.url);
+        let gap = Infinity;
+        for (const o of after.nodes) {
+          if (o === hub || o.level !== "page") continue;
+          const t = dist(o, hub);
+          if (t < gap) gap = t;
+        }
+        const reach = kids.length
+          ? Math.max(...kids.map((k: any) => dist(k, hub))) : 0;
+        return {
+          page: hub.url, nodes_before: before, nodes_after: after.nodes.length,
+          branches: kids.length,
+          reach: Math.round(reach * 10) / 10,
+          gap_to_nearest_page: Math.round(gap * 10) / 10,
+          stayed_inside: reach <= gap * 0.5,
+        };
+      }
+      /**
+       * Press a node, which is what a reader does (`G-40`, `G-57`).
+       *
+       * Through the projector's own click path rather than a synthetic
+       * mouse event, because a hit test against a rotated 3D scene is a
+       * source of flake that says nothing about the requirement.
+       */
+      case "click": {
+        const l = await ready("domvec-graph-view");
+        const view: any = l?.view;
+        const proj: any = view?.projector || view;
+        if (!proj?.graph) return { error: "no projector" };
+        const data: any = proj.graph.graphData();
+        const node = data.nodes.find(
+          (n: any) => n.id === arg || n.url === arg || n.id === "page:" + arg);
+        if (!node) return { error: "no such node: " + arg };
+        const handler = proj.graph.onNodeClick();
+        if (typeof handler !== "function") return { error: "no click handler" };
+        await handler(node);
+        await sleep(1500);
+        const br: any = leaf("domvec-browser-view")?.view;
+        return {
+          clicked: node.id, level: node.level,
+          browser_url: br?.webview ? (() => {
+            try { return br.webview.getURL(); } catch { return null; }
+          })() : null,
+          billboards: proj.billboards ? proj.billboards.size : 0,
+        };
+      }
+      /**
+       * Run a retrieval the way the overlay does (`G-56`, `G-71`), and
+       * report what it put ON SCREEN rather than what the sidecar returned.
+       * Those came apart once already: hits arrived and nothing was drawn.
+       */
+      case "retrieve": {
+        const l = await ready("domvec-graph-view");
+        const view: any = l?.view;
+        const proj: any = view?.projector || view;
+        if (!proj?.graph) return { error: "no projector" };
+        const before = proj.graph.graphData().nodes.length;
+        const got = await (app as any).plugins
+          .getPlugin("domvec-bridge")?.sidecar?.search(String(arg || ""), 8);
+        const hits = (got && (got.hits || [])) || [];
+        const byUrl: Record<string, string[]> = {};
+        for (const h of hits) {
+          if (!h?.cid || !h?.url) continue;
+          (byUrl[h.url] = byUrl[h.url] || []).push(h.cid);
+        }
+        for (const [url, cids] of Object.entries(byUrl)) {
+          if (typeof proj.showHits === "function") await proj.showHits(url, cids);
+        }
+        await sleep(1200);
+        const after: any = proj.graph.graphData();
+        const drawn = new Set(after.nodes.map((n: any) => n.id));
+        return {
+          query: arg, hits: hits.length,
+          pages_touched: Object.keys(byUrl).length,
+          nodes_before: before, nodes_after: after.nodes.length,
+          hits_now_drawn: hits.filter((h: any) => drawn.has(h.cid)).length,
+        };
+      }
+      /**
+       * Reload the plugin -- **the first act of any probe that scores it.**
+       *
+       * A collider probe once passed with its own target defect planted and
+       * returned numbers identical to the clean run, because it reopened
+       * the pane but never reloaded the code. `npm run build` had replaced
+       * a file nobody was running.
+       */
+      case "reload": {
+        const plugins = (app as any).plugins;
+        await plugins.disablePlugin("domvec-bridge");
+        await plugins.enablePlugin("domvec-bridge");
+        await sleep(4000);
+        return { reloaded: true, enabled: !!plugins.getPlugin("domvec-bridge") };
       }
       case "level": {
         // The projector's own switch, not a re-fetch: this is the thing a

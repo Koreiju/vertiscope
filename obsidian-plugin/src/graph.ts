@@ -978,6 +978,12 @@ export class GraphView extends ItemView {
       // 1,173-chunk reference index drawn as the same dot as a one-chunk
       // stub -- and the `val` the layout computed was simply discarded here.
       val: n.val ?? Math.max(1, Math.sqrt(n.chars)),
+      //: The territory this node must stay inside, and the point it is
+      //: measured from (`D-27`). Present only on what an unfolding
+      //: produced; a page node owns the whole cloud and is bounded by
+      //: nothing. `containWithin` is what enforces it.
+      room: (n as any).room,
+      anchorPos: (n as any).anchor,
       rank: n.rank,
       tokens: n.tokens ?? 0,
       image: n.image,
@@ -1165,6 +1171,54 @@ export class GraphView extends ItemView {
     // Zero strength is the spring the goal forbids, turned off, while
     // initialization still runs and still resolves the endpoints.
     graph.d3Force("link")?.strength(0);
+    // The live node array, handed over by d3 at `initialize`.
+    let containNodes: any[] = [];
+    // **The nested layer is bounded, and that is what makes it nested.**
+    //
+    // `layout._room_around` gives every unfolding a territory -- 0.45 of the
+    // distance to the nearest other page -- and placing inside it was not
+    // enough, because relaxation runs afterwards. Measured on RFC 9110, 31
+    // branches placed inside a 33-unit ball: the collider pushed them out to
+    // **102 units** against a 74-unit gap to the next page, so the unfolding
+    // ended up on top of a page it has nothing to do with. Placement is a
+    // starting condition; a boundary has to be a force.
+    //
+    // Radial and one-sided: a node inside its territory feels nothing at
+    // all, so this cannot flatten the structure the local fit produced. A
+    // node outside is pulled back to the surface, proportionally to how far
+    // out it is, which resolves against the collider instead of fighting it
+    // -- the two settle at a packing that fits rather than at a standoff.
+    //
+    // In trie terms: layer 1 gives every root a territory, and a patricia
+    // step down from that root stays in it while the forces run.
+    // **A d3 force, not a callback.** d3 calls `force.initialize(nodes)`
+    // once when the simulation binds it and `force(alpha)` every tick, and
+    // the node array it hands over is the live one. The first version of
+    // this reached for `graph.graphData()` inside the tick instead, which
+    // threw and took the whole projector down -- the pane drew nothing and
+    // every check below reported "no projector", which reads exactly like a
+    // dead plugin and was a dead force.
+    const contain: any = (alpha: number) => {
+      for (const n of containNodes) {
+        const room = n.room;
+        const at = n.anchorPos;
+        if (!room || !at) continue;
+        const dx = (n.x ?? 0) - at[0];
+        const dy = (n.y ?? 0) - at[1];
+        const dz = (n.z ?? 0) - at[2];
+        const d = Math.hypot(dx, dy, dz);
+        if (d <= room || d < 1e-6) continue;
+        // Back to the SURFACE, not to the centre: pulling to the anchor
+        // would collapse an unfolding into its own hub.
+        const pull = ((d - room) / d) * alpha;
+        n.vx = (n.vx ?? 0) - dx * pull;
+        n.vy = (n.vy ?? 0) - dy * pull;
+        n.vz = (n.vz ?? 0) - dz * pull;
+      }
+    };
+    contain.initialize = (nodes: any[]) => { containNodes = nodes || []; };
+    graph.d3Force("contain", contain);
+
     graph.d3Force("collide", forceCollide()
       // `G-21`: the drawn radius, plus a quarter of it as clearance. A
       // collider exactly the size of the sphere lets two nodes rest touching,

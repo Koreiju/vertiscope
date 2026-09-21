@@ -85,6 +85,76 @@ TOOLS: List[Dict] = [
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
+        "name": "wake",
+        "description": (
+            "Force the Obsidian window to behave as focused and visible, and "
+            "say whether it was. A minimised window throttles the render loop "
+            "to about one frame every two seconds, so any reading with time in "
+            "it -- frame rates, settling, whether a simulation moved -- is a "
+            "reading of the window manager rather than the plugin. Measured on "
+            "one pane: 0 frames in 2 s hidden, 407 awake. Geometry is "
+            "unaffected. Every other tool here wakes the window first; this is "
+            "for asking what state it was in."),
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "graph_probe",
+        "description": (
+            "Whether the projector's two layers NEST, measured in world units "
+            "with the pane's own sizing and collider functions. Reports node "
+            "radius by layer, how far each unfolding reaches against the gap "
+            "to the nearest other page, how many branches draw larger than the "
+            "page they came out of, genuinely interpenetrating pairs, and "
+            "nodes drawn with no edge at all. Use instead of reading "
+            "ui_state's screen-space overlap count, which conflates depth."),
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "key_coverage",
+        "description": (
+            "Do the markdown lines a reader sees carry their address? "
+            "Reported PER PAGE, because the failure is all-or-nothing per page "
+            "and a corpus-wide ratio hides it. Also returns the store's blank-"
+            "key counters. A line with no key has no handle on the page: no "
+            "affordances, and nothing for resolve_address to resolve."),
+        "inputSchema": {
+            "type": "object",
+            "properties": {"sample": {"type": "integer",
+                                      "description": "How many pages (default 40)"}},
+        },
+    },
+    {
+        "name": "confirm",
+        "description": (
+            "Run the live requirement checks against the RUNNING app and "
+            "return a verdict per requirement id, with the evidence each one "
+            "measured. Reloads the plugin first, because a probe scores the "
+            "instrument that is loaded, not the one on disk. Pass `only` to "
+            "run a subset by id."),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "only": {"type": "array", "items": {"type": "string"},
+                         "description": "Requirement ids, e.g. [\"G-54\", \"G-6\"]"},
+            },
+        },
+    },
+    {
+        "name": "design_state",
+        "description": (
+            "The computed status of every numbered requirement: how many are "
+            "done, open, partly, defect, and which done rows cite no evidence. "
+            "Computed from the PRD, never hand-kept -- it drifted sixteen rows "
+            "in a week when it was."),
+        "inputSchema": {
+            "type": "object",
+            "properties": {"status": {"type": "string",
+                                      "description": "Filter: done|open|partly|defect"},
+                           "prefix": {"type": "string",
+                                      "description": "Filter by id prefix, e.g. G- or D-"}},
+        },
+    },
+    {
         "name": "search",
         "title": "Search distilled chunks",
         "description": "Rank stored web chunks against a query using the "
@@ -167,6 +237,11 @@ class DomvecMCP:
             "ui_state": self._ui_state,
             "ui_act": self._ui_act,
             "live_health": self._live_health,
+            "wake": self._wake,
+            "graph_probe": self._graph_probe,
+            "key_coverage": self._key_coverage,
+            "confirm": self._confirm,
+            "design_state": self._design_state,
         }
         # Built lazily: the live endpoints may not be up, and a server that
         # refuses to start because the app is closed is useless for finding
@@ -190,6 +265,76 @@ class DomvecMCP:
 
     def _live_health(self, args: Dict) -> Dict:
         return self.live().health()
+
+    def _wake(self, args: Dict) -> Dict:
+        return self.live().wake()
+
+    def _graph_probe(self, args: Dict) -> Dict:
+        return self.live().graph_probe()
+
+    def _key_coverage(self, args: Dict) -> Dict:
+        return self.live().key_coverage(int(args.get("sample") or 40))
+
+    def _confirm(self, args: Dict) -> Dict:
+        """Live requirement verdicts, from the app that is actually running.
+
+        **Why this is a tool and not a script to run.** The checks existed --
+        `confirm.mjs` -- but reaching them meant a shell, a node process, a
+        ten-minute wait and a text file to read back. So they were run once
+        or twice a session and the requirement space was argued about in
+        between. A verdict that is one call away can be the first thing
+        asked rather than the last.
+        """
+        return self.live().confirm(args.get("only") or None)
+
+    def _design_state(self, args: Dict) -> Dict:
+        """The computed status column, read rather than regenerated.
+
+        Regenerating needs the analytics package and a repo checkout; this
+        reads the artifact that `python -m domvec.analytics.design_state`
+        writes, and says how old it is so a stale answer cannot pass as a
+        fresh one.
+        """
+        import os
+        import re
+        import time
+        path = os.path.join("build_analytics", "design_state.md")
+        if not os.path.exists(path):
+            return {"error": "no design_state.md; run "
+                             "python -m domvec.analytics.design_state"}
+        text = open(path, encoding="utf-8").read()
+        want_status = (args.get("status") or "").lower()
+        want_prefix = (args.get("prefix") or "")
+        rows, counts = [], {}
+        for line in text.splitlines():
+            m = re.match(r"^\|\s*([A-Z]+-\d+)\s*\|", line)
+            if not m:
+                continue
+            cells = [c.strip() for c in line.strip().strip("|").split("|")]
+            rid = cells[0]
+            status = ""
+            for cell in cells[1:]:
+                low = cell.lower()
+                for name in ("defect", "done", "partly", "open", "confirm",
+                             "standing", "superseded"):
+                    if low.startswith(name) or low == name:
+                        status = name
+                        break
+                if status:
+                    break
+            counts[status or "?"] = counts.get(status or "?", 0) + 1
+            if want_status and status != want_status:
+                continue
+            if want_prefix and not rid.startswith(want_prefix):
+                continue
+            rows.append({"id": rid, "status": status or "?",
+                         "what": cells[1][:150] if len(cells) > 1 else ""})
+        return {
+            "generated": time.strftime(
+                "%Y-%m-%d %H:%M", time.localtime(os.path.getmtime(path))),
+            "age_minutes": round((time.time() - os.path.getmtime(path)) / 60),
+            "counts": counts, "matched": len(rows), "rows": rows[:120],
+        }
 
     # --- tools ---------------------------------------------------------------
 
