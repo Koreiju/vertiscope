@@ -858,9 +858,49 @@ export class GraphView extends ItemView {
     // each stands for, see `layout._room_around`), so a branch cannot
     // exceed the page it came out of -- `members <= chunks` is a property
     // of the trie, not a number anyone tuned.
+    // **Scaled to fit the territory, keeping the trie's proportions.**
+    //
+    // `layout._room_around` gives this unfolding a ball; the branches have
+    // to pack into it. Thirty-one branches at their natural size needed
+    // roughly 47 units of radius against the 19 they were given, so the
+    // collider pushed them out to 275 -- past a neighbouring page 80 units
+    // away. A boundary and a collider that disagree do not negotiate.
+    //
+    // The packing estimate is the usual one: n spheres of radius r occupy
+    // about `1.6 * r * cbrt(n)` of radius once loosely packed. Solving for r
+    // gives the largest a branch may be drawn. Only ever shrinks -- a small
+    // unfolding with room to spare keeps the size the trie asked for, so
+    // this cannot inflate anything.
+    //
+    // Relative size is preserved because every branch is scaled by the same
+    // factor: a branch covering 400 chunks still draws larger than one
+    // covering 4, which is the statement `val` is making.
+    if (opened.length) {
+      const room = opened[0]?.room;
+      if (room && room > 0) {
+        const relSize = (this.graph as any).nodeRelSize?.() ?? 1;
+        const biggest = opened.reduce(
+          (m: number, n: any) => Math.max(m, Math.cbrt(Math.max(n.val ?? 1, 1e-9)) * relSize), 0);
+        const allowed = room / (1.6 * Math.cbrt(opened.length));
+        if (biggest > allowed && biggest > 0) {
+          // `val` is radius cubed, so a radius scale of `k` is `k^3` on val.
+          const k = Math.pow(allowed / biggest, 3);
+          for (const n of opened) n.val = Math.max((n.val ?? 1) * k, 1e-3);
+        }
+      }
+    }
     if (hub) {
       hub.unfolded = true;
       if (hub.valFull === undefined) hub.valFull = hub.val;
+      // **Bound to the territory it is the centre of.** Without this the
+      // branches stayed put and the page walked: 18.1 units of reach from
+      // the anchor, 283.8 from the hub, on the same unfolding. A quarter of
+      // the branches' own room leaves the collider enough slack to separate
+      // it from a neighbour without letting it leave.
+      if (opened.length && opened[0]?.room) {
+        hub.anchorPos = [hub.fitX, hub.fitY, hub.fitZ];
+        hub.room = opened[0].room * 0.25;
+      }
       // A billboard is drawn at the panel edge rather than at `val`, so
       // leaving the image would leave exactly the lid this removes.
       delete hub.image;
@@ -1210,7 +1250,11 @@ export class GraphView extends ItemView {
         if (d <= room || d < 1e-6) continue;
         // Back to the SURFACE, not to the centre: pulling to the anchor
         // would collapse an unfolding into its own hub.
-        const pull = ((d - room) / d) * alpha;
+        // **Floored, not alpha-scaled.** A boundary that fades as the
+        // simulation cools is a boundary only while nothing is settled,
+        // which is the opposite of what it is for; the collider keeps
+        // acting at every alpha and would walk a node out unopposed.
+        const pull = ((d - room) / d) * Math.max(alpha, 0.35);
         n.vx = (n.vx ?? 0) - dx * pull;
         n.vy = (n.vy ?? 0) - dy * pull;
         n.vz = (n.vz ?? 0) - dz * pull;

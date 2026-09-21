@@ -500,6 +500,28 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send(500, {"error": "%s: %s" % (type(exc).__name__, exc)})
             return
 
+        # Rebuild `akey` for every address that lost it (`D-26`).
+        #
+        # A write, so it is a POST, but not a capture: it invents nothing and
+        # reaches no page. The key is DERIVED from four columns already on
+        # the row, so this is recomputation rather than repair in the sense
+        # of guessing. A row missing its url or xpath is left alone and
+        # counted, because a handle that points nowhere is worse than none.
+        #
+        # It is a route rather than a maintenance script because the store is
+        # held open by this process: repairing it otherwise means stopping
+        # the sidecar, which means the plugin loses its backend, which is how
+        # a five-second fix became a restart every time.
+        if route == "repair_keys":
+            if self.workspace is None:
+                self._send(503, {"error": "no workspace"})
+                return
+            try:
+                self._send(200, self.workspace.store.repair_blank_keys())
+            except Exception as exc:                # noqa: BLE001
+                self._send(500, {"error": "%s: %s" % (type(exc).__name__, exc)})
+            return
+
         if route == "place":
             try:
                 length = int(self.headers.get("Content-Length") or 0)

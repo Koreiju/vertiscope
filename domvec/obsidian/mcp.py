@@ -124,6 +124,18 @@ TOOLS: List[Dict] = [
         },
     },
     {
+        "name": "repair_keys",
+        "description": (
+            "Rebuild the address key for every stored address that lost one, "
+            "in place and without re-scanning: the key is derived from four "
+            "columns already on the row. A line whose address has no key has "
+            "no handle on the page -- no affordances, nothing for "
+            "resolve_address. Returns how many were blank, repaired, and "
+            "unrepairable. Idempotent; check key_coverage first to see "
+            "whether it is needed."),
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
         "name": "confirm",
         "description": (
             "Run the live requirement checks against the RUNNING app and "
@@ -238,6 +250,7 @@ class DomvecMCP:
             "ui_act": self._ui_act,
             "live_health": self._live_health,
             "wake": self._wake,
+            "repair_keys": self._repair_keys,
             "graph_probe": self._graph_probe,
             "key_coverage": self._key_coverage,
             "confirm": self._confirm,
@@ -268,6 +281,9 @@ class DomvecMCP:
 
     def _wake(self, args: Dict) -> Dict:
         return self.live().wake()
+
+    def _repair_keys(self, args: Dict) -> Dict:
+        return self.live().post("/repair_keys", {})
 
     def _graph_probe(self, args: Dict) -> Dict:
         return self.live().graph_probe()

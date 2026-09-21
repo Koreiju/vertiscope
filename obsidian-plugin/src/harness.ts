@@ -314,12 +314,22 @@ export function installHarness(app: App, sidecarBase: () => string) {
           const t = dist(o, hub);
           if (t < gap) gap = t;
         }
+        // From the ANCHOR, not the hub: containment is defined against the
+        // page's position in the fit, and the hub is a node the collider
+        // moves. Measuring from it reported a spill that was not one.
+        const at = kids[0]?.anchorPos;
+        const from = at ? { x: at[0], y: at[1], z: at[2] } : hub;
+        const room = kids[0]?.room ?? null;
         const reach = kids.length
-          ? Math.max(...kids.map((k: any) => dist(k, hub))) : 0;
+          ? Math.max(...kids.map((k: any) => dist(k, from))) : 0;
         return {
           page: hub.url, nodes_before: before, nodes_after: after.nodes.length,
           branches: kids.length,
-          reach: Math.round(reach * 10) / 10,
+          room: room === null ? null : Math.round(room * 10) / 10,
+          reach_from_anchor: Math.round(reach * 10) / 10,
+          reach_from_hub: kids.length
+            ? Math.round(Math.max(...kids.map((k: any) => dist(k, hub))) * 10) / 10
+            : 0,
           gap_to_nearest_page: Math.round(gap * 10) / 10,
           stayed_inside: reach <= gap * 0.5,
         };

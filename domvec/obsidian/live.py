@@ -265,13 +265,27 @@ class Live:
         let gap = Infinity;
         for (const o of pages) { if (o === hub) continue;
           const t = D(o, hub); if (t < gap) gap = t; }
-        const reach = Math.max.apply(null, kids.map(k => D(k, hub)));
+        // **From the ANCHOR, which is what containment is defined against.**
+        // The hub is an ordinary node and the collider moves it; measuring
+        // from it reported a 341-unit spill while every branch was inside
+        // its territory.
+        const at = kids[0].anchorPos;
+        const from = at ? {x: at[0], y: at[1], z: at[2]} : hub;
+        const room = kids[0].room || null;
+        const reach = Math.max.apply(null, kids.map(k => D(k, from)));
+        const fromHub = Math.max.apply(null, kids.map(k => D(k, hub)));
         groups.push({page: hub.url, hub_radius: +R(hub).toFixed(2),
           branches: kids.length, branch_radius_p50: q(kids.map(R), .5),
-          reach: +reach.toFixed(1), gap_to_nearest_page: +gap.toFixed(1),
+          room: room ? +room.toFixed(1) : null,
+          reach_from_anchor: +reach.toFixed(1),
+          reach_from_hub: +fromHub.toFixed(1),
+          hub_drift_from_anchor: at ? +D(hub, from).toFixed(1) : null,
+          gap_to_nearest_page: +gap.toFixed(1),
           reach_over_gap: +(reach / gap).toFixed(3),
+          outside_their_room: room
+            ? kids.filter(k => D(k, from) > room * 1.05).length : null,
           bigger_than_container: kids.filter(k => R(k) > R(hub)).length,
-          past_halfway: kids.filter(k => D(k, hub) > gap * 0.5).length});
+          past_halfway: kids.filter(k => D(k, from) > gap * 0.5).length});
       }
       const nn = [];
       for (const a of pages) { let m = Infinity;
@@ -317,12 +331,18 @@ class Live:
                 "pages_opened": len(groups),
                 "branches_bigger_than_their_page":
                     sum(g["bigger_than_container"] for g in groups),
+                "branches_outside_their_room":
+                    sum(g["outside_their_room"] or 0 for g in groups),
                 "unfoldings_spilling_past_halfway":
                     sum(1 for g in groups if g["past_halfway"]),
                 "worst_reach_over_gap":
                     max((g["reach_over_gap"] for g in groups), default=None),
+                "worst_hub_drift":
+                    max((g["hub_drift_from_anchor"] or 0 for g in groups),
+                        default=None),
                 "nests": bool(groups) and all(
                     not g["bigger_than_container"] and not g["past_halfway"]
+                    and not (g["outside_their_room"] or 0)
                     for g in groups),
             }
         return got
@@ -406,8 +426,47 @@ class Live:
         gestures = self.evaluate(
             "(()=>{try{return !!(window.__domvec && window.__domvec.act);}"
             "catch(e){return false;}})()")
+        drew = self.wait_for_projector()
         return {"version_before": before, "harness_installed": bool(gestures),
-                "settled_s": settle}
+                "settled_s": settle, "projector": drew}
+
+    def wait_for_projector(self, timeout: float = 90.0) -> Dict:
+        """Wait until the pane has actually DRAWN something.
+
+        **`enablePlugin` returning is not the pane being ready**, and the
+        gap is not small: the view has to be constructed, ask the sidecar
+        for a layout, and let the renderer put nodes in the scene. Checks
+        run in that window see `ui().graph` missing and report "no
+        projector", which reads exactly like a dead plugin -- seven
+        requirements failed that way on one run, with the same pane showing
+        815 nodes by the time the last check ran.
+
+        Opens the pane if it is not open, because a reload can leave it
+        closed and a harness that reports "not open" for something it could
+        have opened is refusing to do its job.
+        """
+        import time
+        deadline = time.time() + timeout
+        opened = False
+        last = {}
+        while time.time() < deadline:
+            try:
+                got = self.ui().get("graph") or {}
+            except Exception:                       # noqa: BLE001
+                got = {}
+            last = got
+            if got.get("nodes"):
+                return {"ready": True, "nodes": got.get("nodes"),
+                        "waited_s": round(timeout - (deadline - time.time()), 1)}
+            if not opened:
+                opened = True
+                try:
+                    self.act("open", "graph")
+                except Exception:                   # noqa: BLE001
+                    pass
+            time.sleep(2.0)
+        return {"ready": False, "last": last,
+                "why": "the projector drew nothing within %gs" % timeout}
 
     # -- requirement verdicts -------------------------------------------------
 
@@ -496,7 +555,17 @@ class Live:
     # belongs in the evidence, not hidden inside a boolean.
 
     def _graph(self) -> Dict:
+        """The projector's state, waiting for it rather than catching it mid-draw.
+
+        A check that reads the pane while it is still building reports the
+        plugin as broken. Waiting once here is cheaper than every check
+        learning to retry, and it cannot mask a real failure: the wait has a
+        deadline and says so.
+        """
         got = self.ui().get("graph") or {}
+        if not got.get("nodes"):
+            self.wait_for_projector()
+            got = self.ui().get("graph") or {}
         if not got or got.get("error"):
             raise RuntimeError(got.get("error") or "projector not open")
         return got
@@ -519,11 +588,12 @@ class Live:
         ok = bool(r.get("branches")) and bool(r.get("stayed_inside"))
         return ("PASS" if ok else "FAIL",
                 {k: r.get(k) for k in
-                 ("page", "branches", "reach", "gap_to_nearest_page",
-                  "stayed_inside", "nodes_before", "nodes_after")})
+                 ("page", "branches", "room", "reach_from_anchor",
+                  "reach_from_hub", "gap_to_nearest_page", "stayed_inside",
+                  "nodes_before", "nodes_after")})
 
     def _c_links(self):
-        g = self._graph()
+        g = self._graph()                           # waits for the pane
         links = g.get("links") or 0
         # An endpoint that never resolved leaves a link with a string for a
         # source, and the renderer silently draws nothing.
