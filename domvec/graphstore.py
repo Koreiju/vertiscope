@@ -454,21 +454,47 @@ class GraphStore:
         # anchor phase. An address whose content hash has not moved is a row
         # being written to the value it already has.
         if addresses:
-            wanted = {a.aid: ch for a, _v, ch in addresses}
-            held = {aid: ch for aid, ch in self._rows(
+            wanted = {a.aid: (ch, a.key()) for a, _v, ch in addresses}
+            # **The guard reads `akey` as well as `content_hash`, and that is
+            # not belt-and-braces.**
+            #
+            # The write this skips is one statement setting six columns:
+            # `akey`, `url`, `xpath`, `tag`, `accessor`, `value`. Keying the
+            # skip on `content_hash` alone made it a claim about the VALUE
+            # standing in for a claim about the ROW, so a row that was
+            # missing its key was judged current and left that way -- and
+            # permanently, because re-scanning the page cannot move a content
+            # hash that never changed. This is `CLAUDE.md` 5c applied to a
+            # row: a cached verdict has to name what it is a function of.
+            #
+            # Measured in the live corpus before the fix: **118,180 of
+            # 331,242 addresses** held a blank `akey`, all-or-nothing per
+            # page -- 29 of 74 sampled pages at 100% and the rest at 0%. A
+            # blank key will not parse, so `addresses_of` drops the row and
+            # every line on that page is served with `key: ""`: no handle on
+            # the page, no affordances, nothing for `resolve_address`. That
+            # is D-26, and it was filed as a missing ANCHOR when the anchors
+            # were there all along.
+            #
+            # `akey` is the one extra column checked because it is derived
+            # from the other four -- `url|xpath|tag|accessor` is exactly what
+            # `ContentAddress.key()` spells -- so comparing it covers them
+            # without five more comparisons. `value` stays governed by the
+            # content hash, which is what that hash is for.
+            held = {aid: (ch, akey) for aid, ch, akey in self._rows(
                 "MATCH (a:Address) WHERE list_contains($aids, a.aid) "
-                "RETURN a.aid, a.content_hash",
+                "RETURN a.aid, a.content_hash, a.akey",
                 {"aids": list(wanted)})}
             counts["addresses_incoming"] = len(wanted)
-            counts["addresses_unchanged"] = sum(
-                1 for aid, ch in wanted.items()
-                if aid in held and held[aid] == ch)
-            # An address whose content hash has not moved is already written
-            # to the value it would be written to. 11,474 of 11,474 on a
-            # re-index of ar.wikipedia.
             unchanged_addresses = {
-                aid for aid, ch in wanted.items()
-                if aid in held and held[aid] == ch}
+                aid for aid, (ch, key) in wanted.items()
+                if aid in held and held[aid][0] == ch and held[aid][1] == key}
+            counts["addresses_unchanged"] = len(unchanged_addresses)
+            # Reported so a corpus repairing itself is visible rather than
+            # inferred from a timing that got slower.
+            counts["addresses_rekeyed"] = sum(
+                1 for aid, (ch, key) in wanted.items()
+                if aid in held and held[aid][0] == ch and held[aid][1] != key)
         else:
             unchanged_addresses = set()
 
@@ -1291,6 +1317,47 @@ class GraphStore:
     #: the UI at all, which is the most expensive way for one bad row to
     #: fail.
     unreadable_addresses: int = 0
+
+    def repair_blank_keys(self, batch: int = 20000) -> dict:
+        """Rebuild `akey` in place for every address that lost it.
+
+        **No re-scan, because the key is derived, not captured.**
+        `ContentAddress.key()` is `url|xpath|tag|accessor` with `%` and `|`
+        escaped, and all four of those are already columns on the row. So an
+        address with a blank key is not missing information; it is missing a
+        string that can be recomputed from what is beside it.
+
+        That matters because re-scanning would not have fixed it anyway: the
+        guard in `ingest` is now a function of `akey`, so a fresh scan does
+        repair a page -- but only a page someone thinks to visit, and the
+        live corpus had 29 of 74 sampled pages affected across sites that
+        need a browser each. This repairs the store it is pointed at.
+
+        Idempotent: it only touches rows whose key is null or empty.
+        """
+        from .address import _esc, _SEP
+
+        rows = self._rows(
+            "MATCH (a:Address) WHERE a.akey IS NULL OR a.akey = '' "
+            "RETURN a.aid, a.url, a.xpath, a.tag, a.accessor")
+        out = {"blank": len(rows), "repaired": 0, "unrepairable": 0}
+        fixed = []
+        for aid, url, xpath, tag, accessor in rows:
+            # A row missing its url or xpath cannot be spelled back, and
+            # inventing a key for it would put a handle on the page that
+            # points nowhere. Counted, not guessed.
+            if not url or not xpath:
+                out["unrepairable"] += 1
+                continue
+            fixed.append({"aid": aid, "akey": _SEP.join(
+                _esc(part or "") for part in (url, xpath, tag, accessor))})
+        for i in range(0, len(fixed), batch):
+            self._batch(
+                "UNWIND $rows AS r MATCH (a:Address {aid: r.aid}) "
+                "SET a.akey = r.akey",
+                fixed[i:i + batch])
+        out["repaired"] = len(fixed)
+        return out
 
     def addresses_of(self, cid: str) -> List[Tuple[ContentAddress, str]]:
         """The addresses a chunk anchors, in line order.

@@ -1008,6 +1008,24 @@ class _Handler(BaseHTTPRequestHandler):
                                  "MATCH (a:Address) RETURN count(a)"),
                              "anchors": _one(
                                  "MATCH ()-[r:Anchors]->() RETURN count(r)"),
+                             # **An anchor whose address will not parse is
+                             # worse than a missing one**, because the line
+                             # still draws and simply has no handle on the
+                             # page -- silently, since `addresses_of` skips
+                             # it. Reported so the two causes of a keyless
+                             # line can be told apart without guessing.
+                             "anchors_blank_key": _one(
+                                 "MATCH ()-[r:Anchors]->(a:Address) "
+                                 "WHERE a.akey IS NULL OR a.akey = '' "
+                                 "RETURN count(r)"),
+                             "addresses_blank_key": _one(
+                                 "MATCH (a:Address) "
+                                 "WHERE a.akey IS NULL OR a.akey = '' "
+                                 "RETURN count(a)"),
+                             "unreadable_addresses":
+                                 __import__("domvec.graphstore",
+                                            fromlist=["GraphStore"])
+                                 .GraphStore.unreadable_addresses,
                              "enact": bool(self.enact_allowed),
                              "capture": bool(self.capture_allowed),
                              # Advertised so the panel can draw a run button as
