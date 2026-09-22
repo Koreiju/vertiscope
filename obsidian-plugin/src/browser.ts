@@ -195,7 +195,9 @@ export class BrowserView extends ItemView {
   private debounce = 0;
 
   constructor(leaf: WorkspaceLeaf, private sidecar: Sidecar,
-              private onChunks: (nodes: LayoutNode[]) => void = () => {},
+              private onChunks: (nodes: LayoutNode[],
+                                 edges?: { source: string; target: string }[])
+                => void = () => {},
               //: What the reader has scrolled to, for the projector to
               //: open the page to (`G-55`, `G-56`).
               private onHits: (url: string, cids: string[]) => void =
@@ -656,7 +658,13 @@ export class BrowserView extends ItemView {
         return;
       }
       const nodes = (reply.nodes as LayoutNode[]) || [];
-      if (nodes.length) this.onChunks(nodes);
+      // **With the edges.** `place_into` computes the containment among
+      // what it placed and this dropped them, so every live-captured
+      // chunk drew as a loose dot: 793 chunk nodes, 16 with an edge.
+      if (nodes.length) {
+        this.onChunks(nodes,
+          (reply.edges as { source: string; target: string }[]) || []);
+      }
       // "Unplaced" has two causes and they are not the same news: a chunk
       // seconds old has no vector yet and will get one, while a workspace
       // with no fit has nowhere to put anything and will not until it is

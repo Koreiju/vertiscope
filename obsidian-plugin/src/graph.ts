@@ -931,8 +931,10 @@ export class GraphView extends ItemView {
    * changed, so the fit puts it somewhere else, and pretending otherwise
    * would leave a node standing where its old meaning used to be.
    */
-  absorb(incoming: LayoutNode[]): { added: number; moved: number } {
-    const out = { added: 0, moved: 0 };
+  absorb(incoming: LayoutNode[],
+         edges?: { source: string; target: string }[]):
+      { added: number; moved: number; edges: number } {
+    const out = { added: 0, moved: 0, edges: 0 };
     if (!this.graph || !incoming || !incoming.length) return out;
     const data: any = this.graph.graphData();
     const byId = new Map<string, any>(data.nodes.map((n: any) => [n.id, n]));
@@ -964,6 +966,15 @@ export class GraphView extends ItemView {
     // of node OBJECTS where it expects to re-resolve, and the edges would
     // stop drawing -- which is exactly the failure that removing the link
     // force caused.
+    // **The trie's own edges, which were computed and then dropped.**
+    //
+    // `place_into` returns the containment edges among what it placed --
+    // `G-6` -- and the pane's callback chain passed only the nodes, so a
+    // live capture drew its chunks as loose dots. Measured before this:
+    // 921 nodes, 84 links, and of 793 chunk nodes exactly 16 had an edge of
+    // any kind. A patricia trie that is not drawn has no structure for a
+    // force to act on, which is most of why the picture reads as a clump.
+    out.edges = this.addEdges(data, edges);
     this.graph.graphData(data);
     this.graph.d3ReheatSimulation();
     this.sayCounts();
@@ -1034,6 +1045,24 @@ export class GraphView extends ItemView {
   private draw(canvas: HTMLElement, layout: Layout) {
     canvas.empty();
     const nodes = layout.nodes.map((n) => this.nodeFrom(n));
+
+    // **A page node is held at the position the fit gave it.**
+    //
+    // Where a page sits IS the corpus's statement about it -- that is the
+    // whole of layer 1 -- so no force may relocate it. That was free while
+    // the link force contributed nothing; with links pulling at 0.25 a hub
+    // was measured **757.6 units** from its own anchor, dragging its open
+    // page across the cloud and taking the meaning of its position with it.
+    //
+    // The allowance is a small multiple of the node's own size rather than
+    // zero, so collision can still separate two pages the fit placed on top
+    // of each other. Layer 2 does its fanning out INSIDE these territories;
+    // layer 1 does not move.
+    for (const n of nodes) {
+      if (n.level !== "page" || (n as any).room) continue;
+      (n as any).anchorPos = [n.fitX, n.fitY, n.fitZ];
+      (n as any).room = Math.max(6, Math.cbrt(Math.max(n.val ?? 1, 1e-9)) * 2.5);
+    }
 
     // How big a node should be, from the span it is drawn in and how many
     // there are -- not from a constant.
@@ -1210,7 +1239,32 @@ export class GraphView extends ItemView {
     //
     // Zero strength is the spring the goal forbids, turned off, while
     // initialization still runs and still resolves the endpoints.
-    graph.d3Force("link")?.strength(0);
+    // **The link force pulls now, and the boundary is what makes that safe.**
+    //
+    // It was `strength(0)` -- initialized so endpoints resolve, contributing
+    // nothing -- on the reasoning that a spring layout would rewrite the
+    // embedding the fit computed. That reasoning was right while nothing
+    // bounded a node: a spring could drag a chunk anywhere. `contain` now
+    // holds every chunk inside its own page's territory however hard its
+    // edges pull, so the spring can only arrange nodes WITHIN the region the
+    // fit assigned them -- which is exactly the force-directed unfold the
+    // goal asks for, and no longer a threat to the semantic placement.
+    //
+    // Distance from the two nodes' drawn radii rather than a constant: a
+    // link between two big nodes needs more room than one between two small
+    // ones, and a fixed length packed the large ones on top of each other.
+    // Strength is modest and capped so a node with many children is not
+    // torn apart by them.
+    const linkForce: any = graph.d3Force("link");
+    if (linkForce) {
+      linkForce
+        .distance((l: any) => {
+          const a = drawnRadius(l.source, relSize, media);
+          const b = drawnRadius(l.target, relSize, media);
+          return (a + b) * 2.2;
+        })
+        .strength(0.25);
+    }
     // The live node array, handed over by d3 at `initialize`.
     let containNodes: any[] = [];
     // **The nested layer is bounded, and that is what makes it nested.**
@@ -1487,7 +1541,81 @@ export class GraphView extends ItemView {
       return (Math.max(horizontal, vertical) + mz) * 1.12;
     };
 
-    window.setTimeout(place, 250);
+    /**
+     * How much of the canvas the cloud actually covers, at the camera's
+     * current position. Fraction of width and of height, 0..1.
+     *
+     * Only nodes in FRONT of the camera count. One behind it projects to a
+     * perfectly ordinary screen point, and including those is how the live
+     * checks once reported 97 of 97 nodes on screen while the pane was
+     * blank.
+     */
+    const screenCoverage = (): { w: number; h: number } | null => {
+      const g: any = graph;
+      const cam: any = g.camera?.();
+      const pts = g.graphData().nodes as any[];
+      if (!cam || !pts.length) return null;
+      const W = canvas.clientWidth;
+      const H = canvas.clientHeight;
+      if (!(W > 2 && H > 2)) return null;
+      cam.updateMatrixWorld?.();
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      let seen = 0;
+      for (const n of pts) {
+        const v = new (cam.position.constructor as any)(
+          n.x ?? 0, n.y ?? 0, n.z ?? 0);
+        v.project(cam);
+        // `project` divides by w; a point behind the camera comes back with
+        // z outside [-1, 1], which is the cheap form of the same test.
+        if (!(v.z > -1 && v.z < 1)) continue;
+        seen += 1;
+        const sx = (v.x * 0.5 + 0.5) * W;
+        const sy = (-v.y * 0.5 + 0.5) * H;
+        if (sx < minX) minX = sx;
+        if (sx > maxX) maxX = sx;
+        if (sy < minY) minY = sy;
+        if (sy > maxY) maxY = sy;
+      }
+      if (seen < 2 || !isFinite(minX)) return null;
+      return { w: (maxX - minX) / W, h: (maxY - minY) / H };
+    };
+
+    /**
+     * Close the gap between the framing the formula predicted and the
+     * picture it produced.
+     *
+     * `target` is how much of the smaller canvas dimension the cloud should
+     * fill. Not 1.0: a node is drawn with a radius the projection does not
+     * know about, and a billboard is drawn wider still.
+     */
+    const tighten = (target = 0.88, steps = 2) => {
+      const g: any = graph;
+      for (let i = 0; i < steps; i++) {
+        const cover = screenCoverage();
+        if (!cover) return;
+        const filled = Math.max(cover.w, cover.h);
+        if (!(filled > 0.01)) return;
+        const ratio = filled / target;
+        // Already close enough; another step would only jitter the camera.
+        if (ratio > 0.92 && ratio < 1.08) return;
+        const cam: any = g.cameraPosition();
+        const d = Math.hypot(cam.x ?? 0, cam.y ?? 0, cam.z ?? 0);
+        if (!(d > 0)) return;
+        // Screen span goes as 1/d, so scaling the distance by the shortfall
+        // is the step that lands on target.
+        let next = d * Math.min(1.6, Math.max(0.55, ratio));
+        // **Never inside the cloud.** This is the guard the previous attempt
+        // at this did not have, and it is why the pane went empty.
+        const pts = g.graphData().nodes as any[];
+        let frontmost = 0;
+        for (const n of pts) frontmost = Math.max(frontmost, n.z ?? 0);
+        const floor = frontmost + Math.max(20, frontmost * 0.15);
+        if (next < floor) next = floor;
+        g.cameraPosition({ x: 0, y: 0, z: next }, { x: 0, y: 0, z: 0 }, 0);
+      }
+    };
+
+    window.setTimeout(() => { place(); window.setTimeout(tighten, 120); }, 250);
 
     // The same thing, on demand. A reader who has orbited into the middle of
     // the cloud has no way back otherwise, and "the graph went blank" is not
@@ -1496,6 +1624,9 @@ export class GraphView extends ItemView {
       placed = null;              // an explicit reframe is always wanted
       graph.cameraPosition({ x: 0, y: 0, z: frameDistance() },
                            { x: 0, y: 0, z: 0 }, 400);
+      // After the flight, not during it: the camera is animating for 400ms
+      // and a measurement taken mid-flight frames the halfway point.
+      window.setTimeout(() => tighten(), 450);
     };
   }
 }

@@ -260,6 +260,15 @@ def build_page_layout(workspace,
         if found is not None:
             pictures[chunk.url] = found
 
+    # **Relaxed by content before anything records these positions.**
+    # `_room_around`, the unfold, the live placement and the pane's camera
+    # all read from here, so the spacing has to be right at this point or
+    # every one of them inherits a cloud with no room in it.
+    chunk_counts = [len(by_page.get(u) or ()) for u in urls]
+    relaxed = _relax_pages(coords, chunk_counts, dims)
+    if relaxed is not None and len(relaxed) == len(coords):
+        coords[:, :dims] = relaxed
+
     here = _PAGE_POS.setdefault(_space_name(spherical_fit), {})
     here.clear()
     nodes = []
@@ -1306,6 +1315,58 @@ def _room_around(url: str, space: str, anchor) -> float:
     return float(min(UNFOLD_RADIUS, max(UNFOLD_RADIUS * 0.15, nearest * 0.45)))
 
 
+def _relax_pages(coords: np.ndarray, counts, dims: int,
+                 rounds: int = 120) -> np.ndarray:
+    """Push pages apart until each has room for its own chunks.
+
+    Collision only, and one-sided: a pair further apart than the room they
+    both need feels nothing, so the UMAP's structure is preserved wherever it
+    already works and only the crowded neighbourhoods open up. Seeded from
+    the fit and reported as drift, per `G-20`.
+
+    The radius a page claims is `cbrt(chunks)`, scaled to the cloud. Cube
+    root because room is a VOLUME: a page with eight times the chunks needs
+    twice the radius, not eight times, and using the count directly made one
+    reference index claim a third of the corpus.
+    """
+    if len(coords) < 2:
+        return coords
+    pts = np.asarray(coords[:, :dims], dtype=np.float32).copy()
+    want = np.asarray([max(1.0, float(c)) ** (1.0 / 3.0) for c in counts],
+                      dtype=np.float32)
+    # Scale the claims so the median page keeps roughly the spacing the fit
+    # already gave it. Without this the absolute units are arbitrary and the
+    # relaxation either does nothing or explodes the cloud.
+    gaps = []
+    for i in range(len(pts)):
+        d = np.linalg.norm(pts - pts[i], axis=1)
+        d[i] = np.inf
+        gaps.append(float(d.min()))
+    median_gap = float(np.median(gaps)) or 1.0
+    want = want * (median_gap / float(np.median(want) or 1.0)) * 0.5
+
+    for _ in range(rounds):
+        moved = 0.0
+        for i in range(len(pts)):
+            delta = pts - pts[i]
+            dist = np.linalg.norm(delta, axis=1)
+            dist[i] = np.inf
+            need = want + want[i]
+            hit = np.where(dist < need)[0]
+            if not len(hit):
+                continue
+            for j in hit:
+                d = float(dist[j]) or 1e-6
+                push = (float(need[j]) - d) / d * 0.5
+                step = delta[j] * push * 0.5
+                pts[i] -= step
+                pts[j] += step
+                moved += float(np.linalg.norm(step))
+        if moved < 1e-3:
+            break
+    return pts
+
+
 def _local_positions(rows: np.ndarray, anchor, *, seed: int = 0,
                      radius: float = UNFOLD_RADIUS):
     """A fit over the page's OWN chunks, placed around `anchor`.
@@ -1748,6 +1809,16 @@ def place_into(workspace, cids) -> Dict:
             if picture is not None:
                 node["image"] = picture
             nodes.append(node)
+            #: The territory, as `unfold` sends it, so a placed chunk is
+            #: bound the same way a branch is. Without it a live capture's
+            #: chunks were the only nodes in the picture free to wander.
+            room_for = _PAGE_POS.get(space_name) or {}
+            at = room_for.get(chunk.url)
+            if at and len(at) >= 3:
+                node["anchor"] = [float(v) for v in at[:3]]
+                node["room"] = float(
+                    _room_around(chunk.url, space_name,
+                                 np.asarray(at[:3], dtype=np.float32)))
 
     # A count, not the chunks. See `GraphStore.chunk_count`.
     # The containment edges among what was just placed (`G-6`). Chunks
