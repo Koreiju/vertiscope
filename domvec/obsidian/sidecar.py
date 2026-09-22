@@ -492,10 +492,16 @@ class _Handler(BaseHTTPRequestHandler):
                 # actually looking at. Without it an unfolding taken while
                 # the pane showed S3 hung its chunks off euclidean page
                 # positions, 378 units from the node they belong to.
-                self._send(200, unfold_path(self.workspace,
-                                            body.get("url") or "",
-                                            body.get("path") or "",
-                                            space=str(body.get("space") or "")))
+                self._send(200, unfold_path(
+                    self.workspace,
+                    body.get("url") or "",
+                    body.get("path") or "",
+                    space=str(body.get("space") or ""),
+                    #: The territory a recursive step inherits from the
+                    #: branch that revealed it. Absent for a first step,
+                    #: where the page's own room is the right answer.
+                    anchor_at=body.get("anchor"),
+                    room=float(body.get("room") or 0.0)))
             except Exception as exc:                # noqa: BLE001
                 self._send(500, {"error": "%s: %s" % (type(exc).__name__, exc)})
             return

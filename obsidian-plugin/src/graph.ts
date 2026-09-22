@@ -860,11 +860,91 @@ export class GraphView extends ItemView {
     return added;
   }
 
+  /**
+   * How deep one expansion opens, and how much of the tree it may draw.
+   *
+   * Depth rather than breadth is the bounded quantity because that is what
+   * patricia compression makes cheap: a chain of single-child wrappers
+   * costs one step, so four steps reach much further into a real document
+   * than four levels of a naive tree would. The node budget is the backstop
+   * for a page whose top fork is very wide.
+   */
+  private static readonly UNFOLD_DEPTH = 3;
+  private static readonly UNFOLD_BUDGET = 160;
+
+  /**
+   * Open a node into the SHAPE of the trie beneath it, not just its first
+   * fork (`G-54`, and the reader's "this is not a DAG").
+   *
+   * Each branch a step reveals is itself a place the trie forks, and
+   * stopping at the first one draws a star: measured at 31 edges from the
+   * hub, 30 between branches, every branch at degree 2, depth 1. Recursing
+   * turns the same calls into a tree with levels, which is the structure
+   * the patricia trie actually holds.
+   *
+   * Breadth-first, so the budget spends itself on the widest part of the
+   * tree nearest the reader rather than on one deep chain.
+   */
   private async unfoldNode(node: any): Promise<void> {
-    if (!this.graph || !node || !node.url) return;
-    const got = await this.sidecar.unfold(node.url, node.path || "", this.space);
+    const added = await this.unfoldStep(node);
+    if (!added.length) return;
+    let frontier = added.filter((n: any) => n.level === "path");
+    let drawn = added.length;
+    for (let depth = 1;
+         depth < GraphView.UNFOLD_DEPTH
+           && frontier.length
+           && drawn < GraphView.UNFOLD_BUDGET;
+         depth++) {
+      const next: any[] = [];
+      for (const branch of frontier) {
+        if (drawn >= GraphView.UNFOLD_BUDGET) break;
+        const more = await this.unfoldStep(branch);
+        drawn += more.length;
+        for (const m of more) if (m.level === "path") next.push(m);
+      }
+      frontier = next;
+    }
+    // Containment across everything now drawn, which is where the edges
+    // BETWEEN levels come from: a parent and a grandchild are never in the
+    // same step's result, so no single step could draw that edge.
+    await this.drawContainment();
+  }
+
+  /** One patricia step, returning what it added. */
+  private async unfoldStep(node: any): Promise<any[]> {
+    if (!this.graph || !node || !node.url) return [];
+    // A branch opened inside another branch inherits its territory: its
+    // anchor is that branch's own position and its room a share of that
+    // branch's room. `1/sqrt(siblings)` because children fill an AREA
+    // inside their parent's ball, not a length; dividing the radius by
+    // the count shrinks deep levels to dots far faster than the geometry
+    // requires.
+    // **Only a BRANCH passes down a territory.** A page node carries a
+    // small `room` too, but that is the leash holding it at its fit
+    // position (`D-27`), not a region its contents live in -- and reading
+    // it as one handed the very first step a territory of 8 world units
+    // instead of 48, which drew every node in the expansion at 2px.
+    const parentRoom = node.level === "page" ? 0 : (node as any).room;
+    const inherit = parentRoom && (node as any).anchorPos
+      ? {
+          anchor: [node.x ?? 0, node.y ?? 0, node.z ?? 0],
+          // **Half the parent's radius, floored.** The first version
+          // divided by `sqrt(members)` -- the chunks a branch STANDS for,
+          // routinely hundreds -- so a depth-2 territory came out at 0.1
+          // world units and every node drew as a 0.5px speck. `members` is
+          // a statement about the subtree's size, not about how many
+          // siblings have to share a ball. Halving per level is the
+          // geometric relation that actually holds: children with their own
+          // contents fit inside their parent with room to spare, and three
+          // levels still leave a quarter of the page's territory.
+          room: Math.max(parentRoom * 0.5, 8),
+        }
+      : null;
+    const got = await this.sidecar.unfold(
+      node.url, node.path || "", this.space,
+      inherit?.anchor, inherit?.room);
     const nodes = (got && (got.nodes as LayoutNode[])) || [];
-    if (!nodes.length) return;
+    if (!nodes.length) return [];
 
     const data: any = this.graph.graphData();
     const hub = data.nodes.find((n: any) => n.id === node.id);
@@ -973,7 +1053,7 @@ export class GraphView extends ItemView {
     this.graph.graphData(data);
     this.graph.d3ReheatSimulation();
     this.sayCounts();
-    void this.drawContainment();
+    return opened;
   }
 
   /**

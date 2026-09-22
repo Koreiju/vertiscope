@@ -1481,7 +1481,8 @@ def _ensure_projection(workspace):
     return live_projection()
 
 
-def unfold(workspace, url: str, path: str = "", space: str = "") -> Dict:
+def unfold(workspace, url: str, path: str = "", space: str = "",
+           anchor_at=None, room: float = 0.0) -> Dict:
     """One step of unravelling a page's patricia path (`G-54`).
 
     Not an expansion of a subtree. The reader's word for this is
@@ -1627,7 +1628,17 @@ def unfold(workspace, url: str, path: str = "", space: str = "") -> Dict:
             anchor = where[0]
     if anchor is None:
         anchor = coords.mean(axis=0)
-    room = _room_around(url, wanted, anchor)
+    # **A nested step is placed inside its PARENT, not inside the page.**
+    #
+    # The caller knows the tree; this function sees one step of it. When a
+    # parent territory is handed in, it is the one that applies -- otherwise
+    # every level of a recursive expansion would be sized for the page and
+    # the deeper ones would pile into the same ball. Measured without it:
+    # 162 nodes over three levels in a territory computed for 31, gap 4.7px
+    # against a drawn radius of 7.1.
+    if anchor_at is not None and len(anchor_at) >= 3:
+        anchor = np.asarray(anchor_at[:3], dtype=np.float32)
+    room = float(room) if room and room > 0 else _room_around(url, wanted, anchor)
     local = _local_positions(block, anchor, seed=0, radius=room)
     if local is not None and len(local) == len(coords):
         coords = local
