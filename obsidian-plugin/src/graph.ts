@@ -910,18 +910,47 @@ export class GraphView extends ItemView {
     // Relative size is preserved because every branch is scaled by the same
     // factor: a branch covering 400 chunks still draws larger than one
     // covering 4, which is the statement `val` is making.
-    if (opened.length) {
+    if (opened.length > 1) {
       const room = opened[0]?.room;
-      if (room && room > 0) {
-        const relSize = (this.graph as any).nodeRelSize?.() ?? 1;
-        const biggest = opened.reduce(
-          (m: number, n: any) => Math.max(m, Math.cbrt(Math.max(n.val ?? 1, 1e-9)) * relSize), 0);
-        const allowed = room / (1.6 * Math.cbrt(opened.length));
-        if (biggest > allowed && biggest > 0) {
-          // `val` is radius cubed, so a radius scale of `k` is `k^3` on val.
-          const k = Math.pow(allowed / biggest, 3);
-          for (const n of opened) n.val = Math.max((n.val ?? 1) * k, 1e-3);
+      const relSize = (this.graph as any).nodeRelSize?.() ?? 1;
+      // **The application's own radius function, not a reimplementation.**
+      // `cbrt(val) * relSize` is the radius of a PLAIN node; one showing a
+      // picture is drawn at 1.75x that, and sizing against the smaller
+      // number left every image-bearing branch overlapping its neighbour --
+      // 12 pairs, enough for the collider to shove the interior outward and
+      // turn the fit's uniform ball (cv 0.289) into a shell (cv 0.153).
+      // `G-21` was filed for exactly this mistake in a live check, which
+      // wrote its own `drawnRadius` and invented 49 overlaps.
+      const media = this.media();
+      const radiusOf = (n: any) => drawnRadius(n, relSize, media);
+      // **The smallest gap the fit actually left**, not an estimate of how
+      // many spheres would pack into the territory. These nodes are placed,
+      // not packed: the only question is whether each is small enough to sit
+      // where the projection put it without touching its neighbour.
+      let closest = Infinity;
+      for (let i = 0; i < opened.length; i++) {
+        for (let j = i + 1; j < opened.length; j++) {
+          const a = opened[i];
+          const b = opened[j];
+          const d = Math.hypot((a.x ?? 0) - (b.x ?? 0),
+                               (a.y ?? 0) - (b.y ?? 0),
+                               (a.z ?? 0) - (b.z ?? 0));
+          if (d > 1e-6 && d < closest) closest = d;
         }
+      }
+      const biggest = opened.reduce(
+        (m: number, n: any) => Math.max(m, radiusOf(n)), 0);
+      // Half the gap, less the margin the collider adds on each side.
+      let allowed = Number.isFinite(closest)
+        ? closest / (2 * COLLIDER_SAFETY) : biggest;
+      // Never shrink to nothing because one pair landed on top of each
+      // other; there the collider should act, and separating one pair is a
+      // better outcome than an unfolding nobody can see.
+      if (room && room > 0) allowed = Math.max(allowed, room * 0.06);
+      if (biggest > allowed && biggest > 0) {
+        // `val` is radius cubed, so a radius scale of `k` is `k^3` on val.
+        const k = Math.pow(allowed / biggest, 3);
+        for (const n of opened) n.val = Math.max((n.val ?? 1) * k, 1e-3);
       }
     }
     if (hub) {
@@ -1313,6 +1342,56 @@ export class GraphView extends ItemView {
     graph.d3Force("link")?.strength(0);
     // The live node array, handed over by d3 at `initialize`.
     let containNodes: any[] = [];
+
+    /**
+     * **Home: the fit is an attractor, not just a starting point (`G-20`).**
+     *
+     * Measured on the sidecar's own unfold output, 31 branches: mean radius
+     * 0.714 of the territory with sd 0.206, a coefficient of variation of
+     * 0.289 -- a uniform ball, against the 0.259 a uniform ball gives. The
+     * same unfolding in the pane read cv 0.13, so the ball was being turned
+     * into a shell here.
+     *
+     * Nothing was holding a node anywhere. `forceCollide` pushes a node off
+     * whatever it overlaps and has no opinion about the result; `contain`
+     * pushes it back at the boundary. So a node shoved out of the interior
+     * never came back and the equilibrium was every branch resting against
+     * the inside of its territory.
+     *
+     * Weak on purpose. It has to yield to collision locally or two nodes the
+     * projection put in the same place would stay there; it only has to win
+     * over many ticks of aimless shoving. Applied to every node that carries
+     * a fit coordinate, which is every node the sidecar placed.
+     */
+    const home: any = (alpha: number) => {
+      // **Floored, for the same reason `contain` is, and it is the whole
+      // point of this force.**
+      //
+      // `forceCollide` is a positional constraint: it acts at full strength
+      // on every tick regardless of alpha. An alpha-scaled restoring force
+      // therefore loses by construction -- it fades to nothing while the
+      // thing it is meant to balance keeps shoving. Measured with it
+      // alpha-scaled: the fit's uniform ball (mean/R 0.714, cv 0.289)
+      // settled at 0.778 and cv 0.153, with a median node not moving at all
+      // and the p90 moving 10.25 units. The median is blind to this, which
+      // is why `fit_drift_p50` read 0 through the whole defect.
+      // Tried floored, like `contain`, on the argument that collision is
+      // alpha-independent and an alpha-scaled restoring force must lose to
+      // it. Measured: the distribution did not move (cv 0.153 -> 0.149)
+      // and 37 of 133 nodes went off screen, because a force that never
+      // cools keeps feeding the camera a cloud that is still moving when it
+      // frames. The argument may still be right; this implementation of it
+      // is not, and a regression that big is not worth a 0.004 improvement.
+      const k = alpha * 0.55;
+      for (const n of containNodes) {
+        if (n.fitX === undefined) continue;
+        n.vx = (n.vx ?? 0) + (n.fitX - (n.x ?? 0)) * k;
+        n.vy = (n.vy ?? 0) + (n.fitY - (n.y ?? 0)) * k;
+        n.vz = (n.vz ?? 0) + (n.fitZ - (n.z ?? 0)) * k;
+      }
+    };
+    home.initialize = (nodes: any[]) => { containNodes = nodes || []; };
+    graph.d3Force("home", home);
     // **The nested layer is bounded, and that is what makes it nested.**
     //
     // `layout._room_around` gives every unfolding a territory -- 0.45 of the
@@ -1362,6 +1441,11 @@ export class GraphView extends ItemView {
     };
     contain.initialize = (nodes: any[]) => { containNodes = nodes || []; };
     graph.d3Force("contain", contain);
+    // Registered after `home` so both share the node array d3 hands over;
+    // either one's `initialize` sets it and they are called with the same
+    // list, but leaving that to registration order would be a trap for the
+    // next change.
+
 
     graph.d3Force("collide", forceCollide()
       // `G-21`: the drawn radius, plus a quarter of it as clearance. A
