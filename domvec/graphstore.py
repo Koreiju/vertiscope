@@ -284,6 +284,24 @@ def _same_content(chunks) -> tuple:
     return canonical, {cid: n for cid, n in counts.items() if n > 1}
 
 
+def _index_spellings(url: str):
+    """The other ways a directory index is written.
+
+    Only the pair that is genuinely one resource: a url ending in `/` and the
+    same url with `index.html` on it. Nothing else is assumed equivalent --
+    `/a` and `/a/` are different resources on plenty of servers and guessing
+    there would invent edges.
+    """
+    if not url:
+        return ()
+    if url.endswith("/"):
+        return (url + "index.html",)
+    for suffix in ("/index.html", "/index.htm", "/index.php"):
+        if url.endswith(suffix):
+            return (url[: -len(suffix) + 1],)
+    return ()
+
+
 class GraphStore:
     """Kuzu-backed unified store. Use as ``with GraphStore(path) as gs:``."""
 
@@ -1317,6 +1335,112 @@ class GraphStore:
     #: the UI at all, which is the most expensive way for one bad row to
     #: fail.
     unreadable_addresses: int = 0
+
+    def relink_pages(self, batch: int = 20000) -> dict:
+        """Recompute `LinksTo` across the whole corpus.
+
+        **Why this is not a repair of bad data.** Every edge
+        `_link_hyperlinks` wrote is correct; the ones it never wrote are the
+        problem, and it never wrote them because the target had not been
+        scanned yet. A link graph is a property of the corpus as a WHOLE, and
+        it was being computed per page at ingest time against whatever
+        happened to exist. Running it again with every page present is the
+        same rule applied to the complete set.
+
+        Reads only what the store already holds: a url-valued address, and
+        the chunk anchored to it. `MERGE` so existing edges are untouched and
+        a second run costs nothing.
+
+        Returns the counts that matter for judging it: how many url addresses
+        were considered, how many resolved to a page the store actually has,
+        and how many edges exist afterwards. An address pointing off-corpus
+        is not a failure and is counted separately, because that number is
+        mostly what a link graph over a hundred unrelated pages should be.
+        """
+        from .address import ContentAddress
+
+        stored = list(self.page_urls())
+        exact = set(stored)
+        by_canonical: Dict[str, str] = {}
+        for candidate in stored:
+            by_canonical.setdefault(canonical_url(candidate) or candidate,
+                                    candidate)
+            # **`/` and `/index.html` are the same page, and the store keeps
+            # whichever one it was scanned with.** A relative `../index.html`
+            # resolves to the second spelling while the page is stored under
+            # the first, so the edge was dropped as off-corpus -- 78 of them
+            # on books.toscrape alone, a site whose pages link almost only to
+            # each other. Registering both spellings costs one dict entry and
+            # is the difference between a site that draws as a connected
+            # component and one that draws as dust.
+            canonical = canonical_url(candidate) or candidate
+            for spelling in _index_spellings(canonical):
+                by_canonical.setdefault(spelling, candidate)
+
+        rows = self._rows(
+            "MATCH (c:Chunk)-[:Anchors]->(a:Address) "
+            "RETURN c.cid, c.url, a.akey, a.value")
+        out = {"url_addresses": 0, "off_corpus": 0, "self_links": 0,
+               "unreadable": 0, "pairs": 0, "before": 0, "after": 0}
+        out["before"] = self._rows(
+            "MATCH (:Chunk)-[r:LinksTo]->(:Page) RETURN count(r)")[0][0]
+
+        seen = set()
+        pairs = []
+        for cid, curl, akey, value in rows:
+            if not akey or not value:
+                continue
+            try:
+                address = ContentAddress.parse(akey)
+            except Exception:                       # noqa: BLE001
+                out["unreadable"] += 1
+                continue
+            if not address.is_url:
+                continue
+            out["url_addresses"] += 1
+            target = canonical_url(value, curl)
+            if not target:
+                continue
+            resolved = target if target in exact else by_canonical.get(target)
+            if resolved is None:
+                out["off_corpus"] += 1
+                # **What it failed to match, not just how often.** A link to
+                # a page the store HAS, spelled differently, is
+                # indistinguishable from a link to the open web unless the
+                # misses are looked at -- and the two want opposite fixes.
+                host = target.split("/")[2] if "//" in target else ""
+                out.setdefault("_hosts", {})
+                out["_hosts"][host] = out["_hosts"].get(host, 0) + 1
+                if len(out.setdefault("miss_sample", [])) < 12:
+                    out["miss_sample"].append(target)
+                continue
+            if resolved == curl:
+                out["self_links"] += 1
+                continue
+            key = (cid, resolved)
+            if key in seen:
+                continue
+            seen.add(key)
+            pairs.append({"cid": cid, "url": resolved})
+
+        for i in range(0, len(pairs), batch):
+            self._batch(
+                "UNWIND $rows AS r MATCH (c:Chunk {cid: r.cid}), "
+                "(p:Page {url: r.url}) MERGE (c)-[:LinksTo]->(p)",
+                pairs[i:i + batch],
+            )
+        out["pairs"] = len(pairs)
+        out["after"] = self._rows(
+            "MATCH (:Chunk)-[r:LinksTo]->(:Page) RETURN count(r)")[0][0]
+        # Hosts we hold pages for, that links to them still missed: the
+        # near-misses, which are a spelling defect rather than the open web.
+        held_hosts = {u.split("/")[2] for u in stored if "//" in u}
+        hosts = out.pop("_hosts", {})
+        out["missed_on_a_host_we_hold"] = sum(
+            n for h, n in hosts.items() if h in held_hosts)
+        out["missed_hosts_top"] = sorted(
+            hosts.items(), key=lambda kv: -kv[1])[:6]
+        return out
 
     def repair_blank_keys(self, batch: int = 20000) -> dict:
         """Rebuild `akey` in place for every address that lost it.

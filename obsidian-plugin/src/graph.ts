@@ -655,6 +655,7 @@ export class GraphView extends ItemView {
     this.graph.graphData(fresh);
     this.graph.d3ReheatSimulation();
     this.sayCounts();
+    void this.drawContainment();
   }
 
   /**
@@ -825,6 +826,40 @@ export class GraphView extends ItemView {
     this.billboardFrame = 0;
   }
 
+  /**
+   * Draw the containment the trie holds among everything on screen (`G-6`).
+   *
+   * **Asked for the whole drawn set, not per arrival.** Every route computed
+   * edges only among the nodes it was producing: `unfold` for its branches,
+   * `place_into` for one drain's chunks. An edge has two ends and they
+   * routinely arrive from different calls, so a chunk placed by a live
+   * capture that contains one an unfolding drew earlier got no edge from
+   * either. Measured: 9,257 `Contains` edges in the store, 99 drawn, and
+   * 110 of 189 nodes isolated.
+   */
+  private async drawContainment(): Promise<number> {
+    if (!this.graph) return 0;
+    const data: any = this.graph.graphData();
+    const cids = data.nodes
+      .filter((n: any) => n.level && n.level !== "page")
+      .map((n: any) => n.id)
+      .filter((id: string) => !String(id).startsWith("path:"));
+    if (cids.length < 2) return 0;
+    const urls = [...new Set(data.nodes
+      .filter((n: any) => n.url).map((n: any) => n.url))] as string[];
+    const got: any = await this.sidecar.edgesAmong(cids, urls);
+    const edges = (got && got.edges) || [];
+    if (!edges.length) return 0;
+    const fresh: any = this.graph.graphData();
+    const added = this.addEdges(fresh, edges);
+    if (added) {
+      this.graph.graphData(fresh);
+      this.graph.d3ReheatSimulation();
+      this.sayCounts();
+    }
+    return added;
+  }
+
   private async unfoldNode(node: any): Promise<void> {
     if (!this.graph || !node || !node.url) return;
     const got = await this.sidecar.unfold(node.url, node.path || "", this.space);
@@ -909,6 +944,7 @@ export class GraphView extends ItemView {
     this.graph.graphData(data);
     this.graph.d3ReheatSimulation();
     this.sayCounts();
+    void this.drawContainment();
   }
 
   /**
@@ -976,6 +1012,7 @@ export class GraphView extends ItemView {
     // force to act on, which is most of why the picture reads as a clump.
     out.edges = this.addEdges(data, edges);
     this.graph.graphData(data);
+    void this.drawContainment();
     this.graph.d3ReheatSimulation();
     this.sayCounts();
     return out;
@@ -1255,16 +1292,25 @@ export class GraphView extends ItemView {
     // ones, and a fixed length packed the large ones on top of each other.
     // Strength is modest and capped so a node with many children is not
     // torn apart by them.
-    const linkForce: any = graph.d3Force("link");
-    if (linkForce) {
-      linkForce
-        .distance((l: any) => {
-          const a = drawnRadius(l.source, relSize, media);
-          const b = drawnRadius(l.target, relSize, media);
-          return (a + b) * 2.2;
-        })
-        .strength(0.25);
-    }
+    // **Reverted to zero, and the reason is worth keeping.**
+    //
+    // I turned this up to 0.25 with a radius-derived distance, reasoning
+    // that `contain` now made a spring safe. It is safe -- nothing left its
+    // territory -- and it is still wrong. A spring pulls every child to the
+    // SAME distance from its parent, so a 31-branch unfolding was drawn to
+    // a shell of equal radius around its hub: a cloud of nodes around one
+    // url, which is what the reader saw and reported. Bounding the spring
+    // stopped it escaping; it did not stop it flattening the structure
+    // inside the bound.
+    //
+    // The local UMAP already says where these nodes go relative to each
+    // other, and that statement is the thing worth drawing. A spring
+    // overwrites it with "equidistant from the parent", which carries no
+    // information at all. So the force contributes nothing and the edges
+    // are drawn as lines over the fit -- which is what `strength(0)` meant
+    // the first time, and the comment that survived this round trip should
+    // now be read as load-bearing rather than cautious.
+    graph.d3Force("link")?.strength(0);
     // The live node array, handed over by d3 at `initialize`.
     let containNodes: any[] = [];
     // **The nested layer is bounded, and that is what makes it nested.**

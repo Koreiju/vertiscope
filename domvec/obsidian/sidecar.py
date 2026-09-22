@@ -522,6 +522,60 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send(500, {"error": "%s: %s" % (type(exc).__name__, exc)})
             return
 
+        # Recompute the page link graph over the whole corpus (`D-32`).
+        # Same justification as `/repair_keys`: the store is held open by
+        # this process, so doing it any other way means taking the plugin's
+        # backend away to fix the plugin.
+        # Containment among an arbitrary set of drawn chunks (`G-6`).
+        #
+        # Read-only. The pane sends what it is drawing and gets back the
+        # edges the trie holds between those nodes -- including pairs that
+        # arrived from different routes at different times, which is exactly
+        # what every per-call edge computation misses.
+        if route == "edges":
+            if self.workspace is None:
+                self._send(503, {"error": "no workspace"})
+                return
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(length) or b"{}")
+            except Exception as exc:                # noqa: BLE001
+                self._send(400, {"error": "bad body: %s" % exc})
+                return
+            cids = [c for c in (body.get("cids") or []) if c]
+            if not cids:
+                self._send(200, {"edges": [], "n": 0})
+                return
+            try:
+                drawn = set(cids)
+                urls = {c.url for c in self.workspace.store.chunks_by_cids(cids)} \
+                    if hasattr(self.workspace.store, "chunks_by_cids") \
+                    else {u for u in (body.get("urls") or [])}
+                if not urls:
+                    urls = set(self.workspace.pages())
+                out, seen = [], set()
+                for page in urls:
+                    for a, b in self.workspace.store.contains_within(page):
+                        if a in drawn and b in drawn and a != b \
+                                and (a, b) not in seen:
+                            seen.add((a, b))
+                            out.append({"source": a, "target": b})
+                self._send(200, {"edges": out, "n": len(out),
+                                 "asked": len(cids), "pages": len(urls)})
+            except Exception as exc:                # noqa: BLE001
+                self._send(500, {"error": "%s: %s" % (type(exc).__name__, exc)})
+            return
+
+        if route == "relink":
+            if self.workspace is None:
+                self._send(503, {"error": "no workspace"})
+                return
+            try:
+                self._send(200, self.workspace.store.relink_pages())
+            except Exception as exc:                # noqa: BLE001
+                self._send(500, {"error": "%s: %s" % (type(exc).__name__, exc)})
+            return
+
         if route == "place":
             try:
                 length = int(self.headers.get("Content-Length") or 0)
@@ -1044,6 +1098,21 @@ class _Handler(BaseHTTPRequestHandler):
                                  "MATCH (a:Address) "
                                  "WHERE a.akey IS NULL OR a.akey = '' "
                                  "RETURN count(a)"),
+                             # The edge sets, because "the trie is drawn"
+                             # is a claim about these and nothing else was
+                             # counting them. A projector showing 89 of 144
+                             # nodes isolated is either a layout that does
+                             # not ask or a store that does not hold them,
+                             # and only these two numbers tell them apart.
+                             "contains_edges": _one(
+                                 "MATCH (:Chunk)-[r:Contains]->(:Chunk) "
+                                 "RETURN count(r)"),
+                             "linksto_edges": _one(
+                                 "MATCH (:Chunk)-[r:LinksTo]->(:Page) "
+                                 "RETURN count(r)"),
+                             "linksto_between_stored_pages": _one(
+                                 "MATCH (c:Chunk)-[r:LinksTo]->(p:Page) "
+                                 "WHERE c.url <> p.url RETURN count(r)"),
                              "unreadable_addresses":
                                  __import__("domvec.graphstore",
                                             fromlist=["GraphStore"])

@@ -136,6 +136,17 @@ TOOLS: List[Dict] = [
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
+        "name": "relink",
+        "description": (
+            "Recompute the page-to-page link graph across the whole corpus. "
+            "A link edge is written at ingest against the pages that existed "
+            "then, and nothing revisits it, so a corpus built one page at a "
+            "time ends with almost none. Nothing is re-scanned: every "
+            "outgoing link is already a url-valued address in the store. "
+            "Idempotent."),
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
         "name": "confirm",
         "description": (
             "Run the live requirement checks against the RUNNING app and "
@@ -251,6 +262,7 @@ class DomvecMCP:
             "live_health": self._live_health,
             "wake": self._wake,
             "repair_keys": self._repair_keys,
+            "relink": self._relink,
             "graph_probe": self._graph_probe,
             "key_coverage": self._key_coverage,
             "confirm": self._confirm,
@@ -284,6 +296,9 @@ class DomvecMCP:
 
     def _repair_keys(self, args: Dict) -> Dict:
         return self.live().post("/repair_keys", {})
+
+    def _relink(self, args: Dict) -> Dict:
+        return self.live().post("/relink", {})
 
     def _graph_probe(self, args: Dict) -> Dict:
         return self.live().graph_probe()

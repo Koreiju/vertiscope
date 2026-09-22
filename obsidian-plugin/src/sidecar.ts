@@ -67,6 +67,29 @@ export class Sidecar {
   }
 
   /**
+   * The containment the trie holds among a set of nodes the pane is drawing.
+   *
+   * Asked for the WHOLE drawn set rather than per arrival, because an edge
+   * has two ends and they routinely arrive from different calls: 9,257
+   * edges in the store against 99 drawn, with 110 of 189 nodes isolated.
+   */
+  async edgesAmong(cids: string[], urls: string[] = []) {
+    const base = this.base().trim().replace(/\/+$/, "");
+    if (!base) return null;
+    try {
+      const res = await fetch(`${base}/edges`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cids, urls }),
+      });
+      return (await res.json()) as
+        { edges: { source: string; target: string }[]; n: number };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * The fitted 3D placement. Seconds on a first call, cached after.
    *
    * Fitted in Python, where the vectors, numpy and UMAP already are. A
