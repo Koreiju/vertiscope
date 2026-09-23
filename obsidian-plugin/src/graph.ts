@@ -265,6 +265,8 @@ function drawnRadius(node: any, relSize: number, media: boolean): number {
 export class GraphView extends ItemView {
   /** Put the camera back outside the cloud, looking at the middle. */
   private reframe: (() => void) | null = null;
+  /** Frame what an expansion just opened. Set in `draw`. */
+  private frameOn: ((subset: any[]) => void) | null = null;
   /**
    * Fetched pictures, shared across every instance of the view.
    *
@@ -908,6 +910,77 @@ export class GraphView extends ItemView {
     // BETWEEN levels come from: a parent and a grandchild are never in the
     // same step's result, so no single step could draw that edge.
     await this.drawContainment();
+    // **Not reframed on the expansion, and the reason is worth recording.**
+    //
+    // I added that, on the argument that 161 nodes inside a 48-unit ball
+    // are about 40 screen pixels and the reader needs to be closer. Moving
+    // the camera in made every node bigger by exactly the same factor as it
+    // made the gaps bigger: in a perspective projection the drawn radius
+    // and the distance between two centres both scale as 1/d, so the ratio
+    // between them -- which is what "overlapping" means -- is invariant
+    // under any camera move. Measured after zooming in: radius 23.2px, gap
+    // p50 -36.2px, 159 of 162 touching, and 98 nodes pushed off screen.
+    //
+    // Overlap is a property of the LAYOUT in world units and has to be
+    // fixed there. `fitRadiiToSpacing` is that fix.
+    this.fitRadiiToSpacing();
+  }
+
+  /**
+   * No node may be drawn wider than the room its neighbours leave it.
+   *
+   * **The invariant a readable picture actually needs**, and the one thing
+   * that was never enforced. `nodeRelSize` is global and computed from the
+   * page-level spread, so when an expansion drops 161 nodes into a 48-unit
+   * ball they keep the size that suited 97 pages across 900 units. Measured
+   * there: drawn radius about 14 world units against a nearest-neighbour
+   * spacing of about 14 -- diameters twice the spacing, so more than half
+   * the picture necessarily overlaps, at every zoom level.
+   *
+   * Zooming cannot help. In a perspective projection the drawn radius and
+   * the gap between two centres both scale as 1/distance, so their ratio is
+   * invariant under camera moves; a node that overlaps its neighbour does so
+   * at every magnification. That is why this is a layout pass and not a
+   * camera one.
+   *
+   * Each node is capped at 0.45 of its own nearest-neighbour distance, so a
+   * pair always shows a visible gap. Only ever SHRINKS: a node with room to
+   * spare keeps the size its `val` asked for, which is the statement about
+   * how many chunks it stands for, and that statement survives wherever the
+   * picture can afford it.
+   */
+  private fitRadiiToSpacing(): void {
+    if (!this.graph) return;
+    const data: any = this.graph.graphData();
+    const nodes = data.nodes as any[];
+    if (nodes.length < 2) return;
+    const relSize = (this.graph as any).nodeRelSize?.() ?? 1;
+    const media = this.media();
+    let changed = false;
+    for (let i = 0; i < nodes.length; i++) {
+      const a = nodes[i];
+      let nearest = Infinity;
+      for (let j = 0; j < nodes.length; j++) {
+        if (i === j) continue;
+        const b = nodes[j];
+        const d = Math.hypot((a.x ?? 0) - (b.x ?? 0),
+                             (a.y ?? 0) - (b.y ?? 0),
+                             (a.z ?? 0) - (b.z ?? 0));
+        if (d > 1e-6 && d < nearest) nearest = d;
+      }
+      if (!Number.isFinite(nearest)) continue;
+      const allowed = nearest * 0.45;
+      const drawn = drawnRadius(a, relSize, media);
+      if (drawn <= allowed || drawn <= 0) continue;
+      // `val` is radius cubed, so a radius scale of k is k^3 on val.
+      if (a.valFull === undefined) a.valFull = a.val;
+      a.val = Math.max((a.val ?? 1) * Math.pow(allowed / drawn, 3), 1e-4);
+      changed = true;
+    }
+    if (changed) {
+      this.graph.graphData(data);
+      this.sayCounts();
+    }
   }
 
   /** One patricia step, returning what it added. */
@@ -925,7 +998,8 @@ export class GraphView extends ItemView {
     // it as one handed the very first step a territory of 8 world units
     // instead of 48, which drew every node in the expansion at 2px.
     const parentRoom = node.level === "page" ? 0 : (node as any).room;
-    const inherit = parentRoom && (node as any).anchorPos
+    let inherit: { anchor: number[]; room: number } | null =
+      parentRoom && (node as any).anchorPos
       ? {
           anchor: [node.x ?? 0, node.y ?? 0, node.z ?? 0],
           // **Half the parent's radius, floored.** The first version
@@ -940,6 +1014,40 @@ export class GraphView extends ItemView {
           room: Math.max(parentRoom * 0.5, 8),
         }
       : null;
+    // **A page anchors its own unfolding.** The sidecar answers from
+    // `_PAGE_POS`, an in-process table written by whichever fit ran last,
+    // while `/layout` can serve a STORED layout built by an earlier one.
+    // Measured inside a single process: the layout and the pane agreed the
+    // page sat at [-203.5, -192.5, -111.5] and the unfold anchored at
+    // [-178.8, 248.8, 130.7] -- 504 units away, so every branch hung in the
+    // middle of the corpus rather than on its page. That is the whole of
+    // "nodes way too jumbled": the expansion measured 553 units across
+    // against a territory of 52.7, and only 10 of 161 nodes read as
+    // outside "their" room because the room was centred somewhere else.
+    //
+    // `D-22`'s family -- a stale fit answering for the wrong corpus -- and
+    // the fix that closes the family rather than the instance is to stop
+    // keeping two answers. The pane cannot drift from itself.
+    if (node.level === "page") {
+      const at = [node.fitX ?? node.x ?? 0,
+                  node.fitY ?? node.y ?? 0,
+                  node.fitZ ?? node.z ?? 0];
+      // `_room_around`'s own rule, against the pages actually on screen:
+      // 0.45 of the way to the nearest one is the largest radius that
+      // cannot reach a neighbour's centre.
+      let gap = Infinity;
+      for (const other of (this.graph.graphData() as any).nodes) {
+        if (other === node || other.level !== "page") continue;
+        const d = Math.hypot((other.fitX ?? 0) - at[0],
+                             (other.fitY ?? 0) - at[1],
+                             (other.fitZ ?? 0) - at[2]);
+        if (d > 1e-6 && d < gap) gap = d;
+      }
+      inherit = {
+        anchor: at,
+        room: Number.isFinite(gap) ? Math.max(gap * 0.45, 12) : 90,
+      };
+    }
     const got = await this.sidecar.unfold(
       node.url, node.path || "", this.space,
       inherit?.anchor, inherit?.room);
@@ -1830,6 +1938,47 @@ export class GraphView extends ItemView {
     // The same thing, on demand. A reader who has orbited into the middle of
     // the cloud has no way back otherwise, and "the graph went blank" is not
     // a state anyone should have to recognise.
+    /**
+     * Frame a SUBSET -- what an expansion just opened (`G-54`, `G-4`).
+     *
+     * **Why an expansion has to move the camera.** The nesting is
+     * scale-wise on purpose: a page's contents live inside that page's
+     * territory, which is a small part of the corpus by construction.
+     * Measured with eight pages open: 430 nodes, and `rfc9110`'s 161 of
+     * them inside a 48.6-unit ball while the cloud's radius is 472 -- about
+     * 40 screen pixels for 161 nodes. The median node overlapped its nearest
+     * neighbour by 3.3px and 333 of 430 touched one. No layout change fixes
+     * that, because the layout is right: the picture was showing the whole
+     * corpus while the reader was asking about one page.
+     *
+     * So opening a page frames it. `reframe` remains the way back out.
+     */
+    const frameOn = (subset: any[]) => {
+      if (!subset || subset.length < 2) return;
+      let cx = 0, cy = 0, cz = 0;
+      for (const n of subset) { cx += n.x ?? 0; cy += n.y ?? 0; cz += n.z ?? 0; }
+      cx /= subset.length; cy /= subset.length; cz /= subset.length;
+      let mx = 0, my = 0, mz = 0;
+      for (const n of subset) {
+        mx = Math.max(mx, Math.abs((n.x ?? 0) - cx));
+        my = Math.max(my, Math.abs((n.y ?? 0) - cy));
+        mz = Math.max(mz, Math.abs((n.z ?? 0) - cz));
+      }
+      const cam: any = graph.camera();
+      const vfov = ((cam?.fov ?? 50) * Math.PI) / 180;
+      const aspect = Math.max(0.01,
+        canvas.clientWidth / Math.max(1, canvas.clientHeight));
+      const hfov = 2 * Math.atan(Math.tan(vfov / 2) * aspect);
+      const d = (Math.max(mx / Math.tan(hfov / 2),
+                          my / Math.tan(vfov / 2)) + mz) * 1.18;
+      // **Never inside the subset.** The guard that was missing the first
+      // time a camera change emptied this pane.
+      const safe = Math.max(d, mz + Math.max(20, mz * 0.2));
+      graph.cameraPosition({ x: cx, y: cy, z: cz + safe },
+                           { x: cx, y: cy, z: cz }, 600);
+    };
+    this.frameOn = frameOn;
+
     this.reframe = () => {
       placed = null;              // an explicit reframe is always wanted
       graph.cameraPosition({ x: 0, y: 0, z: frameDistance() },
