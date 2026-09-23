@@ -644,8 +644,21 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send(503, {"error": "no workspace"})
                 return
             try:
-                self._send(200, place_into(self.workspace,
-                                           body.get("cids") or []))
+                started = time.perf_counter()
+                placed = place_into(self.workspace, body.get("cids") or [])
+                # **Profiled, because this is now where most placement
+                # happens.** The pane's placement queue asks here for chunks
+                # a capture could not place yet; before this was recorded,
+                # the profile showed zero placements while the queue was
+                # placing everything -- and the warmup's own test skipped,
+                # unable to see the path doing the work.
+                rec = {("place_" + k): v
+                       for k, v in (placed.get("timing") or {}).items()}
+                rec.update(total=round((time.perf_counter() - started) * 1000, 1),
+                           placed=len(placed.get("nodes") or []),
+                           unplaced=len(placed.get("unplaced") or []))
+                _profile("place", rec)
+                self._send(200, placed)
             except Exception as exc:                # noqa: BLE001
                 self._send(500, {"error": "%s: %s" % (type(exc).__name__, exc)})
             return
@@ -1097,6 +1110,12 @@ class _Handler(BaseHTTPRequestHandler):
             try:
                 placed = place_into(self.workspace, wanted) if wanted else {}
                 reply.update(placed)
+                # Placement's own parts, into the profile. `place` was one
+                # number and read 532 ms for ONE chunk after the warmup had
+                # removed the transform's cold cost -- so something else was
+                # in there, and a single figure could not say what.
+                for k, v in (placed.get("timing") or {}).items():
+                    phases["place_" + k] = v
                 session["pending"] = list(placed.get("unplaced") or [])
             except Exception as exc:                # noqa: BLE001
                 # Named and non-fatal. The capture succeeded and is stored;
@@ -1359,8 +1378,14 @@ class _Handler(BaseHTTPRequestHandler):
         if segments[0] == "profile":
             query = parse_qs(parts.query)
             if (query.get("reset") or [""])[0]:
+                # **Not the warmup.** It happens once per process, at startup,
+                # and a run reset is about the run. Clearing it made the
+                # warmup look as though it had never run -- which is what the
+                # test for it reported, about a warmup that had.
+                kept = {k: v for k, v in _PROFILE.items() if k == "warmup"}
                 _PROFILE.clear()
-                self._send(200, {"reset": True})
+                _PROFILE.update(kept)
+                self._send(200, {"reset": True, "kept": sorted(kept)})
                 return
             self._send(200, {k: list(v) for k, v in _PROFILE.items()})
             return
@@ -1635,6 +1660,24 @@ def serve(workspace, port: int = 8787, *, block: bool = True,
             target=_embed_forever, args=(workspace, stop),
             name="domvec-embed", daemon=True)
         _EMBED_THREAD.start()
+
+    # **Warm placement before a reader needs it.** UMAP's transform costs
+    # ~1.5 s on its first calls in a process and ~3 ms after; that cost used
+    # to land on whichever gesture came first after a restart. Off the
+    # request path, holding `_FIT_LOCK` only while a fit may be built -- the
+    # same lock every layout build takes, because concurrent UMAP fits were
+    # one of the hazards under `D-23`.
+    if workspace is not None:
+        def _warm():
+            try:
+                from .layout import _ensure_projection, warm_placement
+                with _FIT_LOCK:
+                    _ensure_projection(workspace)
+                _profile("warmup", warm_placement(workspace))
+            except Exception as exc:                # noqa: BLE001
+                _profile("warmup", {"warmed": False,
+                                    "why": "%s: %s" % (type(exc).__name__, exc)})
+        threading.Thread(target=_warm, name="domvec-warm", daemon=True).start()
 
     handler = type("_Bound", (_Handler,),
                    {"workspace": workspace, "enact_allowed": bool(enact),

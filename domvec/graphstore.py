@@ -1053,6 +1053,67 @@ class GraphStore:
         return StoredChunk(*r[:8], r[8] or "", r[9] or 1,
                            r[10] or "", r[11] or 1)
 
+    #: Below this many cids, one lookup per cid is cheaper than one scan.
+    #:
+    #: Measured on a 14,488-chunk store, placement's read, median of 5:
+    #:
+    #:        n    per-cid    UNWIND   list_contains
+    #:        1      1.1 ms   55.8 ms     16.7 ms
+    #:        4      4.3      56.8        19.8
+    #:       16     19.2      54.2        17.3
+    #:       64     73.9      58.6        20.6
+    #:      151    337.1      60.2        25.3
+    #:
+    #: Per-cid grows linearly at ~1.1-2.2 ms a cid; the scan is nearly flat
+    #: but pays for the whole table; `UNWIND ... MATCH {cid: id}` is never
+    #: best -- a flat ~55 ms that looks like plan cost, not lookup cost. The
+    #: crossover is near 16. **The scan's cost grows with the CORPUS**, so
+    #: this threshold is a fact about a store of this size and should be
+    #: re-measured when the store is an order of magnitude larger.
+    _PLACEMENT_SCAN_AT = 12
+
+    def chunks_for_placement(self, cids: Sequence[str]):
+        """Each cid's chunk and the vector placement should use, in `cids` order.
+
+        Returns ``[(cid, StoredChunk or None, vector or None)]``. The vector is
+        the group embedding for a group lead with more than one member, else
+        the chunk's own -- the same substitution `place_into` made with two
+        or three separate queries per cid, which on a 151-chunk page was 337
+        ms of placement's time spent on round trips.
+        """
+        cids = [c for c in dict.fromkeys(cids) if c]
+        if not cids:
+            return []
+        if len(cids) < self._PLACEMENT_SCAN_AT:
+            out = []
+            for cid in cids:
+                chunk = self.chunk(cid)
+                vector = (self.group_embedding(cid)
+                          if chunk is not None and chunk.group_n > 1 else None)
+                if not vector and chunk is not None:
+                    vector = self.embedding(cid)
+                out.append((cid, chunk, vector))
+            return out
+        rows = self._rows(
+            "MATCH (c:Chunk) WHERE list_contains($cids, c.cid) RETURN "
+            "c.cid, c.url, c.xpath, c.part, c.md, c.chars, c.line_count, "
+            "c.row, c.dup_of, c.dup_n, c.group_of, c.group_n, "
+            "c.embedding, c.group_embedding", {"cids": cids})
+        found = {}
+        for r in rows:
+            chunk = StoredChunk(*r[:8], r[8] or "", r[9] or 1,
+                                r[10] or "", r[11] or 1)
+            group = list(r[13]) if r[13] is not None else None
+            # `group_embedding()` treats an all-zero vector as absent; so
+            # does this, or a lead with an unset group vector would be placed
+            # at the origin instead of by its own embedding.
+            if group is not None and not any(group):
+                group = None
+            own = list(r[12]) if r[12] is not None else None
+            vector = group if (chunk.group_n > 1 and group) else own
+            found[r[0]] = (chunk, vector)
+        return [(cid,) + found.get(cid, (None, None)) for cid in cids]
+
     def set_groups(self, url: str, groups) -> int:
         """Record stage two's verdict for one page (`G-26`).
 

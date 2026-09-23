@@ -112,7 +112,22 @@ export class PipelineProfiler {
     const started = performance.now();
     const firstFrame = this.frame();
 
+    // **A deadline on the timer clock, not the frame clock.** The check
+    // below runs inside `requestAnimationFrame`, and Chrome SUSPENDS rAF in
+    // a hidden window -- so a timeout tested only inside it can never fire,
+    // and the trace stays open forever. Measured: the listener's own test
+    // got "never closed" where it expected "not_seen", with the window
+    // minimised. `finish` is idempotent, so whichever of the two closes the
+    // trace first wins and the other does nothing.
+    const deadline = window.setTimeout(() => {
+      if (t.done) return;
+      this.fact(t, "waited_ms", Math.round(performance.now() - started));
+      this.fact(t, "raf_suspended", this.frame() === firstFrame);
+      this.finish(t, "not_seen");
+    }, timeoutMs);
+
     const check = () => {
+      if (t.done) { window.clearTimeout(deadline); return; }
       const g = this.graphSource ? this.graphSource() : null;
       if (!g) return this.finish(t, "no_graph");
       const seen = this.visibleAmong(g, want);

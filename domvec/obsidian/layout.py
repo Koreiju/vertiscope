@@ -1719,6 +1719,50 @@ def unfold(workspace, url: str, path: str = "", space: str = "",
             "depth": depth, "branches": len(branches), "leaves": len(leaves)}
 
 
+def warm_placement(workspace, sample: int = 4) -> Dict:
+    """Run placement once, on real chunks, and throw the answer away.
+
+    **What this pays for, measured.** `projection.place` -- UMAP's
+    `transform` into the global fit -- is slow on its first calls in a
+    process and fast forever after: 1,552 ms, then 699, then 7. Placing the
+    SAME chunk three times in a fresh process gave 1,662 / 11 / 12 ms, so it
+    is process state and not the data; and warming on a DIFFERENT page's
+    vector moved the whole cost there (1,493 ms) and left the real first
+    placement at 126 ms. It is JIT compilation and the nearest-neighbour
+    index being built on first use.
+
+    Before this, the reader paid it. The profiler's "1,955 ms to place ONE
+    chunk" was exactly that: the first placement after a sidecar restart.
+
+    Real chunks rather than a synthetic vector, so every path placement
+    takes is exercised -- the transform, the local fit, the reads, the edge
+    query -- and warmed together. Nothing is written.
+    """
+    import time as _time
+    projection = _ensure_projection(workspace)
+    if projection is None:
+        return {"warmed": False, "why": "no fit to warm"}
+    cids: List[str] = []
+    try:
+        for chunk in workspace.store.chunks():
+            if chunk.redundant:
+                continue
+            vec = workspace.store.embedding(chunk.cid)
+            if vec and any(vec):
+                cids.append(chunk.cid)
+            if len(cids) >= sample:
+                break
+    except Exception as exc:                        # noqa: BLE001
+        return {"warmed": False, "why": "%s: %s" % (type(exc).__name__, exc)}
+    if not cids:
+        return {"warmed": False, "why": "no chunk has a vector yet"}
+    started = _time.perf_counter()
+    got = place_into(workspace, cids)
+    return {"warmed": True, "n": len(cids),
+            "ms": round((_time.perf_counter() - started) * 1000, 1),
+            "timing": got.get("timing")}
+
+
 def place_into(workspace, cids) -> Dict:
     """Place chunks captured after the fit, into the fit (`G-34`).
 
@@ -1754,9 +1798,16 @@ def place_into(workspace, cids) -> Dict:
     # A chunk with no vector yet comes back in `unplaced`, which is what it
     # is, and lands in the picture on a later tick. The caller is responsible
     # for starting that worker; `layout` has no business owning a thread.
+    import time as _time
+    #: Every part of placement, timed on its own. The profile measured 1,955
+    #: ms to place ONE dirty chunk on a 151-chunk page, and "it must be the
+    #: local UMAP fit" was a hypothesis; these are what test it.
+    timing: Dict[str, float] = {}
+    _t = _time.perf_counter()
     rows, meta, missing = [], [], []
-    for cid in wanted:
-        chunk = workspace.store.chunk(cid)
+    # One statement for the lot when there are enough of them -- see
+    # `GraphStore.chunks_for_placement` for the measured crossover.
+    for cid, chunk, vector in workspace.store.chunks_for_placement(wanted):
         if chunk is None or chunk.redundant:
             # A redundant chunk is deliberately not drawn -- `G-25` -- so it
             # is not "unplaced", it is placed as the copy it is.
@@ -1765,12 +1816,8 @@ def place_into(workspace, cids) -> Dict:
             # Likewise a member of a merge group: drawn as its lead (`G-27`),
             # not missing.
             continue
-        # The same substitution the fit makes: a group is placed by what it
-        # says, not by what its first member says.
-        vector = (workspace.store.group_embedding(cid)
-                  if chunk.group_n > 1 else None)
-        if not vector:
-            vector = workspace.store.embedding(cid)
+        # The same substitution the fit makes -- a group is placed by what
+        # it says, not by what its first member says -- is done in the read.
         if not vector or not any(vector):
             # Captured but not yet embedded. The embedding phase is
             # asynchronous by design (the goal says so), so this is the
@@ -1779,11 +1826,16 @@ def place_into(workspace, cids) -> Dict:
             continue
         rows.append(vector)
         meta.append(chunk)
+    timing["ms_read"] = round((_time.perf_counter() - _t) * 1000, 1)
+    timing["n_wanted"] = len(wanted)
+    timing["n_placeable"] = len(rows)
 
     nodes = []
     if rows:
         block = np.asarray(rows, dtype=np.float32)
+        _t = _time.perf_counter()
         coords, colours = projection.place(block)
+        timing["ms_transform"] = round((_time.perf_counter() - _t) * 1000, 1)
         if coords is None:
             return {"nodes": [], "unplaced": wanted, "stale": True,
                     "why": "the fit could not transform these"}
@@ -1810,8 +1862,13 @@ def place_into(workspace, cids) -> Dict:
         for i, chunk in enumerate(meta):
             if table.get(chunk.url) is not None:
                 by_url.setdefault(chunk.url, []).append(i)
+        _t = _time.perf_counter()
+        timing["local_fits"] = 0
+        timing["local_rows"] = 0
         for page_url, idx in by_url.items():
             anchor = np.asarray(table[page_url][:3], dtype=np.float32)
+            timing["local_fits"] += 1
+            timing["local_rows"] += len(idx)
             # The same territory an unfolding gets, for the same reason: a
             # chunk arriving from a live scan belongs inside its page, not
             # 90 units away on top of the page next to it.
@@ -1860,10 +1917,13 @@ def place_into(workspace, cids) -> Dict:
                     _room_around(chunk.url, space_name,
                                  np.asarray(at[:3], dtype=np.float32)))
 
+        timing["ms_local"] = round((_time.perf_counter() - _t) * 1000, 1)
+
     # A count, not the chunks. See `GraphStore.chunk_count`.
     # The containment edges among what was just placed (`G-6`). Chunks
     # arriving from a capture or a scoped ranking had none, so they drew as
     # loose dots with the structure the trie holds left undrawn.
+    _t = _time.perf_counter()
     placed_edges: List[Dict] = []
     drawn = {n["cid"] for n in nodes}
     for page in {n["url"] for n in nodes}:
@@ -1871,7 +1931,9 @@ def place_into(workspace, cids) -> Dict:
             if a in drawn and b in drawn and a != b:
                 placed_edges.append({"source": a, "target": b})
 
+    timing["ms_edges"] = round((_time.perf_counter() - _t) * 1000, 1)
     total = workspace.store.chunk_count()
-    return {"nodes": nodes, "edges": placed_edges, "unplaced": missing,
+    return {"timing": timing,
+            "nodes": nodes, "edges": placed_edges, "unplaced": missing,
             "stale": projection.stale(total),
             "fitted_n": projection.fitted_n, "n": total}
