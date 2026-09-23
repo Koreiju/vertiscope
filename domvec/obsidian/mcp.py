@@ -147,6 +147,30 @@ TOOLS: List[Dict] = [
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
+        "name": "pipeline_profile",
+        "description": (
+            "Time every stage of the live pipeline from the page to the "
+            "pixels: the guest's fold, the drain bridge, the capture round "
+            "trip, the sidecar's own phases (decode, trie absorb, markdown "
+            "render, lock wait, store and its parts, UMAP placement), "
+            "transport, the graph's absorb, and the moment a listener SEES "
+            "the node drawn in the 3D view. Drives a real workload: navigates "
+            "the browser cell and scrolls so the MutationObserver folds. "
+            "Returns percentiles per stage, each drain's outcome, the "
+            "background embedder's own timings, and consistency checks."),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string",
+                        "description": "Page to drive; blank = current page"},
+                "seconds": {"type": "number",
+                            "description": "How long to drive it (default 25)"},
+                "scrolls": {"type": "integer",
+                            "description": "Scroll steps (default 6)"},
+            },
+        },
+    },
+    {
         "name": "confirm",
         "description": (
             "Run the live requirement checks against the RUNNING app and "
@@ -261,6 +285,7 @@ class DomvecMCP:
             "ui_act": self._ui_act,
             "live_health": self._live_health,
             "wake": self._wake,
+            "pipeline_profile": self._pipeline_profile,
             "repair_keys": self._repair_keys,
             "relink": self._relink,
             "graph_probe": self._graph_probe,
@@ -293,6 +318,12 @@ class DomvecMCP:
 
     def _wake(self, args: Dict) -> Dict:
         return self.live().wake()
+
+    def _pipeline_profile(self, args: Dict) -> Dict:
+        return self.live().pipeline_profile(
+            url=str(args.get("url") or ""),
+            seconds=float(args.get("seconds") or 25.0),
+            scrolls=int(args.get("scrolls") or 6))
 
     def _repair_keys(self, args: Dict) -> Dict:
         return self.live().post("/repair_keys", {})

@@ -750,6 +750,105 @@ class Live:
                 {"nodes_with_a_picture": with_picture,
                  "billboards": g.get("billboards"), "status": status})
 
+    # -- the pipeline profile ------------------------------------------------
+
+    def pipeline_profile(self, url: str = "", seconds: float = 25.0,
+                         scrolls: int = 6) -> Dict:
+        """Drive live capture on a page and time every stage to the pixels.
+
+        **A real workload, not a synthetic one.** It navigates the browser
+        cell, lets the live drain loop run, and scrolls the page so the
+        MutationObserver has something to fold -- which is what a reader
+        does. The pane records each drain in its own clock and closes it when
+        a listener sees the node drawn; the sidecar records its phases in its
+        clock. This reads both back and joins them on the trace id.
+
+        **Both halves are reset first**, so the numbers describe this run and
+        not whatever the session did before it.
+
+        Returns per-stage percentiles, the outcome of every drain, the
+        sidecar's own view including the background embedder it never
+        reported before, and the consistency checks that decide whether the
+        numbers can be trusted at all.
+        """
+        import time
+        self.wake()
+        self.evaluate("window.__domvec && window.__domvec.profile.reset()")
+        try:
+            self.get("/profile?reset=1")
+        except Exception:                           # noqa: BLE001
+            pass
+
+        if url:
+            self.act("navigate", url)
+        # Let the first drain land, then give the observer work to do.
+        deadline = time.time() + seconds
+        step = max(1.0, seconds / max(scrolls + 1, 1))
+        time.sleep(min(step, 4.0))
+        for i in range(scrolls):
+            if time.time() > deadline:
+                break
+            try:
+                self.evaluate(
+                    "(async()=>{const l=app.workspace.getLeavesOfType("
+                    "'domvec-browser-view')[0];const wv=l&&l.view&&l.view.webview;"
+                    "if(!wv)return 0;return await wv.executeJavaScript("
+                    "'window.scrollBy(0, Math.round(window.innerHeight*0.9)); "
+                    "window.scrollY');})()")
+            except Exception:                       # noqa: BLE001
+                pass
+            time.sleep(step)
+        # Let the in-flight listeners close; each waits up to 8s.
+        time.sleep(max(0.0, min(9.0, deadline - time.time() + 9.0)))
+
+        pane = self.json_eval(
+            "JSON.stringify({summary: window.__domvec.profile.summary(),"
+            " traces: window.__domvec.profile.traces(60)})") or {}
+        try:
+            side = self.get("/profile")
+        except Exception as exc:                    # noqa: BLE001
+            side = {"error": str(exc)[:120]}
+
+        def pct(values, q):
+            v = sorted(x for x in values if isinstance(x, (int, float)))
+            return v[min(len(v) - 1, int(q * (len(v) - 1)))] if v else None
+
+        def ring(name, field):
+            rows = side.get(name) or []
+            vals = [r.get(field) for r in rows]
+            return {"n": len(rows), "p50": pct(vals, .5), "p90": pct(vals, .9),
+                    "max": pct(vals, 1.0)}
+
+        traces = pane.get("traces") or []
+        # **Consistency.** A sidecar total larger than the round trip that
+        # contained it is impossible; if it happens the clocks or the join
+        # are wrong and nothing below should be believed.
+        inconsistent = [t["id"] for t in traces
+                        if t.get("facts", {}).get("clock_inconsistent")]
+        # Every traced drain must end in a named outcome. One left open means
+        # a path through the code that the profiler does not close.
+        unnamed = [t["id"] for t in traces if not t.get("facts", {}).get("outcome")]
+
+        return {
+            "page": url or "(current)",
+            "pane": pane.get("summary"),
+            "sidecar": {
+                "captures": ring("capture", "total"),
+                "capture_lock_wait": ring("capture", "lock_wait"),
+                "embed_batches": ring("embed", "ms"),
+                "embed_lock_wait": ring("embed", "lock_wait_ms"),
+                "embedded_per_batch": ring("embed", "embedded"),
+                "aggregate": ring("aggregate", "ms"),
+            },
+            "checks": {
+                "traces": len(traces),
+                "clock_inconsistent": inconsistent,
+                "open_outcomes": unnamed,
+                "trusted": not inconsistent and not unnamed and bool(traces),
+            },
+            "sample": traces[-3:],
+        }
+
     def health(self) -> Dict:
         """Both halves, in one answer, because either can be the problem."""
         out: Dict[str, object] = {}

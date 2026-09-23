@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import threading
+from collections import deque
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Dict, List, Optional
@@ -78,6 +79,27 @@ _FIT_LOCK = threading.Lock()
 #: Raised when there are chunks waiting for vectors.
 _EMBED_WANTED = threading.Event()
 
+#: Pipeline profile, sidecar side. Bounded so a long session cannot grow it.
+#:
+#: Rings rather than aggregates, because a percentile has to be taken over
+#: the samples and an average hides exactly the tail the profiler is for.
+_PROFILE_CAP = 400
+_PROFILE: Dict[str, "deque"] = {}
+
+
+def _profile(kind: str, record: Dict) -> None:
+    """Append one timed record. Never raises: a profiler that can fail a
+    capture has made the thing it measures less reliable."""
+    try:
+        ring = _PROFILE.get(kind)
+        if ring is None:
+            ring = _PROFILE[kind] = deque(maxlen=_PROFILE_CAP)
+        record = dict(record)
+        record["at"] = round(time.time(), 3)
+        ring.append(record)
+    except Exception:                               # noqa: BLE001
+        pass
+
 #: The background embedder, started by `serve()` when a workspace has an
 #: embedder to run. One thread, not a pool: the encoder is the bottleneck and
 #: two of them would contend for the same GPU.
@@ -97,8 +119,14 @@ def _aggregate_due(workspace) -> None:
     for url in due:
         _AGGREGATE_AFTER.pop(url, None)
         try:
+            asked = time.perf_counter()
             with _WORK_LOCK:
+                got_lock = time.perf_counter()
                 workspace.aggregate(url)
+            _profile("aggregate", {
+                "lock_wait_ms": round((got_lock - asked) * 1000, 1),
+                "ms": round((time.perf_counter() - got_lock) * 1000, 1),
+            })
         except Exception:                           # noqa: BLE001
             # A page that failed to cluster is a page with the groups it had.
             # It must not stop the worker, or nothing would ever be embedded
@@ -124,7 +152,10 @@ def _embed_forever(workspace, stop: threading.Event) -> None:
         _EMBED_WANTED.clear()
         while not stop.is_set():
             try:
+                asked = time.perf_counter()
                 with _WORK_LOCK:
+                    got_lock = time.perf_counter()
+                    before = len(workspace.vectors)
                     workspace.flush_vectors(limit=_EMBED_BATCH)
                     # The QUEUE's length, not the flush's return value.
                     # `flush_vectors` answers with `vectors.report()`, which
@@ -135,6 +166,13 @@ def _embed_forever(workspace, stop: threading.Event) -> None:
                     # encoder, taking and dropping the lock, starving every
                     # request behind it.
                     remaining = len(workspace.vectors)
+                done = time.perf_counter()
+                _profile("embed", {
+                    "lock_wait_ms": round((got_lock - asked) * 1000, 1),
+                    "ms": round((done - got_lock) * 1000, 1),
+                    "embedded": max(0, before - remaining),
+                    "queue_after": remaining,
+                })
             except Exception:                       # noqa: BLE001
                 # A failed batch leaves its chunks queued and unembedded,
                 # which the pane already reports as awaiting a vector. It must
@@ -983,7 +1021,15 @@ class _Handler(BaseHTTPRequestHandler):
             mark = time.perf_counter()
 
             if dirty:
+                # **The wait is not the work.** `_WORK_LOCK` is shared with
+                # the embed worker (per 64-chunk batch) and aggregation (per
+                # page), so a drain arriving mid-batch waits for someone
+                # else's job -- and that wait was inside `store`, which then
+                # read as a slow database.
+                asked = time.perf_counter()
                 with _WORK_LOCK:
+                    phases["lock_wait"] = round(
+                        (time.perf_counter() - asked) * 1000, 1)
                     _written, counts = self.workspace.ingest_chunks(
                         url, dirty, complete=False)
                 # The store's own breakdown, carried up. `store` was 96% of a
@@ -991,6 +1037,11 @@ class _Handler(BaseHTTPRequestHandler):
                 if isinstance(counts, dict):
                     phases.update({k: v for k, v in counts.items()
                                    if str(k).startswith("ms_")})
+                    # A size, not a time, but it is what makes `ms_mirror`
+                    # readable: the cost of the checkpoint is proportional
+                    # to how much of the page it rewrote.
+                    if "mirror_rows_written" in counts:
+                        phases["mirror_rows"] = counts["mirror_rows_written"]
                 # There are chunks without vectors now. The worker embeds
                 # them; this request does not wait for it.
                 _EMBED_WANTED.set()
@@ -1062,6 +1113,15 @@ class _Handler(BaseHTTPRequestHandler):
             pass
         phases["place"] = round((time.perf_counter() - place_mark) * 1000, 1)
         reply["ms"] = round((time.perf_counter() - started) * 1000, 1)
+        # Carried back so the pane can correlate this reply with the drain
+        # that produced it; the sidecar has no other way to know which one.
+        if body.get("trace"):
+            reply["trace"] = body.get("trace")
+        _profile("capture", dict(phases, total=reply["ms"],
+                                 dirty=len(dirty), url=url,
+                                 placed=len(reply.get("nodes") or []),
+                                 unplaced=len(reply.get("unplaced") or []),
+                                 trace=body.get("trace") or ""))
         self._send(200, reply)
 
     def _layout_count(self) -> int:
@@ -1294,6 +1354,17 @@ class _Handler(BaseHTTPRequestHandler):
         # EMPTY markdown was invisible to the very sampler used to look for
         # empty markdown. 11,542 of 14,313 chunks were in that state and the
         # search-based probes reported nothing wrong.
+        # The sidecar's half of the pipeline profile, from its own clock.
+        # `?reset=1` empties the rings so a run measures only itself.
+        if segments[0] == "profile":
+            query = parse_qs(parts.query)
+            if (query.get("reset") or [""])[0]:
+                _PROFILE.clear()
+                self._send(200, {"reset": True})
+                return
+            self._send(200, {k: list(v) for k, v in _PROFILE.items()})
+            return
+
         if segments[0] == "chunk_stats":
             query = parse_qs(parts.query)
             url = (query.get("url") or [""])[0]

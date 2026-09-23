@@ -216,8 +216,8 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
         // sets uniformly; a panel opened after the change reads the store
         // fresh and could hardly be wrong, and that is exactly what hid the
         // one that was already open being stale.
-        (nodes, edges) => {
-          this.eachGraph((view) => view.absorb(nodes, edges));
+        (nodes, edges, trace) => {
+          this.eachGraph((view) => view.absorb(nodes, edges, trace));
           const cids = nodes.map((n) => n.cid);
           this.eachChunkPanel((view) => void view.refreshIf(cids));
         },

@@ -399,8 +399,12 @@ class Workspace:
         # What reconciliation needs is this url's current chunks, so a queued
         # write for a DIFFERENT page cannot affect the answer. Only a pending
         # write to this same url has to be applied first.
+        _timed: Dict[str, float] = {}
+        _t = time.perf_counter()
         if any(job["url"] == url for job in self._pending):
             self.settle()
+        _timed["ms_settle"] = round((time.perf_counter() - _t) * 1000, 1)
+        _t = time.perf_counter()
         store = self._store
         if complete:
             superseded = ({c.cid for c in store.chunks(url)}
@@ -411,6 +415,7 @@ class Workspace:
             self.freq.remove(cid)
 
         rows = {c.cid: self.freq.add(c.cid, c.markdown) for c in chunks}
+        _timed["ms_freq"] = round((time.perf_counter() - _t) * 1000, 1)
 
         # Queued, not embedded. This is a write path — the sensor calls it
         # once per drain, so embedding here made vectorisation a per-delta
@@ -425,10 +430,12 @@ class Workspace:
         # The page node must exist before links can resolve to it.
         # The page node is written now even when the rest is queued: it is
         # one row, and the edges the deferred write creates resolve to it.
+        _t = time.perf_counter()
         store.conn.execute(
             "MERGE (p:Page {url: $url}) SET p.title = $title",
             {"url": url, "title": title},
         )
+        _timed["ms_page"] = round((time.perf_counter() - _t) * 1000, 1)
         job = {"url": url, "addresses": addresses, "chunks": chunks,
                "rows": rows, "embeddings": vectors or None, "title": title,
                "root_hash": root_hash, "complete": complete}
@@ -459,6 +466,7 @@ class Workspace:
         # 16 against 537. The mirror is meant to be the checkpoint the store
         # can be rebuilt from, so a partial write must add to it, not define
         # it.
+        _t = time.perf_counter()
         mirror = self.mirror_path(url)
         if complete:
             write_jsonl(chunks, mirror)
@@ -468,6 +476,14 @@ class Workspace:
             for cid in (removed or ()):
                 merged.pop(cid, None)
             write_jsonl(list(merged.values()), mirror)
+        # **The mirror is O(page) on every delta.** It re-reads the page's
+        # whole checkpoint, folds the changed chunks in and writes the whole
+        # thing back -- 1,097 rows rewritten to record 6 on a long page. It
+        # is timed on its own so the profile can say how much of `store` that
+        # is, rather than it hiding inside the database's number.
+        _timed["ms_mirror"] = round((time.perf_counter() - _t) * 1000, 1)
+        _timed["mirror_rows_written"] = (
+            len(chunks) if complete else len(merged))
         self._index = None      # ranks are stale once the graph changed
         # A write that describes a whole page is a settled unit, and flushing
         # it is a batch — one embedder call for the page, which is what the
@@ -489,6 +505,8 @@ class Workspace:
                 self.aggregate(url)
             except Exception:                       # noqa: BLE001
                 pass
+        if isinstance(counts, dict):
+            counts.update(_timed)
         return chunks, counts
 
     def page_url(self, url: str) -> str:

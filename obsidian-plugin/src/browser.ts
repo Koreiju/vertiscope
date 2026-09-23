@@ -27,6 +27,7 @@
  * that has never seen the site (`G-40`).
  */
 
+import { profiler } from "./profile";
 import { Component, ItemView, MarkdownRenderer, WorkspaceLeaf } from "obsidian";
 
 import { LayoutNode } from "./graph";
@@ -134,6 +135,17 @@ export class BrowserView extends ItemView {
   /** Fetched once per app run and shared: it is one file on disk and it does
    *  not change under a running plugin. */
   private static sensorSource = "";
+  /** The sensor's `repairMs` is cumulative; this is the last value
+   *  seen, so each drain's `fold` stage is its own share. */
+  private lastRepairMs: number | undefined;
+  /**
+   * Chunks stored but not yet placeable, waiting on the embedder -- and the
+   * trace each came from, so the profile's end-to-end includes the wait.
+   * Keyed by cid; a later drain that re-dirties a chunk replaces its entry.
+   */
+  private pendingPlace = new Map<string, { trace: string; since: number }>();
+  private placeTimer = 0;
+  private placing = false;
   private webview: any = null;
   private face: Face = "browser";
   private address!: HTMLInputElement;
@@ -196,7 +208,8 @@ export class BrowserView extends ItemView {
 
   constructor(leaf: WorkspaceLeaf, private sidecar: Sidecar,
               private onChunks: (nodes: LayoutNode[],
-                                 edges?: { source: string; target: string }[])
+                                 edges?: { source: string; target: string }[],
+                                 trace?: string)
                 => void = () => {},
               //: What the reader has scrolled to, for the projector to
               //: open the page to (`G-55`, `G-56`).
@@ -615,20 +628,91 @@ export class BrowserView extends ItemView {
    * append-only, so out-of-order drains do not merely arrive late, they
    * arrive unreadable.
    */
+  /**
+   * Hold chunks that are stored but not yet placeable, and keep asking.
+   *
+   * On its own timer rather than the drain's, because the two are
+   * independent: a drain happens when the page mutates, a chunk becomes
+   * placeable when the encoder finishes, and tying the second to the first
+   * meant a static page's last chunks were never drawn.
+   */
+  private enqueuePlacement(cids: string[], traceId: string) {
+    const now = performance.now();
+    for (const cid of cids) this.pendingPlace.set(cid, { trace: traceId, since: now });
+    if (!this.placeTimer) {
+      this.placeTimer = window.setInterval(() => void this.drainPlacement(), 250);
+    }
+  }
+
+  private async drainPlacement(): Promise<void> {
+    if (this.placing) return;
+    if (!this.pendingPlace.size) {
+      window.clearInterval(this.placeTimer);
+      this.placeTimer = 0;
+      return;
+    }
+    this.placing = true;
+    const prof = profiler();
+    try {
+      // Give up on anything that has waited a long time: a chunk whose
+      // vector never comes would otherwise keep this loop alive forever.
+      const now = performance.now();
+      for (const [cid, v] of this.pendingPlace) {
+        if (now - v.since > 60000) {
+          this.pendingPlace.delete(cid);
+          const t = prof.get(v.trace);
+          if (t) { prof.fact(t, "why", "vector never arrived"); prof.finish(t, "not_seen"); }
+        }
+      }
+      const cids = [...this.pendingPlace.keys()];
+      if (!cids.length) return;
+      const got: any = await this.sidecar.place(cids);
+      const nodes = ((got && got.nodes) || []) as LayoutNode[];
+      if (!nodes.length) return;
+      // Group what landed by the trace that asked for it, so each drain's
+      // end-to-end closes on ITS chunks appearing.
+      const byTrace = new Map<string, LayoutNode[]>();
+      for (const n of nodes) {
+        const entry = this.pendingPlace.get(n.cid);
+        if (!entry) continue;
+        this.pendingPlace.delete(n.cid);
+        const t = prof.get(entry.trace);
+        if (t) prof.stage(t, "vector_wait", now - entry.since);
+        const list = byTrace.get(entry.trace) || [];
+        list.push(n);
+        byTrace.set(entry.trace, list);
+      }
+      const edges = ((got && got.edges) || []) as { source: string; target: string }[];
+      for (const [traceId, list] of byTrace) this.onChunks(list, edges, traceId);
+    } finally {
+      this.placing = false;
+    }
+  }
+
   private async tick(): Promise<void> {
     if (!this.live || this.draining || !this.webview) return;
     const wv = this.webview;
     const url = wv.getURL();
     if (!url || url === "about:blank" || wv.isLoading()) return;
-    if (url !== this.session) { await this.pageChanged(url); return; }
+    if (url !== this.session) {
+      this.lastRepairMs = undefined;
+      await this.pageChanged(url);
+      return;
+    }
 
     this.draining = true;
+    // One trace per drain, closed by the graph when a node from it is seen
+    // on screen -- or by one of the early returns below, each of which is
+    // a real outcome worth counting rather than a trace to lose.
+    const prof = profiler();
+    const trace = prof.begin("live", url);
     try {
       if (!BrowserView.sensorSource) {
         const got = await this.sidecar.sensor();
         if (!got || !got.source) return;
         BrowserView.sensorSource = got.source;
       }
+      const drainStart = performance.now();
       const payload = await wv.executeJavaScript(`(function () {
         if (!window[${JSON.stringify(HANDLE)}]) {
           var h = (${BrowserView.sensorSource})(
@@ -642,12 +726,30 @@ export class BrowserView extends ItemView {
       // Nothing changed. Not posted: an empty delta costs a round trip, a
       // decode and a store write to say "no", and a reader idling on a static
       // page would pay it once a second forever.
-      if (!payload || !(payload.chunks || []).length) return;
+      prof.stage(trace, "drain", performance.now() - drainStart);
+      // The guest's own fold time for this drain, from its own clock. It is
+      // INSIDE `drain`, and the difference is the executeJavaScript bridge.
+      const repair = payload && payload.stats ? payload.stats.repairMs : undefined;
+      if (typeof repair === "number") {
+        prof.stage(trace, "fold", repair - (this.lastRepairMs ?? 0));
+        this.lastRepairMs = repair;
+      }
+      if (!payload || !(payload.chunks || []).length) {
+        prof.fact(trace, "why", "empty drain");
+        prof.finish(trace, "nothing_placed");
+        return;
+      }
+      prof.fact(trace, "chunks_in_drain", (payload.chunks || []).length);
 
       // One round trip: fold, store, and place, because per drain they are
       // one question. The second call carried a list of cids the server had
       // just computed and was handing straight back.
-      const reply = await this.sidecar.capture(url, { payload, place: true });
+      const captureStart = performance.now();
+      const reply = await this.sidecar.capture(
+        url, { payload, place: true, trace: trace.id });
+      const captureMs = performance.now() - captureStart;
+      prof.stage(trace, "capture", captureMs);
+      if (reply) prof.sidecar(trace, reply.phases, reply.ms, captureMs);
       if (!reply || reply.error) {
         this.say(`capture: ${reply ? reply.error : "no reply"}`);
         return;
@@ -655,15 +757,35 @@ export class BrowserView extends ItemView {
       const cids = (reply.dirty_cids || []) as string[];
       if (!cids.length) {
         this.say(`live · ${reply.addresses} addresses`);
+        prof.fact(trace, "why", "nothing dirty");
+        prof.finish(trace, "nothing_placed");
         return;
       }
       const nodes = (reply.nodes as LayoutNode[]) || [];
+      prof.fact(trace, "dirty", cids.length);
+      prof.fact(trace, "placed", nodes.length);
+      prof.fact(trace, "unplaced", (reply.unplaced || []).length);
+      // Anything stored but not yet placeable goes on the placement queue,
+      // which asks again on its own timer until the encoder has caught up.
+      // Before this, those chunks waited for the next DRAIN -- and a page
+      // that had finished loading never drained again, so they never
+      // appeared at all.
+      const unplacedCids = (reply.unplaced || []) as string[];
+      if (unplacedCids.length) this.enqueuePlacement(unplacedCids, trace.id);
+      if (!nodes.length) {
+        // The trace stays open: `enqueuePlacement` will close it when the
+        // queue places these, so end-to-end includes the encoder's time.
+        prof.fact(trace, "why", "awaiting vectors");
+        prof.fact(trace, "queued_for_placement", unplacedCids.length);
+        if (!unplacedCids.length) prof.finish(trace, "nothing_placed");
+      }
       // **With the edges.** `place_into` computes the containment among
       // what it placed and this dropped them, so every live-captured
       // chunk drew as a loose dot: 793 chunk nodes, 16 with an edge.
       if (nodes.length) {
         this.onChunks(nodes,
-          (reply.edges as { source: string; target: string }[]) || []);
+          (reply.edges as { source: string; target: string }[]) || [],
+          trace.id);
       }
       // "Unplaced" has two causes and they are not the same news: a chunk
       // seconds old has no vector yet and will get one, while a workspace

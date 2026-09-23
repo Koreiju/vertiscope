@@ -229,6 +229,13 @@ export interface ChunkPreview {
 /** What `POST /capture` says the browser cell's scan produced (`G-47`). */
 export interface CaptureResult {
   url?: string;
+  /** The sidecar's own per-phase timings for this capture, ms, its
+   *  clock: decode, absorb, render, lock_wait, store and its ms_*
+   *  parts, place. Durations only -- they cannot be subtracted from
+   *  this renderer's clock, only checked against it. */
+  phases?: Record<string, number>;
+  /** Echo of the profiler trace id the drain was sent with. */
+  trace?: string;
   passno?: number;
   addresses?: number;
   chunks?: number;

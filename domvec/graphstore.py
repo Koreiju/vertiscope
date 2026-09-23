@@ -424,6 +424,10 @@ class GraphStore:
         """
         rows = rows or {}
         embeddings = embeddings or {}
+        # Everything from here to `_reconcile` -- the anchor `before` set and
+        # the `held` address lookup -- ran before any timer started, so no
+        # bucket saw it. Timed as `ms_prequery`.
+        _t_pre = time.perf_counter()
         counts = {"addresses": 0, "chunks": 0, "anchors": 0,
                   "contains": 0, "links": 0,
                   "chunks_removed": 0, "addresses_removed": 0}
@@ -516,6 +520,7 @@ class GraphStore:
         else:
             unchanged_addresses = set()
 
+        counts["ms_prequery"] = round((time.perf_counter() - _t_pre) * 1000, 1)
         _t = time.perf_counter()
         counts.update(self._reconcile(url, chunks, addresses,
                                       complete=complete,

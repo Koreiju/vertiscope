@@ -32,6 +32,7 @@
 
 import type { App } from "obsidian";
 import { uiState } from "./uistate";
+import { profiler } from "./profile";
 
 export interface TraceCall {
   /** Milliseconds since the recording started. */
@@ -430,6 +431,12 @@ export function installHarness(app: App, sidecarBase: () => string) {
 
   w.__domvec = {
     ui: () => uiState(app),
+    /** The pipeline profiler: traces from the page to the pixels. */
+    profile: {
+      summary: () => profiler().summary(),
+      traces: (n = 20) => profiler().list().slice(-n),
+      reset: () => { profiler().reset(); return true; },
+    },
     trace: {
       start: (cap?: number) => trace.start(cap),
       stop: () => trace.stop(),

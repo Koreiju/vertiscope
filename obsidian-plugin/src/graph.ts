@@ -15,6 +15,7 @@
  * and draws them.
  */
 
+import { profiler } from "./profile";
 import { ItemView, WorkspaceLeaf, requestUrl } from "obsidian";
 import ForceGraph3D, { ForceGraph3DInstance } from "3d-force-graph";
 // `d3-force-3d` is what `3d-force-graph` runs its simulation on, so this is
@@ -1191,10 +1192,17 @@ export class GraphView extends ItemView {
    * would leave a node standing where its old meaning used to be.
    */
   absorb(incoming: LayoutNode[],
-         edges?: { source: string; target: string }[]):
+         edges?: { source: string; target: string }[],
+         traceId?: string):
       { added: number; moved: number; edges: number } {
     const out = { added: 0, moved: 0, edges: 0 };
-    if (!this.graph || !incoming || !incoming.length) return out;
+    const prof = profiler();
+    const trace = traceId ? prof.get(traceId) : undefined;
+    const absorbStart = performance.now();
+    if (!this.graph || !incoming || !incoming.length) {
+      if (trace) prof.finish(trace, this.graph ? "nothing_placed" : "no_graph");
+      return out;
+    }
     const data: any = this.graph.graphData();
     const byId = new Map<string, any>(data.nodes.map((n: any) => [n.id, n]));
 
@@ -1236,6 +1244,14 @@ export class GraphView extends ItemView {
     out.edges = this.addEdges(data, edges);
     this.graph.graphData(data);
     void this.drawContainment();
+    // `absorb` ends here; the listener takes it from the scene.
+    if (trace) {
+      const absorbEnd = performance.now();
+      prof.stage(trace, "absorb", absorbEnd - absorbStart);
+      prof.fact(trace, "absorbed", out.added);
+      prof.fact(trace, "moved", out.moved);
+      prof.watch(trace, incoming.map((n) => n.cid).filter(Boolean), absorbEnd);
+    }
     this.graph.d3ReheatSimulation();
     this.sayCounts();
     return out;
@@ -1669,6 +1685,9 @@ export class GraphView extends ItemView {
     // point; without a reheat it was the finishing point too.
     graph.d3ReheatSimulation();
     this.graph = graph;
+    // The profiler's listener reads the scene through this, so "visible"
+    // is decided by what is drawn and not by what `absorb` returned.
+    profiler().graphSource = () => this.graph;
 
     // **And again when the forces settle.** The cap is measured against
     // where nodes ARE, and on insertion that is where the fit put them --

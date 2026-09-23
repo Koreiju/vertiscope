@@ -294,7 +294,10 @@ export class Sidecar {
   async capture(url: string,
                 what: { payload?: unknown; settle?: boolean;
                         restart?: boolean; title?: string;
-                        place?: boolean },
+                        place?: boolean;
+                        /** The profiler's trace id, echoed back in the
+                         *  reply so a capture can be matched to its drain. */
+                        trace?: string },
                ): Promise<CaptureResult | null> {
     const base = this.base().trim().replace(/\/+$/, "");
     if (!base) return null;
