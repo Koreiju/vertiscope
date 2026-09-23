@@ -1272,6 +1272,21 @@ def remember_page_positions(payload, spherical: bool = False) -> int:
 
 
 
+def _first_md_with_image(members) -> str:
+    """The markdown of the first member that shows a picture, else the first.
+
+    Ordered by `(xpath, part)` like `first` is, so a branch's thumbnail is
+    the picture a reader would meet first when they opened it -- not
+    whichever chunk the store happened to return first.
+    """
+    ordered = sorted(members, key=lambda c: (c.xpath, c.part))
+    for chunk in ordered:
+        md = chunk.md or ""
+        if "![" in md:
+            return md
+    return ordered[0].md if ordered else ""
+
+
 def _room_around(url: str, space: str, anchor) -> float:
     """How much room a page actually has, before its unfolding covers a
     neighbour.
@@ -1566,7 +1581,21 @@ def unfold(workspace, url: str, path: str = "", space: str = "",
             #: this is not a tuning choice.
             "val": float(max(1.0, len(members) ** 0.5)),
             "path": "/" + "/".join(parts),
-            "md": first.md if single else "",
+            #: A branch shows the first picture anything BENEATH it shows.
+            #:
+            #: This was `first.md if single else ""`, so a node standing for
+            #: more than one chunk had no markdown and `_first_image` below
+            #: had nothing to read: measured, **0 of 161 fan-out nodes
+            #: carried an image** while page nodes did. A branch is a
+            #: container for its subtree, and the subtree's first picture is
+            #: exactly the thumbnail a container should wear -- it is the
+            #: same rule `pictures` already applies one level up, where a
+            #: page looks like the first image any of its chunks showed.
+            #:
+            #: Joined rather than concatenated in full: `_first_image` stops
+            #: at the first match, so this pays for the members it has to
+            #: scan before finding one and not for the whole subtree.
+            "md": first.md if single else _first_md_with_image(members),
             #: Every chunk this node stands for, so `_edges_among` can map a
             #: containment edge between two chunks onto the two nodes that
             #: are actually drawn.

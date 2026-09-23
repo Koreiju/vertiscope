@@ -572,6 +572,19 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send(500, {"error": "%s: %s" % (type(exc).__name__, exc)})
             return
 
+        # Refill chunk markdown the graph lost, from the checkpoint (`D-33`).
+        # A route for the same reason `/repair_keys` is one: the store is
+        # held open by this process.
+        if route == "restore_markdown":
+            if self.workspace is None:
+                self._send(503, {"error": "no workspace"})
+                return
+            try:
+                self._send(200, self.workspace.restore_markdown())
+            except Exception as exc:                # noqa: BLE001
+                self._send(500, {"error": "%s: %s" % (type(exc).__name__, exc)})
+            return
+
         if route == "relink":
             if self.workspace is None:
                 self._send(503, {"error": "no workspace"})
@@ -1110,6 +1123,24 @@ class _Handler(BaseHTTPRequestHandler):
                              # nodes isolated is either a layout that does
                              # not ask or a store that does not hold them,
                              # and only these two numbers tell them apart.
+                             # How much of the corpus can show a picture at
+                             # all. A branch or page node carries an image only
+                             # if its markdown contains one, so this is the
+                             # ceiling on what the projector can billboard --
+                             # and it was never counted, so "a lot of missing
+                             # images" could not be told apart from "there are
+                             # not many images".
+                             "chunks_with_image": _one(
+                                 "MATCH (c:Chunk) WHERE c.md CONTAINS '![' "
+                                 "RETURN count(c)"),
+                             "chunks_total": _one(
+                                 "MATCH (c:Chunk) RETURN count(c)"),
+                             "pages_with_image": _one(
+                                 "MATCH (c:Chunk) WHERE c.md CONTAINS '![' "
+                                 "RETURN count(DISTINCT c.url)"),
+                             "image_addresses": _one(
+                                 "MATCH (a:Address) WHERE a.tag = 'image' "
+                                 "RETURN count(a)"),
                              "contains_edges": _one(
                                  "MATCH (:Chunk)-[r:Contains]->(:Chunk) "
                                  "RETURN count(r)"),
@@ -1254,6 +1285,32 @@ class _Handler(BaseHTTPRequestHandler):
             if needle:
                 urls = [u for u in urls if needle in u]
             self._send(200, {"urls": urls, "n": len(urls)})
+            return
+
+        # The state of one page's chunks, straight from the store.
+        #
+        # Every other way of asking went through `/search`, which only
+        # returns chunks with text to match -- so a page whose chunks had
+        # EMPTY markdown was invisible to the very sampler used to look for
+        # empty markdown. 11,542 of 14,313 chunks were in that state and the
+        # search-based probes reported nothing wrong.
+        if segments[0] == "chunk_stats":
+            query = parse_qs(parts.query)
+            url = (query.get("url") or [""])[0]
+            if not url:
+                self._send(400, {"error": "no url"})
+                return
+            rows = self.workspace.store._rows(
+                "MATCH (c:Chunk {url: $u}) RETURN c.cid, c.md, c.line_count",
+                {"u": url})
+            empty = [cid for cid, md, _n in rows if not (md or "").strip()]
+            self._send(200, {
+                "url": url, "chunks": len(rows), "empty_md": len(empty),
+                "with_image": sum(1 for _c, md, _n in rows if "![" in (md or "")),
+                "line_count_but_empty_md": sum(
+                    1 for _c, md, n in rows if not (md or "").strip() and (n or 0) > 0),
+                "sample_empty": empty[:3],
+            })
             return
 
         if segments[0] == "addresses":

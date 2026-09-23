@@ -23,6 +23,8 @@ factors is issued in exactly one place.
 
 from __future__ import annotations
 
+import json
+
 import shutil
 import time
 from dataclasses import dataclass, field
@@ -508,6 +510,79 @@ class Workspace:
         from .graphstore import canonical_url
 
         return self.store.resolve_page(url) or canonical_url(url) or url
+
+    def restore_markdown(self, batch: int = 2000) -> Dict[str, int]:
+        """Refill chunk markdown the graph lost, from the JSONL checkpoint.
+
+        **What was lost, measured.** 11,542 of 14,313 stored chunks had EMPTY
+        `c.md`, and 85 of 102 pages had every chunk empty. The checkpoint
+        beside the store held markdown for **100% of its 16,194 rows, 2,391 of
+        them with an image**, against 228 chunks with an image in the graph.
+        So the content was captured and rendered correctly and then did not
+        survive into the database -- which is the whole of "a lot of missing
+        images where there should be a lot": a node shows a picture only if
+        its markdown contains one, and most of the markdown was gone.
+
+        **Not a re-render, and not a guess.** The checkpoint is written from
+        the same `MarkdownChunk` the graph row is, at the same ingest; this
+        copies a recorded value back into the column it came from, matched
+        on `cid`.
+
+        **Fills only what is empty.** A chunk whose graph markdown is present
+        is never touched, because that value may be newer than any checkpoint
+        row. Where the checkpoint holds several rows for one cid -- it is
+        appended to -- the last non-empty one wins, which is the latest write
+        that carried content.
+
+        The live settle path does NOT cause this: re-capturing a page with
+        intact markdown was measured before and after, 26 chunks, 0 empty, 20
+        with an image, identical. The empty pages came from an earlier
+        ingest, and this recovers them; it does not claim to explain them.
+        """
+        store = self.store
+        empty = {cid for cid, md in store._rows(
+            "MATCH (c:Chunk) RETURN c.cid, c.md") if not (md or "").strip()}
+        out = {"empty_before": len(empty), "restored": 0,
+               "not_in_checkpoint": 0, "files_read": 0}
+        if not empty:
+            return out
+        found: Dict[str, dict] = {}
+        for path in sorted(self.chunks_dir.glob("*.jsonl")):
+            out["files_read"] += 1
+            try:
+                with path.open(encoding="utf-8", errors="replace") as fh:
+                    for line in fh:
+                        try:
+                            row = json.loads(line)
+                        except Exception:              # noqa: BLE001
+                            continue
+                        if not isinstance(row, dict):
+                            continue
+                        cid = row.get("cid")
+                        md = row.get("md") or ""
+                        if cid in empty and md.strip():
+                            found[cid] = row           # last non-empty wins
+            except OSError:
+                continue
+        rows = [{"cid": cid, "md": r.get("md") or "",
+                 "chars": int(r.get("chars") or len(r.get("md") or "")),
+                 # The checkpoint spells `lines` as a COUNT; the first run of
+                 # this died on `len(int)`. Either form, else count the md.
+                 "lines": (r.get("lines") if isinstance(r.get("lines"), int)
+                           else len(r.get("lines") or []) or
+                           (r.get("md") or "").count(chr(10)) + 1)}
+                for cid, r in found.items()]
+        for i in range(0, len(rows), batch):
+            store._batch(
+                "UNWIND $rows AS r MATCH (c:Chunk {cid: r.cid}) "
+                "WHERE c.md IS NULL OR size(c.md) = 0 "
+                "SET c.md = r.md, c.chars = r.chars, c.line_count = r.lines",
+                rows[i:i + batch])
+        out["restored"] = len(rows)
+        out["not_in_checkpoint"] = len(empty) - len(rows)
+        out["empty_after"] = sum(1 for _c, md in store._rows(
+            "MATCH (c:Chunk) RETURN c.cid, c.md") if not (md or "").strip())
+        return out
 
     def index_html(self, html: str, url: str, *, title: str = "") -> ScanResult:
         """Offline path: one snapshot, no browser."""
