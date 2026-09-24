@@ -499,6 +499,8 @@ class EmbeddingMatrix:
     #: hypothetical -- that is the traceback this lock was added for.
     _lock: "threading.RLock" = field(
         default_factory=threading.RLock, repr=False, compare=False)
+    #: The allocation behind `_matrix`, which is a view of its used rows.
+    _buf: Optional[np.ndarray] = field(default=None, repr=False, compare=False)
 
     def set(self, cid: str, vector: np.ndarray) -> int:
         vec = np.asarray(vector, dtype=np.float32).ravel()[: self.dim]
@@ -516,13 +518,26 @@ class EmbeddingMatrix:
         return row
 
     def _grow(self, n_rows: int) -> None:
-        if self._matrix is None:
-            self._matrix = np.zeros((n_rows, self.dim), dtype=np.float32)
+        """Make room for `n_rows` rows, doubling the allocation.
+
+        It grew by exactly the rows asked for, so every new chunk copied the
+        whole matrix: O(n^2) over a load. Measured on 16k chunks, the query
+        index's first build spent 146 s hydrating, and each vector embedded
+        while browsing copied every row before it. `_matrix` stays a VIEW of
+        the used rows, so `_matrix.shape[0]` still means rows in use and no
+        reader changes.
+        """
+        used = 0 if self._matrix is None else self._matrix.shape[0]
+        if n_rows <= used:
             return
-        if n_rows > self._matrix.shape[0]:
-            grown = np.zeros((n_rows, self.dim), dtype=np.float32)
-            grown[: self._matrix.shape[0]] = self._matrix
-            self._matrix = grown
+        cap = 0 if self._buf is None else self._buf.shape[0]
+        if n_rows > cap:
+            grown = np.zeros((max(n_rows, 2 * cap, 1024), self.dim),
+                             dtype=np.float32)
+            if used:
+                grown[:used] = self._matrix
+            self._buf = grown
+        self._matrix = self._buf[:n_rows]
 
     def forget(self, cids: Iterable[str]) -> int:
         """Zero and tombstone the rows of retired chunks. Returns how many.

@@ -2008,6 +2008,22 @@ def serve(workspace, port: int = 8787, *, block: bool = True,
             _projector.PROJECTOR.start(workspace, work_lock=_WORK_LOCK,
                                        fit_lock=_FIT_LOCK)
 
+    # **The query index, built before anyone asks.** Its first build hydrated
+    # every embedding (146 s measured before the growth fix) and landed on
+    # the first reader's search. The embed worker owns the encoder here, so
+    # a search never runs it inline (`Workspace.embed_inline`).
+    if workspace is not None and hasattr(workspace, "embed_inline"):
+        workspace.embed_inline = False
+
+        def _warm_index():
+            try:
+                started = time.perf_counter()
+                workspace.index
+                _profile("index_warm", {"ms": round((time.perf_counter() - started) * 1000, 1)})
+            except Exception as exc:                # noqa: BLE001
+                _profile("index_warm", {"error": "%s: %s" % (type(exc).__name__, exc)})
+        threading.Thread(target=_warm_index, name="domvec-index", daemon=True).start()
+
     # **Lexical rows for every chunk, at start.** Rows lost to a hard kill
     # (the matrix used to be written only on a clean close) or indexed while
     # a chunk's markdown was empty are re-derived from the store's markdown,

@@ -139,6 +139,13 @@ class Workspace:
         #: and the growth raced -- every `/search` died on an
         #: `IndexError` out of `vectors.set`. Built once, here.
         self._index_lock = threading.RLock()
+        #: Whether building the query index may run the encoder. True for a
+        #: script, which has no one else to embed for it. A server with an
+        #: embedding worker sets it False: that worker owns the encoder, and
+        #: a search that embedded inline waited 38 s behind it (measured).
+        #: A chunk not embedded yet is simply not ranked semantically until
+        #: the worker reaches it.
+        self.embed_inline = True
 
     # -- on-disk naming ---------------------------------------------------
     def mirror_path(self, url: str) -> Path:
@@ -1281,18 +1288,32 @@ class Workspace:
         # matrix would score every chunk 0 on the semantic axis, and under
         # the strict triple product a zero is a veto, so search would answer
         # nothing and call it an absence of matches.
+        # In bulk: which chunks are not loaded yet (a light query), then
+        # their vectors in one read, and markdown only for those a backfill
+        # will embed. It was one query per chunk inside a loop that loaded
+        # every chunk's markdown first.
+        loaded = (lambda c: self.embeddings is not None
+                  and self.embeddings.row_of(c) is not None)
+        todo = [c for (c,) in self.store._rows("MATCH (c:Chunk) RETURN c.cid")
+                if c and not loaded(c)]
         missing: List = []
-        for chunk in self.store.chunks():
-            if self.embeddings is not None and                     self.embeddings.row_of(chunk.cid) is not None:
-                continue
-            vector = self.store.embedding(chunk.cid)
-            if vector and any(vector):
-                if self.embeddings is None:
-                    self.embeddings = EmbeddingMatrix()
-                self.embeddings.set(chunk.cid, np.asarray(vector, dtype=np.float32))
-                counts["loaded"] += 1
-            else:
-                missing.append(chunk)
+        if todo:
+            got = dict(self.store._rows(
+                "MATCH (c:Chunk) WHERE list_contains($cids, c.cid) "
+                "RETURN c.cid, c.embedding", {"cids": todo}))
+            empty = []
+            for cid in todo:
+                vector = got.get(cid)
+                if vector is not None and any(vector):
+                    if self.embeddings is None:
+                        self.embeddings = EmbeddingMatrix()
+                    self.embeddings.set(cid, np.asarray(vector, dtype=np.float32))
+                    counts["loaded"] += 1
+                else:
+                    empty.append(cid)
+            if empty and backfill and self.embedder is not None:
+                wanted = set(empty)
+                missing = [c for c in self.store.chunks() if c.cid in wanted]
 
         if self.embeddings is None:
             # Nothing stored and nothing to backfill into.
@@ -1341,9 +1362,10 @@ class Workspace:
                 # live and lands on the first query after any embed batch.
                 import time as _time
                 t0 = _time.perf_counter()
-                self.flush_vectors()
+                if self.embed_inline:
+                    self.flush_vectors()
                 t1 = _time.perf_counter()
-                self._hydrate_embeddings()
+                self._hydrate_embeddings(backfill=self.embed_inline)
                 t2 = _time.perf_counter()
                 self._index = ThreeFormIndex(
                     self.store, self.freq, self.embeddings,
