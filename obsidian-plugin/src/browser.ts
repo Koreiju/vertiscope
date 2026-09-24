@@ -27,6 +27,7 @@
  * that has never seen the site (`G-40`).
  */
 
+import { PipelineBox } from "./pipelinebox";
 import { profiler } from "./profile";
 import { Component, ItemView, MarkdownRenderer, WorkspaceLeaf } from "obsidian";
 
@@ -274,6 +275,15 @@ export class BrowserView extends ItemView {
     view.style.height = "100%";
     this.browserWrap.appendChild(view);
     this.webview = view;
+    // The pipeline, over the page being browsed: a box in the cell's corner
+    // and the hovered chunk's outline. Both live in the CELL, never in the
+    // page (`G-41`). Hover rings the projector through the same `onHover`
+    // the right-click path uses, read at call time because the plugin
+    // assigns it after construction.
+    this.pipebox?.destroy();
+    this.pipebox = new PipelineBox(this.browserWrap, this.sidecar,
+                                   () => this.webview,
+                                   (cid, url) => this.onHover(cid, url));
 
     view.addEventListener("did-start-loading", () => this.say("loading…"));
     view.addEventListener("did-stop-loading", () => {
@@ -349,6 +359,8 @@ export class BrowserView extends ItemView {
   }
 
   async onClose(): Promise<void> {
+    this.pipebox?.destroy();
+    this.pipebox = null;
     // Settle whatever page was being captured. Per-drain writes are deltas;
     // a pane closed mid-page would leave the store holding the last delta
     // rather than the finished trie.
@@ -384,6 +396,8 @@ export class BrowserView extends ItemView {
   //: Told the plugin, which tells the projector (`G-38`). Brokered, like
   //  every other cross-pane signal here: neither pane may require the other.
   onHover: (cid: string, url: string) => void = () => {};
+  /** The pipeline overlay; see `pipelinebox.ts`. */
+  pipebox: PipelineBox | null = null;
 
   setScope(url: string): void {
     this.rankScope = url || "";
@@ -617,6 +631,31 @@ export class BrowserView extends ItemView {
       await this.sidecar.capture(leaving, { settle: true });
     }
     if (this.live) this.say(`live · ${url}`);
+    void this.placeWholePage(url);
+  }
+
+  /**
+   * Send EVERY chunk the store holds for this page to the projector.
+   *
+   * **Why a drain is not enough.** A drain places what it changed. A page
+   * the store already holds barely changes when revisited, so after a
+   * reload the reader could be looking at a fully captured, fully embedded
+   * page with none of it in the graph -- measured, "0/688 in graph" on a
+   * page whose 676 chunks all had vectors. The chain the reader is owed is
+   * every chunk, not every changed one.
+   *
+   * Through the placement queue, which already does the rest: batches,
+   * waits for any chunk still being embedded, and hands each result to the
+   * graph, which ignores what it already has. Traced, so the profile shows
+   * the cost of landing on a page as its own entry.
+   */
+  private async placeWholePage(url: string): Promise<void> {
+    if (!url || url === "about:blank") return;
+    const cids = await this.sidecar.pageCids(url).catch(() => [] as string[]);
+    if (!cids.length || this.session !== url) return;
+    const trace = profiler().begin("land", url);
+    profiler().fact(trace, "page_chunks", cids.length);
+    this.enqueuePlacement(cids, trace.id);
   }
 
   /**
@@ -672,9 +711,14 @@ export class BrowserView extends ItemView {
       // Group what landed by the trace that asked for it, so each drain's
       // end-to-end closes on ITS chunks appearing.
       const byTrace = new Map<string, LayoutNode[]>();
+      // Nodes nobody queued -- the page hub `place` sends with its chunks --
+      // travel with the first batch. Dropping them dropped every page->root
+      // edge with them: on a page new to the graph the hub did not exist
+      // yet, so `addEdges` discarded 57 of 79 edges and the trie hung loose.
+      const unasked: LayoutNode[] = [];
       for (const n of nodes) {
         const entry = this.pendingPlace.get(n.cid);
-        if (!entry) continue;
+        if (!entry) { unasked.push(n); continue; }
         this.pendingPlace.delete(n.cid);
         const t = prof.get(entry.trace);
         if (t) prof.stage(t, "vector_wait", now - entry.since);
@@ -683,6 +727,8 @@ export class BrowserView extends ItemView {
         byTrace.set(entry.trace, list);
       }
       const edges = ((got && got.edges) || []) as { source: string; target: string }[];
+      const first = byTrace.keys().next();
+      if (!first.done && unasked.length) byTrace.get(first.value)!.unshift(...unasked);
       for (const [traceId, list] of byTrace) this.onChunks(list, edges, traceId);
     } finally {
       this.placing = false;
@@ -746,7 +792,7 @@ export class BrowserView extends ItemView {
       // just computed and was handing straight back.
       const captureStart = performance.now();
       const reply = await this.sidecar.capture(
-        url, { payload, place: true, trace: trace.id });
+        url, { payload, place: true, trace: trace.id, title: wv.getTitle() || "" });
       const captureMs = performance.now() - captureStart;
       prof.stage(trace, "capture", captureMs);
       if (reply) prof.sidecar(trace, reply.phases, reply.ms, captureMs);
@@ -905,7 +951,8 @@ export class BrowserView extends ItemView {
         this.say(`drain ${passes} failed: ${String(e).slice(0, 100)}`);
         return;
       }
-      const reply = await this.sidecar.capture(url, { payload });
+      const reply = await this.sidecar.capture(
+        url, { payload, title: this.webview?.getTitle() || "" });
       if (!reply || reply.error) {
         this.say(`capture failed: ${reply ? reply.error : "no reply"}`);
         return;

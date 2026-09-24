@@ -1086,12 +1086,25 @@ const CHECKS = [
         }
       }
       const far = away.length ? Math.max(...away) : 0;
+      // **Where they go is the chunk projector's answer (`G-72`).** This
+      // gated on `far <= 120` -- inside the local ball `_local_positions`
+      // fitted around the page. Addendum V replaced that layer ("Instead,
+      // stream ... to a fitted UMAP projector"), so the claim to check is
+      // that an unfolded chunk sits exactly where the projector put it; how
+      // far that is from its page is reported, not gated, because it is
+      // what the content says rather than a defect.
+      const all = await ask("/layout?level=chunk");
+      const at = new Map((all.nodes || []).map((n) => [n.cid, n.pos]));
+      const chunks = d.nodes.filter((n) => n.level === "chunk" && at.has(n.cid));
+      const offProjector = chunks.reduce((m, n) => Math.max(m, Math.hypot(
+        n.pos[0] - at.get(n.cid)[0], n.pos[1] - at.get(n.cid)[1],
+        n.pos[2] - at.get(n.cid)[2])), 0);
       return {
         pass: d.nodes.length > 0 && d.nodes.length < biggest.members / 4
            // Not piled on the frame.
            && onFrame === 0
-           // Anchored at the page they came out of, inside the unfold ball.
-           && far <= 120
+           // Placed by the projector, not by a second computation.
+           && d.source === "projector" && chunks.length > 0 && offProjector < 1e-3
            // And distinguishable from each other.
            && (pos.length < 2 || closest > 1),
         evidence: {
@@ -1100,6 +1113,8 @@ const CHECKS = [
           edges: (d.edges || []).length,
           depth: d.depth, branches: d.branches, leaves: d.leaves,
           on_the_frame: onFrame,
+          source: d.source, chunks_checked: chunks.length,
+          off_projector: Math.round(offProjector * 1000) / 1000,
           furthest_from_its_page: Math.round(far),
           closest_pair: Number.isFinite(closest) ? Math.round(closest * 10) / 10 : null,
         },

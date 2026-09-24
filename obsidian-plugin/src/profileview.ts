@@ -72,8 +72,9 @@ const CHILDREN: Record<string, [string, string][]> = {
   ],
   "sidecar.place": [
     ["sidecar.place_ms_read", "read chunks and vectors"],
-    ["sidecar.place_ms_transform", "UMAP transform"],
-    ["sidecar.place_ms_local", "local fit beside the page"],
+    // Placement reads positions the projector's stream already computed;
+    // it transforms here only what the stream has not reached yet.
+    ["sidecar.place_ms_transform", "transform (stream not there yet)"],
     ["sidecar.place_ms_edges", "containment among placed"],
   ],
 };
@@ -222,6 +223,19 @@ export class ProfileView extends ItemView {
     const lines: string[] = [];
     if (embed) lines.push(`encoder: ${embed.n} batches, p50 ${fmt(embed.p50)}, max ${fmt(embed.max)}`);
     if (place) lines.push(`placement queue: ${place.n} calls, p50 ${fmt(place.p50)}, max ${fmt(place.max)}`);
+    // The chunk projector: its stream of batches, and its fits.
+    const proj = this.ring("project", "ms");
+    const batches = (this.side?.project || []) as any[];
+    if (proj) {
+      const placed = batches.reduce((a, b) => a + (b.placed || 0), 0);
+      const tr = batches.map((b) => b.ms_transform || 0).sort((a, b) => a - b);
+      lines.push(`projector stream: ${proj.n} batches, ${placed} chunks transformed, ` +
+                 `batch p50 ${fmt(proj.p50)} (transform p50 ${fmt(tr[Math.floor(tr.length / 2)] || 0)})`);
+    }
+    const fits = (this.side?.projector_fit || []) as any[];
+    const lastFit = fits[fits.length - 1];
+    if (lastFit) lines.push(`projector fit ${lastFit.epoch}: UMAP on ${lastFit.sample} of ` +
+      `${lastFit.chunks} chunks ${fmt(lastFit.ms_fit)}, the rest transformed ${fmt(lastFit.ms_transform)}`);
     if (layout.length) {
       const k: Record<string, number> = {};
       for (const e of layout) k[e.kind] = (k[e.kind] || 0) + 1;

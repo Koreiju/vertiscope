@@ -95,7 +95,7 @@ export class Sidecar {
    * Fitted in Python, where the vectors, numpy and UMAP already are. A
    * projection fitted twice in two languages is two projections.
    */
-  layout(dims = 3, space = "", level = ""): Promise<unknown | null> {
+  layout(dims = 3, space = "", level = "", refit = false): Promise<unknown | null> {
     // `space=S3` asks for the quaternion embedding (`G-18`). The two fits
     // are a thing to compare rather than a setting to choose once, so the
     // pane can ask for either and the reply says which it got.
@@ -103,12 +103,37 @@ export class Sidecar {
     // (`G-53`). Empty means the server's default, which is pages.
     const which = space ? `&space=${encodeURIComponent(space)}` : "";
     const deep = level ? `&level=${encodeURIComponent(level)}` : "";
-    return this.get(`/layout?dims=${dims}${which}${deep}`);
+    // `refit` asks the chunk projector to refit in the background; the reply
+    // is still the current picture.
+    const again = refit ? "&refit=1" : "";
+    return this.get(`/layout?dims=${dims}${which}${deep}${again}`);
   }
 
   /** Whether the sidecar answers at all, and what it will allow. */
   health(): Promise<Health | null> {
     return this.get<Health>("/health");
+  }
+
+  /** The chunk projector: its fit, its queue, what it has placed. */
+  async projector(url = ""): Promise<any | null> {
+    return this.get("/projector" + (url ? "?url=" + encodeURIComponent(url) : ""));
+  }
+
+  /** What the projector placed after `since`, or `reload` on a new fit. */
+  async projectorDelta(since: number, epoch: number): Promise<any | null> {
+    return this.get(`/projector/delta?since=${since}&epoch=${epoch}`);
+  }
+
+  /** Where one page is in the pipeline: stored, embedded, windowed, fitted. */
+  async pageStatus(url: string): Promise<any | null> {
+    return this.get("/page_status?url=" + encodeURIComponent(url));
+  }
+
+  /** Every chunk id the store holds for a page. */
+  async pageCids(url: string): Promise<string[]> {
+    const got: any = await this.get(
+      "/page_status?cids=1&url=" + encodeURIComponent(url));
+    return (got && Array.isArray(got.cids)) ? got.cids : [];
   }
 
   /** The sidecar's half of the pipeline profile: its own timing rings. */

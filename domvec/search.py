@@ -294,11 +294,45 @@ class ThreeFormIndex:
         except Exception:
             return np.zeros(rows, dtype=np.float32), False
         sims = self.embeddings.similarities(vector)
+        # **Joined on cid, not on row number.** `similarities` answers in
+        # the EMBEDDING matrix's row order -- the order vectors arrived in --
+        # and every other factor here is in FREQUENCY-row order. They agree
+        # on a corpus built in one pass and nowhere else: the frequency
+        # matrix reclaims retired rows and gains rows from repair, while the
+        # embedding matrix appends. Read positionally, a chunk was scored
+        # with another chunk's similarity -- measured live, 4,724 rows
+        # repaired in one start-up and pages captured that afternoon
+        # unreachable by their own name.
+        emb_rows = self._embedding_rows(rows)
+        out = np.zeros(rows, dtype=np.float32)
+        have = emb_rows >= 0
+        have &= emb_rows < sims.shape[0]
+        out[have] = sims[emb_rows[have]]
         # cosine is in [-1, 1]; a negative similarity is not "less relevant
         # than nothing", it is opposition, and raising a negative to a
         # fractional exponent is undefined. Clamp at zero and let the veto
         # apply.
-        return _fit(np.maximum(sims, 0.0), rows), True
+        return np.maximum(out, 0.0), True
+
+    def _embedding_rows(self, rows: int) -> np.ndarray:
+        """For each frequency row, its row in the embedding matrix, or -1.
+
+        Cached against both matrices' sizes: either growing means new rows
+        whose mapping is not known yet.
+        """
+        key = (rows, int(self.embeddings.matrix.shape[0])
+               if self.embeddings.matrix is not None else 0)
+        cached = getattr(self, "_emb_rows", None)
+        if cached is not None and cached[0] == key:
+            return cached[1]
+        mapping = np.full(rows, -1, dtype=np.int64)
+        for i, cid in enumerate(self.freq.rows[:rows]):
+            if cid:
+                got = self.embeddings.row_of(cid)
+                if got is not None:
+                    mapping[i] = got
+        self._emb_rows = (key, mapping)
+        return mapping
 
     # -- navigation --------------------------------------------------------
     def addresses_for(self, cid: str):

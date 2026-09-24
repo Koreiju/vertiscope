@@ -85,6 +85,12 @@ interface Layout {
   /** How many chunks stand behind the pages, at page level. */
   chunks?: number;
   note?: string;
+  /** Answered by the chunk projector: which fit, and how far its stream is. */
+  source?: string;
+  epoch?: number;
+  seq?: number;
+  fitting?: boolean;
+  projector?: any;
 }
 
 /**
@@ -277,6 +283,20 @@ export class GraphView extends ItemView {
    */
   private static textures = new Map<string, string | null>();
   private graph: ForceGraph3DInstance | null = null;
+  /** The projector fit this picture was drawn from, and how far into its
+   *  stream the pane has applied. -1 when the layout did not come from it. */
+  projEpoch = -1;
+  projSeq = 0;
+  /** The projector's last reported state, for the caption and the harness. */
+  projStatus: any = null;
+  /** What the stream has done to this pane, counted. */
+  streamApplied = { deltas: 0, moved: 0, added: 0, gone: 0, pages: 0,
+                    reloads: 0, lastAt: 0 };
+  private pulling = false;
+  /** Chunks the reader had open when a new fit was announced, kept until a
+   *  picture in the NEW fit is actually drawn and they can be re-placed. */
+  private reopen = new Set<string>();
+  private retryLoad = 0;
   //: The caption is written on load and the picture changes afterwards.
   //  Unfolding took 96 nodes to 122 and the bar still said "96 pages", which
   //  is the one number on screen a reader uses to check the pane against the
@@ -376,11 +396,38 @@ export class GraphView extends ItemView {
         status.setText("no sidecar — start it to see the graph");
         return;
       }
+      if (layout.fitting) {
+        // The projector is making its fit. Say so and ask again; the old
+        // separate fits are not a fallback, because the stream never places
+        // into them.
+        const ps = layout.projector || {};
+        status.setText(`projector fitting · ${ps.chunks_now ?? "?"} chunks` +
+                       ` · sample ≤ ${ps.fit_sample || 4000}`);
+        // One pending retry, not one per caller: the stream also asks for a
+        // reload while a fit is running, and each used to queue its own.
+        window.clearTimeout(this.retryLoad);
+        this.retryLoad = window.setTimeout(() => void load(), 3000);
+        return;
+      }
       if (!layout.nodes.length) {
         status.setText(layout.note || "nothing to place yet");
         return;
       }
       this.draw(canvas, layout);
+      this.projEpoch = layout.source === "projector" ? (layout.epoch ?? -1) : -1;
+      this.projSeq = layout.seq ?? 0;
+      this.projStatus = layout.projector ?? null;
+      // What the reader had open before a new fit, placed again in it.
+      if (this.reopen.size && this.projEpoch >= 0) {
+        const open = [...this.reopen];
+        this.reopen.clear();
+        void (async () => {
+          for (let i = 0; i < open.length; i += 400) {
+            const got: any = await this.sidecar.place(open.slice(i, i + 400));
+            if (got?.nodes?.length) this.absorb(got.nodes, got.edges);
+          }
+        })();
+      }
       // Composing the LABEL must not be able to break the PANE.
       //
       // The picture is already on screen by this line. Everything below is a
@@ -426,7 +473,8 @@ export class GraphView extends ItemView {
         : `${layout.n} chunks`;
       this.statusEl = status;
       this.captionTail =
-        `${(layout.spaces ?? []).join(" + ")} · ${fit} · ${colour}${pictures}`;
+        `${(layout.spaces ?? []).join(" + ")} · ${fit} · ${colour}${pictures}` +
+        this.projectorCaption();
       status.setText(`${unit} · ${this.captionTail}`);
       } catch (err) {
         // Say the count, which is the one thing a reader needs to know the
@@ -436,8 +484,143 @@ export class GraphView extends ItemView {
       }
     };
 
-    again.onclick = () => load();
+    // "refit" asks the PROJECTOR to refit, in the background. The picture
+    // stays until the new fit is complete; the stream then reports a new
+    // epoch and `pullDelta` redraws once.
+    again.onclick = async () => {
+      status.setText("projector refitting in the background…");
+      await this.sidecar.layout(3, this.space, this.level, true);
+    };
     await load();
+    // The stream. Once a second: what the projector placed since the last
+    // sequence number this pane applied. O(delta) -- a quiet corpus costs
+    // one empty reply.
+    this.registerInterval(window.setInterval(() => void this.pullDelta(load), 1000));
+  }
+
+  /** The projector's state, in the caption's words. */
+  private projectorCaption(): string {
+    const ps = this.projStatus;
+    if (this.projEpoch < 0 || !ps) return " · legacy fit";
+    const refit = ps.refit_at
+      ? ` · refits at ${ps.refit_at} chunks` + (ps.chunks_now ? ` (now ${ps.chunks_now})` : "")
+      : "";
+    const queue = ps.queue ? ` · ${ps.queue} queued` : "";
+    // The epoch is an identity (milliseconds), not a count; say WHEN.
+    const when = new Date(this.projEpoch).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    return ` · chunk projector: UMAP on a ${ps.fit_sample ?? "?"}-chunk sample (fit ${when}) · ` +
+           `${ps.projected ?? "?"} chunks placed by transform` +
+           `${refit}${queue}${ps.fitting ? " · refitting" : ""}`;
+  }
+
+  /**
+   * Apply what the chunk projector placed since this pane last looked.
+   *
+   * * a chunk the pane draws that the stream re-placed moves to its new fit
+   *   position (its text changed, so its meaning did);
+   * * a chunk on a page the pane has OPEN that it does not draw yet is
+   *   placed -- this is how a page's late-embedded chunks arrive without
+   *   the reader doing anything;
+   * * a chunk the stream says is gone is removed, with its links;
+   * * a page whose chunks changed moves to the new transform of its mean;
+   * * a new epoch -- the projector refit at 2x growth -- redraws once, and
+   *   re-places every chunk that was open, so the reader keeps what they
+   *   had unfolded, in the new fit's coordinates.
+   */
+  private async pullDelta(reload: () => Promise<void>): Promise<void> {
+    if (!this.graph || this.projEpoch < 0 || this.pulling) return;
+    this.pulling = true;
+    try {
+      const d: any = await this.sidecar.projectorDelta(this.projSeq, this.projEpoch);
+      if (!d) return;
+      if (d.status) this.projStatus = d.status;
+      if (d.reload) {
+        // Nothing to redraw INTO until the new fit is complete; asking for a
+        // layout meanwhile is what produced a reload a second.
+        if (d.status?.fitting || !d.status?.fitted_chunks) return;
+        const before: any = this.graph.graphData();
+        for (const n of before.nodes) {
+          if (n.level !== "page" && !String(n.id).startsWith("path:")) {
+            this.reopen.add(String(n.id));
+          }
+        }
+        this.streamApplied.reloads++;
+        await reload();                  // re-places `reopen` once it draws
+        return;
+      }
+      if (typeof d.seq !== "number" || d.seq === this.projSeq) {
+        this.refreshCaption();
+        return;
+      }
+      this.projSeq = d.seq;
+      const data: any = this.graph.graphData();
+      const byId = new Map<string, any>(data.nodes.map((n: any) => [n.id, n]));
+      const openUrls = new Set<string>(data.nodes
+        .filter((n: any) => n.level !== "page").map((n: any) => n.url));
+      let moved = 0, gone = 0, pages = 0, structural = false;
+      const toPlace: string[] = [];
+      for (const [cid, got] of Object.entries<any>(d.chunks || {})) {
+        const node = byId.get(cid);
+        if (node && got.pos) {
+          node.fitX = got.pos[0]; node.fitY = got.pos[1]; node.fitZ = got.pos[2];
+          moved++;
+        } else if (!node && got.url && openUrls.has(got.url)) {
+          toPlace.push(cid);
+        }
+      }
+      const goneIds = new Set<string>((d.gone || []).filter((c: string) => byId.has(c)));
+      if (goneIds.size) {
+        data.nodes = data.nodes.filter((n: any) => !goneIds.has(n.id));
+        data.links = data.links.filter((l: any) =>
+          !goneIds.has(l.source?.id ?? l.source) && !goneIds.has(l.target?.id ?? l.target));
+        gone = goneIds.size;
+        structural = true;
+      }
+      for (const [url, got] of Object.entries<any>(d.pages || {})) {
+        if (!got?.pos) continue;
+        const node = byId.get("page:" + url);
+        if (node) {
+          node.fitX = got.pos[0]; node.fitY = got.pos[1]; node.fitZ = got.pos[2];
+          node.anchorPos = [got.pos[0], got.pos[1], got.pos[2]];
+        } else {
+          const members = got.projected ?? 1;
+          const built = this.nodeFrom({ cid: "page:" + url, url, title: url,
+            level: "page", pos: got.pos, members, rank: 0, chars: 0, tokens: 0,
+            val: Math.max(1, Math.sqrt(Math.max(members, 1))),
+            hsv: got.hsv } as any);
+          built.anchorPos = [built.fitX, built.fitY, built.fitZ];
+          built.room = Math.max(6, Math.cbrt(Math.max(built.val ?? 1, 1e-9)) * 2.5);
+          data.nodes.push(built);
+          structural = true;
+        }
+        pages++;
+      }
+      if (structural) this.graph.graphData(data);
+      if (moved || gone || pages || structural) this.graph.d3ReheatSimulation();
+      let added = 0;
+      if (toPlace.length) {
+        const trace = profiler().begin("stream", [...openUrls][0] || "");
+        profiler().fact(trace, "stream_cids", toPlace.length);
+        const got: any = await this.sidecar.place(toPlace);
+        if (got?.nodes?.length) added = this.absorb(got.nodes, got.edges, trace.id).added;
+        else profiler().finish(trace, "nothing_placed");
+      }
+      const a = this.streamApplied;
+      a.deltas++; a.moved += moved; a.added += added; a.gone += gone;
+      a.pages += pages; a.lastAt = Date.now();
+      this.refreshCaption();
+    } catch {
+      // A missed delta is re-asked for next second from the same `since`.
+    } finally {
+      this.pulling = false;
+    }
+  }
+
+  private refreshCaption(): void {
+    if (!this.captionTail) return;
+    this.captionTail = this.captionTail.replace(/ · (projector fit|legacy fit).*$/, "") +
+      this.projectorCaption();
+    this.sayCounts();
   }
 
   async onClose() {
@@ -627,6 +810,15 @@ export class GraphView extends ItemView {
     const data: any = this.graph.graphData();
     const known = new Set(data.nodes.map((n: any) => n.id));
     const wanted = cids.filter((cid) => cid && !known.has(cid));
+    // The page is OPEN whether or not its hits needed placing. Landing on a
+    // page now places all of it, so a query scoped to the page being read
+    // finds every hit already drawn -- and this returned before marking the
+    // hub, leaving the page drawn as closed with its hits hanging off it.
+    const openHub = data.nodes.find((n: any) => n.id === "page:" + url);
+    if (openHub && cids.some((cid) => known.has(cid))) {
+      openHub.unfolded = true;
+      this.sayCounts();
+    }
     if (!wanted.length) return;
 
     const placed = await this.sidecar.place(wanted);

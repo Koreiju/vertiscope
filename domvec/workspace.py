@@ -48,6 +48,9 @@ from .vectors import EmbeddingMatrix, FreqMatrix, VectorQueue
 
 __all__ = ["Workspace", "ScanResult"]
 
+#: `SET p.title` that keeps the stored title when the writer has none.
+_KEEP_TITLE = "CASE WHEN $title = '' THEN p.title ELSE $title END"
+
 ProgressFn = Callable[[str, str], None]
 
 
@@ -242,19 +245,53 @@ class Workspace:
         The rows are derivable from the markdown the store already holds, so
         this is a repair and not a re-scan.
         """
-        added = skipped = 0
+        # **And a row that exists but says nothing.** A chunk indexed while
+        # its markdown was empty got a row with no terms; `restore_markdown`
+        # later refilled the markdown and left that row empty, so the chunk
+        # had a lexical row and a veto at once. Re-derived from the markdown
+        # the store holds now, in place (`add` replaces a row, never
+        # renumbers it).
+        from .vectors import tokens as _tokens
+        added = refreshed = skipped = 0
         for chunk in self.store.chunks():
-            if self.freq.row_of(chunk.cid) is not None:
-                skipped += 1
+            row = self.freq.row_of(chunk.cid)
+            if row is not None:
+                if not self.freq._counts[row] and any(True for _ in _tokens(chunk.md or "")):
+                    self.freq.add(chunk.cid, chunk.md or "")
+                    refreshed += 1
+                else:
+                    skipped += 1
                 continue
             self.freq.add(chunk.cid, chunk.md or "")
             added += 1
             if progress and added % 2000 == 0:
                 progress("lexical", "%d rows added" % added)
-        if added:
+        if added or refreshed:
             self.freq.save(self.path / "freq")
+            self._lexical_saved = self.freq.version
         self._index = None          # the ranking is stale by construction
-        return {"added": added, "already_had_one": skipped}
+        return {"added": added, "refreshed": refreshed,
+                "already_had_one": skipped}
+
+    def save_lexical(self) -> bool:
+        """Write the frequency matrix if it changed since the last write.
+
+        **Why this exists.** The matrix was written only by `close()` and by
+        `rebuild_lexical()`. A sidecar ended any other way -- a hard kill, a
+        crash, a machine going to sleep for good -- lost every lexical row
+        added since it opened, while the chunks themselves were already in
+        the graph. Retrieval is a strict product, so each of those chunks came
+        back from a restart with a vetoed lexical factor: a page captured live
+        that afternoon answered nothing to any query, its own name included.
+        """
+        if self.read_only:
+            return False             # a reader never writes (see `close`)
+        version = getattr(self.freq, "version", 0)
+        if version == getattr(self, "_lexical_saved", None):
+            return False
+        self.freq.save(self.path / "freq")
+        self._lexical_saved = version
+        return True
 
     # -- writing ----------------------------------------------------------
     @property
@@ -432,7 +469,10 @@ class Workspace:
         # one row, and the edges the deferred write creates resolve to it.
         _t = time.perf_counter()
         store.conn.execute(
-            "MERGE (p:Page {url: $url}) SET p.title = $title",
+            # A write that does not know the title must not erase it: every
+            # live drain arrives without one, and 121 of 130 pages had been
+            # blanked to their url this way.
+            "MERGE (p:Page {url: $url}) SET p.title = %s" % _KEEP_TITLE,
             {"url": url, "title": title},
         )
         _timed["ms_page"] = round((time.perf_counter() - _t) * 1000, 1)
@@ -1182,6 +1222,9 @@ class Workspace:
         if progress and len(self.vectors):
             progress("embed", f"{len(self.vectors)} chunk(s) queued")
         produced = self.vectors.flush(self.embedder, limit=limit)
+        #: Which chunks this flush gave a vector, so a consumer downstream --
+        #: the sidecar's chunk projector -- is handed exactly the delta.
+        self.last_embedded = list(produced or ())
         if produced:
             rows = []
             for cid, vector in produced.items():
@@ -1293,12 +1336,25 @@ class Workspace:
                 # markdown moved, and hydration only fills in chunks that
                 # have no vector at all. Without this a *changed* chunk would
                 # keep answering with the vector of what it used to say.
+                #
+                # Each phase timed: a rebuild was measured at over a minute
+                # live and lands on the first query after any embed batch.
+                import time as _time
+                t0 = _time.perf_counter()
                 self.flush_vectors()
+                t1 = _time.perf_counter()
                 self._hydrate_embeddings()
+                t2 = _time.perf_counter()
                 self._index = ThreeFormIndex(
                     self.store, self.freq, self.embeddings,
                     embedder=self.embedder,
                 ).build()
+                t3 = _time.perf_counter()
+                self.index_builds = (getattr(self, "index_builds", []) + [{
+                    "ms_flush": round((t1 - t0) * 1000, 1),
+                    "ms_hydrate": round((t2 - t1) * 1000, 1),
+                    "ms_build": round((t3 - t2) * 1000, 1),
+                    "at": round(_time.time(), 3)}])[-16:]
         return self._index
 
     def search(self, query: str, k: int = 10, **kwargs) -> List[Hit]:

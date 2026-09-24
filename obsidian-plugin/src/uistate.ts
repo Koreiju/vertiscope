@@ -375,6 +375,36 @@ export function uiState(app: App) {
     out.profile = { e2e_shown: val, rows: rows.length, stage_rows: rows.slice(0, 40),
                     integrity: integ };
   }
+  // The pipeline box over the browser cell, and the hovered chunk's outline,
+  // read off the DOM the reader sees.
+  const bl: any = leavesOf(BROWSER_VIEW)[0];
+  const pb = bl && !bl.isDeferred && bl.view ? bl.view.pipebox : null;
+  if (pb && pb.el) {
+    const outline = bl.view.containerEl.querySelector(".domvec-chunk-outline") as HTMLElement | null;
+    const box = pb.el.getBoundingClientRect();
+    // The requirement is the bottom-right of the BROWSER, which is the
+    // webview -- not the view container, which also holds the toolbar and
+    // whatever sits beside the page.
+    const host = (bl.view.webview || bl.view.containerEl).getBoundingClientRect();
+    out.pipebox = {
+      drawn: drawn(pb.el).drawn,
+      expanded: !!pb.expanded,
+      mini: (pb.el.querySelector(".domvec-pipebox-mini")?.textContent || "").trim(),
+      lines: Array.from(pb.el.querySelectorAll(
+        ".domvec-pipebox-full .domvec-pipebox-line, .domvec-pipebox-full .domvec-pipebox-h"))
+        .map((e: any) => (e.textContent || "").trim()),
+      chain: Array.from(pb.el.querySelectorAll(".domvec-pipebox-step")).map((e: any) => ({
+        label: e.querySelector(".domvec-pipebox-l")?.textContent,
+        value: e.querySelector(".domvec-pipebox-n")?.textContent,
+        ok: e.classList.contains("is-ok") })),
+      // Where the box sits relative to the cell: it must be the bottom-right.
+      corner: { right: Math.round(host.right - box.right), bottom: Math.round(host.bottom - box.bottom) },
+      hover: pb.hover ? { cid: pb.hover.cid, walked: pb.hover.walked, rect: pb.hover.rect } : null,
+      outline: outline && outline.style.display !== "none" ? {
+        left: outline.style.left, top: outline.style.top,
+        width: outline.style.width, height: outline.style.height } : null,
+    };
+  }
   // The status-bar readout exists whether or not the pane is open, so it is
   // read whether or not the pane is open.
   out.status_bar = document.querySelector(".domvec-profile-status")?.textContent || null;

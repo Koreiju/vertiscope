@@ -962,6 +962,48 @@ addendum.*
 
 ---
 
+## Addendum V, 2026-09-22/23 - one streaming projector, and the pipeline wired into the plugin
+
+> I also suspect an improvement to this dual based approach would be best.
+> Instead, stream O(delta) diff chunk updates in queue based batches to a
+> fitted UMAP projector that incrementally re-fits for every 2x growth in the
+> number of total chunks (as their aggregate 512 token form from their
+> components), which resides downstream directly from the similar
+> vectorization and electron browser navigation panel that runs recursive
+> shadow DOM mutationobserver chunk extraction on the *fullest* possible set
+> of content detection dictionaries that can be collected throughout our
+> current code space and possibly some improvements from the diff as well.
+
+> A small black box on the bottom right corner that, when hovered, shows the
+> actual live processing that the real scanning pipeline is actually running
+> in the real app on the actual electron browser with meaningful feedback on
+> hovering chunks, streams to the projector, and most importantly, the thing
+> about our force-directed layout: all chunks, as in the 256 context window
+> limited ones, are embedded and sent to the projector for transforms with
+> intermittent refits.
+
+> I don't think the plugin yet surfaces the full pipeline throughout,
+> including the way our 3D graph layout is now computed.
+
+> What I mean is, the pipeline is disconnected in what it computes from what
+> it is supposed to supply to our various panels. I'm not talking about
+> measurement harnesses anymore. I'm talking about the actual features of the
+> plugin itself not being up to date with the current pipeline you have built
+> with measurements for. I don't see any of the updates happening in the
+> pipeline if its processing is the original code that is wired into our
+> plugin, which was the original intent of the ask.
+
+*What this changes, read against Addenda I-IV. "Instead" replaces the
+dual approach -- a page-level UMAP with a separate per-page layout for each
+unfolding -- with ONE fitted projector over chunks, the aggregate (merge
+group) vector standing for its 256-token members as Addendum IV's "the
+projector shows the aggregated vectors" already said. Positions in every
+panel come from that projector: the default page view, an unfolding, a live
+capture. The last two quotes are the acceptance test: a pipeline that is
+measured but does not decide what the panels draw has not been built.*
+
+---
+
 ## Standing instructions carried in the verbatim
 
 Two of these are process rules, not features, and they bind every future

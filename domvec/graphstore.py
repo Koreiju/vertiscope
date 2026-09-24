@@ -529,7 +529,9 @@ class GraphStore:
         _t = time.perf_counter()
 
         self._execute(
-            "MERGE (p:Page {url: $url}) SET p.title = $title, "
+            # Kept when the writer has no title -- see `workspace._KEEP_TITLE`.
+            "MERGE (p:Page {url: $url}) SET "
+            "p.title = CASE WHEN $title = '' THEN p.title ELSE $title END, "
             "p.scanned_at = $ts, p.root_hash = $rh, p.chunk_count = $nc, "
             "p.address_count = $na",
             {"url": url, "title": title, "ts": time.time(), "rh": root_hash,
@@ -1232,6 +1234,39 @@ class GraphStore:
             if vector is not None:
                 by_page.setdefault(url, []).append(vector)
         return by_page, counts
+
+    def lead_vectors(self):
+        """Every DRAWABLE chunk with the vector that speaks for it, in one query.
+
+        ``[(cid, url, vector)]``: the rows the chunk projector is fitted on
+        and places. The same substitution as `page_vectors` -- a duplicate is
+        resolved to its original, a merge-group member speaks through its
+        lead, a lead with members through its group vector -- but keyed by
+        chunk rather than folded into a page mean, because the projector's
+        points ARE chunks.
+        """
+        out = []
+        rows = self._rows(
+            "MATCH (p:Page)-[:HasChunk]->(c:Chunk) "
+            "RETURN c.url, c.cid, c.dup_of, c.group_of, c.group_n, "
+            "c.embedding, c.group_embedding")
+        for url, cid, dup, group_of, group_n, emb, gemb in rows:
+            if not url or dup:
+                continue
+            if group_of and group_of != cid:
+                continue
+            vector = None
+            if group_n and int(group_n) > 1 and gemb is not None:
+                values = list(gemb)
+                if any(values):
+                    vector = values
+            if vector is None and emb is not None:
+                values = list(emb)
+                if any(values):
+                    vector = values
+            if vector is not None:
+                out.append((cid, url, vector))
+        return out
 
     def page_titles(self) -> Dict[str, str]:
         """Every page's title, in one query."""

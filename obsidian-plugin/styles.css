@@ -695,3 +695,40 @@ button.domvec-run-fence:hover {
 .domvec-profile-drain.is-nothing_placed { color: var(--text-muted); }
 .domvec-profile-muted { color: var(--text-faint); }
 .domvec-profile-status { cursor: pointer; font-variant-numeric: tabular-nums; }
+
+
+/* ---- pipeline box over the browser cell (pipelinebox.ts) ----------------- */
+.domvec-pipebox { position: fixed; right: 10px; bottom: 10px; z-index: 30;
+  background: rgba(12, 12, 14, 0.88); color: #e8e8ea; border-radius: 8px;
+  font-size: 11px; line-height: 1.35; font-variant-numeric: tabular-nums;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35); max-width: 360px;
+  backdrop-filter: blur(4px); pointer-events: auto; }
+.domvec-pipebox-mini { display: flex; align-items: center; gap: 6px;
+  padding: 5px 9px; white-space: nowrap; cursor: default; }
+.domvec-pipebox-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+.domvec-pipebox-dot.is-ok { background: #3fb950; }
+.domvec-pipebox-dot.is-warn { background: #d29922; }
+.domvec-pipebox-dot.is-idle { background: #6e7681; }
+.domvec-pipebox-full { padding: 2px 10px 9px; width: 340px; max-height: calc(70vh); overflow-y: auto;
+  border-top: 1px solid rgba(255, 255, 255, 0.08); }
+.domvec-pipebox-h { margin-top: 8px; color: #9da5ae; font-size: 10px;
+  text-transform: uppercase; letter-spacing: 0.05em; }
+.domvec-pipebox-line { padding: 1px 0; }
+.domvec-pipebox-line.is-warn { color: #e3b341; }
+.domvec-pipebox-muted { color: #7d8590; }
+.domvec-pipebox-chain, .domvec-pipebox-strip { display: flex; gap: 4px; margin-top: 3px; flex-wrap: wrap; }
+.domvec-pipebox-step, .domvec-pipebox-cell { flex: 1 1 0; min-width: 52px; padding: 3px 4px;
+  border-radius: 4px; background: rgba(255, 255, 255, 0.05); text-align: center; }
+.domvec-pipebox-step.is-ok { box-shadow: inset 0 -2px 0 #3fb950; }
+.domvec-pipebox-step.is-warn { box-shadow: inset 0 -2px 0 #d29922; }
+.domvec-pipebox-n { font-size: 12px; font-weight: 600; }
+.domvec-pipebox-l { color: #9da5ae; font-size: 9.5px; }
+.domvec-pipebox-growth { height: 4px; background: rgba(255, 255, 255, 0.08);
+  border-radius: 2px; margin: 4px 0 2px; overflow: hidden; }
+.domvec-pipebox-growthfill { height: 100%; background: #58a6ff; }
+/* Non-blinding: a thin outline and a faint wash, no animation. It sits in the
+   CELL above the webview and never catches the pointer, so the page under it
+   behaves exactly as it would without it. */
+.domvec-chunk-outline { position: fixed; z-index: 25; pointer-events: none;
+  border: 1.5px solid rgba(88, 166, 255, 0.75); background: rgba(88, 166, 255, 0.06);
+  border-radius: 3px; box-sizing: border-box; }

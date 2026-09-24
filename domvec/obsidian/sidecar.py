@@ -79,6 +79,9 @@ _FIT_LOCK = threading.Lock()
 #: Raised when there are chunks waiting for vectors.
 _EMBED_WANTED = threading.Event()
 
+#: Token counts for the page the overlay is watching, keyed on its chunk set.
+_TOKEN_MEMO: Dict = {}
+
 #: The page-level fit made in this process, per (dims, spherical), kept
 #: until the chunk corpus doubles. See the `layout` route.
 _PAGE_FIT: Dict = {}
@@ -113,6 +116,83 @@ def _profile(kind: str, record: Dict) -> None:
 _EMBED_THREAD = None
 
 
+#: `/health`'s lexical coverage, memoised on what it is a function of: the
+#: chunk count and the frequency matrix's mutation counter.
+_LEXICAL_MEMO: Dict = {}
+
+
+def _lexical_coverage(workspace) -> Dict[str, int]:
+    """How many chunks retrieval can reach on the lexical factor (`G-3`).
+
+    Two ways to be unreachable, counted apart because they have different
+    causes: no row at all (the matrix lost it, or never had it), and a row
+    with no terms while the chunk's markdown has words (indexed while empty).
+    """
+    from ..vectors import tokens as _tokens
+    freq = workspace.freq
+    key = (workspace.store.chunk_count(), getattr(freq, "version", 0))
+    if _LEXICAL_MEMO.get("key") == key:
+        return _LEXICAL_MEMO["value"]
+    no_row = empty_row = 0
+    for cid, md in workspace.store._rows("MATCH (c:Chunk) RETURN c.cid, c.md"):
+        row = freq.row_of(cid)
+        if row is None:
+            no_row += 1
+        elif not freq._counts[row] and any(True for _ in _tokens(md or "")):
+            empty_row += 1
+    value = {"chunks_without_lexical_row": no_row,
+             "chunks_with_empty_lexical_row": empty_row}
+    _LEXICAL_MEMO.update(key=key, value=value)
+    return value
+
+
+def _project(cids) -> None:
+    """Hand chunks to the chunk projector's queue. Never raises."""
+    try:
+        from .projector import projector as _get
+        got = _get()
+        if got is not None and cids:
+            got.enqueue(list(cids))
+    except Exception:                               # noqa: BLE001
+        pass
+
+
+def _project_page(workspace, url: str) -> None:
+    """Queue every chunk a page holds now, plus any the projector still
+    holds for it that the page has lost."""
+    try:
+        from .projector import projector as _get
+        got = _get()
+        if got is None or not url:
+            return
+        cids = [r[0] for r in workspace.store._rows(
+            "MATCH (c:Chunk {url: $u}) RETURN c.cid", {"u": url})]
+        got.enqueue_page(url, cids)
+    except Exception:                               # noqa: BLE001
+        pass
+
+
+_LEXICAL_SAVED_AT = [0.0]
+
+
+def _save_lexical_due(workspace, every: float = 30.0) -> None:
+    """Persist the frequency matrix at most every `every` seconds, if it
+    changed. Never raises."""
+    now = time.monotonic()
+    if now - _LEXICAL_SAVED_AT[0] < every:
+        return
+    _LEXICAL_SAVED_AT[0] = now
+    try:
+        started = time.perf_counter()
+        with _WORK_LOCK:
+            wrote = workspace.save_lexical()
+        if wrote:
+            _profile("lexical_save", {
+                "ms": round((time.perf_counter() - started) * 1000, 1)})
+    except Exception:                               # noqa: BLE001
+        pass
+
+
 def _aggregate_due(workspace) -> None:
     """Re-cluster the pages that have gone quiet (`G-65`).
 
@@ -130,6 +210,9 @@ def _aggregate_due(workspace) -> None:
             with _WORK_LOCK:
                 got_lock = time.perf_counter()
                 workspace.aggregate(url)
+            # Merge groups changed, so which chunk leads and which vector it
+            # speaks with changed too: the projector re-places the page.
+            _project_page(workspace, url)
             _profile("aggregate", {
                 "lock_wait_ms": round((got_lock - asked) * 1000, 1),
                 "ms": round((time.perf_counter() - got_lock) * 1000, 1),
@@ -155,6 +238,9 @@ def _embed_forever(workspace, stop: threading.Event) -> None:
             # Nothing to embed, but a page may still be due to re-cluster --
             # the last drain of a visit queues one and then no more arrive.
             _aggregate_due(workspace)
+            # And the lexical rows go to disk once things are quiet, so a
+            # hard kill costs seconds of them, not the whole session's.
+            _save_lexical_due(workspace)
             continue
         _EMBED_WANTED.clear()
         while not stop.is_set():
@@ -164,6 +250,9 @@ def _embed_forever(workspace, stop: threading.Event) -> None:
                     got_lock = time.perf_counter()
                     before = len(workspace.vectors)
                     workspace.flush_vectors(limit=_EMBED_BATCH)
+                    # The stream: what just got a vector is transformed into
+                    # the fit next, in the projector's own batches.
+                    _project(getattr(workspace, "last_embedded", None) or ())
                     # The QUEUE's length, not the flush's return value.
                     # `flush_vectors` answers with `vectors.report()`, which
                     # is a set of cumulative counters -- pushed, queued,
@@ -993,6 +1082,9 @@ class _Handler(BaseHTTPRequestHandler):
                     with _WORK_LOCK:
                         self.workspace.ingest(
                             url, spine.trie, title=(body.get("title") or ""))
+                # A settled page is complete: whatever the projector holds
+                # for it that the page no longer has is gone.
+                _project_page(self.workspace, url)
                 stored = list(self.workspace.store.chunks(url))
                 sessions.pop(url, None)
                 self._send(200, {
@@ -1051,7 +1143,8 @@ class _Handler(BaseHTTPRequestHandler):
                     phases["lock_wait"] = round(
                         (time.perf_counter() - asked) * 1000, 1)
                     _written, counts = self.workspace.ingest_chunks(
-                        url, dirty, complete=False)
+                        url, dirty, complete=False,
+                        title=(body.get("title") or ""))
                 # The store's own breakdown, carried up. `store` was 96% of a
                 # capture and one number cannot say which statement it is.
                 if isinstance(counts, dict):
@@ -1074,6 +1167,10 @@ class _Handler(BaseHTTPRequestHandler):
             # and a count would leave it re-fetching the whole layout to find
             # out which three nodes moved.
             dirty_cids = [c.cid for c in dirty]
+            # Rewritten chunks keep their cid only if their span did; either
+            # way the projector must look again. One without a vector yet is
+            # dropped from its queue and comes back through the embedder.
+            _project(dirty_cids)
         except Exception as exc:                    # noqa: BLE001
             # Named rather than swallowed. A capture that fails quietly is
             # indistinguishable from a page with nothing in it, and that
@@ -1257,6 +1354,7 @@ class _Handler(BaseHTTPRequestHandler):
                              "linksto_between_stored_pages": _one(
                                  "MATCH (c:Chunk)-[r:LinksTo]->(p:Page) "
                                  "WHERE c.url <> p.url RETURN count(r)"),
+                             **_lexical_coverage(self.workspace),
                              "unreadable_addresses":
                                  __import__("domvec.graphstore",
                                             fromlist=["GraphStore"])
@@ -1410,12 +1508,134 @@ class _Handler(BaseHTTPRequestHandler):
                 # and a run reset is about the run. Clearing it made the
                 # warmup look as though it had never run -- which is what the
                 # test for it reported, about a warmup that had.
-                kept = {k: v for k, v in _PROFILE.items() if k == "warmup"}
+                kept = {k: v for k, v in _PROFILE.items()
+                        if k in ("warmup", "projector_fit")}
                 _PROFILE.clear()
                 _PROFILE.update(kept)
                 self._send(200, {"reset": True, "kept": sorted(kept)})
                 return
-            self._send(200, {k: list(v) for k, v in _PROFILE.items()})
+            got = {k: list(v) for k, v in _PROFILE.items()}
+            # The query index's rebuilds, timed where they happen.
+            got["index_build"] = list(getattr(self.workspace, "index_builds", []) or [])
+            self._send(200, got)
+            return
+
+        # Where ONE page is in the pipeline, for the browser cell's overlay.
+        #
+        # The chain a reader cares about for the page in front of them:
+        # captured -> embedded -> placed, how each chunk sits against the
+        # context window, and how close the fit is to its next refit. Asked
+        # about every second while the overlay is open, so the token count --
+        # the only part that costs anything -- is memoised on the page's
+        # chunk set.
+        # The chunk projector: the fit every position in the graph comes
+        # from, and the stream of what it has placed since a given point.
+        if segments[0] == "projector":
+            from .projector import projector as _get
+            proj = _get()
+            if proj is None:
+                self._send(503, {"error": "no projector in this process"})
+                return
+            query = parse_qs(parts.query)
+            if len(segments) > 1 and segments[1] == "delta":
+                since = int((query.get("since") or ["0"])[0] or 0)
+                epoch = int((query.get("epoch") or ["-1"])[0] or -1)
+                self._send(200, proj.delta(since, epoch))
+                return
+            url = (query.get("url") or [""])[0]
+            out = proj.status(self.workspace, url)
+            if (query.get("quality") or [""])[0]:
+                out["neighbourhoods"] = proj.neighbourhoods_kept()
+            if (query.get("drawable") or [""])[0]:
+                # The denominator for "every drawable chunk is projected",
+                # NOW -- not at the fit, which a merge or a retirement since
+                # has already made stale. The same read the fit uses.
+                with _WORK_LOCK:
+                    now = {c for c, _u, _v in self.workspace.store.lead_vectors()}
+                with proj.lock:
+                    held = set(proj.pos)
+                # One snapshot for both sides: `projected` above was read
+                # before the store, and a drain in flight between them made
+                # 14,382 vs 14,374 out of two equal sets.
+                out["projected"] = len(held)
+                out["drawable_now"] = len(now)
+                out["drawable_unprojected"] = len(now - held)
+                out["projected_not_drawable"] = len(held - now)
+            self._send(200, out)
+            return
+
+        if segments[0] == "page_status":
+            from .. import tokens as _tokens
+            from .layout import (_ESTIMATED_PAGES, _PAGE_POS, live_projection)
+            query = parse_qs(parts.query)
+            url = (query.get("url") or [""])[0]
+            if not url:
+                self._send(400, {"error": "no url"})
+                return
+            store = self.workspace.store
+            rows = store._rows(
+                "MATCH (c:Chunk {url: $u}) RETURN c.cid, c.md, "
+                "c.embedding IS NOT NULL", {"u": url})
+            # The DRAWABLE chunks, which is the denominator "in the graph" is
+            # answerable for. A duplicate is drawn once as the copy it is
+            # (`G-25`) and a merge-group member through its lead (`G-27`), so
+            # neither ever gets a node of its own. Dividing by every stored
+            # chunk read a correct projector as missing 89 of 688.
+            drawable = store._rows(
+                "MATCH (c:Chunk {url: $u}) WHERE (c.dup_of IS NULL OR "
+                "c.dup_of = '') AND (c.group_of IS NULL OR c.group_of = '' "
+                "OR c.group_of = c.cid) RETURN count(c)", {"u": url})[0][0]
+            window = int(getattr(self.workspace, "context_window", 0) or 256)
+            key = (url, len(rows), sum(len(md or "") for _c, md, _e in rows))
+            toks = _TOKEN_MEMO.get(key)
+            if toks is None:
+                toks = sorted(_tokens.budget_for(md or "", url)
+                              for _c, md, _e in rows if (md or "").strip())
+                _TOKEN_MEMO.clear()
+                _TOKEN_MEMO[key] = toks
+            # The chunk projector is what the graph is drawn from, so it is
+            # what this page's "fit" is. The old page-mean fit is consulted
+            # only if the projector is not running in this process.
+            from .projector import projector as _get_projector
+            cp = _get_projector()
+            projection = (cp.projection if cp is not None and cp.projection
+                          is not None else live_projection())
+            total = store.chunk_count()
+            fitted = projection.fitted_chunks if projection else None
+            fits = [e for e in (_PROFILE.get("projector_fit") or _PROFILE.get("layout") or [])
+                    if e.get("kind", "fit") == "fit"]
+            anchored = any(url in (t or {}) for t in _PAGE_POS.values()) or bool(
+                cp is not None and url in cp.page_pos)
+            self._send(200, {
+                "url": url,
+                "chunks": len(rows),
+                "drawable": int(drawable),
+                "empty_md": sum(1 for _c, md, _e in rows if not (md or "").strip()),
+                "embedded": sum(1 for _c, _m, e in rows if e),
+                "window": window,
+                "tokens_max": toks[-1] if toks else 0,
+                "tokens_p50": toks[len(toks) // 2] if toks else 0,
+                "over_window": sum(1 for t in toks if t > window),
+                "fitted_chunks": fitted,
+                "chunks_now": total,
+                "growth": round(total / fitted, 3) if fitted else None,
+                "refit_at": 2 * fitted if fitted else None,
+                "stale": bool(projection and projection.stale(total)),
+                "last_fit_at": fits[-1].get("at") if fits else None,
+                "anchor": ("projector" if cp is not None and url in cp.page_pos
+                           else "estimated" if url in _ESTIMATED_PAGES
+                           else "fitted" if anchored else "none"),
+                "embed_queue": len(self.workspace.vectors),
+                #: This page's chunks with a position in the projector, and
+                #: the projector's own stream state.
+                "projected": (len(cp.by_url.get(url) or ()) if cp is not None else None),
+                "projector": (cp.brief() if cp is not None else None),
+                # Asked for when the browser lands on a page, so every chunk
+                # can be queued for the projector and not only the ones a
+                # drain happens to re-dirty.
+                **({"cids": [c for c, _m, _e in rows]}
+                   if (query.get("cids") or [""])[0] else {}),
+            })
             return
 
         if segments[0] == "chunk_stats":
@@ -1531,6 +1751,41 @@ class _Handler(BaseHTTPRequestHandler):
             # transform has to come from the same fit that drew the pages it
             # is placing beside; a stored layout cannot provide that.
             refit_asked = bool((parse_qs(parts.query).get("refit") or [""])[0])
+            # **The chunk projector answers, when it has a fit.** Positions
+            # for pages and chunks alike come from the one fit the stream
+            # places into, so the default view, an unfolding and a live
+            # capture are the same picture. `?source=legacy` keeps the old
+            # separate fits reachable for comparison; S3 still uses them,
+            # because the projector fits Euclidean space only.
+            source = (parse_qs(parts.query).get("source") or [""])[0]
+            if source != "legacy" and not spherical and want == 3:
+                from .layout import projected_chunk_layout, projected_page_layout
+                from .projector import projector as _get
+                proj = _get()
+                if proj is not None and refit_asked and not proj.fitting:
+                    threading.Thread(target=proj.fit, args=(self.workspace,),
+                                     name="domvec-refit", daemon=True).start()
+                if proj is not None and proj.projection is not None:
+                    _t0 = time.perf_counter()
+                    got = (projected_page_layout(self.workspace, proj)
+                           if level == "page"
+                           else projected_chunk_layout(self.workspace, proj))
+                    if got is not None:
+                        _profile("layout", {"kind": "projector", "level": level,
+                                            "n": got.get("n"),
+                                            "epoch": got.get("epoch"),
+                                            "ms": round((time.perf_counter() - _t0) * 1000, 1)})
+                        self._send(200, got)
+                        return
+                if proj is not None and (proj.fitting or proj.projection is None):
+                    # Not fitted yet: say so rather than fall back to a
+                    # different model the stream will never place into.
+                    self._send(200, {"nodes": [], "edges": [], "n": 0,
+                                     "level": level, "source": "projector",
+                                     "fitting": True,
+                                     "projector": proj.status(self.workspace),
+                                     "note": "the chunk projector is fitting"})
+                    return
             if level == "page" and not refit_asked:
                 live_fit = _PAGE_FIT.get((want, spherical))
                 if live_fit is not None:
@@ -1741,23 +1996,38 @@ def serve(workspace, port: int = 8787, *, block: bool = True,
             name="domvec-embed", daemon=True)
         _EMBED_THREAD.start()
 
-    # **Warm placement before a reader needs it.** UMAP's transform costs
-    # ~1.5 s on its first calls in a process and ~3 ms after; that cost used
-    # to land on whichever gesture came first after a restart. Off the
-    # request path, holding `_FIT_LOCK` only while a fit may be built -- the
-    # same lock every layout build takes, because concurrent UMAP fits were
-    # one of the hazards under `D-23`.
+    # **The chunk projector.** One fit over every drawable chunk, made off
+    # the request path; then a worker that drains the stream the embedder and
+    # the capture path feed it, and refits in the background at 2x growth.
     if workspace is not None:
-        def _warm():
+        from . import projector as _projector
+        if _projector.PROJECTOR is None:
+            _projector.PROJECTOR = _projector.ChunkProjector(dims=3)
+            _projector.PROJECTOR.on_batch = lambda r: _profile("project", r)
+            _projector.PROJECTOR.on_fit = lambda r: _profile("projector_fit", r)
+            _projector.PROJECTOR.start(workspace, work_lock=_WORK_LOCK,
+                                       fit_lock=_FIT_LOCK)
+
+    # **Lexical rows for every chunk, at start.** Rows lost to a hard kill
+    # (the matrix used to be written only on a clean close) or indexed while
+    # a chunk's markdown was empty are re-derived from the store's markdown,
+    # off the request path. See `Workspace.rebuild_lexical`.
+    if workspace is not None and hasattr(workspace, "rebuild_lexical"):
+        def _lexical():
             try:
-                from .layout import _ensure_projection, warm_placement
-                with _FIT_LOCK:
-                    _ensure_projection(workspace)
-                _profile("warmup", warm_placement(workspace))
+                started = time.perf_counter()
+                with _WORK_LOCK:
+                    got = workspace.rebuild_lexical()
+                got["ms"] = round((time.perf_counter() - started) * 1000, 1)
+                _profile("lexical_repair", got)
             except Exception as exc:                # noqa: BLE001
-                _profile("warmup", {"warmed": False,
-                                    "why": "%s: %s" % (type(exc).__name__, exc)})
-        threading.Thread(target=_warm, name="domvec-warm", daemon=True).start()
+                _profile("lexical_repair", {"error": "%s: %s" % (type(exc).__name__, exc)})
+        threading.Thread(target=_lexical, name="domvec-lexical", daemon=True).start()
+
+    # (The page-fit warmup that stood here is gone: it built the old
+    # page-mean fit so its transform would be warm. The projector's fit
+    # transforms every chunk on its way in, which warms the same thing, and
+    # the page-mean fit is no longer what the graph is drawn from.)
 
     handler = type("_Bound", (_Handler,),
                    {"workspace": workspace, "enact_allowed": bool(enact),

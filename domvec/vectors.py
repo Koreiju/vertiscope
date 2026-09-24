@@ -256,6 +256,9 @@ class FreqMatrix:
         # view of the counts; both are re-derived rather than patched.
         self._csr = None
         self._df = None
+        #: Bumped on every mutation, so a long-running owner can save only
+        #: when something changed. See `Workspace.save_lexical`.
+        self.version = getattr(self, "version", 0) + 1
 
     def _matrix(self) -> sparse.csr_matrix:
         """Raw term counts as CSR, built once per mutation batch."""

@@ -105,3 +105,46 @@ def test_a_read_only_workspace_writes_nothing_on_close(ws_path):
     assert after == before, \
         "a read-only close rewrote %s" % sorted(
             k for k in after if after.get(k) != before.get(k))
+
+
+def test_rebuild_lexical_refreshes_a_row_indexed_while_empty(ws_path):
+    """A row that EXISTS and says nothing is a veto too.
+
+    Planted the way the corpus got it: a chunk indexed while its markdown was
+    empty, whose markdown was later restored. `row_of` is not None, so the
+    old repair skipped it, and the chunk stayed unreachable.
+    """
+    with Workspace(ws_path) as ws:
+        ws.index_html(PAGE, URL)
+        chunk = next(iter(ws.store.chunks()))
+        ws.freq.add(chunk.cid, "")                  # indexed while empty
+        row = ws.freq.row_of(chunk.cid)
+        assert row is not None and not ws.freq._counts[row], "plant failed"
+
+        got = ws.rebuild_lexical()
+        assert got["refreshed"] == 1, got
+        assert ws.freq._counts[ws.freq.row_of(chunk.cid)], \
+            "the row is still empty"
+        assert ws.freq.row_of(chunk.cid) == row, "the row was renumbered"
+
+
+def test_lexical_rows_survive_a_session_that_never_closed(ws_path):
+    """The sidecar is often ended by a hard kill, which runs no `close()`.
+
+    Rows added after open must reach the disk through `save_lexical`, the
+    path the sidecar's idle loop takes -- and a second call with nothing new
+    must write nothing.
+    """
+    with Workspace(ws_path) as ws:
+        ws.index_html(PAGE, URL)
+    ws = Workspace(ws_path)
+    try:
+        ws.freq.add("planted-cid", "sphinx of black quartz judge my vow")
+        assert ws.save_lexical() is True
+        assert ws.save_lexical() is False, "saved again with nothing new"
+    finally:
+        ws.store.close()                            # NOT ws.close(): a kill
+    with Workspace(ws_path, read_only=True) as back:
+        assert back.freq.row_of("planted-cid") is not None, \
+            "a row added in a session that never closed was lost"
+        assert back.save_lexical() is False, "a reader wrote the matrix"

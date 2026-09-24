@@ -274,6 +274,8 @@ def build_page_layout(workspace,
 
     here = _PAGE_POS.setdefault(_space_name(spherical_fit), {})
     here.clear()
+    # Every page is fitted now; no anchor is an estimate any more.
+    _ESTIMATED_PAGES.clear()
     nodes = []
     for i, url in enumerate(urls):
         here[url] = [float(v) for v in coords[i][:dims]]
@@ -1266,6 +1268,18 @@ UNFOLD_RADIUS = 90.0
 #: 90. The pane says which space it is in and gets the anchors for that one.
 _PAGE_POS: Dict[str, Dict[str, List[float]]] = {}
 
+#: Pages whose anchor in `_PAGE_POS` is an ESTIMATE -- placed into the fit at
+#: the transform of their chunks' mean -- rather than a fitted position.
+#:
+#: Tracked because two paths create such an anchor and only one of them sent
+#: the page's node. `refresh_page_layout` registers the anchor and puts the
+#: node in the layout; `place_into` then finds the anchor, concludes the page
+#: already has a node, and sends chunks only. The live pane receives chunks,
+#: never the layout's copy, so a page browsed after the fit drew 684 chunk
+#: nodes around empty space with no hub. Every placement for a page in this
+#: set now carries its node. A refit replaces the estimates and clears it.
+_ESTIMATED_PAGES: set = set()
+
 
 def _space_name(spherical: bool) -> str:
     return "S3" if spherical else "euclidean"
@@ -1540,7 +1554,12 @@ def unfold(workspace, url: str, path: str = "", space: str = "",
     Positions come from `Projection.place`, so what appears lands in the
     picture already on screen rather than in a second, unrelated one.
     """
-    projection = _ensure_projection(workspace)
+    _cp = _live_chunk_projector()
+    if _cp is None and _projector_running():
+        return {"nodes": [], "path": path, "url": url,
+                "why": "the chunk projector is fitting"}
+    projection = (_cp.projection if _cp is not None
+                  else _ensure_projection(workspace))
     stored = [c for c in workspace.store.chunks(url) if not c.redundant]
     stored = [c for c in stored
               if not (c.group_of and c.group_of != c.cid)]
@@ -1656,6 +1675,41 @@ def unfold(workspace, url: str, path: str = "", space: str = "",
     # Position from a LOCAL fit, anchored where this page sits (see
     # `_local_positions`). Colour stays the global fit's, so two chunks on
     # different pages that mean the same thing still look the same.
+    if _cp is not None:
+        # **Placed by the projector, and nothing else.** A branch sits at the
+        # transform of its members' mean, a chunk where the stream put it,
+        # the page where the fit puts what it means. No local ball, no room:
+        # the trie's structure is the edges, and where a node sits is what it
+        # says.
+        with _cp.lock:
+            for i, info in enumerate(meta):
+                if info["level"] == "chunk" and info["cid"] in _cp.pos:
+                    coords[i] = _cp.pos[info["cid"]]
+                    if colours is not None and info["cid"] in _cp.hsv:
+                        colours[i] = _cp.hsv[info["cid"]]
+        nodes = []
+        for i, info in enumerate(meta):
+            node = dict(info)
+            node.pop("md", None)
+            node.pop("covers", None)
+            node.update({"rank": 0.0, "copies": 1, "source": "projector",
+                         "pos": [float(v) for v in coords[i]]})
+            if colours is not None:
+                node["hsv"] = [float(v) for v in colours[i]]
+            picture = _first_image(info.get("md") or "", url)
+            if picture is not None:
+                node["image"] = picture
+            nodes.append(node)
+        parent_id = ("page:" + url if not prefix
+                     else "path:%s#/%s" % (url, "/".join(prefix)))
+        edges = [{"source": parent_id, "target": info["cid"]} for info in meta]
+        edges.extend(_edges_among(workspace, url, meta))
+        return {"nodes": nodes, "edges": edges, "parent": parent_id,
+                "url": url, "source": "projector",
+                "path": "/" + "/".join(_segments(path)) if prefix else "",
+                "depth": depth, "branches": len(branches),
+                "leaves": len(leaves)}
+
     anchor = None
     # The anchors for the space the READER is in, not whichever fit ran last.
     wanted = _space_name(bool(space) and space.lower() in ("s3", "spherical"))
@@ -1831,6 +1885,7 @@ def refresh_page_layout(workspace, fitted: Dict, spherical: bool = False) -> Dic
                 continue
             pos = [float(v) for v in where[0][:3]]
             table[url] = pos
+            _ESTIMATED_PAGES.add(url)
             count = int(workspace.store.chunk_count(url))
             node = {"cid": "page:" + url, "url": url, "title": url,
                     "rank": 0.0, "chars": 0, "tokens": 0, "copies": 1,
@@ -1874,6 +1929,18 @@ def place_into(workspace, cids) -> Dict:
     rather than dropped: a chunk that was captured and cannot be drawn is a
     fact the pane should be able to say out loud.
     """
+    # The chunk projector answers when it has a fit: positions are the
+    # stream's, not a second computation made here.
+    _cp = _live_chunk_projector()
+    if _cp is not None:
+        return place_projected(workspace, cids, _cp)
+    if _projector_running():
+        # The projector exists but is still making its first fit. Placing
+        # through the old page-mean fit here built that fit as a side effect
+        # and drew chunks in a model the stream never places into.
+        wanted = [c for c in dict.fromkeys(cids or []) if c]
+        return {"nodes": [], "unplaced": wanted, "stale": False,
+                "why": "the chunk projector is fitting", "source": "projector"}
     projection = _ensure_projection(workspace)
     wanted = [c for c in dict.fromkeys(cids or []) if c]
     if projection is None:
@@ -1988,6 +2055,7 @@ def place_into(workspace, cids) -> Dict:
             if where is None or not len(where):
                 continue
             table[page_url] = [float(v) for v in where[0][:3]]
+            _ESTIMATED_PAGES.add(page_url)
             fresh_pages[page_url] = table[page_url]
         timing["fresh_pages"] = len(fresh_pages)
         _t = _time.perf_counter()
@@ -2056,7 +2124,11 @@ def place_into(workspace, cids) -> Dict:
     # unit -- sqrt of the chunks it holds -- so it nests like any other page.
     page_nodes = []
     if rows:
-        for page_url, at in fresh_pages.items():
+        hubs = dict(fresh_pages)
+        for page_url in by_url:
+            if page_url in _ESTIMATED_PAGES and table.get(page_url) is not None:
+                hubs.setdefault(page_url, table[page_url])
+        for page_url, at in hubs.items():
             held = workspace.store.chunk_count(page_url) if hasattr(
                 workspace.store, "chunk_count") else len(by_url.get(page_url, []))
             try:
@@ -2107,3 +2179,281 @@ def place_into(workspace, cids) -> Dict:
             #: The pair `stale` is actually decided on, so a reader of this
             #: reply can check the verdict instead of trusting it.
             "fitted_chunks": projection.fitted_chunks, "n": total}
+
+
+# ---------------------------------------------------------------------------
+# The chunk projector's answers, in the shapes the pane already reads.
+#
+# `projector.ChunkProjector` holds one fit over every drawable chunk and the
+# position the stream last gave each of them. Everything below reads those
+# positions and assembles nodes; none of it fits, relaxes or re-places
+# anything, so what the pane draws is exactly what the projector computed.
+# ---------------------------------------------------------------------------
+
+def _live_chunk_projector():
+    """The sidecar's projector, if it has a fit to answer from."""
+    from .projector import projector as _get
+    got = _get()
+    return got if got is not None and got.projection is not None else None
+
+
+def _projector_running() -> bool:
+    """A projector exists in this process, fitted or not."""
+    from .projector import projector as _get
+    return _get() is not None
+
+
+def _page_pictures(workspace, urls=None) -> Dict[str, Dict]:
+    """Each page's first picture, read from the chunks that have one."""
+    out: Dict[str, Dict] = {}
+    try:
+        rows = workspace.store._rows(
+            "MATCH (c:Chunk) WHERE c.md CONTAINS '![' "
+            "RETURN c.url, c.xpath, c.part, c.md")
+    except Exception:                               # noqa: BLE001
+        return out
+    for url, _x, _p, md in sorted(rows, key=lambda r: (r[0] or "", r[1] or "",
+                                                       r[2] or 0)):
+        if not url or url in out or (urls is not None and url not in urls):
+            continue
+        found = _first_image(md or "", url)
+        if found is not None:
+            out[url] = found
+    return out
+
+
+def projected_page_layout(workspace, proj=None) -> Optional[Dict]:
+    """Every page, at the chunk projector's position for it (`G-53`).
+
+    Pages are the default view for the frame rate (94 draw calls, not
+    12,820), but they are no longer a separate fit: each page sits at the
+    transform of its chunks' mean vector INTO THE CHUNK FIT, so a page and
+    the chunks it unfolds into are placed by the same model.
+    """
+    proj = proj or _live_chunk_projector()
+    if proj is None:
+        return None
+    with proj.lock:
+        page_pos = dict(proj.page_pos)
+        page_hsv = dict(proj.page_hsv)
+        counts = {u: len(cs) for u, cs in proj.by_url.items()}
+        epoch, seq = proj.epoch, proj.seq
+    titles = workspace.store.page_titles()
+    held: Dict[str, int] = {}
+    try:
+        for url, n in workspace.store._rows(
+                "MATCH (p:Page)-[:HasChunk]->(c:Chunk) RETURN p.url, count(c)"):
+            held[url] = int(n)
+    except Exception:                               # noqa: BLE001
+        held = dict(counts)
+    pictures = _page_pictures(workspace, set(page_pos))
+    here = _PAGE_POS.setdefault(_space_name(False), {})
+    here.clear()
+    _ESTIMATED_PAGES.clear()
+    nodes = []
+    for url in sorted(page_pos):
+        at = page_pos[url]
+        here[url] = [float(v) for v in at[:3]]
+        members = held.get(url, counts.get(url, 0))
+        node = {
+            "cid": "page:" + url, "url": url,
+            "title": titles.get(url) or url, "rank": 0.0, "chars": 0,
+            "tokens": 0, "copies": 1, "members": members, "level": "page",
+            "val": float(max(1.0, max(members, 1) ** 0.5)),
+            "pos": [float(v) for v in at[:3]],
+            #: How many of this page's chunks the projector holds a position
+            #: for -- "is all of it in the map", per page.
+            "projected": counts.get(url, 0),
+            "source": "projector",
+        }
+        if url in page_hsv:
+            node["hsv"] = page_hsv[url]
+        if url in pictures:
+            node["image"] = pictures[url]
+        nodes.append(node)
+    known = {n["url"] for n in nodes}
+    edges = [{"source": "page:" + s, "target": "page:" + t}
+             for s, t in workspace.store.page_links()
+             if s in known and t in known and s != t]
+    coords = (np.asarray([n["pos"] for n in nodes], dtype=np.float32)
+              if nodes else np.zeros((0, 3), dtype=np.float32))
+    status = proj.status(workspace)
+    return {
+        "nodes": nodes, "edges": edges, "spaces": ["semantic"],
+        "space": "euclidean", "n": len(nodes), "level": "page", "dims": 3,
+        "hsv": bool(page_hsv), "fitted_dims": 3,
+        "chunks": sum(held.values()), "fitted_on": {"semantic": True},
+        "spacing": _spacing(coords, 3) if len(coords) else None,
+        "images": sum(1 for n in nodes if n.get("image")),
+        "source": "projector", "epoch": epoch, "seq": seq,
+        "projector": status,
+        "fitted_chunks": status.get("fitted_chunks"),
+        "chunks_now": status.get("chunks_now"),
+        "stale": False, "from_store": False,
+    }
+
+
+def projected_chunk_layout(workspace, proj=None) -> Optional[Dict]:
+    """Every drawable chunk at its projector position (`?level=chunk`)."""
+    proj = proj or _live_chunk_projector()
+    if proj is None:
+        return None
+    with proj.lock:
+        pos = dict(proj.pos)
+        hsv = dict(proj.hsv)
+        epoch, seq = proj.epoch, proj.seq
+    rows = workspace.store._rows(
+        "MATCH (c:Chunk) RETURN c.cid, c.url, c.md, c.chars, c.group_n, c.dup_n")
+    nodes = []
+    for cid, url, md, chars, group_n, dup_n in rows:
+        at = pos.get(cid)
+        if at is None:
+            continue
+        members = int(group_n or 1)
+        node = {"cid": cid, "url": url, "title": _title(md or ""),
+                "rank": 0.0, "chars": int(chars or 0),
+                # How many identical renderings this node stands for (`G-25`).
+                # It was a constant 1 here, so the one node per distinct
+                # rendering never said it was one of several.
+                "tokens": tokens.budget(md or ""),
+                "copies": int(dup_n or 1),
+                "members": members, "level": "chunk",
+                "val": float(max(1.0, max(members, 1) ** 0.5)),
+                "pos": at, "source": "projector"}
+        if cid in hsv:
+            node["hsv"] = hsv[cid]
+        picture = _first_image(md or "", url or "")
+        if picture is not None:
+            node["image"] = picture
+        nodes.append(node)
+    drawn = {n["cid"] for n in nodes}
+    edges = []
+    for page in {n["url"] for n in nodes}:
+        for a, b in workspace.store.contains_within(page):
+            if a in drawn and b in drawn and a != b:
+                edges.append({"source": a, "target": b})
+    status = proj.status(workspace)
+    return {"nodes": nodes, "edges": edges, "spaces": ["semantic"],
+            "space": "euclidean", "n": len(nodes), "level": "chunk",
+            "dims": 3, "hsv": bool(hsv), "fitted_dims": 3,
+            "chunks": status.get("chunks_now"),
+            "fitted_on": {"semantic": True}, "source": "projector",
+            "epoch": epoch, "seq": seq, "projector": status,
+            "images": sum(1 for n in nodes if n.get("image")),
+            "stale": False, "from_store": False}
+
+
+def place_projected(workspace, cids, proj) -> Dict:
+    """`place_into`, answered from the chunk projector.
+
+    A chunk the stream has already placed is drawn where the stream put it.
+    One it has not reached yet -- embedded a moment ago, still in the queue --
+    is transformed here, into the same fit, and queued so the stream's own
+    record catches up. Nothing is moved to sit beside its page: the page sits
+    where the fit puts what it means, and so do its chunks.
+    """
+    import time as _time
+    timing: Dict[str, float] = {}
+    wanted = [c for c in dict.fromkeys(cids or []) if c]
+    if not wanted:
+        return {"nodes": [], "unplaced": [], "stale": False, "timing": timing,
+                "source": "projector"}
+    _t = _time.perf_counter()
+    rows, meta, missing = [], [], []
+    for cid, chunk, vector in workspace.store.chunks_for_placement(wanted):
+        if chunk is None or chunk.redundant:
+            continue
+        if chunk.group_of and chunk.group_of != cid:
+            continue
+        if not vector or not any(vector):
+            missing.append(cid)
+            continue
+        rows.append(vector)
+        meta.append(chunk)
+    timing["ms_read"] = round((_time.perf_counter() - _t) * 1000, 1)
+    timing["n_wanted"] = len(wanted)
+    timing["n_placeable"] = len(rows)
+
+    with proj.lock:
+        known = {m.cid: proj.pos.get(m.cid) for m in meta}
+        known_hsv = {m.cid: proj.hsv.get(m.cid) for m in meta}
+        page_at = dict(proj.page_pos)
+        page_hsv = dict(proj.page_hsv)
+        projection = proj.projection
+    fresh = [i for i, m in enumerate(meta) if known.get(m.cid) is None]
+    timing["from_stream"] = len(meta) - len(fresh)
+    timing["transformed_here"] = len(fresh)
+    _t = _time.perf_counter()
+    if fresh:
+        where, colour = projection.place(
+            np.asarray([rows[i] for i in fresh], dtype=np.float32))
+        if where is not None:
+            for j, i in enumerate(fresh):
+                known[meta[i].cid] = [float(v) for v in where[j][:3]]
+                if colour is not None:
+                    known_hsv[meta[i].cid] = [float(v) for v in colour[j]]
+        proj.enqueue(meta[i].cid for i in fresh)
+    timing["ms_transform"] = round((_time.perf_counter() - _t) * 1000, 1)
+
+    nodes = []
+    for chunk in meta:
+        at = known.get(chunk.cid)
+        if at is None:
+            missing.append(chunk.cid)
+            continue
+        node = {
+            "cid": chunk.cid, "url": chunk.url, "title": _title(chunk.md),
+            "rank": 0.0, "chars": chunk.chars,
+            "tokens": tokens.budget(chunk.md or ""),
+            "copies": chunk.dup_n, "members": chunk.group_n,
+            "val": float(max(1.0, max(chunk.group_n, 1) ** 0.5)),
+            "level": "chunk", "pos": [float(v) for v in at], "placed": True,
+            "source": "projector",
+        }
+        if known_hsv.get(chunk.cid):
+            node["hsv"] = known_hsv[chunk.cid]
+        picture = _first_image(chunk.md, chunk.url)
+        if picture is not None:
+            node["image"] = picture
+        nodes.append(node)
+
+    # Every page these chunks hang from, as a node at the projector's own
+    # position for it. The pane ignores a node it already has; a page it has
+    # never drawn (browsed after the layout was fetched) gets its hub here.
+    page_nodes = []
+    for url in sorted({m.url for m in meta}):
+        at = page_at.get(url)
+        if at is None:
+            continue
+        held = int(workspace.store.chunk_count(url))
+        pn = {"cid": "page:" + url, "url": url, "title": url, "level": "page",
+              "rank": 0.0, "chars": 0, "tokens": 0, "copies": 1,
+              "members": held, "val": float(max(1.0, max(held, 1) ** 0.5)),
+              "pos": [float(v) for v in at[:3]], "source": "projector"}
+        if url in page_hsv:
+            pn["hsv"] = page_hsv[url]
+        page_nodes.append(pn)
+    nodes.extend(page_nodes)
+
+    _t = _time.perf_counter()
+    placed_edges: List[Dict] = []
+    drawn = {n["cid"] for n in nodes}
+    has_parent = set()
+    for page in {n["url"] for n in nodes}:
+        for a, b in workspace.store.contains_within(page):
+            if a in drawn and b in drawn and a != b:
+                placed_edges.append({"source": a, "target": b})
+                has_parent.add(b)
+    for pn in page_nodes:
+        for n in nodes:
+            if (n.get("url") == pn["url"] and n.get("level") != "page"
+                    and n["cid"] not in has_parent):
+                placed_edges.append({"source": pn["cid"], "target": n["cid"]})
+    timing["ms_edges"] = round((_time.perf_counter() - _t) * 1000, 1)
+    status = proj.status(workspace)
+    return {"timing": timing, "nodes": nodes, "edges": placed_edges,
+            "unplaced": missing, "stale": False, "source": "projector",
+            "epoch": status["epoch"], "seq": status["seq"],
+            "fitted_n": status.get("fit_sample"),
+            "fitted_chunks": status.get("fitted_chunks"),
+            "n": status.get("chunks_now")}
