@@ -248,7 +248,10 @@ def build_page_layout(workspace,
     global _LAST_PROJECTION
     _LAST_PROJECTION = Projection.of(dims=dims, hsv=colours is not None,
                                      fitted_n=len(urls),
-                                     spherical=spherical_fit)
+                                     spherical=spherical_fit,
+                                     # Chunks, not pages: growth is judged
+                                     # in chunks. See `fitted_chunks`.
+                                     fitted_chunks=workspace.store.chunk_count())
 
     # One picture per page: the first that any of its chunks showed. Read
     # from the chunks' markdown, which is where `_first_image` looks anyway.
@@ -1158,7 +1161,8 @@ class Projection:
 
     def __init__(self, *, svd, reducer, dims: int, hsv: bool,
                  hsv_bands, spread_cdf, frame, fitted_n: int,
-                 spherical: bool = False) -> None:
+                 spherical: bool = False,
+                 fitted_chunks: Optional[int] = None) -> None:
         #: Fitted on S³, so a newcomer is MAPPED to the ball rather than
         #: rescaled. Replaying `_spread` and `_framed` on angles would put it
         #: somewhere the fit never placed anything.
@@ -1170,11 +1174,26 @@ class Projection:
         self.hsv_bands = hsv_bands
         self.spread_cdf = spread_cdf or {}
         self.frame_mid, self.frame_scale = frame if frame else (0.0, 1.0)
+        #: How many POINTS the fit was made on -- pages for the page-level
+        #: fit, chunks for the chunk-level one.
         self.fitted_n = int(fitted_n)
+        #: How many CHUNKS the corpus held when this was fitted, which is the
+        #: unit growth is judged in.
+        #:
+        #: **Not `fitted_n`, and that confusion is why "stale" meant nothing.**
+        #: The page-level fit -- the one the pane actually draws -- recorded
+        #: `fitted_n = len(urls)`, 112 pages, while `stale()` was handed the
+        #: corpus CHUNK count, 14,787. A ratio of 132 against a threshold of
+        #: 2, so the fit read stale permanently and the pane's "fit is stale,
+        #: refit" was lit the whole time and meant nothing. Wiring a refit to
+        #: that flag would have refit on every capture.
+        self.fitted_chunks = int(fitted_chunks if fitted_chunks is not None
+                                 else fitted_n)
 
     @classmethod
     def of(cls, *, dims: int, hsv: bool, fitted_n: int,
-           spherical: bool = False) -> Optional["Projection"]:
+           spherical: bool = False,
+           fitted_chunks: Optional[int] = None) -> Optional["Projection"]:
         """Collect what the fit just left on the shelf."""
         reducer = _LAST_FIT.get("reducer")
         if reducer is None or not hasattr(reducer, "transform"):
@@ -1183,11 +1202,15 @@ class Projection:
                    hsv=hsv, hsv_bands=_LAST_FIT.get("hsv_bands"),
                    spread_cdf=_LAST_FIT.get("spread_cdf"),
                    frame=_LAST_FIT.get("frame"), fitted_n=fitted_n,
-                   spherical=spherical)
+                   spherical=spherical, fitted_chunks=fitted_chunks)
 
     def stale(self, n: int) -> bool:
-        """True once the corpus has doubled since this was fitted."""
-        return self.fitted_n > 0 and n >= 2 * self.fitted_n
+        """True once the corpus's CHUNK count has doubled since this fit.
+
+        `n` is a chunk count, and so is what it is compared against. See
+        `fitted_chunks` for what happened when it was not.
+        """
+        return self.fitted_chunks > 0 and n >= 2 * self.fitted_chunks
 
     def place(self, semantic: np.ndarray):
         """Rows of the raw semantic space -> (positions, colours-or-None).
@@ -1763,6 +1786,81 @@ def warm_placement(workspace, sample: int = 4) -> Dict:
             "timing": got.get("timing")}
 
 
+def refresh_page_layout(workspace, fitted: Dict, spherical: bool = False) -> Dict:
+    """The fitted page layout, brought up to date WITHOUT refitting.
+
+    **What refitting on every new page cost, measured.** The layout was keyed
+    on a hash of the Page table, so capturing ONE page invalidated it and the
+    next request refit the corpus: 14 ms -> 1,189 ms. Worse than the time, a
+    fresh UMAP fit over a slightly different input put every page somewhere
+    else. Adding one page moved **all 113** existing pages -- the median by
+    348 units, 54% of a 643-unit cloud, the worst by more than its width. A
+    reader who browsed somewhere new came back to a different map.
+
+    So the fit is kept and the corpus is reconciled against it:
+
+    * a page the fit placed and the store still holds keeps its fitted
+      position -- the map does not move;
+    * a page the store no longer holds is dropped, which is what `D-22` was
+      protecting against when it keyed the cache on the page table;
+    * a page the fit never saw is placed INTO it, at the transform of the
+      mean of its chunks' vectors -- the same thing the fit was made of.
+
+    The caller refits only when `stale` says the chunk corpus has doubled,
+    which is the bound `Projection` was designed around: 5k, 10k, 20k.
+    """
+    projection = live_projection()
+    held = set(workspace.pages())
+    kept = [n for n in (fitted.get("nodes") or []) if n.get("url") in held]
+    fitted_urls = {n.get("url") for n in kept}
+    fresh = sorted(held - fitted_urls)
+    space = _space_name(spherical)
+    table = _PAGE_POS.setdefault(space, {})
+    added = []
+    if projection is not None and fresh:
+        for url in fresh:
+            vectors = [v for v in workspace.store.embeddings_for(url).values()
+                       if v and any(v)]
+            if not vectors:
+                continue                  # not embedded yet; next request
+            mean = np.asarray(vectors, dtype=np.float32).mean(axis=0)
+            norm = float(np.linalg.norm(mean))
+            where, colour = projection.place(
+                (mean / norm if norm > 1e-9 else mean).reshape(1, -1))
+            if where is None or not len(where):
+                continue
+            pos = [float(v) for v in where[0][:3]]
+            table[url] = pos
+            count = int(workspace.store.chunk_count(url))
+            node = {"cid": "page:" + url, "url": url, "title": url,
+                    "rank": 0.0, "chars": 0, "tokens": 0, "copies": 1,
+                    "members": count, "level": "page",
+                    "val": float(max(1.0, max(count, 1) ** 0.5)),
+                    "pos": pos, "estimated": True}
+            if colour is not None and len(colour):
+                node["hsv"] = [float(v) for v in colour[0]]
+            added.append(node)
+    for n in kept:
+        # Re-asserted, because an estimate written by `place_into` for a page
+        # the fit DID place must not survive into an unfolding's anchor.
+        if n.get("pos"):
+            table[n["url"]] = [float(v) for v in n["pos"][:3]]
+    nodes = kept + added
+    ids = {n["cid"] for n in nodes}
+    edges = [e for e in (fitted.get("edges") or [])
+             if e.get("source") in ids and e.get("target") in ids]
+    total = workspace.store.chunk_count()
+    out = dict(fitted)
+    out.update({
+        "nodes": nodes, "edges": edges, "n": len(nodes),
+        "fresh_pages": len(added), "dropped_pages": len(fitted.get("nodes") or []) - len(kept),
+        "fitted_chunks": projection.fitted_chunks if projection else None,
+        "chunks_now": total,
+        "stale": bool(projection and projection.stale(total)),
+    })
+    return out
+
+
 def place_into(workspace, cids) -> Dict:
     """Place chunks captured after the fit, into the fit (`G-34`).
 
@@ -1860,12 +1958,44 @@ def place_into(workspace, cids) -> Dict:
                 break
         by_url: Dict[str, List[int]] = {}
         for i, chunk in enumerate(meta):
-            if table.get(chunk.url) is not None:
-                by_url.setdefault(chunk.url, []).append(i)
+            by_url.setdefault(chunk.url, []).append(i)
+
+        # **A page the fit has never seen gets an anchor anyway.**
+        #
+        # `_PAGE_POS` holds only the pages that existed when the fit ran, so a
+        # page captured since had no entry and was silently skipped here: its
+        # chunks kept their global-transform coordinates and floated with no
+        # page to hang from. Measured, `local_fits: 0` on every fresh page.
+        #
+        # The anchor is where the fit would put the page itself -- the
+        # transform of the mean of its chunks' vectors, which is what the
+        # page-level fit is made of. `unfold` already derives one this way
+        # when its table has no entry; placement did not. It is written back
+        # to `_PAGE_POS`, so the next placement, an unfolding and
+        # `_room_around` all agree on where this page is until a refit
+        # replaces the estimate with a fitted position.
+        fresh_pages: Dict[str, List[float]] = {}
+        if not table:
+            space_name = _space_name(False)
+            table = _PAGE_POS.setdefault(space_name, {})
+        for page_url, idx in by_url.items():
+            if table.get(page_url) is not None:
+                continue
+            mean = block[idx].mean(axis=0)
+            norm = float(np.linalg.norm(mean))
+            where, _ = projection.place(
+                (mean / norm if norm > 1e-9 else mean).reshape(1, -1))
+            if where is None or not len(where):
+                continue
+            table[page_url] = [float(v) for v in where[0][:3]]
+            fresh_pages[page_url] = table[page_url]
+        timing["fresh_pages"] = len(fresh_pages)
         _t = _time.perf_counter()
         timing["local_fits"] = 0
         timing["local_rows"] = 0
         for page_url, idx in by_url.items():
+            if table.get(page_url) is None:
+                continue                    # the transform could not place it
             anchor = np.asarray(table[page_url][:3], dtype=np.float32)
             timing["local_fits"] += 1
             timing["local_rows"] += len(idx)
@@ -1919,6 +2049,32 @@ def place_into(workspace, cids) -> Dict:
 
         timing["ms_local"] = round((_time.perf_counter() - _t) * 1000, 1)
 
+    # **And the page itself, as a node.** A fresh page's chunks now land
+    # beside an anchor, but the anchor is only a coordinate; with no node
+    # there the chunks cluster around empty space and the reader cannot see
+    # which page they came from, or click it. Sized in the page level's own
+    # unit -- sqrt of the chunks it holds -- so it nests like any other page.
+    page_nodes = []
+    if rows:
+        for page_url, at in fresh_pages.items():
+            held = workspace.store.chunk_count(page_url) if hasattr(
+                workspace.store, "chunk_count") else len(by_url.get(page_url, []))
+            try:
+                held = int(held)
+            except Exception:                       # noqa: BLE001
+                held = len(by_url.get(page_url, []))
+            page_nodes.append({
+                "cid": "page:" + page_url, "url": page_url,
+                "title": page_url, "level": "page", "rank": 0.0,
+                "chars": 0, "tokens": 0, "copies": 1,
+                "members": held, "val": float(max(1.0, max(held, 1) ** 0.5)),
+                "pos": [float(v) for v in at],
+                #: Where this position came from, so a reader can tell an
+                #: estimate from a fit.
+                "estimated": True,
+            })
+        nodes.extend(page_nodes)
+
     # A count, not the chunks. See `GraphStore.chunk_count`.
     # The containment edges among what was just placed (`G-6`). Chunks
     # arriving from a capture or a scoped ranking had none, so they drew as
@@ -1926,14 +2082,28 @@ def place_into(workspace, cids) -> Dict:
     _t = _time.perf_counter()
     placed_edges: List[Dict] = []
     drawn = {n["cid"] for n in nodes}
+    has_parent = set()
     for page in {n["url"] for n in nodes}:
         for a, b in workspace.store.contains_within(page):
             if a in drawn and b in drawn and a != b:
                 placed_edges.append({"source": a, "target": b})
+                has_parent.add(b)
+    # A fresh page node hangs only the chunks with no parent among what was
+    # drawn -- the roots -- so the result is the trie's own tree under the
+    # page, not a star from the page to every chunk. A star is what the
+    # reader rejected when they said an expansion was "not a DAG".
+    for pn in page_nodes:
+        for n in nodes:
+            if (n.get("url") == pn["url"] and n.get("level") != "page"
+                    and n["cid"] not in has_parent):
+                placed_edges.append({"source": pn["cid"], "target": n["cid"]})
 
     timing["ms_edges"] = round((_time.perf_counter() - _t) * 1000, 1)
     total = workspace.store.chunk_count()
     return {"timing": timing,
             "nodes": nodes, "edges": placed_edges, "unplaced": missing,
             "stale": projection.stale(total),
-            "fitted_n": projection.fitted_n, "n": total}
+            "fitted_n": projection.fitted_n,
+            #: The pair `stale` is actually decided on, so a reader of this
+            #: reply can check the verdict instead of trusting it.
+            "fitted_chunks": projection.fitted_chunks, "n": total}

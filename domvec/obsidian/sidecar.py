@@ -79,6 +79,13 @@ _FIT_LOCK = threading.Lock()
 #: Raised when there are chunks waiting for vectors.
 _EMBED_WANTED = threading.Event()
 
+#: The page-level fit made in this process, per (dims, spherical), kept
+#: until the chunk corpus doubles. See the `layout` route.
+_PAGE_FIT: Dict = {}
+#: The last reconciliation of each kept fit, keyed on the page table it was
+#: reconciled against, so an unchanged corpus is answered without redoing it.
+_PAGE_REFRESH: Dict = {}
+
 #: Pipeline profile, sidecar side. Bounded so a long session cannot grow it.
 #:
 #: Rings rather than aggregates, because a percentile has to be taken over
@@ -1217,6 +1224,19 @@ class _Handler(BaseHTTPRequestHandler):
                              "pages_with_image": _one(
                                  "MATCH (c:Chunk) WHERE c.md CONTAINS '![' "
                                  "RETURN count(DISTINCT c.url)"),
+                             # A chunk with text and no vector cannot be
+                             # placed, and a page none of whose chunks has one
+                             # is missing from the fit. Counted because the
+                             # layout dropped from 112 page nodes to 95 with
+                             # no other sign anything was wrong.
+                             "chunks_without_vector": _one(
+                                 "MATCH (c:Chunk) WHERE size(c.md) > 0 AND "
+                                 "c.embedding IS NULL RETURN count(c)"),
+                             "pages_without_any_vector": _one(
+                                 "MATCH (p:Page) WHERE NOT EXISTS { "
+                                 "MATCH (p)-[:HasChunk]->(c:Chunk) "
+                                 "WHERE c.embedding IS NOT NULL } "
+                                 "RETURN count(p)"),
                              "image_addresses": _one(
                                  "MATCH (a:Address) WHERE a.tag = 'image' "
                                  "RETURN count(a)"),
@@ -1493,8 +1513,49 @@ class _Handler(BaseHTTPRequestHandler):
             #
             # `corpus_fingerprint` is one ordered scan of the Page table,
             # hashed, on the same path that already pays for the count.
+            # **The page level is fitted at 2x growth and refreshed between.**
+            # Keyed on the page table, capturing ONE page refit the corpus
+            # (14 -> 1,189 ms) and moved every existing page -- the median by
+            # 54% of the cloud. So a page fit made IN THIS PROCESS is kept,
+            # and reconciled against the corpus on each request instead:
+            # purged pages dropped, new pages placed into it, refit only once
+            # the chunk corpus has doubled. In-process only, because the
+            # transform has to come from the same fit that drew the pages it
+            # is placing beside; a stored layout cannot provide that.
+            refit_asked = bool((parse_qs(parts.query).get("refit") or [""])[0])
+            if level == "page" and not refit_asked:
+                live_fit = _PAGE_FIT.get((want, spherical))
+                if live_fit is not None:
+                    from .layout import refresh_page_layout
+                    # **Memoised on the page table.** Reconciling costs 300-470
+                    # ms -- it reads every page and the chunk count -- and it
+                    # ran on EVERY request, including the many where nothing
+                    # had changed. The fingerprint is exactly "has the set of
+                    # pages changed", which is exactly when the answer can.
+                    mark = self.workspace.store.corpus_fingerprint()
+                    memo = _PAGE_REFRESH.get((want, spherical))
+                    if memo is not None and memo[0] == mark and memo[1] is live_fit:
+                        _profile("layout", {"kind": "refresh-memo"})
+                        self._send(200, memo[2])
+                        return
+                    got = refresh_page_layout(self.workspace, live_fit, spherical)
+                    if not got.get("stale"):
+                        got["from_store"] = False
+                        got["incremental"] = True
+                        _PAGE_REFRESH[(want, spherical)] = (mark, live_fit, got)
+                        _profile("layout", {"kind": "refresh",
+                                            "fresh": got.get("fresh_pages"),
+                                            "dropped": got.get("dropped_pages")})
+                        self._send(200, got)
+                        return
+                    _profile("layout", {"kind": "stale", "chunks": got.get("chunks_now"),
+                                        "fitted_chunks": got.get("fitted_chunks")})
             fresh = (self.workspace.store.corpus_fingerprint(), want,
                      spherical, level)
+            if refit_asked or (level == "page" and (want, spherical) in _PAGE_FIT):
+                # A refit was asked for, or the kept fit went stale: the cache
+                # must not answer with the fit being replaced.
+                getattr(type(self), "_layouts", {}).pop(fresh, None)
             # A few slots, not one.
             #
             # A single slot is right when there is one question; there are
@@ -1508,7 +1569,11 @@ class _Handler(BaseHTTPRequestHandler):
             cache = getattr(type(self), "_layouts", None)
             if cache is None:
                 cache = type(self)._layouts = {}
-            if fresh not in cache:
+            # A refit that is answered from the store is not a refit: it would
+            # hand back a layout this process did not fit, whose transform it
+            # does not hold, and keep nothing. Measured: `?refit=1` returned in
+            # 36 ms and the next page still refit the corpus.
+            if fresh not in cache and not refit_asked:
                 # `G-12`: the store may already hold this exact fit. Keyed
                 # on everything the fit is a function of, so a stored answer
                 # comes back only to the question it answered. The
@@ -1539,12 +1604,19 @@ class _Handler(BaseHTTPRequestHandler):
               # and the point is that only one of them fits.
               with _FIT_LOCK:
                 if fresh not in cache:
+                    _fit_started = time.perf_counter()
                     cache[fresh] = (
                         build_page_layout(self.workspace, dims=want,
                                           spherical_space=spherical)
                         if level == "page"
                         else build_layout(self.workspace, dims=want,
                                           spherical_space=spherical))
+                    _profile("layout", {"kind": "fit", "level": level,
+                                        "ms": round((time.perf_counter() - _fit_started) * 1000, 1)})
+                    if level == "page":
+                        # This process made this fit, so its transform
+                        # agrees with its positions: it can be kept.
+                        _PAGE_FIT[(want, spherical)] = cache[fresh]
                     # Always present, true or false. It was set only when
                     # the answer CAME from the store, so a freshly built one
                     # had no such key -- and a caller asking "which did I
