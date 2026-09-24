@@ -1524,6 +1524,17 @@ export class GraphView extends ItemView {
   }
 
   private draw(canvas: HTMLElement, layout: Layout) {
+    // **The previous graph is destroyed, not just unmounted.** `canvas.empty()`
+    // removes its DOM, but a `ForceGraph3D` keeps its animation loop, its
+    // hover raycasting and its WebGL context running on the detached canvas.
+    // Every redraw -- a refit, a new projector epoch, a level or space toggle
+    // -- leaked one. Measured after a day of them: the renderer held above a
+    // full core with the pane showing an empty graph, profiled as WebGL draws
+    // and `checkGeometryIntersection` from graphs nobody could see.
+    this.resizeObserver?.disconnect();
+    this.resizeObserver = null;
+    this.graph?._destructor?.();
+    this.graph = null;
     canvas.empty();
     const nodes = layout.nodes.map((n) => this.nodeFrom(n));
 

@@ -2222,6 +2222,56 @@ def _page_pictures(workspace, urls=None) -> Dict[str, Dict]:
     return out
 
 
+#: `_page_headings`' answer, keyed on the pages asked about and the chunk count.
+_HEADING_MEMO: Dict = {}
+
+
+def _page_headings(workspace, urls) -> Dict[str, str]:
+    """Each page's first markdown heading, for pages with no stored title.
+
+    **A label, not a title.** 121 of 130 pages lost their titles to a write
+    path that blanked them on every drain (fixed; titles come back as pages
+    are visited). Until then the graph labelled them with their urls. The
+    first heading is what the page says it is about, read from the page's own
+    chunks in document order -- and every node that uses it says so
+    (`title_source: "heading"`), so it is never passed off as the title.
+    """
+    import re
+    urls = set(urls)
+    if not urls:
+        return {}
+    key = (frozenset(urls), workspace.store.chunk_count())
+    if _HEADING_MEMO.get("key") == key:
+        return _HEADING_MEMO["value"]
+    # Indented: the markdown carries the page's structure as indentation, so
+    # a heading is rarely at column 0. The page's H1 is its name; a first
+    # H2 in document order is usually a sidebar's ("Contents").
+    h1 = re.compile(r"^[ \t]*#[ \t]+(.+?)[ \t]*#*[ \t]*$", re.M)
+    heading = re.compile(r"^[ \t]*#{2,3}[ \t]+(.+?)[ \t]*#*[ \t]*$", re.M)
+    link = re.compile(r"!?\[([^\]]*)\]\([^)]*\)")
+    rows = workspace.store._rows(
+        "MATCH (c:Chunk) WHERE list_contains($urls, c.url) AND c.md CONTAINS '#' "
+        "RETURN c.url, c.xpath, c.part, c.md", {"urls": sorted(urls)})
+    out: Dict[str, str] = {}
+    fallback: Dict[str, str] = {}
+    for url, _x, _p, md in sorted(rows, key=lambda r: (r[0] or "", r[1] or "",
+                                                       r[2] or 0)):
+        if url in out:
+            continue
+        for pattern, into in ((h1, out), (heading, fallback)):
+            if url in into:
+                continue
+            m = pattern.search(md or "")
+            if m:
+                text = link.sub(lambda g: g.group(1), m.group(1)).strip(" *_`")
+                if text:
+                    into[url] = text[:120]
+    for url, text in fallback.items():
+        out.setdefault(url, text)
+    _HEADING_MEMO.update(key=key, value=out)
+    return out
+
+
 def projected_page_layout(workspace, proj=None) -> Optional[Dict]:
     """Every page, at the chunk projector's position for it (`G-53`).
 
@@ -2247,6 +2297,8 @@ def projected_page_layout(workspace, proj=None) -> Optional[Dict]:
     except Exception:                               # noqa: BLE001
         held = dict(counts)
     pictures = _page_pictures(workspace, set(page_pos))
+    headings = _page_headings(
+        workspace, [u for u in page_pos if not titles.get(u)])
     here = _PAGE_POS.setdefault(_space_name(False), {})
     here.clear()
     _ESTIMATED_PAGES.clear()
@@ -2257,7 +2309,12 @@ def projected_page_layout(workspace, proj=None) -> Optional[Dict]:
         members = held.get(url, counts.get(url, 0))
         node = {
             "cid": "page:" + url, "url": url,
-            "title": titles.get(url) or url, "rank": 0.0, "chars": 0,
+            "title": titles.get(url) or headings.get(url) or url,
+            #: Where the label came from: the page's stored title, its first
+            #: heading (the title was lost; see `_page_headings`), or the url.
+            "title_source": ("title" if titles.get(url) else
+                             "heading" if headings.get(url) else "url"),
+            "rank": 0.0, "chars": 0,
             "tokens": 0, "copies": 1, "members": members, "level": "page",
             "val": float(max(1.0, max(members, 1) ** 0.5)),
             "pos": [float(v) for v in at[:3]],

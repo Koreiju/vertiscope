@@ -2244,21 +2244,35 @@ const CHECKS = [
       // the same picture, node for node.
       const a = await ask("/layout?level=page");
       const b = await ask("/layout?level=page");
-      const same = JSON.stringify((a.nodes || []).map((n) => n.pos))
-                === JSON.stringify((b.nodes || []).map((n) => n.pos));
+      // **Under the chunk projector (`G-72`, `G-74`)** the fit is persisted
+      // as `projector.pkl` and answered from memory, never refitted per ask
+      // -- and a page may move between two asks for one reason only: the
+      // stream re-placed its chunks in between. So: same fit, and every page
+      // that moved is one the stream NAMED between the two sequence numbers.
+      // A page moving for any other reason is the map moving under a reader.
+      const posA = new Map((a.nodes || []).map((n) => [n.url, n.pos]));
+      const moved = (b.nodes || [])
+        .filter((n) => posA.has(n.url)
+          && JSON.stringify(posA.get(n.url)) !== JSON.stringify(n.pos))
+        .map((n) => n.url);
+      let named = new Set();
+      if (a.source === "projector" && moved.length) {
+        const d = await ask(`/projector/delta?since=${a.seq}&epoch=${a.epoch}`);
+        named = new Set(Object.keys(d.pages || {}));
+      }
+      const unexplained = moved.filter((u) => !named.has(u));
+      const sameFit = a.source === "projector"
+        ? a.epoch === b.epoch
+        : (health.layouts || 0) > 0;
       return {
-        // The store is holding fits, the field exists so a reader can tell
-        // which they got, and the same question gives the same answer. A
-        // cache that returned a DIFFERENT picture each time would be worse
-        // than no cache: the map would move under someone reading it.
-        pass: (health.layouts || 0) > 0
-           && typeof a.from_store === "boolean"
-           && same,
+        pass: typeof a.from_store === "boolean" && sameFit
+           && unexplained.length === 0,
         evidence: {
-          stored_fits: health.layouts,
-          from_store: a.from_store,
-          nodes: a.n,
-          identical_on_a_second_ask: same,
+          source: a.source, epoch_same: a.epoch === b.epoch,
+          stored_fits: health.layouts, from_store: a.from_store,
+          nodes: a.n, seq: [a.seq, b.seq],
+          moved: moved.length, moved_by_the_stream: moved.length - unexplained.length,
+          unexplained: unexplained.slice(0, 5),
         },
       };
     },
