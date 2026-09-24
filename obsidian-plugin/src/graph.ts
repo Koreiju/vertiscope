@@ -472,10 +472,12 @@ export class GraphView extends ItemView {
         ? `${layout.n} pages · ${layout.chunks ?? "?"} chunks`
         : `${layout.n} chunks`;
       this.statusEl = status;
+      // The fit's description only. The projector's state changes every
+      // second and is composed in at display time -- never appended here,
+      // or each refresh stacks another copy onto the last.
       this.captionTail =
-        `${(layout.spaces ?? []).join(" + ")} · ${fit} · ${colour}${pictures}` +
-        this.projectorCaption();
-      status.setText(`${unit} · ${this.captionTail}`);
+        `${(layout.spaces ?? []).join(" + ")} · ${fit} · ${colour}${pictures}`;
+      this.setStatus(`${unit} · ${this.captionTail}${this.projectorCaption()}`);
       } catch (err) {
         // Say the count, which is the one thing a reader needs to know the
         // pane is alive, and name the failure rather than swallowing it.
@@ -618,9 +620,20 @@ export class GraphView extends ItemView {
 
   private refreshCaption(): void {
     if (!this.captionTail) return;
-    this.captionTail = this.captionTail.replace(/ · (projector fit|legacy fit).*$/, "") +
-      this.projectorCaption();
     this.sayCounts();
+  }
+
+  /**
+   * One line, always. The caption is rebuilt from its parts on every
+   * refresh; it used to be edited in place with a regex, and when the text
+   * it looked for was renamed the regex stopped matching and a copy was
+   * appended each second -- measured, a bar 12,620 px tall covering the
+   * whole projector. The full text stays readable as a tooltip.
+   */
+  private setStatus(text: string): void {
+    if (!this.statusEl) return;
+    this.statusEl.setText(text);
+    this.statusEl.setAttr("title", text);
   }
 
   async onClose() {
@@ -769,7 +782,7 @@ export class GraphView extends ItemView {
     const opened = d.nodes.filter((n: any) => n.unfolded).length;
     const parts = [`${d.nodes.length} nodes`, `${d.links.length} links`];
     if (opened) parts.push(`${opened} opened`);
-    this.statusEl.setText(`${parts.join(" · ")} · ${this.captionTail}`);
+    this.setStatus(`${parts.join(" · ")} · ${this.captionTail}${this.projectorCaption()}`);
   }
 
   private addEdges(data: any, edges?: { source: string; target: string }[]) {

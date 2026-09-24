@@ -157,7 +157,10 @@
    implicit: a layout fitted on frequency alone and one fitted on both are
    different pictures, and a reader who cannot tell them apart will read a
    lexical clustering as a semantic one. */
-.domvec-graph-status { flex: 1; }
+/* One line, whatever it says: a caption that wraps grows the bar and pushes
+   (or, positioned, covers) the projector. The full text is the tooltip. */
+.domvec-graph-status { flex: 1; min-width: 0; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; }
 
 /* `position: relative` so the billboard layer (`G-57`) is placed
    against the CANVAS, which is the frame `graph2ScreenCoords`
