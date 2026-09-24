@@ -648,3 +648,50 @@ button.domvec-run-fence:hover {
 .domvec-bb-body { overflow: auto; padding: 6px 8px; }
 .domvec-bb-line { white-space: pre-wrap; }
 .domvec-bb-more { color: var(--text-faint); padding-top: 4px; }
+
+
+/* ---- pipeline profile pane (profileview.ts) ---------------------------- */
+.domvec-profile { padding: 0 !important; display: flex; flex-direction: column; }
+.domvec-profile-bar { display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px; border-bottom: 1px solid var(--background-modifier-border); }
+.domvec-profile-title { font-weight: 600; flex: 1; }
+.domvec-profile-body { padding: 10px 12px; overflow-y: auto; font-size: var(--font-ui-small); }
+.domvec-profile-head { display: flex; align-items: center; gap: 16px; margin-bottom: 10px; flex-wrap: wrap; }
+.domvec-profile-e2e-value { font-size: 1.8em; font-weight: 600; font-variant-numeric: tabular-nums; }
+.domvec-profile-e2e-label { color: var(--text-muted); font-size: var(--font-ui-smaller); }
+.domvec-profile-outcomes { display: flex; gap: 6px; flex-wrap: wrap; }
+.domvec-profile-pill { padding: 1px 8px; border-radius: 10px; font-size: var(--font-ui-smaller);
+  background: var(--background-modifier-hover); }
+.domvec-profile-pill.is-visible { color: var(--color-green); }
+.domvec-profile-pill.is-not_seen, .domvec-profile-pill.is-no_graph { color: var(--color-red); }
+.domvec-profile-waterfall { display: flex; flex-direction: column; gap: 1px; }
+.domvec-profile-row { display: grid; grid-template-columns: minmax(150px, 1.4fr) 2fr 64px 64px 64px 36px;
+  gap: 8px; align-items: center; font-variant-numeric: tabular-nums; padding: 1px 0; }
+.domvec-profile-row > span:nth-child(n+3) { text-align: right; }
+.domvec-profile-row.is-header { color: var(--text-faint); font-size: var(--font-ui-smaller);
+  border-bottom: 1px solid var(--background-modifier-border); }
+.domvec-profile-row.depth-1 .domvec-profile-label { padding-left: 14px; color: var(--text-muted); }
+.domvec-profile-row.is-total { font-weight: 600; }
+.domvec-profile-group { margin-top: 6px; color: var(--text-faint); font-size: var(--font-ui-smaller);
+  text-transform: uppercase; letter-spacing: 0.04em; }
+.domvec-profile-track { height: 8px; background: var(--background-modifier-hover);
+  border-radius: 4px; overflow: hidden; }
+.domvec-profile-barfill { display: block; height: 100%; background: var(--interactive-accent);
+  border-radius: 4px; }
+.domvec-profile-row.depth-1 .domvec-profile-barfill { opacity: 0.55; }
+.domvec-profile-note { margin: 10px 0; padding: 6px 8px; border-left: 3px solid var(--interactive-accent);
+  background: var(--background-secondary); }
+.domvec-profile-section { margin-top: 14px; }
+.domvec-profile-section h4 { margin: 0 0 4px; font-size: var(--font-ui-small); }
+.domvec-profile-line { color: var(--text-normal); padding: 1px 0; }
+.domvec-profile-integ { padding: 1px 0; }
+.domvec-profile-integ.is-bad { color: var(--color-red); }
+.domvec-profile-integ.is-ok .domvec-profile-dot { color: var(--color-green); }
+.domvec-profile-dot { display: inline-block; width: 16px; }
+.domvec-profile-why { color: var(--text-muted); }
+.domvec-profile-bad { color: var(--color-red); }
+.domvec-profile-drain { padding: 1px 0; font-variant-numeric: tabular-nums; }
+.domvec-profile-drain.is-not_seen { color: var(--color-red); }
+.domvec-profile-drain.is-nothing_placed { color: var(--text-muted); }
+.domvec-profile-muted { color: var(--text-faint); }
+.domvec-profile-status { cursor: pointer; font-variant-numeric: tabular-nums; }

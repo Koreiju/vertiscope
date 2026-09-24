@@ -239,9 +239,16 @@ export function installHarness(app: App, sidecarBase: () => string) {
     switch (name) {
       case "open": {
         const cmd = { graph: "domvec-open-graph", browser: "domvec-open-browser",
-                      terminal: "domvec-open-terminal" }[arg as string];
+                      terminal: "domvec-open-terminal",
+                      profile: "domvec-open-profile" }[arg as string];
         if (!cmd) return { error: "no such pane: " + arg };
-        await (app as any).commands.executeCommandById(cmd);
+        // **Prefixed with the plugin id**, which is how Obsidian stores a
+        // plugin's commands. Called bare, `executeCommandById` returns false
+        // and does nothing -- so `open` was a no-op for every pane, and it
+        // looked as though it worked only because the graph happened to be
+        // open already. It says so now when a command does not run.
+        const ran = (app as any).commands.executeCommandById("domvec-bridge:" + cmd);
+        if (!ran) return { error: "command did not run: domvec-bridge:" + cmd };
         await sleep(1200);
         const l = await ready("domvec-" + arg + "-view");
         if (l) app.workspace.revealLeaf(l);

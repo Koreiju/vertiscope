@@ -18,6 +18,8 @@
  * the native graph work for free.
  */
 
+import { ProfileView, PROFILE_VIEW } from "./profileview";
+import { profiler } from "./profile";
 import {
   App,
   MarkdownPostProcessorContext,
@@ -237,6 +239,34 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
       callback: () => this.openBrowser(),
     });
 
+    // The pipeline profile, in the app. See `profileview.ts`.
+    this.registerView(
+      PROFILE_VIEW,
+      (leaf: WorkspaceLeaf) => new ProfileView(leaf, this.sidecar),
+    );
+    this.addCommand({
+      id: "domvec-open-profile",
+      name: "Open the pipeline profile",
+      callback: () => this.openProfile(),
+    });
+    // A one-line readout of the last drains, always visible, that opens the
+    // pane. The reader should not have to know the pane exists to learn that
+    // a drain just took four seconds.
+    const readout = this.addStatusBarItem();
+    readout.addClass("domvec-profile-status");
+    readout.setText("⏱ —");
+    readout.onClickEvent(() => void this.openProfile());
+    this.registerInterval(window.setInterval(() => {
+      const s: any = profiler().summary();
+      const e2e = s.stages && s.stages["end_to_end"];
+      const oc = s.outcomes || {};
+      readout.setText(e2e
+        ? `⏱ ${e2e.p50 >= 1000 ? (e2e.p50 / 1000).toFixed(1) + " s" : Math.round(e2e.p50) + " ms"}` +
+          ` page→pixels (n=${e2e.n})`
+        : (s.traces ? `⏱ ${s.traces} drains, none drawn yet` : "⏱ —"));
+      readout.setAttr("title", `pipeline profile: ${JSON.stringify(oc)} -- click for detail`);
+    }, 2000));
+
     this.addRibbonIcon("git-fork", "domvec 3D graph", () => this.openGraph());
     this.addCommand({
       id: "domvec-open-graph",
@@ -446,6 +476,20 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     await leaf.setViewState({ type: BROWSER_VIEW, active: true });
     this.app.workspace.revealLeaf(leaf);
   }
+  private async openProfile() {
+    const existing = this.app.workspace.getLeavesOfType(PROFILE_VIEW);
+    if (existing.length) {
+      this.app.workspace.revealLeaf(existing[0]);
+      return;
+    }
+    // Beside whatever is open, not over it: the point is to watch the
+    // numbers while using the browser cell and the graph.
+    const leaf = this.app.workspace.getRightLeaf(false) ||
+                 this.app.workspace.getLeaf("split", "vertical");
+    await leaf.setViewState({ type: PROFILE_VIEW, active: true });
+    this.app.workspace.revealLeaf(leaf);
+  }
+
   private async openTerminal() {
     const leaf = this.app.workspace.getLeaf("split", "horizontal");
     await leaf.setViewState({ type: TERMINAL_VIEW, active: true });

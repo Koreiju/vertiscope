@@ -31,6 +31,7 @@ export const GRAPH_VIEW = "domvec-graph-view";
 export const BROWSER_VIEW = "domvec-browser-view";
 export const CHUNK_VIEW = "domvec-chunk-view";
 export const TERMINAL_VIEW = "domvec-terminal-view";
+export const PROFILE_VIEW = "domvec-profile-view";
 
 /** Is this element actually drawn, and where? */
 function drawn(el: HTMLElement | null | undefined) {
@@ -357,8 +358,26 @@ export function uiState(app: App) {
       browser: paneOf(BROWSER_VIEW),
       chunk: paneOf(CHUNK_VIEW),
       terminal: paneOf(TERMINAL_VIEW),
+      profile: paneOf(PROFILE_VIEW),
     },
   };
+  // What the profile pane is SHOWING, read off its DOM, so a check can
+  // compare the displayed figures with the profiler's own summary instead
+  // of trusting that the pane drew what it was given.
+  const pl: any = leavesOf(PROFILE_VIEW)[0];
+  if (pl && !pl.isDeferred && pl.view) {
+    const el: HTMLElement | undefined = pl.view.containerEl;
+    const val = el?.querySelector(".domvec-profile-e2e-value")?.textContent || null;
+    const rows = el ? Array.from(el.querySelectorAll(".domvec-profile-row:not(.is-header)"))
+      .map((r) => Array.from(r.children).map((c) => (c.textContent || "").trim())) : [];
+    const integ = el ? Array.from(el.querySelectorAll(".domvec-profile-integ"))
+      .map((r) => ({ bad: r.classList.contains("is-bad"), text: (r.textContent || "").trim() })) : [];
+    out.profile = { e2e_shown: val, rows: rows.length, stage_rows: rows.slice(0, 40),
+                    integrity: integ };
+  }
+  // The status-bar readout exists whether or not the pane is open, so it is
+  // read whether or not the pane is open.
+  out.status_bar = document.querySelector(".domvec-profile-status")?.textContent || null;
 
   const g: any = leavesOf(GRAPH_VIEW)[0];
   if (g && !g.isDeferred && g.view) {

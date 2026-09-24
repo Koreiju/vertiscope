@@ -1229,6 +1229,14 @@ class _Handler(BaseHTTPRequestHandler):
                              # is missing from the fit. Counted because the
                              # layout dropped from 112 page nodes to 95 with
                              # no other sign anything was wrong.
+                             # The defect that emptied 80.6% of the corpus's
+                             # markdown with no error anywhere. Counted so the
+                             # app can show it -- a store that silently lost
+                             # its content is the one state every other
+                             # number on the profile pane depends on.
+                             "chunks_empty_md": _one(
+                                 "MATCH (c:Chunk) WHERE c.md IS NULL OR "
+                                 "size(c.md) = 0 RETURN count(c)"),
                              "chunks_without_vector": _one(
                                  "MATCH (c:Chunk) WHERE size(c.md) > 0 AND "
                                  "c.embedding IS NULL RETURN count(c)"),

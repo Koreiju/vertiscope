@@ -111,6 +111,16 @@ export class Sidecar {
     return this.get<Health>("/health");
   }
 
+  /** The sidecar's half of the pipeline profile: its own timing rings. */
+  async profile(): Promise<Record<string, any[]> | null> {
+    return this.get<Record<string, any[]>>("/profile");
+  }
+
+  /** Empty the sidecar's per-run rings (the startup warmup is kept). */
+  async resetProfile(): Promise<unknown> {
+    return this.get("/profile?reset=1");
+  }
+
   async alive(): Promise<boolean> {
     return (await this.health()) !== null;
   }
