@@ -475,7 +475,12 @@ class Workspace:
         # The page node is written now even when the rest is queued: it is
         # one row, and the edges the deferred write creates resolve to it.
         _t = time.perf_counter()
-        store.conn.execute(
+        # Through the store's serialised entry point (`D-23`), never the raw
+        # connection. This was the ONE statement that bypassed `_db_lock`: it
+        # held the sidecar's work lock, which the GET handlers do not take, so
+        # a read could be inside kuzu on the same connection at the same time
+        # -- and its result was never drained.
+        store._execute(
             # A write that does not know the title must not erase it: every
             # live drain arrives without one, and 121 of 130 pages had been
             # blanked to their url this way.

@@ -21,6 +21,18 @@ from .sidecar import serve
 
 
 def main(argv=None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    # `supervise` wraps `serve` in a child process that is restarted on a
+    # native crash (`D-23`); every option after the workspace is serve's.
+    if argv[:1] == ["supervise"]:
+        from .supervise import supervise
+        rest = argv[1:]
+        if "--workspace" not in rest:
+            print("supervise needs --workspace", file=sys.stderr)
+            return 2
+        i = rest.index("--workspace")
+        workspace = Path(rest[i + 1])
+        return supervise(workspace, rest[:i] + rest[i + 2:])
     parser = argparse.ArgumentParser(prog="python -m domvec.obsidian")
     sub = parser.add_subparsers(dest="cmd", required=True)
 

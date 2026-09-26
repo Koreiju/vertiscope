@@ -51,6 +51,16 @@ from .privacy import redact_url
 
 __all__ = ["GraphStore", "StoredChunk", "canonical_url"]
 
+
+def _close(result) -> None:
+    """Release a kuzu QueryResult now, on this thread, under the caller's
+    lock -- not whenever the garbage collector gets to it. Never raises."""
+    try:
+        if result is not None and hasattr(result, "close"):
+            result.close()
+    except Exception:                               # noqa: BLE001
+        pass
+
 EMBED_DIM = 768
 
 #: How much memory kuzu may hold for its buffer pool, in bytes (`D-23`).
@@ -997,19 +1007,59 @@ class GraphStore:
         another thread" has a single answer instead of twelve.
         """
         with self._db_lock:
-            return self.conn.execute(query, params or {})
+            self._breadcrumb(query, params)
+            result = self.conn.execute(query, params or {})
+            # **Closed inside the lock, never returned.** The live QueryResult
+            # used to be handed back to a caller that dropped it at once --
+            # so its native destructor ran on that thread OUTSIDE the lock,
+            # possibly while another thread was inside `execute` on the same
+            # connection. Both faulthandler traces of the D-23 segfault show
+            # exactly one Python thread in kuzu, which a destructor racing it
+            # from C would explain. No caller used the result.
+            _close(result)
+            return None
 
     def _rows(self, query: str, params: Optional[dict] = None) -> List[list]:
         # The result is drained INSIDE the lock. A kuzu QueryResult is a
         # cursor over the connection, so iterating it after releasing lets
         # another thread execute against the connection being read -- which
-        # is the same race by a longer route.
+        # is the same race by a longer route. And closed inside it, for the
+        # destructor reason given in `_execute`.
         with self._db_lock:
+            self._breadcrumb(query, params)
             result = self.conn.execute(query, params or {})
             out = []
             while result.has_next():
                 out.append(result.get_next())
+            _close(result)
         return out
+
+    #: A fixed-size record of the statement about to run, rewritten in place
+    #: before every statement: when kuzu segfaults (D-23) no Python frame can
+    #: say WHICH statement did it, and this file can. Microseconds per write.
+    _CRUMB_SIZE = 512
+
+    def _breadcrumb(self, query: str, params: Optional[dict]) -> None:
+        fd = getattr(self, "_crumb_fd", None)
+        if fd is None:
+            return
+        try:
+            rows = (params or {}).get("rows")
+            head = "%.3f n=%s %s" % (time.time(),
+                                     len(rows) if isinstance(rows, list) else "-",
+                                     " ".join(query.split())[:400])
+            data = head.encode("utf-8", "replace")[:self._CRUMB_SIZE]
+            os.lseek(fd, 0, os.SEEK_SET)
+            os.write(fd, data.ljust(self._CRUMB_SIZE, b" "))
+        except Exception:                           # noqa: BLE001
+            pass
+
+    def enable_breadcrumb(self, path) -> None:
+        """Record each statement's head to `path` before it runs (`D-23`)."""
+        try:
+            self._crumb_fd = os.open(str(path), os.O_RDWR | os.O_CREAT, 0o600)
+        except OSError:
+            self._crumb_fd = None
 
     def resolve_page(self, url: str) -> str:
         """The stored spelling of a page, or "" if it was never scanned.
