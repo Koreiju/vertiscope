@@ -2585,6 +2585,12 @@ _INLINE_TAGS = frozenset({
     "a", "abbr", "b", "bdi", "bdo", "br", "cite", "code", "data", "del", "dfn",
     "em", "i", "img", "ins", "kbd", "mark", "math", "q", "s", "samp", "small",
     "span", "strong", "sub", "sup", "time", "u", "var", "wbr", "#text",
+    # A TEXT NODE, however it is spelled. In the live capture's trie a text
+    # node carries its taxonomy and detecting rule as two segments below it,
+    # so it is not a leaf and read as a block child: every paragraph then
+    # looked composite and the Suffix tree definition split into heading /
+    # lead / list live while the same HTML rendered as one chunk offline.
+    "text()",
 })
 
 

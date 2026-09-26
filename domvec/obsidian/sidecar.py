@@ -1604,6 +1604,33 @@ class _Handler(BaseHTTPRequestHandler):
         # (DESIGN_VII §3): each markdown line's own address and the 256-token
         # chunk that draws it, in one query. The overlay then resolves hovers
         # in memory instead of asking the store per element.
+        if segments[0] == "live_render":
+            # The chunks the LIVE capture currently renders for a page -- the
+            # session's own last full render, read-only -- so what a capture
+            # makes of a page can be compared with what the same HTML makes
+            # offline. The Suffix tree definition rendered as one chunk from
+            # the page's HTML and as three from the live capture, and nothing
+            # showed the live side's partition.
+            query = parse_qs(parts.query)
+            url = (query.get("url") or [""])[0]
+            needle = (query.get("contains") or [""])[0]
+            session = _capture_sessions.get(url)
+            spine = session and session.get("spine")
+            last = spine.updates[-1] if spine is not None and getattr(spine, "updates", None) else None
+            chunks = getattr(last, "all_chunks", None) or []
+            from .. import tokens as _tokens
+            out = []
+            for c in chunks:
+                md_text = c.markdown
+                if needle and needle not in md_text:
+                    continue
+                out.append({"xpath": c.xpath, "part": getattr(c, "part", 0),
+                            "tokens": _tokens.budget(md_text), "lines": len(c.lines),
+                            "head": md_text[:240]})
+            self._send(200, {"url": url, "session": session is not None,
+                             "chunks_total": len(chunks), "chunks": out[:200]})
+            return
+
         if segments[0] == "page_map":
             url = (parse_qs(parts.query).get("url") or [""])[0]
             if not url:
