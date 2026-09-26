@@ -1,0 +1,244 @@
+<!doctype html><html><body><main><section data-mw-section-id="2" id="mwWQ" aria-labelledby="Definition"><div class="mw-heading mw-heading2"><h2 id="Definition">Definition</h2><span class="mw-editsection"><span class="mw-editsection-bracket">[</span><a href="/w/index.php?title=Suffix_tree&amp;action=edit&amp;section=2" title="Edit section: Definition"><span>edit</span></a><span class="mw-editsection-bracket">]</span></span></div>
+<p id="mwWg">The suffix tree for the string <span class="mwe-math-element mwe-math-element-inline" typeof="mw:Extension/math" about="#mwt45" id="mwWw" data-mw="{&quot;name&quot;:&quot;math&quot;,&quot;attrs&quot;:{},&quot;body&quot;:{&quot;extsrc&quot;:&quot;S&quot;}}"><span class="mwe-math-mathml-a11y" style="display: none;"><math xmlns="http://www.w3.org/1998/Math/MathML" class="mathjax_ignore" alttext="{\displaystyle S}">
+  <semantics>
+    <mrow class="MJX-TeXAtom-ORD">
+      <mstyle displaystyle="true" scriptlevel="0">
+        <mi>S</mi>
+      </mstyle>
+    </mrow>
+    <annotation encoding="application/x-tex">{\displaystyle S}</annotation>
+  </semantics>
+</math></span><img src="https://wikimedia.org/api/rest_v1/media/math/render/svg/4611d85173cd3b508e67077d4a1252c9c05abca2" class="mwe-math-fallback-image-inline mw-invert skin-invert" aria-hidden="true" style="vertical-align: -0.338ex; width:1.499ex; height:2.176ex;" alt="{\displaystyle S}"></span> of length <span class="mwe-math-element mwe-math-element-inline" typeof="mw:Extension/math" about="#mwt46" id="mwXA" data-mw="{&quot;name&quot;:&quot;math&quot;,&quot;attrs&quot;:{},&quot;body&quot;:{&quot;extsrc&quot;:&quot;n&quot;}}"><span class="mwe-math-mathml-a11y" style="display: none;"><math xmlns="http://www.w3.org/1998/Math/MathML" class="mathjax_ignore" alttext="{\displaystyle n}">
+  <semantics>
+    <mrow class="MJX-TeXAtom-ORD">
+      <mstyle displaystyle="true" scriptlevel="0">
+        <mi>n</mi>
+      </mstyle>
+    </mrow>
+    <annotation encoding="application/x-tex">{\displaystyle n}</annotation>
+  </semantics>
+</math></span><img src="https://wikimedia.org/api/rest_v1/media/math/render/svg/a601995d55609f2d9f5e233e36fbe9ea26011b3b" class="mwe-math-fallback-image-inline mw-invert skin-invert" aria-hidden="true" style="vertical-align: -0.338ex; width:1.395ex; height:1.676ex;" alt="{\displaystyle n}"></span> is defined as a tree such that:<sup about="#mwt48" class="mw-ref reference" id="cite_ref-7" rel="dc:references" typeof="mw:Extension/ref" data-mw="{&quot;name&quot;:&quot;ref&quot;,&quot;attrs&quot;:{},&quot;body&quot;:{&quot;id&quot;:&quot;mw-reference-text-cite_note-7&quot;}}"><a href="#cite_note-7" id="mwXQ"><span class="mw-reflink-text" id="mwXg"><span class="cite-bracket" id="mwXw">[</span>7<span class="cite-bracket" id="mwYA">]</span></span></a></sup></p>
+<ol id="mwYQ"><li id="mwYg">The tree has exactly n leaves numbered from <span class="mwe-math-element mwe-math-element-inline" typeof="mw:Extension/math" about="#mwt49" id="mwYw" data-mw="{&quot;name&quot;:&quot;math&quot;,&quot;attrs&quot;:{},&quot;body&quot;:{&quot;extsrc&quot;:&quot;1&quot;}}"><span class="mwe-math-mathml-a11y" style="display: none;"><math xmlns="http://www.w3.org/1998/Math/MathML" class="mathjax_ignore" alttext="{\displaystyle 1}">
+  <semantics>
+    <mrow class="MJX-TeXAtom-ORD">
+      <mstyle displaystyle="true" scriptlevel="0">
+        <mn>1</mn>
+      </mstyle>
+    </mrow>
+    <annotation encoding="application/x-tex">{\displaystyle 1}</annotation>
+  </semantics>
+</math></span><img src="https://wikimedia.org/api/rest_v1/media/math/render/svg/92d98b82a3778f043108d4e20960a9193df57cbf" class="mwe-math-fallback-image-inline mw-invert skin-invert" aria-hidden="true" style="vertical-align: -0.338ex; width:1.162ex; height:2.176ex;" alt="{\displaystyle 1}"></span> to <span class="mwe-math-element mwe-math-element-inline" typeof="mw:Extension/math" about="#mwt50" id="mwZA" data-mw="{&quot;name&quot;:&quot;math&quot;,&quot;attrs&quot;:{},&quot;body&quot;:{&quot;extsrc&quot;:&quot;n&quot;}}"><span class="mwe-math-mathml-a11y" style="display: none;"><math xmlns="http://www.w3.org/1998/Math/MathML" class="mathjax_ignore" alttext="{\displaystyle n}">
+  <semantics>
+    <mrow class="MJX-TeXAtom-ORD">
+      <mstyle displaystyle="true" scriptlevel="0">
+        <mi>n</mi>
+      </mstyle>
+    </mrow>
+    <annotation encoding="application/x-tex">{\displaystyle n}</annotation>
+  </semantics>
+</math></span><img src="https://wikimedia.org/api/rest_v1/media/math/render/svg/a601995d55609f2d9f5e233e36fbe9ea26011b3b" class="mwe-math-fallback-image-inline mw-invert skin-invert" aria-hidden="true" style="vertical-align: -0.338ex; width:1.395ex; height:1.676ex;" alt="{\displaystyle n}"></span>.</li>
+<li id="mwZQ">Except for the root, every <a rel="mw:WikiLink" href="https://en.wikipedia.org/wiki/Tree_(data_structure)#Terminology" title="Tree (data structure)" class="mw-redirect" id="mwZg">internal node</a> has at least two children.</li>
+<li id="mwZw">Each edge is labelled with a non-empty substring of <span class="mwe-math-element mwe-math-element-inline" typeof="mw:Extension/math" about="#mwt51" id="mwaA" data-mw="{&quot;name&quot;:&quot;math&quot;,&quot;attrs&quot;:{},&quot;body&quot;:{&quot;extsrc&quot;:&quot;S&quot;}}"><span class="mwe-math-mathml-a11y" style="display: none;"><math xmlns="http://www.w3.org/1998/Math/MathML" class="mathjax_ignore" alttext="{\displaystyle S}">
+  <semantics>
+    <mrow class="MJX-TeXAtom-ORD">
+      <mstyle displaystyle="true" scriptlevel="0">
+        <mi>S</mi>
+      </mstyle>
+    </mrow>
+    <annotation encoding="application/x-tex">{\displaystyle S}</annotation>
+  </semantics>
+</math></span><img src="https://wikimedia.org/api/rest_v1/media/math/render/svg/4611d85173cd3b508e67077d4a1252c9c05abca2" class="mwe-math-fallback-image-inline mw-invert skin-invert" aria-hidden="true" style="vertical-align: -0.338ex; width:1.499ex; height:2.176ex;" alt="{\displaystyle S}"></span>.</li>
+<li id="mwaQ">No two edges starting out of a node can have string-labels beginning with the same character.</li>
+<li id="mwag">The string obtained by concatenating all the string-labels found on the path from the root to leaf <span class="mwe-math-element mwe-math-element-inline" typeof="mw:Extension/math" about="#mwt52" id="mwaw" data-mw="{&quot;name&quot;:&quot;math&quot;,&quot;attrs&quot;:{},&quot;body&quot;:{&quot;extsrc&quot;:&quot;i&quot;}}"><span class="mwe-math-mathml-a11y" style="display: none;"><math xmlns="http://www.w3.org/1998/Math/MathML" class="mathjax_ignore" alttext="{\displaystyle i}">
+  <semantics>
+    <mrow class="MJX-TeXAtom-ORD">
+      <mstyle displaystyle="true" scriptlevel="0">
+        <mi>i</mi>
+      </mstyle>
+    </mrow>
+    <annotation encoding="application/x-tex">{\displaystyle i}</annotation>
+  </semantics>
+</math></span><img src="https://wikimedia.org/api/rest_v1/media/math/render/svg/add78d8608ad86e54951b8c8bd6c8d8416533d20" class="mwe-math-fallback-image-inline mw-invert skin-invert" aria-hidden="true" style="vertical-align: -0.338ex; width:0.802ex; height:2.176ex;" alt="{\displaystyle i}"></span> spells out suffix <span class="mwe-math-element mwe-math-element-inline" typeof="mw:Extension/math" about="#mwt53" id="mwbA" data-mw="{&quot;name&quot;:&quot;math&quot;,&quot;attrs&quot;:{},&quot;body&quot;:{&quot;extsrc&quot;:&quot;S[i..n]&quot;}}"><span class="mwe-math-mathml-a11y" style="display: none;"><math xmlns="http://www.w3.org/1998/Math/MathML" class="mathjax_ignore" alttext="{\displaystyle S[i..n]}">
+  <semantics>
+    <mrow class="MJX-TeXAtom-ORD">
+      <mstyle displaystyle="true" scriptlevel="0">
+        <mi>S</mi>
+        <mo stretchy="false">[</mo>
+        <mi>i</mi>
+        <mo>.</mo>
+        <mo>.</mo>
+        <mi>n</mi>
+        <mo stretchy="false">]</mo>
+      </mstyle>
+    </mrow>
+    <annotation encoding="application/x-tex">{\displaystyle S[i..n]}</annotation>
+  </semantics>
+</math></span><img src="https://wikimedia.org/api/rest_v1/media/math/render/svg/9bc0dcf83580a980c75f42da81ec9c14ffc820ee" class="mwe-math-fallback-image-inline mw-invert skin-invert" aria-hidden="true" style="vertical-align: -0.838ex; width:7.058ex; height:2.843ex;" alt="{\displaystyle S[i..n]}"></span>, for <span class="mwe-math-element mwe-math-element-inline" typeof="mw:Extension/math" about="#mwt54" id="mwbQ" data-mw="{&quot;name&quot;:&quot;math&quot;,&quot;attrs&quot;:{},&quot;body&quot;:{&quot;extsrc&quot;:&quot;i&quot;}}"><span class="mwe-math-mathml-a11y" style="display: none;"><math xmlns="http://www.w3.org/1998/Math/MathML" class="mathjax_ignore" alttext="{\displaystyle i}">
+  <semantics>
+    <mrow class="MJX-TeXAtom-ORD">
+      <mstyle displaystyle="true" scriptlevel="0">
+        <mi>i</mi>
+      </mstyle>
+    </mrow>
+    <annotation encoding="application/x-tex">{\displaystyle i}</annotation>
+  </semantics>
+</math></span><img src="https://wikimedia.org/api/rest_v1/media/math/render/svg/add78d8608ad86e54951b8c8bd6c8d8416533d20" class="mwe-math-fallback-image-inline mw-invert skin-invert" aria-hidden="true" style="vertical-align: -0.338ex; width:0.802ex; height:2.176ex;" alt="{\displaystyle i}"></span> from <span class="mwe-math-element mwe-math-element-inline" typeof="mw:Extension/math" about="#mwt55" id="mwbg" data-mw="{&quot;name&quot;:&quot;math&quot;,&quot;attrs&quot;:{},&quot;body&quot;:{&quot;extsrc&quot;:&quot;1&quot;}}"><span class="mwe-math-mathml-a11y" style="display: none;"><math xmlns="http://www.w3.org/1998/Math/MathML" class="mathjax_ignore" alttext="{\displaystyle 1}">
+  <semantics>
+    <mrow class="MJX-TeXAtom-ORD">
+      <mstyle displaystyle="true" scriptlevel="0">
+        <mn>1</mn>
+      </mstyle>
+    </mrow>
+    <annotation encoding="application/x-tex">{\displaystyle 1}</annotation>
+  </semantics>
+</math></span><img src="https://wikimedia.org/api/rest_v1/media/math/render/svg/92d98b82a3778f043108d4e20960a9193df57cbf" class="mwe-math-fallback-image-inline mw-invert skin-invert" aria-hidden="true" style="vertical-align: -0.338ex; width:1.162ex; height:2.176ex;" alt="{\displaystyle 1}"></span> to <span class="mwe-math-element mwe-math-element-inline" typeof="mw:Extension/math" about="#mwt56" id="mwbw" data-mw="{&quot;name&quot;:&quot;math&quot;,&quot;attrs&quot;:{},&quot;body&quot;:{&quot;extsrc&quot;:&quot;n&quot;}}"><span class="mwe-math-mathml-a11y" style="display: none;"><math xmlns="http://www.w3.org/1998/Math/MathML" class="mathjax_ignore" alttext="{\displaystyle n}">
+  <semantics>
+    <mrow class="MJX-TeXAtom-ORD">
+      <mstyle displaystyle="true" scriptlevel="0">
+        <mi>n</mi>
+      </mstyle>
+    </mrow>
+    <annotation encoding="application/x-tex">{\displaystyle n}</annotation>
+  </semantics>
+</math></span><img src="https://wikimedia.org/api/rest_v1/media/math/render/svg/a601995d55609f2d9f5e233e36fbe9ea26011b3b" class="mwe-math-fallback-image-inline mw-invert skin-invert" aria-hidden="true" style="vertical-align: -0.338ex; width:1.395ex; height:1.676ex;" alt="{\displaystyle n}"></span>.</li></ol>
+
+<p id="mwcA">If a suffix of <span class="mwe-math-element mwe-math-element-inline" typeof="mw:Extension/math" about="#mwt57" id="mwcQ" data-mw="{&quot;name&quot;:&quot;math&quot;,&quot;attrs&quot;:{},&quot;body&quot;:{&quot;extsrc&quot;:&quot;S&quot;}}"><span class="mwe-math-mathml-a11y" style="display: none;"><math xmlns="http://www.w3.org/1998/Math/MathML" class="mathjax_ignore" alttext="{\displaystyle S}">
+  <semantics>
+    <mrow class="MJX-TeXAtom-ORD">
+      <mstyle displaystyle="true" scriptlevel="0">
+        <mi>S</mi>
+      </mstyle>
+    </mrow>
+    <annotation encoding="application/x-tex">{\displaystyle S}</annotation>
+  </semantics>
+</math></span><img src="https://wikimedia.org/api/rest_v1/media/math/render/svg/4611d85173cd3b508e67077d4a1252c9c05abca2" class="mwe-math-fallback-image-inline mw-invert skin-invert" aria-hidden="true" style="vertical-align: -0.338ex; width:1.499ex; height:2.176ex;" alt="{\displaystyle S}"></span> is also the prefix of another suffix, such a tree does not exist for the string. For example, in the string <i id="mwcg">abcbc</i>, the suffix <i id="mwcw">bc</i> is also a prefix of the suffix <i id="mwdA">bcbc</i>. In such a case, the path spelling out <i id="mwdQ">bc</i> will not end in a leaf, violating the fifth rule. To fix this problem, <span class="mwe-math-element mwe-math-element-inline" typeof="mw:Extension/math" about="#mwt58" id="mwdg" data-mw="{&quot;name&quot;:&quot;math&quot;,&quot;attrs&quot;:{},&quot;body&quot;:{&quot;extsrc&quot;:&quot;S&quot;}}"><span class="mwe-math-mathml-a11y" style="display: none;"><math xmlns="http://www.w3.org/1998/Math/MathML" class="mathjax_ignore" alttext="{\displaystyle S}">
+  <semantics>
+    <mrow class="MJX-TeXAtom-ORD">
+      <mstyle displaystyle="true" scriptlevel="0">
+        <mi>S</mi>
+      </mstyle>
+    </mrow>
+    <annotation encoding="application/x-tex">{\displaystyle S}</annotation>
+  </semantics>
+</math></span><img src="https://wikimedia.org/api/rest_v1/media/math/render/svg/4611d85173cd3b508e67077d4a1252c9c05abca2" class="mwe-math-fallback-image-inline mw-invert skin-invert" aria-hidden="true" style="vertical-align: -0.338ex; width:1.499ex; height:2.176ex;" alt="{\displaystyle S}"></span> is padded with a terminal symbol not seen in the string (usually denoted <code id="mwdw">$</code>). This ensures that no suffix is a prefix of another, and that there will be <span class="mwe-math-element mwe-math-element-inline" typeof="mw:Extension/math" about="#mwt59" id="mweA" data-mw="{&quot;name&quot;:&quot;math&quot;,&quot;attrs&quot;:{},&quot;body&quot;:{&quot;extsrc&quot;:&quot;n&quot;}}"><span class="mwe-math-mathml-a11y" style="display: none;"><math xmlns="http://www.w3.org/1998/Math/MathML" class="mathjax_ignore" alttext="{\displaystyle n}">
+  <semantics>
+    <mrow class="MJX-TeXAtom-ORD">
+      <mstyle displaystyle="true" scriptlevel="0">
+        <mi>n</mi>
+      </mstyle>
+    </mrow>
+    <annotation encoding="application/x-tex">{\displaystyle n}</annotation>
+  </semantics>
+</math></span><img src="https://wikimedia.org/api/rest_v1/media/math/render/svg/a601995d55609f2d9f5e233e36fbe9ea26011b3b" class="mwe-math-fallback-image-inline mw-invert skin-invert" aria-hidden="true" style="vertical-align: -0.338ex; width:1.395ex; height:1.676ex;" alt="{\displaystyle n}"></span> leaf nodes, one for each of the <span class="mwe-math-element mwe-math-element-inline" typeof="mw:Extension/math" about="#mwt60" id="mweQ" data-mw="{&quot;name&quot;:&quot;math&quot;,&quot;attrs&quot;:{},&quot;body&quot;:{&quot;extsrc&quot;:&quot;n&quot;}}"><span class="mwe-math-mathml-a11y" style="display: none;"><math xmlns="http://www.w3.org/1998/Math/MathML" class="mathjax_ignore" alttext="{\displaystyle n}">
+  <semantics>
+    <mrow class="MJX-TeXAtom-ORD">
+      <mstyle displaystyle="true" scriptlevel="0">
+        <mi>n</mi>
+      </mstyle>
+    </mrow>
+    <annotation encoding="application/x-tex">{\displaystyle n}</annotation>
+  </semantics>
+</math></span><img src="https://wikimedia.org/api/rest_v1/media/math/render/svg/a601995d55609f2d9f5e233e36fbe9ea26011b3b" class="mwe-math-fallback-image-inline mw-invert skin-invert" aria-hidden="true" style="vertical-align: -0.338ex; width:1.395ex; height:1.676ex;" alt="{\displaystyle n}"></span> suffixes of <span class="mwe-math-element mwe-math-element-inline" typeof="mw:Extension/math" about="#mwt61" id="mweg" data-mw="{&quot;name&quot;:&quot;math&quot;,&quot;attrs&quot;:{},&quot;body&quot;:{&quot;extsrc&quot;:&quot;S&quot;}}"><span class="mwe-math-mathml-a11y" style="display: none;"><math xmlns="http://www.w3.org/1998/Math/MathML" class="mathjax_ignore" alttext="{\displaystyle S}">
+  <semantics>
+    <mrow class="MJX-TeXAtom-ORD">
+      <mstyle displaystyle="true" scriptlevel="0">
+        <mi>S</mi>
+      </mstyle>
+    </mrow>
+    <annotation encoding="application/x-tex">{\displaystyle S}</annotation>
+  </semantics>
+</math></span><img src="https://wikimedia.org/api/rest_v1/media/math/render/svg/4611d85173cd3b508e67077d4a1252c9c05abca2" class="mwe-math-fallback-image-inline mw-invert skin-invert" aria-hidden="true" style="vertical-align: -0.338ex; width:1.499ex; height:2.176ex;" alt="{\displaystyle S}"></span>.<sup about="#mwt63" class="mw-ref reference" id="cite_ref-8" rel="dc:references" typeof="mw:Extension/ref" data-mw="{&quot;name&quot;:&quot;ref&quot;,&quot;attrs&quot;:{},&quot;body&quot;:{&quot;id&quot;:&quot;mw-reference-text-cite_note-8&quot;}}"><a href="#cite_note-8" id="mwew"><span class="mw-reflink-text" id="mwfA"><span class="cite-bracket" id="mwfQ">[</span>8<span class="cite-bracket" id="mwfg">]</span></span></a></sup> Since all internal non-root nodes are branching, there can be at most <span class="mwe-math-element mwe-math-element-inline" typeof="mw:Extension/math" about="#mwt64" id="mwfw" data-mw="{&quot;name&quot;:&quot;math&quot;,&quot;attrs&quot;:{},&quot;body&quot;:{&quot;extsrc&quot;:&quot;n-1&quot;}}"><span class="mwe-math-mathml-a11y" style="display: none;"><math xmlns="http://www.w3.org/1998/Math/MathML" class="mathjax_ignore" alttext="{\displaystyle n-1}">
+  <semantics>
+    <mrow class="MJX-TeXAtom-ORD">
+      <mstyle displaystyle="true" scriptlevel="0">
+        <mi>n</mi>
+        <mo>−<!-- − --></mo>
+        <mn>1</mn>
+      </mstyle>
+    </mrow>
+    <annotation encoding="application/x-tex">{\displaystyle n-1}</annotation>
+  </semantics>
+</math></span><img src="https://wikimedia.org/api/rest_v1/media/math/render/svg/fbd0b0f32b28f51962943ee9ede4fb34198a2521" class="mwe-math-fallback-image-inline mw-invert skin-invert" aria-hidden="true" style="vertical-align: -0.505ex; width:5.398ex; height:2.343ex;" alt="{\displaystyle n-1}"></span> such nodes, and <span class="mwe-math-element mwe-math-element-inline" typeof="mw:Extension/math" about="#mwt65" id="mwgA" data-mw="{&quot;name&quot;:&quot;math&quot;,&quot;attrs&quot;:{},&quot;body&quot;:{&quot;extsrc&quot;:&quot;n+(n-1)+1=2n&quot;}}"><span class="mwe-math-mathml-a11y" style="display: none;"><math xmlns="http://www.w3.org/1998/Math/MathML" class="mathjax_ignore" alttext="{\displaystyle n+(n-1)+1=2n}">
+  <semantics>
+    <mrow class="MJX-TeXAtom-ORD">
+      <mstyle displaystyle="true" scriptlevel="0">
+        <mi>n</mi>
+        <mo>+</mo>
+        <mo stretchy="false">(</mo>
+        <mi>n</mi>
+        <mo>−<!-- − --></mo>
+        <mn>1</mn>
+        <mo stretchy="false">)</mo>
+        <mo>+</mo>
+        <mn>1</mn>
+        <mo>=</mo>
+        <mn>2</mn>
+        <mi>n</mi>
+      </mstyle>
+    </mrow>
+    <annotation encoding="application/x-tex">{\displaystyle n+(n-1)+1=2n}</annotation>
+  </semantics>
+</math></span><img src="https://wikimedia.org/api/rest_v1/media/math/render/svg/a6cb1c9d352744d5a535898b70ed331588d56f6e" class="mwe-math-fallback-image-inline mw-invert skin-invert" aria-hidden="true" style="vertical-align: -0.838ex; width:21.1ex; height:2.843ex;" alt="{\displaystyle n+(n-1)+1=2n}"></span> nodes in total (<span class="mwe-math-element mwe-math-element-inline" typeof="mw:Extension/math" about="#mwt66" id="mwgQ" data-mw="{&quot;name&quot;:&quot;math&quot;,&quot;attrs&quot;:{},&quot;body&quot;:{&quot;extsrc&quot;:&quot;n&quot;}}"><span class="mwe-math-mathml-a11y" style="display: none;"><math xmlns="http://www.w3.org/1998/Math/MathML" class="mathjax_ignore" alttext="{\displaystyle n}">
+  <semantics>
+    <mrow class="MJX-TeXAtom-ORD">
+      <mstyle displaystyle="true" scriptlevel="0">
+        <mi>n</mi>
+      </mstyle>
+    </mrow>
+    <annotation encoding="application/x-tex">{\displaystyle n}</annotation>
+  </semantics>
+</math></span><img src="https://wikimedia.org/api/rest_v1/media/math/render/svg/a601995d55609f2d9f5e233e36fbe9ea26011b3b" class="mwe-math-fallback-image-inline mw-invert skin-invert" aria-hidden="true" style="vertical-align: -0.338ex; width:1.395ex; height:1.676ex;" alt="{\displaystyle n}"></span> leaves, <span class="mwe-math-element mwe-math-element-inline" typeof="mw:Extension/math" about="#mwt67" id="mwgg" data-mw="{&quot;name&quot;:&quot;math&quot;,&quot;attrs&quot;:{},&quot;body&quot;:{&quot;extsrc&quot;:&quot;n-1&quot;}}"><span class="mwe-math-mathml-a11y" style="display: none;"><math xmlns="http://www.w3.org/1998/Math/MathML" class="mathjax_ignore" alttext="{\displaystyle n-1}">
+  <semantics>
+    <mrow class="MJX-TeXAtom-ORD">
+      <mstyle displaystyle="true" scriptlevel="0">
+        <mi>n</mi>
+        <mo>−<!-- − --></mo>
+        <mn>1</mn>
+      </mstyle>
+    </mrow>
+    <annotation encoding="application/x-tex">{\displaystyle n-1}</annotation>
+  </semantics>
+</math></span><img src="https://wikimedia.org/api/rest_v1/media/math/render/svg/fbd0b0f32b28f51962943ee9ede4fb34198a2521" class="mwe-math-fallback-image-inline mw-invert skin-invert" aria-hidden="true" style="vertical-align: -0.505ex; width:5.398ex; height:2.343ex;" alt="{\displaystyle n-1}"></span> internal non-root nodes, 1 root).</p>
+
+<p id="mwgw"><b id="mwhA">Suffix links</b> are a key feature for older linear-time construction algorithms, although most newer algorithms, which are based on <a rel="mw:WikiLink" href="https://en.wikipedia.org/wiki/Farach's_algorithm?action=edit&amp;redlink=1" title="Farach's algorithm (page does not exist)" class="new" typeof="mw:LocalizedAttrs" id="mwhQ" data-mw-i18n="{&quot;title&quot;:{&quot;lang&quot;:&quot;x-page&quot;,&quot;key&quot;:&quot;red-link-title&quot;,&quot;params&quot;:[&quot;Farach's algorithm&quot;]}}">Farach's algorithm</a>, dispense with suffix links. In a complete suffix tree, all internal non-root nodes have a suffix link to another internal node. If the path from the root to a node spells the string <span class="mwe-math-element mwe-math-element-inline" typeof="mw:Extension/math" about="#mwt68" id="mwhg" data-mw="{&quot;name&quot;:&quot;math&quot;,&quot;attrs&quot;:{},&quot;body&quot;:{&quot;extsrc&quot;:&quot;\\chi\\alpha&quot;}}"><span class="mwe-math-mathml-a11y" style="display: none;"><math xmlns="http://www.w3.org/1998/Math/MathML" class="mathjax_ignore" alttext="{\displaystyle \chi \alpha }">
+  <semantics>
+    <mrow class="MJX-TeXAtom-ORD">
+      <mstyle displaystyle="true" scriptlevel="0">
+        <mi>χ<!-- χ --></mi>
+        <mi>α<!-- α --></mi>
+      </mstyle>
+    </mrow>
+    <annotation encoding="application/x-tex">{\displaystyle \chi \alpha }</annotation>
+  </semantics>
+</math></span><img src="https://wikimedia.org/api/rest_v1/media/math/render/svg/31b6b692a5079108be1aa6090d29c12720e5b837" class="mwe-math-fallback-image-inline mw-invert skin-invert" aria-hidden="true" style="vertical-align: -0.671ex; width:2.943ex; height:2.009ex;" alt="{\displaystyle \chi \alpha }"></span>, where <span class="mwe-math-element mwe-math-element-inline" typeof="mw:Extension/math" about="#mwt69" id="mwhw" data-mw="{&quot;name&quot;:&quot;math&quot;,&quot;attrs&quot;:{},&quot;body&quot;:{&quot;extsrc&quot;:&quot;\\chi&quot;}}"><span class="mwe-math-mathml-a11y" style="display: none;"><math xmlns="http://www.w3.org/1998/Math/MathML" class="mathjax_ignore" alttext="{\displaystyle \chi }">
+  <semantics>
+    <mrow class="MJX-TeXAtom-ORD">
+      <mstyle displaystyle="true" scriptlevel="0">
+        <mi>χ<!-- χ --></mi>
+      </mstyle>
+    </mrow>
+    <annotation encoding="application/x-tex">{\displaystyle \chi }</annotation>
+  </semantics>
+</math></span><img src="https://wikimedia.org/api/rest_v1/media/math/render/svg/656111758322ace96d80a9371771aa6d3de25437" class="mwe-math-fallback-image-inline mw-invert skin-invert" aria-hidden="true" style="vertical-align: -0.671ex; width:1.455ex; height:2.009ex;" alt="{\displaystyle \chi }"></span> is a single character and <span class="mwe-math-element mwe-math-element-inline" typeof="mw:Extension/math" about="#mwt70" id="mwiA" data-mw="{&quot;name&quot;:&quot;math&quot;,&quot;attrs&quot;:{},&quot;body&quot;:{&quot;extsrc&quot;:&quot;\\alpha&quot;}}"><span class="mwe-math-mathml-a11y" style="display: none;"><math xmlns="http://www.w3.org/1998/Math/MathML" class="mathjax_ignore" alttext="{\displaystyle \alpha }">
+  <semantics>
+    <mrow class="MJX-TeXAtom-ORD">
+      <mstyle displaystyle="true" scriptlevel="0">
+        <mi>α<!-- α --></mi>
+      </mstyle>
+    </mrow>
+    <annotation encoding="application/x-tex">{\displaystyle \alpha }</annotation>
+  </semantics>
+</math></span><img src="https://wikimedia.org/api/rest_v1/media/math/render/svg/b79333175c8b3f0840bfb4ec41b8072c83ea88d3" class="mwe-math-fallback-image-inline mw-invert skin-invert" aria-hidden="true" style="vertical-align: -0.338ex; width:1.488ex; height:1.676ex;" alt="{\displaystyle \alpha }"></span> is a string (possibly empty), it has a suffix link to the internal node representing <span class="mwe-math-element mwe-math-element-inline" typeof="mw:Extension/math" about="#mwt71" id="mwiQ" data-mw="{&quot;name&quot;:&quot;math&quot;,&quot;attrs&quot;:{},&quot;body&quot;:{&quot;extsrc&quot;:&quot;\\alpha&quot;}}"><span class="mwe-math-mathml-a11y" style="display: none;"><math xmlns="http://www.w3.org/1998/Math/MathML" class="mathjax_ignore" alttext="{\displaystyle \alpha }">
+  <semantics>
+    <mrow class="MJX-TeXAtom-ORD">
+      <mstyle displaystyle="true" scriptlevel="0">
+        <mi>α<!-- α --></mi>
+      </mstyle>
+    </mrow>
+    <annotation encoding="application/x-tex">{\displaystyle \alpha }</annotation>
+  </semantics>
+</math></span><img src="https://wikimedia.org/api/rest_v1/media/math/render/svg/b79333175c8b3f0840bfb4ec41b8072c83ea88d3" class="mwe-math-fallback-image-inline mw-invert skin-invert" aria-hidden="true" style="vertical-align: -0.338ex; width:1.488ex; height:1.676ex;" alt="{\displaystyle \alpha }"></span>. See for example the suffix link from the node for <code id="mwig">ANA</code> to the node for <code id="mwiw">NA</code> in the figure above. Suffix links are also used in some algorithms running on the tree.</p>
+
+<p id="mwjA">A <a rel="mw:WikiLink" href="https://en.wikipedia.org/wiki/Generalized_suffix_tree" title="Generalized suffix tree" id="mwjQ">generalized suffix tree</a> is a suffix tree made for a set of strings instead of a single string. It represents all suffixes from this set of strings. Each string must be terminated by a different termination symbol.</p>
+
+</section></main></body></html>

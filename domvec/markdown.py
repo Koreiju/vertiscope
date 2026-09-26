@@ -1061,6 +1061,64 @@ def _flow_owner(xpath: str) -> str:
     return "/".join(steps)
 
 
+_TEX_WRAP = re.compile(r"^\{\\displaystyle\s*(.*)\}\s*$", re.S)
+
+
+def _collapse_math(units: List[Tuple[ContentAddress, str, str, int]]
+                   ) -> List[Tuple[ContentAddress, str, str, int]]:
+    """Each math element, drawn ONCE, inline, as ``$TeX$``.
+
+    MediaWiki ships a formula three times over for three audiences -- MathML
+    glyphs, a TeX annotation, and a fallback SVG image with the TeX as its alt
+    text -- plus the extension's own ``data-mw`` JSON on the wrapper. Rendered
+    as they came, one inline symbol became five or six markdown lines and
+    40-60 tokens: Wikipedia's *Suffix tree* definition, a heading, one
+    sentence and a five-item list, came out as three chunks whose text was
+    mostly ``{\\displaystyle S}`` repeated (2026-09-26). A reader sees one
+    formula; the chunk should say it once.
+
+    Only the PROJECTION changes: the trie still holds every one of those
+    addresses, and the formula's line is anchored at its annotation's own
+    address, a real element in the page. Keyed on the structure MathML
+    defines (``math/semantics/annotation``), not on a site's class names.
+    """
+    tex_at: Dict[str, Tuple[int, str]] = {}
+    for i, (a, v, _l, _d) in enumerate(units):
+        x = a.xpath
+        k = x.find("/math/")
+        if k < 0 or "/semantics/annotation" not in x:
+            continue
+        tex = v.strip()
+        m = _TEX_WRAP.match(tex)
+        tex_at[x[:k]] = (i, (m.group(1) if m else tex).strip())
+    if not tex_at:
+        return units
+    # The wrapper of each formula: the element holding the <math>'s parent,
+    # which is where the fallback image and the extension's JSON sit.
+    wrappers = {}
+    for parent in tex_at:
+        cut = parent.rfind("/")
+        wrappers[parent[:cut] if cut > 0 else parent] = parent
+    out: List[Tuple[ContentAddress, str, str, int]] = []
+    for i, (a, v, lbl, d) in enumerate(units):
+        x = a.xpath
+        k = x.find("/math/")
+        if k >= 0 and x[:k] in tex_at:
+            hit = tex_at[x[:k]]
+            if hit[0] == i:
+                out.append((a, "$%s$" % hit[1], lbl, d))
+            continue                         # the MathML glyphs
+        base = x.split("/text()")[0]
+        wrapper = next((w for w in wrappers if base == w or base.startswith(w + "/img")), None)
+        if wrapper is not None:
+            if base.startswith(wrapper + "/img"):
+                continue                     # the fallback image and its link
+            if str(a.tag).startswith("json_data") and v.lstrip().startswith(("{", "`{")):
+                continue                     # the extension's own data-mw
+        out.append((a, v, lbl, d))
+    return out
+
+
 def _join_inline(units: List[Tuple[ContentAddress, str, str, int]]
                  ) -> List[Tuple[ContentAddress, str, str, int]]:
     """Sentences broken by inline markup are put back together.
@@ -1375,7 +1433,7 @@ def _render_sized(
             memo.reused_lines += len(cached[0].lines)
             return cached
 
-    units = _join_inline(_collect(node, url_depth))
+    units = _join_inline(_collapse_math(_collect(node, url_depth)))
     xpath = _xpath_of(node, url)
     if not units:
         empty = (MarkdownChunk(url=url, xpath=xpath, lines=[]), 0)
@@ -2454,6 +2512,20 @@ def _piece_hash(chunk: MarkdownChunk) -> int:
 # re-synchronisation, and past this point it spends more than it buys.
 MIN_FILL = 0.5
 
+#: How far past the window a run may go to keep what belongs together (`G-86`).
+#:
+#: The user's rule, 2026-09-26: *"within a margin of error depending on the
+#: percentage increase from the limit to the very next chunk merge. If this is
+#: closer to 512 than 256 in the merge after the context limit, keep the
+#: previous, otherwise include the merge as the final chunk. This should be
+#: pretty lenient to edge cases where we include headings as well."* So a
+#: piece that would take a run past the window is taken anyway while the run
+#: stays nearer the window than twice it -- under 1.5x -- and the run ends
+#: there; past that, the run ends before it, as before. The same bound lets a
+#: buffered heading and lead join the first chunk of an oversized piece that
+#: follows them, instead of standing alone.
+LENIENCY = 1.5
+
 
 def _content_boundary(piece_hash: int, piece_chars: int, window: int,
                       buffered: int = 0) -> bool:
@@ -2506,6 +2578,16 @@ RECORD_SHARE = 0.6
 RECORD_MIN_SIZE = 48
 
 
+#: Elements that sit INSIDE a line of text rather than making a block of their
+#: own. Holding only these does not make an element a record (see
+#: `_record_children`).
+_INLINE_TAGS = frozenset({
+    "a", "abbr", "b", "bdi", "bdo", "br", "cite", "code", "data", "del", "dfn",
+    "em", "i", "img", "ins", "kbd", "mark", "math", "q", "s", "samp", "small",
+    "span", "strong", "sub", "sup", "time", "u", "var", "wbr", "#text",
+})
+
+
 def _record_children(sized: Sequence[Tuple[TrieNode, object, int]],
                      window: int) -> set:      # noqa: ARG001 (see RECORD_MIN_SIZE)
     """The children of a repeated record structure, by identity.
@@ -2554,8 +2636,16 @@ def _record_children(sized: Sequence[Tuple[TrieNode, object, int]],
     _label, run = max(labels.items(), key=lambda kv: len(kv[1]))
     if len(run) < RECORD_MIN or len(run) < RECORD_SHARE * len(sized):
         return set()
+    # COMPOSITE means holding a BLOCK of its own -- a title, a byline, a
+    # picture's box. An element that holds only inline elements is prose
+    # with links in it: every Wikipedia paragraph has an <a> or a <span>, so
+    # the looser test ("holds any element") made a run of paragraphs a record
+    # set, one chunk per paragraph, flushed apart from the heading and list
+    # they belong with (the Suffix tree definition, 2026-09-26). The same
+    # held for a five-item list whose items carried inline math.
     composite = [e for e in run
                  if any(not k.is_leaf and not _is_terminal_pair(k)
+                        and _label_of(k.segment) not in _INLINE_TAGS
                         for k in e[0].ordered_children())]
     if len(composite) < RECORD_SHARE * len(run):
         return set()
@@ -2846,8 +2936,18 @@ def _descend(
 
     for kind, piece, piece_chars, piece_hash, is_record in pieces:
         if kind == "split":
+            sub = _descend(piece, url, url_depth, window, memo)  # type: ignore[arg-type]
+            # A buffered heading and lead go WITH the first chunk of what they
+            # head, when the two fit the lenient bound together (`G-86`).
+            if buffer and sub:
+                first_cost = tokens.budget(sub[0].markdown)
+                if buffered_chars + len(buffer) + first_cost < LENIENCY * window:
+                    buffer.append(sub[0])
+                    flush()
+                    out.extend(sub[1:])
+                    continue
             flush()
-            out.extend(_descend(piece, url, url_depth, window, memo))  # type: ignore[arg-type]
+            out.extend(sub)
             continue
         if is_record:
             # A record stands alone. Flushed BEFORE as well as after, so a
@@ -2864,6 +2964,12 @@ def _descend(
         # hyperparameter stop meaning what it says.
         size = buffered_chars + len(buffer) + piece_chars
         if buffer and size > window:
+            if size < LENIENCY * window:
+                # Nearer the window than twice it: take the piece, end the run.
+                buffer.append(piece)  # type: ignore[arg-type]
+                buffered_chars += piece_chars
+                flush()
+                continue
             flush()
         buffer.append(piece)  # type: ignore[arg-type]
         buffered_chars += piece_chars

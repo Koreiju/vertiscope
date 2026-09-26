@@ -30,7 +30,7 @@
 import { ForceTree, type ForceNodeDelta } from "./forcetree";
 import { PipelineBox } from "./pipelinebox";
 import { profiler } from "./profile";
-import { Component, ItemView, MarkdownRenderer, WorkspaceLeaf } from "obsidian";
+import { Component, ItemView, MarkdownRenderer, Menu, WorkspaceLeaf } from "obsidian";
 
 import { LayoutNode } from "./graph";
 import { Sidecar } from "./sidecar";
@@ -267,7 +267,7 @@ export class BrowserView extends ItemView {
     this.markdownWrap = this.split.createDiv({ cls: "domvec-browser-md" });
     this.markdownWrap.hide();
     this.markdownWrap.createDiv({ cls: "domvec-browser-empty" }).setText(
-      "Right-click a chunk in the browser to bring its full markdown here.");
+      "Double right-click a chunk in the browser to pin it here.");
 
     this.status = root.createDiv({ cls: "domvec-browser-status" });
 
@@ -342,7 +342,25 @@ export class BrowserView extends ItemView {
       const r = view.getBoundingClientRect();
       const x = (Number(p.x) || 0) - r.left;
       const y = (Number(p.y) || 0) - r.top;
-      void this.portMarkdown(x, y);
+      // A DOUBLE right-click pins; a single one is the browser's own menu
+      // (2026-09-26: "double-right-click with a certain debounce would
+      // actually be better for pinning ... keeps regular right click
+      // interactions for the electron browser"). The menu waits out the
+      // debounce, so a second click inside it pins instead of opening it.
+      const now = performance.now();
+      const prev = this.lastRight;
+      if (now - prev.at < BrowserView.DOUBLE_RIGHT_MS
+          && Math.hypot(x - prev.x, y - prev.y) < 16) {
+        window.clearTimeout(this.menuTimer);
+        this.lastRight = { at: 0, x: 0, y: 0 };
+        this.lastGesture = "pin";
+        void this.portMarkdown(x, y);
+        return;
+      }
+      this.lastRight = { at: now, x, y };
+      window.clearTimeout(this.menuTimer);
+      this.menuTimer = window.setTimeout(() => this.contextMenu(p, x, y),
+                                         BrowserView.DOUBLE_RIGHT_MS);
     });
 
     view.addEventListener("did-fail-load", (e: any) => {
@@ -423,6 +441,61 @@ export class BrowserView extends ItemView {
   private pinList() {
     return [...this.pinned.values()].map((p) => ({
       cid: p.cid, matched: p.matched, url: p.url }));
+  }
+
+  /** Two right-clicks closer together than this pin; one alone opens the menu. */
+  static DOUBLE_RIGHT_MS = 350;
+  private lastRight = { at: 0, x: 0, y: 0 };
+  private menuTimer = 0;
+  /** What the last right-click gesture did -- "menu" or "pin" -- for the harness. */
+  lastGesture = "";
+  /** The items of the last context menu shown, for the harness. */
+  lastMenu: string[] = [];
+
+  /**
+   * The browser's own context menu, for a single right-click: what a reader
+   * expects from a browser at that point -- the link, the image, the
+   * selection -- plus navigation and the pin, with its shortcut named.
+   * `p` is the webview's context-menu params (window coordinates).
+   */
+  private contextMenu(p: any, x: number, y: number): void {
+    const menu = new Menu();
+    const items: string[] = [];
+    const add = (title: string, icon: string, run: () => void) => {
+      items.push(title);
+      menu.addItem((i) => i.setTitle(title).setIcon(icon).onClick(run));
+    };
+    const copy = (text: string) => { void navigator.clipboard.writeText(text); };
+    if (p.linkURL) {
+      add("Open link in new tab", "external-link", () => void this.openInNewTab(p.linkURL));
+      add("Open link here", "arrow-right", () => this.go(p.linkURL));
+      add("Copy link address", "link", () => copy(p.linkURL));
+    }
+    if (p.mediaType === "image" && p.srcURL) {
+      add("Open image in new tab", "image", () => void this.openInNewTab(p.srcURL));
+      add("Copy image address", "copy", () => copy(p.srcURL));
+    }
+    if (p.selectionText) add("Copy", "copy", () => copy(p.selectionText));
+    if (p.isEditable) add("Paste", "clipboard-paste", () => this.webview?.paste());
+    menu.addSeparator();
+    const wv = this.webview;
+    if (wv?.canGoBack()) add("Back", "arrow-left", () => wv.goBack());
+    if (wv?.canGoForward()) add("Forward", "arrow-right", () => wv.goForward());
+    add("Reload", "rotate-cw", () => wv?.reload());
+    menu.addSeparator();
+    add("Pin this chunk (double right-click)", "pin", () => void this.portMarkdown(x, y));
+    this.lastMenu = items;
+    this.lastGesture = "menu";
+    menu.showAtPosition({ x: Number(p.x) || 0, y: Number(p.y) || 0 });
+  }
+
+  /** A new browser cell in its own tab, on `url`. */
+  private async openInNewTab(url: string): Promise<void> {
+    const leaf = this.app.workspace.getLeaf("tab");
+    await leaf.setViewState({ type: "domvec-browser-view", active: true });
+    const v: any = leaf.view;
+    for (let i = 0; i < 20 && !(v && v.webview); i++) await new Promise((r) => setTimeout(r, 100));
+    if (v && typeof v.go === "function") v.go(url);
   }
 
   /** Told by the plugin: a drain's delta, decoded here, for the force tree
@@ -508,12 +581,18 @@ export class BrowserView extends ItemView {
     this.markdownWrap.empty();
     if (!this.pinned.size) {
       this.markdownWrap.createDiv({ cls: "domvec-browser-empty" }).setText(
-        "Right-click a chunk in the browser to pin it here.");
+        "Double right-click a chunk in the browser to pin it here.");
       return;
     }
     for (const pin of this.pinned.values()) {
       const card = this.markdownWrap.createDiv({ cls: "domvec-pin-card" });
       card.dataset.cid = pin.cid;
+      // The card is the pin's handle in the slate: clicking it brings the
+      // chunk's billboard back in the 3D view, expanded (2026-09-26).
+      card.onclick = (e: MouseEvent) => {
+        if ((e.target as HTMLElement)?.closest?.(".domvec-pin-close, a")) return;
+        this.onPin(pin.cid);
+      };
       const head = card.createDiv({ cls: "domvec-browser-mdhead" });
       head.createSpan({ text: pin.head });
       const close = head.createSpan({ cls: "domvec-pin-close", text: "\u00d7" });
@@ -829,16 +908,20 @@ export class BrowserView extends ItemView {
     if (url === this.session) return;
     const leaving = this.session;
     this.session = url;
+    // The overlay's map of this page (DESIGN_VII §3), loaded on landing and
+    // patched from every capture reply after -- FIRST, before the page left
+    // behind is settled. It waited behind that settle capture, which is
+    // seconds under load, and until it came every hover and every force
+    // node on the new page was checked against the OLD page's map (P-B2
+    // read map_follows false 600 ms after an address-bar navigation).
+    if (this.pipebox && url && url !== "about:blank") {
+      void this.pipebox.map.load(this.sidecar, url);
+    }
     if (leaving) {
       await this.sidecar.capture(leaving, { settle: true });
     }
     if (this.live) this.say(`live · ${url}`);
     void this.placeWholePage(url);
-    // The overlay's map of this page (DESIGN_VII §3), loaded once on landing
-    // and patched from every capture reply after.
-    if (this.pipebox && url && url !== "about:blank") {
-      void this.pipebox.map.load(this.sidecar, url);
-    }
   }
 
   /**

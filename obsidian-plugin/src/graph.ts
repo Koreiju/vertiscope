@@ -636,7 +636,7 @@ export class GraphView extends ItemView {
       // old content and this stays pending until the new one is placed.
       if (cid && !a.again && byId.has(cid) && !byId.get(cid).force) { this.forceSpecs.delete(a.id); continue; }
       this.forceSpecs.set(a.id, { parent: a.parent, url: d.url, title: a.title, lines: a.lines,
-                                  cid, stale: !!a.again });
+                                  cid, stale: !!a.again, born: Date.now() });
       if (!drawHere) continue;
       const to = a.parent ? this.parentFor(a.parent, d.url, byId) : "";
       const p = to ? byId.get(to) : null;
@@ -685,7 +685,8 @@ export class GraphView extends ItemView {
 
   /** Every force node drawn: what a redraw needs to put it back. */
   private forceSpecs = new Map<string, { parent: string; url: string; title: string;
-                                          lines: number; cid?: string; stale?: boolean }>();
+                                          lines: number; cid?: string; stale?: boolean;
+                                          born?: number }>();
   private settleTimer = 0;
 
   /** Set by the plugin: the url the browser cell is showing. */
@@ -696,6 +697,7 @@ export class GraphView extends ItemView {
     const drawn = this.graph ? this.graph.graphData().nodes.filter((n: any) => n.force).length : 0;
     return { force_nodes: this.forceSpecs.size, drawn,
              covered_known: [...this.forceSpecs.values()].filter((x) => x.cid).length,
+             timed_out: this.forceTimedOut,
              expanded: [...this.expandedUrls()].length };
   }
 
@@ -776,8 +778,18 @@ export class GraphView extends ItemView {
     const drawn = new Set<string>(this.graph.graphData().nodes
       .filter((n: any) => !n.force).map((n: any) => n.id));
     const done = new Set<string>();
+    const now = Date.now();
     for (const [id, spec] of this.forceSpecs) {
-      if (spec.cid && !spec.stale && drawn.has(spec.cid)) done.add(id);
+      if (spec.cid && !spec.stale && drawn.has(spec.cid)) { done.add(id); continue; }
+      // Not every sensor chunk is stored (the store drops what draws
+      // nothing), and not every stored chunk gets a vector. A pending node
+      // that nothing has covered in 20 s, or that was covered and never
+      // placed in 90 s, is not coming: it goes, and is counted.
+      const age = now - (spec.born ?? now);
+      if (spec.parent && ((!spec.cid && age > 20000) || age > 90000)) {
+        done.add(id);
+        this.forceTimedOut++;
+      }
     }
     const key = [...this.expandedUrls()].sort().join("\n");
     if (done.size || key !== this.lastExpanded) this.redrawForce(done);
@@ -865,6 +877,9 @@ export class GraphView extends ItemView {
     this.graph.d3ReheatSimulation?.();
     this.lastExpanded = [...expanded].sort().join("\n");
   }
+
+  /** Pending force nodes dropped because nothing ever covered or placed them. */
+  forceTimedOut = 0;
 
   /** A collapsed force node -> the projected chunk it collapsed into. */
   private collapsedTo = new Map<string, string>();
@@ -1323,7 +1338,9 @@ export class GraphView extends ItemView {
     if (!node || !node.id || !this.graph) return;
     const existing = this.billboards.get(node.id);
     if (existing) {
-      if (fromBrowser) { existing.fromBrowser = true; return; }
+      // Asked for by the browser -- a pin, or a click on its card in the
+      // side panel: shown, and expanded if it had been minimized.
+      if (fromBrowser) { existing.fromBrowser = true; this.setMinimized(existing, false); return; }
       // A second click closes it -- unless the browser's markdown side is
       // holding it open, in which case that side is where it closes.
       if (existing.fromBrowser) return;
@@ -1337,17 +1354,31 @@ export class GraphView extends ItemView {
     const el = this.billboardLayer.createDiv({ cls: "domvec-bb" });
     const head = el.createDiv({ cls: "domvec-bb-head" });
     head.setText(String(node.name || node.id).slice(0, 44));
+    // Minimize: down to the title bar, the chunk still open (2026-09-26).
+    const min = head.createSpan({ cls: "domvec-bb-min" });
+    min.setText("\u2013");
+    min.setAttr("aria-label", "minimize");
+    min.onpointerdown = (e: PointerEvent) => e.stopPropagation();
+    min.onclick = (e: MouseEvent) => {
+      e.stopPropagation();
+      const en: any = this.billboards.get(node.id);
+      if (en) this.setMinimized(en, !en.minimized);
+    };
     const close = head.createSpan({ cls: "domvec-bb-close" });
     close.setText("\u00d7");
+    close.onpointerdown = (e: PointerEvent) => e.stopPropagation();
+    // The x takes the billboard out of the 3D view and nothing else: a
+    // pinned chunk stays pinned -- its card in the browser's side panel and
+    // its outline on the page -- and clicking that card brings the billboard
+    // back (2026-09-26; it used to let go of all three).
     close.onclick = (e: MouseEvent) => {
       e.stopPropagation();
       this.closeBillboard(node.id);
-      this.onBillboardClosed(node.id);
     };
     const body = el.createDiv({ cls: "domvec-bb-body" });
     body.setText("\u2026");
 
-    const entry: any = { el, node, pinned: false, surface: null, fromBrowser };
+    const entry: any = { el, node, pinned: false, surface: null, fromBrowser, minimized: false };
     this.billboards.set(node.id, entry);
     this.positionBillboard(entry);
     this.startBillboardLoop();
@@ -1409,6 +1440,12 @@ export class GraphView extends ItemView {
     }
   }
 
+  /** Collapse a billboard to its title bar, or open it back up. */
+  private setMinimized(entry: any, on: boolean): void {
+    entry.minimized = on;
+    entry.el.toggleClass("is-min", on);
+  }
+
   /** Close one billboard and release its surface. */
   closeBillboard(id: string): void {
     const entry: any = this.billboards.get(id);
@@ -1452,7 +1489,7 @@ export class GraphView extends ItemView {
    *  harness, so a check reads the pane rather than re-deriving it. */
   billboardState(): { id: string; fromBrowser: boolean; shadow: boolean }[] {
     return [...this.billboards.entries()].map(([id, e]: [string, any]) => ({
-      id, fromBrowser: !!e.fromBrowser,
+      id, fromBrowser: !!e.fromBrowser, minimized: !!e.minimized,
       shadow: !!e.el.querySelector(".domvec-html-host")?.shadowRoot,
     }));
   }

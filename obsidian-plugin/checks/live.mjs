@@ -1451,7 +1451,7 @@ export function makeChecks(env) {
     },
     {
       id: "G-39",
-      asks: "right-click puts the markdown beside the page AND rings the node",
+      asks: "right-click is the browser's menu; DOUBLE right-click puts the markdown beside the page and rings the node",
       async run() {
         const got = await evaluate(`(async () => {
           const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -1548,14 +1548,44 @@ export function makeChecks(env) {
           // skipped the one step that was broken: the event reports the
           // point in window coordinates, and every right-click missed the
           // page while this check passed (2026-09-26).
+          //
+          // Two arms (2026-09-26: a DOUBLE right-click pins; a single one is
+          // the browser's own menu). The single arm must open the menu with
+          // the link's items and pin nothing.
+          const rclick = () => {
+            b.webview.sendInputEvent({ type: "mouseDown", x: at.x, y: at.y, button: "right", clickCount: 1 });
+            b.webview.sendInputEvent({ type: "mouseUp", x: at.x, y: at.y, button: "right", clickCount: 1 });
+          };
+          // Loaded and focused first: a right-click sent while the guest is
+          // still loading produced no context-menu event at all (a run on
+          // 2026-09-26 read gesture "" with the page title still arriving).
+          for (let i = 0; i < 40 && b.webview.isLoading(); i++) await sleep(250);
           b.webview.focus();
-          b.webview.sendInputEvent({ type: "mouseDown", x: at.x, y: at.y, button: "right", clickCount: 1 });
-          b.webview.sendInputEvent({ type: "mouseUp", x: at.x, y: at.y, button: "right", clickCount: 1 });
+          await sleep(200);
+          const pinsBefore = b.pinnedState().length;
+          b.lastGesture = "";
+          rclick();
+          await sleep(900);
+          // Retried once, and SAID: a right-click that needs a second try is
+          // a finding, not something to absorb silently.
+          let rclickRetried = false;
+          if (!b.lastGesture) { rclickRetried = true; b.webview.focus(); rclick(); await sleep(900); }
+          const single = { gesture: b.lastGesture, items: b.lastMenu.slice(), retried: rclickRetried,
+                           menu_shown: !!document.querySelector(".menu"),
+                           pinned: b.pinnedState().length - pinsBefore };
+          document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+          document.querySelectorAll(".menu").forEach((m) => m.remove());
+          await sleep(300);
+          rclick();
+          await sleep(120);
+          rclick();
           await sleep(1800);
           const body = b.markdownWrap.querySelector(".domvec-browser-mdbody");
           const head = b.markdownWrap.querySelector(".domvec-browser-mdhead");
           return {
             pointed_at: at,
+            single_right_click: single,
+            double_gesture: b.lastGesture,
             // The page stays the surface: it is shown with a real size, and
             // there is no face toggle left to switch it away (G-82).
             page_shown: b.browserWrap.offsetWidth > 50 && b.browserWrap.offsetHeight > 50,
@@ -1591,7 +1621,12 @@ export function makeChecks(env) {
           // ("the browser stays the main surface"), and right-click now pins
           // (G-78) with the page left showing. Scored the old way, a correct
           // app failed with rendered markdown and one ring in its evidence.
-          pass: got.page_shown === true && got.face_toggle === false
+          pass: got.single_right_click && got.single_right_click.gesture === "menu"
+             && got.single_right_click.menu_shown === true
+             && got.single_right_click.items.includes("Open link in new tab")
+             && got.single_right_click.pinned === 0
+             && got.double_gesture === "pin"
+             && got.page_shown === true && got.face_toggle === false
              && !!got.heading && got.heading.startsWith("/html")
              && got.rendered_chars > 0 && got.rendered_elements > 0
              && (got.links || []).every(
@@ -2599,6 +2634,128 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "P-B2",
+      asks: "the browser cell navigates as a browser does: address bar, back, forward, reload, scan, live, retrieval overlay",
+      async run() {
+        // Every control pressed as a reader presses it -- the toolbar's own
+        // buttons and fields, not the view's methods -- and each step scored
+        // on what the app then shows. Local fixtures for the navigation arms
+        // (a page whose only motion is ours), the seeded store for retrieval.
+        const fixtures = await serveFixtures();
+        const A = fixtures.origin + "/inline_prose.html";
+        const B = fixtures.origin + "/link_family.html";
+        // Words the store holds, from a seeded page, for the retrieval arm.
+        const layout = await ask("/layout?level=chunk");
+        const words = [...new Set((layout.nodes || [])
+          .filter((n) => String(n.url || "").indexOf("books.toscrape.com") >= 0)
+          .map((n) => String(n.title || "")).join(" ")
+          .match(/[A-Za-z][A-Za-z-]{4,}/g) || [])].slice(0, 3).join(" ") || "books";
+        try {
+          const got = await evaluate(`(async () => {
+            const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+            await window.__domvec.act("open", "browser");
+            const b = app.workspace.getLeavesOfType("domvec-browser-view")[0].view;
+            const wv = b.webview, root = b.containerEl;
+            const bar = root.querySelector(".domvec-browser-bar");
+            const btn = (t) => [...bar.querySelectorAll("button")].find((e) => e.textContent.trim().indexOf(t) === 0);
+            const url = () => wv.getURL();
+            let starts = 0;
+            const onStart = () => starts++;
+            wv.addEventListener("did-start-loading", onStart);
+            const settle = async (pred, ms = 20000) => {
+              const t0 = Date.now();
+              while (Date.now() - t0 < ms) { if (!wv.isLoading() && pred()) return Date.now() - t0; await sleep(150); }
+              return -1;
+            };
+            const typeUrl = async (u, pred) => {
+              const a = root.querySelector(".domvec-browser-url");
+              a.focus(); a.value = u;
+              a.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+              return settle(pred);
+            };
+            const mapFollows = () => !!(b.pipebox && b.pipebox.map && b.pipebox.map.url === url());
+            const steps = {};
+            steps.address_bar = { ms: await typeUrl(${JSON.stringify(A)}, () => url() === ${JSON.stringify(A)}), url: url() };
+            await sleep(600); steps.address_bar.map_follows = mapFollows();
+            steps.address_bar_2 = { ms: await typeUrl(${JSON.stringify(B)}, () => url() === ${JSON.stringify(B)}), url: url() };
+            await sleep(600);
+            btn("\\u2190").click();
+            steps.back = { ms: await settle(() => url() === ${JSON.stringify(A)}), url: url(), address: root.querySelector(".domvec-browser-url").value };
+            btn("\\u2192").click();
+            steps.forward = { ms: await settle(() => url() === ${JSON.stringify(B)}), url: url() };
+            const before = starts;
+            btn("\\u27f3").click();
+            await sleep(300);
+            steps.reload = { ms: await settle(() => starts > before), url: url(), loads: starts - before };
+            steps.bare_host = { ms: await typeUrl("books.toscrape.com", () => url().indexOf("https://books.toscrape.com") === 0), url: url() };
+            await sleep(800); steps.bare_host.map_follows = mapFollows();
+            // scan
+            const scanBefore = JSON.stringify(b.lastScan || null);
+            btn("scan").click();
+            let scanned = false;
+            for (let i = 0; i < 60 && !scanned; i++) { await sleep(250); scanned = JSON.stringify(b.lastScan || null) !== scanBefore; }
+            steps.scan = { changed: scanned, last: b.lastScan ? { passes: b.lastScan.passes, addresses: b.lastScan.addresses, settled: b.lastScan.settled } : null };
+            // live
+            const live0 = !!b.live;
+            btn("live").click(); await sleep(300);
+            const live1 = !!b.live;
+            btn("live").click(); await sleep(300);
+            steps.live = { before: live0, toggled: live1, restored: !!b.live };
+            // retrieval overlay
+            const q = root.querySelector(".domvec-query");
+            q.focus(); q.value = ${JSON.stringify(words)};
+            q.dispatchEvent(new Event("input", { bubbles: true }));
+            await sleep(1500);
+            const hits = () => [...root.querySelectorAll(".domvec-hit")];
+            const overlay = root.querySelector(".domvec-overlay");
+            steps.query = { query: q.value, hits: hits().length, overlay_shown: !!overlay && overlay.style.display !== "none" };
+            const list = root.querySelector(".domvec-overlay-list");
+            const n0 = hits().length;
+            if (list) { list.scrollTop = list.scrollHeight; list.dispatchEvent(new Event("scroll")); }
+            await sleep(1500);
+            steps.scroll_more = { before: n0, after: hits().length };
+            const scope = [...root.querySelectorAll(".domvec-browser-search button")].find((e) => /everywhere|this page/.test(e.textContent));
+            scope.click(); await sleep(1500);
+            const scopedUrls = [...new Set(hits().map((h) => (h.querySelector(".domvec-hit-url") || {}).textContent))];
+            steps.scope = { label: scope.textContent, hits: hits().length, urls: scopedUrls.length, only_here: scopedUrls.every((u) => u === url()) };
+            scope.click(); await sleep(1200);
+            const first = hits()[0];
+            const want = first ? (first.querySelector(".domvec-hit-url") || {}).textContent : null;
+            if (first) first.click();
+            steps.hit_click = { want, ms: want ? await settle(() => url() === want) : -1, url: url(), status: b.status.textContent };
+            const x = [...root.querySelectorAll(".domvec-browser-search button")].find((e) => e.textContent.trim() === "\\u00d7");
+            x.click(); await sleep(400);
+            steps.clear = { query: q.value, overlay_shown: !!overlay && overlay.style.display !== "none" };
+            // G-41: nothing of ours was written into the page.
+            steps.nothing_injected = await wv.executeJavaScript("document.querySelectorAll('[class*=domvec],[id*=domvec]').length === 0");
+            wv.removeEventListener("did-start-loading", onStart);
+            try { b.go("about:blank"); } catch (e) {}
+            return steps;
+          })()`, { timeout: 300000 });
+          got.purged = await tidyFixtures(fixtures.origin);
+          const s = got;
+          const ok = {
+            address_bar: s.address_bar.ms >= 0 && s.address_bar.map_follows,
+            back: s.back.ms >= 0 && s.back.address === s.back.url,
+            forward: s.forward.ms >= 0,
+            reload: s.reload.ms >= 0 && s.reload.loads >= 1,
+            bare_host: s.bare_host.ms >= 0 && s.bare_host.map_follows,
+            scan: s.scan.changed && !!s.scan.last && s.scan.last.passes > 0,
+            live: s.live.toggled !== s.live.before && s.live.restored === s.live.before,
+            query: s.query.hits > 0 && s.query.overlay_shown,
+            scroll_more: s.query.hits < 12 || s.scroll_more.after > s.scroll_more.before,
+            scope: /this page/.test(s.scope.label) && s.scope.only_here,
+            hit_click: s.hit_click.ms >= 0,
+            clear: s.clear.query === "" && !s.clear.overlay_shown,
+            nothing_injected: s.nothing_injected === true,
+          };
+          return { pass: Object.values(ok).every(Boolean), evidence: { ok, steps: s } };
+        } finally {
+          await fixtures.close();
+        }
+      },
+    },
+    {
       id: "R-J1",
       asks: "adjacent nodes are separable -- median gap >= one node diameter",
       async run() {
@@ -2928,7 +3085,7 @@ export function makeChecks(env) {
     },
     {
       id: "G-78",
-      asks: "right-click pins a chunk: outline on its box, markdown beside the page, billboard in the graph -- closed together",
+      asks: "a pin: outline on its box, markdown card beside the page, billboard in the graph; the billboard's x and minimize act on it alone, the card brings it back",
       async run() {
         const got = await evaluate(`(async () => {
           const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -2939,6 +3096,10 @@ export function makeChecks(env) {
           await d.act("navigate", "https://en.wikipedia.org/wiki/Radix_tree");
           await sleep(4000);
           const view = app.workspace.getLeavesOfType("domvec-browser-view")[0].view;
+          // From the TOP: returning to a page restores its old scroll, and the
+          // paragraph pinned last time can be 1,800 px above the view.
+          await view.webview.executeJavaScript("window.scrollTo({top:0,behavior:'instant'}); true");
+          await sleep(300);
           // A paragraph in the article, and ITS box in the guest's viewport.
           const target = await view.webview.executeJavaScript(\`(function(){
             var ps = document.querySelectorAll('#mw-content-text p');
@@ -2995,12 +3156,39 @@ export function makeChecks(env) {
             const own = g.billboards && g.billboards.get(pin.cid);
             const x = own && own.el.querySelector(".domvec-bb-close");
             closed_via = x ? "own billboard's x" : "no x on its billboard";
+            const snap = () => {
+              const u = d.ui();
+              const own2 = g.billboards && g.billboards.get(pin.cid);
+              return { pins: (u.pinned && u.pinned.pins || []).length,
+                       card: !!view.markdownWrap.querySelector('.domvec-pin-card[data-cid="' + pin.cid + '"]'),
+                       billboard: !!own2 && document.contains(own2.el),
+                       minimized: !!own2 && !!own2.minimized,
+                       outlines: ((u.pipebox || {}).pins || []).filter((o) => o.shown).length };
+            };
+            // (2026-09-26) The billboard's x removes it from the 3D view ONLY:
+            // the pin, its card and its outline stay.
             if (x) x.click();
             await sleep(800);
-            const u2 = d.ui();
-            after = { pins: (u2.pinned && u2.pinned.pins || []).length,
-                      billboards: (u2.billboards || []).length,
-                      outlines: ((u2.pipebox || {}).pins || []).filter((o) => o.shown).length };
+            after = { x_on_billboard: snap() };
+            // Clicking the card in the side panel brings it back, expanded.
+            const card = () => view.markdownWrap.querySelector('.domvec-pin-card[data-cid="' + pin.cid + '"] .domvec-browser-mdbody');
+            if (card()) card().click();
+            await sleep(1500);
+            after.card_click = snap();
+            // Minimize collapses it to its title bar; the card expands it again.
+            const own3 = g.billboards && g.billboards.get(pin.cid);
+            const mn = own3 && own3.el.querySelector(".domvec-bb-min");
+            if (mn) mn.click();
+            await sleep(300);
+            after.minimize = snap();
+            if (card()) card().click();
+            await sleep(800);
+            after.card_click_again = snap();
+            // The card's own x lets go of all three.
+            const cx = view.markdownWrap.querySelector('.domvec-pin-card[data-cid="' + pin.cid + '"] .domvec-pin-close');
+            if (cx) cx.click();
+            await sleep(800);
+            after.card_x = snap();
           }
           return { target, pinned, pin, box,
                    webview: [wb.left, wb.top, wb.width, wb.height],
@@ -3026,8 +3214,14 @@ export function makeChecks(env) {
              && !!got.outline && got.outline.shown && off !== null && off <= 3
              && !!got.billboard && got.billboard.fromBrowser && got.billboard.shadow
              && !!got.survived && got.survived.in_document && got.survived.has_close
-             && !!got.after && got.after.pins === 0 && got.after.billboards === 0
-             && got.after.outlines === 0,
+             && !!got.after
+             && got.after.x_on_billboard.billboard === false && got.after.x_on_billboard.pins === 1
+             && got.after.x_on_billboard.card === true
+             && got.after.card_click.billboard === true && got.after.card_click.minimized === false
+             && got.after.minimize.billboard === true && got.after.minimize.minimized === true
+             && got.after.card_click_again.minimized === false
+             && got.after.card_x.pins === 0 && got.after.card_x.billboard === false
+             && got.after.card_x.card === false && got.after.card_x.outlines === 0,
           evidence: { ...got, outline_off_px: off },
         };
       },
@@ -3080,6 +3274,8 @@ export function makeChecks(env) {
           await d.act("navigate", "https://en.wikipedia.org/wiki/Radix_tree");
           await sleep(4000);
           const view = app.workspace.getLeavesOfType("domvec-browser-view")[0].view;
+          await view.webview.executeJavaScript("window.scrollTo({top:0,behavior:'instant'}); true");
+          await sleep(300);
           const pageShown = () => view.browserWrap.offsetWidth > 50 && view.browserWrap.offsetHeight > 50;
           const toggle = () => [...view.containerEl.querySelectorAll(".domvec-browser-bar button")]
             .some((e) => /^(markdown|browser)$/.test((e.textContent || "").trim()));

@@ -120,7 +120,11 @@ def test_the_running_total_does_not_have_that_property(running_total, n):
     """
     rows = _uniform(n)
     fresh = _new_text(_rows(rows), _rows([(-1, "inserted at the head")] + rows))
-    assert fresh > n // 20, (
+    # n // 25, not n // 20: the lenient cut (`markdown.LENIENCY`, G-86) ends a
+    # run slightly later, and measured 21 -> 20 new chunks at N=400 and
+    # 86 -> 81 at N=1600 -- still linear in the page, against a constant 2
+    # with content boundaries. The arm's claim is the linearity.
+    assert fresh >= n // 25, (
         "expected an insertion to invalidate most of the page, got {} at "
         "N={}".format(fresh, n))
 
@@ -183,15 +187,20 @@ def test_the_page_is_still_partitioned(n):
     anchors = [a for c in chunks for a in c.anchors]
     assert len(anchors) == len(set(anchors)), "an address reached two chunks"
     assert anchors, "nothing was chunked"
+    # The cap is the LENIENT bound, not the window: a run may take the piece
+    # that crosses the window while it stays under 1.5x (`markdown.LENIENCY`,
+    # G-86 -- the user's rule of 2026-09-26).
     over = [c for c in chunks
-            if tokens.budget(c.markdown) > WINDOW and len(c.lines) > 1]
+            if tokens.budget(c.markdown) > md.LENIENCY * WINDOW and len(c.lines) > 1]
     assert not over, "{} chunk(s) over the window".format(len(over))
 
     # Whatever the render carries past the window must be link targets and
     # nothing else.
+    # (Past the LENIENT bound: prose may run to 1.5x the window by design.)
+    cap = md.LENIENCY * WINDOW
     fat = [c for c in chunks
-           if tokens.count(c.markdown) > WINDOW and len(c.lines) > 1]
-    smuggled = [c for c in fat if tokens.budget(c.markdown) > WINDOW]
+           if tokens.count(c.markdown) > cap and len(c.lines) > 1]
+    smuggled = [c for c in fat if tokens.budget(c.markdown) > cap]
     assert not smuggled, (
         "{} chunk(s) carry PROSE past the window, not just addresses"
         .format(len(smuggled)))

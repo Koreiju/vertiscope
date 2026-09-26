@@ -1390,6 +1390,57 @@ p50 53 ms because it made a second round trip into the page for the boxes;
 they must come back with the drain itself (read by a geometry step beside the
 fold, never inside it -- `invariants.c2`).*
 
+> Also, right-clicking a lot of overlays but still getting "nothing under the
+> cursor"
+
+> I think double-right-click with a certain debounce would actually be better
+> for pinning. That keeps regular right click interactions for the electron
+> browser for options, opening in a new tab, etc.
+
+*Read as: pinning moves to a DOUBLE right-click (two within a short
+debounce); a single right-click is the browser's own context menu -- open a
+link in a new tab, copy, navigate -- which the cell did not have. (The
+"nothing under the cursor" was the event's window coordinates handed to the
+page as page coordinates; fixed in `fae7374`.)*
+
+> Also, electron browser navigation (including retrieval overlay, back,
+> forward, refresh, url, scan, etc) should be fully tested in your harness
+> yourself to fix any and all degradations on features compared to our PRD
+
+*Read as: every control of the browser cell -- the address bar, back,
+forward, reload, scan, live, and the search box's retrieval overlay -- is
+exercised through the plugin by a live check, the way a reader uses it, and
+whatever has degraded against its PRD row is fixed.*
+
+> Seeing degradation on chunk margin thresholds where the following from the
+> suffix tree site shows the header, the first four, and the fifth thing as
+> three separate chunks, despite being part of the same definition.
+
+(The pasted content: Wikipedia's *Suffix tree* "Definition" -- a heading, a
+lead sentence ending "is defined as a tree such that:", and a five-item list
+whose items carry inline math.)
+
+> Also, are the colorful nodes chunks, and if so, are they fitted to UMAP at
+> all?
+
+*Read as: the chunker splits one definition -- heading, lead, list -- into
+three chunks; the lenient cut (decided earlier the same day, `G-86`) must keep
+a heading with what it heads and a list with its lead, within the 256
+window's leniency. And a question to answer with evidence: what the coloured
+nodes are and where their positions come from.*
+
+> Also, on the billboards in the 3D panels on persisted double right click
+> selected nodes; there should be a 'minimize' button and the 'x' button
+> should just remove it from the 3D GUI, but if the panel is clicked on its
+> palette in the 2D browser where the slate of double-right clicked panels
+> are collected, the panel re-expands in the 3D viewer.
+
+*Read as: a pinned chunk's billboard gets a MINIMIZE button (collapses to its
+title bar); its x removes it from the 3D view ONLY -- the pin, its side-panel
+card and its outline stay; clicking the card in the browser's side panel (the
+slate of pinned chunks) brings the billboard back, expanded. The side card's
+own x still lets go of all three. Amends `G-78` ("closed together").*
+
 ---
 
 

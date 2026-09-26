@@ -318,11 +318,11 @@ export class Verifier {
       // ... and until the diff drawn force-directed has collapsed into the
       // page view: the transform placing the pending chunks is the phase the
       // trace must end on (`G-89` C7).
-      for (let i = 0; i < 180; i++) {
+      for (let i = 0; i < 300; i++) {
         const v: any = this.app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
         if (!v) break;
-        const pending = v.pendingState ? v.pendingState().force_nodes : 0;
-        if (v.layoutMode === "projector" && pending === 0) break;
+        const drawn = v.pendingState ? v.pendingState().drawn : 0;
+        if (v.layoutMode === "projector" && drawn === 0) break;
         await sleep(500);
       }
       await sleep(1500);

@@ -120,9 +120,13 @@ def test_a_long_option_list_no_longer_makes_an_oversized_chunk():
 
     chunks = render_trie(trie)
     worst = max(tokens.count(c.markdown) for c in chunks)
-    assert worst <= DEFAULT_CONTEXT_WINDOW, (
-        "worst chunk %d tokens against a %d window"
-        % (worst, DEFAULT_CONTEXT_WINDOW))
+    # The cap is the LENIENT bound, not the window: a run may take the piece
+    # that crosses the window while it stays under 1.5x (`markdown.LENIENCY`,
+    # G-86 -- the user's rule of 2026-09-26).
+    from domvec.markdown import LENIENCY
+    assert worst <= LENIENCY * DEFAULT_CONTEXT_WINDOW, (
+        "worst chunk %d tokens against a %d window (lenient to %gx)"
+        % (worst, DEFAULT_CONTEXT_WINDOW, LENIENCY))
 
     # And the options are all still there, one addressed line each.
     drawn = {line.text.strip() for c in chunks for line in c.lines}

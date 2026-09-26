@@ -119,10 +119,15 @@ def test_accounting_balances_on_every_page(rendered):
     # never returns the chunk over the window, and it is over the window by
     # the time the page-global passes see it, so the growth is between those
     # two points and is not any of the named passes.
-    pytest.param(300, marks=pytest.mark.xfail(strict=True, reason="D-10")),
+    #
+    # **Superseded 2026-09-26, and not by a fix.** The contract moved: the
+    # user's lenient rule (`markdown.LENIENCY`, G-86) lets a run take the piece
+    # that crosses the window while it stays under 1.5x, so 302 against 300
+    # is inside the bound this test now states. The growth past `_descend`
+    # named above is still unexplained; it is simply no longer a violation.
+    300,
     600,
-    pytest.param(DEFAULT_CONTEXT_WINDOW,
-                 marks=pytest.mark.xfail(strict=True, reason="D-10")),
+    DEFAULT_CONTEXT_WINDOW,
     2400,
 ])
 def test_oversized_chunks_are_indivisible_not_lazy(window, rendered):
@@ -168,7 +173,10 @@ def test_oversized_chunks_are_indivisible_not_lazy(window, rendered):
             # Measured the way the chunker measures. `len` is characters and
             # the window is tokens: comparing them says a 666-character chunk
             # overflows a 300-token window when it is 214 tokens and fits.
-            if tokens.budget(chunk.markdown) <= window:
+            # Over the LENIENT bound, not the window (`markdown.LENIENCY`,
+            # G-86): a run may take the piece that crosses the window.
+            from domvec.markdown import LENIENCY
+            if tokens.budget(chunk.markdown) <= LENIENCY * window:
                 continue
             roots = {line.address.xpath for line in chunk.lines}
             assert len(roots) == 1, (
@@ -295,7 +303,8 @@ def test_many_units_on_one_element_respect_the_window(rendered):
         counts[window] = len(chunks)
         assert len({c.cid for c in chunks}) == len(chunks), \
             f"window {window}: two chunks share an id"
-        oversized = [c for c in chunks if tokens.count(c.markdown) > window
+        from domvec.markdown import LENIENCY
+        oversized = [c for c in chunks if tokens.count(c.markdown) > LENIENCY * window
                      and len(c.lines) > 1]
         assert not oversized, (
             f"window {window}: {len(oversized)} multi-line chunk(s) over the "

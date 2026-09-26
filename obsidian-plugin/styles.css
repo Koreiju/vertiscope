@@ -774,3 +774,9 @@ button.domvec-run-fence:hover {
 .domvec-pipebox-profile .domvec-profile-bar { display: none; }
 
 .domvec-pipebox-run { margin-left: 8px; font-size: 10px; padding: 0 6px; height: 18px; }
+
+/* A minimized billboard: its title bar only (G-78). */
+.domvec-bb.is-min .domvec-bb-body { display: none; }
+.domvec-bb-min { float: right; margin-right: 10px; cursor: pointer; opacity: 0.7; }
+.domvec-bb-min:hover { opacity: 1; }
+.domvec-pin-card { cursor: pointer; }
