@@ -24,11 +24,6 @@ def main(argv=None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     # `supervise` wraps `serve` in a child process that is restarted on a
     # native crash (`D-23`); every option after the workspace is serve's.
-    # `fresh` runs the live checks against a new, empty store that the
-    # plugin itself seeds (`freshrun`); every other argument is a check id.
-    if argv[:1] == ["fresh"]:
-        from .freshrun import main as fresh_main
-        return fresh_main(argv[1:])
     if argv[:1] == ["supervise"]:
         from .supervise import supervise
         rest = argv[1:]

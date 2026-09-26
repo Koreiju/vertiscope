@@ -27,6 +27,7 @@
  * that has never seen the site (`G-40`).
  */
 
+import { ForceTree, type ForceNodeDelta } from "./forcetree";
 import { PipelineBox } from "./pipelinebox";
 import { profiler } from "./profile";
 import { Component, ItemView, MarkdownRenderer, WorkspaceLeaf } from "obsidian";
@@ -129,8 +130,6 @@ const LIVE_MS = 1200;
 /** How many results one window of the ranking carries (`G-69`). */
 const PAGE_SIZE = 12;
 
-/** Which face of the panel is showing. */
-type Face = "browser" | "markdown";
 
 /** What a pinned chunk holds: read from the store, never from the page. */
 interface PinRecord {
@@ -153,7 +152,6 @@ export class BrowserView extends ItemView {
   private placeTimer = 0;
   private placing = false;
   private webview: any = null;
-  private face: Face = "browser";
   private address!: HTMLInputElement;
   private status!: HTMLElement;
   private browserWrap!: HTMLElement;
@@ -164,7 +162,6 @@ export class BrowserView extends ItemView {
    *  on the markdown side and open as a billboard in the graph -- one
    *  selection, three surfaces, closed together. */
   private pinned = new Map<string, PinRecord>();
-  private toggle!: HTMLElement;
 
   /** True while a drain is in flight, so a slow one cannot be lapped. */
   private draining = false;
@@ -248,7 +245,6 @@ export class BrowserView extends ItemView {
     this.address.placeholder = "url";
     const scan = bar.createEl("button", { text: "scan" });
     this.liveButton = bar.createEl("button", { text: "live ●" });
-    this.toggle = bar.createEl("button", { text: "markdown" });
 
     // The overlay, above the page and never inside it (`G-41`). This is
     // Obsidian's own DOM drawn over the webview, not script written into the
@@ -330,14 +326,23 @@ export class BrowserView extends ItemView {
         void this.pageChanged(view.getURL());
       }
     });
-    // Right-click ports the chunk's full markdown to the other face
-    // (`G-39`). The event is the WEBVIEW's, raised in the host -- nothing is
+    // Right-click pins the chunk under the cursor: its markdown beside the
+    // page (`G-39`, `G-78`). The event is the WEBVIEW's, raised in the host -- nothing is
     // listening inside the page, and nothing is written into it. The one
     // read it does take is `elementFromPoint` at the cursor, on demand.
     view.addEventListener("context-menu", (e: any) => {
       const p = e && e.params;
       if (!p) return;
-      void this.portMarkdown(Number(p.x) || 0, Number(p.y) || 0);
+      // The event reports the point in the OBSIDIAN WINDOW's coordinates,
+      // not the page's: a right-click at (200, 200) in the page arrived as
+      // (1088, 368) with the cell in the right half of the window. Handed to
+      // the page's `elementFromPoint` as-is, every point landed outside the
+      // 808 px guest -- "nothing under the cursor" on every right-click
+      // whenever the cell was not at the window's left edge (2026-09-26).
+      const r = view.getBoundingClientRect();
+      const x = (Number(p.x) || 0) - r.left;
+      const y = (Number(p.y) || 0) - r.top;
+      void this.portMarkdown(x, y);
     });
 
     view.addEventListener("did-fail-load", (e: any) => {
@@ -352,8 +357,6 @@ export class BrowserView extends ItemView {
     this.address.addEventListener("keydown", (e: KeyboardEvent) => {
       if (e.key === "Enter") this.go(this.address.value);
     });
-    this.toggle.onclick = () => this.show(
-      this.face === "browser" ? "markdown" : "browser");
     scan.onclick = () => this.scan();
 
     // Debounced, because a ranking runs over the corpus and a keystroke is
@@ -400,18 +403,20 @@ export class BrowserView extends ItemView {
   }
 
   /**
-   * Show one face. "browser" is the page, with the markdown SIDE beside it
-   * whenever a chunk is pinned (`G-78`); "markdown" is the markdown alone,
-   * full width -- the switchable second view.
+   * Lay the cell out: the PAGE, always, and the markdown side beside it
+   * whenever a chunk is pinned (`G-82`).
+   *
+   * There is no second face any more. Addendum IV's "switchable second
+   * view" -- the markdown alone, full width, behind a toggle -- was replaced
+   * by Addendum VII's follow-up: the browser stays the main surface and
+   * pinned chunks are side panels. A face that hid the page also hid every
+   * outline on it, which is what the pins exist to show.
    */
-  private show(face: Face): void {
-    this.face = face;
-    const browsing = face === "browser";
-    const side = browsing && this.pinned.size > 0;
-    this.browserWrap.toggle(browsing);
-    this.markdownWrap.toggle(!browsing || side);
+  private layoutSide(): void {
+    const side = this.pinned.size > 0;
+    this.browserWrap.show();
+    this.markdownWrap.toggle(side);
     this.markdownWrap.toggleClass("is-side", side);
-    this.toggle.setText(browsing ? "markdown" : "browser");
   }
 
   /** The pins, newest first, for the corner box's outlines. */
@@ -420,6 +425,36 @@ export class BrowserView extends ItemView {
       cid: p.cid, matched: p.matched, url: p.url }));
   }
 
+  /** Told by the plugin: a drain's delta, decoded here, for the force tree
+   *  (`G-89`) -- before the capture's round trip. */
+  onDrain: (delta: ForceNodeDelta) => void = () => {};
+  /** One chunk tree per page, fed by that page's drains. */
+  private forceTrees = new Map<string, ForceTree>();
+
+  /** Told by the plugin: force nodes whose content a stored chunk now covers. */
+  onCovers: (url: string, covers: Record<string, string>) => void = () => {};
+
+  /**
+   * Which stored chunk draws each address, from the renderer's chunk map
+   * (`chunkmap.ts`) -- the chunk anchored at the address, beneath it, or at
+   * its nearest ancestor. A force node is the PENDING diff only while this
+   * finds nothing the projector has drawn (`G-89`): on a page the store
+   * already holds, the first drain names every chunk, and all but the diff
+   * are covered.
+   */
+  private coversFor(url: string, items: { id: string; address: string }[]): Record<string, string> {
+    const map = this.pipebox?.map;
+    const out: Record<string, string> = {};
+    if (!map || map.url !== url) return out;
+    for (const it of items) {
+      // The address itself, or a stored chunk anchored BENEATH it -- never an
+      // ancestor: a new paragraph inside a stored section is not covered by
+      // the section, it is the diff.
+      const hit = map.lookup([it.address]);
+      if (hit) out[it.id] = hit.cid;
+    }
+    return out;
+  }
   /** Told by the plugin: a capture rewrote these chunks. */
   onDirty: (cids: string[]) => void = () => {};
   /** Told by the plugin: a pinned chunk opened in the graph. */
@@ -433,7 +468,32 @@ export class BrowserView extends ItemView {
     this.pipebox?.setPins(this.pinList());
     void this.renderSide();
     this.onUnpin(cid);
-    if (this.face === "browser") this.show("browser");
+    this.layoutSide();
+  }
+
+  /**
+   * Keep what was just pinned where the reader can see it (`G-78`).
+   *
+   * The first pin opens the side panel, which narrows the page, and the
+   * reflow can carry the pinned element out of the viewport: measured on the
+   * Radix tree page, a paragraph pinned at y 60+ sat at y -242 a second
+   * later, so its outline -- the thing the pin exists to show -- had nowhere
+   * to be drawn. After the layout settles, an element that left the view is
+   * brought back to its middle. Scrolling is a reader's action on the page,
+   * not a write into it.
+   */
+  private async keepInView(xpath: string): Promise<void> {
+    const wv = this.webview;
+    if (!wv || !xpath) return;
+    await new Promise((r) => setTimeout(r, 120));
+    await wv.executeJavaScript(
+      "(function(x){var n=document.evaluate(x,document,null," +
+      "XPathResult.FIRST_ORDERED_NODE_TYPE,null).singleNodeValue;" +
+      "if(n&&n.nodeType===3)n=n.parentElement;if(!n)return false;" +
+      "var b=n.getBoundingClientRect();" +
+      "if(b.bottom>0&&b.top<innerHeight)return false;" +
+      "n.scrollIntoView({block:'center',behavior:'instant'});return true;})(" +
+      JSON.stringify(xpath) + ")").catch(() => false);
   }
 
   /** Which chunks are pinned -- for the harness. */
@@ -473,7 +533,7 @@ export class BrowserView extends ItemView {
     const url = /^[a-z]+:/i.test(where) ? where : `https://${where}`;
     this.address.value = url;
     this.webview.loadURL(url);
-    this.show("browser");
+    this.layoutSide();
   }
 
   /** Restrict the ranking to one shadow DOM, or release it (`G-70`). */
@@ -611,7 +671,7 @@ export class BrowserView extends ItemView {
   }
 
   /**
-   * What is under the cursor -> its chunk -> the markdown face (`G-39`).
+   * What is under the cursor -> its chunk -> pinned beside the page (`G-39`).
    *
    * Three steps, and the middle one is the interesting one. The xpath is
    * built in the page with the SAME convention the trie uses -- the index is
@@ -740,7 +800,8 @@ export class BrowserView extends ItemView {
     this.pinned = new Map([[cid, read], ...this.pinned]);
     this.pipebox?.setPins(this.pinList());
     await this.renderSide();
-    this.show("browser");
+    this.layoutSide();
+    void this.keepInView(read.matched);
     // The projector rings the same chunk (`G-38`) and opens its billboard.
     this.onHover(cid, read.url);
     this.onPin(cid);
@@ -905,6 +966,7 @@ export class BrowserView extends ItemView {
         BrowserView.sensorSource = got.source;
       }
       const drainStart = performance.now();
+      let drainBack = 0;
       const payload = await wv.executeJavaScript(`(function () {
         if (!window[${JSON.stringify(HANDLE)}]) {
           var h = (${BrowserView.sensorSource})(
@@ -912,9 +974,22 @@ export class BrowserView extends ItemView {
           Object.defineProperty(window, ${JSON.stringify(HANDLE)},
             {value: h, enumerable: false, configurable: false});
         }
-        return window[${JSON.stringify(HANDLE)}].drain();
+        var h = window[${JSON.stringify(HANDLE)}];
+        var p = h.drain();
+        // The diff's boxes, in the SAME crossing (G-90): read by the
+        // sensor's box peripheral after the fold, never inside it.
+        if (p && p.chunks && p.chunks.length && h.boxes) {
+          p.boxes = h.boxes(p.chunks.map(function (c) { return c.id; }));
+        }
+        return p;
       })()`);
 
+      drainBack = performance.now();
+      // The diff outlined FIRST, before anything else touches this drain:
+      // boxes came back with it, so this is placement only (`G-90`).
+      if (payload && payload.boxes && payload.boxes.length) {
+        this.pipebox?.flashBoxes(payload.boxes, drainBack, trace.id);
+      }
       // Nothing changed. Not posted: an empty delta costs a round trip, a
       // decode and a store write to say "no", and a reader idling on a static
       // page would pay it once a second forever.
@@ -925,6 +1000,26 @@ export class BrowserView extends ItemView {
       if (typeof repair === "number") {
         prof.stage(trace, "fold", repair - (this.lastRepairMs ?? 0));
         this.lastRepairMs = repair;
+      }
+      // The force tree first (`G-89`): straight from the drain, before the
+      // capture's round trip, so the graph shows the scan at once.
+      if (payload && ((payload.chunks || []).length || (payload.removed || []).length)) {
+        let tree = this.forceTrees.get(url);
+        if (!tree) { tree = new ForceTree(url); this.forceTrees.set(url, tree); }
+        const delta = tree.apply(payload);
+        if (delta && (delta.added.length || delta.removed.length || delta.reparented.length)) {
+          delta.covers = this.coversFor(url, tree.held().filter(
+            (h) => delta.added.some((a) => a.id === h.id)));
+          delta.t0 = drainBack;
+          delta.trace = trace.id;
+          prof.stage(trace, "force_tree", delta.ms);
+          // Both outputs of this drain, from the same instant (`G-90`): the
+          // diff outlined on the page, and its nodes in the 3D graph.
+          if (delta.addresses.length && !(payload && payload.boxes)) {
+            this.pipebox?.flashDiff(delta.addresses, drainBack, trace.id);
+          }
+          this.onDrain(delta);
+        }
       }
       if (!payload || !(payload.chunks || []).length) {
         prof.fact(trace, "why", "empty drain");
@@ -951,6 +1046,15 @@ export class BrowserView extends ItemView {
         this.pipebox.map.apply((reply as any).map_delta);
       }
       const cids = (reply.dirty_cids || []) as string[];
+      // The map now knows what this capture stored: re-check what is still
+      // drawn as pending on this page.
+      {
+        const tree = this.forceTrees.get(url);
+        if (tree) {
+          const covers = this.coversFor(url, tree.held());
+          if (Object.keys(covers).length) this.onCovers(url, covers);
+        }
+      }
       // Every form of a chunk that is open follows the capture that rewrote
       // it -- the pinned markdown here, the billboard in the graph -- keyed
       // on what the capture DIRTIED, not on what it newly placed: a chunk

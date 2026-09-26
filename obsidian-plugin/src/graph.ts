@@ -21,7 +21,8 @@ import ForceGraph3D, { ForceGraph3DInstance } from "3d-force-graph";
 // `d3-force-3d` is what `3d-force-graph` runs its simulation on, so this is
 // the same module instance the graph already uses -- not a second copy whose
 // forces the graph would ignore.
-import { forceCollide } from "d3-force-3d";
+import { forceCenter, forceCollide, forceManyBody } from "d3-force-3d";
+import type { ForceNodeDelta } from "./forcetree";
 import * as THREE from "three";
 
 import { Sidecar } from "./sidecar";
@@ -394,7 +395,9 @@ export class GraphView extends ItemView {
     this.canvasEl = canvas;
 
     const load = async () => {
-      status.setText("fitting…");
+      // Not over the force tree's caption: a retry every 3 s wrote
+      // "fitting…" across a pane that was drawing (`G-89`).
+      if (this.layoutMode !== "force") status.setText("fitting…");
       const asked = this.space;
       const asking = this.level;
       const layout = (await this.sidecar.layout(3, asked, asking)) as
@@ -408,8 +411,10 @@ export class GraphView extends ItemView {
         // separate fits are not a fallback, because the stream never places
         // into them.
         const ps = layout.projector || {};
-        status.setText(`projector fitting · ${ps.chunks_now ?? "?"} chunks` +
-                       ` · sample ≤ ${ps.fit_sample || 4000}`);
+        const fitting = `projector fitting · ${ps.chunks_now ?? "?"} chunks` +
+                        ` · sample ≤ ${ps.fit_sample || 4000}`;
+        // The force tree is what is drawn meanwhile (`G-89` C5): say both.
+        status.setText(this.layoutMode === "force" ? `${forceText()} · ${fitting}` : fitting);
         // One pending retry, not one per caller: the stream also asks for a
         // reload while a fit is running, and each used to queue its own.
         window.clearTimeout(this.retryLoad);
@@ -417,10 +422,31 @@ export class GraphView extends ItemView {
         return;
       }
       if (!layout.nodes.length) {
-        status.setText(layout.note || "nothing to place yet");
+        status.setText(this.layoutMode === "force"
+          ? `${forceText()} · the projector has nothing to place yet`
+          : (layout.note || "nothing to place yet"));
+        // Ask again: a fresh store gets its first fit once enough chunks
+        // have vectors, and nothing else would bring the pane to it.
+        window.clearTimeout(this.retryLoad);
+        this.retryLoad = window.setTimeout(() => void load(), 3000);
         return;
       }
       this.draw(canvas, layout);
+      // The projector's page view is drawn; the pending diff stays drawn,
+      // force-directed, hung from its pages, until the transform places it
+      // (`G-89` C6, C8 -- and a refit must not drop it).
+      this.setMode("projector", layout.source === "projector"
+        ? `projector epoch ${layout.epoch ?? "?"}` : `layout from ${layout.source ?? "?"}`);
+      if (this.forceSpecs.size) {
+        // The fit covers what was scanned before it; only the page in the
+        // browser keeps a pending diff, checked against the map as it comes.
+        const keep = this.browsingUrl ? this.browsingUrl() : "";
+        for (const [id, spec] of this.forceSpecs) {
+          if (spec.url !== keep) this.forceSpecs.delete(id);
+        }
+        this.redrawForce();
+        this.collapseCovered();
+      }
       this.projEpoch = layout.source === "projector" ? (layout.epoch ?? -1) : -1;
       this.projSeq = layout.seq ?? 0;
       this.projStatus = layout.projector ?? null;
@@ -500,12 +526,372 @@ export class GraphView extends ItemView {
       status.setText("projector refitting in the background…");
       await this.sidecar.layout(3, this.space, this.level, true);
     };
+    this.reload = load;
+    const forceText = () => {
+      const n = this.graph ? this.graph.graphData().nodes.length : 0;
+      return `force layout · ${n} nodes from ${this.forceStats.drains} drains · ` +
+             "no embedding needed";
+    };
+    this.forceCaption = () => status.setText(`${forceText()} · waiting for the projector's first fit`);
     await load();
     // The stream. Once a second: what the projector placed since the last
     // sequence number this pane applied. O(delta) -- a quiet corpus costs
     // one empty reply.
     this.registerInterval(window.setInterval(() => void this.pullDelta(load), 1000));
   }
+
+  /**
+   * Fetch the layout again from whichever sidecar the plugin points at, and
+   * redraw. The in-app fresh-store run switches the sidecar and calls this,
+   * so the pane shows the store the checks read -- without a plugin reload,
+   * which would end the run that asked for it.
+   */
+  reload: () => Promise<void> = async () => {};
+
+  // -- the force-directed tree, first and primary (`G-89`) ------------------
+
+  /**
+   * What the pane is drawing: nothing yet, the force-directed tree built in
+   * the renderer from the drains, or the projector's layout. Read by the
+   * harness; `phaseLog` is its history, which is what the phase contracts
+   * are checked against.
+   */
+  layoutMode: "empty" | "force" | "projector" = "empty";
+  phaseLog: { at: number; mode: string; nodes: number; why: string }[] = [];
+  /** Per-drain renderer cost and counts, for C3. */
+  forceStats = { drains: 0, added: 0, removed: 0, reparented: 0, ms: [] as number[],
+                 toScene: [] as number[] };
+
+  private setMode(mode: "empty" | "force" | "projector", why: string): void {
+    if (mode === this.layoutMode) return;
+    this.layoutMode = mode;
+    const nodes = this.graph ? this.graph.graphData().nodes.length : 0;
+    this.phaseLog.push({ at: Date.now(), mode, nodes, why });
+    if (this.phaseLog.length > 200) this.phaseLog.shift();
+  }
+
+  /** The forces a TREE wants -- the ones a projector layout switches off. */
+  private forceConfigure(): void {
+    const g: any = this.graph;
+    if (!g) return;
+    g.d3Force("home", null);
+    g.d3Force("contain", null);
+    g.d3Force("charge", forceManyBody().strength(-60).distanceMax(220));
+    g.d3Force("center", forceCenter());
+    g.d3Force("link")?.strength(0.9).distance(18);
+    g.d3AlphaDecay(0.0228).d3VelocityDecay(0.4);
+  }
+
+  /**
+   * One drain's delta, applied to the force tree (`G-89` C2-C4).
+   *
+   * Called by the browser cell the moment a drain is decoded -- before the
+   * capture's round trip, so nothing here waits on the sidecar, the store,
+   * the embedder or the projector. O(delta): only what the drain added,
+   * removed or re-parented is touched; every other node keeps its object,
+   * so its position and velocity carry on (the tree grows, it is not
+   * redrawn). Ignored once the projector draws the pane (C7): from then on
+   * a drain reaches the picture through the stream.
+   */
+  forceDelta(d: ForceNodeDelta): void {
+    if (!this.canvasEl) return;
+    const t0 = performance.now();
+    if (!this.graph) {
+      this.draw(this.canvasEl, { nodes: [], edges: [] } as any);
+    }
+    if (!this.graph) return;
+    if (this.layoutMode === "empty") this.forceConfigure();
+    const data: any = this.graph.graphData();
+    const gone = new Set(d.removed);
+    const end = (x: any) => (typeof x === "object" && x ? x.id : x);
+    const moving = new Map(d.reparented.map((r) => [r.id, r.parent]));
+    let nodes = gone.size ? data.nodes.filter((n: any) => !gone.has(n.id)) : data.nodes.slice();
+    let links = data.links.filter((l: any) =>
+      !gone.has(end(l.source)) && !gone.has(end(l.target)) && !moving.has(end(l.target)));
+    for (const id of gone) this.forceSpecs.delete(id);
+    const byId = new Map<string, any>(nodes.map((n: any) => [n.id, n]));
+    for (const [id, parent] of moving) {
+      const spec = this.forceSpecs.get(id);
+      if (spec) spec.parent = parent;
+      const to = this.parentFor(parent, d.url, byId);
+      if (byId.has(id) && to) links.push({ source: to, target: id, force: true });
+    }
+    // After the fit a page's pending diff is drawn only while the reader has
+    // that page EXPANDED; collapsed, it is kept and not drawn (2026-09-26).
+    // ... or while the page is new since the fit (no page node yet): its
+    // force tree is the only immediate picture of the scan.
+    const drawHere = this.layoutMode !== "projector" || this.expandedUrls(byId).has(d.url)
+      || !this.projectedPage(d.url, byId);
+    for (const a of d.added) {
+      if (byId.has(a.id)) continue;
+      // A page the projector already draws needs no root of its own: the
+      // pending diff hangs from its projected page node (C6, C8).
+      if (!a.parent && this.projectedPage(d.url, byId)) {
+        this.forceSpecs.set(a.id, { parent: "", url: d.url, title: a.title, lines: 0 });
+        continue;
+      }
+      const cid = d.covers ? d.covers[a.id] : undefined;
+      // Already drawn by the projector: not the diff, nothing to draw -- unless
+      // its content just CHANGED (`again`), in which case what is drawn is the
+      // old content and this stays pending until the new one is placed.
+      if (cid && !a.again && byId.has(cid) && !byId.get(cid).force) { this.forceSpecs.delete(a.id); continue; }
+      this.forceSpecs.set(a.id, { parent: a.parent, url: d.url, title: a.title, lines: a.lines,
+                                  cid, stale: !!a.again });
+      if (!drawHere) continue;
+      const to = a.parent ? this.parentFor(a.parent, d.url, byId) : "";
+      const p = to ? byId.get(to) : null;
+      const jitter = () => (Math.random() - 0.5) * 6;
+      const page = !a.parent;
+      const n: any = {
+        id: a.id, level: page ? "page" : "chunk", name: a.title || a.id,
+        url: d.url, members: 1, tokens: 0, force: true,
+        val: page ? 3 : 1,
+        color: page ? "#8ab4f8" : "#9aa0a6",
+        x: (p?.x ?? 0) + jitter(), y: (p?.y ?? 0) + jitter(), z: (p?.z ?? 0) + jitter(),
+      };
+      nodes.push(n);
+      byId.set(n.id, n);
+      if (p) links.push({ source: p.id, target: n.id, force: true });
+    }
+    this.graph.graphData({ nodes, links });
+    if (this.layoutMode === "projector") {
+      this.treeSpring();
+      this.graph.d3ReheatSimulation?.();
+    }
+    // Time to the SCREEN, not to the data: the next frame after the nodes
+    // were handed over is when the renderer draws them (`G-90`).
+    if (d.t0 && d.added.length) {
+      const from = d.t0, traceId = d.trace;
+      window.requestAnimationFrame(() => {
+        const toScene = performance.now() - from;
+        this.forceStats.toScene.push(toScene);
+        if (this.forceStats.toScene.length > 500) this.forceStats.toScene.shift();
+        const t = traceId ? profiler().get(traceId) : undefined;
+        if (t) profiler().stage(t, "drain_to_3d", toScene);
+      });
+    }
+    const ms = performance.now() - t0 + d.ms;
+    this.forceStats.drains++;
+    this.forceStats.added += d.added.length;
+    this.forceStats.removed += d.removed.length;
+    this.forceStats.reparented += d.reparented.length;
+    this.forceStats.ms.push(ms);
+    if (this.forceStats.ms.length > 500) this.forceStats.ms.shift();
+    if (this.layoutMode !== "projector") {
+      this.setMode("force", `drain on ${d.url}`);
+      this.forceCaption?.();
+    }
+  }
+
+  /** Every force node drawn: what a redraw needs to put it back. */
+  private forceSpecs = new Map<string, { parent: string; url: string; title: string;
+                                          lines: number; cid?: string; stale?: boolean }>();
+  private settleTimer = 0;
+
+  /** Set by the plugin: the url the browser cell is showing. */
+  browsingUrl: (() => string) | null = null;
+
+  /** Force nodes still waiting on a transform -- for the harness. */
+  pendingState() {
+    const drawn = this.graph ? this.graph.graphData().nodes.filter((n: any) => n.force).length : 0;
+    return { force_nodes: this.forceSpecs.size, drawn,
+             covered_known: [...this.forceSpecs.values()].filter((x) => x.cid).length,
+             expanded: [...this.expandedUrls()].length };
+  }
+
+  /** Pages the reader has EXPANDED: their chunks are drawn (not force ones). */
+  private expandedUrls(byId?: Map<string, any>): Set<string> {
+    const nodes: any[] = byId ? [...byId.values()]
+      : (this.graph ? this.graph.graphData().nodes : []);
+    return new Set(nodes.filter((n: any) => !n.force && n.level !== "page" && n.url)
+      .map((n: any) => n.url));
+  }
+
+  /**
+   * A projector layout switches the spring and repulsion forces off (the fit
+   * IS the layout), so force nodes drawn inside an expanded page had nothing
+   * but collision and piled up (2026-09-26: "way too jumbled"). This spring
+   * acts on force nodes only: each is pulled to a rest distance from its
+   * parent, and nothing the projector placed moves.
+   */
+  private treeSpring(): void {
+    const g: any = this.graph;
+    if (!g) return;
+    let links: any[] = [];
+    const spring: any = (alpha: number) => {
+      for (const l of links) {
+        const s = l.source, t = l.target;
+        if (!t || !t.force || typeof s !== "object") continue;
+        const dx = (t.x ?? 0) - (s.x ?? 0), dy = (t.y ?? 0) - (s.y ?? 0), dz = (t.z ?? 0) - (s.z ?? 0);
+        const d = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
+        const k = ((d - 12) / d) * alpha * 0.6;
+        t.vx = (t.vx ?? 0) - dx * k; t.vy = (t.vy ?? 0) - dy * k; t.vz = (t.vz ?? 0) - dz * k;
+      }
+    };
+    spring.initialize = () => {
+      links = (g.graphData().links || []).filter((l: any) => l.force);
+    };
+    g.d3Force("treeSpring", spring);
+  }
+
+  /** The projector's page node for `url`, if it draws one. */
+  private projectedPage(url: string, byId?: Map<string, any>): any {
+    const nodes: any[] = byId ? [...byId.values()]
+      : (this.graph ? this.graph.graphData().nodes : []);
+    return nodes.find((n: any) => !n.force && n.level === "page" && n.url === url) || null;
+  }
+
+  /** Where a force node hangs: its force parent, or -- for a page root --
+   *  the page's projected node when the projector draws one. */
+  private parentFor(parent: string, url: string, byId: Map<string, any>): string {
+    if (parent && byId.has(parent)) return parent;
+    // The parent chunk already collapsed: hang from the projected chunk it
+    // collapsed into, which is where its content is drawn now.
+    const into = parent ? this.collapsedTo.get(parent) : undefined;
+    if (into && byId.has(into)) return into;
+    const page = this.projectedPage(url, byId);
+    return page ? page.id : (byId.has(parent) ? parent : "");
+  }
+
+  /**
+   * The browser's chunk map now names the stored chunk covering these force
+   * nodes. Each collapses as soon as that chunk's projected node is drawn;
+   * until then it stays the pending diff (`G-89` C7).
+   */
+  coverForce(url: string, covers: Record<string, string>): void {
+    for (const [id, cid] of Object.entries(covers)) {
+      const spec = this.forceSpecs.get(id);
+      if (spec) spec.cid = cid;
+    }
+    this.collapseCovered();
+  }
+
+  /**
+   * Remove every force node whose covering chunk the projector now draws.
+   * Called when chunks arrive (a capture, the stream, a placement) and on a
+   * slow timer that also notices a page being expanded or collapsed.
+   */
+  collapseCovered(): void {
+    if (!this.graph || !this.forceSpecs.size) return;
+    const drawn = new Set<string>(this.graph.graphData().nodes
+      .filter((n: any) => !n.force).map((n: any) => n.id));
+    const done = new Set<string>();
+    for (const [id, spec] of this.forceSpecs) {
+      if (spec.cid && !spec.stale && drawn.has(spec.cid)) done.add(id);
+    }
+    const key = [...this.expandedUrls()].sort().join("\n");
+    if (done.size || key !== this.lastExpanded) this.redrawForce(done);
+    if (!this.settleTimer && this.forceSpecs.size) {
+      this.settleTimer = window.setInterval(() => {
+        if (!this.forceSpecs.size) { window.clearInterval(this.settleTimer); this.settleTimer = 0; return; }
+        this.collapseCovered();
+      }, 1500);
+    }
+  }
+
+  /**
+   * Drop `collapse` from the drawn force nodes, re-hang what remains on the
+   * current page nodes, and put back any force node a redraw removed.
+   */
+  private redrawForce(collapse: Set<string> = new Set()): void {
+    if (!this.graph) return;
+    for (const id of collapse) {
+      const cid = this.forceSpecs.get(id)?.cid;
+      if (cid) this.collapsedTo.set(id, cid);
+      this.forceSpecs.delete(id);
+    }
+    if (this.collapsedTo.size > 20000) this.collapsedTo.clear();
+    const data: any = this.graph.graphData();
+    const end = (x: any) => (typeof x === "object" && x ? x.id : x);
+    let nodes = data.nodes.filter((n: any) => !(n.force && !this.forceSpecs.has(n.id)));
+    let links = data.links.filter((l: any) => !l.force);
+    const byId = new Map<string, any>(nodes.map((n: any) => [n.id, n]));
+    // A page root is dropped once its page is drawn by the projector.
+    for (const [id, spec] of this.forceSpecs) {
+      if (!spec.parent && this.projectedPage(spec.url, byId) && byId.has(id)) {
+        nodes = nodes.filter((n: any) => n.id !== id);
+        byId.delete(id);
+      }
+    }
+    const expanded = this.expandedUrls(byId);
+    // A force ROOT whose chunks have all collapsed, on a page the projector
+    // now draws chunks for, has nothing left to hold: it goes too (it was
+    // left behind as a lone dot, "1 in the force tree").
+    const pendingChunkUrls = new Set([...this.forceSpecs.values()]
+      .filter((x) => x.parent).map((x) => x.url));
+    for (const [id, spec] of [...this.forceSpecs]) {
+      if (!spec.parent && !pendingChunkUrls.has(spec.url) && expanded.has(spec.url)) {
+        this.forceSpecs.delete(id);
+        nodes = nodes.filter((n: any) => n.id !== id);
+        byId.delete(id);
+      }
+    }
+    const visible = (url: string) => this.layoutMode !== "projector" || expanded.has(url)
+      || !this.projectedPage(url, byId);
+    // Force nodes of collapsed pages are not drawn after the fit.
+    nodes = nodes.filter((n: any) => !n.force || visible(n.url));
+    for (const id of [...byId.keys()]) {
+      const n = byId.get(id);
+      if (n.force && !visible(n.url)) byId.delete(id);
+    }
+    for (const [id, spec] of this.forceSpecs) {
+      if (!spec.parent && this.projectedPage(spec.url, byId)) continue;
+      if (!visible(spec.url)) continue;
+      if (!byId.has(id)) {
+        const n: any = { id, level: spec.parent ? "chunk" : "page", name: spec.title || id,
+                         url: spec.url, members: 1, tokens: 0, force: true,
+                         val: spec.parent ? 1 : 3,
+                         color: spec.parent ? "#9aa0a6" : "#8ab4f8" };
+        nodes.push(n);
+        byId.set(id, n);
+      }
+    }
+    for (const [id, spec] of this.forceSpecs) {
+      if (!spec.parent || !byId.has(id)) continue;
+      const to = this.parentFor(spec.parent, spec.url, byId);
+      if (to && to !== id) links.push({ source: to, target: id, force: true });
+    }
+    // Place a returning node beside its parent rather than at the origin.
+    for (const l of links) {
+      const t = byId.get(end(l.target)), s = byId.get(end(l.source));
+      if (t && s && t.x === undefined) {
+        t.x = (s.x ?? 0) + (Math.random() - 0.5) * 6;
+        t.y = (s.y ?? 0) + (Math.random() - 0.5) * 6;
+        t.z = (s.z ?? 0) + (Math.random() - 0.5) * 6;
+      }
+    }
+    this.graph.graphData({ nodes, links });
+    if (this.layoutMode === "projector") this.treeSpring();
+    this.graph.d3ReheatSimulation?.();
+    this.lastExpanded = [...expanded].sort().join("\n");
+  }
+
+  /** A collapsed force node -> the projected chunk it collapsed into. */
+  private collapsedTo = new Map<string, string>();
+
+  /** Which pages were expanded at the last force redraw. */
+  private lastExpanded = "";
+
+  /**
+   * The plugin now points at a DIFFERENT store: what is drawn belongs to the
+   * old one. Emptied, and back to `empty`, so the next picture -- a force
+   * tree from the first drain, or the new store's fit -- starts from nothing
+   * (`G-89` C1). Open billboards belong to the old store too and go with it.
+   */
+  resetForStore(why: string): void {
+    for (const id of [...this.billboards.keys()]) this.closeBillboard(id as string);
+    if (this.graph) this.graph.graphData({ nodes: [], links: [] });
+    this.projEpoch = -1;
+    this.projSeq = 0;
+    this.reopen.clear();
+    this.forceStats = { drains: 0, added: 0, removed: 0, reparented: 0, ms: [], toScene: [] };
+    this.forceSpecs.clear();
+    this.layoutMode = "force";            // so setMode records the change
+    this.setMode("empty", why);
+  }
+
+  /** Set by `onOpen`: the caption while the force tree is what is drawn. */
+  private forceCaption: (() => void) | null = null;
 
   /** The projector's state, in the caption's words. */
   private projectorCaption(): string {
@@ -1470,8 +1856,24 @@ export class GraphView extends ItemView {
    */
   absorb(incoming: LayoutNode[],
          edges?: { source: string; target: string }[],
-         traceId?: string):
+         traceId?: string, opts: { pagesOnly?: boolean } = {}):
       { added: number; moved: number; edges: number } {
+    if (this.forceSpecs.size) {
+      // Chunks placed just now carry their NEW content: a force node pending
+      // on a changed chunk may collapse into it from here on.
+      const placed = new Set((incoming || []).map((n) => n.cid));
+      for (const spec of this.forceSpecs.values()) {
+        if (spec.stale && spec.cid && placed.has(spec.cid)) spec.stale = false;
+      }
+      window.setTimeout(() => this.collapseCovered(), 0);
+    }
+    // A capture's chunks join their page node rather than the picture,
+    // unless the reader has that page open (its chunks drawn) -- `G-89`.
+    if (opts.pagesOnly && this.graph && incoming && incoming.length) {
+      const open = new Set<string>(this.graph.graphData().nodes
+        .filter((n: any) => !n.force && n.level !== "page").map((n: any) => n.url));
+      incoming = incoming.filter((n) => (n.level ?? "chunk") === "page" || open.has(n.url));
+    }
     const out = { added: 0, moved: 0, edges: 0 };
     const prof = profiler();
     const trace = traceId ? prof.get(traceId) : undefined;
@@ -1976,6 +2378,7 @@ export class GraphView extends ItemView {
     // The profiler's listener reads the scene through this, so "visible"
     // is decided by what is drawn and not by what `absorb` returned.
     profiler().graphSource = () => this.graph;
+    profiler().graphView = () => this;
 
     // **And again when the forces settle.** The cap is measured against
     // where nodes ARE, and on insertion that is where the fit put them --
@@ -2317,5 +2720,32 @@ export class GraphView extends ItemView {
       // and a measurement taken mid-flight frames the halfway point.
       window.setTimeout(() => tighten(), 450);
     };
+    this.keepBillboards(canvas);
+  }
+
+  /**
+   * Open billboards SURVIVE a redraw (`G-78`: a pinned chunk's billboard
+   * "persists with" its pin).
+   *
+   * `draw()` empties the canvas, and the billboard layer is a child of it.
+   * The view kept its reference to the detached layer, so after any redraw --
+   * a refit, a new epoch, a level toggle, a store switch -- every billboard
+   * already open vanished and every one opened afterwards was built off
+   * screen: the entry existed, `inDom` was false, and there was no x to
+   * press (G-78 read pins 1 / billboards 1 after "closing" it, 2026-09-26).
+   * The layer goes back on top of the new canvas, and each billboard is
+   * re-pointed at its node in the new graph -- a node object from the old
+   * one no longer moves.
+   */
+  private keepBillboards(canvas: HTMLElement): void {
+    if (!this.billboardLayer) return;
+    canvas.appendChild(this.billboardLayer);
+    const byId = new Map<string, any>(
+      (this.graph?.graphData().nodes || []).map((n: any) => [n.id, n]));
+    for (const [id, entry] of this.billboards.entries() as any) {
+      const fresh = byId.get(id);
+      if (fresh) entry.node = fresh;
+    }
+    if (this.billboards.size) this.startBillboardLoop();
   }
 }

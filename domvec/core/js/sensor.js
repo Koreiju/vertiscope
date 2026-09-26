@@ -2709,6 +2709,29 @@
     return out;
   }
 
+  // ---- the box peripheral ----------------------------------------------
+  //
+  // Where each named chunk root is drawn, for the host's diff overlay
+  // (G-90). NOT part of the fold: the host calls it right after `drain()`,
+  // in the SAME round trip, for exactly the chunks that drain emitted, so
+  // the overlay needs no second crossing -- the second crossing is what made
+  // it cost ~50 ms. Read on the terms `styles` is: on demand, for a
+  // caller-named set, kept beside the trie and never in it. A merged run is
+  // boxed at its first node; its siblings are not unioned here.
+  function boxes(ids) {
+    var want = {}, out = [], i, s, el, r;
+    for (i = 0; i < ids.length; i++) { want[ids[i]] = i; out.push(null); }
+    for (i = 0; i < chunkRoots.length; i++) {
+      s = chunkRoots[i];
+      if (!s || !s.node || !(s.id in want)) continue;
+      el = s.node.nodeType === 3 ? s.node.parentNode : s.node;
+      if (!el || !el.getBoundingClientRect) continue;
+      r = el.getBoundingClientRect();
+      out[want[s.id]] = [r.left, r.top, r.width, r.height];
+    }
+    return out;
+  }
+
   // ---- the style peripheral --------------------------------------------
   //
   // Layout facts, read on demand, for a caller-supplied set of paths. This
@@ -2834,6 +2857,7 @@
     step: step,
     perform: perform,
     styles: styles,
+    boxes: boxes,
     resolve: function (path) { return !!resolvePath(path); },
 
     // Does each of these addresses still name a node?

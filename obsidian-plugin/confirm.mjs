@@ -63,7 +63,7 @@ const serveFixtures = async () => {
 };
 
 import { makeChecks } from "./checks/live.mjs";
-const { CHECKS, wakeProjector, tidyFixtures } = makeChecks({
+const { CHECKS, wakeProjector } = makeChecks({
   evaluate, SIDECAR, serveFixtures,
   askTimeoutMs: process.env.DOMVEC_ASK_TIMEOUT_MS,
 });
@@ -152,60 +152,40 @@ const results = [];
 // just been reloaded from out here, so it is the freshly built code; the
 // checks then run in its own window and this script only starts the run and
 // reads it back -- the same thing an MCP tool does, and what the corner box
-// in the browser cell shows while it happens. `DOMVEC_RUN_OUTSIDE=1` keeps
-// the old path (every check body sent over CDP) for debugging the harness.
-const insideApp = process.env.DOMVEC_RUN_OUTSIDE !== "1";
+// in the browser cell shows while it happens. There is no other way to run
+// them: the terminal path that sent each check body over CDP was removed
+// 2026-09-26 ("All tests run on the plugin itself").
 const report = (r) => {
   console.log(`${r.pass ? "PASS" : "FAIL"}  ${r.id}  ${r.asks}`);
   if (!r.pass) console.log("      " + JSON.stringify(r.evidence));
 };
 
-if (insideApp) {
-  const ids = chosen.map((c) => c.id);
-  const started = await evaluate(`(() => {
-    const v = window.__domvec && window.__domvec.verify;
-    if (!v) return { error: "this plugin build has no in-app verifier" };
-    v.start(${JSON.stringify(ids)});
-    return { run: v.state().run, total: v.state().total };
-  })()`);
-  if (!started || started.error) {
-    console.log(`could not start the run in the app: ${JSON.stringify(started)}`);
-    process.exit(2);
-  }
-  console.log(`running ${started.total} checks inside the plugin (run ${started.run})`);
-  let seen = 0;
-  for (;;) {
-    await new Promise((r) => setTimeout(r, 2000));
-    const st = await evaluate("window.__domvec.verify.state()");
-    for (const r of st.results.slice(seen)) { report(r); results.push(r); }
-    seen = st.results.length;
-    if (!st.running) {
-      if (st.stoppedBecause) {
-        console.log(`\nstopped: ${st.stoppedBecause}. Everything after it would`);
-        console.log("fail for that reason, and a run that reports 28 broken features");
-        console.log("when one process went away is worse than no run at all.");
-      }
-      break;
+const ids = chosen.map((c) => c.id);
+const started = await evaluate(`(() => {
+  const v = window.__domvec && window.__domvec.verify;
+  if (!v) return { error: "this plugin build has no in-app verifier" };
+  v.start(${JSON.stringify(ids)});
+  return { run: v.state().run, total: v.state().total };
+})()`);
+if (!started || started.error) {
+  console.log(`could not start the run in the app: ${JSON.stringify(started)}`);
+  process.exit(2);
+}
+console.log(`running ${started.total} checks inside the plugin (run ${started.run})`);
+let seen = 0;
+for (;;) {
+  await new Promise((r) => setTimeout(r, 2000));
+  const st = await evaluate("window.__domvec.verify.state()");
+  for (const r of st.results.slice(seen)) { report(r); results.push(r); }
+  seen = st.results.length;
+  if (!st.running) {
+    if (st.stoppedBecause) {
+      console.log(`
+stopped: ${st.stoppedBecause}. Everything after it would`);
+      console.log("fail for that reason, and a run that reports 28 broken features");
+      console.log("when one process went away is worse than no run at all.");
     }
-  }
-} else {
-  for (const check of chosen) {
-    let got;
-    try {
-      got = await check.run();
-    } catch (err) {
-      got = { pass: false, evidence: { threw: String(err && err.message || err) } };
-    }
-    // A failure with the sidecar gone is not evidence about this row.
-    if (!got.pass && !(await sidecarAlive())) {
-      console.log(`\nthe sidecar died during ${check.id} -- stopping.`);
-      got.evidence = { ...(got.evidence || {}), sidecar: "died mid-check" };
-      results.push({ id: check.id, asks: check.asks, ...got });
-      break;
-    }
-    const r = { id: check.id, asks: check.asks, ...got };
-    results.push(r);
-    report(r);
+    break;
   }
 }
 

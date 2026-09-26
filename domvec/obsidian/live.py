@@ -28,6 +28,7 @@ the UI is renamed, instead of quietly returning ``undefined``.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 import urllib.error
 import urllib.request
 from typing import Dict, Optional
@@ -473,7 +474,8 @@ class Live:
     # -- requirement verdicts -------------------------------------------------
 
     def verify(self, only=None, *, wait: bool = True, timeout_s: float = 1200,
-               reload: bool = True, store: str = "working") -> Dict:
+               reload: bool = True, store: str = "working",
+               fresh: bool = False) -> Dict:
         """Run the live checks INSIDE the plugin and read them back (`G-75`).
 
         Hardware in the loop: the checks are `checks/live.mjs`, the same list
@@ -482,16 +484,24 @@ class Live:
         outside, so the run scores the code on disk -- starts the run, and
         polls its state; progress and failures also show in the browser
         cell's corner box while it runs. `wait=False` returns once started.
+
+        `fresh=True` asks the PLUGIN for a fresh-store run (`G-87`): the app
+        starts a sidecar on an empty store, fills it by browsing, runs the
+        checks and switches itself back -- all of it inside the app, shown
+        in the corner box. Nothing here orchestrates it; this starts it and
+        reads it.
         """
         import time as _time
         if reload:
             self.reload_plugin()
             _time.sleep(3)
+        call = ("v.startFresh(%s)" % json.dumps(list(only or [])) if fresh
+                else "v.start(%s, %s)" % (json.dumps(list(only or [])), json.dumps(store)))
         started = self.json_eval(
             "JSON.stringify((() => { const v = window.__domvec && window.__domvec.verify;"
             " if (!v) return {error: 'this plugin build has no in-app verifier'};"
-            " v.start(%s); const s = v.state();"
-            " return {run: s.run, total: s.total}; })())" % json.dumps(list(only or [])))
+            " %s; const s = v.state();"
+            " return {run: s.run, total: s.total}; })())" % call)
         if not started or started.get("error") or not wait:
             return {"started": started}
         deadline = _time.time() + timeout_s
@@ -502,308 +512,76 @@ class Live:
             if not state.get("running"):
                 break
         results = state.get("results") or []
+        # And what the APP shows for the run: the verdicts as the corner box
+        # draws them. A run the box does not show, or shows differently, is
+        # a finding about the box.
+        try:
+            observed = self.observe_checks()
+        except Exception as err:                    # noqa: BLE001
+            observed = {"error": str(err)[:200]}
         # Every finished run reaches the record of what has been SEEN working,
         # with the store it read (`confirmations`); a run still going does not.
         if results and not state.get("running"):
             from .confirmations import record
-            record(results, store=store, runner="in-app verify")
+            record(results, store=state.get("label") or store,
+                   runner="in-app verify")
         return {
             "run": state.get("run"), "running": bool(state.get("running")),
             "passed": sum(1 for r in results if r.get("pass")),
             "total": state.get("total"), "stopped_because": state.get("stoppedBecause"),
+            "observed_in_app": observed,
+            "label": state.get("label"), "seed": state.get("seed"),
+            "teardown": state.get("teardown"),
             "results": results,
         }
+
+    def observe_checks(self) -> Dict:
+        """The run as the APP SHOWS it: the corner box's check list, read off
+        the rendered box, not off the verifier's state object.
+
+        2026-09-26: *"you observe the results within the app itself"*. The
+        box is opened first (a collapsed box renders nothing to read), and
+        what comes back is what a person looking at it would see -- summary
+        line, one row per verdict, and each failure's evidence as drawn.
+        """
+        self.act("pipebox", "open")
+        import time as _time
+        _time.sleep(1.2)          # the box redraws on its own tick
+        return self.json_eval(r"""JSON.stringify((() => {
+          const l = app.workspace.getLeavesOfType('domvec-browser-view')[0];
+          const box = l && l.view && l.view.pipebox;
+          if (!box) return {error: 'no corner box'};
+          const root = box.wrap;
+          const heads = [...root.querySelectorAll('.domvec-pipebox-h')];
+          const h = heads.find(e => /Checks, run in this app/.test(e.textContent));
+          const summary = h && h.nextElementSibling ? h.nextElementSibling.textContent.trim() : null;
+          const rows = [...root.querySelectorAll('.domvec-pipebox-check')].map(e => ({
+            id: e.dataset.id || null, pass: e.dataset.pass === '1',
+            text: e.textContent.trim().slice(0, 400)}));
+          const r = root.getBoundingClientRect();
+          return {expanded: !!box.expanded, summary, rows,
+                  box_px: [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)],
+                  visible: r.width > 0 && r.height > 0};
+        })())""") or {}
+
+    def screenshot(self, path: str = "") -> Dict:
+        """The Obsidian window as a PNG, for a human-eye check of what the
+        app shows (the corner box, the side panel, the graph)."""
+        import base64
+        import time as _time
+        got = self._cdp("Page.captureScreenshot", {"format": "png"})
+        data = got.get("data")
+        if not data:
+            return {"error": "no image", "got": list(got)}
+        path = path or str(Path("build_analytics") / (
+            "app_%s.png" % _time.strftime("%Y%m%d_%H%M%S")))
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        Path(path).write_bytes(base64.b64decode(data))
+        return {"path": str(Path(path).resolve())}
 
     def verify_state(self) -> Dict:
         """The in-app run's state right now: progress, and results so far."""
         return self.json_eval("JSON.stringify(window.__domvec.verify.state())") or {}
-
-    def confirm_legacy(self, only=None) -> Dict:
-        """SUPERSEDED by `verify` (`G-75`): a Python re-implementation of a
-        subset of the live checks, kept only until nothing calls it. It has
-        drifted from the real list -- its G-54 still asks for the retired
-        "inside its page" ball -- which is the reason one list must win.
-
-        Every observable requirement this harness can answer, with evidence.
-
-        **Why the evidence travels with the verdict.** A bare PASS is the
-        thing this project has been burned by most: three checks passed --
-        "nodes are discernible", "nodes never overlap", "every node is on
-        screen" -- while the pane showed a clump with a fifth of it off the
-        canvas, because each one asked a JavaScript property rather than the
-        picture. So every row below returns the numbers it decided on, and a
-        reader can disagree with the threshold without rerunning anything.
-
-        **The plugin is reloaded first.** A probe scores the instrument that
-        is LOADED. One here passed with its own target defect planted,
-        returning numbers identical to the clean run, because it reopened the
-        pane and never reloaded the code.
-        """
-        checks = [
-            ("G-53", "the projector draws PAGES by default, not chunks",
-             self._c_pages_by_default),
-            ("G-54", "unfolding unravels one patricia step, inside its page",
-             self._c_unfold),
-            ("G-6", "patricia links are drawn, with endpoints that resolve",
-             self._c_links),
-            ("G-4", "nodes are discernible, not a clump",
-             self._c_spread),
-            ("G-5", "every node is on screen at the default camera",
-             self._c_on_screen),
-            ("G-21", "nodes do not overlap, in world space",
-             self._c_overlap),
-            ("G-20", "relaxation is SEEDED from the fit, not replacing it",
-             self._c_seeded),
-            ("D-27", "the two layers nest: contents inside their container",
-             self._c_nesting),
-            ("G-39", "an address on the page resolves to the chunk that draws it",
-             self._c_resolve),
-            ("D-26", "the lines a reader sees carry their address",
-             self._c_keys),
-            ("G-40", "clicking a node takes the browser to that chunk",
-             self._c_click),
-            ("G-34", "live capture lands in the picture already on screen",
-             self._c_absorb),
-            ("G-3", "retrieval is stored and reachable from the pane",
-             self._c_retrieve),
-            ("G-15", "media is present in the projector, not only the panels",
-             self._c_media),
-        ]
-        wanted = set(only or [])
-        if wanted:
-            checks = [c for c in checks if c[0] in wanted]
-        out = {"woke": self.wake()}
-        if not wanted:
-            # Only on a full run: a reload costs ~10s and a caller asking for
-            # one row usually wants it against what is already running.
-            out["reloaded"] = self.reload_plugin()
-        # **And the sidecar has to be answering**, or half of these score the
-        # backend's absence as the plugin's failure. It segfaulted mid-run
-        # once and the report read as ten broken features.
-        try:
-            out["sidecar"] = self.get("/health").get("ok", False)
-        except Exception as exc:                    # noqa: BLE001
-            return dict(out, sidecar=False, checks=[], **{
-                "pass": 0, "fail": 0, "error": 0, "all_pass": False,
-                "why": "the sidecar is not answering (%s); every backend "
-                       "check would fail for that reason and a run that "
-                       "reports it as broken features is worse than no run"
-                       % str(exc)[:80]})
-        rows = []
-        for rid, what, fn in checks:
-            try:
-                verdict, evidence = fn()
-            except Exception as exc:                # noqa: BLE001
-                verdict, evidence = "ERROR", {"threw": str(exc)[:200]}
-            rows.append({"id": rid, "what": what,
-                         "verdict": verdict, "evidence": evidence})
-        out["checks"] = rows
-        out["pass"] = sum(1 for r in rows if r["verdict"] == "PASS")
-        out["fail"] = sum(1 for r in rows if r["verdict"] == "FAIL")
-        out["error"] = sum(1 for r in rows if r["verdict"] == "ERROR")
-        out["all_pass"] = out["fail"] == 0 and out["error"] == 0
-        return out
-
-    # Each returns (verdict, evidence). A threshold that is argued about
-    # belongs in the evidence, not hidden inside a boolean.
-
-    def _graph(self) -> Dict:
-        """The projector's state, waiting for it rather than catching it mid-draw.
-
-        A check that reads the pane while it is still building reports the
-        plugin as broken. Waiting once here is cheaper than every check
-        learning to retry, and it cannot mask a real failure: the wait has a
-        deadline and says so.
-        """
-        got = self.ui().get("graph") or {}
-        if not got.get("nodes"):
-            self.wait_for_projector()
-            got = self.ui().get("graph") or {}
-        if not got or got.get("error"):
-            raise RuntimeError(got.get("error") or "projector not open")
-        return got
-
-    def _c_pages_by_default(self):
-        g = self._graph()
-        probe = self.graph_probe()
-        sizes = probe.get("sizes") or {}
-        pages = (sizes.get("page") or {}).get("n", 0)
-        chunks = (sizes.get("chunk") or {}).get("n", 0)
-        return ("PASS" if pages > chunks else "FAIL",
-                {"page_nodes": pages, "chunk_nodes": chunks,
-                 "status_line": g.get("status")})
-
-    def _c_unfold(self):
-        got = self.act("unfold")
-        r = got.get("result") or {}
-        if r.get("error"):
-            return "FAIL", r
-        ok = bool(r.get("branches")) and bool(r.get("stayed_inside"))
-        return ("PASS" if ok else "FAIL",
-                {k: r.get(k) for k in
-                 ("page", "branches", "room", "reach_from_anchor",
-                  "reach_from_hub", "gap_to_nearest_page", "stayed_inside",
-                  "nodes_before", "nodes_after")})
-
-    def _c_links(self):
-        g = self._graph()                           # waits for the pane
-        links = g.get("links") or 0
-        # An endpoint that never resolved leaves a link with a string for a
-        # source, and the renderer silently draws nothing.
-        drawn = self.json_eval(
-            "JSON.stringify((()=>{const v=app.workspace"
-            ".getLeavesOfType('domvec-graph-view')[0].view;"
-            "const g=(v.projector||v).graph;const d=g.graphData();"
-            "return {links:d.links.length, resolved:d.links.filter("
-            "l=>l.source&&typeof l.source==='object'&&l.target&&"
-            "typeof l.target==='object').length};})())")
-        return ("PASS" if links and drawn.get("resolved") == links else "FAIL",
-                drawn)
-
-    def _c_spread(self):
-        g = self._graph()
-        spread = g.get("spread_pct")
-        return ("PASS" if spread and spread >= 20 else "FAIL",
-                {"spread_pct": spread, "threshold": 20,
-                 "gap_px_p50": g.get("gap_px_p50"),
-                 "radius_px_p50": g.get("radius_px_p50")})
-
-    def _c_on_screen(self):
-        g = self._graph()
-        off = g.get("off_screen")
-        return ("PASS" if off == 0 else "FAIL",
-                {"nodes": g.get("nodes"), "on_screen": g.get("on_screen"),
-                 "off_screen": off, "behind_camera": g.get("behind_camera"),
-                 "in_frustum": g.get("in_frustum")})
-
-    def _c_overlap(self):
-        probe = self.graph_probe()
-        over = probe.get("world_overlapping_pairs")
-        return ("PASS" if over == 0 else "FAIL",
-                {"world_overlapping_pairs": over,
-                 "pairs_tested": probe.get("pairs_tested"),
-                 "note": "world space at the pane's own collider radius; "
-                         "the screen-space count conflates depth"})
-
-    def _c_seeded(self):
-        g = self._graph()
-        drift = g.get("fit_drift_p50")
-        return ("PASS" if drift is not None and drift <= 5 else "FAIL",
-                {"fit_drift_p50": drift, "fit_drift_max": g.get("fit_drift_max"),
-                 "threshold": 5,
-                 "note": "the fit is the starting point; collision may move a "
-                         "node that overlaps, but the median must stay put"})
-
-    def _c_nesting(self):
-        probe = self.graph_probe()
-        v = probe.get("verdict") or {}
-        if not v.get("pages_opened"):
-            self.act("unfold")
-            v = (self.graph_probe().get("verdict") or {})
-        return ("PASS" if v.get("nests") else "FAIL", v)
-
-    def _c_resolve(self):
-        from urllib.parse import quote
-        # Any page with chunks, and an xpath a step BELOW a chunk root --
-        # which is what a cursor actually lands on.
-        hits = (self.get("/search?q=the&k=5").get("hits") or [])
-        if not hits:
-            return "ERROR", {"why": "no chunks to resolve against"}
-        url = hits[0].get("url")
-        lines = (self.get("/chunk/%s" % quote(str(hits[0]["cid"])))
-                 .get("lines") or [])
-        keyed = [ln for ln in lines if ln.get("key")]
-        if not keyed:
-            return "FAIL", {"url": url, "lines": len(lines), "keyed": 0,
-                            "why": "no line carries an address to resolve"}
-        # **Parse the key, do not split it.** A key is escaped
-        # (`%7C` for a pipe, `%25` for a percent) and its xpath may name a
-        # text node, which is not an element anything can be resolved from.
-        # Handing the raw component to `/resolve` 404s, and reading that as
-        # "no chunk draws it" blames the trie for a caller's string handling.
-        from ..address import ContentAddress
-        xpath = ContentAddress.parse(keyed[0]["key"]).xpath
-        xpath = xpath.split("/text()")[0]
-        try:
-            got = self.get("/resolve?url=%s&xpath=%s"
-                           % (quote(url, safe=""), quote(xpath, safe="")))
-        except Exception as exc:                    # noqa: BLE001
-            return "FAIL", {"url": url, "xpath": xpath,
-                            "why": str(exc)[:120]}
-        back = got.get("lines") or []
-        return ("PASS" if got.get("cid") and back else "FAIL",
-                {"url": url, "xpath": xpath, "cid": got.get("cid"),
-                 "ancestors_walked": got.get("ancestors_walked"),
-                 "lines": len(back),
-                 "keyed": sum(1 for ln in back if ln.get("key")),
-                 "controls": sum(1 for ln in back if ln.get("control"))})
-
-    def _c_keys(self):
-        got = self.key_coverage(sample=25)
-        ok = got["pct"] >= 90 and got["store"].get("addresses_blank_key") == 0
-        return ("PASS" if ok else "FAIL",
-                {k: got[k] for k in ("pages_sampled", "fully_keyed",
-                                     "partly_keyed", "zero_keyed", "lines",
-                                     "keyed", "pct", "store")})
-
-    def _c_click(self):
-        g = self._graph()
-        page = self.json_eval(
-            "JSON.stringify((()=>{const v=app.workspace"
-            ".getLeavesOfType('domvec-graph-view')[0].view;"
-            "const d=(v.projector||v).graph.graphData();"
-            "const p=d.nodes.filter(n=>n.level==='page');"
-            "return p.length?p[0].url:null;})())")
-        if not page:
-            return "ERROR", {"why": "no page node to click"}
-        got = self.act("click", page)
-        r = got.get("result") or {}
-        landed = (r.get("browser_url") or "")
-        return ("PASS" if landed else "FAIL",
-                {"clicked": r.get("clicked"), "browser_url": landed,
-                 "reached_that_page": landed.startswith(page[:40]),
-                 "billboards": r.get("billboards")})
-
-    def _c_absorb(self):
-        g0 = self._graph()
-        got = self.act("scan")
-        r = got.get("result") or {}
-        scan = (r.get("scan") or {}) if isinstance(r, dict) else {}
-        g1 = self._graph()
-        calls = ((got.get("backend") or {}).get("calls") or 0)
-        # **Backend calls are part of the claim.** This once passed on a
-        # scan that reported addresses from a cached `lastScan` while the
-        # sidecar was dead and nothing was captured at all.
-        ok = (not r.get("error")) and scan.get("addresses") and calls > 0
-        return ("PASS" if ok else "FAIL",
-                {"addresses": scan.get("addresses"), "backend_calls": calls,
-                 "rewrites": scan.get("rewrites"),
-                 "settled": scan.get("settled"),
-                 "nodes_before": g0.get("nodes"), "nodes_after": g1.get("nodes"),
-                 "backend": got.get("backend")})
-
-    def _c_retrieve(self):
-        got = self.act("retrieve", "price")
-        r = got.get("result") or {}
-        if r.get("error"):
-            return "FAIL", r
-        return ("PASS" if r.get("hits") else "FAIL", r)
-
-    def _c_media(self):
-        g = self._graph()
-        status = g.get("status") or ""
-        with_picture = 0
-        for part in status.split("\u00b7"):
-            if "with a picture" in part:
-                try:
-                    with_picture = int(part.strip().split()[0])
-                except Exception:                   # noqa: BLE001
-                    pass
-        return ("PASS" if with_picture > 0 else "FAIL",
-                {"nodes_with_a_picture": with_picture,
-                 "billboards": g.get("billboards"), "status": status})
-
-    # -- the pipeline profile ------------------------------------------------
 
     def pipeline_profile(self, url: str = "", seconds: float = 25.0,
                          scrolls: int = 6) -> Dict:

@@ -441,6 +441,45 @@ export function installHarness(app: App, sidecarBase: () => string) {
        * The same state a reader's click sets -- so what a tool opens, the
        * person watching sees open.
        */
+      /**
+       * Run the checks the way a person does: open the corner box and PRESS
+       * its button -- "run all", or "fresh store" (`G-87`). `arg` is "all"
+       * or "fresh"; `{fresh, ids}` runs a subset, which has no button, so
+       * that one goes straight to the verifier the buttons call. Returns at
+       * once; the run shows in the box, and `ui()` reads it back.
+       */
+      case "checks": {
+        const l = await ready("domvec-browser-view");
+        const pb: any = l?.view?.pipebox;
+        if (!pb) return { error: "no corner box" };
+        pb.setExpanded(true);
+        await sleep(400);
+        const v: any = (window as any).__domvec?.verify;
+        if (arg && typeof arg === "object" && Array.isArray(arg.ids) && arg.ids.length) {
+          const st = arg.fresh ? v.startFresh(arg.ids) : v.start(arg.ids);
+          return { started: st.run, total: st.total, pressed: null };
+        }
+        const want = arg === "fresh" ? "fresh store" : "run all";
+        const button = Array.from(pb.el.querySelectorAll("button.domvec-pipebox-run"))
+          .find((b: any) => (b.textContent || "").trim() === want) as HTMLElement | undefined;
+        if (!button) return { error: `no "${want}" button in the box -- is a run going?` };
+        button.click();
+        await sleep(300);
+        return { pressed: want, started: v.state().run };
+      }
+      /**
+       * Reload THIS plugin, so the build on disk is the one that runs. Done
+       * on a timer after replying, because the reload ends the code that was
+       * asked -- the reply has to leave first.
+       */
+      case "reload": {
+        const id = "domvec-bridge";
+        const plugins = (app as any).plugins;
+        setTimeout(() => {
+          void plugins.disablePlugin(id).then(() => plugins.enablePlugin(id));
+        }, 200);
+        return { reloading: id };
+      }
       case "pipebox": {
         const l = await ready("domvec-browser-view");
         const pb: any = l?.view?.pipebox;
@@ -495,7 +534,9 @@ export function installHarness(app: App, sidecarBase: () => string) {
      *  `start` returns at once; poll `state()` -- a full run is minutes. */
     verify: {
       list: () => verifier.list(),
-      start: (ids?: string[]) => verifier.start(ids),
+      start: (ids?: string[], label?: string) => verifier.start(ids, label || ""),
+      /** Every check on a FRESH store this app starts and fills (`G-87`). */
+      startFresh: (ids?: string[]) => verifier.startFresh(ids),
       state: () => verifier.state,
     },
     ui: () => uiState(app),

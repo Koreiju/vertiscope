@@ -46,12 +46,19 @@ export class ChunkMap {
 
   /** Replace the map with the store's for `url`: one call, on landing. */
   async load(sidecar: Sidecar, url: string): Promise<boolean> {
-    const got: any = await sidecar.pageMap(url).catch(() => null);
-    if (!got || !got.chunks) return false;
+    // The map is THIS page's from the moment the page is landed on, even
+    // when the store has nothing for it yet. It used to keep the previous
+    // page's map on a page the store did not hold -- and since a capture
+    // only patches the map for its own url, a new page's map stayed empty
+    // for as long as it was open: no hover outline, no coverage for the
+    // force tree's pending diff (2026-09-26).
     this.url = url;
     this.byXpath.clear();
     this.byPrefix.clear();
     this.byCid.clear();
+    const got: any = await sidecar.pageMap(url).catch(() => null);
+    if (this.url !== url) return false;          // the reader moved on
+    if (!got || !got.chunks) return false;
     this.apply(got.chunks);
     this.loadedAt = Date.now();
     return true;

@@ -1211,8 +1211,9 @@ Later the same day, mid-loop:
 *Read as: no check scores the long-lived working store. Each test run starts
 from an empty store that the plugin fills by browsing, so everything a check
 reads was written by the code under test. Built as
-`python -m domvec.obsidian fresh` (`domvec/obsidian/freshrun.py`); the working
-corpus is left alone.*
+the corner box's "fresh store" button (`Verifier.runFresh` in
+`obsidian-plugin/src/verify.ts`) -- run by the app itself, since "All tests
+run inside of the GUI"; the working corpus is left alone.*
 
 ---
 
@@ -1239,6 +1240,155 @@ verbatim sentence -> user story -> requirement row -> check / MCP tool / test
 -> what the app actually did. And the store behind every test suite is fresh,
 filled by real actions in the app (the fresh-store runner above). Findings
 and the chain live in `docs/AUDIT_VIII.md`.*
+
+Later the same day:
+
+> make sure to prioritize feature delivery that you yourself can verify over
+> MCP versus something like diverging designs away from the main GUI plugin.
+> All tests run on the plugin itself.
+
+*Read as: the order of work is FEATURES in the plugin, each verified by the
+agent through the MCP tools against the running app -- ahead of design
+documents, side harnesses or tooling that live beside the plugin rather than
+in it. There is one way to run a test: through the plugin. Any path that runs
+a check outside it (a terminal re-implementation, a Python probe standing in
+for a check) is removed rather than kept alongside.*
+
+And, minutes later:
+
+> All tests run inside of the GUI and you observe the results within the app
+> itself as you build features on the other side
+
+*Read as: the verdict is READ OFF THE APP -- the corner box's check list as
+it renders, and the app window itself -- not off a terminal log or a JSON
+file written beside it. Building happens on one side (the code), observing on
+the other (the running GUI).*
+
+And:
+
+> One important feature add is to ensure that the first handful of scans are
+> rendered with a full force-directed layout as a fallback while waiting for
+> the first projector fit to complete and for transformed nodes to be
+> streamed to the GUI. I think this would in fact do best to show the
+> live-scanning abilities truly *as fast as possible* while awaiting the
+> projector's fit/transforms and even the embeddings aren't needed for this
+> layout, so keeping the force-directed layout and fully expanded and
+> updating diffs as they are stream in truly O(delta) milliseconds straight
+> from the electron's recursive mutationobserver shadow DOM chunking
+> basically prior to vectorization and projection/fitting over UMAP. Add this
+> to the requirements doc and please do see it is integrated soon along with
+> the rest of the features. Make sure to still, though, touch on all the
+> interrelations of this new feature with other requirements, interactions,
+> sequences of actions and full set of apparatus state expectations for
+> different phases as test contracts that are verifiable ontop the harness
+> MCP surfaces themselves (state-space expectation sequence tests within the
+> real and actual plugin and Obsidian GUI).
+
+*What this adds. Before the projector has a fit, the graph is NOT empty: the
+first scans draw at once as a fully expanded force-directed tree built from
+the chunking alone -- no embedding, no UMAP -- and every drain updates it by
+its delta, in milliseconds. When the fit and its transforms arrive, the same
+nodes move to the projector's positions. The requirement comes with its
+contracts: the phases of the apparatus (empty, force fallback, fitting,
+projected) and the state each surface must show in each, checked as ordered
+sequences in the running plugin through the MCP surfaces. PRD `G-89`.*
+
+And, minutes later:
+
+> One other chea-shot idea is to use force-directed layouts as a first and
+> primary representation, but in priority before a UMAP, and for UMAP
+> projections, the priority is first on global chunk averaging on per-page
+> and then fitting, but a transform over the full chunk set is cheap as well.
+
+*Read as: the force-directed layout is not only a stand-in until the fit --
+it is the FIRST and PRIMARY representation, always available, with UMAP after
+it in priority. For UMAP the order is: average each page's chunks (the page
+centroid, Addendum VII), fit on those; then transform the FULL chunk set
+through that fit, which is cheap. Amends `G-89` (force first, not only a
+fallback) and `G-83` (page-centroid fit first, all chunks by transform).*
+
+And, refining both:
+
+> Please also make sure the layout priorities are only on the diff that is
+> queued to the vectorization and projection itself, where when a projector
+> fit has truly completed for the full set of pages with then a projector
+> transform pass on the diff updates to chunks themselves, the layouts
+> collapse to the main page-node view with the projected chunks collapsed
+> once passed through the UMAP projector's transform, and after the UMAP
+> projector is re-fit over the full set of page embedding centroids, so
+> somewhat asynchronous updates to both fit and transform queues are needed,
+> and while we await those, we still expose the full diff set of new chunks
+> without vectorization or umap yet as force-directed layouts. So, the
+> force-directed first kind of layout is more of a priority immediately when
+> scanning, and also intermediately when global averages have already
+> obtained a fitted UMAP but then there's another async wait on
+> projection/transforms to the queue of new chunk diffs in O(delta)
+> themselves that are transformed from the centroid fits.
+
+*Read as: the force-directed layout is not a PHASE that ends at the first
+fit; it is how the pending DIFF is drawn. Every chunk a drain produces that
+has not yet been through the transform is drawn force-directed, hung from its
+page -- before any fit, and equally after one, while new diffs wait in the
+vectorization and transform queues. The fit is over the page centroids and
+refits asynchronously; transforms run on the chunk diffs, O(delta). When a
+chunk's transform lands, its force node COLLAPSES into the page-node view
+(the default view draws pages, with projected chunks collapsed into them).
+Two queues, both asynchronous -- fit, transform -- and the force layout
+covers whatever either has not reached yet. Replaces `G-89`'s C6/C7, which
+had the force tree end at the first fit.*
+
+And:
+
+> And please make sure the millisecond time profiles for force-directed
+> layouts and fastest-to-3D updates from page scanning the O(delta) diff
+> chunks are measured between the electron browser (and its ability to
+> highlight the most recently diff-updated chunk set immediately as overlays
+> immediately after in-page recursive chunk scanning with the 256 context
+> windows) and the 3D GUI itself.
+
+*Read as: two outputs of one drain, timed from the same instant and shown
+side by side -- (a) the browser outlining the chunk set that drain just
+changed, as an overlay, right after the in-page chunking; (b) those chunks
+appearing in the 3D graph as force nodes. Both are O(delta) and neither waits
+on the sidecar. PRD `G-90`.*
+
+Correcting the reading above, after seeing it run:
+
+> i'm actually seeing degraded features; updates to the 3D projector have
+> completely stalled to only the global pages. What this force-directed-first
+> is meant to do is be the temporary and immediate layout prior to the first
+> UMAP fit and, while collapsed, if the global node were expanded,
+> force-directed would still be there before the UMAP transform on the queue
+> of chunk diffs.
+
+> Nodes are *way* too jumbled together. likely another degradation on
+> force-directed side
+
+*Read as: (1) the projector's own updates must keep flowing exactly as
+before -- chunk nodes from captures and the stream are not withheld. (2) The
+force-directed layout is the temporary, immediate layout BEFORE the first fit;
+once the fit is drawn, it appears only INSIDE a page node the reader has
+expanded, for that page's chunk diffs still waiting on the transform. A
+collapsed page shows no force nodes. (3) Force nodes must be laid out as a
+tree -- springs to their parent, spacing between them -- never left to pile up
+under a projector layout that has those forces switched off.*
+
+> So, like, still several bugs in how I would anticipate the fastest,
+> instant, and most visually efficient and clean 3D layout from streaming to
+> 3D from our electron scanning.
+
+> The overlay from the recursive chunks is actually a lot slower than I would
+> imagine it could theoretically be (overlay is shown, its chunks are
+> updates, and the overlap itself is updated all in the single-digit
+> millisecond domain, async with downstream vectorization, and immediately
+> before piping recursive diffs without a UMAP fit update to the 3D GUI.
+
+*Read as: the diff overlay's budget is SINGLE-DIGIT milliseconds from the
+drain -- shown, its chunks updated, its boxes placed -- asynchronous to
+vectorization, and done BEFORE the diff is piped to the 3D graph. It measured
+p50 53 ms because it made a second round trip into the page for the boxes;
+they must come back with the drain itself (read by a geometry step beside the
+fold, never inside it -- `invariants.c2`).*
 
 ---
 

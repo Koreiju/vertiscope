@@ -37,15 +37,68 @@ export interface VerifyState {
   finishedAt: number;
   results: CheckResult[];
   stoppedBecause: string;
+  /** What the run read -- "fresh run_…, 12/12 pages seeded" or "working". */
+  label: string;
+  /** A fresh-store run's seeding, one row per page it browsed. */
+  seed?: { url: string; held: boolean; chunks: number | null; s: number }[];
+  /**
+   * A fresh-store run's PHASE TRACE (`G-89`): the graph's representation as
+   * the store fills, sampled while seeding -- one row whenever the mode, the
+   * page being seeded or the projector's fitted state changes. What the
+   * phase contracts are checked against, in order.
+   */
+  phases?: { t: number; mode: string; nodes: number; force_nodes: number;
+             force_pages: number; multi_parent: number; drains: number;
+             fitted: boolean | null; seeding: number }[];
+  /** A fresh-store run's teardown: back on the working store, test sidecar gone. */
+  teardown?: { sidecar: string; test_sidecar_stopped: boolean } | null;
 }
 
+/**
+ * The pages a fresh store is filled with, by browsing them in the cell --
+ * the product's own capture path. Local fixtures (served on a loopback port)
+ * first, then the public pages the checks name: G-78/G-79/G-82 open Radix
+ * tree, G-80 opens Trie, G-40/G-16 want books.toscrape; the rest give the
+ * projector and the ranking more than one subject to separate.
+ */
+const SEED_FIXTURES = [
+  "inline_prose.html", "mixed_inline.html", "link_family.html",
+  "metadata_family.html", "svg_diagram.html", "shadow_catalogue.html",
+];
+const SEED_PAGES = [
+  "https://en.wikipedia.org/wiki/Radix_tree",
+  "https://en.wikipedia.org/wiki/Trie",
+  "https://books.toscrape.com/",
+  "https://en.wikipedia.org/wiki/B-tree",
+  "https://en.wikipedia.org/wiki/Hash_table",
+  "https://en.wikipedia.org/wiki/Suffix_tree",
+];
+/** The test sidecar's port: beside the working one, never instead of it. */
+const TEST_PORT = 8790;
+
+/**
+ * The last run, kept on the WINDOW, which outlives the plugin. A runner that
+ * scores freshly built code reloads the plugin; the fresh-store runner
+ * reloads it again afterwards to put the plugin back. Held on the Verifier
+ * alone, the verdicts vanished from the corner box with that second reload,
+ * before anyone had looked at them.
+ */
+const KEEP = "__domvecLastRun";
+
 export class Verifier {
-  state: VerifyState = {
+  state: VerifyState = (window as any)[KEEP] || {
     run: 0, running: false, total: 0, done: 0, current: "",
-    startedAt: 0, finishedAt: 0, results: [], stoppedBecause: "",
+    startedAt: 0, finishedAt: 0, results: [], stoppedBecause: "", label: "",
   };
 
-  constructor(private app: App, private sidecarUrl: () => string) {}
+  constructor(private app: App, private sidecarUrl: () => string) {
+    // A run the reload interrupted is not still running; say what ended it.
+    if (this.state.running) {
+      this.state.running = false;
+      this.state.current = "";
+      this.state.stoppedBecause = "the plugin was reloaded mid-run";
+    }
+  }
 
   /** What a runner hands the check module, provided from inside the app. */
   private env() {
@@ -106,12 +159,12 @@ export class Verifier {
   }
 
   /** Start a run and return at once; `state` says how it is going. */
-  start(ids?: string[]): VerifyState {
-    if (!this.state.running) void this.run(ids);
+  start(ids?: string[], label = ""): VerifyState {
+    if (!this.state.running) void this.run(ids, label);
     return this.state;
   }
 
-  async run(ids?: string[]): Promise<VerifyState> {
+  async run(ids?: string[], label = ""): Promise<VerifyState> {
     if (this.state.running) return this.state;
     const { CHECKS, wakeProjector } = makeChecks(this.env());
     const chosen = ids && ids.length
@@ -119,10 +172,24 @@ export class Verifier {
     this.state = {
       run: this.state.run + 1, running: true, total: chosen.length, done: 0,
       current: "", startedAt: Date.now(), finishedAt: 0, results: [],
-      stoppedBecause: "",
+      stoppedBecause: "", label,
     };
+    (window as any)[KEEP] = this.state;
     try {
-      await wakeProjector().catch(() => null);
+      await this.runChecks(chosen, wakeProjector);
+    } finally {
+      this.state.running = false;
+      this.state.current = "";
+      this.state.finishedAt = Date.now();
+    }
+    return this.state;
+  }
+
+  /** The checks themselves, into `this.state`, which the caller set up. */
+  private async runChecks(chosen: any[], wakeProjector: () => Promise<any>): Promise<void> {
+    this.state.total = chosen.length;
+    await wakeProjector().catch(() => null);
+    {
       for (const check of chosen) {
         this.state.current = check.id;
         const t0 = performance.now();
@@ -148,11 +215,306 @@ export class Verifier {
         this.state.results.push(result);
         this.state.done++;
       }
+    }
+  }
+
+  // -- the fresh store (`G-87`), run from inside the app -------------------
+
+  /** Start a fresh-store run and return at once. */
+  startFresh(ids?: string[]): VerifyState {
+    if (!this.state.running) void this.runFresh(ids);
+    return this.state;
+  }
+
+  /**
+   * Every check against a FRESH, EMPTY store that this app fills itself.
+   *
+   * 2026-09-26: *"tear down the current db so that all new tests run in a
+   * fresh and empty db"*, then *"All tests run inside of the GUI"*. The first
+   * version orchestrated from a terminal -- a Python process started the
+   * sidecar, flipped this plugin's setting over CDP and drove the browser
+   * from outside -- so only the check bodies ran here. Now the whole run is
+   * the app's: it starts a sidecar on an empty workspace (a child process, on
+   * its own port, so the working one keeps serving), points itself at it IN
+   * MEMORY ONLY (a reload or a crash falls back to the saved setting, the
+   * working store), fills it by browsing `SEED_*` in the browser cell, runs
+   * the checks, and puts itself back. Each step shows in the corner box as
+   * it happens; the working store is never opened.
+   */
+  async runFresh(ids?: string[]): Promise<VerifyState> {
+    if (this.state.running) return this.state;
+    const plugin: any = (this.app as any).plugins.getPlugin("domvec-bridge");
+    const working = String(plugin?.settings?.sidecar || "");
+    const total = ids && ids.length ? ids.length : this.list().length;
+    this.state = {
+      run: this.state.run + 1, running: true, total, done: 0,
+      current: "starting a sidecar on an empty store", startedAt: Date.now(),
+      finishedAt: 0, results: [], stoppedBecause: "", label: "fresh store",
+      seed: [], teardown: null, phases: [],
+    };
+    (window as any)[KEEP] = this.state;
+    const req = (window as any).require;
+    const path = req("path");
+    const fsp = req("fs/promises");
+    const base = (this.app.vault.adapter as any).basePath || "";
+    const testUrl = `http://127.0.0.1:${TEST_PORT}`;
+    let child: any = null;
+    let fixtures: any = null;
+    try {
+      // 1. An empty workspace; the previous test store goes.
+      const runs = path.join(base, "build", "test_runs");
+      await fsp.mkdir(runs, { recursive: true });
+      for (const old of await fsp.readdir(runs)) {
+        if (old.startsWith("run_")) {
+          await fsp.rm(path.join(runs, old), { recursive: true, force: true });
+        }
+      }
+      const stamp = new Date().toISOString().replace(/[-:T]/g, "").slice(0, 14);
+      const name = `run_${stamp}`;
+      const ws = path.join(runs, name);
+      await fsp.mkdir(ws);
+      // 2. Its sidecar.
+      child = this.spawnSidecar(ws, base, plugin?.settings?.python || "python");
+      if (!(await this.waitHealthy(testUrl, 240000, child))) {
+        throw new Error(`the test sidecar did not answer /health (see ${name}/sidecar.log)`);
+      }
+      // 3. This app, on it -- in memory only. Both panes open and LOADED
+      // first: a pane in a background tab is a deferred stub with no view,
+      // and the phase trace read "none" for a whole run because of it -- a
+      // planted G-89 then "failed" for a reason that had nothing to do with
+      // the force tree.
+      await this.ensurePanes();
+      plugin.settings.sidecar = testUrl;
+      this.resetGraphs("switched to a fresh store");
+      await this.redrawGraphs();
+      // 4. Fill it by browsing, sampling the graph's phase as it goes.
+      fixtures = await this.env().serveFixtures();
+      const urls = [...SEED_FIXTURES.map((f) => `${fixtures.origin}/${f}`), ...SEED_PAGES];
+      let seeding = 0;
+      let sampling = true;
+      const sampler = (async () => {
+        let fitted: boolean | null = null;
+        let lastFitAsk = 0;
+        while (sampling) {
+          if (Date.now() - lastFitAsk > 1000) {
+            lastFitAsk = Date.now();
+            const p = await this.ask(testUrl, "/projector", 3000);
+            fitted = p ? !!p.fitted : null;
+          }
+          this.samplePhase(seeding, fitted);
+          await sleep(250);
+        }
+      })();
+      for (let i = 0; i < urls.length; i++) {
+        seeding = i + 1;
+        const short = urls[i].replace(/^https?:\/\//, "").slice(0, 40);
+        this.state.current = `seeding ${i + 1}/${urls.length} · ${short}`;
+        this.state.seed!.push(await this.seedOne(urls[i], testUrl));
+      }
+      this.state.current = "waiting for the projector to fit the seeded store";
+      await this.waitFitted(testUrl, 300000);
+      // The pane reaches the fit on its own (its load retries); give it the
+      // time a reader would, then stop sampling.
+      // ... and until the diff drawn force-directed has collapsed into the
+      // page view: the transform placing the pending chunks is the phase the
+      // trace must end on (`G-89` C7).
+      for (let i = 0; i < 180; i++) {
+        const v: any = this.app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
+        if (!v) break;
+        const pending = v.pendingState ? v.pendingState().force_nodes : 0;
+        if (v.layoutMode === "projector" && pending === 0) break;
+        await sleep(500);
+      }
+      await sleep(1500);
+      sampling = false;
+      await sampler;
+      const held = this.state.seed!.filter((r) => r.held).length;
+      this.state.label = `fresh ${name}, ${held}/${urls.length} pages seeded`;
+      // 5. The checks -- built NOW, after the switch. `makeChecks` reads the
+      // sidecar's address once, when it is called; built before step 3, every
+      // check asked the WORKING store while the app captured into the test
+      // one (S-12 read 137 pages on a 12-page store, 2026-09-26).
+      const { CHECKS, wakeProjector } = makeChecks(this.env());
+      const chosen = ids && ids.length
+        ? CHECKS.filter((c: any) => ids.includes(c.id)) : CHECKS;
+      await this.runChecks(chosen, wakeProjector);
+    } catch (err: any) {
+      this.state.stoppedBecause = String(err?.message || err).slice(0, 200);
     } finally {
+      // 6. Back on the working store, whatever happened.
+      if (plugin?.settings) plugin.settings.sidecar = working;
+      this.resetGraphs("back on the working store");
+      try { await fixtures?.close(); } catch { /* already closed */ }
+      await this.stopSidecar(child);
+      let stopped = false;
+      try { await fetch(testUrl + "/health", { signal: AbortSignal.timeout(2000) }); }
+      catch { stopped = true; }
+      this.state.teardown = { sidecar: working, test_sidecar_stopped: stopped };
+      await this.redrawGraphs();
       this.state.running = false;
       this.state.current = "";
       this.state.finishedAt = Date.now();
     }
     return this.state;
   }
+
+  /** `supervise serve` on `ws`, logging beside the store. */
+  private spawnSidecar(ws: string, base: string, python: string): any {
+    const req = (window as any).require;
+    const cp = req("child_process");
+    const fs = req("fs");
+    const path = req("path");
+    const log = fs.createWriteStream(path.join(ws, "sidecar.log"));
+    const child = cp.spawn(python, [
+      "-m", "domvec.obsidian", "supervise", "--workspace", ws,
+      "--port", String(TEST_PORT), "--semantic", "--capture",
+    ], { cwd: base, windowsHide: true,
+         env: { ...(window as any).process.env, PYTHONIOENCODING: "utf-8" } });
+    child.stdout?.pipe(log);
+    child.stderr?.pipe(log);
+    return child;
+  }
+
+  /** `supervise` runs `serve` as a CHILD: stop the whole tree, or the child
+   *  keeps the store and the port and the next run is not fresh. */
+  private async stopSidecar(child: any): Promise<void> {
+    if (!child || child.exitCode !== null) return;
+    const proc = (window as any).process;
+    if (proc.platform === "win32") {
+      const cp = (window as any).require("child_process");
+      await new Promise((r) => cp.execFile(
+        "taskkill", ["/PID", String(child.pid), "/T", "/F"],
+        { windowsHide: true }, () => r(null)));
+    } else {
+      child.kill();
+    }
+    for (let i = 0; i < 40 && child.exitCode === null; i++) await sleep(250);
+  }
+
+  private async ask(base: string, route: string, ms = 10000): Promise<any> {
+    try {
+      const res = await fetch(base + route, { signal: AbortSignal.timeout(ms) });
+      return res.ok ? await res.json() : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private async waitHealthy(url: string, ms: number, child: any): Promise<boolean> {
+    const until = Date.now() + ms;
+    while (Date.now() < until) {
+      if (child && child.exitCode !== null) return false;
+      const got = await this.ask(url, "/health", 5000);
+      if (got && got.ok) return true;
+      await sleep(2000);
+    }
+    return false;
+  }
+
+  /**
+   * Browse one page and wait until the store HOLDS it and every chunk has a
+   * vector -- the two things every check then reads. Landing is what
+   * captures (the cell's `did-stop-loading`), so this presses nothing.
+   */
+  private async seedOne(url: string, sidecar: string) {
+    const t0 = Date.now();
+    if (!this.app.workspace.getLeavesOfType("domvec-browser-view").length) {
+      await (this.app as any).commands.executeCommandById("domvec-bridge:domvec-open-browser");
+      await sleep(1500);
+    }
+    const b: any = this.app.workspace.getLeavesOfType("domvec-browser-view")[0]?.view;
+    if (!b || !b.go) return { url, held: false, chunks: null, s: 0 };
+    b.go(url);
+    let held = false;
+    let chunks: number | null = null;
+    const same = (u: string) => u.replace(/\/+$/, "") === url.replace(/\/+$/, "");
+    for (let i = 0; i < 60; i++) {
+      await sleep(2000);
+      const pages = await this.ask(sidecar, "/pages");
+      held = !!pages && (pages.urls || []).some(same);
+      const health = await this.ask(sidecar, "/health");
+      chunks = health ? health.chunks_total ?? null : null;
+      if (held && health && !health.chunks_without_vector) break;
+    }
+    return { url, held, chunks, s: Math.round((Date.now() - t0) / 1000) };
+  }
+
+  private async waitFitted(sidecar: string, ms: number): Promise<void> {
+    const until = Date.now() + ms;
+    while (Date.now() < until) {
+      const p = await this.ask(sidecar, "/projector?drawable=1", 30000);
+      if (p && p.fitted && !p.fitting && !p.queue && !p.drawable_unprojected) return;
+      await sleep(3000);
+    }
+  }
+
+  /** The graph and the browser cell open, each with a real view behind it. */
+  private async ensurePanes(): Promise<void> {
+    const cmds = (this.app as any).commands;
+    for (const [type, cmd] of [["domvec-graph-view", "domvec-open-graph"],
+                               ["domvec-browser-view", "domvec-open-browser"]]) {
+      if (!this.app.workspace.getLeavesOfType(type).length) {
+        cmds.executeCommandById(`domvec-bridge:${cmd}`);
+        await sleep(1500);
+      }
+      for (const l of this.app.workspace.getLeavesOfType(type)) {
+        if ((l as any).loadIfDeferred) await (l as any).loadIfDeferred();
+      }
+    }
+    await sleep(500);
+  }
+
+  /** Every graph pane, emptied: the store it drew is not the one now in use. */
+  private resetGraphs(why: string): void {
+    for (const l of this.app.workspace.getLeavesOfType("domvec-graph-view")) {
+      const v: any = l.view;
+      if (v && typeof v.resetForStore === "function") v.resetForStore(why);
+    }
+  }
+
+  /** One row of the phase trace, only when something in it changed. */
+  private samplePhase(seeding: number, fitted: boolean | null): void {
+    const leaf: any = this.app.workspace.getLeavesOfType("domvec-graph-view")[0];
+    if (leaf?.isDeferred && leaf.loadIfDeferred) void leaf.loadIfDeferred();
+    const v: any = leaf?.view;
+    const data: any = v?.graph ? v.graph.graphData() : { nodes: [], links: [] };
+    const force = data.nodes.filter((n: any) => n.force);
+    const parents = new Map<string, number>();
+    for (const l of data.links) {
+      if (!l.force) continue;
+      const t = typeof l.target === "object" ? l.target.id : l.target;
+      parents.set(t, (parents.get(t) || 0) + 1);
+    }
+    const row = {
+      t: Date.now(), mode: String(v?.layoutMode ?? "none"), nodes: data.nodes.length,
+      force_nodes: force.length,
+      force_pages: force.filter((n: any) => n.level === "page").length,
+      multi_parent: [...parents.values()].filter((n) => n > 1).length,
+      drains: v?.forceStats?.drains ?? 0, fitted, seeding,
+    };
+    const trace = this.state.phases!;
+    const last = trace[trace.length - 1];
+    if (!last || last.mode !== row.mode || last.seeding !== row.seeding
+        || last.fitted !== row.fitted || last.force_pages !== row.force_pages) {
+      trace.push(row);
+    } else {
+      // Same phase: keep the latest counts on the row, not a new row.
+      Object.assign(last, { nodes: row.nodes, force_nodes: row.force_nodes,
+                            multi_parent: Math.max(last.multi_parent, row.multi_parent),
+                            drains: row.drains });
+    }
+  }
+
+  /** Every open graph pane, redrawn from the sidecar the plugin points at. */
+  private async redrawGraphs(): Promise<void> {
+    for (const l of this.app.workspace.getLeavesOfType("domvec-graph-view")) {
+      const v: any = l.view;
+      if (v && typeof v.reload === "function") {
+        try { await v.reload(); } catch { /* the pane says why itself */ }
+      }
+    }
+  }
 }
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+

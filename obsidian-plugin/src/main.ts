@@ -183,6 +183,10 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
         };
         // Closing a billboard the browser pinned lets the browser drop the
         // pin and its markdown too (`G-78`): one selection, three surfaces.
+        view.browsingUrl = () => {
+          const l = this.app.workspace.getLeavesOfType(BROWSER_VIEW)[0];
+          try { return (l?.view as any)?.webview?.getURL() || ""; } catch { return ""; }
+        };
         view.onBillboardClosed = (cid: string) => {
           for (const l of this.app.workspace.getLeavesOfType(BROWSER_VIEW)) {
             const browser = l.view as BrowserView;
@@ -233,6 +237,11 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
         // stays while the browser's markdown side holds it (`G-78`).
         // A capture rewrote chunks: their open billboards redraw. The
         // browser re-reads its own pins; this carries the other form.
+        // Every drain's delta goes to the force tree (`G-89`) the moment it
+        // is decoded -- before the capture's round trip.
+        browser.onDrain = (delta) => this.eachGraph((view) => view.forceDelta(delta));
+        browser.onCovers = (url, covers) =>
+          this.eachGraph((view) => view.coverForce(url, covers));
         browser.onDirty = (cids: string[]) =>
           this.eachGraph((view) => view.refreshBillboards(cids));
         browser.onPin = (cid: string) =>

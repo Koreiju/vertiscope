@@ -718,6 +718,14 @@ button.domvec-run-fence:hover {
   text-transform: uppercase; letter-spacing: 0.05em; }
 .domvec-pipebox-line { padding: 1px 0; }
 .domvec-pipebox-line.is-warn { color: #e3b341; }
+/* The run's verdicts, one line each, read off the app (G-75). */
+.domvec-pipebox-checks { margin: 2px 0 4px; }
+.domvec-pipebox-check { padding: 1px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.domvec-pipebox-check.is-ok .domvec-pipebox-mark { color: #3fb950; }
+.domvec-pipebox-check.is-warn { color: #e3b341; white-space: normal; }
+.domvec-pipebox-mark { display: inline-block; width: 1.1em; }
+.domvec-pipebox-id { font-weight: 600; margin-right: 2px; }
+.domvec-pipebox-evidence { opacity: 0.8; font-size: 0.92em; padding-left: 1.1em; word-break: break-all; }
 .domvec-pipebox-muted { color: #7d8590; }
 .domvec-pipebox-chain, .domvec-pipebox-strip { display: flex; gap: 4px; margin-top: 3px; flex-wrap: wrap; }
 .domvec-pipebox-step, .domvec-pipebox-cell { flex: 1 1 0; min-width: 52px; padding: 3px 4px;
@@ -755,6 +763,11 @@ button.domvec-run-fence:hover {
 .domvec-chunk-pin { position: fixed; z-index: 16; pointer-events: none;
   border: 2px solid rgba(227, 179, 65, 0.85); background: rgba(227, 179, 65, 0.07);
   border-radius: 3px; box-sizing: border-box; }
+/* The last drain's diff (G-90): what the in-page chunking just changed,
+   outlined at once and faded -- green, apart from hover (blue) and pins. */
+.domvec-diff-box { position: fixed; z-index: 15; pointer-events: none;
+  border: 1px dashed rgba(63, 185, 80, 0.9); background: rgba(63, 185, 80, 0.06);
+  border-radius: 2px; box-sizing: border-box; }
 .domvec-pipebox-mini { cursor: pointer; }
 .domvec-pipebox.is-open { box-shadow: 0 2px 14px rgba(0, 0, 0, 0.45); }
 .domvec-pipebox-full { max-height: 70vh; overflow-y: auto; }

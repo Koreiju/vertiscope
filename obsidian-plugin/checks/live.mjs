@@ -923,6 +923,138 @@ export function makeChecks(env) {
 
   const CHECKS = [
     {
+      id: "G-89",
+      asks: "the pending diff is drawn force-directed at once; transformed chunks collapse into the page view",
+      async run() {
+        // The contracts are a SEQUENCE -- empty, force, fit, collapse -- and
+        // only a store that starts empty passes through all of it. C1-C7 are
+        // read off the phase trace the fresh-store run recorded while it
+        // seeded (G-87); C8 is performed here, after the fit: a page new to
+        // the store, then a mutation on it.
+        const fixtures = await serveFixtures();
+        const page = fixtures.origin + "/live_mutate.html";
+        try {
+          const got = await evaluate(`(async () => {
+            const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+            const st = window.__domvec.verify.state();
+            const gl = app.workspace.getLeavesOfType("domvec-graph-view")[0];
+            if (gl && gl.loadIfDeferred) await gl.loadIfDeferred();
+            const v = gl && gl.view;
+            const b = (app.workspace.getLeavesOfType("domvec-browser-view")[0] || {}).view;
+            if (!v || !b) return { error: "panes not open" };
+            const PAGE = ${JSON.stringify(page)};
+            const mine = () => v.graph ? v.graph.graphData().nodes.filter((n) => n.force && n.url === b.webview.getURL()).length : 0;
+            // The page's own chunks drawn by the projector (it is expanded).
+            const projectedPage = () => v.graph ? v.graph.graphData().nodes.some((n) => !n.force && n.level !== "page" && n.url === b.webview.getURL()) : false;
+            // Every pending force node of the page hangs from something drawn
+            // by the projector or from another force node -- none floating.
+            const hungFromPage = () => {
+              if (!v.graph) return null;
+              const d = v.graph.graphData();
+              const f = d.nodes.filter((n) => n.force && n.level !== "page" && n.url === b.webview.getURL());
+              if (!f.length) return null;
+              const parented = new Set(d.links.filter((l) => l.force).map((l) => l.target.id || l.target));
+              return f.filter((n) => parented.has(n.id)).length / f.length;
+            };
+            // Wait for a condition, sampling: how long it took, and the peak.
+            const until = async (cond, ms) => {
+              const t0 = Date.now(); let peak = 0;
+              while (Date.now() - t0 < ms) { peak = Math.max(peak, mine()); if (cond()) return { ok: true, ms: Date.now() - t0, peak }; await sleep(150); }
+              return { ok: false, ms: Date.now() - t0, peak };
+            };
+            const mode_at_start = v.layoutMode;
+            // C8a: a page the store does not hold yet -- after the fit.
+            b.go(PAGE);
+            const appeared = await until(() => mine() > 0, 20000);
+            const collapsed = await until(() => mine() === 0 && projectedPage(), 60000);
+            // C8b: a mutation on that page, now projected.
+            let hung = null, mutated = false;
+            const at = await b.webview.executeJavaScript("(function(){var e=document.getElementById('add');if(!e)return null;e.scrollIntoView({block:'center'});var r=e.getBoundingClientRect();return {x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)};})()");
+            const count = () => b.webview.executeJavaScript("document.getElementById('items').children.length");
+            let second = null, secondGone = null;
+            if (at) {
+              const was = await count();
+              b.webview.focus();
+              for (const type of ["mouseDown", "mouseUp"]) b.webview.sendInputEvent({ type, x: at.x, y: at.y, button: "left", clickCount: 1 });
+              await sleep(600);
+              if ((await count()) === was) await b.webview.executeJavaScript("document.getElementById('add').click(); true");
+              mutated = (await count()) > was;
+              second = await until(() => mine() > 0, 20000);
+              hung = hungFromPage();
+              secondGone = await until(() => mine() === 0, 60000);
+            }
+            try { b.setLive(false); } catch (e) {}
+            try { b.go("about:blank"); } catch (e) {}
+            await sleep(1500);
+            try { b.setLive(true); } catch (e) {}
+            const ui = window.__domvec.ui();
+            return { phases: st.phases || null, label: st.label, mode_at_start,
+                     c8: { appeared, collapsed, mutated, second, hung_from_page: hung, second_gone: secondGone },
+                     force: (ui.graph || {}).force || null,
+                     pending: v.pendingState ? v.pendingState() : null };
+          })()`, { timeout: 300000 });
+          got.purged = await tidyFixtures(fixtures.origin);
+          if (got.error) return { pass: false, evidence: got };
+          const tr = got.phases;
+          if (!tr || !tr.length) {
+            return { pass: false, evidence: { why: "no phase trace -- G-89 is checked inside a fresh-store run", label: got.label } };
+          }
+          const firstForce = tr.findIndex((r) => r.mode === "force");
+          const firstProj = tr.findIndex((r) => r.mode === "projector");
+          const forceRows = tr.filter((r) => r.mode === "force");
+          const last = tr[tr.length - 1];
+          const c = {
+            C1_empty_first: tr[0].mode === "empty" && tr[0].force_nodes === 0,
+            C2_force_before_fit: firstForce >= 0 && (firstProj < 0 || firstForce < firstProj),
+            C2_tree: tr.every((r) => r.multi_parent === 0),
+            C3_drain_p95_ms: got.force ? got.force.ms_p95 : null,
+            C4_pages: forceRows.length ? Math.max(...forceRows.map((r) => r.force_pages)) : 0,
+            C5_force_while_unfitted: forceRows.some((r) => r.fitted === false && r.force_nodes > 0),
+            C6_projector_drawn: firstProj >= 0,
+            C7_collapsed_to: last.force_nodes,
+            C8: got.c8,
+          };
+          return {
+            pass: c.C1_empty_first && c.C2_force_before_fit && c.C2_tree
+               && c.C3_drain_p95_ms !== null && c.C3_drain_p95_ms < 50
+               && c.C4_pages >= 2 && c.C5_force_while_unfitted
+               && c.C6_projector_drawn && c.C7_collapsed_to === 0
+               && got.mode_at_start === "projector"
+               && got.c8.appeared.ok && got.c8.collapsed.ok
+               && got.c8.mutated && got.c8.second && got.c8.second.ok
+               && got.c8.hung_from_page === 1 && got.c8.second_gone && got.c8.second_gone.ok,
+            evidence: { ...c, pending: got.pending, rows: tr.length, trace: tr.slice(0, 40), label: got.label },
+          };
+        } finally {
+          await fixtures.close();
+        }
+      },
+    },
+    {
+      id: "G-90",
+      asks: "one drain, two outputs, one clock: the diff outlined on the page and in the 3D graph, both fast",
+      async run() {
+        const got = await evaluate(`(async () => {
+          const b = (app.workspace.getLeavesOfType("domvec-browser-view")[0] || {}).view;
+          const v = (app.workspace.getLeavesOfType("domvec-graph-view")[0] || {}).view;
+          const pb = b && b.pipebox;
+          const q = (xs, p) => { if (!xs || !xs.length) return null; const s = xs.slice().sort((a, b) => a - b); return Math.round(s[Math.min(s.length - 1, Math.floor(p * s.length))] * 10) / 10; };
+          return {
+            overlay: pb ? { n: pb.diffLatencies.length, p50: q(pb.diffLatencies, 0.5), p95: q(pb.diffLatencies, 0.95), last: pb.lastDiff } : null,
+            scene: v && v.forceStats ? { n: v.forceStats.toScene.length, p50: q(v.forceStats.toScene, 0.5), p95: q(v.forceStats.toScene, 0.95) } : null,
+          };
+        })()`);
+        return {
+          // Measured over every drain of the run -- the seeding and C8 -- from
+          // the instant each drain came back from the page.
+          pass: !!got.overlay && !!got.scene && got.overlay.n >= 10 && got.scene.n >= 10
+             && got.overlay.p95 !== null && got.overlay.p95 < 150
+             && got.scene.p95 !== null && got.scene.p95 < 150,
+          evidence: got,
+        };
+      },
+    },
+    {
       id: "G-53",
       asks: "the projector draws PAGES by default, not chunks",
       async run() {
@@ -1411,14 +1543,24 @@ export function makeChecks(env) {
           if (!(at.y >= 0 && at.y < at.vh && at.x >= 0 && at.x < at.vw)) {
             return { error: "the aim never came on screen", at };
           }
-          b.show("browser");
-          await b.portMarkdown(at.x, at.y);
-          await sleep(1200);
+          // A REAL right-click, through the webview's own context-menu
+          // event -- not a call to the handler with page coordinates, which
+          // skipped the one step that was broken: the event reports the
+          // point in window coordinates, and every right-click missed the
+          // page while this check passed (2026-09-26).
+          b.webview.focus();
+          b.webview.sendInputEvent({ type: "mouseDown", x: at.x, y: at.y, button: "right", clickCount: 1 });
+          b.webview.sendInputEvent({ type: "mouseUp", x: at.x, y: at.y, button: "right", clickCount: 1 });
+          await sleep(1800);
           const body = b.markdownWrap.querySelector(".domvec-browser-mdbody");
           const head = b.markdownWrap.querySelector(".domvec-browser-mdhead");
           return {
             pointed_at: at,
-            face: b.face,
+            // The page stays the surface: it is shown with a real size, and
+            // there is no face toggle left to switch it away (G-82).
+            page_shown: b.browserWrap.offsetWidth > 50 && b.browserWrap.offsetHeight > 50,
+            face_toggle: [...b.containerEl.querySelectorAll(".domvec-browser-bar button")]
+              .some((e) => /^(markdown|browser)$/.test((e.textContent || "").trim())),
             heading: head ? head.textContent : null,
             rendered_chars: body ? (body.innerText || "").length : 0,
             // Rendered, not dumped: a code block would have no elements.
@@ -1449,7 +1591,7 @@ export function makeChecks(env) {
           // ("the browser stays the main surface"), and right-click now pins
           // (G-78) with the page left showing. Scored the old way, a correct
           // app failed with rendered markdown and one ring in its evidence.
-          pass: got.face === "browser"
+          pass: got.page_shown === true && got.face_toggle === false
              && !!got.heading && got.heading.startsWith("/html")
              && got.rendered_chars > 0 && got.rendered_elements > 0
              && (got.links || []).every(
@@ -2372,12 +2514,9 @@ export function makeChecks(env) {
           if (!(at.y >= 0 && at.y < at.vh && at.x >= 0 && at.x < at.vw)) {
             return { error: "the aim never came on screen", at };
           }
-          // The cell has two FACES, and an earlier check leaves it on the
-          // other one: G-39 ports markdown into the panel, and a click aimed
-          // at a webview that is not the face on display lands on nothing.
-          // This is the state P-B1 needs, so P-B1 establishes it.
-          try { b.show("browser"); } catch (e) {}
-          await sleep(500);
+          // (The cell had two FACES until 2026-09-26 and this reset it to the
+          // page; the page is now always shown -- G-82 -- so there is no face
+          // for an earlier check to leave it on.)
           try { b.webview.focus(); } catch (e) {}
           await sleep(300);
 
@@ -2835,13 +2974,28 @@ export function makeChecks(env) {
           const bbs = ui.billboards || [];
           const bb = pin ? bbs.find((b) => b.id === pin.cid) : null;
           const card = (ui.pinned && ui.pinned.side_cards || []).find((c) => pin && c.cid === pin.cid);
+          // It must survive a REDRAW -- a refit, a new epoch, a store
+          // switch all redraw the graph -- still on screen, with its x.
+          // (Each redraw used to detach the billboard layer: the entry
+          // stayed, the element left the document, and nothing could close
+          // it. 2026-09-26.)
+          let survived = null;
+          if (pin) {
+            const g0 = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+            if (typeof g0.reload === "function") { await g0.reload(); await sleep(1500); }
+            const e0 = g0.billboards && g0.billboards.get(pin.cid);
+            survived = { entry: !!e0, in_document: !!e0 && document.contains(e0.el),
+                         has_close: !!e0 && !!e0.el.querySelector(".domvec-bb-close") };
+          }
           // ... and closing it from the GRAPH side lets go of all three.
-          let after = null;
+          let after = null, closed_via = null;
           if (pin) {
             const g = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
-            const el = [...g.containerEl.querySelectorAll(".domvec-bb")]
-              .find((e) => (e.querySelector(".domvec-bb-close")));
-            if (el) el.querySelector(".domvec-bb-close").click();
+            // THIS pin's billboard, not the first one with an x.
+            const own = g.billboards && g.billboards.get(pin.cid);
+            const x = own && own.el.querySelector(".domvec-bb-close");
+            closed_via = x ? "own billboard's x" : "no x on its billboard";
+            if (x) x.click();
             await sleep(800);
             const u2 = d.ui();
             after = { pins: (u2.pinned && u2.pinned.pins || []).length,
@@ -2851,7 +3005,7 @@ export function makeChecks(env) {
           return { target, pinned, pin, box,
                    webview: [wb.left, wb.top, wb.width, wb.height],
                    outline, billboard: bb || null, card: card || null,
-                   side_shown: ui.pinned && ui.pinned.side_shown, after };
+                   side_shown: ui.pinned && ui.pinned.side_shown, survived, closed_via, after };
         })()`, { timeout: 120000 });
         if (got.error) return { pass: false, evidence: got };
         // The outline must sit on the element's own box, clipped to the webview.
@@ -2871,6 +3025,7 @@ export function makeChecks(env) {
              && !!got.card && got.card.rendered_elements > 0
              && !!got.outline && got.outline.shown && off !== null && off <= 3
              && !!got.billboard && got.billboard.fromBrowser && got.billboard.shadow
+             && !!got.survived && got.survived.in_document && got.survived.has_close
              && !!got.after && got.after.pins === 0 && got.after.billboards === 0
              && got.after.outlines === 0,
           evidence: { ...got, outline_off_px: off },
@@ -2908,6 +3063,115 @@ export function makeChecks(env) {
         return {
           pass: !!got.billboard && got.billboard.shadow && got.shadow_elements > 1
              && got.chunk_panes === 0,
+          evidence: got,
+        };
+      },
+    },
+    {
+      id: "G-82",
+      asks: "the side panel is the only second view: page always shown, pins stack, closing one closes its three forms",
+      async run() {
+        const got = await evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const d = window.__domvec;
+          await d.act("open", "graph");
+          await d.act("open", "browser");
+          await d.act("unpin", "all");
+          await d.act("navigate", "https://en.wikipedia.org/wiki/Radix_tree");
+          await sleep(4000);
+          const view = app.workspace.getLeavesOfType("domvec-browser-view")[0].view;
+          const pageShown = () => view.browserWrap.offsetWidth > 50 && view.browserWrap.offsetHeight > 50;
+          const toggle = () => [...view.containerEl.querySelectorAll(".domvec-browser-bar button")]
+            .some((e) => /^(markdown|browser)$/.test((e.textContent || "").trim()));
+          // Pins whose paragraph is in the viewport right now: an outline is
+          // drawn for exactly those (a pin below the fold has nothing to
+          // outline, and after navigating back the page starts at the top).
+          const onScreen = async (xs) => view.webview.executeJavaScript(\`(function(xs){
+            return xs.filter(function(x){
+              var n = document.evaluate(x, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+              if (!n) return false; var b = n.getBoundingClientRect();
+              return b.bottom > 0 && b.top < innerHeight && b.width > 0;
+            }).length; })(\` + JSON.stringify(xs) + ")").catch(() => null);
+          let targetsHere = [];
+          const state = async () => {
+            const u = d.ui();
+            const here = (view.webview.getURL() || "").indexOf("Radix_tree") >= 0;
+            return {
+              pins_on_screen: here ? await onScreen(targetsHere) : 0,
+              page_shown: pageShown(),
+              side_shown: !!(u.pinned && u.pinned.side_shown),
+              cards: [...view.markdownWrap.querySelectorAll(".domvec-pin-card")].map((c) => c.dataset.cid),
+              billboards: (u.billboards || []).filter((b) => b.fromBrowser).map((b) => b.id),
+              outlines_shown: ((u.pipebox || {}).pins || []).filter((o) => o.shown).length,
+            };
+          };
+          // Two paragraphs on screen, as xpaths in the trie's convention.
+          const targets = await view.webview.executeJavaScript(\`(function(){
+            var ps = document.querySelectorAll('#mw-content-text p'), out = [];
+            for (var i = 0; i < ps.length && out.length < 2; i++) {
+              var b = ps[i].getBoundingClientRect();
+              if (!(b.height > 20 && b.top > 60 && b.bottom < innerHeight - 40)) continue;
+              var parts = [], n = ps[i];
+              while (n && n.nodeType === 1) {
+                var t = n.tagName.toLowerCase(), k = 1, s = n.previousElementSibling;
+                while (s) { if (s.tagName === n.tagName) k++; s = s.previousElementSibling; }
+                parts.unshift(k > 1 ? t + '[' + k + ']' : t); n = n.parentElement;
+              }
+              out.push('/' + parts.join('/'));
+            }
+            return out;
+          })()\`);
+          if (!targets || targets.length < 2) return { error: "fewer than two paragraphs on screen", targets };
+          targetsHere = [];
+          const before = await state();
+          const a = (await d.act("pin", targets[0])).result || {};
+          await sleep(1200);
+          const b = (await d.act("pin", targets[1])).result || {};
+          targetsHere = targets.slice();
+          await sleep(1500);
+          const two = await state();
+          // Pins persist as side panels when the page is left; their
+          // outlines belong to the page and leave with it.
+          await d.act("navigate", "https://en.wikipedia.org/wiki/Trie");
+          await sleep(3000);
+          const away = await state();
+          await d.act("navigate", "https://en.wikipedia.org/wiki/Radix_tree");
+          await sleep(4000);
+          const back = await state();
+          // Close the NEWEST from the side panel: its three forms go, the
+          // other pin's stay.
+          const newest = two.cards[0];
+          const x = view.markdownWrap.querySelector('.domvec-pin-card[data-cid="' + newest + '"] .domvec-pin-close');
+          if (x) x.click();
+          targetsHere = [targets[0]];
+          await sleep(1000);
+          const one = await state();
+          await d.act("unpin", "all");
+          await sleep(800);
+          const none = await state();
+          return { targets, pinned: [a.cid || null, b.cid || null], toggle: toggle(),
+                   before, two, away, back, one, none, closed: newest };
+        })()`, { timeout: 180000 });
+        if (got.error) return { pass: false, evidence: got };
+        const [a, b] = got.pinned;
+        const distinct = !!a && !!b && a !== b;
+        return {
+          pass: got.toggle === false
+             && [got.before, got.two, got.away, got.back, got.one, got.none].every((s) => s.page_shown)
+             && got.before.side_shown === false
+             // stacked, newest first, one billboard each
+             && distinct && got.two.side_shown && got.two.cards.join() === [b, a].join()
+             && got.two.billboards.includes(a) && got.two.billboards.includes(b)
+             // one outline per pinned paragraph ON SCREEN -- both, just pinned
+             && got.two.pins_on_screen === 2 && got.two.outlines_shown === 2
+             // away: the side keeps both, the page's outlines go
+             && got.away.cards.length === 2 && got.away.outlines_shown === 0
+             && got.back.outlines_shown === got.back.pins_on_screen
+             // closing one from the side closes its three forms only
+             && got.one.cards.join() === a && !got.one.billboards.includes(b)
+             && got.one.billboards.includes(a)
+             && got.one.outlines_shown === got.one.pins_on_screen
+             && got.none.side_shown === false && got.none.cards.length === 0,
           evidence: got,
         };
       },

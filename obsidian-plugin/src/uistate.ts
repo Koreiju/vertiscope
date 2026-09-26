@@ -70,9 +70,39 @@ function drawn(el: HTMLElement | null | undefined) {
  * drift is zero is a bad FIT, and a clump whose drift is large is a bad
  * RELAXATION, and they need different fixes.
  */
+function pct(xs: number[], q: number): number | null {
+  if (!xs || !xs.length) return null;
+  const s = xs.slice().sort((a, b) => a - b);
+  return Math.round(s[Math.min(s.length - 1, Math.floor(q * s.length))] * 10) / 10;
+}
+
+/** Force-tree nodes with more than one parent link -- must be 0 (a tree). */
+function multiParent(links: any[]): number {
+  const seen = new Map<string, number>();
+  for (const l of links || []) {
+    if (!l.force) continue;
+    const t = typeof l.target === "object" ? l.target.id : l.target;
+    seen.set(t, (seen.get(t) || 0) + 1);
+  }
+  return [...seen.values()].filter((n) => n > 1).length;
+}
+
 function graphState(view: any) {
   const g = view?.graph;
-  if (!g) return { open: true, fitted: false };
+  // The representation and its history (`G-89`): what the phase contracts
+  // are checked against, present whether or not anything is drawn yet.
+  const phase = {
+    layout_mode: view?.layoutMode ?? null,
+    phase_log: (view?.phaseLog || []).slice(-20),
+    force: view?.forceStats ? {
+      drains: view.forceStats.drains, added: view.forceStats.added,
+      removed: view.forceStats.removed, reparented: view.forceStats.reparented,
+      ms_p95: pct(view.forceStats.ms, 0.95), ms_max: Math.max(0, ...view.forceStats.ms),
+      nodes: g ? g.graphData().nodes.filter((n: any) => n.force).length : 0,
+      multi_parent: g ? multiParent(g.graphData().links) : 0,
+    } : null,
+  };
+  if (!g) return { open: true, fitted: false, ...phase };
 
   const nodes = g.graphData().nodes as any[];
   const links = g.graphData().links as any[];
@@ -246,6 +276,7 @@ function graphState(view: any) {
   return {
     open: true,
     fitted: true,
+    ...phase,
     canvas: [w, h],
     nodes: nodes.length,
     links: links.length,
@@ -285,8 +316,9 @@ function browserState(view: any) {
     open: true,
     url,
     live: !!view.live,
-    face: view.markdownWrap && view.markdownWrap.style.display !== "none"
-      ? "markdown" : "browser",
+    // The page is always the surface (`G-82`); the side holds the pins.
+    side_open: !!(view.markdownWrap && view.markdownWrap.style.display !== "none"),
+    pins: view.pinnedState ? view.pinnedState().length : 0,
     webview: drawn(view.webview),
     guest_viewport: guest,
     last_scan: view.lastScan || null,
@@ -396,6 +428,11 @@ export function uiState(app: App) {
       lines: Array.from(pb.el.querySelectorAll(
         ".domvec-pipebox-full .domvec-pipebox-line, .domvec-pipebox-full .domvec-pipebox-h"))
         .map((e: any) => (e.textContent || "").trim()),
+      // The check run AS THE BOX DRAWS IT: one row per verdict, read off
+      // the rendered rows -- where a run is observed (`G-75`).
+      checks: Array.from(pb.el.querySelectorAll(".domvec-pipebox-check")).map((e: any) => ({
+        id: e.dataset.id || null, pass: e.dataset.pass === "1",
+        text: (e.textContent || "").trim().slice(0, 400) })),
       chain: Array.from(pb.el.querySelectorAll(".domvec-pipebox-step")).map((e: any) => ({
         label: e.querySelector(".domvec-pipebox-l")?.textContent,
         value: e.querySelector(".domvec-pipebox-n")?.textContent,

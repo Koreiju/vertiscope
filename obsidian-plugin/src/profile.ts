@@ -59,6 +59,8 @@ export class PipelineProfiler {
   private counter = 0;
   /** Set by the graph view, so the listener can read the scene. */
   graphSource: (() => any) | null = null;
+  /** The graph VIEW, for what it knows beyond the renderer (`G-90`). */
+  graphView: (() => any) | null = null;
 
   begin(kind: string, url: string): Trace {
     const t: Trace = {

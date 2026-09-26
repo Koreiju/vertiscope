@@ -189,12 +189,32 @@ TOOLS: List[Dict] = [
                 "wait": {"type": "boolean", "description": "Wait for the run (default true)"},
                 "timeout_s": {"type": "number", "description": "Give up waiting after (default 1200)"},
                 "fresh": {"type": "boolean", "description": (
-                    "Run against a NEW, EMPTY store that the plugin seeds "
-                    "itself first (a fixed page list), on a second sidecar; "
-                    "the working store is untouched. Slow: minutes of "
-                    "seeding before the checks. Always waits.")},
+                    "Run against a NEW, EMPTY store: the PLUGIN starts a "
+                    "second sidecar, fills it by browsing a fixed page list, "
+                    "runs the checks and switches itself back -- all inside "
+                    "the app, shown in the corner box. The working store is "
+                    "untouched. Minutes of seeding before the checks.")},
             },
         },
+    },
+    {
+        "name": "checks_box",
+        "description": (
+            "The check run AS THE APP SHOWS IT: opens the browser cell's "
+            "corner box and reads its check list off the rendered box -- the "
+            "summary line, one row per verdict, each failure's evidence as "
+            "drawn. This is where a run is observed; verify_state is the "
+            "state object behind it."),
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "app_screenshot",
+        "description": (
+            "A PNG of the Obsidian window, written to build_analytics/ (or "
+            "`path`); returns the file path. For seeing what a person sees: "
+            "the corner box, the side panel, billboards, the graph."),
+        "inputSchema": {"type": "object", "properties": {
+            "path": {"type": "string", "description": "Where to write it (optional)"}}},
     },
     {
         "name": "verify_state",
@@ -309,6 +329,8 @@ class DomvecMCP:
             "graph_probe": self._graph_probe,
             "key_coverage": self._key_coverage,
             "confirm": self._confirm,
+            "checks_box": lambda a: self.live().observe_checks(),
+            "app_screenshot": lambda a: self.live().screenshot(str(a.get("path") or "")),
             "verify_state": self._verify_state,
             "design_state": self._design_state,
         }
@@ -367,12 +389,8 @@ class DomvecMCP:
         asked rather than the last.
         """
         if args.get("fresh"):
-            from .freshrun import fresh_run
-            got = fresh_run(args.get("only") or None,
-                            timeout_s=float(args.get("timeout_s") or 2400))
-            return {"seed": got.get("seed"), "projector": got.get("projector"),
-                    "checks": got.get("checks"), "crashes": got.get("crashes"),
-                    "workspace": got.get("workspace")}
+            return self.live().verify(args.get("only") or None, fresh=True,
+                                      timeout_s=float(args.get("timeout_s") or 2400))
         return self.live().verify(args.get("only") or None,
                                   wait=args.get("wait", True) is not False,
                                   timeout_s=float(args.get("timeout_s") or 1200))

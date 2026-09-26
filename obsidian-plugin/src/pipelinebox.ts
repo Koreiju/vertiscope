@@ -66,6 +66,13 @@ export class PipelineBox {
   private mini: HTMLElement;
   private full: HTMLElement;
   private outline: HTMLElement;
+  /** Boxes outlining the last drain's diff (`G-90`), reused drain to drain. */
+  private diffEls: HTMLElement[] = [];
+  private diffTimer = 0;
+  /** Drain-to-overlay times, ms: the browser half of the `G-90` profile. */
+  diffLatencies: number[] = [];
+  /** What the last flash outlined, for the harness. */
+  lastDiff: { at: number; asked: number; drawn: number; ms: number } | null = null;
   /** Open because someone ASKED -- a click, or the harness on an MCP
    *  tool's behalf (`G-76`). Stays open until asked to close. */
   private userOpen = false;
@@ -271,27 +278,117 @@ export class PipelineBox {
     if (this.expanded) this.draw();
   }
 
+  /** The last flash's own cost: placing the boxes, and the frame they paint in. */
+  diffPlaced: number[] = [];
+
+  /**
+   * Outline a drain's diff from the boxes that came back WITH the drain
+   * (`G-90`): no crossing into the page, placement only. `placed` is the
+   * time from the drain returning to the boxes being in position; the
+   * latency recorded is to the next frame, when they are painted.
+   */
+  flashBoxes(boxes: (number[] | null)[], t0: number, traceId: string): void {
+    const rects = boxes.slice(0, 64);
+    while (this.diffEls.length < rects.length) {
+      this.diffEls.push(this.wrap.createDiv({ cls: "domvec-diff-box" }));
+    }
+    let drawn = 0;
+    this.diffEls.forEach((el, i) => {
+      const r = i < rects.length ? rects[i] : null;
+      if (r) {
+        this.placeBox(el, { x: r[0], y: r[1], w: r[2], h: r[3] });
+        if (el.style.display !== "none") drawn++;
+      } else el.hide();
+    });
+    const placed = performance.now() - t0;
+    this.diffPlaced.push(placed);
+    if (this.diffPlaced.length > 500) this.diffPlaced.shift();
+    window.requestAnimationFrame(() => {
+      const ms = performance.now() - t0;
+      this.diffLatencies.push(ms);
+      if (this.diffLatencies.length > 500) this.diffLatencies.shift();
+      this.lastDiff = { at: Date.now(), asked: boxes.length, drawn, ms };
+      const t = traceId ? profiler().get(traceId) : undefined;
+      if (t) { profiler().stage(t, "drain_to_overlay", ms); profiler().stage(t, "overlay_placed", placed); }
+    });
+    window.clearTimeout(this.diffTimer);
+    this.diffTimer = window.setTimeout(() => this.diffEls.forEach((el) => el.hide()), 1200);
+  }
+
+  /**
+   * Outline the chunk set a drain just changed, at once (`G-90`).
+   *
+   * The in-page chunking has named the chunks that moved; this draws one box
+   * per chunk over the page, in one in-page read of their boxes, before the
+   * capture has even left for the sidecar -- the browser's half of "fastest
+   * to screen". Timed from the instant the drain came back, the same instant
+   * the 3D graph's half is timed from, and the boxes fade after a moment so
+   * the next diff reads as the next diff.
+   */
+  async flashDiff(addresses: string[], t0: number, traceId: string): Promise<void> {
+    const wv = this.webview();
+    if (!wv || !addresses.length) return;
+    const xs = addresses.filter((a) => a.indexOf("#shadow-root") < 0).slice(0, 64);
+    const rects: any[] = (await within<any>(wv.executeJavaScript(
+      "(function(xs){return xs.map(function(x){var n=document.evaluate(x,document," +
+      "null,XPathResult.FIRST_ORDERED_NODE_TYPE,null).singleNodeValue;" +
+      "if(!n)return null;var b=n.getBoundingClientRect();" +
+      "return {x:b.left,y:b.top,w:b.width,h:b.height};});})(" +
+      JSON.stringify(xs) + ")"), 400).catch(() => null)) || [];
+    while (this.diffEls.length < rects.length) {
+      this.diffEls.push(this.wrap.createDiv({ cls: "domvec-diff-box" }));
+    }
+    let drawn = 0;
+    this.diffEls.forEach((el, i) => {
+      const r = rects[i];
+      if (i < rects.length && r) { this.placeBox(el, r); if (el.isShown()) drawn++; }
+      else el.hide();
+    });
+    window.requestAnimationFrame(() => {
+      const ms = performance.now() - t0;
+      this.diffLatencies.push(ms);
+      if (this.diffLatencies.length > 500) this.diffLatencies.shift();
+      this.lastDiff = { at: Date.now(), asked: addresses.length, drawn, ms };
+      const t = traceId ? profiler().get(traceId) : undefined;
+      if (t) profiler().stage(t, "drain_to_overlay", ms);
+    });
+    window.clearTimeout(this.diffTimer);
+    this.diffTimer = window.setTimeout(() => this.diffEls.forEach((el) => el.hide()), 1200);
+  }
+
   /** Each pinned chunk's box, measured in the page and outlined over it. */
   private async placePins() {
     const wv = this.webview();
     if (!wv || !this.pins.length) return;
+    // **A pin is outlined on ITS page only** (`G-82`). Its side panel stays
+    // when the reader browses on; its outline belongs to the page it was
+    // pinned on. The fallback below evaluates the pin's xpath in whatever
+    // page is showing, and pages built from one template share addresses:
+    // a Radix tree paragraph pinned, then Trie opened, and the outline sat on
+    // an unrelated Trie paragraph at the same address (2026-09-26).
+    const here = this.url();
+    const mine = this.pins.filter((p) => p.url === here);
+    for (const pin of this.pins) {
+      if (pin.url !== here) this.pinEls.get(pin.cid)?.hide();
+    }
+    if (!mine.length) return;
     // The pinned chunk's whole extent, as for hover; the matched element
-    // alone only when the map does not know the chunk (another page).
-    if (this.map.url === this.url()) {
-      for (const pin of this.pins) {
+    // alone only when the map does not know the chunk.
+    if (this.map.url === here) {
+      for (const pin of mine) {
         const el = this.pinEls.get(pin.cid);
         const xs = this.map.xpaths(pin.cid);
         if (el && xs.length) this.placeBox(el, await this.unionRect(xs));
       }
-      if (this.pins.every((p) => this.map.xpaths(p.cid).length)) return;
+      if (mine.every((p) => this.map.xpaths(p.cid).length)) return;
     }
     const rects: any = await wv.executeJavaScript(
       "(function(xs){return xs.map(function(x){var n=document.evaluate(x,document," +
       "null,XPathResult.FIRST_ORDERED_NODE_TYPE,null).singleNodeValue;" +
       "if(n&&n.nodeType===3)n=n.parentElement;if(!n)return null;" +
       "var b=n.getBoundingClientRect();return {x:b.left,y:b.top,w:b.width,h:b.height};});})(" +
-      JSON.stringify(this.pins.map((x) => x.matched)) + ")").catch(() => null);
-    this.pins.forEach((pin, i) => {
+      JSON.stringify(mine.map((x) => x.matched)) + ")").catch(() => null);
+    mine.forEach((pin, i) => {
       const el = this.pinEls.get(pin.cid);
       const r = rects && rects[i];
       if (el) this.placeBox(el, r || null);
@@ -362,14 +459,17 @@ export class PipelineBox {
     if (!g || !url) return null;
     try {
       const nodes = g.graphData().nodes as any[];
-      let chunks = 0, hub = false, hovered = false;
+      let chunks = 0, hub = false, hovered = false, force = 0, forceAll = 0;
       for (const n of nodes) {
+        // The force tree (`G-89`) is drawn from the drains, not the store:
+        // counted apart, so "in graph" never mixes the two.
+        if (n.force) { forceAll++; if (n.url === url) force++; continue; }
         if (n.url !== url) continue;
         if (n.level === "page") hub = true;
         else chunks++;
         if (this.hover && n.id === this.hover.cid) hovered = true;
       }
-      return { chunks, hub, hovered };
+      return { chunks, hub, hovered, force, forceAll };
     } catch {
       return null;
     }
@@ -435,7 +535,9 @@ export class PipelineBox {
     } else {
       const parts: string[] = [];
       if (lastSeen) parts.push(fmt(lastSeen.stages.end_to_end));
-      parts.push(`${proj ? proj.chunks : "?"}/${drawable} in graph`);
+      parts.push(proj && proj.forceAll
+        ? `${proj.force} in the force tree`
+        : `${proj ? proj.chunks : "?"}/${drawable} in graph`);
       this.mini.createSpan({ text: parts.join(" · ") });
     }
 
@@ -474,11 +576,38 @@ export class PipelineBox {
     step("in graph", proj ? proj.chunks : "?", drawable, !!proj && proj.chunks >= drawable);
     step("page hub", proj ? (proj.hub ? "yes" : "no") : "?", 0, !!proj && proj.hub);
     if (s.empty_md) this.line(`${s.empty_md} chunks stored with no markdown`, true);
-    if (proj && !proj.hub) this.line("chunks are in the graph with no page node to hang from", true);
+    if (proj && !proj.hub && proj.chunks > 0) {
+      this.line("chunks are in the graph with no page node to hang from", true);
+    }
+    if (proj && proj.forceAll) {
+      this.line(`force tree: ${proj.force} nodes for this page, ${proj.forceAll} in all -- ` +
+                "drawn from the drains, before any embedding (G-89)");
+    }
 
     this.line(`window ${s.window} tokens · chunk p50 ${s.tokens_p50}, max ${s.tokens_max}` +
               (s.over_window ? ` · ${s.over_window} OVER the window` : " · none over"),
               s.over_window > 0);
+
+    // ---- fastest to screen: one drain, two outputs (`G-90`) ------------------
+    {
+      const view: any = profiler().graphView ? profiler().graphView!() : null;
+      const scene: number[] = view?.forceStats?.toScene || [];
+      const over = this.diffLatencies;
+      if (over.length || scene.length) {
+        this.section("Drain to screen");
+        const q = (xs: number[], p: number) => {
+          if (!xs.length) return null;
+          const s = xs.slice().sort((a, b) => a - b);
+          return s[Math.min(s.length - 1, Math.floor(p * s.length))];
+        };
+        const placed = this.diffPlaced;
+        this.line(`page overlay placed ${fmt(placed[placed.length - 1])} (p95 ${fmt(q(placed, 0.95))}) · ` +
+                  `painted ${fmt(over[over.length - 1])} (p95 ${fmt(q(over, 0.95))}, n ${over.length})` +
+                  (this.lastDiff ? ` · ${this.lastDiff.drawn}/${this.lastDiff.asked} chunks outlined` : ""));
+        this.line(`3D graph ${fmt(scene[scene.length - 1])} (p95 ${fmt(q(scene, 0.95))}, n ${scene.length})` +
+                  (view ? ` · ${view.layoutMode}` : ""));
+      }
+    }
 
     // ---- the last drain ----------------------------------------------------
     if (last) {
@@ -532,7 +661,11 @@ export class PipelineBox {
                 (s.anchor === "estimated" ? " (placed into the fit, refit will fit it)" : ""),
                 s.anchor === "none");
     } else {
-      this.line("no fit in this process yet — open the graph", true);
+      // Said as what it is: the projector has no fit yet. The graph is
+      // usually open -- it draws the force tree meanwhile.
+      this.line(proj && proj.forceAll
+        ? "no fit yet — the graph shows the force tree until the projector fits"
+        : "no fit yet — the projector fits once enough chunks have vectors", !(proj && proj.forceAll));
     }
 
     // ---- under the pointer ------------------------------------------------
@@ -560,11 +693,14 @@ export class PipelineBox {
     this.section("Checks, run in this app");
     const row = this.dyn.createDiv({ cls: "domvec-pipebox-line" });
     if (st.running) {
-      row.setText(`running ${st.done}/${st.total} · ${st.current}`);
+      row.setText(`running ${st.done}/${st.total} · ${st.current}` +
+                  (st.label ? ` · ${st.label}` : ""));
     } else if (st.run) {
       const passed = st.results.filter((r: any) => r.pass).length;
       const secs = Math.round((st.finishedAt - st.startedAt) / 1000);
-      row.setText(`${passed} of ${st.results.length} pass · ${secs} s` +
+      const when = new Date(st.finishedAt).toTimeString().slice(0, 5);
+      row.setText(`${passed} of ${st.results.length} pass · ${secs} s · ${when}` +
+                  (st.label ? ` · ${st.label}` : "") +
                   (st.stoppedBecause ? ` · stopped: ${st.stoppedBecause}` : ""));
       if (passed < st.results.length) row.addClass("is-warn");
     } else {
@@ -574,11 +710,50 @@ export class PipelineBox {
     if (!st.running) {
       const go = row.createEl("button", { text: "run all", cls: "domvec-pipebox-run" });
       go.onclick = (e) => { e.stopPropagation(); v.start(); this.draw(); };
+      // The same checks on a store this app starts empty and fills itself.
+      const fresh = row.createEl("button", { text: "fresh store", cls: "domvec-pipebox-run" });
+      fresh.title = "start an empty store, fill it by browsing, run every check, switch back";
+      fresh.onclick = (e) => { e.stopPropagation(); v.startFresh(); this.draw(); };
     }
-    for (const r of (st.results || []).filter((x: any) => !x.pass)) {
-      const f = this.dyn.createDiv({ cls: "domvec-pipebox-line is-warn" });
-      f.setText(`FAIL ${r.id} · ${r.asks}`);
-      f.title = JSON.stringify(r.evidence).slice(0, 600);
+    // A fresh-store run's own steps: what it browsed, and that it put the
+    // app back afterwards.
+    const seed = st.seed || [];
+    if (seed.length) {
+      const held = seed.filter((r: any) => r.held).length;
+      const last = seed[seed.length - 1];
+      this.line(`seeded ${held} of ${seed.length} pages · ${last.chunks ?? "?"} chunks`,
+                held < seed.length);
+      for (const r of seed.filter((x: any) => !x.held)) {
+        this.line(`not held: ${String(r.url).slice(0, 60)}`, true);
+      }
+    }
+    if (st.teardown) {
+      this.line(`back on ${st.teardown.sidecar} · test sidecar ` +
+                (st.teardown.test_sidecar_stopped ? "stopped" : "STILL RUNNING"),
+                !st.teardown.test_sidecar_stopped);
+    }
+    // EVERY verdict, not only the failures: this box is where a run is
+    // read (2026-09-26: "you observe the results within the app itself"),
+    // so a pass has to be visible as a pass, with how long it took. A
+    // failure carries its evidence inline -- a tooltip is invisible to a
+    // reader and to anyone reading the box -- trimmed to what fits.
+    const list = this.dyn.createDiv({ cls: "domvec-pipebox-checks" });
+    for (const r of st.results || []) {
+      const f = list.createDiv({
+        cls: `domvec-pipebox-check ${r.pass ? "is-ok" : "is-warn"}` });
+      f.dataset.id = r.id;
+      f.dataset.pass = r.pass ? "1" : "0";
+      f.createSpan({ cls: "domvec-pipebox-mark", text: r.pass ? "✓" : "✗" });
+      f.createSpan({ cls: "domvec-pipebox-id", text: r.id });
+      f.createSpan({ text: ` ${r.asks} · ${fmt(r.ms)}` });
+      if (!r.pass) {
+        f.createDiv({ cls: "domvec-pipebox-evidence",
+                      text: JSON.stringify(r.evidence ?? null).slice(0, 360) });
+      }
+    }
+    if (st.running && st.current) {
+      list.createDiv({ cls: "domvec-pipebox-check domvec-pipebox-muted",
+                       text: `… ${st.current}` });
     }
   }
 

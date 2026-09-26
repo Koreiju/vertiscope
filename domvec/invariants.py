@@ -564,6 +564,9 @@ _LAYOUT_READERS = {
     # from Python with an explicit address list, and it never runs during a
     # drain -- which is what keeps geometry out of the trie.
     "styles",
+    # The box peripheral (G-90): the host calls it after a drain, in the same
+    # round trip, for the chunks that drain named -- never during the fold.
+    "boxes",
     # The actuator. `step` has to know what is on screen before it scrolls,
     # and it runs once per step rather than once per node.
     "inView",
