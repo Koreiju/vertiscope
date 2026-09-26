@@ -361,12 +361,15 @@ export function uiState(app: App) {
       profile: paneOf(PROFILE_VIEW),
     },
   };
-  // What the profile pane is SHOWING, read off its DOM, so a check can
+  // What the profile readout is SHOWING, read off its DOM, so a check can
   // compare the displayed figures with the profiler's own summary instead
-  // of trusting that the pane drew what it was given.
-  const pl: any = leavesOf(PROFILE_VIEW)[0];
-  if (pl && !pl.isDeferred && pl.view) {
-    const el: HTMLElement | undefined = pl.view.containerEl;
+  // of trusting that it drew what it was given. It lives in the browser
+  // cell's corner box now (`G-76`), not in a pane of its own.
+  const bl0: any = leavesOf(BROWSER_VIEW)[0];
+  const profileEl: HTMLElement | null = bl0 && !bl0.isDeferred && bl0.view?.pipebox
+    ? bl0.view.pipebox.el.querySelector(".domvec-pipebox-profile") : null;
+  if (profileEl) {
+    const el: HTMLElement | undefined = profileEl;
     const val = el?.querySelector(".domvec-profile-e2e-value")?.textContent || null;
     const rows = el ? Array.from(el.querySelectorAll(".domvec-profile-row:not(.is-header)"))
       .map((r) => Array.from(r.children).map((c) => (c.textContent || "").trim())) : [];
@@ -400,14 +403,27 @@ export function uiState(app: App) {
       // Where the box sits relative to the cell: it must be the bottom-right.
       corner: { right: Math.round(host.right - box.right), bottom: Math.round(host.bottom - box.bottom) },
       hover: pb.hover ? { cid: pb.hover.cid, walked: pb.hover.walked, rect: pb.hover.rect } : null,
+      // Open because someone asked (a click, or a tool) -- vs a hover peek.
+      asked_open: pb.el.classList.contains("is-open"),
+      // Each pinned chunk's outline, where it is drawn on screen (`G-78`).
+      pins: Array.from(document.querySelectorAll(".domvec-chunk-pin")).map((e: any) => {
+        const r = e.getBoundingClientRect();
+        return { shown: e.style.display !== "none",
+                 rect: [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)] };
+      }),
       outline: outline && outline.style.display !== "none" ? {
         left: outline.style.left, top: outline.style.top,
         width: outline.style.width, height: outline.style.height } : null,
     };
   }
-  // The status-bar readout exists whether or not the pane is open, so it is
-  // read whether or not the pane is open.
-  out.status_bar = document.querySelector(".domvec-profile-status")?.textContent || null;
+  // The plugin's own panes that are open. Statistics and a chunk's two forms
+  // have no pane of their own any more (`G-76`, `G-77`); a pane of either
+  // kind showing up here is a regression.
+  out.separate_panes = {
+    chunk: leavesOf(CHUNK_VIEW).length,
+    profile: leavesOf(PROFILE_VIEW).length,
+    status_bar_readout: !!document.querySelector(".domvec-profile-status"),
+  };
 
   const g: any = leavesOf(GRAPH_VIEW)[0];
   if (g && !g.isDeferred && g.view) {
@@ -418,6 +434,22 @@ export function uiState(app: App) {
   if (b && !b.isDeferred && b.view?.webview) {
     try { out.browser = browserState(b.view); }
     catch (e) { out.browser = { open: true, error: String(e).slice(0, 160) }; }
+    // The pinned chunks and the markdown side that shows them (`G-78`).
+    try {
+      const md = b.view.containerEl.querySelector(".domvec-browser-md") as HTMLElement | null;
+      out.pinned = {
+        pins: typeof b.view.pinnedState === "function" ? b.view.pinnedState() : [],
+        side_shown: !!md && md.style.display !== "none" && md.classList.contains("is-side"),
+        side_cards: md ? Array.from(md.querySelectorAll(".domvec-pin-card"))
+          .map((c: any) => ({ cid: c.dataset.cid,
+                              rendered_elements: c.querySelectorAll(".domvec-browser-mdbody *").length })) : [],
+      };
+    } catch (e) { out.pinned = { error: String(e).slice(0, 160) }; }
+  }
+  // The billboards open in the graph, and whether each is the chunk's
+  // shadow-DOM form (`G-77`) and held open by the browser (`G-78`).
+  if (g && !g.isDeferred && g.view && typeof g.view.billboardState === "function") {
+    out.billboards = g.view.billboardState();
   }
   const c: any = leavesOf(CHUNK_VIEW)[0];
   if (c && !c.isDeferred && c.view) {

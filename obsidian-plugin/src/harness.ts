@@ -238,9 +238,10 @@ export function installHarness(app: App, sidecarBase: () => string) {
   async function gesture(name: string, arg?: any): Promise<any> {
     switch (name) {
       case "open": {
+        // No `profile`: the pipeline's statistics are the browser cell's
+        // corner box now (`G-76`) -- see the `pipebox` gesture.
         const cmd = { graph: "domvec-open-graph", browser: "domvec-open-browser",
-                      terminal: "domvec-open-terminal",
-                      profile: "domvec-open-profile" }[arg as string];
+                      terminal: "domvec-open-terminal" }[arg as string];
         if (!cmd) return { error: "no such pane: " + arg };
         // **Prefixed with the plugin id**, which is how Obsidian stores a
         // plugin's commands. Called bare, `executeCommandById` returns false
@@ -430,6 +431,55 @@ export function installHarness(app: App, sidecarBase: () => string) {
         }
         await sleep(1500);
         return { level: arg };
+      }
+      /**
+       * Open or close the pipeline readout in the browser's corner (`G-76`).
+       * The same state a reader's click sets -- so what a tool opens, the
+       * person watching sees open.
+       */
+      case "pipebox": {
+        const l = await ready("domvec-browser-view");
+        const pb: any = l?.view?.pipebox;
+        if (!pb) return { error: "no corner box" };
+        const want = arg === "toggle" ? !pb.expanded : arg !== "close";
+        pb.setExpanded(want);
+        await sleep(300);
+        return { expanded: pb.expanded };
+      }
+      /**
+       * Pin a chunk, as a right-click does (`G-78`). `arg` is an xpath in
+       * the page, or `{x, y}` in the page's viewport. Returns what pinned it
+       * -- the outline, the markdown side and the billboard are read back
+       * from `ui()`, not asserted here.
+       */
+      case "pin": {
+        const l = await ready("domvec-browser-view");
+        const view: any = l?.view;
+        if (!view) return { error: "no browser" };
+        let xpath = typeof arg === "string" ? arg : "";
+        if (!xpath && arg && typeof arg.x === "number") {
+          xpath = await view.webview.executeJavaScript(
+            "(function(){var el=document.elementFromPoint(" + arg.x + "," + arg.y + ");" +
+            "if(!el) return '';var parts=[];" +
+            "while(el && el.nodeType===1 && el.tagName){" +
+            "var tag=el.tagName.toLowerCase(),i=1,sib=el.previousElementSibling;" +
+            "while(sib){if(sib.tagName===el.tagName)i++;sib=sib.previousElementSibling;}" +
+            "parts.unshift(i>1?tag+'['+i+']':tag);el=el.parentElement;}" +
+            "return '/'+parts.join('/');})()");
+        }
+        if (!xpath) return { error: "nothing to pin" };
+        const got = await view.pinXpath(xpath);
+        await sleep(1500);
+        return got;
+      }
+      case "unpin": {
+        const l = await ready("domvec-browser-view");
+        const view: any = l?.view;
+        if (!view) return { error: "no browser" };
+        const all = view.pinnedState().map((p: any) => p.cid);
+        for (const cid of (arg === "all" || !arg) ? all : [arg]) view.unpin(cid);
+        await sleep(500);
+        return { unpinned: arg || "all", left: view.pinnedState().length };
       }
       default:
         return { error: "unknown gesture: " + name };

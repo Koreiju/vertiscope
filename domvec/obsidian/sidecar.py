@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import threading
+from pathlib import Path
 from collections import deque
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -611,6 +612,33 @@ class _Handler(BaseHTTPRequestHandler):
         # nothing, it asks the existing fit where a point lands.
         # One step of unravelling a page's path (`G-54`). Read-only: it
         # fits nothing and stores nothing.
+        # Hover-first (`G-80`): the chunks under the reader's pointer jump the
+        # encoder's queue and the projector's, so what they point at is what
+        # is embedded and drawn next. Nothing is written; only order changes.
+        if route == "focus":
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(length) or b"{}")
+            except Exception as exc:                # noqa: BLE001
+                self._send(400, {"error": "bad body: %s" % exc})
+                return
+            if self.workspace is None:
+                self._send(503, {"error": "no workspace"})
+                return
+            cids = [str(c) for c in (body.get("cids") or []) if c][:64]
+            from .projector import projector as _get_projector
+            proj = _get_projector()
+            with _WORK_LOCK:
+                embed_first = self.workspace.vectors.prioritize(cids)
+            projected = proj.prioritize(cids) if proj is not None else 0
+            if embed_first:
+                _EMBED_WANTED.set()
+            _profile("focus", {"cids": len(cids), "embed_first": embed_first,
+                               "project_first": projected})
+            self._send(200, {"cids": len(cids), "embed_first": embed_first,
+                             "project_first": projected})
+            return
+
         if route == "unfold":
             try:
                 length = int(self.headers.get("Content-Length") or 0)
@@ -1999,6 +2027,12 @@ def serve(workspace, port: int = 8787, *, block: bool = True,
     # **The chunk projector.** One fit over every drawable chunk, made off
     # the request path; then a worker that drains the stream the embedder and
     # the capture path feed it, and refits in the background at 2x growth.
+    # The statement kuzu is running, recorded before it runs (`D-23`): the
+    # sidecar segfaults natively in kuzu under load, and a crash leaves no
+    # Python frame that names the statement. `supervise` reads this back.
+    if workspace is not None and hasattr(workspace.store, "enable_breadcrumb"):
+        workspace.store.enable_breadcrumb(Path(workspace.path) / "last_statement.txt")
+
     if workspace is not None:
         from . import projector as _projector
         if _projector.PROJECTOR is None:

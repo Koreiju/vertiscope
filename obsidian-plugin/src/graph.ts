@@ -25,6 +25,7 @@ import { forceCollide } from "d3-force-3d";
 import * as THREE from "three";
 
 import { Sidecar } from "./sidecar";
+import { ChunkSurface, SurfaceHost } from "./surface";
 
 export const GRAPH_VIEW = "domvec-graph-view";
 
@@ -308,6 +309,11 @@ export class GraphView extends ItemView {
   //  same node twice does not stack two of them.
   private billboards = new Map<string, {
     el: HTMLElement; node: any; pinned: boolean;
+    /** The mounted chunk surface, released when the billboard closes. */
+    surface?: ChunkSurface | null;
+    /** Opened by a right-click in the browser (`G-78`): it stays until the
+     *  markdown side lets it go, and a click on the node does not close it. */
+    fromBrowser?: boolean;
   }>();
   private billboardFrame = 0;
   private billboardLayer: HTMLElement | null = null;
@@ -325,7 +331,8 @@ export class GraphView extends ItemView {
    *  detached canvas keeps the view, its WebGL context and its 5,337 node
    *  objects alive for as long as the app runs. */
   private resizeObserver: ResizeObserver | null = null;
-  private onPick: (cid: string) => void;
+  /** Where billboards fetch and enact from: the plugin. */
+  private surfaceHost: SurfaceHost;
   /** Ask the browser's overlay to restrict its ranking to one page, or to
    *  release it (`G-70`). Set by the plugin, because a graph pane must work
    *  with no browser open. */
@@ -337,10 +344,10 @@ export class GraphView extends ItemView {
   onReveal: (url: string, xpath: string) => void = () => {};
 
   constructor(leaf: WorkspaceLeaf, private sidecar: Sidecar,
-              onPick: (cid: string) => void,
+              surfaceHost: SurfaceHost,
               private media: () => boolean) {
     super(leaf);
-    this.onPick = onPick;
+    this.surfaceHost = surfaceHost;
   }
 
   getViewType() { return GRAPH_VIEW; }
@@ -926,13 +933,15 @@ export class GraphView extends ItemView {
    * a reader says "keep this where I can see it", and a panel that snapped
    * back would be arguing with them.
    */
-  async openBillboard(node: any): Promise<void> {
+  async openBillboard(node: any, fromBrowser = false): Promise<void> {
     if (!node || !node.id || !this.graph) return;
     const existing = this.billboards.get(node.id);
-    if (existing) {                       // a second click closes it
-      existing.el.remove();
-      this.billboards.delete(node.id);
-      this.stopBillboardLoop();
+    if (existing) {
+      if (fromBrowser) { existing.fromBrowser = true; return; }
+      // A second click closes it -- unless the browser's markdown side is
+      // holding it open, in which case that side is where it closes.
+      if (existing.fromBrowser) return;
+      this.closeBillboard(node.id);
       return;
     }
     if (!this.billboardLayer) {
@@ -946,14 +955,13 @@ export class GraphView extends ItemView {
     close.setText("\u00d7");
     close.onclick = (e: MouseEvent) => {
       e.stopPropagation();
-      el.remove();
-      this.billboards.delete(node.id);
-      this.stopBillboardLoop();
+      this.closeBillboard(node.id);
+      this.onBillboardClosed(node.id);
     };
     const body = el.createDiv({ cls: "domvec-bb-body" });
     body.setText("\u2026");
 
-    const entry = { el, node, pinned: false };
+    const entry: any = { el, node, pinned: false, surface: null, fromBrowser };
     this.billboards.set(node.id, entry);
     this.positionBillboard(entry);
     this.startBillboardLoop();
@@ -980,23 +988,87 @@ export class GraphView extends ItemView {
       head.addEventListener("pointerup", up);
     };
 
-    // The content, from the store -- the same panel, in a different place.
-    const got = await this.sidecar.chunk(node.id);
-    const lines = (got && (got.lines as { text: string }[])) || [];
+    // **The chunk's rendered shadow-DOM form (`G-77`)** -- the same
+    // `ChunkSurface` a note fence mounts, forced to its interactive form: the
+    // distilled HTML in an open shadow root. It replaced both a text-only
+    // list of lines here and the separate chunk pane; the markdown form is
+    // the browser's markdown side.
     body.empty();
-    if (!lines.length) {
-      body.setText(node.level === "page" || node.level === "path"
-        ? "a page stands for its chunks -- click to unravel it"
-        : "no panel for this node");
+    if (node.level === "page" || node.level === "path") {
+      body.setText("a page stands for its chunks -- click to unravel it");
       return;
     }
-    for (const line of lines.slice(0, 40)) {
-      body.createDiv({ cls: "domvec-bb-line" }).setText(line.text);
+    const surface = new ChunkSurface(body, node.id, this.surfaceHost,
+                                     { interactive: true });
+    entry.surface = surface;
+    this.addChild(surface);
+  }
+
+  /**
+   * A capture rewrote some chunks: redraw the billboards showing them, so an
+   * open shadow-DOM form never shows what the page used to say (`S-12`; it
+   * was the chunk pane's `refreshIf`, and the pane is gone).
+   */
+  refreshBillboards(cids: string[]): void {
+    const changed = new Set(cids);
+    for (const [id, entry] of this.billboards.entries() as any) {
+      if (!changed.has(id) || !entry.surface) continue;
+      const body = entry.el.querySelector(".domvec-bb-body") as HTMLElement | null;
+      if (!body) continue;
+      this.removeChild(entry.surface);
+      body.empty();
+      entry.surface = new ChunkSurface(body, id, this.surfaceHost,
+                                       { interactive: true });
+      this.addChild(entry.surface);
     }
-    if (lines.length > 40) {
-      body.createDiv({ cls: "domvec-bb-more" })
-        .setText(`\u2026 ${lines.length - 40} more lines`);
+  }
+
+  /** Close one billboard and release its surface. */
+  closeBillboard(id: string): void {
+    const entry: any = this.billboards.get(id);
+    if (!entry) return;
+    if (entry.surface) this.removeChild(entry.surface);
+    entry.el.remove();
+    this.billboards.delete(id);
+    this.stopBillboardLoop();
+  }
+
+  /** Told when the reader closes a billboard with its x, so the browser can
+   *  drop the matching pin and markdown (`G-78`). Assigned by the plugin. */
+  onBillboardClosed: (id: string) => void = () => {};
+
+  /**
+   * Open a chunk's billboard because the browser pinned it (`G-78`).
+   *
+   * Placed first if the graph does not draw it yet -- a right-click on a
+   * page whose chunks are not in the picture still gets its billboard.
+   */
+  async pinChunk(cid: string): Promise<boolean> {
+    if (!this.graph || !cid) return false;
+    let node = this.graph.graphData().nodes.find((n: any) => n.id === cid);
+    if (!node) {
+      const got: any = await this.sidecar.place([cid]);
+      if (got?.nodes?.length) this.absorb(got.nodes, got.edges);
+      node = this.graph.graphData().nodes.find((n: any) => n.id === cid);
     }
+    if (!node) return false;
+    await this.openBillboard(node, true);
+    return true;
+  }
+
+  /** The browser let a chunk go: close its billboard. */
+  unpinChunk(cid: string): void {
+    const entry: any = this.billboards.get(cid);
+    if (entry && entry.fromBrowser) this.closeBillboard(cid);
+  }
+
+  /** Which billboards are open, and which the browser holds -- for the
+   *  harness, so a check reads the pane rather than re-deriving it. */
+  billboardState(): { id: string; fromBrowser: boolean; shadow: boolean }[] {
+    return [...this.billboards.entries()].map(([id, e]: [string, any]) => ({
+      id, fromBrowser: !!e.fromBrowser,
+      shadow: !!e.el.querySelector(".domvec-html-host")?.shadowRoot,
+    }));
   }
 
   /** Put a billboard where its node is, in screen coordinates. */

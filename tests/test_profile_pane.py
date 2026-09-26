@@ -1,4 +1,8 @@
-"""The pipeline profile pane shows what the profiler measured -- and changes.
+"""The pipeline profile readout shows what the profiler measured -- and changes.
+
+It is not a pane any more (`G-76`): it is a section of the corner box over
+the Electron browser, opened with the harness's `pipebox` gesture -- the same
+state a reader's click sets.
 
 A pane that displays numbers can be wrong in two ways a screenshot will not
 catch: it can show a figure the profiler never produced, and it can keep
@@ -29,9 +33,11 @@ def live():
     from domvec.obsidian.live import Live
     got = Live()
     got.reload_plugin()
-    opened = got.act("open", "profile").get("result") or {}
-    assert opened.get("opened") == "profile", opened
-    time.sleep(2)
+    opened = got.act("open", "browser").get("result") or {}
+    assert opened.get("opened") == "browser", opened
+    box = got.act("pipebox", "open").get("result") or {}
+    assert box.get("expanded") is True, box
+    time.sleep(3)
     return got
 
 
@@ -49,10 +55,12 @@ def test_open_fails_loudly_for_a_pane_that_does_not_exist(live):
     assert "error" in got, "open reported success for a pane that does not exist"
 
 
-def test_the_pane_is_open_and_drawn(live):
-    pane = (live.ui().get("panes") or {}).get("profile") or {}
-    assert pane.get("open"), "the profile pane did not open"
-    assert (pane.get("container") or {}).get("drawn"), "open but not drawn"
+def test_the_readout_is_open_in_the_corner_box_and_no_pane_exists(live):
+    ui = live.ui()
+    box = ui.get("pipebox") or {}
+    assert box.get("expanded") and box.get("asked_open"), box
+    assert (ui.get("profile") or {}).get("e2e_shown") is not None,         "the corner box is open but the profile readout drew nothing"
+    assert (ui.get("separate_panes") or {}).get("profile") == 0,         "a separate profile pane is open (G-76)"
 
 
 def test_the_pane_shows_what_the_profiler_measured(live):
@@ -90,13 +98,13 @@ def test_a_bad_integrity_counter_is_drawn_as_bad(live):
     and must draw that row as bad. Planted in the pane's state, not the
     store, so the test never damages what it is checking."""
     got = live.evaluate(r"""(() => {
-      const leaf = app.workspace.getLeavesOfType('domvec-profile-view')[0];
-      const view = leaf && leaf.view;
+      const leaf = app.workspace.getLeavesOfType('domvec-browser-view')[0];
+      const view = leaf && leaf.view && leaf.view.pipebox && leaf.view.pipebox.readout;
       if (!view) return 'no view';
       const real = view.health;
       view.health = Object.assign({}, real || {}, {chunks_empty_md: 12000});
       view.draw();
-      const bad = Array.from(view.containerEl.querySelectorAll(
+      const bad = Array.from(view.host.querySelectorAll(
         '.domvec-profile-integ.is-bad')).map(e => e.textContent);
       view.health = real;
       view.draw();

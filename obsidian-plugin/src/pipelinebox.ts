@@ -25,6 +25,11 @@
 
 import type { Sidecar } from "./sidecar";
 import { profiler } from "./profile";
+import { ProfileReadout } from "./profileview";
+
+/** A chunk the reader right-clicked: pinned until the markdown side lets
+ *  it go (`G-78`). */
+export interface PinnedChunk { cid: string; matched: string; url: string; }
 
 /** The xpath of an element, by the trie's convention (see `portMarkdown`). */
 const XPATH_OF = "var parts=[];" +
@@ -49,7 +54,26 @@ export class PipelineBox {
   private mini: HTMLElement;
   private full: HTMLElement;
   private outline: HTMLElement;
-  private expanded = false;
+  /** Open because someone ASKED -- a click, or the harness on an MCP
+   *  tool's behalf (`G-76`). Stays open until asked to close. */
+  private userOpen = false;
+  /** Open because the pointer is over it: a peek, gone on leave. */
+  private peek = false;
+  /** What is drawn: asked-open or peeking. Read by the harness. */
+  expanded = false;
+  /** Everything the box redraws each tick; the profile readout below it is
+   *  mounted once and redraws itself. */
+  private dyn!: HTMLElement;
+  private profileHost!: HTMLElement;
+  private readout: ProfileReadout | null = null;
+  /** Pinned chunks and the outline each one draws on the page. */
+  pins: PinnedChunk[] = [];
+  private pinEls = new Map<string, HTMLElement>();
+  /** Told when the pointer is over something the store does not hold yet,
+   *  so the browser can drain NOW rather than on its next tick (`G-80`). */
+  onUnresolved: (xpath: string) => void = () => {};
+  private lastUnresolved = "";
+  private focused = new Set<string>();
   private timer = 0;
   private hoverTimer = 0;
   private status: any = null;
@@ -67,9 +91,15 @@ export class PipelineBox {
     this.el = wrap.createDiv({ cls: "domvec-pipebox" });
     this.mini = this.el.createDiv({ cls: "domvec-pipebox-mini" });
     this.full = this.el.createDiv({ cls: "domvec-pipebox-full" });
+    this.dyn = this.full.createDiv({ cls: "domvec-pipebox-dyn" });
+    this.profileHost = this.full.createDiv({ cls: "domvec-pipebox-profile" });
     this.full.hide();
-    this.el.addEventListener("mouseenter", () => { this.expanded = true; this.draw(); });
-    this.el.addEventListener("mouseleave", () => { this.expanded = false; this.draw(); });
+    // A click opens or closes it and it STAYS that way (`G-76`); hovering
+    // only peeks. The harness calls `setExpanded`, which is the same state a
+    // click sets, so what an MCP tool opens a human sees open.
+    this.mini.addEventListener("click", () => this.setExpanded(!this.userOpen));
+    this.el.addEventListener("mouseenter", () => { this.peek = true; this.draw(); });
+    this.el.addEventListener("mouseleave", () => { this.peek = false; this.draw(); });
     this.timer = window.setInterval(() => void this.tick(), 1000);
     // Hover is polled rather than listened for: mouse events over a webview
     // go to the GUEST, and listening there would mean installing a handler
@@ -81,8 +111,34 @@ export class PipelineBox {
   destroy() {
     window.clearInterval(this.timer);
     window.clearInterval(this.hoverTimer);
+    this.readout?.destroy();
     this.el.remove();
     this.outline.remove();
+    for (const el of this.pinEls.values()) el.remove();
+    this.pinEls.clear();
+  }
+
+  /** Open or close the readout, and keep it that way. */
+  setExpanded(open: boolean) {
+    this.userOpen = open;
+    this.draw();
+  }
+
+  /** The chunks the markdown side holds; each gets an outline (`G-78`). */
+  setPins(pins: PinnedChunk[]) {
+    this.pins = pins.slice();
+    const keep = new Set(pins.map((x) => x.cid));
+    for (const [cid, el] of this.pinEls) {
+      if (!keep.has(cid)) { el.remove(); this.pinEls.delete(cid); }
+    }
+    for (const pin of pins) {
+      if (!this.pinEls.has(pin.cid)) {
+        const el = this.wrap.createDiv({ cls: "domvec-chunk-pin" });
+        el.hide();
+        this.pinEls.set(pin.cid, el);
+      }
+    }
+    void this.placePins();
   }
 
   private url(): string {
@@ -115,6 +171,7 @@ export class PipelineBox {
     if (!wv || this.hoverBusy || !this.visible()) return;
     this.hoverBusy = true;
     try {
+      if (this.pins.length) await this.placePins();
       const got = await wv.executeJavaScript(
         "(function(){var hs=document.querySelectorAll(':hover');" +
         "if(!hs.length) return null;var el=hs[hs.length-1];" +
@@ -126,7 +183,16 @@ export class PipelineBox {
       let hit = this.resolved.get(xpath);
       if (!hit) {
         const r: any = await this.sidecar.resolve(url, xpath).catch(() => null);
-        if (!r || !r.cid) { this.clearHover(); return; }
+        if (!r || !r.cid) {
+          // Nothing stored draws this yet: ask for it NOW (`G-80`). Once per
+          // element, so resting the pointer does not drain five times a second.
+          if (xpath !== this.lastUnresolved) {
+            this.lastUnresolved = xpath;
+            this.onUnresolved(xpath);
+          }
+          this.clearHover();
+          return;
+        }
         hit = { cid: String(r.cid), matched: String(r.matched_xpath || xpath),
                 walked: Number(r.ancestors_walked || 0),
                 lines: (r.lines || []).length };
@@ -145,7 +211,21 @@ export class PipelineBox {
       this.hover = { xpath, cid: hit.cid, matched: hit.matched, walked: hit.walked,
                      rect: rect || null, lines: hit.lines, at: performance.now() };
       this.placeOutline();
-      if (changed) this.onHoverChunk(hit.cid, url);
+      if (changed) {
+        this.onHoverChunk(hit.cid, url);
+        // Hover-first (`G-80`): the chunk under the pointer goes to the front
+        // of the encoder's and the projector's queues, and the profile traces
+        // how long it takes to be drawn -- its own kind, "hover".
+        if (!this.focused.has(hit.cid)) {
+          this.focused.add(hit.cid);
+          if (this.focused.size > 500) this.focused.clear();
+          void this.sidecar.focus([hit.cid]).catch(() => null);
+          const prof = profiler();
+          const trace = prof.begin("hover", url);
+          prof.fact(trace, "cid", hit.cid);
+          prof.watch(trace, [hit.cid], performance.now());
+        }
+      }
       if (this.expanded) this.draw();
     } finally {
       this.hoverBusy = false;
@@ -158,6 +238,47 @@ export class PipelineBox {
     this.outline.hide();
     this.onHoverChunk("", "");
     if (this.expanded) this.draw();
+  }
+
+  /** Each pinned chunk's box, measured in the page and outlined over it. */
+  private async placePins() {
+    const wv = this.webview();
+    if (!wv || !this.pins.length) return;
+    const rects: any = await wv.executeJavaScript(
+      "(function(xs){return xs.map(function(x){var n=document.evaluate(x,document," +
+      "null,XPathResult.FIRST_ORDERED_NODE_TYPE,null).singleNodeValue;" +
+      "if(n&&n.nodeType===3)n=n.parentElement;if(!n)return null;" +
+      "var b=n.getBoundingClientRect();return {x:b.left,y:b.top,w:b.width,h:b.height};});})(" +
+      JSON.stringify(this.pins.map((x) => x.matched)) + ")").catch(() => null);
+    this.pins.forEach((pin, i) => {
+      const el = this.pinEls.get(pin.cid);
+      const r = rects && rects[i];
+      if (el) this.placeBox(el, r || null);
+    });
+  }
+
+  /** Put a fixed-position box over a guest-viewport rect, clipped to the
+   *  webview and corrected for the containing block (see `pin`). */
+  private placeBox(el: HTMLElement, r: { x: number; y: number; w: number; h: number } | null) {
+    const wv = this.webview();
+    if (!r || !wv || r.w <= 0 || r.h <= 0) { el.hide(); return; }
+    const wb = wv.getBoundingClientRect();
+    const left = wb.left + Math.max(0, r.x);
+    const top = wb.top + Math.max(0, r.y);
+    const right = wb.left + Math.min(wb.width, r.x + r.w);
+    const bottom = wb.top + Math.min(wb.height, r.y + r.h);
+    if (right <= left || bottom <= top) { el.hide(); return; }
+    Object.assign(el.style, {
+      left: `${left}px`, top: `${top}px`,
+      width: `${right - left}px`, height: `${bottom - top}px`,
+    });
+    el.show();
+    const got = el.getBoundingClientRect();
+    const dx = got.left - left, dy = got.top - top;
+    if (Math.abs(dx) >= 1 || Math.abs(dy) >= 1) {
+      el.style.left = `${left - dx}px`;
+      el.style.top = `${top - dy}px`;
+    }
   }
 
   /** The outline sits in the CELL over the webview, never in the page. */
@@ -277,18 +398,25 @@ export class PipelineBox {
       this.mini.createSpan({ text: parts.join(" · ") });
     }
 
+    this.expanded = this.userOpen || this.peek;
+    this.el.toggleClass("is-open", this.userOpen);
     if (!this.expanded) { this.full.hide(); return; }
     this.full.show();
-    this.full.empty();
+    this.dyn.empty();
+    // The stage profile, mounted once and left to redraw itself (`G-76`).
+    if (!this.readout) {
+      this.readout = new ProfileReadout(this.profileHost, this.sidecar);
+      void this.readout.mount();
+    }
     if (!s) {
-      this.full.createDiv({ cls: "domvec-pipebox-muted",
+      this.dyn.createDiv({ cls: "domvec-pipebox-muted",
         text: url && url !== "about:blank" ? "asking the sidecar…" : "no page loaded" });
       return;
     }
 
     // ---- the chain every chunk travels ------------------------------------
     this.section("This page's chunks");
-    const chain = this.full.createDiv({ cls: "domvec-pipebox-chain" });
+    const chain = this.dyn.createDiv({ cls: "domvec-pipebox-chain" });
     const step = (label: string, n: number | string, of: number, ok: boolean) => {
       const c = chain.createDiv({ cls: `domvec-pipebox-step ${ok ? "is-ok" : "is-warn"}` });
       c.createDiv({ cls: "domvec-pipebox-n", text: String(n) });
@@ -313,7 +441,7 @@ export class PipelineBox {
       this.section(`Last drain · ${String(last.facts?.outcome || "?")}` +
                    (last.facts?.why ? ` (${last.facts.why})` : ""));
       const st = last.stages || {};
-      const strip = this.full.createDiv({ cls: "domvec-pipebox-strip" });
+      const strip = this.dyn.createDiv({ cls: "domvec-pipebox-strip" });
       for (const [k, label] of [
         ["fold", "fold"], ["sidecar.absorb", "trie"], ["sidecar.render", "markdown"],
         ["sidecar.store", "store"], ["vector_wait", "embed"], ["sidecar.place", "place"],
@@ -350,7 +478,7 @@ export class PipelineBox {
     }
     if (s.fitted_chunks) {
       const growth = s.growth || 0;
-      const bar = this.full.createDiv({ cls: "domvec-pipebox-growth" });
+      const bar = this.dyn.createDiv({ cls: "domvec-pipebox-growth" });
       const fill = bar.createDiv({ cls: "domvec-pipebox-growthfill" });
       fill.style.width = `${Math.min(100, (growth / 2) * 100)}%`;
       this.line(`${s.chunks_now.toLocaleString()} chunks against ${s.fitted_chunks.toLocaleString()} ` +
@@ -377,11 +505,11 @@ export class PipelineBox {
   }
 
   private section(title: string) {
-    this.full.createDiv({ cls: "domvec-pipebox-h", text: title });
+    this.dyn.createDiv({ cls: "domvec-pipebox-h", text: title });
   }
 
   private line(text: string, warn = false, muted = false) {
-    this.full.createDiv({
+    this.dyn.createDiv({
       cls: `domvec-pipebox-line${warn ? " is-warn" : ""}${muted ? " domvec-pipebox-muted" : ""}`,
       text,
     });

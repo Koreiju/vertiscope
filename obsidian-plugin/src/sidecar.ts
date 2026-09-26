@@ -294,6 +294,22 @@ export class Sidecar {
    * where these points land. `stale` coming back true means the corpus has
    * doubled since that fit and the pane should ask for a real layout.
    */
+  /** Hover-first (`G-80`): move these chunks to the front of the sidecar's
+   *  encoder and projector queues. */
+  async focus(cids: string[]): Promise<any | null> {
+    const base = this.base().trim().replace(/\/+$/, "");
+    if (!base || !cids.length) return null;
+    try {
+      const res = await fetch(`${base}/focus`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cids }),
+      });
+      return res.ok ? await res.json() : null;
+    } catch {
+      return null;
+    }
+  }
+
   async place(cids: string[]): Promise<PlaceResult | null> {
     const base = this.base().trim().replace(/\/+$/, "");
     if (!base || !cids.length) return null;

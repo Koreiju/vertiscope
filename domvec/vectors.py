@@ -700,6 +700,16 @@ class VectorQueue:
     def __len__(self) -> int:
         return len(self.pending)
 
+    def prioritize(self, cids: Iterable[str]) -> int:
+        """Move queued chunks to the FRONT, so the next flush embeds them
+        first (`G-80`, hover-first). Returns how many were queued."""
+        moved = 0
+        for cid in reversed(list(cids)):
+            if cid in self.pending:
+                self.pending.move_to_end(cid, last=False)
+                moved += 1
+        return moved
+
     def flush(self, embedder, *, limit: Optional[int] = None
               ) -> Dict[str, np.ndarray]:
         """Embed what is queued, `batch` at a time. Returns cid -> vector.

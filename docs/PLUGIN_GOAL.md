@@ -1004,6 +1004,65 @@ measured but does not decide what the panels draw has not been built.*
 
 ---
 
+## Addendum VI, 2026-09-26 - verification inside the app, and one place for each form of a chunk
+
+> The two confirmation passes are still running in the background. But since
+> these are running without Obsidian open, my suspicion is that there's a
+> hidden opportunity to bring all the tests/sweeps/etc you've been running in
+> some terminals _*into obsidian*_ as a *plugin-facing component for all
+> test/script layers for fully-observable verification in the actual app
+> itself via various MCP tools and layers. I'd also like you to remove the
+> segregated statistics panels on scans etc. It's not that the feature itself
+> is undesired, because if you can see it and I can see it, it's importnant.
+> However, it shouldn't start taking up a non-negotiable space that is
+> separate from the rest of the plugin's GUI features. If the statistics are
+> for the scanning pipeline, it then becomes a simple open/closed scrollable
+> readout that can be collapsed to a small black box on the bottom right
+> corner as an overlay *within* the electron browser that the MCP tools will
+> always see (and be able to select expand and collapse to show the human),
+> but the way the statistics and scan readouts are presented. Also, I'm seeing
+> a separate panel with the old shadow DOM/markdown panels of the chunks,
+> which I want to keep as a concept, but here's what I want changed about the
+> way these two forms of the chunk are presented: the shadow DOM form of the
+> rendered chunk should be show as a billboarded 2D panel within the 3D gui
+> rather than a third panel in the overall UI. The markdown form should be
+> ported over to the right-click second view on the electron browser. This
+> separation of concerns enables full-span chunk persistence, both to
+> presentable 3D gui and in markdown form on the right-click. Plus, you have
+> skipped a *lot* of the details I originally specified in previous prompts on
+> chunk highlighting when hovered on the electron browser as another overlay
+> that matches the cartesian coordinates of what's rendered in the actual
+> browser, where right clicks persist the chunk that is then
+> overlay-highlighted and sends the markdown render to the markdown-side
+> panel. When this happens, the shadow DOM billboard is also opened and
+> persists with what is put in the markdown-side of the electron browser. So,
+> whatever is on the markdown panel is also opened as a shadow DOM billboard
+> in the 3D graph GUI, where we can see the web content associated with any
+> chunk nodes represented by only one of their image billboards which expands
+> to viewing the total chunk as a billboard. Remember, please, to keep this
+> interlaced with the rest of the tests for our full-scan O(delta) diff
+> streaming in millisecond-time profiles as per the traces throughout our
+> electron and our 3D graph editor. And make sure that all of these tests and
+> scripts have a full Obsidian MCP layer that runs all tests through the
+> *actual* plugin itself while live in the Obsidian GUI. So, very much like
+> hardware in the loop testing.
+
+*What this changes, read against Addenda I-V. Three things. (1) Every check
+runs THROUGH the running plugin -- hardware in the loop -- and is driven and
+read by MCP tools; a check that runs in a terminal against a closed app has
+verified nothing a reader sees. (2) Statistics get no pane of their own: the
+scanning pipeline's readout is the collapsible box in the Electron browser's
+bottom-right corner, which the MCP tools can see and expand or collapse.
+(3) A chunk has two forms and each has one home: its rendered shadow-DOM form
+is a billboard in the 3D graph, its markdown form is the browser's
+right-click second view -- and they are one selection: hover outlines the
+chunk at its on-screen coordinates, right-click pins that outline, sends the
+markdown to the markdown side, and opens the billboard, which stays open as
+long as the markdown does. A chunk node shows one of its pictures and expands
+to the whole chunk. The separate chunk pane goes.*
+
+---
+
 ## Standing instructions carried in the verbatim
 
 Two of these are process rules, not features, and they bind every future

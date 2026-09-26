@@ -139,9 +139,13 @@ export class ChunkSurface extends MarkdownRenderChild {
     containerEl: HTMLElement,
     private cid: string,
     private host: SurfaceHost,
+    /** Force a form. The graph's billboard is the chunk's SHADOW-DOM form
+     *  (`G-77`), whatever the note default is; the markdown form lives on
+     *  the browser's markdown side. */
+    opts: { interactive?: boolean } = {},
   ) {
     super(containerEl);
-    this.interactive = host.settings.interactiveByDefault;
+    this.interactive = opts.interactive ?? host.settings.interactiveByDefault;
   }
 
   async onload() {

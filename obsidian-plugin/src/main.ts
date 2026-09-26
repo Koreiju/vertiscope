@@ -18,7 +18,6 @@
  * the native graph work for free.
  */
 
-import { ProfileView, PROFILE_VIEW } from "./profileview";
 import { profiler } from "./profile";
 import {
   App,
@@ -32,7 +31,6 @@ import {
   Setting,
 } from "obsidian";
 
-import { CHUNK_VIEW, ChunkView } from "./chunkview";
 import { installHarness } from "./harness";
 import { TERMINAL_VIEW, TerminalView } from "./terminal";
 import {
@@ -158,7 +156,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
       GRAPH_VIEW,
       (leaf: WorkspaceLeaf) => {
         const view = new GraphView(
-          leaf, this.sidecar, (cid) => this.openChunk(cid),
+          leaf, this.sidecar, this,
           () => this.settings.loadRemoteMedia);
         // Clicking a page in the projector narrows the browser's ranking to
         // it, and right-clicking releases that (`G-70`). Brokered here for
@@ -183,13 +181,16 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
             }
           }
         };
+        // Closing a billboard the browser pinned lets the browser drop the
+        // pin and its markdown too (`G-78`): one selection, three surfaces.
+        view.onBillboardClosed = (cid: string) => {
+          for (const l of this.app.workspace.getLeavesOfType(BROWSER_VIEW)) {
+            const browser = l.view as BrowserView;
+            if (browser && typeof browser.unpin === "function") browser.unpin(cid);
+          }
+        };
         return view;
       },
-    );
-    this.registerView(
-      CHUNK_VIEW,
-      (leaf: WorkspaceLeaf) =>
-        new ChunkView(leaf, this, (cid) => this.revealChunk(cid)),
     );
     // The terminal is a SEPARATE PANE, per NOTEBOOK_PANEL_DESIGN §4a: the
     // in-panel switch selects a kernel run, and shell work lives out here.
@@ -220,8 +221,10 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
         // one that was already open being stale.
         (nodes, edges, trace) => {
           this.eachGraph((view) => view.absorb(nodes, edges, trace));
+          // The chunk's two forms follow a capture wherever they are open:
+          // its billboard in the graph, its markdown on the browser's side.
           const cids = nodes.map((n) => n.cid);
-          this.eachChunkPanel((view) => void view.refreshIf(cids));
+          this.eachGraph((view) => view.refreshBillboards(cids));
         },
         // And so does the ranking (`G-55`, `G-56`): what the reader has
         // scrolled to is what the projector opens the page to.
@@ -230,6 +233,12 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
         // (`G-38`). Brokered like everything else across the two panes.
         browser.onHover = (cid: string, url: string) =>
           this.eachGraph((view) => view.highlightChunk(cid, url));
+        // Right-click pins a chunk: its billboard opens in the graph and
+        // stays while the browser's markdown side holds it (`G-78`).
+        browser.onPin = (cid: string) =>
+          this.eachGraph((view) => void view.pinChunk(cid));
+        browser.onUnpin = (cid: string) =>
+          this.eachGraph((view) => view.unpinChunk(cid));
         return browser;
       },
     );
@@ -239,33 +248,16 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
       callback: () => this.openBrowser(),
     });
 
-    // The pipeline profile, in the app. See `profileview.ts`.
-    this.registerView(
-      PROFILE_VIEW,
-      (leaf: WorkspaceLeaf) => new ProfileView(leaf, this.sidecar),
-    );
-    this.addCommand({
-      id: "domvec-open-profile",
-      name: "Open the pipeline profile",
-      callback: () => this.openProfile(),
+    // (The profile pane and its status-bar readout are gone (`G-76`): the
+    // pipeline's statistics live in the browser cell's corner box, where the
+    // page they describe is, and where the MCP tools read and toggle them.)
+    // A layout saved while those panes existed still names them; close
+    // those leaves rather than leave "plugin view missing" tabs behind.
+    this.app.workspace.onLayoutReady(() => {
+      for (const gone of ["domvec-profile-view", "domvec-chunk-view"]) {
+        this.app.workspace.detachLeavesOfType(gone);
+      }
     });
-    // A one-line readout of the last drains, always visible, that opens the
-    // pane. The reader should not have to know the pane exists to learn that
-    // a drain just took four seconds.
-    const readout = this.addStatusBarItem();
-    readout.addClass("domvec-profile-status");
-    readout.setText("⏱ —");
-    readout.onClickEvent(() => void this.openProfile());
-    this.registerInterval(window.setInterval(() => {
-      const s: any = profiler().summary();
-      const e2e = s.stages && s.stages["end_to_end"];
-      const oc = s.outcomes || {};
-      readout.setText(e2e
-        ? `⏱ ${e2e.p50 >= 1000 ? (e2e.p50 / 1000).toFixed(1) + " s" : Math.round(e2e.p50) + " ms"}` +
-          ` page→pixels (n=${e2e.n})`
-        : (s.traces ? `⏱ ${s.traces} drains, none drawn yet` : "⏱ —"));
-      readout.setAttr("title", `pipeline profile: ${JSON.stringify(oc)} -- click for detail`);
-    }, 2000));
 
     this.addRibbonIcon("git-fork", "domvec 3D graph", () => this.openGraph());
     this.addCommand({
@@ -449,14 +441,6 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
    */
 
   /** Do something to every open projector, if any is open at all. */
-  /** Every open chunk panel. The mirror of `eachGraph`, and for the same
-   *  reason: a panel that is closed must not stop a capture from landing. */
-  private eachChunkPanel(fn: (view: ChunkView) => void): void {
-    for (const leaf of this.app.workspace.getLeavesOfType(CHUNK_VIEW)) {
-      const view = leaf.view as ChunkView;
-      if (view) fn(view);
-    }
-  }
 
   private eachGraph(fn: (view: GraphView) => void): void {
     for (const leaf of this.app.workspace.getLeavesOfType(GRAPH_VIEW)) {
@@ -474,19 +458,6 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     }
     const leaf = this.app.workspace.getLeaf("split", "vertical");
     await leaf.setViewState({ type: BROWSER_VIEW, active: true });
-    this.app.workspace.revealLeaf(leaf);
-  }
-  private async openProfile() {
-    const existing = this.app.workspace.getLeavesOfType(PROFILE_VIEW);
-    if (existing.length) {
-      this.app.workspace.revealLeaf(existing[0]);
-      return;
-    }
-    // Beside whatever is open, not over it: the point is to watch the
-    // numbers while using the browser cell and the graph.
-    const leaf = this.app.workspace.getRightLeaf(false) ||
-                 this.app.workspace.getLeaf("split", "vertical");
-    await leaf.setViewState({ type: PROFILE_VIEW, active: true });
     this.app.workspace.revealLeaf(leaf);
   }
 
@@ -507,30 +478,6 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     this.app.workspace.revealLeaf(leaf);
   }
 
-  /**
-   * Show the chunk a graph node stands for -- and only that chunk.
-   *
-   * A node stands for a chunk, so clicking it shows the chunk, as its
-   * structured markdown or as the interactive HTML. It used to open the
-   * NOTE, which is a page of a vault: frontmatter, the distilled markdown, a
-   * fence, and whatever the reader has since written around it. The note is
-   * still one button away, in the pane's own bar.
-   *
-   * One pane, reused. Opening a tab per click buries the graph you are
-   * clicking in within a few nodes.
-   */
-  private async openChunk(cid: string) {
-    const existing = this.app.workspace.getLeavesOfType(CHUNK_VIEW);
-    const leaf = existing.length
-      ? existing[0]
-      : this.app.workspace.getLeaf("split", "vertical");
-    if (!existing.length) {
-      await leaf.setViewState({ type: CHUNK_VIEW, active: true });
-    }
-    const view = leaf.view as ChunkView;
-    await view.show(cid);
-    this.app.workspace.revealLeaf(leaf);
-  }
 
   /**
    * Open the note a graph node stands for.

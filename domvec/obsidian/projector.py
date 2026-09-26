@@ -289,6 +289,18 @@ class ChunkProjector:
             self.wanted.set()
         return added
 
+    def prioritize(self, cids: Iterable[str]) -> int:
+        """Queue these chunks at the FRONT (`G-80`, hover-first): the next
+        batch transforms them before anything that was waiting."""
+        wanted = [c for c in dict.fromkeys(cids) if c]
+        if not wanted:
+            return 0
+        with self.queue_lock:
+            rest = [c for c in self.queue if c not in set(wanted)]
+            self.queue = dict.fromkeys(wanted + rest)
+        self.wanted.set()
+        return len(wanted)
+
     def enqueue_page(self, url: str, cids: Iterable[str]) -> int:
         """Queue a page's current chunks AND any this projector still holds
         for it that the page no longer has -- they are gone, and nothing else

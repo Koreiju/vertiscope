@@ -2037,8 +2037,14 @@ const CHECKS = [
       return {
         // The hits are drawn, the page they came from is kept as their hub,
         // and it is marked open -- the same shape `G-6` asserts for a click.
+        // The graph must GROW only when there was something new to place:
+        // landing on a page now places all of it (whole-page placement), so
+        // a scoped query on the page being read finds every hit already
+        // drawn -- and correctly adds nothing. What must still happen is the
+        // page opening around them.
         pass: got.hits_drawn > 0
-           && got.nodes_after > got.nodes_before
+           && (got.nodes_after > got.nodes_before
+               || got.already_drawn >= got.scoped_hits)
            && got.hub_kept === true && got.hub_marked_open === true
            && got.links > 0,
         evidence: got,

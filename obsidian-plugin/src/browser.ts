@@ -153,6 +153,13 @@ export class BrowserView extends ItemView {
   private status!: HTMLElement;
   private browserWrap!: HTMLElement;
   private markdownWrap!: HTMLElement;
+  /** The page and the markdown side, side by side (`G-78`). */
+  private split!: HTMLElement;
+  /** Right-clicked chunks, newest first. Each is outlined on the page, shown
+   *  on the markdown side and open as a billboard in the graph -- one
+   *  selection, three surfaces, closed together. */
+  private pinned = new Map<string, { cid: string; url: string; matched: string;
+                                     markdown: string; head: string }>();
   private toggle!: HTMLElement;
 
   /** True while a drain is in flight, so a slow one cannot be lapped. */
@@ -252,11 +259,12 @@ export class BrowserView extends ItemView {
     const clear = search.createEl("button", { text: "×" });
     clear.onclick = () => { this.queryInput.value = ""; this.showResults([]); };
 
-    this.browserWrap = root.createDiv({ cls: "domvec-browser-page" });
+    this.split = root.createDiv({ cls: "domvec-browser-split" });
+    this.browserWrap = this.split.createDiv({ cls: "domvec-browser-page" });
     this.overlay = this.browserWrap.createDiv({ cls: "domvec-overlay" });
     this.results = this.overlay.createDiv({ cls: "domvec-overlay-list" });
     this.overlay.hide();
-    this.markdownWrap = root.createDiv({ cls: "domvec-browser-md" });
+    this.markdownWrap = this.split.createDiv({ cls: "domvec-browser-md" });
     this.markdownWrap.hide();
     this.markdownWrap.createDiv({ cls: "domvec-browser-empty" }).setText(
       "Right-click a chunk in the browser to bring its full markdown here.");
@@ -281,9 +289,22 @@ export class BrowserView extends ItemView {
     // the right-click path uses, read at call time because the plugin
     // assigns it after construction.
     this.pipebox?.destroy();
-    this.pipebox = new PipelineBox(this.browserWrap, this.sidecar,
-                                   () => this.webview,
-                                   (cid, url) => this.onHover(cid, url));
+    // Guarded: the box failing to build must not take the rest of the cell
+    // with it. It did once -- a throw here skipped every listener registered
+    // below it (right-click, navigation, the live tick) with no error shown.
+    try {
+      this.pipebox = new PipelineBox(this.browserWrap, this.sidecar,
+                                     () => this.webview,
+                                     (cid, url) => this.onHover(cid, url));
+      // Hover-first (`G-80`): the pointer is over something the store does
+      // not hold yet, so drain now instead of on the next tick.
+      this.pipebox.onUnresolved = () => { if (!this.draining) void this.tick(); };
+      this.pipebox.setPins(this.pinList());
+    } catch (err) {
+      console.error("domvec: the pipeline box failed to build", err);
+      this.pipeboxError = String((err as any)?.stack || err).slice(0, 400);
+      this.pipebox = null;
+    }
 
     view.addEventListener("did-start-loading", () => this.say("loading…"));
     view.addEventListener("did-stop-loading", () => {
@@ -374,13 +395,70 @@ export class BrowserView extends ItemView {
     this.webview = null;
   }
 
-  /** Show one face; the other keeps its state rather than being rebuilt. */
+  /**
+   * Show one face. "browser" is the page, with the markdown SIDE beside it
+   * whenever a chunk is pinned (`G-78`); "markdown" is the markdown alone,
+   * full width -- the switchable second view.
+   */
   private show(face: Face): void {
     this.face = face;
     const browsing = face === "browser";
+    const side = browsing && this.pinned.size > 0;
     this.browserWrap.toggle(browsing);
-    this.markdownWrap.toggle(!browsing);
+    this.markdownWrap.toggle(!browsing || side);
+    this.markdownWrap.toggleClass("is-side", side);
     this.toggle.setText(browsing ? "markdown" : "browser");
+  }
+
+  /** The pins, newest first, for the corner box's outlines. */
+  private pinList() {
+    return [...this.pinned.values()].map((p) => ({
+      cid: p.cid, matched: p.matched, url: p.url }));
+  }
+
+  /** Told by the plugin: a pinned chunk opened in the graph. */
+  onPin: (cid: string) => void = () => {};
+  /** Told by the plugin: a pinned chunk was let go. */
+  onUnpin: (cid: string) => void = () => {};
+
+  /** Let a pinned chunk go: its outline, its markdown and its billboard. */
+  unpin(cid: string): void {
+    if (!this.pinned.delete(cid)) return;
+    this.pipebox?.setPins(this.pinList());
+    void this.renderSide();
+    this.onUnpin(cid);
+    if (this.face === "browser") this.show("browser");
+  }
+
+  /** Which chunks are pinned -- for the harness. */
+  pinnedState() {
+    return [...this.pinned.values()].map((p) => ({
+      cid: p.cid, url: p.url, matched: p.matched,
+      lines: p.markdown.split("\n").length }));
+  }
+
+  /** The markdown side: one card per pinned chunk, natively rendered. */
+  private async renderSide(): Promise<void> {
+    this.markdownWrap.empty();
+    if (!this.pinned.size) {
+      this.markdownWrap.createDiv({ cls: "domvec-browser-empty" }).setText(
+        "Right-click a chunk in the browser to pin it here.");
+      return;
+    }
+    for (const pin of this.pinned.values()) {
+      const card = this.markdownWrap.createDiv({ cls: "domvec-pin-card" });
+      card.dataset.cid = pin.cid;
+      const head = card.createDiv({ cls: "domvec-browser-mdhead" });
+      head.createSpan({ text: pin.head });
+      const close = head.createSpan({ cls: "domvec-pin-close", text: "\u00d7" });
+      close.setAttr("aria-label", "unpin");
+      close.onclick = () => this.unpin(pin.cid);
+      const body = card.createDiv({ cls: "domvec-browser-mdbody" });
+      // The NATIVE renderer (`G-37`): the same content as an Obsidian
+      // markdown panel, rendering the full markdown.
+      await MarkdownRenderer.render(this.app, pin.markdown, body, "",
+                                    this as unknown as Component);
+    }
   }
 
   /** Navigate. Bare hosts get https, because a reader types `arxiv.org`. */
@@ -398,6 +476,8 @@ export class BrowserView extends ItemView {
   onHover: (cid: string, url: string) => void = () => {};
   /** The pipeline overlay; see `pipelinebox.ts`. */
   pipebox: PipelineBox | null = null;
+  /** Why the overlay did not build, if it did not -- read by the harness. */
+  pipeboxError = "";
 
   setScope(url: string): void {
     this.rankScope = url || "";
@@ -557,11 +637,23 @@ export class BrowserView extends ItemView {
       return;
     }
     if (!xpath) { this.say("nothing under the cursor"); return; }
+    await this.pinXpath(xpath);
+  }
 
+  /**
+   * Pin the chunk that draws `xpath` (`G-78`): what a right-click does once
+   * it knows which element was under the cursor. Public so the harness can
+   * pin by address -- an MCP tool asks for exactly what a reader's
+   * right-click would have produced.
+   */
+  async pinXpath(xpath: string): Promise<{ cid: string } | { error: string }> {
+    const wv = this.webview;
+    if (!wv) return { error: "no browser" };
+    const url = wv.getURL();
     const got = await this.sidecar.resolve(url, xpath);
     if (!got || !got.lines) {
       this.say(`no chunk draws ${xpath.slice(-48)}`);
-      return;
+      return { error: `no chunk draws ${xpath}` };
     }
     let markdown = (got.lines as { text: string }[])
       .map((l) => l.text).join("\n");
@@ -589,22 +681,28 @@ export class BrowserView extends ItemView {
           }
         });
     }
-    this.markdownWrap.empty();
-    const head = this.markdownWrap.createDiv({ cls: "domvec-browser-mdhead" });
-    head.setText(got.ancestors_walked
-      ? `${got.matched_xpath} · ${got.ancestors_walked} above what you clicked`
-      : String(got.matched_xpath || xpath));
-    const body = this.markdownWrap.createDiv({ cls: "domvec-browser-mdbody" });
-    // The NATIVE renderer, not a code block: `G-37` asks for the same
-    // content as an Obsidian markdown panel, rendering the full markdown.
-    await MarkdownRenderer.render(this.app, markdown, body, "",
-                                  this as unknown as Component);
-    // The projector rings the same chunk (`G-38`, as far as it goes). One
-    // gesture, both surfaces: the reader points once and the map says where
-    // that is.
-    this.onHover(String(got.cid || ""), String(got.url || url || ""));
-    this.show("markdown");
-    this.say(`${got.cid} · ${markdown.split("\n").length} lines`);
+    // **Pinned, not swapped in (`G-78`).** Right-click used to replace the
+    // page with the markdown, which left nothing to highlight. Now the chunk
+    // is pinned: outlined on the page at its box, rendered on the markdown
+    // side beside it, and opened as a billboard in the graph -- and it stays
+    // until it is let go from either side.
+    const cid = String(got.cid || "");
+    const matched = String(got.matched_xpath || xpath);
+    this.pinned.delete(cid);                     // re-pinning moves it to the top
+    this.pinned = new Map([[cid, {
+      cid, url: String(got.url || url || ""), matched, markdown,
+      head: got.ancestors_walked
+        ? `${matched} · ${got.ancestors_walked} above what you clicked`
+        : matched,
+    }], ...this.pinned]);
+    this.pipebox?.setPins(this.pinList());
+    await this.renderSide();
+    this.show("browser");
+    // The projector rings the same chunk (`G-38`) and opens its billboard.
+    this.onHover(cid, String(got.url || url || ""));
+    this.onPin(cid);
+    this.say(`${cid} · ${markdown.split("\n").length} lines · pinned`);
+    return { cid };
   }
 
   /** Turn live capture on or off, and say which it is. */

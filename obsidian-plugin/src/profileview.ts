@@ -1,5 +1,12 @@
 /**
- * The pipeline profile, in the app.
+ * The pipeline profile, as a readout inside the browser cell's corner box.
+ *
+ * **Not a pane (`G-76`).** It was one, and the reader asked for the opposite:
+ * statistics are wanted -- "if you can see it and I can see it, it's
+ * important" -- but not in a space of their own, separate from the rest of
+ * the plugin. The scanning pipeline's numbers belong over the page being
+ * scanned, in the collapsible box in its bottom-right corner, which the MCP
+ * tools also read and toggle. Same drawing code, mounted there.
  *
  * **What this pane is for.** The profiler times every live drain from the
  * page to the pixels, but until now its answers were reachable only through
@@ -23,11 +30,8 @@
  * returns, rather than found by someone counting by hand.
  */
 
-import { ItemView, WorkspaceLeaf } from "obsidian";
 import type { Sidecar } from "./sidecar";
 import { profiler } from "./profile";
-
-export const PROFILE_VIEW = "domvec-profile-view";
 
 /** Pipeline order, grouped the way a drain passes through them. */
 const GROUPS: { name: string; where: string; stages: [string, string][] }[] = [
@@ -96,23 +100,18 @@ const INTEGRITY: { key: string; label: string; bad: (v: number, h: any) => boole
     bad: (v) => v > 0, why: "rows dropped silently on read" },
 ];
 
-export class ProfileView extends ItemView {
+export class ProfileReadout {
   private timer = 0;
   private body!: HTMLElement;
   private side: Record<string, any[]> | null = null;
   private health: any = null;
   private lastSidePoll = 0;
 
-  constructor(leaf: WorkspaceLeaf, private sidecar: Sidecar) {
-    super(leaf);
-  }
+  /** Mounted into `host`, which the corner box owns and shows or hides. */
+  constructor(private host: HTMLElement, private sidecar: Sidecar) {}
 
-  getViewType() { return PROFILE_VIEW; }
-  getIcon() { return "timer"; }
-  getDisplayText() { return "domvec pipeline profile"; }
-
-  async onOpen() {
-    const root = this.containerEl.children[1] as HTMLElement;
+  async mount() {
+    const root = this.host;
     root.empty();
     root.addClass("domvec-profile");
     const bar = root.createDiv({ cls: "domvec-profile-bar" });
@@ -133,14 +132,14 @@ export class ProfileView extends ItemView {
     this.timer = window.setInterval(() => void this.tick(), 1000);
   }
 
-  async onClose() {
+  destroy() {
     window.clearInterval(this.timer);
     this.timer = 0;
   }
 
   private async tick() {
-    // Nothing to redraw in a pane nobody can see.
-    if (!this.containerEl.isShown()) return;
+    // Nothing to redraw while the box is collapsed.
+    if (!this.host.isShown()) return;
     await this.pollSidecar(false);
     this.draw();
   }
