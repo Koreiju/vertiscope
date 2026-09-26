@@ -759,3 +759,5 @@ button.domvec-run-fence:hover {
 .domvec-pipebox.is-open { box-shadow: 0 2px 14px rgba(0, 0, 0, 0.45); }
 .domvec-pipebox-full { max-height: 70vh; overflow-y: auto; }
 .domvec-pipebox-profile .domvec-profile-bar { display: none; }
+
+.domvec-pipebox-run { margin-left: 8px; font-size: 10px; padding: 0 6px; height: 18px; }

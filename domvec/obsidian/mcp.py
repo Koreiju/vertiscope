@@ -173,18 +173,31 @@ TOOLS: List[Dict] = [
     {
         "name": "confirm",
         "description": (
-            "Run the live requirement checks against the RUNNING app and "
-            "return a verdict per requirement id, with the evidence each one "
-            "measured. Reloads the plugin first, because a probe scores the "
-            "instrument that is loaded, not the one on disk. Pass `only` to "
-            "run a subset by id."),
+            "Run the live requirement checks INSIDE the running plugin -- "
+            "hardware in the loop -- and return a verdict per requirement id "
+            "with the evidence each measured. The checks are the plugin's own "
+            "(checks/live.mjs, the same list the terminal runs); the plugin "
+            "is reloaded first so the loaded code is the code on disk, and "
+            "progress shows in the browser cell's corner box while it runs. "
+            "`only` runs a subset; `wait:false` returns once started (then "
+            "poll verify_state)."),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "only": {"type": "array", "items": {"type": "string"},
                          "description": "Requirement ids, e.g. [\"G-54\", \"G-6\"]"},
+                "wait": {"type": "boolean", "description": "Wait for the run (default true)"},
+                "timeout_s": {"type": "number", "description": "Give up waiting after (default 1200)"},
             },
         },
+    },
+    {
+        "name": "verify_state",
+        "description": (
+            "The in-app check run's state right now: whether it is running, "
+            "which check, how many done, and every result so far with its "
+            "evidence. Read-only; does not start anything."),
+        "inputSchema": {"type": "object", "properties": {}},
     },
     {
         "name": "design_state",
@@ -291,6 +304,7 @@ class DomvecMCP:
             "graph_probe": self._graph_probe,
             "key_coverage": self._key_coverage,
             "confirm": self._confirm,
+            "verify_state": self._verify_state,
             "design_state": self._design_state,
         }
         # Built lazily: the live endpoints may not be up, and a server that
@@ -347,7 +361,13 @@ class DomvecMCP:
         between. A verdict that is one call away can be the first thing
         asked rather than the last.
         """
-        return self.live().confirm(args.get("only") or None)
+        return self.live().verify(args.get("only") or None,
+                                  wait=args.get("wait", True) is not False,
+                                  timeout_s=float(args.get("timeout_s") or 1200))
+
+    def _verify_state(self, args: Dict) -> Dict:
+        """Progress of the in-app run, without starting one."""
+        return self.live().verify_state()
 
     def _design_state(self, args: Dict) -> Dict:
         """The computed status column, read rather than regenerated.

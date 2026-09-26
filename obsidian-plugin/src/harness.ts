@@ -30,6 +30,7 @@
  * about ordering. One call now answers "what did this do, everywhere".
  */
 
+import { Verifier } from "./verify";
 import type { App } from "obsidian";
 import { uiState } from "./uistate";
 import { profiler } from "./profile";
@@ -123,6 +124,9 @@ class Trace {
 }
 
 export function installHarness(app: App, sidecarBase: () => string) {
+  // The live checks, run inside the plugin (`G-75`): one verifier for the
+  // app's lifetime, so a run in progress survives a pane closing.
+  const verifier = new Verifier(app, sidecarBase);
   const trace = new Trace();
 
   // ---- the boundary ----
@@ -487,6 +491,13 @@ export function installHarness(app: App, sidecarBase: () => string) {
   }
 
   w.__domvec = {
+    /** Hardware-in-the-loop checks (`G-75`): start a run, read its state.
+     *  `start` returns at once; poll `state()` -- a full run is minutes. */
+    verify: {
+      list: () => verifier.list(),
+      start: (ids?: string[]) => verifier.start(ids),
+      state: () => verifier.state,
+    },
     ui: () => uiState(app),
     /** The pipeline profiler: traces from the page to the pixels. */
     profile: {

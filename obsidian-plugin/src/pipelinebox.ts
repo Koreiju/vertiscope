@@ -408,6 +408,9 @@ export class PipelineBox {
       this.readout = new ProfileReadout(this.profileHost, this.sidecar);
       void this.readout.mount();
     }
+    // The live checks come first: they do not depend on a page being loaded
+    // (`G-75`), and a run is worth seeing on a blank browser too.
+    this.drawChecks();
     if (!s) {
       this.dyn.createDiv({ cls: "domvec-pipebox-muted",
         text: url && url !== "about:blank" ? "asking the sidecar…" : "no page loaded" });
@@ -501,6 +504,40 @@ export class PipelineBox {
                 (h.walked ? ` · ${h.walked} ancestors above what you point at` : ""));
       this.line(`in the projector: ${proj?.hovered ? "yes, ringed" : "not drawn yet"}`,
                 !proj?.hovered);
+    }
+  }
+
+  /**
+   * Hardware-in-the-loop checks: the same list `confirm.mjs` runs, executed by
+   * the plugin in this window. Whoever started the run -- a reader here, an
+   * MCP tool, the terminal client -- its progress and failures show here.
+   */
+  private drawChecks() {
+    const v: any = (window as any).__domvec?.verify;
+    if (!v) return;
+    const st: any = v.state();
+    this.section("Checks, run in this app");
+    const row = this.dyn.createDiv({ cls: "domvec-pipebox-line" });
+    if (st.running) {
+      row.setText(`running ${st.done}/${st.total} · ${st.current}`);
+    } else if (st.run) {
+      const passed = st.results.filter((r: any) => r.pass).length;
+      const secs = Math.round((st.finishedAt - st.startedAt) / 1000);
+      row.setText(`${passed} of ${st.results.length} pass · ${secs} s` +
+                  (st.stoppedBecause ? ` · stopped: ${st.stoppedBecause}` : ""));
+      if (passed < st.results.length) row.addClass("is-warn");
+    } else {
+      row.setText("not run in this session");
+      row.addClass("domvec-pipebox-muted");
+    }
+    if (!st.running) {
+      const go = row.createEl("button", { text: "run all", cls: "domvec-pipebox-run" });
+      go.onclick = (e) => { e.stopPropagation(); v.start(); this.draw(); };
+    }
+    for (const r of (st.results || []).filter((x: any) => !x.pass)) {
+      const f = this.dyn.createDiv({ cls: "domvec-pipebox-line is-warn" });
+      f.setText(`FAIL ${r.id} · ${r.asks}`);
+      f.title = JSON.stringify(r.evidence).slice(0, 600);
     }
   }
 

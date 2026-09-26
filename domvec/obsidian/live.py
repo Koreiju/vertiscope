@@ -470,8 +470,54 @@ class Live:
 
     # -- requirement verdicts -------------------------------------------------
 
-    def confirm(self, only=None) -> Dict:
-        """Every observable requirement this harness can answer, with evidence.
+    def verify(self, only=None, *, wait: bool = True, timeout_s: float = 1200,
+               reload: bool = True) -> Dict:
+        """Run the live checks INSIDE the plugin and read them back (`G-75`).
+
+        Hardware in the loop: the checks are `checks/live.mjs`, the same list
+        the terminal client runs, executed by the plugin in its own window
+        (`window.__domvec.verify`). This only reloads the plugin -- from
+        outside, so the run scores the code on disk -- starts the run, and
+        polls its state; progress and failures also show in the browser
+        cell's corner box while it runs. `wait=False` returns once started.
+        """
+        import time as _time
+        if reload:
+            self.reload_plugin()
+            _time.sleep(3)
+        started = self.json_eval(
+            "JSON.stringify((() => { const v = window.__domvec && window.__domvec.verify;"
+            " if (!v) return {error: 'this plugin build has no in-app verifier'};"
+            " v.start(%s); const s = v.state();"
+            " return {run: s.run, total: s.total}; })())" % json.dumps(list(only or [])))
+        if not started or started.get("error") or not wait:
+            return {"started": started}
+        deadline = _time.time() + timeout_s
+        state = {}
+        while _time.time() < deadline:
+            _time.sleep(3)
+            state = self.json_eval("JSON.stringify(window.__domvec.verify.state())") or {}
+            if not state.get("running"):
+                break
+        results = state.get("results") or []
+        return {
+            "run": state.get("run"), "running": bool(state.get("running")),
+            "passed": sum(1 for r in results if r.get("pass")),
+            "total": state.get("total"), "stopped_because": state.get("stoppedBecause"),
+            "results": results,
+        }
+
+    def verify_state(self) -> Dict:
+        """The in-app run's state right now: progress, and results so far."""
+        return self.json_eval("JSON.stringify(window.__domvec.verify.state())") or {}
+
+    def confirm_legacy(self, only=None) -> Dict:
+        """SUPERSEDED by `verify` (`G-75`): a Python re-implementation of a
+        subset of the live checks, kept only until nothing calls it. It has
+        drifted from the real list -- its G-54 still asks for the retired
+        "inside its page" ball -- which is the reason one list must win.
+
+        Every observable requirement this harness can answer, with evidence.
 
         **Why the evidence travels with the verdict.** A bare PASS is the
         thing this project has been burned by most: three checks passed --
