@@ -20,8 +20,8 @@ showing the wrong one.
 | unit | what it is | made by | shown by |
 |---|---|---|---|
 | **address** | one element of the page, `url : xpath` | the sensor's fold, the trie | nothing directly; everything resolves through it |
-| **chunk (256)** | a contiguous run of the trie's content, ≤ 256 link-free tokens | stage one, `render_trie` | the **retrieval panel** (search hits, scoped ranking, a model's context) |
-| **display unit (512)** | a merge group's lead standing for its members — or a chunk with no group — ≤ 512 link-free tokens | stage two, `aggregate` | the **browser overlay** (hover, pin), the **markdown side panel**, the **3D graph's leaves**, the **billboards** |
+| **chunk (256)** | a contiguous run of the trie's content, ≤ 256 link-free tokens, leniently (§4) | stage one, `render_trie` | the **retrieval panel** (search hits, scoped ranking, a model's context), the **browser overlay** (hover, pin), the **markdown side panel**, a **pinned billboard's content** |
+| **display unit (512)** | a merge group's lead standing for its members — or a chunk with no group — ≤ 512 link-free tokens | stage two, `aggregate` | the **3D graph's leaves** (a pinned chunk's billboard hangs from its group's leaf) |
 | **page** | a scanned url | the store | the **3D graph's UMAP layer** (one centroid per page) |
 
 Verbatim: *"The projector shows the aggregated vectors while the retrieval
@@ -31,14 +31,14 @@ their respective UIs; the retrieval panel(s) and the 3D graph"* (VII);
 
 **Consequences that are work:**
 
-* The overlay outlines **the display unit's extent** — the union of the boxes
-  of every element its lines address, across all its members — not the one
-  element the hover resolved to. Measured: on the Radix tree page 6 of 8
+* The overlay outlines **the chunk's extent** — the union of the boxes of
+  every element its lines address — not the one element the hover resolved
+  to. (Decided 2026-09-26: *"make hover-pin the 256 limit"*; this section
+  first proposed the 512 unit.) Measured: on the Radix tree page 6 of 8
   heading/paragraph pairs are ONE chunk, yet hovering drew the `<h2>` box for
   one and the `<p>` box for the other; the reader saw "two different chunks"
   that the pipeline had as one.
-* The markdown side panel shows the display unit's markdown (the group's, when
-  it has members), with the member chunks' boundaries visible.
+* The markdown side panel shows the pinned chunk's markdown (256).
 * The graph's tree leaves are display units (`page_tree` already draws leads
   only).
 * The retrieval panel stays on 256 chunks (`G-27`, `G-63`, `G-64` — unchanged).
@@ -60,9 +60,8 @@ TARGETS removed, link labels kept, bare urls removed, everything else counted
 Differences to resolve:
 
 1. "Text-only" (512) vs "link-free" (256) are worded differently in the
-   requirements and implemented identically. **Proposed: one definition —
-   link-free — stated once, and the PRD's "text-only" read as that.** Open
-   for the reader to overrule.
+   requirements and implemented identically. **Decided 2026-09-26: they are
+   the same rule** (*"text only and link free are the same"*).
 2. `code://` chunks are *embedded* without code (`budget_for`) but *cut* with
    it (`budget`) — the chunker counts a string the encoder never sees. Fix:
    the chunker uses `budget_for` with the chunk's url.
@@ -116,12 +115,22 @@ wrapper (22 and 16 tokens) is flushed alone: either a content-boundary cut
 lands right after it, or the next child is too big to pack and forces a flush.
 Stage two does not rejoin them because it merges by similarity, not adjacency.
 
-**Rule: a heading never ends a chunk.** In the merge loop, a piece whose
-content is a heading (and its edit affordance) is never followed by a
-boundary cut, and when the next piece must be descended, the heading is
-merged into the first chunk that descent produces (rooted at the shared
-parent, which under-claims — safe, per the existing rule). Only if heading +
-first chunk would exceed the window does it stand alone.
+**Rule (decided 2026-09-26): the 256 cut is lenient.** Verbatim: *"If this
+is closer to 512 than 256 in the merge after the context limit, keep the
+previous, otherwise include the merge as the final chunk. This should be
+pretty lenient to edge cases where we include headings as well."* So in the
+merge loop, when the next piece would take the run past the window, the run
+TAKES it if the result is still nearer 256 than 512 (under 1.5 × window =
+384) and ends the run there; otherwise it stops before it. The same test
+governs the two ways a heading is orphaned today:
+
+* a content-boundary cut is never taken right after a heading piece;
+* when the next piece must be descended, a buffered run ending in a heading
+  is merged into the first chunk that descent produces if the two together
+  are under 384 (rooted at the shared parent, which under-claims — safe).
+
+The retrieval unit's ceiling therefore becomes 384 in the worst case, by the
+reader's own rule; the target stays 256.
 
 This changes chunk ids on re-scanned pages (a chunk's id is its root and
 part). `CLAUDE.md`'s rule applies: no corpus run while this is being edited;

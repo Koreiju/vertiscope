@@ -2880,69 +2880,140 @@ export function makeChecks(env) {
     },
     {
       id: "G-79",
-      asks: "hover outlines the chunk over the page's own layout and rings its node in the graph",
+      asks: "hover outlines the 256 chunk's whole extent over the page, fast, and rings its node",
       async run() {
+        // DESIGN_VII §1/§3. Navigated fresh, so the page's landing capture is
+        // in flight while the hovers happen -- the condition under which the
+        // old path (one store query per hover) took up to 5.6 s.
+        //
+        // Each heading/paragraph pair is scrolled into view, hovered, and its
+        // outline compared at THAT moment with an oracle that is not the
+        // overlay's code: the chunk's elements per the sidecar's own
+        // /page_map, their boxes read in the page.
         const got = await evaluate(`(async () => {
           const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
           const d = window.__domvec;
+          const base = String(app.plugins.getPlugin("domvec-bridge").settings.sidecar || "").replace(/\\/+$/, "");
           await d.act("open", "browser");
           await d.act("navigate", "https://en.wikipedia.org/wiki/Radix_tree");
-          await sleep(3000);
           const view = app.workspace.getLeavesOfType("domvec-browser-view")[0].view;
-          // Somewhere inside a paragraph, in guest coordinates.
-          const at = await view.webview.executeJavaScript(\`(function(){
-            var ps = document.querySelectorAll('#mw-content-text p');
-            for (var i = 0; i < ps.length; i++) {
-              var b = ps[i].getBoundingClientRect();
-              if (b.height > 20 && b.top > 60 && b.bottom < innerHeight - 40)
-                return {x: Math.round(b.left + 30), y: Math.round(b.top + b.height / 2)};
+          const wv = view.webview, pb = view.pipebox;
+          for (let i = 0; i < 40 && !(pb.map.url === wv.getURL() && pb.map.size); i++) await sleep(250);
+          if (!pb.map.size) return { error: "the overlay's map never loaded" };
+          const oracle = await fetch(base + "/page_map?url=" + encodeURIComponent(wv.getURL())).then((r) => r.json());
+          pb.latencies.length = 0;
+          const count = await wv.executeJavaScript(
+            "document.querySelectorAll('#mw-content-text h2, #mw-content-text h3').length");
+          const UNION = "(function(xs){var l=1e9,t=1e9,r=-1e9,b=-1e9,any=false;" +
+            "for(var i=0;i<xs.length;i++){var n=document.evaluate(xs[i],document,null,9,null).singleNodeValue;" +
+            "if(n&&n.nodeType===3)n=n.parentElement;if(!n)continue;var q=n.getBoundingClientRect();" +
+            "if(q.width<=0&&q.height<=0)continue;any=true;" +
+            "l=Math.min(l,q.left);t=Math.min(t,q.top);r=Math.max(r,q.right);b=Math.max(b,q.bottom);}" +
+            "return any?[l,t,r,b]:null;})";
+          const wb = wv.getBoundingClientRect();
+          async function hoverAt(x, y) {
+            // Move, let Chromium apply it, then wait out two of the overlay's
+            // 80 ms polls, so the reading is of THIS position, not the last.
+            // Chromium does not re-hit-test a move to where the pointer
+            // already is, so after a scroll :hover can stay on the element
+            // that USED to be there. Jiggle away and back until the page's
+            // own :hover agrees with elementFromPoint -- the aim is then real.
+            const AGREE = "(function(x,y){var e=document.elementFromPoint(x,y);" +
+              "var hs=document.querySelectorAll(':hover');return !!e&&hs.length>0&&hs[hs.length-1]===e;})";
+            for (let k = 0; k < 8; k++) {
+              wv.sendInputEvent({ type: "mouseMove", x: x + 6 + k, y: y + 4 });
+              await sleep(25);
+              wv.sendInputEvent({ type: "mouseMove", x, y });
+              await sleep(35);
+              if (await wv.executeJavaScript(AGREE + "(" + x + "," + y + ")")) break;
             }
-            return null; })()\`);
-          if (!at) return { error: "no paragraph on screen" };
-          // A real mouse move INSIDE the guest -- the event a pointer makes.
-          let hover = null;
-          for (let i = 0; i < 12 && !hover; i++) {
-            view.webview.sendInputEvent({ type: "mouseMove", x: at.x, y: at.y });
-            await sleep(250);
-            hover = view.pipebox && view.pipebox.hover;
+            const moved = performance.now();
+            let h = null;
+            for (let i = 0; i < 25; i++) {
+              await sleep(40);
+              h = pb.hover;
+              if (h && h.at > moved + 90) break;
+              if (!h && performance.now() - moved > 250) break;
+            }
+            const o = view.containerEl.querySelector(".domvec-chunk-outline");
+            const r = o && o.style.display !== "none" ? o.getBoundingClientRect() : null;
+            const outline = r ? [r.left, r.top, r.width, r.height] : null;
+            let off = null;
+            if (h && outline) {
+              const xs = (oracle.chunks || {})[h.cid] || [];
+              const box = await wv.executeJavaScript(UNION + "(" + JSON.stringify(xs.slice(0, 400)) + ")");
+              if (box) {
+                const want = [wb.left + Math.max(0, box[0]), wb.top + Math.max(0, box[1]),
+                              wb.left + Math.min(wb.width, box[2]), wb.top + Math.min(wb.height, box[3])];
+                off = Math.max(Math.abs(outline[0] - want[0]), Math.abs(outline[1] - want[1]),
+                               Math.abs(outline[0] + outline[2] - want[2]),
+                               Math.abs(outline[1] + outline[3] - want[3]));
+              }
+            }
+            return { cid: h && h.cid, outline, off };
           }
-          if (!hover) return { at, error: "the hover never resolved to a chunk" };
-          const ui = d.ui();
-          const rect = await view.webview.executeJavaScript(
-            "(function(){var n=document.evaluate(" + JSON.stringify(hover.matched) +
-            ",document,null,XPathResult.FIRST_ORDERED_NODE_TYPE,null).singleNodeValue;" +
-            "if(n&&n.nodeType===3)n=n.parentElement;if(!n)return null;var b=n.getBoundingClientRect();" +
-            "return {x:b.left,y:b.top,w:b.width,h:b.height};})()");
-          const wb = view.webview.getBoundingClientRect();
-          // The outline's RENDERED box on screen -- not its style values, which
-          // are in its containing block's frame.
-          const oel = view.containerEl.querySelector(".domvec-chunk-outline");
-          const ob = oel && oel.style.display !== "none" ? oel.getBoundingClientRect() : null;
-          const o = ob ? [ob.left, ob.top, ob.width, ob.height] : null;
+          const pairs = [];
+          for (let j = 0; j < count && pairs.length < 6; j++) {
+            // Jump -- the page scrolls smoothly, and coordinates read mid-
+            // animation point at whatever was there before -- then measure
+            // once it has settled.
+            const ok = await wv.executeJavaScript("(function(j){" +
+              "var h=document.querySelectorAll('#mw-content-text h2, #mw-content-text h3')[j];" +
+              "var wrap=h.closest('.mw-heading')||h, p=wrap.nextElementSibling;" +
+              "while(p&&p.tagName!=='P')p=p.nextElementSibling; if(!p) return false;" +
+              "window.scrollTo({top: wrap.getBoundingClientRect().top + scrollY - 120, behavior: 'instant'});" +
+              "return true;})(" + j + ")");
+            if (!ok) continue;
+            await sleep(200);
+            const t = await wv.executeJavaScript("(function(j){" +
+              "var h=document.querySelectorAll('#mw-content-text h2, #mw-content-text h3')[j];" +
+              "var wrap=h.closest('.mw-heading')||h, p=wrap.nextElementSibling;" +
+              "while(p&&p.tagName!=='P')p=p.nextElementSibling;" +
+              "var hb=h.getBoundingClientRect(), q=p.getBoundingClientRect();" +
+              "if(hb.top<0||q.top>innerHeight-30) return null;" +
+              "return {h:[Math.round(hb.left+10),Math.round(hb.top+hb.height/2)]," +
+              "p:[Math.round(q.left+10),Math.round(q.top+Math.min(20,q.height/2))]};})(" + j + ")");
+            if (!t) continue;
+            const a = await hoverAt(t.h[0], t.h[1]);
+            const b = await hoverAt(t.p[0], t.p[1]);
+            pairs.push({ heading: a, paragraph: b });
+          }
+          const lat = pb.latencies.slice().sort((x, y) => x - y);
           const g = app.workspace.getLeavesOfType("domvec-graph-view")[0];
-          const node = g && g.view && g.view.graph
-            ? g.view.graph.graphData().nodes.find((n) => n.id === hover.cid) : null;
-          return { at, cid: hover.cid, matched: hover.matched, rect,
-                   webview: [wb.left, wb.top, wb.width, wb.height], outline: o,
+          const last = pairs.length ? pairs[pairs.length - 1].paragraph : null;
+          const node = g && g.view && g.view.graph && last && last.cid
+            ? g.view.graph.graphData().nodes.find((n) => n.id === last.cid) : null;
+          return { pairs, latency_p50: lat[lat.length >> 1] ?? null,
+                   latency_p95: lat[Math.floor(lat.length * 0.95)] ?? null, samples: lat.length,
                    node_in_graph: !!node, node_ringed: !!(node && node.hovered) };
-        })()`, { timeout: 90000 });
+        })()`, { timeout: 150000 });
         if (got.error) return { pass: false, evidence: got };
-        let off = null;
-        if (got.rect && got.outline) {
-          const [wl, wt, ww, wh] = got.webview;
-          const left = wl + Math.max(0, got.rect.x), top = wt + Math.max(0, got.rect.y);
-          const right = wl + Math.min(ww, got.rect.x + got.rect.w);
-          const bottom = wt + Math.min(wh, got.rect.y + got.rect.h);
-          const [ol, ot, ow, oh] = got.outline;
-          off = Math.max(Math.abs(ol - left), Math.abs(ot - top),
-                         Math.abs(ol + ow - right), Math.abs(ot + oh - bottom));
+        const offs = [];
+        let sameChunk = 0, oneBox = 0;
+        for (const pair of got.pairs) {
+          for (const side of [pair.heading, pair.paragraph]) offs.push(side.off);
+          if (pair.heading.cid && pair.heading.cid === pair.paragraph.cid) {
+            sameChunk++;
+            const a = pair.heading.outline, b = pair.paragraph.outline;
+            if (a && b && a.every((v, i) => Math.abs(v - b[i]) <= 2)) oneBox++;
+          }
         }
+        const measured = offs.filter((v) => v !== null && v !== undefined);
+        const worst = measured.length ? Math.max(...measured) : null;
         return {
-          // Ringed only if the node is drawn; a chunk not in the picture yet
-          // cannot be ringed, and hover-first (G-80) is what brings it.
-          pass: !!got.cid && !!got.outline && off !== null && off <= 3
+          pass: got.pairs.length > 0 && measured.length === offs.length
+             && worst !== null && worst <= 3
+             && sameChunk > 0 && oneBox === sameChunk
+             && got.latency_p95 !== null && got.latency_p95 < 100
              && (!got.node_in_graph || got.node_ringed),
-          evidence: { ...got, outline_off_px: off },
+          evidence: { pairs: got.pairs.length, measured: measured.length,
+                      extent_off_px_worst: worst, same_chunk_pairs: sameChunk,
+                      drawn_as_one_box: oneBox, latency_ms_p50: got.latency_p50,
+                      latency_ms_p95: got.latency_p95, samples: got.samples,
+                      node_in_graph: got.node_in_graph, node_ringed: got.node_ringed,
+                      per_pair: got.pairs.map((p) => ({
+                        heading: p.heading.cid, paragraph: p.paragraph.cid,
+                        off: [p.heading.off, p.paragraph.off] })) },
         };
       },
     },

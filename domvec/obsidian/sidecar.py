@@ -1195,6 +1195,11 @@ class _Handler(BaseHTTPRequestHandler):
             # and a count would leave it re-fetching the whole layout to find
             # out which three nodes moved.
             dirty_cids = [c.cid for c in dirty]
+            # And the elements each one draws, for the browser's overlay map
+            # (DESIGN_VII §3): the delta that keeps it current, already in
+            # memory, so the overlay never has to ask the store.
+            map_delta = {c.cid: [line.address.xpath for line in c.lines]
+                         for c in dirty}
             # Rewritten chunks keep their cid only if their span did; either
             # way the projector must look again. One without a vector yet is
             # dropped from its queue and comes back through the embedder.
@@ -1214,6 +1219,7 @@ class _Handler(BaseHTTPRequestHandler):
             "changed": sense.changed,
             "dirty": len(dirty),
             "dirty_cids": dirty_cids,
+            "map_delta": map_delta,
             "wire_bytes": sense.wire_bytes,
             "phases": phases,
         }
@@ -1594,6 +1600,29 @@ class _Handler(BaseHTTPRequestHandler):
 
         # A page's whole patricia TREE (Addendum VII): every drawable chunk
         # on the tree of its DOM, branches only where the DOM branches.
+        # The page's element -> chunk map, for the browser cell's overlay
+        # (DESIGN_VII §3): each markdown line's own address and the 256-token
+        # chunk that draws it, in one query. The overlay then resolves hovers
+        # in memory instead of asking the store per element.
+        if segments[0] == "page_map":
+            url = (parse_qs(parts.query).get("url") or [""])[0]
+            if not url:
+                self._send(400, {"error": "no url"})
+                return
+            _t0 = time.perf_counter()
+            rows = self.workspace.store._rows(
+                "MATCH (c:Chunk)-[:Anchors]->(a:Address) WHERE c.url = $u "
+                "RETURN c.cid, a.xpath", {"u": url})
+            chunks: Dict[str, List[str]] = {}
+            for cid, xpath in rows:
+                if cid and xpath:
+                    chunks.setdefault(cid, []).append(xpath)
+            ms = round((time.perf_counter() - _t0) * 1000, 1)
+            _profile("page_map", {"url": url[-60:], "chunks": len(chunks),
+                                  "addresses": len(rows), "ms": ms})
+            self._send(200, {"url": url, "chunks": chunks, "ms": ms})
+            return
+
         if segments[0] == "page_tree":
             from .layout import page_tree
             from .projector import projector as _get_projector
@@ -2056,9 +2085,15 @@ def serve(workspace, port: int = 8787, *, block: bool = True,
             # Addendum VII: UMAP over one centroid per page; a page's chunks
             # are its patricia tree, laid out by force in the pane. The
             # centroid is the triple mechanism's unless told otherwise.
+            # Behind DOMVEC_PROJECTOR=page until the pane opens page trees
+            # (DESIGN_VII §9 step 3); the chunk projector until then, so the
+            # running app stays coherent at every commit.
             import os as _os
-            _projector.PROJECTOR = _projector.PageProjector(
-                dims=3, centroid=_os.environ.get("DOMVEC_PAGE_CENTROID", "triple"))
+            if _os.environ.get("DOMVEC_PROJECTOR", "chunk") == "page":
+                _projector.PROJECTOR = _projector.PageProjector(
+                    dims=3, centroid=_os.environ.get("DOMVEC_PAGE_CENTROID", "triple"))
+            else:
+                _projector.PROJECTOR = _projector.ChunkProjector(dims=3)
             _projector.PROJECTOR.on_batch = lambda r: _profile("project", r)
             _projector.PROJECTOR.on_fit = lambda r: _profile("projector_fit", r)
             _projector.PROJECTOR.start(workspace, work_lock=_WORK_LOCK,

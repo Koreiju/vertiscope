@@ -26,6 +26,7 @@
 import type { Sidecar } from "./sidecar";
 import { profiler } from "./profile";
 import { ProfileReadout } from "./profileview";
+import { ChunkMap } from "./chunkmap";
 
 /** A chunk the reader right-clicked: pinned until the markdown side lets
  *  it go (`G-78`). */
@@ -47,6 +48,17 @@ export interface HoverState {
   rect: { x: number; y: number; w: number; h: number } | null;
   lines: number;
   at: number;
+}
+
+/**
+ * An in-page read with a deadline. `executeJavaScript` on a page that is still
+ * loading can wait until the load finishes; the hover poll holds a busy flag
+ * across it, so one stalled read froze the overlay for the whole load --
+ * found by a check that hovers right after navigating and saw nothing at all.
+ * Past the deadline the read is abandoned and the next poll starts fresh.
+ */
+function within<T>(p: Promise<T>, ms: number): Promise<T | null> {
+  return Promise.race([p.catch(() => null), new Promise<null>((r) => setTimeout(() => r(null), ms))]);
 }
 
 export class PipelineBox {
@@ -74,6 +86,11 @@ export class PipelineBox {
   onUnresolved: (xpath: string) => void = () => {};
   private lastUnresolved = "";
   private focused = new Set<string>();
+  /** Which chunk draws which element of this page -- in memory, so a hover
+   *  never waits on the store (DESIGN_VII §3). */
+  map = new ChunkMap();
+  /** The last hovers' latencies, pointer-read to outline drawn, in ms. */
+  latencies: number[] = [];
   private timer = 0;
   private hoverTimer = 0;
   private status: any = null;
@@ -104,7 +121,9 @@ export class PipelineBox {
     // Hover is polled rather than listened for: mouse events over a webview
     // go to the GUEST, and listening there would mean installing a handler
     // in the page. Reading `:hover` five times a second installs nothing.
-    this.hoverTimer = window.setInterval(() => void this.pollHover(), 200);
+    // 80 ms: the poll is two small in-page reads and a map lookup now, so a
+    // shorter interval costs little and is most of the hover's latency.
+    this.hoverTimer = window.setInterval(() => void this.pollHover(), 80);
     this.draw();
   }
 
@@ -172,45 +191,42 @@ export class PipelineBox {
     this.hoverBusy = true;
     try {
       if (this.pins.length) await this.placePins();
-      const got = await wv.executeJavaScript(
+      const t0 = performance.now();
+      // The hovered element's ancestor chain, leaf first: one in-page read.
+      const chain: string[] | null = await within(wv.executeJavaScript(
         "(function(){var hs=document.querySelectorAll(':hover');" +
-        "if(!hs.length) return null;var el=hs[hs.length-1];" +
-        XPATH_OF.replace("return", "var xp=") +
-        "return xp;})()").catch(() => null);
-      const xpath = typeof got === "string" ? got : "";
-      if (!xpath) { this.clearHover(); return; }
+        "if(!hs.length) return null;var el=hs[hs.length-1];var out=[];" +
+        "while(el&&el.nodeType===1&&el.tagName){var parts=[],n=el;" +
+        "while(n&&n.nodeType===1&&n.tagName){var t=n.tagName.toLowerCase(),k=1,s=n.previousElementSibling;" +
+        "while(s){if(s.tagName===n.tagName)k++;s=s.previousElementSibling;}" +
+        "parts.unshift(k>1?t+'['+k+']':t);n=n.parentElement;}" +
+        "out.push('/'+parts.join('/'));el=el.parentElement;}return out;})()"), 400);
+      if (!chain || !chain.length) { this.clearHover(); return; }
       const url = this.url();
-      let hit = this.resolved.get(xpath);
+      // In memory: the same nearest-ancestor walk `/resolve` does in the store.
+      const hit = this.map.url === url ? this.map.lookup(chain) : null;
       if (!hit) {
-        const r: any = await this.sidecar.resolve(url, xpath).catch(() => null);
-        if (!r || !r.cid) {
-          // Nothing stored draws this yet: ask for it NOW (`G-80`). Once per
-          // element, so resting the pointer does not drain five times a second.
-          if (xpath !== this.lastUnresolved) {
-            this.lastUnresolved = xpath;
-            this.onUnresolved(xpath);
-          }
-          this.clearHover();
-          return;
+        // Nothing mapped draws this yet: drain NOW (`G-80`, hover-first).
+        // Once per element, so resting the pointer does not drain repeatedly.
+        if (chain[0] !== this.lastUnresolved) {
+          this.lastUnresolved = chain[0];
+          this.onUnresolved(chain[0]);
         }
-        hit = { cid: String(r.cid), matched: String(r.matched_xpath || xpath),
-                walked: Number(r.ancestors_walked || 0),
-                lines: (r.lines || []).length };
-        if (this.resolved.size > 400) this.resolved.clear();
-        this.resolved.set(xpath, hit);
+        this.clearHover();
+        return;
       }
-      // The CHUNK's box, not the hovered leaf's: the reader is pointing at a
-      // word and the thing the trie holds is the section around it.
-      const rect = await wv.executeJavaScript(
-        "(function(){var n=document.evaluate(" + JSON.stringify(hit.matched) +
-        ",document,null,XPathResult.FIRST_ORDERED_NODE_TYPE,null).singleNodeValue;" +
-        "if(!n) return null;if(n.nodeType===3)n=n.parentElement;if(!n) return null;" +
-        "var b=n.getBoundingClientRect();return {x:b.left,y:b.top,w:b.width,h:b.height};})()")
-        .catch(() => null);
+      // The CHUNK's extent: the union of every element its lines draw -- not
+      // the one element that matched. A heading and its paragraph in one
+      // chunk are one box.
+      const rect = await this.unionRect(this.map.xpaths(hit.cid));
       const changed = !this.hover || this.hover.cid !== hit.cid;
-      this.hover = { xpath, cid: hit.cid, matched: hit.matched, walked: hit.walked,
-                     rect: rect || null, lines: hit.lines, at: performance.now() };
+      this.hover = { xpath: chain[0], cid: hit.cid, matched: hit.matched,
+                     walked: hit.walked, rect, lines: this.map.xpaths(hit.cid).length,
+                     at: performance.now() };
       this.placeOutline();
+      const ms = performance.now() - t0;
+      this.latencies.push(Math.round(ms * 10) / 10);
+      if (this.latencies.length > 100) this.latencies.shift();
       if (changed) {
         this.onHoverChunk(hit.cid, url);
         // Hover-first (`G-80`): the chunk under the pointer goes to the front
@@ -223,6 +239,7 @@ export class PipelineBox {
           const prof = profiler();
           const trace = prof.begin("hover", url);
           prof.fact(trace, "cid", hit.cid);
+          prof.fact(trace, "ms_outline", Math.round(ms));
           prof.watch(trace, [hit.cid], performance.now());
         }
       }
@@ -230,6 +247,20 @@ export class PipelineBox {
     } finally {
       this.hoverBusy = false;
     }
+  }
+
+  /** The bounding box of several elements, in the page's viewport: one read. */
+  private async unionRect(xpaths: string[]):
+      Promise<{ x: number; y: number; w: number; h: number } | null> {
+    const wv = this.webview();
+    if (!wv || !xpaths.length) return null;
+    return await within(wv.executeJavaScript(
+      "(function(xs){var l=1e9,t=1e9,r=-1e9,b=-1e9,any=false;" +
+      "for(var i=0;i<xs.length;i++){var n=document.evaluate(xs[i],document,null,9,null).singleNodeValue;" +
+      "if(n&&n.nodeType===3)n=n.parentElement;if(!n||!n.getBoundingClientRect)continue;" +
+      "var q=n.getBoundingClientRect();if(q.width<=0&&q.height<=0)continue;any=true;" +
+      "if(q.left<l)l=q.left;if(q.top<t)t=q.top;if(q.right>r)r=q.right;if(q.bottom>b)b=q.bottom;}" +
+      "return any?{x:l,y:t,w:r-l,h:b-t}:null;})(" + JSON.stringify(xpaths.slice(0, 400)) + ")"), 400);
   }
 
   private clearHover() {
@@ -244,6 +275,16 @@ export class PipelineBox {
   private async placePins() {
     const wv = this.webview();
     if (!wv || !this.pins.length) return;
+    // The pinned chunk's whole extent, as for hover; the matched element
+    // alone only when the map does not know the chunk (another page).
+    if (this.map.url === this.url()) {
+      for (const pin of this.pins) {
+        const el = this.pinEls.get(pin.cid);
+        const xs = this.map.xpaths(pin.cid);
+        if (el && xs.length) this.placeBox(el, await this.unionRect(xs));
+      }
+      if (this.pins.every((p) => this.map.xpaths(p.cid).length)) return;
+    }
     const rects: any = await wv.executeJavaScript(
       "(function(xs){return xs.map(function(x){var n=document.evaluate(x,document," +
       "null,XPathResult.FIRST_ORDERED_NODE_TYPE,null).singleNodeValue;" +

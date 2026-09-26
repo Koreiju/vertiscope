@@ -1186,6 +1186,23 @@ is superseded): the Electron browser stays the main surface and pinned
 chunks are side panels. And the method is binding: design from the whole of
 Addenda V-VII before code -- see `docs/DESIGN_VII.md`.*
 
+Decisions the same day, on the two choices `DESIGN_VII.md` left open:
+
+> On the choices you cited for just your most recent response only; text
+> only and link free are the same, and make hover-pin the 256 limit. Of
+> course, this is within a margin of error depending on the percentage
+> increase from the limit to the very next chunk merge. If this is closer to
+> 512 than 256 in the merge after the context limit, keep the previous,
+> otherwise include the merge as the final chunk. This should be pretty
+> lenient to edge cases where we include headings as well.
+
+*Read as: (1) "text-only" (512) and "link-free" (256) are ONE counting rule.
+(2) Hover and pin outline the 256 chunk, not the 512 group. (3) The 256 cut
+is lenient: when the next merge would take a run past 256, the run takes it
+anyway if the result is still nearer 256 than 512 (under 384), and stops
+before it otherwise -- which is what keeps a heading with the paragraph it
+heads.*
+
 ---
 
 

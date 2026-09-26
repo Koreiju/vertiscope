@@ -294,6 +294,11 @@ export class Sidecar {
    * where these points land. `stale` coming back true means the corpus has
    * doubled since that fit and the pane should ask for a real layout.
    */
+  /** The page's element -> chunk map, for the overlay (DESIGN_VII §3). */
+  async pageMap(url: string): Promise<any | null> {
+    return this.get("/page_map?url=" + encodeURIComponent(url));
+  }
+
   /** Hover-first (`G-80`): move these chunks to the front of the sidecar's
    *  encoder and projector queues. */
   async focus(cids: string[]): Promise<any | null> {

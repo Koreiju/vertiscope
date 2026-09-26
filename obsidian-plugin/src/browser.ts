@@ -730,6 +730,11 @@ export class BrowserView extends ItemView {
     }
     if (this.live) this.say(`live · ${url}`);
     void this.placeWholePage(url);
+    // The overlay's map of this page (DESIGN_VII §3), loaded once on landing
+    // and patched from every capture reply after.
+    if (this.pipebox && url && url !== "about:blank") {
+      void this.pipebox.map.load(this.sidecar, url);
+    }
   }
 
   /**
@@ -897,6 +902,10 @@ export class BrowserView extends ItemView {
       if (!reply || reply.error) {
         this.say(`capture: ${reply ? reply.error : "no reply"}`);
         return;
+      }
+      // The chunks this drain rewrote, and the elements they draw.
+      if (this.pipebox && this.pipebox.map.url === url) {
+        this.pipebox.map.apply((reply as any).map_delta);
       }
       const cids = (reply.dirty_cids || []) as string[];
       if (!cids.length) {
