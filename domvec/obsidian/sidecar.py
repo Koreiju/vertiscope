@@ -1592,6 +1592,23 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(200, out)
             return
 
+        # A page's whole patricia TREE (Addendum VII): every drawable chunk
+        # on the tree of its DOM, branches only where the DOM branches.
+        if segments[0] == "page_tree":
+            from .layout import page_tree
+            from .projector import projector as _get_projector
+            url = (parse_qs(parts.query).get("url") or [""])[0]
+            if not url:
+                self._send(400, {"error": "no url"})
+                return
+            _t0 = time.perf_counter()
+            got = page_tree(self.workspace, url, _get_projector())
+            got["ms"] = round((time.perf_counter() - _t0) * 1000, 1)
+            _profile("tree", {"url": url[-60:], "nodes": len(got.get("nodes") or []),
+                              "ms": got["ms"]})
+            self._send(200, got)
+            return
+
         if segments[0] == "page_status":
             from .. import tokens as _tokens
             from .layout import (_ESTIMATED_PAGES, _PAGE_POS, live_projection)
@@ -2036,7 +2053,12 @@ def serve(workspace, port: int = 8787, *, block: bool = True,
     if workspace is not None:
         from . import projector as _projector
         if _projector.PROJECTOR is None:
-            _projector.PROJECTOR = _projector.ChunkProjector(dims=3)
+            # Addendum VII: UMAP over one centroid per page; a page's chunks
+            # are its patricia tree, laid out by force in the pane. The
+            # centroid is the triple mechanism's unless told otherwise.
+            import os as _os
+            _projector.PROJECTOR = _projector.PageProjector(
+                dims=3, centroid=_os.environ.get("DOMVEC_PAGE_CENTROID", "triple"))
             _projector.PROJECTOR.on_batch = lambda r: _profile("project", r)
             _projector.PROJECTOR.on_fit = lambda r: _profile("projector_fit", r)
             _projector.PROJECTOR.start(workspace, work_lock=_WORK_LOCK,

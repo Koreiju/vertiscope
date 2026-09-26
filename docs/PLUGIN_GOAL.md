@@ -1061,7 +1061,133 @@ markdown to the markdown side, and opens the billboard, which stays open as
 long as the markdown does. A chunk node shows one of its pictures and expands
 to the whole chunk. The separate chunk pane goes.*
 
+Follow-up the same day: *"Make sure you also got all my previous prompts on
+the same highlight-on-hover mentions/features."* (Collected into `G-78`..`G-80`
+with their sources: Addendum I's overlay "overtop of the page's native
+cartesian displays", Addendum IV's "minimal highlight ... without banners"
+and "switchable second view", 2026-09-22's "clear highlight (non-blinding)"
+and "recursively chunked first".)
+
 ---
+
+## Addendum VII, 2026-09-26 - UMAP over page centroids only; the patricia TREE, opened whole
+
+> Also, when time, when you go to make a final report back, please do also
+> tell me about what processing is happening on embedding/UMAP side, and
+> whether or not we still have force-directed patricia tries on our
+> subchunks, which are the 512-token limit form of the aggregate 256-limit
+> original subchunks, which are what are used in the actual retrieval itself.
+> Please verify the context window limiting and sanctioning of subchunks vs
+> chunks to their respective UIs; the retrieval panel(s) and the 3D graph.
+> Also, please inform me on what the requirements say about what
+> tokens/content are included in token counting on window thresholding for
+> both 512 and 256 token limit chunks. So; what is counted and what is not
+> for both... Are they the same or different in the requirements? How about
+> in the code?
+>
+> A fork in the road on the best rendering pipeline appears in the case of
+> investigations on the first point (UMAP/trie rendering in the 3D graph). If
+> we are UMAPing the entire set of 512-chunk embeddings from averages on their
+> subchunk embeddings, if we are UMAPing efficient averages of sub-chunks for
+> a scanned page, and if millisecond time constraints bar umapping over the
+> full set of chunks vs UMAPing only the global subchunk centroids for each
+> scanned url path (upper half of the patricia trie's code partitions). In the
+> case where we are UMAPing all chunks to 3D, we will move instead to only on
+> the global centroids for each page. When I say global centroid, this is of
+> our triple-retrieval mechansim; pagerank, frequency, quantized transformer
+> embeddings. Perhaps, depending on what vectors are sent to UMAP, we could
+> compute centroids on the triple retrieval mechanism where pagerank weights
+> concatenated centroids over the semantic and frequency embeddings, since
+> these are computed anyways for our 256-retrieval mechanism. I'm also unsure
+> of whether or not our Hit@1 measurements used triple mechanism or just
+> quantized. Depending, though, on millisecond time profiles, it may be more
+> efficient just to compute the quantized embeddings and use those for
+> retrieval, which also enables more efficient averaging, so we may go with
+> that instead. Anyways, UMAP is only applied to the averages over pages, and
+> then clicking one page I think (rather than recursively open at each level
+> for each click) we should expand out the full patricia trie at the same time
+> for one shadow DOM. Left-clicks on nodes expand, right clicks contract them
+> back to their central UMAP nodes vs force-directed chunks. One thing I will
+> note is that this means you can scrub all the complexities on the per-fold
+> opening/closing logic and keep opening and closing force-directed layouts
+> *that* simple. We are also seeing persistent errors with force-directed
+> where, I think, the current patricia trie is not actually a 'tree'
+> structure that allows for efficient use of space and repulsion forces,
+> because nodes are connected to multiple ancestors perhaps or something that
+> means they are over-constrained and cannot properly fan out as a real tree
+> structure clearly would in the GUI. Instead, we have these triangular
+> lattice structures because I think, depending on how you're interpreting
+> the structure of the trie vs the tree of the shadow DOM, the trie might be
+> designed for fast retrieval with a higher perplexity on path nodes that
+> indexes every intermediate node and their leaves to their closest common
+> ancestors, which is what deviates the trie structure from the original
+> shadow DOM tree structure. I think there was mention originally that the
+> "patricia tree" part and the "trie" got combined, but info on "tree" vs
+> "trie" got a little muttled that we can visit now. In our case, we're
+> actually interested (for our 3D graph GUI) in the patricia tree because we
+> can see the tree-like structure that disregards intermediate path lengths to
+> ultimately root and leaf nodes. So, the patricia component is a way of
+> saying that the tree structure we're concerned with is actually the subtree
+> of all the content nodes detected in the full shadow DOM tree. That means
+> our graph GUI representation shows these intermediate path nodes, if they
+> go from one root to one leaf, as a single link rather than a collection of
+> links between the actual full set of path nodes. I think, also, regardless
+> of the perplexity/density of trie vs tree connections between shadow DOM
+> nodes, the upper limit on max link length in force-directed layouts is
+> still wayyyyy too low. The max link lengths need to be much longer.
+
+*What this changes, read against Addenda V-VI. It supersedes Addendum V's
+chunk-level fit for the 3D graph: UMAP runs over one centroid per PAGE only
+(the triple mechanism's centroid -- pagerank weighting concatenated semantic
+and frequency centroids -- or the quantized embedding alone, whichever the
+millisecond profiles favour). A page opens, on one left-click, into its
+WHOLE patricia tree at once -- the subtree of the page's content nodes in the
+shadow DOM, with every single-child chain of intermediate elements collapsed
+to one link -- laid out force-directed around the page's UMAP node; a
+right-click closes it back to that node. Per-step unravelling (`G-54`) and
+its territory logic go. The drawn structure must be a TREE (one parent per
+node), and its links far longer than today. It also asks four questions to be
+answered from the documents and the code: what the embedding/UMAP side does
+now; whether subchunk trees are force-directed; how the 256 retrieval unit
+and the 512 display unit are each confined to their UI; and what the
+requirements and the code each count as tokens for the two windows.*
+
+Follow-up the same day, after using the pinned overlays:
+
+> Overlay rendering works, but is super super slow and inaccurate, and I'm
+> wondering if that's because we're not async on the stages of processing in
+> our scanning pipeline, where our chunking algorithms would be blocked by
+> downstream vectorization before we see the actual chunk-based overlays. I'm
+> also worried about the actual chunk mechanics on the context windows
+> because I'm hovering over a heading and a paragraph and seeing two
+> different chunks, but I'm sure that this should be one chunk. The hovers
+> need a 1 second or longer latency currently to show their overlay, the
+> overlays are in the correct position and update somewhat but are extremely
+> slow in doing this which is concerning. I actually like the direct side-by
+> side sub-panel on the electron so this might actually replace its
+> duplicitous hidden second-view panel that was our original, but we will now
+> favor a more direct side-by-side with electron browser as still the main
+> focus and the right-clicked chunks still as the side-panels. I hope you've
+> entered this and the most previous prompt into our verbatim on this as
+> well. Once there, re-assess the landscape of the features from a
+> bird's-eye-view and propagate the necessary updates and changes downwards
+> to the details as necessary. Make sure you consider all factors and
+> connections between these features when going to design new code, so that
+> you're not making a whole bunch of filament-like single-shim changes in
+> place of more fully informed designs from the full totality of the context
+> of these new verbatim requirements.
+
+*What this adds. The overlay is the scanning pipeline's fastest output and
+must not wait on anything downstream of chunking -- vectorisation above all.
+A heading and the paragraph it heads are one chunk to a reader, and the
+overlay must show the unit a reader means. The side-by-side markdown panel
+REPLACES the switchable second view (Addendum IV's "switchable second view"
+is superseded): the Electron browser stays the main surface and pinned
+chunks are side panels. And the method is binding: design from the whole of
+Addenda V-VII before code -- see `docs/DESIGN_VII.md`.*
+
+---
+
 
 ## Standing instructions carried in the verbatim
 

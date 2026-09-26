@@ -664,6 +664,360 @@ class ChunkProjector:
         return self.page_pos.get(url)
 
 
+# ---------------------------------------------------------------------------
+# Addendum VII: UMAP over one centroid per PAGE.
+# ---------------------------------------------------------------------------
+
+class PageProjector(ChunkProjector):
+    """UMAP over each page's centroid, streamed and refitted like the chunks'.
+
+    **Why pages, again.** Addendum V fitted every chunk (14,382 points, 40 s
+    of fit plus 34 s of transform) and drew each at its own position, so a
+    page's chunks were scattered across the cloud -- 43.4% nearer their own
+    page than any other. Addendum VII keeps UMAP for what it is good at here,
+    placing PAGES by what they mean, and gives the inside of a page to the
+    force-directed patricia tree instead.
+
+    **The centroid** (`centroid=`):
+
+    * ``"triple"`` -- the retrieval mechanism's own three signals: each
+      chunk's quantized embedding and its frequency (tf-idf) row, weighted by
+      the chunk's PageRank, averaged over the page; the frequency centroid is
+      reduced by an SVD fitted on the pages, and the two halves are unit-
+      normalised and concatenated.
+    * ``"semantic"`` -- the plain mean of the quantized embeddings.
+
+    Both are computed and timed at every fit, whichever one is drawn, so the
+    choice rests on measured milliseconds rather than on a guess.
+
+    The stream is the chunk projector's: a changed chunk re-derives only its
+    PAGE's centroid and transforms that one point into the fit.
+    """
+
+    def __init__(self, dims: int = 3, *, centroid: str = "triple",
+                 seed: int = 0) -> None:
+        super().__init__(dims, sample_cap=10 ** 9, seed=seed)
+        self.centroid = centroid if centroid in ("triple", "semantic") else "triple"
+        self.svd_f = None
+        self.page_vec: Dict[str, np.ndarray] = {}
+        self.centroid_ms: Dict[str, float] = {}
+
+    FILE = "page_projector.pkl"
+    #: Read by `layout` to pick the tree path over the chunk-position path.
+    kind = "page"
+
+    # -- the centroids ------------------------------------------------------
+    def _signals(self, workspace):
+        """PageRank per chunk and the tf-idf matrix, from the query index."""
+        try:
+            index = workspace.index
+            ranks = np.asarray(index.ranks, dtype=np.float64)
+            tfidf = workspace.freq.tfidf()
+            return ranks, tfidf, workspace.freq
+        except Exception:                            # noqa: BLE001
+            return None, None, None
+
+    def _weights(self, cids, ranks, freq):
+        rows = [freq.row_of(c) if freq is not None else None for c in cids]
+        w = np.array([ranks[r] if (ranks is not None and r is not None
+                                   and r < len(ranks)) else 0.0 for r in rows])
+        if not np.isfinite(w).all() or w.sum() <= 0:
+            w = np.ones(len(cids))
+        return w / w.sum(), rows
+
+    def _semantic_centroid(self, cids, vec, w=None):
+        block = np.asarray([vec[c] for c in cids], dtype=np.float32)
+        c = block.mean(axis=0) if w is None else (w[:, None] * block).sum(axis=0)
+        return _unit(c.astype(np.float32))
+
+    def _freq_centroid(self, rows, w, tfidf):
+        """The weighted tf-idf centroid, still sparse (1 x vocabulary)."""
+        from scipy import sparse
+        keep = [(i, r) for i, r in enumerate(rows) if r is not None and r < tfidf.shape[0]]
+        if not keep:
+            return sparse.csr_matrix((1, tfidf.shape[1]), dtype=np.float32)
+        idx = [r for _i, r in keep]
+        ww = np.asarray([w[i] for i, _r in keep], dtype=np.float32)
+        return sparse.csr_matrix(ww.reshape(1, -1)) @ tfidf[idx]
+
+    def _page_rows(self, workspace, by_url, vec, fit: bool):
+        """(urls, features) for these pages, in the configured centroid, and
+        how long each kind took. At fit time the frequency SVD is (re)fitted."""
+        import time as _t
+        from scipy import sparse
+        urls = [u for u, cs in by_url.items() if any(c in vec for c in cs)]
+        if not urls:
+            return [], None
+        members = {u: [c for c in by_url[u] if c in vec] for u in urls}
+        t = _t.perf_counter()
+        semantic = np.asarray([self._semantic_centroid(members[u], vec) for u in urls],
+                              dtype=np.float32)
+        self.centroid_ms["semantic"] = round((_t.perf_counter() - t) * 1000, 2)
+        t = _t.perf_counter()
+        ranks, tfidf, freq = self._signals(workspace)
+        triple = None
+        if tfidf is not None:
+            sem_w, freq_rows = [], []
+            for u in urls:
+                w, rows = self._weights(members[u], ranks, freq)
+                sem_w.append(self._semantic_centroid(members[u], vec, w))
+                freq_rows.append(self._freq_centroid(rows, w, tfidf))
+            F = sparse.vstack(freq_rows).tocsr()
+            if fit or self.svd_f is None:
+                from sklearn.decomposition import TruncatedSVD
+                k = int(max(2, min(64, F.shape[0] - 1, F.shape[1] - 1)))
+                self.svd_f = TruncatedSVD(n_components=k, random_state=self.seed).fit(F)
+            fr = self.svd_f.transform(F).astype(np.float32)
+            fr = np.asarray([_unit(r) for r in fr], dtype=np.float32)
+            sw = np.asarray(sem_w, dtype=np.float32)
+            triple = np.hstack([sw, fr]) / np.sqrt(2.0)
+        self.centroid_ms["triple"] = round((_t.perf_counter() - t) * 1000, 2)
+        use = triple if (self.centroid == "triple" and triple is not None) else semantic
+        return urls, use
+
+    # -- the fit ------------------------------------------------------------
+    def fit(self, workspace) -> Dict:
+        from . import layout as L
+        started = time.perf_counter()
+        with self.lock:
+            if self.fitting:
+                return {"skipped": "already fitting"}
+            self.fitting = True
+        try:
+            t = time.perf_counter()
+            with (self.work_lock or nullcontext()):
+                rows = workspace.store.lead_vectors()
+                chunks_at_fit = int(workspace.store.chunk_count())
+            ms_read = (time.perf_counter() - t) * 1000
+            vec = {c: np.asarray(v, dtype=np.float32) for c, _u, v in rows}
+            url_of = {c: u for c, u, _v in rows}
+            by_url: Dict[str, set] = {}
+            for c, u in url_of.items():
+                by_url.setdefault(u, set()).add(c)
+            t = time.perf_counter()
+            urls, X = self._page_rows(workspace, by_url, vec, fit=True)
+            ms_centroids = (time.perf_counter() - t) * 1000
+            if len(urls) < 4:
+                return {"skipped": "too few pages", "n": len(urls)}
+            t = time.perf_counter()
+            with (self.fit_lock or nullcontext()):
+                L._LAST_FIT.clear()
+                X = L._unit_rows(np.asarray(X, dtype=np.float32))
+                want = self.dims + 3
+                coords = L._umap(X, dims=want, seed=self.seed,
+                                 neighbors=min(15, len(urls) - 1), min_dist=0.25)
+                got = int(coords.shape[1])
+                colours = (L._hsv(coords[:, self.dims:self.dims + 3])
+                           if got >= want else None)
+                coords = L._spread(coords, self.dims)
+                coords = L._framed(coords, self.dims)
+                projection = L.Projection.of(dims=self.dims, hsv=colours is not None,
+                                             fitted_n=len(urls),
+                                             fitted_chunks=chunks_at_fit)
+            ms_fit = (time.perf_counter() - t) * 1000
+            if projection is None:
+                self.fit_error = "the fit produced no transformable reducer"
+                return {"error": self.fit_error}
+            page_pos = {u: [float(v) for v in coords[i][:self.dims]]
+                        for i, u in enumerate(urls)}
+            page_hsv = ({u: [float(v) for v in colours[i]] for i, u in enumerate(urls)}
+                        if colours is not None else {})
+            with self.lock:
+                self.projection = projection
+                self.pos, self.hsv = {}, {}          # chunks are the tree's now
+                self.vec, self.url_of, self.by_url = vec, url_of, by_url
+                self.page_pos, self.page_hsv = page_pos, page_hsv
+                self.page_vec = {u: X[i] for i, u in enumerate(urls)}
+                self.fitted_chunks = projection.fitted_chunks
+                self.fitted_points = len(urls)
+                self.fit_sample = len(urls)
+                self.epoch = _next_epoch(self.epoch)
+                self.log.clear()
+                self.fit_error = ""
+            record = {
+                "epoch": self.epoch, "kind": "page", "centroid": self.centroid,
+                "pages": len(urls), "chunks": len(rows), "fitted_chunks": self.fitted_chunks,
+                "ms_read": round(ms_read, 1), "ms_centroids": round(ms_centroids, 1),
+                "centroid_ms": dict(self.centroid_ms), "dims_in": int(X.shape[1]),
+                "ms_fit": round(ms_fit, 1),
+                "ms": round((time.perf_counter() - started) * 1000, 1),
+                "at": round(time.time(), 3),
+            }
+            self.fits.append(record)
+            del self.fits[:-8]
+            record["saved"] = self.save(workspace)
+            if self.on_fit:
+                try:
+                    self.on_fit(record)
+                except Exception:                   # noqa: BLE001
+                    pass
+            return record
+        except Exception as exc:                    # noqa: BLE001
+            self.fit_error = "%s: %s" % (type(exc).__name__, exc)
+            return {"error": self.fit_error}
+        finally:
+            with self.lock:
+                self.fitting = False
+
+    # -- the stream -----------------------------------------------------------
+    def drain(self, workspace) -> Optional[Dict]:
+        """A batch of changed chunks re-derives the centroid of each PAGE they
+        belong to, and only those pages are transformed into the fit."""
+        with self.queue_lock:
+            if not self.queue:
+                return None
+            batch = list(self.queue)[:BATCH]
+            for cid in batch:
+                self.queue.pop(cid, None)
+        projection = self.projection
+        if projection is None:
+            return None
+        started = time.perf_counter()
+        read = workspace.store.chunks_for_placement(batch)
+        pages = set()
+        with self.lock:
+            for cid, chunk, vector in read:
+                drawable = (chunk is not None and not chunk.redundant
+                            and not (chunk.group_of and chunk.group_of != cid)
+                            and vector and any(vector))
+                was = self.url_of.get(cid)
+                if drawable:
+                    self.vec[cid] = np.asarray(vector, dtype=np.float32)
+                    self.url_of[cid] = chunk.url
+                    self.by_url.setdefault(chunk.url, set()).add(cid)
+                    pages.add(chunk.url)
+                    if was and was != chunk.url:
+                        self.by_url.get(was, set()).discard(cid)
+                        pages.add(was)
+                elif was is not None and (chunk is None or chunk.redundant or
+                                          (chunk.group_of and chunk.group_of != cid)):
+                    self.vec.pop(cid, None)
+                    self.url_of.pop(cid, None)
+                    self.by_url.get(was, set()).discard(cid)
+                    pages.add(was)
+            live = {u: set(self.by_url.get(u) or ()) for u in pages}
+        t = time.perf_counter()
+        urls, X = self._page_rows(workspace, {u: cs for u, cs in live.items() if cs},
+                                  self.vec, fit=False)
+        where, colour = (projection.place(np.asarray(X, dtype=np.float32))
+                         if urls else (None, None))
+        ms_transform = (time.perf_counter() - t) * 1000
+        with self.lock:
+            if projection is not self.projection:
+                self.enqueue(batch)
+                return None
+            for i, u in enumerate(urls):
+                if where is None:
+                    break
+                self.page_pos[u] = [float(v) for v in where[i][:self.dims]]
+                if colour is not None:
+                    self.page_hsv[u] = [float(v) for v in colour[i]]
+                self.page_vec[u] = X[i]
+            for u in pages - set(urls):
+                self.page_pos.pop(u, None)
+                self.page_hsv.pop(u, None)
+            for u in pages:
+                self.seq += 1
+                self.log.append((self.seq, "page", u))
+            self.placed_total += len(urls)
+        record = {"batch": len(batch), "pages": len(pages), "placed": len(urls),
+                  "ms_transform": round(ms_transform, 1),
+                  "ms": round((time.perf_counter() - started) * 1000, 1),
+                  "queue_after": len(self.queue), "seq": self.seq, "epoch": self.epoch,
+                  "at": round(time.time(), 3)}
+        self.batches.append(record)
+        if self.on_batch:
+            try:
+                self.on_batch(record)
+            except Exception:                       # noqa: BLE001
+                pass
+        return record
+
+    def status(self, workspace=None, url: str = "") -> Dict:
+        out = super().status(workspace, url)
+        out.update({"kind": "page", "centroid": self.centroid,
+                    "projected": len(self.page_pos), "pages": len(self.page_pos),
+                    "chunks_held": len(self.vec), "centroid_ms": dict(self.centroid_ms)})
+        if url:
+            out["page"] = {"url": url, "chunks": len(self.by_url.get(url) or ()),
+                           "pos": self.page_pos.get(url)}
+        return out
+
+    def brief(self) -> Dict:
+        out = super().brief()
+        out.update({"kind": "page", "centroid": self.centroid,
+                    "projected": len(self.page_pos)})
+        return out
+
+    # -- persistence: the chunk projector's, plus the page-only state ----------
+    def save(self, workspace) -> bool:
+        import pickle
+        path = self._file(workspace)
+        if path is None:
+            return False
+        with self.lock:
+            state = {"version": 2, "kind": "page", "dims": self.dims,
+                     "centroid": self.centroid, "projection": self.projection,
+                     "svd_f": self.svd_f, "url_of": self.url_of, "vec": self.vec,
+                     "page_pos": self.page_pos, "page_hsv": self.page_hsv,
+                     "page_vec": self.page_vec, "fitted_chunks": self.fitted_chunks,
+                     "fitted_points": self.fitted_points, "fit_sample": self.fit_sample,
+                     "epoch": self.epoch, "fits": self.fits}
+        try:
+            tmp = path.with_suffix(".tmp")
+            with open(tmp, "wb") as fh:
+                pickle.dump(state, fh, protocol=pickle.HIGHEST_PROTOCOL)
+            tmp.replace(path)
+            return True
+        except Exception as exc:                    # noqa: BLE001
+            self.fit_error = "save failed: %s: %s" % (type(exc).__name__, exc)
+            return False
+
+    def load(self, workspace) -> bool:
+        import pickle
+        path = self._file(workspace)
+        if path is None or not path.exists():
+            return False
+        try:
+            with open(path, "rb") as fh:
+                state = pickle.load(fh)
+            if (state.get("version") != 2 or state.get("kind") != "page"
+                    or state.get("dims") != self.dims
+                    or state.get("centroid") != self.centroid
+                    or state.get("projection") is None):
+                return False
+        except Exception as exc:                    # noqa: BLE001
+            self.fit_error = "load failed: %s: %s" % (type(exc).__name__, exc)
+            return False
+        with self.lock:
+            self.projection = state["projection"]
+            self.svd_f = state["svd_f"]
+            self.url_of, self.vec = state["url_of"], state["vec"]
+            self.by_url = {}
+            for cid, u in self.url_of.items():
+                self.by_url.setdefault(u, set()).add(cid)
+            self.page_pos, self.page_hsv = state["page_pos"], state["page_hsv"]
+            self.page_vec = state["page_vec"]
+            self.fitted_chunks = state["fitted_chunks"]
+            self.fitted_points = state["fitted_points"]
+            self.fit_sample = state["fit_sample"]
+            self.epoch = _next_epoch(int(state["epoch"]))
+            self.fits = list(state.get("fits") or [])
+            self.log.clear()
+        with (self.work_lock or nullcontext()):
+            rows = workspace.store.lead_vectors()
+        changed = [c for c, u, v in rows
+                   if c not in self.vec or self.url_of.get(c) != u
+                   or not np.allclose(self.vec[c], np.asarray(v, dtype=np.float32), atol=1e-5)]
+        held = {c for c, _u, _v in rows}
+        gone = [c for c in self.vec if c not in held]
+        self.enqueue(changed + gone)
+        self.fits.append({"epoch": self.epoch, "loaded": True, "kind": "page",
+                          "changed": len(changed), "gone": len(gone),
+                          "at": round(time.time(), 3)})
+        return True
+
+
 #: The sidecar's one projector. `None` until `serve()` makes it.
 PROJECTOR: Optional[ChunkProjector] = None
 

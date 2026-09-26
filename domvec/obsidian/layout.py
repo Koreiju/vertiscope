@@ -1932,6 +1932,8 @@ def place_into(workspace, cids) -> Dict:
     # The chunk projector answers when it has a fit: positions are the
     # stream's, not a second computation made here.
     _cp = _live_chunk_projector()
+    if _cp is not None and getattr(_cp, "kind", "") == "page":
+        return place_tree(workspace, cids, _cp)
     if _cp is not None:
         return place_projected(workspace, cids, _cp)
     if _projector_running():
@@ -2514,3 +2516,164 @@ def place_projected(workspace, cids, proj) -> Dict:
             "fitted_n": status.get("fit_sample"),
             "fitted_chunks": status.get("fitted_chunks"),
             "n": status.get("chunks_now")}
+
+
+# ---------------------------------------------------------------------------
+# Addendum VII: a page's whole patricia TREE, in one reply.
+# ---------------------------------------------------------------------------
+
+def page_tree(workspace, url: str, proj=None) -> Dict:
+    """Every drawable chunk of a page, hung on the patricia tree of its DOM.
+
+    **A tree, not a trie's index.** The reader's words: the structure wanted is
+    "the subtree of all the content nodes detected in the full shadow DOM
+    tree", with "intermediate path nodes, if they go from one root to one
+    leaf, as a single link". So a DOM path becomes a node here only where it
+    BRANCHES -- two or more children, counting the chunks rooted exactly there
+    -- and every single-child chain between two such points is one link. Each
+    chunk hangs from its nearest branch; each branch from its nearest branch
+    above; the page is the root. Every node has exactly one parent, by
+    construction, so the layout can fan it out instead of pinning it into
+    the triangles a multi-parent graph forms.
+
+    What it replaces: one patricia STEP per click (`G-54`), where a click
+    showed one level of branches and drew a star from their parent to each
+    and containment edges among them -- the lattices the reader saw. A page
+    now opens whole, once, and closes whole.
+
+    Positions: every node starts at the page's UMAP position (the pane's
+    force layout spreads the tree around it); the page is where the projector
+    put its centroid.
+    """
+    proj = proj or _live_chunk_projector()
+    at = None
+    if proj is not None:
+        at = proj.page_pos.get(url)
+    stored = [c for c in workspace.store.chunks(url)
+              if not c.redundant and not (c.group_of and c.group_of != c.cid)]
+    if not stored:
+        return {"url": url, "nodes": [], "edges": [], "why": "no chunks stored for this page"}
+    at = [float(v) for v in (at or [0.0, 0.0, 0.0])[:3]]
+
+    # The trie over xpath segments: which prefixes branch, which hold chunks.
+    kids: Dict[tuple, set] = {(): set()}
+    held: Dict[tuple, List] = {}
+    for chunk in stored:
+        parts = tuple(_segments(chunk.xpath))
+        for i in range(len(parts)):
+            kids.setdefault(parts[:i], set()).add(parts[:i + 1])
+            kids.setdefault(parts[:i + 1], set())
+        held.setdefault(parts, []).append(chunk)
+
+    def branches(prefix: tuple) -> bool:
+        return prefix == () or len(kids.get(prefix, ())) + len(held.get(prefix, ())) >= 2
+
+    def up(prefix: tuple) -> tuple:
+        """The nearest drawn node at or above `prefix`."""
+        p = prefix
+        while not branches(p):
+            p = p[:-1]
+        return p
+
+    page_id = "page:" + url
+
+    def nid(prefix: tuple) -> str:
+        return page_id if prefix == () else "path:%s#/%s" % (url, "/".join(prefix))
+
+    # Subtree sizes and first pictures, for sizing and billboarding branches.
+    below: Dict[tuple, List] = {}
+    for prefix, chunks in held.items():
+        p = prefix
+        while True:
+            below.setdefault(p, []).extend(chunks)
+            if p == ():
+                break
+            p = p[:-1]
+
+    nodes: List[Dict] = []
+    edges: List[Dict] = []
+    drawn = sorted(p for p in kids if branches(p) and p != ())
+    for prefix in drawn:
+        members = below.get(prefix, [])
+        node = {
+            "cid": nid(prefix), "url": url, "level": "path",
+            "path": "/" + "/".join(prefix),
+            "title": _title(_first_md_with_image(members)) or prefix[-1],
+            "members": len(members), "rank": 0.0, "chars": 0, "tokens": 0,
+            "copies": 1, "val": float(max(1.0, len(members) ** 0.5)),
+            "pos": list(at), "source": "tree",
+        }
+        picture = _first_image(_first_md_with_image(members), url)
+        if picture is not None:
+            node["image"] = picture
+        nodes.append(node)
+        edges.append({"source": nid(up(prefix[:-1])), "target": node["cid"]})
+    for chunk in sorted(stored, key=lambda c: (c.xpath, c.part)):
+        parts = tuple(_segments(chunk.xpath))
+        node = {
+            "cid": chunk.cid, "url": url, "level": "chunk", "path": chunk.xpath,
+            "title": _title(chunk.md), "members": chunk.group_n, "rank": 0.0,
+            "chars": chunk.chars, "tokens": tokens.budget(chunk.md or ""),
+            "copies": chunk.dup_n, "val": float(max(1.0, max(chunk.group_n, 1) ** 0.5)),
+            "pos": list(at), "source": "tree",
+        }
+        picture = _first_image(chunk.md, url)
+        if picture is not None:
+            node["image"] = picture
+        nodes.append(node)
+        edges.append({"source": nid(up(parts)), "target": chunk.cid})
+
+    parents: Dict[str, int] = {}
+    for e in edges:
+        parents[e["target"]] = parents.get(e["target"], 0) + 1
+    return {
+        "url": url, "root": page_id, "page_pos": at,
+        "nodes": nodes, "edges": edges,
+        "chunks": len(stored), "branches": len(drawn),
+        #: Checked, not assumed: a tree has one parent per node.
+        "max_parents": max(parents.values()) if parents else 0,
+        "depth": max((len(p) for p in drawn), default=0),
+    }
+
+
+def place_tree(workspace, cids, proj) -> Dict:
+    """Place chunks from a live capture ON THEIR PAGE'S TREE (Addendum VII).
+
+    Each requested chunk comes back with every ancestor it needs in the
+    page's patricia tree and the page node, and only the edges among those --
+    so a chunk streamed in by a drain arrives attached to its branch, the
+    same parent it has when the whole page is opened.
+    """
+    import time as _time
+    t0 = _time.perf_counter()
+    wanted = [c for c in dict.fromkeys(cids or []) if c]
+    by_url: Dict[str, List[str]] = {}
+    for cid, chunk, _vector in workspace.store.chunks_for_placement(wanted):
+        if chunk is not None and not chunk.redundant and not (
+                chunk.group_of and chunk.group_of != cid):
+            by_url.setdefault(chunk.url, []).append(cid)
+    nodes, edges = [], []
+    for url, mine in by_url.items():
+        tree = page_tree(workspace, url, proj)
+        parent = {e["target"]: e["source"] for e in tree["edges"]}
+        keep = set()
+        for cid in mine:
+            n = cid
+            while n in parent and n not in keep:
+                keep.add(n)
+                n = parent[n]
+        keep.add("page:" + url)
+        nodes.extend(n for n in tree["nodes"] if n["cid"] in keep)
+        at = proj.page_pos.get(url)
+        if at is not None:
+            nodes.append({"cid": "page:" + url, "url": url, "title": url,
+                          "level": "page", "rank": 0.0, "chars": 0, "tokens": 0,
+                          "copies": 1, "members": tree.get("chunks", 0),
+                          "val": float(max(1.0, max(tree.get("chunks", 1), 1) ** 0.5)),
+                          "pos": [float(v) for v in at[:3]], "source": "projector"})
+        edges.extend(e for e in tree["edges"] if e["target"] in keep and e["source"] in keep)
+    placed = {n["cid"] for n in nodes}
+    return {"nodes": nodes, "edges": edges, "source": "tree",
+            "unplaced": [c for c in wanted if c not in placed],
+            "stale": False, "timing": {"ms": round((_time.perf_counter() - t0) * 1000, 1),
+                                       "n_wanted": len(wanted)}}
