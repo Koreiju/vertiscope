@@ -188,6 +188,11 @@ TOOLS: List[Dict] = [
                          "description": "Requirement ids, e.g. [\"G-54\", \"G-6\"]"},
                 "wait": {"type": "boolean", "description": "Wait for the run (default true)"},
                 "timeout_s": {"type": "number", "description": "Give up waiting after (default 1200)"},
+                "fresh": {"type": "boolean", "description": (
+                    "Run against a NEW, EMPTY store that the plugin seeds "
+                    "itself first (a fixed page list), on a second sidecar; "
+                    "the working store is untouched. Slow: minutes of "
+                    "seeding before the checks. Always waits.")},
             },
         },
     },
@@ -361,6 +366,13 @@ class DomvecMCP:
         between. A verdict that is one call away can be the first thing
         asked rather than the last.
         """
+        if args.get("fresh"):
+            from .freshrun import fresh_run
+            got = fresh_run(args.get("only") or None,
+                            timeout_s=float(args.get("timeout_s") or 2400))
+            return {"seed": got.get("seed"), "projector": got.get("projector"),
+                    "checks": got.get("checks"), "crashes": got.get("crashes"),
+                    "workspace": got.get("workspace")}
         return self.live().verify(args.get("only") or None,
                                   wait=args.get("wait", True) is not False,
                                   timeout_s=float(args.get("timeout_s") or 1200))

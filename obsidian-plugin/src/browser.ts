@@ -132,6 +132,11 @@ const PAGE_SIZE = 12;
 /** Which face of the panel is showing. */
 type Face = "browser" | "markdown";
 
+/** What a pinned chunk holds: read from the store, never from the page. */
+interface PinRecord {
+  cid: string; url: string; matched: string; markdown: string; head: string;
+}
+
 export class BrowserView extends ItemView {
   /** Fetched once per app run and shared: it is one file on disk and it does
    *  not change under a running plugin. */
@@ -158,8 +163,7 @@ export class BrowserView extends ItemView {
   /** Right-clicked chunks, newest first. Each is outlined on the page, shown
    *  on the markdown side and open as a billboard in the graph -- one
    *  selection, three surfaces, closed together. */
-  private pinned = new Map<string, { cid: string; url: string; matched: string;
-                                     markdown: string; head: string }>();
+  private pinned = new Map<string, PinRecord>();
   private toggle!: HTMLElement;
 
   /** True while a drain is in flight, so a slow one cannot be lapped. */
@@ -416,6 +420,8 @@ export class BrowserView extends ItemView {
       cid: p.cid, matched: p.matched, url: p.url }));
   }
 
+  /** Told by the plugin: a capture rewrote these chunks. */
+  onDirty: (cids: string[]) => void = () => {};
   /** Told by the plugin: a pinned chunk opened in the graph. */
   onPin: (cid: string) => void = () => {};
   /** Told by the plugin: a pinned chunk was let go. */
@@ -646,15 +652,15 @@ export class BrowserView extends ItemView {
    * pin by address -- an MCP tool asks for exactly what a reader's
    * right-click would have produced.
    */
-  async pinXpath(xpath: string): Promise<{ cid: string } | { error: string }> {
-    const wv = this.webview;
-    if (!wv) return { error: "no browser" };
-    const url = wv.getURL();
+  /**
+   * What a pin holds for the chunk drawing `xpath` on `url`: read from the
+   * store, with relative targets resolved against the page. Shared by the
+   * right-click and by `refreshPins`, so a pinned chunk re-read after a
+   * capture is the same thing a fresh pin would have been.
+   */
+  private async readPin(url: string, xpath: string): Promise<PinRecord | { error: string }> {
     const got = await this.sidecar.resolve(url, xpath);
-    if (!got || !got.lines) {
-      this.say(`no chunk draws ${xpath.slice(-48)}`);
-      return { error: `no chunk draws ${xpath}` };
-    }
+    if (!got || !got.lines) return { error: `no chunk draws ${xpath}` };
     let markdown = (got.lines as { text: string }[])
       .map((l) => l.text).join("\n");
     // Relative targets are resolved against the PAGE, not the vault.
@@ -681,25 +687,62 @@ export class BrowserView extends ItemView {
           }
         });
     }
+    const cid = String(got.cid || "");
+    const matched = String(got.matched_xpath || xpath);
+    return {
+      cid, url: String(got.url || url || ""), matched, markdown,
+      head: got.ancestors_walked
+        ? `${matched} · ${got.ancestors_walked} above what you clicked`
+        : matched,
+    };
+  }
+
+  /**
+   * A capture rewrote `cids`: re-read every PINNED one among them, so the
+   * markdown beside the page never shows what the page used to say (`S-12`).
+   *
+   * The side panel held the markdown read at pin time, and nothing re-read
+   * it: after a page added an item, the pinned chunk's billboard showed it
+   * and its side panel did not (364 characters before and after, 2026-09-26),
+   * while unpinning and pinning again showed it at once. O(delta): only the
+   * pins a capture names are read, one resolve each.
+   */
+  async refreshPins(cids: string[]): Promise<number> {
+    const touched = [...this.pinned.values()].filter((p) => cids.includes(p.cid));
+    let changed = 0;
+    for (const pin of touched) {
+      const read = await this.readPin(pin.url, pin.matched);
+      if ("error" in read || read.cid !== pin.cid) continue;
+      if (read.markdown === pin.markdown) continue;
+      this.pinned.set(pin.cid, { ...read, head: pin.head });
+      changed++;
+    }
+    if (changed) await this.renderSide();
+    return changed;
+  }
+
+  async pinXpath(xpath: string): Promise<{ cid: string } | { error: string }> {
+    const wv = this.webview;
+    if (!wv) return { error: "no browser" };
+    const url = wv.getURL();
+    const read = await this.readPin(url, xpath);
+    if ("error" in read) {
+      this.say(`no chunk draws ${xpath.slice(-48)}`);
+      return read;
+    }
+    const { cid, markdown } = read;
     // **Pinned, not swapped in (`G-78`).** Right-click used to replace the
     // page with the markdown, which left nothing to highlight. Now the chunk
     // is pinned: outlined on the page at its box, rendered on the markdown
     // side beside it, and opened as a billboard in the graph -- and it stays
     // until it is let go from either side.
-    const cid = String(got.cid || "");
-    const matched = String(got.matched_xpath || xpath);
     this.pinned.delete(cid);                     // re-pinning moves it to the top
-    this.pinned = new Map([[cid, {
-      cid, url: String(got.url || url || ""), matched, markdown,
-      head: got.ancestors_walked
-        ? `${matched} · ${got.ancestors_walked} above what you clicked`
-        : matched,
-    }], ...this.pinned]);
+    this.pinned = new Map([[cid, read], ...this.pinned]);
     this.pipebox?.setPins(this.pinList());
     await this.renderSide();
     this.show("browser");
     // The projector rings the same chunk (`G-38`) and opens its billboard.
-    this.onHover(cid, String(got.url || url || ""));
+    this.onHover(cid, read.url);
     this.onPin(cid);
     this.say(`${cid} · ${markdown.split("\n").length} lines · pinned`);
     return { cid };
@@ -908,6 +951,14 @@ export class BrowserView extends ItemView {
         this.pipebox.map.apply((reply as any).map_delta);
       }
       const cids = (reply.dirty_cids || []) as string[];
+      // Every form of a chunk that is open follows the capture that rewrote
+      // it -- the pinned markdown here, the billboard in the graph -- keyed
+      // on what the capture DIRTIED, not on what it newly placed: a chunk
+      // already drawn is rewritten without being placed again.
+      if (cids.length) {
+        void this.refreshPins(cids);
+        this.onDirty(cids);
+      }
       if (!cids.length) {
         this.say(`live · ${reply.addresses} addresses`);
         prof.fact(trace, "why", "nothing dirty");

@@ -1203,6 +1203,43 @@ anyway if the result is still nearer 256 than 512 (under 384), and stops
 before it otherwise -- which is what keeps a heading with the paragraph it
 heads.*
 
+Later the same day, mid-loop:
+
+> While working in the loop, i would almost suggest also making sure to tear
+> down the current db so that all new tests run in a fresh and empty db
+
+*Read as: no check scores the long-lived working store. Each test run starts
+from an empty store that the plugin fills by browsing, so everything a check
+reads was written by the code under test. Built as
+`python -m domvec.obsidian fresh` (`domvec/obsidian/freshrun.py`); the working
+corpus is left alone.*
+
+---
+
+
+## Addendum VIII, 2026-09-26 - audit the app against the design, by using it
+
+> Before you really get going, please revisit the original design prompts and
+> investigate through direct interaction and records how well our features
+> are actually behaving, making sure to keep track of the peripheral changes
+> in the app as well. Playing around with different interactions in the app
+> that the design would imbibe yourself, seeing if the app really lives up to
+> the ideals, and then see what kinds of improvements can really be made, and
+> how so too while factoring in how the verbatim maps to the harness/mcp/tests/
+> plugin interactions and user stories, how db refreshes run with every test
+> suite interfacing with real actions in the app itself, etc. I'd suggest
+> starting another cron /loop
+
+*What this adds. Before more building: an AUDIT of the running app against
+the verbatim, done by using it -- the interactions the design implies,
+performed in the app, with their records kept -- including the PERIPHERAL
+changes an interaction causes (other panes, the corner box, the graph, the
+store), not only the one it targets. Each finding is traced along one chain:
+verbatim sentence -> user story -> requirement row -> check / MCP tool / test
+-> what the app actually did. And the store behind every test suite is fresh,
+filled by real actions in the app (the fresh-store runner above). Findings
+and the chain live in `docs/AUDIT_VIII.md`.*
+
 ---
 
 

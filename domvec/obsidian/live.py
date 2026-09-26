@@ -403,7 +403,7 @@ class Live:
         }
 
 
-    def reload_plugin(self, settle: float = 6.0) -> Dict:
+    def reload_plugin(self, settle: float = 6.0, wait: bool = True) -> Dict:
         """Reload the plugin, WITHOUT going through the harness.
 
         The harness is what a reload replaces, so asking it to perform one is
@@ -426,7 +426,9 @@ class Live:
         gestures = self.evaluate(
             "(()=>{try{return !!(window.__domvec && window.__domvec.act);}"
             "catch(e){return false;}})()")
-        drew = self.wait_for_projector()
+        # `wait=False` for a store that has nothing to draw yet: a fresh
+        # test workspace, before it is seeded, would sit out the whole timeout.
+        drew = self.wait_for_projector() if wait else None
         return {"version_before": before, "harness_installed": bool(gestures),
                 "settled_s": settle, "projector": drew}
 
@@ -471,7 +473,7 @@ class Live:
     # -- requirement verdicts -------------------------------------------------
 
     def verify(self, only=None, *, wait: bool = True, timeout_s: float = 1200,
-               reload: bool = True) -> Dict:
+               reload: bool = True, store: str = "working") -> Dict:
         """Run the live checks INSIDE the plugin and read them back (`G-75`).
 
         Hardware in the loop: the checks are `checks/live.mjs`, the same list
@@ -500,6 +502,11 @@ class Live:
             if not state.get("running"):
                 break
         results = state.get("results") or []
+        # Every finished run reaches the record of what has been SEEN working,
+        # with the store it read (`confirmations`); a run still going does not.
+        if results and not state.get("running"):
+            from .confirmations import record
+            record(results, store=store, runner="in-app verify")
         return {
             "run": state.get("run"), "running": bool(state.get("running")),
             "passed": sum(1 for r in results if r.get("pass")),

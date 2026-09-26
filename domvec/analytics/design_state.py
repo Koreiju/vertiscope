@@ -307,8 +307,9 @@ def main() -> int:
     live_path = ROOT / "build_analytics" / "live_confirmations.json"
     add("## Seen working in the running application")
     add("")
-    add("From `obsidian-plugin/confirm.mjs`, which drives the loaded plugin "
-        "and the running sidecar. A status column can only drift from what "
+    add("From `build_analytics/live_confirmations.json`, merged by "
+        "requirement from every run that drives the loaded plugin and a "
+        "running sidecar (`domvec/obsidian/confirmations.py`). A status column can only drift from what "
         "the DOCUMENT says; this is the drift that matters. `G-6` sat in "
         "`Confirm` citing 31 nodes and 30 edges, and live it was 26 and 0.")
     add("")
@@ -317,13 +318,16 @@ def main() -> int:
         blob = json.loads(live_path.read_text(encoding="utf-8"))
         rows_seen = blob.get("results", [])
         ok = [r for r in rows_seen if r.get("pass")]
-        add("Run **%s** — %d of %d pass."
-            % (blob.get("when", "?"), len(ok), len(rows_seen)))
+        fresh = [r for r in rows_seen if str(r.get("store", "")).startswith("fresh")]
+        add("Each requirement's LATEST verdict — %d of %d pass; %d read off a "
+            "fresh store the run seeded itself, %d off the working one."
+            % (len(ok), len(rows_seen), len(fresh), len(rows_seen) - len(fresh)))
         add("")
         for r in rows_seen:
-            add("- `%s` %s — %s"
+            add("- `%s` %s — %s *(%s, %s)*"
                 % (r["id"], "PASS" if r.get("pass") else "**FAIL**",
-                   r.get("asks", "")[:80]))
+                   r.get("asks", "")[:80], r.get("when", "?"),
+                   r.get("store", "?")))
         add("")
         have = {r["id"] for r in rows_seen}
         missing = [r for r in rows
@@ -332,7 +336,7 @@ def main() -> int:
             "is the honest denominator: they may work, and nothing here says "
             "so." % len(missing))
     else:
-        add("No run recorded. `node obsidian-plugin/confirm.mjs` writes one.")
+        add("No run recorded. `python -m domvec.obsidian fresh` writes one.")
     add("")
 
     add("## Where the verbatim record ends")

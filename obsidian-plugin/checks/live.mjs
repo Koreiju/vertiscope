@@ -324,8 +324,8 @@ export function makeChecks(env) {
   //:
   //: S-7 asked whether an interaction reaches the store. This asks the
   //: separate question of whether it reaches every SURFACE uniformly: the
-  //: graph, a panel that was already open when the change landed, and a panel
-  //: that was closed then and is opened afterwards.
+  //: graph, a chunk that was already pinned when the change landed (its side
+  //: panel AND its billboard), and one pinned again afterwards.
   //:
   //: The three are listed separately in the row because they fail separately.
   //: A panel opened after the fact reads the store fresh and can hardly be
@@ -336,7 +336,6 @@ export function makeChecks(env) {
     const PAGE = ${JSON.stringify(page)};
     const TOKEN = ${JSON.stringify(token)};
     const SIDE = ${JSON.stringify(sidecar)};
-    const CHUNK_VIEW = "domvec-chunk-view";
 
     // **Establish a cell wide enough to click in.**
     //
@@ -401,51 +400,39 @@ export function makeChecks(env) {
     if (!first) return { error: "the page never reached the trie", landed };
     const cid = first.cid;
 
-    // ---- A panel OPEN before the change lands. ----
-    const openPanel = async () => {
-      let leaves = app.workspace.getLeavesOfType(CHUNK_VIEW);
-      let leaf = leaves[0];
-      if (!leaf) {
-        leaf = app.workspace.getLeaf("split", "vertical");
-        await leaf.setViewState({ type: CHUNK_VIEW, active: true });
-      }
-      const view = leaf.view;
-      await view.show(cid);
-      await sleep(900);
-      return { leaf, view };
-    };
-    // **Where a chunk panel's text actually is.**
+    // ---- The chunk PINNED before the change lands. ----
     //
-    // Not in containerEl.textContent. The surface renders the distilled HTML
-    // into a .domvec-html-host that carries its own SHADOW ROOT, so the pane
-    // reads as 109 characters of toolbar with the chunk apparently empty --
-    // which is what "the panel never updated" looked like for two runs. This
-    // is the plugin's own shadow root, not a page's, so reading it is not the
-    // thing constraint 6 refuses.
-    const panelText = (view) => {
-      const root = view.containerEl;
-      const host = root.querySelector(".domvec-html-host");
+    // Since Addenda VI and VII a chunk's two forms live in two places, and
+    // both open from one right-click: its markdown as a side panel beside
+    // the page, its shadow-DOM form as a billboard in the graph (G-78). This
+    // asked the retired chunk PANE until 2026-09-26 -- it opened a view type
+    // that no longer exists, got a blank leaf, and threw "view.show is not a
+    // function". Pinned by address, exactly what a right-click produces.
+    const gl0 = app.workspace.getLeavesOfType("domvec-graph-view")[0];
+    const g0 = gl0 && gl0.view;
+    const sideText = () => {
+      const card = b.markdownWrap.querySelector('.domvec-pin-card[data-cid="' + cid + '"]');
+      return card ? (card.innerText || card.textContent || "") : "";
+    };
+    // The billboard renders into the plugin's OWN shadow root (a
+    // .domvec-html-host); reading it is not what constraint 6 refuses.
+    const boardText = () => {
+      const e = g0 && g0.billboards && g0.billboards.get(cid);
+      if (!e) return "";
+      const host = e.el.querySelector(".domvec-html-host");
       const sr = host && host.shadowRoot;
-      const inner = sr && sr.querySelector(".domvec-html");
-      return ((root.textContent || "")
-              + String.fromCharCode(10)
-              + (inner ? (inner.textContent || "")
-                       : (sr ? (sr.textContent || "") : "")));
+      return (e.el.textContent || "") + String.fromCharCode(10) + (sr ? (sr.textContent || "") : "");
     };
-
-    // Which of the surface's two faces was actually drawn (T-8). The
-    // interactive one renders the distilled DOM as elements into a shadow
-    // root; the other is a pre of markdown text. Reporting "the panel
-    // updated" without saying which would leave T-8 inferred.
-    const surfaceMode = (view) => {
-      const root = view.containerEl;
-      if (root.querySelector(".domvec-html-host")) return "interactive";
-      if (root.querySelector(".domvec-md")) return "markdown";
-      return "none";
+    const pin = async () => {
+      const got = await b.pinXpath(LIST);
+      for (let i = 0; i < 30 && !boardText(); i++) await sleep(300);
+      await sleep(900);
+      return got;
     };
-
-    const opened = await openPanel();
-    const panelBefore = panelText(opened.view);
+    const pinned = await pin();
+    if (!pinned || pinned.cid !== cid) return { error: "pinning did not hold the list's chunk", pinned, cid };
+    const sideBefore = sideText();
+    const boardBefore = boardText();
 
     // ---- The interaction. ----
     const at = await b.webview.executeJavaScript(
@@ -459,8 +446,8 @@ export function makeChecks(env) {
     // **Which path made the page move, reported rather than assumed.**
     //
     // A real input event is the honest trigger and S-7 proves it works -- but
-    // it only lands while the browser leaf has focus, and this check has just
-    // opened a chunk panel, which takes it. So: activate the browser leaf and
+    // it only lands while the browser leaf has focus, and pinning has just
+    // opened a billboard in the graph, which can take it. So: activate the browser leaf and
     // try the real event; if the page did not move, fall back to the DOM's own
     // click and SAY SO. What S-12 is about is where the resulting stream goes,
     // not how the mutation was started, and hiding the fallback would let a
@@ -497,14 +484,17 @@ export function makeChecks(env) {
     }
 
     await sleep(2500);
-    const panelAfter = panelText(opened.view);
+    const sideAfter = sideText();
+    const boardAfter = boardText();
 
-    // ---- The CLOSED arm: detach, then open a fresh panel on the same cid. ----
-    opened.leaf.detach();
+    // ---- The CLOSED arm: let it go, then pin it again. ----
+    b.unpin(cid);
     await sleep(700);
-    const reopened = await openPanel();
-    await sleep(1200);
-    const panelReopened = panelText(reopened.view);
+    const boardGone = !boardText();
+    await pin();
+    const sideRepinned = sideText();
+    const boardRepinned = boardText();
+    b.unpin(cid);
 
     // ---- The graph. Counts taken EAGERLY: graphData hands back the live
     //: arrays, and holding the object to read it later reads the after-state.
@@ -537,16 +527,17 @@ export function makeChecks(env) {
     return {
       landed, cid,
       trigger, mutated_in_page: mutated,
-      surface_mode: surfaceMode(opened.view),
-      reopened_surface_mode: surfaceMode(reopened.view),
       db_has_token: dbHas,
-      panel_open_before_had_token: panelBefore.indexOf(TOKEN) >= 0,
-      open_panel_has_token: panelAfter.indexOf(TOKEN) >= 0,
-      reopened_panel_has_token: panelReopened.indexOf(TOKEN) >= 0,
+      side_before_had_token: sideBefore.indexOf(TOKEN) >= 0,
+      board_before_had_token: boardBefore.indexOf(TOKEN) >= 0,
+      side_has_token: sideAfter.indexOf(TOKEN) >= 0,
+      board_has_token: boardAfter.indexOf(TOKEN) >= 0,
+      unpin_closed_board: boardGone,
+      repinned_side_has_token: sideRepinned.indexOf(TOKEN) >= 0,
+      repinned_board_has_token: boardRepinned.indexOf(TOKEN) >= 0,
       graph_has_node: graphHasNode,
-      panel_before_chars: panelBefore.length,
-      panel_after_chars: panelAfter.length,
-      panel_reopened_chars: panelReopened.length,
+      side_chars: [sideBefore.length, sideAfter.length, sideRepinned.length],
+      board_chars: [boardBefore.length, boardAfter.length, boardRepinned.length],
     };
   })()`;
 
@@ -562,16 +553,17 @@ export function makeChecks(env) {
   //: Asks `GET /pages`, not `/layout`: the latter is a CACHED FIT keyed on
   //: chunk count and answered 98 while the store held 119, which is correct
   //: for a fit and useless for "what is in here".
-  const tidyFixtures = async () => {
+  //:
+  //: **By ORIGIN, not by file name.** Each check serves its fixtures on its
+  //: own port, so `origin` names exactly the pages that check made. Matching
+  //: by file name purged ANY page called shadow_catalogue.html -- including
+  //: the one a fresh-store run had seeded on its own port -- and S-7 and S-8
+  //: then failed their own "pages_after === pages_before" on a page they had
+  //: deleted themselves (13 -> 12, 2026-09-26).
+  const tidyFixtures = async (origin) => {
     try {
-      const names = ["live_mutate.html", "live_tall.html",
-                     "shadow_catalogue.html"];
-      let listed = { urls: [] };
-      for (const n of names) {
-        const got = await ask("/pages?contains=" + n);
-        listed.urls = listed.urls.concat(got.urls || []);
-      }
-      // Both fixtures: live_mutate.html and live_tall.html.
+      if (!origin) return -1;
+      const listed = await ask("/pages?contains=" + encodeURIComponent(origin + "/"));
       let removed = 0;
       for (const url of listed.urls || []) {
         const res = await fetch(`${SIDECAR}/purge`, {
@@ -1327,7 +1319,7 @@ export function makeChecks(env) {
     },
     {
       id: "G-39",
-      asks: "right-click ports the markdown AND rings the node in the projector",
+      asks: "right-click puts the markdown beside the page AND rings the node",
       async run() {
         const got = await evaluate(`(async () => {
           const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -1448,9 +1440,16 @@ export function makeChecks(env) {
         })()`);
         if (got.error) return { pass: false, evidence: got };
         return {
-          // Switched face, resolved to an address, and produced RENDERED
-          // markdown -- not a placeholder and not a blob of source text.
-          pass: got.face === "markdown"
+          // Resolved to an address and produced RENDERED markdown -- not a
+          // placeholder and not a blob of source text -- BESIDE the page.
+          //
+          // The face must NOT switch. This asked for face === "markdown"
+          // until 2026-09-26, which is Addendum IV's "switchable second
+          // view"; Addendum VII's follow-up replaced that with a side panel
+          // ("the browser stays the main surface"), and right-click now pins
+          // (G-78) with the page left showing. Scored the old way, a correct
+          // app failed with rendered markdown and one ring in its evidence.
+          pass: got.face === "browser"
              && !!got.heading && got.heading.startsWith("/html")
              && got.rendered_chars > 0 && got.rendered_elements > 0
              && (got.links || []).every(
@@ -1516,14 +1515,27 @@ export function makeChecks(env) {
       id: "G-70",
       asks: "scoping a query to one url returns only that url's chunks",
       async run() {
-        const global_ = await ask("/search?q=header&k=20");
+        // **The query is CHOSEN from the store**, a few words from each of
+        // three pages, so the global ranking can span pages at all. It was
+        // the literal "header", which a fresh store seeded with pages about
+        // trees and tables does not contain: zero hits, reported as "spanned
+        // one page" -- the fourth guessed query to read as a broken feature.
+        const layout = await ask("/layout?level=chunk");
+        const byUrl = new Map();
+        for (const n of layout.nodes || []) {
+          const w = String(n.title || "").match(/[A-Za-z][A-Za-z-]{4,}/g) || [];
+          if (n.url && w.length >= 2 && !byUrl.has(n.url)) byUrl.set(n.url, w.slice(0, 2));
+          if (byUrl.size >= 3) break;
+        }
+        const q = encodeURIComponent([...byUrl.values()].flat().join(" "));
+        const global_ = await ask(`/search?q=${q}&k=20`);
         const urls = [...new Set((global_.hits || []).map((h) => h.url))];
         if (urls.length < 2) {
           return { pass: false, evidence: { why: "global ranking spanned one page",
-                                            urls } };
+                                            query: decodeURIComponent(q), urls } };
         }
         const scoped = await ask(
-          `/search?q=header&k=20&url=${encodeURIComponent(urls[0])}`);
+          `/search?q=${q}&k=20&url=${encodeURIComponent(urls[0])}`);
         const scopedUrls = [...new Set((scoped.hits || []).map((h) => h.url))];
         return {
           // Scoped to exactly one page, and it returns SOMETHING -- an empty
@@ -1532,6 +1544,7 @@ export function makeChecks(env) {
           pass: (scoped.hits || []).length > 0
              && scopedUrls.length === 1 && scopedUrls[0] === urls[0],
           evidence: {
+            query: decodeURIComponent(q),
             global_hits: (global_.hits || []).length, global_pages: urls.length,
             scoped_to: urls[0].slice(0, 54),
             scoped_hits: (scoped.hits || []).length, scoped_pages: scopedUrls.length,
@@ -1554,13 +1567,26 @@ export function makeChecks(env) {
         if (!groups.length) {
           return { pass: false, evidence: { why: "no merge group in the store" } };
         }
-        const lead = groups[0];
-        const chunk = await ask(`/chunk/${encodeURIComponent(lead.cid)}`);
-        const words = ((chunk.lines || []).map((l) => l.text).join(" ")
-          .match(/[A-Za-z][A-Za-z-]{4,}/g) || []).slice(0, 6);
-        if (words.length < 2) {
-          return { pass: false, evidence: { why: "the group's lead has no words",
-                                            lead: lead.cid } };
+        // The biggest group with WORDS to ask about. The biggest group alone
+        // was a row of book covers on a fresh store -- a lead with no text
+        // -- and the check reported that as a ranking failure. Which group is
+        // asked about is the check's choice; the claim is about the ranking.
+        let lead = null, words = [], tried = 0;
+        for (const g of groups.slice(0, 12)) {
+          tried++;
+          const chunk = await ask(`/chunk/${encodeURIComponent(g.cid)}`);
+          // LINK-FREE text, the string the index was built from: words
+          // taken from link targets ("ref-aho" out of a citation anchor)
+          // are not in the lexical index, so asking for them measured a
+          // query nothing could answer, not the ranking.
+          const text = (chunk.lines || []).map((l) => l.text).join(" ")
+            .replace(/\]\([^)]*\)/g, "]").replace(/<[^>]*>/g, " ");
+          const w = [...new Set(text.match(/[A-Za-z][A-Za-z-]{4,}/g) || [])].slice(0, 6);
+          if (w.length >= 2) { lead = g; words = w; break; }
+        }
+        if (!lead) {
+          return { pass: false, evidence: { why: "no group's lead has words",
+                                            groups_tried: tried } };
         }
         const q = encodeURIComponent(words.join(" "));
         const coarse = await ask(`/search?q=${q}&k=25&coarse=1`);
@@ -2538,7 +2564,7 @@ export function makeChecks(env) {
                                      { timeout: 600000 });
           // Leave the corpus as it was found. A confirmation harness that adds
           // a page per run is an instrument changing its own denominator.
-          got.purged = await tidyFixtures();
+          got.purged = await tidyFixtures(fixtures.origin);
           got.pages_before = pagesBefore;
           got.pages_after = (await ask("/health")).pages;
           if (got.error) return { pass: false, evidence: got };
@@ -2562,7 +2588,7 @@ export function makeChecks(env) {
     },
     {
       id: "S-12",
-      asks: "one capture reaches the graph and BOTH panel sets, uniformly",
+      asks: "one capture reaches the graph and BOTH forms of a pinned chunk, uniformly",
       async run() {
         const fixtures = await serveFixtures();
         const token = "domvecuniform" + Date.now().toString(36);
@@ -2571,18 +2597,26 @@ export function makeChecks(env) {
         try {
           const got = await evaluate(uniformProbe(page, token, SIDECAR),
                                      { timeout: 600000 });
-          got.purged = await tidyFixtures();
+          got.purged = await tidyFixtures(fixtures.origin);
           got.pages_before = pagesBefore;
           got.pages_after = (await ask("/health")).pages;
           if (got.error) return { pass: false, evidence: got };
           return {
             // "Uniformly" is the whole row, so every surface has to carry it,
             // and the arm below stops the token being there all along.
-            pass: got.panel_open_before_had_token === false
+            // Both forms of a pinned chunk -- the side panel and the
+            // billboard -- while it is held, and again after it is let go
+            // and pinned anew (a fresh read, which can hardly be wrong; the
+            // held one has to be TOLD, and is the arm that fails).
+            pass: got.side_before_had_token === false
+               && got.board_before_had_token === false
                && got.mutated_in_page === true
                && got.db_has_token === true
-               && got.open_panel_has_token === true
-               && got.reopened_panel_has_token === true
+               && got.side_has_token === true
+               && got.board_has_token === true
+               && got.unpin_closed_board === true
+               && got.repinned_side_has_token === true
+               && got.repinned_board_has_token === true
                && got.graph_has_node === true
                && got.pages_after === got.pages_before,
             evidence: got,
@@ -2605,7 +2639,7 @@ export function makeChecks(env) {
           const pagesBefore = (await ask("/health")).pages;
           const got = await evaluate(paceProbe(pages, SIDECAR),
                                      { timeout: 900000 });
-          got.purged = await tidyFixtures();
+          got.purged = await tidyFixtures(fixtures.origin);
           got.pages_before = pagesBefore;
           got.pages_after = (await ask("/health")).pages;
           if (got.error) return { pass: false, evidence: got };
@@ -2644,7 +2678,7 @@ export function makeChecks(env) {
           const pagesBefore = (await ask("/health")).pages;
           const got = await evaluate(shadowProbe(page, SIDECAR),
                                      { timeout: 600000 });
-          got.purged = await tidyFixtures();
+          got.purged = await tidyFixtures(fixtures.origin);
           got.pages_before = pagesBefore;
           got.pages_after = (await ask("/health")).pages;
           if (got.error) return { pass: false, evidence: got };
@@ -2677,7 +2711,7 @@ export function makeChecks(env) {
           const pagesBefore = (await ask("/health")).pages;
           const got = await evaluate(deltaProbe(page, SIDECAR),
                                      { timeout: 600000 });
-          got.purged = await tidyFixtures();
+          got.purged = await tidyFixtures(fixtures.origin);
           got.pages_before = pagesBefore;
           got.pages_after = (await ask("/health")).pages;
           if (got.error) return { pass: false, evidence: got };

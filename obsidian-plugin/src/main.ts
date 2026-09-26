@@ -221,10 +221,6 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
         // one that was already open being stale.
         (nodes, edges, trace) => {
           this.eachGraph((view) => view.absorb(nodes, edges, trace));
-          // The chunk's two forms follow a capture wherever they are open:
-          // its billboard in the graph, its markdown on the browser's side.
-          const cids = nodes.map((n) => n.cid);
-          this.eachGraph((view) => view.refreshBillboards(cids));
         },
         // And so does the ranking (`G-55`, `G-56`): what the reader has
         // scrolled to is what the projector opens the page to.
@@ -235,6 +231,10 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
           this.eachGraph((view) => view.highlightChunk(cid, url));
         // Right-click pins a chunk: its billboard opens in the graph and
         // stays while the browser's markdown side holds it (`G-78`).
+        // A capture rewrote chunks: their open billboards redraw. The
+        // browser re-reads its own pins; this carries the other form.
+        browser.onDirty = (cids: string[]) =>
+          this.eachGraph((view) => view.refreshBillboards(cids));
         browser.onPin = (cid: string) =>
           this.eachGraph((view) => void view.pinChunk(cid));
         browser.onUnpin = (cid: string) =>
