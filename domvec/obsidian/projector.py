@@ -871,9 +871,13 @@ class PageProjector(ChunkProjector):
                 whiten = copy.copy(self.projection.reducer)
                 whiten.model = model
                 projection.reducer = whiten
-                urls = list(self.page_pos)
-                P = np.asarray([self.page_vec[u] for u in urls if u in self.page_vec], dtype=np.float32)
-                urls = [u for u in urls if u in self.page_vec]
+                # ONLY the pages just trained on are re-placed: "assume
+                # previous fits are fixed". Re-placing every page moved all
+                # 149 pages and 15,212 chunks by the model's tiny drift on
+                # each update -- the whole picture shifting for one page
+                # learned (2026-09-27).
+                urls = [u for u in todo if u in self.page_vec]
+                P = np.asarray([self.page_vec[u] for u in urls], dtype=np.float32)
             where, colour = projection.place(P) if len(P) else (None, None)
             new_pos = {u: [float(v) for v in where[i][:self.dims]] for i, u in enumerate(urls)} if where is not None else {}
             with self.lock:
@@ -892,7 +896,7 @@ class PageProjector(ChunkProjector):
                         moved_pages.append(u)
                 # Chunks re-placed for the pages that moved (and the trained
                 # ones); only those whose drawn position changed are streamed.
-                again = {c: self.vec[c] for u in set(moved_pages) | set(todo)
+                again = {c: self.vec[c] for u in set(todo)
                          for c in (self.by_url.get(u) or ()) if c in self.vec}
             cpos, chsv = self._place_chunks(projection, again)
             with self.lock:

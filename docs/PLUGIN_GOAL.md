@@ -1808,6 +1808,30 @@ distance from their own page and from the picture is. (4) The refit button,
 the online training on diffs, and the streaming updates must all run the
 CUDA model, and be visibly faster for it.*
 
+> While cool, the densely packed maybe not tree structures should be less
+> interconnected and a simple tree. Second image has a sample panel/card from
+> the page. Also, there are way too many nodes without images billboarded when
+> they are known to exist. Even missing .icon (micro icons usually seen in the
+> browser tab and search results), similar to the 'wikipedia' item but for the
+> remainder of url-level nodes and also as many chunks as possible, and just
+> show the most relevant image or one of the images in chunks with multiple
+> images, perhaps using css-scaled size (so, post-rendered size, since html
+> rendering on our card panels as chunks is still not in the state it should
+> be... the 3D gui is not reflecting the same structure of panel as in the
+> clipboard on the 2D electron browser).
+
+(With two screenshots: an open page -- EUR-Lex, "33 chunks merged" -- drawn as
+a dense web of links among large chunk spheres; and a billboard opened from a
+node, showing the distilled markdown with fragments "- , by Armon Dadgar",
+"- (the creator of", not the page-like panel the side card shows.)
+
+*Read as: (1) an open page is a SIMPLE TREE -- one parent per node, no web of
+cross links. (2) Every url-level node shows its site's icon (favicon, as in
+the tab and search results) and every chunk that has a picture shows one --
+the most relevant, chosen by its RENDERED size in the page. (3) The 3D
+billboard shows the chunk the way the 2D side card does (the page's own
+rendering), not the distilled lines.*
+
 ---
 
 

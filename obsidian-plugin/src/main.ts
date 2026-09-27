@@ -255,6 +255,11 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
             view.onNavigate = (href: string) => browser.go(href);
             void view.pinChunk(cid);
           });
+        // Any billboard opened in 3D can ask for its chunk's page snapshot.
+        this.eachGraph((view) => {
+          view.snapshotFor = (cid: string, url: string) => browser.snapshotChunk(cid, url);
+          view.onNavigate = (href: string) => browser.go(href);
+        });
         browser.onUnpin = (cid: string) =>
           this.eachGraph((view) => view.unpinChunk(cid));
         return browser;

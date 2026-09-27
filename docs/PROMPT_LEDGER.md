@@ -7,7 +7,7 @@ binding record; this is the index that proves nothing in a transcript was lost.
 Transcripts cover 2026-09-12 onward; earlier direction lives only in
 `PLUGIN_GOAL.md` (the opening statement and Addenda I-III).
 
-**149 prompts:** LIVE 62, ONE-OFF 36, PARTLY 12, PROCESS 26, QUESTION 11, SUPERSEDED 2
+**151 prompts:** LIVE 63, ONE-OFF 36, PARTLY 12, PROCESS 26, QUESTION 11, SUPERSEDED 2, UNREVIEWED 1
 
 ## Still binding (LIVE, PARTLY, PROCESS)
 
@@ -113,6 +113,11 @@ Transcripts cover 2026-09-12 onward; earlier direction lives only in
 | P147 | 2026-09-27 | LIVE | Page nodes read as pages; nothing but the reader's pages in the picture (no test leakage). | G-94, D-39 |
 | P148 | 2026-09-27 | LIVE | Scanning nodes stay NEAR the nodes they belong to; spacing alone is not the measure. | G-93 |
 | P149 | 2026-09-27 | LIVE | Refit, online updates and streaming all run the CUDA model, visibly faster. | G-97 |
+| P150 | 2026-09-27 | LIVE | Open pages drawn as a SIMPLE TREE (one parent, no cross links); favicons on url nodes; the most relevant picture (by rendered size) on chunks; the 3D billboard looks like the 2D card. | G-84, G-81, G-100, G-102, D-36 |
+
+## UNREVIEWED
+
+- P151
 
 ## Superseded
 
@@ -788,4 +793,12 @@ Transcripts cover 2026-09-12 onward; earlier direction lives only in
 ### P149 -- 2026-09-27 17:19 -- LIVE
 
 > [mid-turn] Also, I don't think "refit" is applying the cuda form, and I don't know if incremental updates on the CUDA form are actually there yet. Depending on fit times, it might be a lot faster on CUDA than CPU, and we should be seeing much faster layout streaming updates from using CUDA
+
+### P150 -- 2026-09-27 21:23 -- LIVE
+
+> While cool, the densely packed maybe not tree structures should be less interconnected and a simple tree. Second image has a sample panel/card from the page. Also, there are way too many nodes without images billboarded when they are known to exist. Even missing .icon (micro icons usually seen in the browser tab and search results), similar to the 'wikipedia' item but for the remainder of url-level nodes and also as many chunks as possible, and just show the most relevant image or one of the images in chunks with multiple images, perhaps using css-scaled size (so, post-rendered size, since html rendering on our card panels as chunks is still not in the state it should be... the 3D gui is not reflecting the same structure of panel as in the clipboard on the 2D electron browser).
+
+### P151 -- 2026-09-27 21:29 -- UNREVIEWED
+
+> Total scan feature loss seen at https://duckduckgo.com/?q=radix+trie+planted962&ia=web
 

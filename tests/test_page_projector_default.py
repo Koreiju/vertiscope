@@ -165,3 +165,33 @@ def test_the_stream_trains_online_on_pages_the_model_has_not_learned(monkeypatch
     spacing = float(np.median(np.linalg.norm(P[:, None] - P[None], axis=2)))
     moved = np.median([np.linalg.norm(np.asarray(proj.page_pos[u]) - np.asarray(before[u])) for u in before])
     assert moved / spacing < 0.08
+
+
+def test_an_online_update_leaves_every_other_page_exactly_where_it_was(monkeypatch):
+    """'assume previous fits are fixed': only the pages trained on move."""
+    import time
+    import pytest
+    pytest.importorskip("torch")
+    monkeypatch.setattr(PageProjector, "ONLINE_DEBOUNCE_S", 0.05)
+    rows = _rows(spread=0.6)
+    first = [r for r in rows if r[1] != "https://p13.test/"]
+    ws = SimpleNamespace(store=_Store(first), path=None)
+    proj = PageProjector(dims=3, centroid="semantic", seed=0, engine="parametric")
+    proj.fit(ws)
+    before = {u: list(v) for u, v in proj.page_pos.items()}
+    u = "https://p13.test/"
+    mine = [r for r in rows if r[1] == u]
+    for c, _u, v in mine:
+        proj.vec[c] = np.asarray(v, dtype=np.float32)
+        proj.url_of[c] = u
+        proj.by_url.setdefault(u, set()).add(c)
+    proj.page_vec[u] = proj._semantic_centroid([c for c, _u, _v in mine], proj.vec)
+    proj._schedule_online([u])
+    for _ in range(600):
+        if proj.online_updates:
+            break
+        time.sleep(0.1)
+    rec = proj.online_updates[-1]
+    assert rec["pages_moved"] <= 1, rec
+    assert all(proj.page_pos[k] == v for k, v in before.items())
+    assert u in proj.page_pos

@@ -569,6 +569,21 @@ looks only at POSIX paths, so on Windows every call returns
 `spawn obsidian ENOENT` -- and it surfaces that as an error in the GUI. It
 also wants port 27124, which collides with local-rest-api's HTTPS port.
 
+**Launch Obsidian for in-app runs with the window unthrottled.**
+
+```
+Obsidian.exe --remote-debugging-port=9222 --disable-backgrounding-occluded-windows --disable-renderer-backgrounding --disable-background-timer-throttling
+```
+
+Chromium throttles a window it considers covered to ONE frame a second, even
+when it reports itself visible and focused -- and with the frames go the
+timers and the 3D layout's simulation. Measured 2026-09-27: 984-1027 ms per
+frame with Obsidian behind another window; `setBackgroundThrottling(false)`
+did not help; these flags did (4 ms frames). A run on a throttled window
+scores the throttle (D-35's hover took 5.2 s, G-94 measured a layout that
+had settled for six ticks), so every fresh run now records its frame rate in
+its label.
+
 **The fallback: `obsidian-plugin/cdp.mjs`.**
 
 It evaluates JavaScript inside a running Obsidian.

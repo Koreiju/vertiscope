@@ -278,6 +278,7 @@ export class Verifier {
     const base = (this.app.vault.adapter as any).basePath || "";
     const testUrl = `http://127.0.0.1:${TEST_PORT}`;
     let child: any = null;
+    let readerPage = "";
     let fixtures: any = null;
     try {
       // 1. An empty workspace; the previous test store goes.
@@ -306,6 +307,8 @@ export class Verifier {
       // planted G-89 then "failed" for a reason that had nothing to do with
       // the force tree.
       await this.ensurePanes();
+      // The page the reader had open, to go back to afterwards.
+      readerPage = this.browserUrl();
       plugin.settings.sidecar = testUrl;
       this.resetGraphs("switched to a fresh store");
       await this.redrawGraphs();
@@ -353,7 +356,21 @@ export class Verifier {
       sampling = false;
       await sampler;
       const held = this.state.seed!.filter((r) => r.held).length;
-      this.state.label = `fresh ${name}, ${held}/${urls.length} pages seeded`;
+      // The window's frame rate goes on every verdict of the run: a covered
+      // window is throttled to one frame a second, which slows timers and the
+      // layout's simulation too, and a run measured then scores the throttle
+      // (2026-09-27: D-35 and G-94 failed on it). Launch flags that prevent
+      // it: docs/OBSIDIAN_BRIDGE.md.
+      const frames: number[] = [];
+      for (let i = 0; i < 5; i++) {
+        const f0 = performance.now();
+        await Promise.race([new Promise((r) => requestAnimationFrame(() => r(null))), sleep(2000)]);
+        frames.push(performance.now() - f0);
+      }
+      frames.sort((a, b) => a - b);
+      const frameMs = Math.round(frames[2]);
+      this.state.label = `fresh ${name}, ${held}/${urls.length} pages seeded, `
+        + (frameMs < 50 ? `frames ${frameMs} ms` : `WINDOW THROTTLED (${frameMs} ms frames)`);
       // 5. The checks -- built NOW, after the switch. `makeChecks` reads the
       // sidecar's address once, when it is called; built before step 3, every
       // check asked the WORKING store while the app captured into the test
@@ -368,6 +385,12 @@ export class Verifier {
       // 6. Back on the working store, whatever happened.
       if (plugin?.settings) plugin.settings.sidecar = working;
       this.resetGraphs("back on the working store");
+      // And the browser cell back on the reader's page, freshly loaded: a page
+      // left open across the switch kept a sensor whose dictionary the
+      // WORKING sidecar never received, and scanning there was lost until a
+      // reload (2026-09-27: "Total scan feature loss" on the planted arm's
+      // DuckDuckGo page, which was also left on screen).
+      this.backToReader(readerPage);
       try { await fixtures?.close(); } catch { /* already closed */ }
       await this.stopSidecar(child);
       let stopped = false;
@@ -436,6 +459,26 @@ export class Verifier {
     }
     this.restoreLive();
     return out;
+  }
+
+  /** The url the browser cell shows, if any. */
+  private browserUrl(): string {
+    try {
+      const b: any = this.app.workspace.getLeavesOfType("domvec-browser-view")[0]?.view;
+      const u = b?.webview?.getURL?.() || "";
+      return /^https?:/.test(u) && !/127\.0\.0\.1|localhost/.test(u) ? u : "";
+    } catch { return ""; }
+  }
+
+  /** The browser cell restarts capture on the reader's page (or a blank one). */
+  private backToReader(url: string): void {
+    for (const l of this.app.workspace.getLeavesOfType("domvec-browser-view")) {
+      const b: any = l.view;
+      try {
+        if (typeof b?.restartCapture === "function") b.restartCapture();
+        if (b?.go) b.go(url || "about:blank");
+      } catch { /* the cell is gone */ }
+    }
   }
 
   /** Live capture back on in every browser cell; true if any was off. */

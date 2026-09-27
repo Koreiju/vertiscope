@@ -396,10 +396,11 @@ export class PipelineBox {
       }
       let shown = 0;
       const t = performance.now();
+      const frame = this.diffEls.length ? this.boxFrame(this.diffEls[0]) : null;
       this.diffEls.forEach((el, i) => {
         const r = i < ids.length ? rects[i] : null;
         if (!r) { el.hide(); return; }
-        this.placeBox(el, { x: r[0], y: r[1], w: r[2], h: r[3] });
+        this.placeBox(el, { x: r[0], y: r[1], w: r[2], h: r[3] }, frame);
         if (el.style.display !== "none") {
           shown++;
           const s = this.streaming.get(ids[i]);
@@ -422,10 +423,11 @@ export class PipelineBox {
       this.diffEls.push(this.wrap.createDiv({ cls: "domvec-diff-box" }));
     }
     let drawn = 0;
+    const frame = this.diffEls.length ? this.boxFrame(this.diffEls[0]) : null;
     this.diffEls.forEach((el, i) => {
       const r = i < rects.length ? rects[i] : null;
       if (r) {
-        this.placeBox(el, { x: r[0], y: r[1], w: r[2], h: r[3] });
+        this.placeBox(el, { x: r[0], y: r[1], w: r[2], h: r[3] }, frame);
         if (el.style.display !== "none") drawn++;
       } else el.hide();
     });
@@ -528,9 +530,36 @@ export class PipelineBox {
 
   /** Put a fixed-position box over a guest-viewport rect, clipped to the
    *  webview and corrected for the containing block (see `pin`). */
-  private placeBox(el: HTMLElement, r: { x: number; y: number; w: number; h: number } | null) {
+  /**
+   * The two reads every box's position depends on, taken ONCE per batch: the
+   * webview's rect and the boxes' positioned parent's. Placing a box used to
+   * write it, read it back and correct it -- a forced layout per box, up to 64
+   * per drain: G-90 measured placement p95 31 ms on a 356-chunk drain.
+   */
+  private boxFrame(el: HTMLElement): { wb: DOMRect; ox: number; oy: number } | null {
+    const wv = this.webview();
+    if (!wv) return null;
+    const wb = wv.getBoundingClientRect();
+    const op = (el.offsetParent || el.parentElement) as HTMLElement | null;
+    if (!op) return { wb, ox: 0, oy: 0 };
+    const pr = op.getBoundingClientRect();
+    return { wb, ox: pr.left + op.clientLeft - op.scrollLeft, oy: pr.top + op.clientTop - op.scrollTop };
+  }
+
+  private placeBox(el: HTMLElement, r: { x: number; y: number; w: number; h: number } | null,
+                   frame?: { wb: DOMRect; ox: number; oy: number } | null) {
     const wv = this.webview();
     if (!r || !wv || r.w <= 0 || r.h <= 0) { el.hide(); return; }
+    if (frame) {
+      const wb = frame.wb;
+      const left = wb.left + Math.max(0, r.x), top = wb.top + Math.max(0, r.y);
+      const right = wb.left + Math.min(wb.width, r.x + r.w), bottom = wb.top + Math.min(wb.height, r.y + r.h);
+      if (right <= left || bottom <= top) { el.hide(); return; }
+      Object.assign(el.style, { left: `${left - frame.ox}px`, top: `${top - frame.oy}px`,
+                                width: `${right - left}px`, height: `${bottom - top}px` });
+      el.show();
+      return;
+    }
     const wb = wv.getBoundingClientRect();
     const left = wb.left + Math.max(0, r.x);
     const top = wb.top + Math.max(0, r.y);

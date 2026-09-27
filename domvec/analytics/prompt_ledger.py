@@ -269,6 +269,9 @@ VERDICTS: Dict[int, Tuple[str, str, str]] = {
     147: ("LIVE", "Page nodes read as pages; nothing but the reader's pages in the picture (no test leakage).", "G-94, D-39"),
     148: ("LIVE", "Scanning nodes stay NEAR the nodes they belong to; spacing alone is not the measure.", "G-93"),
     149: ("LIVE", "Refit, online updates and streaming all run the CUDA model, visibly faster.", "G-97"),
+    150: ("LIVE", "Open pages drawn as a SIMPLE TREE (one parent, no cross links); favicons on url nodes; "
+          "the most relevant picture (by rendered size) on chunks; the 3D billboard looks like the 2D card.",
+          "G-84, G-81, G-100, G-102, D-36"),
     141: ("LIVE", "The 3D layout AFTER collapse must not be jumbled (measured as seen, on screen); the hard-page "
           "list must be a real, comprehensive in-app suite.", "G-94, G-101"),
 }

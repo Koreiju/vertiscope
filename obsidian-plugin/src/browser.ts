@@ -31,6 +31,7 @@ import { ForceTree, type ForceNodeDelta } from "./forcetree";
 import { PipelineBox } from "./pipelinebox";
 import { profiler } from "./profile";
 import { Component, ItemView, MarkdownRenderer, Menu, WorkspaceLeaf } from "obsidian";
+import { putFavicon } from "./snapshot";
 import { Snapshot, dropSnapshot, getSnapshot, putSnapshot, renderSnapshot, snapshotScript, xpathsOfLines } from "./snapshot";
 
 import { LayoutNode } from "./graph";
@@ -144,6 +145,11 @@ interface PinRecord {
   cid: string; url: string; matched: string; markdown: string; head: string;
   /** The elements the chunk's lines draw, for the page-faithful snapshot (D-36). */
   xpaths?: string[];
+}
+
+/** A url's DOCUMENT: the same page with or without a #fragment. */
+function docKey(u: string): string {
+  return String(u || "").split("#")[0];
 }
 
 /** One queued capture: a drain's payload, or the settle of a page left. */
@@ -328,6 +334,17 @@ export class BrowserView extends ItemView {
     }
 
     view.addEventListener("did-start-loading", () => this.say("loading…"));
+    // The page's own icon, as the webview reports it for the tab (G-81).
+    view.addEventListener("page-favicon-updated", (e: any) => {
+      const list = (e && e.favicons) || [];
+      try { if (list.length) putFavicon(view.getURL(), String(list[0])); } catch { /* not attached */ }
+    });
+    // The document is ready to read once dom-ready fires, whatever the network
+    // is still doing; a new main-frame navigation (not an in-page one) resets it.
+    view.addEventListener("dom-ready", () => { this.domReady = true; });
+    view.addEventListener("did-start-navigation", (e: any) => {
+      if (e && e.isMainFrame && !e.isInPlace && !e.isSameDocument) this.domReady = false;
+    });
     view.addEventListener("did-stop-loading", () => {
       this.address.value = view.getURL();
       try {
@@ -346,6 +363,13 @@ export class BrowserView extends ItemView {
     // reason; the SESSION still has to move, or the new route's chunks are
     // filed under the old one.
     view.addEventListener("did-navigate-in-page", (e: any) => {
+      // A #fragment is the SAME document: following an anchor link started
+      // a new page ("Radix_tree#PATR" stored beside "Radix_tree", 2026-09-27).
+      const sameDoc = (a: string, c: string) => a.split("#")[0] === c.split("#")[0];
+      if (e && e.isMainFrame && this.session && sameDoc(String(e.url || view.getURL()), this.session)) {
+        this.address.value = view.getURL();
+        return;
+      }
       if (e && e.isMainFrame) {
         this.address.value = view.getURL();
         void this.pageChanged(view.getURL());
@@ -688,6 +712,43 @@ export class BrowserView extends ItemView {
       note(false, String(e).slice(0, 80));
       return false;
     }
+  }
+
+  /** The current document has fired dom-ready (drains may run while loading). */
+  private domReady = false;
+
+  /**
+   * A snapshot of `cid` for the 3D billboard (2026-09-27: "the 3D gui is not
+   * reflecting the same structure of panel as in the clipboard"): taken now,
+   * from the live page, when the chunk's page is the one open in the cell.
+   * False when it cannot be (another page is open, or nothing is found).
+   */
+  async snapshotChunk(cid: string, url: string): Promise<boolean> {
+    if (!cid || getSnapshot(cid)) return !!getSnapshot(cid);
+    let here = "";
+    try { here = this.webview?.getURL() || ""; } catch { /* not attached */ }
+    if (!here || docKey(here) !== docKey(url || "")) return false;
+    const payload: any = await this.sidecar.chunk(cid).catch(() => null);
+    const lines = (payload && payload.lines) || [];
+    if (!lines.length) return false;
+    await this.takeSnapshot({ cid, url: here, matched: "", markdown: "", head: "",
+                              xpaths: xpathsOfLines(lines) });
+    return !!getSnapshot(cid);
+  }
+
+  /**
+   * Start capture over (the plugin's sidecar changed under the cell): the
+   * session and the force trees are dropped, so the next load starts a new
+   * capture session with a fresh sensor -- a sensor's dictionary belongs to
+   * the sidecar it was talking to.
+   */
+  restartCapture(): void {
+    this.session = "";
+    this.forceTrees.clear();
+    this.unstoredIds.clear();
+    this.unstoredAt.clear();
+    this.captureQueue = [];
+    this.pipebox?.clearStreaming();
   }
 
   /** Named defects a check can plant through the plugin (non-vacuity arms). */
@@ -1064,7 +1125,7 @@ export class BrowserView extends ItemView {
       }
       return;
     }
-    if (url === this.session) return;
+    if (url === this.session || (this.session && docKey(url) === docKey(this.session))) return;
     const leaving = this.session;
     this.session = url;
     // Sensor ids are per document: nothing streaming on the page left behind.
@@ -1242,8 +1303,12 @@ export class BrowserView extends ItemView {
     if (!this.live || this.draining || !this.webview) return;
     const wv = this.webview;
     const url = wv.getURL();
-    if (!url || url === "about:blank" || wv.isLoading()) return;
-    if (url !== this.session) {
+    // Drained once the DOCUMENT is ready, loading or not: YouTube and IMDb
+    // never stop "loading" (streaming requests), and waiting for them to meant
+    // 0 and 2 drains in 16 s -- the heavy live pages were barely scanned
+    // (G-101, 2026-09-27).
+    if (!url || url === "about:blank" || (wv.isLoading() && !this.domReady)) return;
+    if (url !== this.session && docKey(url) !== docKey(this.session)) {
       this.lastRepairMs = undefined;
       await this.pageChanged(url);
       return;

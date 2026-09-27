@@ -27,7 +27,7 @@ import * as THREE from "three";
 
 import { Sidecar } from "./sidecar";
 import { ChunkSurface, SurfaceHost } from "./surface";
-import { getSnapshot, renderSnapshot } from "./snapshot";
+import { faviconFor, getSnapshot, renderSnapshot } from "./snapshot";
 
 export const GRAPH_VIEW = "domvec-graph-view";
 
@@ -195,6 +195,15 @@ function hue(url: string): string {
  * (2026-09-27). The collider is the drawn radius times an INTEGER, plus an
  * invisible margin in scene units.
  */
+/**
+ * The fitted layout drawn as a THICK DISC facing the default camera
+ * (2026-09-27, G-94): the camera looks down z, and a full-depth cloud stacked
+ * page behind page -- 29 of 199 nodes buried on the working store. Depth is
+ * kept, compressed; display only (the fit and the stored coordinates are
+ * untouched).
+ */
+const DEPTH = 0.4;
+
 const COLLIDER_SAFETY = 2;
 const COLLIDER_MARGIN = 1;
 
@@ -1028,10 +1037,14 @@ export class GraphView extends ItemView {
       .map((n: any) => n.id));
     if (!gone.size) return;
     const end = (x: any) => (typeof x === "object" && x ? x.id : x);
-    this.graph.graphData({
+    const next = {
       nodes: data.nodes.filter((n: any) => !gone.has(n.id)),
       links: data.links.filter((l: any) => !gone.has(end(l.source)) && !gone.has(end(l.target))),
-    });
+    };
+    // Its neighbours, moved aside while it was open, go home (G-94).
+    this.makeRoom(next, this.graph.nodeRelSize());
+    this.graph.graphData(next);
+    this.graph.d3ReheatSimulation?.();
     for (const [id, spec] of [...this.forceSpecs]) if (spec.url === url) this.forceSpecs.delete(id);
     this.collapsed.push({ at: Date.now(), url, nodes: gone.size });
     if (this.collapsed.length > 50) this.collapsed.shift();
@@ -1153,7 +1166,7 @@ export class GraphView extends ItemView {
       for (const [cid, got] of Object.entries<any>(d.chunks || {})) {
         const node = byId.get(cid);
         if (node && got.pos) {
-          node.fitX = got.pos[0]; node.fitY = got.pos[1]; node.fitZ = got.pos[2];
+          node.fitX = got.pos[0]; node.fitY = got.pos[1]; node.fitZ = got.pos[2] * DEPTH;
           moved++;
         } else if (!node && got.url && openUrls.has(got.url)) {
           toPlace.push(cid);
@@ -1171,8 +1184,8 @@ export class GraphView extends ItemView {
         if (!got?.pos) continue;
         const node = byId.get("page:" + url);
         if (node) {
-          node.fitX = got.pos[0]; node.fitY = got.pos[1]; node.fitZ = got.pos[2];
-          node.anchorPos = [got.pos[0], got.pos[1], got.pos[2]];
+          node.fitX = got.pos[0]; node.fitY = got.pos[1]; node.fitZ = got.pos[2] * DEPTH;
+          node.anchorPos = [got.pos[0], got.pos[1], got.pos[2] * DEPTH];
         } else {
           const members = got.projected ?? 1;
           const built = this.nodeFrom({ cid: "page:" + url, url, title: url,
@@ -1252,12 +1265,24 @@ export class GraphView extends ItemView {
    * asset host cannot silently empty the graph.
    */
   /** A streaming node: a small translucent sphere in its own colour. */
+  /** One geometry for every streaming node, and one material per colour
+   *  (G-90: a new geometry and material per node cost a 356-node drain its
+   *  p95 of 52 ms in the graph). Scaled per node, not rebuilt. */
+  private static streamGeo: any = null;
+  private static streamMats = new Map<string, any>();
+  private static ringMat: any = null;
   private streamingSphere(node: any): any {
     const r = node.level === "page" ? STREAM.RADIUS * 1.6 : STREAM.RADIUS;
-    const mesh = new THREE.Mesh(
-      new THREE.SphereGeometry(r, 12, 10),
-      new THREE.MeshLambertMaterial({ color: new THREE.Color(node.hovered ? "#ffffff" : (node.color || "#9aa0a6")),
-                                      transparent: true, opacity: STREAM.OPACITY, depthWrite: false }));
+    if (!GraphView.streamGeo) GraphView.streamGeo = new THREE.SphereGeometry(1, 12, 10);
+    const colour = node.color || "#9aa0a6";
+    let mat = GraphView.streamMats.get(colour);
+    if (!mat) {
+      mat = new THREE.MeshLambertMaterial({ color: new THREE.Color(colour), transparent: true,
+                                            opacity: STREAM.OPACITY, depthWrite: false });
+      GraphView.streamMats.set(colour, mat);
+    }
+    const mesh = new THREE.Mesh(GraphView.streamGeo, mat);
+    mesh.scale.setScalar(r);
     (mesh as any).__streaming = true;
     return mesh;
   }
@@ -1293,6 +1318,7 @@ export class GraphView extends ItemView {
           texture.colorSpace = THREE.SRGBColorSpace;
           texture.needsUpdate = true;
           material.map = texture;
+          node.imgLoaded = true;           // for the harness: the picture is ON the node
           // White once a picture is on it: the colour was standing in for the
           // image, and leaving it would tint every photograph.
           material.color = new THREE.Color(0xffffff);
@@ -1401,7 +1427,45 @@ export class GraphView extends ItemView {
       data.links.push({ source, target });
       added++;
     }
+    if (added) this.treeOnly(data);
     return added;
+  }
+
+  /** Planted by G-94's check: every containment edge kept (the web). */
+  plantWeb = false;
+
+  /**
+   * A drawn page is a SIMPLE TREE (2026-09-27: "the densely packed maybe not
+   * tree structures should be less interconnected and a simple tree").
+   * Containment is transitive -- a chunk is contained by its parent, its
+   * grandparent and its page -- and every one of those edges was drawn, so
+   * each chunk hung from several nodes and an open page read as a web. Each
+   * node keeps ONE incoming edge: from the deepest container drawn (one that
+   * no other container of it contains), chunks preferred over the page.
+   */
+  private treeOnly(data: any): void {
+    if (this.plantWeb) return;
+    const end = (x: any) => (typeof x === "object" && x ? x.id : x);
+    const byId = new Map<string, any>(data.nodes.map((n: any) => [n.id, n]));
+    const into = new Map<string, any[]>();
+    const outOf = new Map<string, Set<string>>();
+    for (const l of data.links) {
+      if (l.force) continue;
+      const s = end(l.source), t = end(l.target);
+      (into.get(t) || into.set(t, []).get(t)!).push(l);
+      (outOf.get(s) || outOf.set(s, new Set()).get(s)!).add(t);
+    }
+    const drop = new Set<any>();
+    for (const [t, links] of into) {
+      if (links.length < 2) continue;
+      const sources = links.map((l) => end(l.source));
+      const isPage = (id: string) => (byId.get(id)?.level === "page");
+      // Deepest: a source that no other source of t contains.
+      const deepest = sources.filter((s) => !isPage(s) && !sources.some((o) => o !== s && outOf.get(s)?.has(o)));
+      const keep = deepest[0] ?? sources.find((s) => !isPage(s)) ?? sources[0];
+      for (const l of links) if (end(l.source) !== keep) drop.add(l);
+    }
+    if (drop.size) data.links = data.links.filter((l: any) => !drop.has(l));
   }
 
   /**
@@ -1513,9 +1577,15 @@ export class GraphView extends ItemView {
     // A streaming node is its own translucent mesh: ring it by its material.
     for (const n of data.nodes) {
       const obj: any = n.force ? (n as any).__threeObj : null;
-      if (obj && obj.material && obj.material.color) {
-        obj.material.color.set(n.hovered ? "#ffffff" : (n.color || "#9aa0a6"));
-        obj.material.opacity = n.hovered ? 0.9 : STREAM.OPACITY;
+      if (obj && obj.__streaming) {
+        // Materials are shared: the ring swaps in its own, never recolours one.
+        if (n.hovered) {
+          if (!GraphView.ringMat) GraphView.ringMat = new THREE.MeshLambertMaterial({ color: new THREE.Color("#ffffff"),
+            transparent: true, opacity: 0.9, depthWrite: false });
+          obj.material = GraphView.ringMat;
+        } else {
+          obj.material = GraphView.streamMats.get(n.color || "#9aa0a6") || obj.material;
+        }
       }
     }
   }
@@ -1615,7 +1685,15 @@ export class GraphView extends ItemView {
       body.setText("a page stands for its chunks -- click to unravel it");
       return;
     }
-    // The chunk as the browser draws it (D-36), when the page gave one.
+    // The chunk as the browser draws it (D-36), when the page gave one --
+    // asked for NOW if its page is the one open in the browser cell.
+    const ask = this.snapshotFor || ((cid: string, url: string) => {
+      const b: any = this.app.workspace.getLeavesOfType("domvec-browser-view")[0]?.view;
+      return b && typeof b.snapshotChunk === "function" ? b.snapshotChunk(cid, url) : Promise.resolve(false);
+    });
+    if (!getSnapshot(node.id)) {
+      try { await ask(node.id, node.url || ""); } catch { /* keep the distilled form */ }
+    }
     if (this.mountSnapshot(entry, body)) return;
     const surface = new ChunkSurface(body, node.id, this.surfaceHost,
                                      { interactive: true });
@@ -1635,37 +1713,149 @@ export class GraphView extends ItemView {
    */
   private fitChunkSizes(data: any): void {
     if (!this.graph || this.plantBigChunks) return;
-    const relSize = this.graph.nodeRelSize(), media = this.media();
-    const pages = data.nodes.filter((n: any) => !n.force && n.level === "page" && Number.isFinite(n.fitX ?? n.x));
-    const at = (n: any) => [n.fitX ?? n.x, n.fitY ?? n.y, n.fitZ ?? n.z ?? 0];
+    const relSize = this.graph.nodeRelSize();
     const byUrl = new Map<string, any[]>();
     for (const n of data.nodes) {
       if (n.force || n.level === "page" || !n.url) continue;
       (byUrl.get(n.url) || byUrl.set(n.url, []).get(n.url)!).push(n);
     }
+    // Every open page drawn as a flat disc FACING THE CAMERA (2026-09-27,
+    // G-94). In a 3D ball, 45 chunk discs covered each other on screen
+    // however small they were drawn (50 of 57 overlapping, 27 buried): seen
+    // from one side a ball is a stack. On a disc in the view plane nothing
+    // is behind anything. Each chunk keeps the DIRECTION its UMAP position
+    // gave it (its angle around the page), and takes its radius from its
+    // rank by UMAP distance -- a sunflower, r ~ sqrt(rank) -- so the disc
+    // is evenly filled. The true coordinates stay in the store (`raw_pos`).
+    const floor = 0.35 * relSize;
+    const collider = floor * COLLIDER_SAFETY + COLLIDER_MARGIN;
+    const cam = this.graph.camera();
+    const e = cam.matrixWorld.elements;
+    const right = [e[0], e[1], e[2]], up = [e[4], e[5], e[6]];
+    const pages = data.nodes.filter((n: any) => !n.force && n.level === "page");
     for (const [url, chunks] of byUrl) {
       const page = pages.find((p: any) => p.url === url);
-      if (!page) continue;
-      const [px, py, pz] = at(page);
-      let nearest = Infinity;
-      for (const q of pages) {
-        if (q === page) continue;
-        const [qx, qy, qz] = at(q);
-        nearest = Math.min(nearest, Math.hypot(px - qx, py - qy, pz - qz));
+      if (!page || !Number.isFinite(page.fitX)) continue;
+      page.x = page.fitX; page.y = page.fitY; page.z = page.fitZ ?? 0;
+      const P = [page.fitX, page.fitY, page.fitZ ?? 0];
+      const polar = chunks.map((c: any) => {
+        const o = c.projX !== undefined ? [c.projX - P[0], c.projY - P[1], c.projZ - P[2]]
+          : [(c.fitX ?? c.x) - P[0], (c.fitY ?? c.y) - P[1], (c.fitZ ?? c.z ?? 0) - P[2]];
+        if (c.projX === undefined) { c.projX = P[0] + o[0]; c.projY = P[1] + o[1]; c.projZ = P[2] + o[2]; }
+        const x = o[0] * right[0] + o[1] * right[1] + o[2] * right[2];
+        const y = o[0] * up[0] + o[1] * up[1] + o[2] * up[2];
+        return { c, angle: Math.atan2(y, x), dist: Math.hypot(o[0], o[1], o[2]) };
+      });
+      polar.sort((p, q) => p.dist - q.dist);
+      // Spaced by the largest thing actually DRAWN: a chunk with a picture is
+      // a panel ~1.75x its sphere, and spacing by the sphere buried 11 of the
+      // page's chunks behind its own picture panels (2026-09-27).
+      const media = this.media();
+      const drawnMax = Math.max(floor, ...chunks.map((c: any) =>
+        drawnRadius({ ...c, val: Math.pow(floor / relSize, 3) }, relSize, media)));
+      const step = (drawnMax * COLLIDER_SAFETY + COLLIDER_MARGIN) * 1.25;
+      page.discStep = step;
+      // The first ring outside the page node itself (it sits at the centre).
+      const inner = drawnRadius(page, relSize, media) * COLLIDER_SAFETY + COLLIDER_MARGIN;
+      // SUNFLOWER slots (golden angle), which are evenly spaced by
+      // construction; each chunk, nearest-first, takes the free slot among the
+      // next few whose angle is nearest its UMAP direction. Keeping each
+      // chunk's own angle and a rank radius stacked chunks at similar angles
+      // -- rings sqrt(k+1)-sqrt(k) apart -- and buried 10 of 58 (2026-09-27).
+      const GOLDEN = Math.PI * (3 - Math.sqrt(5));
+      const slots = polar.map((_it, k) => ({ r: inner + step * Math.sqrt(k + 1), a: k * GOLDEN, used: false }));
+      const angDist = (x: number, y: number) => {
+        const d = Math.abs(((x - y) % (2 * Math.PI) + 3 * Math.PI) % (2 * Math.PI) - Math.PI);
+        return d;
+      };
+      polar.forEach((it, rank) => {
+        let best = -1;
+        for (let k = rank; k < Math.min(slots.length, rank + 8); k++) {
+          if (slots[k].used) continue;
+          if (best < 0 || angDist(slots[k].a, it.angle) < angDist(slots[best].a, it.angle)) best = k;
+        }
+        if (best < 0) best = slots.findIndex((x) => !x.used);
+        slots[best].used = true;
+        const r = slots[best].r;
+        it.c.onDisc = true;
+        const ca = Math.cos(slots[best].a), sa = Math.sin(slots[best].a);
+        const pos = [P[0] + r * (ca * right[0] + sa * up[0]),
+                     P[1] + r * (ca * right[1] + sa * up[1]),
+                     P[2] + r * (ca * right[2] + sa * up[2])];
+        it.c.fitX = pos[0]; it.c.fitY = pos[1]; it.c.fitZ = pos[2];
+        // PLACED there, not attracted: the home force is alpha-scaled and the
+        // simulation had cooled, so disc chunks never arrived (G-94 read 2.0x).
+        it.c.x = pos[0]; it.c.y = pos[1]; it.c.z = pos[2];
+        it.c.vx = 0; it.c.vy = 0; it.c.vz = 0;
+        // Its territory is where it was placed: `contain` held each chunk to
+        // a region around its PROJECTED anchor and folded the disc into one
+        // point (46 chunks at one distance, 41 buried; 2026-09-27).
+        it.c.anchorPos = [pos[0], pos[1], pos[2]];
+        if (it.c.fullVal === undefined) it.c.fullVal = it.c.val ?? 1;
+        it.c.val = Math.pow(floor / relSize, 3);
+      });
+    }
+    this.makeRoom(data, relSize);
+  }
+
+  /**
+   * An OPEN page's neighbours move aside (2026-09-27, G-94). Sizing chunks to
+   * their page's room was not enough where pages crowd: the collider the
+   * chunks need to stay visible and apart could not fit in 0.45 x the nearest
+   * page's distance, and the collision pushed them to 0.68-0.97x of it, into
+   * the neighbour's half, with 36 of 64 discs buried. So the room is MADE:
+   * n chunks at the smallest readable size, each with its collider, pack a
+   * ball of radius B = collider * (n / 0.6)^(1/3); every page nearer than
+   * B / 0.45 has its home moved out along its own direction to that distance
+   * while the page is open, and back to the fit's position when it closes.
+   * Display only -- the fit and the store are untouched.
+   */
+  private makeRoom(data: any, relSize: number): void {
+    const pages = data.nodes.filter((n: any) => !n.force && n.level === "page");
+    // Back to the fit first; the open pages below push again.
+    for (const q of pages) {
+      if (q.homeFit) {
+        [q.fitX, q.fitY, q.fitZ] = q.homeFit;
+        q.x = q.fitX; q.y = q.fitY; q.z = q.fitZ;
+        if (q.homeAnchor) q.anchorPos = q.homeAnchor;
+        q.homeFit = undefined; q.homeAnchor = undefined;
       }
-      if (!Number.isFinite(nearest)) continue;
-      const R = 0.45 * nearest;                 // the projector's NEIGHBOURHOOD
-      // A floor, so a crowded page's chunks stay visible: the fixed collider
-      // margin could eat the whole room and leave specks (val ~ 0).
-      const floor = 0.35 * relSize;
-      const room = Math.max(floor, (R * Math.cbrt(0.6 / chunks.length) - COLLIDER_MARGIN) / COLLIDER_SAFETY);
-      for (const c of chunks) {
-        if (c.fullVal === undefined) c.fullVal = c.val ?? 1;
-        const r = drawnRadius({ ...c, val: c.fullVal }, relSize, media);
-        c.val = r > room ? c.fullVal * Math.pow(room / r, 3) : c.fullVal;
+    }
+    const count = new Map<string, number>();
+    for (const n of data.nodes) {
+      if (n.force || n.level === "page" || !n.url) continue;
+      count.set(n.url, (count.get(n.url) || 0) + 1);
+    }
+    const floor = 0.35 * relSize;
+    const collider = floor * COLLIDER_SAFETY + COLLIDER_MARGIN;
+    for (const [url, n] of count) {
+      const p = pages.find((x: any) => x.url === url);
+      if (!p || !Number.isFinite(p.fitX)) continue;
+      // The disc's radius (sunflower of n at the page's step), and room for
+      // it inside half the distance to any other page.
+      const step = p.discStep || collider * 1.25;
+      const inner = drawnRadius(p, relSize, this.media()) * COLLIDER_SAFETY + COLLIDER_MARGIN;
+      const need = (inner + step * Math.sqrt(n) + step) / 0.45;
+      for (const q of pages) {
+        if (q === p || !Number.isFinite(q.fitX)) continue;
+        const dx = q.fitX - p.fitX, dy = q.fitY - p.fitY, dz = (q.fitZ ?? 0) - (p.fitZ ?? 0);
+        const d = Math.hypot(dx, dy, dz) || 1e-6;
+        if (d >= need) continue;
+        if (!q.homeFit) { q.homeFit = [q.fitX, q.fitY, q.fitZ]; q.homeAnchor = q.anchorPos; }
+        const k = need / d;
+        q.fitX = p.fitX + dx * k; q.fitY = p.fitY + dy * k; q.fitZ = (p.fitZ ?? 0) + dz * k;
+        q.x = q.fitX; q.y = q.fitY; q.z = q.fitZ;          // moved, not attracted
+        q.vx = 0; q.vy = 0; q.vz = 0;
+        // And its TERRITORY with it: `contain` bounds a node to a region
+        // around `anchorPos`, and pulled the moved neighbours back to 41-67
+        // units when they had been moved to 145 (G-94, 2026-09-27).
+        if (q.anchorPos) q.anchorPos = [q.fitX, q.fitY, q.fitZ];
       }
     }
   }
+
+  /** Planted by G-81's check: page nodes get no favicon. */
+  plantNoIcons = false;
 
   /** Planted by G-94's check: chunks drawn at full size, whatever the room. */
   plantBigChunks = false;
@@ -1732,6 +1922,9 @@ export class GraphView extends ItemView {
 
   /** The streaming layout's parameters, live -- a check plants the old ones (G-93). */
   streamParams = STREAM;
+
+  /** Asks the browser cell for a chunk's page snapshot (set by the plugin). */
+  snapshotFor: ((cid: string, url: string) => Promise<boolean>) | null = null;
 
   /** Where a link clicked inside a billboard's snapshot goes: the browser cell. */
   onNavigate: (href: string) => void = () => {};
@@ -2298,6 +2491,7 @@ export class GraphView extends ItemView {
         // should not be left drawing at its old meaning's address.
         Object.assign(existing, {
           name: built.name, url: built.url, val: built.val, fullVal: built.val,
+          projX: built.fitX, projY: built.fitY, projZ: built.fitZ,
           tokens: built.tokens, image: built.image, color: built.color,
           fitX: built.fitX, fitY: built.fitY, fitZ: built.fitZ,
           x: built.x, y: built.y, z: built.z,
@@ -2376,12 +2570,12 @@ export class GraphView extends ItemView {
       // put the guesswork back.
       x: n.pos[0],
       y: n.pos[1],
-      z: n.pos[2] ?? 0,
+      z: (n.pos[2] ?? 0) * DEPTH,
       //: Where the FIT put this node, kept so drift off the embedding can be
       //: measured rather than assumed. Nothing reads it to draw.
       fitX: n.pos[0],
       fitY: n.pos[1],
-      fitZ: n.pos[2] ?? 0,
+      fitZ: (n.pos[2] ?? 0) * DEPTH,
       // The payload's own `val` when it has one, because a page node's size
       // is its CHUNK COUNT and it has no characters of its own. Deriving it
       // from `chars` gave every one of 96 pages the same radius -- a
@@ -2396,7 +2590,11 @@ export class GraphView extends ItemView {
       anchorPos: (n as any).anchor,
       rank: n.rank,
       tokens: n.tokens ?? 0,
-      image: n.image,
+      // A page with no picture of its own shows its site's icon (G-81).
+      image: n.image ?? ((n.level === "page" && n.url && !this.plantNoIcons) ? (() => {
+        const src = faviconFor(n.url);
+        return src ? { src, alt: "icon" } : undefined;
+      })() : undefined),
       color: colourOf(n),
     };
   }
@@ -2763,7 +2961,11 @@ export class GraphView extends ItemView {
       // projected chunks off their transform positions, which pushed them
       // up to 23 units away with spikes past 300 while a diff was drawn
       // (S-7). The tree's own spring and charge space the force nodes.
-      .radius((n: any) => n.force || this.plantNoCollide ? 0
+      // A chunk on an open page's disc is PLACED, not collided: the disc is
+      // already evenly spaced, and colliding with its own large page node at
+      // the centre pushed the inner ring out to 1.46x the nearest page's
+      // distance (G-94, 2026-09-27).
+      .radius((n: any) => n.force || n.onDisc || this.plantNoCollide ? 0
         : drawnRadius(n, relSize, media) * COLLIDER_SAFETY + COLLIDER_MARGIN)
       // Soft and iterated rather than hard and once. `d3-force-3d` documents
       // collision as "by default a soft constraint with a configurable
@@ -3130,7 +3332,13 @@ export class GraphView extends ItemView {
                            { x: 0, y: 0, z: 0 }, 400);
       // After the flight, not during it: the camera is animating for 400ms
       // and a measurement taken mid-flight frames the halfway point.
-      window.setTimeout(() => tighten(), 450);
+      window.setTimeout(() => {
+        // Open pages' discs face the camera again (G-94).
+        const d: any = graph.graphData();
+        this.fitChunkSizes(d);
+        graph.d3ReheatSimulation?.();
+        tighten();
+      }, 450);
     };
     this.keepBillboards(canvas);
   }

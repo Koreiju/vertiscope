@@ -225,6 +225,40 @@ export function xpathsOfLines(lines: { key?: string }[]): string[] {
   return [...out];
 }
 
+/**
+ * Each page's favicon (2026-09-27: "missing .icon (micro icons usually seen in
+ * the browser tab and search results) ... for the remainder of url-level
+ * nodes"). Reported by the webview's own `page-favicon-updated` event --
+ * nothing is read from the page for it -- and remembered per vault.
+ */
+const ICONS_KEY = "domvec-favicons";
+let icons: Record<string, string> | null = null;
+function iconTable(): Record<string, string> {
+  if (icons) return icons;
+  try { icons = JSON.parse(window.localStorage.getItem(ICONS_KEY) || "{}"); } catch { icons = {}; }
+  return icons!;
+}
+export function putFavicon(pageUrl: string, icon: string): void {
+  if (!pageUrl || !/^https?:/.test(icon || "")) return;
+  const t = iconTable();
+  const key = pageUrl.split("#")[0];
+  if (t[key] === icon) return;
+  t[key] = icon;
+  try { window.localStorage.setItem(ICONS_KEY, JSON.stringify(t)); } catch { /* storage unavailable */ }
+}
+/** The page's icon: the one the webview reported, else the site's /favicon.ico. */
+export function faviconFor(pageUrl: string): string {
+  const t = iconTable();
+  const key = String(pageUrl || "").split("#")[0];
+  if (t[key]) return t[key];
+  try {
+    const u = new URL(key);
+    if (!/^https?:$/.test(u.protocol)) return "";
+    const same = Object.entries(t).find(([k]) => { try { return new URL(k).host === u.host; } catch { return false; } });
+    return same ? same[1] : `${u.origin}/favicon.ico`;
+  } catch { return ""; }
+}
+
 /** Snapshots by chunk id, shared by both panels for the life of the app. */
 const STORE = new Map<string, Snapshot>();
 export function putSnapshot(cid: string, s: Snapshot | null): void {
