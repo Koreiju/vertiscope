@@ -730,6 +730,7 @@ export class GraphView extends ItemView {
     if (!g) return;
     let links: any[] = [];
     const spring: any = (alpha: number) => {
+      const bySource = new Map<string, any[]>();
       for (const l of links) {
         const s = l.source, t = l.target;
         if (!t || !t.force || typeof s !== "object") continue;
@@ -737,6 +738,28 @@ export class GraphView extends ItemView {
         const d = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
         const k = ((d - 12) / d) * alpha * 0.6;
         t.vx = (t.vx ?? 0) - dx * k; t.vy = (t.vy ?? 0) - dy * k; t.vz = (t.vz ?? 0) - dz * k;
+        const kids = bySource.get(s.id) || [];
+        kids.push(t);
+        bySource.set(s.id, kids);
+      }
+      // SIBLINGS apart: with no charge and no collision room, the spring
+      // alone let force nodes under one parent settle on one point (G-4
+      // counted 8 coincident nodes). Short-range and among siblings only,
+      // so nothing the projector placed is touched.
+      for (const kids of bySource.values()) {
+        if (kids.length < 2 || kids.length > 400) continue;
+        for (let i = 0; i < kids.length; i++) {
+          for (let j = i + 1; j < kids.length; j++) {
+            const a = kids[i], b = kids[j];
+            let dx = (a.x ?? 0) - (b.x ?? 0), dy = (a.y ?? 0) - (b.y ?? 0), dz = (a.z ?? 0) - (b.z ?? 0);
+            let d2 = dx * dx + dy * dy + dz * dz;
+            if (d2 > 64) continue;
+            if (d2 < 1e-6) { dx = Math.random() - 0.5; dy = Math.random() - 0.5; dz = Math.random() - 0.5; d2 = 0.25; }
+            const d = Math.sqrt(d2), push = ((8 - d) / d) * alpha * 0.5;
+            a.vx = (a.vx ?? 0) + dx * push; a.vy = (a.vy ?? 0) + dy * push; a.vz = (a.vz ?? 0) + dz * push;
+            b.vx = (b.vx ?? 0) - dx * push; b.vy = (b.vy ?? 0) - dy * push; b.vz = (b.vz ?? 0) - dz * push;
+          }
+        }
       }
     };
     spring.initialize = () => {

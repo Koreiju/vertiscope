@@ -69,6 +69,11 @@ export class ForceTree {
 
   get size(): number { return this.chunks.size; }
 
+  /** A held chunk's address by its sensor id. */
+  addressOf(sensorId: number): string | null {
+    return this.chunks.get(sensorId)?.address ?? null;
+  }
+
   /** Every chunk held: its node id and address -- for coverage checks. */
   held(): { id: string; address: string }[] {
     return [...this.chunks.values()].map((h) => ({ id: h.id, address: h.address }));

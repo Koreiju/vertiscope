@@ -516,6 +516,17 @@ export class BrowserView extends ItemView {
   onUnstored: (url: string, ids: string[]) => void = () => {};
   /** Force ids a capture has shown the store does not keep. */
   private unstoredIds = new Set<string>();
+  /** The same knowledge by page and ADDRESS: a sensor instance renumbers its
+   *  chunks on every landing, so id-keyed memory forgot page furniture each
+   *  visit and it flashed as the diff again (G-91: 22 boxes on a stored page). */
+  private unstoredAt = new Map<string, Set<string>>();
+
+  /** Addresses on `url` a capture has shown the store does not keep. */
+  private unstoredOn(url: string): Set<string> {
+    let s = this.unstoredAt.get(url);
+    if (!s) { s = new Set(); this.unstoredAt.set(url, s); }
+    return s;
+  }
   /** Told by the plugin: the reader is leaving this page (not yet settled). */
   onLeaving: (url: string) => void = () => {};
   /** Told by the plugin: the reader left this page and it is settled. */
@@ -1186,6 +1197,8 @@ export class BrowserView extends ItemView {
             const id = tree.nodeId(Number(c.id));
             // Not flashed: covered and unchanged, or known never to be stored.
             if (this.unstoredIds.has(id) && !again.has(id)) return null;
+            const addr = tree.addressOf(Number(c.id));
+            if (addr && this.unstoredOn(url).has(addr) && !again.has(id)) return null;
             return (!delta.covers[id] || again.has(id)) ? payload.boxes[i] : null;
           });
           if (boxes.some(Boolean)) this.pipebox?.flashBoxes(boxes, drainBack, trace.id);
@@ -1194,6 +1207,12 @@ export class BrowserView extends ItemView {
           if (!payload.boxes) delta.covers = this.coversFor(url, tree.held().filter(
             (h) => delta.added.some((a) => a.id === h.id)));
           delta.settled = this.settledOf(url, delta.covers);
+          // Known never to be stored on this page: not the diff either.
+          const known = this.unstoredOn(url);
+          for (const h of tree.held()) {
+            if (known.has(h.address) && !delta.covers[h.id]
+                && delta.added.some((a) => a.id === h.id && !a.again)) delta.settled.push(h.id);
+          }
           delta.t0 = drainBack;
           delta.trace = trace.id;
           prof.stage(trace, "force_tree", delta.ms);
@@ -1202,7 +1221,12 @@ export class BrowserView extends ItemView {
           if (delta.addresses.length && !(payload && payload.boxes)) {
             this.pipebox?.flashDiff(delta.addresses, drainBack, trace.id);
           }
-          this.onDrain(delta);
+          // The 3D update AFTER the frame that paints the overlay (G-90): run in
+          // the same task it held the main thread, and while the graph was
+          // large the boxes waited for it -- 545 ms p50 to paint, against
+          // 5-9 ms when the graph was small. rAF, then a task: the paint
+          // happens between them.
+          window.requestAnimationFrame(() => window.setTimeout(() => this.onDrain(delta), 0));
         }
       }
       if (!payload || !(payload.chunks || []).length) {
@@ -1241,11 +1265,24 @@ export class BrowserView extends ItemView {
         if (tree) {
           const held = tree.held();
           const covers = this.coversFor(url, held);
-          if (Object.keys(covers).length) this.onCovers(url, covers, this.settledOf(url, covers));
+          // A rewritten chunk the capture neither placed nor queued for a
+          // vector is not drawable on its own (a merge-group member, a
+          // duplicate -- drawn through its lead): what it covers is settled,
+          // or it waited for a node that never comes (G-89 C7: 3 left).
+          const placedNow = new Set(((reply as any).nodes || []).map((n: any) => n.cid));
+          const waitingNow = new Set(((reply as any).unplaced || []) as string[]);
+          const undrawable = new Set(((reply as any).dirty_cids || [] as string[])
+            .filter((c: string) => !placedNow.has(c) && !waitingNow.has(c)));
+          const settledNow = this.settledOf(url, covers)
+            .concat(Object.entries(covers).filter(([, c]) => undrawable.has(c)).map(([id]) => id));
+          if (Object.keys(covers).length) this.onCovers(url, covers, settledNow);
           const captured = new Set(drainIds);
           const unstored = held.filter((h) => captured.has(h.id) && !covers[h.id]).map((h) => h.id);
           if (unstored.length) this.onUnstored(url, unstored);
-          for (const h of held) if (!covers[h.id]) this.unstoredIds.add(h.id);
+          const at = this.unstoredOn(url);
+          for (const h of held) {
+            if (!covers[h.id]) { this.unstoredIds.add(h.id); at.add(h.address); } else at.delete(h.address);
+          }
         }
       }
       // Every form of a chunk that is open follows the capture that rewrote

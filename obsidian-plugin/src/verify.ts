@@ -64,6 +64,8 @@ export interface VerifyState {
 const SEED_FIXTURES = [
   "inline_prose.html", "mixed_inline.html", "link_family.html",
   "metadata_family.html", "svg_diagram.html", "shadow_catalogue.html",
+  // Forty records of one shape: what the merge layer groups (G-27, G-63).
+  "records_catalog.html",
 ];
 const SEED_PAGES = [
   "https://en.wikipedia.org/wiki/Radix_tree",

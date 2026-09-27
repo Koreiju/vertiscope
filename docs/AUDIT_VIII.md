@@ -182,3 +182,32 @@ is projected (S-2, S-4). Proposed, and built next:
    A pinned chunk stays drawn wherever its page is.
 4. **Landing never waits on the previous page's settle** -- S-3.
 5. **Force nodes do not collide with projected ones** -- S-7.
+
+### Pass 2 — where each finding stands (2026-09-27)
+
+Fixed, each seen in the running app on fresh stores the app filled itself
+(the 12 streaming checks went 6 -> 8 -> 9 -> 11 of 12 across the round):
+
+| # | fix | measured after |
+|---|---|---|
+| S-1, S-8 | `/page_map` serves the page's projected chunk nodes and page node from the projector's memory; drawn on landing | stored page: projected chunks 150-600 ms after landing (was 3.6-5.2 s) |
+| S-2, H-1 | pending = the TRUE diff: stored-before-visit content is settled; coverage walks inline ancestors to the block; never-stored content remembered per page and address | force nodes on a stored page 0-2 (was 145-564); diff flash 0-2 boxes (was 20-34) |
+| S-3 | landing places before settling the page left | the next page's projected chunks no longer wait 6 s |
+| S-4 | a page with no projected node draws its force tree at once; pending diff hangs from the projected chunk its parent collapsed into | new page: tree in 0.1-0.9 s, collapsed in 1-5 s |
+| S-6 | leaving (blank included) drops the page's diff and, once settled, collapses its projected chunks into its node; late results for a left page add nothing; reader-opened pages and pins stay | other pages' chunk nodes: 0 after leaving (had grown to 280) |
+| S-7 | force nodes take no collision room; O(drain x graph) page lookups removed | per-node p95 0.2 ms on 500-chunk drains; small drains p95 0.7-0.9 ms |
+| S-9 | never-stored and undrawable (group member / duplicate) coverage settles instead of timing out | pending force nodes reach 0 after the fit |
+| — | overlay paints BEFORE the 3D update (same task had held the paint) | drain -> overlay p50 4.2 ms (was 545 under a large graph), -> 3D p50 8.4 ms |
+| — | capture session restarts when the page's sensor restarts (stale dictionary wrote `'?'` addresses) | 58 garbage chunks on 3 pages found, purged, re-captured clean |
+| — | drains no longer throw when the graph pane is an unloaded background tab | nothing had been captured while it was |
+| — | chunk map: newer chunks take over only at or below their root | G-79 back to passing |
+| M-1, M-2 | formulas fold into their sentence; `data-mw` dropped from the projection | Suffix tree list items read as sentences |
+| R-1 | supervisor sets an unreplayable write-ahead log aside after two failed opens | tests + planted arm |
+| harness | checks isolated (pins, menus, billboards, live capture, idle guest); stale test sidecar freed; live capture restored | late input under load no longer contaminates the next check |
+
+Still open: S-5 (a stored page's chunk set churns for seconds after landing
+while captures re-partition it), H-3 (a billboard for a chunk a re-partition
+replaced stays open), M-3 (the Python scan's tail-text order), R-2 (disk 98%
+full), R-3 (a plugin reload drops pins), P-1 (page-centroid UMAP not the
+default; whole-tree open/close; long links), P-2 (`G-5`), P-3 (seed count
+variance).
