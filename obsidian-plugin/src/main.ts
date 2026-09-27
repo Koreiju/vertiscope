@@ -457,10 +457,19 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
 
   /** Do something to every open projector, if any is open at all. */
 
+  /**
+   * Every LOADED graph pane. A pane in a background tab is a deferred stub
+   * with none of the view's methods: calling one threw inside the browser's
+   * drain -- "view.forceDelta is not a function" -- before the capture was
+   * sent, so while the graph sat in a background tab NOTHING was captured
+   * (2026-09-27: two purged pages would not re-store). And one pane's
+   * failure must not stop the others, or the browser.
+   */
   private eachGraph(fn: (view: GraphView) => void): void {
     for (const leaf of this.app.workspace.getLeavesOfType(GRAPH_VIEW)) {
       const view = leaf.view as GraphView;
-      if (view) fn(view);
+      if (!view || (leaf as any).isDeferred || !(view instanceof GraphView)) continue;
+      try { fn(view); } catch (err) { console.error("domvec: a graph pane failed", err); }
     }
   }
 

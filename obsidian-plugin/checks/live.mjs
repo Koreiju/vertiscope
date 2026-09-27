@@ -3571,7 +3571,8 @@ export function makeChecks(env) {
                                Math.abs(outline[1] + outline[3] - want[3]));
               }
             }
-            return { cid: h && h.cid, outline, off };
+            const under = await wv.executeJavaScript("(function(x,y){var e=document.elementFromPoint(x,y);return e?e.tagName+(e.className?'.'+String(e.className).split(' ')[0]:''):null;})(" + x + "," + y + ")");
+            return { cid: h && h.cid, outline, off, under, has_outline: !!outline };
           }
           const pairs = [];
           for (let j = 0; j < count && pairs.length < 6; j++) {
@@ -3592,8 +3593,13 @@ export function makeChecks(env) {
               "while(p&&p.tagName!=='P')p=p.nextElementSibling;" +
               "var hb=h.getBoundingClientRect(), q=p.getBoundingClientRect();" +
               "if(hb.top<0||q.top>innerHeight-30) return null;" +
-              "return {h:[Math.round(hb.left+10),Math.round(hb.top+hb.height/2)]," +
-              "p:[Math.round(q.left+10),Math.round(q.top+Math.min(20,q.height/2))]};})(" + j + ")");
+              // Aimed INTO the heading's text, not 10 px from its edge: in a
+              // narrower pane Wikipedia's floating contents button sits over
+              // the left edge, and the pointer hovered the button.
+              "var r=document.createRange();r.selectNodeContents(h);var tb=r.getBoundingClientRect();" +
+              "var hx=Math.round(tb.left+Math.min(tb.width/2,40)),hy=Math.round(tb.top+tb.height/2);" +
+              "return {h:[hx,hy]," +
+              "p:[Math.round(q.left+Math.min(q.width/2,60)),Math.round(q.top+Math.min(20,q.height/2))]};})(" + j + ")");
             if (!t) continue;
             const a = await hoverAt(t.h[0], t.h[1]);
             const b = await hoverAt(t.p[0], t.p[1]);
@@ -3634,7 +3640,9 @@ export function makeChecks(env) {
                       node_in_graph: got.node_in_graph, node_ringed: got.node_ringed,
                       per_pair: got.pairs.map((p) => ({
                         heading: p.heading.cid, paragraph: p.paragraph.cid,
-                        off: [p.heading.off, p.paragraph.off] })) },
+                        off: [p.heading.off, p.paragraph.off],
+                        under: [p.heading.under, p.paragraph.under],
+                        outline: [p.heading.has_outline, p.paragraph.has_outline] })) },
         };
       },
     },

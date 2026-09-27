@@ -51,6 +51,27 @@ from .layout import (build_layout, build_page_layout, place_into,
 #: would fail in a way that looks like a page suddenly going empty.
 _capture_sessions: Dict[str, Dict] = {}
 
+
+def sensor_restarted(session: Dict, body: Dict) -> bool:
+    """Did the page's sensor start over since this capture session began?
+
+    A reload of the same url injects a new sensor whose tag dictionary begins
+    again at 0; decoded against the session's old dictionary, ids read as "?"
+    and garbage addresses reach the store. Each payload reports its sensor's
+    dictionary size (`stats.dictSize`, after this payload's additions): it
+    must equal what the session holds plus what the payload adds.
+    """
+    if body.get("settle"):
+        return False
+    payload = body.get("payload")
+    if not isinstance(payload, dict):
+        return False
+    size = (payload.get("stats") or {}).get("dictSize")
+    if not isinstance(size, int):
+        return False
+    held = len(getattr(session.get("sensor"), "_dict", []) or [])
+    return size != held + len(payload.get("dict") or [])
+
 #: Serialises everything that WRITES the workspace.
 #:
 #: The server is already threaded -- a vault opens many chunks at once -- and
@@ -1087,6 +1108,16 @@ class _Handler(BaseHTTPRequestHandler):
 
         sessions = _capture_sessions
         session = sessions.get(url)
+        # **The page's sensor started over** -- a reload of the same url
+        # injects a new sensor, whose tag dictionary begins again at 0 -- and
+        # this session still holds the old one. Decoded against it, every id
+        # past the old dictionary read as "?", and addresses like
+        # /html/*[name()='?'][1]/... went into the store; one such chunk then
+        # claimed the whole page in the overlay's map (G-79, 2026-09-27).
+        # The payload says how big its dictionary is; if that is not what this
+        # session holds plus what the payload adds, it is a new sensor.
+        if session is not None and sensor_restarted(session, body):
+            session = None
         if session is None or body.get("restart"):
             session = {
                 "sensor": Sensor(None, url),

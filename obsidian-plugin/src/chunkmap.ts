@@ -93,6 +93,18 @@ export class ChunkMap {
       }
       if (!xpaths || !xpaths.length) { this.byCid.delete(cid); continue; }
       this.byCid.set(cid, xpaths.slice());
+      // The chunk's ROOT: the longest element path all its addresses share.
+      // A newer chunk takes over paths at or below it -- never the ancestors
+      // above, or one chunk claims the page (a capture with a stale sensor
+      // dictionary wrote a chunk rooted at /html/*[..'?'][1], and with
+      // "newest wins" everywhere every hover on the page resolved to it).
+      let root = xpaths[0] || "";
+      for (const x of xpaths) {
+        let k = 0;
+        while (k < root.length && k < x.length && root[k] === x[k]) k++;
+        root = root.slice(0, k);
+      }
+      root = root.slice(0, root.lastIndexOf("/") + 1 || root.length);
       for (const x of xpaths) {
         // A re-partition names NEW chunks for addresses an older chunk held,
         // and never names the old one (it is retired, not rewritten). The
@@ -113,7 +125,8 @@ export class ChunkMap {
         while (cut > 0) {
           const up = x.slice(0, cut);
           const held = this.byPrefix.get(up);
-          if (!held || !this.byCid.has(held) || this.fresh) this.byPrefix.set(up, cid);
+          const below = up.length + 1 >= root.length && (up + "/").startsWith(root);
+          if (!held || !this.byCid.has(held) || (this.fresh && below)) this.byPrefix.set(up, cid);
           cut = up.lastIndexOf("/");
         }
       }
