@@ -98,6 +98,14 @@ function graphState(view: any) {
       drains: view.forceStats.drains, added: view.forceStats.added,
       removed: view.forceStats.removed, reparented: view.forceStats.reparented,
       ms_p95: pct(view.forceStats.ms, 0.95), ms_max: Math.max(0, ...view.forceStats.ms),
+      // O(delta), judged per node the drain touched, and on small drains.
+      // Per node on LARGE drains only: on a one-node drain the fixed cost
+      // is the whole cost and reads as "per node".
+      ms_per_node_p95: pct((view.forceStats.sized || []).filter((x: any) => x[1] >= 50)
+        .map((x: any) => x[0] / x[1]), 0.95),
+      small_drain_ms_p95: pct((view.forceStats.sized || []).filter((x: any) => x[1] > 0 && x[1] < 50)
+        .map((x: any) => x[0]), 0.95),
+      largest_drain: Math.max(0, ...(view.forceStats.sized || []).map((x: any) => x[1])),
       nodes: g ? g.graphData().nodes.filter((n: any) => n.force).length : 0,
       multi_parent: g ? multiParent(g.graphData().links) : 0,
     } : null,

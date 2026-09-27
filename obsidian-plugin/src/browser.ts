@@ -131,6 +131,13 @@ const LIVE_MS = 1200;
 const PAGE_SIZE = 12;
 
 
+/** Elements that sit inside a line of text (mirrors `markdown._INLINE_TAGS`). */
+const INLINE_TAGS = new Set([
+  "a", "abbr", "b", "bdi", "bdo", "br", "cite", "code", "data", "del", "dfn",
+  "em", "i", "img", "ins", "kbd", "mark", "math", "q", "s", "samp", "small",
+  "span", "strong", "sub", "sup", "time", "u", "var", "wbr",
+]);
+
 /** What a pinned chunk holds: read from the store, never from the page. */
 interface PinRecord {
   cid: string; url: string; matched: string; markdown: string; head: string;
@@ -504,8 +511,17 @@ export class BrowserView extends ItemView {
   /** One chunk tree per page, fed by that page's drains. */
   private forceTrees = new Map<string, ForceTree>();
 
+  /** Told by the plugin: force nodes a capture processed and the store did
+   *  not keep -- never pending. */
+  onUnstored: (url: string, ids: string[]) => void = () => {};
+  /** Force ids a capture has shown the store does not keep. */
+  private unstoredIds = new Set<string>();
+  /** Told by the plugin: the reader is leaving this page (not yet settled). */
+  onLeaving: (url: string) => void = () => {};
+  /** Told by the plugin: the reader left this page and it is settled. */
+  onLeft: (url: string) => void = () => {};
   /** Told by the plugin: force nodes whose content a stored chunk now covers. */
-  onCovers: (url: string, covers: Record<string, string>) => void = () => {};
+  onCovers: (url: string, covers: Record<string, string>, settled: string[]) => void = () => {};
 
   /**
    * Which stored chunk draws each address, from the renderer's chunk map
@@ -515,6 +531,14 @@ export class BrowserView extends ItemView {
    * already holds, the first drain names every chunk, and all but the diff
    * are covered.
    */
+  /** Of `covers`, the ids whose chunk the store held when the page was
+   *  landed on -- already transformed, so never pending. */
+  private settledOf(url: string, covers: Record<string, string>): string[] {
+    const map = this.pipebox?.map;
+    if (!map || map.url !== url) return [];
+    return Object.entries(covers).filter(([, cid]) => map.stored.has(cid)).map(([id]) => id);
+  }
+
   private coversFor(url: string, items: { id: string; address: string }[]): Record<string, string> {
     const map = this.pipebox?.map;
     const out: Record<string, string> = {};
@@ -523,7 +547,21 @@ export class BrowserView extends ItemView {
       // The address itself, or a stored chunk anchored BENEATH it -- never an
       // ancestor: a new paragraph inside a stored section is not covered by
       // the section, it is the diff.
-      const hit = map.lookup([it.address]);
+      // ... or at the nearest BLOCK ancestor, walking up through inline
+      // elements only: a bold word or a link inside a stored paragraph has
+      // no anchor of its own (its text is joined into the paragraph's line),
+      // and Trie drew 133 such fragments as pending over its projected
+      // chunks. A new paragraph is a block, so it still stops here.
+      const chain = [it.address];
+      let a = it.address;
+      while (true) {
+        const cut = a.lastIndexOf("/");
+        const tag = a.slice(cut + 1).split("[")[0].toLowerCase();
+        if (cut <= 0 || !INLINE_TAGS.has(tag)) break;
+        a = a.slice(0, cut);
+        chain.push(a);
+      }
+      const hit = map.lookup(chain);
       if (hit) out[it.id] = hit.cid;
     }
     return out;
@@ -904,7 +942,19 @@ export class BrowserView extends ItemView {
    * leave in the store -- which is a page half-rewritten by the one after it.
    */
   private async pageChanged(url: string): Promise<void> {
-    if (!url || url === "about:blank") { this.session = ""; return; }
+    if (!url || url === "about:blank") {
+      // Leaving for a blank page is still LEAVING: the page left behind is
+      // settled and collapses like any other (G-91 -- it used to return here
+      // first, and the page stayed expanded for good).
+      const left = this.session;
+      this.session = "";
+      if (left) {
+        this.onLeaving(left);
+        await this.sidecar.capture(left, { settle: true });
+        if (this.session !== left) this.onLeft(left);
+      }
+      return;
+    }
     if (url === this.session) return;
     const leaving = this.session;
     this.session = url;
@@ -915,13 +965,38 @@ export class BrowserView extends ItemView {
     // node on the new page was checked against the OLD page's map (P-B2
     // read map_follows false 600 ms after an address-bar navigation).
     if (this.pipebox && url && url !== "about:blank") {
-      void this.pipebox.map.load(this.sidecar, url);
+      const map = this.pipebox.map;
+      // The page's projected chunks come WITH its map (S-1): drawn the moment
+      // the reader lands, from the projector's memory, not through the
+      // placement queue behind the page's first capture.
+      void map.load(this.sidecar, url).then(() => {
+        if (map.url !== url || this.session !== url) return;
+        if (map.nodes.length) this.onChunks(map.nodes, [], "");
+        // A drain that beat the map here was checked against nothing, and
+        // drew the page's stored chunks as pending (Trie: 133 force nodes
+        // over 84 projected ones). Now that the map is in, check again.
+        const tree = this.forceTrees.get(url);
+        if (tree) {
+          const covers = this.coversFor(url, tree.held());
+          if (Object.keys(covers).length) this.onCovers(url, covers, this.settledOf(url, covers));
+        }
+      });
     }
+    // Anything the projector has not placed yet goes on the queue -- BEFORE
+    // the page left behind is settled, not after: the next page's 3D used to
+    // wait behind that settle, 6 s after a large page (S-3).
+    void this.placeWholePage(url);
+    // The page left behind: its pending diff is not the reader's any more --
+    // drawn now it would hang in the graph until the settle is done (B-tree's
+    // 401 force nodes did, for the length of a long settle).
+    if (leaving) this.onLeaving(leaving);
     if (leaving) {
       await this.sidecar.capture(leaving, { settle: true });
+      // Settled: its last diff is stored and on its way through the
+      // transform, so its chunk nodes fold back into its page node (S-6).
+      if (this.session !== leaving) this.onLeft(leaving);
     }
     if (this.live) this.say(`live · ${url}`);
-    void this.placeWholePage(url);
   }
 
   /**
@@ -939,6 +1014,16 @@ export class BrowserView extends ItemView {
    * graph, which ignores what it already has. Traced, so the profile shows
    * the cost of landing on a page as its own entry.
    */
+  /**
+   * Chunk nodes are drawn for the page being BROWSED only (and its page
+   * node always). A placement or capture result that arrives after the reader
+   * left its page used to re-add that page's chunks just after they had been
+   * collapsed into its node (G-91: the left page never stayed collapsed).
+   */
+  private forPage(nodes: LayoutNode[]): LayoutNode[] {
+    return nodes.filter((n: any) => n.level === "page" || !n.url || n.url === this.session);
+  }
+
   private async placeWholePage(url: string): Promise<void> {
     if (!url || url === "about:blank") return;
     const cids = await this.sidecar.pageCids(url).catch(() => [] as string[]);
@@ -1019,7 +1104,7 @@ export class BrowserView extends ItemView {
       const edges = ((got && got.edges) || []) as { source: string; target: string }[];
       const first = byTrace.keys().next();
       if (!first.done && unasked.length) byTrace.get(first.value)!.unshift(...unasked);
-      for (const [traceId, list] of byTrace) this.onChunks(list, edges, traceId);
+      for (const [traceId, list] of byTrace) this.onChunks(this.forPage(list), edges, traceId);
     } finally {
       this.placing = false;
     }
@@ -1050,6 +1135,8 @@ export class BrowserView extends ItemView {
       }
       const drainStart = performance.now();
       let drainBack = 0;
+      // The force ids this drain emitted: what its capture is answerable for.
+      let drainIds: string[] = [];
       const payload = await wv.executeJavaScript(`(function () {
         if (!window[${JSON.stringify(HANDLE)}]) {
           var h = (${BrowserView.sensorSource})(
@@ -1068,11 +1155,7 @@ export class BrowserView extends ItemView {
       })()`);
 
       drainBack = performance.now();
-      // The diff outlined FIRST, before anything else touches this drain:
-      // boxes came back with it, so this is placement only (`G-90`).
-      if (payload && payload.boxes && payload.boxes.length) {
-        this.pipebox?.flashBoxes(payload.boxes, drainBack, trace.id);
-      }
+
       // Nothing changed. Not posted: an empty delta costs a round trip, a
       // decode and a store write to say "no", and a reader idling on a static
       // page would pay it once a second forever.
@@ -1090,9 +1173,27 @@ export class BrowserView extends ItemView {
         let tree = this.forceTrees.get(url);
         if (!tree) { tree = new ForceTree(url); this.forceTrees.set(url, tree); }
         const delta = tree.apply(payload);
-        if (delta && (delta.added.length || delta.removed.length || delta.reparented.length)) {
+        if (delta) drainIds = delta.added.map((a) => a.id);
+        // The diff outlined FIRST (`G-90`) -- boxes came back with the drain,
+        // so this is placement only -- and only the TRUE diff (H-1): a chunk
+        // the store already holds unchanged is not news, and landing on a
+        // stored page used to flash its whole first drain.
+        if (delta && payload.boxes && payload.boxes.length) {
           delta.covers = this.coversFor(url, tree.held().filter(
             (h) => delta.added.some((a) => a.id === h.id)));
+          const again = new Set(delta.added.filter((a) => a.again).map((a) => a.id));
+          const boxes = (payload.chunks || []).map((c: any, i: number) => {
+            const id = tree.nodeId(Number(c.id));
+            // Not flashed: covered and unchanged, or known never to be stored.
+            if (this.unstoredIds.has(id) && !again.has(id)) return null;
+            return (!delta.covers[id] || again.has(id)) ? payload.boxes[i] : null;
+          });
+          if (boxes.some(Boolean)) this.pipebox?.flashBoxes(boxes, drainBack, trace.id);
+        }
+        if (delta && (delta.added.length || delta.removed.length || delta.reparented.length)) {
+          if (!payload.boxes) delta.covers = this.coversFor(url, tree.held().filter(
+            (h) => delta.added.some((a) => a.id === h.id)));
+          delta.settled = this.settledOf(url, delta.covers);
           delta.t0 = drainBack;
           delta.trace = trace.id;
           prof.stage(trace, "force_tree", delta.ms);
@@ -1126,16 +1227,25 @@ export class BrowserView extends ItemView {
       }
       // The chunks this drain rewrote, and the elements they draw.
       if (this.pipebox && this.pipebox.map.url === url) {
-        this.pipebox.map.apply((reply as any).map_delta);
+        this.pipebox.map.patch((reply as any).map_delta);
       }
       const cids = (reply.dirty_cids || []) as string[];
       // The map now knows what this capture stored: re-check what is still
-      // drawn as pending on this page.
+      // drawn as pending on this page. What the capture processed and the
+      // store still holds no chunk for -- page furniture, content the
+      // projection does not render -- is not waiting on anything: it is not
+      // pending, and goes (it lingered for the 20 s timeout, and flashed as
+      // the diff on every landing).
       {
         const tree = this.forceTrees.get(url);
         if (tree) {
-          const covers = this.coversFor(url, tree.held());
-          if (Object.keys(covers).length) this.onCovers(url, covers);
+          const held = tree.held();
+          const covers = this.coversFor(url, held);
+          if (Object.keys(covers).length) this.onCovers(url, covers, this.settledOf(url, covers));
+          const captured = new Set(drainIds);
+          const unstored = held.filter((h) => captured.has(h.id) && !covers[h.id]).map((h) => h.id);
+          if (unstored.length) this.onUnstored(url, unstored);
+          for (const h of held) if (!covers[h.id]) this.unstoredIds.add(h.id);
         }
       }
       // Every form of a chunk that is open follows the capture that rewrote
@@ -1174,7 +1284,7 @@ export class BrowserView extends ItemView {
       // what it placed and this dropped them, so every live-captured
       // chunk drew as a loose dot: 793 chunk nodes, 16 with an edge.
       if (nodes.length) {
-        this.onChunks(nodes,
+        this.onChunks(this.forPage(nodes),
           (reply.edges as { source: string; target: string }[]) || [],
           trace.id);
       }

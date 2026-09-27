@@ -560,7 +560,11 @@ export class GraphView extends ItemView {
   phaseLog: { at: number; mode: string; nodes: number; why: string }[] = [];
   /** Per-drain renderer cost and counts, for C3. */
   forceStats = { drains: 0, added: 0, removed: 0, reparented: 0, ms: [] as number[],
-                 toScene: [] as number[] };
+                 toScene: [] as number[],
+                 /** [ms, nodes the drain touched] per drain: O(delta) is judged
+                  *  per touched node, not per drain (a page's first drain
+                  *  carries 500 chunks, later ones a handful). */
+                 sized: [] as [number, number][] };
 
   private setMode(mode: "empty" | "force" | "projector", why: string): void {
     if (mode === this.layoutMode) return;
@@ -610,27 +614,30 @@ export class GraphView extends ItemView {
       !gone.has(end(l.source)) && !gone.has(end(l.target)) && !moving.has(end(l.target)));
     for (const id of gone) this.forceSpecs.delete(id);
     const byId = new Map<string, any>(nodes.map((n: any) => [n.id, n]));
+    const pageNode = this.projectedPage(d.url, byId);
     for (const [id, parent] of moving) {
       const spec = this.forceSpecs.get(id);
       if (spec) spec.parent = parent;
-      const to = this.parentFor(parent, d.url, byId);
+      const to = this.parentFor(parent, d.url, byId, pageNode);
       if (byId.has(id) && to) links.push({ source: to, target: id, force: true });
     }
     // After the fit a page's pending diff is drawn only while the reader has
     // that page EXPANDED; collapsed, it is kept and not drawn (2026-09-26).
     // ... or while the page is new since the fit (no page node yet): its
     // force tree is the only immediate picture of the scan.
-    const drawHere = this.layoutMode !== "projector" || this.expandedUrls(byId).has(d.url)
-      || !this.projectedPage(d.url, byId);
+    const drawHere = this.layoutMode !== "projector" || !pageNode
+      || this.expandedUrls(byId).has(d.url);
     for (const a of d.added) {
       if (byId.has(a.id)) continue;
       // A page the projector already draws needs no root of its own: the
       // pending diff hangs from its projected page node (C6, C8).
-      if (!a.parent && this.projectedPage(d.url, byId)) {
+      if (!a.parent && pageNode) {
         this.forceSpecs.set(a.id, { parent: "", url: d.url, title: a.title, lines: 0 });
         continue;
       }
       const cid = d.covers ? d.covers[a.id] : undefined;
+      // Stored before this visit and unchanged: already transformed.
+      if (!a.again && d.settled && d.settled.includes(a.id)) { this.forceSpecs.delete(a.id); continue; }
       // Already drawn by the projector: not the diff, nothing to draw -- unless
       // its content just CHANGED (`again`), in which case what is drawn is the
       // old content and this stays pending until the new one is placed.
@@ -638,7 +645,7 @@ export class GraphView extends ItemView {
       this.forceSpecs.set(a.id, { parent: a.parent, url: d.url, title: a.title, lines: a.lines,
                                   cid, stale: !!a.again, born: Date.now() });
       if (!drawHere) continue;
-      const to = a.parent ? this.parentFor(a.parent, d.url, byId) : "";
+      const to = a.parent ? this.parentFor(a.parent, d.url, byId, pageNode) : "";
       const p = to ? byId.get(to) : null;
       const jitter = () => (Math.random() - 0.5) * 6;
       const page = !a.parent;
@@ -677,6 +684,8 @@ export class GraphView extends ItemView {
     this.forceStats.reparented += d.reparented.length;
     this.forceStats.ms.push(ms);
     if (this.forceStats.ms.length > 500) this.forceStats.ms.shift();
+    this.forceStats.sized.push([ms, d.added.length + d.removed.length + d.reparented.length]);
+    if (this.forceStats.sized.length > 500) this.forceStats.sized.shift();
     if (this.layoutMode !== "projector") {
       this.setMode("force", `drain on ${d.url}`);
       this.forceCaption?.();
@@ -745,13 +754,17 @@ export class GraphView extends ItemView {
 
   /** Where a force node hangs: its force parent, or -- for a page root --
    *  the page's projected node when the projector draws one. */
-  private parentFor(parent: string, url: string, byId: Map<string, any>): string {
+  private parentFor(parent: string, url: string, byId: Map<string, any>,
+                    pageNode?: any): string {
     if (parent && byId.has(parent)) return parent;
     // The parent chunk already collapsed: hang from the projected chunk it
     // collapsed into, which is where its content is drawn now.
     const into = parent ? this.collapsedTo.get(parent) : undefined;
     if (into && byId.has(into)) return into;
-    const page = this.projectedPage(url, byId);
+    // The page node, looked up ONCE per drain by the caller: scanning the
+    // graph for it per added node made a drain O(drain x graph) -- the
+    // renderer's per-drain p95 went from 14 to 60 ms (G-89 C3).
+    const page = pageNode !== undefined ? pageNode : this.projectedPage(url, byId);
     return page ? page.id : (byId.has(parent) ? parent : "");
   }
 
@@ -760,11 +773,17 @@ export class GraphView extends ItemView {
    * nodes. Each collapses as soon as that chunk's projected node is drawn;
    * until then it stays the pending diff (`G-89` C7).
    */
-  coverForce(url: string, covers: Record<string, string>): void {
+  coverForce(url: string, covers: Record<string, string>, settled: string[] = []): void {
     for (const [id, cid] of Object.entries(covers)) {
       const spec = this.forceSpecs.get(id);
       if (spec) spec.cid = cid;
     }
+    // Stored before this visit and unchanged: already through the transform.
+    const done = new Set(settled.filter((id) => {
+      const spec = this.forceSpecs.get(id);
+      return spec && !spec.stale;
+    }));
+    if (done.size) this.redrawForce(done);
     this.collapseCovered();
   }
 
@@ -858,9 +877,14 @@ export class GraphView extends ItemView {
         byId.set(id, n);
       }
     }
+    // One page-node lookup per page, not one scan per force node.
+    const pageByUrl = new Map<string, any>();
+    for (const n of byId.values()) {
+      if (!n.force && n.level === "page" && n.url && !pageByUrl.has(n.url)) pageByUrl.set(n.url, n);
+    }
     for (const [id, spec] of this.forceSpecs) {
       if (!spec.parent || !byId.has(id)) continue;
-      const to = this.parentFor(spec.parent, spec.url, byId);
+      const to = this.parentFor(spec.parent, spec.url, byId, pageByUrl.get(spec.url) || null);
       if (to && to !== id) links.push({ source: to, target: id, force: true });
     }
     // Place a returning node beside its parent rather than at the origin.
@@ -881,6 +905,59 @@ export class GraphView extends ItemView {
   /** Pending force nodes dropped because nothing ever covered or placed them. */
   forceTimedOut = 0;
 
+  /** Pages the reader opened in the graph themselves -- never auto-collapsed. */
+  openedByReader = new Set<string>();
+
+  /**
+   * The reader left `url` and its last diff is settled: its chunk nodes fold
+   * back into its page node (S-6). Chunk nodes of pages browsed and left used
+   * to stay drawn for good -- 52, then 122, then 280 of them after five pages.
+   * A page the reader opened in the graph stays open, and a chunk held by an
+   * open billboard (a pin) stays drawn.
+   */
+  collapsePage(url: string): void {
+    if (!this.graph || !url || this.openedByReader.has(url)) return;
+    if (this.layoutMode !== "projector") return;
+    const data: any = this.graph.graphData();
+    const keep = new Set<string>(this.billboards.keys() as any);
+    const gone = new Set<string>(data.nodes
+      .filter((n: any) => n.url === url && n.level !== "page" && !keep.has(n.id))
+      .map((n: any) => n.id));
+    if (!gone.size) return;
+    const end = (x: any) => (typeof x === "object" && x ? x.id : x);
+    this.graph.graphData({
+      nodes: data.nodes.filter((n: any) => !gone.has(n.id)),
+      links: data.links.filter((l: any) => !gone.has(end(l.source)) && !gone.has(end(l.target))),
+    });
+    for (const [id, spec] of [...this.forceSpecs]) if (spec.url === url) this.forceSpecs.delete(id);
+    this.collapsed.push({ at: Date.now(), url, nodes: gone.size });
+    if (this.collapsed.length > 50) this.collapsed.shift();
+  }
+
+  /** The pending diff of a page the reader is leaving: gone at once. */
+  dropForce(url: string): void {
+    // Before the first fit the force trees ARE the picture of every page
+    // scanned: leaving one must not wipe it (G-89 C4 saw one tree at a time).
+    if (this.layoutMode !== "projector") return;
+    let any = false;
+    for (const [id, spec] of [...this.forceSpecs]) {
+      if (spec.url === url) { this.forceSpecs.delete(id); any = true; }
+    }
+    if (any) this.redrawForce();
+  }
+
+  /** Force nodes known not to be pending (never stored): gone. */
+  dropForceIds(ids: string[]): void {
+    // Before the fit a never-stored chunk is still part of the scan's tree.
+    if (this.layoutMode !== "projector") return;
+    let any = false;
+    for (const id of ids) if (this.forceSpecs.delete(id)) any = true;
+    if (any) this.redrawForce();
+  }
+
+  /** Every collapse, for the harness: when, which page, how many nodes. */
+  collapsed: { at: number; url: string; nodes: number }[] = [];
+
   /** A collapsed force node -> the projected chunk it collapsed into. */
   private collapsedTo = new Map<string, string>();
 
@@ -899,7 +976,8 @@ export class GraphView extends ItemView {
     this.projEpoch = -1;
     this.projSeq = 0;
     this.reopen.clear();
-    this.forceStats = { drains: 0, added: 0, removed: 0, reparented: 0, ms: [], toScene: [] };
+    this.forceStats = { drains: 0, added: 0, removed: 0, reparented: 0, ms: [], toScene: [],
+                        sized: [] };
     this.forceSpecs.clear();
     this.layoutMode = "force";            // so setMode records the change
     this.setMode("empty", why);
@@ -1589,6 +1667,8 @@ export class GraphView extends ItemView {
    * tree nearest the reader rather than on one deep chain.
    */
   private async unfoldNode(node: any): Promise<void> {
+    // Opened by the READER: stays open when they browse away (S-6).
+    if (node && node.url) this.openedByReader.add(node.url);
     const added = await this.unfoldStep(node);
     if (!added.length) return;
     let frontier = added.filter((n: any) => n.level === "path");
@@ -2389,7 +2469,11 @@ export class GraphView extends ItemView {
       // collider exactly the size of the sphere lets two nodes rest touching,
       // which reads as one shape; the margin makes a gap a reader can see
       // between things the projection says are distinct.
-      .radius((n: any) => drawnRadius(n, relSize, media) * COLLIDER_SAFETY)
+      // Force nodes (the pending diff) take no room: they must not shove
+      // projected chunks off their transform positions, which pushed them
+      // up to 23 units away with spikes past 300 while a diff was drawn
+      // (S-7). The tree's own spring and charge space the force nodes.
+      .radius((n: any) => n.force ? 0 : drawnRadius(n, relSize, media) * COLLIDER_SAFETY)
       // Soft and iterated rather than hard and once. `d3-force-3d` documents
       // collision as "by default a soft constraint with a configurable
       // strength and iteration count" to reduce jitter; a hard shove would

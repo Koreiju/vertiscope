@@ -107,3 +107,78 @@ resolve that chunk and read its lines.
 - `fresh` switches the plugin's `sidecar` setting for the run and restores it
   in a `finally`; a run killed from outside leaves the plugin pointed at a
   dead port. The restore is visible in `fresh_run.json` (`previous_sidecar`).
+
+## Pass 2 — the streaming layout, timed (2026-09-26, evening)
+
+Collected before fixing, per the user's instruction. Each row comes from a
+250 ms timeline of the running app while a reader's gesture happens (probe:
+browser url/loading, graph mode and node counts by kind and page, force
+nodes, projected-chunk drift from their fit, diff boxes, pin outlines, the
+chunk map, the projector stream's sequence). Scenarios: A land on a stored
+page, B land on a new page, C scroll a long stored page, D page to page and
+back, E hover sweep.
+
+### Streaming: 3D nodes
+
+| # | what the app did | evidence |
+|---|---|---|
+| S-1 | **A stored page's projected chunks reach the 3D graph 3-4 s after landing**, though the projector has held their positions all along; they come through the placement queue behind the page's first capture | A: landed 1.36 s, 52 chunk nodes at 5.21 s |
+| S-2 | **Meanwhile the first drain draws the page's whole chunk set as force nodes -- for content already projected** (the diff rule only sees what is DRAWN, and the projected nodes are not drawn yet) | A: 145 force nodes at 2.38 s on Radix tree, all collapsed at 5.21 s; C: 564 on Hash table, 14 still up 15 s later |
+| S-3 | **The next page's 3D waits behind the previous page's settle.** `pageChanged` awaits the settle capture of the page left before placing the new one | D: Trie after Hash table -- 0 chunk nodes for 6 s; B-tree the same |
+| S-4 | **After the fit, a page with a projected node but no chunks drawn gets NO force nodes (collapsed rule), then gets them 2 s later when its projected chunks arrive** -- the pending diff appears after the projection instead of before it | B: projected chunks 3.10 s, 137 force nodes appear with them, collapse by 6.5 s |
+| S-5 | **The page's chunk set churns for ~9 s after landing** as successive captures re-partition it (projected nodes added and retired: 71 -> 83 -> 71) | B |
+| S-6 | **Chunk nodes of pages the reader has left never collapse back into their page node**; they accumulate | B-D: other pages' chunk nodes 52 -> 122 -> 248 -> 280 |
+| S-7 | **Projected chunk nodes are pushed off their transform positions** -- up to 12-23 units steadily, with spikes to 89 / 297 / 398 while force nodes and stream updates arrive (collision with the force cloud, reheats) | A-D drift_max |
+| S-8 | **Some stored pages have no page node in the page view** until the stream adds one | C: Hash table page_here false until 7.6 s |
+| S-9 | Pending force nodes that are never covered linger (timeout 20/90 s) | C: 14 force nodes 15 s after landing |
+
+### Streaming: 2D browser highlights
+
+| # | what the app did | evidence |
+|---|---|---|
+| H-1 | **Landing on a stored page flashes its whole first drain as the "diff"** (20-34 boxes) although nothing changed against the store | A, D, E |
+| H-2 | A pin's outline covers only the clicked element after a re-partition (the map does not yet hold the new chunk) | Suffix tree pin, item 5 only |
+| H-3 | A pinned chunk's billboard for a chunk the re-partition replaced stays open (stale cid) | screenshot, be475590 |
+| H-4 | Synthetic hover sweeps did not register until the pointer jiggled -- the known Chromium `:hover` lag; G-79's check handles it, the probe did not (not an app defect) | E |
+
+### Markdown in the chunk (what the card and the billboard show)
+
+| # | what the app did |
+|---|---|
+| M-1 | A list item's sentence is split into fragments around each inline element ("numbered from" / `$1$` / "to" / `$n$` / ".") -- `_join_inline` joins prose lines but not list-item fragments |
+| M-2 | MediaWiki furniture in chunks: the "[ edit ]" section link and "Edit section: X", citation link targets `](#cite_note-7)`, `data-mw`-style JSON on non-math elements (`{"name":"ref",...}`, `{"title":{"lang":"x-page",...}}`) |
+| M-3 | The Python scan files tail text under the preceding inline element (reading order, fixture xfail) -- the live sensor is not affected |
+
+### Projector and graph (open from before)
+
+| # | what |
+|---|---|
+| P-1 | Page-centroid UMAP (`G-83`) is built but not the default; whole-tree open/close (`G-84`) and long links (`G-85`) not in the pane |
+| P-2 | `G-5`: not every node on screen at the default camera (33 of 41) |
+| P-3 | The same page seeded twice gave different chunk counts (B-tree 227 vs 205) |
+
+### Robustness and harness
+
+| # | what |
+|---|---|
+| R-1 | The sidecar crash (`D-23`) left a write-ahead log kuzu could not replay; the store would not open until it was set aside by hand. The supervisor should detect that failure and quarantine the log itself |
+| R-2 | The disk is 98% full (40 GB free) under a 21 GB store |
+| R-3 | A plugin reload drops every pin |
+| R-4 | The first right-click after a page load was once swallowed (G-39 now retries and says so) |
+| R-5 | The MCP server in the session predates today's tools until it restarts |
+
+### What the user asked to be decided: when do projected chunks collapse?
+
+Today a page's projected chunk nodes are added when it is browsed and never
+leave (S-6), and force nodes are drawn by what is drawn rather than by what
+is projected (S-2, S-4). Proposed, and built next:
+
+1. **On landing, the page's projected chunks come from the projector at once**
+   (positions served with the page's chunk map, one call, ~50 ms) -- S-1.
+2. **Force nodes are the TRUE diff only**: chunks the store does not hold, or
+   whose content changed, until the transform places them -- S-2, S-4, H-1.
+3. **The browsed page is expanded; when the reader leaves it and its diff has
+   been transformed, its chunk nodes collapse into its page node** -- S-6.
+   A pinned chunk stays drawn wherever its page is.
+4. **Landing never waits on the previous page's settle** -- S-3.
+5. **Force nodes do not collide with projected ones** -- S-7.

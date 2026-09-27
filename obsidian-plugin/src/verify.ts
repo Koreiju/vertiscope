@@ -192,6 +192,8 @@ export class Verifier {
     {
       for (const check of chosen) {
         this.state.current = check.id;
+        // Each check starts from the same UI, whatever the last one left.
+        const reset = await this.isolate();
         const t0 = performance.now();
         let got: any;
         try {
@@ -203,6 +205,16 @@ export class Verifier {
           id: check.id, asks: check.asks, pass: !!got?.pass,
           evidence: got?.evidence ?? null, ms: Math.round(performance.now() - t0),
         };
+        // A check that parks the browser cell (live capture off, to purge its
+        // fixture) must not leave it parked: S-12 did, and the NEXT fresh run
+        // seeded twelve pages that were never captured -- 0 pages stored after
+        // 20 minutes. Put back, and said.
+        if (this.restoreLive()) {
+          result.evidence = { ...(result.evidence || {}), left_live_capture_off: true };
+        }
+        if (reset.pins || reset.billboards || reset.menus) {
+          result.evidence = { ...(result.evidence || {}), reset_before: reset };
+        }
         // Same rule as the terminal runner: a dead sidecar fails every check
         // after it for THAT reason, so the run stops and says so.
         if (!result.pass && !(await this.sidecarAlive())) {
@@ -273,7 +285,10 @@ export class Verifier {
       const name = `run_${stamp}`;
       const ws = path.join(runs, name);
       await fsp.mkdir(ws);
-      // 2. Its sidecar.
+      // 2. Its sidecar -- on a FREE port. A run interrupted (a reload
+      // mid-run) leaves its test sidecar holding the port, and the next run
+      // would find it "healthy" and use a store that is not fresh.
+      await this.freeTestPort();
       child = this.spawnSidecar(ws, base, plugin?.settings?.python || "python");
       if (!(await this.waitHealthy(testUrl, 240000, child))) {
         throw new Error(`the test sidecar did not answer /health (see ${name}/sidecar.log)`);
@@ -287,7 +302,9 @@ export class Verifier {
       plugin.settings.sidecar = testUrl;
       this.resetGraphs("switched to a fresh store");
       await this.redrawGraphs();
-      // 4. Fill it by browsing, sampling the graph's phase as it goes.
+      // 4. Fill it by browsing, sampling the graph's phase as it goes --
+      // with live capture ON, whatever the last run left it as.
+      this.restoreLive();
       fixtures = await this.env().serveFixtures();
       const urls = [...SEED_FIXTURES.map((f) => `${fixtures.origin}/${f}`), ...SEED_PAGES];
       let seeding = 0;
@@ -356,6 +373,75 @@ export class Verifier {
       this.state.finishedAt = Date.now();
     }
     return this.state;
+  }
+
+  /** Stop whatever still listens on the test port (Windows: netstat + taskkill). */
+  private async freeTestPort(): Promise<void> {
+    const alive = await this.ask(`http://127.0.0.1:${TEST_PORT}`, "/health", 2000);
+    if (!alive) return;
+    const proc = (window as any).process;
+    const cp = (window as any).require("child_process");
+    if (proc.platform !== "win32") return;
+    const out: string = await new Promise((r) => cp.execFile("netstat", ["-ano", "-p", "TCP"],
+      { windowsHide: true }, (_e: any, so: string) => r(String(so || ""))));
+    const pids = new Set<string>();
+    for (const line of out.split(/\r?\n/)) {
+      const f = line.trim().split(/\s+/);
+      if (f.length >= 5 && f[1].endsWith(`:${TEST_PORT}`) && f[3] === "LISTENING") pids.add(f[4]);
+    }
+    for (const pid of pids) {
+      await new Promise((r) => cp.execFile("taskkill", ["/PID", pid, "/T", "/F"],
+        { windowsHide: true }, () => r(null)));
+    }
+    for (let i = 0; i < 20; i++) {
+      if (!(await this.ask(`http://127.0.0.1:${TEST_PORT}`, "/health", 1000))) return;
+      await sleep(500);
+    }
+  }
+
+  /**
+   * The shared UI back to a known state before a check (checks were
+   * contaminating each other). Under a fresh run's load the browser's input
+   * events arrive LATE -- G-39's right-clicks landed seconds after it ended,
+   * pinning chunks of whatever page the next check had open -- so pins,
+   * open menus and billboards from before are let go, live capture is on,
+   * and the guest is given a moment with no load or drain in flight.
+   */
+  private async isolate(): Promise<{ pins: number; billboards: number; menus: number }> {
+    const out = { pins: 0, billboards: 0, menus: 0 };
+    await sleep(400);                            // let late input land first
+    for (const m of Array.from(document.querySelectorAll(".menu"))) { m.remove(); out.menus++; }
+    for (const l of this.app.workspace.getLeavesOfType("domvec-browser-view")) {
+      const b: any = l.view;
+      if (!b || typeof b.pinnedState !== "function") continue;
+      for (const p of b.pinnedState()) { b.unpin(p.cid); out.pins++; }
+      for (let i = 0; i < 25; i++) {
+        let loading = false;
+        try { loading = !!b.webview?.isLoading(); } catch { /* not ready */ }
+        if (!loading && !b.draining) break;
+        await sleep(200);
+      }
+    }
+    for (const l of this.app.workspace.getLeavesOfType("domvec-graph-view")) {
+      const g: any = l.view;
+      if (!g || !g.billboards) continue;
+      for (const id of Array.from(g.billboards.keys())) { g.closeBillboard(id); out.billboards++; }
+    }
+    this.restoreLive();
+    return out;
+  }
+
+  /** Live capture back on in every browser cell; true if any was off. */
+  private restoreLive(): boolean {
+    let was = false;
+    for (const l of this.app.workspace.getLeavesOfType("domvec-browser-view")) {
+      const v: any = l.view;
+      if (v && v.live === false && typeof v.setLive === "function") {
+        v.setLive(true);
+        was = true;
+      }
+    }
+    return was;
   }
 
   /** `supervise serve` on `ws`, logging beside the store. */

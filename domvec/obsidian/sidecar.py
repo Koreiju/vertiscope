@@ -1644,10 +1644,58 @@ class _Handler(BaseHTTPRequestHandler):
             for cid, xpath in rows:
                 if cid and xpath:
                     chunks.setdefault(cid, []).append(xpath)
+            # **And where the projector already has them** (S-1). Landing on
+            # a stored page used to draw nothing for 3-4 s: its chunks came
+            # through the placement queue, behind the page's first capture
+            # and the store lock, though the projector held every position
+            # in memory. Served here, in the same call as the map, so the
+            # pane draws the page's projected chunks -- and its page node,
+            # which the page view could lack (S-8) -- the moment it lands.
+            nodes, page_node = [], None
+            from .projector import projector as _get_projector
+            proj = _get_projector()
+            if proj is not None and getattr(proj, "projection", None) is not None and chunks:
+                from .layout import _first_image, _title
+                meta = self.workspace.store._rows(
+                    "MATCH (c:Chunk) WHERE c.url = $u RETURN c.cid, c.md, c.chars, "
+                    "c.dup_of, c.dup_n, c.group_of, c.group_n", {"u": url})
+                with proj.lock:
+                    pos = {m[0]: proj.pos.get(m[0]) for m in meta}
+                    hsv = {m[0]: proj.hsv.get(m[0]) for m in meta}
+                    page_at = proj.page_pos.get(url)
+                    page_hsv = proj.page_hsv.get(url)
+                for cid, md_text, chars, dup_of, dup_n, group_of, group_n in meta:
+                    if dup_of or (group_of and group_of != cid):
+                        continue
+                    at = pos.get(cid)
+                    if at is None:
+                        continue
+                    node = {"cid": cid, "url": url, "title": _title(md_text or ""),
+                            "rank": 0.0, "chars": chars or 0,
+                            "tokens": 0, "copies": dup_n or 1, "members": group_n or 1,
+                            "val": float(max(1.0, max(group_n or 1, 1) ** 0.5)),
+                            "level": "chunk", "pos": [float(v) for v in at[:3]],
+                            "placed": True, "source": "projector"}
+                    if hsv.get(cid):
+                        node["hsv"] = hsv[cid]
+                    pic = _first_image(md_text or "", url)
+                    if pic is not None:
+                        node["image"] = pic
+                    nodes.append(node)
+                if page_at is not None:
+                    page_node = {"cid": "page:" + url, "url": url, "title": url,
+                                 "level": "page", "rank": 0.0, "chars": 0, "tokens": 0,
+                                 "copies": 1, "members": len(meta),
+                                 "val": float(max(1.0, max(len(meta), 1) ** 0.5)),
+                                 "pos": [float(v) for v in page_at[:3]],
+                                 "source": "projector"}
+                    if page_hsv:
+                        page_node["hsv"] = page_hsv
             ms = round((time.perf_counter() - _t0) * 1000, 1)
             _profile("page_map", {"url": url[-60:], "chunks": len(chunks),
-                                  "addresses": len(rows), "ms": ms})
-            self._send(200, {"url": url, "chunks": chunks, "ms": ms})
+                                  "addresses": len(rows), "nodes": len(nodes), "ms": ms})
+            self._send(200, {"url": url, "chunks": chunks, "ms": ms,
+                             "nodes": nodes + ([page_node] if page_node else [])})
             return
 
         if segments[0] == "page_tree":

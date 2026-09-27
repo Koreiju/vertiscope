@@ -40,6 +40,13 @@ export class ChunkMap {
   private byPrefix = new Map<string, string>();
   /** chunk -> every element its lines draw, for the outline's extent */
   private byCid = new Map<string, string[]>();
+  /** The page's chunks where the projector already has them, served with
+   *  the map on landing (S-1): drawn at once, not through the queue. */
+  nodes: any[] = [];
+  /** Chunks the store held when the page was landed on: already through the
+   *  transform, so never the pending diff (whether or not drawn as a node --
+   *  a merge-group member is drawn through its lead). */
+  stored = new Set<string>();
 
   get size(): number { return this.byXpath.size; }
   get chunks(): number { return this.byCid.size; }
@@ -56,15 +63,28 @@ export class ChunkMap {
     this.byXpath.clear();
     this.byPrefix.clear();
     this.byCid.clear();
+    this.nodes = [];
+    this.stored = new Set();
     const got: any = await sidecar.pageMap(url).catch(() => null);
     if (this.url !== url) return false;          // the reader moved on
     if (!got || !got.chunks) return false;
     this.apply(got.chunks);
+    this.stored = new Set(Object.keys(got.chunks));
+    this.nodes = Array.isArray(got.nodes) ? got.nodes : [];
     this.loadedAt = Date.now();
     return true;
   }
 
+  /** True while applying a capture's delta (not the landing load): newer
+   *  chunks then take ancestor paths from older ones. */
+  private fresh = false;
+
   /** Patch from a capture reply: each named chunk's addresses, replaced. */
+  patch(delta: Record<string, string[]> | null | undefined): void {
+    this.fresh = true;
+    try { this.apply(delta); } finally { this.fresh = false; }
+  }
+
   apply(delta: Record<string, string[]> | null | undefined): void {
     if (!delta) return;
     for (const [cid, xpaths] of Object.entries(delta)) {
@@ -74,14 +94,26 @@ export class ChunkMap {
       if (!xpaths || !xpaths.length) { this.byCid.delete(cid); continue; }
       this.byCid.set(cid, xpaths.slice());
       for (const x of xpaths) {
+        // A re-partition names NEW chunks for addresses an older chunk held,
+        // and never names the old one (it is retired, not rewritten). The
+        // newer chunk takes the address from it, or hover kept resolving to
+        // the retired chunk and outlining its partial extent (G-79 drew 2 of
+        // 4 same-chunk pairs as one box after the chunker changed).
+        const prev = this.byXpath.get(x);
+        if (prev && prev !== cid) {
+          const left = (this.byCid.get(prev) || []).filter((y) => y !== x);
+          if (left.length) this.byCid.set(prev, left); else this.byCid.delete(prev);
+        }
         this.byXpath.set(x, cid);
         // Each ancestor path, so an element resolves to a chunk anchored
-        // beneath it. The first chunk seen keeps a path, as `/resolve`'s
-        // LIMIT 1 does; a leaf's own path is specific enough not to collide.
+        // beneath it. On a live page the LATEST chunk to claim a path under
+        // it wins -- the earlier rule (first seen keeps it) held retired
+        // chunks' prefixes forever.
         let cut = x.lastIndexOf("/");
         while (cut > 0) {
           const up = x.slice(0, cut);
-          if (!this.byPrefix.has(up)) this.byPrefix.set(up, cid);
+          const held = this.byPrefix.get(up);
+          if (!held || !this.byCid.has(held) || this.fresh) this.byPrefix.set(up, cid);
           cut = up.lastIndexOf("/");
         }
       }

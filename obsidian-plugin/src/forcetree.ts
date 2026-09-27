@@ -46,6 +46,8 @@ export interface ForceNodeDelta {
   /** Node id -> the stored chunk that already draws its content, from the
    *  browser's chunk map; absent when nothing stored covers it yet. */
   covers: Record<string, string>;
+  /** Node ids whose covering chunk the store held before this visit. */
+  settled: string[];
 }
 
 interface Held {
@@ -139,7 +141,7 @@ export class ForceTree {
     }
     for (const d of payload?.dict || []) this.dict.push(String(d));
     const delta: ForceNodeDelta = { url: this.url, added: [], removed: [], reparented: [],
-                                    size: 0, ms: 0, addresses: [], t0: 0, trace: "", covers: {} };
+                                    size: 0, ms: 0, addresses: [], t0: 0, trace: "", covers: {}, settled: [] };
     if (!this.started) {
       this.started = true;
       delta.added.push({ id: ForceTree.pageId(this.url), parent: "", title: this.url, lines: 0 });

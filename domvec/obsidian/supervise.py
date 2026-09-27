@@ -29,6 +29,32 @@ from typing import List, Optional
 BURST = 5
 WINDOW_S = 60.0
 
+#: A start that dies this fast did not run: it failed to OPEN the store.
+FAILED_OPEN_S = 15.0
+
+
+def quarantine_wal(workspace: Path) -> Optional[Path]:
+    """Set an unreplayable write-ahead log aside so the store can open.
+
+    A crash mid-write (`D-23`) can leave ``graph.kuzu.wal`` that kuzu then
+    fails to replay -- "Caught an unknown exception!" at open, read-only or
+    not -- so every restart dies in two seconds and the loop gives up. On
+    2026-09-26 the working store sat unopenable until the log was moved by
+    hand; the 138 pages were intact behind it.
+
+    Renamed, never deleted: what the log held (the last few captures) is
+    unreachable either way, and a renamed file can still be put back.
+    """
+    wal = workspace / "graph.kuzu.wal"
+    if not wal.exists():
+        return None
+    aside = workspace / ("graph.kuzu.wal.unreplayable-%s" % time.strftime("%Y%m%d-%H%M%S"))
+    try:
+        wal.rename(aside)
+    except OSError:
+        return None
+    return aside
+
 
 def _statement(workspace: Path) -> str:
     try:
@@ -55,6 +81,21 @@ def supervise(workspace: Path, serve_args: List[str], *,
             return 0                           # a clean stop is not a crash
         now = time.time()
         crashes = [t for t in crashes if now - t < WINDOW_S] + [now]
+        # Two starts in a row that could not even open the store, with a
+        # write-ahead log present: the log is the thing that will not replay.
+        quick = [t for t in crashes if now - t < WINDOW_S]
+        if code != 0 and now - started < FAILED_OPEN_S and len(quick) >= 2:
+            aside = quarantine_wal(workspace)
+            if aside is not None:
+                note = "%s store would not open twice; write-ahead log set aside as %s\n" % (
+                    time.strftime("%Y-%m-%d %H:%M:%S"), aside.name)
+                try:
+                    with log.open("a", encoding="utf-8") as fh:
+                        fh.write(note)
+                except OSError:
+                    pass
+                print(note.strip(), flush=True)
+                crashes = []                 # a fresh chance to start
         line = "%s exit=%s after=%.0fs statement=%s\n" % (
             time.strftime("%Y-%m-%d %H:%M:%S"), code, now - started,
             _statement(workspace))

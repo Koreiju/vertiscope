@@ -1429,6 +1429,19 @@ a heading with what it heads and a list with its lead, within the 256
 window's leniency. And a question to answer with evidence: what the coloured
 nodes are and where their positions come from.*
 
+> Tackle what's open, but first collect the full list because there's still a
+> lot of bugs with the real-time streaming layouts because the different diffs
+> an 3D nodes and 2D browser highlights can get a little involved, and I see
+> some room for improvement on this end as well (including UMAP transforms and
+> *when* collapses to page centroid nodes happens for all subchunk/chunk nodes
+> already projected from the fitted UMAP transform.
+
+*Read as: before fixing, COLLECT the full list of open defects -- above all in
+real-time streaming: how a drain's diff reaches the 3D nodes and the 2D
+browser highlights, the UMAP transforms that place chunks, and WHEN chunk and
+sub-chunk nodes that the fitted transform has already placed collapse back
+into their page's node. Then work through it.*
+
 > Also, on the billboards in the 3D panels on persisted double right click
 > selected nodes; there should be a 'minimize' button and the 'x' button
 > should just remove it from the 3D GUI, but if the panel is clicked on its

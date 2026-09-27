@@ -240,8 +240,14 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
         // Every drain's delta goes to the force tree (`G-89`) the moment it
         // is decoded -- before the capture's round trip.
         browser.onDrain = (delta) => this.eachGraph((view) => view.forceDelta(delta));
-        browser.onCovers = (url, covers) =>
-          this.eachGraph((view) => view.coverForce(url, covers));
+        browser.onUnstored = (url: string, ids: string[]) =>
+          this.eachGraph((view) => view.dropForceIds(ids));
+        browser.onLeaving = (url: string) =>
+          this.eachGraph((view) => view.dropForce(url));
+        browser.onLeft = (url: string) =>
+          this.eachGraph((view) => view.collapsePage(url));
+        browser.onCovers = (url, covers, settled) =>
+          this.eachGraph((view) => view.coverForce(url, covers, settled));
         browser.onDirty = (cids: string[]) =>
           this.eachGraph((view) => view.refreshBillboards(cids));
         browser.onPin = (cid: string) =>

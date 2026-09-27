@@ -1082,6 +1082,12 @@ def _collapse_math(units: List[Tuple[ContentAddress, str, str, int]]
     address, a real element in the page. Keyed on the structure MathML
     defines (``math/semantics/annotation``), not on a site's class names.
     """
+    # MediaWiki's own ``data-mw`` attribute (Parsoid's round-trip metadata --
+    # template names, reference ids, i18n keys) is never shown to a reader;
+    # drawn as a JSON line it filled chunks with `{"name":"ref",...}` (M-2).
+    # Dropped from the projection only; the trie still holds it.
+    units = [u for u in units
+             if not str(getattr(u[0], "accessor", "")).startswith("data-mw")]
     tex_at: Dict[str, Tuple[int, str]] = {}
     for i, (a, v, _l, _d) in enumerate(units):
         x = a.xpath
@@ -1106,7 +1112,18 @@ def _collapse_math(units: List[Tuple[ContentAddress, str, str, int]]
         if k >= 0 and x[:k] in tex_at:
             hit = tex_at[x[:k]]
             if hit[0] == i:
-                out.append((a, "$%s$" % hit[1], lbl, d))
+                tex = "$%s$" % hit[1]
+                # INLINE, in the sentence it sits in: the formula's own address
+                # is deep in MathML, so as a line of its own it shared neither
+                # the sentence's flow nor its depth, and a list item read
+                # "numbered from" / "$1$" / "to" / "$n$" / "." (M-1). Folded
+                # into the text before it when that text is the same flow.
+                wrapper = x[:k].rsplit("/", 1)[0]
+                if out and _flow_owner(out[-1][0].xpath) == _flow_owner(wrapper)                         and out[-1][0].render_class not in _OBJECT_CLASSES:
+                    pa, pv, pl, pd = out[-1]
+                    out[-1] = (pa, (pv.rstrip() + " " + tex).strip(), pl, pd)
+                else:
+                    out.append((a, tex, lbl, d))
             continue                         # the MathML glyphs
         base = x.split("/text()")[0]
         wrapper = next((w for w in wrappers if base == w or base.startswith(w + "/img")), None)
