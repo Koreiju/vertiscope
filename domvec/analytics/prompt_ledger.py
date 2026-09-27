@@ -255,6 +255,14 @@ VERDICTS: Dict[int, Tuple[str, str, str]] = {
     135: ("PROCESS", "Every test runs through the app, observable to the tools and to Claude.", "G-103"),
     136: ("ONE-OFF", "(sidecar restarted.)", ""),
     137: ("PROCESS", "Every non-superseded detail of every prompt is carried by the loop: this ledger.", "G-103"),
+    138: ("LIVE", "Both chunk panels (billboard, side card) must render like the page: inline runs whole, "
+          "controls not '( label )', pictures load.", "D-36, G-102"),
+    139: ("LIVE", "(repeat of P138) The panels render the page's OWN rendering of the chunk, not a "
+          "reconstruction from distilled lines; the distilled form is secondary/offline.", "D-36"),
+    140: ("LIVE", "Streaming must meet the millisecond overlay requirement while interacting and loading new "
+          "diffs; new-diff overlays must be seen.", "D-35, D-37, G-90"),
+    141: ("LIVE", "The 3D layout AFTER collapse must not be jumbled (measured as seen, on screen); the hard-page "
+          "list must be a real, comprehensive in-app suite.", "G-94, G-101"),
 }
 
 

@@ -7,7 +7,7 @@ binding record; this is the index that proves nothing in a transcript was lost.
 Transcripts cover 2026-09-12 onward; earlier direction lives only in
 `PLUGIN_GOAL.md` (the opening statement and Addenda I-III).
 
-**137 prompts:** LIVE 51, ONE-OFF 36, PARTLY 12, PROCESS 25, QUESTION 11, SUPERSEDED 2
+**147 prompts:** LIVE 55, ONE-OFF 36, PARTLY 12, PROCESS 25, QUESTION 11, SUPERSEDED 2, UNREVIEWED 6
 
 ## Still binding (LIVE, PARTLY, PROCESS)
 
@@ -101,6 +101,19 @@ Transcripts cover 2026-09-12 onward; earlier direction lives only in
 | P134 | 2026-09-27 | LIVE | Addendum IX: the stream order, collapse on save, integer collision factor, root click toggles, UMAP coords persisted, everything on a page detected, media cached, hard pages, billboard HTML, notebooks + package trees, D-35, one visual-judgement loop. | G-92..G-105, D-35 |
 | P135 | 2026-09-27 | PROCESS | Every test runs through the app, observable to the tools and to Claude. | G-103 |
 | P137 | 2026-09-27 | PROCESS | Every non-superseded detail of every prompt is carried by the loop: this ledger. | G-103 |
+| P138 | 2026-09-27 | LIVE | Both chunk panels (billboard, side card) must render like the page: inline runs whole, controls not '( label )', pictures load. | D-36, G-102 |
+| P139 | 2026-09-27 | LIVE | (repeat of P138) The panels render the page's OWN rendering of the chunk, not a reconstruction from distilled lines; the distilled form is secondary/offline. | D-36 |
+| P140 | 2026-09-27 | LIVE | Streaming must meet the millisecond overlay requirement while interacting and loading new diffs; new-diff overlays must be seen. | D-35, D-37, G-90 |
+| P141 | 2026-09-27 | LIVE | The 3D layout AFTER collapse must not be jumbled (measured as seen, on screen); the hard-page list must be a real, comprehensive in-app suite. | G-94, G-101 |
+
+## UNREVIEWED
+
+- P142
+- P143
+- P144
+- P145
+- P146
+- P147
 
 ## Superseded
 
@@ -728,4 +741,44 @@ Transcripts cover 2026-09-12 onward; earlier direction lives only in
 ### P137 -- 2026-09-27 15:53 -- PROCESS
 
 > [mid-turn] Also, please do find where our full transcript for the conversation is stored and make sure to capture *all* details from my prompts that aren't superseded by later prompts in the current cron loop
+
+### P138 -- 2026-09-27 15:59 -- LIVE
+
+> [mid-turn, 1 image(s)] Note the panel rendering of the chunk in both GUI locations (3D billboard and 2D clipboard) are discontinuous with how the text/html is rendered in the original webpage, which is a bug
+
+### P139 -- 2026-09-27 16:06 -- LIVE
+
+> [mid-turn, 1 image(s)] I repeat, the rendering on our two chunk-level panels does not match how they are rendered in the browser
+
+### P140 -- 2026-09-27 16:09 -- LIVE
+
+> [mid-turn] Also, chunk streaming is heavily degraded currently (interacting with the page and loading new diffs does not meet the millisecond chunk overlay requirement at all, and overlays for completely new diff updates are completely broken and have not been observed for several minutes)
+
+### P141 -- 2026-09-27 16:37 -- LIVE
+
+> the 3D layout is still too jumbled after collapse. I'm also not seeing as comprehensive and real web a test suite over the URLs as I had requested
+
+### P142 -- 2026-09-27 16:47 -- UNREVIEWED
+
+> make the page-centroid UMAP the default projector
+
+### P143 -- 2026-09-27 16:50 -- UNREVIEWED
+
+> [mid-turn] UMAP should be able to fit_transform and do simple transforms given the pre-fit, no? Perhaps search the web too
+
+### P144 -- 2026-09-27 16:53 -- UNREVIEWED
+
+> [mid-turn] If there's a way to incrementally re-train online for new embeddings, that might work. The suggestion there would be to train on just the diff updates and assume previous fits are fixed. Also, training on subchunks happens only after they are first projected through the previously fitted transform, before the re-fit with the new diffs. There is likely a way UMAP supports previous parameter persistence while also enabling for new fits on new batches.
+
+### P145 -- 2026-09-27 16:54 -- UNREVIEWED
+
+> [mid-turn] Also, whichever of your finds supports our local cuda runtime, that should also be included in online updates
+
+### P146 -- 2026-09-27 17:07 -- UNREVIEWED
+
+> [mid-turn] Nothing showing in the obsidian browser. It's currently a blank screen
+
+### P147 -- 2026-09-27 17:15 -- UNREVIEWED
+
+> [mid-turn] Current 3D layout seems scattered and like the nodes may not be pages/url nodes and show leakage
 

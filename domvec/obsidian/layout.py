@@ -1932,7 +1932,9 @@ def place_into(workspace, cids) -> Dict:
     # The chunk projector answers when it has a fit: positions are the
     # stream's, not a second computation made here.
     _cp = _live_chunk_projector()
-    if _cp is not None and getattr(_cp, "kind", "") == "page":
+    # The page projector places chunks too when its centroid is the chunks'
+    # own space (Addendum IX); the synthetic tree only when it cannot.
+    if _cp is not None and getattr(_cp, "kind", "") == "page" and not getattr(_cp, "pos", None):
         return place_tree(workspace, cids, _cp)
     if _cp is not None:
         return place_projected(workspace, cids, _cp)

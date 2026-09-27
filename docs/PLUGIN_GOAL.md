@@ -1720,6 +1720,70 @@ the 3D node does: a streaming chunk stays outlined, following the page as it
 scrolls, until the store confirms it saved (Addendum IX step 4), and for a
 minimum time once it is on screen.*
 
+> the 3D layout is still too jumbled after collapse. I'm also not seeing as
+> comprehensive and real web a test suite over the URLs as I had requested
+
+*Read as: two gaps. (1) After the streaming nodes collapse, the picture that
+remains -- projected page and chunk nodes -- is still jumbled: `G-93` measured
+only the streaming layout, and nothing measures the collapsed one as a reader
+sees it (on screen, in drawn sizes). Addendum IX's collision rule applies
+there: diameter x an INTEGER safety factor plus an invisible margin, which
+replaces the quarter-radius factor of `G-21`. (2) The live suite browses
+fixtures and a handful of Wikipedia pages; the hard pages named in Addendum
+IX (archive.org, YouTube, Instagram, Amazon, Facebook, Netflix, IMDb,
+DuckDuckGo, Richard Mille, Bandcamp) must be browsed IN THE APP and scored
+there, each page, each requirement the stream carries.*
+
+> make the page-centroid UMAP the default projector
+
+*Read as: `G-83` becomes the default. The fit is over one centroid per page
+(Addendum VII; Addendum IX: "fit for the first time once reached an
+appropriate number of scanned pages"), and -- because Addendum IX still gives
+every chunk UMAP coordinates, stored and re-projected on every refit -- each
+chunk's vector is transformed through that same page fit. So the centroid is
+the SEMANTIC one (the chunks' own space); the triple centroid is not in the
+space a chunk vector can be transformed from.*
+
+> UMAP should be able to fit_transform and do simple transforms given the
+> pre-fit, no? Perhaps search the web too
+
+> If there's a way to incrementally re-train online for new embeddings, that
+> might work. The suggestion there would be to train on just the diff updates
+> and assume previous fits are fixed. Also, training on subchunks happens only
+> after they are first projected through the previously fitted transform,
+> before the re-fit with the new diffs. There is likely a way UMAP supports
+> previous parameter persistence while also enabling for new fits on new
+> batches.
+
+> Also, whichever of your finds supports our local cuda runtime, that should
+> also be included in online updates
+
+*Read as: the projector learns ONLINE. A new diff is first placed through the
+fit that exists (transform), and only then trained on, with what was fitted
+before held fixed and the model's parameters carried forward; the training
+runs on the local CUDA runtime where the method supports it.*
+
+*What was measured before building (2026-09-27, real corpus):*
+
+- *umap-learn 0.5.9 `transform` of the training points returns
+  `embedding_` exactly, so fit and transform do agree on fitted points.*
+- *Chunk transforms through a PAGE fit land nearest their own page only
+  19-23% of the time: individual chunks mean something nearer other pages.
+  So chunks are drawn in their page's neighbourhood (UMAP direction kept,
+  scaled) and their true coordinates stored.*
+- *`UMAP.update` exists (undocumented on the API page): it appends the new
+  points and re-optimises ALL of them from the previous embedding. On 100
+  pages + 26 new: a common shift of 5.1, then old pages move a median 37%
+  of the page spacing (p90 137%) -- far less than a fresh fit (95% / 294%
+  after the best rotation), but previous positions are not held fixed.*
+- *Local GPU: RTX 4070 Laptop, 8 GB; PyTorch 2.6 + CUDA 12.4 and CuPy
+  present; RAPIDS cuML absent (not native on Windows); TensorFlow absent, so
+  umap-learn's ParametricUMAP cannot run. The method that does what is asked
+  -- network weights persisted, trained on the new batch with a landmark loss
+  holding previous embeddings fixed (umap-learn's own "landmarked parametric
+  UMAP" recipe), and transform = the network, identical for fitted and new
+  points -- is a parametric UMAP in PyTorch, on CUDA.*
+
 ---
 
 

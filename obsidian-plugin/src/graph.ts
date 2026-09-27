@@ -185,13 +185,45 @@ function hue(url: string): string {
 }
 
 /**
- * Clearance beyond the drawn sphere, as a fraction of its radius (`G-21`).
+ * The collider of a projected node (`G-21`, amended by Addendum IX / `G-94`).
  *
- * "a quarter distance safety factor". A collider exactly the size of the
- * sphere lets two nodes rest in contact, which draws as a single shape; the
- * margin keeps a visible gap between things the projection calls distinct.
+ * Addendum IX: "collision boundaries defined as the diameter multiplied by
+ * some safety factor for space between real nodes by some extra invisible
+ * barrier length that I would argue is integer-valued in its safety
+ * factors". It replaces the "quarter distance safety factor" (1.25) of
+ * Addendum I, under which the collapsed picture still read as jumbled
+ * (2026-09-27). The collider is the drawn radius times an INTEGER, plus an
+ * invisible margin in scene units.
  */
-const COLLIDER_SAFETY = 1.25;
+const COLLIDER_SAFETY = 2;
+const COLLIDER_MARGIN = 1;
+
+/**
+ * Streaming (force-directed) nodes, Addendum IX (`G-93`, `G-94`).
+ *
+ * "without an upper bound on link lengths and perhaps more lenient/relaxed
+ * attractive forces (rather than strong repulsion)"; siblings kept apart by
+ * "the diameter multiplied by some safety factor ... integer-valued", plus an
+ * invisible margin. The spring rested every node 12 units from its parent
+ * and pushed siblings apart only inside 8, so a 100-chunk drain packed into
+ * one grey ball.
+ */
+export const STREAM = {
+  /** Rest length of a link: BASE + PER * sqrt(nodes hanging below the child). Unbounded. */
+  BASE: 18,
+  PER: 7,
+  /** Pull toward the rest length, per tick (it was 0.6). */
+  PULL: 0.18,
+  /** Sibling clearance: diameter x SAFETY (an integer) + MARGIN. */
+  SAFETY: 3,
+  MARGIN: 2,
+  /** A streaming node's drawn radius, in scene units, and its opacity. */
+  RADIUS: 2.2,
+  OPACITY: 0.35,
+  /** Planted by G-93's check: the spring this replaced (rest 12, pull 0.6,
+   *  siblings apart inside 8, groups over 400 not spread). */
+  LEGACY: false,
+};
 
 /**
  * How much wider a picture panel may be than the sphere it replaces (`G-21`).
@@ -730,6 +762,10 @@ export class GraphView extends ItemView {
     const g: any = this.graph;
     if (!g) return;
     let links: any[] = [];
+    // How many nodes hang below each node, so a link's rest length grows
+    // with what it carries: a big subtree is given room, a leaf stays close.
+    let below = new Map<string, number>();
+    let siblings = new Map<string, number>();
     const spring: any = (alpha: number) => {
       const bySource = new Map<string, any[]>();
       for (const l of links) {
@@ -737,7 +773,13 @@ export class GraphView extends ItemView {
         if (!t || !t.force || typeof s !== "object") continue;
         const dx = (t.x ?? 0) - (s.x ?? 0), dy = (t.y ?? 0) - (s.y ?? 0), dz = (t.z ?? 0) - (s.z ?? 0);
         const d = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
-        const k = ((d - 12) / d) * alpha * 0.6;
+        // Room for what hangs below this child AND for the siblings sharing
+        // its shell: n siblings need a sphere of radius ~ clear*sqrt(n/4pi).
+        // No upper bound (Addendum IX).
+        const clearance = 2 * STREAM.RADIUS * STREAM.SAFETY + STREAM.MARGIN;
+        const shell = clearance * Math.sqrt((siblings.get(typeof s === "object" ? s.id : s) || 1) / (4 * Math.PI)) * 1.2;
+        const rest = STREAM.LEGACY ? 12 : Math.max(STREAM.BASE + STREAM.PER * Math.sqrt(below.get(t.id) || 0), shell);
+        const k = ((d - rest) / d) * alpha * (STREAM.LEGACY ? 0.6 : STREAM.PULL);
         t.vx = (t.vx ?? 0) - dx * k; t.vy = (t.vy ?? 0) - dy * k; t.vz = (t.vz ?? 0) - dz * k;
         const kids = bySource.get(s.id) || [];
         kids.push(t);
@@ -747,16 +789,33 @@ export class GraphView extends ItemView {
       // alone let force nodes under one parent settle on one point (G-4
       // counted 8 coincident nodes). Short-range and among siblings only,
       // so nothing the projector placed is touched.
+      const clear = STREAM.LEGACY ? 8 : 2 * STREAM.RADIUS * STREAM.SAFETY + STREAM.MARGIN;
       for (const kids of bySource.values()) {
-        if (kids.length < 2 || kids.length > 400) continue;
-        for (let i = 0; i < kids.length; i++) {
-          for (let j = i + 1; j < kids.length; j++) {
-            const a = kids[i], b = kids[j];
+        if (kids.length < 2 || (STREAM.LEGACY && kids.length > 400)) continue;
+        // A grid of cells one clearance wide: each node is compared with the
+        // 27 cells around it, so a 1,260-sibling drain costs O(n), not O(n^2)
+        // -- the old pairwise loop skipped groups over 400, and exactly those
+        // packed into one ball (G-93: nn p50 0.4 radii on a heavy page).
+        const cell = new Map<string, any[]>();
+        const key = (x: number, y: number, z: number) => `${Math.floor(x / clear)},${Math.floor(y / clear)},${Math.floor(z / clear)}`;
+        for (const a of kids) {
+          const k = key(a.x ?? 0, a.y ?? 0, a.z ?? 0);
+          const list = cell.get(k); if (list) list.push(a); else cell.set(k, [a]);
+        }
+        const pairs: [any, any][] = [];
+        for (const a of kids) {
+          const cx = Math.floor((a.x ?? 0) / clear), cy = Math.floor((a.y ?? 0) / clear), cz = Math.floor((a.z ?? 0) / clear);
+          for (let ox = -1; ox <= 1; ox++) for (let oy = -1; oy <= 1; oy++) for (let oz = -1; oz <= 1; oz++) {
+            for (const b of cell.get(`${cx + ox},${cy + oy},${cz + oz}`) || []) if (a.id < b.id) pairs.push([a, b]);
+          }
+        }
+        for (const [a, b] of pairs) {
+          {
             let dx = (a.x ?? 0) - (b.x ?? 0), dy = (a.y ?? 0) - (b.y ?? 0), dz = (a.z ?? 0) - (b.z ?? 0);
             let d2 = dx * dx + dy * dy + dz * dz;
-            if (d2 > 64) continue;
+            if (d2 > clear * clear) continue;
             if (d2 < 1e-6) { dx = Math.random() - 0.5; dy = Math.random() - 0.5; dz = Math.random() - 0.5; d2 = 0.25; }
-            const d = Math.sqrt(d2), push = ((8 - d) / d) * alpha * 0.5;
+            const d = Math.sqrt(d2), push = ((clear - d) / d) * alpha * 0.5;
             a.vx = (a.vx ?? 0) + dx * push; a.vy = (a.vy ?? 0) + dy * push; a.vz = (a.vz ?? 0) + dz * push;
             b.vx = (b.vx ?? 0) - dx * push; b.vy = (b.vy ?? 0) - dy * push; b.vz = (b.vz ?? 0) - dz * push;
           }
@@ -765,6 +824,26 @@ export class GraphView extends ItemView {
     };
     spring.initialize = () => {
       links = (g.graphData().links || []).filter((l: any) => l.force);
+      const kids = new Map<string, string[]>();
+      for (const l of links) {
+        const sid = typeof l.source === "object" ? l.source.id : l.source;
+        const tid = typeof l.target === "object" ? l.target.id : l.target;
+        const k = kids.get(sid) || [];
+        k.push(tid);
+        kids.set(sid, k);
+      }
+      below = new Map();
+      siblings = new Map([...kids.entries()].map(([k, v]) => [k, v.length]));
+      const count = (id: string, seen: Set<string>): number => {
+        if (below.has(id)) return below.get(id)!;
+        if (seen.has(id)) return 0;
+        seen.add(id);
+        let n = 0;
+        for (const c of kids.get(id) || []) n += 1 + count(c, seen);
+        below.set(id, n);
+        return n;
+      };
+      for (const id of kids.keys()) count(id, new Set());
     };
     g.d3Force("treeSpring", spring);
   }
@@ -1172,6 +1251,17 @@ export class GraphView extends ItemView {
    * that never loads leaves a tile rather than an invisible node, so a dead
    * asset host cannot silently empty the graph.
    */
+  /** A streaming node: a small translucent sphere in its own colour. */
+  private streamingSphere(node: any): any {
+    const r = node.level === "page" ? STREAM.RADIUS * 1.6 : STREAM.RADIUS;
+    const mesh = new THREE.Mesh(
+      new THREE.SphereGeometry(r, 12, 10),
+      new THREE.MeshLambertMaterial({ color: new THREE.Color(node.hovered ? "#ffffff" : (node.color || "#9aa0a6")),
+                                      transparent: true, opacity: STREAM.OPACITY, depthWrite: false }));
+    (mesh as any).__streaming = true;
+    return mesh;
+  }
+
   private billboard(node: any, relSize: number): any {
     const src = node?.image?.src;
     if (!src) return null;
@@ -1420,6 +1510,14 @@ export class GraphView extends ItemView {
       if (!!n.hovered !== want) { n.hovered = want; changed = true; }
     }
     if (changed) this.graph.nodeColor(this.graph.nodeColor());
+    // A streaming node is its own translucent mesh: ring it by its material.
+    for (const n of data.nodes) {
+      const obj: any = n.force ? (n as any).__threeObj : null;
+      if (obj && obj.material && obj.material.color) {
+        obj.material.color.set(n.hovered ? "#ffffff" : (n.color || "#9aa0a6"));
+        obj.material.opacity = n.hovered ? 0.9 : STREAM.OPACITY;
+      }
+    }
   }
 
   /**
@@ -1524,6 +1622,69 @@ export class GraphView extends ItemView {
     entry.surface = surface;
     this.addChild(surface);
   }
+
+  /** Planted by G-94's check: no collision room for projected nodes. */
+  plantNoCollide = false;
+  /** The collider's parameters, for checks that must use the pane's own numbers. */
+  collider = { safety: COLLIDER_SAFETY, margin: COLLIDER_MARGIN };
+
+  /**
+   * The collapsed picture AS SEEN (G-94): every drawn node projected to the
+   * screen with its drawn radius in pixels, and how much of it other nodes
+   * cover. What "jumbled" means to a reader -- discs on top of discs --
+   * rather than distances in the fit's own space.
+   */
+  seenLayout(): any {
+    const g: any = this.graph;
+    if (!g) return null;
+    const cam = g.camera();
+    const e = cam.matrixWorld.elements;          // column 0: the camera's right
+    const right = [e[0], e[1], e[2]];
+    const relSize = g.nodeRelSize(), media = this.media();
+    const w = this.canvasEl ? this.canvasEl.clientWidth : 0, h = this.canvasEl ? this.canvasEl.clientHeight : 0;
+    const drawn: any[] = [];
+    for (const n of g.graphData().nodes) {
+      if (n.force || typeof n.x !== "number") continue;
+      const r = drawnRadius(n, relSize, media);
+      const c = g.graph2ScreenCoords(n.x, n.y, n.z || 0);
+      const q = g.graph2ScreenCoords(n.x + right[0] * r, n.y + right[1] * r, (n.z || 0) + right[2] * r);
+      const rp = Math.hypot(q.x - c.x, q.y - c.y);
+      if (c.x < -rp || c.y < -rp || c.x > w + rp || c.y > h + rp) continue;
+      drawn.push({ id: n.id, level: n.level, x: c.x, y: c.y, r: Math.max(0.5, rp) });
+    }
+    // Nearest neighbour in units of "touching" (r_a + r_b): < 1 overlaps.
+    const cell = 40, grid = new Map<string, any[]>();
+    for (const d of drawn) {
+      const k = `${Math.floor(d.x / cell)},${Math.floor(d.y / cell)}`;
+      (grid.get(k) || grid.set(k, []).get(k)!).push(d);
+    }
+    const ratio: number[] = [];
+    for (const a of drawn) {
+      let best = Infinity;
+      const cx = Math.floor(a.x / cell), cy = Math.floor(a.y / cell);
+      const reach = Math.ceil((a.r * 4) / cell) + 1;
+      for (let ox = -reach; ox <= reach; ox++) for (let oy = -reach; oy <= reach; oy++) {
+        for (const b of grid.get(`${cx + ox},${cy + oy}`) || []) {
+          if (b === a) continue;
+          best = Math.min(best, Math.hypot(a.x - b.x, a.y - b.y) / (a.r + b.r));
+        }
+      }
+      ratio.push(best);
+    }
+    const sorted = ratio.filter(Number.isFinite).sort((x, y) => x - y);
+    const q = (p: number) => sorted.length ? Math.round(sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))] * 100) / 100 : null;
+    return {
+      drawn: drawn.length, pages: drawn.filter((d) => d.level === "page").length,
+      overlapping: ratio.filter((x) => x < 1).length,
+      buried: ratio.filter((x) => x < 0.5).length,
+      nn_touch_p10: q(0.1), nn_touch_p50: q(0.5),
+      radius_px_p50: drawn.length ? Math.round(drawn.map((d) => d.r).sort((x, y) => x - y)[Math.floor(drawn.length / 2)] * 10) / 10 : null,
+      canvas: [w, h],
+    };
+  }
+
+  /** The streaming layout's parameters, live -- a check plants the old ones (G-93). */
+  streamParams = STREAM;
 
   /** Where a link clicked inside a billboard's snapshot goes: the browser cell. */
   onNavigate: (href: string) => void = () => {};
@@ -1630,11 +1791,24 @@ export class GraphView extends ItemView {
 
   /** Which billboards are open, and which the browser holds -- for the
    *  harness, so a check reads the pane rather than re-deriving it. */
-  billboardState(): { id: string; fromBrowser: boolean; shadow: boolean }[] {
-    return [...this.billboards.entries()].map(([id, e]: [string, any]) => ({
-      id, fromBrowser: !!e.fromBrowser, minimized: !!e.minimized,
-      shadow: !!e.el.querySelector(".domvec-html-host")?.shadowRoot,
-    }));
+  billboardState(): { id: string; fromBrowser: boolean; shadow: boolean; form: string; elements: number }[] {
+    return [...this.billboards.entries()].map(([id, e]: [string, any]) => {
+      const host = e.el.querySelector(".domvec-html-host");
+      const frame = e.el.querySelector("iframe.domvec-snapshot") as HTMLIFrameElement | null;
+      let elements = 0;
+      try {
+        elements = frame ? (frame.contentDocument?.querySelectorAll("#domvec-root *").length || 0)
+          : (host?.shadowRoot?.querySelectorAll("*").length || 0);
+      } catch { /* not readable yet */ }
+      // Two forms (D-36): the chunk as the PAGE draws it, when the page gave
+      // one, else the distilled shadow-DOM form. Both are rendered HTML.
+      return {
+        id, fromBrowser: !!e.fromBrowser, minimized: !!e.minimized,
+        shadow: !!host?.shadowRoot || !!frame,
+        form: frame ? "page" : (host?.shadowRoot ? "distilled" : "none"),
+        elements,
+      };
+    });
   }
 
   /** Put a billboard where its node is, in screen coordinates. */
@@ -2350,7 +2524,10 @@ export class GraphView extends ItemView {
     //: two to answer differently -- and a collider sizing spheres while the
     //: renderer draws panels is the defect `drawnRadius` documents.
     const media = this.media();
-    if (media) graph.nodeThreeObject((n: any) => this.billboard(n, relSize));
+    // Streaming nodes are TRANSLUCENT (Addendum IX): "simple translucent
+    // nodes to signify chunks that are part of a stream through the diff".
+    graph.nodeThreeObject((n: any) => n.force ? this.streamingSphere(n)
+      : (media ? this.billboard(n, relSize) : null));
 
     // Relax overlaps, and nothing else (`G-20`, `G-21`).
     //
@@ -2538,7 +2715,8 @@ export class GraphView extends ItemView {
       // projected chunks off their transform positions, which pushed them
       // up to 23 units away with spikes past 300 while a diff was drawn
       // (S-7). The tree's own spring and charge space the force nodes.
-      .radius((n: any) => n.force ? 0 : drawnRadius(n, relSize, media) * COLLIDER_SAFETY)
+      .radius((n: any) => n.force || this.plantNoCollide ? 0
+        : drawnRadius(n, relSize, media) * COLLIDER_SAFETY + COLLIDER_MARGIN)
       // Soft and iterated rather than hard and once. `d3-force-3d` documents
       // collision as "by default a soft constraint with a configurable
       // strength and iteration count" to reduce jitter; a hard shove would

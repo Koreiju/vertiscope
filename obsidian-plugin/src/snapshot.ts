@@ -230,6 +230,9 @@ const STORE = new Map<string, Snapshot>();
 export function putSnapshot(cid: string, s: Snapshot | null): void {
   if (cid && s && s.html) STORE.set(cid, s);
 }
+export function dropSnapshot(cid: string): void {
+  STORE.delete(cid);
+}
 export function getSnapshot(cid: string): Snapshot | null {
   return STORE.get(cid) || null;
 }

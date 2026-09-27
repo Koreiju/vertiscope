@@ -452,6 +452,10 @@ export function installHarness(app: App, sidecarBase: () => string) {
         const l = await ready("domvec-browser-view");
         const pb: any = l?.view?.pipebox;
         if (!pb) return { error: "no corner box" };
+        // Remembered, so whoever reads the verdicts can put the box back the
+        // way the reader had it: left open after a run it covered a third of
+        // the page (P104: no panel may cover the view).
+        pb.openedForChecks = !pb.expanded;
         pb.setExpanded(true);
         await sleep(400);
         const v: any = (window as any).__domvec?.verify;
@@ -484,8 +488,10 @@ export function installHarness(app: App, sidecarBase: () => string) {
         const l = await ready("domvec-browser-view");
         const pb: any = l?.view?.pipebox;
         if (!pb) return { error: "no corner box" };
-        const want = arg === "toggle" ? !pb.expanded : arg !== "close";
+        const want = arg === "toggle" ? !pb.expanded
+          : arg === "restore" ? (pb.openedForChecks ? false : pb.expanded) : arg !== "close";
         pb.setExpanded(want);
+        if (arg === "restore") pb.openedForChecks = false;
         await sleep(300);
         return { expanded: pb.expanded };
       }

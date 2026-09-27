@@ -111,10 +111,14 @@ export class PipelineBox {
   private hoverBusy = false;
   private resolved = new Map<string, { cid: string; matched: string; walked: number; lines: number }>();
   hover: HoverState | null = null;
+  /** The checks gesture opened this box; "restore" closes it again. */
+  openedForChecks = false;
   /** Hovers answered by each source, for the harness (D-35). */
   hoverSources = { store: 0, page: 0 };
-  /** Planted arm for D-35's check: ignore the store map, page chunking only. */
+  /** Ignore the store map: the page's own chunking only (diagnostic). */
   pageOnly = false;
+  /** Planted by D-35's check: the old store-only hover, no in-page answer. */
+  plantStoreOnly = false;
 
   constructor(private wrap: HTMLElement, private sidecar: Sidecar,
               private webview: () => any,
@@ -230,7 +234,7 @@ export class PipelineBox {
       const url = this.url();
       // In memory: the same nearest-ancestor walk `/resolve` does in the store.
       const hit = this.pageOnly ? null : (this.map.url === url ? this.map.lookup(chain) : null);
-      if (!hit && got && got.at && got.at.box) {
+      if (!hit && got && got.at && got.at.box && !this.plantStoreOnly) {
         // The store does not know this element yet: outline the chunk the
         // PAGE's own chunking put it in, and ring its force node.
         const b = got.at.box;

@@ -668,6 +668,20 @@ class ChunkProjector:
 # Addendum VII: UMAP over one centroid per PAGE.
 # ---------------------------------------------------------------------------
 
+def _default_engine() -> str:
+    """"parametric" where torch sees a CUDA device, else "umap".
+    DOMVEC_PAGE_ENGINE overrides."""
+    import os
+    forced = os.environ.get("DOMVEC_PAGE_ENGINE", "")
+    if forced in ("parametric", "umap"):
+        return forced
+    try:
+        import torch
+        return "parametric" if torch.cuda.is_available() else "umap"
+    except Exception:                               # noqa: BLE001
+        return "umap"
+
+
 class PageProjector(ChunkProjector):
     """UMAP over each page's centroid, streamed and refitted like the chunks'.
 
@@ -695,11 +709,20 @@ class PageProjector(ChunkProjector):
     """
 
     def __init__(self, dims: int = 3, *, centroid: str = "triple",
-                 seed: int = 0) -> None:
+                 seed: int = 0, engine: str = "") -> None:
         super().__init__(dims, sample_cap=10 ** 9, seed=seed)
         self.centroid = centroid if centroid in ("triple", "semantic") else "triple"
+        #: "parametric" -- the online GPU model (`pumap.py`): a refit trains on
+        #: the NEW pages only, earlier ones held where they were. "umap" --
+        #: umap-learn, refitted whole. Default: parametric when CUDA is here.
+        self.engine = engine or _default_engine()
+        self.pumap = None
         self.svd_f = None
         self.page_vec: Dict[str, np.ndarray] = {}
+        #: Each chunk's true UMAP coordinates through the page fit, and each
+        #: page's drawing scale (see `_place_chunks`).
+        self.raw_pos: Dict[str, List[float]] = {}
+        self.page_scale: Dict[str, float] = {}
         self.centroid_ms: Dict[str, float] = {}
 
     FILE = "page_projector.pkl"
@@ -775,6 +798,153 @@ class PageProjector(ChunkProjector):
         use = triple if (self.centroid == "triple" and triple is not None) else semantic
         return urls, use
 
+    def _first_fit(self, L, X, want: int, n_pages: int):
+        """The first fit of the page layout, by the configured engine."""
+        if self.engine == "parametric":
+            try:
+                from .pumap import ParametricUMAP, Whitened
+                self.pumap = ParametricUMAP(n_components=want,
+                                            n_neighbors=min(15, n_pages - 1),
+                                            min_dist=0.25, seed=self.seed)
+                raw = np.asarray(self.pumap.fit_transform(X), dtype=np.float32)
+                # Decorrelate the drawn axes once; replayed for every point.
+                self._whiten = Whitened(self.pumap, dims=self.dims)
+                coords = self._whiten.fit_whitening(raw)
+                L._LAST_FIT["reducer"] = self._whiten
+                return coords
+            except Exception as exc:                # noqa: BLE001
+                # No torch, no GPU memory: umap-learn, and say why.
+                self.fit_error = "parametric fit failed, umap used: %s" % exc
+                self.pumap = None
+                self.engine = "umap"
+        return L._umap(X, dims=want, seed=self.seed,
+                       neighbors=min(15, n_pages - 1), min_dist=0.25)
+
+    def _refit_online(self, urls, X, chunks_at_fit):
+        """A refit that TRAINS ON THE DIFF (2026-09-27): the pages new since
+        the last fit, with every page placed before held where it was.
+
+        They were already drawn through `transform` as they arrived; this is
+        the training that follows. The projection object -- its spread, its
+        frame, its colour bands -- is kept, so an old page's position is the
+        same function of the same (barely moved) network output. None when
+        there is nothing to update online (first fit, other engine)."""
+        wrapper = self.projection.reducer if self.projection is not None else None
+        if (self.engine != "parametric" or self.pumap is None
+                or getattr(wrapper, "model", None) is not self.pumap):
+            return None
+        import copy
+        new = [i for i, u in enumerate(urls) if u not in self.page_pos]
+        # Trained on a COPY: the stream keeps transforming through the model
+        # that is live until the new one is swapped in (`G-74`).
+        model = copy.deepcopy(self.pumap)
+        if new:
+            model.update(X[new])
+        projection = copy.copy(self.projection)
+        whiten = copy.copy(wrapper)
+        whiten.model = model
+        projection.reducer = whiten
+        projection.fitted_chunks = int(chunks_at_fit)
+        projection.fitted_n = int(len(urls))
+        self._next_pumap = model
+        where, colour = projection.place(X)
+        if where is None:
+            return None
+        page_pos = {u: [float(v) for v in where[i][:self.dims]] for i, u in enumerate(urls)}
+        page_hsv = ({u: [float(v) for v in colour[i]] for i, u in enumerate(urls)}
+                    if colour is not None else {})
+        return projection, page_pos, page_hsv
+
+    def _place_chunks(self, projection, vec: Dict[str, np.ndarray],
+                      page_pos: Optional[Dict[str, List[float]]] = None,
+                      url_of: Optional[Dict[str, str]] = None):
+        """Chunk vectors through the page fit, in batches: (pos, hsv).
+
+        **Relative to the chunk's page, in ONE frame.** UMAP's `transform`
+        does not reproduce its own `fit_transform` positions, so a chunk
+        transformed on its own and its page taken from the fit sit in two
+        frames: only 36% of chunks landed nearest their own page (test,
+        2026-09-27). Each chunk goes to its page's fitted position plus its
+        offset from the page centroid's OWN transform -- both terms from the
+        same transform, so what survives is where the chunk sits relative to
+        what its page means.
+        """
+        pos: Dict[str, List[float]] = {}
+        hsv: Dict[str, List[float]] = {}
+        if self.centroid != "semantic" or projection is None or not vec:
+            return pos, hsv
+        page_pos = self.page_pos if page_pos is None else page_pos
+        url_of = self.url_of if url_of is None else url_of
+        # The transform of each involved page's centroid (the fitted space's
+        # own point for the page), for the offset.
+        pages = sorted({url_of.get(c) for c in vec if url_of.get(c) in page_pos})
+        anchor: Dict[str, np.ndarray] = {}
+        if pages:
+            # Each page's members once, from every vector known (the fit's
+            # and this batch's), so a centroid is the page's whole mean.
+            known = dict(self.vec)
+            known.update(vec)
+            wanted = set(pages)
+            members: Dict[str, List[str]] = {}
+            for c, u in url_of.items():
+                if u in wanted and c in known:
+                    members.setdefault(u, []).append(c)
+            cents = [self._semantic_centroid(members[u], known) for u in pages]
+            where, _col = projection.place(np.asarray(cents, dtype=np.float32))
+            if where is not None:
+                anchor = {u: where[i][:self.dims] for i, u in enumerate(pages)}
+        cids = list(vec)
+        offsets: Dict[str, List[Tuple[str, np.ndarray]]] = {}
+        for lo in range(0, len(cids), 2048):
+            part = cids[lo:lo + 2048]
+            where, colour = projection.place(
+                np.asarray([vec[c] for c in part], dtype=np.float32))
+            if where is None:
+                continue
+            for j, c in enumerate(part):
+                u = url_of.get(c)
+                xyz = np.asarray(where[j][:self.dims], dtype=np.float64)
+                # The chunk's true UMAP coordinates, kept (Addendum IX:
+                # "UMAP coordinates for projected chunks are saved").
+                self.raw_pos[c] = [float(v) for v in xyz]
+                if u in anchor and u in page_pos:
+                    offsets.setdefault(u, []).append((c, xyz - anchor[u]))
+                else:
+                    pos[c] = [float(v) for v in xyz]
+                if colour is not None:
+                    hsv[c] = [float(v) for v in colour[j]]
+        # **Drawn in the page's neighbourhood.** Measured on the corpus
+        # (14,382 chunks, 126 pages, 2026-09-27): a chunk's own transform lands
+        # nearest its OWN page only 19-23% of the time, at a median offset of
+        # 40% of the page spacing -- a nav block or a reference list means
+        # something nearer other pages than its page's mean. Drawn raw, every
+        # page scatters across the map: the jumble. So each page's chunks keep
+        # their UMAP DIRECTION from the page and are scaled into a radius a
+        # fraction of the way to the nearest other page; the true coordinates
+        # stay in `raw_pos`.
+        if offsets:
+            names = list(page_pos)
+            P = np.asarray([page_pos[n] for n in names], dtype=np.float64)
+            for u, items in offsets.items():
+                here = np.asarray(page_pos[u], dtype=np.float64)
+                d = np.linalg.norm(P - here, axis=1)
+                d = d[d > 1e-9]
+                room = float(d.min()) * self.NEIGHBOURHOOD if len(d) else 1.0
+                norms = np.asarray([np.linalg.norm(o) for _c, o in items])
+                reach = float(np.percentile(norms, 90)) if len(norms) else 0.0
+                if u in self.page_scale and len(items) < 8:
+                    scale = self.page_scale[u]          # a few streamed chunks
+                else:
+                    scale = min(1.0, room / reach) if reach > 1e-9 else 1.0
+                self.page_scale[u] = scale
+                for c, o in items:
+                    pos[c] = [float(v) for v in here + o * scale]
+        return pos, hsv
+
+    #: How far toward the nearest other page an expanded page's chunks may
+    #: reach (their p90), as a share of that distance.
+    NEIGHBOURHOOD = 0.4
+
     # -- the fit ------------------------------------------------------------
     def fit(self, workspace) -> Dict:
         from . import layout as L
@@ -800,31 +970,56 @@ class PageProjector(ChunkProjector):
             if len(urls) < 4:
                 return {"skipped": "too few pages", "n": len(urls)}
             t = time.perf_counter()
+            X = L._unit_rows(np.asarray(X, dtype=np.float32))
+            online = self._refit_online(urls, X, chunks_at_fit)
+            if online is not None:
+                projection, page_pos, page_hsv = online
+                colours = page_hsv or None
+                ms_fit = (time.perf_counter() - t) * 1000
             with (self.fit_lock or nullcontext()):
-                L._LAST_FIT.clear()
-                X = L._unit_rows(np.asarray(X, dtype=np.float32))
+                if online is None:
+                    L._LAST_FIT.clear()
                 want = self.dims + 3
-                coords = L._umap(X, dims=want, seed=self.seed,
-                                 neighbors=min(15, len(urls) - 1), min_dist=0.25)
-                got = int(coords.shape[1])
-                colours = (L._hsv(coords[:, self.dims:self.dims + 3])
-                           if got >= want else None)
-                coords = L._spread(coords, self.dims)
-                coords = L._framed(coords, self.dims)
-                projection = L.Projection.of(dims=self.dims, hsv=colours is not None,
-                                             fitted_n=len(urls),
-                                             fitted_chunks=chunks_at_fit)
-            ms_fit = (time.perf_counter() - t) * 1000
-            if projection is None:
-                self.fit_error = "the fit produced no transformable reducer"
-                return {"error": self.fit_error}
-            page_pos = {u: [float(v) for v in coords[i][:self.dims]]
-                        for i, u in enumerate(urls)}
-            page_hsv = ({u: [float(v) for v in colours[i]] for i, u in enumerate(urls)}
-                        if colours is not None else {})
+                coords = (None if online is not None else
+                          self._first_fit(L, X, want, len(urls)))
+                if online is None:
+                    got = int(coords.shape[1])
+                    colours = (L._hsv(coords[:, self.dims:self.dims + 3])
+                               if got >= want else None)
+                    coords = L._spread(coords, self.dims)
+                    coords = L._framed(coords, self.dims)
+                    projection = L.Projection.of(dims=self.dims, hsv=colours is not None,
+                                                 fitted_n=len(urls),
+                                                 fitted_chunks=chunks_at_fit)
+            if online is None:
+                ms_fit = (time.perf_counter() - t) * 1000
+                if projection is None:
+                    self.fit_error = "the fit produced no transformable reducer"
+                    return {"error": self.fit_error}
+                page_pos = {u: [float(v) for v in coords[i][:self.dims]]
+                            for i, u in enumerate(urls)}
+                page_hsv = ({u: [float(v) for v in colours[i]] for i, u in enumerate(urls)}
+                            if colours is not None else {})
+            # **Every chunk through the PAGE fit** (Addendum IX): "compute the
+            # subchunk centroid and project it over the currently fitted
+            # UMAP", and "all coordinates ... for all 512-chunks are
+            # re-projected ... upon a new re-fit". With the semantic centroid
+            # a page is a unit mean of its chunks' vectors, so a chunk's own
+            # vector is a point of the space the fit was made in, and
+            # `place` sends it through the same stages the pages went
+            # through. (The triple centroid concatenates a frequency half a
+            # chunk vector has no counterpart for; there chunks stay the
+            # tree's.)
+            t = time.perf_counter()
+            self.vec = vec
+            self.page_scale, self.raw_pos = {}, {}
+            pos, hsv = self._place_chunks(projection, vec, page_pos, url_of)
+            ms_chunks = (time.perf_counter() - t) * 1000
             with self.lock:
                 self.projection = projection
-                self.pos, self.hsv = {}, {}          # chunks are the tree's now
+                if getattr(self, "_next_pumap", None) is not None:
+                    self.pumap, self._next_pumap = self._next_pumap, None
+                self.pos, self.hsv = pos, hsv
                 self.vec, self.url_of, self.by_url = vec, url_of, by_url
                 self.page_pos, self.page_hsv = page_pos, page_hsv
                 self.page_vec = {u: X[i] for i, u in enumerate(urls)}
@@ -839,7 +1034,10 @@ class PageProjector(ChunkProjector):
                 "pages": len(urls), "chunks": len(rows), "fitted_chunks": self.fitted_chunks,
                 "ms_read": round(ms_read, 1), "ms_centroids": round(ms_centroids, 1),
                 "centroid_ms": dict(self.centroid_ms), "dims_in": int(X.shape[1]),
-                "ms_fit": round(ms_fit, 1),
+                "ms_fit": round(ms_fit, 1), "ms_chunks": round(ms_chunks, 1),
+                "engine": self.engine, "online": online is not None,
+                "pumap": dict(self.pumap.stats) if self.pumap is not None else None,
+                "chunks_placed": len(pos),
                 "ms": round((time.perf_counter() - started) * 1000, 1),
                 "at": round(time.time(), 3),
             }
@@ -901,6 +1099,9 @@ class PageProjector(ChunkProjector):
                                   self.vec, fit=False)
         where, colour = (projection.place(np.asarray(X, dtype=np.float32))
                          if urls else (None, None))
+        # The chunks of this batch, through the same fit (Addendum IX).
+        mine = {c: self.vec[c] for c, _ch, _v in read if c in self.vec}
+        cpos, chsv = self._place_chunks(projection, mine)
         ms_transform = (time.perf_counter() - t) * 1000
         with self.lock:
             if projection is not self.projection:
@@ -916,6 +1117,18 @@ class PageProjector(ChunkProjector):
             for u in pages - set(urls):
                 self.page_pos.pop(u, None)
                 self.page_hsv.pop(u, None)
+            for c, xyz in cpos.items():
+                self.pos[c] = xyz
+                if c in chsv:
+                    self.hsv[c] = chsv[c]
+                self.seq += 1
+                self.log.append((self.seq, "chunk", c))
+            for c, _ch, _v in read:
+                if c not in self.vec and c in self.pos:
+                    self.pos.pop(c, None)
+                    self.hsv.pop(c, None)
+                    self.seq += 1
+                    self.log.append((self.seq, "gone", c))
             for u in pages:
                 self.seq += 1
                 self.log.append((self.seq, "page", u))
@@ -936,7 +1149,9 @@ class PageProjector(ChunkProjector):
     def status(self, workspace=None, url: str = "") -> Dict:
         out = super().status(workspace, url)
         out.update({"kind": "page", "centroid": self.centroid,
-                    "projected": len(self.page_pos), "pages": len(self.page_pos),
+                    # Chunks placed through the page fit, and the pages it fitted.
+                    "projected": len(self.pos) if self.pos else len(self.page_pos),
+                    "pages": len(self.page_pos),
                     "chunks_held": len(self.vec), "centroid_ms": dict(self.centroid_ms)})
         if url:
             out["page"] = {"url": url, "chunks": len(self.by_url.get(url) or ()),
@@ -960,6 +1175,9 @@ class PageProjector(ChunkProjector):
                      "centroid": self.centroid, "projection": self.projection,
                      "svd_f": self.svd_f, "url_of": self.url_of, "vec": self.vec,
                      "page_pos": self.page_pos, "page_hsv": self.page_hsv,
+                     "pos": self.pos, "hsv": self.hsv, "raw_pos": self.raw_pos,
+                     "engine": self.engine,
+                     "page_scale": self.page_scale,
                      "page_vec": self.page_vec, "fitted_chunks": self.fitted_chunks,
                      "fitted_points": self.fitted_points, "fit_sample": self.fit_sample,
                      "epoch": self.epoch, "fits": self.fits}
@@ -997,6 +1215,12 @@ class PageProjector(ChunkProjector):
             for cid, u in self.url_of.items():
                 self.by_url.setdefault(u, set()).add(cid)
             self.page_pos, self.page_hsv = state["page_pos"], state["page_hsv"]
+            self.pos, self.hsv = dict(state.get("pos") or {}), dict(state.get("hsv") or {})
+            self.raw_pos = dict(state.get("raw_pos") or {})
+            reducer = getattr(self.projection, "reducer", None)
+            if type(reducer).__name__ == "Whitened":
+                self.pumap, self.engine = reducer.model, "parametric"
+            self.page_scale = dict(state.get("page_scale") or {})
             self.page_vec = state["page_vec"]
             self.fitted_chunks = state["fitted_chunks"]
             self.fitted_points = state["fitted_points"]

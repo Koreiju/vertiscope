@@ -404,6 +404,38 @@ class Live:
         }
 
 
+    def recover(self, settle: float = 12.0) -> Dict:
+        """Bring back a window that stopped answering (2026-09-27).
+
+        During a hard-page run the Obsidian renderer stopped answering even
+        the debugger -- idle CPU, blocked -- and the browser cell went blank.
+        A RELOAD is handled on the browser side, so it works on a page that
+        cannot answer: through the browser-level endpoint, attach to the page
+        target and `Page.reload`. Same as Ctrl+R; the vault is untouched."""
+        import json as _json
+        import time as _t
+        import urllib.request as _u
+        import websocket as _ws
+        ver = _json.load(_u.urlopen(self.cdp + "/json/version", timeout=10))
+        ws = _ws.create_connection(ver["webSocketDebuggerUrl"], timeout=15, suppress_origin=True)
+        try:
+            ws.send(_json.dumps({"id": 1, "method": "Target.getTargets"}))
+            infos = _json.loads(ws.recv())["result"]["targetInfos"]
+            page = [t for t in infos if t.get("type") == "page"][0]["targetId"]
+            ws.send(_json.dumps({"id": 2, "method": "Target.attachToTarget",
+                                 "params": {"targetId": page, "flatten": True}}))
+            sid = None
+            while sid is None:
+                m = _json.loads(ws.recv())
+                if m.get("id") == 2:
+                    sid = m["result"]["sessionId"]
+            ws.send(_json.dumps({"id": 3, "sessionId": sid, "method": "Page.reload", "params": {}}))
+        finally:
+            ws.close()
+        self.close()
+        _t.sleep(settle)
+        return {"reloaded": True, "alive": self.evaluate("1+1", timeout=15) == 2}
+
     def reload_plugin(self, settle: float = 6.0, wait: bool = True) -> Dict:
         """Reload the plugin, WITHOUT going through the harness.
 
@@ -517,6 +549,12 @@ class Live:
         # a finding about the box.
         try:
             observed = self.observe_checks()
+            # Read, then put the corner box back as the reader had it: the run
+            # opened it to press its button, and left open it covers the page.
+            try:
+                self.act("pipebox", "restore")
+            except Exception:                           # noqa: BLE001
+                pass
         except Exception as err:                    # noqa: BLE001
             observed = {"error": str(err)[:200]}
         # Every finished run reaches the record of what has been SEEN working,
@@ -544,6 +582,9 @@ class Live:
         what comes back is what a person looking at it would see -- summary
         line, one row per verdict, and each failure's evidence as drawn.
         """
+        # Opened to be read -- remembered, so `restore` closes it again.
+        self.evaluate("(()=>{const l=app.workspace.getLeavesOfType('domvec-browser-view')[0];"
+                      "const pb=l&&l.view&&l.view.pipebox;if(pb&&!pb.expanded)pb.openedForChecks=true;return 1})()")
         self.act("pipebox", "open")
         import time as _time
         _time.sleep(1.2)          # the box redraws on its own tick

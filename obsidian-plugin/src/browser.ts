@@ -31,7 +31,7 @@ import { ForceTree, type ForceNodeDelta } from "./forcetree";
 import { PipelineBox } from "./pipelinebox";
 import { profiler } from "./profile";
 import { Component, ItemView, MarkdownRenderer, Menu, WorkspaceLeaf } from "obsidian";
-import { Snapshot, getSnapshot, putSnapshot, renderSnapshot, snapshotScript, xpathsOfLines } from "./snapshot";
+import { Snapshot, dropSnapshot, getSnapshot, putSnapshot, renderSnapshot, snapshotScript, xpathsOfLines } from "./snapshot";
 
 import { LayoutNode } from "./graph";
 import { Sidecar } from "./sidecar";
@@ -330,6 +330,10 @@ export class BrowserView extends ItemView {
     view.addEventListener("did-start-loading", () => this.say("loading…"));
     view.addEventListener("did-stop-loading", () => {
       this.address.value = view.getURL();
+      try {
+        const u = view.getURL();
+        if (/^https?:/.test(u)) (this.app as any).saveLocalStorage?.("domvec-browser-last", u);
+      } catch { /* not attached */ }
       this.say(view.getTitle() || view.getURL());
       // A load finishing is when a page becomes worth reading. Booting here
       // rather than on `did-navigate` means the sensor folds a document that
@@ -423,6 +427,15 @@ export class BrowserView extends ItemView {
                                              LIVE_MS));
 
     this.say("ready");
+    // Back where the reader was (2026-09-27: after a window reload the cell
+    // came back on about:blank, and "nothing showing in the obsidian
+    // browser" was the report). The last page is remembered per vault.
+    try {
+      const last = String((this.app as any).loadLocalStorage?.("domvec-browser-last") || "");
+      if (last && /^https?:/.test(last) && !/[?&](d3[5-7]|g9[34]|d36)=/.test(last)) {
+        window.setTimeout(() => this.go(last), 300);
+      }
+    } catch { /* storage unavailable: start blank */ }
   }
 
   async onClose(): Promise<void> {
@@ -659,7 +672,11 @@ export class BrowserView extends ItemView {
     let here = "";
     try { here = wv.getURL(); } catch { /* not attached */ }
     if (here !== read.url) { note(false, "page not open"); return false; }
-    if (this.plant.has("distilled-panels")) { note(false, "planted: distilled only"); return false; }
+    if (this.plant.has("distilled-panels")) {
+      dropSnapshot(read.cid);
+      note(false, "planted: distilled only");
+      return false;
+    }
     try {
       const snap = await wv.executeJavaScript(snapshotScript(read.xpaths || []));
       if (!snap || !snap.html) { note(false, "nothing found"); return false; }
@@ -1362,6 +1379,13 @@ export class BrowserView extends ItemView {
       this.captureQueue.push({ url, payload, trace, drainIds,
                                title: wv.getTitle() || "" });
       void this.pumpCaptures();
+      // Planted by D-35's check: the old behaviour, the drain loop held
+      // across the whole capture.
+      if (this.plant.has("serial-capture")) {
+        while (this.capturing || this.captureQueue.length) {
+          await new Promise((r) => window.setTimeout(r, 50));
+        }
+      }
     } catch (e) {
       // The realm goes away on navigation and the handle with it. That is
       // ordinary, not an error: the next tick reboots into the new document.

@@ -410,9 +410,14 @@ export function makeChecks(env) {
     // function". Pinned by address, exactly what a right-click produces.
     const gl0 = app.workspace.getLeavesOfType("domvec-graph-view")[0];
     const g0 = gl0 && gl0.view;
+    // A panel's text as a reader sees it: its own text AND the page
+    // snapshot's frame (D-36 draws the chunk as the page does, in a frame).
+    const frameText = (root) => [...root.querySelectorAll("iframe.domvec-snapshot")].map((f) => {
+      try { return f.contentDocument.body.innerText || ""; } catch (e) { return ""; }
+    }).join(String.fromCharCode(10));
     const sideText = () => {
       const card = b.markdownWrap.querySelector('.domvec-pin-card[data-cid="' + cid + '"]');
-      return card ? (card.innerText || card.textContent || "") : "";
+      return card ? (card.innerText || card.textContent || "") + String.fromCharCode(10) + frameText(card) : "";
     };
     // The billboard renders into the plugin's OWN shadow root (a
     // .domvec-html-host); reading it is not what constraint 6 refuses.
@@ -421,7 +426,8 @@ export function makeChecks(env) {
       if (!e) return "";
       const host = e.el.querySelector(".domvec-html-host");
       const sr = host && host.shadowRoot;
-      return (e.el.textContent || "") + String.fromCharCode(10) + (sr ? (sr.textContent || "") : "");
+      return (e.el.textContent || "") + String.fromCharCode(10) + (sr ? (sr.textContent || "") : "")
+        + String.fromCharCode(10) + frameText(e.el);
     };
     const pin = async () => {
       const got = await b.pinXpath(LIST);
@@ -560,6 +566,36 @@ export function makeChecks(env) {
   //: the one a fresh-store run had seeded on its own port -- and S-7 and S-8
   //: then failed their own "pages_after === pages_before" on a page they had
   //: deleted themselves (13 -> 12, 2026-09-26).
+  // The browser cell, fronted, attached and sized, with `land(url, ms)`
+  // waiting for a load to finish at that url. Shared by the Addendum IX
+  // checks, which drive the cell the way a reader does.
+  const PREP = `
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    await window.__domvec.act("open", "graph");
+    await window.__domvec.act("open", "browser");
+    for (const l of app.workspace.getLeavesOfType("domvec-graph-view")) { if (l.loadIfDeferred) await l.loadIfDeferred(); }
+    const bl = app.workspace.getLeavesOfType("domvec-browser-view")[0];
+    if (bl.loadIfDeferred) await bl.loadIfDeferred();
+    app.workspace.revealLeaf(bl);
+    const b = bl.view;
+    for (let i = 0; i < 80; i++) {
+      try { const sz = await b.webview.executeJavaScript("[innerWidth, innerHeight]"); if (sz[0] > 50 && sz[1] > 50) break; }
+      catch (e) { /* not attached yet */ }
+      await sleep(250);
+    }
+    const land = async (url, ms) => {
+      if (b.webview.getURL() !== url) b.go(url);
+      const t = performance.now();
+      while (performance.now() - t < ms) {
+        await sleep(150);
+        let u = "", loading = true;
+        try { u = b.webview.getURL(); loading = b.webview.isLoading(); } catch (e) { continue; }
+        if (u === url && !loading) return true;
+      }
+      return false;
+    };
+  `;
+
   const tidyFixtures = async (origin) => {
     try {
       if (!origin) return -1;
@@ -1148,6 +1184,391 @@ export function makeChecks(env) {
         };
       },
     },
+    // ---- Addendum IX defects, each with its planted arm run through the plugin ----
+    {
+      id: "D-35",
+      asks: "navigating to a new page, the overlay and the stream keep going: drains continue while the new page's first capture is stored, and hover answers from the page's own chunking before the store knows the page",
+      async run() {
+        const fixtures = await serveFixtures();
+        const arm = (planted) => evaluate(`(async () => {
+          ${PREP}
+          const pb = b.pipebox;
+          b.plant.clear(); pb.plantStoreOnly = false;
+          if (${planted}) { b.plant.add("serial-capture"); pb.plantStoreOnly = true; }
+          try {
+            // From a page the store holds, the way a reader arrives.
+            await land("https://en.wikipedia.org/wiki/Radix_tree", 25000);
+            await sleep(3000);
+            const target = ${JSON.stringify(fixtures.origin)} + "/nav_heavy.html?d35=" + (${planted} ? "p" : "c") + Date.now();
+            const P = window.__domvecProfiler;
+            const t0 = performance.now();
+            b.go(target);
+            await land(target, 25000);
+            await sleep(200);
+            const pt = await b.webview.executeJavaScript(
+              "(function(){var e=document.querySelectorAll('p')[2];if(!e)return null;var r=e.getBoundingClientRect();" +
+              "return [Math.round(r.left+Math.min(80,r.width/2)),Math.round(r.top+r.height/2)];})()");
+            let firstDrain = -1, firstHover = -1, source = null, k = 0;
+            while (performance.now() - t0 < 14000) {
+              const tr = P.list().filter((t) => t.kind === "live" && t.url === target);
+              if (tr.length && firstDrain < 0) firstDrain = tr[0].t0 - t0;
+              if (pt && firstDrain >= 0 && firstHover < 0) {
+                b.webview.sendInputEvent({ type: "mouseMove", x: pt[0] + (k++ % 7), y: pt[1] });
+                if (pb.hover && pb.hover.cid) { firstHover = performance.now() - t0; source = pb.hover.source || null; }
+              }
+              await sleep(100);
+            }
+            const tr = P.list().filter((t) => t.kind === "live" && t.url === target).map((t) => t.t0).sort((x, y) => x - y);
+            let gap = 0;
+            for (let i = 1; i < tr.length; i++) gap = Math.max(gap, tr[i] - tr[i - 1]);
+            if (tr.length) gap = Math.max(gap, (t0 + 14000) - tr[tr.length - 1]);
+            const caps = P.list().filter((t) => t.url === target && t.stages.capture).map((t) => t.stages.capture);
+            return { planted: ${planted}, drains: tr.length, first_drain_ms: Math.round(firstDrain),
+                     max_drain_gap_ms: Math.round(gap), max_capture_ms: Math.round(Math.max(0, ...caps)),
+                     first_hover_after_drain_ms: firstHover >= 0 && firstDrain >= 0 ? Math.round(firstHover - firstDrain) : -1,
+                     hover_source: source, aimed: pt };
+          } finally {
+            b.plant.clear(); pb.plantStoreOnly = false;
+          }
+        })()`, { timeout: 180000 });
+        try {
+          const clean = await arm(false);
+          const planted = await arm(true);
+          // The stream keeps drawing: no drain gap longer than two ticks
+          // (LIVE_MS 1200), whatever the capture costs; hover within 1.5 s of
+          // the first drain, answered by the page's own chunking if need be.
+          const ok = (x) => x.first_drain_ms >= 0 && x.max_drain_gap_ms < 2600
+            && x.first_hover_after_drain_ms >= 0 && x.first_hover_after_drain_ms < 1500;
+          const evidence = { clean, planted, purged: await tidyFixtures(fixtures.origin) };
+          // Non-vacuity: the planted arm (drain held across the capture,
+          // store-only hover) must FAIL; if the capture was too quick to
+          // show it, the check says so rather than passing.
+          return { pass: ok(clean) && !ok(planted), evidence };
+        } finally {
+          await fixtures.close();
+        }
+      },
+    },
+    {
+      id: "D-37",
+      asks: "new diffs are outlined where the reader looks: a chunk that loaded off screen is outlined when the reader scrolls to it, until it is saved and has been seen",
+      async run() {
+        const fixtures = await serveFixtures();
+        const arm = (planted) => evaluate(`(async () => {
+          ${PREP}
+          const pb = b.pipebox;
+          pb.plantFlashOnly = ${planted};
+          const shown = (el) => !!el && el.style.display !== "none" && el.offsetWidth > 0;
+          try {
+            const target = ${JSON.stringify(fixtures.origin)} + "/result_cards.html?d37=" + (${planted} ? "p" : "c") + Date.now();
+            await land(target, 25000);
+            await sleep(4000);
+            await b.webview.executeJavaScript(
+              "(function(){var e=document.getElementById('more');e.scrollIntoView({block:'center',behavior:'instant'});return 1})()");
+            await sleep(500);
+            const at = await b.webview.executeJavaScript(
+              "(function(){var r=document.getElementById('more').getBoundingClientRect();return [Math.round(r.left+r.width/2),Math.round(r.top+r.height/2)]})()");
+            b.webview.sendInputEvent({ type: "mouseDown", x: at[0], y: at[1], button: "left", clickCount: 1 });
+            b.webview.sendInputEvent({ type: "mouseUp", x: at[0], y: at[1], button: "left", clickCount: 1 });
+            // The new results arrive below the button; the store saves them.
+            await sleep(3000);
+            const before = { streaming: pb.streaming.size, visible: pb.diffEls.filter(shown).length };
+            // The reader scrolls to them.
+            await b.webview.executeJavaScript("(function(){window.scrollBy(0, 700);return 1})()");
+            let maxVisible = 0, maxShown = 0;
+            const t1 = performance.now();
+            while (performance.now() - t1 < 1500) {
+              maxVisible = Math.max(maxVisible, pb.diffEls.filter(shown).length);
+              maxShown = Math.max(maxShown, pb.streamingShown || 0);
+              await sleep(100);
+            }
+            const flash = window.__domvecProfiler.list().filter((t) => t.url === target && t.facts.flash).map((t) => t.facts.flash);
+            return { planted: ${planted}, before_scroll: before, max_visible_after_scroll: maxVisible,
+                     max_following: maxShown, drains_with_new: flash.length, flash };
+          } finally {
+            pb.plantFlashOnly = false;
+          }
+        })()`, { timeout: 120000 });
+        try {
+          const clean = await arm(false);
+          const planted = await arm(true);
+          const ok = (x) => x.max_visible_after_scroll >= 3;
+          return { pass: ok(clean) && !ok(planted),
+                   evidence: { clean, planted, purged: await tidyFixtures(fixtures.origin) } };
+        } finally {
+          await fixtures.close();
+        }
+      },
+    },
+    {
+      id: "D-36",
+      asks: "a pinned chunk's two panels read and look like the page: the same text in the same order, no distilled marks, the page's own colours and decorations, pictures loaded",
+      async run() {
+        const fixtures = await serveFixtures();
+        const arm = (planted) => evaluate(`(async () => {
+          ${PREP}
+          if (${planted}) b.plant.add("distilled-panels");
+          const words = (t) => String(t || "").replace(/\\s+/g, " ").trim().toLowerCase().split(" ").filter(Boolean);
+          // Share of the page's words the panel says, IN ORDER (greedy subsequence).
+          const inOrder = (page, panel) => {
+            const a = words(page), p = words(panel);
+            let j = 0, hit = 0;
+            for (const w of a) { const k = p.indexOf(w, j); if (k >= 0) { hit++; j = k + 1; } }
+            return a.length ? Math.round((hit / a.length) * 100) / 100 : 0;
+          };
+          const lofi = (t) => /\\(\\s[^)]{1,80}\\s\\)/.test(t) || /\\]\\(/.test(t) || /^\\s*- /m.test(t);
+          try {
+            for (const p of b.pinnedState()) b.unpin(p.cid);
+            const target = ${JSON.stringify(fixtures.origin)} + "/result_cards.html?d36=" + (${planted} ? "p" : "c") + Date.now();
+            await land(target, 25000);
+            // Stored first: a pin reads its chunk from the store.
+            for (let i = 0; i < 60 && !(b.pipebox && b.pipebox.map.url === target && b.pipebox.map.size > 0); i++) await sleep(250);
+            await sleep(1500);
+            const page = await b.webview.executeJavaScript(
+              "(function(){var s=document.querySelector('li.r .snip');s.scrollIntoView({block:'center',behavior:'instant'});" +
+              "var li=s.closest('li.r'),t=li.querySelector('a.title'),c=li.querySelector('a.crumb');" +
+              "return {text:li.innerText,title:getComputedStyle(t).color,crumb_color:getComputedStyle(c).color," +
+              "crumb_deco:getComputedStyle(c).textDecorationLine,title_text:t.innerText.trim()}})()");
+            await sleep(400);
+            const at = await b.webview.executeJavaScript(
+              "(function(){var r=document.querySelector('li.r .snip b').getBoundingClientRect();return [Math.round(r.left+r.width/2),Math.round(r.top+r.height/2)]})()");
+            b.lastGesture = "";
+            for (let i = 0; i < 2; i++) {
+              b.webview.sendInputEvent({ type: "mouseDown", x: at[0], y: at[1], button: "right", clickCount: 1 });
+              b.webview.sendInputEvent({ type: "mouseUp", x: at[0], y: at[1], button: "right", clickCount: 1 });
+              await sleep(120);
+            }
+            for (let i = 0; i < 40 && !b.pinnedState().length; i++) await sleep(200);
+            await sleep(2500);
+            const read = (sel) => {
+              const f = document.querySelector(sel + " iframe.domvec-snapshot");
+              if (!f || !f.contentDocument) {
+                const md = document.querySelector(sel === ".domvec-pin-card" ? ".domvec-pin-card .domvec-browser-mdbody" : ".domvec-bb .domvec-bb-body");
+                const t = md ? md.innerText : "";
+                return { frame: false, text: t.slice(0, 600), in_order: inOrder(page.text, t), lofi: lofi(t) };
+              }
+              const d = f.contentDocument, t = d.body.innerText;
+              const title = [...d.querySelectorAll("a")].find((a) => a.innerText.trim() === page.title_text);
+              const crumb = [...d.querySelectorAll("a")].find((a) => /›/.test(a.innerText));
+              const imgs = [...d.images];
+              return { frame: true, text: t.slice(0, 600), in_order: inOrder(page.text, t), lofi: lofi(t),
+                       title_color: title ? getComputedStyle(title).color : null,
+                       crumb_color: crumb ? getComputedStyle(crumb).color : null,
+                       crumb_deco: crumb ? getComputedStyle(crumb).textDecorationLine : null,
+                       images: imgs.length, images_loaded: imgs.filter((i) => i.complete && i.naturalWidth > 0).length };
+            };
+            const card = read(".domvec-pin-card"), board = read(".domvec-bb");
+            return { planted: ${planted}, pins: b.pinnedState().length, snapshot: b.lastSnapshot, page, card, board };
+          } finally {
+            for (const p of b.pinnedState()) b.unpin(p.cid);
+            b.plant.clear();
+          }
+        })()`, { timeout: 120000 });
+        try {
+          const clean = await arm(false);
+          const planted = await arm(true);
+          const looks = (x, p) => x.frame && x.in_order >= 0.9 && !x.lofi
+            && x.title_color === p.title && x.crumb_color === p.crumb_color && x.crumb_deco === p.crumb_deco;
+          const ok = (r) => r.pins === 1 && looks(r.card, r.page) && looks(r.board, r.page)
+            && r.card.images_loaded >= 1;
+          return { pass: ok(clean) && !ok(planted),
+                   evidence: { clean, planted, purged: await tidyFixtures(fixtures.origin) } };
+        } finally {
+          await fixtures.close();
+        }
+      },
+    },
+    {
+      id: "G-93",
+      asks: "streaming nodes are translucent and spread out: no upper bound on link length, relaxed attraction, siblings a whole number of diameters apart -- not a ball",
+      async run() {
+        const fixtures = await serveFixtures();
+        const arm = (planted) => evaluate(`(async () => {
+          ${PREP}
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          const P = v.streamParams, saved = { ...P };
+          // The spring this replaced: rest 12, pull 0.6, siblings apart inside 8.
+          if (${planted}) P.LEGACY = true;
+          try {
+            const target = ${JSON.stringify(fixtures.origin)} + "/nav_heavy.html?g93=" + (${planted} ? "p" : "c") + Date.now();
+            await land(target, 25000);
+            // Sample while the page streams: force nodes of THIS page only.
+            let best = null;
+            const t0 = performance.now();
+            while (performance.now() - t0 < 9000) {
+              await sleep(500);
+              const ns = v.graph.graphData().nodes.filter((n) => n.force && n.url === target && n.level !== "page");
+              if (ns.length < 20) continue;
+              const nn = ns.map((a) => {
+                let m = Infinity;
+                for (const b of ns) if (b !== a) m = Math.min(m, Math.hypot(a.x - b.x, a.y - b.y, (a.z || 0) - (b.z || 0)));
+                return m;
+              }).sort((x, y) => x - y);
+              const r = P.RADIUS;
+              const snap = { nodes: ns.length,
+                nn_p10_in_radii: Math.round((nn[Math.floor(nn.length * 0.1)] / r) * 10) / 10,
+                nn_p50_in_radii: Math.round((nn[Math.floor(nn.length * 0.5)] / r) * 10) / 10,
+                overlapping: nn.filter((d) => d < 2 * r).length,
+                translucent: ns.filter((n) => n.__threeObj && n.__threeObj.material && n.__threeObj.material.transparent
+                                              && n.__threeObj.material.opacity < 0.6).length };
+              if (!best || snap.nodes >= best.nodes) best = snap;
+            }
+            return { planted: ${planted}, best };
+          } finally {
+            Object.assign(P, saved);
+          }
+        })()`, { timeout: 120000 });
+        try {
+          const clean = await arm(false);
+          const planted = await arm(true);
+          // Spread: the closest tenth of nodes still >= 3 radii from their
+          // nearest neighbour (a visible gap), under 5% touching; all translucent.
+          const ok = (x) => !!x.best && x.best.nn_p10_in_radii >= 3
+            && x.best.overlapping <= x.best.nodes * 0.05 && x.best.translucent === x.best.nodes;
+          return { pass: ok(clean) && !ok(planted),
+                   evidence: { clean, planted, purged: await tidyFixtures(fixtures.origin) } };
+        } finally {
+          await fixtures.close();
+        }
+      },
+    },
+    {
+      id: "G-94",
+      asks: "the COLLAPSED picture is legible as seen: on screen, drawn discs do not sit on top of each other -- on a page (its chunks drawn) and after leaving it (all collapsed)",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          ${PREP}
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          const recollide = () => {
+            const f = v.graph.d3Force("collide");
+            if (f) f.radius(f.radius());               // re-reads every radius
+            v.graph.d3ReheatSimulation && v.graph.d3ReheatSimulation();
+          };
+          const recentre = async () => {
+            const btn = [...document.querySelectorAll("button")].find((x) => (x.textContent || "").trim() === "recentre");
+            if (btn) btn.click();
+            await sleep(1500);
+          };
+          v.plantNoCollide = ${planted};
+          recollide();
+          try {
+            await land("https://en.wikipedia.org/wiki/Radix_tree", 25000);
+            await sleep(6000);
+            await recentre(); await sleep(2500);
+            const onPage = v.seenLayout();
+            b.go("about:blank");
+            // Collapsed: the page's chunks fold into its node once it is settled.
+            for (let i = 0; i < 40; i++) {
+              await sleep(250);
+              const left = v.graph.graphData().nodes.filter((n) => !n.force && n.level !== "page"
+                && n.url === "https://en.wikipedia.org/wiki/Radix_tree").length;
+              if (!left) break;
+            }
+            await recentre(); await sleep(2500);
+            return { planted: ${planted}, on_page: onPage, collapsed: v.seenLayout() };
+          } finally {
+            v.plantNoCollide = false;
+            recollide();
+          }
+        })()`, { timeout: 120000 });
+        const clean = await arm(false);
+        const planted = await arm(true);
+        // A reader sees a jumble when discs cover each other: at most 5% of
+        // drawn nodes may overlap a neighbour, and the closest tenth must at
+        // least touch (nearest neighbour >= r_a + r_b).
+        const legible = (x) => !!x && x.drawn > 5 && x.overlapping <= x.drawn * 0.05 && (x.nn_touch_p10 ?? 0) >= 1;
+        const ok = (r) => legible(r.on_page) && legible(r.collapsed);
+        return { pass: ok(clean) && !ok(planted), evidence: { clean, planted } };
+      },
+    },
+    {
+      id: "G-101",
+      asks: "the hard pages, browsed in the app: every one captured and stored, overlay in milliseconds, its first 3D node within seconds, pictures stored where it shows pictures",
+      async run() {
+        const PAGES = [
+          "https://archive.org/", "https://www.youtube.com/", "https://www.instagram.com/",
+          "https://www.amazon.com/", "https://www.facebook.com/", "https://www.netflix.com/",
+          "https://www.imdb.com/", "https://duckduckgo.com/?q=patricia+trie&ia=web",
+          "https://www.richardmille.com/", "https://bandcamp.com/",
+        ];
+        const visit = (url, planted) => evaluate(`(async () => {
+          ${PREP}
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          const P = window.__domvecProfiler;
+          if (${planted}) b.setLive(false);
+          try {
+            const t0 = performance.now();
+            b.go(${JSON.stringify(url)});
+            await land(${JSON.stringify(url)}, 30000);   // some pages never stop loading
+            let here = "";
+            try { here = b.webview.getURL(); } catch (e) {}
+            let first3d = -1;
+            while (performance.now() - t0 < 16000) {
+              await sleep(250);
+              try { here = b.webview.getURL(); } catch (e) {}
+              if (first3d < 0 && v.graph && v.graph.graphData().nodes.some((n) => n.url === here && n.level !== "page"))
+                first3d = performance.now() - t0;
+            }
+            const tr = P.list().filter((t) => t.kind === "live" && t.url === here);
+            const ov = tr.map((t) => t.stages.drain_to_overlay).filter((x) => typeof x === "number").sort((a, c) => a - c);
+            const d3 = tr.map((t) => t.stages.drain_to_3d).filter((x) => typeof x === "number").sort((a, c) => a - c);
+            const pct = (xs, q) => xs.length ? Math.round(xs[Math.min(xs.length - 1, Math.floor(xs.length * q))] * 10) / 10 : null;
+            const errs = tr.filter((t) => /error|failed/i.test(String(t.facts.why || ""))).length;
+            let page = null;
+            try {
+              page = await b.webview.executeJavaScript("(function(){var vis=function(e){var r=e.getBoundingClientRect();return r.width>8&&r.height>8};" +
+                "var t=(document.body&&document.body.innerText)||'';return {title:document.title.slice(0,60),text_chars:t.length," +
+                "images:[].filter.call(document.images,vis).length,videos:document.querySelectorAll('video').length," +
+                "json_scripts:document.querySelectorAll('script[type*=json]').length,iframes:document.querySelectorAll('iframe').length," +
+                "shadow_hosts:[].filter.call(document.querySelectorAll('*'),function(e){return !!e.shadowRoot}).length," +
+                "login_wall:/log ?in|sign ?in|create (new )?account/i.test(t.slice(0,4000))&&t.length<6000}})()");
+            } catch (e) { page = { error: String(e).slice(0, 80) }; }
+            // The page's own motion, no gesture: drains with chunks in 5 s idle.
+            const before = P.list().filter((t) => t.kind === "live" && t.url === here && t.facts.chunks_in_drain).length;
+            await sleep(5000);
+            const idle = P.list().filter((t) => t.kind === "live" && t.url === here && t.facts.chunks_in_drain).length - before;
+            return { url: ${JSON.stringify(url)}, landed: here, planted: ${planted},
+                     drains: tr.length, drains_with_chunks: tr.filter((t) => t.facts.chunks_in_drain).length,
+                     chunks_drained: tr.reduce((s, t) => s + (t.facts.chunks_in_drain || 0), 0),
+                     overlay_p50: pct(ov, 0.5), overlay_p95: pct(ov, 0.95), to3d_p50: pct(d3, 0.5),
+                     first_3d_ms: Math.round(first3d), capture_errors: errs, idle_drains_with_chunks: idle, page };
+          } finally {
+            if (${planted}) b.setLive(true);
+          }
+        })()`, { timeout: 90000 });
+        const rows = [];
+        for (const url of PAGES) {
+          let r;
+          try { r = await visit(url, false); } catch (e) { r = { url, error: String(e).slice(0, 120) }; }
+          try {
+            const st = await ask("/page_status?url=" + encodeURIComponent(r.landed || url));
+            r.stored = { chunks: st.chunks, embedded: st.embedded, projected: st.projected, kinds: st.kinds,
+                         over_window: st.over_window, tokens_max: st.tokens_max };
+          } catch (e) { r.stored = { error: String(e).slice(0, 80) }; }
+          rows.push(r);
+        }
+        const judge = (r) => {
+          const why = [];
+          if (r.error) why.push("error");
+          if (!(r.stored && r.stored.chunks > 0)) why.push("nothing stored");
+          if (!(r.overlay_p95 !== null && r.overlay_p95 < 50)) why.push("overlay p95 >= 50 ms");
+          if (!(r.first_3d_ms >= 0 && r.first_3d_ms < 8000)) why.push("no 3D node within 8 s");
+          if (r.page && r.page.images > 2 && !(r.stored && r.stored.kinds && r.stored.kinds.images > 0)) why.push("shows pictures, stores none");
+          if (r.capture_errors) why.push("capture errors");
+          return why;
+        };
+        for (const r of rows) r.failed = judge(r);
+        // Non-vacuity: the same judgement on a visit with live capture OFF
+        // must fail (a page-scoring check that could not see a dead stream
+        // would pass everything).
+        const plantedRow = await visit("https://duckduckgo.com/?q=radix+trie+planted" + Date.now() % 1000 + "&ia=web", true);
+        plantedRow.stored = await ask("/page_status?url=" + encodeURIComponent(plantedRow.landed)).then((s) => ({ chunks: s.chunks, kinds: s.kinds })).catch(() => ({}));
+        plantedRow.failed = judge(plantedRow);
+        const passing = rows.filter((r) => !r.failed.length).length;
+        return { pass: passing === rows.length && plantedRow.failed.length > 0,
+                 evidence: { passing, of: rows.length, rows, planted: plantedRow } };
+      },
+    },
     {
       id: "G-53",
       asks: "the projector draws PAGES by default, not chunks",
@@ -1370,8 +1791,12 @@ export function makeChecks(env) {
           const radius = (n) => (n.image && n.image.src)
             ? sphereOf(n) * PANEL_GAIN
             : sphereOf(n);
-          const ns = d.nodes.filter(n => Number.isFinite(n.x));
+          // Projected nodes only: streaming (force) nodes are drawn as their
+          // own small translucent spheres and spaced by G-93's rule, not by
+          // this collider.
+          const ns = d.nodes.filter(n => Number.isFinite(n.x) && !n.force);
           const sample = ns.slice(0, 1200);
+          const C = v.collider || { safety: 1.25, margin: 0 };
           let pairs = 0, worst = 0, panels = 0, inBand = 0;
           for (let i = 0; i < sample.length; i++) {
             for (let j = i + 1; j < sample.length; j++) {
@@ -1381,7 +1806,7 @@ export function makeChecks(env) {
               if (d - ra - rb < 0) {
                 pairs++; worst = Math.max(worst, ra + rb - d);
                 if ((a.image&&a.image.src)||(b.image&&b.image.src)) panels++;
-              } else if (d - (ra + rb) * 1.25 < 0) {
+              } else if (d - (ra + rb) * C.safety - 2 * C.margin < 0) {
                 // The quarter-distance safety factor the collider actually
                 // runs at. Reported apart from real overlap: a pair inside the
                 // band is the requirement's margin being used, not a defect.
@@ -3402,9 +3827,9 @@ export function makeChecks(env) {
           const host = [...v.containerEl.querySelectorAll(".domvec-bb")]
             .map((e) => e.querySelector(".domvec-html-host")).find(Boolean);
           const inside = host && host.shadowRoot
-            ? host.shadowRoot.querySelectorAll("*").length : 0;
+            ? host.shadowRoot.querySelectorAll("*").length : (bb ? bb.elements : 0);
           v.closeBillboard(again.id);
-          return { node: again.id, billboard: bb, shadow_elements: inside,
+          return { node: again.id, billboard: bb, shadow_elements: inside, form: bb ? bb.form : null,
                    chunk_panes: app.workspace.getLeavesOfType("domvec-chunk-view").length };
         `);
         return {

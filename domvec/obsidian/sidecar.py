@@ -29,6 +29,7 @@ a handle on it.
 from __future__ import annotations
 
 import json
+import re
 import threading
 from pathlib import Path
 from collections import deque
@@ -50,6 +51,27 @@ from .layout import (build_layout, build_page_layout, place_into,
 #: dropped mid-page could not resolve the next drain's interned segments and
 #: would fail in a way that looks like a page suddenly going empty.
 _capture_sessions: Dict[str, Dict] = {}
+
+
+_MEDIA_LINE = re.compile(r"^\s*(?:- )?\([^)]*\)\[[^\]]+\]", re.M)
+_JSON_LINE = re.compile(r"^\s*(?:- )?`?[\[{]\s*\"", re.M)
+_LINKISH = re.compile(r"!?\[[^\]]*\]\([^)]*\)")
+
+
+def _content_kinds(mds) -> Dict[str, int]:
+    """Counts of content kinds across a page's chunk markdown: pictures,
+    other media (video/audio, drawn ``(alt)[url]``), JSON-looking lines, and
+    chunks with any words. Read from the projection, so it names what the
+    reader's panels and the index were given."""
+    out = {"images": 0, "media": 0, "json": 0, "text_chunks": 0}
+    for md in mds:
+        md = md or ""
+        out["images"] += md.count("![")
+        out["media"] += len(_MEDIA_LINE.findall(md))
+        out["json"] += len(_JSON_LINE.findall(md))
+        if re.search(r"[A-Za-z]{3,}", _LINKISH.sub("", md)):
+            out["text_chunks"] += 1
+    return out
 
 
 def sensor_restarted(session: Dict, body: Dict) -> bool:
@@ -1834,6 +1856,9 @@ class _Handler(BaseHTTPRequestHandler):
                 "chunks": len(rows),
                 "drawable": int(drawable),
                 "empty_md": sum(1 for _c, md, _e in rows if not (md or "").strip()),
+                # What KINDS of content the page's chunks carry (G-99): a
+                # page that shows pictures and stores none has lost them.
+                "kinds": _content_kinds(md for _c, md, _e in rows),
                 "embedded": sum(1 for _c, _m, e in rows if e),
                 "window": window,
                 "tokens_max": toks[-1] if toks else 0,
@@ -2000,9 +2025,13 @@ class _Handler(BaseHTTPRequestHandler):
                                             "ms": round((time.perf_counter() - _t0) * 1000, 1)})
                         self._send(200, got)
                         return
-                if proj is not None and (proj.fitting or proj.projection is None):
+                if proj is not None and proj.projection is None:
                     # Not fitted yet: say so rather than fall back to a
                     # different model the stream will never place into.
+                    # (A REFIT is not this: the old fit keeps answering until
+                    # the new one is swapped in, `G-74`. Refusing on
+                    # `proj.fitting` blanked the picture -- and every unfold --
+                    # for the length of each refit, 2026-09-27.)
                     self._send(200, {"nodes": [], "edges": [], "n": 0,
                                      "level": level, "source": "projector",
                                      "fitting": True,
@@ -2234,13 +2263,16 @@ def serve(workspace, port: int = 8787, *, block: bool = True,
             # Addendum VII: UMAP over one centroid per page; a page's chunks
             # are its patricia tree, laid out by force in the pane. The
             # centroid is the triple mechanism's unless told otherwise.
-            # Behind DOMVEC_PROJECTOR=page until the pane opens page trees
-            # (DESIGN_VII §9 step 3); the chunk projector until then, so the
-            # running app stays coherent at every commit.
+            # THE DEFAULT since 2026-09-27 ("make the page-centroid UMAP the
+            # default projector"): fitted on page centroids, every chunk
+            # transformed through that fit. The semantic centroid by default,
+            # because it is the space a chunk vector lives in; the triple one
+            # stays selectable. DOMVEC_PROJECTOR=chunk brings back the fit on
+            # a sample of chunks.
             import os as _os
-            if _os.environ.get("DOMVEC_PROJECTOR", "chunk") == "page":
+            if _os.environ.get("DOMVEC_PROJECTOR", "page") == "page":
                 _projector.PROJECTOR = _projector.PageProjector(
-                    dims=3, centroid=_os.environ.get("DOMVEC_PAGE_CENTROID", "triple"))
+                    dims=3, centroid=_os.environ.get("DOMVEC_PAGE_CENTROID", "semantic"))
             else:
                 _projector.PROJECTOR = _projector.ChunkProjector(dims=3)
             _projector.PROJECTOR.on_batch = lambda r: _profile("project", r)

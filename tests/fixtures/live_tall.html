@@ -31,7 +31,7 @@ ours.</p>
   var loaded = 0;
   addEventListener("scroll", function () {
     var reached = Math.floor((scrollY + innerHeight) / (innerHeight * 1.5));
-    while (loaded < reached && loaded < 8) {
+    while (loaded < reached && loaded < 12) {   // 12: clearly past a fixed schedule's 8.2 viewports (S-8 flaked at 8)
       loaded += 1;
       (function (n) {
         setTimeout(function () {

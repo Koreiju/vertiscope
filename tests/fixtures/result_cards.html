@@ -1,0 +1,58 @@
+<!doctype html><html><head><meta charset="utf-8"><title>result cards</title><style>
+body{background:#1c1c1c;color:#eee;font-family:Arial,sans-serif;font-size:16px;margin:0}
+main{width:720px;margin:0 auto;padding:24px}
+ol{list-style:none;padding:0;margin:0}
+li.r{margin:0 0 28px}
+.site{display:flex;align-items:center;gap:10px}
+.fav{width:28px;height:28px;border-radius:50%;background:#333;padding:2px}
+.name{margin:0;font-size:14px}
+a.crumb{color:#aaa;text-decoration:none;font-size:13px}
+a.crumb p{margin:0}
+.menu{display:none}
+h2{margin:6px 0 4px;font-size:20px;font-weight:400}
+a.title{color:#8ab4f8;text-decoration:none}
+.snip{font-size:15px;line-height:1.5;color:#ddd}
+.snip b{color:#fff}
+#more{margin:12px 0 900px;padding:10px 18px;border-radius:18px;background:#333;color:#eee;border:0;font-size:15px}
+</style></head><body><main>
+<form action="/?q=radix+tree&ia=chat"><button type="button">Ask the chat</button></form>
+<ol id="results">
+<li class="r"><article>
+  <div class="site"><img class="fav" src="fav.svg" alt=""><div><p class="name">github.com</p>
+    <a class="crumb" href="https://github.com/Tessil/hat-trie"><div><p><span>https://github.com</span> › Tessil › hat-trie</p></div></a></div>
+    <div class="menu"><button>Only include results for this site</button><button>Block this site</button></div></div>
+  <h2><a class="title" href="https://github.com/Tessil/hat-trie"><span>A C++ implementation of a fast and memory efficient HAT-trie</span></a></h2>
+  <div class="snip"><span><span><b>Trie</b> implementation based on the HAT-trie paper, a cache-conscious <b>trie</b> based data structure for strings with fast lookups.</span></span></div>
+</article></li>
+<li class="r"><article>
+  <div class="site"><img class="fav" src="fav.svg" alt=""><div><p class="name">en.wikipedia.org</p>
+    <a class="crumb" href="https://en.wikipedia.org/wiki/Suffix_tree"><div><p><span>https://en.wikipedia.org</span> › wiki › Suffix_tree</p></div></a></div>
+    <div class="menu"><button>Only include results for this site</button><button>Block this site</button></div></div>
+  <h2><a class="title" href="https://en.wikipedia.org/wiki/Suffix_tree"><span>Suffix tree - Wikipedia</span></a></h2>
+  <div class="snip"><span><span><b>A suffix tree</b> is a compressed trie containing all the suffixes of the given text as their keys and positions in the <b>text</b> as their values.</span></span></div>
+</article></li>
+<li class="r"><article>
+  <div class="site"><img class="fav" src="fav.svg" alt=""><div><p class="name">www.geeksforgeeks.org</p>
+    <a class="crumb" href="https://www.geeksforgeeks.org/dsa/trie"><div><p><span>https://www.geeksforgeeks.org</span> › dsa › trie</p></div></a></div>
+    <div class="menu"><button>Only include results for this site</button><button>Block this site</button></div></div>
+  <h2><a class="title" href="https://www.geeksforgeeks.org/dsa/trie"><span>Trie Data Structure Tutorial</span></a></h2>
+  <div class="snip"><span><span><b>Trie</b> is a tree-like data structure used for efficient retrieval of key-value pairs in a <b>trie</b> of strings.</span></span></div>
+</article></li>
+<li class="r"><article>
+  <div class="site"><img class="fav" src="fav.svg" alt=""><div><p class="name">stackoverflow.com</p>
+    <a class="crumb" href="https://stackoverflow.com/q/56897883"><div><p><span>https://stackoverflow.com</span> › questions › 56897883</p></div></a></div>
+    <div class="menu"><button>Only include results for this site</button><button>Block this site</button></div></div>
+  <h2><a class="title" href="https://stackoverflow.com/q/56897883"><span>How would an LRU cache work for a trie?</span></a></h2>
+  <div class="snip"><span><span><b>Cache</b> eviction in a trie removes the least recently used leaf, and the <b>trie</b> shrinks by one path.</span></span></div>
+</article></li>
+</ol>
+<button id="more">More results</button>
+<div style="height:1200px"></div>
+</main><script>
+var MORE = "<li class=\"r\"><article>\n  <div class=\"site\"><img class=\"fav\" src=\"fav.svg\" alt=\"\"><div><p class=\"name\">example1.org</p>\n    <a class=\"crumb\" href=\"https://example1.org/p/1\"><div><p><span>https://example1.org</span> \u203a p \u203a 1</p></div></a></div>\n    <div class=\"menu\"><button>Only include results for this site</button><button>Block this site</button></div></div>\n  <h2><a class=\"title\" href=\"https://example1.org/p/1\"><span>More result 1 about radix tries</span></a></h2>\n  <div class=\"snip\"><span><span><b>Radix</b> trees compress single-child chains so that each <b>radix</b> node holds a run of characters, result 1.</span></span></div>\n</article></li>\n<li class=\"r\"><article>\n  <div class=\"site\"><img class=\"fav\" src=\"fav.svg\" alt=\"\"><div><p class=\"name\">example2.org</p>\n    <a class=\"crumb\" href=\"https://example2.org/p/2\"><div><p><span>https://example2.org</span> \u203a p \u203a 2</p></div></a></div>\n    <div class=\"menu\"><button>Only include results for this site</button><button>Block this site</button></div></div>\n  <h2><a class=\"title\" href=\"https://example2.org/p/2\"><span>More result 2 about radix tries</span></a></h2>\n  <div class=\"snip\"><span><span><b>Radix</b> trees compress single-child chains so that each <b>radix</b> node holds a run of characters, result 2.</span></span></div>\n</article></li>\n<li class=\"r\"><article>\n  <div class=\"site\"><img class=\"fav\" src=\"fav.svg\" alt=\"\"><div><p class=\"name\">example3.org</p>\n    <a class=\"crumb\" href=\"https://example3.org/p/3\"><div><p><span>https://example3.org</span> \u203a p \u203a 3</p></div></a></div>\n    <div class=\"menu\"><button>Only include results for this site</button><button>Block this site</button></div></div>\n  <h2><a class=\"title\" href=\"https://example3.org/p/3\"><span>More result 3 about radix tries</span></a></h2>\n  <div class=\"snip\"><span><span><b>Radix</b> trees compress single-child chains so that each <b>radix</b> node holds a run of characters, result 3.</span></span></div>\n</article></li>\n<li class=\"r\"><article>\n  <div class=\"site\"><img class=\"fav\" src=\"fav.svg\" alt=\"\"><div><p class=\"name\">example4.org</p>\n    <a class=\"crumb\" href=\"https://example4.org/p/4\"><div><p><span>https://example4.org</span> \u203a p \u203a 4</p></div></a></div>\n    <div class=\"menu\"><button>Only include results for this site</button><button>Block this site</button></div></div>\n  <h2><a class=\"title\" href=\"https://example4.org/p/4\"><span>More result 4 about radix tries</span></a></h2>\n  <div class=\"snip\"><span><span><b>Radix</b> trees compress single-child chains so that each <b>radix</b> node holds a run of characters, result 4.</span></span></div>\n</article></li>\n<li class=\"r\"><article>\n  <div class=\"site\"><img class=\"fav\" src=\"fav.svg\" alt=\"\"><div><p class=\"name\">example5.org</p>\n    <a class=\"crumb\" href=\"https://example5.org/p/5\"><div><p><span>https://example5.org</span> \u203a p \u203a 5</p></div></a></div>\n    <div class=\"menu\"><button>Only include results for this site</button><button>Block this site</button></div></div>\n  <h2><a class=\"title\" href=\"https://example5.org/p/5\"><span>More result 5 about radix tries</span></a></h2>\n  <div class=\"snip\"><span><span><b>Radix</b> trees compress single-child chains so that each <b>radix</b> node holds a run of characters, result 5.</span></span></div>\n</article></li>\n<li class=\"r\"><article>\n  <div class=\"site\"><img class=\"fav\" src=\"fav.svg\" alt=\"\"><div><p class=\"name\">example6.org</p>\n    <a class=\"crumb\" href=\"https://example6.org/p/6\"><div><p><span>https://example6.org</span> \u203a p \u203a 6</p></div></a></div>\n    <div class=\"menu\"><button>Only include results for this site</button><button>Block this site</button></div></div>\n  <h2><a class=\"title\" href=\"https://example6.org/p/6\"><span>More result 6 about radix tries</span></a></h2>\n  <div class=\"snip\"><span><span><b>Radix</b> trees compress single-child chains so that each <b>radix</b> node holds a run of characters, result 6.</span></span></div>\n</article></li>\n<li class=\"r\"><article>\n  <div class=\"site\"><img class=\"fav\" src=\"fav.svg\" alt=\"\"><div><p class=\"name\">example7.org</p>\n    <a class=\"crumb\" href=\"https://example7.org/p/7\"><div><p><span>https://example7.org</span> \u203a p \u203a 7</p></div></a></div>\n    <div class=\"menu\"><button>Only include results for this site</button><button>Block this site</button></div></div>\n  <h2><a class=\"title\" href=\"https://example7.org/p/7\"><span>More result 7 about radix tries</span></a></h2>\n  <div class=\"snip\"><span><span><b>Radix</b> trees compress single-child chains so that each <b>radix</b> node holds a run of characters, result 7.</span></span></div>\n</article></li>\n<li class=\"r\"><article>\n  <div class=\"site\"><img class=\"fav\" src=\"fav.svg\" alt=\"\"><div><p class=\"name\">example8.org</p>\n    <a class=\"crumb\" href=\"https://example8.org/p/8\"><div><p><span>https://example8.org</span> \u203a p \u203a 8</p></div></a></div>\n    <div class=\"menu\"><button>Only include results for this site</button><button>Block this site</button></div></div>\n  <h2><a class=\"title\" href=\"https://example8.org/p/8\"><span>More result 8 about radix tries</span></a></h2>\n  <div class=\"snip\"><span><span><b>Radix</b> trees compress single-child chains so that each <b>radix</b> node holds a run of characters, result 8.</span></span></div>\n</article></li>\n<li class=\"r\"><article>\n  <div class=\"site\"><img class=\"fav\" src=\"fav.svg\" alt=\"\"><div><p class=\"name\">example9.org</p>\n    <a class=\"crumb\" href=\"https://example9.org/p/9\"><div><p><span>https://example9.org</span> \u203a p \u203a 9</p></div></a></div>\n    <div class=\"menu\"><button>Only include results for this site</button><button>Block this site</button></div></div>\n  <h2><a class=\"title\" href=\"https://example9.org/p/9\"><span>More result 9 about radix tries</span></a></h2>\n  <div class=\"snip\"><span><span><b>Radix</b> trees compress single-child chains so that each <b>radix</b> node holds a run of characters, result 9.</span></span></div>\n</article></li>\n<li class=\"r\"><article>\n  <div class=\"site\"><img class=\"fav\" src=\"fav.svg\" alt=\"\"><div><p class=\"name\">example10.org</p>\n    <a class=\"crumb\" href=\"https://example10.org/p/10\"><div><p><span>https://example10.org</span> \u203a p \u203a 10</p></div></a></div>\n    <div class=\"menu\"><button>Only include results for this site</button><button>Block this site</button></div></div>\n  <h2><a class=\"title\" href=\"https://example10.org/p/10\"><span>More result 10 about radix tries</span></a></h2>\n  <div class=\"snip\"><span><span><b>Radix</b> trees compress single-child chains so that each <b>radix</b> node holds a run of characters, result 10.</span></span></div>\n</article></li>";
+document.getElementById("more").addEventListener("click", function () {
+  setTimeout(function () {
+    document.getElementById("results").insertAdjacentHTML("beforeend", MORE);
+  }, 300);
+});
+</script></body></html>

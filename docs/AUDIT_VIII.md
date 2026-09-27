@@ -211,3 +211,20 @@ replaced stays open), M-3 (the Python scan's tail-text order), R-2 (disk 98%
 full), R-3 (a plugin reload drops pins), P-1 (page-centroid UMAP not the
 default; whole-tree open/close; long links), P-2 (`G-5`), P-3 (seed count
 variance).
+
+## Pass 3 (2026-09-27) — the unified loop's first pass: pictures against measurements
+
+Addendum IX's rule for this pass: judge the app as a person looking at it
+would, and where the picture shows something the measurements miss, fix the
+MEASUREMENT first (an in-app check with a planted arm), then the app.
+
+| # | what the picture / the user showed | what the measurements said | measurement added | app fix |
+|---|---|---|---|---|
+| D-35 | navigating: overlay and stream "completely degrade" | per-drain overlay p50 ~4 ms -- every drain that RAN was fast; nothing counted the drains that did not run | `D-35`: longest gap between drains across a navigation to a new heavy page, and time to the first hover; planted arm = drain loop held across the capture + store-only hover | encoder outside the store lock, foreground captures first; captures queued (drains never wait on the store); page left settled after the new page's first capture; hover from the page's own chunking (`at`) |
+| D-37 | new-diff outlines "not observed for several minutes" | `drain_to_overlay` 4-9 ms: the outline WAS painted -- off screen, for 1.2 s | per-drain `flash` reasons (flashed / covered / unstored / offscreen / nobox); `D-37`: outlines visible after the reader scrolls to results loaded off screen; planted arm = the 1.2 s flash | streaming outlines follow their chunks until saved + 1.5 s dwell on screen |
+| D-36 | billboard and side card do not look like the page (three bullets for one sentence, `( label )`, `[..](..)`, unloaded favicons) | the panel checks (G-77/G-81/G-82) counted elements, images and cards -- none compared the panel with the PAGE | `D-36`: panel text vs the page's text, in order; distilled marks; the page's own title colour and breadcrumb colour/decoration; images loaded -- for the card AND the billboard; planted arm = distilled panels | panels render the chunk's own elements from the live page (computed styles, sandboxed frame); the distilled form fixed too (inline joins across depth, form actions hidden, `//` urls resolved) |
+| G-93 | the 3D streaming cluster reads as one grey ball | G-89 counted force nodes and coincident pairs, not spacing relative to size | `G-93`: nearest-neighbour distance in node radii, overlap share, translucency; planted arm = the old spring | rest length grows with the subtree (no cap), softer pull, siblings 3 diameters + margin apart, translucent streaming spheres |
+
+Rule added to the loop after I drove the browser while the user was using it
+(a test pin landed on their DuckDuckGo page): check for the user's activity
+before any gesture, and work on code instead when they are there.

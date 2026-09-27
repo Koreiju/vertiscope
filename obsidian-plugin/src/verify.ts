@@ -129,7 +129,12 @@ export class Verifier {
             .replace(/^\/+/, "").replace(/\.\./g, "");
           try {
             const body = await fs.readFile(path.join(dir, name));
-            res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+            // By extension: a fixture's picture has to load as a picture
+            // (D-36's check reads whether the panels' images loaded).
+            const ext = String(path.extname(name)).toLowerCase();
+            const type = ({ ".svg": "image/svg+xml", ".png": "image/png", ".json": "application/json" } as any)[ext]
+              || "text/html; charset=utf-8";
+            res.writeHead(200, { "content-type": type });
             res.end(body);
           } catch {
             res.writeHead(404).end("no such fixture");
