@@ -40,9 +40,14 @@ const XPATH_OF = "var parts=[];" +
   "parts.unshift(i>1?tag+'['+i+']':tag);el=el.parentElement;}" +
   "return '/'+parts.join('/');";
 
+/** The sensor's handle on the guest window (as `browser.ts` installs it). */
+const SENSOR_HANDLE = "__domvecSensor";
+
 export interface HoverState {
   xpath: string;
   cid: string;
+  /** Who answered: the store's chunk map, or the in-page chunking (D-35). */
+  source?: "store" | "page";
   matched: string;
   walked: number;
   rect: { x: number; y: number; w: number; h: number } | null;
@@ -106,6 +111,10 @@ export class PipelineBox {
   private hoverBusy = false;
   private resolved = new Map<string, { cid: string; matched: string; walked: number; lines: number }>();
   hover: HoverState | null = null;
+  /** Hovers answered by each source, for the harness (D-35). */
+  hoverSources = { store: 0, page: 0 };
+  /** Planted arm for D-35's check: ignore the store map, page chunking only. */
+  pageOnly = false;
 
   constructor(private wrap: HTMLElement, private sidecar: Sidecar,
               private webview: () => any,
@@ -131,12 +140,13 @@ export class PipelineBox {
     // 80 ms: the poll is two small in-page reads and a map lookup now, so a
     // shorter interval costs little and is most of the hover's latency.
     this.hoverTimer = window.setInterval(() => void this.pollHover(), 80);
+    this.streamTimer = window.setInterval(() => void this.followStreaming(), 120);
     this.draw();
   }
 
   destroy() {
     window.clearInterval(this.timer);
-    window.clearInterval(this.hoverTimer);
+    window.clearInterval(this.hoverTimer); window.clearInterval(this.streamTimer);
     this.readout?.destroy();
     this.el.remove();
     this.outline.remove();
@@ -200,18 +210,47 @@ export class PipelineBox {
       if (this.pins.length) await this.placePins();
       const t0 = performance.now();
       // The hovered element's ancestor chain, leaf first: one in-page read.
-      const chain: string[] | null = await within(wv.executeJavaScript(
+      // ...and, in the same crossing, the IN-PAGE chunking's answer: which
+      // chunk the sensor draws it in, and that chunk's box (D-35). It needs
+      // no store, so the overlay works on a page the store has not seen and
+      // in the seconds after a navigation, when the store's map is not in.
+      const got: { chain: string[]; at: { id: number; box: number[] | null; depth: number } | null } | null =
+        await within(wv.executeJavaScript(
         "(function(){var hs=document.querySelectorAll(':hover');" +
-        "if(!hs.length) return null;var el=hs[hs.length-1];var out=[];" +
+        "if(!hs.length) return null;var el=hs[hs.length-1],leaf=el;var out=[];" +
         "while(el&&el.nodeType===1&&el.tagName){var parts=[],n=el;" +
         "while(n&&n.nodeType===1&&n.tagName){var t=n.tagName.toLowerCase(),k=1,s=n.previousElementSibling;" +
         "while(s){if(s.tagName===n.tagName)k++;s=s.previousElementSibling;}" +
         "parts.unshift(k>1?t+'['+k+']':t);n=n.parentElement;}" +
-        "out.push('/'+parts.join('/'));el=el.parentElement;}return out;})()"), 400);
+        "out.push('/'+parts.join('/'));el=el.parentElement;}" +
+        "var h=window[" + JSON.stringify(SENSOR_HANDLE) + "];" +
+        "return {chain:out,at:(h&&h.at)?h.at(leaf):null};})()"), 400);
+      const chain = got ? got.chain : null;
       if (!chain || !chain.length) { this.clearHover(); return; }
       const url = this.url();
       // In memory: the same nearest-ancestor walk `/resolve` does in the store.
-      const hit = this.map.url === url ? this.map.lookup(chain) : null;
+      const hit = this.pageOnly ? null : (this.map.url === url ? this.map.lookup(chain) : null);
+      if (!hit && got && got.at && got.at.box) {
+        // The store does not know this element yet: outline the chunk the
+        // PAGE's own chunking put it in, and ring its force node.
+        const b = got.at.box;
+        const cid = `f:${url}#${got.at.id}`;
+        const changed = !this.hover || this.hover.cid !== cid;
+        this.hover = { xpath: chain[0], cid, matched: "", walked: got.at.depth, source: "page",
+                       rect: { x: b[0], y: b[1], w: b[2], h: b[3] }, lines: 0, at: performance.now() };
+        this.placeOutline();
+        const ms = performance.now() - t0;
+        this.latencies.push(Math.round(ms * 10) / 10);
+        if (this.latencies.length > 100) this.latencies.shift();
+        this.hoverSources.page++;
+        if (changed) this.onHoverChunk(cid, url);
+        if (chain[0] !== this.lastUnresolved) {
+          this.lastUnresolved = chain[0];
+          this.onUnresolved(chain[0]);
+        }
+        if (this.expanded) this.draw();
+        return;
+      }
       if (!hit) {
         // Nothing mapped draws this yet: drain NOW (`G-80`, hover-first).
         // Once per element, so resting the pointer does not drain repeatedly.
@@ -227,7 +266,8 @@ export class PipelineBox {
       // chunk are one box.
       const rect = await this.unionRect(this.map.xpaths(hit.cid));
       const changed = !this.hover || this.hover.cid !== hit.cid;
-      this.hover = { xpath: chain[0], cid: hit.cid, matched: hit.matched,
+      this.hoverSources.store++;
+      this.hover = { xpath: chain[0], cid: hit.cid, matched: hit.matched, source: "store",
                      walked: hit.walked, rect, lines: this.map.xpaths(hit.cid).length,
                      at: performance.now() };
       this.placeOutline();
@@ -287,7 +327,92 @@ export class PipelineBox {
    * time from the drain returning to the boxes being in position; the
    * latency recorded is to the next frame, when they are painted.
    */
-  flashBoxes(boxes: (number[] | null)[], t0: number, traceId: string): void {
+  // ---- streaming outlines (D-37) --------------------------------------------
+  //
+  // A new chunk stays outlined from the drain that produced it until the
+  // store confirms it saved -- the event that collapses its translucent node
+  // in 3D (Addendum IX, step 4) -- and for at least `DWELL_MS` once it has
+  // been on screen. The outline FOLLOWS it: its box is re-read from the
+  // sensor's box peripheral while it streams, so content that loaded below
+  // the fold is outlined when the reader scrolls to it. It was a 1.2 s flash
+  // of whatever was on screen at the drain, which a reader almost never saw.
+  static DWELL_MS = 1500;
+  private streamTimer = 0;
+  private streamBusy = false;
+  /** Sensor chunk id -> when it first showed on screen (0: not yet), saved? */
+  streaming = new Map<number, { shownAt: number; saved: boolean; since: number }>();
+  /** Outlines drawn by the follower on its last pass, for the harness. */
+  streamingShown = 0;
+  /** Named defect planted by a check: the old 1.2 s flash, no following. */
+  plantFlashOnly = false;
+
+  /** A drain's new chunks start streaming. */
+  markStreaming(ids: number[]): void {
+    if (this.plantFlashOnly) return;
+    const now = performance.now();
+    for (const id of ids) {
+      const had = this.streaming.get(id);
+      if (had) { had.saved = false; had.since = now; } else this.streaming.set(id, { shownAt: 0, saved: false, since: now });
+    }
+    while (this.streaming.size > 400) this.streaming.delete(this.streaming.keys().next().value as number);
+  }
+
+  /** The store confirmed these saved: their outlines go once they have dwelt. */
+  savedStreaming(ids: number[]): void {
+    for (const id of ids) { const s = this.streaming.get(id); if (s) s.saved = true; }
+  }
+
+  /** A new page: nothing on it is streaming yet. */
+  clearStreaming(): void {
+    this.streaming.clear();
+    this.diffEls.forEach((el) => el.hide());
+  }
+
+  private async followStreaming(): Promise<void> {
+    if (this.streamBusy || !this.streaming.size || !this.visible()) return;
+    const wv = this.webview();
+    if (!wv) return;
+    this.streamBusy = true;
+    try {
+      const now = performance.now();
+      for (const [id, s] of this.streaming) {
+        // Gone once saved and seen for the dwell; saved and never scrolled to
+        // within 20 s is let go too, or the set would only grow.
+        if (s.saved && ((s.shownAt && now - s.shownAt >= PipelineBox.DWELL_MS) || now - s.since > 20000)) {
+          this.streaming.delete(id);
+        }
+      }
+      const ids = [...this.streaming.keys()].slice(0, 64);
+      if (!ids.length) { this.diffEls.forEach((el) => el.hide()); this.streamingShown = 0; return; }
+      const rects: (number[] | null)[] = (await within<any>(wv.executeJavaScript(
+        "(function(ids){var h=window[" + JSON.stringify(SENSOR_HANDLE) + "];" +
+        "return h&&h.boxes?h.boxes(ids):null;})(" + JSON.stringify(ids) + ")"), 300)) || [];
+      while (this.diffEls.length < ids.length) {
+        this.diffEls.push(this.wrap.createDiv({ cls: "domvec-diff-box" }));
+      }
+      let shown = 0;
+      const t = performance.now();
+      this.diffEls.forEach((el, i) => {
+        const r = i < ids.length ? rects[i] : null;
+        if (!r) { el.hide(); return; }
+        this.placeBox(el, { x: r[0], y: r[1], w: r[2], h: r[3] });
+        if (el.style.display !== "none") {
+          shown++;
+          const s = this.streaming.get(ids[i]);
+          if (s && !s.shownAt) s.shownAt = t;
+        }
+      });
+      this.streamingShown = shown;
+    } finally {
+      this.streamBusy = false;
+    }
+  }
+
+  flashBoxes(boxes: (number[] | null)[], t0: number, traceId: string, ids: number[] = []): void {
+    // The drain's new chunks join the streaming set, which keeps them
+    // outlined from here on; this call still paints them NOW, from the boxes
+    // the drain brought, so the first paint stays in the same frame (G-90).
+    if (ids.length) this.markStreaming(ids.filter((_id, i) => !!boxes[i]));
     const rects = boxes.slice(0, 64);
     while (this.diffEls.length < rects.length) {
       this.diffEls.push(this.wrap.createDiv({ cls: "domvec-diff-box" }));
@@ -312,7 +437,9 @@ export class PipelineBox {
       if (t) { profiler().stage(t, "drain_to_overlay", ms); profiler().stage(t, "overlay_placed", placed); }
     });
     window.clearTimeout(this.diffTimer);
-    this.diffTimer = window.setTimeout(() => this.diffEls.forEach((el) => el.hide()), 1200);
+    if (this.plantFlashOnly || !ids.length) {
+      this.diffTimer = window.setTimeout(() => this.diffEls.forEach((el) => el.hide()), 1200);
+    }
   }
 
   /**

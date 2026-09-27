@@ -567,6 +567,10 @@ _LAYOUT_READERS = {
     # The box peripheral (G-90): the host calls it after a drain, in the same
     # round trip, for the chunks that drain named -- never during the fold.
     "boxes",
+    # The hover peripheral (D-35): which chunk draws the element under the
+    # pointer, and its box -- on a hover, never during a drain.
+    "at",
+    "runBox",
     # The actuator. `step` has to know what is on screen before it scrolls,
     # and it runs once per step rather than once per node.
     "inView",

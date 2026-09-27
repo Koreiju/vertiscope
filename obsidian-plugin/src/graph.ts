@@ -27,6 +27,7 @@ import * as THREE from "three";
 
 import { Sidecar } from "./sidecar";
 import { ChunkSurface, SurfaceHost } from "./surface";
+import { getSnapshot, renderSnapshot } from "./snapshot";
 
 export const GRAPH_VIEW = "domvec-graph-view";
 
@@ -1516,10 +1517,49 @@ export class GraphView extends ItemView {
       body.setText("a page stands for its chunks -- click to unravel it");
       return;
     }
+    // The chunk as the browser draws it (D-36), when the page gave one.
+    if (this.mountSnapshot(entry, body)) return;
     const surface = new ChunkSurface(body, node.id, this.surfaceHost,
                                      { interactive: true });
     entry.surface = surface;
     this.addChild(surface);
+  }
+
+  /** Where a link clicked inside a billboard's snapshot goes: the browser cell. */
+  onNavigate: (href: string) => void = () => {};
+
+  /**
+   * Mount the page-faithful snapshot of a chunk into a billboard body, with a
+   * toggle to the distilled form. False when there is none to show.
+   */
+  private mountSnapshot(entry: any, body: HTMLElement): boolean {
+    const snap = getSnapshot(entry.node.id);
+    if (!snap) return false;
+    body.empty();
+    entry.snapshot = true;
+    renderSnapshot(body, snap, { maxHeight: 420, onLink: (h) => this.onNavigate(h) });
+    const toggle = entry.el.querySelector(".domvec-bb-head") as HTMLElement | null;
+    if (toggle && !toggle.querySelector(".domvec-bb-form")) {
+      const t = toggle.createSpan({ cls: "domvec-bb-form", text: "md" });
+      t.setAttr("aria-label", "distilled form");
+      t.onpointerdown = (e: PointerEvent) => e.stopPropagation();
+      t.onclick = (e: MouseEvent) => {
+        e.stopPropagation();
+        const b = entry.el.querySelector(".domvec-bb-body") as HTMLElement;
+        if (entry.snapshot) {
+          b.empty();
+          entry.snapshot = false;
+          entry.surface = new ChunkSurface(b, entry.node.id, this.surfaceHost, { interactive: true });
+          this.addChild(entry.surface);
+          t.setText("page");
+        } else {
+          if (entry.surface) { this.removeChild(entry.surface); entry.surface = null; }
+          this.mountSnapshot(entry, b);
+          t.setText("md");
+        }
+      };
+    }
+    return true;
   }
 
   /**
@@ -1530,9 +1570,11 @@ export class GraphView extends ItemView {
   refreshBillboards(cids: string[]): void {
     const changed = new Set(cids);
     for (const [id, entry] of this.billboards.entries() as any) {
-      if (!changed.has(id) || !entry.surface) continue;
+      if (!changed.has(id)) continue;
       const body = entry.el.querySelector(".domvec-bb-body") as HTMLElement | null;
       if (!body) continue;
+      if (entry.snapshot) { this.mountSnapshot(entry, body); continue; }
+      if (!entry.surface) continue;
       this.removeChild(entry.surface);
       body.empty();
       entry.surface = new ChunkSurface(body, id, this.surfaceHost,

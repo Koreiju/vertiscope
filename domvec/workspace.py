@@ -1234,6 +1234,21 @@ class Workspace:
         if progress and len(self.vectors):
             progress("embed", f"{len(self.vectors)} chunk(s) queued")
         produced = self.vectors.flush(self.embedder, limit=limit)
+        return self.store_vectors(produced)
+
+    # The same flush in three steps, for a caller that must not hold its lock
+    # across the encoder: take (locked), encode (unlocked), store (locked).
+    def take_vectors(self, limit: Optional[int] = None):
+        if self.embedder is None or self.embeddings is None:
+            return []
+        return self.vectors.take(limit)
+
+    def encode_taken(self, items) -> Dict[str, np.ndarray]:
+        if not items or self.embedder is None:
+            return {}
+        return self.vectors.embed(self.embedder, items)
+
+    def store_vectors(self, produced) -> Dict[str, int]:
         #: Which chunks this flush gave a vector, so a consumer downstream --
         #: the sidecar's chunk projector -- is handed exactly the delta.
         self.last_embedded = list(produced or ())

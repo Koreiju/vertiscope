@@ -1457,6 +1457,272 @@ own x still lets go of all three. Amends `G-78` ("closed together").*
 ---
 
 
+## Addendum IX, 2026-09-27 - one loop, judged by the eye; the stream's order of events; everything on a page; notebooks next
+
+> Please merge/synthesize the two running loops and re-run them, also
+> incorporating our shift in design features without de-focusing on the
+> totality of the context of *all* our requirements, **no matter whether or
+> not they are reported or measured to be completed or accomplished, there is
+> likely hidden detail underlying more requirements that are predicates to
+> what is already in our PRD, and each modality of our full app's play loop
+> needs to be properly situated with foundational conceptacles that ensure
+> stable interactions between each component of our main features. There is
+> also likely a forgotten gap on some other panels (like jupyter nodebooks
+> with web browsers), but before we get there, we need to focus solely on the
+> various successes and abilities to properly assess both with sparing visual
+> snapshots and MCP-based measurements that are informed by what information
+> in the snapshots is missed by the MCP, and the judgements of this
+> information is from the perspective of what a human user would most likely
+> say about the visual feedback component of the app, and allow that to
+> better inform both MCP design as well as the app's design overall. Make sure
+> you get all of this in a new and unified loop cron on 30 minute intervals,
+> including the crucial influencing factors I am mentioning here. The human's
+> visual evaluation should be what informs our app's design for both features
+> and MCP-based interaction testing. This can most likely also be done by chat
+> agents as well. However, "what the human would say" is honestly both a
+> combination of what the requirements are intended to state as overall
+> feature-experience implications, and what the human qualitatively speaking
+> from visual feedback and the intended effects and visual distributions of
+> our force-directed, UMAP, etc, and most importantly the when and how of each
+> of our steps in layout rendering:
+>
+> * Initial force-directed layout on chunk diffs that are from most current
+>   streams from the web browser, and these are preceded by the in-browser
+>   shadow DOM recursive chunking algorithms themselves, where first the
+>   recursive mutationobserver chunking updates on the 256 token context
+>   window first produce the highlight-when-hover panels in the milliseconds
+>   (and you must always check for improvements to this end to get as close to
+>   near-instant, single-digit millisecond or even microsecond updates from the
+>   mutations to the chunk diffs in O(delta) to the overlay), and then these
+>   chunk diffs (still following necessary deduplication, though, and all
+>   insights learned on the *git* diff of our recursive chunking algorithm
+>   content completeness and deduplication efficiency/full content coverage
+>   precision and that sort of thing) are then immediately streamed to the 3D
+>   gui where they are rendered. These two steps should happen *before* even
+>   saving to DB if possible/necessary, where DB saves are after the full
+>   pipeline stream in the GUI has completed, and this is also where
+>   vectorization would naturally happen as well so the two steps segmented
+>   there in the sequence of processing would make the most sense. So, these
+>   immediate streams on O(delta) as chunk diffs are updates on the browser
+>   side are first rendered with force-directed layouts without an upper bound
+>   on link lengths and perhaps more lenient/relaxed attractive forces (rather
+>   than strong repulsion). Then, once the chunks are streamed to the DB and
+>   queued for vectorization, umap fits, and chunk projection, that is where
+>   the later priorities of 3D rendering schemes come into play. The
+>   processing on UMAP can actually be simplified even more so than our
+>   requirements already have stated. We can simply vectorize the chunk diffs
+>   (ensuring deduplication on DB-side as well, including vectorization steps,
+>   perhaps some tests for this, and new tests once the old ones pass to
+>   double-check for new edge cases) and immediately compute the subchunk
+>   centroid and project it over the currently fitted UMAP (or fit for the
+>   first time once reached an appropriate number of scanned pages has been
+>   reached for a UMAP fit). As soon as the diffs are confirmed saved to the
+>   DB, but before they are vectorized and UMAP fit, the force-directed layout
+>   persists, but *those specific nodes that have been confirmed saved to db
+>   are then collapsed to their root url nodes, even if their roots haven't
+>   even been projected or fitted to yet*, and the root nodes are simple
+>   force-directed as well until projected and streamed back to the frontend
+>   3D layout. However, note that force-directed subchunks are replaced with
+>   UMAP projections (with some force direction afterwards for simple things
+>   like collision boundaries defined as the diameter multiplied by some
+>   safety factor for space between real nodes by some extra invisible barrier
+>   length that I would argue is integer-valued in its safety factors). So, as
+>   soon as the db pings back that the one node in the diff from any set of
+>   the streams has been saved, that one node collapses (still force-directed
+>   only until umap projections return) to its root. When the roots are
+>   clicked, all nodes expand and show a complete tree structure on the
+>   patricia trie. When the roots that are uncollapsed are clicked again, all
+>   the chunks for that page collapse back. UMAP coordinates for projected
+>   chunks are saved to DB, but not their force-directed updates. All
+>   coordinates in the DB for all 512-chunks are re-projected over the UMAP
+>   upon a new re-fit on an updated set of the full web history of urls/pages.
+>   Chunk colouring is also a component of UMAP fits, note that, but also
+>   force-directed layouts initialize to simple translucent nodes to signify
+>   chunks that are part of a stream through the diff and that are more
+>   temporary signals that this is the streaming happening at the current
+>   time while scanning is happening.
+> * Please make sure *all content that could possibly be detected, whether it
+>   be text; json; images; videos; media; and so on are being detected* and I
+>   would again suggest intelligent and planned searches over the git diff for
+>   these things as well. While this is happening, you will also have to
+>   confirm that all images are actually presented in the 3D GUI, and that
+>   re-fetches aren't required by locally saving the media in a workspace
+>   cache somewhere along with its original web data.
+> * Please test on more difficult and larger-scale pages like archive,
+>   youtube, instagram, amazon, facebook, netflix, imdb, duckduckgo,
+>   richardmille (which has difficult-to-spot rotating panels with JSON),
+>   bandcamp (a live-events updates on the set of albums just released,
+>   challening adapting subchunks and updating over full diffs over time) etc
+> * Snapshot only important intermediate steps, see what the measurements
+>   miss from the requirements, fix up the measurements and then the app that
+>   that order, make this part of the new synthesized loop
+> * shadow DOM panels in the 3D gui for opened 512 chunk nodes aren't
+>   necessarily 'interactive on their xpaths' and so the buttons are just
+>   stale. I think *some* amount of html-based rendering improvements on these
+>   chunk panels in the 3D viewer are also in order.
+> * We should also go over some more of the older design documents and more
+>   previous requirements on designs for jupyter kernels with terminals and
+>   web browser cells as well, now that our browser panel is basically all
+>   set. There are quite a few details on these designs that have already been
+>   recorded and identified somewhere in our docs. There are also some points
+>   in the older docs about bringing in our local set of python packages and
+>   structuring them similarly to how we're doing it for our web interface.
+>   So, we'd render each python package as a tree-structured UMAP projection
+>   on the chunked comments/code docs, and show the full dependencies on
+>   variables to modules to directories as well, but within a chunk-localized
+>   setting. This is where our parts on notebook kernels get really fun,
+>   because one thing that can be crucially linked is this chunk-based map of
+>   locally installed python packages and bringing these chunks into code
+>   prototypes in jupyter python cells on a notebook. This includes our own
+>   codebase for the project. I think some other design docs also discuss
+>   heavily on chats with chat models and protocols for how chat inputs and
+>   outputs are formatted with our notebook kernels. We can iterate on the
+>   chat-side details later, but jupyter notebooks with all our extended
+>   features and connections to our `pip list` of python packages as web
+>   chunks are our next steps that we can also begin building toward
+>   simultaneously with the quality-related components of our web streaming
+>   and 3D layout interfaces themselves.
+> * All of these updates must be collected into our current PRD.
+> * Currently when using the app, I see that the chunk overlay and streaming
+>   from the electron scanning completely degrades when navigating to a new
+>   page which is suspicious
+
+*Read as, in the order the stream runs (this replaces the order `G-89` and
+`G-91` assumed, where a chunk collapsed only once the TRANSFORM had placed
+it):*
+
+1. **Mutation -> chunk diff -> overlay**, in the page, O(delta), single-digit
+   milliseconds or better; the overlay (hover highlights) is the first thing
+   drawn. Always measured, always pushed lower.
+2. **Diff -> 3D, before the store.** The deduplicated diff streams straight
+   to the graph and is drawn FORCE-DIRECTED: no upper bound on link length,
+   relaxed attraction rather than strong repulsion, TRANSLUCENT nodes that say
+   "this is streaming now".
+3. **Store, then embed.** The capture is written after the GUI has drawn it;
+   vectorization follows the write. Deduplication holds on the store side
+   too, including the vectors (tests, then new edge-case tests once those
+   pass).
+4. **Saved -> collapse to the root, per node.** The moment the store confirms
+   a node saved, THAT node collapses into its page's root node -- before any
+   vector, before any projection, even if the root itself is not projected
+   yet. An unprojected root is itself force-directed.
+5. **Embedded -> projected.** Each new chunk's vector is projected through
+   the current UMAP fit right away (the sub-chunk centroid, projected), or the
+   first fit runs once enough pages are scanned. A projection REPLACES the
+   force position; a light force pass afterwards only keeps collision
+   spacing: diameter x an INTEGER safety factor, plus an invisible margin.
+6. **Root click toggles the whole tree**: click a collapsed root, all its
+   chunks expand as the complete patricia tree; click again, they collapse.
+7. **Persistence**: UMAP coordinates are stored per chunk; force positions
+   never are. A re-fit (over the whole page history) re-projects every
+   stored 512-chunk. Colour comes from the fit.
+
+*And around that order:*
+
+- **One loop**, 30 minutes, replacing the build loop and the audit loop.
+  Each pass is judged the way a person looking at the app would judge it:
+  sparing screenshots at the steps that matter, compared against what the
+  MCP measured; where the picture shows something the measurement missed,
+  the MEASUREMENT is fixed first, then the app. Every requirement is in
+  scope, "Done" rows included -- their predicates are where hidden detail
+  hides.
+- **Everything on a page is detected**: text, JSON, images, video, media.
+  Images reach the 3D view, and media is cached in the workspace with its
+  source so nothing is fetched twice.
+- **Hard pages**: archive.org, YouTube, Instagram, Amazon, Facebook, Netflix,
+  IMDb, DuckDuckGo, Richard Mille (rotating panels fed by JSON), Bandcamp
+  (a live feed of new releases -- sub-chunks that keep changing).
+- **Billboards render HTML**: the opened chunk's panel should look like the
+  chunk, and its controls should not pretend to be live when they are not.
+- **Notebooks next**, in parallel with the quality work: gather what the old
+  design docs already decided about kernels, terminals and browser cells;
+  each installed Python package rendered as a tree-shaped projection of its
+  chunked comments and docs, with dependencies from variable to module to
+  directory; package chunks pulled into Jupyter cells as code prototypes; our
+  own codebase included. Chat protocols later.
+- **A defect**: navigating to a new page, the overlay and the streaming
+  "completely degrade".
+
+> I'd like you to double-check the detail of the new loop task because I
+> think it might skimp on plugin-mcp-test alignment where all tests are run
+> directly through the app in ways that are observable to the tools and
+> yourself
+
+*Read as: the loop must not let a terminal probe, a pytest pass or a number
+read from outside stand in for the app. Every test runs IN the app, started by
+the app's own control, and its result is something the MCP tools and I can
+observe in what the app renders. A probe's finding becomes a live check and an
+MCP-visible field before it counts. (The first draft of the loop said "a check
+or an MCP field", which allowed exactly that shortcut; rewritten the same
+hour.)*
+
+> Also, I'm sure sidecar needs refreshing
+
+> Also, please do find where our full transcript for the conversation is
+> stored and make sure to capture *all* details from my prompts that aren't
+> superseded by later prompts in the current cron loop
+
+*Read as: every prompt in the transcripts, verbatim, with what became of it
+-- live, superseded (by which), one-off, question -- and the loop reads the
+live list each pass. Built as `domvec/analytics/prompt_ledger.py`, writing
+`docs/PROMPT_LEDGER.md` (137 prompts, 2026-09-12 onward; forty-odd were
+never transcribed here, among them the observability rules, the DAG and
+clumping reports, the billboard fields and the collider factor).*
+
+> Note the panel rendering of the chunk in both GUI locations (3D billboard
+> and 2D clipboard) are discontinuous with how the text/html is rendered in
+> the original webpage, which is a bug
+
+(With a screenshot: DuckDuckGo's Search Assist answer pinned. The page shows
+one sentence -- "A **suffix trie** is a trie data structure ..." -- and both
+the billboard and the side card show it as three bullets, "A", "suffix trie",
+"is a trie data structure ..."; buttons appear as "( Search Assist )"; the
+source favicons show as "//external-content.duckduckgo.com/... could not be
+found"; a raw "/?q=suffix+tree&ia=chat" stands in for a control.)
+
+*Read as: a chunk's two panel forms must read like the page -- inline runs
+stay one line of text, controls look like controls (or say they are inert),
+images load. A DEFECT (`D-36`), and it is `G-102`'s predicate.*
+
+> I repeat, the rendering on our two chunk-level panels does not match how
+> they are rendered in the browser
+
+(With a screenshot: DuckDuckGo, a result card pinned. The page draws a
+favicon, a site name, a breadcrumb url, a blue title, a bold-led snippet and
+three thumbnails. The billboard shows "image", then "https://" as a link
+followed by raw `[www.global-traceability.com › en › radix-tree](https://...)`;
+the side card shows "( Block this site from all results )" and every
+thumbnail as `"//external-content.duckduckgo.com/iu/?u=..." could not be
+found`.)
+
+*Read as: patching the distilled reconstruction is not the fix -- a panel
+rebuilt from markdown lines cannot look like the page, because it is not the
+page's HTML. Both panels render what the BROWSER renders for that chunk: its
+own elements, read from the live page when the chunk is pinned (a read, on
+demand, like the box peripheral -- nothing written into the page), with the
+computed styles that decide how text and pictures look, absolute urls,
+scripts and handlers stripped, shown in a sandboxed frame. The distilled
+markdown stays available beside it; the stored distilled form is the offline
+fallback.*
+
+> Also, chunk streaming is heavily degraded currently (interacting with the
+> page and loading new diffs does not meet the millisecond chunk overlay
+> requirement at all, and overlays for completely new diff updates are
+> completely broken and have not been observed for several minutes)
+
+*Read as: a defect in the running app (`D-37`). Measured the same hour, on a
+DuckDuckGo query the store had never seen, "More results" clicked: the
+overlay was painted 4-9 ms after each drain, but most of a new drain lands
+OFF SCREEN (17 of 33, 13 of 17), and the outline was a 1.2 s flash -- gone
+before the reader scrolls to the new results, and never drawn again. So the
+new diff is, to the reader, never outlined. The outline has to last the way
+the 3D node does: a streaming chunk stays outlined, following the page as it
+scrolls, until the store confirms it saved (Addendum IX step 4), and for a
+minimum time once it is on screen.*
+
+---
+
+
 ## Standing instructions carried in the verbatim
 
 Two of these are process rules, not features, and they bind every future

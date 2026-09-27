@@ -420,7 +420,7 @@ export class Verifier {
       for (let i = 0; i < 25; i++) {
         let loading = false;
         try { loading = !!b.webview?.isLoading(); } catch { /* not ready */ }
-        if (!loading && !b.draining) break;
+        if (!loading && !b.draining && !b.capturing) break;
         await sleep(200);
       }
     }

@@ -720,11 +720,43 @@ class VectorQueue:
         """
         if embedder is None or not self.pending:
             return {}
-        take = len(self.pending) if limit is None else min(limit, len(self.pending))
-        items: List[Tuple[str, str]] = []
-        for _ in range(take):
-            items.append(self.pending.popitem(last=False))
+        return self.embed(embedder, self.take(limit))
 
+    def take(self, limit: Optional[int] = None) -> List[Tuple[str, str]]:
+        """Pop up to `limit` queued (cid, markdown) pairs, oldest first.
+
+        Split from `embed` so a caller can hold its store lock for the pop
+        and the write only -- not for the encoder, which is the slow part
+        (D-35: a new page's capture waited 8.8 s behind the page left
+        behind being encoded under the lock).
+        """
+        take = len(self.pending) if limit is None else min(limit, len(self.pending))
+        return [self.pending.popitem(last=False) for _ in range(take)]
+
+    def requeue(self, items: List[Tuple[str, str]]) -> None:
+        """Put taken items back at the FRONT, unless a newer text was queued
+        for the same chunk meanwhile (that one wins)."""
+        for cid, md in reversed(items):
+            if cid in self.pending:
+                continue
+            self.pending[cid] = md
+            self.pending.move_to_end(cid, last=False)
+
+    def embed(self, embedder, items: List[Tuple[str, str]]
+              ) -> Dict[str, np.ndarray]:
+        """Vectors for taken items. Touches the embedder and this queue's own
+        digest cache, never `pending` -- safe outside the caller's lock while
+        other threads queue more. On failure the items go back, then it raises."""
+        if embedder is None or not items:
+            return {}
+        try:
+            return self._embed(embedder, items)
+        except Exception:
+            self.requeue(items)
+            raise
+
+    def _embed(self, embedder, items: List[Tuple[str, str]]
+               ) -> Dict[str, np.ndarray]:
         out: Dict[str, np.ndarray] = {}
 
         # Text already embedded under some other id needs a row, not a call.

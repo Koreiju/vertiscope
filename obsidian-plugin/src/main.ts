@@ -251,7 +251,10 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
         browser.onDirty = (cids: string[]) =>
           this.eachGraph((view) => view.refreshBillboards(cids));
         browser.onPin = (cid: string) =>
-          this.eachGraph((view) => void view.pinChunk(cid));
+          this.eachGraph((view) => {
+            view.onNavigate = (href: string) => browser.go(href);
+            void view.pinChunk(cid);
+          });
         browser.onUnpin = (cid: string) =>
           this.eachGraph((view) => view.unpinChunk(cid));
         return browser;

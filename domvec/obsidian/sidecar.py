@@ -98,6 +98,35 @@ _WORK_LOCK = threading.RLock()
 #: wait for fits.
 _FIT_LOCK = threading.Lock()
 
+#: Foreground captures waiting for `_WORK_LOCK` right now. Background work
+#: (the embed worker, aggregation) steps aside while this is non-zero: the
+#: lock is not fair, and a reader who just navigated waited 8.8 s (Radix
+#: tree) and 22.8 s (DuckDuckGo) for the capture of the page they are LOOKING
+#: at, behind work for the page they left (D-35, 2026-09-27).
+_FOREGROUND = [0]
+_FOREGROUND_GUARD = threading.Lock()
+
+
+class _foreground:
+    """Mark a foreground wait for `_WORK_LOCK` for the length of a block."""
+
+    def __enter__(self):
+        with _FOREGROUND_GUARD:
+            _FOREGROUND[0] += 1
+
+    def __exit__(self, *exc):
+        with _FOREGROUND_GUARD:
+            _FOREGROUND[0] -= 1
+
+
+def _yield_to_foreground(limit_s: float = 5.0) -> float:
+    """Background work calls this before taking `_WORK_LOCK`. Returns the
+    seconds it stood aside (bounded, so background work is never starved)."""
+    started = time.perf_counter()
+    while _FOREGROUND[0] > 0 and time.perf_counter() - started < limit_s:
+        time.sleep(0.02)
+    return time.perf_counter() - started
+
 #: Raised when there are chunks waiting for vectors.
 _EMBED_WANTED = threading.Event()
 
@@ -228,6 +257,7 @@ def _aggregate_due(workspace) -> None:
     for url in due:
         _AGGREGATE_AFTER.pop(url, None)
         try:
+            _yield_to_foreground()
             asked = time.perf_counter()
             with _WORK_LOCK:
                 got_lock = time.perf_counter()
@@ -267,11 +297,22 @@ def _embed_forever(workspace, stop: threading.Event) -> None:
         _EMBED_WANTED.clear()
         while not stop.is_set():
             try:
+                stood = _yield_to_foreground()
                 asked = time.perf_counter()
+                # Take, ENCODE OUTSIDE THE LOCK, store (D-35). The encoder is
+                # the slow part of a batch, and holding the store's lock
+                # through it made every capture on the page being read wait
+                # for the page left behind to be embedded.
+                with _WORK_LOCK:
+                    before = len(workspace.vectors)
+                    taken = workspace.take_vectors(limit=_EMBED_BATCH)
+                enc_start = time.perf_counter()
+                produced = workspace.encode_taken(taken)
+                enc_ms = (time.perf_counter() - enc_start) * 1000
+                stood += _yield_to_foreground()
                 with _WORK_LOCK:
                     got_lock = time.perf_counter()
-                    before = len(workspace.vectors)
-                    workspace.flush_vectors(limit=_EMBED_BATCH)
+                    workspace.store_vectors(produced)
                     # The stream: what just got a vector is transformed into
                     # the fit next, in the projector's own batches.
                     _project(getattr(workspace, "last_embedded", None) or ())
@@ -286,7 +327,9 @@ def _embed_forever(workspace, stop: threading.Event) -> None:
                     remaining = len(workspace.vectors)
                 done = time.perf_counter()
                 _profile("embed", {
-                    "lock_wait_ms": round((got_lock - asked) * 1000, 1),
+                    "lock_wait_ms": round((got_lock - asked) * 1000 - enc_ms, 1),
+                    "yielded_ms": round(stood * 1000, 1),
+                    "encode_ms": round(enc_ms, 1),
                     "ms": round((done - got_lock) * 1000, 1),
                     "embedded": max(0, before - remaining),
                     "queue_after": remaining,
@@ -1198,7 +1241,7 @@ class _Handler(BaseHTTPRequestHandler):
                 # else's job -- and that wait was inside `store`, which then
                 # read as a slow database.
                 asked = time.perf_counter()
-                with _WORK_LOCK:
+                with _foreground(), _WORK_LOCK:
                     phases["lock_wait"] = round(
                         (time.perf_counter() - asked) * 1000, 1)
                     _written, counts = self.workspace.ingest_chunks(

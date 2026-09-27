@@ -31,6 +31,7 @@ import { ForceTree, type ForceNodeDelta } from "./forcetree";
 import { PipelineBox } from "./pipelinebox";
 import { profiler } from "./profile";
 import { Component, ItemView, MarkdownRenderer, Menu, WorkspaceLeaf } from "obsidian";
+import { Snapshot, getSnapshot, putSnapshot, renderSnapshot, snapshotScript, xpathsOfLines } from "./snapshot";
 
 import { LayoutNode } from "./graph";
 import { Sidecar } from "./sidecar";
@@ -141,6 +142,19 @@ const INLINE_TAGS = new Set([
 /** What a pinned chunk holds: read from the store, never from the page. */
 interface PinRecord {
   cid: string; url: string; matched: string; markdown: string; head: string;
+  /** The elements the chunk's lines draw, for the page-faithful snapshot (D-36). */
+  xpaths?: string[];
+}
+
+/** One queued capture: a drain's payload, or the settle of a page left. */
+interface CaptureJob {
+  url: string;
+  payload?: any;
+  trace?: any;
+  drainIds?: string[];
+  title?: string;
+  settle?: boolean;
+  done?: () => void;
 }
 
 export class BrowserView extends ItemView {
@@ -625,6 +639,43 @@ export class BrowserView extends ItemView {
       lines: p.markdown.split("\n").length }));
   }
 
+  /** Last snapshot outcome, for the harness: what was read and how much. */
+  lastSnapshot: { cid: string; ok: boolean; elements: number; found: number; asked: number; ms: number; why?: string } | null = null;
+
+  /**
+   * Read the chunk's own elements from the live page (D-36) -- only when the
+   * page open in the cell is the chunk's page. True if a snapshot was taken
+   * and differs from the one held.
+   */
+  private async takeSnapshot(read: PinRecord): Promise<boolean> {
+    const wv = this.webview;
+    const t0 = performance.now();
+    const asked = (read.xpaths || []).length;
+    const note = (ok: boolean, why: string, s: any = null) => {
+      this.lastSnapshot = { cid: read.cid, ok, elements: s ? s.elements : 0, found: s ? s.found : 0,
+                            asked, ms: Math.round(performance.now() - t0), why: why || undefined };
+    };
+    if (!wv || !asked) { note(false, "no page or no xpaths"); return false; }
+    let here = "";
+    try { here = wv.getURL(); } catch { /* not attached */ }
+    if (here !== read.url) { note(false, "page not open"); return false; }
+    if (this.plant.has("distilled-panels")) { note(false, "planted: distilled only"); return false; }
+    try {
+      const snap = await wv.executeJavaScript(snapshotScript(read.xpaths || []));
+      if (!snap || !snap.html) { note(false, "nothing found"); return false; }
+      const before = getSnapshot(read.cid);
+      putSnapshot(read.cid, snap as Snapshot);
+      note(true, "", snap);
+      return !before || before.html !== snap.html;
+    } catch (e) {
+      note(false, String(e).slice(0, 80));
+      return false;
+    }
+  }
+
+  /** Named defects a check can plant through the plugin (non-vacuity arms). */
+  plant = new Set<string>();
+
   /** The markdown side: one card per pinned chunk, natively rendered. */
   private async renderSide(): Promise<void> {
     this.markdownWrap.empty();
@@ -643,11 +694,28 @@ export class BrowserView extends ItemView {
         this.onPin(pin.cid);
       };
       const head = card.createDiv({ cls: "domvec-browser-mdhead" });
-      head.createSpan({ text: pin.head });
+      // The site, not the xpath: the address is kept as the tooltip.
+      let host = "";
+      try { host = new URL(pin.url).host; } catch { /* not a url */ }
+      head.createSpan({ text: host || pin.head }).setAttr("title", pin.head);
       const close = head.createSpan({ cls: "domvec-pin-close", text: "\u00d7" });
       close.setAttr("aria-label", "unpin");
       close.onclick = () => this.unpin(pin.cid);
       const body = card.createDiv({ cls: "domvec-browser-mdbody" });
+      // The chunk as the BROWSER draws it (D-36), when the page gave one; the
+      // distilled markdown one click away -- and alone when the page is not
+      // open to read from.
+      const snap = getSnapshot(pin.cid);
+      if (snap) {
+        body.addClass("has-snapshot");
+        renderSnapshot(body, snap, { maxHeight: 640, onLink: (h) => this.go(h) });
+        const more = card.createEl("details", { cls: "domvec-pin-md" });
+        more.createEl("summary", { text: "markdown" });
+        const md = more.createDiv({ cls: "domvec-browser-mdbody" });
+        await MarkdownRenderer.render(this.app, pin.markdown, md, "",
+                                      this as unknown as Component);
+        continue;
+      }
       // The NATIVE renderer (`G-37`): the same content as an Obsidian
       // markdown panel, rendering the full markdown.
       await MarkdownRenderer.render(this.app, pin.markdown, body, "",
@@ -849,7 +917,11 @@ export class BrowserView extends ItemView {
   private async readPin(url: string, xpath: string): Promise<PinRecord | { error: string }> {
     const got = await this.sidecar.resolve(url, xpath);
     if (!got || !got.lines) return { error: `no chunk draws ${xpath}` };
-    let markdown = (got.lines as { text: string }[])
+    // A form's own line is its `action` url, which the page never draws
+    // (D-36): left out of the side card, as the billboard leaves it out.
+    let markdown = (got.lines as { text: string; cls?: string; key?: string }[])
+      .filter((l) => !(l.cls === "group" && /\|action(%7C|\|)/.test(String(l.key || ""))
+                       && /^\s*(\/|\?|https?:)/.test(String(l.text || ""))))
       .map((l) => l.text).join("\n");
     // Relative targets are resolved against the PAGE, not the vault.
     //
@@ -863,9 +935,11 @@ export class BrowserView extends ItemView {
       markdown = markdown.replace(
         /(!?\[[^\]]*\]\()([^)\s]+)/g,
         (whole: string, head: string, target: string) => {
-          // Absolute, protocol-relative and in-page anchors are left alone.
-          if (/^[a-z][a-z0-9+.-]*:/i.test(target)
-              || target.startsWith("//") || target.startsWith("#")) {
+          // Absolute urls and in-page anchors are left alone. A
+          // PROTOCOL-relative one is not: left as `//host/...` Obsidian took
+          // it against its own `app://` origin, and DuckDuckGo's favicons
+          // read "could not be found" in the side card (D-36).
+          if (/^[a-z][a-z0-9+.-]*:/i.test(target) || target.startsWith("#")) {
             return whole;
           }
           try {
@@ -879,6 +953,7 @@ export class BrowserView extends ItemView {
     const matched = String(got.matched_xpath || xpath);
     return {
       cid, url: String(got.url || url || ""), matched, markdown,
+      xpaths: xpathsOfLines(got.lines as { key?: string }[]),
       head: got.ancestors_walked
         ? `${matched} · ${got.ancestors_walked} above what you clicked`
         : matched,
@@ -901,7 +976,10 @@ export class BrowserView extends ItemView {
     for (const pin of touched) {
       const read = await this.readPin(pin.url, pin.matched);
       if ("error" in read || read.cid !== pin.cid) continue;
-      if (read.markdown === pin.markdown) continue;
+      // The page's own rendering is re-read too: it can change while the
+      // distilled markdown does not (a restyle, a picture arriving).
+      const snapped = await this.takeSnapshot(read);
+      if (read.markdown === pin.markdown && !snapped) continue;
       this.pinned.set(pin.cid, { ...read, head: pin.head });
       changed++;
     }
@@ -919,6 +997,9 @@ export class BrowserView extends ItemView {
       return read;
     }
     const { cid, markdown } = read;
+    // The chunk as the browser draws it, read BEFORE either panel opens, so
+    // the card and the billboard both show the page's rendering (D-36).
+    await this.takeSnapshot(read);
     // **Pinned, not swapped in (`G-78`).** Right-click used to replace the
     // page with the markdown, which left nothing to highlight. Now the chunk
     // is pinned: outlined on the page at its box, rendered on the markdown
@@ -961,7 +1042,7 @@ export class BrowserView extends ItemView {
       this.session = "";
       if (left) {
         this.onLeaving(left);
-        await this.sidecar.capture(left, { settle: true });
+        await this.settleQueued(left);
         if (this.session !== left) this.onLeft(left);
       }
       return;
@@ -969,6 +1050,8 @@ export class BrowserView extends ItemView {
     if (url === this.session) return;
     const leaving = this.session;
     this.session = url;
+    // Sensor ids are per document: nothing streaming on the page left behind.
+    this.pipebox?.clearStreaming();
     // The overlay's map of this page (DESIGN_VII §3), loaded on landing and
     // patched from every capture reply after -- FIRST, before the page left
     // behind is settled. It waited behind that settle capture, which is
@@ -1002,7 +1085,12 @@ export class BrowserView extends ItemView {
     // 401 force nodes did, for the length of a long settle).
     if (leaving) this.onLeaving(leaving);
     if (leaving) {
-      await this.sidecar.capture(leaving, { settle: true });
+      // The page left behind settles AFTER the new page's first capture
+      // (D-35). A settle re-ingests the whole page under the store's lock;
+      // sent first, it held the lock for seconds while the page the reader is
+      // looking at waited to be stored, mapped and placed.
+      await this.firstCapture(url, 4000);
+      await this.settleQueued(leaving);
       // Settled: its last diff is stored and on its way through the
       // transform, so its chunk nodes fold back into its page node (S-6).
       if (this.session !== leaving) this.onLeft(leaving);
@@ -1033,6 +1121,18 @@ export class BrowserView extends ItemView {
    */
   private forPage(nodes: LayoutNode[]): LayoutNode[] {
     return nodes.filter((n: any) => n.level === "page" || !n.url || n.url === this.session);
+  }
+
+  /** When each url's first capture of this visit came back (D-35). */
+  private capturedAt = new Map<string, number>();
+  /** The settle of the page left, deferred behind the next page's first capture. */
+  private async firstCapture(url: string, limitMs: number): Promise<void> {
+    const since = performance.now();
+    this.capturedAt.delete(url);
+    while (performance.now() - since < limitMs) {
+      if (this.capturedAt.has(url) || this.session !== url) return;
+      await new Promise((r) => window.setTimeout(r, 100));
+    }
   }
 
   private async placeWholePage(url: string): Promise<void> {
@@ -1193,15 +1293,31 @@ export class BrowserView extends ItemView {
           delta.covers = this.coversFor(url, tree.held().filter(
             (h) => delta.added.some((a) => a.id === h.id)));
           const again = new Set(delta.added.filter((a) => a.again).map((a) => a.id));
+          // WHY each chunk of the drain was or was not outlined, as facts on
+          // the trace (2026-09-27: "overlays for completely new diff updates
+          // ... have not been observed for several minutes" -- and the trace
+          // could not say whether a drain was stored content, furniture known
+          // never to be stored, off screen, or dropped).
+          const why = { flashed: 0, covered: 0, unstored: 0, offscreen: 0, nobox: 0 };
+          const vh = (this.webview as any)?.clientHeight || 0;
           const boxes = (payload.chunks || []).map((c: any, i: number) => {
             const id = tree.nodeId(Number(c.id));
             // Not flashed: covered and unchanged, or known never to be stored.
-            if (this.unstoredIds.has(id) && !again.has(id)) return null;
+            if (this.unstoredIds.has(id) && !again.has(id)) { why.unstored++; return null; }
             const addr = tree.addressOf(Number(c.id));
-            if (addr && this.unstoredOn(url).has(addr) && !again.has(id)) return null;
-            return (!delta.covers[id] || again.has(id)) ? payload.boxes[i] : null;
+            if (addr && this.unstoredOn(url).has(addr) && !again.has(id)) { why.unstored++; return null; }
+            if (delta.covers[id] && !again.has(id)) { why.covered++; return null; }
+            const r = payload.boxes[i];
+            if (!r) { why.nobox++; return null; }
+            if (r[1] + r[3] < 0 || (vh && r[1] > vh) || (r[2] <= 0 && r[3] <= 0)) why.offscreen++;
+            else why.flashed++;
+            return r;
           });
-          if (boxes.some(Boolean)) this.pipebox?.flashBoxes(boxes, drainBack, trace.id);
+          prof.fact(trace, "flash", why);
+          if (boxes.some(Boolean)) {
+            this.pipebox?.flashBoxes(boxes, drainBack, trace.id,
+                                     (payload.chunks || []).map((c: any) => Number(c.id)));
+          }
         }
         if (delta && (delta.added.length || delta.removed.length || delta.reparented.length)) {
           if (!payload.boxes) delta.covers = this.coversFor(url, tree.held().filter(
@@ -1230,11 +1346,81 @@ export class BrowserView extends ItemView {
         }
       }
       if (!payload || !(payload.chunks || []).length) {
+        this.capturedAt.set(url, performance.now());
         prof.fact(trace, "why", "empty drain");
         prof.finish(trace, "nothing_placed");
         return;
       }
       prof.fact(trace, "chunks_in_drain", (payload.chunks || []).length);
+
+      // The store comes AFTER the GUI (Addendum IX, D-35): the capture is
+      // queued, and this drain is done -- the next tick drains, outlines and
+      // draws again whether or not the store has answered. It used to hold
+      // `draining` across the whole round trip, and a new page's first
+      // capture (the whole page, 5-7 s to store) froze the overlay and the
+      // 3D stream for exactly that long after every navigation.
+      this.captureQueue.push({ url, payload, trace, drainIds,
+                               title: wv.getTitle() || "" });
+      void this.pumpCaptures();
+    } catch (e) {
+      // The realm goes away on navigation and the handle with it. That is
+      // ordinary, not an error: the next tick reboots into the new document.
+      this.say(`live · ${String(e).slice(0, 80)}`);
+    } finally {
+      this.draining = false;
+    }
+  }
+
+  /** Captures waiting to be sent, in drain order per url. */
+  private captureQueue: CaptureJob[] = [];
+  /** A capture (or settle) is in flight. */
+  capturing = false;
+  /** Queued captures, for the harness and the corner box. */
+  get captureBacklog(): number { return this.captureQueue.length; }
+
+  /**
+   * Send queued captures one at a time. The CURRENT page's go first; any
+   * other url's (the page left behind: its last drains, then its settle)
+   * keep their own order and wait. Order within one url is kept because the
+   * sidecar's decoder dictionary is append-only; across urls there is no
+   * shared state to order.
+   */
+  private async pumpCaptures(): Promise<void> {
+    if (this.capturing) return;
+    this.capturing = true;
+    try {
+      while (this.captureQueue.length) {
+        let k = this.captureQueue.findIndex((c) => c.url === this.session);
+        if (k < 0) k = 0;
+        const job = this.captureQueue.splice(k, 1)[0];
+        if (job.settle) {
+          try { await this.sidecar.capture(job.url, { settle: true }); } catch { /* reported by the next */ }
+          job.done && job.done();
+          continue;
+        }
+        try {
+          await this.captureOne(job);
+        } catch (e) {
+          this.say(`live · ${String(e).slice(0, 80)}`);
+        }
+      }
+    } finally {
+      this.capturing = false;
+    }
+  }
+
+  /** Settle a page through the queue, after every capture of it already queued. */
+  private settleQueued(url: string): Promise<void> {
+    return new Promise((resolve) => {
+      this.captureQueue.push({ url, settle: true, done: resolve });
+      void this.pumpCaptures();
+    });
+  }
+
+  private async captureOne(job: CaptureJob): Promise<void> {
+    const { url, payload, trace, drainIds } = job;
+    const prof = profiler();
+    const wv = { getTitle: () => job.title || "" };
 
       // One round trip: fold, store, and place, because per drain they are
       // one question. The second call carried a list of cids the server had
@@ -1243,6 +1429,7 @@ export class BrowserView extends ItemView {
       const reply = await this.sidecar.capture(
         url, { payload, place: true, trace: trace.id, title: wv.getTitle() || "" });
       const captureMs = performance.now() - captureStart;
+      this.capturedAt.set(url, performance.now());
       prof.stage(trace, "capture", captureMs);
       if (reply) prof.sidecar(trace, reply.phases, reply.ms, captureMs);
       if (!reply || reply.error) {
@@ -1276,6 +1463,12 @@ export class BrowserView extends ItemView {
           const settledNow = this.settledOf(url, covers)
             .concat(Object.entries(covers).filter(([, c]) => undrawable.has(c)).map(([id]) => id));
           if (Object.keys(covers).length) this.onCovers(url, covers, settledNow);
+          // Saved: their outlines on the page go too (after their dwell) --
+          // the same moment their translucent nodes collapse in 3D (D-37).
+          if (this.pipebox && url === this.session) {
+            const sid = (id: string) => Number(id.slice(id.lastIndexOf("#") + 1));
+            this.pipebox.savedStreaming(Object.keys(covers).map(sid).filter((n) => !isNaN(n)));
+          }
           const captured = new Set(drainIds);
           const unstored = held.filter((h) => captured.has(h.id) && !covers[h.id]).map((h) => h.id);
           if (unstored.length) this.onUnstored(url, unstored);
@@ -1337,13 +1530,6 @@ export class BrowserView extends ItemView {
                (reply.place_error ? ` · ${reply.place_error}` : "") +
                (reply.stale ? " · fit is stale, refit" : "") +
                ` · ${reply.ms} ms`);
-    } catch (e) {
-      // The realm goes away on navigation and the handle with it. That is
-      // ordinary, not an error: the next tick reboots into the new document.
-      this.say(`live · ${String(e).slice(0, 80)}`);
-    } finally {
-      this.draining = false;
-    }
   }
 
   /**

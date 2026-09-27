@@ -764,6 +764,22 @@ def _listbox(owner: str, run: List[Dict], base: str) -> str:
             % (min(len(parts), 12), holder, "".join(parts)))
 
 
+def _is_form_action(line: Dict, raw: str) -> bool:
+    """A form's own line, whose text is its ``action`` url (D-36).
+
+    The page draws nothing there -- a form is a container -- and the panel
+    printed ``/?q=suffix+tree&ia=chat`` as a line of text in the middle of
+    DuckDuckGo's answer. Hidden in the panel only: the line and its address
+    stay in the payload, the trie and the markdown.
+    """
+    if str(line.get("cls") or "") != "group":
+        return False
+    key = str(line.get("key") or "")
+    text = raw.strip()
+    return ("|action" in key or "action%7C" in key) and (
+        text.startswith(("/", "?", "http://", "https://")) or text == str(line.get("target") or ""))
+
+
 def render_lines(lines: List[Dict], *, base: str = "") -> str:
     """The distilled elements for one chunk's payload lines.
 
@@ -783,7 +799,7 @@ def render_lines(lines: List[Dict], *, base: str = "") -> str:
                         % _listbox(owner, run, base))
             continue
         raw = str(item.get("text") or "")
-        if not raw.strip():
+        if not raw.strip() or _is_form_action(item, raw):
             continue
         depth = (len(raw) - len(raw.lstrip(" "))) // 2
         builder.at(depth)

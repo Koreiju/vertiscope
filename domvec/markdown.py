@@ -1233,11 +1233,16 @@ def _join_inline(units: List[Tuple[ContentAddress, str, str, int]]
                  or _flow_owner(address.xpath) in mixed)
             and not _looks_like_url(value)
             and not _looks_like_url(prev[1])
-            and prev[3] == depth
+            # Depth is NOT asked (D-36). An inline element between two text
+            # children adds an element step when the trie keeps it as its own
+            # level -- the live capture's does; the Python scan's collapses
+            # it -- so "A <span>suffix trie</span> is a trie ..." arrived at
+            # depths 9, 10, 9 and stayed three bullets in both panel forms.
+            # Same flow owner and adjacency already mean one block's text.
         )
         if joinable:
             merged = (prev[1].rstrip() + " " + value.lstrip()).strip()
-            out[-1] = (prev[0], merged, prev[2], prev[3])
+            out[-1] = (prev[0], merged, prev[2], min(prev[3], depth))
             continue
         out.append(unit)
     return out

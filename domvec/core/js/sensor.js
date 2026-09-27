@@ -1394,6 +1394,11 @@
       collectLines(run[i].node, run[i].seg, run[i].rec, 0, lines, [], TAX_ROOT);
     }
     d = d >>> 0;
+    // The run's last node, for `at` (the hover peripheral): a merged run is
+    // keyed on its FIRST node only, and an element inside a later sibling of
+    // the run has to be traced back to it. Bookkeeping beside the slot, never
+    // in the payload.
+    slot.tail = run[run.length - 1].node;
     var where = pathKey(parentPath);
     if (USE_GATE && slot.digest === d && slot.path === where) {
       stats.skipped++; return null;
@@ -1599,6 +1604,7 @@
     if (!slot.tracked) { slot.tracked = true; chunkRoots.push(slot); }
     slot.seen = stats.repairs;
     slot.node = node;
+    slot.tail = node;
     slot.digest = rec.digest;
     // Before the id-anchor rewrite below: the gate compares composed paths,
     // and an anchored address is stable under exactly the moves it needs to
@@ -2732,6 +2738,58 @@
     return out;
   }
 
+  // ---- the hover peripheral (D-35, G-92) ----------------------------------
+  //
+  // Which chunk draws the element under the pointer, and where it is: the
+  // IN-PAGE chunking's answer, needing no store. The overlay used to wait for
+  // the store's map of the page, so on a page the store did not hold yet --
+  // and for seconds after every navigation -- hovering outlined nothing.
+  // Called by the host on a hover, never during a drain; the walk is up the
+  // composed tree from the element, and at each level back along its
+  // siblings to a run that covers it.
+  function covers(slot, n) {
+    if (!slot.tail || slot.tail === n) return true;
+    return !!(n.compareDocumentPosition(slot.tail) & 4);   // tail FOLLOWS n
+  }
+  function runBox(slot) {
+    var l = 1e9, t = 1e9, r = -1e9, b = -1e9, any = false, n = slot.node, k = 0;
+    while (n && k++ < 400) {
+      var q = null;
+      if (n.nodeType === 1 && n.getBoundingClientRect) q = n.getBoundingClientRect();
+      else if (n.nodeType === 3) {
+        var rg = document.createRange(); rg.selectNode(n); q = rg.getBoundingClientRect();
+      }
+      if (q && (q.width > 0 || q.height > 0)) {
+        any = true;
+        if (q.left < l) l = q.left; if (q.top < t) t = q.top;
+        if (q.right > r) r = q.right; if (q.bottom > b) b = q.bottom;
+      }
+      if (n === slot.tail || !slot.tail) break;
+      n = n.nextSibling;
+    }
+    return any ? [l, t, r - l, b - t] : null;
+  }
+  function at(el) {
+    var n = el, depth = 0;
+    while (n && depth++ < 200) {
+      var s = chunkOf.get(n);
+      if (s && s.tracked && s.node === n && n.isConnected) {
+        return { id: s.id, box: runBox(s), depth: depth - 1 };
+      }
+      var p = n.previousSibling, k = 0;
+      while (p && k++ < 200) {
+        s = chunkOf.get(p);
+        if (s && s.tracked && s.node === p) {
+          if (covers(s, n)) return { id: s.id, box: runBox(s), depth: depth - 1 };
+          break;
+        }
+        p = p.previousSibling;
+      }
+      n = n.parentNode || n.host || null;
+    }
+    return null;
+  }
+
   // ---- the style peripheral --------------------------------------------
   //
   // Layout facts, read on demand, for a caller-supplied set of paths. This
@@ -2858,6 +2916,7 @@
     perform: perform,
     styles: styles,
     boxes: boxes,
+    at: at,
     resolve: function (path) { return !!resolvePath(path); },
 
     // Does each of these addresses still name a node?
