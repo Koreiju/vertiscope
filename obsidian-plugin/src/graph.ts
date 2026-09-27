@@ -1623,6 +1623,53 @@ export class GraphView extends ItemView {
     this.addChild(surface);
   }
 
+  /**
+   * An open page's chunk nodes sized to FIT its neighbourhood (2026-09-27:
+   * "a lot of it is way too far from the original set of nodes"). The
+   * projector draws a page's chunks within 0.4x the distance to the nearest
+   * other page; drawn at full size, 88 chunks and their colliders could not
+   * fit there, the collision pushed them out to 1.1-1.8x that distance, and
+   * each page became a ball engulfing its neighbours. n spheres of radius r
+   * pack a sphere of radius R when r ~ R * (0.6 / n)^(1/3), and the collider
+   * is the drawn radius x COLLIDER_SAFETY plus its margin.
+   */
+  private fitChunkSizes(data: any): void {
+    if (!this.graph || this.plantBigChunks) return;
+    const relSize = this.graph.nodeRelSize(), media = this.media();
+    const pages = data.nodes.filter((n: any) => !n.force && n.level === "page" && Number.isFinite(n.fitX ?? n.x));
+    const at = (n: any) => [n.fitX ?? n.x, n.fitY ?? n.y, n.fitZ ?? n.z ?? 0];
+    const byUrl = new Map<string, any[]>();
+    for (const n of data.nodes) {
+      if (n.force || n.level === "page" || !n.url) continue;
+      (byUrl.get(n.url) || byUrl.set(n.url, []).get(n.url)!).push(n);
+    }
+    for (const [url, chunks] of byUrl) {
+      const page = pages.find((p: any) => p.url === url);
+      if (!page) continue;
+      const [px, py, pz] = at(page);
+      let nearest = Infinity;
+      for (const q of pages) {
+        if (q === page) continue;
+        const [qx, qy, qz] = at(q);
+        nearest = Math.min(nearest, Math.hypot(px - qx, py - qy, pz - qz));
+      }
+      if (!Number.isFinite(nearest)) continue;
+      const R = 0.45 * nearest;                 // the projector's NEIGHBOURHOOD
+      // A floor, so a crowded page's chunks stay visible: the fixed collider
+      // margin could eat the whole room and leave specks (val ~ 0).
+      const floor = 0.35 * relSize;
+      const room = Math.max(floor, (R * Math.cbrt(0.6 / chunks.length) - COLLIDER_MARGIN) / COLLIDER_SAFETY);
+      for (const c of chunks) {
+        if (c.fullVal === undefined) c.fullVal = c.val ?? 1;
+        const r = drawnRadius({ ...c, val: c.fullVal }, relSize, media);
+        c.val = r > room ? c.fullVal * Math.pow(room / r, 3) : c.fullVal;
+      }
+    }
+  }
+
+  /** Planted by G-94's check: chunks drawn at full size, whatever the room. */
+  plantBigChunks = false;
+
   /** Planted by G-94's check: no collision room for projected nodes. */
   plantNoCollide = false;
   /** The collider's parameters, for checks that must use the pane's own numbers. */
@@ -2250,7 +2297,7 @@ export class GraphView extends ItemView {
         // set too: the simulation owns those, but a chunk whose meaning moved
         // should not be left drawing at its old meaning's address.
         Object.assign(existing, {
-          name: built.name, url: built.url, val: built.val,
+          name: built.name, url: built.url, val: built.val, fullVal: built.val,
           tokens: built.tokens, image: built.image, color: built.color,
           fitX: built.fitX, fitY: built.fitY, fitZ: built.fitZ,
           x: built.x, y: built.y, z: built.z,
@@ -2277,6 +2324,7 @@ export class GraphView extends ItemView {
     // any kind. A patricia trie that is not drawn has no structure for a
     // force to act on, which is most of why the picture reads as a clump.
     out.edges = this.addEdges(data, edges);
+    this.fitChunkSizes(data);
     this.graph.graphData(data);
     void this.drawContainment();
     // `absorb` ends here; the listener takes it from the scene.

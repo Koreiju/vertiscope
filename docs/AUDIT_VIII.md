@@ -228,3 +228,16 @@ MEASUREMENT first (an in-app check with a planted arm), then the app.
 Rule added to the loop after I drove the browser while the user was using it
 (a test pin landed on their DuckDuckGo page): check for the user's activity
 before any gesture, and work on code instead when they are there.
+
+## Pass 4 (2026-09-27) — the page-centroid default, online CUDA training, and "too far from the original nodes"
+
+| # | what the picture / the user showed | what the measurements said | measurement added | app change |
+|---|---|---|---|---|
+| G-83 | "make the page-centroid UMAP the default" | chunks transformed through a page fit land nearest their own page only 19-23% (real corpus) | unit tests: own-page share, raw coords kept, planted raw placement | default; chunks DRAWN in the page's neighbourhood (direction kept, clipped), true coords in `raw_pos` |
+| G-97 | "incrementally re-train online ... previous fits fixed ... CUDA" | umap-learn `update` moves old pages 37% of spacing; fresh fit 95% | tests: landmark update < 10% (measured 0.7% real, 4-8% toy), planted no-landmark 22-265% | `pumap.py`: parametric UMAP on CUDA; refit and a continuous background worker train only on the diff; GPU fuzzy graph (numba JIT was most of a 33 s fit); fit 57 s -> 10 s, training 3.2 s, transform < 1 ms |
+| D-38 | "Nothing showing in the obsidian browser" | the window answered nothing, not even the debugger | `Live.recover()` (browser-side reload), watchdog around in-app runs | the cell reopens its last page |
+| D-39 | "the nodes may not be pages ... leakage" | two stored pages were MY probes' DuckDuckGo queries | (guard still to build: probes on a test store only) | purged |
+| G-94 | "way too far from the original set of nodes, even though there is sufficient spacing" | spacing checks passed; nothing measured distance from the node's OWN page | G-94 `near_page`: chunk distance / nearest-other-page distance, must stay < 0.5 (nearer its own page than any other); two planted arms (no collision; full-size chunks) | furniture chunks clipped (14.6x -> 0.84x on the working store); chunks sized to their page's room. **Still failing on a fresh store**: crowded neighbourhoods push chunks to 0.68-0.97x and 36/64 discs are buried -- the open page must push its neighbours aside |
+| G-93 | (the streaming layout) | — | — | passes in-app: nn p10 51 radii vs planted 0.1 |
+
+Still unobserved or failing in the app: G-94 (above), G-101 (the hard-page run hung the window, D-38 -- to re-run page by page with the watchdog), D-39's guard.

@@ -117,11 +117,51 @@ def _online_refit(landmark_weight):
 
 def test_an_online_refit_trains_the_diff_and_holds_the_old_pages():
     share, proj = _online_refit(10.0)
-    # Measured: 4.5% here (12 -> 14 pages), 0.7% on the real corpus (100 -> 126).
-    assert share < 0.08, share                      # old pages stay put
+    # Measured 4.3-8.5% here across runs (GPU training is not bit-reproducible;
+    # 12 -> 14 pages), 0.7% on the real corpus (100 -> 126); planted: 22%+.
+    assert share < 0.10, share                      # old pages stay put
     assert len(proj.page_pos) == PAGES               # the new ones are placed
 
 
 def test_planted_no_landmark_moves_the_old_pages():
     share, _proj = _online_refit(0.0)
     assert share > 0.12, share                      # measured 22%
+
+
+def test_the_stream_trains_online_on_pages_the_model_has_not_learned(monkeypatch):
+    """Continuous: pages the stream placed but the model never trained on are
+    trained in the background, earlier pages held (2026-09-27)."""
+    import time
+    import pytest
+    pytest.importorskip("torch")
+    monkeypatch.setattr(PageProjector, "ONLINE_DEBOUNCE_S", 0.05)
+    rows = _rows(spread=0.6)
+    first = [r for r in rows if not r[1].startswith(("https://p12.", "https://p13."))]
+    ws = SimpleNamespace(store=_Store(first), path=None)
+    proj = PageProjector(dims=3, centroid="semantic", seed=0, engine="parametric")
+    proj.fit(ws)
+    before = dict(proj.page_pos)
+    # The stream: two new pages arrive, are placed through transform, and
+    # are handed to the online worker.
+    for u in ("https://p12.test/", "https://p13.test/"):
+        mine = [r for r in rows if r[1] == u]
+        for c, _u, v in mine:
+            proj.vec[c] = np.asarray(v, dtype=np.float32)
+            proj.url_of[c] = u
+            proj.by_url.setdefault(u, set()).add(c)
+        proj.page_vec[u] = proj._semantic_centroid([c for c, _u, _v in mine], proj.vec)
+        where, _col = proj.projection.place(np.asarray([proj.page_vec[u]]))
+        proj.page_pos[u] = [float(x) for x in where[0][:3]]
+    proj._schedule_online(["https://p12.test/", "https://p13.test/"])
+    for _ in range(600):
+        if proj.online_updates:
+            break
+        time.sleep(0.1)
+    assert proj.online_updates, "no online update ran"
+    rec = proj.online_updates[-1]
+    assert rec["pages_trained"] == 2
+    assert {"https://p12.test/", "https://p13.test/"} <= proj.trained
+    P = np.asarray(list(before.values()))
+    spacing = float(np.median(np.linalg.norm(P[:, None] - P[None], axis=2)))
+    moved = np.median([np.linalg.norm(np.asarray(proj.page_pos[u]) - np.asarray(before[u])) for u in before])
+    assert moved / spacing < 0.08

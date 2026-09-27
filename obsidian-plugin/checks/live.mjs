@@ -1449,13 +1449,38 @@ export function makeChecks(env) {
             if (btn) btn.click();
             await sleep(1500);
           };
-          v.plantNoCollide = ${planted};
+          // Two planted defects, one per arm, each caught by its own measure:
+          // "overlap" -- no collision room (discs on discs); "big" -- chunks at
+          // full size, which the collision pushed out to 1.1-1.8x the nearest
+          // page's distance (2026-09-27).
+          v.plantNoCollide = ${JSON.stringify(planted)} === "overlap";
+          v.plantBigChunks = ${JSON.stringify(planted)} === "big";
           recollide();
+          // How far an open page's chunks are drawn from their OWN page, in
+          // units of the distance to the nearest other page (2026-09-27: "way
+          // too far from the original set of nodes" -- spacing is not it).
+          const nearPage = () => {
+            const ns = v.graph.graphData().nodes;
+            const pages = ns.filter((n) => !n.force && n.level === "page" && Number.isFinite(n.x));
+            const byUrl = new Map(pages.map((p) => [p.url, p]));
+            const nn = (p) => { let m = Infinity; for (const q of pages) { if (q === p) continue;
+              m = Math.min(m, Math.hypot(p.x - q.x, p.y - q.y, (p.z || 0) - (q.z || 0))); } return m; };
+            const r = [];
+            for (const c of ns) {
+              if (c.force || c.level === "page" || !Number.isFinite(c.x)) continue;
+              const p = byUrl.get(c.url);
+              if (p) r.push(Math.hypot(c.x - p.x, c.y - p.y, (c.z || 0) - (p.z || 0)) / nn(p));
+            }
+            r.sort((a, b) => a - b);
+            const q = (f) => r.length ? Math.round(r[Math.min(r.length - 1, Math.floor(r.length * f))] * 100) / 100 : null;
+            return { chunks: r.length, p50: q(0.5), p90: q(0.9), max: q(1) };
+          };
           try {
             await land("https://en.wikipedia.org/wiki/Radix_tree", 25000);
             await sleep(6000);
             await recentre(); await sleep(2500);
             const onPage = v.seenLayout();
+            onPage.near_page = nearPage();
             b.go("about:blank");
             // Collapsed: the page's chunks fold into its node once it is settled.
             for (let i = 0; i < 40; i++) {
@@ -1465,20 +1490,27 @@ export function makeChecks(env) {
               if (!left) break;
             }
             await recentre(); await sleep(2500);
-            return { planted: ${planted}, on_page: onPage, collapsed: v.seenLayout() };
+            return { planted: ${JSON.stringify(planted)}, on_page: onPage, collapsed: v.seenLayout() };
           } finally {
             v.plantNoCollide = false;
+            v.plantBigChunks = false;
             recollide();
           }
         })()`, { timeout: 120000 });
         const clean = await arm(false);
-        const planted = await arm(true);
+        const planted = await arm("overlap");
+        const plantedBig = await arm("big");
         // A reader sees a jumble when discs cover each other: at most 5% of
         // drawn nodes may overlap a neighbour, and the closest tenth must at
         // least touch (nearest neighbour >= r_a + r_b).
         const legible = (x) => !!x && x.drawn > 5 && x.overlapping <= x.drawn * 0.05 && (x.nn_touch_p10 ?? 0) >= 1;
-        const ok = (r) => legible(r.on_page) && legible(r.collapsed);
-        return { pass: ok(clean) && !ok(planted), evidence: { clean, planted } };
+        // Near its page: an open page's chunks stay inside its neighbourhood
+        // (the farthest nearer its own page than any other: under half the
+        // distance to the nearest other page).
+        const near = (x) => !!x && !!x.near_page && x.near_page.chunks > 0 && x.near_page.max <= 0.5;   // < D/2: nearer its own page than any other
+        const ok = (r) => near(r.on_page) && legible(r.on_page) && legible(r.collapsed);
+        return { pass: ok(clean) && !legible(planted.on_page) && !near(plantedBig.on_page),
+                 evidence: { clean, planted_overlap: planted, planted_big: plantedBig } };
       },
     },
     {

@@ -1784,6 +1784,30 @@ runs on the local CUDA runtime where the method supports it.*
   UMAP" recipe), and transform = the network, identical for fitted and new
   points -- is a parametric UMAP in PyTorch, on CUDA.*
 
+> Nothing showing in the obsidian browser. It's currently a blank screen
+
+> Current 3D layout seems scattered and like the nodes may not be pages/url
+> nodes and show leakage
+
+> Not much of our scanning layout is good, a lot of it is way too far from
+> the original set of nodes, even though there is "sufficient" spacing apart
+
+> Also, I don't think "refit" is applying the cuda form, and I don't know if
+> incremental updates on the CUDA form are actually there yet. Depending on
+> fit times, it might be a lot faster on CUDA than CPU, and we should be
+> seeing much faster layout streaming updates from using CUDA
+
+*Read as: (1) the Obsidian window had hung (the renderer answered nothing,
+not even the debugger) and the browser cell showed nothing -- recovered by a
+browser-side reload; the cell now reopens its last page and the harness can
+recover a hung window itself. (2) Page nodes must read as pages, and nothing
+that is not a reader's page may be in the picture: two of the store's pages
+were MY probes' DuckDuckGo queries (purged). (3) Nodes drawn while scanning
+must stay near the nodes they belong to -- spacing is not the measure;
+distance from their own page and from the picture is. (4) The refit button,
+the online training on diffs, and the streaming updates must all run the
+CUDA model, and be visibly faster for it.*
+
 ---
 
 

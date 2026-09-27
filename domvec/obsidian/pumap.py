@@ -97,6 +97,55 @@ class ParametricUMAP:
 
     # -- the graph -----------------------------------------------------------
     def _graph(self, X: np.ndarray):
+        """UMAP's fuzzy simplicial set of X: on the GPU for the sizes a page
+        layout has (exact kNN by `cdist`), umap-learn's otherwise.
+
+        umap-learn builds it with numba-compiled code that compiles on first
+        use in a process -- most of a 16-33 s first fit whose training steps
+        took 4 ms each (2026-09-27). Same maths: rho = distance to the nearest
+        neighbour, sigma by binary search so the memberships sum to log2(k),
+        then the fuzzy union W + W' - W*W'."""
+        if len(X) <= 20000:
+            try:
+                return self._graph_torch(X)
+            except Exception:                        # noqa: BLE001
+                pass
+        return self._graph_umap(X)
+
+    def _graph_torch(self, X: np.ndarray):
+        import torch
+        dev = _device()
+        n = len(X)
+        k = int(max(2, min(self.n_neighbors, n - 1)))
+        Xt = torch.as_tensor(np.asarray(X, dtype=np.float32), device=dev)
+        rows_i, rows_j, rows_d = [], [], []
+        for lo in range(0, n, 4096):
+            D = torch.cdist(Xt[lo:lo + 4096], Xt)
+            D[torch.arange(D.shape[0], device=dev), torch.arange(lo, lo + D.shape[0], device=dev)] = float("inf")
+            d, j = torch.topk(D, k, dim=1, largest=False)
+            rows_d.append(d); rows_j.append(j)
+        d = torch.cat(rows_d); j = torch.cat(rows_j)
+        rho = d[:, 0:1]
+        target = float(np.log2(k))
+        lo_s = torch.zeros(n, 1, device=dev); hi_s = torch.full((n, 1), float("inf"), device=dev)
+        sigma = torch.ones(n, 1, device=dev)
+        excess = (d - rho).clamp_min(0)
+        for _ in range(64):
+            psum = torch.exp(-excess / sigma).sum(1, keepdim=True)
+            above = psum > target
+            hi_s = torch.where(above, sigma, hi_s)
+            lo_s = torch.where(above, lo_s, sigma)
+            sigma = torch.where(torch.isinf(hi_s), sigma * 2, (lo_s + hi_s) / 2)
+        w = torch.exp(-excess / sigma.clamp_min(1e-6))
+        i = torch.arange(n, device=dev).unsqueeze(1).expand(-1, k)
+        W = torch.sparse_coo_tensor(torch.stack([i.reshape(-1), j.reshape(-1)]), w.reshape(-1), (n, n)).coalesce()
+        Wt = W.transpose(0, 1).coalesce()
+        S = (W + Wt - W * Wt).coalesce()
+        idx, val = S.indices().cpu().numpy(), S.values().cpu().numpy()
+        keep = val > val.max() / 200.0
+        return idx[0][keep], idx[1][keep], val[keep]
+
+    def _graph_umap(self, X: np.ndarray):
         from umap.umap_ import fuzzy_simplicial_set
         from sklearn.utils import check_random_state
         k = int(max(2, min(self.n_neighbors, len(X) - 1)))
@@ -114,6 +163,7 @@ class ParametricUMAP:
         dev = _device()
         started = time.perf_counter()
         head, tail, w = self._graph(X)
+        self.stats["graph_s"] = round(time.perf_counter() - started, 3)
         if not len(head):
             return 0.0
         Xt = torch.as_tensor(X, dtype=torch.float32, device=dev)
@@ -132,11 +182,17 @@ class ParametricUMAP:
         # holds under one batch of edges, and 200 steps did not converge.
         steps_per_epoch = max(4, int(np.ceil(len(head) / self.batch_edges)))
         self.net.train()
+        # A page layout has a few hundred rows: run the network ONCE per step
+        # over all of them and index into the result, instead of three forward
+        # passes over thousands of sampled rows (the first fit took 15.7 s for
+        # 146 pages that way, 2026-09-27).
+        whole = n <= 8192
         for _epoch in range(epochs):
             for _s in range(steps_per_epoch):
                 e = torch.multinomial(p, self.batch_edges, replacement=True, generator=g)
-                zi = self.net(Xt[H[e]])
-                zj = self.net(Xt[T[e]])
+                Z = self.net(Xt) if whole else None
+                zi = Z[H[e]] if whole else self.net(Xt[H[e]])
+                zj = Z[T[e]] if whole else self.net(Xt[T[e]])
                 # UMAP's cross-entropy in its stable log form. With
                 # u = a * d^(2b):  -log q = log1p(u);  -log(1-q) = log1p(u) - log(u).
                 # Clamping q (the first version) zeroed the repulsion's gradient
@@ -146,7 +202,7 @@ class ParametricUMAP:
                 u = a * d2 ** b
                 attract = torch.log1p(u).mean()
                 neg = torch.randint(0, n, (self.batch_edges * self.negative_rate,), device=dev, generator=g)
-                zn = self.net(Xt[neg])
+                zn = Z[neg] if whole else self.net(Xt[neg])
                 zi_rep = zi.repeat_interleave(self.negative_rate, 0)
                 d2n = ((zi_rep - zn) ** 2).sum(1) + 1e-3
                 un = a * d2n ** b
@@ -157,7 +213,8 @@ class ParametricUMAP:
                     # back to where it was placed.
                     m = len(L)
                     idx = torch.randint(0, m, (min(m, self.batch_edges),), device=dev, generator=g)
-                    loss = loss + self.landmark_weight * ((self.net(Xt[idx]) - L[idx]) ** 2).sum(1).mean()
+                    zl = Z[idx] if whole else self.net(Xt[idx])
+                    loss = loss + self.landmark_weight * ((zl - L[idx]) ** 2).sum(1).mean()
                 opt.zero_grad()
                 loss.backward()
                 opt.step()
@@ -171,7 +228,8 @@ class ParametricUMAP:
         secs = self._train(X, self.epochs)
         self._raw = X
         self.embedding_ = self.transform(X)
-        self.stats = {"rows": len(X), "fit_s": round(secs, 3), "device": str(_device())}
+        self.stats = {"rows": len(X), "fit_s": round(secs, 3), "device": str(_device()),
+                      "graph_s": self.stats.get("graph_s")}
         return self
 
     def fit_transform(self, X: np.ndarray) -> np.ndarray:
@@ -239,7 +297,11 @@ class Whitened:
         self.mean = head.mean(axis=0)
         cov = np.cov((head - self.mean).T)
         vals, vecs = np.linalg.eigh(cov)
-        self.W = vecs / np.sqrt(np.maximum(vals, 1e-9))
+        # PARTIAL: axes scaled by variance^(-1/4), not ^(-1/2). Full whitening
+        # turned the ribbon into a structureless cloud ("scattered", the user,
+        # 2026-09-27) and magnified the weakest axis (0.9% of the variance)
+        # ~10x, so a landmark update's tiny drift there read as 8.5% movement.
+        self.W = vecs / np.maximum(vals, 1e-9) ** 0.25
         return self.apply(Y)
 
     def apply(self, Y: np.ndarray) -> np.ndarray:

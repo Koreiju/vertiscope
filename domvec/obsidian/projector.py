@@ -717,6 +717,11 @@ class PageProjector(ChunkProjector):
         #: umap-learn, refitted whole. Default: parametric when CUDA is here.
         self.engine = engine or _default_engine()
         self.pumap = None
+        #: Pages the online model has been TRAINED on (not just transformed).
+        self.trained: set = set()
+        self._pending_online: set = set()
+        self._online_thread = None
+        self.online_updates: List[Dict] = []
         self.svd_f = None
         self.page_vec: Dict[str, np.ndarray] = {}
         #: Each chunk's true UMAP coordinates through the page fit, and each
@@ -777,7 +782,11 @@ class PageProjector(ChunkProjector):
                               dtype=np.float32)
         self.centroid_ms["semantic"] = round((_t.perf_counter() - t) * 1000, 2)
         t = _t.perf_counter()
-        ranks, tfidf, freq = self._signals(workspace)
+        # The triple centroid only when it is the one drawn: computing it
+        # alongside the semantic one cost ~6 s of every fit (2026-09-27), and
+        # the semantic centroid is the one chunks can be transformed through.
+        ranks, tfidf, freq = (self._signals(workspace) if self.centroid == "triple"
+                              else (None, None, None))
         triple = None
         if tfidf is not None:
             sem_w, freq_rows = [], []
@@ -820,6 +829,99 @@ class PageProjector(ChunkProjector):
         return L._umap(X, dims=want, seed=self.seed,
                        neighbors=min(15, n_pages - 1), min_dist=0.25)
 
+    #: Quiet time before the stream's new pages are trained on (they are
+    #: already drawn through `transform`; this is the training that follows).
+    ONLINE_DEBOUNCE_S = 2.0
+
+    def _schedule_online(self, urls) -> None:
+        """Queue pages the stream placed but the model never trained on; one
+        background worker trains on them, on the GPU, after a short quiet."""
+        with self.lock:
+            self._pending_online.update(urls)
+            if self._online_thread is not None and self._online_thread.is_alive():
+                return
+            import threading
+            self._online_thread = threading.Thread(target=self._online_worker,
+                                                   name="domvec-online-umap", daemon=True)
+            self._online_thread.start()
+
+    def _online_worker(self) -> None:
+        import copy
+        while True:
+            time.sleep(self.ONLINE_DEBOUNCE_S)
+            with self.lock:
+                todo = [u for u in self._pending_online if u in self.page_vec]
+                self._pending_online.clear()
+                wrapper = self.projection.reducer if self.projection is not None else None
+                if not todo or self.pumap is None or getattr(wrapper, "model", None) is not self.pumap:
+                    self._online_thread = None
+                    return
+                X = np.asarray([self.page_vec[u] for u in todo], dtype=np.float32)
+                model = copy.deepcopy(self.pumap)
+            started = time.perf_counter()
+            try:
+                model.update(X)
+            except Exception as exc:                # noqa: BLE001
+                self.fit_error = "online update failed: %s" % exc
+                continue
+            ms_train = (time.perf_counter() - started) * 1000
+            t = time.perf_counter()
+            with self.lock:
+                projection = copy.copy(self.projection)
+                whiten = copy.copy(self.projection.reducer)
+                whiten.model = model
+                projection.reducer = whiten
+                urls = list(self.page_pos)
+                P = np.asarray([self.page_vec[u] for u in urls if u in self.page_vec], dtype=np.float32)
+                urls = [u for u in urls if u in self.page_vec]
+            where, colour = projection.place(P) if len(P) else (None, None)
+            new_pos = {u: [float(v) for v in where[i][:self.dims]] for i, u in enumerate(urls)} if where is not None else {}
+            with self.lock:
+                if self.pumap is not getattr(self.projection.reducer, "model", None):
+                    continue                        # a full refit landed meanwhile
+                old_pos = dict(self.page_pos)
+                self.projection, self.pumap = projection, model
+                self.trained.update(todo)
+                moved_pages = []
+                for u, xyz in new_pos.items():
+                    was = old_pos.get(u)
+                    self.page_pos[u] = xyz
+                    if colour is not None:
+                        self.page_hsv[u] = [float(v) for v in colour[urls.index(u)]]
+                    if was is None or float(np.linalg.norm(np.asarray(xyz) - np.asarray(was))) > 0.25:
+                        moved_pages.append(u)
+                # Chunks re-placed for the pages that moved (and the trained
+                # ones); only those whose drawn position changed are streamed.
+                again = {c: self.vec[c] for u in set(moved_pages) | set(todo)
+                         for c in (self.by_url.get(u) or ()) if c in self.vec}
+            cpos, chsv = self._place_chunks(projection, again)
+            with self.lock:
+                moved_chunks = 0
+                for c, xyz in cpos.items():
+                    was = self.pos.get(c)
+                    self.pos[c] = xyz
+                    if c in chsv:
+                        self.hsv[c] = chsv[c]
+                    if was is None or float(np.linalg.norm(np.asarray(xyz) - np.asarray(was))) > 0.25:
+                        self.seq += 1
+                        self.log.append((self.seq, "chunk", c))
+                        moved_chunks += 1
+                for u in moved_pages:
+                    self.seq += 1
+                    self.log.append((self.seq, "page", u))
+            record = {"pages_trained": len(todo), "ms_train": round(ms_train, 1),
+                      "ms_place": round((time.perf_counter() - t) * 1000, 1),
+                      "pages_moved": len(moved_pages), "chunks_moved": moved_chunks,
+                      "old_drift_p50": model.stats.get("old_drift_p50"),
+                      "device": model.stats.get("device"), "at": round(time.time(), 3)}
+            self.online_updates.append(record)
+            del self.online_updates[:-20]
+            if self.on_batch:
+                try:
+                    self.on_batch(dict(record, kind="online"))
+                except Exception:                   # noqa: BLE001
+                    pass
+
     def _refit_online(self, urls, X, chunks_at_fit):
         """A refit that TRAINS ON THE DIFF (2026-09-27): the pages new since
         the last fit, with every page placed before held where it was.
@@ -834,7 +936,12 @@ class PageProjector(ChunkProjector):
                 or getattr(wrapper, "model", None) is not self.pumap):
             return None
         import copy
-        new = [i for i, u in enumerate(urls) if u not in self.page_pos]
+        # New pages, and pages whose centroid moved since they were trained
+        # (their content changed): the diff the refit trains on.
+        def changed(i, u):
+            old = self.page_vec.get(u)
+            return old is None or float(np.dot(old, X[i])) < 0.98
+        new = [i for i, u in enumerate(urls) if u not in self.trained or changed(i, u)]
         # Trained on a COPY: the stream keeps transforming through the model
         # that is live until the new one is swapped in (`G-74`).
         model = copy.deepcopy(self.pumap)
@@ -938,12 +1045,27 @@ class PageProjector(ChunkProjector):
                     scale = min(1.0, room / reach) if reach > 1e-9 else 1.0
                 self.page_scale[u] = scale
                 for c, o in items:
-                    pos[c] = [float(v) for v in here + o * scale]
+                    # Clipped to the neighbourhood, direction kept: scaling
+                    # by the p90 left the top tenth -- page furniture like
+                    # "Contents", "Views", "References", whose vectors are the
+                    # SITE's chrome rather than the article -- up to 14.6x the
+                    # nearest-page distance away, drawn as long links across
+                    # the picture (2026-09-27).
+                    d = o * scale
+                    norm = float(np.linalg.norm(d))
+                    if norm > room > 0:
+                        d = d * (room / norm)
+                    pos[c] = [float(v) for v in here + d]
         return pos, hsv
 
     #: How far toward the nearest other page an expanded page's chunks may
     #: reach (their p90), as a share of that distance.
-    NEIGHBOURHOOD = 0.4
+    #: 0.45 (2026-09-27): a chunk must stay nearer its own page than any
+    #: other, and a point r from its page is nearer that page than a
+    #: neighbour D away only while r < D/2 -- 0.8 put chunks among the
+    #: neighbours (the unit test caught it). At 0.4 an open page's chunks were
+    #: packed so tight that 63% of their discs overlapped on screen.
+    NEIGHBOURHOOD = 0.45
 
     # -- the fit ------------------------------------------------------------
     def fit(self, workspace) -> Dict:
@@ -1019,6 +1141,8 @@ class PageProjector(ChunkProjector):
                 self.projection = projection
                 if getattr(self, "_next_pumap", None) is not None:
                     self.pumap, self._next_pumap = self._next_pumap, None
+                if self.engine == "parametric":
+                    self.trained = set(urls)
                 self.pos, self.hsv = pos, hsv
                 self.vec, self.url_of, self.by_url = vec, url_of, by_url
                 self.page_pos, self.page_hsv = page_pos, page_hsv
@@ -1133,6 +1257,10 @@ class PageProjector(ChunkProjector):
                 self.seq += 1
                 self.log.append((self.seq, "page", u))
             self.placed_total += len(urls)
+        if self.engine == "parametric" and self.pumap is not None:
+            untrained = [u for u in urls if u not in self.trained]
+            if untrained:
+                self._schedule_online(untrained)
         record = {"batch": len(batch), "pages": len(pages), "placed": len(urls),
                   "ms_transform": round(ms_transform, 1),
                   "ms": round((time.perf_counter() - started) * 1000, 1),
@@ -1152,7 +1280,11 @@ class PageProjector(ChunkProjector):
                     # Chunks placed through the page fit, and the pages it fitted.
                     "projected": len(self.pos) if self.pos else len(self.page_pos),
                     "pages": len(self.page_pos),
-                    "chunks_held": len(self.vec), "centroid_ms": dict(self.centroid_ms)})
+                    "chunks_held": len(self.vec), "centroid_ms": dict(self.centroid_ms),
+                    "engine": self.engine, "trained_pages": len(self.trained),
+                    "pending_online": len(self._pending_online),
+                    "last_online": self.online_updates[-1] if self.online_updates else None,
+                    "device": (self.pumap.stats.get("device") if self.pumap is not None else None)})
         if url:
             out["page"] = {"url": url, "chunks": len(self.by_url.get(url) or ()),
                            "pos": self.page_pos.get(url)}

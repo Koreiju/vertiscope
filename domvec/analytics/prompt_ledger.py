@@ -261,6 +261,14 @@ VERDICTS: Dict[int, Tuple[str, str, str]] = {
           "reconstruction from distilled lines; the distilled form is secondary/offline.", "D-36"),
     140: ("LIVE", "Streaming must meet the millisecond overlay requirement while interacting and loading new "
           "diffs; new-diff overlays must be seen.", "D-35, D-37, G-90"),
+    142: ("LIVE", "The page-centroid UMAP is the default projector.", "G-83, G-97"),
+    143: ("PROCESS", "UMAP fits once and transforms after; check the docs/web before assuming.", "G-97"),
+    144: ("LIVE", "Train ONLINE on the diff after it is first transformed; previous fits held fixed; parameters persist.", "G-96, G-97"),
+    145: ("LIVE", "Online training uses the local CUDA runtime.", "G-97"),
+    146: ("LIVE", "The browser cell must never be left blank: a hung window recovers, the last page reopens.", "D-38"),
+    147: ("LIVE", "Page nodes read as pages; nothing but the reader's pages in the picture (no test leakage).", "G-94, D-39"),
+    148: ("LIVE", "Scanning nodes stay NEAR the nodes they belong to; spacing alone is not the measure.", "G-93"),
+    149: ("LIVE", "Refit, online updates and streaming all run the CUDA model, visibly faster.", "G-97"),
     141: ("LIVE", "The 3D layout AFTER collapse must not be jumbled (measured as seen, on screen); the hard-page "
           "list must be a real, comprehensive in-app suite.", "G-94, G-101"),
 }

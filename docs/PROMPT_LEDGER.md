@@ -7,7 +7,7 @@ binding record; this is the index that proves nothing in a transcript was lost.
 Transcripts cover 2026-09-12 onward; earlier direction lives only in
 `PLUGIN_GOAL.md` (the opening statement and Addenda I-III).
 
-**147 prompts:** LIVE 55, ONE-OFF 36, PARTLY 12, PROCESS 25, QUESTION 11, SUPERSEDED 2, UNREVIEWED 6
+**149 prompts:** LIVE 62, ONE-OFF 36, PARTLY 12, PROCESS 26, QUESTION 11, SUPERSEDED 2
 
 ## Still binding (LIVE, PARTLY, PROCESS)
 
@@ -105,15 +105,14 @@ Transcripts cover 2026-09-12 onward; earlier direction lives only in
 | P139 | 2026-09-27 | LIVE | (repeat of P138) The panels render the page's OWN rendering of the chunk, not a reconstruction from distilled lines; the distilled form is secondary/offline. | D-36 |
 | P140 | 2026-09-27 | LIVE | Streaming must meet the millisecond overlay requirement while interacting and loading new diffs; new-diff overlays must be seen. | D-35, D-37, G-90 |
 | P141 | 2026-09-27 | LIVE | The 3D layout AFTER collapse must not be jumbled (measured as seen, on screen); the hard-page list must be a real, comprehensive in-app suite. | G-94, G-101 |
-
-## UNREVIEWED
-
-- P142
-- P143
-- P144
-- P145
-- P146
-- P147
+| P142 | 2026-09-27 | LIVE | The page-centroid UMAP is the default projector. | G-83, G-97 |
+| P143 | 2026-09-27 | PROCESS | UMAP fits once and transforms after; check the docs/web before assuming. | G-97 |
+| P144 | 2026-09-27 | LIVE | Train ONLINE on the diff after it is first transformed; previous fits held fixed; parameters persist. | G-96, G-97 |
+| P145 | 2026-09-27 | LIVE | Online training uses the local CUDA runtime. | G-97 |
+| P146 | 2026-09-27 | LIVE | The browser cell must never be left blank: a hung window recovers, the last page reopens. | D-38 |
+| P147 | 2026-09-27 | LIVE | Page nodes read as pages; nothing but the reader's pages in the picture (no test leakage). | G-94, D-39 |
+| P148 | 2026-09-27 | LIVE | Scanning nodes stay NEAR the nodes they belong to; spacing alone is not the measure. | G-93 |
+| P149 | 2026-09-27 | LIVE | Refit, online updates and streaming all run the CUDA model, visibly faster. | G-97 |
 
 ## Superseded
 
@@ -758,27 +757,35 @@ Transcripts cover 2026-09-12 onward; earlier direction lives only in
 
 > the 3D layout is still too jumbled after collapse. I'm also not seeing as comprehensive and real web a test suite over the URLs as I had requested
 
-### P142 -- 2026-09-27 16:47 -- UNREVIEWED
+### P142 -- 2026-09-27 16:47 -- LIVE
 
 > make the page-centroid UMAP the default projector
 
-### P143 -- 2026-09-27 16:50 -- UNREVIEWED
+### P143 -- 2026-09-27 16:50 -- PROCESS
 
 > [mid-turn] UMAP should be able to fit_transform and do simple transforms given the pre-fit, no? Perhaps search the web too
 
-### P144 -- 2026-09-27 16:53 -- UNREVIEWED
+### P144 -- 2026-09-27 16:53 -- LIVE
 
 > [mid-turn] If there's a way to incrementally re-train online for new embeddings, that might work. The suggestion there would be to train on just the diff updates and assume previous fits are fixed. Also, training on subchunks happens only after they are first projected through the previously fitted transform, before the re-fit with the new diffs. There is likely a way UMAP supports previous parameter persistence while also enabling for new fits on new batches.
 
-### P145 -- 2026-09-27 16:54 -- UNREVIEWED
+### P145 -- 2026-09-27 16:54 -- LIVE
 
 > [mid-turn] Also, whichever of your finds supports our local cuda runtime, that should also be included in online updates
 
-### P146 -- 2026-09-27 17:07 -- UNREVIEWED
+### P146 -- 2026-09-27 17:07 -- LIVE
 
 > [mid-turn] Nothing showing in the obsidian browser. It's currently a blank screen
 
-### P147 -- 2026-09-27 17:15 -- UNREVIEWED
+### P147 -- 2026-09-27 17:15 -- LIVE
 
 > [mid-turn] Current 3D layout seems scattered and like the nodes may not be pages/url nodes and show leakage
+
+### P148 -- 2026-09-27 17:18 -- LIVE
+
+> [mid-turn] Not much of our scanning layout is good, a lot of it is way too far from the original set of nodes, even though there is "sufficient" spacing apart
+
+### P149 -- 2026-09-27 17:19 -- LIVE
+
+> [mid-turn] Also, I don't think "refit" is applying the cuda form, and I don't know if incremental updates on the CUDA form are actually there yet. Depending on fit times, it might be a lot faster on CUDA than CPU, and we should be seeing much faster layout streaming updates from using CUDA
 
