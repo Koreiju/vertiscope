@@ -27,7 +27,7 @@ import * as THREE from "three";
 
 import { Sidecar } from "./sidecar";
 import { ChunkSurface, SurfaceHost } from "./surface";
-import { faviconFor, getSnapshot, renderSnapshot } from "./snapshot";
+import { faviconFor, getSnapshot, pictureFor, renderSnapshot } from "./snapshot";
 
 export const GRAPH_VIEW = "domvec-graph-view";
 
@@ -1746,7 +1746,6 @@ export class GraphView extends ItemView {
         const y = o[0] * up[0] + o[1] * up[1] + o[2] * up[2];
         return { c, angle: Math.atan2(y, x), dist: Math.hypot(o[0], o[1], o[2]) };
       });
-      polar.sort((p, q) => p.dist - q.dist);
       // Spaced by the largest thing actually DRAWN: a chunk with a picture is
       // a panel ~1.75x its sphere, and spacing by the sphere buried 11 of the
       // page's chunks behind its own picture panels (2026-09-27).
@@ -1757,43 +1756,149 @@ export class GraphView extends ItemView {
       page.discStep = step;
       // The first ring outside the page node itself (it sits at the centre).
       const inner = drawnRadius(page, relSize, media) * COLLIDER_SAFETY + COLLIDER_MARGIN;
-      // SUNFLOWER slots (golden angle), which are evenly spaced by
-      // construction; each chunk, nearest-first, takes the free slot among the
-      // next few whose angle is nearest its UMAP direction. Keeping each
-      // chunk's own angle and a rank radius stacked chunks at similar angles
-      // -- rings sqrt(k+1)-sqrt(k) apart -- and buried 10 of 58 (2026-09-27).
-      const GOLDEN = Math.PI * (3 - Math.sqrt(5));
-      const slots = polar.map((_it, k) => ({ r: inner + step * Math.sqrt(k + 1), a: k * GOLDEN, used: false }));
-      const angDist = (x: number, y: number) => {
-        const d = Math.abs(((x - y) % (2 * Math.PI) + 3 * Math.PI) % (2 * Math.PI) - Math.PI);
-        return d;
-      };
-      polar.forEach((it, rank) => {
-        let best = -1;
-        for (let k = rank; k < Math.min(slots.length, rank + 8); k++) {
-          if (slots[k].used) continue;
-          if (best < 0 || angDist(slots[k].a, it.angle) < angDist(slots[best].a, it.angle)) best = k;
-        }
-        if (best < 0) best = slots.findIndex((x) => !x.used);
-        slots[best].used = true;
-        const r = slots[best].r;
-        it.c.onDisc = true;
-        const ca = Math.cos(slots[best].a), sa = Math.sin(slots[best].a);
+      const place = (c: any, r: number, a: number) => {
+        c.onDisc = true;
+        const ca = Math.cos(a), sa = Math.sin(a);
         const pos = [P[0] + r * (ca * right[0] + sa * up[0]),
                      P[1] + r * (ca * right[1] + sa * up[1]),
                      P[2] + r * (ca * right[2] + sa * up[2])];
-        it.c.fitX = pos[0]; it.c.fitY = pos[1]; it.c.fitZ = pos[2];
+        c.fitX = pos[0]; c.fitY = pos[1]; c.fitZ = pos[2];
         // PLACED there, not attracted: the home force is alpha-scaled and the
         // simulation had cooled, so disc chunks never arrived (G-94 read 2.0x).
-        it.c.x = pos[0]; it.c.y = pos[1]; it.c.z = pos[2];
-        it.c.vx = 0; it.c.vy = 0; it.c.vz = 0;
+        c.x = pos[0]; c.y = pos[1]; c.z = pos[2];
+        c.vx = 0; c.vy = 0; c.vz = 0;
         // Its territory is where it was placed: `contain` held each chunk to
         // a region around its PROJECTED anchor and folded the disc into one
         // point (46 chunks at one distance, 41 buried; 2026-09-27).
-        it.c.anchorPos = [pos[0], pos[1], pos[2]];
-        if (it.c.fullVal === undefined) it.c.fullVal = it.c.val ?? 1;
-        it.c.val = Math.pow(floor / relSize, 3);
-      });
+        c.anchorPos = [pos[0], pos[1], pos[2]];
+        if (c.fullVal === undefined) c.fullVal = c.val ?? 1;
+        c.val = Math.pow(floor / relSize, 3);
+      };
+      const angDist = (x: number, y: number) =>
+        Math.abs(((x - y) % (2 * Math.PI) + 3 * Math.PI) % (2 * Math.PI) - Math.PI);
+      if (this.plantSunflower) {
+        // Planted by G-94's check: the rank sunflower, blind to the tree.
+        polar.sort((p, q) => p.dist - q.dist);
+        const GOLDEN = Math.PI * (3 - Math.sqrt(5));
+        const slots = polar.map((_it, k) => ({ r: inner + step * Math.sqrt(k + 1), a: k * GOLDEN, used: false }));
+        polar.forEach((it, rank) => {
+          let best = -1;
+          for (let k = rank; k < Math.min(slots.length, rank + 8); k++) {
+            if (slots[k].used) continue;
+            if (best < 0 || angDist(slots[k].a, it.angle) < angDist(slots[best].a, it.angle)) best = k;
+          }
+          if (best < 0) best = slots.findIndex((x) => !x.used);
+          slots[best].used = true;
+          place(it.c, slots[best].r, slots[best].a);
+        });
+        page.discR = inner + step * Math.sqrt(polar.length + 1);
+        continue;
+      }
+      // A RADIAL TREE on the disc (2026-09-27: "force-directed layouts have
+      // incorrect geometries and constraints"). The rank sunflower gave every
+      // chunk a slot by UMAP distance, blind to its parent, so a hub chunk's
+      // 30 edges crossed the whole disc to wherever its children had landed
+      // and an open page read as a web converging on a point. Now each
+      // subtree owns a WEDGE of the disc -- its leaves' share of the circle,
+      // siblings ordered by their UMAP direction -- internal nodes sit on
+      // inner rings at the middle of their wedge, and leaves on an outer band
+      // staggered over m rings. Wedges do not overlap, so no edge crosses
+      // another subtree's; every neighbour is at least one collider step away.
+      const end = (x: any) => (typeof x === "object" && x ? x.id : x);
+      const angleOf = new Map<string, number>(polar.map((it) => [it.c.id, it.angle]));
+      const members = new Map<string, any>(chunks.map((c: any) => [c.id, c]));
+      const parentOf = new Map<string, string>();
+      for (const l of data.links) {
+        if (l.force) continue;
+        const s = end(l.source), t = end(l.target);
+        if (!members.has(t) || parentOf.has(t)) continue;
+        if (s === page.id || members.has(s)) parentOf.set(t, s);
+      }
+      const kids = new Map<string, any[]>();
+      for (const c of chunks) {
+        // Up to the page without a cycle, or it hangs from the page itself.
+        let x = c.id, ok = false;
+        const seen = new Set<string>([x]);
+        for (;;) {
+          const upId = parentOf.get(x);
+          if (upId === undefined || upId === page.id) { ok = true; break; }
+          if (seen.has(upId) || !members.has(upId)) break;
+          seen.add(upId); x = upId;
+        }
+        const p = ok ? (parentOf.get(c.id) ?? page.id) : page.id;
+        (kids.get(p) || kids.set(p, []).get(p)!).push(c);
+      }
+      // Each subtree's direction: the circular mean of its members' UMAP angles.
+      const dir = new Map<string, number>();
+      const direction = (id: string): [number, number] => {
+        const a = angleOf.get(id);
+        let sx = a === undefined ? 0 : Math.cos(a), sy = a === undefined ? 0 : Math.sin(a);
+        for (const k of kids.get(id) || []) { const [kx, ky] = direction(k.id); sx += kx; sy += ky; }
+        dir.set(id, Math.atan2(sy, sx));
+        return [sx, sy];
+      };
+      direction(page.id);
+      const leaves: any[] = [];
+      const depth = new Map<string, number>();
+      const internal: any[] = [];
+      const walk = (id: string, d: number) => {
+        const ks = (kids.get(id) || []).slice().sort((a, b) => (dir.get(a.id) ?? 0) - (dir.get(b.id) ?? 0));
+        kids.set(id, ks);
+        for (const k of ks) {
+          depth.set(k.id, d);
+          if ((kids.get(k.id) || []).length) { internal.push(k); walk(k.id, d + 1); }
+          else leaves.push(k);
+        }
+      };
+      walk(page.id, 1);
+      const L = Math.max(1, leaves.length);
+      const slice = (2 * Math.PI) / L;
+      // Turn the whole ring so leaves sit nearest their own UMAP directions.
+      let theta0 = 0, bestCost = Infinity;
+      for (let t = 0; t < 72; t++) {
+        const off = (t / 72) * 2 * Math.PI;
+        let cost = 0;
+        leaves.forEach((c, j) => { cost += angDist(off + (j + 0.5) * slice, angleOf.get(c.id) ?? 0); });
+        if (cost < bestCost) { bestCost = cost; theta0 = off; }
+      }
+      const at = new Map<string, number>();
+      leaves.forEach((c, j) => at.set(c.id, theta0 + (j + 0.5) * slice));
+      const span = (id: string): [number, number] => {
+        const a = at.get(id);
+        if (a !== undefined && !(kids.get(id) || []).length) return [a, a];
+        let lo = Infinity, hi = -Infinity;
+        for (const k of kids.get(id) || []) { const [l, h] = span(k.id); lo = Math.min(lo, l); hi = Math.max(hi, h); }
+        at.set(id, (lo + hi) / 2);
+        return [lo, hi];
+      };
+      span(page.id);
+      // Inner rings: one per depth, far enough out that neighbours on it are
+      // a step apart (chord), and a step outside the ring before.
+      const chordR = (gap: number) => gap >= Math.PI ? 0 : step / (2 * Math.sin(Math.max(gap, 1e-6) / 2));
+      const maxD = internal.reduce((m, c) => Math.max(m, depth.get(c.id) || 1), 0);
+      const ringR: number[] = [inner];
+      for (let d = 1; d <= maxD; d++) {
+        const angs = internal.filter((c) => depth.get(c.id) === d).map((c) => at.get(c.id)!).sort((a, b) => a - b);
+        let gap = 2 * Math.PI;
+        for (let i = 0; i < angs.length; i++) {
+          const next = i + 1 < angs.length ? angs[i + 1] : angs[0] + 2 * Math.PI;
+          if (angs.length > 1) gap = Math.min(gap, next - angs[i]);
+        }
+        ringR[d] = Math.max(ringR[d - 1] + step, angs.length > 1 ? chordR(gap) : 0);
+      }
+      for (const c of internal) place(c, ringR[depth.get(c.id) || 1], at.get(c.id)!);
+      // The leaf band: m rings, leaf j on ring j mod m, so neighbours on one
+      // ring are m slices apart. m is chosen for the smallest outer radius.
+      const base = ringR[maxD] + step;
+      let m = 1, bandR = Infinity;
+      for (let k = 1; k <= Math.min(12, L); k++) {
+        const r0 = Math.max(base, L > k ? chordR(k * slice) : 0);
+        if (r0 + (k - 1) * step < bandR) { bandR = r0 + (k - 1) * step; m = k; }
+      }
+      const r0 = Math.max(base, L > m ? chordR(m * slice) : 0);
+      leaves.forEach((c, j) => place(c, r0 + (j % m) * step, at.get(c.id)!));
+      page.discR = r0 + (m - 1) * step;
+      page.discTree = { leaves: leaves.length, internal: internal.length, rings: m, depth: maxD };
     }
     this.makeRoom(data, relSize);
   }
@@ -1835,7 +1940,7 @@ export class GraphView extends ItemView {
       // it inside half the distance to any other page.
       const step = p.discStep || collider * 1.25;
       const inner = drawnRadius(p, relSize, this.media()) * COLLIDER_SAFETY + COLLIDER_MARGIN;
-      const need = (inner + step * Math.sqrt(n) + step) / 0.45;
+      const need = ((p.discR ?? (inner + step * Math.sqrt(n))) + step) / 0.45;
       for (const q of pages) {
         if (q === p || !Number.isFinite(q.fitX)) continue;
         const dx = q.fitX - p.fitX, dy = q.fitY - p.fitY, dz = (q.fitZ ?? 0) - (p.fitZ ?? 0);
@@ -1854,11 +1959,40 @@ export class GraphView extends ItemView {
     }
   }
 
+  /**
+   * Chunks get their most relevant picture (largest rendered in the page):
+   * set on the nodes drawn now; later redraws read it back from the table.
+   */
+  setPictures(byCid: Record<string, string>): void {
+    if (!this.graph) return;
+    let any = false;
+    for (const n of this.graph.graphData().nodes as any[]) {
+      const src = byCid[n.id];
+      if (!src || n.force || (n.image && n.image.src === src)) continue;
+      n.image = { src, alt: "" };
+      n.imgLoaded = false;
+      any = true;
+    }
+    if (any) this.graph.nodeThreeObject(this.graph.nodeThreeObject());
+  }
+
   /** Planted by G-81's check: page nodes get no favicon. */
   plantNoIcons = false;
 
   /** Planted by G-94's check: chunks drawn at full size, whatever the room. */
   plantBigChunks = false;
+
+  /** Planted by G-94's check: the rank sunflower, blind to the tree. */
+  plantSunflower = false;
+  /** The radius a node is DRAWN at, the pane's own number, for checks. */
+  drawnRadiusOf(n: any): number {
+    return this.graph ? drawnRadius(n, this.graph.nodeRelSize(), this.media()) : 0;
+  }
+
+  /** Planted by G-94's check: an orbit leaves the disc where it was laid. */
+  plantNoReface = false;
+  /** Discs turned back to face the camera after an orbit, for checks. */
+  discRefaced = 0;
 
   /** Planted by G-94's check: no collision room for projected nodes. */
   plantNoCollide = false;
@@ -2591,7 +2725,8 @@ export class GraphView extends ItemView {
       rank: n.rank,
       tokens: n.tokens ?? 0,
       // A page with no picture of its own shows its site's icon (G-81).
-      image: n.image ?? ((n.level === "page" && n.url && !this.plantNoIcons) ? (() => {
+      image: (n.level !== "page" && pictureFor(n.cid) ? { src: pictureFor(n.cid), alt: "" } : null)
+        ?? n.image ?? ((n.level === "page" && n.url && !this.plantNoIcons) ? (() => {
         const src = faviconFor(n.url);
         return src ? { src, alt: "icon" } : undefined;
       })() : undefined),
@@ -3041,6 +3176,18 @@ export class GraphView extends ItemView {
     const trackball = () =>
       graph.controls() as { handleResize?: () => void };
 
+    let refaceTimer = 0;
+    try {
+      (graph.controls() as any).addEventListener?.("end", () => {
+        window.clearTimeout(refaceTimer);
+        refaceTimer = window.setTimeout(() => {
+          const d = graph.graphData() as any;
+          // Re-faced, never re-projected: the same tree, turned to the camera.
+          if (this.plantNoReface) return;
+          if (d.nodes.some((n: any) => n.onDisc)) { this.fitChunkSizes(d); this.discRefaced++; }
+        }, 120);
+      });
+    } catch { /* controls without events */ }
     const fit = () => {
       graph.width(canvas.clientWidth).height(canvas.clientHeight);
       trackball().handleResize?.();

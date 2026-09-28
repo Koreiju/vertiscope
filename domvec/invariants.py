@@ -571,6 +571,11 @@ _LAYOUT_READERS = {
     # pointer, and its box -- on a hover, never during a drain.
     "at",
     "runBox",
+    # The picture peripheral: the largest rendered image in a chunk's run.
+    "pictures",
+    # The pushed hover: a passive pointer listener reading the box of the
+    # chunk under the pointer, once a frame -- never the fold.
+    "onPointer",
     # The actuator. `step` has to know what is on screen before it scrolls,
     # and it runs once per step rather than once per node.
     "inView",

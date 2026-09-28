@@ -1832,6 +1832,58 @@ the most relevant, chosen by its RENDERED size in the page. (3) The 3D
 billboard shows the chunk the way the 2D side card does (the page's own
 rendering), not the distilled lines.*
 
+> Total scan feature loss seen at
+> https://duckduckgo.com/?q=radix+trie+planted962&ia=web
+
+> Significant chunk highlight-when-hovered lag after extensive scrolling on
+> https://discourse.julialang.org/latest. The millisecond bound is not
+> followed for overlay highlights in the electron browser on chunks, and
+> neither with 3D force-directed chunk node diff rendering. Not that the
+> feature is nonexistent or doesn't work for a first couple seconds, but
+> there's some false reason for the lag because it should be simple enough to
+> continuously stream diffs from the mutationobservers to the electron overlay
+> to the 3D gui without having to wait for database write queues. Perhaps
+> there's an LRU cache overload going on because the queue's max length has to
+> be extended, or otherwise ensure asynchronous streaming of the force-directed
+> chunks is unblocked by downstream processes, which is the main intention
+> anyways.
+
+*Read as: (1) a page left open across a store switch lost its scanning (fixed:
+the run returns the cell to the reader's page, freshly loaded). (2) The
+millisecond bound must hold for as long as a reader scrolls, not only for the
+first seconds: overlay and force-directed 3D diffs stream from the observers
+and never wait on the store; whatever grows with a long session (a queue, a
+cache, a per-drain scan) is the defect.*
+
+> Tests aren't validating on the original websites
+
+*Read as: a defect is confirmed fixed on the website it was SEEN on, not on a
+fixture built to resemble it. The lag was reported on discourse's /latest and
+the scan loss on a DuckDuckGo results page; a check that passes on
+`busy_feed.html` or `result_cards.html` says the mechanism works, not that the
+reader's page does. Every check whose defect came from a named site runs on
+that site, judged by an observer independent of the code under test, with its
+planted arm on the same site. A fixture may stay as a secondary, controlled
+arm, never as the one that is judged.*
+
+> Tests aren't validating on the original websites, the measurement was from
+> the julia forums I think
+
+> Also, force-directed layouts have incorrect geometries and constraints
+
+(With a screenshot: the Wikipedia globe as an open page's billboard, its
+chunks bunched in clumps along a ring around it rather than spread, some
+drawn on top of the globe, straight edges from two "+" nodes above and below
+fanning to many chunks, and a bundle of edges converging on an undrawn point
+beneath the page; a few chunks far outside the ring.)
+
+*Read as: (1) the lag was measured on discourse.julialang.org/latest, so D-40
+is judged THERE. (2) The open page's layout breaks its own constraints: no two
+drawn nodes may overlap (the page's billboard included), the disc must spread
+its chunks rather than clump them on a ring, an open page is a simple tree (no
+edges from other nodes into its chunks, no hub that is not drawn), and nothing
+is flung outside its page's room.*
+
 ---
 
 

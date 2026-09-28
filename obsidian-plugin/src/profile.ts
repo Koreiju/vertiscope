@@ -196,6 +196,11 @@ export class PipelineProfiler {
     }
   }
 
+  /** Forget a trace that turned out not to be one (its drain was pushed). */
+  drop(t: Trace) {
+    this.live.delete(t.id);
+  }
+
   finish(t: Trace, outcome: Outcome) {
     if (t.done) return;
     t.done = true;

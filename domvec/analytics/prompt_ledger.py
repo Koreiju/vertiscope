@@ -272,6 +272,16 @@ VERDICTS: Dict[int, Tuple[str, str, str]] = {
     150: ("LIVE", "Open pages drawn as a SIMPLE TREE (one parent, no cross links); favicons on url nodes; "
           "the most relevant picture (by rendered size) on chunks; the 3D billboard looks like the 2D card.",
           "G-84, G-81, G-100, G-102, D-36"),
+    151: ("LIVE", "A planted search page must never lose its scan: a store switch leaves the sensor's dictionary "
+          "stale unless capture restarts (fixed: backToReader + restartCapture).", "D-37, G-101"),
+    152: ("LIVE", "Hover and diffs stream in milliseconds after a long scroll, never waiting on the store or "
+          "downstream queues: pushed from the page, not polled.", "D-40, D-35, G-90"),
+    153: ("PROCESS", "A defect seen on a named site is confirmed ON that site, timed by an observer independent of the "
+          "code under test, planted arm on the same site; a fixture is a secondary arm, never the judged one.",
+          "D-40, D-35, D-36, D-37, G-94"),
+    154: ("LIVE", "The lag was on the Julia forum (discourse.julialang.org/latest): D-40 is judged there.", "D-40"),
+    155: ("LIVE", "An open page's layout keeps its geometry: no overlaps (the page's billboard included), a spread disc, a "
+          "simple planar tree, nothing flung out -- and still after an orbit.", "G-94, D-41"),
     141: ("LIVE", "The 3D layout AFTER collapse must not be jumbled (measured as seen, on screen); the hard-page "
           "list must be a real, comprehensive in-app suite.", "G-94, G-101"),
 }

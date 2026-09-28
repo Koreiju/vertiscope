@@ -596,6 +596,78 @@ export function makeChecks(env) {
     };
   `;
 
+  // The page's own changes, timed by an observer OF THE CHECK'S (2026-09-27:
+  // "Tests aren't validating on the original websites"). A live site cannot be
+  // made to log its own writes, so the check watches for them: when content
+  // (an element with 40+ chars of text) is delivered to any MutationObserver --
+  // the earliest a script can know -- and which chunk it landed in, asked of
+  // the sensor's `at` afterwards. Each is then matched to the drain that
+  // CARRIED that chunk (its trace's `chunk_ids`), never merely the next drain.
+  // Held in a closure under a random, non-enumerable name, and removed after:
+  // nothing of it is left in the page.
+  const STREAM_SEEN = `
+    const qq = (xs, p) => { if (!xs.length) return null; const s = xs.slice().sort((a, c) => a - c); return Math.round(s[Math.min(s.length - 1, Math.floor(p * s.length))] * 10) / 10; };
+    const observePage = async (KEY) => b.webview.executeJavaScript("(function () {" +
+      "if (window[" + JSON.stringify(KEY) + "]) return 1;" +
+      "var log = [];" +
+      "var mo = new MutationObserver(function (recs) {" +
+      "  var t = Date.now(), els = [];" +
+      "  for (var i = 0; i < recs.length; i++) { var a = recs[i].addedNodes;" +
+      "    for (var k = 0; k < a.length; k++) { var n = a[k];" +
+      "      if (n.nodeType === 1 && (n.textContent || '').trim().length >= 40) els.push(n); } }" +
+      "  if (els.length) log.push({ t: t, els: els.slice(0, 4) });" +
+      "});" +
+      "mo.observe(document.documentElement, { childList: true, subtree: true });" +
+      "Object.defineProperty(window, " + JSON.stringify(KEY) + ", { value: { log: log, mo: mo }, enumerable: false, configurable: true });" +
+      "return 1; })()");
+    const collectPage = async (KEY) => b.webview.executeJavaScript("(function () {" +
+      "var d = window[" + JSON.stringify(KEY) + "]; if (!d) return null; d.mo.disconnect();" +
+      "var h = window.__domvecSensor;" +
+      "var out = d.log.map(function (b) { var ids = [];" +
+      "  b.els.forEach(function (e) { try { var g = h && h.at ? h.at(e) : null; if (g) ids.push(g.id); } catch (x) {} });" +
+      "  return { t: b.t, ids: ids }; });" +
+      "delete window[" + JSON.stringify(KEY) + "]; return out; })()");
+    const dropPage = async (KEY) => { try { await b.webview.executeJavaScript("(function(){var d=window[" + JSON.stringify(KEY) + "];if(d){d.mo.disconnect();delete window[" + JSON.stringify(KEY) + "];}return 1;})()"); } catch (e) {} };
+    const matchSeen = (seen, prefix, from, to) => {
+      const traces = window.__domvecProfiler.list().filter((t) => t.url.startsWith(prefix) && t.kind === "live"
+        && Array.isArray(t.facts.chunk_ids) && typeof t.facts.host_epoch === "number")
+        .sort((a, c) => a.facts.host_epoch - c.facts.host_epoch);
+      const rows = [];
+      let unmapped = 0, unanswered = 0;
+      for (const m of (seen || [])) {
+        if (m.t < from || m.t > to) continue;
+        if (!m.ids.length) { unmapped++; continue; }
+        const hit = traces.find((t) => t.facts.host_epoch >= m.t && t.facts.chunk_ids.some((id) => m.ids.includes(id)));
+        if (!hit || hit.facts.host_epoch - m.t > 10000) { unanswered++; continue; }
+        const h = hit.facts.host_epoch - m.t;
+        rows.push({ t: m.t, host: h,
+                    to3d: typeof hit.stages.drain_to_3d === "number" ? h + hit.stages.drain_to_3d : null,
+                    overlay: typeof hit.stages.drain_to_overlay === "number" ? h + hit.stages.drain_to_overlay : null });
+      }
+      return { rows, unmapped, unanswered };
+    };
+    // Pointer moves the way a reader makes them; each one that lands on
+    // ANOTHER chunk is timed from the move to the outline.
+    const hoverRun = async (n, tag) => {
+      const pb = b.pipebox, wv = b.webview, r = wv.getBoundingClientRect(), out = [];
+      for (let i = 0; i < n; i++) {
+        const x = Math.round(40 + (i * 71) % Math.max(80, r.width - 80));
+        const y = Math.round(60 + (i * 113) % Math.max(80, r.height - 120));
+        const before = pb.hover ? pb.hover.at : 0, beforeCid = pb.hover ? pb.hover.cid : "";
+        const t0 = performance.now();
+        wv.sendInputEvent({ type: "mouseMove", x, y });
+        let dt = null, source = null;
+        while (performance.now() - t0 < 1500) {
+          await sleep(1);
+          if (pb.hover && pb.hover.at >= t0 && pb.hover.at > before) { dt = pb.hover.at - t0; source = pb.hover.source; break; }
+        }
+        if (dt !== null || !pb.hover || pb.hover.cid !== beforeCid) out.push({ tag, ms: dt, source });
+        await sleep(60);
+      }
+      return out;
+    };
+  `;
+
   const tidyFixtures = async (origin) => {
     try {
       if (!origin) return -1;
@@ -1102,6 +1174,12 @@ export function makeChecks(env) {
             // The graph's own work per drain.
             graph_ms: v && v.forceStats ? { n: v.forceStats.ms.length, p50: q(v.forceStats.ms, 0.5), p95: q(v.forceStats.ms, 0.95) } : null,
             frame_ms_p50: Math.round(fr[2]),
+            // Where the slowest placements spent their time, by phase.
+            worst_placed: window.__domvecProfiler.list().filter((t) => typeof t.stages.overlay_placed === "number")
+              .sort((a, c) => c.stages.overlay_placed - a.stages.overlay_placed).slice(0, 3)
+              .map((t) => ({ url: t.url.slice(0, 60), chunks: t.facts.chunks_in_drain,
+                             stages: Object.fromEntries(["pump_wait", "force_tree", "absorb.covers", "absorb.flash_prep", "overlay_placed", "drain_to_overlay"]
+                               .filter((k) => typeof t.stages[k] === "number").map((k) => [k, Math.round(t.stages[k] * 10) / 10])) })),
           };
         })()`);
         const flowing = got.frame_ms_p50 < 50;
@@ -1206,87 +1284,191 @@ export function makeChecks(env) {
     // ---- Addendum IX defects, each with its planted arm run through the plugin ----
     {
       id: "D-35",
-      asks: "navigating to a new page, the overlay and the stream keep going: drains continue while the new page's first capture is stored, and hover answers from the page's own chunking before the store knows the page",
+      asks: "navigating to a new page, the overlay and the stream keep going: while the new page's first capture is being stored, what the page changes still reaches the GUI in milliseconds, and hover answers from the page's own chunking before the store knows the page",
       async run() {
-        const fixtures = await serveFixtures();
+        // On real sites (2026-09-27: "Tests aren't validating on the original
+        // websites"): from a page the store holds to the Julia forum's /latest,
+        // new to the store (a query string of its own per arm), scrolled at
+        // once, so topics keep arriving while its first capture is stored.
+        // Under push a quiet page leaves no trace to count, so the question is
+        // not "did drains continue" but "did what the page changed DURING the
+        // capture reach the GUI" -- timed by the check's own observer.
+        const FROM = "https://en.wikipedia.org/wiki/Radix_tree";
+        const TO = "https://discourse.julialang.org/latest";
         const arm = (planted) => evaluate(`(async () => {
           ${PREP}
+          ${STREAM_SEEN}
           const pb = b.pipebox;
           b.plant.clear(); pb.plantStoreOnly = false;
           if (${planted}) { b.plant.add("serial-capture"); pb.plantStoreOnly = true; }
+          const KEY = "__domvecCheck" + Math.random().toString(36).slice(2);
           try {
-            // From a page the store holds, the way a reader arrives.
-            await land("https://en.wikipedia.org/wiki/Radix_tree", 25000);
+            await land(${JSON.stringify(FROM)}, 25000);
             await sleep(3000);
-            const target = ${JSON.stringify(fixtures.origin)} + "/nav_heavy.html?d35=" + (${planted} ? "p" : "c") + Date.now();
-            const P = window.__domvecProfiler;
-            const t0 = performance.now();
-            b.go(target);
-            await land(target, 25000);
-            await sleep(200);
-            const pt = await b.webview.executeJavaScript(
-              "(function(){var e=document.querySelectorAll('p')[2];if(!e)return null;var r=e.getBoundingClientRect();" +
-              "return [Math.round(r.left+Math.min(80,r.width/2)),Math.round(r.top+r.height/2)];})()");
-            let firstDrain = -1, firstHover = -1, source = null, k = 0;
-            while (performance.now() - t0 < 14000) {
-              const tr = P.list().filter((t) => t.kind === "live" && t.url === target);
-              if (tr.length && firstDrain < 0) firstDrain = tr[0].t0 - t0;
-              if (pt && firstDrain >= 0 && firstHover < 0) {
-                b.webview.sendInputEvent({ type: "mouseMove", x: pt[0] + (k++ % 7), y: pt[1] });
-                if (pb.hover && pb.hover.cid) { firstHover = performance.now() - t0; source = pb.hover.source || null; }
-              }
-              await sleep(100);
+            const to = ${JSON.stringify(TO)} + "?d35=" + (${planted} ? "p" : "c") + Date.now();
+            const t0 = Date.now();
+            b.go(to);
+            let observed = false;
+            for (let i = 0; i < 300 && !observed; i++) {
+              await sleep(50);
+              try { if (b.webview.getURL().startsWith(${JSON.stringify(TO)}) && await b.webview.executeJavaScript("document.readyState !== 'loading'")) observed = !!(await observePage(KEY)); } catch (e) {}
             }
-            const tr = P.list().filter((t) => t.kind === "live" && t.url === target).map((t) => t.t0).sort((x, y) => x - y);
-            let gap = 0;
-            for (let i = 1; i < tr.length; i++) gap = Math.max(gap, tr[i] - tr[i - 1]);
-            if (tr.length) gap = Math.max(gap, (t0 + 14000) - tr[tr.length - 1]);
-            const caps = P.list().filter((t) => t.url === target && t.stages.capture).map((t) => t.stages.capture);
-            return { planted: ${planted}, drains: tr.length, first_drain_ms: Math.round(firstDrain),
-                     max_drain_gap_ms: Math.round(gap), max_capture_ms: Math.round(Math.max(0, ...caps)),
-                     first_hover_after_drain_ms: firstHover >= 0 && firstDrain >= 0 ? Math.round(firstHover - firstDrain) : -1,
-                     hover_source: source, aimed: pt };
+            // Whether a capture was in flight, sampled on the host.
+            const busy = [];
+            const sampler = setInterval(() => busy.push([Date.now(), !!(b.capturing || (b.captureQueue || []).length)]), 25);
+            const wv = b.webview;
+            for (let i = 0; i < 40; i++) {
+              wv.sendInputEvent({ type: "mouseWheel", x: 300, y: 300, deltaX: 0, deltaY: -500 });
+              await sleep(200);
+            }
+            const hovers = await hoverRun(15, "after");
+            clearInterval(sampler);
+            await sleep(2000);
+            const seen = await collectPage(KEY);
+            const m = matchSeen(seen, ${JSON.stringify(TO)}, t0, Date.now());
+            const capturingAt = (t) => { let v = false; for (const [bt, on] of busy) { if (bt > t) break; v = on; } return v; };
+            const during = m.rows.filter((r) => capturingAt(r.t)).map((r) => r.host);
+            const hv = hovers.filter((x) => x.ms !== null).map((x) => x.ms);
+            const firstDrain = window.__domvecProfiler.list().filter((t) => t.kind === "live" && t.url.startsWith(${JSON.stringify(TO)})
+              && (t.facts.chunks_in_drain || 0) > 0).map((t) => t.facts.host_epoch).filter(Boolean).sort((a, c) => a - c)[0];
+            return { planted: ${planted}, observed, url: wv.getURL(),
+                     first_drain_ms: firstDrain ? firstDrain - t0 : -1,
+                     capturing_share: busy.length ? Math.round(100 * busy.filter((x) => x[1]).length / busy.length) / 100 : 0,
+                     seen: (seen || []).length, answered: m.rows.length, unmapped: m.unmapped, unanswered: m.unanswered,
+                     during_capture_ms: { n: during.length, p50: qq(during, 0.5), p95: qq(during, 0.95) },
+                     all_ms: { n: m.rows.length, p50: qq(m.rows.map((r) => r.host), 0.5), p95: qq(m.rows.map((r) => r.host), 0.95) },
+                     hover_ms: { asked: hovers.length, answered: hv.length, p50: qq(hv, 0.5), p95: qq(hv, 0.95),
+                                 sources: hovers.reduce((a, x) => { a[x.source || "none"] = (a[x.source || "none"] || 0) + 1; return a; }, {}) } };
           } finally {
             b.plant.clear(); pb.plantStoreOnly = false;
+            await dropPage(KEY);
           }
         })()`, { timeout: 180000 });
-        try {
-          const clean = await arm(false);
-          const planted = await arm(true);
-          // The stream keeps drawing: no drain gap longer than two ticks
-          // (LIVE_MS 1200), whatever the capture costs; hover within 1.5 s of
-          // the first drain, answered by the page's own chunking if need be.
-          const ok = (x) => x.first_drain_ms >= 0 && x.max_drain_gap_ms < 2600
-            && x.first_hover_after_drain_ms >= 0 && x.first_hover_after_drain_ms < 1500;
-          const evidence = { clean, planted, purged: await tidyFixtures(fixtures.origin) };
-          // Non-vacuity: the planted arm (drain held across the capture,
-          // store-only hover) must FAIL; if the capture was too quick to
-          // show it, the check says so rather than passing.
-          return { pass: ok(clean) && !ok(planted), evidence };
-        } finally {
-          await fixtures.close();
-        }
+        const clean = await arm(false);
+        const planted = await arm(true);
+        // What the page changed while its first capture was stored reached the
+        // GUI fast (p95 < 150 ms over at least 5 such changes), and hover
+        // answered from the page (p95 < 50 ms). The planted arm -- drains held
+        // behind each capture, hover from the store only -- must fail it.
+        const ok = (x) => x.observed && x.first_drain_ms >= 0
+          && x.during_capture_ms.n >= 5 && x.during_capture_ms.p95 !== null && x.during_capture_ms.p95 < 150
+          && x.hover_ms.answered >= 5 && x.hover_ms.p95 !== null && x.hover_ms.p95 < 50;
+        return { pass: ok(clean) && !ok(planted), evidence: { clean, planted } };
+      },
+    },
+    {
+      id: "D-40",
+      asks: "on the Julia forum's /latest, through a long scroll, hover and new topics reach the overlay and the 3D stream in milliseconds -- pushed from the page, never pulled behind its long tasks -- and stay that fast to the end",
+      async run() {
+        // Judged on the site the lag was SEEN on (2026-09-27: "Significant
+        // chunk highlight-when-hovered lag after extensive scrolling on
+        // https://discourse.julialang.org/latest"; "the measurement was from
+        // the julia forums"). Timed by the check's own observer, each change
+        // matched to the drain that carried it (STREAM_SEEN).
+        const URL = "https://discourse.julialang.org/latest";
+        const arm = (planted) => evaluate(`(async () => {
+          ${PREP}
+          ${STREAM_SEEN}
+          b.plant.clear();
+          if (${planted}) { b.plant.add("pull-drain"); b.plant.add("poll-hover"); }
+          const KEY = "__domvecCheck" + Math.random().toString(36).slice(2);
+          try {
+            const fr = [];
+            for (let i = 0; i < 5; i++) {
+              const f0 = performance.now();
+              await Promise.race([new Promise((r) => requestAnimationFrame(r)), new Promise((r) => setTimeout(r, 2000))]);
+              fr.push(performance.now() - f0);
+            }
+            fr.sort((a, c) => a - c);
+            // A fresh realm, so the handle boots under this arm's plant.
+            b.go("about:blank"); await sleep(800);
+            b.go(${JSON.stringify(URL)});
+            await land(${JSON.stringify(URL)}, 30000);
+            await sleep(5000);
+            await observePage(KEY);
+            const wv = b.webview;
+            const phases = [], hovers = [];
+            // Three thirds of a long scroll, hovers between the wheel steps.
+            for (let ph = 0; ph < 3; ph++) {
+              phases.push(Date.now());
+              for (let i = 0; i < 5; i++) {
+                for (let k = 0; k < 5; k++) {
+                  wv.sendInputEvent({ type: "mouseWheel", x: 300, y: 300, deltaX: 0, deltaY: -500 });
+                  await sleep(140);
+                }
+                hovers.push(...(await hoverRun(4, ph)));
+              }
+            }
+            phases.push(Date.now());
+            await sleep(3000);
+            const seen = await collectPage(KEY);
+            const m = matchSeen(seen, "https://discourse.julialang.org/", phases[0], phases[3]);
+            const third = (t) => t < phases[1] ? 0 : t < phases[2] ? 1 : 2;
+            const host = (k) => m.rows.filter((r) => k === undefined || third(r.t) === k).map((r) => r.host);
+            const to3d = m.rows.map((r) => r.to3d).filter((x) => x !== null);
+            const ov = m.rows.map((r) => r.overlay).filter((x) => x !== null);
+            const hv = (k) => hovers.filter((x) => (k === undefined || x.tag === k) && x.ms !== null).map((x) => x.ms);
+            return {
+              url: wv.getURL(), frame_ms_p50: Math.round(fr[2]),
+              seen: (seen || []).length, answered: m.rows.length, unmapped: m.unmapped, unanswered: m.unanswered,
+              pushed_payloads: b.pushedPayloads,
+              to_host_ms: { p50: qq(host(), 0.5), p95: qq(host(), 0.95),
+                            first_third_p95: qq(host(0), 0.95), last_third_p95: qq(host(2), 0.95),
+                            n_by_third: [0, 1, 2].map((k) => host(k).length) },
+              to_3d_ms: { n: to3d.length, p50: qq(to3d, 0.5), p95: qq(to3d, 0.95) },
+              to_overlay_painted_ms: { n: ov.length, p50: qq(ov, 0.5), p95: qq(ov, 0.95) },
+              hover_ms: { asked: hovers.length, answered: hv().length, p50: qq(hv(), 0.5), p95: qq(hv(), 0.95),
+                          last_third_p95: qq(hv(2), 0.95) },
+            };
+          } finally {
+            b.plant.clear();
+            await dropPage(KEY);
+          }
+        })()`, { timeout: 180000 });
+        const clean = await arm(false);
+        const planted = await arm(true);
+        // A live page moves on its own and its network decides how many topics
+        // arrive; the bar asks for enough of them to judge, and for the LAST
+        // third of the scroll to be as fast as the first.
+        const bar = (x) => x.answered >= 10
+          && x.to_host_ms.p95 !== null && x.to_host_ms.p95 < 100
+          && x.to_host_ms.last_third_p95 !== null && x.to_host_ms.last_third_p95 < 100
+          && x.to_3d_ms.p95 !== null && x.to_3d_ms.p95 < 150
+          && x.hover_ms.answered >= 20 && x.hover_ms.p95 !== null && x.hover_ms.p95 < 30
+          && x.hover_ms.last_third_p95 !== null && x.hover_ms.last_third_p95 < 30;
+        return {
+          // The planted arm is the OLD path on the SAME site -- drains pulled,
+          // the fold waiting for idle, hover found by the poll -- and the same
+          // bar must catch it.
+          pass: bar(clean) && !bar(planted),
+          evidence: { clean, planted,
+                      bar: "new topics: page-delivered -> host p95 < 100 ms (and in the last third), -> 3D p95 < 150 ms; hover move -> outline p95 < 30 ms (and in the last third)" },
+        };
       },
     },
     {
       id: "D-37",
       asks: "new diffs are outlined where the reader looks: a chunk that loaded off screen is outlined when the reader scrolls to it, until it is saved and has been seen",
       async run() {
-        const fixtures = await serveFixtures();
+        // On the site it was SEEN on (2026-09-27: "Total scan feature loss seen
+        // at https://duckduckgo.com/?q=radix+trie+planted962&ia=web", the
+        // Search Assist panels; then "Tests aren't validating on the original
+        // websites"). A query string of its own per arm makes each a page new
+        // to the store.
         const arm = (planted) => evaluate(`(async () => {
           ${PREP}
           const pb = b.pipebox;
           pb.plantFlashOnly = ${planted};
           const shown = (el) => !!el && el.style.display !== "none" && el.offsetWidth > 0;
           try {
-            const target = ${JSON.stringify(fixtures.origin)} + "/result_cards.html?d37=" + (${planted} ? "p" : "c") + Date.now();
+            const target = "https://duckduckgo.com/?q=radix+trie+planted962&ia=web&d37=" + (${planted} ? "p" : "c") + Date.now();
             await land(target, 25000);
             await sleep(4000);
             await b.webview.executeJavaScript(
-              "(function(){var e=document.getElementById('more');e.scrollIntoView({block:'center',behavior:'instant'});return 1})()");
+              "(function(){var e=document.getElementById('more-results');if(!e)return 0;e.scrollIntoView({block:'center',behavior:'instant'});return 1})()");
             await sleep(500);
             const at = await b.webview.executeJavaScript(
-              "(function(){var r=document.getElementById('more').getBoundingClientRect();return [Math.round(r.left+r.width/2),Math.round(r.top+r.height/2)]})()");
+              "(function(){var r=document.getElementById('more-results').getBoundingClientRect();return [Math.round(r.left+r.width/2),Math.round(r.top+r.height/2)]})()");
             b.webview.sendInputEvent({ type: "mouseDown", x: at[0], y: at[1], button: "left", clickCount: 1 });
             b.webview.sendInputEvent({ type: "mouseUp", x: at[0], y: at[1], button: "left", clickCount: 1 });
             // The new results arrive below the button; the store saves them.
@@ -1312,18 +1494,19 @@ export function makeChecks(env) {
           const clean = await arm(false);
           const planted = await arm(true);
           const ok = (x) => x.max_visible_after_scroll >= 3;
-          return { pass: ok(clean) && !ok(planted),
-                   evidence: { clean, planted, purged: await tidyFixtures(fixtures.origin) } };
-        } finally {
-          await fixtures.close();
-        }
+          return { pass: ok(clean) && !ok(planted), evidence: { clean, planted } };
+        } finally { /* nothing served */ }
       },
     },
     {
       id: "D-36",
       asks: "a pinned chunk's two panels read and look like the page: the same text in the same order, no distilled marks, the page's own colours and decorations, pictures loaded",
       async run() {
-        const fixtures = await serveFixtures();
+        // On the site it was SEEN on (2026-09-27: "Total scan feature loss seen
+        // at https://duckduckgo.com/?q=radix+trie+planted962&ia=web", the
+        // Search Assist panels; then "Tests aren't validating on the original
+        // websites"). A query string of its own per arm makes each a page new
+        // to the store.
         const arm = (planted) => evaluate(`(async () => {
           ${PREP}
           if (${planted}) b.plant.add("distilled-panels");
@@ -1338,19 +1521,20 @@ export function makeChecks(env) {
           const lofi = (t) => /\\(\\s[^)]{1,80}\\s\\)/.test(t) || /\\]\\(/.test(t) || /^\\s*- /m.test(t);
           try {
             for (const p of b.pinnedState()) b.unpin(p.cid);
-            const target = ${JSON.stringify(fixtures.origin)} + "/result_cards.html?d36=" + (${planted} ? "p" : "c") + Date.now();
+            const target = "https://duckduckgo.com/?q=radix+trie&ia=web&d36=" + (${planted} ? "p" : "c") + Date.now();
             await land(target, 25000);
             // Stored first: a pin reads its chunk from the store.
             for (let i = 0; i < 60 && !(b.pipebox && b.pipebox.map.url === target && b.pipebox.map.size > 0); i++) await sleep(250);
             await sleep(1500);
             const page = await b.webview.executeJavaScript(
-              "(function(){var s=document.querySelector('li.r .snip');s.scrollIntoView({block:'center',behavior:'instant'});" +
-              "var li=s.closest('li.r'),t=li.querySelector('a.title'),c=li.querySelector('a.crumb');" +
-              "return {text:li.innerText,title:getComputedStyle(t).color,crumb_color:getComputedStyle(c).color," +
-              "crumb_deco:getComputedStyle(c).textDecorationLine,title_text:t.innerText.trim()}})()");
+              "(function(){var li=document.querySelector('article[data-testid=\\\"result\\\"]');" +
+              "var s=li.querySelector('[data-result=\\\"snippet\\\"]');s.scrollIntoView({block:'center',behavior:'instant'});" +
+              "var t=li.querySelector('a[data-testid=\\\"result-title-a\\\"]'),c=li.querySelector('a[data-testid=\\\"result-extras-url-link\\\"]');" +
+              "return {text:li.innerText,title:getComputedStyle(t).color,crumb_color:c?getComputedStyle(c).color:null," +
+              "crumb_deco:c?getComputedStyle(c).textDecorationLine:null,title_text:t.innerText.trim()}})()");
             await sleep(400);
             const at = await b.webview.executeJavaScript(
-              "(function(){var r=document.querySelector('li.r .snip b').getBoundingClientRect();return [Math.round(r.left+r.width/2),Math.round(r.top+r.height/2)]})()");
+              "(function(){var r=document.querySelector('article[data-testid=\\\"result\\\"] [data-result=\\\"snippet\\\"] b').getBoundingClientRect();return [Math.round(r.left+r.width/2),Math.round(r.top+r.height/2)]})()");
             b.lastGesture = "";
             for (let i = 0; i < 2; i++) {
               b.webview.sendInputEvent({ type: "mouseDown", x: at[0], y: at[1], button: "right", clickCount: 1 });
@@ -1407,11 +1591,8 @@ export function makeChecks(env) {
           const ok = (r) => r.pins === 1 && looks(r.card, r.page) && looks(r.board, r.page)
             && r.card.images_loaded >= 1
             && !!r.from_graph && r.from_graph.form === "page" && r.from_graph.elements > 3;
-          return { pass: ok(clean) && !ok(planted),
-                   evidence: { clean, planted, purged: await tidyFixtures(fixtures.origin) } };
-        } finally {
-          await fixtures.close();
-        }
+          return { pass: ok(clean) && !ok(planted), evidence: { clean, planted } };
+        } finally { /* nothing served */ }
       },
     },
     {
@@ -1492,7 +1673,67 @@ export function makeChecks(env) {
           v.plantNoCollide = ${JSON.stringify(planted)} === "overlap";
           v.plantBigChunks = ${JSON.stringify(planted)} === "big";
           v.plantWeb = ${JSON.stringify(planted)} === "web";
+          v.plantSunflower = ${JSON.stringify(planted)} === "sunflower";
+          v.plantNoReface = ${JSON.stringify(planted)} === "noreface";
           recollide();
+          const PAGE = "https://en.wikipedia.org/wiki/Radix_tree";
+          // The open page's tree AS SEEN (2026-09-27: "force-directed layouts
+          // have incorrect geometries and constraints", over a screenshot of
+          // edges crossing a clumped ring): its drawn edges projected to the
+          // screen, and how many pairs of them cross; and how many of its
+          // chunks sit on the page's own billboard.
+          const treeSeen = () => {
+            const g = v.graph, ns = g.graphData().nodes;
+            const end = (x) => (typeof x === "object" && x ? x.id : x);
+            const byId = new Map(ns.map((n) => [n.id, n]));
+            const mine = (n) => !!n && !n.force && n.url === PAGE && Number.isFinite(n.x);
+            const scr = (n) => g.graph2ScreenCoords(n.x, n.y, n.z || 0);
+            const segs = [];
+            for (const l of g.graphData().links) {
+              if (l.force) continue;
+              const a = byId.get(end(l.source)), b = byId.get(end(l.target));
+              if (!mine(a) || !mine(b)) continue;
+              segs.push([a.id, b.id, scr(a), scr(b)]);
+            }
+            const cross = (p1, p2, p3, p4) => {
+              const d = (a, b, c) => (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+              const d1 = d(p3, p4, p1), d2 = d(p3, p4, p2), d3 = d(p1, p2, p3), d4 = d(p1, p2, p4);
+              return ((d1 > 0) !== (d2 > 0)) && ((d3 > 0) !== (d4 > 0));
+            };
+            let crossings = 0;
+            for (let i = 0; i < segs.length; i++) for (let j = i + 1; j < segs.length; j++) {
+              const [a1, b1, p1, p2] = segs[i], [a2, b2, p3, p4] = segs[j];
+              if (a1 === a2 || a1 === b2 || b1 === a2 || b1 === b2) continue;   // sharing an end is not a crossing
+              if (cross(p1, p2, p3, p4)) crossings++;
+            }
+            const page = ns.find((n) => !n.force && n.level === "page" && n.url === PAGE);
+            let onBillboard = 0;
+            if (page && Number.isFinite(page.x)) {
+              const rel = g.nodeRelSize();
+              const cam = g.camera(), e = cam.matrixWorld.elements, right = [e[0], e[1], e[2]];
+              const rad = (n) => { const c = scr(n), r = v.drawnRadiusOf ? v.drawnRadiusOf(n) : Math.cbrt(n.val || 1) * rel;
+                const q = g.graph2ScreenCoords(n.x + right[0] * r, n.y + right[1] * r, (n.z || 0) + right[2] * r);
+                return [c, Math.hypot(q.x - c.x, q.y - c.y)]; };
+              const [pc, pr] = rad(page);
+              for (const n of ns) { if (!mine(n) || n.level === "page") continue;
+                const [c, r] = rad(n); if (Math.hypot(c.x - pc.x, c.y - pc.y) < pr + r) onBillboard++; }
+            }
+            return { edges: segs.length, crossings, on_billboard: onBillboard, tree: page ? page.discTree || null : null };
+          };
+          // An orbit the way a reader makes one: the camera swung 70 degrees
+          // round the page, then the controls' own "end".
+          const orbit = async () => {
+            const g = v.graph, page = g.graphData().nodes.find((n) => !n.force && n.level === "page" && n.url === PAGE);
+            if (!page) return false;
+            const c = g.camera().position, t = { x: page.x, y: page.y, z: page.z || 0 };
+            const dx = c.x - t.x, dz = c.z - t.z, a = 70 * Math.PI / 180;
+            g.cameraPosition({ x: t.x + dx * Math.cos(a) - dz * Math.sin(a), y: c.y + (c.y - t.y) * 0.3,
+                               z: t.z + dx * Math.sin(a) + dz * Math.cos(a) }, t, 0);
+            await sleep(100);
+            g.controls().dispatchEvent({ type: "end" });
+            await sleep(900);
+            return true;
+          };
           // How far an open page's chunks are drawn from their OWN page, in
           // units of the distance to the nearest other page (2026-09-27: "way
           // too far from the original set of nodes" -- spacing is not it).
@@ -1528,6 +1769,10 @@ export function makeChecks(env) {
             await recentre(); await sleep(2500);
             const onPage = v.seenLayout();
             onPage.near_page = nearPage();
+            onPage.tree_seen = treeSeen();
+            const orbited = await orbit();
+            const afterOrbit = orbited ? v.seenLayout() : null;
+            if (afterOrbit) afterOrbit.tree_seen = treeSeen();
             b.go("about:blank");
             // Collapsed: the page's chunks fold into its node once it is settled.
             for (let i = 0; i < 40; i++) {
@@ -1537,11 +1782,13 @@ export function makeChecks(env) {
               if (!left) break;
             }
             await recentre(); await sleep(2500);
-            return { planted: ${JSON.stringify(planted)}, on_page: onPage, collapsed: v.seenLayout() };
+            return { planted: ${JSON.stringify(planted)}, on_page: onPage, after_orbit: afterOrbit, collapsed: v.seenLayout() };
           } finally {
             v.plantNoCollide = false;
             v.plantBigChunks = false;
             v.plantWeb = false;
+            v.plantSunflower = false;
+            v.plantNoReface = false;
             recollide();
           }
         })()`, { timeout: 120000 });
@@ -1549,6 +1796,8 @@ export function makeChecks(env) {
         const planted = await arm("overlap");
         const plantedBig = await arm("big");
         const plantedWeb = await arm("web");
+        const plantedSunflower = await arm("sunflower");
+        const plantedNoReface = await arm("noreface");
         // A reader sees a jumble when discs cover each other: at most 5% of
         // drawn nodes may overlap a neighbour, and the closest tenth must at
         // least touch (nearest neighbour >= r_a + r_b).
@@ -1564,9 +1813,18 @@ export function makeChecks(env) {
         // distance to the nearest other page).
         const near = (x) => !!x && !!x.near_page && x.near_page.chunks > 0 && x.near_page.max <= 0.5;   // < D/2: nearer its own page than any other
         const tree = (x) => !!x && !!x.near_page && x.near_page.multi_parent === 0;
-        const ok = (r) => near(r.on_page) && tree(r.on_page) && legible(r.on_page) && legible(r.collapsed);
-        return { pass: ok(clean) && !legible(planted.on_page) && !near(plantedBig.on_page) && !tree(plantedWeb.on_page),
-                 evidence: { clean, planted_overlap: planted, planted_big: plantedBig, planted_web: plantedWeb } };
+        // A tree drawn as a tree: none of its edges cross on screen, and none
+        // of its chunks sit on the page's own billboard.
+        const planar = (x) => !!x && !!x.tree_seen && x.tree_seen.edges > 0
+          && x.tree_seen.crossings === 0 && x.tree_seen.on_billboard === 0;
+        // And the reader may orbit: the same must hold after the camera moves.
+        const orbitOk = (r) => legible(r.after_orbit) && planar(r.after_orbit);
+        const ok = (r) => near(r.on_page) && tree(r.on_page) && legible(r.on_page) && planar(r.on_page)
+          && orbitOk(r) && legible(r.collapsed);
+        return { pass: ok(clean) && !legible(planted.on_page) && !near(plantedBig.on_page) && !tree(plantedWeb.on_page)
+                   && !planar(plantedSunflower.on_page) && !orbitOk(plantedNoReface),
+                 evidence: { clean, planted_overlap: planted, planted_big: plantedBig, planted_web: plantedWeb,
+                             planted_sunflower: plantedSunflower, planted_noreface: plantedNoReface } };
       },
     },
     {

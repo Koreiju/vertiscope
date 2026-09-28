@@ -181,7 +181,11 @@ def test_table_rows_and_cells_read_in_order():
 #: is filed under that element by `StreamingScan`, so it reads before the
 #: element's own content: 22 inversions in 55 prose lines. The live sensor
 #: addresses each text node as itself and is not affected.
-_KNOWN_ORDER_DEFECTS = {"suffix_definition.html"}
+#: `result_cards.html` (D-36's DuckDuckGo-shaped fixture, 2026-09-27) is the
+#: same defect: the crumb's " › Tessil › hat-trie" follows an inline `<span>`
+#: and is filed under it, so its walk position lands after the snippet's --
+#: 4 inversions in 13 prose lines, all four the crumbs.
+_KNOWN_ORDER_DEFECTS = {"suffix_definition.html", "result_cards.html"}
 
 
 @pytest.mark.parametrize("path", [

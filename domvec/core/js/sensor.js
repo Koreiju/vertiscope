@@ -29,6 +29,40 @@
   var MERGE_AT = BUDGET >> 1;          // hysteresis: split at BUDGET, merge below half
   // Both are reassigned by the `budget` axis below.
   var DEBOUNCE = CFG.debounce > 0 ? CFG.debounce : 80;
+  // PUSH, not poll (2026-09-27): with `signal` set, the sensor tells its host
+  // the moment a repair leaves chunks to drain, and which chunk the pointer
+  // is over. The host polled instead -- a drain every 1.2 s, a hover read
+  // every 80 ms, each a crossing that cost 10-23 ms on a busy page -- and a
+  // reader felt 65-138 ms of hover lag and up to 1.2 s of stream lag. The
+  // channel is the page's console (the webview reports it to the host); no
+  // DOM is touched. Captured at boot, so a page that wraps console later
+  // cannot swallow it.
+  var SIGNAL = typeof CFG.signal === 'string' && CFG.signal ? CFG.signal : '';
+  //
+  // Only the browser's OWN console. A page that has wrapped it -- error
+  // reporters keep console calls as breadcrumbs and send them with their
+  // reports -- would carry these signals off the machine, and nothing is
+  // transmitted; such a page gets no signals and its host polls instead.
+  var SAY = null;
+  try {
+    if (SIGNAL && typeof console !== 'undefined' && console.debug
+        && /\[native code\]/.test(Function.prototype.toString.call(console.debug))) {
+      SAY = console.debug.bind(console);
+    }
+  } catch (e) { SAY = null; }
+  // `push`: the drain itself travels on that channel, sent from the task that
+  // folded it (2026-09-27, discourse after long scrolling: a drain PULLED by
+  // the host queued behind the page's own long tasks -- a bare round trip
+  // measured 12 ms p50 and 942 ms max -- so the diff reached the overlay
+  // 30-231 ms after the fold, growing drain by drain). One channel, in order.
+  var PUSH = !!(SAY && CFG.push);
+  var signalled = false;
+  // When the oldest undrained mutation arrived (epoch ms: the host's clock
+  // agrees with it, performance.now()'s origin does not), so the host can
+  // time mutation -> overlay end to end. Not a layout read.
+  var dirtySince = 0;
+  // When the last pushed fold ran (see `schedule`).
+  var lastFoldAt = -1e9;
   var SKETCH_W = 16;                   // counters per node, fixed width
 
   // Variants. Each names one mechanism from the design space and can be
@@ -568,6 +602,32 @@
   // pager, whatever they are labelled. `?page=2` beside `?page=3` beside
   // `?page=4` is a pagination control in every language there is, and the
   // vocabulary bank never has to have heard of the site.
+  //
+  // The families in a scope are read ONCE per fold pass. Asked per link, a
+  // topic list of N digit-bearing links queried its whole scope N times --
+  // quadratic in the batch, and on discourse's /latest the larger part of a
+  // 30-topic fold (2026-09-27). What the memo is a function of (5c): the
+  // scope's subtree at this instant. A fold pass is synchronous and writes
+  // nothing into the page, so that subtree cannot change during one; the
+  // memo is dropped when the pass ends and never outlives it.
+  var familyMemo = null;
+  function familiesIn(scope) {
+    var got = familyMemo && familyMemo.get(scope);
+    if (got) return got;
+    var links = scope.querySelectorAll('a[href]');
+    var fam = { links: links.length, by: {} };
+    for (var i = 0; i < links.length; i++) {
+      var h = links[i].getAttribute('href');
+      if (!h || !/\d/.test(h)) continue;
+      var mask = h.replace(/\d+/g, '#');
+      var key = h.match(/\d+/g).join(',');
+      var f = fam.by[mask] || (fam.by[mask] = { n: 0, seen: {} });
+      if (!f.seen[key]) { f.seen[key] = 1; f.n++; }
+    }
+    if (familyMemo) familyMemo.set(scope, fam);
+    return fam;
+  }
+
   function numericFamily(el) {
     var href = el.getAttribute && el.getAttribute('href');
     if (!href || !/\d/.test(href)) return false;
@@ -576,21 +636,12 @@
       scope = scope.parentNode;
     }
     if (!scope || !scope.querySelectorAll) return false;
-    var links = scope.querySelectorAll('a[href]');
-    if (links.length < 3) return false;
-    var mask = function (h) { return h.replace(/\d+/g, '#'); };
-    var mine = mask(href), seen = {}, n = 0, i, h, m;
-    for (i = 0; i < links.length; i++) {
-      h = links[i].getAttribute('href');
-      if (!h || mask(h) !== mine) continue;
-      m = h.match(/\d+/g);
-      if (!m) continue;
-      var key = m.join(',');
-      if (!seen[key]) { seen[key] = 1; n++; }
-    }
+    var fam = familiesIn(scope);
+    if (fam.links < 3) return false;
+    var mine = fam.by[href.replace(/\d+/g, '#')];
     // Three distinct members of one numeric family, differing only in their
     // digits. Two is a coincidence; three is a series.
-    return n >= 3;
+    return !!mine && mine.n >= 3;
   }
 
   // -> the rule that fired, i.e. the `@regex-addr` tail, or null
@@ -2263,6 +2314,13 @@
     } catch (e) { stats.errors++; }
   }
 
+  function signalDirty() {
+    if (!SAY || signalled) return;
+    if (front.length === 0 && removedIds.length === 0) return;
+    signalled = true;
+    try { SAY(SIGNAL + 'dirty'); } catch (e) { stats.errors++; }
+  }
+
   function schedule() {
     // `lazy`: no background work at all. The fold happens when someone
     // drains, which is the most literal reading of "passive sensor" — the
@@ -2271,8 +2329,40 @@
     // `eager`: fold inside the mutation callback. The opposite bound, and
     // the one that shows what the debounce is worth.
     if (USE_EAGER) { repair(); return; }
+    if (!dirtySince) dirtySince = Date.now();
     if (timer !== null) return;
-    var run = function () { timer = null; repair(); };
+    var run = function () {
+      timer = null; repair();
+      if (PUSH) flush(SIGNAL); else signalDirty();
+    };
+    // A pushing host folds in the SAME TASK as the mutation, not when the
+    // page next idles. An idle callback on a busy page waited up to 4x the
+    // debounce (320 ms); a frame or a timer waits behind whatever task the
+    // page queued next (discourse queues its long render tasks back to back).
+    // A microtask runs before any of them. In a burst -- folds closer than a
+    // frame apart -- it falls back to the next frame, so a page animating an
+    // attribute pays one fold per frame and not one per task.
+    if (PUSH) {
+      var clockNow = (typeof performance !== 'undefined' && performance.now)
+        ? performance.now() : Date.now();
+      if (clockNow - lastFoldAt >= 16 && typeof queueMicrotask === 'function') {
+        timer = 1;
+        queueMicrotask(function () { lastFoldAt = clockNow; run(); });
+        return;
+      }
+      if (typeof requestAnimationFrame === 'function') {
+        var fired = false;
+        var once = function () {
+          if (fired) return; fired = true;
+          lastFoldAt = (typeof performance !== 'undefined' && performance.now)
+            ? performance.now() : Date.now();
+          run();
+        };
+        timer = requestAnimationFrame(once);
+        setTimeout(once, DEBOUNCE);     // a hidden page gets no frames
+        return;
+      }
+    }
     timer = (typeof requestIdleCallback === 'function')
       ? requestIdleCallback(function () { run(); }, { timeout: DEBOUNCE * 4 })
       : setTimeout(run, DEBOUNCE);
@@ -2297,6 +2387,7 @@
     // are stale. Inside the timed region, because it is fold work and a phase
     // timing that hides its own cost is not a phase timing.
     reclassify();
+    familyMemo = (typeof Map === 'function') ? new Map() : null;
     try {
       stats.repairs++;
       var out = [];
@@ -2355,6 +2446,7 @@
       dirtySpans.clear();
       stats.nodes = 0;
     } catch (e) { stats.errors++; }
+    familyMemo = null;
     var t1 = (typeof performance !== 'undefined' && performance.now)
       ? performance.now() : Date.now();
     stats.repairMs = (stats.repairMs || 0) + (t1 - t0);
@@ -2404,9 +2496,46 @@
     schedule();
   }
 
+  // ---- flush: the drain, its boxes and pictures, pushed ----------------
+  // What the streaming host takes from the page, in ONE place: the drain,
+  // then the diff's boxes and largest rendered pictures (peripherals, read
+  // after the fold, never inside it). With `push` it is sent on the console
+  // channel and only `{pushed: v}` is returned; otherwise it is returned.
+  // `expect` is the host's own signal: a handle booted by an EARLIER host
+  // (the realm outlives a plugin reload) returns its payload instead of
+  // pushing it where nobody is listening.
+  function flush(expect) {
+    var clock = (typeof performance !== 'undefined' && performance.now)
+      ? function () { return performance.now(); } : Date.now;
+    var since = dirtySince;
+    var t0 = clock();
+    var p = drain();
+    var t1 = clock(), t2 = t1, t3 = t1;
+    if (!p) return p;
+    var ids = [];
+    for (var i = 0; i < (p.chunks || []).length; i++) ids.push(p.chunks[i].id);
+    if (ids.length) {
+      p.boxes = boxes(ids); t2 = clock();
+      p.pictures = pictures(ids); t3 = clock();
+    }
+    p.inpage = { drain: t1 - t0, boxes: t2 - t1, pictures: t3 - t2 };
+    p.dirtyAt = since;
+    p.sentAt = Date.now();
+    if (PUSH && expect === SIGNAL && (ids.length || (p.removed || []).length || (p.moves || []).length
+                 || (p.dict || []).length)) {
+      try {
+        SAY(SIGNAL + 'drain ' + JSON.stringify(p));
+        return { pushed: p.v, url: p.url };
+      } catch (e) { stats.errors++; }
+    }
+    return p;
+  }
+
   // ---- drain (one round trip) ------------------------------------------
   var lastDrain = 0;
   function drain() {
+    signalled = false;
+    dirtySince = 0;
     if (USE_LAZY || front.length === 0 && removedIds.length === 0) repair();
     // `coalesce`: a crossing costs the same whether it carries one chunk or
     // forty. Holding a thin payload until it thickens — or until enough time
@@ -2738,6 +2867,37 @@
     return out;
   }
 
+  // ---- the picture peripheral (2026-09-27) --------------------------------
+  //
+  // For each chunk, the picture a reader SEES most of: the largest rendered
+  // <img> in its run (area on screen, css-scaled), not the first in the
+  // markup -- which is often an icon or a spacer. Read on demand with the
+  // boxes, after the fold, never in it. Returns [src, width, height] or null.
+  function pictures(ids) {
+    var want = {}, out = [], i, s, n, k, best, area, imgs, j, r, src;
+    for (i = 0; i < ids.length; i++) { want[ids[i]] = i; out.push(null); }
+    for (i = 0; i < chunkRoots.length; i++) {
+      s = chunkRoots[i];
+      if (!s || !s.node || !(s.id in want)) continue;
+      best = null; area = 0; n = s.node; k = 0;
+      while (n && k++ < 400) {
+        if (n.nodeType === 1) {
+          imgs = n.tagName === 'IMG' ? [n] : (n.querySelectorAll ? n.querySelectorAll('img') : []);
+          for (j = 0; j < imgs.length && j < 50; j++) {
+            src = imgs[j].currentSrc || imgs[j].src || '';
+            if (!/^https?:/.test(src)) continue;
+            r = imgs[j].getBoundingClientRect();
+            if (r.width * r.height > area) { area = r.width * r.height; best = [src, Math.round(r.width), Math.round(r.height)]; }
+          }
+        }
+        if (n === s.tail || !s.tail) break;
+        n = n.nextSibling;
+      }
+      out[want[s.id]] = area >= 16 * 16 ? best : null;
+    }
+    return out;
+  }
+
   // ---- the hover peripheral (D-35, G-92) ----------------------------------
   //
   // Which chunk draws the element under the pointer, and where it is: the
@@ -2788,6 +2948,38 @@
       n = n.parentNode || n.host || null;
     }
     return null;
+  }
+
+  // The pointer, pushed: which chunk it is over and that chunk's box, at most
+  // once a frame and only when either changes. A passive listener -- it
+  // cannot cancel or alter the page's own handling.
+  var lastHoverKey = '', lastHoverAt = 0, lastHoverTarget = null;
+  function onPointer(ev) {
+    if (!SAY) return;
+    var target = (ev.composedPath && ev.composedPath()[0]) || ev.target;
+    // On the event itself, no frame waited for; at most one every 8 ms, and
+    // not at all while the pointer stays on the same element.
+    var now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+    if (target === lastHoverTarget || now - lastHoverAt < 8) return;
+    lastHoverAt = now;
+    lastHoverTarget = target;
+    var got = null;
+    try { got = target && target.nodeType ? at(target) : null; } catch (e) { stats.errors++; }
+    var key = got && got.box ? got.id + ' ' + got.box.map(Math.round).join(',') : '-';
+    if (key === lastHoverKey) return;
+    lastHoverKey = key;
+    try { SAY(SIGNAL + 'hover ' + key); } catch (e) { stats.errors++; }
+  }
+  function onPointerOut(ev) {
+    if (!SAY || ev.relatedTarget) return;
+    lastHoverKey = '-';
+    try { SAY(SIGNAL + 'hover -'); } catch (e) { stats.errors++; }
+  }
+  if (SIGNAL && typeof document !== 'undefined' && document.addEventListener) {
+    try {
+      document.addEventListener('pointermove', onPointer, { passive: true, capture: true });
+      document.addEventListener('pointerout', onPointerOut, { passive: true, capture: true });
+    } catch (e) { stats.errors++; }
   }
 
   // ---- the style peripheral --------------------------------------------
@@ -2912,11 +3104,13 @@
 
   return {
     drain: drain,
+    flush: flush,
     step: step,
     perform: perform,
     styles: styles,
     boxes: boxes,
     at: at,
+    pictures: pictures,
     resolve: function (path) { return !!resolvePath(path); },
 
     // Does each of these addresses still name a node?

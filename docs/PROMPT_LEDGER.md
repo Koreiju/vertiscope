@@ -7,7 +7,7 @@ binding record; this is the index that proves nothing in a transcript was lost.
 Transcripts cover 2026-09-12 onward; earlier direction lives only in
 `PLUGIN_GOAL.md` (the opening statement and Addenda I-III).
 
-**151 prompts:** LIVE 63, ONE-OFF 36, PARTLY 12, PROCESS 26, QUESTION 11, SUPERSEDED 2, UNREVIEWED 1
+**155 prompts:** LIVE 67, ONE-OFF 36, PARTLY 12, PROCESS 27, QUESTION 11, SUPERSEDED 2
 
 ## Still binding (LIVE, PARTLY, PROCESS)
 
@@ -114,10 +114,11 @@ Transcripts cover 2026-09-12 onward; earlier direction lives only in
 | P148 | 2026-09-27 | LIVE | Scanning nodes stay NEAR the nodes they belong to; spacing alone is not the measure. | G-93 |
 | P149 | 2026-09-27 | LIVE | Refit, online updates and streaming all run the CUDA model, visibly faster. | G-97 |
 | P150 | 2026-09-27 | LIVE | Open pages drawn as a SIMPLE TREE (one parent, no cross links); favicons on url nodes; the most relevant picture (by rendered size) on chunks; the 3D billboard looks like the 2D card. | G-84, G-81, G-100, G-102, D-36 |
-
-## UNREVIEWED
-
-- P151
+| P151 | 2026-09-27 | LIVE | A planted search page must never lose its scan: a store switch leaves the sensor's dictionary stale unless capture restarts (fixed: backToReader + restartCapture). | D-37, G-101 |
+| P152 | 2026-09-27 | LIVE | Hover and diffs stream in milliseconds after a long scroll, never waiting on the store or downstream queues: pushed from the page, not polled. | D-40, D-35, G-90 |
+| P153 | 2026-09-27 | PROCESS | A defect seen on a named site is confirmed ON that site, timed by an observer independent of the code under test, planted arm on the same site; a fixture is a secondary arm, never the judged one. | D-40, D-35, D-36, D-37, G-94 |
+| P154 | 2026-09-27 | LIVE | The lag was on the Julia forum (discourse.julialang.org/latest): D-40 is judged there. | D-40 |
+| P155 | 2026-09-27 | LIVE | An open page's layout keeps its geometry: no overlaps (the page's billboard included), a spread disc, a simple planar tree, nothing flung out -- and still after an orbit. | G-94, D-41 |
 
 ## Superseded
 
@@ -798,7 +799,23 @@ Transcripts cover 2026-09-12 onward; earlier direction lives only in
 
 > While cool, the densely packed maybe not tree structures should be less interconnected and a simple tree. Second image has a sample panel/card from the page. Also, there are way too many nodes without images billboarded when they are known to exist. Even missing .icon (micro icons usually seen in the browser tab and search results), similar to the 'wikipedia' item but for the remainder of url-level nodes and also as many chunks as possible, and just show the most relevant image or one of the images in chunks with multiple images, perhaps using css-scaled size (so, post-rendered size, since html rendering on our card panels as chunks is still not in the state it should be... the 3D gui is not reflecting the same structure of panel as in the clipboard on the 2D electron browser).
 
-### P151 -- 2026-09-27 21:29 -- UNREVIEWED
+### P151 -- 2026-09-27 21:29 -- LIVE
 
 > Total scan feature loss seen at https://duckduckgo.com/?q=radix+trie+planted962&ia=web
+
+### P152 -- 2026-09-27 21:37 -- LIVE
+
+> [mid-turn] Significant chunk highlight-when-hovered lag after extensive scrolling on https://discourse.julialang.org/latest. The millisecond bound is not followed for overlay highlights in the electron browser on chunks, and neither with 3D force-directed chunk node diff rendering. Not that the feature is nonexistent or doesn't work for a first couple seconds, but there's some false reason for the lag because it should be simple enough to continuously stream diffs from the mutationobservers to the electron overlay to the 3D gui without having to wait for database write queues. Perhaps there's an LRU cache overload going on because the queue's max length has to be extended, or otherwise ensure asynchronous streaming of the force-directed chunks is unblocked by downstream processes, which is the main intention anyways.
+
+### P153 -- 2026-09-27 22:05 -- PROCESS
+
+> Tests aren't validating on the original websites
+
+### P154 -- 2026-09-27 22:08 -- LIVE
+
+> [mid-turn] Tests aren't validating on the original websites, the measurement was from the julia forums I think
+
+### P155 -- 2026-09-27 22:08 -- LIVE
+
+> [mid-turn, 1 image(s)] Also, force-directed layouts have incorrect geometries and constraints
 

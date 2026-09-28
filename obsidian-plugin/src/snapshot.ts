@@ -259,6 +259,34 @@ export function faviconFor(pageUrl: string): string {
   } catch { return ""; }
 }
 
+/**
+ * Each chunk's most relevant picture: the LARGEST as the page renders it
+ * (css-scaled, on screen), read by the sensor's picture peripheral with the
+ * drain (2026-09-27: "show the most relevant image ... using css-scaled size
+ * (so, post-rendered size)"). Remembered per vault, by stored chunk id.
+ */
+const PICS_KEY = "domvec-pictures";
+let pics: Record<string, string> | null = null;
+function picTable(): Record<string, string> {
+  if (pics) return pics;
+  try { pics = JSON.parse(window.localStorage.getItem(PICS_KEY) || "{}"); } catch { pics = {}; }
+  return pics!;
+}
+export function putPictures(byCid: Record<string, string>): void {
+  const t = picTable();
+  let changed = false;
+  for (const [cid, src] of Object.entries(byCid)) {
+    if (!/^https?:/.test(src) || t[cid] === src) continue;
+    t[cid] = src; changed = true;
+  }
+  const keys = Object.keys(t);
+  if (keys.length > 20000) for (const k of keys.slice(0, keys.length - 20000)) delete t[k];
+  if (changed) { try { window.localStorage.setItem(PICS_KEY, JSON.stringify(t)); } catch { /* full */ } }
+}
+export function pictureFor(cid: string): string {
+  return picTable()[cid] || "";
+}
+
 /** Snapshots by chunk id, shared by both panels for the life of the app. */
 const STORE = new Map<string, Snapshot>();
 export function putSnapshot(cid: string, s: Snapshot | null): void {

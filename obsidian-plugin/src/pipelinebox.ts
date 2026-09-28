@@ -234,6 +234,14 @@ export class PipelineBox {
       const url = this.url();
       // In memory: the same nearest-ancestor walk `/resolve` does in the store.
       const hit = this.pageOnly ? null : (this.map.url === url ? this.map.lookup(chain) : null);
+      // Once the sensor pushes, ITS outline is the outline (the overlay comes
+      // from the in-page chunking, Addendum IX): the poll only resolves which
+      // STORED chunk it is, for the ring and hover-first. Two sources had
+      // been trading the outline, and the poll's was 81-130 ms late.
+      if (this.pushedAt) {
+        if (hit && (!this.hover || this.hover.source === "page")) this.onHoverChunk(hit.cid, url);
+        return;
+      }
       if (!hit && got && got.at && got.at.box && !this.plantStoreOnly) {
         // The store does not know this element yet: outline the chunk the
         // PAGE's own chunking put it in, and ring its force node.
@@ -530,6 +538,40 @@ export class PipelineBox {
 
   /** Put a fixed-position box over a guest-viewport rect, clipped to the
    *  webview and corrected for the containing block (see `pin`). */
+  /** When a pushed hover last arrived (the poll does not overwrite it). */
+  private pushedAt = 0;
+  private pushedUrl = "";
+  /** A new page: pushes start over (the poll draws until the sensor speaks). */
+  resetPush(): void { this.pushedAt = 0; this.pushedUrl = ""; }
+  /** Pushed hovers received, and their host-side handling time, for the harness. */
+  pushedHovers = 0;
+  pushedHandleMs: number[] = [];
+
+  /**
+   * The sensor pushed "the pointer is over chunk <id>, box x,y,w,h" (or "-").
+   * Drawn at once, from the page's own chunking: no poll to wait for and no
+   * crossing to make (2026-09-27: 65-138 ms from pointer move to outline).
+   * The store's chunk is still resolved by the poll, for the ring in 3D.
+   */
+  pushedHover(body: string, url: string): void {
+    const t0 = performance.now();
+    this.pushedHovers++;
+    this.pushedAt = t0;
+    this.pushedUrl = url;
+    if (body === "-" || !body) { this.clearHover(); return; }
+    const [id, box] = body.split(" ");
+    const b = (box || "").split(",").map(Number);
+    if (b.length !== 4 || b.some((x) => !Number.isFinite(x))) return;
+    const cid = `f:${url}#${id}`;
+    const changed = !this.hover || this.hover.cid !== cid;
+    this.hover = { xpath: "", cid, matched: "", walked: 0, source: "page",
+                   rect: { x: b[0], y: b[1], w: b[2], h: b[3] }, lines: 0, at: t0 };
+    this.placeOutline();
+    this.pushedHandleMs.push(performance.now() - t0);
+    if (this.pushedHandleMs.length > 200) this.pushedHandleMs.shift();
+    if (changed) this.onHoverChunk(cid, url);
+  }
+
   /**
    * The two reads every box's position depends on, taken ONCE per batch: the
    * webview's rect and the boxes' positioned parent's. Placing a box used to

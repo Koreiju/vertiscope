@@ -31,7 +31,7 @@ import { ForceTree, type ForceNodeDelta } from "./forcetree";
 import { PipelineBox } from "./pipelinebox";
 import { profiler } from "./profile";
 import { Component, ItemView, MarkdownRenderer, Menu, WorkspaceLeaf } from "obsidian";
-import { putFavicon } from "./snapshot";
+import { putFavicon, putPictures } from "./snapshot";
 import { Snapshot, dropSnapshot, getSnapshot, putSnapshot, renderSnapshot, snapshotScript, xpathsOfLines } from "./snapshot";
 
 import { LayoutNode } from "./graph";
@@ -146,6 +146,14 @@ interface PinRecord {
   /** The elements the chunk's lines draw, for the page-faithful snapshot (D-36). */
   xpaths?: string[];
 }
+
+/**
+ * The prefix the sensor's pushed signals carry on the page's console: a
+ * control character, and a nonce per plugin load. The page can write to its
+ * own console, and a fixed prefix would let it forge a drain into the store;
+ * the nonce lives only in the sensor's closure.
+ */
+const SIGNAL = "\u0001domvec:" + Math.random().toString(36).slice(2, 10) + ":";
 
 /** A url's DOCUMENT: the same page with or without a #fragment. */
 function docKey(u: string): string {
@@ -334,6 +342,29 @@ export class BrowserView extends ItemView {
     }
 
     view.addEventListener("did-start-loading", () => this.say("loading…"));
+    // The sensor's PUSHED signals (2026-09-27): "dirty" -- chunks are ready,
+    // drain now instead of on the next 1.2 s tick; "hover <id> <box>" -- the
+    // pointer is over this chunk, outline it now instead of on the next poll.
+    view.addEventListener("console-message", (e: any) => {
+      const m = String((e && e.message) || "");
+      if (!m.startsWith(SIGNAL)) return;
+      const body = m.slice(SIGNAL.length);
+      if (body.startsWith("drain ")) {
+        // The drain itself, sent from the task that folded it.
+        let payload: any = null;
+        try { payload = JSON.parse(body.slice(6)); } catch { return; }
+        this.pushedPayloads++;
+        void this.onPushedDrain(payload);
+      } else if (body === "dirty") {
+        this.pushedDrains++;
+        if (!this.draining) void this.tick();
+        else this.drainAgain = true;
+      } else if (body.startsWith("hover ")) {
+        // Planted by D-40's check: the old path, hover found by the poll.
+        if (this.plant.has("poll-hover")) return;
+        this.pipebox?.pushedHover(body.slice(6), this.session || "");
+      }
+    });
     // The page's own icon, as the webview reports it for the tab (G-81).
     view.addEventListener("page-favicon-updated", (e: any) => {
       const list = (e && e.favicons) || [];
@@ -713,6 +744,18 @@ export class BrowserView extends ItemView {
       return false;
     }
   }
+
+  /** The largest rendered picture per drained chunk (force id -> src). */
+  private drainPics = new Map<string, string>();
+  /** Told when stored chunks get their most relevant picture. Set by the plugin. */
+  onPictures: (byCid: Record<string, string>) => void = () => {};
+
+  /** Drains the sensor asked for (pushed), for the harness. */
+  pushedDrains = 0;
+  /** Drains that arrived as payloads on the console channel (D-40). */
+  pushedPayloads = 0;
+  /** A push arrived mid-drain: drain again as soon as this one ends. */
+  private drainAgain = false;
 
   /** The current document has fired dom-ready (drains may run while loading). */
   private domReady = false;
@@ -1130,6 +1173,7 @@ export class BrowserView extends ItemView {
     this.session = url;
     // Sensor ids are per document: nothing streaming on the page left behind.
     this.pipebox?.clearStreaming();
+    this.pipebox?.resetPush();
     // The overlay's map of this page (DESIGN_VII §3), loaded on landing and
     // patched from every capture reply after -- FIRST, before the page left
     // behind is settled. It waited behind that settle capture, which is
@@ -1328,135 +1372,225 @@ export class BrowserView extends ItemView {
       }
       const drainStart = performance.now();
       let drainBack = 0;
-      // The force ids this drain emitted: what its capture is answerable for.
-      let drainIds: string[] = [];
       const payload = await wv.executeJavaScript(`(function () {
         if (!window[${JSON.stringify(HANDLE)}]) {
           var h = (${BrowserView.sensorSource})(
-            {budget: 0, debounce: 80, variants: {}, known: []});
+            {budget: 0, debounce: 80, variants: {}, known: [], signal: ${JSON.stringify(SIGNAL)},
+             push: ${!this.plant.has("pull-drain")}});
           Object.defineProperty(window, ${JSON.stringify(HANDLE)},
             {value: h, enumerable: false, configurable: false});
         }
         var h = window[${JSON.stringify(HANDLE)}];
+        // One place for the drain, its boxes and pictures; pushed when this
+        // host's signal is the handle's, and then only {pushed: v} comes back.
+        if (h.flush) return h.flush(${JSON.stringify(SIGNAL)});
+        var t0 = performance.now();
         var p = h.drain();
+        var t1 = performance.now(), t2 = t1, t3 = t1;
         // The diff's boxes, in the SAME crossing (G-90): read by the
         // sensor's box peripheral after the fold, never inside it.
         if (p && p.chunks && p.chunks.length && h.boxes) {
           p.boxes = h.boxes(p.chunks.map(function (c) { return c.id; }));
+          t2 = performance.now();
+          // And each chunk's largest RENDERED picture, in the same crossing.
+          if (h.pictures) p.pictures = h.pictures(p.chunks.map(function (c) { return c.id; }));
+          t3 = performance.now();
         }
+        // Where the crossing's time goes, on the guest's clock; the rest of
+        // \`drain\` is serialisation and the bridge.
+        if (p) p.inpage = {drain: t1 - t0, boxes: t2 - t1, pictures: t3 - t2};
         return p;
       })()`);
 
       drainBack = performance.now();
-
-      // Nothing changed. Not posted: an empty delta costs a round trip, a
-      // decode and a store write to say "no", and a reader idling on a static
-      // page would pay it once a second forever.
-      prof.stage(trace, "drain", performance.now() - drainStart);
-      // The guest's own fold time for this drain, from its own clock. It is
-      // INSIDE `drain`, and the difference is the executeJavaScript bridge.
-      const repair = payload && payload.stats ? payload.stats.repairMs : undefined;
-      if (typeof repair === "number") {
-        prof.stage(trace, "fold", repair - (this.lastRepairMs ?? 0));
-        this.lastRepairMs = repair;
-      }
-      // The force tree first (`G-89`): straight from the drain, before the
-      // capture's round trip, so the graph shows the scan at once.
-      if (payload && ((payload.chunks || []).length || (payload.removed || []).length)) {
-        let tree = this.forceTrees.get(url);
-        if (!tree) { tree = new ForceTree(url); this.forceTrees.set(url, tree); }
-        const delta = tree.apply(payload);
-        if (delta) drainIds = delta.added.map((a) => a.id);
-        // The diff outlined FIRST (`G-90`) -- boxes came back with the drain,
-        // so this is placement only -- and only the TRUE diff (H-1): a chunk
-        // the store already holds unchanged is not news, and landing on a
-        // stored page used to flash its whole first drain.
-        if (delta && payload.boxes && payload.boxes.length) {
-          delta.covers = this.coversFor(url, tree.held().filter(
-            (h) => delta.added.some((a) => a.id === h.id)));
-          const again = new Set(delta.added.filter((a) => a.again).map((a) => a.id));
-          // WHY each chunk of the drain was or was not outlined, as facts on
-          // the trace (2026-09-27: "overlays for completely new diff updates
-          // ... have not been observed for several minutes" -- and the trace
-          // could not say whether a drain was stored content, furniture known
-          // never to be stored, off screen, or dropped).
-          const why = { flashed: 0, covered: 0, unstored: 0, offscreen: 0, nobox: 0 };
-          const vh = (this.webview as any)?.clientHeight || 0;
-          const boxes = (payload.chunks || []).map((c: any, i: number) => {
-            const id = tree.nodeId(Number(c.id));
-            // Not flashed: covered and unchanged, or known never to be stored.
-            if (this.unstoredIds.has(id) && !again.has(id)) { why.unstored++; return null; }
-            const addr = tree.addressOf(Number(c.id));
-            if (addr && this.unstoredOn(url).has(addr) && !again.has(id)) { why.unstored++; return null; }
-            if (delta.covers[id] && !again.has(id)) { why.covered++; return null; }
-            const r = payload.boxes[i];
-            if (!r) { why.nobox++; return null; }
-            if (r[1] + r[3] < 0 || (vh && r[1] > vh) || (r[2] <= 0 && r[3] <= 0)) why.offscreen++;
-            else why.flashed++;
-            return r;
-          });
-          prof.fact(trace, "flash", why);
-          if (boxes.some(Boolean)) {
-            this.pipebox?.flashBoxes(boxes, drainBack, trace.id,
-                                     (payload.chunks || []).map((c: any) => Number(c.id)));
-          }
-        }
-        if (delta && (delta.added.length || delta.removed.length || delta.reparented.length)) {
-          if (!payload.boxes) delta.covers = this.coversFor(url, tree.held().filter(
-            (h) => delta.added.some((a) => a.id === h.id)));
-          delta.settled = this.settledOf(url, delta.covers);
-          // Known never to be stored on this page: not the diff either.
-          const known = this.unstoredOn(url);
-          for (const h of tree.held()) {
-            if (known.has(h.address) && !delta.covers[h.id]
-                && delta.added.some((a) => a.id === h.id && !a.again)) delta.settled.push(h.id);
-          }
-          delta.t0 = drainBack;
-          delta.trace = trace.id;
-          prof.stage(trace, "force_tree", delta.ms);
-          // Both outputs of this drain, from the same instant (`G-90`): the
-          // diff outlined on the page, and its nodes in the 3D graph.
-          if (delta.addresses.length && !(payload && payload.boxes)) {
-            this.pipebox?.flashDiff(delta.addresses, drainBack, trace.id);
-          }
-          // The 3D update AFTER the frame that paints the overlay (G-90): run in
-          // the same task it held the main thread, and while the graph was
-          // large the boxes waited for it -- 545 ms p50 to paint, against
-          // 5-9 ms when the graph was small. rAF, then a task: the paint
-          // happens between them.
-          window.requestAnimationFrame(() => window.setTimeout(() => this.onDrain(delta), 0));
-        }
-      }
-      if (!payload || !(payload.chunks || []).length) {
-        this.capturedAt.set(url, performance.now());
-        prof.fact(trace, "why", "empty drain");
-        prof.finish(trace, "nothing_placed");
-        return;
-      }
-      prof.fact(trace, "chunks_in_drain", (payload.chunks || []).length);
-
-      // The store comes AFTER the GUI (Addendum IX, D-35): the capture is
-      // queued, and this drain is done -- the next tick drains, outlines and
-      // draws again whether or not the store has answered. It used to hold
-      // `draining` across the whole round trip, and a new page's first
-      // capture (the whole page, 5-7 s to store) froze the overlay and the
-      // 3D stream for exactly that long after every navigation.
-      this.captureQueue.push({ url, payload, trace, drainIds,
-                               title: wv.getTitle() || "" });
-      void this.pumpCaptures();
-      // Planted by D-35's check: the old behaviour, the drain loop held
-      // across the whole capture.
-      if (this.plant.has("serial-capture")) {
-        while (this.capturing || this.captureQueue.length) {
-          await new Promise((r) => window.setTimeout(r, 50));
-        }
-      }
+      // Pushed: it arrives (or has arrived) on the console channel, in order.
+      if (payload && payload.pushed) { prof.drop(trace); return; }
+      await this.absorbDrain(payload, url, trace, drainStart, drainBack, wv.getTitle() || "");
     } catch (e) {
       // The realm goes away on navigation and the handle with it. That is
       // ordinary, not an error: the next tick reboots into the new document.
       this.say(`live · ${String(e).slice(0, 80)}`);
     } finally {
       this.draining = false;
+      if (this.drainAgain) { this.drainAgain = false; window.setTimeout(() => void this.tick(), 0); }
+    }
+  }
+
+  /**
+   * A drain the sensor PUSHED (2026-09-27): sent from the task that folded
+   * it, so it never queues behind the page's long tasks the way a pulled
+   * drain did. Absorbed in arrival order -- one channel, so page order.
+   */
+  private pushQueue: { payload: any; at: number }[] = [];
+  private pumpingPush = false;
+  private async onPushedDrain(payload: any): Promise<void> {
+    this.pushQueue.push({ payload, at: performance.now() });
+    if (this.pumpingPush) return;
+    this.pumpingPush = true;
+    try {
+      while (this.pushQueue.length) {
+        const { payload: p, at } = this.pushQueue.shift()!;
+        const wv = this.webview;
+        if (!wv || !this.live) continue;
+        const url = String(p.url || wv.getURL() || "");
+        if (!url || url === "about:blank") continue;
+        if (url !== this.session && docKey(url) !== docKey(this.session)) {
+          this.lastRepairMs = undefined;
+          // Sets the session at once; the settle it starts runs behind.
+          void this.pageChanged(url);
+        }
+        const prof = profiler();
+        const trace = prof.begin("live", url);
+        const inpage = p.inpage || {};
+        const transit = typeof p.sentAt === "number" ? Math.max(0, Date.now() - p.sentAt) : 0;
+        prof.stage(trace, "push_transit", transit);
+        const inPage = (inpage.drain || 0) + (inpage.boxes || 0) + (inpage.pictures || 0);
+        // How long it sat in the host's queue before being absorbed (G-90).
+        prof.stage(trace, "pump_wait", performance.now() - at);
+        await this.absorbDrain(p, url, trace, at - inPage - transit, at, wv.getTitle() || "");
+      }
+    } catch (e) {
+      this.say(`live · ${String(e).slice(0, 80)}`);
+    } finally {
+      this.pumpingPush = false;
+    }
+  }
+
+  /**
+   * One drain into the GUI, pulled or pushed: the force tree, the overlay's
+   * outlines, the 3D stream, and the store's capture queued behind them.
+   */
+  private async absorbDrain(payload: any, url: string, trace: any, drainStart: number,
+                            drainBack: number, title: string): Promise<void> {
+    const prof = profiler();
+    // The host's wall clock at arrival: a page that logs its own mutations
+    // can time the stream against ITS clock (D-40), not the sensor's.
+    prof.fact(trace, "host_epoch", Date.now());
+    // Which of the page's chunks this drain carried (the sensor's own ids, as
+    // `at()` answers them), so a check can tie a mutation it saw to the drain
+    // that brought it rather than to whichever drain came next.
+    if (payload && payload.chunks) prof.fact(trace, "chunk_ids", payload.chunks.map((c: any) => Number(c.id)).slice(0, 400));
+    if (payload && payload.dirtyAt) prof.stage(trace, "mutation_to_host", Math.max(0, Date.now() - payload.dirtyAt));
+    // The force ids this drain emitted: what its capture is answerable for.
+    let drainIds: string[] = [];
+    // Nothing changed. Not posted: an empty delta costs a round trip, a
+    // decode and a store write to say "no", and a reader idling on a static
+    // page would pay it once a second forever.
+    prof.stage(trace, "drain", performance.now() - drainStart);
+    // The guest's own fold time for this drain, from its own clock. It is
+    // INSIDE `drain`, and the difference is the executeJavaScript bridge.
+    if (payload && payload.inpage) {
+      prof.stage(trace, "drain.call", payload.inpage.drain);
+      prof.stage(trace, "drain.boxes", payload.inpage.boxes);
+      prof.stage(trace, "drain.pictures", payload.inpage.pictures);
+    }
+    const repair = payload && payload.stats ? payload.stats.repairMs : undefined;
+    if (typeof repair === "number") {
+      // Cumulative per handle; a new handle (a new realm) starts from zero.
+      const prev = this.lastRepairMs ?? 0;
+      prof.stage(trace, "fold", repair >= prev ? repair - prev : repair);
+      this.lastRepairMs = repair;
+    }
+    // The force tree first (`G-89`): straight from the drain, before the
+    // capture's round trip, so the graph shows the scan at once.
+    if (payload && ((payload.chunks || []).length || (payload.removed || []).length)) {
+      let tree = this.forceTrees.get(url);
+      if (!tree) { tree = new ForceTree(url); this.forceTrees.set(url, tree); }
+      const delta = tree.apply(payload);
+      if (delta) drainIds = delta.added.map((a) => a.id);
+      if (payload.pictures) {
+        (payload.chunks || []).forEach((c: any, i: number) => {
+          const pic = payload.pictures[i];
+          if (pic && pic[0]) this.drainPics.set(tree!.nodeId(Number(c.id)), String(pic[0]));
+        });
+        while (this.drainPics.size > 5000) this.drainPics.delete(this.drainPics.keys().next().value as string);
+      }
+      // The diff outlined FIRST (`G-90`) -- boxes came back with the drain,
+      // so this is placement only -- and only the TRUE diff (H-1): a chunk
+      // the store already holds unchanged is not news, and landing on a
+      // stored page used to flash its whole first drain.
+      if (delta && payload.boxes && payload.boxes.length) {
+        const tc = performance.now();
+        const addedIds = new Set(delta.added.map((a) => a.id));
+        delta.covers = this.coversFor(url, tree.held().filter((h) => addedIds.has(h.id)));
+        prof.stage(trace, "absorb.covers", performance.now() - tc);
+        const again = new Set(delta.added.filter((a) => a.again).map((a) => a.id));
+        // WHY each chunk of the drain was or was not outlined, as facts on
+        // the trace (2026-09-27: "overlays for completely new diff updates
+        // ... have not been observed for several minutes" -- and the trace
+        // could not say whether a drain was stored content, furniture known
+        // never to be stored, off screen, or dropped).
+        const why = { flashed: 0, covered: 0, unstored: 0, offscreen: 0, nobox: 0 };
+        const vh = (this.webview as any)?.clientHeight || 0;
+        const boxes = (payload.chunks || []).map((c: any, i: number) => {
+          const id = tree.nodeId(Number(c.id));
+          // Not flashed: covered and unchanged, or known never to be stored.
+          if (this.unstoredIds.has(id) && !again.has(id)) { why.unstored++; return null; }
+          const addr = tree.addressOf(Number(c.id));
+          if (addr && this.unstoredOn(url).has(addr) && !again.has(id)) { why.unstored++; return null; }
+          if (delta.covers[id] && !again.has(id)) { why.covered++; return null; }
+          const r = payload.boxes[i];
+          if (!r) { why.nobox++; return null; }
+          if (r[1] + r[3] < 0 || (vh && r[1] > vh) || (r[2] <= 0 && r[3] <= 0)) why.offscreen++;
+          else why.flashed++;
+          return r;
+        });
+        prof.fact(trace, "flash", why);
+        prof.stage(trace, "absorb.flash_prep", performance.now() - tc);
+        if (boxes.some(Boolean)) {
+          this.pipebox?.flashBoxes(boxes, drainBack, trace.id,
+                                   (payload.chunks || []).map((c: any) => Number(c.id)));
+        }
+      }
+      if (delta && (delta.added.length || delta.removed.length || delta.reparented.length)) {
+        if (!payload.boxes) delta.covers = this.coversFor(url, tree.held().filter(
+          (h) => delta.added.some((a) => a.id === h.id)));
+        delta.settled = this.settledOf(url, delta.covers);
+        // Known never to be stored on this page: not the diff either.
+        const known = this.unstoredOn(url);
+        for (const h of tree.held()) {
+          if (known.has(h.address) && !delta.covers[h.id]
+              && delta.added.some((a) => a.id === h.id && !a.again)) delta.settled.push(h.id);
+        }
+        delta.t0 = drainBack;
+        delta.trace = trace.id;
+        prof.stage(trace, "force_tree", delta.ms);
+        // Both outputs of this drain, from the same instant (`G-90`): the
+        // diff outlined on the page, and its nodes in the 3D graph.
+        if (delta.addresses.length && !(payload && payload.boxes)) {
+          this.pipebox?.flashDiff(delta.addresses, drainBack, trace.id);
+        }
+        // The 3D update AFTER the frame that paints the overlay (G-90): run in
+        // the same task it held the main thread, and while the graph was
+        // large the boxes waited for it -- 545 ms p50 to paint, against
+        // 5-9 ms when the graph was small. rAF, then a task: the paint
+        // happens between them.
+        window.requestAnimationFrame(() => window.setTimeout(() => this.onDrain(delta), 0));
+      }
+    }
+    if (!payload || !(payload.chunks || []).length) {
+      this.capturedAt.set(url, performance.now());
+      prof.fact(trace, "why", "empty drain");
+      prof.finish(trace, "nothing_placed");
+      return;
+    }
+    prof.fact(trace, "chunks_in_drain", (payload.chunks || []).length);
+
+    // The store comes AFTER the GUI (Addendum IX, D-35): the capture is
+    // queued, and this drain is done -- the next tick drains, outlines and
+    // draws again whether or not the store has answered. It used to hold
+    // `draining` across the whole round trip, and a new page's first
+    // capture (the whole page, 5-7 s to store) froze the overlay and the
+    // 3D stream for exactly that long after every navigation.
+    this.captureQueue.push({ url, payload, trace, drainIds,
+                             title });
+    void this.pumpCaptures();
+    // Planted by D-35's check: the old behaviour, the drain loop held
+    // across the whole capture.
+    if (this.plant.has("serial-capture")) {
+      while (this.capturing || this.captureQueue.length) {
+        await new Promise((r) => window.setTimeout(r, 50));
+      }
     }
   }
 
@@ -1552,6 +1686,13 @@ export class BrowserView extends ItemView {
           const settledNow = this.settledOf(url, covers)
             .concat(Object.entries(covers).filter(([, c]) => undrawable.has(c)).map(([id]) => id));
           if (Object.keys(covers).length) this.onCovers(url, covers, settledNow);
+          // The stored chunks now known for drained ones carry their pictures.
+          const picked: Record<string, string> = {};
+          for (const [fid, cid] of Object.entries(covers)) {
+            const src = this.drainPics.get(fid);
+            if (src && cid) picked[cid as string] = src;
+          }
+          if (Object.keys(picked).length) { putPictures(picked); this.onPictures(picked); }
           // Saved: their outlines on the page go too (after their dwell) --
           // the same moment their translucent nodes collapse in 3D (D-37).
           if (this.pipebox && url === this.session) {
