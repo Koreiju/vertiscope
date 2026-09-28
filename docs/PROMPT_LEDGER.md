@@ -7,7 +7,7 @@ binding record; this is the index that proves nothing in a transcript was lost.
 Transcripts cover 2026-09-12 onward; earlier direction lives only in
 `PLUGIN_GOAL.md` (the opening statement and Addenda I-III).
 
-**155 prompts:** LIVE 67, ONE-OFF 36, PARTLY 12, PROCESS 27, QUESTION 11, SUPERSEDED 2
+**171 prompts:** LIVE 79, NOTE 1, ONE-OFF 36, PARTLY 12, PROCESS 30, QUESTION 11, SUPERSEDED 2
 
 ## Still binding (LIVE, PARTLY, PROCESS)
 
@@ -119,6 +119,21 @@ Transcripts cover 2026-09-12 onward; earlier direction lives only in
 | P153 | 2026-09-27 | PROCESS | A defect seen on a named site is confirmed ON that site, timed by an observer independent of the code under test, planted arm on the same site; a fixture is a secondary arm, never the judged one. | D-40, D-35, D-36, D-37, G-94 |
 | P154 | 2026-09-27 | LIVE | The lag was on the Julia forum (discourse.julialang.org/latest): D-40 is judged there. | D-40 |
 | P155 | 2026-09-27 | LIVE | An open page's layout keeps its geometry: no overlaps (the page's billboard included), a spread disc, a simple planar tree, nothing flung out -- and still after an orbit. | G-94, D-41 |
+| P156 | 2026-09-28 | LIVE | An open page is laid out BY FORCES (tree springs, integer collider, page room), not a pinned geometry; a geometric layout may seed it, never replace it; the edges drawn are the tree laid out. | G-94, D-41 |
+| P157 | 2026-09-28 | LIVE | A flat star (many chunks under one page) must not rest as a ring: the forces fill a disc or ball. | G-94, D-41 |
+| P158 | 2026-09-28 | LIVE | Nothing in the 3D layout follows the camera -- no re-facing on orbit, no seeding in the camera's plane -- and what is force-directed keeps working. | G-94, D-41 |
+| P159 | 2026-09-28 | LIVE | Trace the stream stage by stage and make the app match it: fold on save, UMAP positions for projected chunks, update()-style incremental transforms for new nodes, refit re-projects; the update's scope (every chunk vs page centroids) chosen by measured GPU cost. | G-92, G-96, G-97, G-106 |
+| P161 | 2026-09-28 | LIVE | Measure duplicate nodes in the 3D view and duplicate chunks in the store, both ways, with a planted duplicate. | G-98 |
+| P162 | 2026-09-28 | PROCESS | Gate in-app runs on the reader's use of the APP, not machine-wide idle. |  |
+| P163 | 2026-09-28 | LIVE | The pipeline checks must not break down mid-run (a run stuck seeding, fighting the reader). | G-75, G-87 |
+| P164 | 2026-09-28 | LIVE | The streaming force tree stays calm between rapid-fire updates. | G-93 |
+| P165 | 2026-09-28 | LIVE | Diffs reach the store in about one capture's time however fast the page drains. | D-42 |
+| P166 | 2026-09-28 | PROCESS | Bring the whole stack back up after a reboot (sidecar, Obsidian with flags, plugin). |  |
+| P167 | 2026-09-28 | LIVE | Obsidian must not freeze while scrolling the Julia forum (D-38: renderer OOM). | D-38 |
+| P168 | 2026-09-28 | LIVE | Formal nested requirements/design model over the design history; focused module tests; the rest of the pending requirements built; Merkle-subtree dedup as in the reference serializer; the star layout tracked; GPU update() refits observable; lighter overlays; one full-pipeline harness with time AND memory profiles, rendering included. | D-38, D-41, G-98, G-106 |
+| P169 | 2026-09-28 | LIVE | Obsidian froze again (D-38). | D-38 |
+| P170 | 2026-09-28 | PROCESS | A rapid scroll-and-hover stress gesture on the site where it happens, with time and memory profiling. | D-38 |
+| P171 | 2026-09-28 | LIVE | Every scanner diff reaches the 3D view with the same latency and in the same proportion. | G-89, G-90, D-40 |
 
 ## Superseded
 
@@ -818,4 +833,68 @@ Transcripts cover 2026-09-12 onward; earlier direction lives only in
 ### P155 -- 2026-09-27 22:08 -- LIVE
 
 > [mid-turn, 1 image(s)] Also, force-directed layouts have incorrect geometries and constraints
+
+### P156 -- 2026-09-28 01:41 -- LIVE
+
+> Layouts still collapsing to something likely non force directed. This is a flat circle which surprises me
+
+### P157 -- 2026-09-28 01:47 -- LIVE
+
+> Ring layouts still showing instead of force directed
+
+### P158 -- 2026-09-28 01:51 -- LIVE
+
+> Don't know why live diff streams in the 3D graph editor keep re-facing the growing force-directed form of tree nodes where the structure is always facing the camera and adjusting its orientation; this is an unneeded addition that needs to be removed without breaking the functionality of what is force-directed
+
+### P159 -- 2026-09-28 01:55 -- LIVE
+
+> I'm honestly unsure if the UMAP layouts are being followed at all either, along with force-directed layouts. The immediate streaming of diffs *does* work, but I had detailed quite a few steps for 3D layouts depending on where each diff node was in the processing pipeline. I've made a few updates as well. Please chase this processing sequence down and fix what discrepancies between how the app currently behaves and my described features and processing (folding in when the diffed nodes are saved to the DB, changing to UMAP coordinates after a re-fit and `update()` style transform incrementally over the new nodes. Depending on GPU runtimes, perhaps update with the full set of chunks, or just the centroided pages, or the former for few pages and the latter for tens to hundreds.
+
+### P160 -- 2026-09-28 01:55 -- NOTE
+
+> [mid-turn] I
+
+### P161 -- 2026-09-28 01:56 -- LIVE
+
+> [mid-turn] I'll also raise my suspicions here about deduplication and duplicate nodes in the 3D graph view, whether this exists or not.
+
+### P162 -- 2026-09-28 03:14 -- PROCESS
+
+> Idle's never going to finish. Been at it for an hour
+
+### P163 -- 2026-09-28 03:16 -- LIVE
+
+> I think your pipeline checks are breaking down now
+
+### P164 -- 2026-09-28 03:20 -- LIVE
+
+> Force-directed scans in rapid fire on the julia page are fast and responsive, but the force directed layout in 3D is way too chaotic between scan updates
+
+### P165 -- 2026-09-28 03:21 -- LIVE
+
+> [mid-turn] I'm also surprised that the database ingests leave out so many diffed chunks for *so long*
+
+### P166 -- 2026-09-28 22:42 -- PROCESS
+
+> Alrighty. Fresh new computer reboot. Can you please bring everything back up?
+
+### P167 -- 2026-09-28 22:45 -- LIVE
+
+> Obsidian's froze up after scrolling over julia panels
+
+### P168 -- 2026-09-28 23:02 -- LIVE
+
+> Also might be worth running targeted batches of tests on the plugin-in-the-loop with obsidian open for various things and entries in our current collection of specs and architecture notes throughout the project history. I've also attached a more recent snapshot of the search results and I've noticed some hidden deduplication catches that I think may have been covered in our original copy of @domvec/reference/dom_deep_serializer.py. Please do recommend an additional set of focused feature-wise module tests that don't trade memory and context size for completeness and coverage. Fuller detail and more nested directories are favored on requirement lofting and design notes over the current set of designs. This is a formal model of the software architecture governed by the most up-to-date smooth integral over the full design history. It is separate from the software itself but informs the design to track updates on requirements and dependency changes for careful localization on feature degradations, for example. We are also concerned with filling out the rest of our current software with the remainder of the pending requirements and features that have yet to be formalized as a proper software model and built in to our current plugin, again, tested with plugin-in-the-loop. I've also attached another very zoomed in photo of a potential force-directed or interpretation form of degradation on the 3D layout. This layout is likely a lot simpler than what is being designed over. Make sure to track it, and make sure that it gets built properly. Please also ensure that we're using GPU and `update()` based batch re-fits on our UMAP models and that these are harnessed into what is observable to yourself, so that we can clearly integrate UMAP transformations with the remainder of the preceding steps in the main scanning pipeline [i.e. vectorization on chunk diff updates, those updates coming from the 3D graph editor, the diff on those updates are streamed from the recursive chunking algorithm that produces overlays on the electron browser, and these highlighted overlays (which need to be in a very much lighter and un-tinted color but keeping some tint and borders still, just fainter on tint/border but a little bit higher luminosity while keeping translucency reasonable), and so on]. Also, we're frozen again after a few scrolls on the julia forums. Not sure where in the pipeline it is, but I would suggest adding a memory profile along with a time profiler if you haven't already. Please ensure that you're centralizing everything to this main pipeline that we keep running into (that includes rendering as deeper inlaid parts of the processing now, each with different time constraints) with the plugin harness that is used for the *full* pipeline.
+
+### P169 -- 2026-09-28 23:06 -- LIVE
+
+> Frozen again
+
+### P170 -- 2026-09-28 23:12 -- PROCESS
+
+> I'd suggest adding a simple rapid scroll and hover feature while listening and watching for this site specifically (time-memory-profile dentistry)
+
+### P171 -- 2026-09-28 23:17 -- LIVE
+
+> [mid-turn] I'd also like you to include the updates on the 3D graph viewer as well, ensure that the diff updates are sent from the browser/electron scanner and received on the other end within the same diff update latency and proportion in rendering. I think there might be some blockage on the 3D side where we stop seeing any updates from the scanner side at all.
 

@@ -603,6 +603,8 @@ export class GraphView extends ItemView {
   /** Per-drain renderer cost and counts, for C3. */
   forceStats = { drains: 0, added: 0, removed: 0, reparented: 0, ms: [] as number[],
                  toScene: [] as number[],
+                 /** Mean movement of the already-drawn streaming nodes between updates. */
+                 jitter: [] as number[],
                  /** [ms, nodes the drain touched] per drain: O(delta) is judged
                   *  per touched node, not per drain (a page's first drain
                   *  carries 500 chunks, later ones a handful). */
@@ -622,10 +624,71 @@ export class GraphView extends ItemView {
     if (!g) return;
     g.d3Force("home", null);
     g.d3Force("contain", null);
-    g.d3Force("charge", forceManyBody().strength(-60).distanceMax(220));
+    // Charge builds an octree every tick too: sanitised first (D-38).
+    const charge: any = forceManyBody().strength(-60).distanceMax(220);
+    let chargeNodes: any[] = [];
+    const safeCharge: any = (alpha: number) => { this.sanitize(chargeNodes); charge(alpha); };
+    safeCharge.initialize = (...a: any[]) => { chargeNodes = a[0] || []; return charge.initialize(...a); };
+    g.d3Force("charge", safeCharge);
     g.d3Force("center", forceCenter());
     g.d3Force("link")?.strength(0.9).distance(18);
     g.d3AlphaDecay(0.0228).d3VelocityDecay(0.4);
+    this.installHold();
+    this.watchForces();
+  }
+
+  /**
+   * CALM BETWEEN UPDATES (2026-09-28: "Force-directed scans in rapid fire on
+   * the julia page are fast and responsive, but the force directed layout in
+   * 3D is way too chaotic between scan updates"). Every drain hands the graph
+   * a new node array, and that restarts the simulation at full heat: a burst
+   * of drains re-shook the whole tree -- charge, springs, siblings -- for the
+   * few nodes each one added. Now the nodes already drawn are HELD where they
+   * are for 1.5 s after each update (renewed while updates keep coming); only
+   * the newcomers are free to settle, and they start where they belong.
+   */
+  private installHold(): void {
+    const g: any = this.graph;
+    if (!g) return;
+    let held: any[] = [];
+    const hold: any = () => {
+      const now = performance.now();
+      for (const n of held) {
+        const at = n.holdAt;
+        if (!at) continue;
+        if (now > n.holdUntil) { n.holdAt = undefined; continue; }
+        n.vx = (n.vx ?? 0) * 0.2 + (at[0] - (n.x ?? 0)) * 0.5;
+        n.vy = (n.vy ?? 0) * 0.2 + (at[1] - (n.y ?? 0)) * 0.5;
+        n.vz = (n.vz ?? 0) * 0.2 + (at[2] - (n.z ?? 0)) * 0.5;
+      }
+    };
+    hold.initialize = (nodes: any[]) => { held = nodes || []; };
+    g.d3Force("hold", hold);
+  }
+
+  /** Planted by G-93's check: no hold -- every update re-shakes the whole tree. */
+  plantNoHold = false;
+
+  /** Hold every streaming node already drawn (not `fresh`), and measure how
+   *  far the held ones moved since the last update (`forceStats.jitter`). */
+  private holdAll(nodes: any[], fresh: Set<string>): void {
+    const now = performance.now();
+    let moved = 0, n = 0;
+    for (const x of nodes) {
+      if (!x.force || fresh.has(x.id) || !Number.isFinite(x.x)) continue;
+      if (x.lastAt) {
+        moved += Math.hypot(x.x - x.lastAt[0], x.y - x.lastAt[1], (x.z ?? 0) - x.lastAt[2]);
+        n++;
+      }
+      x.lastAt = [x.x, x.y, x.z ?? 0];
+      if (this.plantNoHold) continue;
+      x.holdAt = [x.x, x.y, x.z ?? 0];
+      x.holdUntil = now + 1500;
+    }
+    if (n) {
+      this.forceStats.jitter.push(moved / n);
+      if (this.forceStats.jitter.length > 500) this.forceStats.jitter.shift();
+    }
   }
 
   /**
@@ -686,22 +749,34 @@ export class GraphView extends ItemView {
       if (cid && !a.again && byId.has(cid) && !byId.get(cid).force) { this.forceSpecs.delete(a.id); continue; }
       this.forceSpecs.set(a.id, { parent: a.parent, url: d.url, title: a.title, lines: a.lines,
                                   cid, stale: !!a.again, born: Date.now() });
+      if (a.parent) {
+        this.life.nodes.set(a.id, { url: d.url, drawnAt: Date.now(), cid });
+        if (this.life.nodes.size > 20000) this.life.nodes.delete(this.life.nodes.keys().next().value as string);
+      }
       if (!drawHere) continue;
       const to = a.parent ? this.parentFor(a.parent, d.url, byId, pageNode) : "";
       const p = to ? byId.get(to) : null;
-      const jitter = () => (Math.random() - 0.5) * 6;
+      // Where it belongs, not a random jitter: a spring length from its
+      // parent, in the next direction of a Fibonacci sphere of its siblings.
+      const k = (this.childCount.get(to) || 0);
+      this.childCount.set(to, k + 1);
+      const zz = 1 - 2 * ((k % 32) + 0.5) / 32, rr = Math.sqrt(Math.max(0, 1 - zz * zz));
+      const th = k * Math.PI * (3 - Math.sqrt(5));
+      const off = [rr * Math.cos(th) * STREAM.BASE, rr * Math.sin(th) * STREAM.BASE, zz * STREAM.BASE];
+      const jitter = (i: number) => (p ? off[i] : (Math.random() - 0.5) * 6);
       const page = !a.parent;
       const n: any = {
         id: a.id, level: page ? "page" : "chunk", name: a.title || a.id,
         url: d.url, members: 1, tokens: 0, force: true,
         val: page ? 3 : 1,
         color: page ? "#8ab4f8" : "#9aa0a6",
-        x: (p?.x ?? 0) + jitter(), y: (p?.y ?? 0) + jitter(), z: (p?.z ?? 0) + jitter(),
+        x: (p?.x ?? 0) + jitter(0), y: (p?.y ?? 0) + jitter(1), z: (p?.z ?? 0) + jitter(2),
       };
       nodes.push(n);
       byId.set(n.id, n);
       if (p) links.push({ source: p.id, target: n.id, force: true });
     }
+    this.holdAll(nodes, new Set(d.added.map((a) => a.id)));
     this.graph.graphData({ nodes, links });
     if (this.layoutMode === "projector") {
       this.treeSpring();
@@ -733,6 +808,9 @@ export class GraphView extends ItemView {
       this.forceCaption?.();
     }
   }
+
+  /** Children placed under each parent so far, for the newcomers' directions. */
+  private childCount = new Map<string, number>();
 
   /** Every force node drawn: what a redraw needs to put it back. */
   private forceSpecs = new Map<string, { parent: string; url: string; title: string;
@@ -855,6 +933,8 @@ export class GraphView extends ItemView {
       for (const id of kids.keys()) count(id, new Set());
     };
     g.d3Force("treeSpring", spring);
+    this.installHold();
+    this.watchForces();
   }
 
   /** The projector's page node for `url`, if it draws one. */
@@ -886,17 +966,235 @@ export class GraphView extends ItemView {
    * until then it stays the pending diff (`G-89` C7).
    */
   coverForce(url: string, covers: Record<string, string>, settled: string[] = []): void {
+    // The capture's reply: the store has SAVED these (Addendum IX, stage 4:
+    // "The moment the store confirms a node saved, THAT node collapses into
+    // its page's root node -- before any vector, before any projection").
+    // It used to wait for the projected node to be DRAWN -- G-89's older
+    // order -- so a saved chunk stayed a streaming node through embedding
+    // and placement, and on a collapsed page for good (2026-09-28).
+    const now = Date.now();
+    const saved = new Set<string>();
     for (const [id, cid] of Object.entries(covers)) {
       const spec = this.forceSpecs.get(id);
-      if (spec) spec.cid = cid;
+      if (!spec || !cid) continue;
+      spec.cid = cid;
+      spec.stale = false;
+      saved.add(id);
+      const l = this.life.nodes.get(id);
+      if (l && !l.savedAt) l.savedAt = now;
     }
-    // Stored before this visit and unchanged: already through the transform.
-    const done = new Set(settled.filter((id) => {
-      const spec = this.forceSpecs.get(id);
-      return spec && !spec.stale;
-    }));
-    if (done.size) this.redrawForce(done);
+    for (const id of settled) if (this.forceSpecs.has(id)) saved.add(id);
+    // Planted by G-92's check: the old order, collapse only once projected.
+    if (this.plantLateCollapse) { this.collapseCovered(); return; }
+    if (saved.size) this.foldIn(saved);
     this.collapseCovered();
+  }
+
+  /** Planted by G-92's check: a saved node waits for its projection (the old order). */
+  plantLateCollapse = false;
+  /**
+   * D-38, found 2026-09-28 by pausing the frozen renderer: the stack was
+   * `add3 <- addAll3 <- octree <- collide force <- tick`, heap 866 MB and
+   * climbing. d3-octree skips a NaN coordinate but not +-Infinity: an infinite
+   * extent makes `add`'s subdivision loop (and `cover`'s) never end, and each
+   * turn allocates -- Chromium: "Renderer process oom", the whole window gone.
+   * So no node reaches an octree with a non-finite (or runaway, > 1e7)
+   * position: it goes back to its fit, still, and is RECORDED with everything
+   * that moved it, so the force that produced it can be named.
+   */
+  nonFinite: any[] = [];
+  nonFiniteCount = 0;
+  /** Which FORCE first left a non-finite velocity, per tick it happened (D-38). */
+  nanBy: { at: number; force: string; nodes: number; alpha: number; sample: any }[] = [];
+
+  /**
+   * Every force the pane runs, wrapped: after it acts, velocities are
+   * checked, and the FIRST force to leave a non-finite one is named -- the
+   * guard (`sanitize`) keeps the octree safe, this says where the NaN came
+   * from. O(nodes) per force per tick.
+   */
+  private watchForces(): void {
+    const g: any = this.graph;
+    if (!g) return;
+    for (const name of ["link", "center", "charge", "home", "contain", "collide", "treeSpring", "hold"]) {
+      const f: any = g.d3Force(name);
+      if (!f || f.__watched) continue;
+      let nodes: any[] = [];
+      const w: any = (alpha: number) => {
+        f(alpha);
+        for (const n of nodes) {
+          if (Number.isFinite(n.vx) && Number.isFinite(n.vy) && Number.isFinite(n.vz ?? 0)) continue;
+          if (n.vx === undefined) continue;
+          const bad = nodes.filter((m) => m.vx !== undefined && !(Number.isFinite(m.vx) && Number.isFinite(m.vy) && Number.isFinite(m.vz ?? 0)));
+          if (this.nanBy.length < 40) this.nanBy.push({ at: Date.now(), force: name, nodes: bad.length, alpha,
+            sample: { id: String(n.id).slice(0, 60), level: n.level, force: !!n.force, x: n.x, vx: String(n.vx), fitX: n.fitX, val: n.val,
+                      anchor: n.anchorPos, room: n.room, hold: n.holdAt } });
+          break;
+        }
+      };
+      w.initialize = (...a: any[]) => { nodes = a[0] || []; return f.initialize ? f.initialize(...a) : undefined; };
+      // The accessors the rest of the pane calls on these forces pass through.
+      for (const k of ["strength", "distance", "radius", "iterations", "distanceMax", "links", "id", "x", "y", "z"]) {
+        if (typeof f[k] === "function") w[k] = (...a: any[]) => { const r = f[k](...a); return a.length ? w : r; };
+      }
+      w.__watched = true;
+      g.d3Force(name, w);
+    }
+  }
+  private sanitize(nodes: any[]): void {
+    for (const n of nodes) {
+      const x = n.x, y = n.y, z = n.z ?? 0;
+      const vx = n.vx ?? 0, vy = n.vy ?? 0, vz = n.vz ?? 0;
+      // Positions AND velocities: collision's octree is built on x + vx (the
+      // predicted position), so an infinite velocity hangs it as surely --
+      // finite positions passed this check and the renderer still froze.
+      if (Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z)
+          && Math.abs(x) < 1e7 && Math.abs(y) < 1e7 && Math.abs(z) < 1e7
+          && Number.isFinite(vx) && Number.isFinite(vy) && Number.isFinite(vz)
+          && Math.abs(vx) < 1e6 && Math.abs(vy) < 1e6 && Math.abs(vz) < 1e6) continue;
+      if (x === undefined) continue;                 // not placed yet: the octree skips it
+      this.nonFiniteCount++;
+      if (this.nonFinite.length < 40) {
+        const r = (v: any) => (typeof v === "number" ? (Number.isFinite(v) ? Math.round(v * 100) / 100 : String(v)) : v);
+        this.nonFinite.push({ at: Date.now(), id: String(n.id).slice(0, 80), force: !!n.force, level: n.level,
+          x: r(x), y: r(y), z: r(z), vx: r(n.vx), vy: r(n.vy), vz: r(n.vz), fx: r(n.fx),
+          fit: [r(n.fitX), r(n.fitY), r(n.fitZ)], hold: n.holdAt ? n.holdAt.map(r) : null,
+          anchor: n.anchorPos ? n.anchorPos.map(r) : null, room: r(n.room), val: r(n.val),
+          folding: this.folding.has(n.id), mode: this.layoutMode });
+      }
+      const fit = [n.fitX, n.fitY, n.fitZ];
+      const to = fit.every(Number.isFinite) ? fit : [0, 0, 0];
+      n.x = to[0]; n.y = to[1]; n.z = to[2];
+      n.vx = 0; n.vy = 0; n.vz = 0;
+      if (n.fx != null && !(Number.isFinite(n.fx) && Number.isFinite(n.fy) && Number.isFinite(n.fz))) {
+        n.fx = undefined; n.fy = undefined; n.fz = undefined;
+      }
+      if (n.holdAt && !n.holdAt.every(Number.isFinite)) n.holdAt = undefined;
+    }
+  }
+
+  /** Collision runs until this time (performance.now); see `draw`. */
+  collideUntil = 0;
+  /** Planted by the host-load check: collision on every tick, as before. */
+  plantAlwaysCollide = false;
+  /** The projected layout changed: collision spaces it for the next 3 s. */
+  private collideSoon(): void { this.collideUntil = performance.now() + 3000; }
+
+  /** Planted by G-97's check: projected chunks drawn away from their fit, `home` off. */
+  plantScatter = false;
+
+  /**
+   * The lifecycle of every diff node through the stream, for the checks and
+   * the reader's corner: when it was drawn, saved, folded into its root, and
+   * when its chunk was placed by the fit (Addendum IX's order, stage by stage).
+   */
+  life = {
+    nodes: new Map<string, { url: string; drawnAt: number; savedAt?: number; foldedAt?: number; cid?: string }>(),
+    placed: new Map<string, { at: number; drawn: boolean; url: string }>(),
+    folded_unopened: 0, moved: 0, replaced_force: 0,
+  };
+
+  /** Force nodes folding into their page's root right now (a 250 ms tween). */
+  private folding = new Map<string, { t0: number; from: number[]; to: any; node: any }>();
+
+  /**
+   * SAVED nodes fold into their page's root: the projected page node, or --
+   * a page not projected yet -- its own force-directed root. Drawn, they
+   * travel into it over 250 ms (what "folding in" looks like); not drawn,
+   * they simply go.
+   */
+  private foldIn(ids: Set<string>): void {
+    if (!this.graph) return;
+    const data: any = this.graph.graphData();
+    const byId = new Map<string, any>(data.nodes.map((n: any) => [n.id, n]));
+    const now = performance.now(), wall = Date.now();
+    const at = new Set<string>();
+    for (const id of ids) {
+      const spec = this.forceSpecs.get(id);
+      const n = byId.get(id);
+      const l = this.life.nodes.get(id);
+      if (l) l.foldedAt = wall;
+      if (!spec || !spec.parent) continue;              // a root folds into nothing
+      const root = this.projectedPage(spec.url, byId) || byId.get(`f:${spec.url}`);
+      if (!n || !root || this.folding.has(id)) { at.add(id); continue; }
+      this.folding.set(id, { t0: now, from: [n.x ?? 0, n.y ?? 0, n.z ?? 0], to: root, node: n });
+    }
+    if (at.size) this.redrawForce(at);
+    if (!this.folding.size) return;
+    const step = () => {
+      const t = performance.now();
+      const done = new Set<string>();
+      for (const [id, f] of this.folding) {
+        const k = Math.min(1, (t - f.t0) / 250);
+        const e = k * k * (3 - 2 * k);
+        f.node.fx = f.from[0] + ((f.to.x ?? 0) - f.from[0]) * e;
+        f.node.fy = f.from[1] + ((f.to.y ?? 0) - f.from[1]) * e;
+        f.node.fz = f.from[2] + ((f.to.z ?? 0) - f.from[2]) * e;
+        if (k >= 1) done.add(id);
+      }
+      for (const id of done) this.folding.delete(id);
+      if (done.size) this.redrawForce(done);
+      if (this.folding.size) window.requestAnimationFrame(step);
+    };
+    window.requestAnimationFrame(step);
+  }
+
+  /**
+   * The stream's lifecycle, measured: how long each stage took, how many
+   * nodes skipped a stage or ran out of order, and whether projected chunks
+   * sit where the fit put them (in collider units). For checks and the MCP.
+   */
+  lifecycleState(url = ""): any {
+    const q = (xs: number[], p: number) => { if (!xs.length) return null; const s2 = xs.slice().sort((a, b) => a - b); return Math.round(s2[Math.min(s2.length - 1, Math.floor(p * s2.length))]); };
+    const rows = [...this.life.nodes.values()].filter((l) => !url || l.url === url);
+    const saved = rows.filter((l) => l.savedAt);
+    const drawnToSaved = saved.map((l) => l.savedAt! - l.drawnAt);
+    const savedToFolded = saved.filter((l) => l.foldedAt).map((l) => l.foldedAt! - l.savedAt!);
+    const foldedBeforeSaved = rows.filter((l) => l.foldedAt && (!l.savedAt || l.foldedAt < l.savedAt)).length;
+    const savedNotFolded = saved.filter((l) => !l.foldedAt && Date.now() - l.savedAt! > 2000).length;
+    const savedToPlaced: number[] = [];
+    let placedBeforeSaved = 0, alreadyStored = 0;
+    for (const l of saved) {
+      const pl = l.cid ? this.life.placed.get(l.cid) : undefined;
+      if (!pl) continue;
+      // Placed before the node was even DRAWN: content the store held from an
+      // earlier visit, re-drained -- not a stage run out of order.
+      if (pl.at <= l.drawnAt) { alreadyStored++; continue; }
+      if (pl.at < l.savedAt!) placedBeforeSaved++;
+      else savedToPlaced.push(pl.at - l.savedAt!);
+    }
+    // Projected chunks: how far from the fit's position, in colliders.
+    const off: number[] = [];
+    let duplicates = 0;
+    if (this.graph) {
+      const relSize = this.graph.nodeRelSize(), media = this.media();
+      const nodes = this.graph.graphData().nodes as any[];
+      const drawnCids = new Set<string>();
+      for (const n of nodes) {
+        if (n.force || n.level === "page" || (url && n.url !== url) || !Number.isFinite(n.fitX)) continue;
+        drawnCids.add(n.id);
+        const c = drawnRadius(n, relSize, media) * COLLIDER_SAFETY + COLLIDER_MARGIN;
+        off.push(Math.hypot(n.x - n.fitX, n.y - n.fitY, (n.z || 0) - (n.fitZ || 0)) / Math.max(c, 1e-6));
+      }
+      // A force node still drawn beside the stored node it became.
+      for (const n of nodes) {
+        if (!n.force) continue;
+        const spec = this.forceSpecs.get(n.id);
+        if (spec && spec.cid && drawnCids.has(spec.cid)) duplicates++;
+      }
+    }
+    const offQ = (p: number) => { if (!off.length) return null; const s2 = off.slice().sort((a, b) => a - b); return Math.round(s2[Math.min(s2.length - 1, Math.floor(p * s2.length))] * 100) / 100; };
+    return {
+      drawn: rows.length, saved: saved.length, folded: rows.filter((l) => l.foldedAt).length,
+      drawn_to_saved_ms: { p50: q(drawnToSaved, 0.5), p95: q(drawnToSaved, 0.95) },
+      saved_to_folded_ms: { n: savedToFolded.length, p50: q(savedToFolded, 0.5), p95: q(savedToFolded, 0.95) },
+      saved_to_placed_ms: { n: savedToPlaced.length, p50: q(savedToPlaced, 0.5), p95: q(savedToPlaced, 0.95) },
+      out_of_order: { folded_before_saved: foldedBeforeSaved, saved_not_folded: savedNotFolded, placed_before_saved: placedBeforeSaved },
+      already_stored: alreadyStored,
+      projected_drawn: off.length, off_fit_colliders: { p50: offQ(0.5), p90: offQ(0.9), max: offQ(1) },
+      force_beside_stored: duplicates,
+      folded_unopened: this.life.folded_unopened, fit_moves: this.life.moved,
+    };
   }
 
   /**
@@ -1008,6 +1306,7 @@ export class GraphView extends ItemView {
         t.z = (s.z ?? 0) + (Math.random() - 0.5) * 6;
       }
     }
+    this.holdAll(nodes, new Set());
     this.graph.graphData({ nodes, links });
     if (this.layoutMode === "projector") this.treeSpring();
     this.graph.d3ReheatSimulation?.();
@@ -1041,8 +1340,13 @@ export class GraphView extends ItemView {
       nodes: data.nodes.filter((n: any) => !gone.has(n.id)),
       links: data.links.filter((l: any) => !gone.has(end(l.source)) && !gone.has(end(l.target))),
     };
-    // Its neighbours, moved aside while it was open, go home (G-94).
-    this.makeRoom(next, this.graph.nodeRelSize());
+    this.collideSoon();
+    const pageNode = next.nodes.find((n: any) => !n.force && n.level === "page" && n.url === url);
+    if (pageNode && pageNode.fullVal !== undefined && pageNode.val !== pageNode.fullVal) {
+      const was = pageNode.val;
+      pageNode.val = pageNode.fullVal;
+      this.rescaleObject(pageNode, was);
+    }
     this.graph.graphData(next);
     this.graph.d3ReheatSimulation?.();
     for (const [id, spec] of [...this.forceSpecs]) if (spec.url === url) this.forceSpecs.delete(id);
@@ -1093,7 +1397,7 @@ export class GraphView extends ItemView {
     this.projSeq = 0;
     this.reopen.clear();
     this.forceStats = { drains: 0, added: 0, removed: 0, reparented: 0, ms: [], toScene: [],
-                        sized: [] };
+                        jitter: [], sized: [] };
     this.forceSpecs.clear();
     this.layoutMode = "force";            // so setMode records the change
     this.setMode("empty", why);
@@ -1166,7 +1470,12 @@ export class GraphView extends ItemView {
       for (const [cid, got] of Object.entries<any>(d.chunks || {})) {
         const node = byId.get(cid);
         if (node && got.pos) {
+          // The fit's new coordinates ARE the node's place (stage 7: an
+          // online update or a refit moves projected chunks; `home` carries
+          // them there, collision only spacing them).
           node.fitX = got.pos[0]; node.fitY = got.pos[1]; node.fitZ = got.pos[2] * DEPTH;
+          node.projX = node.fitX; node.projY = node.fitY; node.projZ = node.fitZ;
+          this.life.moved++;
           moved++;
         } else if (!node && got.url && openUrls.has(got.url)) {
           toPlace.push(cid);
@@ -1194,13 +1503,14 @@ export class GraphView extends ItemView {
             hsv: got.hsv } as any);
           built.anchorPos = [built.fitX, built.fitY, built.fitZ];
           built.room = Math.max(6, Math.cbrt(Math.max(built.val ?? 1, 1e-9)) * 2.5);
-          data.nodes.push(built);
+          // A new array, never pushed in place (D-38; see `addEdges`).
+          data.nodes = data.nodes.concat([built]);
           structural = true;
         }
         pages++;
       }
       if (structural) this.graph.graphData(data);
-      if (moved || gone || pages || structural) this.graph.d3ReheatSimulation();
+      if (moved || gone || pages || structural) { this.collideSoon(); this.graph.d3ReheatSimulation(); }
       let added = 0;
       if (toPlace.length) {
         const trace = profiler().begin("stream", [...openUrls][0] || "");
@@ -1417,6 +1727,7 @@ export class GraphView extends ItemView {
     const have = new Set(data.links.map(
       (l: any) => `${l.source?.id ?? l.source} ${l.target?.id ?? l.target}`));
     let added = 0;
+    const fresh: any[] = [];
     for (const edge of edges) {
       const source = byId.get(edge.source);
       const target = byId.get(edge.target);
@@ -1424,9 +1735,17 @@ export class GraphView extends ItemView {
       const key = `${edge.source} ${edge.target}`;
       if (have.has(key)) continue;
       have.add(key);
-      data.links.push({ source, target });
+      fresh.push({ source, target });
       added++;
     }
+    // NEVER in place (D-38): the simulation iterates this very array, and its
+    // forces' per-item arrays (link strengths and distances, collision radii)
+    // are rebuilt only at the graph's deferred digest -- a frame ticked in
+    // between read the grown array with the old weights, `l * undefined`
+    // wrote NaN velocities, and collision's octree looped until the renderer
+    // died of out-of-memory (paused in `add3 <- addAll3 <- octree <- collide`,
+    // the NaN first written by the link force). A NEW array; the digest adopts it.
+    if (added) data.links = data.links.concat(fresh);
     if (added) this.treeOnly(data);
     return added;
   }
@@ -1512,11 +1831,14 @@ export class GraphView extends ItemView {
     if (hub) hub.unfolded = true;
     const have = new Set(fresh.nodes.map((n: any) => n.id));
     const drawn: string[] = [];
+    const built: any[] = [];
     for (const node of nodes) {
       if (!node || !node.cid || have.has(node.cid)) continue;
-      fresh.nodes.push(this.nodeFrom(node));
+      built.push(this.nodeFrom(node));
       drawn.push(node.cid);
     }
+    // A new array, never pushed in place (D-38; see `addEdges`).
+    if (built.length) fresh.nodes = fresh.nodes.concat(built);
     const star = hub
       ? drawn.map((cid) => ({ source: pageId, target: cid }))
       : [];
@@ -1704,259 +2026,95 @@ export class GraphView extends ItemView {
   /**
    * An open page's chunk nodes sized to FIT its neighbourhood (2026-09-27:
    * "a lot of it is way too far from the original set of nodes"). The
-   * projector draws a page's chunks within 0.4x the distance to the nearest
+   * projector draws a page's chunks within 0.45x the distance to the nearest
    * other page; drawn at full size, 88 chunks and their colliders could not
    * fit there, the collision pushed them out to 1.1-1.8x that distance, and
    * each page became a ball engulfing its neighbours. n spheres of radius r
    * pack a sphere of radius R when r ~ R * (0.6 / n)^(1/3), and the collider
    * is the drawn radius x COLLIDER_SAFETY plus its margin.
+   *
+   * **Sizes only.** Where a projected chunk is drawn is its UMAP position
+   * (Addendum IX, stage 5: "a projection REPLACES the force position; a light
+   * force pass afterwards only keeps collision spacing"). A geometric layout
+   * here -- a sunflower disc, then a radial tree, then a force-seeded tree --
+   * replaced the fit for every open page, and "I'm honestly unsure if the UMAP
+   * layouts are being followed at all" (2026-09-28) was right: they were not.
    */
   private fitChunkSizes(data: any): void {
     if (!this.graph || this.plantBigChunks) return;
-    const relSize = this.graph.nodeRelSize();
+    this.collideSoon();
+    const relSize = this.graph.nodeRelSize(), media = this.media();
+    const pages = data.nodes.filter((n: any) => !n.force && n.level === "page" && Number.isFinite(n.fitX ?? n.x));
+    // A page an earlier open page had moved aside goes back to its fit.
+    for (const q of pages) {
+      if (q.homeFit) {
+        [q.fitX, q.fitY, q.fitZ] = q.homeFit;
+        if (q.homeAnchor) q.anchorPos = q.homeAnchor;
+        q.homeFit = undefined; q.homeAnchor = undefined;
+      }
+    }
+    const at = (n: any) => [n.fitX ?? n.x, n.fitY ?? n.y, n.fitZ ?? n.z ?? 0];
     const byUrl = new Map<string, any[]>();
     for (const n of data.nodes) {
       if (n.force || n.level === "page" || !n.url) continue;
       (byUrl.get(n.url) || byUrl.set(n.url, []).get(n.url)!).push(n);
     }
-    // Every open page drawn as a flat disc FACING THE CAMERA (2026-09-27,
-    // G-94). In a 3D ball, 45 chunk discs covered each other on screen
-    // however small they were drawn (50 of 57 overlapping, 27 buried): seen
-    // from one side a ball is a stack. On a disc in the view plane nothing
-    // is behind anything. Each chunk keeps the DIRECTION its UMAP position
-    // gave it (its angle around the page), and takes its radius from its
-    // rank by UMAP distance -- a sunflower, r ~ sqrt(rank) -- so the disc
-    // is evenly filled. The true coordinates stay in the store (`raw_pos`).
-    const floor = 0.35 * relSize;
-    const collider = floor * COLLIDER_SAFETY + COLLIDER_MARGIN;
-    const cam = this.graph.camera();
-    const e = cam.matrixWorld.elements;
-    const right = [e[0], e[1], e[2]], up = [e[4], e[5], e[6]];
-    const pages = data.nodes.filter((n: any) => !n.force && n.level === "page");
     for (const [url, chunks] of byUrl) {
       const page = pages.find((p: any) => p.url === url);
-      if (!page || !Number.isFinite(page.fitX)) continue;
-      page.x = page.fitX; page.y = page.fitY; page.z = page.fitZ ?? 0;
-      const P = [page.fitX, page.fitY, page.fitZ ?? 0];
-      const polar = chunks.map((c: any) => {
-        const o = c.projX !== undefined ? [c.projX - P[0], c.projY - P[1], c.projZ - P[2]]
-          : [(c.fitX ?? c.x) - P[0], (c.fitY ?? c.y) - P[1], (c.fitZ ?? c.z ?? 0) - P[2]];
-        if (c.projX === undefined) { c.projX = P[0] + o[0]; c.projY = P[1] + o[1]; c.projZ = P[2] + o[2]; }
-        const x = o[0] * right[0] + o[1] * right[1] + o[2] * right[2];
-        const y = o[0] * up[0] + o[1] * up[1] + o[2] * up[2];
-        return { c, angle: Math.atan2(y, x), dist: Math.hypot(o[0], o[1], o[2]) };
-      });
-      // Spaced by the largest thing actually DRAWN: a chunk with a picture is
-      // a panel ~1.75x its sphere, and spacing by the sphere buried 11 of the
-      // page's chunks behind its own picture panels (2026-09-27).
-      const media = this.media();
-      const drawnMax = Math.max(floor, ...chunks.map((c: any) =>
-        drawnRadius({ ...c, val: Math.pow(floor / relSize, 3) }, relSize, media)));
-      const step = (drawnMax * COLLIDER_SAFETY + COLLIDER_MARGIN) * 1.25;
-      page.discStep = step;
-      // The first ring outside the page node itself (it sits at the centre).
-      const inner = drawnRadius(page, relSize, media) * COLLIDER_SAFETY + COLLIDER_MARGIN;
-      const place = (c: any, r: number, a: number) => {
-        c.onDisc = true;
-        const ca = Math.cos(a), sa = Math.sin(a);
-        const pos = [P[0] + r * (ca * right[0] + sa * up[0]),
-                     P[1] + r * (ca * right[1] + sa * up[1]),
-                     P[2] + r * (ca * right[2] + sa * up[2])];
-        c.fitX = pos[0]; c.fitY = pos[1]; c.fitZ = pos[2];
-        // PLACED there, not attracted: the home force is alpha-scaled and the
-        // simulation had cooled, so disc chunks never arrived (G-94 read 2.0x).
-        c.x = pos[0]; c.y = pos[1]; c.z = pos[2];
-        c.vx = 0; c.vy = 0; c.vz = 0;
-        // Its territory is where it was placed: `contain` held each chunk to
-        // a region around its PROJECTED anchor and folded the disc into one
-        // point (46 chunks at one distance, 41 buried; 2026-09-27).
-        c.anchorPos = [pos[0], pos[1], pos[2]];
-        if (c.fullVal === undefined) c.fullVal = c.val ?? 1;
-        c.val = Math.pow(floor / relSize, 3);
-      };
-      const angDist = (x: number, y: number) =>
-        Math.abs(((x - y) % (2 * Math.PI) + 3 * Math.PI) % (2 * Math.PI) - Math.PI);
-      if (this.plantSunflower) {
-        // Planted by G-94's check: the rank sunflower, blind to the tree.
-        polar.sort((p, q) => p.dist - q.dist);
-        const GOLDEN = Math.PI * (3 - Math.sqrt(5));
-        const slots = polar.map((_it, k) => ({ r: inner + step * Math.sqrt(k + 1), a: k * GOLDEN, used: false }));
-        polar.forEach((it, rank) => {
-          let best = -1;
-          for (let k = rank; k < Math.min(slots.length, rank + 8); k++) {
-            if (slots[k].used) continue;
-            if (best < 0 || angDist(slots[k].a, it.angle) < angDist(slots[best].a, it.angle)) best = k;
-          }
-          if (best < 0) best = slots.findIndex((x) => !x.used);
-          slots[best].used = true;
-          place(it.c, slots[best].r, slots[best].a);
-        });
-        page.discR = inner + step * Math.sqrt(polar.length + 1);
-        continue;
+      if (!page) continue;
+      const [px, py, pz] = at(page);
+      let nearest = Infinity;
+      for (const q of pages) {
+        if (q === page) continue;
+        const [qx, qy, qz] = at(q);
+        nearest = Math.min(nearest, Math.hypot(px - qx, py - qy, pz - qz));
       }
-      // A RADIAL TREE on the disc (2026-09-27: "force-directed layouts have
-      // incorrect geometries and constraints"). The rank sunflower gave every
-      // chunk a slot by UMAP distance, blind to its parent, so a hub chunk's
-      // 30 edges crossed the whole disc to wherever its children had landed
-      // and an open page read as a web converging on a point. Now each
-      // subtree owns a WEDGE of the disc -- its leaves' share of the circle,
-      // siblings ordered by their UMAP direction -- internal nodes sit on
-      // inner rings at the middle of their wedge, and leaves on an outer band
-      // staggered over m rings. Wedges do not overlap, so no edge crosses
-      // another subtree's; every neighbour is at least one collider step away.
-      const end = (x: any) => (typeof x === "object" && x ? x.id : x);
-      const angleOf = new Map<string, number>(polar.map((it) => [it.c.id, it.angle]));
-      const members = new Map<string, any>(chunks.map((c: any) => [c.id, c]));
-      const parentOf = new Map<string, string>();
-      for (const l of data.links) {
-        if (l.force) continue;
-        const s = end(l.source), t = end(l.target);
-        if (!members.has(t) || parentOf.has(t)) continue;
-        if (s === page.id || members.has(s)) parentOf.set(t, s);
-      }
-      const kids = new Map<string, any[]>();
+      if (!Number.isFinite(nearest)) continue;
+      const R = 0.45 * nearest;                 // the projector's NEIGHBOURHOOD
+      // A floor, so a crowded page's chunks stay visible: the fixed collider
+      // margin could eat the whole room and leave specks (val ~ 0).
+      const floor = 0.35 * relSize;
+      const room = Math.max(floor, (R * Math.cbrt(0.6 / chunks.length) - COLLIDER_MARGIN) / COLLIDER_SAFETY);
       for (const c of chunks) {
-        // Up to the page without a cycle, or it hangs from the page itself.
-        let x = c.id, ok = false;
-        const seen = new Set<string>([x]);
-        for (;;) {
-          const upId = parentOf.get(x);
-          if (upId === undefined || upId === page.id) { ok = true; break; }
-          if (seen.has(upId) || !members.has(upId)) break;
-          seen.add(upId); x = upId;
-        }
-        const p = ok ? (parentOf.get(c.id) ?? page.id) : page.id;
-        (kids.get(p) || kids.set(p, []).get(p)!).push(c);
+        if (c.fullVal === undefined) c.fullVal = c.val ?? 1;
+        const r = drawnRadius({ ...c, val: c.fullVal }, relSize, media);
+        c.val = r > room ? c.fullVal * Math.pow(room / r, 3) : c.fullVal;
       }
-      // Each subtree's direction: the circular mean of its members' UMAP angles.
-      const dir = new Map<string, number>();
-      const direction = (id: string): [number, number] => {
-        const a = angleOf.get(id);
-        let sx = a === undefined ? 0 : Math.cos(a), sy = a === undefined ? 0 : Math.sin(a);
-        for (const k of kids.get(id) || []) { const [kx, ky] = direction(k.id); sx += kx; sy += ky; }
-        dir.set(id, Math.atan2(sy, sx));
-        return [sx, sy];
-      };
-      direction(page.id);
-      const leaves: any[] = [];
-      const depth = new Map<string, number>();
-      const internal: any[] = [];
-      const walk = (id: string, d: number) => {
-        const ks = (kids.get(id) || []).slice().sort((a, b) => (dir.get(a.id) ?? 0) - (dir.get(b.id) ?? 0));
-        kids.set(id, ks);
-        for (const k of ks) {
-          depth.set(k.id, d);
-          if ((kids.get(k.id) || []).length) { internal.push(k); walk(k.id, d + 1); }
-          else leaves.push(k);
-        }
-      };
-      walk(page.id, 1);
-      const L = Math.max(1, leaves.length);
-      const slice = (2 * Math.PI) / L;
-      // Turn the whole ring so leaves sit nearest their own UMAP directions.
-      let theta0 = 0, bestCost = Infinity;
-      for (let t = 0; t < 72; t++) {
-        const off = (t / 72) * 2 * Math.PI;
-        let cost = 0;
-        leaves.forEach((c, j) => { cost += angDist(off + (j + 0.5) * slice, angleOf.get(c.id) ?? 0); });
-        if (cost < bestCost) { bestCost = cost; theta0 = off; }
+      // The OPEN page's own node, too: drawn at full size its billboard's
+      // collider was larger than the room the fit gives its chunks, and it
+      // shoved every one out to a shell beyond it -- the forum's chunks sat at
+      // 299 from their page where the fit put them at 75, 5 colliders off
+      // (2026-09-28, in the app). Its collider may reach at most to its
+      // nearest chunk's fit position; back to full size when it collapses.
+      const fitD = chunks.map((c: any) => Math.hypot((c.fitX ?? c.x) - px, (c.fitY ?? c.y) - py, (c.fitZ ?? c.z ?? 0) - pz))
+        .filter(Number.isFinite).sort((a: number, b: number) => a - b);
+      if (fitD.length) {
+        if (page.fullVal === undefined) page.fullVal = page.val ?? 1;
+        const reach = Math.max(floor, (fitD[Math.floor(fitD.length * 0.1)] - COLLIDER_MARGIN) / COLLIDER_SAFETY);
+        const rp = drawnRadius({ ...page, val: page.fullVal }, relSize, media);
+        const was = page.val;
+        page.val = rp > reach ? page.fullVal * Math.pow(reach / rp, 3) : page.fullVal;
+        if (was && Math.abs(was - page.val) > 0.05 * page.val) this.rescaleObject(page, was);
       }
-      const at = new Map<string, number>();
-      leaves.forEach((c, j) => at.set(c.id, theta0 + (j + 0.5) * slice));
-      const span = (id: string): [number, number] => {
-        const a = at.get(id);
-        if (a !== undefined && !(kids.get(id) || []).length) return [a, a];
-        let lo = Infinity, hi = -Infinity;
-        for (const k of kids.get(id) || []) { const [l, h] = span(k.id); lo = Math.min(lo, l); hi = Math.max(hi, h); }
-        at.set(id, (lo + hi) / 2);
-        return [lo, hi];
-      };
-      span(page.id);
-      // Inner rings: one per depth, far enough out that neighbours on it are
-      // a step apart (chord), and a step outside the ring before.
-      const chordR = (gap: number) => gap >= Math.PI ? 0 : step / (2 * Math.sin(Math.max(gap, 1e-6) / 2));
-      const maxD = internal.reduce((m, c) => Math.max(m, depth.get(c.id) || 1), 0);
-      const ringR: number[] = [inner];
-      for (let d = 1; d <= maxD; d++) {
-        const angs = internal.filter((c) => depth.get(c.id) === d).map((c) => at.get(c.id)!).sort((a, b) => a - b);
-        let gap = 2 * Math.PI;
-        for (let i = 0; i < angs.length; i++) {
-          const next = i + 1 < angs.length ? angs[i + 1] : angs[0] + 2 * Math.PI;
-          if (angs.length > 1) gap = Math.min(gap, next - angs[i]);
-        }
-        ringR[d] = Math.max(ringR[d - 1] + step, angs.length > 1 ? chordR(gap) : 0);
-      }
-      for (const c of internal) place(c, ringR[depth.get(c.id) || 1], at.get(c.id)!);
-      // The leaf band: m rings, leaf j on ring j mod m, so neighbours on one
-      // ring are m slices apart. m is chosen for the smallest outer radius.
-      const base = ringR[maxD] + step;
-      let m = 1, bandR = Infinity;
-      for (let k = 1; k <= Math.min(12, L); k++) {
-        const r0 = Math.max(base, L > k ? chordR(k * slice) : 0);
-        if (r0 + (k - 1) * step < bandR) { bandR = r0 + (k - 1) * step; m = k; }
-      }
-      const r0 = Math.max(base, L > m ? chordR(m * slice) : 0);
-      leaves.forEach((c, j) => place(c, r0 + (j % m) * step, at.get(c.id)!));
-      page.discR = r0 + (m - 1) * step;
-      page.discTree = { leaves: leaves.length, internal: internal.length, rings: m, depth: maxD };
     }
-    this.makeRoom(data, relSize);
+    // A page with no chunks drawn is closed: its node back to full size.
+    for (const q of pages) {
+      if (byUrl.has(q.url) || q.fullVal === undefined || q.val === q.fullVal) continue;
+      const was = q.val;
+      q.val = q.fullVal;
+      this.rescaleObject(q, was);
+    }
   }
 
   /**
-   * An OPEN page's neighbours move aside (2026-09-27, G-94). Sizing chunks to
-   * their page's room was not enough where pages crowd: the collider the
-   * chunks need to stay visible and apart could not fit in 0.45 x the nearest
-   * page's distance, and the collision pushed them to 0.68-0.97x of it, into
-   * the neighbour's half, with 36 of 64 discs buried. So the room is MADE:
-   * n chunks at the smallest readable size, each with its collider, pack a
-   * ball of radius B = collider * (n / 0.6)^(1/3); every page nearer than
-   * B / 0.45 has its home moved out along its own direction to that distance
-   * while the page is open, and back to the fit's position when it closes.
-   * Display only -- the fit and the store are untouched.
+   * A node's size changed after its object was built: scale THAT object by
+   * the drawn radius's ratio (cbrt of val). Rebuilding every object for one
+   * page re-uploaded every picture's texture (0.4 s of a 13 s profile).
    */
-  private makeRoom(data: any, relSize: number): void {
-    const pages = data.nodes.filter((n: any) => !n.force && n.level === "page");
-    // Back to the fit first; the open pages below push again.
-    for (const q of pages) {
-      if (q.homeFit) {
-        [q.fitX, q.fitY, q.fitZ] = q.homeFit;
-        q.x = q.fitX; q.y = q.fitY; q.z = q.fitZ;
-        if (q.homeAnchor) q.anchorPos = q.homeAnchor;
-        q.homeFit = undefined; q.homeAnchor = undefined;
-      }
-    }
-    const count = new Map<string, number>();
-    for (const n of data.nodes) {
-      if (n.force || n.level === "page" || !n.url) continue;
-      count.set(n.url, (count.get(n.url) || 0) + 1);
-    }
-    const floor = 0.35 * relSize;
-    const collider = floor * COLLIDER_SAFETY + COLLIDER_MARGIN;
-    for (const [url, n] of count) {
-      const p = pages.find((x: any) => x.url === url);
-      if (!p || !Number.isFinite(p.fitX)) continue;
-      // The disc's radius (sunflower of n at the page's step), and room for
-      // it inside half the distance to any other page.
-      const step = p.discStep || collider * 1.25;
-      const inner = drawnRadius(p, relSize, this.media()) * COLLIDER_SAFETY + COLLIDER_MARGIN;
-      const need = ((p.discR ?? (inner + step * Math.sqrt(n))) + step) / 0.45;
-      for (const q of pages) {
-        if (q === p || !Number.isFinite(q.fitX)) continue;
-        const dx = q.fitX - p.fitX, dy = q.fitY - p.fitY, dz = (q.fitZ ?? 0) - (p.fitZ ?? 0);
-        const d = Math.hypot(dx, dy, dz) || 1e-6;
-        if (d >= need) continue;
-        if (!q.homeFit) { q.homeFit = [q.fitX, q.fitY, q.fitZ]; q.homeAnchor = q.anchorPos; }
-        const k = need / d;
-        q.fitX = p.fitX + dx * k; q.fitY = p.fitY + dy * k; q.fitZ = (p.fitZ ?? 0) + dz * k;
-        q.x = q.fitX; q.y = q.fitY; q.z = q.fitZ;          // moved, not attracted
-        q.vx = 0; q.vy = 0; q.vz = 0;
-        // And its TERRITORY with it: `contain` bounds a node to a region
-        // around `anchorPos`, and pulled the moved neighbours back to 41-67
-        // units when they had been moved to 145 (G-94, 2026-09-27).
-        if (q.anchorPos) q.anchorPos = [q.fitX, q.fitY, q.fitZ];
-      }
-    }
+  private rescaleObject(n: any, wasVal: number): void {
+    const obj = n.__threeObj;
+    if (!obj || !(wasVal > 0) || !(n.val > 0)) return;
+    obj.scale.multiplyScalar(Math.cbrt(n.val / wasVal));
   }
 
   /**
@@ -1982,17 +2140,11 @@ export class GraphView extends ItemView {
   /** Planted by G-94's check: chunks drawn at full size, whatever the room. */
   plantBigChunks = false;
 
-  /** Planted by G-94's check: the rank sunflower, blind to the tree. */
-  plantSunflower = false;
   /** The radius a node is DRAWN at, the pane's own number, for checks. */
   drawnRadiusOf(n: any): number {
     return this.graph ? drawnRadius(n, this.graph.nodeRelSize(), this.media()) : 0;
   }
 
-  /** Planted by G-94's check: an orbit leaves the disc where it was laid. */
-  plantNoReface = false;
-  /** Discs turned back to face the camera after an orbit, for checks. */
-  discRefaced = 0;
 
   /** Planted by G-94's check: no collision room for projected nodes. */
   plantNoCollide = false;
@@ -2461,9 +2613,10 @@ export class GraphView extends ItemView {
     for (const incoming of nodes) {
       if (!incoming || !incoming.cid || known.has(incoming.cid)) continue;
       const built = this.nodeFrom(incoming);
-      data.nodes.push(built);
       opened.push(built);
     }
+    // A new array, never pushed in place (D-38; see `addEdges`).
+    if (opened.length) data.nodes = data.nodes.concat(opened);
     // An opened container is still a CONTAINER, and this used to shrink it
     // to the smallest thing it revealed.
     //
@@ -2604,6 +2757,27 @@ export class GraphView extends ItemView {
         .filter((n: any) => !n.force && n.level !== "page").map((n: any) => n.url));
       incoming = incoming.filter((n) => (n.level ?? "chunk") === "page" || open.has(n.url));
     }
+    // A projected chunk is DRAWN only while its page is open -- the page the
+    // reader is on, or one they opened; any other page holds it folded in its
+    // root (Addendum IX: chunks of a collapsed page are not drawn). A late
+    // placement -- vectors trail the store by seconds -- used to reopen a page
+    // the reader had already left.
+    if (this.graph && incoming && incoming.length) {
+      const data0: any = this.graph.graphData();
+      const openNow = new Set<string>(data0.nodes.filter((n: any) => !n.force && n.level !== "page").map((n: any) => n.url));
+      const browsing = this.browsingUrl ? this.browsingUrl() : "";
+      const open = (u: string) => !!u && (openNow.has(u) || this.openedByReader.has(u)
+        || (!!browsing && u.split("#")[0] === browsing.split("#")[0]));
+      const t = Date.now();
+      incoming = incoming.filter((n) => {
+        if ((n.level ?? "chunk") === "page") return true;
+        const shown = open(n.url || "");
+        if (n.cid && !this.life.placed.has(n.cid)) this.life.placed.set(n.cid, { at: t, drawn: shown, url: n.url || "" });
+        if (!shown) this.life.folded_unopened++;
+        return shown;
+      });
+      if (this.life.placed.size > 40000) this.life.placed.clear();
+    }
     const out = { added: 0, moved: 0, edges: 0 };
     const prof = profiler();
     const trace = traceId ? prof.get(traceId) : undefined;
@@ -2614,10 +2788,15 @@ export class GraphView extends ItemView {
     }
     const data: any = this.graph.graphData();
     const byId = new Map<string, any>(data.nodes.map((n: any) => [n.id, n]));
+    const arrived: any[] = [];
 
     for (const node of incoming) {
       if (!node || !node.cid || !node.pos) continue;
       const built = this.nodeFrom(node);
+      if (this.plantScatter && node.level !== "page") {
+        const j = () => (Math.random() - 0.5) * 60;
+        built.x = (built.x ?? 0) + j(); built.y = (built.y ?? 0) + j(); built.z = (built.z ?? 0) + j();
+      }
       const existing = byId.get(node.cid);
       if (existing) {
         // Fields the render reads, and the fit's own coordinates. `x/y/z` is
@@ -2632,11 +2811,13 @@ export class GraphView extends ItemView {
         });
         out.moved++;
       } else {
-        data.nodes.push(built);
+        arrived.push(built);
         byId.set(node.cid, built);
         out.added++;
       }
     }
+    // A new array, never pushed in place (D-38; see `addEdges`).
+    if (arrived.length) data.nodes = data.nodes.concat(arrived);
     if (!out.added && !out.moved) return out;
     // The links array is handed back unchanged. `forceLink` resolved its
     // endpoints in place at boot, so rebuilding it here would hand d3 a list
@@ -2651,6 +2832,19 @@ export class GraphView extends ItemView {
     // 921 nodes, 84 links, and of 793 chunk nodes exactly 16 had an edge of
     // any kind. A patricia trie that is not drawn has no structure for a
     // force to act on, which is most of why the picture reads as a clump.
+    // The projection REPLACES the force position: a force node still drawn
+    // for a chunk now placed (not yet saved-and-folded) goes.
+    if (this.forceSpecs.size) {
+      const placedCids = new Set((incoming || []).map((n) => n.cid));
+      const replaced = new Set<string>();
+      for (const [id, spec] of this.forceSpecs) if (spec.cid && placedCids.has(spec.cid) && !this.plantLateCollapse) replaced.add(id);
+      if (replaced.size) {
+        this.life.replaced_force += replaced.size;
+        for (const id of replaced) this.forceSpecs.delete(id);
+        data.nodes = data.nodes.filter((n: any) => !(n.force && replaced.has(n.id)));
+        data.links = data.links.filter((l: any) => !(l.force && (replaced.has(l.target?.id ?? l.target) || replaced.has(l.source?.id ?? l.source))));
+      }
+    }
     out.edges = this.addEdges(data, edges);
     this.fitChunkSizes(data);
     this.graph.graphData(data);
@@ -3022,7 +3216,7 @@ export class GraphView extends ItemView {
       // cools keeps feeding the camera a cloud that is still moving when it
       // frames. The argument may still be right; this implementation of it
       // is not, and a regression that big is not worth a 0.004 improvement.
-      const k = alpha * 0.55;
+      const k = this.plantScatter ? 0 : alpha * 0.55;
       for (const n of containNodes) {
         if (n.fitX === undefined) continue;
         n.vx = (n.vx ?? 0) + (n.fitX - (n.x ?? 0)) * k;
@@ -3087,7 +3281,7 @@ export class GraphView extends ItemView {
     // next change.
 
 
-    graph.d3Force("collide", forceCollide()
+    const collideForce: any = forceCollide()
       // `G-21`: the drawn radius, plus a quarter of it as clearance. A
       // collider exactly the size of the sphere lets two nodes rest touching,
       // which reads as one shape; the margin makes a gap a reader can see
@@ -3100,14 +3294,44 @@ export class GraphView extends ItemView {
       // already evenly spaced, and colliding with its own large page node at
       // the centre pushed the inner ring out to 1.46x the nearest page's
       // distance (G-94, 2026-09-27).
-      .radius((n: any) => n.force || n.onDisc || this.plantNoCollide ? 0
-        : drawnRadius(n, relSize, media) * COLLIDER_SAFETY + COLLIDER_MARGIN)
+      .radius((n: any) => {
+        if (n.force || this.plantNoCollide) return 0;
+        const r = drawnRadius(n, relSize, media) * COLLIDER_SAFETY + COLLIDER_MARGIN;
+        // A non-finite or absurd radius makes collision's first pass push by
+        // Infinity and its second pass's octree hang (D-38): refused, recorded.
+        if (Number.isFinite(r) && r >= 0 && r < 1e4) return r;
+        this.nonFiniteCount++;
+        if (this.nonFinite.length < 40) this.nonFinite.push({ at: Date.now(), radius: String(r), id: String(n.id).slice(0, 80),
+          level: n.level, val: String(n.val), fullVal: String(n.fullVal), image: !!(n.image && n.image.src), mode: this.layoutMode });
+        return COLLIDER_MARGIN;
+      })
       // Soft and iterated rather than hard and once. `d3-force-3d` documents
       // collision as "by default a soft constraint with a configurable
       // strength and iteration count" to reduce jitter; a hard shove would
       // trade overlap for nodes visibly vibrating against each other.
       .strength(0.7)
-      .iterations(2));
+      .iterations(2);
+    // **Only while the PROJECTED layout is changing.** Profiled on the reader's
+    // store while the forum streamed (2026-09-28): the 3D loop held Obsidian's
+    // main thread 11.4 s of 13 -- collision 5.0 s of it, every tick, over
+    // ~1,000 nodes -- because each streaming update reheats the simulation and
+    // collision ran through every one. Streaming nodes take no collision room,
+    // and projected nodes already spaced do not need it again: it runs for 3 s
+    // after a placement, a move by the fit, a resize or a collapse.
+    let gatedNodes: any[] = [];
+    const gated: any = (alpha: number) => {
+      // EVERY tick, gate open or not: a non-finite position must never reach
+      // an octree (D-38, below).
+      this.sanitize(gatedNodes);
+      if (this.plantAlwaysCollide || performance.now() < this.collideUntil) collideForce(alpha);
+    };
+    gated.initialize = (...a: any[]) => { gatedNodes = a[0] || []; return collideForce.initialize(...a); };
+    gated.radius = (...a: any[]) => { const r = collideForce.radius(...a); return a.length ? gated : r; };
+    gated.strength = (...a: any[]) => { const r = collideForce.strength(...a); return a.length ? gated : r; };
+    gated.iterations = (...a: any[]) => { const r = collideForce.iterations(...a); return a.length ? gated : r; };
+    this.collideUntil = performance.now() + 3000;
+    graph.d3Force("collide", gated);
+    window.setTimeout(() => this.watchForces(), 0);
 
     // It has to be allowed to run, having been frozen. These are d3's own
     // defaults: the simulation cools over a few hundred ticks and stops.
@@ -3176,18 +3400,6 @@ export class GraphView extends ItemView {
     const trackball = () =>
       graph.controls() as { handleResize?: () => void };
 
-    let refaceTimer = 0;
-    try {
-      (graph.controls() as any).addEventListener?.("end", () => {
-        window.clearTimeout(refaceTimer);
-        refaceTimer = window.setTimeout(() => {
-          const d = graph.graphData() as any;
-          // Re-faced, never re-projected: the same tree, turned to the camera.
-          if (this.plantNoReface) return;
-          if (d.nodes.some((n: any) => n.onDisc)) { this.fitChunkSizes(d); this.discRefaced++; }
-        }, 120);
-      });
-    } catch { /* controls without events */ }
     const fit = () => {
       graph.width(canvas.clientWidth).height(canvas.clientHeight);
       trackball().handleResize?.();

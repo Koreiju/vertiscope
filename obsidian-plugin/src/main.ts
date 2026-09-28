@@ -72,6 +72,16 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     // is how three of them passed while the pane showed a clump.
     installHarness(this.app, () => this.settings.sidecar);
 
+    // When the READER last used THIS app (2026-09-28: "Idle's never going to
+    // finish" -- the machine-wide idle clock counted every keystroke in every
+    // window, so an in-app run waited an hour for a reader typing elsewhere).
+    // Keys, clicks, wheel and pointer in the Obsidian window; pointer moves in
+    // the browser cell arrive as the sensor's pushed hovers (browser.ts).
+    const touch = () => { (window as any).__domvecReaderAt = Date.now(); };
+    for (const ev of ["keydown", "pointerdown", "wheel", "pointermove"] as const) {
+      this.registerDomEvent(window, ev, touch, { capture: true, passive: true } as any);
+    }
+
     this.settings = Object.assign({}, DEFAULTS, await this.loadData());
     this.sidecar = new Sidecar(() => this.settings.sidecar);
     this.links = new VaultLinks(this.app, this.sidecar);

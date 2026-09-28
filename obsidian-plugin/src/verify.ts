@@ -40,7 +40,7 @@ export interface VerifyState {
   /** What the run read -- "fresh run_…, 12/12 pages seeded" or "working". */
   label: string;
   /** A fresh-store run's seeding, one row per page it browsed. */
-  seed?: { url: string; held: boolean; chunks: number | null; s: number }[];
+  seed?: { url: string; held: boolean; chunks: number | null; s: number; left?: string }[];
   /**
    * A fresh-store run's PHASE TRACE (`G-89`): the graph's representation as
    * the store fills, sampled while seeding -- one row whenever the mode, the
@@ -336,8 +336,15 @@ export class Verifier {
         seeding = i + 1;
         const short = urls[i].replace(/^https?:\/\//, "").slice(0, 40);
         this.state.current = `seeding ${i + 1}/${urls.length} · ${short}`;
-        this.state.seed!.push(await this.seedOne(urls[i], testUrl));
+        const got: any = await this.seedOne(urls[i], testUrl);
+        this.state.seed!.push(got);
+        if (got.left) {
+          this.state.stoppedBecause = `the browser left ${urls[i]} for ${got.left} while it was being seeded `
+            + `-- a reader navigating the shared cell; the run stops rather than fight them`;
+          break;
+        }
       }
+      if (this.state.stoppedBecause) throw new Error(this.state.stoppedBecause);
       this.state.current = "waiting for the projector to fit the seeded store";
       await this.waitFitted(testUrl, 300000);
       // The pane reaches the fit on its own (its load retries); give it the
@@ -390,7 +397,14 @@ export class Verifier {
       // WORKING sidecar never received, and scanning there was lost until a
       // reload (2026-09-27: "Total scan feature loss" on the planted arm's
       // DuckDuckGo page, which was also left on screen).
-      this.backToReader(readerPage);
+      // ... unless the READER took the cell somewhere during the run: then it
+      // stays on their page, reloaded for a fresh sensor, not dragged back.
+      let back = readerPage;
+      if (/a reader navigating/.test(this.state.stoppedBecause)) {
+        try { back = (this.app.workspace.getLeavesOfType("domvec-browser-view")[0]?.view as any)?.webview?.getURL() || readerPage; }
+        catch { /* the cell is gone */ }
+      }
+      this.backToReader(back);
       try { await fixtures?.close(); } catch { /* already closed */ }
       await this.stopSidecar(child);
       let stopped = false;
@@ -564,8 +578,22 @@ export class Verifier {
     let held = false;
     let chunks: number | null = null;
     const same = (u: string) => u.replace(/\/+$/, "") === url.replace(/\/+$/, "");
+    // Where the cell actually IS (2026-09-28: a run sat 34 min on "seeding
+    // 8/13 · Radix_tree" while the cell showed discourse's /top, the test
+    // store busy storing a page nobody seeded). The cell is shared with the
+    // reader: not there yet, it is sent once more; there and then gone to
+    // another page, someone navigated it, and the run stops rather than
+    // fight them -- or seed from a page that is not the seed.
+    const doc = (u: string) => String(u || "").split("#")[0].replace(/\/+$/, "");
+    let landed = false, resent = false;
     for (let i = 0; i < 60; i++) {
       await sleep(2000);
+      let here = "";
+      try { here = b.webview?.getURL() || ""; } catch { /* not attached */ }
+      if (doc(here) === doc(url)) landed = true;
+      else if (landed && /^https?:/.test(here)) {
+        return { url, held: false, chunks, s: Math.round((Date.now() - t0) / 1000), left: here };
+      } else if (!landed && !resent && i >= 5) { resent = true; b.go(url); }
       const pages = await this.ask(sidecar, "/pages");
       held = !!pages && (pages.urls || []).some(same);
       const health = await this.ask(sidecar, "/health");

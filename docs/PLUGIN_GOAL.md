@@ -1884,6 +1884,165 @@ its chunks rather than clump them on a ring, an open page is a simple tree (no
 edges from other nodes into its chunks, no hub that is not drawn), and nothing
 is flung outside its page's room.*
 
+> Layouts still collapsing to something likely non force directed. This is a
+> flat circle which surprises me
+
+(With a screenshot: the Wikipedia page open, its favicon at the centre, its
+chunks as one even ring of dots around it, math-formula pictures scattered
+along the ring, and long straight edges from two hubs near the centre -- one
+fanning to most of the ring, including chunks on its far side.)
+
+*Read as: the geometric placement that replaced the sunflower (a radial tree
+on the disc, every node pinned to its slot, no collision, no forces) is not
+what was asked for. An open page is laid out BY FORCES -- links along the
+tree, collision by the integer collider, gentle charge, held in the page's
+room -- as the streaming nodes already are; a geometric layout may seed it,
+never replace it. And the edges drawn must be the tree that was laid out.*
+
+> Ring layouts still showing instead of force directed
+
+(With a screenshot: the Julia forum's /latest open in the browser cell, and in
+the 3D pane its chunks as a dense ring of dots around an empty centre.)
+
+> Don't know why live diff streams in the 3D graph editor keep re-facing the
+> growing force-directed form of tree nodes where the structure is always
+> facing the camera and adjusting its orientation; this is an unneeded
+> addition that needs to be removed without breaking the functionality of
+> what is force-directed
+
+*Read as: (1) a flat star (229 rows under one page) must not become a ring --
+the forces fill a disc or ball. (2) Nothing in the layout follows the camera:
+not the seeding of streamed nodes (laid in the camera's plane) and not an
+orbit (the tree turned to face it). The tree is seeded in 3D from its own
+structure and directions and laid out by the forces alone; the reader's
+camera moves around it.*
+
+> I'm honestly unsure if the UMAP layouts are being followed at all either,
+> along with force-directed layouts. The immediate streaming of diffs *does*
+> work, but I had detailed quite a few steps for 3D layouts depending on where
+> each diff node was in the processing pipeline. I've made a few updates as
+> well. Please chase this processing sequence down and fix what discrepancies
+> between how the app currently behaves and my described features and
+> processing (folding in when the diffed nodes are saved to the DB, changing
+> to UMAP coordinates after a re-fit and `update()` style transform
+> incrementally over the new nodes. Depending on GPU runtimes, perhaps update
+> with the full set of chunks, or just the centroided pages, or the former for
+> few pages and the latter for tens to hundreds.
+
+*Read as: every diff node's 3D position follows WHERE IT IS in the pipeline,
+and that has to be traced and shown stage by stage, not assumed: drained ->
+force-directed (translucent) -> saved to the store -> folded into its page ->
+vectorized -> placed by the fit's `update()`-style transform (incremental,
+new nodes only) -> moved to fresh UMAP coordinates after a refit. The online
+update's scope is chosen by measured GPU cost: every chunk while pages are
+few, page centroids once there are tens to hundreds.*
+
+> I'll also raise my suspicions here about deduplication and duplicate nodes
+> in the 3D graph view, whether this exists or not.
+
+*Read as: measure it, both ways -- the same chunk drawn twice in the 3D view
+(a force node beside the stored node it became; the same content under two
+cids; the same cid under two ids), and the same chunk stored or embedded
+twice -- and state what exists, with a planted duplicate that the measure
+must catch.*
+
+> Idle's never going to finish. Been at it for an hour
+
+> I think your pipeline checks are breaking down now
+
+> Force-directed scans in rapid fire on the julia page are fast and
+> responsive, but the force directed layout in 3D is way too chaotic between
+> scan updates
+
+> I'm also surprised that the database ingests leave out so many diffed chunks
+> for *so long*
+
+*Read as: (1) gate runs on the reader's use of the APP, not the machine. (2)
+The streaming tree stays CALM between updates: what is drawn holds still, only
+the newcomers settle, and they start where they belong -- no full reheat per
+drain. (3) A diff reaches the store in about one capture's time however fast
+the page drains: queued drains of one page ride in one capture, and the
+backlog is measured.*
+
+> Alrighty. Fresh new computer reboot. Can you please bring everything back up?
+
+> Obsidian's froze up after scrolling over julia panels
+
+> Also might be worth running targeted batches of tests on the
+> plugin-in-the-loop with obsidian open for various things and entries in our
+> current collection of specs and architecture notes throughout the project
+> history. I've also attached a more recent snapshot of the search results and
+> I've noticed some hidden deduplication catches that I think may have been
+> covered in our original copy of @domvec/reference/dom_deep_serializer.py.
+> Please do recommend an additional set of focused feature-wise module tests
+> that don't trade memory and context size for completeness and coverage.
+> Fuller detail and more nested directories are favored on requirement lofting
+> and design notes over the current set of designs. This is a formal model of
+> the software architecture governed by the most up-to-date smooth integral
+> over the full design history. It is separate from the software itself but
+> informs the design to track updates on requirements and dependency changes
+> for careful localization on feature degradations, for example. We are also
+> concerned with filling out the rest of our current software with the
+> remainder of the pending requirements and features that have yet to be
+> formalized as a proper software model and built in to our current plugin,
+> again, tested with plugin-in-the-loop. I've also attached another very
+> zoomed in photo of a potential force-directed or interpretation form of
+> degradation on the 3D layout. This layout is likely a lot simpler than what
+> is being designed over. Make sure to track it, and make sure that it gets
+> built properly. Please also ensure that we're using GPU and `update()` based
+> batch re-fits on our UMAP models and that these are harnessed into what is
+> observable to yourself, so that we can clearly integrate UMAP
+> transformations with the remainder of the preceding steps in the main
+> scanning pipeline [i.e. vectorization on chunk diff updates, those updates
+> coming from the 3D graph editor, the diff on those updates are streamed from
+> the recursive chunking algorithm that produces overlays on the electron
+> browser, and these highlighted overlays (which need to be in a very much
+> lighter and un-tinted color but keeping some tint and borders still, just
+> fainter on tint/border but a little bit higher luminosity while keeping
+> translucency reasonable), and so on]. Also, we're frozen again after a few
+> scrolls on the julia forums. Not sure where in the pipeline it is, but I
+> would suggest adding a memory profile along with a time profiler if you
+> haven't already. Please ensure that you're centralizing everything to this
+> main pipeline that we keep running into (that includes rendering as deeper
+> inlaid parts of the processing now, each with different time constraints)
+> with the plugin harness that is used for the *full* pipeline.
+
+(With two screenshots. (1) The browser cell's corpus search for
+"consultancy" on the Julia forum's /latest: results 1 and 3 are the same
+topic row -- "Looking for job or consultancy / Jobs / ufechner7's profile" --
+at 77 and 118 tokens, result 2 another grouping around the same row. (2) The
+3D pane zoomed on the forum's page: a star of straight edges from one centre
+to ~200 chunks, balls and small avatar billboards in a dense ball that
+overlaps neighbouring pages' icons.)
+
+> Frozen again
+
+> I'd suggest adding a simple rapid scroll and hover feature while listening
+> and watching for this site specifically (time-memory-profile dentistry)
+
+> I'd also like you to include the updates on the 3D graph viewer as well,
+> ensure that the diff updates are sent from the browser/electron scanner and
+> received on the other end within the same diff update latency and
+> proportion in rendering. I think there might be some blockage on the 3D side
+> where we stop seeing any updates from the scanner side at all.
+
+*Read as: (1) D-38 is a renderer OUT OF MEMORY (Chromium: "Renderer process
+oom") -- profile memory as well as time, in the one pipeline harness, with a
+rapid scroll-and-hover stress gesture on the site where it happens. (2) The
+store keeps near-duplicates of one topic row under different groupings and
+addresses; the reference serializer pruned identical SUBTREES by a Merkle
+signature wherever they sat -- recover that. (3) A formal, nested
+requirements/design model, separate from the code, integrating the whole
+design history, localizing degradations. (4) Focused feature-wise module
+tests, cheap in memory and context. (5) The rest of the pending requirements
+built, plugin-in-the-loop. (6) The star-shaped layout is a degradation:
+tracked and built properly. (7) GPU `update()` batch refits, observable,
+joined to the pipeline's earlier stages. (8) Overlays: much lighter,
+near-untinted, fainter tint and border, a little brighter, still translucent.
+(9) Everything -- rendering included, each stage with its own time bound --
+centralized in the full-pipeline harness. (10) Every diff the scanner sends
+reaches the 3D view within the same latency, in the same proportion.*
+
 ---
 
 

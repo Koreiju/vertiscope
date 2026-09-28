@@ -169,6 +169,40 @@ interface CaptureJob {
   title?: string;
   settle?: boolean;
   done?: () => void;
+  /** When it was queued (performance.now), for the backlog it waited in. */
+  queuedAt?: number;
+  /** Traces of the drains merged into this one capture. */
+  merged?: any[];
+}
+
+/**
+ * Consecutive drains of one page as ONE capture (2026-09-28: "I'm also
+ * surprised that the database ingests leave out so many diffed chunks for
+ * *so long*"). Captures ran one per drain, one at a time -- 0.9 s p50 on a
+ * small store, 5-6 s on the reader's -- while a scroll drains several times a
+ * second, so the queue grew for as long as the reader scrolled and a diff
+ * waited behind every drain before it. A sensor payload is incremental, so
+ * drains merge in order: the dictionary, shapes and moves concatenated (the
+ * last `stats.dictSize` is the running total, which is what the sidecar's
+ * restart check compares); each chunk at its LATEST emission; a chunk emitted
+ * and then removed dropped; the host's own fields (boxes, pictures) left out.
+ */
+export function mergePayloads(ps: any[]): any {
+  if (ps.length === 1) return ps[0];
+  const last = ps[ps.length - 1];
+  const out: any = { ...last, dict: [], shapes: [], moves: [], removed: [], chunks: [] };
+  const byId = new Map<string, any>();
+  for (const p of ps) {
+    for (const d of p.dict || []) out.dict.push(d);
+    for (const x of p.shapes || []) out.shapes.push(x);
+    for (const m of p.moves || []) out.moves.push(m);
+    for (const r of p.removed || []) out.removed.push(r);
+    for (const c of p.chunks || []) { byId.delete(String(c.id)); byId.set(String(c.id), c); }
+  }
+  const removed = new Set(out.removed.map(String));
+  out.chunks = [...byId.values()].filter((c) => !removed.has(String(c.id)));
+  delete out.boxes; delete out.pictures; delete out.inpage;
+  return out;
 }
 
 export class BrowserView extends ItemView {
@@ -362,6 +396,9 @@ export class BrowserView extends ItemView {
       } else if (body.startsWith("hover ")) {
         // Planted by D-40's check: the old path, hover found by the poll.
         if (this.plant.has("poll-hover")) return;
+        // The reader's pointer moving over the page is the reader using the app
+        // (unless a check is running: its synthetic moves are not the reader).
+        if (!(window as any).__domvec?.verify?.state?.()?.running) (window as any).__domvecReaderAt = Date.now();
         this.pipebox?.pushedHover(body.slice(6), this.session || "");
       }
     });
@@ -1582,7 +1619,7 @@ export class BrowserView extends ItemView {
     // `draining` across the whole round trip, and a new page's first
     // capture (the whole page, 5-7 s to store) froze the overlay and the
     // 3D stream for exactly that long after every navigation.
-    this.captureQueue.push({ url, payload, trace, drainIds,
+    this.captureQueue.push({ url, payload, trace, drainIds, queuedAt: performance.now(),
                              title });
     void this.pumpCaptures();
     // Planted by D-35's check: the old behaviour, the drain loop held
@@ -1593,6 +1630,9 @@ export class BrowserView extends ItemView {
       }
     }
   }
+
+  /** Drains that rode along in another drain's capture (merged ingest). */
+  mergedCaptures = 0;
 
   /** Captures waiting to be sent, in drain order per url. */
   private captureQueue: CaptureJob[] = [];
@@ -1615,7 +1655,25 @@ export class BrowserView extends ItemView {
       while (this.captureQueue.length) {
         let k = this.captureQueue.findIndex((c) => c.url === this.session);
         if (k < 0) k = 0;
-        const job = this.captureQueue.splice(k, 1)[0];
+        let job = this.captureQueue.splice(k, 1)[0];
+        // Every later drain of the same page queued meanwhile rides along --
+        // up to a settle of that page, which stays a barrier.
+        if (!job.settle && !this.plant.has("serial-ingest")) {
+          const ride: CaptureJob[] = [];
+          for (let i = k; i < this.captureQueue.length && ride.length < 40; ) {
+            const c = this.captureQueue[i];
+            if (c.url !== job.url) { i++; continue; }
+            if (c.settle) break;
+            ride.push(this.captureQueue.splice(i, 1)[0]);
+          }
+          if (ride.length) {
+            const all = [job, ...ride];
+            job = { ...job, payload: mergePayloads(all.map((j) => j.payload)),
+                    drainIds: all.flatMap((j) => j.drainIds || []),
+                    merged: ride.map((j) => j.trace).filter(Boolean) };
+            this.mergedCaptures += ride.length;
+          }
+        }
         if (job.settle) {
           try { await this.sidecar.capture(job.url, { settle: true }); } catch { /* reported by the next */ }
           job.done && job.done();
@@ -1643,6 +1701,9 @@ export class BrowserView extends ItemView {
   private async captureOne(job: CaptureJob): Promise<void> {
     const { url, payload, trace, drainIds } = job;
     const prof = profiler();
+    // How long this drain's diff waited for the store to take it.
+    if (job.queuedAt) prof.stage(trace, "capture_queue_wait", performance.now() - job.queuedAt);
+    for (const t of job.merged || []) prof.fact(t, "merged_into", trace?.id || "");
     const wv = { getTitle: () => job.title || "" };
 
       // One round trip: fold, store, and place, because per drain they are

@@ -282,6 +282,26 @@ VERDICTS: Dict[int, Tuple[str, str, str]] = {
     154: ("LIVE", "The lag was on the Julia forum (discourse.julialang.org/latest): D-40 is judged there.", "D-40"),
     155: ("LIVE", "An open page's layout keeps its geometry: no overlaps (the page's billboard included), a spread disc, a "
           "simple planar tree, nothing flung out -- and still after an orbit.", "G-94, D-41"),
+    156: ("LIVE", "An open page is laid out BY FORCES (tree springs, integer collider, page room), not a pinned geometry; "
+          "a geometric layout may seed it, never replace it; the edges drawn are the tree laid out.", "G-94, D-41"),
+    157: ("LIVE", "A flat star (many chunks under one page) must not rest as a ring: the forces fill a disc or ball.", "G-94, D-41"),
+    158: ("LIVE", "Nothing in the 3D layout follows the camera -- no re-facing on orbit, no seeding in the camera's plane -- "
+          "and what is force-directed keeps working.", "G-94, D-41"),
+    159: ("LIVE", "Trace the stream stage by stage and make the app match it: fold on save, UMAP positions for projected "
+          "chunks, update()-style incremental transforms for new nodes, refit re-projects; the update's scope (every chunk "
+          "vs page centroids) chosen by measured GPU cost.", "G-92, G-96, G-97, G-106"),
+    160: ("NOTE", "An incomplete message (\"I\"); nothing to act on.", ""),
+    161: ("LIVE", "Measure duplicate nodes in the 3D view and duplicate chunks in the store, both ways, with a planted duplicate.", "G-98"),
+    162: ("PROCESS", "Gate in-app runs on the reader's use of the APP, not machine-wide idle.", ''),
+    163: ("LIVE", 'The pipeline checks must not break down mid-run (a run stuck seeding, fighting the reader).', 'G-75, G-87'),
+    164: ("LIVE", 'The streaming force tree stays calm between rapid-fire updates.', 'G-93'),
+    165: ("LIVE", "Diffs reach the store in about one capture's time however fast the page drains.", 'D-42'),
+    166: ("PROCESS", 'Bring the whole stack back up after a reboot (sidecar, Obsidian with flags, plugin).', ''),
+    167: ("LIVE", 'Obsidian must not freeze while scrolling the Julia forum (D-38: renderer OOM).', 'D-38'),
+    168: ("LIVE", 'Formal nested requirements/design model over the design history; focused module tests; the rest of the pending requirements built; Merkle-subtree dedup as in the reference serializer; the star layout tracked; GPU update() refits observable; lighter overlays; one full-pipeline harness with time AND memory profiles, rendering included.', 'D-38, D-41, G-98, G-106'),
+    169: ("LIVE", 'Obsidian froze again (D-38).', 'D-38'),
+    170: ("PROCESS", 'A rapid scroll-and-hover stress gesture on the site where it happens, with time and memory profiling.', 'D-38'),
+    171: ("LIVE", 'Every scanner diff reaches the 3D view with the same latency and in the same proportion.', 'G-89, G-90, D-40'),
     141: ("LIVE", "The 3D layout AFTER collapse must not be jumbled (measured as seen, on screen); the hard-page "
           "list must be a real, comprehensive in-app suite.", "G-94, G-101"),
 }

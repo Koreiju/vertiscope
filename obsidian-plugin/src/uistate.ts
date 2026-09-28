@@ -106,9 +106,19 @@ function graphState(view: any) {
       small_drain_ms_p95: pct((view.forceStats.sized || []).filter((x: any) => x[1] > 0 && x[1] < 50)
         .map((x: any) => x[0]), 0.95),
       largest_drain: Math.max(0, ...(view.forceStats.sized || []).map((x: any) => x[1])),
+      // Calm between updates: how far the ALREADY-drawn streaming nodes moved
+      // from one update to the next (scene units per node).
+      jitter_p50: pct(view.forceStats.jitter || [], 0.5), jitter_p95: pct(view.forceStats.jitter || [], 0.95),
       nodes: g ? g.graphData().nodes.filter((n: any) => n.force).length : 0,
       multi_parent: g ? multiParent(g.graphData().links) : 0,
     } : null,
+    // Addendum IX's stream, stage by stage: drawn -> saved -> folded into
+    // the root -> placed by the fit; out-of-order counts; projected chunks'
+    // distance from their fit position (G-92, G-97).
+    lifecycle: typeof view?.lifecycleState === "function" ? view.lifecycleState() : null,
+    // D-38: nodes caught with a non-finite / runaway position before an octree.
+    non_finite: view ? { count: view.nonFiniteCount || 0, first: (view.nonFinite || []).slice(0, 5),
+                         by_force: (view.nanBy || []).slice(0, 10) } : null,
   };
   if (!g) return { open: true, fitted: false, ...phase };
 

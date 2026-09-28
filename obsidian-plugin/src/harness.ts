@@ -546,6 +546,8 @@ export function installHarness(app: App, sidecarBase: () => string) {
       state: () => verifier.state,
     },
     ui: () => uiState(app),
+    /** Milliseconds since the reader last used this app (rule g's gate). */
+    reader: { idleMs: () => Date.now() - ((window as any).__domvecReaderAt || 0) },
     /** The pipeline profiler: traces from the page to the pixels. */
     profile: {
       summary: () => profiler().summary(),

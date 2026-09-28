@@ -51,11 +51,14 @@ infinite-scrolling forum looks like from inside the page.</p>
     // The page's own long task, queued behind the render.
     setTimeout(function () { var e = Date.now() + 150; while (Date.now() < e) {} }, 0);
   }
+  // `?every=ms&rounds=n` (D-42 drains it faster than a capture can store).
+  var q = new URLSearchParams(location.search);
+  var every = Number(q.get("every")) || 450, total = Number(q.get("rounds")) || 20;
   var rounds = 0;
   function tick() {
-    if (rounds++ >= 20) return;
+    if (rounds++ >= total) return;
     batch();
-    setTimeout(tick, 450);
+    setTimeout(tick, every);
   }
   // After the first read of the page has settled.
   setTimeout(tick, 2500);
