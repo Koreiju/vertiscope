@@ -116,6 +116,7 @@ function graphState(view: any) {
     // the root -> placed by the fit; out-of-order counts; projected chunks'
     // distance from their fit position (G-92, G-97).
     lifecycle: typeof view?.lifecycleState === "function" ? view.lifecycleState() : null,
+    render: typeof view?.renderStats === "function" ? view.renderStats() : null,
     // D-38: nodes caught with a non-finite / runaway position before an octree.
     non_finite: view ? { count: view.nonFiniteCount || 0, first: (view.nonFinite || []).slice(0, 5),
                          by_force: (view.nanBy || []).slice(0, 10) } : null,

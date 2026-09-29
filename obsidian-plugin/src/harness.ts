@@ -34,6 +34,7 @@ import { Verifier } from "./verify";
 import type { App } from "obsidian";
 import { uiState } from "./uistate";
 import { profiler } from "./profile";
+import { StressRun } from "./stress";
 
 export interface TraceCall {
   /** Milliseconds since the recording started. */
@@ -197,6 +198,8 @@ export function installHarness(app: App, sidecarBase: () => string) {
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
   const leaf = (type: string) => (app.workspace.getLeavesOfType(type)[0] as any);
+  const stress = new StressRun(() => ({ browser: leaf("domvec-browser-view")?.view,
+                                         graph: leaf("domvec-graph-view")?.view }));
 
   /**
    * A leaf that is loaded, laid out, and usable.
@@ -546,6 +549,14 @@ export function installHarness(app: App, sidecarBase: () => string) {
       state: () => verifier.state,
     },
     ui: () => uiState(app),
+    /** Rapid scroll and hover on one page, every pipeline stage read per
+     *  segment: time, memory, the 3D stream, render (`stress.ts`). `start`
+     *  returns at once; poll `state()`. */
+    stress: {
+      start: (o?: any) => stress.start(o || {}),
+      stop: () => stress.stop(),
+      state: () => stress.state(),
+    },
     /** Milliseconds since the reader last used this app (rule g's gate). */
     reader: { idleMs: () => Date.now() - ((window as any).__domvecReaderAt || 0) },
     /** The pipeline profiler: traces from the page to the pixels. */

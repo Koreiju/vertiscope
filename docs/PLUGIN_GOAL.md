@@ -2043,6 +2043,19 @@ near-untinted, fainter tint and border, a little brighter, still translucent.
 centralized in the full-pipeline harness. (10) Every diff the scanner sends
 reaches the 3D view within the same latency, in the same proportion.*
 
+**Ruling, 2026-09-28** (asked: *"What should an open page draw?"* -- the Julia
+forum's /latest drew ~1,000 stored topics as 2,467 nodes and 1,476 textures).
+The user chose:
+
+> Everything stored
+
+-- the option offered with the note "Keep drawing the page's whole history;
+I'd attack the cost with instancing and texture atlases instead." Recorded as
+`.design/Q/001.md`.
+
+*Read as: an open page draws every chunk stored for it; the render budget is
+met by HOW the scene is drawn (instancing, an atlas), never by drawing less.*
+
 ---
 
 

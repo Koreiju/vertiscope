@@ -1848,8 +1848,7 @@ export function makeChecks(env) {
                 nn_p10_in_radii: Math.round((nn[Math.floor(nn.length * 0.1)] / r) * 10) / 10,
                 nn_p50_in_radii: Math.round((nn[Math.floor(nn.length * 0.5)] / r) * 10) / 10,
                 overlapping: nn.filter((d) => d < 2 * r).length,
-                translucent: ns.filter((n) => n.__threeObj && n.__threeObj.material && n.__threeObj.material.transparent
-                                              && n.__threeObj.material.opacity < 0.6).length };
+                translucent: ns.filter((n) => { const a = v.drawnAs(n); return a.translucent && a.alpha < 0.6; }).length };
               if (!best || snap.nodes >= best.nodes) best = snap;
             }
             // How far the already-drawn streaming nodes moved between updates.
@@ -2215,6 +2214,110 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-107",
+      asks: "the 3D view draws every node and edge it holds in a bounded number of draw calls, each at the size the collider reserves, and the pointer still picks each node",
+      async run() {
+        // The check makes its own scale: a fresh store holds ~90 nodes, and
+        // the claim is about the forum, where one open page drew 2,467. It
+        // lands /latest (the page the render cost was measured on) and
+        // scrolls it, so stored and streaming nodes are both in the graph.
+        //
+        // Then three arms on that one graph: the scene batch; the per-node
+        // objects and per-link cylinders it replaced (planted -- must fail
+        // the draw-call bar); and pick proxies the raycaster cannot hit
+        // (planted -- must fail picking). Frame GAPS are reported, never
+        // judged: a background window is throttled to ~1 Hz whatever is
+        // drawn. The render call's own CPU time is what draw calls cost.
+        const got = await evaluate(`(async () => {
+          ${PREP}
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          const target = "https://discourse.julialang.org/latest?g107=" + Date.now();
+          const landed = await land(target, 30000);
+          await sleep(6000);
+          const r0 = b.webview.getBoundingClientRect();
+          for (let i = 0; i < 12; i++) {
+            b.webview.sendInputEvent({ type: "mouseWheel", x: Math.round(r0.width / 2), y: Math.round(r0.height / 2), deltaX: 0, deltaY: -900 });
+            await sleep(700);
+          }
+          await sleep(12000);
+          const g = v.graph, el = g.renderer().domElement;
+          const arm = async (plant) => {
+            v.plantNoPick = plant === "no-pick";
+            v.setPerNode(plant === "per-node");
+            try {
+              await sleep(7000);
+              const stats = v.renderStats();
+              // Instances and nodes read in ONE turn, so neither is a frame
+              // older than the other (the graph grows while the forum streams).
+              const synced = v.batchSync();
+              const d = g.graphData();
+              const finite = d.nodes.filter((n) => Number.isFinite(n.x) && Number.isFinite(n.y)).length;
+              const drawn = synced ? synced.opaque + synced.translucent : null;
+              const streaming = d.nodes.filter((n) => n.force).length;
+              // Demand 4: what is drawn is what collides -- the application's
+              // own drawnRadius against the size the renderer drew.
+              let sized = 0, off = 0;
+              for (const n of d.nodes.filter((n) => !n.force && Number.isFinite(n.x)).slice(0, 800)) {
+                const a = v.drawnAs(n), r = v.drawnRadiusOf(n);
+                const drawnR = a.kind === "picture" ? a.half * Math.SQRT2 : a.half;
+                sized++;
+                if (Math.abs(drawnR - r) > 1e-6 * Math.max(1, r)) off++;
+              }
+              // Demand 3: a pointer over a node names THAT node, through the
+              // graph's own hover path (the tooltip it writes a frame later).
+              const cam = g.camera(), box = el.getBoundingClientRect();
+              const label = g.nodeLabel();
+              const text = (h) => { const e = document.createElement("div"); e.innerHTML = h; return (e.textContent || "").trim(); };
+              const cands = [];
+              for (const n of d.nodes.filter((n) => !n.force && n.__threeObj && Number.isFinite(n.x))) {
+                const V3 = n.__threeObj.position.constructor;
+                const p = new V3(n.x, n.y, n.z || 0).project(cam);
+                if (Math.abs(p.x) > 0.9 || Math.abs(p.y) > 0.9 || p.z > 1) continue;
+                cands.push({ n, sx: box.left + (p.x + 1) / 2 * box.width, sy: box.top + (1 - p.y) / 2 * box.height, z: p.z });
+              }
+              cands.sort((a, c) => a.z - c.z);
+              let asked = 0, hit = 0;
+              const misses = [];
+              for (const c of cands.slice(0, 10)) {
+                asked++;
+                el.dispatchEvent(new PointerEvent("pointermove", { clientX: c.sx, clientY: c.sy, bubbles: true, pointerType: "mouse" }));
+                await sleep(1300);
+                const want = text(typeof label === "function" ? label(c.n) : String(c.n.name || ""));
+                const tips = [...document.querySelectorAll(".float-tooltip-kap, .scene-tooltip, .graph-tooltip")].map((e) => (e.textContent || "").trim());
+                if (want && tips.some((t) => t === want)) hit++;
+                else misses.push({ want: want.slice(0, 50), got: tips.filter(Boolean).map((t) => t.slice(0, 50)) });
+              }
+              el.dispatchEvent(new PointerEvent("pointermove", { clientX: box.left + 2, clientY: box.top + 2, bubbles: true, pointerType: "mouse" }));
+              return { planted: plant || false, stats, nodes: d.nodes.length, finite, streaming, drawn_instances: drawn,
+                       sized, size_off: off, pick: { asked, hit, misses: misses.slice(0, 3) } };
+            } finally {
+              v.plantNoPick = false;
+              v.setPerNode(false);
+            }
+          };
+          const clean = await arm(false);
+          const perNode = await arm("per-node");
+          const noPick = await arm("no-pick");
+          return { landed, url: b.webview.getURL(), clean, per_node: perNode, no_pick: noPick };
+        })()`, { timeout: 300000 });
+        if (!got || got.error) return { pass: false, evidence: got };
+        const { clean, per_node: perNode, no_pick: noPick } = got;
+        const draws = (x) => !!x.stats && x.stats.draw_calls_p50 != null && x.stats.draw_calls_p50 <= 10;
+        const picks = (x) => !!x.pick && x.pick.asked >= 5 && x.pick.hit >= Math.ceil(x.pick.asked * 0.7);
+        // A floor, not a scale claim: what shows the bound is the planted arm
+        // paying at least one call per node on the SAME graph while the batch
+        // pays two. (The 2,467-node figure is the working store's, in L5.)
+        const ok = (x) => x.finite >= 150 && draws(x) && x.drawn_instances === x.finite
+          && x.sized > 0 && x.size_off === 0 && picks(x);
+        const scales = (x) => !!x.stats && x.stats.draw_calls_p50 >= x.finite;
+        return {
+          pass: ok(clean) && !draws(perNode) && scales(perNode) && !picks(noPick)
+            && clean.pick.hit >= perNode.pick.hit - 1,
+          evidence: got,
+        };
+      },
+    },
+    {
       id: "G-81",
       asks: "url-level nodes show their site's icon or a picture, and chunks that hold a picture show one -- loaded, on the node",
       async run() {
@@ -2249,7 +2352,54 @@ export function makeChecks(env) {
         const planted = await arm(true);
         const ok = (x) => x.pages > 0 && x.pages_image_loaded >= Math.ceil(x.pages * 0.8)
           && (x.chunks_with_picture === 0 || x.chunks_picture_loaded >= Math.ceil(x.chunks_with_picture * 0.8));
-        return { pass: ok(clean) && !ok(planted), evidence: { clean, planted } };
+        // The chunk half: a chunk that holds a picture is DRAWN as it, and
+        // opens to the whole chunk. It makes its own state -- a fresh store
+        // draws pages only, so it unfolds pages until a chunk with a picture
+        // is on screen -- and its plant is the renderer ignoring chunk
+        // pictures (the node keeps its image; nothing draws it).
+        const chunkArm = (planted) => evaluate(`(async () => {
+          ${PREP}
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          v.plantNoPicture = ${planted};
+          try {
+            const pics = () => v.graph.graphData().nodes.filter((n) => n.level !== "page" && !n.force && n.image && n.image.src);
+            const pages = v.graph.graphData().nodes.filter((n) => n.level === "page" && !n.force);
+            pages.sort((x, y) => (/books|harbour|catalogue/i.test((y.url || "") + (y.name || "")) ? 1 : 0)
+                               - (/books|harbour|catalogue/i.test((x.url || "") + (x.name || "")) ? 1 : 0));
+            const tried = [];
+            for (const p of pages.slice(0, 6)) {
+              if (pics().length) break;
+              tried.push(p.url);
+              await v.unfoldNode(p);
+              await sleep(4000);
+            }
+            const withPic = pics();
+            if (!withPic.length) return { planted: ${planted}, error: "no chunk node with a picture is drawn", tried };
+            await sleep(4000);             // pictures decode into the atlas
+            const sample = withPic.slice(0, 40);
+            const drawn = sample.filter((n) => v.drawnAs(n).kind === "picture").length;
+            const node = withPic[0];
+            for (const bb of v.billboardState()) v.closeBillboard(bb.id);
+            await v.openBillboard(node);
+            await sleep(3000);
+            const host = [...v.containerEl.querySelectorAll(".domvec-bb")]
+              .map((e) => e.querySelector(".domvec-html-host")).find(Boolean);
+            const root = host && host.shadowRoot;
+            const out = { planted: ${planted}, tried, node: node.id, with_picture: sample.length, drawn_as_picture: drawn,
+                          shadow_elements: root ? root.querySelectorAll("*").length : 0,
+                          shadow_images: root ? root.querySelectorAll("img").length : 0 };
+            v.closeBillboard(node.id);
+            return out;
+          } finally {
+            v.plantNoPicture = false;
+          }
+        })()`, { timeout: 120000 });
+        const chunkClean = await chunkArm(false);
+        const chunkPlanted = await chunkArm(true);
+        const chunkOk = (x) => !x.error && x.with_picture > 0 && x.drawn_as_picture >= Math.ceil(x.with_picture * 0.8)
+          && x.shadow_elements > 1;
+        return { pass: ok(clean) && !ok(planted) && chunkOk(chunkClean) && !chunkOk(chunkPlanted),
+                 evidence: { clean, planted, chunk: chunkClean, chunk_planted: chunkPlanted } };
       },
     },
     {
@@ -4836,36 +4986,6 @@ export function makeChecks(env) {
         return {
           pass: !!got.cid && focus.length > 0 && got.hover_traces > 0,
           evidence: { ...got, focus_calls: focus.length, focus: focus.slice(-3) },
-        };
-      },
-    },
-    {
-      id: "G-81",
-      asks: "a chunk node shows one of its pictures and expands to the whole chunk",
-      async run() {
-        const got = await inPane(`
-          const data = v.graph.graphData();
-          const withPic = data.nodes.filter((n) => n.level === "chunk" && n.image);
-          if (!withPic.length) return { error: "no chunk node with a picture is drawn",
-                                        chunks: data.nodes.filter((n) => n.level === "chunk").length };
-          const node = withPic[0];
-          const obj = node.__threeObj;
-          const sprite = !!obj && (obj.type === "Sprite" || !!(obj.children || []).find((c) => c.type === "Sprite"));
-          for (const b of v.billboardState()) v.closeBillboard(b.id);
-          await v.openBillboard(node);
-          await sleep(3000);
-          const host = [...v.containerEl.querySelectorAll(".domvec-bb")]
-            .map((e) => e.querySelector(".domvec-html-host")).find(Boolean);
-          const root = host && host.shadowRoot;
-          const out = { node: node.id, sprite,
-                        shadow_elements: root ? root.querySelectorAll("*").length : 0,
-                        shadow_images: root ? root.querySelectorAll("img").length : 0 };
-          v.closeBillboard(node.id);
-          return out;
-        `);
-        return {
-          pass: !got.error && got.sprite && got.shadow_elements > 1,
-          evidence: got,
         };
       },
     },

@@ -397,8 +397,11 @@ export class BrowserView extends ItemView {
         // Planted by D-40's check: the old path, hover found by the poll.
         if (this.plant.has("poll-hover")) return;
         // The reader's pointer moving over the page is the reader using the app
-        // (unless a check is running: its synthetic moves are not the reader).
-        if (!(window as any).__domvec?.verify?.state?.()?.running) (window as any).__domvecReaderAt = Date.now();
+        // (unless a check or a stress run is going: their synthetic moves are
+        // not the reader).
+        if (!(window as any).__domvec?.verify?.state?.()?.running && !(window as any).__domvecStressing) {
+          (window as any).__domvecReaderAt = Date.now();
+        }
         this.pipebox?.pushedHover(body.slice(6), this.session || "");
       }
     });

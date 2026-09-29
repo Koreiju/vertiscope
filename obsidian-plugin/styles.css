@@ -740,8 +740,12 @@ button.domvec-run-fence:hover {
 /* Non-blinding: a thin outline and a faint wash, no animation. It sits in the
    CELL above the webview and never catches the pointer, so the page under it
    behaves exactly as it would without it. */
+/* 2026-09-28: "a very much lighter and un-tinted color but keeping some tint
+   and borders still, just fainter on tint/border but a little bit higher
+   luminosity while keeping translucency reasonable" -- each hue kept only as
+   a hint (hover blue, pin amber, diff green), all near-white. */
 .domvec-chunk-outline { position: fixed; z-index: 25; pointer-events: none;
-  border: 1.5px solid rgba(88, 166, 255, 0.75); background: rgba(88, 166, 255, 0.06);
+  border: 1px solid rgba(214, 230, 255, 0.55); background: rgba(240, 246, 255, 0.05);
   border-radius: 3px; box-sizing: border-box; }
 
 
@@ -761,12 +765,12 @@ button.domvec-run-fence:hover {
    warmer than the hover outline so the two read apart, no animation, never
    catches the pointer. */
 .domvec-chunk-pin { position: fixed; z-index: 16; pointer-events: none;
-  border: 2px solid rgba(227, 179, 65, 0.85); background: rgba(227, 179, 65, 0.07);
+  border: 1.5px solid rgba(255, 238, 200, 0.6); background: rgba(255, 249, 234, 0.05);
   border-radius: 3px; box-sizing: border-box; }
 /* The last drain's diff (G-90): what the in-page chunking just changed,
    outlined at once and faded -- green, apart from hover (blue) and pins. */
 .domvec-diff-box { position: fixed; z-index: 15; pointer-events: none;
-  border: 1px dashed rgba(63, 185, 80, 0.9); background: rgba(63, 185, 80, 0.06);
+  border: 1px dashed rgba(214, 244, 218, 0.55); background: rgba(240, 252, 242, 0.04);
   border-radius: 2px; box-sizing: border-box; }
 .domvec-pipebox-mini { cursor: pointer; }
 .domvec-pipebox.is-open { box-shadow: 0 2px 14px rgba(0, 0, 0, 0.45); }

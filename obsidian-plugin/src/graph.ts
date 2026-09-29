@@ -24,6 +24,7 @@ import ForceGraph3D, { ForceGraph3DInstance } from "3d-force-graph";
 import { forceCenter, forceCollide, forceManyBody } from "d3-force-3d";
 import type { ForceNodeDelta } from "./forcetree";
 import * as THREE from "three";
+import { NodeLook, SceneBatch } from "./scenebatch";
 
 import { Sidecar } from "./sidecar";
 import { ChunkSurface, SurfaceHost } from "./surface";
@@ -1557,6 +1558,7 @@ export class GraphView extends ItemView {
     // destroyed renderer.
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;
+    this.stopBatch();
     this.graph?._destructor?.();
     this.graph = null;
   }
@@ -2106,6 +2108,204 @@ export class GraphView extends ItemView {
     }
   }
 
+  // ---- G-107: the scene batch ------------------------------------------
+
+  /** What draws every node and edge (`scenebatch.ts`). */
+  private batch: SceneBatch | null = null;
+  private batchRaf = 0;
+  /** Read once per draw, like the collider's: the two must agree. */
+  private drawnMedia = false;
+  /** Planted by G-107's check: the per-node spheres, sprites and per-link
+   *  cylinders the batch replaced -- one draw call each. */
+  plantPerNode = false;
+  /** Planted by G-107's check: pick proxies the raycaster cannot hit. */
+  plantNoPick = false;
+  /** Planted by G-81's check: chunk pictures kept on the node, never drawn. */
+  plantNoPicture = false;
+  /** Main-thread frame gaps (ms) and draw calls per frame, newest last. */
+  private frameGaps: number[] = [];
+  private callsPerFrame: number[] = [];
+  private lastFrameAt = 0;
+  private lastFrameNo = 0;
+  /** CPU ms inside `renderer.render` per call: the draw-call cost itself,
+   *  which a throttled background window does not hide (its frame GAPS read
+   *  1,000 ms whatever is drawn). */
+  private renderMs: number[] = [];
+  private static proxyGeo: any = null;
+  private static proxyMat: any = null;
+
+  /**
+   * The radius a node's pick proxy answers for: what the reader SEES, which
+   * is the drawn half-extent -- not the collider's radius. For a picture the
+   * collider reserves the half-DIAGONAL (the sphere a panel sweeps across an
+   * orbit), and a proxy that size reached past the drawn square into its
+   * neighbours: G-107 found a pointer on a fixture page's node naming the
+   * B-tree page beside it, 8 of 10 picks against the per-node sprites' 10.
+   */
+  private proxyRadius(n: any): number {
+    return this.graph ? this.lookOf(n, this.graph.nodeRelSize(), this.drawnMedia).half : 1;
+  }
+
+  /**
+   * A node's own three.js object, now: an invisible sphere the raycaster
+   * still hits (three tests layers, not visibility) and the renderer skips
+   * (an invisible material is never queued). Shared geometry and material.
+   */
+  private pickProxy(n: any, relSize: number, media: boolean): any {
+    if (!GraphView.proxyGeo) {
+      GraphView.proxyGeo = new THREE.SphereGeometry(1, 8, 6);
+      GraphView.proxyMat = new THREE.MeshBasicMaterial({ visible: false });
+    }
+    const m = new THREE.Mesh(GraphView.proxyGeo, GraphView.proxyMat);
+    m.scale.setScalar(this.lookOf(n, relSize, media).half);
+    (m as any).__proxy = true;
+    if (this.plantNoPick) m.raycast = () => {};
+    return m;
+  }
+
+  /**
+   * How one node looks, for the batch -- the same choices the per-node
+   * objects made: a translucent sphere while streaming (white when hovered),
+   * a picture panel when media is on and it has one, a sphere otherwise.
+   * READS the node; writes nothing the layout uses.
+   */
+  private lookOf(n: any, relSize: number, media: boolean): NodeLook {
+    if (n.force) {
+      return { half: n.level === "page" ? STREAM.RADIUS * 1.6 : STREAM.RADIUS, translucent: true,
+               alpha: n.hovered ? 0.9 : STREAM.OPACITY, color: n.hovered ? "#ffffff" : (n.color || "#9aa0a6") };
+    }
+    const src = media && !(this.plantNoPicture && n.level !== "page") ? n.image?.src : undefined;
+    if (src) return { half: billboardEdge(n, relSize) / 2, translucent: false, alpha: 0.95,
+                      color: n.color || "#888888", picture: src };
+    return { half: Math.cbrt(Math.max(n.val ?? 1, 1e-9)) * relSize, translucent: false, alpha: 1,
+             color: n.hovered ? "#ffffff" : (n.color || "#9aa0a6") };
+  }
+
+  /** A picture decoded to an `<img>`, through the same CORS-free fetch. */
+  private decoded(src: string): Promise<HTMLImageElement | null> {
+    return this.texture(src).then((url) => new Promise<HTMLImageElement | null>((resolve) => {
+      if (!url) { resolve(null); return; }
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => { console.warn("domvec: picture would not decode", src); resolve(null); };
+      img.src = url;
+    }), () => null);
+  }
+
+  private startBatch(graph: any, media: boolean): void {
+    this.stopBatch();
+    this.batch = new SceneBatch(graph.scene(), graph.renderer(), (src) => this.decoded(src));
+    this.frameGaps = [];
+    this.callsPerFrame = [];
+    this.lastFrameAt = 0;
+    const info = graph.renderer().info;
+    // Counted across the whole frame, however many passes it takes.
+    info.autoReset = false;
+    info.reset();
+    this.lastFrameNo = info.render.frame;
+    this.renderMs = [];
+    const renderer: any = graph.renderer();
+    if (!renderer.__domvecTimed) {
+      const draw = renderer.render.bind(renderer);
+      renderer.render = (scene: any, camera: any) => {
+        const t = performance.now();
+        draw(scene, camera);
+        this.renderMs.push(performance.now() - t);
+        if (this.renderMs.length > 600) this.renderMs.splice(0, 100);
+      };
+      renderer.__domvecTimed = true;
+    }
+    const tick = (t: number) => {
+      this.batchRaf = requestAnimationFrame(tick);
+      const g: any = this.graph;
+      if (!g || !this.batch) return;
+      if (this.lastFrameAt) {
+        this.frameGaps.push(t - this.lastFrameAt);
+        if (this.frameGaps.length > 600) this.frameGaps.splice(0, 100);
+      }
+      this.lastFrameAt = t;
+      const frames = info.render.frame - this.lastFrameNo;
+      if (frames > 0) {
+        this.callsPerFrame.push(info.render.calls / frames);
+        if (this.callsPerFrame.length > 600) this.callsPerFrame.splice(0, 100);
+        this.lastFrameNo = info.render.frame;
+        info.reset();
+      }
+      this.batch.setVisible(!this.plantPerNode);
+      if (this.plantPerNode) return;
+      const d = g.graphData();
+      const rs = g.nodeRelSize();
+      this.batch.sync(d.nodes, d.links, (n) => this.lookOf(n, rs, media));
+    };
+    this.batchRaf = requestAnimationFrame(tick);
+  }
+
+  /** One sync now, outside the frame loop: a check reads the stats and the
+   *  graph in the same turn, so neither is a frame older than the other. */
+  batchSync(): any {
+    const g: any = this.graph;
+    if (!g || !this.batch || this.plantPerNode) return null;
+    const d = g.graphData(), rs = g.nodeRelSize();
+    this.batch.sync(d.nodes, d.links, (n) => this.lookOf(n, rs, this.drawnMedia));
+    return { ...this.batch.lastStats };
+  }
+
+  private stopBatch(): void {
+    if (this.batchRaf) cancelAnimationFrame(this.batchRaf);
+    this.batchRaf = 0;
+    this.batch?.dispose();
+    this.batch = null;
+  }
+
+  /** G-107's plant: the per-node objects and per-link cylinders, or the batch. */
+  setPerNode(on: boolean): void {
+    this.plantPerNode = on;
+    const g: any = this.graph;
+    if (!g) return;
+    g.linkVisibility(on);
+    g.nodeThreeObject(g.nodeThreeObject());
+    this.frameGaps = [];
+    this.callsPerFrame = [];
+    this.renderMs = [];
+  }
+
+  /** How a node is drawn right now -- checks ask this, never the objects. */
+  drawnAs(n: any): { batched: boolean; kind: "picture" | "sphere"; translucent: boolean; alpha: number; half: number } {
+    if (this.plantPerNode || !this.graph) {
+      const o: any = n.__threeObj, mat: any = o?.material;
+      const sprite = o?.type === "Sprite";
+      return { batched: false, kind: sprite ? "picture" : "sphere",
+               translucent: !!mat?.transparent, alpha: mat?.opacity ?? 1,
+               half: sprite ? o.scale.x / 2 : (o?.scale?.x ?? 0) };
+    }
+    const lk = this.lookOf(n, this.graph.nodeRelSize(), this.drawnMedia);
+    return { batched: true, kind: lk.picture ? "picture" : "sphere", translucent: lk.translucent,
+             alpha: lk.alpha, half: lk.half };
+  }
+
+  /** The render stage, for the harness: draw calls and frame gaps, measured. */
+  renderStats(): any {
+    const g: any = this.graph;
+    if (!g) return null;
+    const q = (xs: number[], p: number) => {
+      if (!xs.length) return null;
+      const s = [...xs].sort((a, b) => a - b);
+      return Math.round(s[Math.min(s.length - 1, Math.floor(p * s.length))] * 10) / 10;
+    };
+    const info = g.renderer().info, d = g.graphData();
+    return {
+      mode: this.plantPerNode ? "per-node" : "batch",
+      nodes: d.nodes.length, links: d.links.length,
+      draw_calls_p50: q(this.callsPerFrame, 0.5), draw_calls_max: q(this.callsPerFrame, 1),
+      frame_gap_p50: q(this.frameGaps, 0.5), frame_gap_p95: q(this.frameGaps, 0.95),
+      frames: this.frameGaps.length,
+      render_ms_p50: q(this.renderMs, 0.5), render_ms_p95: q(this.renderMs, 0.95), renders: this.renderMs.length,
+      hidden: document.hidden,
+      textures: info.memory.textures, geometries: info.memory.geometries,
+      batch: this.batch ? { ...this.batch.lastStats } : null,
+    };
+  }
+
   /**
    * A node's size changed after its object was built: scale THAT object by
    * the drawn radius's ratio (cbrt of val). Rebuilding every object for one
@@ -2130,8 +2330,11 @@ export class GraphView extends ItemView {
       n.image = { src, alt: "" };
       n.imgLoaded = false;
       any = true;
+      // A picture changes what the node occupies (a panel's half-diagonal):
+      // the proxy follows. The batch reads `n.image` on its next frame.
+      if (!this.plantPerNode) (n as any).__threeObj?.scale.setScalar(this.proxyRadius(n));
     }
-    if (any) this.graph.nodeThreeObject(this.graph.nodeThreeObject());
+    if (any && this.plantPerNode) this.graph.nodeThreeObject(this.graph.nodeThreeObject());
   }
 
   /** Planted by G-81's check: page nodes get no favicon. */
@@ -2919,7 +3122,11 @@ export class GraphView extends ItemView {
       rank: n.rank,
       tokens: n.tokens ?? 0,
       // A page with no picture of its own shows its site's icon (G-81).
-      image: (n.level !== "page" && pictureFor(n.cid) ? { src: pictureFor(n.cid), alt: "" } : null)
+      // Planted (G-81): a page has NO picture, whatever supplies one -- the
+      // layout's own image included, which the plant once left standing
+      // and so removed nothing.
+      image: (n.level === "page" && this.plantNoIcons) ? null
+        : (n.level !== "page" && pictureFor(n.cid) ? { src: pictureFor(n.cid), alt: "" } : null)
         ?? n.image ?? ((n.level === "page" && n.url && !this.plantNoIcons) ? (() => {
         const src = faviconFor(n.url);
         return src ? { src, alt: "icon" } : undefined;
@@ -2938,6 +3145,7 @@ export class GraphView extends ItemView {
     // and `checkGeometryIntersection` from graphs nobody could see.
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;
+    this.stopBatch();
     this.graph?._destructor?.();
     this.graph = null;
     canvas.empty();
@@ -3061,6 +3269,9 @@ export class GraphView extends ItemView {
       .nodeVal((n: any) => n.val)
       .linkOpacity(0.25)
       .linkWidth(0.5)
+      // Edges are drawn by the batch's one line-segment set (`G-107`); the
+      // per-link cylinders come back only under the planted arm.
+      .linkVisibility(this.plantPerNode)
       .backgroundColor("rgba(0,0,0,0)")
       .onNodeClick((n: any) => {
         // A page or a branch unravels; a chunk opens (`G-54`). One gesture,
@@ -3101,7 +3312,15 @@ export class GraphView extends ItemView {
     const media = this.media();
     // Streaming nodes are TRANSLUCENT (Addendum IX): "simple translucent
     // nodes to signify chunks that are part of a stream through the diff".
-    graph.nodeThreeObject((n: any) => n.force ? this.streamingSphere(n)
+    //
+    // `G-107`: every node is DRAWN by the scene batch (three draw calls for
+    // the whole graph) and keeps only an invisible pick proxy here, so hover,
+    // click and right-click still land on it. The per-node spheres, sprites
+    // and cylinders it replaced -- ~1,800 draw calls at 2,467 nodes -- come
+    // back only when G-107's check plants them.
+    this.drawnMedia = media;
+    graph.nodeThreeObject((n: any) => !this.plantPerNode ? this.pickProxy(n, relSize, media)
+      : n.force ? this.streamingSphere(n)
       : (media ? this.billboard(n, relSize) : null));
 
     // Relax overlaps, and nothing else (`G-20`, `G-21`).
@@ -3348,6 +3567,7 @@ export class GraphView extends ItemView {
     // point; without a reheat it was the finishing point too.
     graph.d3ReheatSimulation();
     this.graph = graph;
+    this.startBatch(graph, media);
     // The profiler's listener reads the scene through this, so "visible"
     // is decided by what is drawn and not by what `absorb` returned.
     profiler().graphSource = () => this.graph;
