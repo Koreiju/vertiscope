@@ -90,7 +90,9 @@ export class StressRun {
     let { browser: b, graph: g } = this.views();
     if (!b?.webview) throw new Error("no browser cell");
     const w = b.webview;
-    if (o.url && !String(w.getURL()).startsWith(o.url)) {
+    // Exact: a prefix test once left the cell on a check's ?g107= variant
+    // of the forum -- a page the store had never seen -- and called it done.
+    if (o.url && String(w.getURL()) !== o.url) {
       b.go(o.url);
       await sleep(7000);
     }
@@ -104,6 +106,7 @@ export class StressRun {
         pushed: b.pushedPayloads || 0,
         drains: g?.forceStats?.drains || 0, added: g?.forceStats?.added || 0,
         guard: g?.nonFiniteCount || 0, nan: (g?.nanBy || []).length,
+        skips: g?.octreeSkips ? g.octreeSkips.collide + g.octreeSkips.charge : 0,
       };
       const t0 = performance.now();
       let asked = 0, steps = 0;
@@ -168,6 +171,7 @@ export class StressRun {
       stages,
       render: typeof g?.renderStats === "function" ? g.renderStats() : null,
       guard: { caught: (g?.nonFiniteCount || 0) - base.guard,
+               octree_skips: g?.octreeSkips ? g.octreeSkips.collide + g.octreeSkips.charge - base.skips : null,
                nan_by: (g?.nanBy || []).slice(base.nan).map((x: any) => x.force + ":" + x.nodes) },
     };
   }

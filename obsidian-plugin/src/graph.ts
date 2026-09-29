@@ -25,6 +25,7 @@ import { forceCenter, forceCollide, forceManyBody } from "d3-force-3d";
 import type { ForceNodeDelta } from "./forcetree";
 import * as THREE from "three";
 import { NodeLook, SceneBatch } from "./scenebatch";
+import { octreeVerdict } from "./octreeguard";
 
 import { Sidecar } from "./sidecar";
 import { ChunkSurface, SurfaceHost } from "./surface";
@@ -628,7 +629,10 @@ export class GraphView extends ItemView {
     // Charge builds an octree every tick too: sanitised first (D-38).
     const charge: any = forceManyBody().strength(-60).distanceMax(220);
     let chargeNodes: any[] = [];
-    const safeCharge: any = (alpha: number) => { this.sanitize(chargeNodes); charge(alpha); };
+    const safeCharge: any = (alpha: number) => {
+      this.sanitize(chargeNodes);
+      if (this.octreeOk(chargeNodes, "charge", false)) charge(alpha);
+    };
     safeCharge.initialize = (...a: any[]) => { chargeNodes = a[0] || []; return charge.initialize(...a); };
     g.d3Force("charge", safeCharge);
     g.d3Force("center", forceCenter());
@@ -1042,6 +1046,18 @@ export class GraphView extends ItemView {
       g.d3Force(name, w);
     }
   }
+  /** Ticks an octree force sat out because a node could not be placed in
+   *  one (octreeguard), and the last such, for the harness. */
+  octreeSkips: { collide: number; charge: number; last: any } = { collide: 0, charge: 0, last: null };
+
+  private octreeOk(nodes: any[], force: "collide" | "charge", predicted: boolean): boolean {
+    const v = octreeVerdict(nodes, predicted);
+    if (v.ok) return true;
+    this.octreeSkips[force]++;
+    this.octreeSkips.last = { at: Date.now(), force, bad: v.bad, of: nodes.length, sample: v.sample };
+    return false;
+  }
+
   private sanitize(nodes: any[]): void {
     for (const n of nodes) {
       const x = n.x, y = n.y, z = n.z ?? 0;
@@ -1053,7 +1069,10 @@ export class GraphView extends ItemView {
           && Math.abs(x) < 1e7 && Math.abs(y) < 1e7 && Math.abs(z) < 1e7
           && Number.isFinite(vx) && Number.isFinite(vy) && Number.isFinite(vz)
           && Math.abs(vx) < 1e6 && Math.abs(vy) < 1e6 && Math.abs(vz) < 1e6) continue;
-      if (x === undefined) continue;                 // not placed yet: the octree skips it
+      // Not placed yet: left for d3 to place. The octree does NOT skip it --
+      // it inserts it at the origin -- so `octreeOk` keeps such a tick out
+      // of the build instead.
+      if (x === undefined) continue;
       this.nonFiniteCount++;
       if (this.nonFinite.length < 40) {
         const r = (v: any) => (typeof v === "number" ? (Number.isFinite(v) ? Math.round(v * 100) / 100 : String(v)) : v);
@@ -2259,11 +2278,21 @@ export class GraphView extends ItemView {
 
   /** G-107's plant: the per-node objects and per-link cylinders, or the batch. */
   setPerNode(on: boolean): void {
+    const leaving = this.plantPerNode && !on;
     this.plantPerNode = on;
     const g: any = this.graph;
     if (!g) return;
+    // Leaving the planted arm frees its pictures. 3d-force-graph disposes a
+    // replaced object's material but not the material's TEXTURE, and three
+    // keeps every undisposed texture's source image referenced -- so each
+    // per-node arm left one decoded picture per node in this renderer and
+    // one GL texture in the GPU process. Two arms in the working store
+    // (2,283 and 1,805 textures) were followed by "Renderer process oom".
+    const maps: any[] = leaving ? g.graphData().nodes
+      .map((n: any) => n.__threeObj?.material?.map).filter(Boolean) : [];
     g.linkVisibility(on);
     g.nodeThreeObject(g.nodeThreeObject());
+    for (const m of new Set(maps)) { try { m.dispose(); } catch { /* already gone */ } }
     this.frameGaps = [];
     this.callsPerFrame = [];
     this.renderMs = [];
@@ -3542,7 +3571,11 @@ export class GraphView extends ItemView {
       // EVERY tick, gate open or not: a non-finite position must never reach
       // an octree (D-38, below).
       this.sanitize(gatedNodes);
-      if (this.plantAlwaysCollide || performance.now() < this.collideUntil) collideForce(alpha);
+      if (!(this.plantAlwaysCollide || performance.now() < this.collideUntil)) return;
+      // And never an octree over a node whose predicted position is not a
+      // number -- one the simulation has not placed yet included, which
+      // d3-octree inserts at the origin and then cannot separate (octreeguard).
+      if (this.octreeOk(gatedNodes, "collide", true)) collideForce(alpha);
     };
     gated.initialize = (...a: any[]) => { gatedNodes = a[0] || []; return collideForce.initialize(...a); };
     gated.radius = (...a: any[]) => { const r = collideForce.radius(...a); return a.length ? gated : r; };
