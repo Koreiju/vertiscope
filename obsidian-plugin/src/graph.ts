@@ -25,7 +25,7 @@ import { forceCenter, forceCollide, forceManyBody } from "d3-force-3d";
 import type { ForceNodeDelta } from "./forcetree";
 import * as THREE from "three";
 import { NodeLook, SceneBatch } from "./scenebatch";
-import { octreeVerdict } from "./octreeguard";
+import { flushTiny, octreeVerdict } from "./octreeguard";
 
 import { Sidecar } from "./sidecar";
 import { ChunkSurface, SurfaceHost } from "./surface";
@@ -1048,7 +1048,7 @@ export class GraphView extends ItemView {
   }
   /** Ticks an octree force sat out because a node could not be placed in
    *  one (octreeguard), and the last such, for the harness. */
-  octreeSkips: { collide: number; charge: number; last: any } = { collide: 0, charge: 0, last: null };
+  octreeSkips: { collide: number; charge: number; flushed: number; last: any } = { collide: 0, charge: 0, flushed: 0, last: null };
 
   private octreeOk(nodes: any[], force: "collide" | "charge", predicted: boolean): boolean {
     const v = octreeVerdict(nodes, predicted);
@@ -3558,7 +3558,11 @@ export class GraphView extends ItemView {
       // strength and iteration count" to reduce jitter; a hard shove would
       // trade overlap for nodes visibly vibrating against each other.
       .strength(0.7)
-      .iterations(2);
+      // ONE iteration per call; `gated` runs the iterations itself so the
+      // octree check stands between them (D-38: the first iteration can throw
+      // a coincident pair to Infinity, and the second builds its octree on it).
+      .iterations(1);
+    let collideIterations = 2;
     // **Only while the PROJECTED layout is changing.** Profiled on the reader's
     // store while the forum streamed (2026-09-28): the 3D loop held Obsidian's
     // main thread 11.4 s of 13 -- collision 5.0 s of it, every tick, over
@@ -3571,16 +3575,28 @@ export class GraphView extends ItemView {
       // EVERY tick, gate open or not: a non-finite position must never reach
       // an octree (D-38, below).
       this.sanitize(gatedNodes);
+      // Vanishing velocities to exactly zero, so a coincident pair meets d3's
+      // jiggle instead of a squared distance that underflows to 0 and a
+      // divide that throws both to Infinity (octreeguard.flushTiny).
+      this.octreeSkips.flushed += flushTiny(gatedNodes);
       if (!(this.plantAlwaysCollide || performance.now() < this.collideUntil)) return;
       // And never an octree over a node whose predicted position is not a
       // number -- one the simulation has not placed yet included, which
-      // d3-octree inserts at the origin and then cannot separate (octreeguard).
-      if (this.octreeOk(gatedNodes, "collide", true)) collideForce(alpha);
+      // d3-octree inserts at the origin and then cannot separate -- checked
+      // before EVERY iteration, not once per tick.
+      for (let k = 0; k < collideIterations; k++) {
+        if (!this.octreeOk(gatedNodes, "collide", true)) { this.sanitize(gatedNodes); break; }
+        collideForce(alpha);
+      }
     };
     gated.initialize = (...a: any[]) => { gatedNodes = a[0] || []; return collideForce.initialize(...a); };
     gated.radius = (...a: any[]) => { const r = collideForce.radius(...a); return a.length ? gated : r; };
     gated.strength = (...a: any[]) => { const r = collideForce.strength(...a); return a.length ? gated : r; };
-    gated.iterations = (...a: any[]) => { const r = collideForce.iterations(...a); return a.length ? gated : r; };
+    gated.iterations = (...a: any[]) => {
+      if (!a.length) return collideIterations;
+      collideIterations = Math.max(1, Math.floor(+a[0] || 1));
+      return gated;
+    };
     this.collideUntil = performance.now() + 3000;
     graph.d3Force("collide", gated);
     window.setTimeout(() => this.watchForces(), 0);

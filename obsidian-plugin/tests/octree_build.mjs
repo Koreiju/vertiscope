@@ -7,7 +7,9 @@ import { octree } from "d3-octree";
 let raw = "";
 process.stdin.on("data", (c) => { raw += c; });
 process.stdin.on("end", () => {
-  const nodes = JSON.parse(raw);
+  // Non-finite numbers travel as strings: JSON would make Infinity null (0).
+  const nodes = JSON.parse(raw, (k, v) =>
+    v === "Infinity" ? Infinity : v === "-Infinity" ? -Infinity : v === "NaN" ? NaN : v);
   octree(nodes, (d) => d.x + d.vx, (d) => d.y + d.vy, (d) => d.z + d.vz);
   process.stdout.write("done");
 });

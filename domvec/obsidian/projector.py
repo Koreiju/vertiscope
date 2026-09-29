@@ -729,8 +729,20 @@ class PageProjector(ChunkProjector):
         self.raw_pos: Dict[str, List[float]] = {}
         self.page_scale: Dict[str, float] = {}
         self.centroid_ms: Dict[str, float] = {}
+        #: G-106: what the online model TRAINS on -- "chunks" (every chunk's
+        #: vector, and the page centroids) or "pages" (centroids only) --
+        #: decided per fit from what an update costs on this GPU
+        #: (`refitscope`). Drawing does not change with it.
+        from .refitscope import RefitCost
+        self.scope = "pages"
+        self.scope_record: Dict = {}
+        self.refit_cost = RefitCost()
+        #: Chunks the online model has been trained on (chunk scope only).
+        self.trained_chunks: set = set()
 
     FILE = "page_projector.pkl"
+    #: What one online update may cost before the scope falls back to pages.
+    SCOPE_BUDGET_MS = 5000.0
     #: Read by `layout` to pick the tree path over the chunk-position path.
     kind = "page"
 
@@ -857,6 +869,15 @@ class PageProjector(ChunkProjector):
                     self._online_thread = None
                     return
                 X = np.asarray([self.page_vec[u] for u in todo], dtype=np.float32)
+                # Chunk scope: the untrained chunks of these pages join the
+                # update, so every chunk is a point the model LEARNED.
+                new_chunks = ([c for u in todo for c in sorted(self.by_url.get(u) or ())
+                               if c in self.vec and c not in self.trained_chunks]
+                              if self.scope == "chunks" else [])
+                if new_chunks:
+                    from . import layout as _L
+                    C = _L._unit_rows(np.asarray([self.vec[c] for c in new_chunks], dtype=np.float32))
+                    X = np.vstack([X, C])
                 model = copy.deepcopy(self.pumap)
             started = time.perf_counter()
             try:
@@ -865,6 +886,7 @@ class PageProjector(ChunkProjector):
                 self.fit_error = "online update failed: %s" % exc
                 continue
             ms_train = (time.perf_counter() - started) * 1000
+            self.refit_cost.observe(int(model.stats.get("rows") or 0), ms_train)
             t = time.perf_counter()
             with self.lock:
                 projection = copy.copy(self.projection)
@@ -886,6 +908,7 @@ class PageProjector(ChunkProjector):
                 old_pos = dict(self.page_pos)
                 self.projection, self.pumap = projection, model
                 self.trained.update(todo)
+                self.trained_chunks.update(new_chunks)
                 moved_pages = []
                 for u, xyz in new_pos.items():
                     was = old_pos.get(u)
@@ -913,7 +936,9 @@ class PageProjector(ChunkProjector):
                 for u in moved_pages:
                     self.seq += 1
                     self.log.append((self.seq, "page", u))
-            record = {"pages_trained": len(todo), "ms_train": round(ms_train, 1),
+            record = {"pages_trained": len(todo), "chunks_trained": len(new_chunks),
+                      "scope": self.scope, "rows": int(model.stats.get("rows") or 0),
+                      "ms_train": round(ms_train, 1),
                       "ms_place": round((time.perf_counter() - t) * 1000, 1),
                       "pages_moved": len(moved_pages), "chunks_moved": moved_chunks,
                       "old_drift_p50": model.stats.get("old_drift_p50"),
@@ -926,7 +951,7 @@ class PageProjector(ChunkProjector):
                 except Exception:                   # noqa: BLE001
                     pass
 
-    def _refit_online(self, urls, X, chunks_at_fit):
+    def _refit_online(self, urls, X, chunks_at_fit, chunk_ids=(), C=None):
         """A refit that TRAINS ON THE DIFF (2026-09-27): the pages new since
         the last fit, with every page placed before held where it was.
 
@@ -949,8 +974,16 @@ class PageProjector(ChunkProjector):
         # Trained on a COPY: the stream keeps transforming through the model
         # that is live until the new one is swapped in (`G-74`).
         model = copy.deepcopy(self.pumap)
-        if new:
-            model.update(X[new])
+        rows = X[new]
+        # Chunk scope: every chunk not yet trained on joins this refit.
+        fresh = [j for j, c in enumerate(chunk_ids) if c not in self.trained_chunks]
+        if C is not None and fresh:
+            rows = np.vstack([rows, C[fresh]]) if len(rows) else C[fresh]
+        if len(rows):
+            t = time.perf_counter()
+            model.update(rows)
+            self.refit_cost.observe(int(model.stats.get("rows") or 0),
+                                    (time.perf_counter() - t) * 1000)
         projection = copy.copy(self.projection)
         whiten = copy.copy(wrapper)
         whiten.model = model
@@ -1097,7 +1130,21 @@ class PageProjector(ChunkProjector):
                 return {"skipped": "too few pages", "n": len(urls)}
             t = time.perf_counter()
             X = L._unit_rows(np.asarray(X, dtype=np.float32))
-            online = self._refit_online(urls, X, chunks_at_fit)
+            # G-106: every chunk, or page centroids -- by what an update costs.
+            from .refitscope import choose_scope
+            fitted = set(urls)
+            chunk_ids = sorted(c for c in vec if url_of.get(c) in fitted)
+            decision = choose_scope(len(urls), len(chunk_ids), self.refit_cost,
+                                    self.SCOPE_BUDGET_MS, self.engine, self.centroid)
+            scope = decision["scope"]
+            C = (L._unit_rows(np.asarray([vec[c] for c in chunk_ids], dtype=np.float32))
+                 if scope == "chunks" and chunk_ids else None)
+            # A model that learned chunks cannot shed them by updating: its
+            # every later update trains on every row it ever saw. Falling back
+            # to pages is a fresh fit.
+            online = (None if (scope == "pages" and self.scope == "chunks")
+                      else self._refit_online(urls, X, chunks_at_fit,
+                                              chunk_ids if C is not None else (), C))
             if online is not None:
                 projection, page_pos, page_hsv = online
                 colours = page_hsv or None
@@ -1106,9 +1153,13 @@ class PageProjector(ChunkProjector):
                 if online is None:
                     L._LAST_FIT.clear()
                 want = self.dims + 3
+                Xtrain = X if C is None else np.vstack([X, C])
                 coords = (None if online is not None else
-                          self._first_fit(L, X, want, len(urls)))
+                          self._first_fit(L, Xtrain, want, len(Xtrain)))
                 if online is None:
+                    # The pages are the first rows; chunk rows (chunk scope)
+                    # were trained on and are placed below through `place`.
+                    coords = coords[:len(urls)] if C is not None else coords
                     got = int(coords.shape[1])
                     colours = (L._hsv(coords[:, self.dims:self.dims + 3])
                                if got >= want else None)
@@ -1147,6 +1198,8 @@ class PageProjector(ChunkProjector):
                     self.pumap, self._next_pumap = self._next_pumap, None
                 if self.engine == "parametric":
                     self.trained = set(urls)
+                    self.trained_chunks = set(chunk_ids) if C is not None else set()
+                self.scope, self.scope_record = scope, decision
                 self.pos, self.hsv = pos, hsv
                 self.vec, self.url_of, self.by_url = vec, url_of, by_url
                 self.page_pos, self.page_hsv = page_pos, page_hsv
@@ -1164,6 +1217,7 @@ class PageProjector(ChunkProjector):
                 "centroid_ms": dict(self.centroid_ms), "dims_in": int(X.shape[1]),
                 "ms_fit": round(ms_fit, 1), "ms_chunks": round(ms_chunks, 1),
                 "engine": self.engine, "online": online is not None,
+                "scope": decision,
                 "pumap": dict(self.pumap.stats) if self.pumap is not None else None,
                 "chunks_placed": len(pos),
                 "ms": round((time.perf_counter() - started) * 1000, 1),
@@ -1263,8 +1317,11 @@ class PageProjector(ChunkProjector):
             self.placed_total += len(urls)
         if self.engine == "parametric" and self.pumap is not None:
             untrained = [u for u in urls if u not in self.trained]
+            if self.scope == "chunks":
+                untrained += sorted({self.url_of[c] for c in mine
+                                     if c not in self.trained_chunks and c in self.url_of})
             if untrained:
-                self._schedule_online(untrained)
+                self._schedule_online(sorted(set(untrained)))
         record = {"batch": len(batch), "pages": len(pages), "placed": len(urls),
                   "ms_transform": round(ms_transform, 1),
                   "ms": round((time.perf_counter() - started) * 1000, 1),
@@ -1288,6 +1345,9 @@ class PageProjector(ChunkProjector):
                     "engine": self.engine, "trained_pages": len(self.trained),
                     "pending_online": len(self._pending_online),
                     "last_online": self.online_updates[-1] if self.online_updates else None,
+                    "scope": self.scope, "scope_why": self.scope_record.get("why"),
+                    "scope_decision": {k: v for k, v in self.scope_record.items() if k != "why"},
+                    "trained_chunks": len(self.trained_chunks),
                     "device": (self.pumap.stats.get("device") if self.pumap is not None else None)})
         if url:
             out["page"] = {"url": url, "chunks": len(self.by_url.get(url) or ()),
@@ -1316,7 +1376,10 @@ class PageProjector(ChunkProjector):
                      "page_scale": self.page_scale,
                      "page_vec": self.page_vec, "fitted_chunks": self.fitted_chunks,
                      "fitted_points": self.fitted_points, "fit_sample": self.fit_sample,
-                     "epoch": self.epoch, "fits": self.fits}
+                     "epoch": self.epoch, "fits": self.fits,
+                     "scope": self.scope, "scope_record": self.scope_record,
+                     "trained": set(self.trained), "trained_chunks": set(self.trained_chunks),
+                     "refit_cost": list(self.refit_cost.observed)}
         try:
             tmp = path.with_suffix(".tmp")
             with open(tmp, "wb") as fh:
@@ -1363,6 +1426,11 @@ class PageProjector(ChunkProjector):
             self.fit_sample = state["fit_sample"]
             self.epoch = _next_epoch(int(state["epoch"]))
             self.fits = list(state.get("fits") or [])
+            self.scope = state.get("scope") or "pages"
+            self.scope_record = dict(state.get("scope_record") or {})
+            self.trained = set(state.get("trained") or ())
+            self.trained_chunks = set(state.get("trained_chunks") or ())
+            self.refit_cost.observed = list(state.get("refit_cost") or [])
             self.log.clear()
         with (self.work_lock or nullcontext()):
             rows = workspace.store.lead_vectors()

@@ -4,7 +4,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { octreeVerdict } from "../src/octreeguard.ts";
+import { octreeVerdict, flushTiny } from "../src/octreeguard.ts";
+import { forceCollide } from "d3-force-3d";
 
 const placed = (x, y, z) => ({ x, y, z, vx: 0, vy: 0, vz: 0 });
 // Two placed nodes, both at positive coordinates (the extent excludes the
@@ -22,7 +23,8 @@ function build(nodes, ms = 3000) {
     const timer = setTimeout(() => { child.kill(); resolve("hung"); }, ms);
     child.stdout.on("data", (c) => { out += c; });
     child.on("exit", () => { clearTimeout(timer); resolve(out === "done" ? "done" : "hung"); });
-    child.stdin.end(JSON.stringify(nodes));
+    child.stdin.end(JSON.stringify(nodes, (k, v) =>
+      (typeof v === "number" && !Number.isFinite(v) ? String(v) : v)));
   });
 }
 
@@ -67,4 +69,41 @@ test("the guard also refuses Infinity, NaN velocity, and a runaway position", ()
   assert.equal(octreeVerdict([placed(2e7, 1, 1)]).ok, false);
   // many-body reads x, not x + vx
   assert.equal(octreeVerdict([{ ...placed(1, 1, 1), vx: NaN }], false).ok, true);
+});
+
+// The road the app actually took (caught paused, 2026-09-28 23:58): two nodes
+// at the identical position with velocities decayed to ~1e-200.
+const coincident = () => [
+  { index: 0, x: -288.896, y: -224.545, z: 49.006, vx: 1e-200, vy: 1e-200, vz: 1e-200 },
+  { index: 1, x: -288.896, y: -224.545, z: 49.006, vx: 1e-200, vy: 1e-200, vz: 1e-200 },
+  { index: 2, x: 12, y: 40, z: -3, vx: 0, vy: 0, vz: 0 },
+];
+const collideOnce = (nodes) => {
+  const f = forceCollide(5).iterations(1);
+  f.initialize(nodes, () => 0.25, 3);
+  f(1);
+  return nodes;
+};
+
+test("planted: coincident nodes with vanishing velocities are thrown to Infinity by collide", async () => {
+  const nodes = collideOnce(coincident());
+  assert.ok(!Number.isFinite(nodes[0].vx) && !Number.isFinite(nodes[1].vx), JSON.stringify(nodes.slice(0, 2)));
+  // ... and the next iteration's octree over them never finishes.
+  assert.equal(await build(nodes), "hung");
+  assert.equal(octreeVerdict(nodes).ok, false);
+});
+
+test("flushed to zero first, d3's own jiggle separates them finitely", async () => {
+  const nodes = coincident();
+  assert.equal(flushTiny(nodes), 6);
+  collideOnce(nodes);
+  assert.ok(nodes.every((n) => Number.isFinite(n.vx) && Number.isFinite(n.vy) && Number.isFinite(n.vz)));
+  assert.equal(octreeVerdict(nodes).ok, true);
+  assert.equal(await build(nodes), "done");
+});
+
+test("flushTiny leaves real velocities alone", () => {
+  const n = [{ vx: 0.3, vy: -2e-5, vz: 1e-101 }];
+  assert.equal(flushTiny(n), 1);
+  assert.deepEqual(n[0], { vx: 0.3, vy: -2e-5, vz: 0 });
 });

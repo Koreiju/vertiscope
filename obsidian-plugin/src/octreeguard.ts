@@ -47,3 +47,28 @@ export function octreeVerdict(nodes: any[], predicted = true, limit = 1e7): Octr
   }
   return { ok: bad === 0, bad, sample };
 }
+
+/**
+ * Velocities too small to matter, set to exactly zero. Returns how many.
+ *
+ * The OTHER road into the same hang, caught paused 2026-09-28 23:58 with the
+ * octree's own input read out: two page nodes of one site at the IDENTICAL
+ * position, velocities decayed toward zero but not to it (x 0.6 per tick).
+ * d3's collide measures their separation as x_a + vx_a - x_b - vx_b: the
+ * positions cancel, the velocities leave a component of ~1e-200, which is
+ * not `=== 0` so d3 does not jiggle it, and whose square underflows to 0.
+ * Then `(r - sqrt(0)) / 0` is Infinity: the pair flew apart at +-Infinity in
+ * the force's first iteration, and its second iteration's octree could never
+ * be built (bounds -Infinity and NaN). At exactly zero, d3's own jiggle takes
+ * the pair apart finitely.
+ */
+export function flushTiny(nodes: any[], eps = 1e-100): number {
+  let flushed = 0;
+  for (const n of nodes) {
+    for (const k of ["vx", "vy", "vz"]) {
+      const v = n[k];
+      if (typeof v === "number" && v !== 0 && Math.abs(v) < eps) { n[k] = 0; flushed++; }
+    }
+  }
+  return flushed;
+}
