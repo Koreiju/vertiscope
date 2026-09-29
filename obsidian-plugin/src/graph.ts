@@ -26,6 +26,7 @@ import type { ForceNodeDelta } from "./forcetree";
 import * as THREE from "three";
 import { NodeLook, SceneBatch } from "./scenebatch";
 import { flushTiny, octreeVerdict } from "./octreeguard";
+import { MotionRecorder } from "./motion";
 
 import { Sidecar } from "./sidecar";
 import { ChunkSurface, SurfaceHost } from "./surface";
@@ -613,6 +614,7 @@ export class GraphView extends ItemView {
                  sized: [] as [number, number][] };
 
   private setMode(mode: "empty" | "force" | "projector", why: string): void {
+    this.motion.event("mode", { mode, why: String(why).slice(0, 60) });
     if (mode === this.layoutMode) return;
     this.layoutMode = mode;
     const nodes = this.graph ? this.graph.graphData().nodes.length : 0;
@@ -782,6 +784,9 @@ export class GraphView extends ItemView {
       if (p) links.push({ source: p.id, target: n.id, force: true });
     }
     this.holdAll(nodes, new Set(d.added.map((a) => a.id)));
+    this.touchActive(d.url);
+    this.motion.event("drain", { url: d.url.slice(-50), added: d.added.length, removed: d.removed.length,
+                                 reparented: d.reparented.length });
     this.graph.graphData({ nodes, links });
     if (this.layoutMode === "projector") {
       this.treeSpring();
@@ -1026,7 +1031,9 @@ export class GraphView extends ItemView {
       if (!f || f.__watched) continue;
       let nodes: any[] = [];
       const w: any = (alpha: number) => {
+        const before = this.motion.forceBefore(nodes);
         f(alpha);
+        this.motion.forceAfter(name, nodes, before, alpha);
         for (const n of nodes) {
           if (Number.isFinite(n.vx) && Number.isFinite(n.vy) && Number.isFinite(n.vz ?? 0)) continue;
           if (n.vx === undefined) continue;
@@ -1124,6 +1131,7 @@ export class GraphView extends ItemView {
    * they simply go.
    */
   private foldIn(ids: Set<string>): void {
+    this.motion.event("fold", { nodes: ids.size });
     if (!this.graph) return;
     const data: any = this.graph.graphData();
     const byId = new Map<string, any>(data.nodes.map((n: any) => [n.id, n]));
@@ -1145,7 +1153,9 @@ export class GraphView extends ItemView {
       const t = performance.now();
       const done = new Set<string>();
       for (const [id, f] of this.folding) {
-        const k = Math.min(1, (t - f.t0) / 250);
+        // 450 ms, like a glide: at 250 a fold's peak step crossed 10 units a frame
+        // and the flight recorder read the pane's own animation as a teleport.
+        const k = Math.min(1, (t - f.t0) / 450);
         const e = k * k * (3 - 2 * k);
         f.node.fx = f.from[0] + ((f.to.x ?? 0) - f.from[0]) * e;
         f.node.fy = f.from[1] + ((f.to.y ?? 0) - f.from[1]) * e;
@@ -1347,6 +1357,8 @@ export class GraphView extends ItemView {
    * open billboard (a pin) stays drawn.
    */
   collapsePage(url: string): void {
+    this.touchActive(url);
+    this.motion.event("collapse", { url: url.slice(-50) });
     if (!this.graph || !url || this.openedByReader.has(url)) return;
     if (this.layoutMode !== "projector") return;
     const data: any = this.graph.graphData();
@@ -1495,6 +1507,7 @@ export class GraphView extends ItemView {
           // them there, collision only spacing them).
           node.fitX = got.pos[0]; node.fitY = got.pos[1]; node.fitZ = got.pos[2] * DEPTH;
           node.projX = node.fitX; node.projY = node.fitY; node.projZ = node.fitZ;
+          this.glide(node, [node.fitX, node.fitY, node.fitZ]);
           this.life.moved++;
           moved++;
         } else if (!node && got.url && openUrls.has(got.url)) {
@@ -1515,6 +1528,7 @@ export class GraphView extends ItemView {
         if (node) {
           node.fitX = got.pos[0]; node.fitY = got.pos[1]; node.fitZ = got.pos[2] * DEPTH;
           node.anchorPos = [got.pos[0], got.pos[1], got.pos[2] * DEPTH];
+          this.glide(node, [node.fitX, node.fitY, node.fitZ]);
         } else {
           const members = got.projected ?? 1;
           const built = this.nodeFrom({ cid: "page:" + url, url, title: url,
@@ -2099,7 +2113,9 @@ export class GraphView extends ItemView {
       for (const c of chunks) {
         if (c.fullVal === undefined) c.fullVal = c.val ?? 1;
         const r = drawnRadius({ ...c, val: c.fullVal }, relSize, media);
+        const was = c.val;
         c.val = r > room ? c.fullVal * Math.pow(room / r, 3) : c.fullVal;
+        if (!(Math.abs((was ?? 0) - c.val) <= 0.05 * c.val)) c.__freeUntil = performance.now() + 3000;
       }
       // The OPEN page's own node, too: drawn at full size its billboard's
       // collider was larger than the room the fit gives its chunks, and it
@@ -2137,6 +2153,155 @@ export class GraphView extends ItemView {
   /** Planted by G-107's check: the per-node spheres, sprites and per-link
    *  cylinders the batch replaced -- one draw call each. */
   plantPerNode = false;
+  // ---- calm: what the stream is not changing holds still -------------------
+
+  /**
+   * Pages the stream is changing, until when (performance.now). The flight
+   * recorder, 2026-09-29, 20 s of scrolling on the forum: 210 teleports and
+   * 257 vibrating nodes, and the worst were page nodes of pages nobody was
+   * touching (DuckDuckGo searches, ja.wikipedia) reversing ~18 times a second
+   * with 40-46 unit jumps -- collide shoving, contain and home hauling back,
+   * re-energised by the 21 reheats the drains triggered. Scrolling one page
+   * must not shake the corpus.
+   */
+  private activeUntil = new Map<string, number>();
+  /** No calm pin before this (performance.now): the first settle is free. */
+  private calmFrom = 0;
+  /** Planted by the calm check: nothing pinned, every node free, as before. */
+  plantNoCalm = false;
+  calmStats = { pinned: 0, released: 0 };
+
+  /**
+   * A fit move is a GLIDE, not a jump (2026-09-29, the flight recorder: 31
+   * stored chunks of a page being built up moved 190-256 units in ONE frame,
+   * 7 ms after a placement reported `moved: 31` -- the page's centroid shifts
+   * as its chunks arrive, the online UMAP re-places it, and the node was
+   * assigned its new coordinates outright). The user's step is "changing to
+   * UMAP coordinates after a re-fit": a transition. 450 ms, smoothstep, driven
+   * from the render loop so it finishes even when the simulation has cooled;
+   * the node is held where it lands.
+   */
+  private glides = new Set<any>();
+  /** Planted by the glide check: fit moves assigned outright, as before. */
+  plantTeleport = false;
+  glideStats = { started: 0, done: 0 };
+
+  private glide(n: any, to: number[], ms = 450): void {
+    if (!to.every(Number.isFinite)) return;
+    if (this.plantTeleport || !Number.isFinite(n.x)) {
+      n.x = to[0]; n.y = to[1]; n.z = to[2];
+      if (n.__calm) { n.fx = n.x; n.fy = n.y; n.fz = n.z; n.__calmFit = [n.fitX, n.fitY, n.fitZ]; }
+      return;
+    }
+    if (Math.hypot(to[0] - n.x, to[1] - n.y, to[2] - (n.z ?? 0)) < 1e-6) return;
+    n.__glide = { from: [n.x, n.y, n.z ?? 0], to, t0: performance.now(), ms };
+    n.fx = n.x; n.fy = n.y; n.fz = n.z ?? 0; n.__calm = false;
+    this.glides.add(n);
+    this.glideStats.started++;
+  }
+
+  private stepGlides(): void {
+    if (!this.glides.size) return;
+    const now = performance.now();
+    for (const n of this.glides) {
+      const g = n.__glide;
+      if (!g) { this.glides.delete(n); continue; }
+      const e = Math.min(1, (now - g.t0) / g.ms), k = e * e * (3 - 2 * e);
+      n.fx = n.x = g.from[0] + (g.to[0] - g.from[0]) * k;
+      n.fy = n.y = g.from[1] + (g.to[1] - g.from[1]) * k;
+      n.fz = n.z = g.from[2] + (g.to[2] - g.from[2]) * k;
+      n.vx = 0; n.vy = 0; n.vz = 0;
+      if (e >= 1) {
+        delete n.__glide;
+        this.glides.delete(n);
+        this.glideStats.done++;
+        n.__calm = true; n.__calmFit = [n.fitX, n.fitY, n.fitZ];   // held where it landed
+      }
+    }
+  }
+
+  /**
+   * The governor: no free node moves further than this in one tick, whatever
+   * the forces add up to (2026-09-29, the flight recorder: stored chunks
+   * jumped 70-90 units in a frame -- collide resolving a whole overlap at
+   * once after a resize, home yanking a node 400 units from its fit back at
+   * alpha * 0.55 of the distance). A glide or a pin sets its own position and
+   * is not governed. Applied after the tick, so the order forces run in
+   * cannot let one escape it.
+   */
+  static GOVERNOR = 2.5;
+  /** Planted by the governor check: forces move nodes as far as they like. */
+  plantNoGovernor = false;
+  governorStats = { clamped: 0, ticks: 0 };
+
+  private govern(): void {
+    const g: any = this.graph;
+    if (!g) return;
+    this.governorStats.ticks++;
+    const cap = GraphView.GOVERNOR;
+    for (const n of g.graphData().nodes as any[]) {
+      const x = n.x, y = n.y, z = n.z ?? 0;
+      if (!Number.isFinite(x)) continue;
+      if (!this.plantNoGovernor && n.__px !== undefined && n.fx == null && !n.__glide) {
+        const dx = x - n.__px, dy = y - n.__py, dz = z - n.__pz;
+        const d = Math.hypot(dx, dy, dz);
+        if (d > cap) {
+          const k = cap / d;
+          n.x = n.__px + dx * k; n.y = n.__py + dy * k; n.z = n.__pz + dz * k;
+          n.vx = (n.vx ?? 0) * k; n.vy = (n.vy ?? 0) * k; n.vz = (n.vz ?? 0) * k;
+          this.governorStats.clamped++;
+        }
+      }
+      n.__px = n.x; n.__py = n.y; n.__pz = n.z ?? 0;
+    }
+  }
+
+  private touchActive(url: string, ms = 4000): void {
+    if (url) this.activeUntil.set(String(url).split("#")[0], performance.now() + ms);
+  }
+
+  /**
+   * Every stored node on a page the stream is NOT changing is held where it
+   * settled (fx/fy/fz); the page browsed, and any page a drain, placement,
+   * fold or collapse touched in the last 4 s, stays free. A held node whose
+   * own fit moves (an online UMAP update) is let go to follow it.
+   */
+  private calm(nodes: any[]): void {
+    const now = performance.now();
+    if (now < this.calmFrom) return;
+    const browsing = String(this.browsingUrl ? this.browsingUrl() : "").split("#")[0];
+    for (const n of nodes) {
+      if (n.force || n.x === undefined || n.__glide) continue;
+      const u = String(n.url || "").split("#")[0];
+      // Per NODE, as Addendum IX reads: "what is drawn holds still, only the
+      // newcomers settle". A stored node is free for 3 s after it is placed,
+      // moved by its fit or resized -- the page it is on being streamed does
+      // not free the rest of it (the first, page-level version left the
+      // browsed page's own 98 nodes vibrating).
+      const active = this.plantNoCalm || (n.__freeUntil || 0) > now;
+      if (active) {
+        if (n.__calm) { n.fx = undefined; n.fy = undefined; n.fz = undefined; n.__calm = false; }
+        continue;
+      }
+      if (n.__calm) {
+        const f = n.__calmFit;
+        if (f && (n.fitX !== f[0] || n.fitY !== f[1] || n.fitZ !== f[2])) {
+          n.fx = undefined; n.fy = undefined; n.fz = undefined; n.__calm = false;
+          n.__freeUntil = now + 3000;
+          this.calmStats.released++;
+        }
+        continue;
+      }
+      if (n.fx != null || !Number.isFinite(n.x)) continue;     // held by something else
+      n.fx = n.x; n.fy = n.y; n.fz = n.z ?? 0;
+      n.vx = 0; n.vy = 0; n.vz = 0;
+      n.__calm = true; n.__calmFit = [n.fitX, n.fitY, n.fitZ];
+      this.calmStats.pinned++;
+    }
+  }
+
+  /** The 3D view's flight recorder (`motion.ts`): read by the harness. */
+  motion = new MotionRecorder();
   /** Planted by G-107's check: pick proxies the raycaster cannot hit. */
   plantNoPick = false;
   /** Planted by G-81's check: chunk pictures kept on the node, never drawn. */
@@ -2226,6 +2391,7 @@ export class GraphView extends ItemView {
     const renderer: any = graph.renderer();
     if (!renderer.__domvecTimed) {
       const draw = renderer.render.bind(renderer);
+      renderer.__domvecDraw = draw;
       renderer.render = (scene: any, camera: any) => {
         const t = performance.now();
         draw(scene, camera);
@@ -2234,10 +2400,39 @@ export class GraphView extends ItemView {
       };
       renderer.__domvecTimed = true;
     }
+    // Every graphData swap and reheat on the recorder's clock.
+    const gd = graph.graphData.bind(graph), reheat = graph.d3ReheatSimulation?.bind(graph);
+    graph.graphData = (...a: any[]) => {
+      if (a.length) this.motion.event("graphData", { nodes: a[0]?.nodes?.length, links: a[0]?.links?.length });
+      return gd(...a);
+    };
+    if (reheat) graph.d3ReheatSimulation = (...a: any[]) => { this.motion.event("reheat"); return reheat(...a); };
+    const V3 = new THREE.Vector3();
     const tick = (t: number) => {
       this.batchRaf = requestAnimationFrame(tick);
       const g: any = this.graph;
       if (!g || !this.batch) return;
+      this.stepGlides();
+      if (this.motion.recording) {
+        const cam = g.camera(), el = g.renderer().domElement;
+        const W = el.clientWidth || 1, H = el.clientHeight || 1;
+        this.motion.box = { w: W, h: H };
+        cam.updateMatrixWorld();
+        const tanHalf = Math.tan(((cam.fov || 50) * Math.PI) / 360);
+        const rs0 = g.nodeRelSize();
+        const cp = cam.position, cq = cam.quaternion;
+        this.motion.camera([cp.x, cp.y, cp.z, cq.x, cq.y, cq.z, cq.w]);
+        this.motion.linksNow = () => g.graphData().links;
+        this.motion.frame(g.graphData().nodes,
+          (x, y, z) => {
+            V3.set(x, y, z).applyMatrix4(cam.matrixWorldInverse);
+            const depth = -V3.z;
+            V3.set(x, y, z).project(cam);
+            return [(V3.x + 1) / 2 * W, (1 - V3.y) / 2 * H, depth];
+          },
+          (n) => this.lookOf(n, rs0, media).half,
+          (depth) => (H / 2) / (depth * tanHalf));
+      }
       if (this.lastFrameAt) {
         this.frameGaps.push(t - this.lastFrameAt);
         if (this.frameGaps.length > 600) this.frameGaps.splice(0, 100);
@@ -2257,6 +2452,70 @@ export class GraphView extends ItemView {
       this.batch.sync(d.nodes, d.links, (n) => this.lookOf(n, rs, media));
     };
     this.batchRaf = requestAnimationFrame(tick);
+  }
+
+  private inspectRT: any = null;
+  private inspectCanvas: HTMLCanvasElement | null = null;
+
+  /**
+   * A second camera on ONE page, rendered off-screen: what the reader would
+   * see zoomed onto it, without moving the reader's camera (2026-09-29: the
+   * glitches live at the page's scale, and at the default zoom an open page's
+   * 1,109 chunks are a 9-pixel dot). Same scene, same batch, the reader's
+   * viewing direction; framed on the page's nodes. Returns a PNG data URL.
+   */
+  inspect(url = "", size = 480, pad = 1.25): any {
+    const g: any = this.graph;
+    if (!g) return { error: "no graph" };
+    const d = g.graphData();
+    const u = url || (this.browsingUrl ? this.browsingUrl() : "");
+    const members = d.nodes.filter((n: any) => n.url === u && Number.isFinite(n.x));
+    if (!members.length) return { error: "nothing drawn for " + u };
+    const c = [0, 0, 0];
+    for (const n of members) { c[0] += n.x; c[1] += n.y; c[2] += n.z || 0; }
+    c[0] /= members.length; c[1] /= members.length; c[2] /= members.length;
+    const dist = members.map((n: any) => Math.hypot(n.x - c[0], n.y - c[1], (n.z || 0) - c[2])).sort((a: number, b: number) => a - b);
+    const r = Math.max(1, dist[Math.floor(0.95 * (dist.length - 1))]);
+    const main = g.camera();
+    const back0 = pad * r / Math.tan((20 * Math.PI) / 180);
+    // The near plane just in front of the page: a node between this camera
+    // and the page (another page's, say) otherwise fills the frame -- the
+    // first inspection film was dominated by exactly that.
+    const cam = new THREE.PerspectiveCamera(40, 1, Math.max(r / 200, back0 - 1.3 * r), back0 + 1.3 * r);
+    cam.quaternion.copy(main.quaternion);
+    const back = new THREE.Vector3(0, 0, 1).applyQuaternion(main.quaternion).multiplyScalar(back0);
+    cam.position.set(c[0], c[1], c[2]).add(back);
+    cam.updateMatrixWorld();
+    const renderer: any = g.renderer();
+    if (!this.inspectRT || this.inspectRT.width !== size) {
+      this.inspectRT?.dispose();
+      this.inspectRT = new THREE.WebGLRenderTarget(size, size);
+      this.inspectRT.texture.colorSpace = THREE.SRGBColorSpace;
+    }
+    const prevTarget = renderer.getRenderTarget();
+    const prevColor = new THREE.Color(); renderer.getClearColor(prevColor);
+    const prevAlpha = renderer.getClearAlpha();
+    renderer.setRenderTarget(this.inspectRT);
+    renderer.setClearColor(0x1e1e1e, 1);
+    renderer.clear();
+    (renderer.__domvecDraw || renderer.render.bind(renderer))(g.scene(), cam);
+    const px = new Uint8Array(size * size * 4);
+    renderer.readRenderTargetPixels(this.inspectRT, 0, 0, size, size, px);
+    renderer.setRenderTarget(prevTarget);
+    renderer.setClearColor(prevColor, prevAlpha);
+    if (!this.inspectCanvas) this.inspectCanvas = document.createElement("canvas");
+    const cv = this.inspectCanvas;
+    cv.width = size; cv.height = size;
+    const ctx = cv.getContext("2d")!;
+    const img = ctx.createImageData(size, size);
+    for (let y = 0; y < size; y++) img.data.set(px.subarray((size - 1 - y) * size * 4, (size - y) * size * 4), y * size * 4);
+    ctx.putImageData(img, 0, 0);
+    // Where each node of the page lands in THIS image, for annotation.
+    const at = (n: any) => { const v = new THREE.Vector3(n.x, n.y, n.z || 0).project(cam); return [Math.round((v.x + 1) / 2 * size), Math.round((1 - v.y) / 2 * size)]; };
+    return { png: cv.toDataURL("image/png"), url: u, nodes: members.length, radius: Math.round(r * 100) / 100,
+             center: c.map((v) => Math.round(v * 100) / 100), at_ms: Math.round(performance.now()),
+             streaming: members.filter((n: any) => n.force).length,
+             points: members.slice(0, 1500).map((n: any) => [String(n.id).slice(0, 24), n.force ? 1 : 0, ...at(n)]) };
   }
 
   /** One sync now, outside the frame loop: a check reads the stats and the
@@ -3024,6 +3283,7 @@ export class GraphView extends ItemView {
 
     for (const node of incoming) {
       if (!node || !node.cid || !node.pos) continue;
+      this.touchActive(node.url || "");
       const built = this.nodeFrom(node);
       if (this.plantScatter && node.level !== "page") {
         const j = () => (Math.random() - 0.5) * 60;
@@ -3039,10 +3299,12 @@ export class GraphView extends ItemView {
           projX: built.fitX, projY: built.fitY, projZ: built.fitZ,
           tokens: built.tokens, image: built.image, color: built.color,
           fitX: built.fitX, fitY: built.fitY, fitZ: built.fitZ,
-          x: built.x, y: built.y, z: built.z,
         });
+        // To its new place by a glide, not a jump.
+        this.glide(existing, [built.x, built.y, built.z]);
         out.moved++;
       } else {
+        built.__freeUntil = performance.now() + 3000;
         arrived.push(built);
         byId.set(node.cid, built);
         out.added++;
@@ -3078,6 +3340,7 @@ export class GraphView extends ItemView {
       }
     }
     out.edges = this.addEdges(data, edges);
+    this.motion.event("placed", { added: out.added, moved: out.moved, edges: out.edges });
     this.fitChunkSizes(data);
     this.graph.graphData(data);
     void this.drawContainment();
@@ -3572,6 +3835,8 @@ export class GraphView extends ItemView {
     // after a placement, a move by the fit, a resize or a collapse.
     let gatedNodes: any[] = [];
     const gated: any = (alpha: number) => {
+      // What the stream is not changing holds still (calm, above).
+      this.calm(gatedNodes);
       // EVERY tick, gate open or not: a non-finite position must never reach
       // an octree (D-38, below).
       this.sanitize(gatedNodes);
@@ -3616,6 +3881,8 @@ export class GraphView extends ItemView {
     // point; without a reheat it was the finishing point too.
     graph.d3ReheatSimulation();
     this.graph = graph;
+    this.calmFrom = performance.now() + 6000;
+    graph.onEngineTick(() => this.govern());
     this.startBatch(graph, media);
     // The profiler's listener reads the scene through this, so "visible"
     // is decided by what is drawn and not by what `absorb` returned.

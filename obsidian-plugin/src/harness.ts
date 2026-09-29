@@ -557,6 +557,17 @@ export function installHarness(app: App, sidecarBase: () => string) {
       stop: () => stress.stop(),
       state: () => stress.state(),
     },
+    /** The 3D view's flight recorder: every node's motion, per-force pushes and
+     *  pipeline events over a window, then the anomalies (`motion.ts`).
+     *  `start` returns at once; `state().result` once the window closes. */
+    motion: {
+      start: (o?: any) => leaf("domvec-graph-view")?.view?.motion?.start(o || {}) ?? { error: "no graph view" },
+      stop: () => leaf("domvec-graph-view")?.view?.motion?.stop() ?? null,
+      state: () => leaf("domvec-graph-view")?.view?.motion?.state() ?? { error: "no graph view" },
+    },
+    /** An off-screen camera framed on one page (default: the one browsed),
+     *  rendered to a PNG data URL -- the page at the scale its glitches live. */
+    inspect: (url?: string, size?: number) => leaf("domvec-graph-view")?.view?.inspect(url || "", size || 480) ?? { error: "no graph view" },
     /** Milliseconds since the reader last used this app (rule g's gate). */
     reader: { idleMs: () => Date.now() - ((window as any).__domvecReaderAt || 0) },
     /** The pipeline profiler: traces from the page to the pixels. */

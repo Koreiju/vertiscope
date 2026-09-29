@@ -217,6 +217,35 @@ TOOLS: List[Dict] = [
             "path": {"type": "string", "description": "Where to write it (optional)"}}},
     },
     {
+        "name": "graph_motion",
+        "description": (
+            "Film the 3D graph while the pipeline feeds it. Records every node's "
+            "world and screen motion per rendered frame, the velocity each force "
+            "added to it, and the pipeline's events (drains, placements, folds, "
+            "graphData swaps, reheats); optionally drives rapid scroll+hover in the "
+            "browser cell meanwhile. Returns the anomalies -- teleports, vibration, "
+            "drift, runaways, flicker, pulsing sizes, page churn, long links, and "
+            "why nodes are not visible -- each with the forces that moved it and "
+            "the event just before; writes an annotated overview, contact sheets "
+            "of the overview and of a zoomed off-screen film of the open page, and "
+            "the full JSON."),
+        "inputSchema": {"type": "object", "properties": {
+            "seconds": {"type": "number", "description": "Recording window (default 16, max 60)"},
+            "drive_seconds": {"type": "number", "description": "Rapid scroll+hover seconds (default 8; 0 = only watch)"},
+            "url": {"type": "string", "description": "Page to drive and film (default: the one browsed)"},
+            "reload": {"type": "boolean", "description": "Reload the plugin first so the build on disk is what runs"}}},
+    },
+    {
+        "name": "graph_inspect",
+        "description": (
+            "An off-screen camera framed on one page (default: the one browsed), "
+            "from the reader's viewing direction, rendered to a PNG without moving "
+            "the reader's camera -- the page at the scale its glitches live."),
+        "inputSchema": {"type": "object", "properties": {
+            "url": {"type": "string"}, "size": {"type": "integer"},
+            "path": {"type": "string", "description": "Where to write the PNG (optional)"}}},
+    },
+    {
         "name": "verify_state",
         "description": (
             "The in-app check run's state right now: whether it is running, "
@@ -331,6 +360,9 @@ class DomvecMCP:
             "confirm": self._confirm,
             "checks_box": lambda a: self.live().observe_checks(),
             "app_screenshot": lambda a: self.live().screenshot(str(a.get("path") or "")),
+            "graph_motion": self._graph_motion,
+            "graph_inspect": lambda a: __import__("domvec.obsidian.motionfilm", fromlist=["inspect"]).inspect(
+                self.live(), str(a.get("url") or ""), int(a.get("size") or 480), str(a.get("path") or "")),
             "verify_state": self._verify_state,
             "design_state": self._design_state,
         }
@@ -394,6 +426,12 @@ class DomvecMCP:
         return self.live().verify(args.get("only") or None,
                                   wait=args.get("wait", True) is not False,
                                   timeout_s=float(args.get("timeout_s") or 1200))
+
+    def _graph_motion(self, args: Dict) -> Dict:
+        from .motionfilm import film
+        return film(self.live(), seconds=min(60.0, float(args.get("seconds") or 16)),
+                    drive_seconds=float(args.get("drive_seconds") if args.get("drive_seconds") is not None else 8),
+                    url=str(args.get("url") or ""), reload=bool(args.get("reload")))
 
     def _verify_state(self, args: Dict) -> Dict:
         """Progress of the in-app run, without starting one."""

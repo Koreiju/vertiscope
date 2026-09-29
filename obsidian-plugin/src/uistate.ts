@@ -119,6 +119,9 @@ function graphState(view: any) {
     render: typeof view?.renderStats === "function" ? view.renderStats() : null,
     // D-38: nodes caught with a non-finite / runaway position before an octree.
     octree_skips: view?.octreeSkips || null,
+    calm: view?.calmStats ? { ...view.calmStats, planted: !!view.plantNoCalm } : null,
+    glide: view?.glideStats ? { ...view.glideStats, planted: !!view.plantTeleport } : null,
+    governor: view?.governorStats ? { ...view.governorStats, planted: !!view.plantNoGovernor } : null,
     non_finite: view ? { count: view.nonFiniteCount || 0, first: (view.nonFinite || []).slice(0, 5),
                          by_force: (view.nanBy || []).slice(0, 10) } : null,
   };

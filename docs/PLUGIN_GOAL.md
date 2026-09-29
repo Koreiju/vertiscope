@@ -2056,6 +2056,19 @@ I'd attack the cost with instancing and texture atlases instead." Recorded as
 *Read as: an open page draws every chunk stored for it; the render budget is
 met by HOW the scene is drawn (instancing, an atlas), never by drawing less.*
 
+> Try again
+
+> See our current 3D gui. The force-directed methods are still throwing
+> glitches. You'll need to improve the fidelity of your MCP tooling harness to
+> capture the details of what anomalous and specific behavior I'm describing.
+> Get inventive.
+
+*Read as: (1) the harness must SEE motion -- per frame, per node, per force,
+per pipeline event -- and at the scale the glitch lives (an open page's
+chunks are a 9-pixel dot at the default zoom), exposed as MCP tools; (2) the
+glitches it finds in the force-directed view are defects to fix, each with a
+planted arm.*
+
 ---
 
 

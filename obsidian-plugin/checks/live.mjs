@@ -2214,6 +2214,62 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-108",
+      asks: "while a page streams into the 3D view, nothing elsewhere moves, and what moves on the page glides: no node jumps across a frame, none vibrates",
+      async run() {
+        // 2026-09-29: "The force-directed methods are still throwing glitches."
+        // The flight recorder (`motion.ts`) caught, on the live forum: 210
+        // teleports and 257 vibrating nodes in 20 s, the worst on pages nobody
+        // was touching; chunks assigned new fit coordinates outright (190-256
+        // units in a frame); collide resolving whole overlaps at once. Three
+        // fixes, three planted arms, one deterministic input: the busy feed
+        // (40 batches, 120 ms apart), recorded with NO cameras -- screenshots
+        // and inspection frames cut the frame rate from 197 to 57 fps and put
+        // stalls into what they measured.
+        const fixtures = await serveFixtures();
+        const arm = (flags, tag) => evaluate(`(async () => {
+          ${PREP}
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          const flags = ${JSON.stringify(flags)};
+          Object.assign(v, flags);
+          try {
+            const url = ${JSON.stringify(fixtures.origin)} + "/busy_feed.html?every=120&rounds=40&g108=" + ${JSON.stringify(tag)} + Date.now();
+            b.go(url);
+            await land(url, 25000);
+            await sleep(800);
+            v.motion.start({ seconds: 14 });
+            await sleep(14500);
+            let r = null;
+            for (let i = 0; i < 20 && !r; i++) { r = v.motion.state().result; if (!r) await sleep(500); }
+            if (!r) return { error: "the recorder returned nothing" };
+            const here = (u) => String(u).split("#")[0] === url;
+            const split = (k) => { let on = 0, off = 0; for (const [u, n] of (r.by_url && r.by_url[k]) || []) { if (here(u)) on += n; else off += n; } return { on, off }; };
+            return { flags, url, frames: r.frames, fps: r.fps, counts: r.counts, teleports: split("teleports"),
+                     vibrating: split("vibrating"), drifting: split("drifting"), stalls: { n: r.stalls.n, worst_ms: r.stalls.worst_ms },
+                     events: (r.events || []).reduce((m, e) => (m[e.kind] = (m[e.kind] || 0) + 1, m), {}),
+                     worst: (r.teleports || []).slice(0, 3).map((a) => ({ id: a.id.slice(0, 40), force: a.force, world_jump: a.world_jump,
+                                                                           gap_ms: a.jump_gap_ms, forces: a.forces, near: a.near_event && a.near_event.kind })) };
+          } finally {
+            Object.assign(v, Object.fromEntries(Object.keys(flags).map((k) => [k, false])));
+          }
+        })()`, { timeout: 90000 });
+        const clean = await arm({}, "c");
+        const noCalm = await arm({ plantNoCalm: true }, "n");
+        const noGovernor = await arm({ plantNoGovernor: true }, "g");
+        const teleport = await arm({ plantTeleport: true }, "t");
+        const still = (x) => !x.error && x.teleports.off === 0 && x.vibrating.off === 0 && x.drifting.off === 0;
+        const smooth = (x) => !x.error && x.counts.teleports <= 5 && x.counts.vibrating <= 2;
+        const streamed = (x) => !x.error && (x.events.drain || 0) >= 5;
+        return {
+          // Each fix answerable for its own bar: calm for "nothing elsewhere",
+          // the governor and the glide for "no jumps" on the page.
+          pass: streamed(clean) && still(clean) && smooth(clean)
+            && !(still(noCalm) && smooth(noCalm)) && !smooth(noGovernor) && !smooth(teleport),
+          evidence: { clean, no_calm: noCalm, no_governor: noGovernor, teleport },
+        };
+      },
+    },
+    {
       id: "G-107",
       asks: "the 3D view draws every node and edge it holds in a bounded number of draw calls, each at the size the collider reserves, and the pointer still picks each node",
       async run() {
