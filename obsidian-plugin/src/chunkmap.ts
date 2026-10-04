@@ -22,6 +22,7 @@
  */
 
 import type { Sidecar } from "./sidecar";
+import type { CentralDiff } from "./types";
 
 export class ChunkMap {
   url = "";
@@ -131,6 +132,61 @@ export class ChunkMap {
         }
       }
     }
+  }
+
+  /**
+   * The central diff's retirements and renames, applied to this map.
+   *
+   * The store's patricia trie dropped `retired` cids and gave `renamed`
+   * content a new cid; this map is a projection of the same trie keyed on the
+   * same cid, so it makes the same two moves rather than keep a chunk the
+   * store no longer has (which hover would keep resolving to). Run AFTER
+   * `patch`: the capture's `map_delta` already names a renamed chunk's new
+   * addresses, and a retired cid's entries are dropped only where it still
+   * owns them (a newer chunk that took the address keeps it). O(delta): only
+   * the retired chunks' own addresses and their ancestor paths are visited.
+   */
+  applyDiff(diff: CentralDiff | null | undefined): { dropped: number; renamed: number } {
+    const out = { dropped: 0, renamed: 0 };
+    if (!diff || diff.url !== this.url) return out;
+    const renamed = diff.renamed || {};
+    const goneNow = new Set<string>();
+    for (const old of diff.retired || []) {
+      const to = renamed[old];
+      const xs = this.byCid.get(old) || [];
+      if (to && !this.byCid.has(to) && xs.length) {
+        // The new cid has no addresses of its own yet: it inherits the old
+        // chunk's (same content, shifted index).
+        this.byCid.set(to, xs.slice());
+        for (const x of xs) {
+          if (this.byXpath.get(x) === old) this.byXpath.set(x, to);
+          let cut = x.lastIndexOf("/");
+          while (cut > 0) {
+            const up = x.slice(0, cut);
+            if (this.byPrefix.get(up) === old) this.byPrefix.set(up, to);
+            cut = up.lastIndexOf("/");
+          }
+        }
+        this.byCid.delete(old);
+        if (this.stored.delete(old)) this.stored.add(to);
+        out.renamed++;
+        continue;
+      }
+      for (const x of xs) {
+        if (this.byXpath.get(x) === old) this.byXpath.delete(x);
+        let cut = x.lastIndexOf("/");
+        while (cut > 0) {
+          const up = x.slice(0, cut);
+          if (this.byPrefix.get(up) === old) this.byPrefix.delete(up);
+          cut = up.lastIndexOf("/");
+        }
+      }
+      if (this.byCid.delete(old)) out.dropped++;
+      this.stored.delete(old);
+      goneNow.add(old);
+    }
+    if (goneNow.size) this.nodes = this.nodes.filter((n: any) => !goneNow.has(n?.cid));
+    return out;
   }
 
   /**

@@ -121,6 +121,10 @@ function graphState(view: any) {
     octree_skips: view?.octreeSkips || null,
     calm: view?.calmStats ? { ...view.calmStats, planted: !!view.plantNoCalm } : null,
     glide: view?.glideStats ? { ...view.glideStats, planted: !!view.plantTeleport } : null,
+    // G-109: the central diff applied to this view (retired / renamed / known),
+    // and the last stale-stored reading (drawn chunks the store no longer has).
+    diff: view?.diffStats ? { ...view.diffStats, planted: !!view.plantNoDiff,
+                              stale: view.staleDetail || null } : null,
     governor: view?.governorStats ? { ...view.governorStats, planted: !!view.plantNoGovernor } : null,
     non_finite: view ? { count: view.nonFiniteCount || 0, first: (view.nonFinite || []).slice(0, 5),
                          by_force: (view.nanBy || []).slice(0, 10) } : null,

@@ -36,14 +36,31 @@ infinite-scrolling forum looks like from inside the page.</p>
   }
   var k = 0;
   window.__born = [];
+  // `?shift=1` (G-109): each round re-homes the feed in a container of the
+  // OTHER tag (section <-> div), so every chunk already on the page changes
+  // its address and keeps its content. A pure prepend does not do this: the
+  // positional address of an existing chunk survives it (only the last
+  // sibling gains a new one), so nothing is retired and nothing renamed.
+  function rehome() {
+    var next = document.createElement(feed.tagName === "SECTION" ? "div" : "section");
+    while (feed.firstChild) next.appendChild(feed.firstChild);
+    feed.parentNode.replaceChild(next, feed);
+    feed = next;
+  }
   function batch() {
+    if (shift) rehome();
     for (var j = 0; j < 2; j++) {
       k++;
       var a = document.createElement("article");
       a.innerHTML = "<h3>Topic " + k + ": " + sentence(k, 4) + "</h3>" +
-        "<p>" + sentence(k, 38) + ".</p>" +
+        "<p>" + sentence(k, perArticle) + ".</p>" +
         "<a href=\"#topic-" + k + "\">" + (3 + k % 9) + " replies</a>";
-      feed.appendChild(a);
+      // `?prepend=1` (G-109): each batch goes in at the TOP, so every chunk
+      // already on the page shifts one article down and its positional
+      // address (hence its cid) changes while its content does not -- the
+      // renames the central diff has to carry.
+      if (prepend && feed.firstChild) feed.insertBefore(a, feed.firstChild);
+      else feed.appendChild(a);
     }
     // The reader follows the feed down, as on a long scroll.
     window.scrollTo(0, document.body.scrollHeight);
@@ -54,6 +71,11 @@ infinite-scrolling forum looks like from inside the page.</p>
   // `?every=ms&rounds=n` (D-42 drains it faster than a capture can store).
   var q = new URLSearchParams(location.search);
   var every = Number(q.get("every")) || 450, total = Number(q.get("rounds")) || 20;
+  var prepend = q.get("prepend") === "1";
+  var shift = q.get("shift") === "1";
+  // `?words=n`: words per article (G-109 sizes each article to about one chunk,
+  // so a shift renames whole chunks instead of re-cutting them).
+  var perArticle = Number(q.get("words")) || 38;
   var rounds = 0;
   function tick() {
     if (rounds++ >= total) return;
