@@ -131,3 +131,47 @@ def test_the_diff_is_recorded_with_a_rising_sequence(monkeypatch):
     assert b["seq"] == a["seq"] + 1
     assert [x["seq"] for x in sidecar._DIFFS] == [a["seq"], b["seq"]]
     assert b["kind"] == "settle" and "at" in b
+
+
+# -- across visits (2026-10-04, measured live) ---------------------------------
+#
+# A revisit of a gamerevolution guide re-rendered its 26 stored chunks at
+# shifted xpaths; the store ended with 50 rows, 24 of them byte-identical
+# copies under new cids. The store's content is the spine: a stored chunk the
+# revisit draws under a new address is that chunk renamed.
+
+def _sessions_over_store():
+    from domvec.obsidian.sidecar import _digest
+    stored = {"old1": "alpha", "old2": "beta", "old3": "gone"}
+    return {"stored": set(stored), "stored_md": {c: _digest(m) for c, m in stored.items()}}
+
+
+def test_a_revisit_at_shifted_addresses_renames_the_stored_chunks():
+    session = _sessions_over_store()
+    d = diff(session, render(new1="alpha", new2="beta", new4="fresh"))
+    assert d["renamed"] == {"old1": "new1", "old2": "new2"}
+    # The old rows retire (the store keeps ONE row per content), the chunk
+    # with no counterpart in this render is left to the settle (Q.002).
+    assert sorted(d["retired"]) == ["old1", "old2"]
+    assert "old3" not in d["retired"]
+    # Each stored cid is consumed once: a later capture does not rename again.
+    again = diff(session, render(new1="alpha", new2="beta", new4="fresh", new5="alpha"), passno=1)
+    assert again["renamed"] == {} and again["retired"] == []
+
+
+def test_planted_without_the_stored_content_a_revisit_duplicates():
+    """The arm that proves the test above can fail: the cids alone (the
+    behaviour before this) see three new chunks and retire nothing, which is
+    the 26 -> 50 the store measured."""
+    session = _sessions_over_store()
+    session.pop("stored_md")
+    d = diff(session, render(new1="alpha", new2="beta", new4="fresh"))
+    assert d["renamed"] == {} and d["retired"] == []
+    assert sorted(d["added"]) == ["new1", "new2", "new4"]
+
+
+def test_a_stored_chunk_still_at_its_address_is_not_renamed_to_a_copy():
+    from domvec.obsidian.sidecar import _digest
+    session = {"stored": {"a"}, "stored_md": {"a": _digest("same")}}
+    d = diff(session, render(a="same", b="same"))
+    assert d["renamed"] == {} and d["retired"] == [] and d["known"] == ["a"]

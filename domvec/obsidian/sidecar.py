@@ -288,6 +288,29 @@ def _page_diff(session: dict, url: str, passno: int, all_chunks, dirty) -> Optio
         cands = by_digest.get(prev[old]) if prev else None
         if cands:
             renamed[old] = cands.pop(0)
+    # **Across visits** (2026-10-04, measured live): a page re-rendered on a
+    # revisit draws the same content at shifted xpaths -- 26 stored chunks
+    # became 50 after one revisit of a gamerevolution guide, every one of the
+    # 24 new cids a byte-identical copy of an old one. A stored cid that is
+    # NOT in this render, whose markdown this render draws under a new cid, is
+    # that chunk renamed: the old row retires, the new cid takes its place,
+    # and the views carry the node instead of spawning another. Each stored
+    # cid is matched at most once per session (`stored_md` is consumed).
+    pool = session.get("stored_md") or {}
+    if pool:
+        free = {}
+        for old, dg in pool.items():
+            if old not in now:
+                free.setdefault(dg, []).append(old)
+        for c in list(added):
+            olds = free.get(now[c])
+            if olds and by_digest.get(now[c]) and c in by_digest[now[c]]:
+                old = olds.pop(0)
+                renamed[old] = c
+                retired.append(old)
+                pool.pop(old, None)
+                stored.discard(old)
+                by_digest[now[c]].remove(c)
     return {"kind": "capture", "url": url, "passno": passno, "added": added,
             "dirty": [c.cid for c in dirty], "retired": retired, "renamed": renamed,
             # Rendered now AND already in the store before this visit: drawn
@@ -1276,9 +1299,13 @@ class _Handler(BaseHTTPRequestHandler):
             # The store's cids for this page as the visit begins (the trie on
             # the DB is the spine): the diff judges ADDED against it.
             try:
-                session["stored"] = {c.cid for c in self.workspace.store.chunks(url)}
+                _rows = list(self.workspace.store.chunks(url))
+                session["stored"] = {c.cid for c in _rows}
+                # Their content, for the cross-visit rename (`_page_diff`).
+                session["stored_md"] = {c.cid: _digest(c.md) for c in _rows}
             except Exception:                       # noqa: BLE001
                 session["stored"] = set()
+                session["stored_md"] = {}
             sessions[url] = session
 
         started = time.perf_counter()
