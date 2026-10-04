@@ -1655,6 +1655,69 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-109",
+      asks: "every view applies the backend's one central diff: a chunk the store retired (a shift moved its address) is no longer drawn in the 3D view, and a renamed chunk's node is carried over rather than left behind",
+      async run() {
+        // 2026-10-04: after browsing duckduckgo.com then a search, 24 of 65
+        // stored-chunk nodes had no chunk in the store (retired at settle,
+        // never removed from the view). The page below PREPENDS each batch
+        // and re-homes the feed in a container of the other tag every round
+        // (`shift=1`), so every chunk already drawn changes its positional
+        // cid while its content stays: the backend names those as `renamed`
+        // (a pure prepend does not -- measured on the pipeline offline: 0
+        // retired, 0 renamed), and the view must drop the old node and
+        // carry its place to the new one. Clean: after the feed finishes and the
+        // queue drains no drawn stored-chunk node lacks a chunk in the store
+        // AND renames actually happened (non-vacuity of the clean arm).
+        // Planted (`plantNoDiff`): the same page, the view ignores the diff --
+        // it must read stale nodes, or the metric measures nothing.
+        const fixtures = await serveFixtures();
+        const arm = (planted) => evaluate(`(async () => {
+          ${PREP}
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          b.plant.clear();
+          v.plantNoDiff = ${planted};
+          try {
+            const url = ${JSON.stringify(fixtures.origin)} + "/busy_feed.html?prepend=1&shift=1&words=120&every=4000&rounds=8&g109=" + (${planted} ? "p" : "c") + Date.now();
+            const before = { ...v.diffStats };
+            b.go(url);
+            await land(url, 25000);
+            // 2.5 s to the first batch, 8 x 4 s (slow enough for each
+            // batch's chunks to be embedded and drawn before the next shift
+            // retires them), then the store and the projector catch up.
+            await sleep(2500 + 8 * 4000 + 1500);
+            const t0 = Date.now();
+            while (Date.now() - t0 < 40000 && (b.capturing || (b.captureQueue || []).length)) await sleep(250);
+            await sleep(4000);
+            const drawn = v.graph.graphData().nodes.filter((n) => !n.force && n.level !== "page" && n.url === url).length;
+            const stale = await v.staleStored();
+            const d = v.diffStats;
+            return { planted: ${planted}, url, drawn_chunks: drawn, stale, detail: v.staleDetail,
+                     diff: { applied: d.applied - before.applied, retired_removed: d.retired_removed - before.retired_removed,
+                             renamed: d.renamed - before.renamed, carried: d.carried - before.carried, known: d.known - before.known },
+                     browser: { ...b.diffsApplied } };
+          } finally {
+            v.plantNoDiff = false;
+            b.plant.clear();
+          }
+        })()`, { timeout: 150000 });
+        try {
+          const clean = await arm(false);
+          const planted = await arm(true);
+          const cleanOk = !clean.error && clean.drawn_chunks > 0 && clean.stale === 0
+            && clean.diff.applied > 0 && clean.diff.renamed > 0;
+          const plantedBites = !planted.error && planted.stale > 0;
+          return {
+            pass: cleanOk && plantedBites,
+            evidence: { clean, planted,
+                        bar: "clean: >= 1 drawn chunk, 0 drawn stored chunks missing from the store, diffs applied and renames seen; planted (plantNoDiff): stale > 0" },
+          };
+        } finally {
+          await fixtures.close();
+        }
+      },
+    },
+    {
       id: "D-37",
       asks: "new diffs are outlined where the reader looks: a chunk that loaded off screen is outlined when the reader scrolls to it, until it is saved and has been seen",
       async run() {
