@@ -2270,6 +2270,111 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-110",
+      asks: "right-click on a page (url) node folds its chunks into the node, and right-click again draws the page's whole stored chunk set at its UMAP positions; a folded page stays folded under placements",
+      async run() {
+        // 2026-10-04: "no right-click on central url nodes collapsing the
+        // chunks into the node and expanding the full UMAPped chunk set."
+        // The handler used to release the search scope whatever was clicked.
+        //
+        // One page of the working store, its right-click handler fired the way
+        // the pane fires it (the graph's own `onNodeRightClick` callback, not
+        // a method the check chose), and the claim read off the graph:
+        //   1. chunk nodes drawn -> right-click -> none drawn, the page node
+        //      stays, the scope was not released, and a placement of the
+        //      page's chunks (what a browse produces) does not redraw them;
+        //   2. right-click again -> every chunk the sidecar can place for the
+        //      page is drawn, at the position `place` gave it (the UMAP fit),
+        //      and nothing is drawn that the store does not hold.
+        // "Can place" is asked of the sidecar independently of the pane, so a
+        // pane that drew only the first unfold step (a handful) fails against
+        // a page_map of dozens. The planted arm is the old handler
+        // (`plantNoToggle`): the collapse half must fail.
+        const arm = (planted) => evaluate(`(async () => {
+          ${PREP}
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          const g = v.graph;
+          const base = app.plugins.plugins["domvec-bridge"].settings.sidecar.replace(/\/+$/, "");
+          const poll = async (cond, ms) => { const t = performance.now(); while (performance.now() - t < ms) { if (cond()) return true; await sleep(250); } return cond(); };
+          // The handler the pane registered with the graph, fired as the graph
+          // fires it (no handler registered fires nothing, and the arm fails).
+          const click = (node) => { const h = g.onNodeRightClick(); if (typeof h === "function") h(node); };
+          const origScope = v.onScope, scopeCalls = [];
+          v.onScope = (u) => { scopeCalls.push(u); return origScope.call(v, u); };
+          try {
+            v.plantNoToggle = false;
+            const pages = g.graphData().nodes.filter((n) => n.level === "page" && !n.force && /^https?:/.test(n.url || "")
+              && n.members >= 3 && n.members <= 400).sort((x, y) => (x.members - y.members) || String(x.url).localeCompare(String(y.url)));
+            let page = null, cids = [];
+            for (const p of pages.slice(0, 6)) {
+              const c = await v.sidecar.pageCids(p.url).catch(() => []);
+              if (c.length >= 3) { page = p; cids = c; break; }
+            }
+            if (!page) return { planted: ${planted}, error: "no stored page with >= 3 chunks is drawn as a page node", pages: pages.length };
+            const url = page.url;
+            const chunks = () => g.graphData().nodes.filter((n) => n.url === url && n.level !== "page" && !n.force);
+            const pageNodes = () => g.graphData().nodes.filter((n) => n.id === "page:" + url && !n.force).length;
+            // The state under test: the page's chunks drawn, by the same path.
+            if (!chunks().length) { await v.togglePage(page); await poll(() => chunks().length > 0, 30000); }
+            await sleep(1500);
+            const opened = chunks().length;
+            const map = await (await fetch(base + "/page_map?url=" + encodeURIComponent(url))).json();
+            const mapChunks = Object.keys(map.chunks || {}).length;
+            // What the sidecar can place for this page, independent of the pane.
+            const oracle = await v.sidecar.place(cids);
+            const placeable = ((oracle && oracle.nodes) || []).filter((n) => n.level !== "page" && n.cid).map((n) => n.cid);
+            v.plantNoToggle = ${planted};
+            scopeCalls.length = 0;
+            click(g.graphData().nodes.find((n) => n.id === "page:" + url && !n.force) || page);
+            await poll(() => chunks().length === 0, 4000);
+            const afterCollapse = chunks().length;
+            const collapsed = { drawn: afterCollapse, page_node: pageNodes(), scope_calls: scopeCalls.length,
+                                in_set: v.collapsedByReader.has(url) };
+            // A placement of the page's chunks must not redraw the folded page.
+            let stays = null;
+            if (!${planted}) {
+              const got = await v.sidecar.place(cids.slice(0, 8));
+              if (got && got.nodes) v.absorb(got.nodes, got.edges);
+              await sleep(1500);
+              stays = chunks().length === 0;
+            }
+            scopeCalls.length = 0;
+            click(g.graphData().nodes.find((n) => n.id === "page:" + url && !n.force) || page);
+            let last = -1, steady = 0;
+            await poll(() => { const k = chunks().length; steady = (k === last && k > 0) ? steady + 1 : 0; last = k; return steady >= 8; }, 40000);
+            const drawn = chunks();
+            const ids = new Set(drawn.map((n) => n.id));
+            const have = new Set(cids);
+            const missing = placeable.filter((c) => !ids.has(c));
+            const phantom = [...ids].filter((i) => !have.has(i) && !String(i).startsWith("path:"));
+            return { planted: ${planted}, url, stored: cids.length, page_map_chunks: mapChunks, placeable: placeable.length,
+                     opened, collapsed, stays_collapsed: stays,
+                     expanded: { drawn: drawn.length, missing: missing.length, missing_sample: missing.slice(0, 3),
+                                 phantom: phantom.length, scope_calls: scopeCalls.length,
+                                 in_collapsed_set: v.collapsedByReader.has(url) },
+                     toggles: v.toggled.slice(-4) };
+          } finally {
+            v.onScope = origScope;
+            v.plantNoToggle = false;
+          }
+        })()`, { timeout: 180000 });
+        const clean = await arm(false);
+        const planted = await arm(true);
+        const foldsAndStays = (x) => !x.error && x.opened > 0 && x.collapsed.drawn === 0 && x.collapsed.page_node === 1
+          && x.collapsed.scope_calls === 0 && x.collapsed.in_set && x.stays_collapsed === true;
+        // The expansion is the whole stored set: nothing the sidecar can place
+        // is absent, nothing the store lacks is drawn, and at least the page's
+        // placeable chunks (not a first step's handful) are there.
+        const expandsAll = (x) => !x.error && x.placeable >= 3 && x.expanded.drawn >= x.placeable
+          && x.expanded.missing === 0 && x.expanded.phantom === 0 && !x.expanded.in_collapsed_set
+          && x.expanded.scope_calls === 0;
+        return {
+          pass: foldsAndStays(clean) && expandsAll(clean) && !foldsAndStays(planted),
+          evidence: { clean, planted },
+        };
+      },
+    },
+    {
       id: "G-107",
       asks: "the 3D view draws every node and edge it holds in a bounded number of draw calls, each at the size the collider reserves, and the pointer still picks each node",
       async run() {

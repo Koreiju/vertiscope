@@ -760,7 +760,9 @@ export class GraphView extends ItemView {
         this.life.nodes.set(a.id, { url: d.url, drawnAt: Date.now(), cid });
         if (this.life.nodes.size > 20000) this.life.nodes.delete(this.life.nodes.keys().next().value as string);
       }
-      if (!drawHere) continue;
+      // A page the reader folded by right-click keeps its diff pending, not
+      // drawn: the page node alone stands for it (`collapsedByReader`).
+      if (!drawHere || (a.parent && this.readerCollapsed(d.url))) continue;
       const to = a.parent ? this.parentFor(a.parent, d.url, byId, pageNode) : "";
       const p = to ? byId.get(to) : null;
       // Where it belongs, not a random jitter: a spring length from its
@@ -1299,15 +1301,18 @@ export class GraphView extends ItemView {
     }
     const visible = (url: string) => this.layoutMode !== "projector" || expanded.has(url)
       || !this.projectedPage(url, byId);
-    // Force nodes of collapsed pages are not drawn after the fit.
-    nodes = nodes.filter((n: any) => !n.force || visible(n.url));
+    // Force nodes of collapsed pages are not drawn after the fit; nor are the
+    // chunks of a page the reader folded by right-click, whatever the layout
+    // mode (its root, if it has no page node yet, still is).
+    const shown = (url: string, chunk: boolean) => visible(url) && !(chunk && this.readerCollapsed(url));
+    nodes = nodes.filter((n: any) => !n.force || shown(n.url, n.level !== "page"));
     for (const id of [...byId.keys()]) {
       const n = byId.get(id);
-      if (n.force && !visible(n.url)) byId.delete(id);
+      if (n.force && !shown(n.url, n.level !== "page")) byId.delete(id);
     }
     for (const [id, spec] of this.forceSpecs) {
       if (!spec.parent && this.projectedPage(spec.url, byId)) continue;
-      if (!visible(spec.url)) continue;
+      if (!shown(spec.url, !!spec.parent)) continue;
       if (!byId.has(id)) {
         const n: any = { id, level: spec.parent ? "chunk" : "page", name: spec.title || id,
                          url: spec.url, members: 1, tokens: 0, force: true,
@@ -1361,12 +1366,95 @@ export class GraphView extends ItemView {
     this.motion.event("collapse", { url: url.slice(-50) });
     if (!this.graph || !url || this.openedByReader.has(url)) return;
     if (this.layoutMode !== "projector") return;
+    this.foldChunks(url);
+  }
+
+  /**
+   * Pages whose chunks the reader folded into the page node themselves, by
+   * right-click on it (2026-10-04). The mirror of `openedByReader`: that set
+   * keeps a page's chunks drawn when the reader browses away, this one keeps
+   * them folded when the reader browses TO the page -- `absorb` draws the page
+   * being browsed, and without this a late placement redrew a page the reader
+   * had just collapsed. Read by `absorb` (nothing of a url in here is drawn
+   * from a placement) and cleared by an explicit expand.
+   */
+  collapsedByReader = new Set<string>();
+
+  /** `url` is held folded by the reader (fragment-insensitive, like browsing). */
+  private readerCollapsed(url: string): boolean {
+    return !!url && this.collapsedByReader.size > 0
+      && (this.collapsedByReader.has(url) || this.collapsedByReader.has(url.split("#")[0]));
+  }
+
+  /** Planted (G-110): right-click does what it did before -- release the scope. */
+  plantNoToggle = false;
+
+  /** Every toggle, for the harness. */
+  toggled: { at: number; url: string; action: string; nodes: number }[] = [];
+
+  /**
+   * Right-click on a PAGE node (2026-10-04: "no right-click on central url
+   * nodes collapsing the chunks into the node and expanding the full UMAPped
+   * chunk set"). A toggle on one url's subtree of the trie:
+   *
+   * * chunk nodes of the url are drawn -> they fold into the page node (its
+   *   root in the trie); the url joins `collapsedByReader`, leaves
+   *   `openedByReader`, and a pending force diff for it stays folded too;
+   * * none are drawn -> EVERY chunk the store holds under the url is read
+   *   (`pageCids`, the trie's leaves for that url), placed by the projector's
+   *   transform and drawn at its UMAP position -- not the page's first
+   *   unfold step, the whole set.
+   *
+   * Anything that is not a page node keeps its old meaning (release the
+   * scope). Returns what was done, for the harness.
+   */
+  async togglePage(node: any): Promise<{ action: string; url: string; nodes: number }> {
+    if (this.plantNoToggle || !node || node.force || node.level !== "page" || !node.url) {
+      this.onScope("");
+      return { action: "scope", url: String(node?.url || ""), nodes: 0 };
+    }
+    const url: string = node.url;
+    const out = (action: string, nodes: number) => {
+      this.toggled.push({ at: Date.now(), url, action, nodes });
+      if (this.toggled.length > 50) this.toggled.shift();
+      this.motion.event("toggle", { url: url.slice(-50), action, nodes });
+      return { action, url, nodes };
+    };
+    if (!this.graph) return out("none", 0);
+    const drawn = this.graph.graphData().nodes
+      .some((n: any) => n.url === url && n.level !== "page" && !n.force);
+    if (drawn) {
+      this.openedByReader.delete(url);
+      this.collapsedByReader.add(url);
+      return out("collapse", this.foldChunks(url));
+    }
+    this.collapsedByReader.delete(url);
+    this.openedByReader.add(url);
+    const cids = await this.sidecar.pageCids(url).catch(() => [] as string[]);
+    let placed = 0;
+    // 400 a request, as the reopen after a refit does: a 1,109-chunk page is
+    // three placements, each absorbed as it lands.
+    for (let i = 0; i < cids.length; i += 400) {
+      // The reader folded it again while the placements were in flight.
+      if (this.collapsedByReader.has(url)) break;
+      const got: any = await this.sidecar.place(cids.slice(i, i + 400));
+      if (got?.nodes?.length) placed += this.absorb(got.nodes, got.edges).added;
+    }
+    return out("expand", placed);
+  }
+
+  /**
+   * Fold every chunk node of `url` into its page node, in any layout mode;
+   * a chunk held by an open billboard (a pin) stays. Returns how many went.
+   */
+  private foldChunks(url: string): number {
+    if (!this.graph) return 0;
     const data: any = this.graph.graphData();
     const keep = new Set<string>(this.billboards.keys() as any);
     const gone = new Set<string>(data.nodes
       .filter((n: any) => n.url === url && n.level !== "page" && !keep.has(n.id))
       .map((n: any) => n.id));
-    if (!gone.size) return;
+    if (!gone.size) return 0;
     const end = (x: any) => (typeof x === "object" && x ? x.id : x);
     const next = {
       nodes: data.nodes.filter((n: any) => !gone.has(n.id)),
@@ -1384,6 +1472,7 @@ export class GraphView extends ItemView {
     for (const [id, spec] of [...this.forceSpecs]) if (spec.url === url) this.forceSpecs.delete(id);
     this.collapsed.push({ at: Date.now(), url, nodes: gone.size });
     if (this.collapsed.length > 50) this.collapsed.shift();
+    return gone.size;
   }
 
   /** The pending diff of a page the reader is leaving: gone at once. */
@@ -1428,6 +1517,7 @@ export class GraphView extends ItemView {
     this.projEpoch = -1;
     this.projSeq = 0;
     this.reopen.clear();
+    this.collapsedByReader.clear();
     this.forceStats = { drains: 0, added: 0, removed: 0, reparented: 0, ms: [], toScene: [],
                         jitter: [], sized: [] };
     this.forceSpecs.clear();
@@ -2924,7 +3014,7 @@ export class GraphView extends ItemView {
    */
   private async unfoldNode(node: any): Promise<void> {
     // Opened by the READER: stays open when they browse away (S-6).
-    if (node && node.url) this.openedByReader.add(node.url);
+    if (node && node.url) { this.openedByReader.add(node.url); this.collapsedByReader.delete(node.url); }
     const added = await this.unfoldStep(node);
     if (!added.length) return;
     let frontier = added.filter((n: any) => n.level === "path");
@@ -3257,7 +3347,10 @@ export class GraphView extends ItemView {
       const data0: any = this.graph.graphData();
       const openNow = new Set<string>(data0.nodes.filter((n: any) => !n.force && n.level !== "page").map((n: any) => n.url));
       const browsing = this.browsingUrl ? this.browsingUrl() : "";
-      const open = (u: string) => !!u && (openNow.has(u) || this.openedByReader.has(u)
+      // A page the reader folded by right-click is never drawn from a
+      // placement, even the page being browsed (`collapsedByReader`): its
+      // chunks stay in the page node until an explicit expand.
+      const open = (u: string) => !!u && !this.readerCollapsed(u) && (openNow.has(u) || this.openedByReader.has(u)
         || (!!browsing && u.split("#")[0] === browsing.split("#")[0]));
       const t = Date.now();
       incoming = incoming.filter((n) => {
@@ -3587,9 +3680,11 @@ export class GraphView extends ItemView {
         // projector reaches for.
         void this.openBillboard(n);
       })
-      // Right-click releases the scope (`G-70`): back to the corpus, from
-      // wherever the reader had narrowed to.
-      .onNodeRightClick(() => this.onScope(""));
+      // Right-click on a PAGE node toggles its chunks: folded into the node
+      // when drawn, the whole stored set at its UMAP positions when not
+      // (`togglePage`). Anywhere else it releases the scope (`G-70`): back
+      // to the corpus, from wherever the reader had narrowed to.
+      .onNodeRightClick((n: any) => { void this.togglePage(n); });
 
     // A chunk that showed a picture looks like the thing it showed.
     //

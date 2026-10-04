@@ -119,6 +119,14 @@ function graphState(view: any) {
     render: typeof view?.renderStats === "function" ? view.renderStats() : null,
     // D-38: nodes caught with a non-finite / runaway position before an octree.
     octree_skips: view?.octreeSkips || null,
+    // Right-click on a page node (G-110): which pages the reader folded into
+    // their page node, which they opened, and every toggle so far.
+    page_toggle: view ? {
+      collapsedByReader: [...(view.collapsedByReader || [])],
+      openedByReader: [...(view.openedByReader || [])],
+      toggles: (view.toggled || []).slice(-10),
+      planted: !!view.plantNoToggle,
+    } : null,
     calm: view?.calmStats ? { ...view.calmStats, planted: !!view.plantNoCalm } : null,
     glide: view?.glideStats ? { ...view.glideStats, planted: !!view.plantTeleport } : null,
     governor: view?.governorStats ? { ...view.governorStats, planted: !!view.plantNoGovernor } : null,
