@@ -1409,7 +1409,7 @@ export class GraphView extends ItemView {
    * scope). Returns what was done, for the harness.
    */
   async togglePage(node: any): Promise<{ action: string; url: string; nodes: number }> {
-    if (this.plantNoToggle || !node || node.force || node.level !== "page" || !node.url) {
+    if (this.plantNoToggle || !node || node.level !== "page" || !node.url) {
       this.onScope("");
       return { action: "scope", url: String(node?.url || ""), nodes: 0 };
     }
@@ -1422,7 +1422,8 @@ export class GraphView extends ItemView {
     };
     if (!this.graph) return out("none", 0);
     const drawn = this.graph.graphData().nodes
-      .some((n: any) => n.url === url && n.level !== "page" && !n.force);
+      // Force chunks count: the page being browsed is drawn by the stream.
+      .some((n: any) => n.url === url && n.level !== "page");
     if (drawn) {
       this.openedByReader.delete(url);
       this.collapsedByReader.add(url);
