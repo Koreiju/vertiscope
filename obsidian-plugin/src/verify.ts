@@ -496,7 +496,7 @@ export class Verifier {
   }
 
   /** Live capture back on in every browser cell; true if any was off. */
-  private restoreLive(): boolean {
+  restoreLive(): boolean {
     let was = false;
     for (const l of this.app.workspace.getLeavesOfType("domvec-browser-view")) {
       const v: any = l.view;
@@ -509,7 +509,7 @@ export class Verifier {
   }
 
   /** `supervise serve` on `ws`, logging beside the store. */
-  private spawnSidecar(ws: string, base: string, python: string): any {
+  spawnSidecar(ws: string, base: string, python: string, port = TEST_PORT): any {
     const req = (window as any).require;
     const cp = req("child_process");
     const fs = req("fs");
@@ -517,7 +517,7 @@ export class Verifier {
     const log = fs.createWriteStream(path.join(ws, "sidecar.log"));
     const child = cp.spawn(python, [
       "-m", "domvec.obsidian", "supervise", "--workspace", ws,
-      "--port", String(TEST_PORT), "--semantic", "--capture",
+      "--port", String(port), "--semantic", "--capture",
     ], { cwd: base, windowsHide: true,
          env: { ...(window as any).process.env, PYTHONIOENCODING: "utf-8" } });
     child.stdout?.pipe(log);
@@ -527,7 +527,7 @@ export class Verifier {
 
   /** `supervise` runs `serve` as a CHILD: stop the whole tree, or the child
    *  keeps the store and the port and the next run is not fresh. */
-  private async stopSidecar(child: any): Promise<void> {
+  async stopSidecar(child: any): Promise<void> {
     if (!child || child.exitCode !== null) return;
     const proc = (window as any).process;
     if (proc.platform === "win32") {
@@ -541,7 +541,7 @@ export class Verifier {
     for (let i = 0; i < 40 && child.exitCode === null; i++) await sleep(250);
   }
 
-  private async ask(base: string, route: string, ms = 10000): Promise<any> {
+  async ask(base: string, route: string, ms = 10000): Promise<any> {
     try {
       const res = await fetch(base + route, { signal: AbortSignal.timeout(ms) });
       return res.ok ? await res.json() : null;
@@ -550,7 +550,7 @@ export class Verifier {
     }
   }
 
-  private async waitHealthy(url: string, ms: number, child: any): Promise<boolean> {
+  async waitHealthy(url: string, ms: number, child: any): Promise<boolean> {
     const until = Date.now() + ms;
     while (Date.now() < until) {
       if (child && child.exitCode !== null) return false;
@@ -613,7 +613,7 @@ export class Verifier {
   }
 
   /** The graph and the browser cell open, each with a real view behind it. */
-  private async ensurePanes(): Promise<void> {
+  async ensurePanes(): Promise<void> {
     const cmds = (this.app as any).commands;
     for (const [type, cmd] of [["domvec-graph-view", "domvec-open-graph"],
                                ["domvec-browser-view", "domvec-open-browser"]]) {
@@ -629,7 +629,7 @@ export class Verifier {
   }
 
   /** Every graph pane, emptied: the store it drew is not the one now in use. */
-  private resetGraphs(why: string): void {
+  resetGraphs(why: string): void {
     for (const l of this.app.workspace.getLeavesOfType("domvec-graph-view")) {
       const v: any = l.view;
       if (v && typeof v.resetForStore === "function") v.resetForStore(why);
@@ -670,7 +670,7 @@ export class Verifier {
   }
 
   /** Every open graph pane, redrawn from the sidecar the plugin points at. */
-  private async redrawGraphs(): Promise<void> {
+  async redrawGraphs(): Promise<void> {
     for (const l of this.app.workspace.getLeavesOfType("domvec-graph-view")) {
       const v: any = l.view;
       if (v && typeof v.reload === "function") {

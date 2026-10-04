@@ -1126,8 +1126,20 @@ class PageProjector(ChunkProjector):
             t = time.perf_counter()
             urls, X = self._page_rows(workspace, by_url, vec, fit=True)
             ms_centroids = (time.perf_counter() - t) * 1000
-            if len(urls) < 4:
-                return {"skipped": "too few pages", "n": len(urls)}
+            # **Fewer than 4 pages: fit the CHUNKS** (2026-10-04, the user story
+            # from an empty workspace: the first page's 31 chunks were stored
+            # and vectorised, the page fit refused to run under 4 pages, and
+            # the 3D view could show nothing but the streaming root -- a click
+            # on it unfolded nothing). A page UMAP needs pages; a chunk UMAP
+            # (G-106's chunk scope) needs only chunks.
+            few = len(urls) < 4
+            n_chunks = sum(1 for c in vec if url_of.get(c) in set(urls))
+            # Either engine: a FIRST fit over chunks needs no update(); only
+            # the online updates that follow do (umap-learn refits whole).
+            if few and not (urls and self.centroid == "semantic" and n_chunks >= 8):
+                self.fit_skip = {"skipped": "too few pages", "n": len(urls), "chunks": n_chunks,
+                                 "engine": self.engine, "centroid": self.centroid, "at": round(time.time(), 3)}
+                return dict(self.fit_skip)
             t = time.perf_counter()
             X = L._unit_rows(np.asarray(X, dtype=np.float32))
             # G-106: every chunk, or page centroids -- by what an update costs.
@@ -1136,6 +1148,10 @@ class PageProjector(ChunkProjector):
             chunk_ids = sorted(c for c in vec if url_of.get(c) in fitted)
             decision = choose_scope(len(urls), len(chunk_ids), self.refit_cost,
                                     self.SCOPE_BUDGET_MS, self.engine, self.centroid)
+            if few:
+                decision = dict(decision, scope="chunks",
+                                why="%d page(s), fewer than the 4 a page fit needs: the fit is over its %d chunks"
+                                    % (len(urls), len(chunk_ids)))
             scope = decision["scope"]
             C = (L._unit_rows(np.asarray([vec[c] for c in chunk_ids], dtype=np.float32))
                  if scope == "chunks" and chunk_ids else None)
@@ -1159,12 +1175,20 @@ class PageProjector(ChunkProjector):
                 if online is None:
                     # The pages are the first rows; chunk rows (chunk scope)
                     # were trained on and are placed below through `place`.
-                    coords = coords[:len(urls)] if C is not None else coords
+                    # Under 4 pages the frame is fitted over EVERY row: a
+                    # spread and a frame fitted to one or two points are
+                    # degenerate. Otherwise over the pages, as before.
+                    whole = few and C is not None
+                    if C is not None and not whole:
+                        coords = coords[:len(urls)]
                     got = int(coords.shape[1])
                     colours = (L._hsv(coords[:, self.dims:self.dims + 3])
                                if got >= want else None)
                     coords = L._spread(coords, self.dims)
                     coords = L._framed(coords, self.dims)
+                    if whole:
+                        coords = coords[:len(urls)]
+                        colours = colours[:len(urls)] if colours is not None else None
                     projection = L.Projection.of(dims=self.dims, hsv=colours is not None,
                                                  fitted_n=len(urls),
                                                  fitted_chunks=chunks_at_fit)

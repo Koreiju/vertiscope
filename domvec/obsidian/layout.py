@@ -1533,6 +1533,28 @@ def _ensure_projection(workspace):
     return live_projection()
 
 
+def _not_fitted_why() -> str:
+    """Why nothing can be placed yet, in words that are true. This said "the
+    chunk projector is fitting" while the projector had never fitted and was
+    not trying to: it had refused, for want of pages (2026-10-04)."""
+    try:
+        from .projector import projector as _get
+        p = _get()
+    except Exception:                               # noqa: BLE001
+        p = None
+    if p is None:
+        return "no projector"
+    if getattr(p, "fitting", False):
+        return "the projector is fitting"
+    skip = getattr(p, "fit_skip", None)
+    if skip:
+        return "not fitted yet: %s (%s page(s), %s chunk(s))" % (
+            skip.get("skipped"), skip.get("n"), skip.get("chunks"))
+    if getattr(p, "fit_error", ""):
+        return "not fitted: %s" % p.fit_error
+    return "not fitted yet"
+
+
 def unfold(workspace, url: str, path: str = "", space: str = "",
            anchor_at=None, room: float = 0.0) -> Dict:
     """One step of unravelling a page's patricia path (`G-54`).
@@ -1556,8 +1578,7 @@ def unfold(workspace, url: str, path: str = "", space: str = "",
     """
     _cp = _live_chunk_projector()
     if _cp is None and _projector_running():
-        return {"nodes": [], "path": path, "url": url,
-                "why": "the chunk projector is fitting"}
+        return {"nodes": [], "path": path, "url": url, "why": _not_fitted_why()}
     projection = (_cp.projection if _cp is not None
                   else _ensure_projection(workspace))
     stored = [c for c in workspace.store.chunks(url) if not c.redundant]
@@ -1944,7 +1965,7 @@ def place_into(workspace, cids) -> Dict:
         # and drew chunks in a model the stream never places into.
         wanted = [c for c in dict.fromkeys(cids or []) if c]
         return {"nodes": [], "unplaced": wanted, "stale": False,
-                "why": "the chunk projector is fitting", "source": "projector"}
+                "why": _not_fitted_why(), "source": "projector"}
     projection = _ensure_projection(workspace)
     wanted = [c for c in dict.fromkeys(cids or []) if c]
     if projection is None:

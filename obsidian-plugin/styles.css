@@ -745,7 +745,7 @@ button.domvec-run-fence:hover {
    luminosity while keeping translucency reasonable" -- each hue kept only as
    a hint (hover blue, pin amber, diff green), all near-white. */
 .domvec-chunk-outline { position: fixed; z-index: 25; pointer-events: none;
-  border: 1px solid rgba(214, 230, 255, 0.55); background: rgba(240, 246, 255, 0.05);
+  border: 1.5px solid rgba(200, 220, 255, 0.9); background: rgba(225, 236, 255, 0.14);
   border-radius: 3px; box-sizing: border-box; }
 
 
@@ -765,12 +765,12 @@ button.domvec-run-fence:hover {
    warmer than the hover outline so the two read apart, no animation, never
    catches the pointer. */
 .domvec-chunk-pin { position: fixed; z-index: 16; pointer-events: none;
-  border: 1.5px solid rgba(255, 238, 200, 0.6); background: rgba(255, 249, 234, 0.05);
+  border: 2px solid rgba(255, 230, 180, 0.95); background: rgba(255, 244, 222, 0.14);
   border-radius: 3px; box-sizing: border-box; }
 /* The last drain's diff (G-90): what the in-page chunking just changed,
    outlined at once and faded -- green, apart from hover (blue) and pins. */
 .domvec-diff-box { position: fixed; z-index: 15; pointer-events: none;
-  border: 1px dashed rgba(214, 244, 218, 0.55); background: rgba(240, 252, 242, 0.04);
+  border: 1.5px dashed rgba(190, 236, 198, 0.9); background: rgba(225, 248, 230, 0.12);
   border-radius: 2px; box-sizing: border-box; }
 .domvec-pipebox-mini { cursor: pointer; }
 .domvec-pipebox.is-open { box-shadow: 0 2px 14px rgba(0, 0, 0, 0.45); }
@@ -784,3 +784,11 @@ button.domvec-run-fence:hover {
 .domvec-bb-min { float: right; margin-right: 10px; cursor: pointer; opacity: 0.7; }
 .domvec-bb-min:hover { opacity: 1; }
 .domvec-pin-card { cursor: pointer; }
+
+/* The empty-workspace switch: a test workspace is never ambiguous. */
+.domvec-session-test {
+  color: var(--text-on-accent);
+  background: var(--color-orange);
+  padding: 0 6px;
+  border-radius: 4px;
+}

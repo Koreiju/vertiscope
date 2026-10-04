@@ -137,3 +137,36 @@ def test_planted_budget_trains_on_pages_only():
     assert proj.pumap._raw.shape[0] == PAGES
     assert proj.trained_chunks == set()
     assert _own_page_share(proj, rows) >= 0.9
+
+
+# -- an empty workspace's first page (2026-10-04) ------------------------------
+
+def test_one_page_fits_over_its_chunks():
+    # The user story from an empty workspace: one page stored, 9 chunks with
+    # vectors. The page fit needs 4 pages; the chunk fit needs only chunks.
+    rows = [r for r in _rows() if r[1] == "https://p0.test/"]
+    proj, record = _fit(rows)
+    assert proj.scope == "chunks", proj.scope_record
+    assert "fewer than the 4" in proj.scope_record["why"]
+    assert len(proj.page_pos) == 1 and len(proj.pos) == len(rows)
+    assert proj.pumap._raw.shape[0] == 1 + len(rows)
+
+
+def test_one_page_fits_over_its_chunks_with_umap_learn_too():
+    # No CUDA (torch 2.14.1+cpu was found installed on 2026-10-04): the first
+    # page must still be drawn.
+    from domvec.obsidian.projector import PageProjector
+    rows = [r for r in _rows() if r[1] == "https://p0.test/"]
+    proj = PageProjector(dims=3, centroid="semantic", seed=0, engine="umap")
+    got = proj.fit(SimpleNamespace(store=_Store(rows), path=None))
+    assert "error" not in got and "skipped" not in got, got
+    assert proj.scope == "chunks" and len(proj.pos) == len(rows) and len(proj.page_pos) == 1
+
+
+def test_planted_one_page_with_the_triple_centroid_still_refuses():
+    # The triple centroid has no chunk-vector counterpart: no chunk fit.
+    from domvec.obsidian.projector import PageProjector
+    rows = [r for r in _rows() if r[1] == "https://p0.test/"]
+    proj = PageProjector(dims=3, centroid="triple", seed=0, engine="umap")
+    got = proj.fit(SimpleNamespace(store=_Store(rows), path=None))
+    assert got.get("skipped") == "too few pages" and proj.fit_skip["chunks"] == len(rows)

@@ -510,6 +510,7 @@ class Workspace:
                 url, addresses, chunks, rows=rows,
                 embeddings=vectors or None, title=title,
                 root_hash=root_hash, complete=complete,
+                removed=None if complete else removed,
             )
         # The mirror is rewritten only by a write that describes the whole
         # page. A delta names some chunks; writing those alone replaced the

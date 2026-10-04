@@ -83,6 +83,14 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     }
 
     this.settings = Object.assign({}, DEFAULTS, await this.loadData());
+    // A test workspace outlives a plugin reload (`session.ts`): put it back,
+    // and badge it in the status bar for as long as it lasts.
+    const sw: any = (window as any).__domvec?.session?.switcher;
+    if (sw) {
+      sw.badge = this.addStatusBarItem();
+      await sw.resume();
+      sw.paint();
+    }
     this.sidecar = new Sidecar(() => this.settings.sidecar);
     this.links = new VaultLinks(this.app, this.sidecar);
 
@@ -126,6 +134,21 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
       livePreviewRunButtons(this, () => this.app.workspace.getActiveFile()?.path ?? ""),
     );
 
+    this.addCommand({
+      id: "domvec-session-empty",
+      name: "Start an empty test workspace",
+      callback: () => { void (window as any).__domvec?.session?.empty(); },
+    });
+    this.addCommand({
+      id: "domvec-session-restart",
+      name: "Restart the test workspace's sidecar",
+      callback: () => { void (window as any).__domvec?.session?.restart(); },
+    });
+    this.addCommand({
+      id: "domvec-session-reader",
+      name: "Return to my workspace",
+      callback: () => { void (window as any).__domvec?.session?.reader(); },
+    });
     this.addCommand({
       id: "domvec-toggle-surface",
       name: "Toggle distilled markdown / interactive surface",

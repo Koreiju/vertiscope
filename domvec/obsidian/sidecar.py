@@ -219,6 +219,83 @@ def _lexical_coverage(workspace) -> Dict[str, int]:
     return value
 
 
+# ---- the central diff (2026-10-04) --------------------------------------------
+#
+# "centralize deduplication etc on diffs throughout the pipeline in a
+# centralized place on the backend that then can facilitate mappings ... a
+# singular diff update on the scan side compatible with the same set of 3D and
+# 2D representations". One record per capture, computed here from the render
+# the trie already produced (`ScanUpdate.all_chunks`), keyed on the cid -- the
+# key every consumer already shares (store, projector, chunk map, 3D nodes,
+# pins). It names what the store must retire and what was only renamed, so no
+# view has to infer it, and every view applies the same list.
+#
+#   added    cids in this render, not in the session's previous one
+#   dirty    cids this capture rewrote
+#   retired  cids in the previous render, not in this one (the store drops
+#            them; the projector reports them gone; the views remove them)
+#   renamed  retired cid -> added cid whose markdown is identical: a shift
+#            moved a chunk's address, not its content
+#
+# Retirement is judged within ONE page session (what this visit rendered).
+# Chunks stored by earlier visits are untouched until the page settles, as
+# before -- whether the store keeps a page's history is Q.002, and with the
+# diff central that is one policy here, `RETIRE`.
+import collections as _collections
+import hashlib as _hashlib
+
+_DIFFS: "collections.deque" = _collections.deque(maxlen=5000)
+_DIFF_SEQ = [0]
+_DIFF_LOCK = threading.Lock()
+#: What a retired cid does to the store: "delete" (today's semantics, the
+#: same thing a settle does) -- Q.002 may make it "mark".
+RETIRE = "delete"
+
+
+def _digest(markdown: str) -> str:
+    return _hashlib.sha1((markdown or "").encode("utf-8")).hexdigest()[:16]
+
+
+def _record_diff(diff: dict) -> dict:
+    with _DIFF_LOCK:
+        _DIFF_SEQ[0] += 1
+        diff = dict(diff, seq=_DIFF_SEQ[0], at=round(time.time(), 3))
+        _DIFFS.append(diff)
+    return diff
+
+
+def _page_diff(session: dict, url: str, passno: int, all_chunks, dirty) -> Optional[dict]:
+    """The capture's diff against the session's previous render. None when
+    this capture rendered nothing (no address changed: no render ran)."""
+    if not all_chunks:
+        return None
+    now = {c.cid: _digest(c.markdown) for c in all_chunks}
+    prev = session.get("render")
+    session["render"] = now
+    # What the store's trie already held for this page when the session
+    # began: a revisit renders chunks the store has, and they are not ADDED
+    # (2026-10-04: "Re-navigating back to a previous page re-spawns existing
+    # nodes. This is where the patricia trie on the DB is the central spine").
+    stored = session.get("stored") or set()
+    known = set(prev or ()) | stored
+    added = [c for c in now if c not in known]
+    retired = [c for c in prev if c not in now] if prev is not None else []
+    by_digest = {}
+    for c in added:
+        by_digest.setdefault(now[c], []).append(c)
+    renamed = {}
+    for old in retired:
+        cands = by_digest.get(prev[old]) if prev else None
+        if cands:
+            renamed[old] = cands.pop(0)
+    return {"kind": "capture", "url": url, "passno": passno, "added": added,
+            "dirty": [c.cid for c in dirty], "retired": retired, "renamed": renamed,
+            # Rendered now AND already in the store before this visit: drawn
+            # from the store, never re-spawned as new.
+            "known": [c for c in now if c in stored and c not in set(prev or ())],
+            "chunks": len(now)}
+
+
 def _project(cids) -> None:
     """Hand chunks to the chunk projector's queue. Never raises."""
     try:
@@ -1196,12 +1273,19 @@ class _Handler(BaseHTTPRequestHandler):
                 # chunk cannot be lost between "captured" and "placed".
                 "pending": [],
             }
+            # The store's cids for this page as the visit begins (the trie on
+            # the DB is the spine): the diff judges ADDED against it.
+            try:
+                session["stored"] = {c.cid for c in self.workspace.store.chunks(url)}
+            except Exception:                       # noqa: BLE001
+                session["stored"] = set()
             sessions[url] = session
 
         started = time.perf_counter()
         try:
             if body.get("settle"):
                 spine = session["spine"]
+                before = {c.cid for c in self.workspace.store.chunks(url)}
                 if spine.trie is not None and len(spine.trie):
                     with _WORK_LOCK:
                         self.workspace.ingest(
@@ -1211,8 +1295,13 @@ class _Handler(BaseHTTPRequestHandler):
                 _project_page(self.workspace, url)
                 stored = list(self.workspace.store.chunks(url))
                 sessions.pop(url, None)
+                after = {c.cid for c in stored}
+                sdiff = _record_diff({"kind": "settle", "url": url, "passno": None,
+                                      "added": sorted(after - before), "dirty": [],
+                                      "retired": sorted(before - after), "renamed": {},
+                                      "chunks": len(after)})
                 self._send(200, {
-                    "settled": True, "url": url,
+                    "settled": True, "url": url, "diff": sdiff,
                     "addresses": len(spine.trie) if spine.trie else 0,
                     "chunks": len(stored),
                     "ms": round((time.perf_counter() - started) * 1000, 1),
@@ -1255,8 +1344,12 @@ class _Handler(BaseHTTPRequestHandler):
             dirty = spine.dirty_chunks(update)
             phases["render"] = round((time.perf_counter() - mark) * 1000, 1)
             mark = time.perf_counter()
+            diff = _page_diff(session, url, passno, update.all_chunks, dirty)
+            retired = list(diff["retired"]) if diff and RETIRE == "delete" else []
+            phases["diff"] = round((time.perf_counter() - mark) * 1000, 1)
+            mark = time.perf_counter()
 
-            if dirty:
+            if dirty or retired:
                 # **The wait is not the work.** `_WORK_LOCK` is shared with
                 # the embed worker (per 64-chunk batch) and aggregation (per
                 # page), so a drain arriving mid-batch waits for someone
@@ -1267,7 +1360,7 @@ class _Handler(BaseHTTPRequestHandler):
                     phases["lock_wait"] = round(
                         (time.perf_counter() - asked) * 1000, 1)
                     _written, counts = self.workspace.ingest_chunks(
-                        url, dirty, complete=False,
+                        url, dirty, complete=False, removed=retired,
                         title=(body.get("title") or ""))
                 # The store's own breakdown, carried up. `store` was 96% of a
                 # capture and one number cannot say which statement it is.
@@ -1299,7 +1392,11 @@ class _Handler(BaseHTTPRequestHandler):
             # Rewritten chunks keep their cid only if their span did; either
             # way the projector must look again. One without a vector yet is
             # dropped from its queue and comes back through the embedder.
-            _project(dirty_cids)
+            # Retired ones too: the projector finds them gone from the store
+            # and logs them `gone`, which is how the pane removes their nodes.
+            _project(dirty_cids + retired)
+            if diff is not None:
+                diff = _record_diff(diff)
         except Exception as exc:                    # noqa: BLE001
             # Named rather than swallowed. A capture that fails quietly is
             # indistinguishable from a page with nothing in it, and that
@@ -1316,6 +1413,8 @@ class _Handler(BaseHTTPRequestHandler):
             "dirty": len(dirty),
             "dirty_cids": dirty_cids,
             "map_delta": map_delta,
+            # The central diff: every view applies these lists, none infers them.
+            "diff": diff,
             "wire_bytes": sense.wire_bytes,
             "phases": phases,
         }
@@ -1725,6 +1824,18 @@ class _Handler(BaseHTTPRequestHandler):
                             "head": md_text[:240]})
             self._send(200, {"url": url, "session": session is not None,
                              "chunks_total": len(chunks), "chunks": out[:200]})
+            return
+
+        if segments[0] == "diffs":
+            # Every diff since `since`, oldest first: the one list every view
+            # applies (2026-10-04, the central diff).
+            q = parse_qs(parts.query)
+            since = int((q.get("since") or ["0"])[0] or 0)
+            want = (q.get("url") or [""])[0]
+            with _DIFF_LOCK:
+                rows = [d for d in _DIFFS if d["seq"] > since and (not want or d["url"] == want)]
+                last = _DIFF_SEQ[0]
+            self._send(200, {"seq": last, "diffs": rows[-500:], "retire": RETIRE})
             return
 
         if segments[0] == "page_map":

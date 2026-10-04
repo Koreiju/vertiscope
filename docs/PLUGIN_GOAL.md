@@ -2069,6 +2069,101 @@ chunks are a 9-pixel dot at the default zoom), exposed as MCP tools; (2) the
 glitches it finds in the force-directed view are defects to fix, each with a
 planted arm.*
 
+**2026-10-04** -- the user story, from an empty workspace:
+
+> I think one thing about force-directed layouts is there is likely a more
+> convenient approach that uses obsidian's original force-directed layout.
+> I'm also seeing some concerning behavior in the GUI but I think it's hard
+> to pin. Let's first visit the interface from the regular user story. We
+> will start with opening up the plugin, sidecar, MCP harnessing for
+> yourself, and obsidian. We will begin with a completely empty workspace.
+> This refresh component must be built-in for testing vs regular usage. I
+> will then navigate myself on a page and we will track each step of the
+> pipeline together. I'd like to understand the complete time profile and
+> processing results for each step in the pipeline reported here in-chat by
+> you as well. One consistent issue I think keeps appearing is that we have
+> way too many force-directed nodes that are persisted in the 3D layout when
+> new scans come in. Not that the nodes aren't registering correctly when
+> message passing between the electron browser and the 3D layout, but when
+> the diffs are updated to the 3D gui, I don't know if there is a complete
+> set of deduplication/queue processing to vectorization/persistence issues
+> etc. If I'm wrong about this and it's just the pace of the scroll/scans
+> being at extremely high throughput on diffs, then please do tell me.
+> However, I might suggest here that we centralize deduplication etc on
+> diffs throughout the pipeline in a centralized place on the backend that
+> then can facilitate mappings... Or otherwise, assign some amount of
+> object/class design that makes a singular diff update on the scan side
+> compatible with the same set of 3D and 2D representations within the same
+> object on the scan diff (deduplication should also be checked here, along
+> with the remainder of measures/precision/coverage/completeness
+> tests/metrics that we track on the electron scan side. I will also
+> instruct you, and please remember to do this part especially, is
+> double-check and reference our current designs with our previous
+> iterations that were geared towards different end-goals. These might
+> appear presently in modules but also in the diff. I recommend spawning
+> haiku (ideally in simple, concrete, and determinist-friendly tasks
+> covering the semantic space of expertise and knowledge we are trying to
+> track our findings against with principles) or sonnet agents for the
+> parallel tasks as necessary. We ideally can centralize our diff along one
+> track of object that interfaces both with the 3D layout forms on patricia
+> tries/trees and the forms in our electron browser like overlay, markdown,
+> shadow DOM (which is still not yet interactive per the original page in
+> its representations, but this needs to also be ensured working for our
+> user story). I should also make note that this scanning diff research
+> should include content detection methods and approaches; double check on
+> the diff at various points for when findings were to negate or confirm
+> any of the designs presently in our current scanning approach on the
+> electron browser that attempts to completely avoid any detectable
+> injection except for required mutationobservers, but with zero contact
+> with "the page itself" such that we don't throw off trackers or even break
+> pages. We must also ensure that the layout of our panels are concise at
+> the deduplication level as well. We must furthermore make an effort to fix
+> the current shadow DOM view of the chunk panels since it may be more apt
+> to direct HTML representations on the distill chunk patricia samples.
+> Interactive components of our shadow DOM views and panels must be linked
+> to the patricia trie and also interface directly with the webpage itself
+> (i.e. clicking a button or link on the chunk opens the browser to first
+> navigate and scroll to the chunk and then take the action on the
+> component in-silico that then performs the update action/event on the
+> browser). We will also have to improve the layout of the retrieval results
+> as well in the electron overlay, since the current layout is somewhat
+> inaccessible to fully "see" and understand. We must ensure all images
+> found in pages are also present in the 3D layout, but so that we don't
+> overlap multiple images for the same URL node. We must also review our
+> current UMAP update layout on GPU for the queue diffs, along with our
+> current approaches on embedding vectorization. Remember that I think we
+> are taking averages of the chunk embeddings. Also, UMAP fit updates I
+> don't know/think are persisting to the UI. Depending on update speed, we
+> can explore re-fit "updating" on the full set of page chunks at a time;
+> balancing local context with global representations. This would be a UMAP
+> model applied to *all* scanned chunks from all URLs (noting diff updates
+> on chunk mutations; revectorization; and re-mapping), but the re-fit
+> update is only on the set of URL chunks. If re-update latency is good, we
+> will use this for 3D coordinate streaming that is a simple switch between
+> force-directed and UMAP fitted to 3D with the full set of chunks always
+> shown unless we apply our right-click gesture to the URL nodes. We have to
+> be careful, again though, about dedup and diff updates respecting these
+> in a centralized way that interfaces chunks to both 2D and 3D views. We
+> must also make sure our patricia trie is shown clearly and also
+> *guaranteed to be tree structured*.
+
+*Read as, in order: (1) bring everything up -- Obsidian, plugin, sidecar,
+the MCP harness -- on an EMPTY workspace, through a built-in switch between
+a test workspace and the reader's own; (2) the user browses; the pipeline is
+traced step by step and its time profile and results reported in chat;
+(3) say plainly whether the persisting force nodes are a dedup/queue/
+vectorize/persist defect or only throughput; (4) one diff object, deduped
+once, that every 2D and 3D form reads (overlay, markdown, shadow DOM,
+patricia tree, UMAP), with the scan-side metrics checked on it; (5) research
+the earlier iterations -- modules and git history -- including content
+detection and the zero-contact sensor, with parallel haiku/sonnet agents;
+(6) Obsidian's own force-directed graph as a candidate; (7) interactive
+shadow-DOM/HTML chunk panels wired to the trie and acting on the live page;
+(8) a readable retrieval overlay; (9) every page image in 3D, one per URL
+node; (10) UMAP over all chunks with per-URL refit updates, persisted to the
+UI, as a switch against force-directed; (11) the patricia trie drawn clearly
+and guaranteed a tree.*
+
 ---
 
 

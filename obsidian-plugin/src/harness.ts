@@ -35,6 +35,7 @@ import type { App } from "obsidian";
 import { uiState } from "./uistate";
 import { profiler } from "./profile";
 import { StressRun } from "./stress";
+import { SessionSwitch } from "./session";
 
 export interface TraceCall {
   /** Milliseconds since the recording started. */
@@ -129,6 +130,8 @@ export function installHarness(app: App, sidecarBase: () => string) {
   // app's lifetime, so a run in progress survives a pane closing.
   const verifier = new Verifier(app, sidecarBase);
   const trace = new Trace();
+  // An empty test workspace, or the reader's own (`session.ts`).
+  const session = new SessionSwitch(app, verifier);
 
   // ---- the boundary ----
   const w = window as any;
@@ -541,6 +544,15 @@ export function installHarness(app: App, sidecarBase: () => string) {
   w.__domvec = {
     /** Hardware-in-the-loop checks (`G-75`): start a run, read its state.
      *  `start` returns at once; poll `state()` -- a full run is minutes. */
+    /** The empty-workspace switch: `empty()` starts a test workspace on its
+     *  own sidecar, `reader()` returns to the reader's own. */
+    session: {
+      empty: () => session.empty(),
+      reader: () => session.reader(),
+      restart: () => session.restart(),
+      state: () => session.state(),
+      switcher: session,
+    },
     verify: {
       list: () => verifier.list(),
       start: (ids?: string[], label?: string) => verifier.start(ids, label || ""),

@@ -413,6 +413,7 @@ class GraphStore:
         title: str = "",
         root_hash: str = "",
         complete: bool = True,
+        removed: Optional[Sequence[str]] = None,
     ) -> Dict[str, int]:
         """Write one page: its addresses, its chunks, and the edges between.
 
@@ -534,7 +535,8 @@ class GraphStore:
         _t = time.perf_counter()
         counts.update(self._reconcile(url, chunks, addresses,
                                       complete=complete,
-                                      stale_anchors=stale_anchors))
+                                      stale_anchors=stale_anchors,
+                                      removed=removed))
         counts["ms_reconcile"] = round((time.perf_counter() - _t) * 1000, 1)
         _t = time.perf_counter()
 
@@ -742,6 +744,7 @@ class GraphStore:
         addresses: Sequence[Tuple[ContentAddress, str, str]],
         complete: bool = True,
         stale_anchors: Optional[Sequence[dict]] = None,
+        removed: Optional[Sequence[str]] = None,
     ) -> Dict[str, int]:
         """Remove what this page used to have and no longer does.
 
@@ -805,8 +808,13 @@ class GraphStore:
                 list(stale_anchors),
             )
 
+        # A partial write retires exactly what its diff NAMES (2026-10-04,
+        # the central diff: `retired` -- in this session's previous render
+        # and not in the current one). Absence from a delta still carries no
+        # information; a name does.
         gone = ([cid for cid in existing if cid not in keep_chunks]
-                if complete else [])
+                if complete else
+                [cid for cid in dict.fromkeys(removed or ()) if cid not in keep_chunks])
         if gone:
             self._batch(
                 "UNWIND $rows AS r MATCH (c:Chunk {cid: r.cid}) DETACH DELETE c",
