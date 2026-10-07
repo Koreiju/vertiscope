@@ -2242,6 +2242,14 @@ a REGRESSION: find it, and put tests in place that would have caught it.*
 *Read as: (11) the overlay that tracks a chunk on the page is drawn outside
 the page's visible bounds.*
 
+> Also, the chunking speed might be pretty slow, and I'm wondering also if
+> the overlay registers the detections 'immediately'. Again, tests, speed
+> profiles, improvements without breaking things, the works.
+
+*Read as: (12) chunking speed profiled and improved; whether the overlay
+registers each detection immediately -- tested, profiled, improved without
+regressions.*
+
 ---
 
 

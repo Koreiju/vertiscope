@@ -2269,11 +2269,39 @@ export class GraphView extends ItemView {
     if (!getSnapshot(node.id)) {
       try { await ask(node.id, node.url || ""); } catch { /* keep the distilled form */ }
     }
-    if (this.mountSnapshot(entry, body)) return;
+    if (this.mountSnapshot(entry, body)) { this.noteBillboard(node, body, "snapshot"); return; }
     const surface = new ChunkSurface(body, node.id, this.surfaceHost,
                                      { interactive: true });
     entry.surface = surface;
     this.addChild(surface);
+    this.noteBillboard(node, body, "surface");
+  }
+
+  /**
+   * Every billboard opened, and what its body actually SHOWED 1.5 s later
+   * (2026-10-06: "a clicked panel not rendering. This has begun to happen
+   * quite a bit now"). Text and shadow-root content are measured where the
+   * reader sees them; an empty body is recorded with what the node was.
+   */
+  billboardLog: { at: number; id: string; level: string; force: boolean; url: string;
+                  via: string; text: number; shadow: number; frame: number; empty: boolean }[] = [];
+  private noteBillboard(node: any, body: HTMLElement, via: string): void {
+    window.setTimeout(() => {
+      let shadow = 0, frame = 0;
+      body.querySelectorAll("*").forEach((el: any) => {
+        if (el.shadowRoot) shadow += (el.shadowRoot.textContent || "").trim().length
+          + el.shadowRoot.querySelectorAll("img,svg,input,button,a").length;
+        if (el.tagName === "IFRAME") {
+          try { frame += ((el.contentDocument && el.contentDocument.body && el.contentDocument.body.textContent) || "").trim().length; }
+          catch { frame += 1; }
+        }
+      });
+      const text = (body.innerText || "").trim().length;
+      this.billboardLog.push({ at: Date.now(), id: String(node.id), level: String(node.level || ""),
+        force: !!node.force, url: String(node.url || ""), via, text, shadow, frame,
+        empty: text + shadow + frame === 0 });
+      if (this.billboardLog.length > 100) this.billboardLog.shift();
+    }, 1500);
   }
 
   /**
