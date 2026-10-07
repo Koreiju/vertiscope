@@ -152,6 +152,25 @@ export interface EnactResult {
   refused?: boolean;
 }
 
+/**
+ * The sidecar's adjudication of a panel gesture (`/enact`, `mode: "plan"`):
+ * what the browser cell is allowed to touch, taken from the TRIE's stored
+ * address and not from the caller -- or the refusal.
+ */
+export interface EnactPlan {
+  ok?: boolean;
+  /** The in-page tick: click, type or choose. */
+  kind?: string;
+  action?: string;
+  address?: string;
+  url?: string;
+  xpath?: string;
+  label?: string;
+  error?: string;
+  refused?: boolean;
+  detail?: string;
+}
+
 export interface SearchResult {
   query: string;
   hits: SearchHit[];

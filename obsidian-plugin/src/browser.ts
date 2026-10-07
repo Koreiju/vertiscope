@@ -36,7 +36,8 @@ import { Snapshot, dropSnapshot, getSnapshot, putSnapshot, renderSnapshot, snaps
 
 import { LayoutNode } from "./graph";
 import { Sidecar } from "./sidecar";
-import { SearchHit } from "./types";
+import { EnactResult, SearchHit } from "./types";
+import { ActRecord, ActResult, PanelAction, addressTable, chainFor, parseAddressKey } from "./panelact";
 
 export const BROWSER_VIEW = "domvec-browser-view";
 
@@ -145,6 +146,8 @@ interface PinRecord {
   cid: string; url: string; matched: string; markdown: string; head: string;
   /** The elements the chunk's lines draw, for the page-faithful snapshot (D-36). */
   xpaths?: string[];
+  /** The trie's address for each of those elements, so the snapshot can carry it (G-111). */
+  addrs?: Record<string, [string, number]>;
 }
 
 /**
@@ -773,7 +776,7 @@ export class BrowserView extends ItemView {
       return false;
     }
     try {
-      const snap = await wv.executeJavaScript(snapshotScript(read.xpaths || []));
+      const snap = await wv.executeJavaScript(snapshotScript(read.xpaths || [], read.addrs || {}));
       if (!snap || !snap.html) { note(false, "nothing found"); return false; }
       const before = getSnapshot(read.cid);
       putSnapshot(read.cid, snap as Snapshot);
@@ -815,7 +818,7 @@ export class BrowserView extends ItemView {
     const lines = (payload && payload.lines) || [];
     if (!lines.length) return false;
     await this.takeSnapshot({ cid, url: here, matched: "", markdown: "", head: "",
-                              xpaths: xpathsOfLines(lines) });
+                              xpaths: xpathsOfLines(lines), addrs: addressTable(lines) });
     return !!getSnapshot(cid);
   }
 
@@ -869,7 +872,10 @@ export class BrowserView extends ItemView {
       const snap = getSnapshot(pin.cid);
       if (snap) {
         body.addClass("has-snapshot");
-        renderSnapshot(body, snap, { maxHeight: 640, onLink: (h) => this.go(h) });
+        renderSnapshot(body, snap, {
+          maxHeight: 640, onLink: (h) => this.go(h), cid: pin.cid,
+          onAct: (rec) => this.actOnChunk(pin.cid, rec),
+        });
         const more = card.createEl("details", { cls: "domvec-pin-md" });
         more.createEl("summary", { text: "markdown" });
         const md = more.createDiv({ cls: "domvec-browser-mdbody" });
@@ -993,25 +999,44 @@ export class BrowserView extends ItemView {
    * machinery for it was already here and private, reachable only from the
    * overlay's own result rows.
    */
-  async reveal(url: string, xpath = ""): Promise<void> {
-    if (!url) return;
-    await this.goToHit({ cid: "", url, xpath } as SearchHit);
+  async reveal(url: string, xpath = ""): Promise<boolean | null> {
+    if (!url) return null;
+    return (await this.arrive(url, xpath)).found;
   }
 
   private async goToHit(hit: SearchHit): Promise<void> {
+    await this.arrive(hit.url, hit.xpath || "");
+  }
+
+  /**
+   * Take the cell to `url`, and the element at `xpath` into view, and say what
+   * happened: whether it had to navigate, and whether the xpath resolved
+   * (`found`: null when no xpath was asked for or the page could not be
+   * reached). The one road both a retrieval click (`G-42`) and a panel gesture
+   * (`G-111`) take before anything else is done to the page.
+   *
+   * The xpath is resolved with the document's own `evaluate`, which cannot
+   * spell a `#shadow-root` step: for an element inside a shadow tree `found`
+   * is false here while the sensor (which walks the composed tree) can still
+   * reach it -- so a caller about to ACT reads `found` as a report, not a veto.
+   */
+  private async arrive(url: string, xpath: string):
+      Promise<{ navigated: boolean; found: boolean | null }> {
     const wv = this.webview;
-    if (!wv) return;
-    if (wv.getURL() !== hit.url) {
-      this.go(hit.url);
+    if (!wv) return { navigated: false, found: null };
+    let navigated = false;
+    if (docKey(wv.getURL()) !== docKey(url)) {
+      navigated = true;
+      this.go(url);
       for (let i = 0; i < 40; i++) {
         await new Promise((r) => setTimeout(r, 400));
         if (!wv.isLoading()) break;
       }
     }
-    if (!hit.xpath) return;
+    if (!xpath) return { navigated, found: null };
     try {
       const found = await wv.executeJavaScript(`(function () {
-        var r = document.evaluate(${JSON.stringify(hit.xpath)}, document,
+        var r = document.evaluate(${JSON.stringify(xpath)}, document,
           null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
         var n = r.singleNodeValue;
         if (!n) return false;
@@ -1020,11 +1045,168 @@ export class BrowserView extends ItemView {
         n.scrollIntoView({block: "center"});
         return true;
       })()`);
-      this.say(found ? `at ${hit.xpath}`
-                     : `the page no longer has ${hit.xpath}`);
+      this.say(found ? `at ${xpath}`
+                     : `the page no longer has ${xpath}`);
+      return { navigated, found: !!found };
     } catch (e) {
       this.say(`could not reach it: ${String(e).slice(0, 80)}`);
+      return { navigated, found: null };
     }
+  }
+
+  /**
+   * Carry a panel's gesture out on the LIVE page (`G-111`).
+   *
+   * The chunk panel is a view of trie addresses, and a control in it is the
+   * page's control seen through its address. Pressing it:
+   *
+   *   1. asks the sidecar to adjudicate the address (`--enact` flag, the trie
+   *      holds it, the refusal set) -- the url and xpath used below are the
+   *      STORED ones it hands back, not the panel's;
+   *   2. brings the cell to the page (navigating if it is elsewhere) and
+   *      scrolls the element into view, reporting whether the xpath resolved;
+   *   3. performs the action in the page through the sensor's `perform`
+   *      (click, type, choose), which refuses the never-press set again
+   *      against what the element says now.
+   *
+   * Nothing else is written: no listener, no global, no attribute. The page's
+   * own handlers run on the event, the sensor sees the mutation and drains it
+   * like any other, and the panel re-reads -- it keeps no state of its own.
+   * The events are synthetic (`isTrusted: false`), so a site that checks it
+   * will not respond.
+   */
+  async actOn(rec: ActRecord): Promise<ActResult> {
+    if (this.plant.has("act-noop")) {
+      return { ok: false, stage: "planted", error: "planted: actOn does nothing" };
+    }
+    const wv = this.webview;
+    if (!wv) return { ok: false, stage: "navigate", error: "no browser cell" };
+    const plan = await this.sidecar.enactPlan(rec.key, rec.action, rec.value);
+    if (!plan) return { ok: false, stage: "plan", error: "no answer from the sidecar" };
+    if (plan.error || !plan.ok || !plan.url || !plan.xpath || !plan.kind) {
+      return { ok: false, stage: "plan", refused: !!plan.refused,
+               error: plan.error || plan.detail || "the sidecar did not adjudicate it" };
+    }
+    const at = await this.arrive(plan.url, plan.xpath);
+    if (at.navigated) {
+      for (let i = 0; i < 40 && !this.domReady; i++) await new Promise((r) => setTimeout(r, 250));
+    }
+    if (!(await this.ensureSensor())) {
+      return { ok: false, stage: "sensor", navigated: at.navigated, scrolled: at.found ?? undefined,
+               error: "the sensor is not in the page" };
+    }
+    let out: any = null;
+    try {
+      out = await wv.executeJavaScript(`(function (c) {
+        var h = window[${JSON.stringify(HANDLE)}];
+        if (!h || !h.perform) return { nosensor: true };
+        if (!h.xpathTicks) return { stale: true };
+        return h.perform(c);
+      })(${JSON.stringify(chainFor(plan.kind, plan.xpath, rec.value))})`);
+    } catch (e) {
+      return { ok: false, stage: "perform", navigated: at.navigated, scrolled: at.found ?? undefined,
+               error: `the page went away mid-gesture: ${String(e).slice(0, 80)}` };
+    }
+    const base = { navigated: at.navigated, scrolled: at.found ?? undefined };
+    if (!out || out.nosensor || out.stale) {
+      return { ok: false, stage: "sensor", ...base,
+               error: out && out.stale ? "this page's sensor predates panel gestures: reload the page"
+                                       : "the sensor is not in the page" };
+    }
+    const failed: [string, string][] = out.failed || [];
+    if (failed.length) {
+      const refused = failed.some((f) => f[1] === "refused");
+      return { ok: false, stage: "perform", refused, ...base, url: out.url, done: out.done, failed,
+               error: refused ? "refused in the page: the never-press set names this element"
+                              : failed.map((f) => `${f[0]}: ${f[1]}`).join("; ") };
+    }
+    this.say(`${rec.action} · ${plan.label || plan.xpath}`);
+    return { ok: true, stage: "done", ...base, url: out.url, done: out.done,
+             did: `${rec.action}${plan.label ? " " + plan.label.slice(0, 40) : ""}` };
+  }
+
+  /**
+   * A gesture on a chunk's panel, and then the panel re-read from the page.
+   * The page's reaction may be asynchronous, so the chunk is re-read a few
+   * times until its rendering changes; the panels redraw from that.
+   */
+  async actOnChunk(cid: string, rec: ActRecord): Promise<ActResult> {
+    const before = getSnapshot(cid)?.html || "";
+    const res = await this.actOn(rec);
+    if (!res.ok) return res;
+    const wv = this.webview;
+    if (!wv) return res;
+    let read: PinRecord | null = null;
+    try {
+      const p: any = await this.sidecar.chunk(cid);
+      const lines = (p && p.lines) || [];
+      if (lines.length) {
+        read = { cid, url: "", matched: "", markdown: "", head: "",
+                 xpaths: xpathsOfLines(lines), addrs: addressTable(lines) };
+      }
+    } catch { /* keep what is shown */ }
+    if (!read) {
+      const again = await this.readPin(rec.url, rec.xpath);
+      if (!("error" in again)) read = { ...again, cid };
+    }
+    if (read) {
+      for (let i = 0; i < 6; i++) {
+        await new Promise((r) => setTimeout(r, 250));
+        let here = "";
+        try { here = wv.getURL(); } catch { break; }
+        await this.takeSnapshot({ ...read, url: here });
+        if ((getSnapshot(cid)?.html || "") !== before) break;
+      }
+    }
+    // After this call's own result has been shown, so the redraw's readout
+    // reads what happened rather than "pressing".
+    window.setTimeout(() => {
+      if (this.pinned.has(cid)) void this.renderSide();
+      this.onDirty([cid]);
+    }, 0);
+    return res;
+  }
+
+  /**
+   * An address held by a surface (the distilled form's controls) acted on in
+   * the same cell, by the same road (`G-111`). The legacy `/enact` drives a
+   * separate headless Firefox the reader never sees.
+   */
+  async actOnAddress(key: string, action = "press", text?: string): Promise<EnactResult | null> {
+    const at = parseAddressKey(key);
+    if (!at) return { error: "unparseable address" };
+    const act: PanelAction = action === "type" || action === "choose" || action === "toggle"
+      ? action : "press";
+    const r = await this.actOn({ key, url: at.url, xpath: at.xpath, action: act, value: text });
+    return r.ok ? { ok: true, did: r.did, detail: r.navigated ? "navigated to the page first" : "in the page",
+                    url: r.url, address: key }
+                : { error: r.error, refused: r.refused, address: key };
+  }
+
+  /** The sensor in the page, booted if absent -- the actuator `perform` lives on it. */
+  private async ensureSensor(): Promise<boolean> {
+    const wv = this.webview;
+    if (!wv) return false;
+    if (!BrowserView.sensorSource) {
+      const got = await this.sidecar.sensor();
+      if (!got || !got.source) return false;
+      BrowserView.sensorSource = got.source;
+    }
+    try {
+      return !!(await wv.executeJavaScript(
+        `(function () { ${this.sensorBoot()} return !!window[${JSON.stringify(HANDLE)}]; })()`));
+    } catch { return false; }
+  }
+
+  /** The install-if-absent statement the drain and an act share. */
+  private sensorBoot(): string {
+    return `if (!window[${JSON.stringify(HANDLE)}]) {
+          var h = (${BrowserView.sensorSource})(
+            {budget: 0, debounce: 80, variants: {}, known: [], signal: ${JSON.stringify(SIGNAL)},
+             push: ${!this.plant.has("pull-drain")}});
+          Object.defineProperty(window, ${JSON.stringify(HANDLE)},
+            {value: h, enumerable: false, configurable: false});
+        }`;
   }
 
   /**
@@ -1115,6 +1297,7 @@ export class BrowserView extends ItemView {
     return {
       cid, url: String(got.url || url || ""), matched, markdown,
       xpaths: xpathsOfLines(got.lines as { key?: string }[]),
+      addrs: addressTable(got.lines as { key?: string; control_key?: string; control?: boolean }[]),
       head: got.ancestors_walked
         ? `${matched} · ${got.ancestors_walked} above what you clicked`
         : matched,
@@ -1413,13 +1596,7 @@ export class BrowserView extends ItemView {
       const drainStart = performance.now();
       let drainBack = 0;
       const payload = await wv.executeJavaScript(`(function () {
-        if (!window[${JSON.stringify(HANDLE)}]) {
-          var h = (${BrowserView.sensorSource})(
-            {budget: 0, debounce: 80, variants: {}, known: [], signal: ${JSON.stringify(SIGNAL)},
-             push: ${!this.plant.has("pull-drain")}});
-          Object.defineProperty(window, ${JSON.stringify(HANDLE)},
-            {value: h, enumerable: false, configurable: false});
-        }
+        ${this.sensorBoot()}
         var h = window[${JSON.stringify(HANDLE)}];
         // One place for the drain, its boxes and pictures; pushed when this
         // host's signal is the handle's, and then only {pushed: v} comes back.

@@ -40,6 +40,7 @@ import { cellSource, findFences } from "./fences";
 import { ChunkSpan, chunkGutter, setChunkSpans } from "./chunkgutter";
 import { hashCell, renderOutput, withOutput } from "./outputs";
 import { BROWSER_VIEW, BrowserView } from "./browser";
+import type { ActRecord } from "./panelact";
 import { GRAPH_VIEW, GraphView } from "./graph";
 import { RetrievalSuggest } from "./retrieval";
 import { Sidecar } from "./sidecar";
@@ -219,6 +220,14 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
         view.browsingUrl = () => {
           const l = this.app.workspace.getLeavesOfType(BROWSER_VIEW)[0];
           try { return (l?.view as any)?.webview?.getURL() || ""; } catch { return ""; }
+        };
+        // A control in a billboard's chunk snapshot is the page's control seen
+        // through its trie address: pressing it acts on the live page in the
+        // cell (`G-111`). Looked up at the moment of the gesture, so a graph
+        // opened before the browser still reaches it.
+        view.onAct = async (cid: string, rec: ActRecord) => {
+          const cell = this.browserCell();
+          return cell ? cell.actOnChunk(cid, rec) : null;
         };
         view.onBillboardClosed = (cid: string) => {
           for (const l of this.app.workspace.getLeavesOfType(BROWSER_VIEW)) {
@@ -577,8 +586,24 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     return this.serverEnact;
   }
 
+  /** The open browser cell, if its view is loaded (a background tab is a stub). */
+  private browserCell(): BrowserView | null {
+    for (const l of this.app.workspace.getLeavesOfType(BROWSER_VIEW)) {
+      const b = l.view as BrowserView;
+      if (b && typeof b.actOn === "function") return b;
+    }
+    return null;
+  }
+
+  /**
+   * A surface's control, pressed: in the browser cell the reader is looking at
+   * when there is one (`G-111`), and only otherwise by the sidecar's own
+   * headless Firefox, which has been the only thing `/enact` could drive.
+   */
   enact(address: string, action = "press",
         text?: string): Promise<EnactResult | null> {
+    const cell = this.browserCell();
+    if (cell) return cell.actOnAddress(address, action, text);
     return this.sidecar.enact(address, action, text);
   }
 

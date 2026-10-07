@@ -1035,7 +1035,22 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(400, {"error": "bad body: %s" % exc})
             return
 
-        from .enact import EnactError, enact
+        from .enact import EnactError, enact, plan
+        if body.get("mode") == "plan":
+            # A panel gesture on the page in the browser CELL: adjudicated
+            # here, carried out by the plugin in the cell. Same flag (above),
+            # same 409 for a refusal, and NOTHING is driven by this process.
+            try:
+                self._send(200, plan(self.workspace,
+                                     body.get("address") or "",
+                                     body.get("action") or "press",
+                                     body.get("text")))
+            except EnactError as exc:
+                self._send(409, {"error": str(exc), "refused": True})
+            except Exception as exc:                # noqa: BLE001
+                self._send(500, {"error": "%s: %s" % (type(exc).__name__,
+                                                      exc)})
+            return
         try:
             self._send(200, enact(self.workspace,
                                   body.get("address") or "",

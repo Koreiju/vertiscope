@@ -10,7 +10,7 @@
  * goes unnoticed.
  */
 
-import { CaptureResult, ChunkPayload, ChunkPreview, EnactResult, Health,
+import { CaptureResult, ChunkPayload, ChunkPreview, EnactPlan, EnactResult, Health,
          SearchResults, UnfoldResult,
          PlaceResult,
          Interpreters,
@@ -169,6 +169,33 @@ export class Sidecar {
         body: JSON.stringify({ address, action, text }),
       });
       return (await res.json()) as EnactResult;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Ask whether a panel gesture on a stored address may be carried out in the
+   * browser cell -- and on what (`G-111`). Drives NOTHING: the sidecar runs
+   * the gates that need no browser (the `--enact` flag, the address being one
+   * the trie holds, the refusal set) and answers with the stored `url`,
+   * `xpath` and in-page `kind`, or with `{error, refused}`.
+   *
+   * POST and not retried, for the reason `enact` is not. The answer for a
+   * refusal is a 409 body, returned, not thrown: a refusal is the system
+   * working and the panel says so.
+   */
+  async enactPlan(address: string, action: string,
+                  text?: string): Promise<EnactPlan | null> {
+    const base = this.base().trim().replace(/\/+$/, "");
+    if (!base) return null;
+    try {
+      const res = await fetch(`${base}/enact`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "plan", address, action, text }),
+      });
+      return (await res.json()) as EnactPlan;
     } catch {
       return null;
     }

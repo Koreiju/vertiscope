@@ -4309,6 +4309,190 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-111",
+      asks: "a control in a chunk's panel acts on the LIVE page through its trie address: the cell navigates and scrolls to it, the action is performed in the page, the page's change comes back as the panel's new state -- and a refused control and a planted no-op change nothing",
+      async run() {
+        // 2026-10-04: "clicking a button or link on the chunk opens the
+        // browser to first navigate and scroll to the chunk and then take the
+        // action on the component in-silico that then performs the update
+        // action/event on the browser".
+        //
+        // The page is a fixture whose only motion is the motion this check
+        // causes (the null arm is read first, on the same page). The panel
+        // is the browser side's pinned card; its controls are driven the way
+        // a reader's events reach them -- dispatched in the card's own frame
+        // -- and the page is read back with a plain read, never written.
+        //
+        // Four arms, and each can fail on its own: the CLEAN click and fill
+        // must change the page and re-render the card; the REFUSED control
+        // ("Sign in", the never-press set) must change nothing and say so;
+        // the PLANTED no-op (`act-noop`) must change nothing; and the
+        // NAVIGATION arm presses from a card while the cell is elsewhere.
+        const health = await ask("/health");
+        if (!health.enact) {
+          return { pass: false, evidence: {
+            blocked: "the sidecar was not started with --enact: panel gestures are adjudicated by it, and this check cannot run without the flag",
+            enact: health.enact } };
+        }
+        const fixtures = await serveFixtures();
+        const page = fixtures.origin + "/panel_act.html";
+        try {
+          const got = await evaluate(`(async () => {
+            ${PREP}
+            const PAGE = ${JSON.stringify(page)};
+            const SIDE = ${JSON.stringify(SIDECAR)};
+            const TOKEN = ${JSON.stringify("word" + Date.now().toString(36))};
+            const out = { page: PAGE };
+            const read = (id) => b.webview.executeJavaScript(
+              "document.getElementById(" + JSON.stringify(id) + ").textContent");
+            const xpathOf = (id) => b.webview.executeJavaScript(
+              "(function(){var el=document.getElementById(" + JSON.stringify(id) + ");" +
+              "if(!el) return '';var parts=[];" +
+              "while(el && el.nodeType===1 && el.tagName){" +
+              "var tag=el.tagName.toLowerCase(),i=1,sib=el.previousElementSibling;" +
+              "while(sib){if(sib.tagName===el.tagName)i++;sib=sib.previousElementSibling;}" +
+              "parts.unshift(i>1?tag+'['+i+']':tag);el=el.parentElement;}" +
+              "return '/'+parts.join('/');})()");
+            const until = async (fn, ms) => {
+              const t = performance.now();
+              while (performance.now() - t < ms) { if (await fn()) return true; await sleep(250); }
+              return false;
+            };
+            let cid = "";
+            try {
+              b.plant.clear();
+              try { b.setLive(true); } catch (e) {}
+              out.landed = await land(PAGE, 30000);
+              const xBtn = await xpathOf("go");
+              out.xpath = xBtn;
+              // The page must be IN the trie: the sidecar only adjudicates addresses it holds.
+              let res = null;
+              for (let i = 0; i < 75 && !res; i++) {
+                const r = await fetch(SIDE + "/resolve?url=" + encodeURIComponent(PAGE) + "&xpath=" + encodeURIComponent(xBtn));
+                if (r.ok) { const j = await r.json(); if (j && j.cid && Array.isArray(j.lines)) res = j; }
+                if (!res) await sleep(800);
+              }
+              if (!res) return { ...out, error: "the page never reached the trie" };
+              out.chunk_lines = res.lines.length;
+              const pinned = await b.pinXpath(xBtn);
+              cid = pinned && pinned.cid;
+              out.pinned = cid || pinned;
+              if (!cid) return { ...out, error: "nothing pinned" };
+
+              const frameOf = () => {
+                const card = b.markdownWrap.querySelector('.domvec-pin-card[data-cid="' + cid + '"]');
+                const f = card && card.querySelector("iframe.domvec-snapshot");
+                return f && f.contentDocument && f.contentDocument.getElementById("domvec-root") ? f : null;
+              };
+              const doc = () => frameOf().contentDocument;
+              const readoutOf = () => { const f = frameOf(); const r = f && f.parentElement.querySelector(".domvec-act-readout"); return r ? r.textContent : ""; };
+              const control = (act, text) => [...doc().querySelectorAll('[data-domvec-act="' + act + '"]')]
+                .find((e) => !text || (e.textContent || "").trim() === text);
+              const click = (el) => el.dispatchEvent(new (el.ownerDocument.defaultView.MouseEvent)(
+                "click", { bubbles: true, cancelable: true }));
+
+              out.card = await until(async () => { const f = frameOf(); return !!f && !!f.contentDocument.querySelector("[data-domvec-address]"); }, 25000);
+              if (!out.card) return { ...out, error: "no card with addressed elements" };
+              const first = frameOf();
+
+              // ---- The card is LINKED to the trie: every addressed element names this page and resolves in it.
+              const tagged = [...doc().querySelectorAll("[data-domvec-address]")];
+              out.tagged = tagged.length;
+              out.acts = [...doc().querySelectorAll("[data-domvec-act]")].map((e) =>
+                e.tagName.toLowerCase() + ":" + e.getAttribute("data-domvec-act") + ":" + (e.textContent || "").trim().slice(0, 16));
+              out.addresses_on_this_page = tagged.every((e) => e.getAttribute("data-domvec-address").split("|")[0] === PAGE);
+              const xs = tagged.map((e) => e.getAttribute("data-domvec-xpath"));
+              const alive = await b.webview.executeJavaScript(
+                "(function(xs){var h=window.__domvecSensor;return h&&h.alive?h.alive(xs):null;})(" + JSON.stringify(xs) + ")");
+              out.addresses_alive = Array.isArray(alive) && alive.length > 0 && alive.every(Boolean);
+              out.has_press = !!control("press", "Pick me");
+              out.has_type = !!control("type");
+              out.has_gate = !!control("press", "Sign in");
+
+              // ---- NULL ARM: the page alone, no gesture.
+              out.before = { out: await read("out"), echo: await read("echo"), gated: await read("gated") };
+              await sleep(3000);
+              out.null_arm_changed = (await read("out")) !== out.before.out
+                || (await read("echo")) !== out.before.echo || (await read("gated")) !== out.before.gated;
+
+              // ---- CLEAN: click from the card.
+              click(control("press", "Pick me"));
+              out.clicked = await until(async () => (await read("out")) === "button pressed 1 times", 15000);
+              out.after_click = await read("out");
+              out.rerendered = await until(async () => { const f = frameOf(); return !!f && f.contentDocument.body.textContent.indexOf("button pressed 1 times") >= 0; }, 15000);
+              out.frame_replaced = frameOf() !== first;
+
+              // ---- CLEAN: fill from the card.
+              const inp = control("type");
+              if (inp) {
+                inp.value = TOKEN;
+                inp.dispatchEvent(new (inp.ownerDocument.defaultView.Event)("change", { bubbles: true }));
+              }
+              out.filled = await until(async () => (await read("echo")) === "echo: " + TOKEN, 15000);
+              out.panel_shows_value = await until(async () => {
+                const f = frameOf(); const i = f && f.contentDocument.querySelector('[data-domvec-act="type"]');
+                return !!i && i.getAttribute("value") === TOKEN; }, 15000);
+
+              // ---- REFUSED: the never-press control changes nothing, and says why.
+              if (control("press", "Sign in")) click(control("press", "Sign in"));
+              out.refusal_said = await until(async () => /^refused/.test(readoutOf()), 15000);
+              await sleep(1500);
+              out.gated_after = await read("gated");
+              out.refusal_text = readoutOf().slice(0, 100);
+
+              // ---- PLANTED: actOn does nothing; the page must not move.
+              b.plant.add("act-noop");
+              click(control("press", "Pick me"));
+              await sleep(3500);
+              out.planted_page = await read("out");
+              out.planted_said = /planted/.test(readoutOf());
+              b.plant.delete("act-noop");
+
+              // ---- Planted arm lifted: the same click works again.
+              click(control("press", "Pick me"));
+              out.second = await until(async () => (await read("out")) === "button pressed 2 times", 15000);
+
+              // ---- NAVIGATION: the cell is elsewhere; the card's click takes it to the page first.
+              b.go("about:blank");
+              await until(async () => { try { return b.webview.getURL() === "about:blank" && !b.webview.isLoading(); } catch (e) { return false; } }, 15000);
+              await sleep(1500);
+              out.card_after_leaving = !!frameOf();
+              if (frameOf() && control("press", "Pick me")) {
+                click(control("press", "Pick me"));
+                out.arrived = await until(async () => { try { return b.webview.getURL() === PAGE; } catch (e) { return false; } }, 40000);
+                out.nav_pressed = await until(async () => {
+                  try { return (await read("out")) === "button pressed 1 times"; } catch (e) { return false; }
+                }, 25000);
+              }
+            } finally {
+              b.plant.clear();
+              try { b.setLive(false); } catch (e) {}
+              try { if (cid) b.unpin(cid); } catch (e) {}
+              try { b.go("about:blank"); } catch (e) {}
+              await sleep(2000);
+            }
+            return out;
+          })()`, { timeout: 420000 });
+          got.purged = await tidyFixtures(fixtures.origin);
+          if (got.error) return { pass: false, evidence: got };
+          const linked = got.tagged > 0 && got.addresses_on_this_page === true && got.addresses_alive === true
+            && got.has_press === true && got.has_type === true && got.has_gate === true;
+          const clean = got.null_arm_changed === false && got.clicked === true && got.rerendered === true
+            && got.filled === true && got.panel_shows_value === true && got.second === true;
+          const refused = got.refusal_said === true && got.gated_after === "still signed out";
+          const planted = got.planted_page === "button pressed 1 times" && got.planted_said === true;
+          const navigated = got.card_after_leaving === true && got.arrived === true && got.nav_pressed === true;
+          return {
+            pass: linked && clean && refused && planted && navigated,
+            evidence: { ...got, arms: { linked, clean, refused, planted, navigated },
+                        bar: "every addressed element names this page and resolves in it; a click and a fill from the card change the page and the card re-renders from it; the never-press control is refused with the page unchanged; the planted no-op leaves the page unchanged; a click with the cell elsewhere navigates first" },
+          };
+        } finally {
+          await fixtures.close();
+        }
+      },
+    },
+    {
       id: "S-7",
       asks: "a page interaction is observed and persisted to db and trie",
       async run() {

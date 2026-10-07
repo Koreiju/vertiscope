@@ -21,13 +21,22 @@
  *   inside the sensor's fold; nothing is written into the page (constraint 7).
  * - **Untrusted by construction.** No script, style sheet, iframe, object or
  *   handler is cloned; no id or class is copied; urls are made absolute and
- *   only http(s)/mailto survive; controls are cloned DISABLED -- they are not
- *   live on their xpaths, and must not pretend to be (`G-102`). The result is
- *   shown in a sandboxed frame WITHOUT `allow-scripts`, so even a missed
- *   vector cannot run.
+ *   only http(s)/mailto survive. The result is shown in a sandboxed frame
+ *   WITHOUT `allow-scripts`, so even a missed vector cannot run.
+ * - **Linked to the trie (G-102, 2026-10-04).** An element the chunk's lines
+ *   name carries the address the store holds for it (`data-domvec-address`,
+ *   `data-domvec-xpath`), and the ones a reader acts on in place also carry
+ *   `data-domvec-act`. Those controls are live: the panel intercepts the
+ *   event, and the browser cell navigates to the page, scrolls to the element
+ *   and performs the action there (`panelact.ts`, `BrowserView.actOn`). A
+ *   control the trie holds no address for is still cloned DISABLED -- it is
+ *   not live on its xpath, and must not pretend to be.
  * - **Offline.** The distilled form stays the fallback -- a chunk whose page
  *   is not open has no live elements to read.
  */
+
+import type { ActRecord, ActResult, PanelEl } from "./panelact";
+import { actFromEvent, describeResult } from "./panelact";
 
 export interface Snapshot {
   html: string;
@@ -43,177 +52,7 @@ export interface Snapshot {
   at: number;
 }
 
-/** The page-side reader. `xs` is the chunk's element xpaths. */
-export function snapshotScript(xpaths: string[]): string {
-  return `(function (xs) {
-  var MAX = 2500, count = 0;
-  var PROPS = ["display","position","box-sizing","color","background-color","background-image",
-    "background-size","background-position","background-repeat","font-family","font-size","font-weight",
-    "font-style","line-height","letter-spacing","text-transform","text-decoration-line","text-decoration-color",
-    "text-align","vertical-align","white-space","word-break","overflow-wrap",
-    "margin-top","margin-right","margin-bottom","margin-left",
-    "padding-top","padding-right","padding-bottom","padding-left",
-    "border-top-width","border-right-width","border-bottom-width","border-left-width",
-    "border-top-style","border-right-style","border-bottom-style","border-left-style",
-    "border-top-color","border-right-color","border-bottom-color","border-left-color",
-    "border-top-left-radius","border-top-right-radius","border-bottom-left-radius","border-bottom-right-radius",
-    "flex-direction","flex-wrap","justify-content","align-items","align-self","gap","column-gap","row-gap",
-    "flex-grow","flex-shrink","flex-basis","grid-template-columns","grid-auto-flow",
-    "list-style-type","object-fit","opacity","box-shadow","overflow-x","overflow-y",
-    "-webkit-line-clamp","-webkit-box-orient","text-overflow","fill","stroke"];
-  var SKIP = {"0px":1,"none":1,"normal":1,"auto":1,"rgba(0, 0, 0, 0)":1,"static":1,"visible":1,
-              "start":1,"baseline":1,"repeat":1,"0% 0%":1,"content-box":1,"1":1,"0":1,"nowrap":1,
-              "row":1,"stretch":1,"currentcolor":1};
-  var KEEP_ZERO = {"flex-shrink":1,"flex-grow":1,"opacity":1};
-  var DROP = {SCRIPT:1,STYLE:1,NOSCRIPT:1,TEMPLATE:1,IFRAME:1,OBJECT:1,EMBED:1,LINK:1,META:1,BASE:1,FORM:0};
-  function esc(t) { return String(t).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
-  function attr(t) { return esc(t).replace(/"/g,"&quot;"); }
-  function safe(u) { u = String(u || ""); return /^(https?:|mailto:)/i.test(u) ? u : ""; }
-  function styleOf(el, cs) {
-    var s = "";
-    for (var i = 0; i < PROPS.length; i++) {
-      var p = PROPS[i], v = cs.getPropertyValue(p);
-      if (!v || (SKIP[v] && !KEEP_ZERO[p]) ) continue;
-      if (p === "background-image" && !/url\\(/.test(v) && !/gradient/.test(v)) continue;
-      if (p.indexOf("border-") === 0 && p.slice(-6) === "-color" && !/solid|dashed|dotted|double/.test(
-          cs.getPropertyValue(p.replace("-color", "-style")))) continue;
-      s += p + ":" + v.replace(/"/g, "'") + ";";
-    }
-    return s;
-  }
-  function pseudo(el, which) {
-    var cs = getComputedStyle(el, which), c = cs.getPropertyValue("content");
-    if (!c || c === "none" || c === "normal" || !/^["']/.test(c)) return "";
-    var text = c.slice(1, -1);
-    if (!text.trim()) return "";
-    return '<span style="' + attr(styleOf(el, cs)) + '">' + esc(text) + "</span>";
-  }
-  function at(x) {
-    try {
-      var n = document.evaluate(x, document, null, 9, null).singleNodeValue;
-      if (n && n.nodeType === 3) n = n.parentElement;
-      return n && n.nodeType === 1 ? n : null;
-    } catch (e) { return null; }
-  }
-  // A line joined from inline fragments keeps its FIRST fragment's address --
-  // "<b>Trie</b> implementation based on ..." is addressed at the <b> -- so
-  // each element found is widened to the block the browser lays its run out
-  // in: up past every ancestor whose computed display is inline.
-  function flow(n) {
-    while (n.parentElement && n.parentElement !== document.body
-           && /^inline/.test(getComputedStyle(n).display)) n = n.parentElement;
-    return n;
-  }
-  var own = new Set(), path = new Set(), found = 0;
-  for (var i = 0; i < xs.length; i++) { var n = at(xs[i]); if (n) { own.add(flow(n)); found++; } }
-  if (!own.size) return null;
-  var list = Array.from(own);
-  function chain(n) { var a = []; while (n) { a.unshift(n); n = n.parentElement; } return a; }
-  var first = chain(list[0]), depth = first.length;
-  for (i = 1; i < list.length; i++) {
-    var a = chain(list[i]), k = 0;
-    while (k < depth && k < a.length && a[k] === first[k]) k++;
-    depth = k;
-  }
-  var root = first[Math.max(0, depth - 1)];
-  for (i = 0; i < list.length; i++) {
-    for (var p = list[i]; p && p !== root; p = p.parentElement) path.add(p);
-  }
-  function kids(el) {
-    if (el.shadowRoot) return Array.from(el.shadowRoot.childNodes);
-    if (el.tagName === "SLOT" && el.assignedNodes) {
-      var got = el.assignedNodes({ flatten: true });
-      if (got.length) return got;
-    }
-    return Array.from(el.childNodes);
-  }
-  function svg(el) {
-    var c = el.cloneNode(true);
-    var bad = c.querySelectorAll("script,foreignObject,a");
-    for (var i = 0; i < bad.length; i++) bad[i].remove();
-    var all = [c].concat(Array.from(c.querySelectorAll("*")));
-    for (i = 0; i < all.length; i++) {
-      for (var j = all[i].attributes.length - 1; j >= 0; j--) {
-        var nm = all[i].attributes[j].name;
-        if (/^on/i.test(nm) || /href$/i.test(nm)) all[i].removeAttribute(nm);
-      }
-    }
-    var r = el.getBoundingClientRect(), cs = getComputedStyle(el);
-    c.setAttribute("width", Math.round(r.width)); c.setAttribute("height", Math.round(r.height));
-    c.setAttribute("style", "color:" + cs.color + ";fill:" + cs.fill + ";vertical-align:middle;");
-    return new XMLSerializer().serializeToString(c);
-  }
-  function clone(el, whole) {
-    if (count++ > MAX) return "";
-    if (el.nodeType === 3) return whole ? esc(el.nodeValue) : "";
-    if (el.nodeType !== 1) return "";
-    var tag = el.tagName;
-    if (DROP[tag]) return "";
-    var cs = getComputedStyle(el);
-    if (cs.display === "none" || cs.visibility === "hidden") return "";
-    if (el instanceof SVGElement) return tag.toLowerCase() === "svg" ? svg(el) : "";
-    var name = tag.toLowerCase();
-    if (name.indexOf("-") > 0 || name === "slot") name = /inline/.test(cs.display) ? "span" : "div";
-    if (name === "form") name = "div";
-    var s = styleOf(el, cs), extra = "";
-    if (name === "a") { var h = safe(el.href); if (h) extra += ' href="' + attr(h) + '" data-href="' + attr(h) + '"'; }
-    if (name === "img") {
-      var src = safe(el.currentSrc || el.src), r = el.getBoundingClientRect();
-      if (!src) return "";
-      extra += ' src="' + attr(src) + '" alt="' + attr(el.alt || "") + '"';
-      s += "width:" + Math.round(r.width) + "px;height:" + Math.round(r.height) + "px;max-width:100%;";
-    }
-    if (name === "picture" || name === "source") { if (name === "source") return ""; }
-    if (name === "video") {
-      var poster = safe(el.poster), vr = el.getBoundingClientRect();
-      return '<img src="' + attr(poster) + '" alt="video" style="' + attr(s + "width:" + Math.round(vr.width) +
-             "px;height:" + Math.round(vr.height) + "px;max-width:100%;background:#000;") + '">';
-    }
-    if (name === "input" || name === "textarea" || name === "select" || name === "button") {
-      extra += " disabled";
-      if (name === "input") {
-        extra += ' type="' + attr(el.type || "text") + '"';
-        if (el.type === "checkbox" || el.type === "radio") { if (el.checked) extra += " checked"; }
-        else extra += ' value="' + attr(el.value || "") + '" placeholder="' + attr(el.placeholder || "") + '"';
-      }
-    }
-    if (el.title) extra += ' title="' + attr(el.title) + '"';
-    if (el.colSpan > 1) extra += ' colspan="' + el.colSpan + '"';
-    if (el.rowSpan > 1) extra += ' rowspan="' + el.rowSpan + '"';
-    if (name === "img" || name === "input" || name === "br" || name === "hr") {
-      return "<" + name + ' style="' + attr(s) + '"' + extra + ">";
-    }
-    var inner = pseudo(el, "::before");
-    if (name === "select") {
-      var o = el.options[el.selectedIndex];
-      inner += "<option>" + esc(o ? o.text : "") + "</option>";
-    } else if (name === "textarea") {
-      inner += esc(el.value || "");
-    } else {
-      var ks = kids(el);
-      for (var i = 0; i < ks.length; i++) {
-        var c = ks[i];
-        if (whole || own.has(c)) inner += clone(c, true);
-        else if (path.has(c)) inner += clone(c, false);
-      }
-    }
-    inner += pseudo(el, "::after");
-    return "<" + name + ' style="' + attr(s) + '"' + extra + ">" + inner + "</" + name + ">";
-  }
-  var html = clone(root, own.has(root));
-  var bg = "", q = root;
-  while (q && q.nodeType === 1) {
-    var b = getComputedStyle(q).backgroundColor;
-    if (b && b !== "rgba(0, 0, 0, 0)" && b !== "transparent") { bg = b; break; }
-    q = q.parentElement;
-  }
-  if (!bg) bg = getComputedStyle(document.body).backgroundColor || "rgb(255, 255, 255)";
-  if (bg === "rgba(0, 0, 0, 0)") bg = "rgb(255, 255, 255)";
-  var rc = getComputedStyle(root);
-  return { html: html, bg: bg, color: rc.color, font: rc.fontSize + " " + rc.fontFamily,
-           elements: count, found: found, url: location.href, at: Date.now() };
-})(${JSON.stringify(xpaths.slice(0, 600))})`;
-}
+export { snapshotScript } from "./snapshotscript";
 
 /** The xpaths a chunk's payload lines draw (`url|xpath|cls|accessor...` keys). */
 export function xpathsOfLines(lines: { key?: string }[]): string[] {
@@ -306,7 +145,15 @@ export function getSnapshot(cid: string): Snapshot | null {
  * the browser cell navigates; the frame never does.
  */
 export function renderSnapshot(host: HTMLElement, snap: Snapshot,
-                               opts: { maxHeight?: number; onLink?: (href: string) => void } = {}): HTMLIFrameElement {
+                               opts: {
+                                 maxHeight?: number;
+                                 onLink?: (href: string) => void;
+                                 /** A gesture on an element the trie addresses: carried out in the
+                                  *  browser cell, on the live page. Absent -> controls stay inert. */
+                                 onAct?: (rec: ActRecord) => Promise<ActResult | null>;
+                                 /** The chunk, so the last gesture's outcome survives a re-draw. */
+                                 cid?: string;
+                               } = {}): HTMLIFrameElement {
   const frame = document.createElement("iframe");
   frame.className = "domvec-snapshot";
   // allow-same-origin WITHOUT allow-scripts: the page's markup cannot run,
@@ -345,12 +192,65 @@ export function renderSnapshot(host: HTMLElement, snap: Snapshot,
     fit();
     // Pictures change the height as they arrive.
     doc.querySelectorAll("img").forEach((img) => img.addEventListener("load", fit));
+    // The frame never navigates and no control acts on its own: every event
+    // is stopped here, and one on an element the trie addresses becomes an
+    // ActRecord handed to the browser cell. The panel is not re-drawn by the
+    // gesture -- it is re-drawn when the page changes (the caller re-reads).
+    const elOf = (t: EventTarget | null) =>
+      (t as HTMLElement | null)?.closest?.("[data-domvec-act]") as HTMLElement | null;
+    const asEl = (el: HTMLElement): PanelEl => ({
+      address: el.getAttribute("data-domvec-address") || undefined,
+      act: el.getAttribute("data-domvec-act") || undefined,
+      value: (el as HTMLInputElement).value,
+    });
+    // Enter and the change it implies can both arrive for one entry: one act.
+    let lastSent = { sig: "", at: 0 };
+    const run = (rec: ActRecord | null): boolean => {
+      if (!rec || !opts.onAct) return false;
+      const sig = `${rec.action}|${rec.key}|${rec.value ?? ""}`;
+      if (sig === lastSent.sig && Date.now() - lastSent.at < 400) return true;
+      lastSent = { sig, at: Date.now() };
+      note(`${rec.action}…`);
+      opts.onAct(rec).then((r) => note(describeResult(r)),
+                           (err) => note(`error: ${String(err).slice(0, 80)}`));
+      return true;
+    };
     doc.addEventListener("click", (e) => {
+      const hit = elOf(e.target);
       const a = (e.target as HTMLElement)?.closest?.("a[data-href]") as HTMLElement | null;
       e.preventDefault();
-      if (a && opts.onLink) opts.onLink(a.getAttribute("data-href") || "");
+      if (hit && run(actFromEvent("click", asEl(hit)))) return;
+      // No address, or no cell to act through: a link still opens its page.
+      if (a && opts.onLink && !(hit && opts.onAct)) opts.onLink(a.getAttribute("data-href") || "");
+    }, true);
+    doc.addEventListener("change", (e) => {
+      const hit = elOf(e.target);
+      if (hit) run(actFromEvent("change", asEl(hit)));
+    }, true);
+    // A reader who types and presses Enter has finished the field; the page's
+    // own form would submit, which this panel does not do -- the value lands
+    // as the `change` it is, and that is all.
+    doc.addEventListener("keydown", (e) => {
+      const ke = e as KeyboardEvent;
+      const t = ke.target as HTMLInputElement | null;
+      if (ke.key === "Enter" && t && t.tagName === "INPUT" && elOf(t)) {
+        ke.preventDefault();
+        run(actFromEvent("change", asEl(elOf(t)!)));
+      }
     }, true);
   });
   host.appendChild(frame);
+  const readout = document.createElement("div");
+  readout.className = "domvec-act-readout";
+  host.appendChild(readout);
+  const note = (text: string) => {
+    readout.textContent = text;
+    readout.style.display = text ? "block" : "none";
+    if (opts.cid) LAST_ACT.set(opts.cid, text);
+  };
+  note(opts.cid ? LAST_ACT.get(opts.cid) || "" : "");
   return frame;
 }
+
+/** What the last gesture on each chunk's panel said, kept across re-draws. */
+const LAST_ACT = new Map<string, string>();

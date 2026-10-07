@@ -31,6 +31,7 @@ import { MotionRecorder } from "./motion";
 import { Sidecar } from "./sidecar";
 import { ChunkSurface, SurfaceHost } from "./surface";
 import { faviconFor, getSnapshot, pictureFor, renderSnapshot } from "./snapshot";
+import type { ActRecord, ActResult } from "./panelact";
 
 export const GRAPH_VIEW = "domvec-graph-view";
 
@@ -2707,6 +2708,13 @@ export class GraphView extends ItemView {
   onNavigate: (href: string) => void = () => {};
 
   /**
+   * A gesture on a control in a billboard's snapshot (`G-111`): carried out in
+   * the browser cell on the live page, which then re-reads the chunk. Brokered
+   * by the plugin like `onNavigate`; null (no cell) leaves the controls inert.
+   */
+  onAct: (cid: string, rec: ActRecord) => Promise<ActResult | null> = async () => null;
+
+  /**
    * Mount the page-faithful snapshot of a chunk into a billboard body, with a
    * toggle to the distilled form. False when there is none to show.
    */
@@ -2715,7 +2723,10 @@ export class GraphView extends ItemView {
     if (!snap) return false;
     body.empty();
     entry.snapshot = true;
-    renderSnapshot(body, snap, { maxHeight: 420, onLink: (h) => this.onNavigate(h) });
+    renderSnapshot(body, snap, {
+      maxHeight: 420, onLink: (h) => this.onNavigate(h), cid: entry.node.id,
+      onAct: (rec) => this.onAct(entry.node.id, rec),
+    });
     const toggle = entry.el.querySelector(".domvec-bb-head") as HTMLElement | null;
     if (toggle && !toggle.querySelector(".domvec-bb-form")) {
       const t = toggle.createSpan({ cls: "domvec-bb-form", text: "md" });
