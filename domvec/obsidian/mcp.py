@@ -236,6 +236,21 @@ TOOLS: List[Dict] = [
             "reload": {"type": "boolean", "description": "Reload the plugin first so the build on disk is what runs"}}},
     },
     {
+        "name": "app_anomalies",
+        "description": (
+            "What is WRONG in the running app right now, measured by the app's "
+            "own objects: drawn nodes the store does not hold (phantoms), "
+            "streaming nodes with no pending spec, links to undrawn nodes, the "
+            "tree verdict over every drawn edge, whether the browsed page's "
+            "stream is a tree or a star hung on its page node, every open panel "
+            "(form, empty, images loaded/broken/duplicated, its trie address), "
+            "the last panels opened and whether they rendered, overlay boxes "
+            "outside the browser cell, and latency (pushed drains, "
+            "mutation->host, drain->overlay, drain->3D). `problems` lists each "
+            "anomaly in words. Read-only."),
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
         "name": "graph_inspect",
         "description": (
             "An off-screen camera framed on one page (default: the one browsed), "
@@ -361,6 +376,8 @@ class DomvecMCP:
             "checks_box": lambda a: self.live().observe_checks(),
             "app_screenshot": lambda a: self.live().screenshot(str(a.get("path") or "")),
             "graph_motion": self._graph_motion,
+            "app_anomalies": lambda a: self.live().json_eval(
+                "(async () => JSON.stringify(await window.__domvec.anomalies()))()"),
             "graph_inspect": lambda a: __import__("domvec.obsidian.motionfilm", fromlist=["inspect"]).inspect(
                 self.live(), str(a.get("url") or ""), int(a.get("size") or 480), str(a.get("path") or "")),
             "verify_state": self._verify_state,

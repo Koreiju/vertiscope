@@ -38,6 +38,7 @@ import { StressRun } from "./stress";
 import { SessionSwitch } from "./session";
 import { treeVerdict } from "./treeguard";
 import { isolation, WORLD } from "./isolate";
+import { anomalies } from "./anomalies";
 
 export interface TraceCall {
   /** Milliseconds since the recording started. */
@@ -584,6 +585,11 @@ export function installHarness(app: App, sidecarBase: () => string) {
     // Where the sensor runs: the isolated world's call count, and every
     // fall-back to the page's main world (2026-10-06).
     isolation: () => ({ world: WORLD, ...isolation }),
+    // Everything the reader reported on 2026-10-06, measured by the app's
+    // own objects: phantoms, stale links, the stream's tree shape, panels,
+    // pictures, the overlay's bounds, latency. One instrument for the MCP
+    // server, the checks and the probes.
+    anomalies: () => anomalies(app, () => profiler().list()),
     // Is what the 3D view draws a tree, over EVERY drawn edge? (2026-10-04)
     tree: () => {
       const g = leaf("domvec-graph-view")?.view?.graph;

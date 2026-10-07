@@ -856,8 +856,12 @@ export class BrowserView extends ItemView {
    * from the live page, when the chunk's page is the one open in the cell.
    * False when it cannot be (another page is open, or nothing is found).
    */
-  async snapshotChunk(cid: string, url: string): Promise<boolean> {
-    if (!cid || getSnapshot(cid)) return !!getSnapshot(cid);
+  async snapshotChunk(cid: string, url: string, again = false): Promise<boolean> {
+    // `again`: re-read the live page even when a snapshot is held -- an open
+    // panel after a diff, or a panel just opened (2026-10-06: the held one was
+    // served forever, and the page form showed a stale grey mask).
+    if (!cid) return false;
+    if (!again && getSnapshot(cid)) return true;
     let here = "";
     try { here = this.webview?.getURL() || ""; } catch { /* not attached */ }
     if (!here || docKey(here) !== docKey(url || "")) return false;
@@ -1249,7 +1253,7 @@ export class BrowserView extends ItemView {
   private sensorBoot(): string {
     return `if (!window[${JSON.stringify(HANDLE)}]) {
           var h = (${BrowserView.sensorSource})(
-            {budget: 0, debounce: 80, variants: {}, known: [], signal: ${JSON.stringify(SIGNAL)},
+            {budget: 0, debounce: 80, variants: ${this.plant.has("no-late-roots") ? "{nolateroots: true}" : "{}"}, known: [], signal: ${JSON.stringify(SIGNAL)},
              push: ${!this.plant.has("pull-drain")}});
           Object.defineProperty(window, ${JSON.stringify(HANDLE)},
             {value: h, enumerable: false, configurable: false});

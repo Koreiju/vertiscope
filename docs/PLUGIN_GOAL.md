@@ -2275,6 +2275,44 @@ with the top-right button resizes the panel about its centre, each form with
 its own size; (16) the image renders; (17) the page form follows the chunk's
 diffs instead of showing a stale grey mask.*
 
+> I should note that this lacking in webpage updates on chunks in their
+> panels is even happening for nodes with image billboards being clicked on.
+
+> One other thing that might work good for umap/force directed is voronoi
+> repulsion thresholds on link lengths. Difficult but maybe doable.
+
+*Read as: (18) the stale page form also affects nodes drawn as image
+billboards; (19) a candidate for both layouts: Voronoi-cell-based repulsion,
+with thresholds on link lengths.*
+
+> Clicking on a page node no longer works (might be diff or something
+> blocking)
+
+> Surprisingly, archive.org is not being picked up at all. I know for a fact
+> this is a nested shadow node issue
+
+> Also, image is attached, not sure if what I'm seeing is tests on the
+> artifacts or actual degradations... Looks voronoi
+
+> Jumbled rendering bug spotted in the Wikipedia quadrant, not sure if this
+> is a recent patricia trie/tree update or no. I'd like to see the full
+> patricia tree rendered. Also, the umap clusters are still quite small, and
+> still quite closely packed for each URL. I don't even think we need
+> voronoi, but maybe we do, for a max bound distance that telescopes the
+> chunk distances from their centroid url node radially within some bounds,
+> which still preserves the UMAP geometries.
+
+*(Photos: long straight edges fanning from a few points across the 3D view;
+an unfolded Wikipedia page as a dense ball of ~770 chunk nodes with tree
+edges crossing everywhere.)*
+
+*Read as: (20) a click on a page node must unfold it; (21) archive.org's
+content lives in nested shadow roots and must be read; (22) the full
+patricia tree of a page drawn so it can be seen as a tree; (23) each page's
+UMAP cluster is too small and too dense: telescope its chunks' distances
+from the page node RADIALLY into bounds (a maximum distance), keeping the
+UMAP geometry -- directions and the order of distances.*
+
 ---
 
 

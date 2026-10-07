@@ -1,0 +1,47 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Late shadow roots</title>
+<body>
+<h1>Components that attach their shadow roots late</h1>
+<p>archive.org's pattern: the light DOM holds only custom-element hosts; each
+attaches an open shadow root when it upgrades, after the page has loaded, and
+the content lives three roots deep. Attaching a root fires no mutation.</p>
+<late-app></late-app>
+<script>
+  // `late` ms after load each host attaches its root; nested three deep.
+  var late = +(new URLSearchParams(location.search).get("late") || 400);
+  class LateLeaf extends HTMLElement {
+    connectedCallback() {
+      var self = this;
+      setTimeout(function () {
+        var r = self.attachShadow({ mode: "open" });
+        r.innerHTML = "<p>Leaf " + self.getAttribute("n") + ": the words that live three shadow roots deep, attached late.</p>";
+      }, late);
+    }
+  }
+  class LateList extends HTMLElement {
+    connectedCallback() {
+      var self = this;
+      setTimeout(function () {
+        var r = self.attachShadow({ mode: "open" });
+        r.innerHTML = "<h2>A list inside a late root</h2><late-leaf n='1'></late-leaf><late-leaf n='2'></late-leaf><late-leaf n='3'></late-leaf>";
+      }, late);
+    }
+  }
+  class LateApp extends HTMLElement {
+    connectedCallback() {
+      var self = this;
+      setTimeout(function () {
+        var r = self.attachShadow({ mode: "open" });
+        r.innerHTML = "<p>The application shell, attached late.</p><late-list></late-list>";
+      }, late);
+    }
+  }
+  // Defined after load, as a bundle that arrives late defines them.
+  setTimeout(function () {
+    customElements.define("late-leaf", LateLeaf);
+    customElements.define("late-list", LateList);
+    customElements.define("late-app", LateApp);
+  }, late);
+</script>
+</body>

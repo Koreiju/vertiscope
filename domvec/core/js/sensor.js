@@ -1078,13 +1078,67 @@
   // clean subtree the host sits in — which is most passes, and is the whole
   // point of the cache. What the number has to mean is "opaque right now".
   var opaqueHosts = (typeof Set === 'function') ? new Set() : null;
+  // Custom-element hosts folded WITHOUT a shadow root (2026-10-06). A
+  // component attaches its root when it upgrades, which is often after the
+  // light DOM it sits in was folded -- archive.org: 426 open roots nested 8
+  // deep and 32,231 characters inside them, the sensor folding 17 chunks
+  // through 33 observers. Attaching a root fires no mutation, so a root that
+  // arrives late was never observed. Each such host is held here and looked
+  // at again (`sweepHosts`) on every repair and on a short backoff while any
+  // are held; one that gains an OPEN root is observed and re-folded. Nothing
+  // is patched: `attachShadow` stays the page's own.
+  var pendingHosts = (typeof Set === 'function') ? new Set() : null;
+  var hostTimer = null, hostDelay = 0;
+  var HOST_DELAYS = [30, 100, 300, 1000, 3000, 5000];
   function noteOpaque(node) {
     if (!opaqueHosts || node.nodeType !== 1) return;
     var name = node.localName || '';
-    if (name.indexOf('-') < 0 || node.childNodes.length) return;
-    try { if (!customElements.get(name)) return; }
-    catch (e) { return; }
+    if (name.indexOf('-') < 0) return;
+    if (pendingHosts && pendingHosts.size < 5000 && !pendingHosts.has(node)) {
+      pendingHosts.add(node);
+      hostDelay = 0;
+      armHosts();
+    }
+    if (node.childNodes.length) return;
+    // `:defined` is the element's own CSS state, the same in every world; the
+    // registry (`customElements.get`) is per world, and an isolated world's
+    // is empty, so every host read as undefined there.
+    var defined = false;
+    try { defined = node.matches(':defined'); } catch (e) { return; }
+    if (!defined) return;
     opaqueHosts.add(node);
+  }
+  function armHosts() {
+    if (hostTimer !== null || !pendingHosts || !pendingHosts.size) return;
+    var wait = HOST_DELAYS[Math.min(hostDelay, HOST_DELAYS.length - 1)];
+    hostDelay++;
+    hostTimer = setTimeout(function () {
+      hostTimer = null;
+      if (sweepHosts()) hostDelay = 0;
+      armHosts();
+    }, wait);
+  }
+  function sweepHosts() {
+    // `nolateroots`: the planted arm -- the old fold, which never looked again.
+    if (!pendingHosts || V.nolateroots) return 0;
+    var found = 0;
+    pendingHosts.forEach(function (el) {
+      try {
+        if (!el.isConnected) { pendingHosts.delete(el); return; }
+        if (el.shadowRoot) {
+          pendingHosts.delete(el);
+          observe(el.shadowRoot);
+          markDirty(el);
+          found++;
+        }
+      } catch (e) { pendingHosts.delete(el); }
+    });
+    if (found) {
+      stats.lateRoots = (stats.lateRoots || 0) + found;
+      schedule();
+    }
+    stats.pendingHosts = pendingHosts.size;
+    return found;
   }
 
   // Anything that has since gained children, gained an open root, or left the
@@ -2443,6 +2497,7 @@
       }
       chunkRoots = live;
       sweepOpaque();
+      sweepHosts();
       dirtySpans.clear();
       stats.nodes = 0;
     } catch (e) { stats.errors++; }

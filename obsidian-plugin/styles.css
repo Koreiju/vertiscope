@@ -649,6 +649,25 @@ button.domvec-run-fence:hover {
 .domvec-bb-close { cursor: pointer; opacity: 0.7; }
 .domvec-bb-close:hover { opacity: 1; }
 .domvec-bb-body { overflow: auto; padding: 6px 8px; }
+/* Two forms, each its own size (2026-10-06): the PAGE form as before, the
+   MARKDOWN form larger, drawn by Obsidian's own renderer. */
+.domvec-bb { width: 340px; max-width: 340px; max-height: 300px; }
+.domvec-bb.is-md { width: 500px; max-width: 500px; max-height: 440px; }
+.domvec-bb-md { font-size: var(--font-ui-small); user-select: text; }
+.domvec-bb-md img { max-width: 100%; height: auto; }
+.domvec-bb-md p { margin: 0.25em 0; }
+/* The header is the chunk's full patricia-trie address. */
+.domvec-bb-addr {
+  flex: 1 1 auto; min-width: 0;
+  font-family: var(--font-monospace); font-size: 10.5px; line-height: 1.3;
+  white-space: normal; word-break: break-all; color: var(--text-muted);
+  max-height: 3.9em; overflow: auto;
+}
+.domvec-bb-form {
+  flex: 0 0 auto; cursor: pointer; padding: 0 6px; border-radius: 4px;
+  border: 1px solid var(--background-modifier-border); color: var(--text-normal);
+}
+.domvec-bb-form:hover { background: var(--background-modifier-hover); }
 .domvec-bb-line { white-space: pre-wrap; }
 .domvec-bb-more { color: var(--text-faint); padding-top: 4px; }
 

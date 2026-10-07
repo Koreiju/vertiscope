@@ -16,7 +16,7 @@
  */
 
 import { profiler } from "./profile";
-import { ItemView, WorkspaceLeaf, requestUrl } from "obsidian";
+import { ItemView, MarkdownRenderer, WorkspaceLeaf, requestUrl } from "obsidian";
 import ForceGraph3D, { ForceGraph3DInstance } from "3d-force-graph";
 // `d3-force-3d` is what `3d-force-graph` runs its simulation on, so this is
 // the same module instance the graph already uses -- not a second copy whose
@@ -2198,7 +2198,11 @@ export class GraphView extends ItemView {
     }
     const el = this.billboardLayer.createDiv({ cls: "domvec-bb" });
     const head = el.createDiv({ cls: "domvec-bb-head" });
-    head.setText(String(node.name || node.id).slice(0, 44));
+    // The chunk's full patricia-trie address (2026-10-06: "the header of the
+    // panel should show the full patricia trie address"): `url : xpath`,
+    // filled in when the store answers; the url alone until then.
+    const addr = head.createDiv({ cls: "domvec-bb-addr" });
+    addr.setText(String(node.url || node.name || node.id));
     // Minimize: down to the title bar, the chunk still open (2026-09-26).
     const min = head.createSpan({ cls: "domvec-bb-min" });
     min.setText("\u2013");
@@ -2250,31 +2254,132 @@ export class GraphView extends ItemView {
       head.addEventListener("pointerup", up);
     };
 
-    // **The chunk's rendered shadow-DOM form (`G-77`)** -- the same
-    // `ChunkSurface` a note fence mounts, forced to its interactive form: the
-    // distilled HTML in an open shadow root. It replaced both a text-only
-    // list of lines here and the separate chunk pane; the markdown form is
-    // the browser's markdown side.
+    // **Two forms (2026-10-06)**: the PAGE -- the live page's own rendering
+    // of the chunk, read from the browser cell -- and MARKDOWN, drawn by
+    // Obsidian's own renderer. "our webpage rendering view is basically the
+    // correct result", so the distilled shadow-DOM form and its switch are
+    // gone from the panel. The page form is the default whenever the chunk's
+    // page is the one open in the cell.
     body.empty();
     if (node.level === "page" || node.level === "path") {
       body.setText("a page stands for its chunks -- click to unravel it");
       return;
     }
-    // The chunk as the browser draws it (D-36), when the page gave one --
-    // asked for NOW if its page is the one open in the browser cell.
-    const ask = this.snapshotFor || ((cid: string, url: string) => {
-      const b: any = this.app.workspace.getLeavesOfType("domvec-browser-view")[0]?.view;
-      return b && typeof b.snapshotChunk === "function" ? b.snapshotChunk(cid, url) : Promise.resolve(false);
-    });
-    if (!getSnapshot(node.id)) {
-      try { await ask(node.id, node.url || ""); } catch { /* keep the distilled form */ }
+    const payload: any = await this.sidecar.chunk(node.id).catch(() => null);
+    entry.payload = payload;
+    if (payload && payload.url) {
+      const full = `${payload.url} : ${payload.xpath || "/"}`;
+      addr.setText(full);
+      addr.setAttr("title", full);
     }
-    if (this.mountSnapshot(entry, body)) { this.noteBillboard(node, body, "snapshot"); return; }
-    const surface = new ChunkSurface(body, node.id, this.surfaceHost,
-                                     { interactive: true });
-    entry.surface = surface;
-    this.addChild(surface);
-    this.noteBillboard(node, body, "surface");
+    const toggle = head.createSpan({ cls: "domvec-bb-form" });
+    toggle.onpointerdown = (e: PointerEvent) => e.stopPropagation();
+    toggle.onclick = (e: MouseEvent) => {
+      e.stopPropagation();
+      void this.switchForm(entry, entry.form === "page" ? "markdown" : "page");
+    };
+    entry.toggle = toggle;
+    const shown = await this.renderForm(entry, "page", true);
+    if (!shown) await this.renderForm(entry, "markdown");
+    this.noteBillboard(node, body, entry.form || "none");
+  }
+
+  /** The chunk's markdown, as Obsidian renders a note: one line per detection,
+   *  its structural indent dropped (four spaces would make a code block). */
+  private chunkMarkdown(payload: any): string {
+    const lines: any[] = (payload && payload.lines) || [];
+    // ONE image per element (2026-10-06: "many images for nodes seem
+    // duplicative"). The live sensor gives an <img> two detections -- its
+    // source accessor and its alt -- and each rendered a picture; measured on
+    // an allrecipes card: the same jpg twice. Keyed on the element's address
+    // (`url|xpath`), keeping the line that carries the alt.
+    const imgAt = new Map<string, number>();
+    const keep = lines.map(() => true);
+    lines.forEach((l, i) => {
+      const t = String(l.text || "").trim();
+      if (!/^!\[/.test(t)) return;
+      const el = String(l.key || "").split("|").slice(0, 2).join("|");
+      if (!el) return;
+      const j = imgAt.get(el);
+      if (j === undefined) { imgAt.set(el, i); return; }
+      const hasAlt = (s: string) => !/^!\[\]/.test(String(s || "").trim());
+      if (hasAlt(t) && !hasAlt(lines[j].text)) { keep[j] = false; imgAt.set(el, i); }
+      else keep[i] = false;
+    });
+    return lines.filter((_l, i) => keep[i])
+      .map((l) => String(l.text || "").replace(/^\s+/, "")).join("\n");
+  }
+
+  /**
+   * Draw one form into the billboard's body. `page` re-reads the live page
+   * every time it is asked (a held snapshot was served forever, so a chunk the
+   * diff had rewritten showed its old rendering: "The html-side of the chunk
+   * also doesn't update"). False when that form cannot be drawn.
+   */
+  private async renderForm(entry: any, form: "page" | "markdown", fresh = true): Promise<boolean> {
+    const body = entry.el.querySelector(".domvec-bb-body") as HTMLElement | null;
+    if (!body) return false;
+    const id = entry.node.id;
+    if (form === "page") {
+      const ask = this.snapshotFor || ((cid: string, url: string, again?: boolean) => {
+        const b: any = this.app.workspace.getLeavesOfType("domvec-browser-view")[0]?.view;
+        return b && typeof b.snapshotChunk === "function" ? b.snapshotChunk(cid, url, again) : Promise.resolve(false);
+      });
+      try { await ask(id, entry.node.url || "", fresh); } catch { /* not open in the cell */ }
+      const snap = getSnapshot(id);
+      if (!snap) return false;
+      body.empty();
+      renderSnapshot(body, snap, {
+        maxHeight: 420, onLink: (h) => this.onNavigate(h), cid: id,
+        onAct: (rec) => this.onAct(id, rec),
+      });
+    } else {
+      if (fresh || !entry.payload) entry.payload = await this.sidecar.chunk(id).catch(() => entry.payload);
+      body.empty();
+      const host = body.createDiv({ cls: "domvec-bb-md markdown-rendered" });
+      const md = this.chunkMarkdown(entry.payload);
+      if (!md.trim()) host.setText("(no lines stored for this chunk)");
+      else await MarkdownRenderer.render(this.app, md, host, "", this);
+      // A link goes to the browser cell, never the vault's own router.
+      host.querySelectorAll("a").forEach((a: HTMLAnchorElement) => {
+        a.onclick = (e: MouseEvent) => {
+          e.preventDefault(); e.stopPropagation();
+          const h = a.getAttribute("href") || a.getAttribute("data-href") || "";
+          if (/^https?:/.test(h)) this.onNavigate(h);
+        };
+      });
+    }
+    entry.form = form;
+    entry.snapshot = form === "page";
+    entry.el.toggleClass("is-md", form === "markdown");
+    if (entry.toggle) entry.toggle.setText(form === "page" ? "markdown" : "page");
+    return true;
+  }
+
+  /**
+   * The top-right button: the other form, at that form's own size, resized
+   * about the panel's CENTRE (2026-10-06: "resizing centered by the button
+   * clicked at the top right corner of the panel to get the page and markdown
+   * sizing unique").
+   */
+  private async switchForm(entry: any, form: "page" | "markdown"): Promise<void> {
+    const before = entry.el.getBoundingClientRect();
+    const host = (this.billboardLayer as HTMLElement).getBoundingClientRect();
+    const cx = before.left + before.width / 2 - host.left;
+    const cy = before.top + before.height / 2 - host.top;
+    const ok = await this.renderForm(entry, form);
+    if (!ok) return;
+    const after = entry.el.getBoundingClientRect();
+    const left = cx - after.width / 2, top = cy - after.height / 2;
+    if (entry.pinned) {
+      entry.el.style.left = `${Math.round(left)}px`;
+      entry.el.style.top = `${Math.round(top)}px`;
+      return;
+    }
+    // Following its node: keep the new offset from the node, so the centre
+    // stays where it was and the panel goes on following.
+    const at: any = this.graph ? (this.graph as any).graph2ScreenCoords(entry.node.x, entry.node.y, entry.node.z) : null;
+    if (at) { entry.dx = Math.round(left - at.x); entry.dy = Math.round(top - at.y); }
   }
 
   /**
@@ -2947,7 +3052,7 @@ export class GraphView extends ItemView {
   streamParams = STREAM;
 
   /** Asks the browser cell for a chunk's page snapshot (set by the plugin). */
-  snapshotFor: ((cid: string, url: string) => Promise<boolean>) | null = null;
+  snapshotFor: ((cid: string, url: string, again?: boolean) => Promise<boolean>) | null = null;
 
   /** Where a link clicked inside a billboard's snapshot goes: the browser cell. */
   onNavigate: (href: string) => void = () => {};
@@ -3007,7 +3112,9 @@ export class GraphView extends ItemView {
       if (!changed.has(id)) continue;
       const body = entry.el.querySelector(".domvec-bb-body") as HTMLElement | null;
       if (!body) continue;
-      if (entry.snapshot) { this.mountSnapshot(entry, body); continue; }
+      // The diff rewrote this chunk: its form is drawn again from the PAGE
+      // (re-read) or the store, never from what was held.
+      if (entry.form) { void this.renderForm(entry, entry.form, true); continue; }
       if (!entry.surface) continue;
       this.removeChild(entry.surface);
       body.empty();
@@ -3091,8 +3198,9 @@ export class GraphView extends ItemView {
     if (!Number.isFinite(n.x)) return;
     const at: any = (this.graph as any).graph2ScreenCoords(n.x, n.y, n.z);
     if (!at) return;
-    entry.el.style.left = `${Math.round(at.x) + 12}px`;
-    entry.el.style.top = `${Math.round(at.y) + 12}px`;
+    const e: any = entry;
+    entry.el.style.left = `${Math.round(at.x) + (e.dx ?? 12)}px`;
+    entry.el.style.top = `${Math.round(at.y) + (e.dy ?? 12)}px`;
   }
 
   /**
