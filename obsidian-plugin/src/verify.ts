@@ -156,13 +156,17 @@ export class Verifier {
   }
 
   private async sidecarAlive(): Promise<boolean> {
-    try {
-      const res = await fetch(this.sidecarUrl().replace(/\/+$/, "") + "/health",
-                              { signal: AbortSignal.timeout(10000) });
-      return res.ok;
-    } catch {
-      return false;
+    // Three tries, 15 s each: a long store write on the 32 GB store stalls
+    // the sidecar's whole process for seconds (Kuzu holds the interpreter),
+    // and one 10 s probe called a busy sidecar dead twice (2026-10-07).
+    for (let i = 0; i < 3; i++) {
+      try {
+        const res = await fetch(this.sidecarUrl().replace(/\/+$/, "") + "/health",
+                                { signal: AbortSignal.timeout(15000) });
+        if (res.ok) return true;
+      } catch { /* try again */ }
     }
+    return false;
   }
 
   /** Start a run and return at once; `state` says how it is going. */
