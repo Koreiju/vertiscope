@@ -114,9 +114,9 @@ figcaption { color: var(--text-muted, #666); font-size: 0.9em; margin-top: 0.1em
 `;
 
 /** `![alt](src)` as the distiller draws media. */
-const MEDIA = /^!\[([^\]]*)\]\(([^)\s]*)\)/;
+const MEDIA = /^!\[([^\]]*)\]\(((?:[^()\s]|\((?:[^()\s]|\([^()\s]*\))*\))*)\)/;
 /** `[words](target)` as it draws a link. */
-const LINK = /^\[([^\]]*)\]\(([^)\s]*)\)/;
+const LINK = /^\[([^\]]*)\]\(((?:[^()\s]|\((?:[^()\s]|\([^()\s]*\))*\))*)\)/;
 
 export interface SurfaceHost {
   settings: DomvecSettings;

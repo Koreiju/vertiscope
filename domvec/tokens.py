@@ -147,7 +147,7 @@ def count(text: str) -> int:
 #: holding two links must yield two matches and not one spanning both. If the
 #: renderer's idea of a link and this one drift apart, the budget stops being
 #: a budget for the string that is actually drawn.
-_TARGET_RE = re.compile(r"(!?)\[([^\]]*)\]\(([^)]*)\)")
+_TARGET_RE = re.compile(r"(!?)\[([^\]]*)\]\(((?:[^()]|\((?:[^()]|\([^()]*\))*\))*)\)")
 
 #: A url standing on its own, not already inside a link's parentheses. The
 #: lookbehind keeps it from firing a second time on a target `_TARGET_RE` has

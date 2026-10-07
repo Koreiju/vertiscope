@@ -1683,7 +1683,7 @@ def _render_sized(
 
 #: A rendered link: `[words](target)`. Non-greedy on the label so a line
 #: holding two of them yields two matches rather than one spanning both.
-_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]*)\)")
+_LINK_RE = re.compile(r"\[([^\]]+)\]\(((?:[^()]|\((?:[^()]|\([^()]*\))*\))*)\)")
 
 
 def _fold_links_into_prose(lines: List[MarkdownLine]) -> List[MarkdownLine]:

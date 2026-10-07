@@ -42,7 +42,7 @@ from .spherical import to_ball as spherical_to_ball
 #: `![alt](src)` as the distiller draws media. Non-greedy on the alt so a
 #: chunk holding two pictures yields the first rather than one match spanning
 #: both.
-_MEDIA_RE = re.compile(r"!\[([^\]]*)\]\(([^)\s]+)\)")
+_MEDIA_RE = re.compile(r"!\[([^\]]*)\]\(((?:[^()\s]|\((?:[^()\s]|\([^()\s]*\))*\))+)\)")
 
 #: The width a space is brought down to before UMAP. A sane reduction, not a
 #: matching exercise -- there is one space to fit now.

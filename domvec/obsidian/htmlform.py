@@ -51,14 +51,14 @@ from typing import Dict, List, Optional, Tuple
 #: markdown surface strips the same marks in the same order for the same
 #: reason; the trap is recorded in `surface.ts::words`.
 _HEADING = re.compile(r"^(#{1,6})\s+(.*)$")
-_MEDIA = re.compile(r"^!\[([^\]]*)\]\(([^)\s]*)\)\s*(.*)$")
+_MEDIA = re.compile(r"^!\[([^\]]*)\]\(((?:[^()\s]|\((?:[^()\s]|\([^()\s]*\))*\))*)\)\s*(.*)$")
 #: The placeholder form: a picture the distiller found and could not locate.
 #: `markdown.py` emits it deliberately -- see the comment on the `cat ==
 #: "media"` branch, which stopped inventing a target rather than dropping the
 #: line -- so a form that only matched `![alt](src)` sent every one of them
 #: down the prose path and drew a picture as a sentence.
 _MEDIA_BARE = re.compile(r"^!\[([^\]]*)\](?!\()\s*(.*)$")
-_LINK = re.compile(r"^\[([^\]]*)\]\(([^)\s]*)\)\s*(.*)$")
+_LINK = re.compile(r"^\[([^\]]*)\]\(((?:[^()\s]|\((?:[^()\s]|\([^()\s]*\))*\))*)\)\s*(.*)$")
 _BARE_URL = re.compile(r"^<([^>\s]+)>$")
 _FORM = re.compile(r"^===\s*(.*?)\s*===$")
 _BUTTON = re.compile(r"^\(\s*(.*?)\s*\)$")

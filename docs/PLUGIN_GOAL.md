@@ -2250,6 +2250,31 @@ the page's visible bounds.*
 registers each detection immediately -- tested, profiled, improved without
 regressions.*
 
+> I think, also, now, the page/markdown panel views should be simplified a
+> little. Perhaps try instead just using obsidian's default markdown renderer
+> in this panel view rather than having this switching between markdown and
+> 'shadow DOM', since our webpage rendering view is basically the correct
+> result. I also think the header of the panel should show the full patricia
+> trie address, if at all possible. Also, the panels could be a little bit
+> bigger in the markdown panel view, at least resizing centered by the button
+> clicked at the top right corner of the panel to get the page and markdown
+> sizing unique. Also, the attached image doesn't actually render anything.
+> The html-side of the chunk also doesn't update (just shows some blank grey
+> mask), even though the second image shows that there is content (that is
+> correctly diff-updated I think, just not its page-rendering mirror).
+
+*(Two photos of an allrecipes chunk billboard: in `shadow DOM` a broken
+image whose url leaks as caption text from `:max_bytes(150000)` on; in
+`markdown` the chunk's lines, image and link lines with full urls.)*
+
+*Read as: (13) the panel has two forms only -- the PAGE (the live page's own
+rendering of the chunk) and MARKDOWN drawn by Obsidian's own renderer -- no
+markdown/shadow-DOM switch; (14) the panel's header is the chunk's full
+patricia-trie address; (15) the markdown form is larger, and switching forms
+with the top-right button resizes the panel about its centre, each form with
+its own size; (16) the image renders; (17) the page form follows the chunk's
+diffs instead of showing a stale grey mask.*
+
 ---
 
 
