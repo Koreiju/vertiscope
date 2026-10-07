@@ -1685,14 +1685,44 @@ export function makeChecks(env) {
             // 2.5 s to the first batch, 8 x 4 s (slow enough for each
             // batch's chunks to be embedded and drawn before the next shift
             // retires them), then the store and the projector catch up.
-            await sleep(2500 + 8 * 4000 + 1500);
+            // Sampled THROUGH the run, every second: the fixture's shift flips
+            // between two address sets, so a chunk retired this round is back
+            // in the store next round, and a single read at the end could not
+            // see a retired node the view had kept (the planted arm read 0).
+            let staleMax = 0;
+            const tRun = Date.now();
+            while (Date.now() - tRun < 2500 + 8 * 4000 + 1500) {
+              await sleep(1000);
+              try { staleMax = Math.max(staleMax, await v.staleStored()); } catch (e) {}
+            }
             const t0 = Date.now();
             while (Date.now() - t0 < 40000 && (b.capturing || (b.captureQueue || []).length)) await sleep(250);
             await sleep(4000);
             const drawn = v.graph.graphData().nodes.filter((n) => !n.force && n.level !== "page" && n.url === url).length;
+            // The PLANTED defect, put in place outright: a node for a chunk the
+            // central diff RETIRED, drawn as if nothing had told the view. The
+            // view has three retirement roads (the diff, the projector's gone
+            // log, folding on leave), so switching one off left nothing stale
+            // to see -- the instrument must still catch this one.
+            let plantedCid = "";
+            if (${planted}) {
+              const dl = await (await fetch(${JSON.stringify(SIDECAR)} + "/diffs?url=" + encodeURIComponent(url))).json().catch(() => ({ diffs: [] }));
+              const retired = [...new Set((dl.diffs || []).flatMap((x) => x.retired || []))];
+              const have = new Set(await v.sidecar.pageCids(url).catch(() => []));
+              // A retired cid still absent, else one the store never held: either
+              // way a drawn node the store does not hold (the fixture's shift
+              // flips between two address sets, so retired cids come back).
+              plantedCid = retired.find((c) => !have.has(c)) || ("0000" + Date.now().toString(16)).slice(-16);
+              if (plantedCid) {
+                const page = v.graph.graphData().nodes.find((n) => n.level === "page" && n.url === url);
+                const d0 = v.graph.graphData();
+                v.graph.graphData({ nodes: d0.nodes.concat([{ id: plantedCid, level: "chunk", url, name: "planted retired", val: 1,
+                                    x: (page && page.x) || 0, y: (page && page.y) || 0, z: (page && page.z) || 0 }]), links: d0.links });
+              }
+            }
             const stale = await v.staleStored();
             const d = v.diffStats;
-            return { planted: ${planted}, url, drawn_chunks: drawn, stale, detail: v.staleDetail,
+            return { planted: ${planted}, url, drawn_chunks: drawn, stale, stale_max: staleMax, planted_cid: plantedCid, detail: v.staleDetail,
                      diff: { applied: d.applied - before.applied, retired_removed: d.retired_removed - before.retired_removed,
                              renamed: d.renamed - before.renamed, carried: d.carried - before.carried, known: d.known - before.known },
                      browser: { ...b.diffsApplied } };
@@ -1706,7 +1736,7 @@ export function makeChecks(env) {
           const planted = await arm(true);
           const cleanOk = !clean.error && clean.drawn_chunks > 0 && clean.stale === 0
             && clean.diff.applied > 0 && clean.diff.renamed > 0;
-          const plantedBites = !planted.error && planted.stale > 0;
+          const plantedBites = !planted.error && !!planted.planted_cid && planted.stale > 0;
           return {
             pass: cleanOk && plantedBites,
             evidence: { clean, planted,
