@@ -155,8 +155,22 @@ _EMBED_WANTED = threading.Event()
 #: When the store was last written (a capture or a settle). The checkpoint
 #: thread waits for a pause in writing before folding the WAL in (D-48).
 _LAST_WRITE = [0.0]
-_CHECKPOINT_QUIET_S = 60.0
-_CHECKPOINT_MIN_WAL = 1 << 20
+#: When ANY request last arrived. A checkpoint holds the store for 10-21 s on
+#: the 32 GB store, and every read -- `/health` included -- waits behind it:
+#: run after a write pause alone, it froze panels and made `confirm.mjs`
+#: declare the sidecar dead (2026-10-07). So it waits for the whole sidecar
+#: to go quiet, and for a WAL worth folding.
+_LAST_REQUEST = [0.0]
+#: The last full `/health` answer and when it was computed.
+_HEALTH_CACHE: Dict[str, object] = {}
+
+
+def _cache_health(body: Dict) -> Dict:
+    _HEALTH_CACHE["body"] = dict(body)
+    _HEALTH_CACHE["at"] = time.time()
+    return body
+_CHECKPOINT_QUIET_S = 120.0
+_CHECKPOINT_MIN_WAL = 8 << 20
 
 
 def _checkpoint_forever(workspace, stop) -> None:
@@ -171,7 +185,7 @@ def _checkpoint_forever(workspace, stop) -> None:
     wal = Path(str(workspace.store.path) + ".wal")
     while not stop.wait(15.0):
         try:
-            if time.time() - _LAST_WRITE[0] < _CHECKPOINT_QUIET_S:
+            if time.time() - max(_LAST_WRITE[0], _LAST_REQUEST[0]) < _CHECKPOINT_QUIET_S:
                 continue
             if not wal.exists() or wal.stat().st_size < _CHECKPOINT_MIN_WAL:
                 continue
@@ -844,6 +858,7 @@ class _Handler(BaseHTTPRequestHandler):
         reader who wanted a notebook did not thereby ask for a vault that can
         drive the web, nor the reverse.
         """
+        _LAST_REQUEST[0] = time.time()
         parts = urlsplit(self.path)
         route = parts.path.strip("/")
         if route == "chunk_preview":
@@ -1625,10 +1640,29 @@ class _Handler(BaseHTTPRequestHandler):
             return 0
 
     def do_GET(self) -> None:                       # noqa: N802 (stdlib name)
+        _LAST_REQUEST[0] = time.time()
         parts = urlsplit(self.path)
         segments = [unquote(s) for s in parts.path.strip("/").split("/") if s]
 
         if not segments or segments[0] == "health":
+            # **Liveness must not wait on the store** (2026-10-07). These are
+            # ~10 full-table counts on a 32 GB store, behind the same lock a
+            # capture's write holds for up to 8 s: `confirm.mjs` waited 10 s,
+            # got nothing, and stopped its run calling the sidecar dead while
+            # it was storing a page. A fresh answer is cached for 30 s; while
+            # the store is busy the last one is served, marked `busy`.
+            now = time.time()
+            cached = _HEALTH_CACHE.get("body")
+            if cached is not None and now - _HEALTH_CACHE.get("at", 0) < 30.0:
+                self._send(200, dict(cached, cached_s=round(now - _HEALTH_CACHE["at"], 1)))
+                return
+            lock = getattr(self.workspace.store, "_db_lock", None)
+            if lock is not None and not lock.acquire(timeout=0.5):
+                self._send(200, dict(cached or {"ok": True}, busy=True,
+                                     cached_s=round(now - _HEALTH_CACHE.get("at", now), 1)))
+                return
+            if lock is not None:
+                lock.release()
             # `enact` is advertised so the plugin can draw a read-only
             # surface as read-only rather than offering a button that 403s.
             # **Is the trie actually ANCHORED?**
@@ -1648,7 +1682,7 @@ class _Handler(BaseHTTPRequestHandler):
                     return self.workspace.store._rows(q)[0][0]
                 except Exception:               # noqa: BLE001
                     return None
-            self._send(200, {"ok": True,
+            self._send(200, _cache_health({"ok": True,
                              "pages": len(self.workspace.pages()),
                              "addresses": _one(
                                  "MATCH (a:Address) RETURN count(a)"),
@@ -1738,7 +1772,7 @@ class _Handler(BaseHTTPRequestHandler):
                              # `kernel` are -- a feature nothing can observe
                              # is a feature nobody can confirm, and this one
                              # is invisible by design when it works.
-                             "layouts": self._layout_count()})
+                             "layouts": self._layout_count()}))
             return
 
         if segments[0] == "chunk" and len(segments) == 2:
