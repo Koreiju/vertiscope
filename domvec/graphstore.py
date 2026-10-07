@@ -1694,6 +1694,27 @@ class GraphStore:
                           params)
         return [(ContentAddress.parse(key), value) for key, value in rows]
 
+    def addresses_at_many(self, xpaths, url: str) -> Dict[str, List[Tuple[ContentAddress, str]]]:
+        """`addresses_at` for many elements of ONE page, in one query.
+
+        A chunk asks for every element it draws; one query per element made a
+        chunk payload cost 0.36-2.0 s on a 500k-address store (2026-10-07: a
+        panel's first paint waited for it, "Rendering on the billboards can
+        definitely still be sped up more"). One scan, filtered by url and the
+        element list, answers them all.
+        """
+        xs = sorted({x for x in xpaths if x})
+        out: Dict[str, List[Tuple[ContentAddress, str]]] = {x: [] for x in xs}
+        if not xs:
+            return out
+        rows = self._rows(
+            "MATCH (a:Address) WHERE a.url = $url AND a.xpath IN $xs "
+            "RETURN a.xpath, a.akey, a.value ORDER BY a.akey",
+            {"url": url, "xs": xs})
+        for xpath, key, value in rows:
+            out.setdefault(xpath, []).append((ContentAddress.parse(key), value))
+        return out
+
     def save_layout(self, key: str, payload: str, n: int = 0) -> None:
         """Keep a fitted layout under `key` (`G-12`).
 

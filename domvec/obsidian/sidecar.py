@@ -555,6 +555,13 @@ def chunk_payload(workspace, cid: str) -> Optional[Dict]:
     # element, which is where the anchor's affordance actually sits. Cached
     # per element because a chunk draws the same element on several lines.
     control_cache: Dict[str, Optional[object]] = {}
+    # Every element the chunk draws, asked in ONE query (`addresses_at_many`):
+    # one query per element cost a panel 0.36-2.0 s on the working store.
+    elements = [a.xpath.split("/text()")[0] for a, _v in addresses]
+    many = getattr(workspace.store, "addresses_at_many", None)
+    if many is not None and elements:
+        for element, found_at in many(elements, stored.url).items():
+            control_cache[element] = next((a for a, _v in found_at if a.is_control), None)
 
     def control_at(element: str):
         if element not in control_cache:
