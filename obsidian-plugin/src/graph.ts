@@ -3592,11 +3592,26 @@ export class GraphView extends ItemView {
    * so a panel anchored on ticks alone detaches from its node the moment the
    * reader orbits, which is exactly when they are looking at it.
    */
+  /** Positioning errors swallowed by the billboard loop (for the harness). */
+  billboardErrors = 0;
+  private billboardBeat = 0;
   private startBillboardLoop(): void {
-    if (this.billboardFrame) return;
+    // A loop that died (frame id set, no frame since) is restarted: the id
+    // alone is not proof of life.
+    if (this.billboardFrame && performance.now() - this.billboardBeat < 500) return;
+    if (this.billboardFrame) window.cancelAnimationFrame(this.billboardFrame);
+    this.billboardFrame = 0;
     const step = () => {
       if (!this.billboards.size) { this.billboardFrame = 0; return; }
-      for (const entry of this.billboards.values()) this.positionBillboard(entry);
+      // One panel's error must not end the loop for all of them: a throw here
+      // left `billboardFrame` set with no frame scheduled, so every panel
+      // opened after it stayed where it first landed -- not following its
+      // node, and not re-centred by the form switch (2026-10-07, found when
+      // the centre shifted 85 px on a switch: dx/dy set, never applied).
+      this.billboardBeat = performance.now();
+      for (const entry of this.billboards.values()) {
+        try { this.positionBillboard(entry); } catch (e) { this.billboardErrors++; }
+      }
       this.billboardFrame = window.requestAnimationFrame(step);
     };
     this.billboardFrame = window.requestAnimationFrame(step);

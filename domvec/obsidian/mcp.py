@@ -694,7 +694,7 @@ def main(argv=None) -> int:
                              "takes the lock the plugin needs. Left unset, "
                              "the backend tools ask the sidecar instead.")
     parser.add_argument("--sidecar", default="http://127.0.0.1:8788")
-    parser.add_argument("--cdp", default="http://127.0.0.1:9222")
+    parser.add_argument("--cdp", default=__import__("os").environ.get("DOMVEC_CDP", "http://127.0.0.1:9222"))
     args = parser.parse_args(argv)
 
     ws = None
