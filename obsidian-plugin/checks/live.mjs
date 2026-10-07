@@ -2438,6 +2438,85 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-113",
+      asks: "hovering a chunk on the page flies the 3D camera to THAT chunk's node and opens its panel at once with content, the outline fits inside the page, and the panel closes when the hover ends -- a planted no-focus arm does none of it",
+      async run() {
+        // 2026-10-06: "hovering overlays should zoom-focus the camera in the
+        // 3D editor on the specific chunk ... when this flying happens, this
+        // also opens the panels on the 3D side, but closes them when the
+        // hovering stops"; then "Billboards don't close, are *very slow* to
+        // render, and don't show anything at all ... Please ensure you're
+        // capturing this in our tests along with your fixes."
+        //
+        // Real pointer input in the guest (`webContents.sendInputEvent`), the
+        // way the reader's mouse reaches the page. Each arm hovers a chunk the
+        // store holds, reads the graph's own focus record and billboard log,
+        // then leaves the page and reads whether the panel closed.
+        const fixtures = await serveFixtures();
+        const page = fixtures.origin + "/shadow_catalogue.html";
+        const arm = (planted) => evaluate(`(async () => {
+          ${PREP}
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          const PAGE = ${JSON.stringify(page)};
+          const out = { planted: ${planted} };
+          const wc = window.require("@electron/remote").webContents.fromId(b.webview.getWebContentsId());
+          try {
+            b.plant.clear();
+            try { b.setLive(true); } catch (e) {}
+            out.landed = await land(PAGE, 30000);
+            // The page's chunks in the store and placeable (vectorised).
+            let cids = [];
+            for (let i = 0; i < 80; i++) {
+              cids = await v.sidecar.pageCids(PAGE).catch(() => []);
+              if (cids.length >= 3) { const got = await v.sidecar.place(cids.slice(0, 3)); if (got && got.nodes && got.nodes.length) break; }
+              await sleep(750);
+            }
+            out.stored = cids.length;
+            if (cids.length < 3) return { ...out, error: "the page never reached the store" };
+            // A point over a chunk the browser can resolve to a stored cid.
+            const pts = JSON.parse(await b.webview.executeJavaScript("(function(){var h=window.__domvecSensor;var vw=innerWidth,vh=innerHeight,a=[];for(var y=30;y<vh;y+=40)for(var x=30;x<vw;x+=60){var st=document.elementsFromPoint(x,y),bb=null,ba=Infinity;for(var i=0;i<st.length&&i<12;i++){var c=null;try{c=h.at(st[i]);}catch(e){}if(c&&c.box){var ar=c.box[2]*c.box[3];if(ar>0&&ar<ba){ba=ar;bb=c;}}}if(bb)a.push({x:x,y:y,id:bb.id,frac:ba/(vw*vh)});}return JSON.stringify(a);})()"));
+            let pick = null;
+            for (const p of pts) { const st = b.storedCidFor("f:" + b.session + "#" + p.id, b.session); if (st) { pick = { ...p, stored: st }; break; } }
+            if (!pick) return { ...out, error: "no hovered chunk resolves to a stored chunk", points: pts.length };
+            out.pick = pick;
+            v.plantNoFocus = ${planted};
+            const f0 = { ...v.focusStats }, n0 = v.billboardLog.length;
+            wc.sendInputEvent({ type: "mouseMove", x: pick.x, y: pick.y });
+            await sleep(40);
+            wc.sendInputEvent({ type: "mouseMove", x: pick.x + 2, y: pick.y + 1 });
+            await sleep(1600);
+            const rect = b.pipebox.hover && b.pipebox.hover.rect;
+            const vp = JSON.parse(await b.webview.executeJavaScript("JSON.stringify([innerWidth, innerHeight])"));
+            out.outline = rect || null;
+            out.outline_frac = rect ? Math.round(rect.w * rect.h / (vp[0] * vp[1]) * 1000) / 1000 : null;
+            out.flown = v.focusStats.flown - f0.flown;
+            out.flew_to = v.focusStats.last;
+            const e = v.billboards.get(pick.stored);
+            out.panel = e ? { from_hover: !!e.fromHover, form: e.form, first_paint_ms: e.firstPaintMs ?? null,
+                              text: ((e.el.querySelector(".domvec-bb-body") || {}).innerText || "").trim().length } : null;
+            out.log = v.billboardLog.slice(n0);
+            wc.sendInputEvent({ type: "mouseLeave", x: -5, y: -5 });
+            await sleep(1200);
+            out.closed_after_leave = !v.billboards.has(pick.stored);
+            return out;
+          } finally {
+            v.plantNoFocus = false;
+            for (const [id, e] of [...v.billboards.entries()]) if (e.fromHover) v.closeBillboard(id);
+          }
+        })()`, { timeout: 180000 });
+        const clean = await arm(false);
+        const planted = await arm(true);
+        const works = (x) => !x.error && x.flown >= 1 && x.flew_to === x.pick.stored && !!x.panel
+          && x.panel.from_hover && x.panel.text > 0 && (x.panel.first_paint_ms ?? 1e9) <= 500
+          && x.outline_frac !== null && x.outline_frac < 1 && x.closed_after_leave === true;
+        return {
+          pass: works(clean) && !planted.error && planted.flown === 0 && !planted.panel,
+          evidence: { clean, planted,
+                      bar: "clean: the camera flew to the hovered chunk's stored node, its panel opened from the hover with text within 500 ms, the outline is smaller than the viewport, and the panel closed after the pointer left; planted (plantNoFocus): no flight, no panel" },
+        };
+      },
+    },
+    {
       id: "G-107",
       asks: "the 3D view draws every node and edge it holds in a bounded number of draw calls, each at the size the collider reserves, and the pointer still picks each node",
       async run() {

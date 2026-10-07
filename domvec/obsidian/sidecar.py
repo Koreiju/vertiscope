@@ -319,6 +319,21 @@ def _page_diff(session: dict, url: str, passno: int, all_chunks, dirty) -> Optio
             "chunks": len(now)}
 
 
+def _settle_truncated(session: dict, stored: int, now: Optional[float] = None) -> bool:
+    """Would settling this session write a TRUNCATED page as the complete one?
+
+    A young session (under 15 s) that rendered under half of what the store
+    holds for the page (6 or more chunks) has seen a page still loading -- a
+    reload ends a session holding only the fresh load's first fold. Such a
+    settle writes nothing and retires nothing (2026-10-06: 30 of johnwick's 31
+    stored chunks retired by a settle of 1 rendered chunk).
+    """
+    now = time.time() if now is None else now
+    rendered = len(session.get("render") or ())
+    young = now - float(session.get("born") or 0) < 15.0
+    return young and stored >= 6 and rendered < 0.5 * stored
+
+
 def _project(cids) -> None:
     """Hand chunks to the chunk projector's queue. Never raises."""
     try:
@@ -1310,6 +1325,7 @@ class _Handler(BaseHTTPRequestHandler):
                 # the pane does not have to remember to ask again, and a
                 # chunk cannot be lost between "captured" and "placed".
                 "pending": [],
+                "born": time.time(),
             }
             # The store's cids for this page as the visit begins (the trie on
             # the DB is the spine): the diff judges ADDED against it.
@@ -1328,6 +1344,26 @@ class _Handler(BaseHTTPRequestHandler):
             if body.get("settle"):
                 spine = session["spine"]
                 before = {c.cid for c in self.workspace.store.chunks(url)}
+                # **A young, nearly empty trie is not the page** (2026-10-06,
+                # measured: a page reloaded in the cell ended its session
+                # holding the first fold of the fresh load -- 1 chunk -- and
+                # the settle wrote that as the complete page, retiring 30 of
+                # johnwick's 31 stored chunks; the next capture re-added 24
+                # as new rows, and the view's nodes for the 30 became
+                # phantoms). Under 15 s old and rendering under half of what
+                # the store holds, the settle writes nothing and retires
+                # nothing; a page that truly shrank settles on a later visit.
+                truncated = _settle_truncated(session, len(before))
+                if truncated:
+                    rendered = len(session.get("render") or ())
+                    sessions.pop(url, None)
+                    sdiff = _record_diff({"kind": "settle", "url": url, "passno": None,
+                                          "added": [], "dirty": [], "retired": [], "renamed": {},
+                                          "chunks": len(before), "skipped": "young trie: %d rendered of %d stored"
+                                          % (rendered, len(before))})
+                    self._send(200, {"settled": False, "url": url, "diff": sdiff,
+                                     "skipped": sdiff["skipped"]})
+                    return
                 if spine.trie is not None and len(spine.trie):
                     with _WORK_LOCK:
                         self.workspace.ingest(

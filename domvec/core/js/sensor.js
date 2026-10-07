@@ -2970,43 +2970,49 @@
     if (!slot.tail || slot.tail === n) return true;
     return !!(n.compareDocumentPosition(slot.tail) & 4);   // tail FOLLOWS n
   }
+  // A chunk's box is what it DRAWS: the union of its text runs and its media
+  // and controls, skipping any nested chunk's subtree (2026-10-06). It was
+  // the CONTAINER's box -- on a full-bleed page (johnwick.movie) a chunk of
+  // a few lines sits in a section several screens tall, and every hover
+  // outline came out larger than the viewport (121 of 121 sampled points,
+  // median 2.6 viewports). The container's own box is the fallback when the
+  // chunk draws nothing measurable. At most 600 nodes read; a peripheral
+  // read, never the fold's.
+  var DRAWN = { IMG: 1, VIDEO: 1, AUDIO: 1, CANVAS: 1, SVG: 1, svg: 1, IFRAME: 1, INPUT: 1, BUTTON: 1,
+                SELECT: 1, TEXTAREA: 1, PICTURE: 1, OBJECT: 1, EMBED: 1 };
   function runBox(slot) {
-    var l = 1e9, t = 1e9, r = -1e9, b = -1e9, any = false, n = slot.node, k = 0;
+    var l = 1e9, t = 1e9, r = -1e9, b = -1e9, any = false, read = 0;
+    function take(q) {
+      if (!q || !(q.width > 0 || q.height > 0)) return;
+      any = true;
+      if (q.left < l) l = q.left; if (q.top < t) t = q.top;
+      if (q.right > r) r = q.right; if (q.bottom > b) b = q.bottom;
+    }
+    var rg = document.createRange();
+    function visit(n) {
+      if (read++ > 600 || !n) return;
+      if (n.nodeType === 3) {
+        if (n.nodeValue && /\S/.test(n.nodeValue)) { rg.selectNodeContents(n); take(rg.getBoundingClientRect()); }
+        return;
+      }
+      if (n.nodeType !== 1) return;
+      var o = chunkOf.get(n);
+      if (o && o.tracked && o.node === n && o !== slot) return;       // another chunk's
+      if (DRAWN[n.tagName]) { take(n.getBoundingClientRect()); return; }
+      var kids = n.shadowRoot ? n.shadowRoot.childNodes : n.childNodes;
+      for (var i = 0; i < kids.length && read <= 600; i++) visit(kids[i]);
+    }
+    var n = slot.node, k = 0;
     while (n && k++ < 400) {
-      var q = null;
-      if (n.nodeType === 1 && n.getBoundingClientRect) q = n.getBoundingClientRect();
-      else if (n.nodeType === 3) {
-        var rg = document.createRange(); rg.selectNode(n); q = rg.getBoundingClientRect();
-      }
-      if (q && (q.width > 0 || q.height > 0)) {
-        any = true;
-        if (q.left < l) l = q.left; if (q.top < t) t = q.top;
-        if (q.right > r) r = q.right; if (q.bottom > b) b = q.bottom;
-      }
-      if (n === slot.tail || !slot.tail) break;
+      visit(n);
+      if (n === slot.tail || !slot.tail || read > 600) break;
       n = n.nextSibling;
     }
     if (!any) {
-      // The run's own boxes are empty -- a zero-height container whose
-      // children are positioned out of flow, or `display: contents`
-      // (2026-10-06: johnwick.movie's header, six logos, `box: null`, so a
-      // hover drew no outline). The box is then what its DESCENDANTS draw,
-      // at most 400 elements read. A peripheral read, never the fold's.
       n = slot.node; k = 0;
-      var seen = 0;
       while (n && k++ < 400) {
-        if (n.nodeType === 1 && n.querySelectorAll) {
-          var all = n.querySelectorAll('*');
-          for (var j = 0; j < all.length && seen < 400; j++, seen++) {
-            var e = all[j].getBoundingClientRect();
-            if (e && e.width > 0 && e.height > 0) {
-              any = true;
-              if (e.left < l) l = e.left; if (e.top < t) t = e.top;
-              if (e.right > r) r = e.right; if (e.bottom > b) b = e.bottom;
-            }
-          }
-        }
-        if (n === slot.tail || !slot.tail || seen >= 400) break;
+        if (n.nodeType === 1 && n.getBoundingClientRect) take(n.getBoundingClientRect());
+        if (n === slot.tail || !slot.tail) break;
         n = n.nextSibling;
       }
     }
@@ -3048,6 +3054,26 @@
     lastHoverTarget = target;
     var got = null;
     try { got = target && target.nodeType ? at(target) : null; } catch (e) { stats.errors++; }
+    // The MOST SPECIFIC chunk under the pointer, not the topmost element's
+    // (2026-10-06, johnwick.movie: its backgrounds are <img> elements -- one
+    // 8,109 px tall -- and the topmost element under text was often one of
+    // them, so the outline drew a chunk ten viewports high: "overlays are
+    // quite large and span lots of text"). Every element stacked at the
+    // point is asked, and the chunk with the smallest box wins. A read of
+    // the peripheral kind, never the fold's.
+    try {
+      if (typeof ev.clientX === 'number' && document.elementsFromPoint) {
+        var stack = document.elementsFromPoint(ev.clientX, ev.clientY);
+        var best = got, area = got && got.box ? got.box[2] * got.box[3] : Infinity;
+        for (var si = 0; si < stack.length && si < 12; si++) {
+          var cand = at(stack[si]);
+          if (!cand || !cand.box) continue;
+          var a2 = cand.box[2] * cand.box[3];
+          if (a2 > 0 && a2 < area) { best = cand; area = a2; }
+        }
+        got = best;
+      }
+    } catch (e) { stats.errors++; }
     var key = got && got.box ? got.id + ' ' + got.box.map(Math.round).join(',') : '-';
     if (key === lastHoverKey) return;
     lastHoverKey = key;

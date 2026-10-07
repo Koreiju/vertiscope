@@ -133,7 +133,15 @@ export async function anomalies(app: any, profile: () => any[]): Promise<any> {
     fold_p50: q(st("fold"), .5), drain_to_overlay_p50: q(st("drain_to_overlay"), .5),
     drain_to_overlay_p90: q(st("drain_to_overlay"), .9), drain_to_3d_p50: q(st("drain_to_3d"), .5) };
 
+  const pt = g.panelTimes || { first_paint: [], page_paint: [], close: [] };
+  const panelSpeed = { opened: pt.first_paint.length,
+    first_paint_p50: q(pt.first_paint, .5), first_paint_p90: q(pt.first_paint, .9),
+    page_paint_p50: q(pt.page_paint, .5), page_paint_p90: q(pt.page_paint, .9),
+    close_p50: q(pt.close, .5), close_p90: q(pt.close, .9),
+    focus: g.focusStats || null };
   const problems: string[] = [];
+  if (panelSpeed.opened >= 3 && (panelSpeed.first_paint_p90 ?? 0) > 300) problems.push(`panels slow to show: first paint p90 ${panelSpeed.first_paint_p90} ms`);
+  if (pt.close.length >= 3 && (panelSpeed.close_p90 ?? 0) > 250) problems.push(`hover panels slow to close: p90 ${panelSpeed.close_p90} ms`);
   if (census.phantom) problems.push(`${census.phantom} phantom node(s): drawn, not in the store`);
   if (census.force_orphan) problems.push(`${census.force_orphan} streaming node(s) with no pending spec`);
   if (dangling) problems.push(`${dangling} link(s) to an undrawn node`);
@@ -153,6 +161,6 @@ export async function anomalies(app: any, profile: () => any[]): Promise<any> {
   return { at: now, browsing: url, nodes: d.nodes.length, links: d.links.length, census, phantoms, dangling,
            tree: { ok: tree.ok, multiParent: tree.multiParent, cyclic: tree.cyclic, crossUrl: tree.crossUrl,
                    forests: tree.forests, sample: tree.sample.slice(0, 3) },
-           stream, panels, opened: log, overlay, latency, isolation: { ...isolation },
+           stream, panels, opened: log, panel_speed: panelSpeed, overlay, latency, isolation: { ...isolation },
            pushed_total: b ? b.pushedPayloads : null, problems };
 }

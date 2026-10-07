@@ -2330,6 +2330,32 @@ UMAP geometry -- directions and the order of distances.*
 and its node; (25) the boundary on contact: the DOM is read, never written;
 MutationObservers are the one accepted injection.*
 
+> Please make sure audio detection is working for this page as well
+
+> And movies/videos and images. There are a lot here and I bet you could
+> screenshot the page and then puzzle-piece the images from the chunks with
+> our current obsidian plugin with the mcp toolspace you currently have
+> until we clearly have fully detected all the possible elements and content
+> we're after. Also, please use this and archive.org as pages to test all of
+> our current features on. Rendering in the page-original panel form will be
+> a challenge for dynamic renders. But we have to ensure feature-completeness,
+> so these are good challenges.
+
+*Read as: (26) audio, video and images on johnwick.movie all detected;
+(27) a visual coverage instrument: screenshot the page and account for every
+visible picture, video and background against the chunks, until nothing is
+missing; (28) johnwick.movie and archive.org as the test pages for every
+current feature, including the page-original panel form on dynamic renders.*
+
+> I also think over-chunking might be happening somewhat, since overlays are
+> quite large and span lots of text. Could be a truly large context window,
+> but I forget the maximum threshold size. From what I see, I would guess in
+> the 128 to 256 token range, maybe even 512. At least from the on billboard
+> I hovered over on the main page. Of johnwick
+
+*Read as: (29) overlays look too large -- say what one outlines and its size
+limit, and make the outlined unit the stored chunk's size.*
+
 ---
 
 

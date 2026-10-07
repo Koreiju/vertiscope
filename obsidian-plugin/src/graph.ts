@@ -2130,15 +2130,28 @@ export class GraphView extends ItemView {
    * previous highlight is always cleared first, so the state is "at most one
    * node is hovered" rather than a trail of them.
    */
-  highlightChunk(cid: string, url = ""): void {
+  highlightChunk(cid: string, url = "", stored = ""): void {
     if (!this.graph) return;
     const data: any = this.graph.graphData();
+    const seq = ++this.hoverSeq;
+    // The stored chunk under the pointer, placed if it is not drawn yet, so
+    // the camera and its panel go to THAT chunk (2026-10-06: "the camera
+    // doesn't 'fly' for hovering over different chunks ... this also opens
+    // the panels on the 3D side, but closes them when the hovering stops").
+    if (cid && stored && !data.nodes.some((n: any) => n.id === stored) && !this.readerCollapsed(url)) {
+      void this.sidecar.place([stored]).then((got: any) => {
+        if (seq !== this.hoverSeq || !got || !got.nodes || !got.nodes.length) return;
+        this.absorb(got.nodes, got.edges);
+        this.highlightChunk(cid, url, stored);
+      }).catch(() => undefined);
+    }
     // The chunk's own node if it is drawn; otherwise the PAGE node standing
     // for it. At the default level the picture is 96 pages and no chunk node
     // exists at all, so ringing only exact ids would light nothing up for
     // every hover until the reader had already unfolded that page -- which
     // is the one case they least need the correspondence drawn.
     let target = cid ? data.nodes.find((n: any) => n.id === cid) : null;
+    if (!target && stored) target = data.nodes.find((n: any) => n.id === stored) || null;
     // A streamed chunk already folded into a stored one: that one.
     if (!target && cid) {
       const into = this.collapsedTo.get(cid) || this.forceSpecs.get(cid)?.cid;
@@ -2154,7 +2167,20 @@ export class GraphView extends ItemView {
       if (!!n.hovered !== want) { n.hovered = want; changed = true; }
     }
     if (changed) this.graph.nodeColor(this.graph.nodeColor());
-    this.focusOn(cid ? target : null);
+    // Only a CHUNK moves the camera and opens a panel: a page node is the
+    // fallback when the hovered chunk is not drawn, and flying to it made the
+    // camera alternate between the chunk and its page on every poll
+    // (measured 4-6 flights per hover, ending on the page).
+    const isChunk = !!target && target.level !== "page" && target.level !== "path";
+    if (!cid || isChunk) {
+      this.focusOn(cid ? target : null);
+      this.hoverPanel(cid ? target : null);
+    } else {
+      // Off every drawn chunk (the page node is only the fallback): the
+      // hover panel closes -- it stayed open until the pointer left the page
+      // (2026-10-06: "Billboards are slow to close when not hovered").
+      this.hoverPanel(null);
+    }
     // A streaming node is its own translucent mesh: ring it by its material.
     for (const n of data.nodes) {
       const obj: any = n.force ? (n as any).__threeObj : null;
@@ -2171,10 +2197,78 @@ export class GraphView extends ItemView {
     }
   }
 
+  private hoverSeq = 0;
+  private hoverBbTimer = 0;
+  private hoverBbPending = "";
+  /** The billboard a hover opened (closed when the hover moves on or ends). */
+  private hoverBb = "";
+
+  /**
+   * A hovered CHUNK opens its panel in 3D, after the same dwell as the
+   * camera; the panel a hover opened closes when the hover moves on or stops
+   * -- unless the reader pinned it (dragged it, or the browser holds it).
+   */
+  private hoverPanel(target: any): void {
+    if (this.plantNoFocus) return;
+    const isChunk = !!target && target.level !== "page" && target.level !== "path";
+    const close = () => {
+      const e: any = this.hoverBb ? this.billboards.get(this.hoverBb) : null;
+      if (e && e.fromHover && !e.pinned && !e.fromBrowser) this.closeBillboard(this.hoverBb);
+      this.hoverBb = "";
+    };
+    if (!isChunk) {
+      if (this.hoverBbPending === "-" || !this.hoverBb) return;
+      window.clearTimeout(this.hoverBbTimer);
+      this.hoverBbPending = "-";
+      const asked = performance.now();
+      this.hoverBbTimer = window.setTimeout(() => {
+        this.hoverBbPending = "";
+        const had = this.hoverBb;
+        close();
+        if (had) { this.panelTimes.close.push(performance.now() - asked); if (this.panelTimes.close.length > 200) this.panelTimes.close.shift(); }
+      }, 250);
+      return;
+    }
+    // The open chunk asserted again CANCELS a pending close: without this a
+    // momentary off-chunk hover closed the panel and the next ask reopened
+    // it -- open, close, open (2026-10-06: "flickering on the billboards").
+    if (this.hoverBb === target.id) {
+      if (this.hoverBbPending === "-") { window.clearTimeout(this.hoverBbTimer); this.hoverBbPending = ""; }
+      return;
+    }
+    if (this.hoverBbPending === target.id) return;
+    window.clearTimeout(this.hoverBbTimer);
+    this.hoverBbPending = target.id;
+    // Fetched NOW, during the dwell, so the panel draws from the cache.
+    void this.chunkPayload(target.id);
+    this.hoverBbTimer = window.setTimeout(async () => {
+      this.hoverBbPending = "";
+      close();
+      if (this.billboards.has(target.id)) return;
+      this.hoverBb = target.id;
+      await this.openBillboard(target, false, true);
+    }, 150);
+  }
+
+  /** Open/close timings of hover panels, for the harness (`app_anomalies`). */
+  panelTimes = { first_paint: [] as number[], page_paint: [] as number[], close: [] as number[] };
+  private payloadCache = new Map<string, { at: number; p: Promise<any> }>();
+  /** A chunk's payload, shared by the hover prefetch and the panel (10 s). */
+  chunkPayload(cid: string): Promise<any> {
+    const now = performance.now();
+    const hit = this.payloadCache.get(cid);
+    if (hit && now - hit.at < 10000) return hit.p;
+    const p = this.sidecar.chunk(cid).catch(() => null);
+    this.payloadCache.set(cid, { at: now, p });
+    if (this.payloadCache.size > 200) this.payloadCache.delete(this.payloadCache.keys().next().value as string);
+    return p;
+  }
+
   /** Planted by the focus check: hover rings only, the camera stays. */
   plantNoFocus = false;
   focusStats = { asked: 0, flown: 0, followed: 0, released: 0, last: "" };
   private focusTimer = 0;
+  private focusPending: any = null;
   private focusFrame = 0;
   private focusNode: any = null;
   private focusLast: number[] | null = null;
@@ -2192,11 +2286,15 @@ export class GraphView extends ItemView {
    */
   private focusOn(target: any): void {
     if (this.plantNoFocus || !this.graph) return;
+    if (!target) { window.clearTimeout(this.focusTimer); this.focusPending = null; return; }
+    // The SAME target asked again (every pushed and every polled hover asks)
+    // leaves its dwell alone: resetting it on each ask meant it never ran --
+    // measured 23 asks, 0 flights (2026-10-06).
+    if (this.focusNode === target || this.focusPending === target) return;
     window.clearTimeout(this.focusTimer);
-    if (!target) return;                       // hover left: keep the view
-    if (this.focusNode === target) return;
+    this.focusPending = target;
     this.focusStats.asked++;
-    this.focusTimer = window.setTimeout(() => this.flyTo(target), 200);
+    this.focusTimer = window.setTimeout(() => { this.focusPending = null; this.flyTo(target); }, 200);
   }
 
   private flyTo(n: any): void {
@@ -2263,7 +2361,7 @@ export class GraphView extends ItemView {
    * a reader says "keep this where I can see it", and a panel that snapped
    * back would be arguing with them.
    */
-  async openBillboard(node: any, fromBrowser = false): Promise<void> {
+  async openBillboard(node: any, fromBrowser = false, fromHover = false): Promise<void> {
     if (!node || !node.id || !this.graph) return;
     const existing = this.billboards.get(node.id);
     if (existing) {
@@ -2311,7 +2409,11 @@ export class GraphView extends ItemView {
     const body = el.createDiv({ cls: "domvec-bb-body" });
     body.setText("\u2026");
 
-    const entry: any = { el, node, pinned: false, surface: null, fromBrowser, minimized: false };
+    // `fromHover` is set NOW, not after the forms load: a hover that ended
+    // while the panel was still loading found it unmarked and left it open
+    // (2026-10-06: "Billboards don't close").
+    const entry: any = { el, node, pinned: false, surface: null, fromBrowser, minimized: false,
+                         fromHover, openedAt: performance.now() };
     this.billboards.set(node.id, entry);
     this.positionBillboard(entry);
     this.startBillboardLoop();
@@ -2349,7 +2451,7 @@ export class GraphView extends ItemView {
       body.setText("a page stands for its chunks -- click to unravel it");
       return;
     }
-    const payload: any = await this.sidecar.chunk(node.id).catch(() => null);
+    const payload: any = await this.chunkPayload(node.id);
     entry.payload = payload;
     if (payload && payload.url) {
       const full = `${payload.url} : ${payload.xpath || "/"}`;
@@ -2360,12 +2462,39 @@ export class GraphView extends ItemView {
     toggle.onpointerdown = (e: PointerEvent) => e.stopPropagation();
     toggle.onclick = (e: MouseEvent) => {
       e.stopPropagation();
+      entry.userForm = true;
       void this.switchForm(entry, entry.form === "page" ? "markdown" : "page");
     };
     entry.toggle = toggle;
-    const shown = await this.renderForm(entry, "page", true);
-    if (!shown) await this.renderForm(entry, "markdown");
-    this.noteBillboard(node, body, entry.form || "none");
+    // FAST first: the markdown form from the store, at once; the PAGE form
+    // replaces it only when its snapshot shows something -- visible text or
+    // a picture (2026-10-06: panels "very slow to render, and don't show
+    // anything at all" -- a chunk spanning johnwick's full-page backgrounds
+    // snapshotted to an empty frame, and the panel waited for it).
+    await this.renderForm(entry, "markdown", false);
+    entry.firstPaintMs = Math.round(performance.now() - entry.openedAt);
+    this.panelTimes.first_paint.push(entry.firstPaintMs);
+    if (this.panelTimes.first_paint.length > 200) this.panelTimes.first_paint.shift();
+    void this.upgradeToPage(entry).then(() => this.noteBillboard(node, body, entry.form || "none"));
+  }
+
+  /** The page form, if its snapshot shows something; else the markdown stays. */
+  private async upgradeToPage(entry: any): Promise<void> {
+    if (!this.billboards.has(entry.node.id)) return;
+    const ask = this.snapshotFor || ((cid: string, url: string, again?: boolean) => {
+      const b: any = this.app.workspace.getLeavesOfType("domvec-browser-view")[0]?.view;
+      return b && typeof b.snapshotChunk === "function" ? b.snapshotChunk(cid, url, again) : Promise.resolve(false);
+    });
+    try { await ask(entry.node.id, entry.node.url || "", true); } catch { return; }
+    const snap = getSnapshot(entry.node.id);
+    if (!snap || !this.billboards.has(entry.node.id) || entry.form !== "markdown" || entry.userForm) return;
+    const html = String(snap.html || "");
+    const text = html.replace(/<style[\s\S]*?<\/style>/gi, "").replace(/<[^>]+>/g, " ").replace(/&[a-z#0-9]+;/gi, " ").trim();
+    if (text.length < 3 && !/<(img|video|svg|canvas|picture)\b/i.test(html)) { entry.pageEmpty = true; return; }
+    await this.renderForm(entry, "page", false);
+    entry.pagePaintMs = Math.round(performance.now() - entry.openedAt);
+    this.panelTimes.page_paint.push(entry.pagePaintMs);
+    if (this.panelTimes.page_paint.length > 200) this.panelTimes.page_paint.shift();
   }
 
   /** The chunk's markdown, as Obsidian renders a note: one line per detection,
@@ -2439,7 +2568,7 @@ export class GraphView extends ItemView {
         onAct: (rec) => this.onAct(id, rec),
       });
     } else {
-      if (fresh || !entry.payload) entry.payload = await this.sidecar.chunk(id).catch(() => entry.payload);
+      if (fresh || !entry.payload) entry.payload = (await this.chunkPayload(id)) || entry.payload;
       body.empty();
       const host = body.createDiv({ cls: "domvec-bb-md markdown-rendered" });
       const md = this.chunkMarkdown(entry.payload);
@@ -2507,9 +2636,11 @@ export class GraphView extends ItemView {
         }
       });
       const text = (body.innerText || "").trim().length;
+      const e: any = this.billboards.get(node.id);
       this.billboardLog.push({ at: Date.now(), id: String(node.id), level: String(node.level || ""),
         force: !!node.force, url: String(node.url || ""), via, text, shadow, frame,
-        empty: text + shadow + frame === 0 });
+        empty: text + shadow + frame === 0, first_paint_ms: e?.firstPaintMs ?? null,
+        page_paint_ms: e?.pagePaintMs ?? null, page_empty: !!e?.pageEmpty, from_hover: !!e?.fromHover } as any);
       if (this.billboardLog.length > 100) this.billboardLog.shift();
     }, 1500);
   }
@@ -2590,7 +2721,10 @@ export class GraphView extends ItemView {
         // larger, up to 2.5x the radius (2026-10-06, measured on
         // johnwick.movie: chunks drawn at 2.7 units with 6.9 of room each --
         // an open page read as a knot of specks).
-        const grow = this.plantNoTelescope ? 1 : Math.min(2.5, room / Math.max(r, 1e-6));
+        // Growth REVERTED (2026-10-06): up to 2.5x made johnwick's picture
+        // billboards overlap ("Nodes are way too closely packed together
+        // now"). Shrink-to-room only, as before.
+        const grow = 1;
         c.val = r > room ? c.fullVal * Math.pow(room / r, 3) : c.fullVal * Math.pow(Math.max(1, grow), 3);
         if (!(Math.abs((was ?? 0) - c.val) <= 0.05 * c.val)) c.__freeUntil = performance.now() + 3000;
       }

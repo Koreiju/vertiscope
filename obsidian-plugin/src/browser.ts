@@ -685,6 +685,23 @@ export class BrowserView extends ItemView {
     return Object.entries(covers).filter(([, cid]) => map.stored.has(cid)).map(([id]) => id);
   }
 
+  /**
+   * The STORED chunk under a pushed hover (`f:<url>#<sensor id>`), through
+   * the same chunk map the diff's covers use -- so the 3D view can fly to and
+   * open the chunk the reader is pointing at, wherever it sits in the diff.
+   * "" when the map does not know it yet.
+   */
+  storedCidFor(cid: string, url: string): string {
+    const m = /^f:(.*)#(\d+)$/.exec(cid || "");
+    if (!m) return "";
+    const tree = this.forceTrees.get(url) || this.forceTrees.get(m[1]);
+    if (!tree) return "";
+    const id = tree.nodeId(Number(m[2]));
+    const held = tree.held().filter((h: any) => h.id === id);
+    if (!held.length) return "";
+    return this.coversFor(url, held)[id] || "";
+  }
+
   private coversFor(url: string, items: { id: string; address: string }[]): Record<string, string> {
     const map = this.pipebox?.map;
     const out: Record<string, string> = {};

@@ -396,9 +396,11 @@ export class PipelineBox {
       }
       const ids = [...this.streaming.keys()].slice(0, 64);
       if (!ids.length) { this.diffEls.forEach((el) => el.hide()); this.streamingShown = 0; return; }
-      const rects: (number[] | null)[] = (await within<any>(wv.executeJavaScript(
+      const got: any = await within<any>(wv.executeJavaScript(
         "(function(ids){var h=window[" + JSON.stringify(SENSOR_HANDLE) + "];" +
-        "return h&&h.boxes?h.boxes(ids):null;})(" + JSON.stringify(ids) + ")"), 300)) || [];
+        "return h&&h.boxes?h.boxes(ids):null;})(" + JSON.stringify(ids) + ")"), 300);
+      if (!got && this.keepOnMiss) return;
+      const rects: (number[] | null)[] = got || [];
       while (this.diffEls.length < ids.length) {
         this.diffEls.push(this.wrap.createDiv({ cls: "domvec-diff-box" }));
       }
@@ -544,13 +546,22 @@ export class PipelineBox {
   scrolls = 0;
   pageScrolled(): void {
     this.scrolls++;
-    if (this.scrollFrame) return;
+    // At most every 50 ms, and only when something is outlined: a page that
+    // animates its styles sends this every frame (johnwick ~450 a session).
+    const now = performance.now();
+    if (this.scrollFrame || now - this.lastScrollMeasure < 50) return;
+    if (!this.pins.length && !this.streaming.size) return;
     this.scrollFrame = window.requestAnimationFrame(() => {
       this.scrollFrame = 0;
-      void this.placePins();
-      void this.followStreaming();
+      this.lastScrollMeasure = performance.now();
+      this.keepOnMiss = true;
+      void Promise.all([this.placePins(), this.followStreaming()]).finally(() => { this.keepOnMiss = false; });
     });
   }
+  private lastScrollMeasure = 0;
+  /** A re-measure caused by motion keeps a box where it was when the page
+   *  does not answer, instead of hiding it for a frame (the flicker). */
+  private keepOnMiss = false;
 
   /** When a pushed hover last arrived (the poll does not overwrite it). */
   private pushedAt = 0;

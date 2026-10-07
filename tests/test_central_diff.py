@@ -175,3 +175,35 @@ def test_a_stored_chunk_still_at_its_address_is_not_renamed_to_a_copy():
     session = {"stored": {"a"}, "stored_md": {"a": _digest("same")}}
     d = diff(session, render(a="same", b="same"))
     assert d["renamed"] == {} and d["retired"] == [] and d["known"] == ["a"]
+
+
+# -- a settle of a young, truncated trie (2026-10-06, measured live) -----------
+#
+# A page reloaded in the cell ended its session holding the fresh load's first
+# fold -- one chunk -- and the settle wrote that as the complete page: 30 of
+# johnwick's 31 stored chunks retired, 24 re-added as new rows a moment later,
+# and the view's nodes for the 30 left as phantoms.
+
+def test_a_young_session_rendering_a_fraction_of_the_store_does_not_settle():
+    from domvec.obsidian.sidecar import _settle_truncated
+    t = 1000.0
+    young = {"born": t - 2.0, "render": {"c1": "x"}}
+    assert _settle_truncated(young, stored=31, now=t)
+
+
+def test_a_settled_visit_or_a_full_render_still_settles():
+    from domvec.obsidian.sidecar import _settle_truncated
+    t = 1000.0
+    full = {"born": t - 2.0, "render": {("c%d" % i): "x" for i in range(29)}}
+    old = {"born": t - 60.0, "render": {"c1": "x"}}
+    small_page = {"born": t - 2.0, "render": {"c1": "x"}}
+    assert not _settle_truncated(full, stored=31, now=t)
+    assert not _settle_truncated(old, stored=31, now=t)        # a page that truly shrank
+    assert not _settle_truncated(small_page, stored=3, now=t)   # too few stored to judge
+
+
+def test_planted_a_session_with_no_birth_reads_as_old_and_would_settle():
+    """The arm that shows the guard depends on `born`: without it (the code
+    before this fix) the same truncated session is treated as settled."""
+    from domvec.obsidian.sidecar import _settle_truncated
+    assert not _settle_truncated({"render": {"c1": "x"}}, stored=31, now=1000.0)

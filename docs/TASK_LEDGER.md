@@ -1,5 +1,32 @@
 # Task ledger
 
+**The tasks now live in `docs/PLUGIN_PRD.md` as numbered rows** (2026-10-07:
+the user: "I think our PRD might be where the new set of tasks are supposed
+to go"), and their progress is the generated `build_analytics/design_state.md`.
+This file is the working index from tonight's items to those rows:
+
+| ledger | PRD row |
+|---|---|
+| A1, A3, C1-C3 | D-46, G-114, G-117 |
+| A2 | G-114 (one image per element), M.5.1 at the source still open |
+| A4 | G-118 (`app_anomalies`); store churn found: D-47 |
+| A5 | G-54 (page click), re-check after D-47 |
+| A6 | D-44 |
+| A7, A8, A9, A12 | D-45 |
+| A10 | D-43, G-113 (latency) |
+| A11 | G-117 |
+| B1 | G-116 |
+| B2, B5 | G-115 |
+| B3 | G-112 |
+| B4 | G-113 |
+| C4 | G-111 |
+| D1, D2 | G-106 / the global UMAP scope; chunking speed open |
+| D3 | G-109 |
+| D7, D8 | G-117, G-119 |
+
+The detail below is kept as the evening's record.
+
+
 Every open item from the user's messages, in one place, worked in order.
 The user's words are in `docs/PLUGIN_GOAL.md` (2026-10-04 and 2026-10-06
 addenda; the numbers below are that file's "Read as" items). A row is DONE
@@ -59,6 +86,10 @@ Last updated: 2026-10-06 (evening session).
 | D4 | Tests that would have caught tonight's regressions | PARTLY | Added: paren urls, late shadow roots (fixture A/B), tree verdict, billboard log, anomalies. NEXT: a Verifier check that opens a panel and asserts it rendered (images loaded, non-empty). |
 | D5 | MCP as observant as the reader (`app_anomalies`) | BUILT | Phantoms, orphans, dangling links, tree, stream star, panels (empty/broken/duplicate), overlay bounds, latency. NEXT: call it through the MCP once loaded. |
 | D6 | Git-history adapter (minimal) | DONE | `domvec-git` MCP: queries run on git, vector cache only; 17 tests; measured 205-500 ms warm. |
+
+| A12 | Overlays too large for a chunk (29) | OPEN | NEXT: measure the in-page unit the overlay outlines vs the stored chunk (256-token window) on johnwick; make them the same unit. |
+| D7 | Visual media coverage: screenshot + account for every visible picture/video/background against the chunks (27) | PARTLY | `python -m domvec.analytics.media_coverage` (store addresses resolved in the page, every media element enumerated incl. shadow roots, screenshot outlined green/red). johnwick: images 154/156, video 2/2, inline svg 0/37, CSS backgrounds 0/3. NEXT: svg graphics and CSS backgrounds detected; archive.org run. |
+| D8 | johnwick.movie and archive.org as the test pages for every feature (28) | OPEN | NEXT: run each ledger item's check on both pages, panel page-form on dynamic renders included. |
 
 ## E. Housekeeping
 
