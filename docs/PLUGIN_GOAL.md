@@ -2202,6 +2202,46 @@ whether that is a dedup or chunk-uniqueness defect or only shared icons;
 adapter that queries git's own logs directly, with efficient vectorization
 beside it rather than a second store of the whole history.*
 
+> Overlay and green register overlays for new chunks/diffs are still quite
+> laggy. Latency should be single digit millisecond.
+
+*Read as: (5) from a page mutation to its overlay (and the green box that
+registers a new chunk or diff) being drawn: single-digit milliseconds.*
+
+> Uh oh! Phantom nodes and weirdness/3d rendering lag on layouts and
+> loose/stale 3D artifacts (nodes and links). I also found that the chunks
+> seem too closely packed together. If that is a scaling issue then good. If
+> that is a UMAP issue then hmm. The lagging chunks initialized into a
+> perfect sphere and note really the 'diff' over the patricia trie at all.
+> Not a lot of tree structure going on either from my view of things. The
+> diff should be sort of like a trickling effect over the emerging diff on
+> the active and open tree structure of how the chunks are organized on the
+> page. Not sure if this is always being followed for many different
+> navigations to different websites. The UMAP fit speed checkts/tests should
+> also be obtained from the true in-app latency, and then speed improvements
+> should be made there as well. Attached photo is of a clicked panel not
+> rendering. This has begun to happen quite a bit now. I would suggests
+> getting some good tests in order along with investigating the
+> degradation. It was working fine before. Impressive from early
+> assessments.
+
+*(The photo: ourworldindata's population grapher in the cell; in the 3D
+view a chunk's billboard is open with its header -- url, `markdown`,
+`shadow DOM` -- and an empty body.)*
+
+*Read as: (6) phantom nodes, stale nodes and links left behind, and render
+lag in the 3D view; (7) chunks packed too closely -- say whether it is the
+view's scale or the UMAP; (8) streamed chunks start on a sphere instead of
+growing as a diff over the page's open patricia tree -- a trickle down the
+tree as it emerges, on every site; (9) UMAP fit speed measured as the IN-APP
+latency, then made faster; (10) a clicked panel renders empty, now often --
+a REGRESSION: find it, and put tests in place that would have caught it.*
+
+> Also the tracked overlay actually slides off the page's bounds.
+
+*Read as: (11) the overlay that tracks a chunk on the page is drawn outside
+the page's visible bounds.*
+
 ---
 
 

@@ -27,6 +27,7 @@
  * that has never seen the site (`G-40`).
  */
 
+import { isolate } from "./isolate";
 import { ForceTree, type ForceNodeDelta } from "./forcetree";
 import { PipelineBox } from "./pipelinebox";
 import { profiler } from "./profile";
@@ -354,6 +355,10 @@ export class BrowserView extends ItemView {
     view.style.width = "100%";
     view.style.height = "100%";
     this.browserWrap.appendChild(view);
+    // Every read of the sensor runs in an isolated world of the page, out of
+    // the page's sight and past its console wrappers (`isolate.ts`). The plant
+    // `main-world` restores the old routing for a check's planted arm.
+    isolate(view, () => this.plant.has("main-world"));
     this.webview = view;
     // The pipeline, over the page being browsed: a box in the cell's corner
     // and the hovered chunk's outline. Both live in the CELL, never in the

@@ -37,6 +37,7 @@ import { profiler } from "./profile";
 import { StressRun } from "./stress";
 import { SessionSwitch } from "./session";
 import { treeVerdict } from "./treeguard";
+import { isolation, WORLD } from "./isolate";
 
 export interface TraceCall {
   /** Milliseconds since the recording started. */
@@ -580,6 +581,9 @@ export function installHarness(app: App, sidecarBase: () => string) {
     },
     /** An off-screen camera framed on one page (default: the one browsed),
      *  rendered to a PNG data URL -- the page at the scale its glitches live. */
+    // Where the sensor runs: the isolated world's call count, and every
+    // fall-back to the page's main world (2026-10-06).
+    isolation: () => ({ world: WORLD, ...isolation }),
     // Is what the 3D view draws a tree, over EVERY drawn edge? (2026-10-04)
     tree: () => {
       const g = leaf("domvec-graph-view")?.view?.graph;
