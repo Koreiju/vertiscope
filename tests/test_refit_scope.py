@@ -60,9 +60,9 @@ def test_the_seed_curve_predicts_the_measured_points_roughly():
 
 def test_this_machines_own_updates_replace_the_seed():
     cost = RefitCost()
-    cost.observe(200, 400.0)
+    cost.observe(rows=200, ms=400.0)
     assert cost.seeded                               # one row count is not a line
-    cost.observe(1200, 1400.0)
+    cost.observe(rows=1200, ms=1400.0)
     assert not cost.seeded
     assert cost.predict(700) == pytest.approx(900.0, abs=1.0)
     # A faster GPU than the seed's: the same store now fits the budget.
