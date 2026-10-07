@@ -379,18 +379,31 @@ class FreqMatrix:
         path = Path(directory)
         path.mkdir(parents=True, exist_ok=True)
         csr = self._matrix()
-        np.savez_compressed(
-            path / "freq.npz",
-            data=csr.data.astype(np.float32),
-            indices=csr.indices.astype(np.int32),
-            indptr=csr.indptr.astype(np.int64),
-            shape=np.asarray(csr.shape, dtype=np.int64),
-        )
-        (path / "freq_meta.json").write_text(
+        # ATOMIC: written beside, then renamed over (2026-10-07: the sidecar
+        # crashed natively mid-save and left `freq.npz` at 0 bytes; every
+        # restart then died on "No data left in file" and the store would not
+        # open). A rename either happened or did not.
+        import os as _os
+        tmp_npz = path / "freq.npz.tmp"
+        with open(tmp_npz, "wb") as fh:
+            np.savez_compressed(
+                fh,
+                data=csr.data.astype(np.float32),
+                indices=csr.indices.astype(np.int32),
+                indptr=csr.indptr.astype(np.int64),
+                shape=np.asarray(csr.shape, dtype=np.int64),
+            )
+            fh.flush()
+            _os.fsync(fh.fileno())
+        tmp_meta = path / "freq_meta.json.tmp"
+        tmp_meta.write_text(
             json.dumps({"vocab": self.vocab, "rows": self.rows,
                         "free": self._free}),
             encoding="utf-8",
         )
+        # Both are complete on disk before either is swapped in.
+        _os.replace(tmp_npz, path / "freq.npz")
+        _os.replace(tmp_meta, path / "freq_meta.json")
 
     @classmethod
     def load(cls, directory) -> "FreqMatrix":
