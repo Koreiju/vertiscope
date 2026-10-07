@@ -2139,6 +2139,11 @@ export class GraphView extends ItemView {
     // every hover until the reader had already unfolded that page -- which
     // is the one case they least need the correspondence drawn.
     let target = cid ? data.nodes.find((n: any) => n.id === cid) : null;
+    // A streamed chunk already folded into a stored one: that one.
+    if (!target && cid) {
+      const into = this.collapsedTo.get(cid) || this.forceSpecs.get(cid)?.cid;
+      if (into) target = data.nodes.find((n: any) => n.id === into) || null;
+    }
     if (!target && cid && url) {
       target = data.nodes.find(
         (n: any) => n.level === "page" && n.url === url);
@@ -2149,6 +2154,7 @@ export class GraphView extends ItemView {
       if (!!n.hovered !== want) { n.hovered = want; changed = true; }
     }
     if (changed) this.graph.nodeColor(this.graph.nodeColor());
+    this.focusOn(cid ? target : null);
     // A streaming node is its own translucent mesh: ring it by its material.
     for (const n of data.nodes) {
       const obj: any = n.force ? (n as any).__threeObj : null;
@@ -2163,6 +2169,84 @@ export class GraphView extends ItemView {
         }
       }
     }
+  }
+
+  /** Planted by the focus check: hover rings only, the camera stays. */
+  plantNoFocus = false;
+  focusStats = { asked: 0, flown: 0, followed: 0, released: 0, last: "" };
+  private focusTimer = 0;
+  private focusFrame = 0;
+  private focusNode: any = null;
+  private focusLast: number[] | null = null;
+  private focusHooked = false;
+
+  /**
+   * The camera goes to the chunk the reader hovers in the browser, and stays
+   * on it while the forces move it (2026-10-06: "hovering overlays should
+   * zoom-focus the camera in the 3D editor on the specific chunk, no matter
+   * placement in the diff, with focus persisting on force-directed
+   * updates"). After a 200 ms dwell on one chunk -- a pointer sweeping the
+   * page must not throw the camera about -- it flies there (400 ms), then
+   * follows the node frame by frame by the node's own displacement. The
+   * reader's own camera gesture releases it.
+   */
+  private focusOn(target: any): void {
+    if (this.plantNoFocus || !this.graph) return;
+    window.clearTimeout(this.focusTimer);
+    if (!target) return;                       // hover left: keep the view
+    if (this.focusNode === target) return;
+    this.focusStats.asked++;
+    this.focusTimer = window.setTimeout(() => this.flyTo(target), 200);
+  }
+
+  private flyTo(n: any): void {
+    const g: any = this.graph;
+    if (!g || !Number.isFinite(n.x)) return;
+    if (!this.focusHooked) {
+      const c: any = g.controls();
+      if (c && c.addEventListener) {
+        c.addEventListener("start", () => {
+          if (!this.focusNode) return;
+          this.focusNode = null; this.focusStats.released++;
+        });
+        this.focusHooked = true;
+      }
+    }
+    const cam = g.camera().position;
+    const r = drawnRadius(n, g.nodeRelSize(), this.media());
+    const D = Math.max(45, 10 * r);
+    let dx = cam.x - n.x, dy = cam.y - n.y, dz = cam.z - (n.z || 0);
+    const len = Math.hypot(dx, dy, dz) || 1;
+    dx /= len; dy /= len; dz /= len;
+    const to = { x: n.x + dx * D, y: n.y + dy * D, z: (n.z || 0) + dz * D };
+    g.cameraPosition(to, { x: n.x, y: n.y, z: n.z || 0 }, 400);
+    this.focusStats.flown++;
+    this.focusStats.last = String(n.id).slice(0, 60);
+    this.focusNode = null;
+    window.setTimeout(() => {
+      this.focusNode = n;
+      this.focusLast = [n.x, n.y, n.z || 0];
+      if (!this.focusFrame) this.followFocus();
+    }, 420);
+  }
+
+  private followFocus(): void {
+    const step = () => {
+      const g: any = this.graph, n = this.focusNode;
+      if (!g || !n || !this.focusLast) { this.focusFrame = 0; return; }
+      const ids = g.graphData().nodes;
+      if (!ids.includes(n)) { this.focusNode = null; this.focusFrame = 0; return; }
+      const [lx, ly, lz] = this.focusLast;
+      const ddx = n.x - lx, ddy = n.y - ly, ddz = (n.z || 0) - lz;
+      if (Math.abs(ddx) + Math.abs(ddy) + Math.abs(ddz) > 1e-3) {
+        const cam = g.camera().position;
+        g.cameraPosition({ x: cam.x + ddx, y: cam.y + ddy, z: cam.z + ddz }, { x: n.x, y: n.y, z: n.z || 0 }, 0);
+        this.focusLast = [n.x, n.y, n.z || 0];
+        this.focusStats.followed++;
+      }
+      this.focusFrame = window.requestAnimationFrame(step);
+    };
+    this.focusFrame = window.requestAnimationFrame(step);
   }
 
   /**
@@ -2306,8 +2390,29 @@ export class GraphView extends ItemView {
       if (hasAlt(t) && !hasAlt(lines[j].text)) { keep[j] = false; imgAt.set(el, i); }
       else keep[i] = false;
     });
-    return lines.filter((_l, i) => keep[i])
-      .map((l) => String(l.text || "").replace(/^\s+/, "")).join("\n");
+    // Destinations are the PAGE's own (johnwick.movie stores
+    // `assets/img/...`): absolutised against the chunk's url, or Obsidian
+    // resolves them against the vault and every picture breaks. A video or
+    // an audio file is a player, not a broken <img> (2026-10-06: "a lot of
+    // rich video, audio, and images ... not registering").
+    const base = String((payload && payload.url) || "");
+    const abs = (u: string) => { try { return new URL(u, base).href; } catch { return u; } };
+    const DEST = /(!?)\[([^\]]*)\]\(((?:[^()\s]|\((?:[^()\s]|\([^()\s]*\))*\))*)\)/g;
+    const esc = (u: string) => u.replace(/"/g, "&quot;");
+    return lines.filter((_l, i) => keep[i]).map((l) => {
+      const t = String(l.text || "").replace(/^\s+/, "");
+      return t.replace(DEST, (_m, bang: string, label: string, dest: string) => {
+        const u = dest ? abs(dest) : dest;
+        if (bang && /\.(mp4|webm|mov|m4v|ogv)(\?|#|$)/i.test(u)) {
+          return `<video controls preload="metadata" src="${esc(u)}" style="max-width:100%"></video>`;
+        }
+        if (bang && /\.(mp3|m4a|ogg|oga|wav|flac|aac)(\?|#|$)/i.test(u)) {
+          return `<audio controls preload="metadata" src="${esc(u)}"></audio>`;
+        }
+        // `<...>` keeps a destination whole whatever it contains (CommonMark).
+        return `${bang}[${label}](<${u}>)`;
+      });
+    }).join("\n");
   }
 
   /**
@@ -2440,6 +2545,15 @@ export class GraphView extends ItemView {
       }
     }
     const at = (n: any) => [n.fitX ?? n.x, n.fitY ?? n.y, n.fitZ ?? n.z ?? 0];
+    // The scene's radius: the 90th percentile page distance from the pages'
+    // centroid -- what an open page's telescope is allowed a share of.
+    let sceneR = 0;
+    if (pages.length) {
+      const c = [0, 1, 2].map((k) => pages.reduce((a: number, q: any) => a + at(q)[k], 0) / pages.length);
+      const ds = pages.map((q: any) => { const [x, y, z] = at(q); return Math.hypot(x - c[0], y - c[1], z - c[2]); })
+        .filter(Number.isFinite).sort((a: number, b: number) => a - b);
+      sceneR = ds.length ? ds[Math.min(ds.length - 1, Math.floor(ds.length * 0.9))] : 0;
+    }
     const byUrl = new Map<string, any[]>();
     for (const n of data.nodes) {
       if (n.force || n.level === "page" || !n.url) continue;
@@ -2457,15 +2571,27 @@ export class GraphView extends ItemView {
       }
       if (!Number.isFinite(nearest)) continue;
       const R = 0.45 * nearest;                 // the projector's NEIGHBOURHOOD
+      // The telescope's bound is the larger of that and a share of the
+      // SCENE (2026-10-06, measured: on johnwick.movie the neighbourhood was
+      // 37 units against a raw p90 chunk distance of 31.5, so telescoping
+      // could only shrink -- k 0.65 -- and the cluster stayed a small dense
+      // ball; pages sit close in the page fit, and 0.45 x the gap is little).
+      const B = Math.max(R, 0.35 * sceneR);
+      this.telescope(page, chunks, B, relSize, media);
       // A floor, so a crowded page's chunks stay visible: the fixed collider
       // margin could eat the whole room and leave specks (val ~ 0).
       const floor = 0.35 * relSize;
-      const room = Math.max(floor, (R * Math.cbrt(0.6 / chunks.length) - COLLIDER_MARGIN) / COLLIDER_SAFETY);
+      const room = Math.max(floor, ((this.plantNoTelescope ? R : B) * Math.cbrt(0.6 / chunks.length) - COLLIDER_MARGIN) / COLLIDER_SAFETY);
       for (const c of chunks) {
         if (c.fullVal === undefined) c.fullVal = c.val ?? 1;
         const r = drawnRadius({ ...c, val: c.fullVal }, relSize, media);
         const was = c.val;
-        c.val = r > room ? c.fullVal * Math.pow(room / r, 3) : c.fullVal;
+        // Shrunk to the room when crowded; GROWN into it when the room is
+        // larger, up to 2.5x the radius (2026-10-06, measured on
+        // johnwick.movie: chunks drawn at 2.7 units with 6.9 of room each --
+        // an open page read as a knot of specks).
+        const grow = this.plantNoTelescope ? 1 : Math.min(2.5, room / Math.max(r, 1e-6));
+        c.val = r > room ? c.fullVal * Math.pow(room / r, 3) : c.fullVal * Math.pow(Math.max(1, grow), 3);
         if (!(Math.abs((was ?? 0) - c.val) <= 0.05 * c.val)) c.__freeUntil = performance.now() + 3000;
       }
       // The OPEN page's own node, too: drawn at full size its billboard's
@@ -2492,6 +2618,61 @@ export class GraphView extends ItemView {
       q.val = q.fullVal;
       this.rescaleObject(q, was);
     }
+  }
+
+  /** Planted by the telescope's check: chunks at their raw fit (the packed ball). */
+  plantNoTelescope = false;
+  /** Per open page, what the last telescope did (for the harness). */
+  teleStats = new Map<string, { n: number; raw_p90: number; bound: number; inner: number; k: number; clamped: number }>();
+
+  /**
+   * A page's chunks TELESCOPED radially about its node (2026-10-06: "the umap
+   * clusters are still quite small, and still quite closely packed for each
+   * URL ... a max bound distance that telescopes the chunk distances from
+   * their centroid url node radially within some bounds, which still
+   * preserves the UMAP geometries").
+   *
+   * Each chunk keeps its DIRECTION from the page node and the ORDER and RATIO
+   * of its distance: d' = inner + k * d, with k chosen so the page's 90th
+   * percentile chunk lands at 0.85 of the bound, and anything beyond clamped
+   * at the bound -- the neighbourhood the projector gives the page (0.45 x
+   * the nearest other page). Computed from the RAW fit each time, so a
+   * second pass never telescopes a telescoped position; a fit that changed
+   * underneath (`fitX` no longer what was written) is taken as the new raw.
+   */
+  private telescope(page: any, chunks: any[], bound: number, relSize: number, media: boolean): void {
+    if (this.plantNoTelescope || !chunks.length || !(bound > 0)) return;
+    const px = page.fitX ?? page.x, py = page.fitY ?? page.y, pz = page.fitZ ?? page.z ?? 0;
+    if (![px, py, pz].every(Number.isFinite)) return;
+    const raw: number[][] = [];
+    for (const c of chunks) {
+      const tf = c.__tele;
+      const moved = !tf || tf[0] !== c.fitX || tf[1] !== c.fitY || tf[2] !== c.fitZ;
+      if (moved || !c.__raw) c.__raw = [c.fitX ?? c.x, c.fitY ?? c.y, c.fitZ ?? c.z ?? 0];
+      raw.push(c.__raw);
+    }
+    const d = raw.map((r) => Math.hypot(r[0] - px, r[1] - py, r[2] - pz));
+    const sorted = d.filter(Number.isFinite).sort((a, b) => a - b);
+    if (!sorted.length) return;
+    const p90 = Math.max(1e-6, sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.9))]);
+    const inner = Math.min(0.3 * bound, 1.5 * drawnRadius({ ...page, val: page.fullVal ?? page.val }, relSize, media));
+    const k = Math.max(0, (0.85 * bound - inner) / p90);
+    let clamped = 0;
+    chunks.forEach((c, i) => {
+      const r = raw[i], di = d[i];
+      if (!Number.isFinite(di)) return;
+      let to = inner + k * di;
+      if (to > bound) { to = bound; clamped++; }
+      const f = di > 1e-9 ? to / di : 0;
+      const nx = px + (r[0] - px) * f, ny = py + (r[1] - py) * f, nz = pz + (r[2] - pz) * f;
+      if (c.fitX !== nx || c.fitY !== ny || c.fitZ !== nz) {
+        c.fitX = nx; c.fitY = ny; c.fitZ = nz;
+        c.__freeUntil = performance.now() + 3000;
+      }
+      c.__tele = [nx, ny, nz];
+    });
+    this.teleStats.set(page.url, { n: chunks.length, raw_p90: Math.round(p90 * 10) / 10, bound: Math.round(bound),
+                                   inner: Math.round(inner), k: Math.round(k * 100) / 100, clamped });
   }
 
   // ---- G-107: the scene batch ------------------------------------------

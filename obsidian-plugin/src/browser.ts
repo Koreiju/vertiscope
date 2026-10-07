@@ -401,6 +401,10 @@ export class BrowserView extends ItemView {
         this.pushedDrains++;
         if (!this.draining) void this.tick();
         else this.drainAgain = true;
+      } else if (body === "scroll") {
+        // Every box moved and nothing mutated: the overlay re-measures what
+        // it shows (pins, the streaming diff boxes) from the page's new place.
+        this.pipebox?.pageScrolled();
       } else if (body.startsWith("hover ")) {
         // Planted by D-40's check: the old path, hover found by the poll.
         if (this.plant.has("poll-hover")) return;

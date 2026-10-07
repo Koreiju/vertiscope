@@ -538,6 +538,20 @@ export class PipelineBox {
 
   /** Put a fixed-position box over a guest-viewport rect, clipped to the
    *  webview and corrected for the containing block (see `pin`). */
+  /** The page scrolled (pushed by the sensor): re-measure what is shown, at
+   *  most once per frame. */
+  private scrollFrame = 0;
+  scrolls = 0;
+  pageScrolled(): void {
+    this.scrolls++;
+    if (this.scrollFrame) return;
+    this.scrollFrame = window.requestAnimationFrame(() => {
+      this.scrollFrame = 0;
+      void this.placePins();
+      void this.followStreaming();
+    });
+  }
+
   /** When a pushed hover last arrived (the poll does not overwrite it). */
   private pushedAt = 0;
   private pushedUrl = "";
@@ -582,6 +596,26 @@ export class PipelineBox {
     const wv = this.webview();
     if (!wv) return null;
     const wb = wv.getBoundingClientRect();
+    // A `position: fixed` box is placed against the VIEWPORT, unless an
+    // ancestor forms its containing block (a transform, filter, perspective,
+    // contain or will-change). Subtracting the parent's offset regardless
+    // drew every diff box up and left of its chunk by the parent's position
+    // -- measured 2026-10-06: a box at y=104 over a cell starting at y=168,
+    // "the tracked overlay actually slides off the page's bounds".
+    if (getComputedStyle(el).position === "fixed") {
+      let a = el.parentElement;
+      while (a && a !== document.body) {
+        const cs = getComputedStyle(a);
+        if ((cs.transform && cs.transform !== "none") || (cs.filter && cs.filter !== "none")
+            || (cs.perspective && cs.perspective !== "none") || /paint|layout|strict|content/.test(cs.contain || "")
+            || /transform|filter|perspective/.test(cs.willChange || "")) {
+          const r = a.getBoundingClientRect();
+          return { wb, ox: r.left + a.clientLeft, oy: r.top + a.clientTop };
+        }
+        a = a.parentElement;
+      }
+      return { wb, ox: 0, oy: 0 };
+    }
     const op = (el.offsetParent || el.parentElement) as HTMLElement | null;
     if (!op) return { wb, ox: 0, oy: 0 };
     const pr = op.getBoundingClientRect();

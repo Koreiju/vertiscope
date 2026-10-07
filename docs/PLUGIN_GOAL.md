@@ -2313,6 +2313,23 @@ UMAP cluster is too small and too dense: telescope its chunks' distances
 from the page node RADIALLY into bounds (a maximum distance), keeping the
 UMAP geometry -- directions and the order of distances.*
 
+> Also, still nothing on archive even being detected still, I don't think.
+> There aren't any overlays for the chunks and I don't see anything
+> registering in the 3D graph editor.
+
+> Also, most images and media are not registering in nodes on
+> https://johnwick.movie/film/john-wick-chapter-3-parabellum. There's a lot
+> of rich video, audio, and images, but I'm not sure if the chunks are
+> making it through here either. This is likely another shadow DOM issue.
+> Remember, though, about the boundaries on what is preferable to run as
+> script injections, since we are trying to minimize write access to the DOM
+> itself whatsoever whilst still managing mutationobservers. If
+> mutationobservers means injection, then we do that.
+
+*Read as: (24) every image, video and audio a page holds reaches its chunk
+and its node; (25) the boundary on contact: the DOM is read, never written;
+MutationObservers are the one accepted injection.*
+
 ---
 
 

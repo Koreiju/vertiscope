@@ -2986,6 +2986,30 @@
       if (n === slot.tail || !slot.tail) break;
       n = n.nextSibling;
     }
+    if (!any) {
+      // The run's own boxes are empty -- a zero-height container whose
+      // children are positioned out of flow, or `display: contents`
+      // (2026-10-06: johnwick.movie's header, six logos, `box: null`, so a
+      // hover drew no outline). The box is then what its DESCENDANTS draw,
+      // at most 400 elements read. A peripheral read, never the fold's.
+      n = slot.node; k = 0;
+      var seen = 0;
+      while (n && k++ < 400) {
+        if (n.nodeType === 1 && n.querySelectorAll) {
+          var all = n.querySelectorAll('*');
+          for (var j = 0; j < all.length && seen < 400; j++, seen++) {
+            var e = all[j].getBoundingClientRect();
+            if (e && e.width > 0 && e.height > 0) {
+              any = true;
+              if (e.left < l) l = e.left; if (e.top < t) t = e.top;
+              if (e.right > r) r = e.right; if (e.bottom > b) b = e.bottom;
+            }
+          }
+        }
+        if (n === slot.tail || !slot.tail || seen >= 400) break;
+        n = n.nextSibling;
+      }
+    }
     return any ? [l, t, r - l, b - t] : null;
   }
   function at(el) {
@@ -3034,10 +3058,50 @@
     lastHoverKey = '-';
     try { SAY(SIGNAL + 'hover -'); } catch (e) { stats.errors++; }
   }
+  // A scroll moves every box and mutates nothing, so no drain follows it and
+  // the overlay stayed where the page used to be (2026-10-06: "Scrolls on
+  // this page leave stale billboards"). Passive, capturing (an inner
+  // scroller's scroll does not bubble), at most one every 8 ms: the host is
+  // told to re-measure what it shows, and the hovered chunk's box is sent
+  // again from its new place. Nothing is written into the page.
+  var lastScrollAt = 0, scrollTrail = null;
+  function onScroll() {
+    if (!SAY) return;
+    var now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+    if (now - lastScrollAt < 8) {
+      // Throttled, with a TRAILING call: the last position after a smooth
+      // scroll settles is the one the overlay must end on.
+      if (scrollTrail === null) scrollTrail = setTimeout(function () { scrollTrail = null; onScroll(); }, 16);
+      return;
+    }
+    lastScrollAt = now;
+    try { SAY(SIGNAL + 'scroll'); } catch (e) { stats.errors++; }
+    if (lastHoverTarget && lastHoverTarget.isConnected) {
+      var got = null;
+      try { got = at(lastHoverTarget); } catch (e) { stats.errors++; }
+      var key = got && got.box ? got.id + ' ' + got.box.map(Math.round).join(',') : '-';
+      if (key !== lastHoverKey) {
+        lastHoverKey = key;
+        try { SAY(SIGNAL + 'hover ' + key); } catch (e) { stats.errors++; }
+      }
+    }
+  }
   if (SIGNAL && typeof document !== 'undefined' && document.addEventListener) {
     try {
       document.addEventListener('pointermove', onPointer, { passive: true, capture: true });
       document.addEventListener('pointerout', onPointerOut, { passive: true, capture: true });
+      document.addEventListener('scroll', onScroll, { passive: true, capture: true });
+      document.addEventListener('wheel', onScroll, { passive: true, capture: true });
+      // A style or class change can move every box without changing any
+      // chunk: a smooth-scroll library translates its container instead of
+      // scrolling (johnwick.movie: scrollY 0 with the content 3,500 px up),
+      // and no scroll event fires. Its own observer, so the fold's stays
+      // filtered to content attributes; it only tells the host to re-measure.
+      if (typeof MutationObserver === 'function' && document.documentElement) {
+        new MutationObserver(function () { onScroll(); }).observe(document.documentElement,
+          { attributes: true, subtree: true, attributeFilter: ['style', 'class'] });
+        stats.observers++;
+      }
     } catch (e) { stats.errors++; }
   }
 
