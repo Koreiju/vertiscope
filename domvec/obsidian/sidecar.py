@@ -1470,7 +1470,15 @@ class _Handler(BaseHTTPRequestHandler):
                     if "mirror_rows_written" in counts:
                         phases["mirror_rows"] = counts["mirror_rows_written"]
                 # There are chunks without vectors now. The worker embeds
-                # them; this request does not wait for it.
+                # them; this request does not wait for it -- but the page the
+                # reader is ON goes to the front of the queue (2026-10-07: a
+                # captured chunk waited p50 1.0 s / p90 12 s for its vector
+                # behind other pages' backlog, end to end p90 4.5 s, while the
+                # fold itself took 1.7 ms). Newest first: what is on screen now.
+                try:
+                    self.workspace.vectors.prioritize([c.cid for c in dirty])
+                except Exception:                   # noqa: BLE001
+                    pass
                 _EMBED_WANTED.set()
                 # And the page's merge groups are now out of date (`G-65`).
                 # Each drain pushes the deadline out, so this lands when the
