@@ -792,3 +792,12 @@ button.domvec-run-fence:hover {
   padding: 0 6px;
   border-radius: 4px;
 }
+
+/* G-111: what the last gesture on a chunk panel said (pressed, refused, ...). */
+.domvec-act-readout {
+  display: none;
+  padding: 2px 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+  border-top: 1px solid var(--background-modifier-border);
+}

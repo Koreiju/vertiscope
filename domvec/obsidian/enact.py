@@ -40,6 +40,15 @@ from typing import Dict, Optional
 #: does through a tested path.
 ACTIONS = ("press", "type", "read")
 
+#: What a PANEL may ask to have done to the page the reader is looking at, and
+#: the in-page tick (`sensor.js` `perform`) each one becomes.
+#:
+#: `toggle` is a click on purpose: a checkbox's own activation behaviour sets
+#: its state and fires `input`/`change` exactly as the reader's would, where
+#: writing `.checked` and then clicking would toggle twice.
+PLAN_KINDS = {"press": "click", "toggle": "click", "type": "type",
+              "choose": "choose"}
+
 
 class EnactError(RuntimeError):
     """Refused, unavailable, or not found -- never a silent failure."""
@@ -177,3 +186,63 @@ def _report(driver, address, did: str, detail: str) -> Dict:
         pass
     return {"ok": True, "did": did, "detail": detail,
             "address": address.key(), "url": landed}
+
+
+def plan(workspace, address_key: str, action: str = "press",
+         text: Optional[str] = None) -> Dict:
+    """Adjudicate one panel gesture and DRIVE NOTHING.
+
+    The panel acts on the page in the browser CELL, which the reader is
+    looking at -- not on the headless Firefox `enact` above drives. The cell
+    belongs to the plugin process, so this process cannot press anything in
+    it; what it can still own is the decision. A plugin setting is not a gate
+    (see the module docstring), so the gates that did not need a driver are
+    run HERE and the plugin gets back only what it is allowed to touch:
+
+    1. the address parses and is one the trie holds (`store.address`) -- the
+       trie is the vocabulary of what can be touched, so the xpath that comes
+       back is the stored one and the caller cannot name another;
+    2. the refusal set (`live._refuse_check`) on the stored label and href and
+       on the page's own url, BEFORE the cell navigates anywhere;
+    3. the action is one of `PLAN_KINDS`, and `type`/`choose` carry a value.
+
+    The server flag (gate one) is the route's, as for `/enact`. The in-page
+    half of the refusal set (`sensor.js` `refused`) is checked again at press
+    time against what the element says NOW, which is what `enact` does with
+    the live label.
+
+    Refusals are `EnactError`, so the route answers 409 `{refused: true}` for
+    both this and `enact`.
+    """
+    if action not in PLAN_KINDS:
+        raise EnactError("unknown action %r; expected one of %s"
+                         % (action, ", ".join(sorted(PLAN_KINDS))))
+    if action in ("type", "choose") and text is None:
+        raise EnactError("%s needs a value" % action)
+
+    from ..address import ContentAddress
+    from .. import live
+
+    try:
+        address = ContentAddress.parse(address_key)
+    except Exception as exc:                        # noqa: BLE001
+        raise EnactError("unparseable address: %s" % exc) from exc
+
+    known = workspace.store.address(address.aid)
+    if known is None:
+        raise EnactError(
+            "address is not in this workspace; only scanned pages can be "
+            "enacted on")
+    stored, value = known
+
+    try:
+        live._refuse_check(str(value or "")[:80],
+                           value if stored.is_url else "")
+        live._refuse_check("", address.url)
+    except live.Refused as exc:
+        raise EnactError(str(exc)) from exc
+
+    return {"ok": True, "did": "plan", "action": action,
+            "kind": PLAN_KINDS[action], "address": address.key(),
+            "url": address.url, "xpath": address.xpath,
+            "label": str(value or "")[:80]}

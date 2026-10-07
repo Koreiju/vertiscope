@@ -220,3 +220,88 @@ def test_type_without_text_is_refused(ws):
     with pytest.raises(EnactError) as caught:
         enact(ws, address.key(), "type")
     assert "needs text" in str(caught.value)
+
+
+# --- the panel's road: plan, adjudicated here, carried out in the cell -----------
+#
+# A panel gesture acts on the page in the browser CELL, which this process
+# cannot press anything in. `plan` keeps the gates that need no driver and
+# drives nothing, so every one of these runs without a browser -- and a
+# regression that booted one would fail loudly rather than slowly.
+
+def _no_driver(monkeypatch):
+    from domvec import live
+
+    def boom():
+        raise AssertionError("a plan must not acquire a driver")
+
+    monkeypatch.setattr(live._S, "need_driver", boom)
+
+
+def test_plan_hands_back_the_stored_xpath_and_drives_nothing(ws, monkeypatch):
+    """The ordinary link gets PAST every gate -- the gate is not stuck shut."""
+    from domvec.obsidian.enact import plan
+
+    _no_driver(monkeypatch)
+    address = _address_of(ws, "/help.html")
+    assert address is not None
+    got = plan(ws, address.key(), "press")
+    assert got["ok"] and got["kind"] == "click"
+    # What comes back is the TRIE's xpath and url, not anything the caller said.
+    assert got["xpath"] == address.xpath and got["url"] == address.url
+
+
+def test_plan_refuses_a_never_visit_target_before_the_cell_moves(ws, monkeypatch):
+    """The planted defect is caught: the sign-in href is refused, and by name."""
+    from domvec.obsidian.enact import plan
+
+    _no_driver(monkeypatch)
+    address = _address_of(ws, "/accounts/login")
+    assert address is not None, "the fixture must yield a sign-in href"
+    with pytest.raises(EnactError) as caught:
+        plan(ws, address.key(), "press")
+    assert "never-visit" in str(caught.value) or \
+           "never-press" in str(caught.value), str(caught.value)
+
+
+def test_plan_refuses_an_address_the_trie_does_not_hold(ws):
+    from domvec.address import ContentAddress
+    from domvec.obsidian.enact import plan
+
+    stranger = ContentAddress(url="https://shop.test/", xpath="/html/body/a[9]",
+                              tag="urls.internal", accessor="href")
+    with pytest.raises(EnactError) as caught:
+        plan(ws, stranger.key(), "press")
+    assert "not in this workspace" in str(caught.value)
+
+
+def test_plan_vocabulary_is_closed_and_values_are_required(ws):
+    from domvec.obsidian.enact import PLAN_KINDS, plan
+
+    assert set(PLAN_KINDS) == {"press", "toggle", "type", "choose"}
+    address = _address_of(ws, "/help.html")
+    with pytest.raises(EnactError):
+        plan(ws, address.key(), "execute_script")
+    for needs in ("type", "choose"):
+        with pytest.raises(EnactError) as caught:
+            plan(ws, address.key(), needs)
+        assert "needs a value" in str(caught.value)
+
+
+def test_plan_route_is_behind_the_same_flag_and_answers_409_for_a_refusal(ws):
+    address = _address_of(ws, "/accounts/login")
+    ok_address = _address_of(ws, "/help.html")
+    off = _serve(ws, 0)
+    try:
+        code, body = _post(_port(off), {"mode": "plan", "address": ok_address.key()})
+        assert code == 403 and "enact is off" in body["error"]
+    finally:
+        off.shutdown(); off.server_close()
+    on = _serve(ws, 0, enact=True)
+    try:
+        code, body = _post(_port(on), {"mode": "plan", "address": ok_address.key()})
+        assert code == 200 and body["xpath"] == ok_address.xpath
+        code, body = _post(_port(on), {"mode": "plan", "address": address.key()})
+        assert code == 409 and body["refused"] is True
+    finally:
+        on.shutdown(); on.server_close()

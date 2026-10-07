@@ -295,12 +295,22 @@ export class ChunkSurface extends MarkdownRenderChild {
         el.closest("select")?.removeAttribute("disabled");
         el.addClass("domvec-live");
       }
+      // A text field is filled, not pressed (`G-111`): the value the reader
+      // enters goes to the page on `change`, and a click only focuses it.
+      const field = el.matches(
+        "input:not([type=checkbox]):not([type=radio]):not([type=button]):not([type=submit]):not([type=reset]), textarea");
+      if (live && field) {
+        el.addEventListener("change", () => {
+          void this.pressAddress(key, this.labelOf(el), "type", (el as HTMLInputElement).value);
+        });
+      }
       el.addEventListener("click", (event) => {
         // Always prevented. An `<a href>` in here points at the live web and
         // clicking it should press the element through the sensor, not
         // navigate the vault's own webview to a scraped url.
         event.preventDefault();
         event.stopPropagation();
+        if (live && field) return;
         if (live) this.pressAddress(key, this.labelOf(el));
         else this.say(`${this.classOf(el)}  ${key}`);
       });
@@ -317,9 +327,9 @@ export class ChunkSurface extends MarkdownRenderChild {
     return cls ? cls.slice(3) : el.tagName.toLowerCase();
   }
 
-  private async pressAddress(key: string, label: string) {
-    this.say(`pressing ${label || key.slice(0, 40)}…`);
-    const result = await this.host.enact(key, "press");
+  private async pressAddress(key: string, label: string, action = "press", text?: string) {
+    this.say(`${action === "press" ? "pressing" : action} ${label || key.slice(0, 40)}…`);
+    const result = await this.host.enact(key, action, text);
     if (!result) {
       this.say("no answer from the sidecar");
       return;

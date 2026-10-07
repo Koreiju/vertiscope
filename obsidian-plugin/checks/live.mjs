@@ -1655,6 +1655,69 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-109",
+      asks: "every view applies the backend's one central diff: a chunk the store retired (a shift moved its address) is no longer drawn in the 3D view, and a renamed chunk's node is carried over rather than left behind",
+      async run() {
+        // 2026-10-04: after browsing duckduckgo.com then a search, 24 of 65
+        // stored-chunk nodes had no chunk in the store (retired at settle,
+        // never removed from the view). The page below PREPENDS each batch
+        // and re-homes the feed in a container of the other tag every round
+        // (`shift=1`), so every chunk already drawn changes its positional
+        // cid while its content stays: the backend names those as `renamed`
+        // (a pure prepend does not -- measured on the pipeline offline: 0
+        // retired, 0 renamed), and the view must drop the old node and
+        // carry its place to the new one. Clean: after the feed finishes and the
+        // queue drains no drawn stored-chunk node lacks a chunk in the store
+        // AND renames actually happened (non-vacuity of the clean arm).
+        // Planted (`plantNoDiff`): the same page, the view ignores the diff --
+        // it must read stale nodes, or the metric measures nothing.
+        const fixtures = await serveFixtures();
+        const arm = (planted) => evaluate(`(async () => {
+          ${PREP}
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          b.plant.clear();
+          v.plantNoDiff = ${planted};
+          try {
+            const url = ${JSON.stringify(fixtures.origin)} + "/busy_feed.html?prepend=1&shift=1&words=120&every=4000&rounds=8&g109=" + (${planted} ? "p" : "c") + Date.now();
+            const before = { ...v.diffStats };
+            b.go(url);
+            await land(url, 25000);
+            // 2.5 s to the first batch, 8 x 4 s (slow enough for each
+            // batch's chunks to be embedded and drawn before the next shift
+            // retires them), then the store and the projector catch up.
+            await sleep(2500 + 8 * 4000 + 1500);
+            const t0 = Date.now();
+            while (Date.now() - t0 < 40000 && (b.capturing || (b.captureQueue || []).length)) await sleep(250);
+            await sleep(4000);
+            const drawn = v.graph.graphData().nodes.filter((n) => !n.force && n.level !== "page" && n.url === url).length;
+            const stale = await v.staleStored();
+            const d = v.diffStats;
+            return { planted: ${planted}, url, drawn_chunks: drawn, stale, detail: v.staleDetail,
+                     diff: { applied: d.applied - before.applied, retired_removed: d.retired_removed - before.retired_removed,
+                             renamed: d.renamed - before.renamed, carried: d.carried - before.carried, known: d.known - before.known },
+                     browser: { ...b.diffsApplied } };
+          } finally {
+            v.plantNoDiff = false;
+            b.plant.clear();
+          }
+        })()`, { timeout: 150000 });
+        try {
+          const clean = await arm(false);
+          const planted = await arm(true);
+          const cleanOk = !clean.error && clean.drawn_chunks > 0 && clean.stale === 0
+            && clean.diff.applied > 0 && clean.diff.renamed > 0;
+          const plantedBites = !planted.error && planted.stale > 0;
+          return {
+            pass: cleanOk && plantedBites,
+            evidence: { clean, planted,
+                        bar: "clean: >= 1 drawn chunk, 0 drawn stored chunks missing from the store, diffs applied and renames seen; planted (plantNoDiff): stale > 0" },
+          };
+        } finally {
+          await fixtures.close();
+        }
+      },
+    },
+    {
       id: "D-37",
       asks: "new diffs are outlined where the reader looks: a chunk that loaded off screen is outlined when the reader scrolls to it, until it is saved and has been seen",
       async run() {
@@ -2266,6 +2329,111 @@ export function makeChecks(env) {
           pass: streamed(clean) && still(clean) && smooth(clean)
             && !(still(noCalm) && smooth(noCalm)) && !smooth(noGovernor) && !smooth(teleport),
           evidence: { clean, no_calm: noCalm, no_governor: noGovernor, teleport },
+        };
+      },
+    },
+    {
+      id: "G-110",
+      asks: "right-click on a page (url) node folds its chunks into the node, and right-click again draws the page's whole stored chunk set at its UMAP positions; a folded page stays folded under placements",
+      async run() {
+        // 2026-10-04: "no right-click on central url nodes collapsing the
+        // chunks into the node and expanding the full UMAPped chunk set."
+        // The handler used to release the search scope whatever was clicked.
+        //
+        // One page of the working store, its right-click handler fired the way
+        // the pane fires it (the graph's own `onNodeRightClick` callback, not
+        // a method the check chose), and the claim read off the graph:
+        //   1. chunk nodes drawn -> right-click -> none drawn, the page node
+        //      stays, the scope was not released, and a placement of the
+        //      page's chunks (what a browse produces) does not redraw them;
+        //   2. right-click again -> every chunk the sidecar can place for the
+        //      page is drawn, at the position `place` gave it (the UMAP fit),
+        //      and nothing is drawn that the store does not hold.
+        // "Can place" is asked of the sidecar independently of the pane, so a
+        // pane that drew only the first unfold step (a handful) fails against
+        // a page_map of dozens. The planted arm is the old handler
+        // (`plantNoToggle`): the collapse half must fail.
+        const arm = (planted) => evaluate(`(async () => {
+          ${PREP}
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          const g = v.graph;
+          const base = app.plugins.plugins["domvec-bridge"].settings.sidecar.replace(/\\/+$/, "");
+          const poll = async (cond, ms) => { const t = performance.now(); while (performance.now() - t < ms) { if (cond()) return true; await sleep(250); } return cond(); };
+          // The handler the pane registered with the graph, fired as the graph
+          // fires it (no handler registered fires nothing, and the arm fails).
+          const click = (node) => { const h = g.onNodeRightClick(); if (typeof h === "function") h(node); };
+          const origScope = v.onScope, scopeCalls = [];
+          v.onScope = (u) => { scopeCalls.push(u); return origScope.call(v, u); };
+          try {
+            v.plantNoToggle = false;
+            const pages = g.graphData().nodes.filter((n) => n.level === "page" && !n.force && /^https?:/.test(n.url || "")
+              && n.members >= 3 && n.members <= 400).sort((x, y) => (x.members - y.members) || String(x.url).localeCompare(String(y.url)));
+            let page = null, cids = [];
+            for (const p of pages.slice(0, 6)) {
+              const c = await v.sidecar.pageCids(p.url).catch(() => []);
+              if (c.length >= 3) { page = p; cids = c; break; }
+            }
+            if (!page) return { planted: ${planted}, error: "no stored page with >= 3 chunks is drawn as a page node", pages: pages.length };
+            const url = page.url;
+            const chunks = () => g.graphData().nodes.filter((n) => n.url === url && n.level !== "page" && !n.force);
+            const pageNodes = () => g.graphData().nodes.filter((n) => n.id === "page:" + url && !n.force).length;
+            // The state under test: the page's chunks drawn, by the same path.
+            if (!chunks().length) { await v.togglePage(page); await poll(() => chunks().length > 0, 30000); }
+            await sleep(1500);
+            const opened = chunks().length;
+            const map = await (await fetch(base + "/page_map?url=" + encodeURIComponent(url))).json();
+            const mapChunks = Object.keys(map.chunks || {}).length;
+            // What the sidecar can place for this page, independent of the pane.
+            const oracle = await v.sidecar.place(cids);
+            const placeable = ((oracle && oracle.nodes) || []).filter((n) => n.level !== "page" && n.cid).map((n) => n.cid);
+            v.plantNoToggle = ${planted};
+            scopeCalls.length = 0;
+            click(g.graphData().nodes.find((n) => n.id === "page:" + url && !n.force) || page);
+            await poll(() => chunks().length === 0, 4000);
+            const afterCollapse = chunks().length;
+            const collapsed = { drawn: afterCollapse, page_node: pageNodes(), scope_calls: scopeCalls.length,
+                                in_set: v.collapsedByReader.has(url) };
+            // A placement of the page's chunks must not redraw the folded page.
+            let stays = null;
+            if (!${planted}) {
+              const got = await v.sidecar.place(cids.slice(0, 8));
+              if (got && got.nodes) v.absorb(got.nodes, got.edges);
+              await sleep(1500);
+              stays = chunks().length === 0;
+            }
+            scopeCalls.length = 0;
+            click(g.graphData().nodes.find((n) => n.id === "page:" + url && !n.force) || page);
+            let last = -1, steady = 0;
+            await poll(() => { const k = chunks().length; steady = (k === last && k > 0) ? steady + 1 : 0; last = k; return steady >= 8; }, 40000);
+            const drawn = chunks();
+            const ids = new Set(drawn.map((n) => n.id));
+            const have = new Set(cids);
+            const missing = placeable.filter((c) => !ids.has(c));
+            const phantom = [...ids].filter((i) => !have.has(i) && !String(i).startsWith("path:"));
+            return { planted: ${planted}, url, stored: cids.length, page_map_chunks: mapChunks, placeable: placeable.length,
+                     opened, collapsed, stays_collapsed: stays,
+                     expanded: { drawn: drawn.length, missing: missing.length, missing_sample: missing.slice(0, 3),
+                                 phantom: phantom.length, scope_calls: scopeCalls.length,
+                                 in_collapsed_set: v.collapsedByReader.has(url) },
+                     toggles: v.toggled.slice(-4) };
+          } finally {
+            v.onScope = origScope;
+            v.plantNoToggle = false;
+          }
+        })()`, { timeout: 180000 });
+        const clean = await arm(false);
+        const planted = await arm(true);
+        const foldsAndStays = (x) => !x.error && x.opened > 0 && x.collapsed.drawn === 0 && x.collapsed.page_node === 1
+          && x.collapsed.scope_calls === 0 && x.collapsed.in_set && x.stays_collapsed === true;
+        // The expansion is the whole stored set: nothing the sidecar can place
+        // is absent, nothing the store lacks is drawn, and at least the page's
+        // placeable chunks (not a first step's handful) are there.
+        const expandsAll = (x) => !x.error && x.placeable >= 3 && x.expanded.drawn >= x.placeable
+          && x.expanded.missing === 0 && x.expanded.phantom === 0 && !x.expanded.in_collapsed_set
+          && x.expanded.scope_calls === 0;
+        return {
+          pass: foldsAndStays(clean) && expandsAll(clean) && !foldsAndStays(planted),
+          evidence: { clean, planted },
         };
       },
     },
@@ -4306,6 +4474,190 @@ export function makeChecks(env) {
           evidence: { first: (first.hits || []).length,
                       second_page: (next.hits || []).length, new_in_second: fresh },
         };
+      },
+    },
+    {
+      id: "G-111",
+      asks: "a control in a chunk's panel acts on the LIVE page through its trie address: the cell navigates and scrolls to it, the action is performed in the page, the page's change comes back as the panel's new state -- and a refused control and a planted no-op change nothing",
+      async run() {
+        // 2026-10-04: "clicking a button or link on the chunk opens the
+        // browser to first navigate and scroll to the chunk and then take the
+        // action on the component in-silico that then performs the update
+        // action/event on the browser".
+        //
+        // The page is a fixture whose only motion is the motion this check
+        // causes (the null arm is read first, on the same page). The panel
+        // is the browser side's pinned card; its controls are driven the way
+        // a reader's events reach them -- dispatched in the card's own frame
+        // -- and the page is read back with a plain read, never written.
+        //
+        // Four arms, and each can fail on its own: the CLEAN click and fill
+        // must change the page and re-render the card; the REFUSED control
+        // ("Sign in", the never-press set) must change nothing and say so;
+        // the PLANTED no-op (`act-noop`) must change nothing; and the
+        // NAVIGATION arm presses from a card while the cell is elsewhere.
+        const health = await ask("/health");
+        if (!health.enact) {
+          return { pass: false, evidence: {
+            blocked: "the sidecar was not started with --enact: panel gestures are adjudicated by it, and this check cannot run without the flag",
+            enact: health.enact } };
+        }
+        const fixtures = await serveFixtures();
+        const page = fixtures.origin + "/panel_act.html";
+        try {
+          const got = await evaluate(`(async () => {
+            ${PREP}
+            const PAGE = ${JSON.stringify(page)};
+            const SIDE = ${JSON.stringify(SIDECAR)};
+            const TOKEN = ${JSON.stringify("word" + Date.now().toString(36))};
+            const out = { page: PAGE };
+            const read = (id) => b.webview.executeJavaScript(
+              "document.getElementById(" + JSON.stringify(id) + ").textContent");
+            const xpathOf = (id) => b.webview.executeJavaScript(
+              "(function(){var el=document.getElementById(" + JSON.stringify(id) + ");" +
+              "if(!el) return '';var parts=[];" +
+              "while(el && el.nodeType===1 && el.tagName){" +
+              "var tag=el.tagName.toLowerCase(),i=1,sib=el.previousElementSibling;" +
+              "while(sib){if(sib.tagName===el.tagName)i++;sib=sib.previousElementSibling;}" +
+              "parts.unshift(i>1?tag+'['+i+']':tag);el=el.parentElement;}" +
+              "return '/'+parts.join('/');})()");
+            const until = async (fn, ms) => {
+              const t = performance.now();
+              while (performance.now() - t < ms) { if (await fn()) return true; await sleep(250); }
+              return false;
+            };
+            let cid = "";
+            try {
+              b.plant.clear();
+              try { b.setLive(true); } catch (e) {}
+              out.landed = await land(PAGE, 30000);
+              const xBtn = await xpathOf("go");
+              out.xpath = xBtn;
+              // The page must be IN the trie: the sidecar only adjudicates addresses it holds.
+              let res = null;
+              for (let i = 0; i < 75 && !res; i++) {
+                const r = await fetch(SIDE + "/resolve?url=" + encodeURIComponent(PAGE) + "&xpath=" + encodeURIComponent(xBtn));
+                if (r.ok) { const j = await r.json(); if (j && j.cid && Array.isArray(j.lines)) res = j; }
+                if (!res) await sleep(800);
+              }
+              if (!res) return { ...out, error: "the page never reached the trie" };
+              out.chunk_lines = res.lines.length;
+              const pinned = await b.pinXpath(xBtn);
+              cid = pinned && pinned.cid;
+              out.pinned = cid || pinned;
+              if (!cid) return { ...out, error: "nothing pinned" };
+
+              const frameOf = () => {
+                const card = b.markdownWrap.querySelector('.domvec-pin-card[data-cid="' + cid + '"]');
+                const f = card && card.querySelector("iframe.domvec-snapshot");
+                return f && f.contentDocument && f.contentDocument.getElementById("domvec-root") ? f : null;
+              };
+              const doc = () => frameOf().contentDocument;
+              const readoutOf = () => { const f = frameOf(); const r = f && f.parentElement.querySelector(".domvec-act-readout"); return r ? r.textContent : ""; };
+              const control = (act, text) => [...doc().querySelectorAll('[data-domvec-act="' + act + '"]')]
+                .find((e) => !text || (e.textContent || "").trim() === text);
+              const click = (el) => el.dispatchEvent(new (el.ownerDocument.defaultView.MouseEvent)(
+                "click", { bubbles: true, cancelable: true }));
+
+              out.card = await until(async () => { const f = frameOf(); return !!f && !!f.contentDocument.querySelector("[data-domvec-address]"); }, 25000);
+              if (!out.card) return { ...out, error: "no card with addressed elements" };
+              const first = frameOf();
+
+              // ---- The card is LINKED to the trie: every addressed element names this page and resolves in it.
+              const tagged = [...doc().querySelectorAll("[data-domvec-address]")];
+              out.tagged = tagged.length;
+              out.acts = [...doc().querySelectorAll("[data-domvec-act]")].map((e) =>
+                e.tagName.toLowerCase() + ":" + e.getAttribute("data-domvec-act") + ":" + (e.textContent || "").trim().slice(0, 16));
+              out.addresses_on_this_page = tagged.every((e) => e.getAttribute("data-domvec-address").split("|")[0] === PAGE);
+              const xs = tagged.map((e) => e.getAttribute("data-domvec-xpath"));
+              const alive = await b.webview.executeJavaScript(
+                "(function(xs){var h=window.__domvecSensor;return h&&h.alive?h.alive(xs):null;})(" + JSON.stringify(xs) + ")");
+              out.addresses_alive = Array.isArray(alive) && alive.length > 0 && alive.every(Boolean);
+              out.has_press = !!control("press", "Pick me");
+              out.has_type = !!control("type");
+              out.has_gate = !!control("press", "Sign in");
+
+              // ---- NULL ARM: the page alone, no gesture.
+              out.before = { out: await read("out"), echo: await read("echo"), gated: await read("gated") };
+              await sleep(3000);
+              out.null_arm_changed = (await read("out")) !== out.before.out
+                || (await read("echo")) !== out.before.echo || (await read("gated")) !== out.before.gated;
+
+              // ---- CLEAN: click from the card.
+              click(control("press", "Pick me"));
+              out.clicked = await until(async () => (await read("out")) === "button pressed 1 times", 15000);
+              out.after_click = await read("out");
+              out.rerendered = await until(async () => { const f = frameOf(); return !!f && f.contentDocument.body.textContent.indexOf("button pressed 1 times") >= 0; }, 15000);
+              out.frame_replaced = frameOf() !== first;
+
+              // ---- CLEAN: fill from the card.
+              const inp = control("type");
+              if (inp) {
+                inp.value = TOKEN;
+                inp.dispatchEvent(new (inp.ownerDocument.defaultView.Event)("change", { bubbles: true }));
+              }
+              out.filled = await until(async () => (await read("echo")) === "echo: " + TOKEN, 15000);
+              out.panel_shows_value = await until(async () => {
+                const f = frameOf(); const i = f && f.contentDocument.querySelector('[data-domvec-act="type"]');
+                return !!i && i.getAttribute("value") === TOKEN; }, 15000);
+
+              // ---- REFUSED: the never-press control changes nothing, and says why.
+              if (control("press", "Sign in")) click(control("press", "Sign in"));
+              out.refusal_said = await until(async () => /^refused/.test(readoutOf()), 15000);
+              await sleep(1500);
+              out.gated_after = await read("gated");
+              out.refusal_text = readoutOf().slice(0, 100);
+
+              // ---- PLANTED: actOn does nothing; the page must not move.
+              b.plant.add("act-noop");
+              click(control("press", "Pick me"));
+              await sleep(3500);
+              out.planted_page = await read("out");
+              out.planted_said = /planted/.test(readoutOf());
+              b.plant.delete("act-noop");
+
+              // ---- Planted arm lifted: the same click works again.
+              click(control("press", "Pick me"));
+              out.second = await until(async () => (await read("out")) === "button pressed 2 times", 15000);
+
+              // ---- NAVIGATION: the cell is elsewhere; the card's click takes it to the page first.
+              b.go("about:blank");
+              await until(async () => { try { return b.webview.getURL() === "about:blank" && !b.webview.isLoading(); } catch (e) { return false; } }, 15000);
+              await sleep(1500);
+              out.card_after_leaving = !!frameOf();
+              if (frameOf() && control("press", "Pick me")) {
+                click(control("press", "Pick me"));
+                out.arrived = await until(async () => { try { return b.webview.getURL() === PAGE; } catch (e) { return false; } }, 40000);
+                out.nav_pressed = await until(async () => {
+                  try { return (await read("out")) === "button pressed 1 times"; } catch (e) { return false; }
+                }, 25000);
+              }
+            } finally {
+              b.plant.clear();
+              try { b.setLive(false); } catch (e) {}
+              try { if (cid) b.unpin(cid); } catch (e) {}
+              try { b.go("about:blank"); } catch (e) {}
+              await sleep(2000);
+            }
+            return out;
+          })()`, { timeout: 420000 });
+          got.purged = await tidyFixtures(fixtures.origin);
+          if (got.error) return { pass: false, evidence: got };
+          const linked = got.tagged > 0 && got.addresses_on_this_page === true && got.addresses_alive === true
+            && got.has_press === true && got.has_type === true && got.has_gate === true;
+          const clean = got.null_arm_changed === false && got.clicked === true && got.rerendered === true
+            && got.filled === true && got.panel_shows_value === true && got.second === true;
+          const refused = got.refusal_said === true && got.gated_after === "still signed out";
+          const planted = got.planted_page === "button pressed 1 times" && got.planted_said === true;
+          const navigated = got.card_after_leaving === true && got.arrived === true && got.nav_pressed === true;
+          return {
+            pass: linked && clean && refused && planted && navigated,
+            evidence: { ...got, arms: { linked, clean, refused, planted, navigated },
+                        bar: "every addressed element names this page and resolves in it; a click and a fill from the card change the page and the card re-renders from it; the never-press control is refused with the page unchanged; the planted no-op leaves the page unchanged; a click with the cell elsewhere navigates first" },
+          };
+        } finally {
+          await fixtures.close();
+        }
       },
     },
     {

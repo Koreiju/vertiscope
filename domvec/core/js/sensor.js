@@ -2751,8 +2751,12 @@
   // One tick. The vocabulary is the subset of the W3C actions grammar a
   // reader can express from a terminal.
   function tick(t, out) {
-    var el = t.path ? resolvePath(t.path) : null;
-    if (t.path && !el) { out.failed.push([t.kind, 'unresolved']); return; }
+    // A target is a `path` (the Selenium host's spelling) or an `xpath` (the
+    // trie's own, which the browser cell holds: `#shadow-root`, `text()[n]` and
+    // re-rooted `*[@id=..]` steps included). Same refusal, same dispatcher.
+    var el = t.path ? resolvePath(t.path)
+           : (t.xpath ? resolveXPath(String(t.xpath)) : null);
+    if ((t.path || t.xpath) && !el) { out.failed.push([t.kind, 'unresolved']); return; }
     if (el && el.nodeType === 3) el = el.parentNode;
     if (el && refused(el)) { out.failed.push([t.kind, 'refused']); return; }
     try {
@@ -3107,6 +3111,10 @@
     flush: flush,
     step: step,
     perform: perform,
+    // `perform` accepts `{xpath}` targets. A handle booted by an earlier
+    // build lacks this, and the host says "reload the page" rather than
+    // reporting every target unresolved.
+    xpathTicks: true,
     styles: styles,
     boxes: boxes,
     at: at,

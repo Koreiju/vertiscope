@@ -152,6 +152,25 @@ export interface EnactResult {
   refused?: boolean;
 }
 
+/**
+ * The sidecar's adjudication of a panel gesture (`/enact`, `mode: "plan"`):
+ * what the browser cell is allowed to touch, taken from the TRIE's stored
+ * address and not from the caller -- or the refusal.
+ */
+export interface EnactPlan {
+  ok?: boolean;
+  /** The in-page tick: click, type or choose. */
+  kind?: string;
+  action?: string;
+  address?: string;
+  url?: string;
+  xpath?: string;
+  label?: string;
+  error?: string;
+  refused?: boolean;
+  detail?: string;
+}
+
 export interface SearchResult {
   query: string;
   hits: SearchHit[];
@@ -227,6 +246,30 @@ export interface ChunkPreview {
 }
 
 /** What `POST /capture` says the browser cell's scan produced (`G-47`). */
+/**
+ * One diff of the patricia trie's rendered chunks, keyed on the cid -- the
+ * identity every consumer shares (store, projector, chunk map, 3D nodes,
+ * pins). The backend computes it once; the browser's chunk map, its pins and
+ * every graph view apply the SAME record, so none of them infers retirement.
+ */
+export interface CentralDiff {
+  seq: number;
+  kind: "capture" | "settle";
+  url: string;
+  passno: number | null;
+  /** In this render, not in the session's previous one nor the store's. */
+  added: string[];
+  dirty: string[];
+  /** Gone from the render: the store dropped them, views must too. */
+  retired: string[];
+  /** retired cid -> added cid with identical markdown (a shift, not a loss). */
+  renamed: Record<string, string>;
+  /** Rendered now and already stored before this visit: drawn, not spawned. */
+  known?: string[];
+  chunks: number;
+  at: number;
+}
+
 export interface CaptureResult {
   url?: string;
   /** The sidecar's own per-phase timings for this capture, ms, its
@@ -263,6 +306,9 @@ export interface CaptureResult {
   place_error?: string;
   changed?: number;
   wire_bytes?: number;
+  /** The central diff (`_page_diff` / `_record_diff` in the sidecar): one
+   *  record per capture and per settle, applied unchanged by every view. */
+  diff?: CentralDiff | null;
   settled?: boolean;
   ms?: number;
   /** Set instead of the rest when the capture did not land. A capture that
