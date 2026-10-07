@@ -210,9 +210,17 @@ export function renderSnapshot(host: HTMLElement, snap: Snapshot,
       const sig = `${rec.action}|${rec.key}|${rec.value ?? ""}`;
       if (sig === lastSent.sig && Date.now() - lastSent.at < 400) return true;
       lastSent = { sig, at: Date.now() };
+      // Only the LATEST gesture on this chunk may write the readout: a fill's
+      // act resolves after its re-snapshot (up to 1.5 s), and its late
+      // "type Your word" overwrote the refusal of a press made meanwhile
+      // (G-111's refused arm, 2026-10-07).
+      const key = opts.cid || "";
+      const seq = (ACT_SEQ.get(key) || 0) + 1;
+      ACT_SEQ.set(key, seq);
+      const latest = () => ACT_SEQ.get(key) === seq;
       note(`${rec.action}…`);
-      opts.onAct(rec).then((r) => note(describeResult(r)),
-                           (err) => note(`error: ${String(err).slice(0, 80)}`));
+      opts.onAct(rec).then((r) => { if (latest()) note(describeResult(r)); },
+                           (err) => { if (latest()) note(`error: ${String(err).slice(0, 80)}`); });
       return true;
     };
     doc.addEventListener("click", (e) => {
@@ -254,3 +262,5 @@ export function renderSnapshot(host: HTMLElement, snap: Snapshot,
 
 /** What the last gesture on each chunk's panel said, kept across re-draws. */
 const LAST_ACT = new Map<string, string>();
+/** The newest gesture's number on each chunk's panel. */
+const ACT_SEQ = new Map<string, number>();

@@ -80,6 +80,19 @@ export function snapshotScript(xpaths: string[],
     var held = tagged.get(tn);
     if (!held || (ad[xk][1] && !held[1])) tagged.set(tn, [ad[xk][0], ad[xk][1], xk]);
   }
+  // A LABEL the trie holds names the control it labels: the store draws
+  // "Your word [ ]" as one line keyed at the <label>, so the empty input had
+  // no address of its own and its card stayed inert (G-111, 2026-10-07: the
+  // fill arm found no field to type into). The label's address goes to its
+  // control (label.control, the browser's own association), as a control.
+  tagged.forEach(function (v, el) {
+    if (!el || el.tagName !== "LABEL") return;
+    var c = null;
+    try { c = el.control || null; } catch (e) { c = null; }
+    if (!c) { var f = el.getAttribute && el.getAttribute("for"); if (f) c = document.getElementById(f); }
+    if (!c) c = el.querySelector ? el.querySelector("input,textarea,select") : null;
+    if (c && !tagged.has(c)) tagged.set(c, [v[0], 1, v[2]]);
+  });
   // What a click or a change on this element should DO to the page, decided
   // by what the element is. "" is inert: no address, a field that must not be
   // typed into from outside (password, file, pickers), or disabled by the page.

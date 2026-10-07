@@ -2813,6 +2813,14 @@
            : (t.xpath ? resolveXPath(String(t.xpath)) : null);
     if ((t.path || t.xpath) && !el) { out.failed.push([t.kind, 'unresolved']); return; }
     if (el && el.nodeType === 3) el = el.parentNode;
+    // A <label> addressed for a field acts through the control it labels: the
+    // store keys "Your word [ ]" at the label, and typing into the label did
+    // nothing (G-111, 2026-10-07).
+    if (el && el.tagName === 'LABEL' && (t.kind === 'type' || t.kind === 'check' || t.kind === 'choose')) {
+      var lc = null;
+      try { lc = el.control || null; } catch (e) { lc = null; }
+      if (lc) el = lc;
+    }
     if (el && refused(el)) { out.failed.push([t.kind, 'refused']); return; }
     try {
       switch (t.kind) {
