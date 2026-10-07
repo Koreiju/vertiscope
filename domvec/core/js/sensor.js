@@ -2947,16 +2947,36 @@
       s = chunkRoots[i];
       if (!s || !s.node || !(s.id in want)) continue;
       best = null; area = 0; n = s.node; k = 0;
-      while (n && k++ < 400) {
-        if (n.nodeType === 1) {
-          imgs = n.tagName === 'IMG' ? [n] : (n.querySelectorAll ? n.querySelectorAll('img') : []);
-          for (j = 0; j < imgs.length && j < 50; j++) {
-            src = imgs[j].currentSrc || imgs[j].src || '';
-            if (!/^https?:/.test(src)) continue;
-            r = imgs[j].getBoundingClientRect();
-            if (r.width * r.height > area) { area = r.width * r.height; best = [src, Math.round(r.width), Math.round(r.height)]; }
-          }
+      // The chunk's pictures through OPEN SHADOW ROOTS too, and a CSS
+      // background image counts as a picture (2026-10-07: `querySelectorAll`
+      // stops at a shadow host, so archive.org's chunk nodes could show none
+      // of the pictures inside its components; johnwick's hero images are CSS
+      // backgrounds). At most 400 elements read per chunk; a peripheral read.
+      var seen = 0;
+      var consider = function (el) {
+        var u = '', rr = null;
+        if (el.tagName === 'IMG') u = el.currentSrc || el.src || '';
+        else {
+          var bi = '';
+          try { bi = getComputedStyle(el).backgroundImage || ''; } catch (e) { bi = ''; }
+          var m = bi.indexOf('url(') >= 0 ? /url\(["']?([^"')]+)/.exec(bi) : null;
+          if (m) u = m[1];
         }
+        if (!u || !/^https?:/.test(u)) return;
+        rr = el.getBoundingClientRect();
+        if (rr.width * rr.height > area) { area = rr.width * rr.height; best = [u, Math.round(rr.width), Math.round(rr.height)]; }
+      };
+      var walkPics = function (root) {
+        var it = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT), el;
+        if (root.nodeType === 1 && seen++ < 400) consider(root);
+        while ((el = it.nextNode()) && seen++ < 400) {
+          consider(el);
+          if (el.shadowRoot) walkPics(el.shadowRoot);
+        }
+        if (root.nodeType === 1 && root.shadowRoot) walkPics(root.shadowRoot);
+      };
+      while (n && k++ < 400 && seen < 400) {
+        if (n.nodeType === 1) walkPics(n);
         if (n === s.tail || !s.tail) break;
         n = n.nextSibling;
       }
