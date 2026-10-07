@@ -36,6 +36,7 @@ import { uiState } from "./uistate";
 import { profiler } from "./profile";
 import { StressRun } from "./stress";
 import { SessionSwitch } from "./session";
+import { treeVerdict } from "./treeguard";
 
 export interface TraceCall {
   /** Milliseconds since the recording started. */
@@ -579,6 +580,13 @@ export function installHarness(app: App, sidecarBase: () => string) {
     },
     /** An off-screen camera framed on one page (default: the one browsed),
      *  rendered to a PNG data URL -- the page at the scale its glitches live. */
+    // Is what the 3D view draws a tree, over EVERY drawn edge? (2026-10-04)
+    tree: () => {
+      const g = leaf("domvec-graph-view")?.view?.graph;
+      if (!g) return { error: "no graph view" };
+      const d = g.graphData();
+      return treeVerdict(d.nodes, d.links);
+    },
     inspect: (url?: string, size?: number) => leaf("domvec-graph-view")?.view?.inspect(url || "", size || 480) ?? { error: "no graph view" },
     /** Milliseconds since the reader last used this app (rule g's gate). */
     reader: { idleMs: () => Date.now() - ((window as any).__domvecReaderAt || 0) },
