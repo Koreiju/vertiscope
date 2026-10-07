@@ -2454,7 +2454,7 @@ export function makeChecks(env) {
         // then leaves the page and reads whether the panel closed.
         const fixtures = await serveFixtures();
         const page = fixtures.origin + "/shadow_catalogue.html";
-        const arm = (planted) => evaluate(`(async () => {
+        const arm = (planted, given) => evaluate(`(async () => {
           ${PREP}
           const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
           const PAGE = ${JSON.stringify(page)};
@@ -2475,8 +2475,15 @@ export function makeChecks(env) {
             if (cids.length < 3) return { ...out, error: "the page never reached the store" };
             // A point over a chunk the browser can resolve to a stored cid.
             const pts = JSON.parse(await b.webview.executeJavaScript("(function(){var h=window.__domvecSensor;var vw=innerWidth,vh=innerHeight,a=[];for(var y=30;y<vh;y+=40)for(var x=30;x<vw;x+=60){var st=document.elementsFromPoint(x,y),bb=null,ba=Infinity;for(var i=0;i<st.length&&i<12;i++){var c=null;try{c=h.at(st[i]);}catch(e){}if(c&&c.box){var ar=c.box[2]*c.box[3];if(ar>0&&ar<ba){ba=ar;bb=c;}}}if(bb)a.push({x:x,y:y,id:bb.id,frac:ba/(vw*vh)});}return JSON.stringify(a);})()"));
-            let pick = null;
-            for (const p of pts) { const st = b.storedCidFor("f:" + b.session + "#" + p.id, b.session); if (st) { pick = { ...p, stored: st }; break; } }
+            // The planted arm hovers the CLEAN arm's point: the same chunk, so a
+            // difference is the plant's and not the pick's.
+            let pick = ${JSON.stringify(given || null)};
+            // The browser's chunk map loads a moment after the page does:
+            // resolution is retried for up to 20 s, not judged on first sight.
+            for (let tries = 0; !pick && tries < 40; tries++) {
+              for (const p of pts) { const st = b.storedCidFor("f:" + b.session + "#" + p.id, b.session); if (st) { pick = { ...p, stored: st }; break; } }
+              if (!pick) await sleep(500);
+            }
             if (!pick) return { ...out, error: "no hovered chunk resolves to a stored chunk", points: pts.length };
             out.pick = pick;
             v.plantNoFocus = ${planted};
@@ -2492,12 +2499,29 @@ export function makeChecks(env) {
             out.flown = v.focusStats.flown - f0.flown;
             out.flew_to = v.focusStats.last;
             const e = v.billboards.get(pick.stored);
+            // Text where the reader sees it: the body, its shadow roots, and the
+            // page form's frame (innerText does not reach into an iframe).
+            const textOf = (el) => {
+              if (!el) return 0;
+              let n = (el.innerText || "").trim().length;
+              el.querySelectorAll("*").forEach((x) => {
+                if (x.shadowRoot) n += (x.shadowRoot.textContent || "").trim().length;
+                if (x.tagName === "IFRAME") { try { n += ((x.contentDocument && x.contentDocument.body && x.contentDocument.body.innerText) || "").trim().length; } catch (z) {} }
+              });
+              return n;
+            };
             out.panel = e ? { from_hover: !!e.fromHover, form: e.form, first_paint_ms: e.firstPaintMs ?? null,
-                              text: ((e.el.querySelector(".domvec-bb-body") || {}).innerText || "").trim().length } : null;
+                              text: textOf(e.el.querySelector(".domvec-bb-body")) } : null;
             out.log = v.billboardLog.slice(n0);
-            wc.sendInputEvent({ type: "mouseLeave", x: -5, y: -5 });
-            await sleep(1200);
-            out.closed_after_leave = !v.billboards.has(pick.stored);
+            // The pointer leaves the page the way a mouse does: moves past its
+            // edge, then the window's leave.
+            wc.sendInputEvent({ type: "mouseMove", x: -8, y: -8 });
+            wc.sendInputEvent({ type: "mouseLeave", x: -8, y: -8 });
+            const tLeave = performance.now();
+            let closed = false;
+            while (performance.now() - tLeave < 1500) { if (!v.billboards.has(pick.stored)) { closed = true; break; } await sleep(25); }
+            out.closed_after_leave = closed;
+            out.close_ms = closed ? Math.round(performance.now() - tLeave) : null;
             return out;
           } finally {
             v.plantNoFocus = false;
@@ -2505,7 +2529,7 @@ export function makeChecks(env) {
           }
         })()`, { timeout: 180000 });
         const clean = await arm(false);
-        const planted = await arm(true);
+        const planted = await arm(true, clean && clean.pick ? clean.pick : null);
         const works = (x) => !x.error && x.flown >= 1 && x.flew_to === x.pick.stored && !!x.panel
           && x.panel.from_hover && x.panel.text > 0 && (x.panel.first_paint_ms ?? 1e9) <= 500
           && x.outline_frac !== null && x.outline_frac < 1 && x.closed_after_leave === true;

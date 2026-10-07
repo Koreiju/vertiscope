@@ -117,6 +117,8 @@ export class PipelineBox {
   hoverSources = { store: 0, page: 0 };
   /** Ignore the store map: the page's own chunking only (diagnostic). */
   pageOnly = false;
+  /** Planted: the poll keeps answering after pushes start (the fight). */
+  plantPollFights = false;
   /** Planted by D-35's check: the old store-only hover, no in-page answer. */
   plantStoreOnly = false;
 
@@ -230,6 +232,13 @@ export class PipelineBox {
         "var h=window[" + JSON.stringify(SENSOR_HANDLE) + "];" +
         "return {chain:out,at:(h&&h.at)?h.at(leaf):null};})()"), 400);
       const chain = got ? got.chain : null;
+      // Once the sensor PUSHES hovers, they are the hover: the poll neither
+      // clears it nor names a chunk of its own. Its empty reads cleared the
+      // hover (closing the panel, stopping the camera's follow) and its store
+      // lookup could name a different chunk than the sensor's -- the camera
+      // retargeted 4 times on one hover and the panel flickered (2026-10-07).
+      // The stored chunk is resolved from the pushed one (`storedCidFor`).
+      if (this.pushedAt && !this.plantPollFights) return;
       if (!chain || !chain.length) { this.clearHover(); return; }
       const url = this.url();
       // In memory: the same nearest-ancestor walk `/resolve` does in the store.

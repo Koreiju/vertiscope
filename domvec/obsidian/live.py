@@ -38,9 +38,12 @@ class Live:
     """The running system, as two endpoints."""
 
     def __init__(self, sidecar: str = "http://127.0.0.1:8788",
-                 cdp: str = "http://127.0.0.1:9222", timeout: float = 120.0):
+                 cdp: str = "", timeout: float = 120.0):
         self.sidecar = sidecar.rstrip("/")
-        self.cdp = cdp.rstrip("/")
+        # `DOMVEC_CDP` names the app's debug port when 9222 is taken (a Chrome
+        # holding 9222 answered for the app on 2026-10-07).
+        import os as _os
+        self.cdp = (cdp or _os.environ.get("DOMVEC_CDP") or "http://127.0.0.1:9222").rstrip("/")
         self.timeout = timeout
         self._ws = None
         self._next_id = 0
