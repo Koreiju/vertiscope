@@ -537,8 +537,14 @@ class GraphStore:
             # `ContentAddress.key()` spells -- so comparing it covers them
             # without five more comparisons. `value` stays governed by the
             # content hash, which is what that hash is for.
+            # Primary-key lookups, not a scan (2026-10-07): `list_contains`
+            # read the whole Address table, ~500k rows in the working store,
+            # for every capture -- the pre-query was 0.4-1.2 s. Measured on a
+            # 300k-address scratch store, 800 aids: scan 631 ms, UNWIND over
+            # the key 70 ms, identical rows. (The comment at
+            # `_PLACEMENT_SCAN_AT` predicted the crossover moves with size.)
             held = {aid: (ch, akey) for aid, ch, akey in self._rows(
-                "MATCH (a:Address) WHERE list_contains($aids, a.aid) "
+                "UNWIND $aids AS x MATCH (a:Address {aid: x}) "
                 "RETURN a.aid, a.content_hash, a.akey",
                 {"aids": list(wanted)})}
             counts["addresses_incoming"] = len(wanted)
