@@ -2164,6 +2164,44 @@ node; (10) UMAP over all chunks with per-URL refit updates, persisted to the
 UI, as a switch against force-directed; (11) the patricia trie drawn clearly
 and guaranteed a tree.*
 
+**2026-10-06** -- images, and a searchable history:
+
+> Numerous nodes are missing at least one of a full set of images that are
+> not currently being detected. Please review our current set of detections
+> in our full set of docs. I would almost recommend a simple graph RAG MCP on
+> the full git diff that auto-updates recursive chunks on things like logs,
+> docstrings, and the like. That would allow you to more formally search over
+> the fully available code-space of possible previous information and
+> findings that are relevant to the current issues faced or design questions
+> to introspect on.
+
+*Read as: (1) nodes lack images the page has -- a chunk or page whose full
+set of pictures is not all detected; review every image detection the docs
+record, against what pages actually hold; (2) a graph-RAG MCP over the whole
+git history (diffs, commit messages, logs, docstrings) whose chunks update
+on their own as the history grows, so earlier findings and design decisions
+can be searched when a new issue or design question comes up.*
+
+Then, the same evening:
+
+> Also, it might be just the way the images in chunks are, but many images
+> for nodes seem duplicative. If dedup is truly working completely and it's
+> not a chunk uniqueness issue but instead an image icon thing, then okay.
+
+> Also, please don't diverge to just the diff graph RAG mcp from the current
+> task. I would almost recommend a minimal adpater plugin design that does
+> vectorization efficiently but queries still directly over the git logs.
+> Recommended good references:
+>
+> https://github.com/jjaakkola/git-diff-mcp-server
+> https://github.com/cyanheads/git-mcp-server
+
+*Read as: (3) many nodes show what look like the same images -- decide
+whether that is a dedup or chunk-uniqueness defect or only shared icons;
+(4) the history tool is secondary to the current task, and MINIMAL: an
+adapter that queries git's own logs directly, with efficient vectorization
+beside it rather than a second store of the whole history.*
+
 ---
 
 
