@@ -290,6 +290,10 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
           this.eachGraph((view) => view.collapsePage(url));
         browser.onCovers = (url, covers, settled) =>
           this.eachGraph((view) => view.coverForce(url, covers, settled));
+        // The central diff (retired / renamed / known), once per capture and
+        // per settle: every graph view applies this one record.
+        browser.onDiff = (diff) =>
+          this.eachGraph((view) => view.applyDiff(diff));
         browser.onDirty = (cids: string[]) =>
           this.eachGraph((view) => view.refreshBillboards(cids));
         browser.onPin = (cid: string) =>

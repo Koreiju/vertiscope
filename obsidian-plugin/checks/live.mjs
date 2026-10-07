@@ -1655,6 +1655,69 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-109",
+      asks: "every view applies the backend's one central diff: a chunk the store retired (a shift moved its address) is no longer drawn in the 3D view, and a renamed chunk's node is carried over rather than left behind",
+      async run() {
+        // 2026-10-04: after browsing duckduckgo.com then a search, 24 of 65
+        // stored-chunk nodes had no chunk in the store (retired at settle,
+        // never removed from the view). The page below PREPENDS each batch
+        // and re-homes the feed in a container of the other tag every round
+        // (`shift=1`), so every chunk already drawn changes its positional
+        // cid while its content stays: the backend names those as `renamed`
+        // (a pure prepend does not -- measured on the pipeline offline: 0
+        // retired, 0 renamed), and the view must drop the old node and
+        // carry its place to the new one. Clean: after the feed finishes and the
+        // queue drains no drawn stored-chunk node lacks a chunk in the store
+        // AND renames actually happened (non-vacuity of the clean arm).
+        // Planted (`plantNoDiff`): the same page, the view ignores the diff --
+        // it must read stale nodes, or the metric measures nothing.
+        const fixtures = await serveFixtures();
+        const arm = (planted) => evaluate(`(async () => {
+          ${PREP}
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          b.plant.clear();
+          v.plantNoDiff = ${planted};
+          try {
+            const url = ${JSON.stringify(fixtures.origin)} + "/busy_feed.html?prepend=1&shift=1&words=120&every=4000&rounds=8&g109=" + (${planted} ? "p" : "c") + Date.now();
+            const before = { ...v.diffStats };
+            b.go(url);
+            await land(url, 25000);
+            // 2.5 s to the first batch, 8 x 4 s (slow enough for each
+            // batch's chunks to be embedded and drawn before the next shift
+            // retires them), then the store and the projector catch up.
+            await sleep(2500 + 8 * 4000 + 1500);
+            const t0 = Date.now();
+            while (Date.now() - t0 < 40000 && (b.capturing || (b.captureQueue || []).length)) await sleep(250);
+            await sleep(4000);
+            const drawn = v.graph.graphData().nodes.filter((n) => !n.force && n.level !== "page" && n.url === url).length;
+            const stale = await v.staleStored();
+            const d = v.diffStats;
+            return { planted: ${planted}, url, drawn_chunks: drawn, stale, detail: v.staleDetail,
+                     diff: { applied: d.applied - before.applied, retired_removed: d.retired_removed - before.retired_removed,
+                             renamed: d.renamed - before.renamed, carried: d.carried - before.carried, known: d.known - before.known },
+                     browser: { ...b.diffsApplied } };
+          } finally {
+            v.plantNoDiff = false;
+            b.plant.clear();
+          }
+        })()`, { timeout: 150000 });
+        try {
+          const clean = await arm(false);
+          const planted = await arm(true);
+          const cleanOk = !clean.error && clean.drawn_chunks > 0 && clean.stale === 0
+            && clean.diff.applied > 0 && clean.diff.renamed > 0;
+          const plantedBites = !planted.error && planted.stale > 0;
+          return {
+            pass: cleanOk && plantedBites,
+            evidence: { clean, planted,
+                        bar: "clean: >= 1 drawn chunk, 0 drawn stored chunks missing from the store, diffs applied and renames seen; planted (plantNoDiff): stale > 0" },
+          };
+        } finally {
+          await fixtures.close();
+        }
+      },
+    },
+    {
       id: "D-37",
       asks: "new diffs are outlined where the reader looks: a chunk that loaded off screen is outlined when the reader scrolls to it, until it is saved and has been seen",
       async run() {
@@ -2266,6 +2329,111 @@ export function makeChecks(env) {
           pass: streamed(clean) && still(clean) && smooth(clean)
             && !(still(noCalm) && smooth(noCalm)) && !smooth(noGovernor) && !smooth(teleport),
           evidence: { clean, no_calm: noCalm, no_governor: noGovernor, teleport },
+        };
+      },
+    },
+    {
+      id: "G-110",
+      asks: "right-click on a page (url) node folds its chunks into the node, and right-click again draws the page's whole stored chunk set at its UMAP positions; a folded page stays folded under placements",
+      async run() {
+        // 2026-10-04: "no right-click on central url nodes collapsing the
+        // chunks into the node and expanding the full UMAPped chunk set."
+        // The handler used to release the search scope whatever was clicked.
+        //
+        // One page of the working store, its right-click handler fired the way
+        // the pane fires it (the graph's own `onNodeRightClick` callback, not
+        // a method the check chose), and the claim read off the graph:
+        //   1. chunk nodes drawn -> right-click -> none drawn, the page node
+        //      stays, the scope was not released, and a placement of the
+        //      page's chunks (what a browse produces) does not redraw them;
+        //   2. right-click again -> every chunk the sidecar can place for the
+        //      page is drawn, at the position `place` gave it (the UMAP fit),
+        //      and nothing is drawn that the store does not hold.
+        // "Can place" is asked of the sidecar independently of the pane, so a
+        // pane that drew only the first unfold step (a handful) fails against
+        // a page_map of dozens. The planted arm is the old handler
+        // (`plantNoToggle`): the collapse half must fail.
+        const arm = (planted) => evaluate(`(async () => {
+          ${PREP}
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          const g = v.graph;
+          const base = app.plugins.plugins["domvec-bridge"].settings.sidecar.replace(/\/+$/, "");
+          const poll = async (cond, ms) => { const t = performance.now(); while (performance.now() - t < ms) { if (cond()) return true; await sleep(250); } return cond(); };
+          // The handler the pane registered with the graph, fired as the graph
+          // fires it (no handler registered fires nothing, and the arm fails).
+          const click = (node) => { const h = g.onNodeRightClick(); if (typeof h === "function") h(node); };
+          const origScope = v.onScope, scopeCalls = [];
+          v.onScope = (u) => { scopeCalls.push(u); return origScope.call(v, u); };
+          try {
+            v.plantNoToggle = false;
+            const pages = g.graphData().nodes.filter((n) => n.level === "page" && !n.force && /^https?:/.test(n.url || "")
+              && n.members >= 3 && n.members <= 400).sort((x, y) => (x.members - y.members) || String(x.url).localeCompare(String(y.url)));
+            let page = null, cids = [];
+            for (const p of pages.slice(0, 6)) {
+              const c = await v.sidecar.pageCids(p.url).catch(() => []);
+              if (c.length >= 3) { page = p; cids = c; break; }
+            }
+            if (!page) return { planted: ${planted}, error: "no stored page with >= 3 chunks is drawn as a page node", pages: pages.length };
+            const url = page.url;
+            const chunks = () => g.graphData().nodes.filter((n) => n.url === url && n.level !== "page" && !n.force);
+            const pageNodes = () => g.graphData().nodes.filter((n) => n.id === "page:" + url && !n.force).length;
+            // The state under test: the page's chunks drawn, by the same path.
+            if (!chunks().length) { await v.togglePage(page); await poll(() => chunks().length > 0, 30000); }
+            await sleep(1500);
+            const opened = chunks().length;
+            const map = await (await fetch(base + "/page_map?url=" + encodeURIComponent(url))).json();
+            const mapChunks = Object.keys(map.chunks || {}).length;
+            // What the sidecar can place for this page, independent of the pane.
+            const oracle = await v.sidecar.place(cids);
+            const placeable = ((oracle && oracle.nodes) || []).filter((n) => n.level !== "page" && n.cid).map((n) => n.cid);
+            v.plantNoToggle = ${planted};
+            scopeCalls.length = 0;
+            click(g.graphData().nodes.find((n) => n.id === "page:" + url && !n.force) || page);
+            await poll(() => chunks().length === 0, 4000);
+            const afterCollapse = chunks().length;
+            const collapsed = { drawn: afterCollapse, page_node: pageNodes(), scope_calls: scopeCalls.length,
+                                in_set: v.collapsedByReader.has(url) };
+            // A placement of the page's chunks must not redraw the folded page.
+            let stays = null;
+            if (!${planted}) {
+              const got = await v.sidecar.place(cids.slice(0, 8));
+              if (got && got.nodes) v.absorb(got.nodes, got.edges);
+              await sleep(1500);
+              stays = chunks().length === 0;
+            }
+            scopeCalls.length = 0;
+            click(g.graphData().nodes.find((n) => n.id === "page:" + url && !n.force) || page);
+            let last = -1, steady = 0;
+            await poll(() => { const k = chunks().length; steady = (k === last && k > 0) ? steady + 1 : 0; last = k; return steady >= 8; }, 40000);
+            const drawn = chunks();
+            const ids = new Set(drawn.map((n) => n.id));
+            const have = new Set(cids);
+            const missing = placeable.filter((c) => !ids.has(c));
+            const phantom = [...ids].filter((i) => !have.has(i) && !String(i).startsWith("path:"));
+            return { planted: ${planted}, url, stored: cids.length, page_map_chunks: mapChunks, placeable: placeable.length,
+                     opened, collapsed, stays_collapsed: stays,
+                     expanded: { drawn: drawn.length, missing: missing.length, missing_sample: missing.slice(0, 3),
+                                 phantom: phantom.length, scope_calls: scopeCalls.length,
+                                 in_collapsed_set: v.collapsedByReader.has(url) },
+                     toggles: v.toggled.slice(-4) };
+          } finally {
+            v.onScope = origScope;
+            v.plantNoToggle = false;
+          }
+        })()`, { timeout: 180000 });
+        const clean = await arm(false);
+        const planted = await arm(true);
+        const foldsAndStays = (x) => !x.error && x.opened > 0 && x.collapsed.drawn === 0 && x.collapsed.page_node === 1
+          && x.collapsed.scope_calls === 0 && x.collapsed.in_set && x.stays_collapsed === true;
+        // The expansion is the whole stored set: nothing the sidecar can place
+        // is absent, nothing the store lacks is drawn, and at least the page's
+        // placeable chunks (not a first step's handful) are there.
+        const expandsAll = (x) => !x.error && x.placeable >= 3 && x.expanded.drawn >= x.placeable
+          && x.expanded.missing === 0 && x.expanded.phantom === 0 && !x.expanded.in_collapsed_set
+          && x.expanded.scope_calls === 0;
+        return {
+          pass: foldsAndStays(clean) && expandsAll(clean) && !foldsAndStays(planted),
+          evidence: { clean, planted },
         };
       },
     },

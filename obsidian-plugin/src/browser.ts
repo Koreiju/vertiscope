@@ -36,7 +36,7 @@ import { Snapshot, dropSnapshot, getSnapshot, putSnapshot, renderSnapshot, snaps
 
 import { LayoutNode } from "./graph";
 import { Sidecar } from "./sidecar";
-import { EnactResult, SearchHit } from "./types";
+import { CentralDiff, EnactResult, SearchHit } from "./types";
 import { ActRecord, ActResult, PanelAction, addressTable, chainFor, parseAddressKey } from "./panelact";
 
 export const BROWSER_VIEW = "domvec-browser-view";
@@ -545,7 +545,8 @@ export class BrowserView extends ItemView {
     if (this.session) {
       const leaving = this.session;
       this.session = "";
-      void this.sidecar.capture(leaving, { settle: true });
+      void this.sidecar.capture(leaving, { settle: true })
+        .then((r) => this.noteDiff(r && !r.error ? r.diff : null));
     }
     // The element goes with the DOM; the browsing SESSION is deliberately
     // left alone, since it is shared and persistent by design.
@@ -702,6 +703,47 @@ export class BrowserView extends ItemView {
     }
     return out;
   }
+  /** Told by the plugin: the central diff of a capture or a settle -- every
+   *  view applies this one record (added / retired / renamed / known). */
+  onDiff: (diff: CentralDiff) => void = () => {};
+  /** Diffs this cell has applied, for the harness. */
+  diffsApplied = { seen: 0, retired: 0, renamed: 0, pins_rekeyed: 0 };
+
+  /**
+   * Apply one central diff (`_page_diff`) to what THIS cell holds, then hand
+   * the same record to every other view. The chunk map drops retired cids and
+   * re-keys renamed ones; a pin keyed by a renamed cid follows it (a shift
+   * moved the chunk's address, not its content), so its outline, its markdown
+   * card and its billboard stay on the same content. A pin on a chunk that
+   * was retired WITHOUT a successor is left as the reader set it: the reader
+   * lets it go, the diff does not take a pin away.
+   */
+  private noteDiff(diff: CentralDiff | null | undefined): void {
+    if (!diff || typeof diff !== "object" || !Array.isArray(diff.retired)) return;
+    this.diffsApplied.seen++;
+    const map = this.pipebox?.map;
+    if (map && map.url === diff.url) {
+      const got = map.applyDiff(diff);
+      this.diffsApplied.retired += got.dropped;
+      this.diffsApplied.renamed += got.renamed;
+    }
+    const renamed = diff.renamed || {};
+    const moved = [...this.pinned.keys()].filter((c) => renamed[c] && !this.pinned.has(renamed[c]));
+    if (moved.length) {
+      this.pinned = new Map([...this.pinned].map(([cid, rec]): [string, PinRecord] =>
+        renamed[cid] && moved.includes(cid)
+          ? [renamed[cid], { ...rec, cid: renamed[cid] }] : [cid, rec]));
+      this.pipebox?.setPins(this.pinList());
+      void this.renderSide();
+      for (const old of moved) {
+        this.onUnpin(old);
+        this.onPin(renamed[old]);
+      }
+      this.diffsApplied.pins_rekeyed += moved.length;
+    }
+    try { this.onDiff(diff); } catch (e) { console.error("domvec: onDiff failed", e); }
+  }
+
   /** Told by the plugin: a capture rewrote these chunks. */
   onDirty: (cids: string[]) => void = () => {};
   /** Told by the plugin: a pinned chunk opened in the graph. */
@@ -1855,7 +1897,12 @@ export class BrowserView extends ItemView {
           }
         }
         if (job.settle) {
-          try { await this.sidecar.capture(job.url, { settle: true }); } catch { /* reported by the next */ }
+          try {
+            const settled = await this.sidecar.capture(job.url, { settle: true });
+            // The settle's diff: what the page's complete trie dropped from
+            // the store that the per-drain deltas never retired.
+            this.noteDiff(settled && !settled.error ? settled.diff : null);
+          } catch { /* reported by the next */ }
           job.done && job.done();
           continue;
         }
@@ -1904,6 +1951,11 @@ export class BrowserView extends ItemView {
       if (this.pipebox && this.pipebox.map.url === url) {
         this.pipebox.map.patch((reply as any).map_delta);
       }
+      // The ONE diff of this capture (retired / renamed / known), applied to
+      // the chunk map and the pins here and handed to every graph view --
+      // before the placed nodes below are absorbed, so a renamed chunk's new
+      // node can start where the old one stood.
+      this.noteDiff(reply.diff);
       const cids = (reply.dirty_cids || []) as string[];
       // The map now knows what this capture stored: re-check what is still
       // drawn as pending on this page. What the capture processed and the
@@ -2157,6 +2209,7 @@ export class BrowserView extends ItemView {
       this.say(`settle failed: ${done ? done.error : "no reply"}`);
       return;
     }
+    this.noteDiff(done.diff);
     this.say(`scanned · ${done.addresses} addresses · ${done.chunks} chunks ` +
              `· ${total} rewrites over ${passes + 1} passes ` +
              `· ${(elapsedMs / 1000).toFixed(1)}s` +

@@ -119,8 +119,20 @@ function graphState(view: any) {
     render: typeof view?.renderStats === "function" ? view.renderStats() : null,
     // D-38: nodes caught with a non-finite / runaway position before an octree.
     octree_skips: view?.octreeSkips || null,
+    // Right-click on a page node (G-110): which pages the reader folded into
+    // their page node, which they opened, and every toggle so far.
+    page_toggle: view ? {
+      collapsedByReader: [...(view.collapsedByReader || [])],
+      openedByReader: [...(view.openedByReader || [])],
+      toggles: (view.toggled || []).slice(-10),
+      planted: !!view.plantNoToggle,
+    } : null,
     calm: view?.calmStats ? { ...view.calmStats, planted: !!view.plantNoCalm } : null,
     glide: view?.glideStats ? { ...view.glideStats, planted: !!view.plantTeleport } : null,
+    // G-109: the central diff applied to this view (retired / renamed / known),
+    // and the last stale-stored reading (drawn chunks the store no longer has).
+    diff: view?.diffStats ? { ...view.diffStats, planted: !!view.plantNoDiff,
+                              stale: view.staleDetail || null } : null,
     governor: view?.governorStats ? { ...view.governorStats, planted: !!view.plantNoGovernor } : null,
     non_finite: view ? { count: view.nonFiniteCount || 0, first: (view.nonFinite || []).slice(0, 5),
                          by_force: (view.nanBy || []).slice(0, 10) } : null,
