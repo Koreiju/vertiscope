@@ -765,7 +765,28 @@ export class GraphView extends ItemView {
       // A page the reader folded by right-click keeps its diff pending, not
       // drawn: the page node alone stands for it (`collapsedByReader`).
       if (!drawHere || (a.parent && this.readerCollapsed(d.url))) continue;
-      const to = a.parent ? this.parentFor(a.parent, d.url, byId, pageNode) : "";
+      // The chunk's trie parent, drawn with its missing ancestors (G-116):
+      // a branch announced while the page was folded, or pruned since, was
+      // not drawn, and the chunk fell back to the page node -- johnwick's
+      // stream read 13/13 on the page with the skeleton built.
+      const ensure = (id: string, depth = 0): string => {
+        if (!id || depth > 40) return "";
+        if (byId.has(id)) return id;
+        const br = d.branches ? d.branches[id] : undefined;
+        if (!br) return "";
+        const up = ensure(br.parent, depth + 1) || (pageNode ? pageNode.id : "");
+        const pu = up ? byId.get(up) : null;
+        const bn: any = { id, level: "path", name: br.title || id, url: d.url, members: 1, tokens: 0,
+                          force: true, branch: true, val: 0.35, color: "#5f6368",
+                          x: (pu?.x ?? 0) + (Math.random() - 0.5) * 8, y: (pu?.y ?? 0) + (Math.random() - 0.5) * 8,
+                          z: (pu?.z ?? 0) + (Math.random() - 0.5) * 8 };
+        nodes.push(bn);
+        byId.set(id, bn);
+        if (up) links.push({ source: up, target: id, force: true });
+        this.forceSpecs.set(id, { parent: br.parent, url: d.url, title: br.title, lines: 0, branch: true } as any);
+        return id;
+      };
+      const to = a.parent ? (ensure(a.parent) || this.parentFor(a.parent, d.url, byId, pageNode)) : "";
       const p = to ? byId.get(to) : null;
       // Where it belongs, not a random jitter: a spring length from its
       // parent, in the next direction of a Fibonacci sphere of its siblings.
@@ -2463,13 +2484,18 @@ export class GraphView extends ItemView {
       body.setText("a page stands for its chunks -- click to unravel it");
       return;
     }
-    const payload: any = await this.chunkPayload(node.id);
-    entry.payload = payload;
-    if (payload && payload.url) {
-      const full = `${payload.url} : ${payload.xpath || "/"}`;
-      addr.setText(full);
-      addr.setAttr("title", full);
-    }
+    // The header's address fills in when the store answers -- NOT awaited:
+    // the first paint must not wait for the sidecar (it queued behind
+    // capture writes for 1.8 s at p90).
+    void this.chunkPayload(node.id).then((payload: any) => {
+      if (!payload) return;
+      if (!entry.payload) entry.payload = payload;
+      if (payload.url) {
+        const full = `${payload.url} : ${payload.xpath || "/"}`;
+        addr.setText(full);
+        addr.setAttr("title", full);
+      }
+    });
     const toggle = head.createSpan({ cls: "domvec-bb-form" });
     toggle.onpointerdown = (e: PointerEvent) => e.stopPropagation();
     toggle.onclick = (e: MouseEvent) => {
@@ -2483,11 +2509,31 @@ export class GraphView extends ItemView {
     // a picture (2026-10-06: panels "very slow to render, and don't show
     // anything at all" -- a chunk spanning johnwick's full-page backgrounds
     // snapshotted to an empty frame, and the panel waited for it).
-    await this.renderForm(entry, "markdown", false);
+    // The PAGE form first when the chunk's page is the one in the cell: it is
+    // read from the live page through the browser's chunk map in a few ms.
+    // Otherwise (or if it shows nothing) the markdown form from the store.
+    const pageFirst = await this.tryPageForm(entry);
+    if (!pageFirst) await this.renderForm(entry, "markdown", false);
     entry.firstPaintMs = Math.round(performance.now() - entry.openedAt);
     this.panelTimes.first_paint.push(entry.firstPaintMs);
     if (this.panelTimes.first_paint.length > 200) this.panelTimes.first_paint.shift();
     void this.upgradeToPage(entry).then(() => this.noteBillboard(node, body, entry.form || "none"));
+  }
+
+  /** The page form at once, if the cell has the chunk's page and the
+   *  snapshot shows something. False otherwise; nothing drawn. */
+  private async tryPageForm(entry: any): Promise<boolean> {
+    const ask = this.snapshotFor || ((cid: string, url: string, again?: boolean) => {
+      const b: any = this.app.workspace.getLeavesOfType("domvec-browser-view")[0]?.view;
+      return b && typeof b.snapshotChunk === "function" ? b.snapshotChunk(cid, url, again) : Promise.resolve(false);
+    });
+    try { await ask(entry.node.id, entry.node.url || "", true); } catch { return false; }
+    const snap = getSnapshot(entry.node.id);
+    if (!snap || !this.billboards.has(entry.node.id)) return false;
+    const html = String(snap.html || "");
+    const text = html.replace(/<style[\s\S]*?<\/style>/gi, "").replace(/<[^>]+>/g, " ").replace(/&[a-z#0-9]+;/gi, " ").trim();
+    if (text.length < 3 && !/<(img|video|svg|canvas|picture)/i.test(html)) return false;
+    return this.renderForm(entry, "page", false);
   }
 
   /** The page form, if its snapshot shows something; else the markdown stays. */

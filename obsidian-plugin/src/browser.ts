@@ -886,6 +886,16 @@ export class BrowserView extends ItemView {
     let here = "";
     try { here = this.webview?.getURL() || ""; } catch { /* not attached */ }
     if (!here || docKey(here) !== docKey(url || "")) return false;
+    // FAST: the chunk's elements from the browser's own chunk map -- no
+    // sidecar round trip, which queued behind the capture's writes (panel
+    // first paint p90 1.8 s while a page was being captured, 2026-10-07).
+    const map = this.pipebox?.map;
+    const local = map && docKey(map.url) === docKey(here) ? map.xpaths(cid) : [];
+    if (local.length) {
+      await this.takeSnapshot({ cid, url: here, matched: "", markdown: "", head: "",
+                                xpaths: local, addrs: {} } as any);
+      if (getSnapshot(cid)) return true;
+    }
     const payload: any = await this.sidecar.chunk(cid).catch(() => null);
     const lines = (payload && payload.lines) || [];
     if (!lines.length) return false;

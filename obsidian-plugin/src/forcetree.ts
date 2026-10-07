@@ -48,6 +48,10 @@ export interface ForceNodeDelta {
   covers: Record<string, string>;
   /** Node ids whose covering chunk the store held before this visit. */
   settled: string[];
+  /** Every branch of the page's trie now: id -> its parent and title, so the
+   *  graph can draw a chunk's missing ancestors instead of hanging it on the
+   *  page (a branch announced while the page was folded was never drawn). */
+  branches?: Record<string, { parent: string; title: string }>;
 }
 
 interface Held {
@@ -277,6 +281,10 @@ export class ForceTree {
         const p = sk.parentOfChunk.get(sid) || ForceTree.pageId(this.url);
         if (p !== h.parent) { h.parent = p; delta.reparented.push({ id: h.id, parent: p }); }
       }
+    }
+    delta.branches = {};
+    for (const [addr, b] of this.branches) {
+      delta.branches[b.id] = { parent: b.parent, title: addr.split("/").filter(Boolean).slice(-2).join("/") };
     }
     delta.size = this.chunks.size;
     delta.ms = performance.now() - t0;

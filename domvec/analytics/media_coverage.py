@@ -49,7 +49,7 @@ PAGE_JS = r"""(function(xs){
  var held = new Set(), unresolved = 0;
  for (var i = 0; i < xs.length; i++) {
    var n = null;
-   try { n = h && h.resolve ? h.resolve(xs[i]) : null; } catch (e) { n = null; }
+   try { n = h && h.node ? h.node(xs[i]) : null; } catch (e) { n = null; }
    if (!n) { try { n = document.evaluate(xs[i], document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue; } catch (e) { n = null; } }
    if (n && n.nodeType === 3) n = n.parentElement;
    if (n) held.add(n); else unresolved++;

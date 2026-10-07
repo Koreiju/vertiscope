@@ -207,3 +207,12 @@ def test_planted_a_session_with_no_birth_reads_as_old_and_would_settle():
     before this fix) the same truncated session is treated as settled."""
     from domvec.obsidian.sidecar import _settle_truncated
     assert not _settle_truncated({"render": {"c1": "x"}}, stored=31, now=1000.0)
+
+
+def test_a_fragment_is_the_same_document_a_hash_route_is_not():
+    from domvec.obsidian.sidecar import _document_url
+    assert _document_url("https://duckduckgo.com/#chat") == "https://duckduckgo.com/"
+    assert _document_url("https://a.test/doc#section-2") == "https://a.test/doc"
+    assert _document_url("https://app.test/#/inbox/3") == "https://app.test/#/inbox/3"
+    assert _document_url("https://app.test/#!/feed") == "https://app.test/#!/feed"
+    assert _document_url("https://a.test/plain") == "https://a.test/plain"

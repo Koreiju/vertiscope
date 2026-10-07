@@ -319,6 +319,18 @@ def _page_diff(session: dict, url: str, passno: int, all_chunks, dirty) -> Optio
             "chunks": len(now)}
 
 
+def _document_url(url: str) -> str:
+    """The DOCUMENT a url names: a plain fragment (`#chat`, `#section-2`) is a
+    place in one document, not another page -- ddg's `/` and `/#chat` were
+    stored as two pages and drew two page nodes for one document (the tree
+    verdict's one second root, 2026-10-07). A hash ROUTE (`#/...`, `#!...`)
+    selects content in a single-page app and is kept."""
+    head, sep, frag = url.partition("#")
+    if not sep or frag.startswith("/") or frag.startswith("!"):
+        return url
+    return head
+
+
 def _settle_truncated(session: dict, stored: int, now: Optional[float] = None) -> bool:
     """Would settling this session write a TRUNCATED page as the complete one?
 
@@ -1297,7 +1309,7 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(400, {"error": "bad body: %s" % exc})
             return
 
-        url = (body.get("url") or "").strip()
+        url = _document_url((body.get("url") or "").strip())
         if not url:
             self._send(400, {"error": "capture needs a url"})
             return

@@ -3043,6 +3043,22 @@
   // once a frame and only when either changes. A passive listener -- it
   // cannot cancel or alter the page's own handling.
   var lastHoverKey = '', lastHoverAt = 0, lastHoverTarget = null;
+  // Every element stacked at a point, THROUGH open shadow roots: the
+  // document's own `elementsFromPoint` stops at a shadow host, so on
+  // archive.org the stack was one host whose chunk spans the app (2026-10-07:
+  // "Archive overlays do exist but are oversized"). Descends into the root
+  // under the point, deepest first.
+  function stackAt(x, y) {
+    var out = [], root = document, guard = 0;
+    while (root && root.elementsFromPoint && guard++ < 16) {
+      var here = root.elementsFromPoint(x, y) || [];
+      out = here.concat(out);
+      var top = here[0];
+      if (!top || !top.shadowRoot || top.shadowRoot === root) break;
+      root = top.shadowRoot;
+    }
+    return out;
+  }
   function onPointer(ev) {
     if (!SAY) return;
     var target = (ev.composedPath && ev.composedPath()[0]) || ev.target;
@@ -3063,7 +3079,7 @@
     // the peripheral kind, never the fold's.
     try {
       if (typeof ev.clientX === 'number' && document.elementsFromPoint) {
-        var stack = document.elementsFromPoint(ev.clientX, ev.clientY);
+        var stack = stackAt(ev.clientX, ev.clientY);
         var best = got, area = got && got.box ? got.box[2] * got.box[3] : Infinity;
         for (var si = 0; si < stack.length && si < 12; si++) {
           var cand = at(stack[si]);
@@ -3265,6 +3281,11 @@
     at: at,
     pictures: pictures,
     resolve: function (path) { return !!resolvePath(path); },
+    // The node an address names, through shadow roots and slots -- read-only,
+    // for instruments that check what the trie accounts for (2026-10-07:
+    // media coverage read archive.org's shadow-DOM pictures as 0/115 because
+    // `resolve` answers yes/no, not the node).
+    node: function (xpath) { return resolveXPath(String(xpath || '')); },
 
     // Does each of these addresses still name a node?
     //

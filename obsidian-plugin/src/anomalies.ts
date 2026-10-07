@@ -97,10 +97,23 @@ export async function anomalies(app: any, profile: () => any[]): Promise<any> {
   const panels = [...g.billboards.values()].map((e: any) => {
     const body = e.el.querySelector(".domvec-bb-body") as HTMLElement | null;
     const im = body ? images(body) : { total: 0, broken: 0, sample: [] };
+    // The page form renders in an iframe: its text and pictures count too
+    // (innerText does not reach into a frame -- a filled page-form panel
+    // read as empty, 2026-10-07).
+    let frameText = 0;
     if (body) body.querySelectorAll("*").forEach((x: any) => {
       if (x.shadowRoot) { const s = images(x.shadowRoot); im.total += s.total; im.broken += s.broken; im.sample.push(...s.sample); }
+      if (x.tagName === "IFRAME") {
+        try {
+          const doc = x.contentDocument;
+          if (doc && doc.body) {
+            frameText += (doc.body.innerText || "").trim().length;
+            const s = images(doc); im.total += s.total; im.broken += s.broken; im.sample.push(...s.sample);
+          }
+        } catch { /* cross-origin frame */ }
+      }
     });
-    const text = body ? (body.innerText || "").trim().length : 0;
+    const text = (body ? (body.innerText || "").trim().length : 0) + frameText;
     const srcs = body ? Array.from(body.querySelectorAll("img")).map((i: any) => i.currentSrc || i.src) : [];
     return { id: e.node.id, form: e.form || (e.surface ? "surface" : "?"), empty: !text && !im.total,
              text, images: im.total, broken: im.broken, duplicate_images: srcs.length - new Set(srcs).size,
