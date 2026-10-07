@@ -55,6 +55,15 @@ PAGE_JS = r"""(function(xs){
    if (n) held.add(n); else unresolved++;
  }
  var vw = innerWidth, vh = innerHeight, items = [];
+ function inControl(el) {
+   // An icon drawn INSIDE a control the trie holds (a link, a button) is part
+   // of that control: counted apart from covered and from missing.
+   for (var a = el.parentElement, k = 0; a && k < 6; a = a.parentElement, k++) {
+     if ((a.tagName === 'A' || a.tagName === 'BUTTON' || a.getAttribute('role') === 'button') && held.has(a)) return true;
+     if (a.parentElement === null && a.getRootNode && a.getRootNode().host) a = a.getRootNode().host;
+   }
+   return false;
+ }
  function covered(el) {
    if (held.has(el)) return true;
    var p = el.parentElement;
@@ -73,7 +82,8 @@ PAGE_JS = r"""(function(xs){
    var r = el.getBoundingClientRect(), cs = getComputedStyle(el);
    var on = r.width > 1 && r.height > 1 && r.bottom > 0 && r.right > 0 && r.top < vh && r.left < vw
             && cs.visibility !== 'hidden' && cs.display !== 'none' && +cs.opacity > 0.02;
-   items.push({kind: kind, url: String(url || '').slice(0, 200), covered: kind === 'background' ? false : covered(el),
+   var cov = kind === 'background' ? false : covered(el);
+   items.push({kind: kind, url: String(url || '').slice(0, 200), covered: cov, in_control: !cov && inControl(el),
                visible: on, box: [r.left, r.top, r.width, r.height].map(Math.round), tag: el.tagName.toLowerCase()});
  }
  function walk(root) {
@@ -111,9 +121,10 @@ def measure(live: Live, out: str = "") -> Dict:
         out = {}
         for r in rows:
             k = r["kind"]
-            o = out.setdefault(k, {"n": 0, "covered": 0})
+            o = out.setdefault(k, {"n": 0, "covered": 0, "in_control": 0})
             o["n"] += 1
             o["covered"] += int(r["covered"])
+            o["in_control"] += int(bool(r.get("in_control")))
         return out
 
     vis = [r for r in items if r["visible"]]
