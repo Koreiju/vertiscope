@@ -3008,15 +3008,33 @@
       if (n === slot.tail || !slot.tail || read > 600) break;
       n = n.nextSibling;
     }
-    if (!any) {
-      n = slot.node; k = 0;
-      while (n && k++ < 400) {
-        if (n.nodeType === 1 && n.getBoundingClientRect) take(n.getBoundingClientRect());
-        if (n === slot.tail || !slot.tail) break;
-        n = n.nextSibling;
+    // The run's own elements' box, for the fallback and as a CLIP: a text
+    // run clipped by its card (`text-overflow: ellipsis`) still measures its
+    // full width, so archive.org's card chunks drew 258 px wide over 177 px
+    // cards (2026-10-07: "Still overlay oversizing").
+    var cl = 1e9, ct = 1e9, cr = -1e9, cb = -1e9, own = false;
+    n = slot.node; k = 0;
+    while (n && k++ < 400) {
+      if (n.nodeType === 1 && n.getBoundingClientRect) {
+        var q = n.getBoundingClientRect();
+        if (q && q.width > 0 && q.height > 0) {
+          own = true;
+          if (q.left < cl) cl = q.left; if (q.top < ct) ct = q.top;
+          if (q.right > cr) cr = q.right; if (q.bottom > cb) cb = q.bottom;
+        }
       }
+      if (n === slot.tail || !slot.tail) break;
+      n = n.nextSibling;
     }
-    return any ? [l, t, r - l, b - t] : null;
+    if (!any) {
+      if (!own) return null;
+      return [cl, ct, cr - cl, cb - ct];
+    }
+    if (own) {
+      var il = Math.max(l, cl), it2 = Math.max(t, ct), ir = Math.min(r, cr), ib = Math.min(b, cb);
+      if (ir > il && ib > it2) { l = il; t = it2; r = ir; b = ib; }
+    }
+    return [l, t, r - l, b - t];
   }
   function at(el) {
     var n = el, depth = 0;
