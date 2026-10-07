@@ -70,9 +70,16 @@ class RefitCost:
 
 
 def choose_scope(page_rows: int, chunk_rows: int, cost: RefitCost, budget_ms: float,
-                 engine: str = "parametric", centroid: str = "semantic") -> Dict:
+                 engine: str = "parametric", centroid: str = "semantic",
+                 want_global: bool = False) -> Dict:
     """Chunks when an update over pages AND chunks fits the budget, pages when
-    it does not -- and why, in words a reader of the status can check."""
+    it does not -- and why, in words a reader of the status can check.
+
+    `want_global` (DOMVEC_UMAP_SCOPE=global, 2026-10-04): one model over every
+    chunk whose update trains only the changed page's rows plus a bounded
+    landmark sample (`pumap.ParametricUMAP.update_subset`). Its cost does not
+    grow with the rows, so neither the budget nor `WHOLE_FORWARD_ROWS` applies;
+    it still needs the parametric engine and a centroid chunks can join."""
     rows = page_rows + chunk_rows
     predicted = cost.predict(rows)
     out = {"rows_if_chunks": rows, "rows_if_pages": page_rows,
@@ -83,6 +90,10 @@ def choose_scope(page_rows: int, chunk_rows: int, cost: RefitCost, budget_ms: fl
         return dict(out, scope="pages", why="umap-learn cannot update(); refits are whole, over pages")
     if centroid != "semantic":
         return dict(out, scope="pages", why="the triple centroid has no chunk-vector counterpart")
+    if want_global:
+        return dict(out, scope="global",
+                    why="one model over %d pages + %d chunks; an update trains the changed page's "
+                        "rows and a bounded landmark sample, not the corpus" % (page_rows, chunk_rows))
     if rows > WHOLE_FORWARD_ROWS:
         return dict(out, scope="pages",
                     why="%d rows is past the %d the trainer runs whole; per-row cost jumps there"

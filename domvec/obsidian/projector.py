@@ -86,6 +86,99 @@ def _unit(v: np.ndarray) -> np.ndarray:
     return v / norm if norm > 1e-9 else v
 
 
+class _RowMap:
+    """Which row of the global model is which chunk (and which page's centroid).
+
+    Scope "global" (`DOMVEC_UMAP_SCOPE=global`) keeps ONE `ParametricUMAP` over
+    every drawable chunk and every page centroid. A page's diff retrains only
+    that page's rows (`update_subset`), so the model has to say which row a
+    chunk is: a chunk id is a key, a page centroid is `"page:" + url`, and the
+    url a row belongs to is how a page finds ITS rows.
+
+    A row whose chunk the page no longer holds is retired in the model and its
+    slot is reused by the next chunk that arrives, so the model does not grow
+    with churn. Pure bookkeeping: no torch, no store, picklable.
+    """
+
+    def __init__(self) -> None:
+        self.row_of: Dict[str, int] = {}
+        self.row_url: Dict[str, str] = {}
+        self.of_url: Dict[str, set] = {}
+        self.free: List[int] = []
+
+    def copy(self) -> "_RowMap":
+        out = _RowMap()
+        out.row_of, out.row_url = dict(self.row_of), dict(self.row_url)
+        out.of_url = {u: set(s) for u, s in self.of_url.items()}
+        out.free = list(self.free)
+        return out
+
+    @classmethod
+    def build(cls, urls, chunk_ids, url_of) -> "_RowMap":
+        """The first fit's layout: the page centroids, then the chunks."""
+        out = cls()
+        for i, u in enumerate(urls):
+            out._set("page:" + u, i, u)
+        for j, c in enumerate(chunk_ids):
+            out._set(c, len(urls) + j, url_of[c])
+        return out
+
+    def _set(self, key: str, row: int, url: str) -> None:
+        old = self.row_url.get(key)
+        if old is not None and old != url:
+            self.of_url.get(old, set()).discard(key)
+        self.row_of[key] = int(row)
+        self.row_url[key] = url
+        self.of_url.setdefault(url, set()).add(key)
+
+    def chunk_ids(self) -> set:
+        return {k for k in self.row_of if not k.startswith("page:")}
+
+    def plan(self, n_rows: int, pages: Dict[str, Tuple[Optional[np.ndarray], Dict[str, np.ndarray]]]) -> Dict:
+        """Rows to write for these pages: {url: (centroid, {cid: unit vector})}.
+        A page with no chunks (centroid None) retires every row it had."""
+        keys, urls, vecs = [], [], []
+        want_all = set()
+        free = list(self.free)
+        nxt = int(n_rows)
+        idx: List[int] = []
+        for u, (cent, chunks) in pages.items():
+            want = dict(chunks)
+            if cent is not None and chunks:
+                want["page:" + u] = cent
+            for k, v in want.items():
+                row = self.row_of.get(k)
+                if row is None:
+                    row = free.pop(0) if free else nxt
+                    nxt += 0 if row != nxt else 1
+                keys.append(k); urls.append(u); vecs.append(v); idx.append(row)
+                want_all.add(k)
+        drop, remove = [], []
+        for u in pages:
+            for k in self.of_url.get(u, ()):
+                if k not in want_all:
+                    drop.append(k)
+                    remove.append(self.row_of[k])
+        dim = len(vecs[0]) if vecs else 0
+        return {"keys": keys, "urls": urls, "idx": np.asarray(idx, dtype=np.int64),
+                "X": (np.asarray(vecs, dtype=np.float32) if vecs else np.zeros((0, dim), np.float32)),
+                "remove": np.asarray(remove, dtype=np.int64), "drop": drop,
+                "free": free, "appended": nxt - int(n_rows)}
+
+    def commit(self, plan: Dict) -> None:
+        for k, u, row in zip(plan["keys"], plan["urls"], plan["idx"]):
+            self._set(k, int(row), u)
+        freed = []
+        for k in plan["drop"]:
+            u = self.row_url.pop(k, None)
+            row = self.row_of.pop(k, None)
+            if u is not None:
+                self.of_url.get(u, set()).discard(k)
+            if row is not None:
+                freed.append(row)
+        self.free = list(plan["free"]) + freed
+
+
 class ChunkProjector:
     """Positions for every drawable chunk, kept current by a stream."""
 
@@ -709,8 +802,14 @@ class PageProjector(ChunkProjector):
     """
 
     def __init__(self, dims: int = 3, *, centroid: str = "triple",
-                 seed: int = 0, engine: str = "") -> None:
+                 seed: int = 0, engine: str = "", umap_scope: str = "") -> None:
         super().__init__(dims, sample_cap=10 ** 9, seed=seed)
+        import os
+        #: "global" -- ONE model over every chunk, a page's diff retrains only
+        #: that page's rows (`DOMVEC_UMAP_SCOPE=global`); "" -- the scope
+        #: chosen by what an update costs (G-106). Off unless asked for.
+        self.umap_scope = (umap_scope or os.environ.get("DOMVEC_UMAP_SCOPE", "")).strip().lower()
+        self.rows = _RowMap()
         self.centroid = centroid if centroid in ("triple", "semantic") else "triple"
         #: "parametric" -- the online GPU model (`pumap.py`): a refit trains on
         #: the NEW pages only, earlier ones held where they were. "umap" --
@@ -819,7 +918,11 @@ class PageProjector(ChunkProjector):
         use = triple if (self.centroid == "triple" and triple is not None) else semantic
         return urls, use
 
-    def _first_fit(self, L, X, want: int, n_pages: int):
+    #: A first fit over every chunk of a large corpus would run epochs x
+    #: edges/batch steps (60,000 at 15,000 rows); the global scope caps it.
+    GLOBAL_FIT_STEPS = 4000
+
+    def _first_fit(self, L, X, want: int, n_pages: int, max_steps=None):
         """The first fit of the page layout, by the configured engine."""
         if self.engine == "parametric":
             try:
@@ -827,7 +930,7 @@ class PageProjector(ChunkProjector):
                 self.pumap = ParametricUMAP(n_components=want,
                                             n_neighbors=min(15, n_pages - 1),
                                             min_dist=0.25, seed=self.seed)
-                raw = np.asarray(self.pumap.fit_transform(X), dtype=np.float32)
+                raw = np.asarray(self.pumap.fit(X, max_steps=max_steps).embedding_, dtype=np.float32)
                 # Decorrelate the drawn axes once; replayed for every point.
                 self._whiten = Whitened(self.pumap, dims=self.dims)
                 coords = self._whiten.fit_whitening(raw)
@@ -862,13 +965,21 @@ class PageProjector(ChunkProjector):
         while True:
             time.sleep(self.ONLINE_DEBOUNCE_S)
             with self.lock:
-                todo = [u for u in self._pending_online if u in self.page_vec]
+                glob = self.scope == "global"
+                todo = [u for u in self._pending_online
+                        if u in self.page_vec or (glob and u in self.rows.of_url)]
                 self._pending_online.clear()
                 wrapper = self.projection.reducer if self.projection is not None else None
                 if not todo or self.pumap is None or getattr(wrapper, "model", None) is not self.pumap:
                     self._online_thread = None
                     return
-                X = np.asarray([self.page_vec[u] for u in todo], dtype=np.float32)
+                X = np.asarray([self.page_vec[u] for u in todo if u in self.page_vec], dtype=np.float32)
+                plan = None
+                if glob:
+                    # The page's rows, whatever changed in them: a mutated
+                    # chunk keeps its row and is retrained there, a new one
+                    # takes a free row or appends, a retired one is dropped.
+                    plan = self.rows.plan(len(self.pumap._raw), self._global_pages(todo))
                 # Chunk scope: the untrained chunks of these pages join the
                 # update, so every chunk is a point the model LEARNED.
                 new_chunks = ([c for u in todo for c in sorted(self.by_url.get(u) or ())
@@ -881,12 +992,19 @@ class PageProjector(ChunkProjector):
                 model = copy.deepcopy(self.pumap)
             started = time.perf_counter()
             try:
-                model.update(X)
+                if plan is not None:
+                    model.update_subset(plan["X"], plan["idx"], remove=plan["remove"],
+                                        measure_drift=False)
+                else:
+                    model.update(X)
             except Exception as exc:                # noqa: BLE001
                 self.fit_error = "online update failed: %s" % exc
                 continue
             ms_train = (time.perf_counter() - started) * 1000
-            self.refit_cost.observe(int(model.stats.get("rows") or 0), ms_train)
+            if plan is None:
+                # The global update's cost is the page's, not the rows': it
+                # would flatten the line `choose_scope` extrapolates.
+                self.refit_cost.observe(int(model.stats.get("rows") or 0), ms_train)
             t = time.perf_counter()
             with self.lock:
                 projection = copy.copy(self.projection)
@@ -898,7 +1016,8 @@ class PageProjector(ChunkProjector):
                 # 149 pages and 15,212 chunks by the model's tiny drift on
                 # each update -- the whole picture shifting for one page
                 # learned (2026-09-27).
-                urls = [u for u in todo if u in self.page_vec]
+                urls = [u for u in todo if u in self.page_vec
+                        and (not glob or self.by_url.get(u))]
                 P = np.asarray([self.page_vec[u] for u in urls], dtype=np.float32)
             where, colour = projection.place(P) if len(P) else (None, None)
             new_pos = {u: [float(v) for v in where[i][:self.dims]] for i, u in enumerate(urls)} if where is not None else {}
@@ -909,6 +1028,9 @@ class PageProjector(ChunkProjector):
                 self.projection, self.pumap = projection, model
                 self.trained.update(todo)
                 self.trained_chunks.update(new_chunks)
+                if plan is not None:
+                    self.rows.commit(plan)
+                    self.trained_chunks = self.rows.chunk_ids()
                 moved_pages = []
                 for u, xyz in new_pos.items():
                     was = old_pos.get(u)
@@ -936,8 +1058,13 @@ class PageProjector(ChunkProjector):
                 for u in moved_pages:
                     self.seq += 1
                     self.log.append((self.seq, "page", u))
-            record = {"pages_trained": len(todo), "chunks_trained": len(new_chunks),
+            record = {"pages_trained": len(todo),
+                      "chunks_trained": (len(plan["keys"]) if plan is not None else len(new_chunks)),
                       "scope": self.scope, "rows": int(model.stats.get("rows") or 0),
+                      "global": ({k: model.stats.get(k) for k in
+                                  ("update_rows", "trained_rows", "landmarks", "steps", "graphed",
+                                   "ms_select", "ms_graph", "ms_train", "ms_place")}
+                                 if plan is not None else None),
                       "ms_train": round(ms_train, 1),
                       "ms_place": round((time.perf_counter() - t) * 1000, 1),
                       "pages_moved": len(moved_pages), "chunks_moved": moved_chunks,
@@ -950,6 +1077,89 @@ class PageProjector(ChunkProjector):
                     self.on_batch(dict(record, kind="online"))
                 except Exception:                   # noqa: BLE001
                     pass
+
+    def _global_pages(self, urls) -> Dict[str, Tuple[Optional[np.ndarray], Dict[str, np.ndarray]]]:
+        """{url: (centroid, {cid: unit vector})} for these pages as the stream
+        holds them now (call under `self.lock`). A page with no chunks left
+        maps to (None, {}): every row it had is retired."""
+        from . import layout as _L
+        out = {}
+        for u in urls:
+            cids = sorted(c for c in (self.by_url.get(u) or ()) if c in self.vec)
+            if not cids or u not in self.page_vec:
+                out[u] = (None, {})
+                continue
+            C = _L._unit_rows(np.asarray([self.vec[c] for c in cids], dtype=np.float32))
+            out[u] = (np.asarray(self.page_vec[u], dtype=np.float32),
+                      {c: C[i] for i, c in enumerate(cids)})
+        return out
+
+    #: Active rows one `update_subset` takes: past this a refit's many changed
+    #: pages go in groups, so no single update leaves the landmark regime.
+    GLOBAL_GROUP_ROWS = 1500
+
+    def _refit_global(self, urls, X, chunks_at_fit, chunk_ids, C, vec, url_of):
+        """`_refit_online` for the global model: every page that is new, or whose
+        chunks or centroid are not what the model holds, retrains ITS rows
+        (`update_subset`); every other page is held by landmarks. Row maps are
+        built on a copy and returned with the new model, so nothing the stream
+        reads changes until the swap."""
+        wrapper = self.projection.reducer if self.projection is not None else None
+        if (self.engine != "parametric" or self.pumap is None or C is None
+                or getattr(wrapper, "model", None) is not self.pumap):
+            return None
+        import copy
+        model = copy.deepcopy(self.pumap)
+        rows = self.rows.copy()
+        members: Dict[str, Dict[str, np.ndarray]] = {}
+        for j, c in enumerate(chunk_ids):
+            members.setdefault(url_of[c], {})[c] = C[j]
+        todo: Dict[str, Tuple[Optional[np.ndarray], Dict[str, np.ndarray]]] = {}
+        for i, u in enumerate(urls):
+            mem = members.get(u, {})
+            keys = set(mem) | {"page:" + u}
+            same = rows.of_url.get(u, set()) == keys
+            if same:
+                r = [rows.row_of[k] for k in sorted(keys)]
+                now = np.asarray([X[i] if k == "page:" + u else mem[k] for k in sorted(keys)],
+                                 dtype=np.float32)
+                same = float(np.abs(model._raw[r] - now).max()) <= 1e-4
+            if not same:
+                todo[u] = (X[i], mem)
+        for u in list(rows.of_url):
+            if u not in set(urls) and rows.of_url[u]:
+                todo[u] = (None, {})
+        t = time.perf_counter()
+        batch: Dict[str, Tuple[Optional[np.ndarray], Dict[str, np.ndarray]]] = {}
+        size = 0
+        groups = []
+        for u, v in todo.items():
+            batch[u] = v
+            size += len(v[1]) + 1
+            if size >= self.GLOBAL_GROUP_ROWS:
+                groups.append(batch); batch, size = {}, 0
+        if batch:
+            groups.append(batch)
+        for g in groups:
+            plan = rows.plan(len(model._raw), g)
+            model.update_subset(plan["X"], plan["idx"], remove=plan["remove"], measure_drift=False)
+            rows.commit(plan)
+        self._global_refit = {"pages": len(todo), "groups": len(groups),
+                              "ms": round((time.perf_counter() - t) * 1000, 1)}
+        projection = copy.copy(self.projection)
+        whiten = copy.copy(wrapper)
+        whiten.model = model
+        projection.reducer = whiten
+        projection.fitted_chunks = int(chunks_at_fit)
+        projection.fitted_n = int(len(urls))
+        self._next_pumap, self._next_rows = model, rows
+        where, colour = projection.place(X)
+        if where is None:
+            return None
+        page_pos = {u: [float(v) for v in where[i][:self.dims]] for i, u in enumerate(urls)}
+        page_hsv = ({u: [float(v) for v in colour[i]] for i, u in enumerate(urls)}
+                    if colour is not None else {})
+        return projection, page_pos, page_hsv
 
     def _refit_online(self, urls, X, chunks_at_fit, chunk_ids=(), C=None):
         """A refit that TRAINS ON THE DIFF (2026-09-27): the pages new since
@@ -1147,20 +1357,28 @@ class PageProjector(ChunkProjector):
             fitted = set(urls)
             chunk_ids = sorted(c for c in vec if url_of.get(c) in fitted)
             decision = choose_scope(len(urls), len(chunk_ids), self.refit_cost,
-                                    self.SCOPE_BUDGET_MS, self.engine, self.centroid)
-            if few:
+                                    self.SCOPE_BUDGET_MS, self.engine, self.centroid,
+                                    want_global=(self.umap_scope == "global"))
+            if few and decision["scope"] != "global":
                 decision = dict(decision, scope="chunks",
                                 why="%d page(s), fewer than the 4 a page fit needs: the fit is over its %d chunks"
                                     % (len(urls), len(chunk_ids)))
             scope = decision["scope"]
             C = (L._unit_rows(np.asarray([vec[c] for c in chunk_ids], dtype=np.float32))
-                 if scope == "chunks" and chunk_ids else None)
+                 if scope in ("chunks", "global") and chunk_ids else None)
             # A model that learned chunks cannot shed them by updating: its
             # every later update trains on every row it ever saw. Falling back
             # to pages is a fresh fit.
-            online = (None if (scope == "pages" and self.scope == "chunks")
-                      else self._refit_online(urls, X, chunks_at_fit,
-                                              chunk_ids if C is not None else (), C))
+            # Moving into or out of the global scope is a fresh fit: its
+            # model is one over rows the others never held.
+            switched = scope != self.scope and "global" in (scope, self.scope)
+            if (scope == "pages" and self.scope == "chunks") or switched:
+                online = None
+            elif scope == "global":
+                online = self._refit_global(urls, X, chunks_at_fit, chunk_ids, C, vec, url_of)
+            else:
+                online = self._refit_online(urls, X, chunks_at_fit,
+                                            chunk_ids if C is not None else (), C)
             if online is not None:
                 projection, page_pos, page_hsv = online
                 colours = page_hsv or None
@@ -1171,7 +1389,8 @@ class PageProjector(ChunkProjector):
                 want = self.dims + 3
                 Xtrain = X if C is None else np.vstack([X, C])
                 coords = (None if online is not None else
-                          self._first_fit(L, Xtrain, want, len(Xtrain)))
+                          self._first_fit(L, Xtrain, want, len(Xtrain),
+                                          self.GLOBAL_FIT_STEPS if scope == "global" else None))
                 if online is None:
                     # The pages are the first rows; chunk rows (chunk scope)
                     # were trained on and are placed below through `place`.
@@ -1220,9 +1439,16 @@ class PageProjector(ChunkProjector):
                 self.projection = projection
                 if getattr(self, "_next_pumap", None) is not None:
                     self.pumap, self._next_pumap = self._next_pumap, None
+                if getattr(self, "_next_rows", None) is not None:
+                    self.rows, self._next_rows = self._next_rows, None
+                elif scope == "global" and C is not None and self.engine == "parametric":
+                    self.rows = _RowMap.build(urls, chunk_ids, url_of)
+                elif scope != "global":
+                    self.rows = _RowMap()
                 if self.engine == "parametric":
                     self.trained = set(urls)
-                    self.trained_chunks = set(chunk_ids) if C is not None else set()
+                    self.trained_chunks = (self.rows.chunk_ids() if scope == "global"
+                                           else set(chunk_ids) if C is not None else set())
                 self.scope, self.scope_record = scope, decision
                 self.pos, self.hsv = pos, hsv
                 self.vec, self.url_of, self.by_url = vec, url_of, by_url
@@ -1243,6 +1469,7 @@ class PageProjector(ChunkProjector):
                 "engine": self.engine, "online": online is not None,
                 "scope": decision,
                 "pumap": dict(self.pumap.stats) if self.pumap is not None else None,
+                "global_refit": getattr(self, "_global_refit", None) if scope == "global" and online is not None else None,
                 "chunks_placed": len(pos),
                 "ms": round((time.perf_counter() - started) * 1000, 1),
                 "at": round(time.time(), 3),
@@ -1341,7 +1568,12 @@ class PageProjector(ChunkProjector):
             self.placed_total += len(urls)
         if self.engine == "parametric" and self.pumap is not None:
             untrained = [u for u in urls if u not in self.trained]
-            if self.scope == "chunks":
+            if self.scope == "global":
+                # Every page the batch touched, trained before or not: a
+                # mutated chunk is a diff the model has to learn too (the
+                # chunk scope retrains only chunks it has never seen).
+                untrained = sorted(pages)
+            elif self.scope == "chunks":
                 untrained += sorted({self.url_of[c] for c in mine
                                      if c not in self.trained_chunks and c in self.url_of})
             if untrained:
@@ -1372,6 +1604,7 @@ class PageProjector(ChunkProjector):
                     "scope": self.scope, "scope_why": self.scope_record.get("why"),
                     "scope_decision": {k: v for k, v in self.scope_record.items() if k != "why"},
                     "trained_chunks": len(self.trained_chunks),
+                    "global_rows": len(self.rows.row_of) if self.scope == "global" else None,
                     "device": (self.pumap.stats.get("device") if self.pumap is not None else None)})
         if url:
             out["page"] = {"url": url, "chunks": len(self.by_url.get(url) or ()),
@@ -1403,6 +1636,7 @@ class PageProjector(ChunkProjector):
                      "epoch": self.epoch, "fits": self.fits,
                      "scope": self.scope, "scope_record": self.scope_record,
                      "trained": set(self.trained), "trained_chunks": set(self.trained_chunks),
+                     "rows": self.rows if self.scope == "global" else None,
                      "refit_cost": list(self.refit_cost.observed)}
         try:
             tmp = path.with_suffix(".tmp")
@@ -1454,6 +1688,7 @@ class PageProjector(ChunkProjector):
             self.scope_record = dict(state.get("scope_record") or {})
             self.trained = set(state.get("trained") or ())
             self.trained_chunks = set(state.get("trained_chunks") or ())
+            self.rows = state.get("rows") or _RowMap()
             self.refit_cost.observed = list(state.get("refit_cost") or [])
             self.log.clear()
         with (self.work_lock or nullcontext()):
