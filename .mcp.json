@@ -11,6 +11,16 @@
         "http://127.0.0.1:9222"
       ],
       "env": {}
+    },
+    "domvec-git": {
+      "command": "python",
+      "args": [
+        "-m",
+        "domvec.obsidian.git_mcp",
+        "--repo",
+        "."
+      ],
+      "env": {}
     }
   }
 }
