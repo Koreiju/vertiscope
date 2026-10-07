@@ -877,6 +877,17 @@ export class BrowserView extends ItemView {
    * from the live page, when the chunk's page is the one open in the cell.
    * False when it cannot be (another page is open, or nothing is found).
    */
+  /** The page form re-read WITH the store's address table, so its controls
+   *  are live (the fast path from the chunk map carries no addresses). */
+  async snapshotAddressed(cid: string, lines: any[]): Promise<boolean> {
+    let here = "";
+    try { here = this.webview?.getURL() || ""; } catch { return false; }
+    if (!here || !lines || !lines.length) return false;
+    await this.takeSnapshot({ cid, url: here, matched: "", markdown: "", head: "",
+                              xpaths: xpathsOfLines(lines), addrs: addressTable(lines) });
+    return !!getSnapshot(cid);
+  }
+
   async snapshotChunk(cid: string, url: string, again = false): Promise<boolean> {
     // `again`: re-read the live page even when a snapshot is held -- an open
     // panel after a diff, or a panel just opened (2026-10-06: the held one was

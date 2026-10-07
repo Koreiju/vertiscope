@@ -2487,9 +2487,17 @@ export class GraphView extends ItemView {
     // The header's address fills in when the store answers -- NOT awaited:
     // the first paint must not wait for the sidecar (it queued behind
     // capture writes for 1.8 s at p90).
-    void this.chunkPayload(node.id).then((payload: any) => {
+    void this.chunkPayload(node.id).then(async (payload: any) => {
       if (!payload) return;
       if (!entry.payload) entry.payload = payload;
+      // The fast page form carried no addresses (its controls inert): now
+      // that the store answered, re-read it addressed and redraw (G-111).
+      if (entry.form === "page" && this.billboards.has(node.id)) {
+        const b: any = this.app.workspace.getLeavesOfType("domvec-browser-view")[0]?.view;
+        if (b && typeof b.snapshotAddressed === "function" && await b.snapshotAddressed(node.id, payload.lines || [])) {
+          if (this.billboards.has(node.id) && entry.form === "page") await this.renderForm(entry, "page", false);
+        }
+      }
       if (payload.url) {
         const full = `${payload.url} : ${payload.xpath || "/"}`;
         addr.setText(full);
