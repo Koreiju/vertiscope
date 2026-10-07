@@ -2357,7 +2357,7 @@ export function makeChecks(env) {
           ${PREP}
           const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
           const g = v.graph;
-          const base = app.plugins.plugins["domvec-bridge"].settings.sidecar.replace(/\/+$/, "");
+          const base = app.plugins.plugins["domvec-bridge"].settings.sidecar.replace(/\\/+$/, "");
           const poll = async (cond, ms) => { const t = performance.now(); while (performance.now() - t < ms) { if (cond()) return true; await sleep(250); } return cond(); };
           // The handler the pane registered with the graph, fired as the graph
           // fires it (no handler registered fires nothing, and the arm fails).

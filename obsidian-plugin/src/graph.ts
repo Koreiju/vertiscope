@@ -1728,7 +1728,11 @@ export class GraphView extends ItemView {
           toPlace.push(cid);
         }
       }
-      const goneIds = new Set<string>((d.gone || []).filter((c: string) => byId.has(c)));
+      // G-109's plant removes EVERY retirement path, this one included: the
+      // projector reports a retired chunk gone as well as the central diff
+      // naming it, and a plant that left this open measured nothing (the
+      // planted arm read stale 0 in the Verifier, 2026-10-06).
+      const goneIds = new Set<string>(this.plantNoDiff ? [] : (d.gone || []).filter((c: string) => byId.has(c)));
       if (goneIds.size) {
         data.nodes = data.nodes.filter((n: any) => !goneIds.has(n.id));
         data.links = data.links.filter((l: any) =>

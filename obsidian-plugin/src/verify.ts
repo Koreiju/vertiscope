@@ -518,6 +518,11 @@ export class Verifier {
     const child = cp.spawn(python, [
       "-m", "domvec.obsidian", "supervise", "--workspace", ws,
       "--port", String(port), "--semantic", "--capture",
+      // Test sidecars only (the Verifier's, and the empty test workspace's):
+      // a panel gesture is adjudicated by `/enact mode=plan`, which the flag
+      // gates (G-111). The reader's own sidecar is started elsewhere and keeps
+      // whatever flags the reader chose.
+      "--enact",
     ], { cwd: base, windowsHide: true,
          env: { ...(window as any).process.env, PYTHONIOENCODING: "utf-8" } });
     child.stdout?.pipe(log);
