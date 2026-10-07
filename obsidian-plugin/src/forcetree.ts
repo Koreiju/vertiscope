@@ -26,7 +26,7 @@ export interface ForceNodeDelta {
   /** Nodes that are new: the page's own on the first drain, then chunks.
    *  `again` marks a chunk the tree already held whose content changed --
    *  pending once more, since its new content has not been transformed. */
-  added: { id: string; parent: string; title: string; lines: number; again?: boolean }[];
+  added: { id: string; parent: string; title: string; lines: number; again?: boolean; branch?: boolean }[];
   /** Node ids gone. */
   removed: string[];
   /** Existing nodes whose parent changed (a chunk arrived or left above them). */
@@ -61,6 +61,69 @@ export class ForceTree {
   private dict: string[] = [];
   private chunks = new Map<number, Held>();
   private started = false;
+  /** The patricia trie's BRANCHING points among the held chunks' addresses
+   *  (address -> its node id and parent): the interior the stream hangs on. */
+  private branches = new Map<string, { id: string; parent: string }>();
+  /** Planted by G-116's check: no branches -- every chunk under the page (the star). */
+  static plantFlat = false;
+
+  branchId(address: string): string { return `f:${this.url}@${address}`; }
+
+  /**
+   * The patricia trie over the held chunks' addresses (2026-10-06: "The
+   * lagging chunks initialized into a perfect sphere and not really the
+   * 'diff' over the patricia trie at all ... The diff should be sort of like
+   * a trickling effect over the emerging diff on the active and open tree").
+   * A chunk's parent was the nearest chunk ENCLOSING it, and sibling regions
+   * rarely enclose each other: 33/33 streamed nodes hung on the page node.
+   * Here the interior is drawn too: a prefix where held addresses DIVERGE
+   * (two or more distinct next steps) is a branch node; every chunk and
+   * branch hangs from its nearest proper-prefix node, chunk or branch, else
+   * the page. Compressed (only branching prefixes), so it is the patricia
+   * trie's own shape. Returns address -> parent id for chunks and branches.
+   */
+  private skeleton(): { parentOfChunk: Map<number, string>; branches: Map<string, string> } {
+    const page = ForceTree.pageId(this.url);
+    const parentOfChunk = new Map<number, string>();
+    const branches = new Map<string, string>();
+    if (ForceTree.plantFlat) {
+      for (const [sid, h] of this.chunks) parentOfChunk.set(sid, this.parentOf(h.address, sid));
+      return { parentOfChunk, branches };
+    }
+    // Next-step continuations under every prefix, and chunk addresses.
+    const nexts = new Map<string, Set<string>>();
+    const chunkAt = new Map<string, number>();
+    for (const [sid, h] of this.chunks) {
+      if (!chunkAt.has(h.address)) chunkAt.set(h.address, sid);
+      const steps = h.address.split("/").filter(Boolean);
+      for (let k = 1; k < steps.length; k++) {
+        const pre = "/" + steps.slice(0, k).join("/");
+        (nexts.get(pre) || nexts.set(pre, new Set()).get(pre)!).add(steps[k]);
+      }
+    }
+    const nodeAt = new Map<string, string>();          // address -> node id
+    for (const [pre, set] of nexts) {
+      if (set.size >= 2 && !chunkAt.has(pre) && pre !== "/html") nodeAt.set(pre, this.branchId(pre));
+    }
+    for (const [addr, sid] of chunkAt) nodeAt.set(addr, this.nodeId(sid));
+    const up = (addr: string): string => {
+      const steps = addr.split("/").filter(Boolean);
+      for (let k = steps.length - 1; k >= 1; k--) {
+        const pre = "/" + steps.slice(0, k).join("/");
+        const id = nodeAt.get(pre);
+        if (id) return id;
+      }
+      return page;
+    };
+    for (const [pre, id] of nodeAt) if (id.indexOf("@") >= 0) branches.set(pre, up(pre));
+    for (const [sid, h] of this.chunks) {
+      const own = chunkAt.get(h.address);
+      // A second chunk at the same address hangs beside the first, from
+      // the same parent (never from its twin).
+      parentOfChunk.set(sid, own !== undefined && own !== sid ? up(h.address) : up(h.address));
+    }
+    return { parentOfChunk, branches };
+  }
 
   constructor(url: string) { this.url = url; }
 
@@ -178,19 +241,40 @@ export class ForceTree {
         }
       }
     }
+    // The trie's skeleton, recomputed when an address came or went: branch
+    // nodes added and dropped, every parent that changed reparented.
+    const sk = (moved.length || fresh.length) ? this.skeleton() : null;
+    if (sk) {
+      // Branches that left (no longer a divergence), deepest first.
+      for (const [addr, b] of [...this.branches]) {
+        if (!sk.branches.has(addr)) { this.branches.delete(addr); delta.removed.push(b.id); }
+      }
+      // Branches that arrived, shallowest first so a parent precedes its child.
+      const arrived = [...sk.branches.keys()].filter((a) => !this.branches.has(a))
+        .sort((a, b) => a.split("/").length - b.split("/").length);
+      for (const addr of arrived) {
+        const parent = sk.branches.get(addr)!;
+        const id = this.branchId(addr);
+        this.branches.set(addr, { id, parent });
+        const last = addr.split("/").filter(Boolean).slice(-2).join("/");
+        delta.added.push({ id, parent, title: last, lines: 0, branch: true });
+      }
+      for (const [addr, b] of this.branches) {
+        const p = sk.branches.get(addr)!;
+        if (p !== b.parent && !arrived.includes(addr)) { b.parent = p; delta.reparented.push({ id: b.id, parent: p }); }
+      }
+    }
+    const freshIds = new Set(fresh);
     for (const sid of fresh) {
       const h = this.chunks.get(sid)!;
-      h.parent = this.parentOf(h.address, sid);
+      h.parent = sk ? (sk.parentOfChunk.get(sid) || ForceTree.pageId(this.url)) : this.parentOf(h.address, sid);
       delta.added.push({ id: h.id, parent: h.parent, title: h.title, lines: h.lines });
       delta.addresses.push(h.address);
     }
-    // Only a node under an address that came or went can have a new parent.
-    if (moved.length) {
-      const freshIds = new Set(fresh);
+    if (sk) {
       for (const [sid, h] of this.chunks) {
         if (freshIds.has(sid)) continue;
-        if (!moved.some((a) => h.address.startsWith(a + "/") || h.address === a)) continue;
-        const p = this.parentOf(h.address, sid);
+        const p = sk.parentOfChunk.get(sid) || ForceTree.pageId(this.url);
         if (p !== h.parent) { h.parent = p; delta.reparented.push({ id: h.id, parent: p }); }
       }
     }

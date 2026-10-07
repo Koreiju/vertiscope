@@ -757,7 +757,7 @@ export class GraphView extends ItemView {
       // old content and this stays pending until the new one is placed.
       if (cid && !a.again && byId.has(cid) && !byId.get(cid).force) { this.forceSpecs.delete(a.id); continue; }
       this.forceSpecs.set(a.id, { parent: a.parent, url: d.url, title: a.title, lines: a.lines,
-                                  cid, stale: !!a.again, born: Date.now() });
+                                  cid, stale: !!a.again, born: Date.now(), branch: !!(a as any).branch } as any);
       if (a.parent) {
         this.life.nodes.set(a.id, { url: d.url, drawnAt: Date.now(), cid });
         if (this.life.nodes.size > 20000) this.life.nodes.delete(this.life.nodes.keys().next().value as string);
@@ -776,11 +776,14 @@ export class GraphView extends ItemView {
       const off = [rr * Math.cos(th) * STREAM.BASE, rr * Math.sin(th) * STREAM.BASE, zz * STREAM.BASE];
       const jitter = (i: number) => (p ? off[i] : (Math.random() - 0.5) * 6);
       const page = !a.parent;
+      // A branch of the page's patricia trie: a small interior node the
+      // stream's chunks hang from (`ForceTree.skeleton`, G-116).
+      const branch = !!(a as any).branch;
       const n: any = {
-        id: a.id, level: page ? "page" : "chunk", name: a.title || a.id,
-        url: d.url, members: 1, tokens: 0, force: true,
-        val: page ? 3 : 1,
-        color: page ? "#8ab4f8" : "#9aa0a6",
+        id: a.id, level: page ? "page" : branch ? "path" : "chunk", name: a.title || a.id,
+        url: d.url, members: 1, tokens: 0, force: true, branch,
+        val: page ? 3 : branch ? 0.35 : 1,
+        color: page ? "#8ab4f8" : branch ? "#5f6368" : "#9aa0a6",
         x: (p?.x ?? 0) + jitter(0), y: (p?.y ?? 0) + jitter(1), z: (p?.z ?? 0) + jitter(2),
       };
       nodes.push(n);
@@ -1396,6 +1399,15 @@ export class GraphView extends ItemView {
       if (cid) this.collapsedTo.set(id, cid);
       this.forceSpecs.delete(id);
     }
+    // A trie branch with nothing left under it goes too, bottom-up: its
+    // chunks folded into stored nodes and it would hang as scaffolding.
+    for (let changed = true; changed;) {
+      changed = false;
+      const parents = new Set<string>([...this.forceSpecs.values()].map((x: any) => x.parent));
+      for (const [id, spec] of [...this.forceSpecs] as any) {
+        if (spec.branch && !parents.has(id)) { this.forceSpecs.delete(id); changed = true; }
+      }
+    }
     if (this.collapsedTo.size > 20000) this.collapsedTo.clear();
     const data: any = this.graph.graphData();
     const end = (x: any) => (typeof x === "object" && x ? x.id : x);
@@ -1414,7 +1426,7 @@ export class GraphView extends ItemView {
     // now draws chunks for, has nothing left to hold: it goes too (it was
     // left behind as a lone dot, "1 in the force tree").
     const pendingChunkUrls = new Set([...this.forceSpecs.values()]
-      .filter((x) => x.parent).map((x) => x.url));
+      .filter((x: any) => x.parent && !x.branch).map((x) => x.url));
     for (const [id, spec] of [...this.forceSpecs]) {
       if (!spec.parent && !pendingChunkUrls.has(spec.url) && expanded.has(spec.url)) {
         this.forceSpecs.delete(id);
