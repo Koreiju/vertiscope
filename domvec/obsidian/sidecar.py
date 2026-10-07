@@ -152,6 +152,35 @@ def _yield_to_foreground(limit_s: float = 5.0) -> float:
 #: Raised when there are chunks waiting for vectors.
 _EMBED_WANTED = threading.Event()
 
+#: When the store was last written (a capture or a settle). The checkpoint
+#: thread waits for a pause in writing before folding the WAL in (D-48).
+_LAST_WRITE = [0.0]
+_CHECKPOINT_QUIET_S = 60.0
+_CHECKPOINT_MIN_WAL = 1 << 20
+
+
+def _checkpoint_forever(workspace, stop) -> None:
+    """Fold the WAL into the store during PAUSES (D-48, 2026-10-07).
+
+    A native Kuzu crash sets the WAL aside unreplayable, losing every write
+    since the last checkpoint (~17 MB once). Kuzu checkpoints on its own only
+    past a size threshold. A checkpoint here took 10-19 s on a 32 GB store, so
+    it runs only after 60 s with no write and once the WAL holds 1 MB or more:
+    a crash costs at most what was written since the reader last paused, and
+    browsing never waits on it."""
+    wal = Path(str(workspace.store.path) + ".wal")
+    while not stop.wait(15.0):
+        try:
+            if time.time() - _LAST_WRITE[0] < _CHECKPOINT_QUIET_S:
+                continue
+            if not wal.exists() or wal.stat().st_size < _CHECKPOINT_MIN_WAL:
+                continue
+            with _WORK_LOCK:
+                ms = workspace.store.checkpoint()
+            _profile("checkpoint", {"ms": ms, "wal_before": wal.stat().st_size if wal.exists() else 0})
+        except Exception as exc:                    # noqa: BLE001
+            _profile("checkpoint", {"error": str(exc)[:160]})
+
 #: Token counts for the page the overlay is watching, keyed on its chunk set.
 _TOKEN_MEMO: Dict = {}
 
@@ -1387,6 +1416,10 @@ class _Handler(BaseHTTPRequestHandler):
                     with _WORK_LOCK:
                         self.workspace.ingest(
                             url, spine.trie, title=(body.get("title") or ""))
+                # Durability is the checkpoint thread's (`_checkpoint_forever`):
+                # on this 32 GB store a checkpoint took 10-19 s, and run here
+                # it held the write lock through every settle (2026-10-07).
+                _LAST_WRITE[0] = time.time()
                 # A settled page is complete: whatever the projector holds
                 # for it that the page no longer has is gone.
                 _project_page(self.workspace, url)
@@ -1480,6 +1513,7 @@ class _Handler(BaseHTTPRequestHandler):
                 except Exception:                   # noqa: BLE001
                     pass
                 _EMBED_WANTED.set()
+                _LAST_WRITE[0] = time.time()
                 # And the page's merge groups are now out of date (`G-65`).
                 # Each drain pushes the deadline out, so this lands when the
                 # reader pauses rather than while they are still scrolling.
@@ -2463,6 +2497,9 @@ def serve(workspace, port: int = 8787, *, block: bool = True,
             target=_embed_forever, args=(workspace, stop),
             name="domvec-embed", daemon=True)
         _EMBED_THREAD.start()
+    if workspace is not None and not getattr(workspace, "read_only", False)             and hasattr(workspace.store, "checkpoint"):
+        threading.Thread(target=_checkpoint_forever, args=(workspace, stop),
+                         name="domvec-checkpoint", daemon=True).start()
 
     # **The chunk projector.** One fit over every drawable chunk, made off
     # the request path; then a worker that drains the stream the embedder and

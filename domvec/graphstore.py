@@ -86,6 +86,29 @@ EMBED_DIM = 768
 _BUFFER_POOL = int(os.environ.get("DOMVEC_KUZU_BUFFER_BYTES",
                                   str(2 * 1024 * 1024 * 1024)))
 
+
+def _pool_for(path) -> int:
+    """The buffer pool for a store of this size (D-48, 2026-10-07).
+
+    2 GiB was chosen for a 4.9 GB store; at 32 GB a CHECKPOINT failed with
+    "the buffer pool is full and no memory could be freed", and the sidecar
+    had died natively in Kuzu minutes earlier. Without an explicit
+    `DOMVEC_KUZU_BUFFER_BYTES`: a sixth of the store, at least 2 GiB, at most
+    a quarter of physical memory."""
+    if os.environ.get("DOMVEC_KUZU_BUFFER_BYTES"):
+        return _BUFFER_POOL
+    floor = 2 * 1024 * 1024 * 1024
+    try:
+        size = os.path.getsize(str(path)) if os.path.exists(str(path)) else 0
+    except OSError:
+        size = 0
+    try:
+        import psutil
+        cap = psutil.virtual_memory().total // 4
+    except Exception:                               # noqa: BLE001
+        cap = 4 * floor
+    return int(max(floor, min(cap, size // 6)))
+
 _SCHEMA = [
     """CREATE NODE TABLE IF NOT EXISTS Page(
         url STRING, title STRING, scanned_at DOUBLE, root_hash STRING,
@@ -339,7 +362,7 @@ class GraphStore:
         try:
             self.db = kuzu.Database(str(self.path),
                                     read_only=self.read_only,
-                                    buffer_pool_size=_BUFFER_POOL)
+                                    buffer_pool_size=_pool_for(self.path))
         except Exception as exc:  # noqa: BLE001
             if "lock" in str(exc).lower():
                 raise RuntimeError(
@@ -1239,6 +1262,18 @@ class GraphStore:
             if any(values):
                 out[cid] = values
         return out
+
+    def checkpoint(self) -> float:
+        """Fold the write-ahead log into the database now; returns ms.
+
+        Kuzu checkpoints on its own only when the WAL passes a size threshold.
+        A native crash then loses everything since the last one: on
+        2026-10-07 a ~17 MB WAL was set aside unreplayable (D-48). Called when
+        a page SETTLES, so a crash costs at most the page in progress.
+        """
+        t0 = time.perf_counter()
+        self._execute("CHECKPOINT")
+        return round((time.perf_counter() - t0) * 1000, 1)
 
     def contains_within(self, url: str):
         """The containment edges among one page's chunks, as (cid, cid).
