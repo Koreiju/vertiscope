@@ -87,12 +87,15 @@ def stage_store(session, wait_s=90):
       const t0 = performance.now();
       let cids = [], placed = [], stable = 0, last = -1;
       while (performance.now() - t0 < %d * 1000) {
+        // G-135: every poll, not once a stage -- this wait ran 90 s blind.
+        if (readerBack()) return JSON.stringify({ stopped: "reader" });
         cids = await v.sidecar.pageCids(U).catch(() => []);
         if (cids.length && cids.length === last) stable++; else stable = 0;
         last = cids.length;
         if (stable >= 4) break;
         await sleep(1500);
       }
+      if (readerBack()) return JSON.stringify({ stopped: "reader" });
       // Placed by the fit: ask for every stored chunk, and draw what comes back.
       const got = cids.length ? await v.sidecar.place(cids) : null;
       if (got && got.nodes && got.nodes.length) v.absorb(got.nodes, got.edges);
@@ -182,6 +185,8 @@ def stage_pin(session):
       }
       pick = pick || fallback;
       if (!pick) return JSON.stringify({ error: "no point resolves to a stored chunk", points: pts.length });
+      // G-135: never press anything once the reader is back.
+      if (readerBack()) return JSON.stringify({ stopped: "reader" });
       try { app.workspace.setActiveLeaf(bl, { focus: true }); } catch (e) {}
       wv.focus(); await sleep(300);
       wc.sendInputEvent({ type: "mouseMove", x: pick.x, y: pick.y }); await sleep(400);
@@ -190,12 +195,12 @@ def stage_pin(session):
         wc.sendInputEvent({ type: "mouseUp", x: pick.x, y: pick.y, button: "right", clickCount: 1 });
         await sleep(120);
       }
-      for (let i = 0; i < 40 && !b.pinnedState().length; i++) await sleep(200);
+      for (let i = 0; i < 40 && !b.pinnedState().length; i++) { if (readerBack()) return JSON.stringify({ stopped: "reader" }); await sleep(200); }
       const pinned = b.pinnedState();
       const cid = pinned.length ? pinned[0].cid : null;
       // The 3D half arrives once the chunk is placeable (pinChunk retries).
       let board = null;
-      for (let i = 0; i < 40 && cid; i++) { board = v.containerEl.querySelector('.domvec-bb[data-cid="' + cid + '"]'); if (board) break; await sleep(250); }
+      for (let i = 0; i < 40 && cid; i++) { if (readerBack()) return JSON.stringify({ stopped: "reader" }); board = v.containerEl.querySelector('.domvec-bb[data-cid="' + cid + '"]'); if (board) break; await sleep(250); }
       await sleep(3000);
       const readPanel = (root, mdSel) => {
         if (!root) return null;
