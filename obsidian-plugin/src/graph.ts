@@ -2380,7 +2380,11 @@ export class GraphView extends ItemView {
 
   /** Planted by the focus check: hover rings only, the camera stays. */
   plantNoFocus = false;
-  focusStats = { asked: 0, flown: 0, followed: 0, released: 0, last: "", zoomed: 0, kept_zoom: 0, last_d: 0 };
+  focusStats = { asked: 0, flown: 0, followed: 0, released: 0, last: "", zoomed: 0, kept_zoom: 0, last_d: 0, clamped: 0 };
+  /** A flight never ends with its target smaller than this radius on screen (px). */
+  minTargetPx = 6;
+  /** Planted: the reader's zoom kept whatever the target's size (the speck flights). */
+  plantSpeckFlights = false;
   /** The navigation the camera last zoomed for, and when (performance.now). */
   private zoomState = { zoomedFor: "", zoomedAt: -1e9 };
   /** Planted: every flight re-zooms (the old behaviour), and tracking copies every jitter. */
@@ -2458,8 +2462,19 @@ export class GraphView extends ItemView {
     const userD = tgt ? Math.hypot(cam.x - tgt.x, cam.y - tgt.y, cam.z - tgt.z) : NaN;
     const decided = zoomFor(this.zoomState, nav, performance.now(), userD, Math.max(45, 10 * r),
                             { always: this.plantAlwaysZoom });
-    const D = decided.distance;
+    let D = decided.distance;
     if (decided.zoom) this.focusStats.zoomed++; else this.focusStats.kept_zoom++;
+    // The reader's zoom is kept -- but never so far out that the target is a
+    // speck: a flight landed on a chunk a pixel or two wide, its links running
+    // off-screen, and read as "an empty nodes problem" (2026-10-10). The
+    // target keeps at least `minTargetPx` of radius on screen.
+    const camObj: any = g.camera();
+    const fov = ((camObj && camObj.fov) || 50) * Math.PI / 180;
+    const H = (g.renderer && g.renderer().domElement && g.renderer().domElement.clientHeight) || 800;
+    const Dvisible = r * (H / 2) / (this.minTargetPx * Math.tan(fov / 2));
+    if (!this.plantSpeckFlights && Number.isFinite(Dvisible) && Dvisible > 0 && D > Dvisible) {
+      D = Dvisible; this.focusStats.clamped++;
+    }
     let dx = cam.x - n.x, dy = cam.y - n.y, dz = cam.z - (n.z || 0);
     const len = Math.hypot(dx, dy, dz) || 1;
     dx /= len; dy /= len; dz /= len;
