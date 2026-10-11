@@ -2911,6 +2911,24 @@ region that decides which pictures are revealed, graded by nearness to the
 ray: an orb glows brighter from within, a picture keeps its image and glows
 (brightened, a soft light at its edge).*
 
+> also, I don't know if the chunks are linked correctly to each other along
+> the hierarchical DOM structures over their patricia trie paths... it looks
+> like a shortcut where there's just all the recursive chunks linked to their
+> root URL node. Perhaps investigate further, since this is a recurring item
+> that needs continuous clarity on its representations in the 3D graph viewer
+
+> node hover and image/glow features seem to work but have a noticeably slow
+> latency
+
+*Read as (2026-10-11): (103) a page's chunks are linked along the patricia
+trie -- each to its nearest enclosing chunk -- never all to the url node, on
+every page, however its chunks were streamed in; and this is checked
+continuously, not once. Measured: Dril 261/263 and Okapi 182/182 agree with
+the trie, RFC 9110 drew all 1,172 off its url node (stored containment is
+linked per drain). (104) hover, glow and picture reveal respond at once:
+pointer to glow measured 49-113 ms in chunk view, most of it an 80 ms throttle
+and a full re-sync per change.*
+
 ---
 
 

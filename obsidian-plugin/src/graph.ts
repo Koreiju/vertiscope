@@ -3661,6 +3661,19 @@ export class GraphView extends ItemView {
     m.updateMatrix();
     (m as any).__proxy = true;
     if (this.plantNoPick) m.raycast = () => {};
+    else {
+      // Exact picking for the nodes near the pointer's ray only (2026-10-11:
+      // three.js's hover raycast tested all 22k proxies on every pointer move,
+      // ~28% of the CPU in chunk view). `glowNear` is the per-frame ranking of
+      // the nodes nearest that same ray; anything outside it cannot be under
+      // the pointer, so it declines before any matrix or sphere test. Empty
+      // (no ranking yet): every proxy is tested, as before. Planted: always.
+      const exact = THREE.Mesh.prototype.raycast;
+      m.raycast = (rc: any, out: any[]) => {
+        if (!this.plantFullPick && this.pickStamp && n.__pk !== this.pickStamp) return;
+        exact.call(m, rc, out);
+      };
+    }
     return m;
   }
 
@@ -3998,6 +4011,15 @@ export class GraphView extends ItemView {
   plantNoHoverGlow = false;
   /** Planted (2026-10-11): the slow glow -- an 80 ms throttle and a full re-sync per change. */
   plantSlowGlow = false;
+  /** Planted (2026-10-11): every pick proxy raycast on every pointer move. */
+  plantFullPick = false;
+  /** Nodes whose drawn disc covers the pointer's ray: always pickable. */
+  pickNear = new Set<any>();
+  /** The ranking's generation; a proxy is tested when its node carries it. */
+  pickStamp = 0;
+  /** Pointer move -> its glow written, ms, last 300 (item 104). */
+  glowLatency: number[] = [];
+  private pointerAt = 0;
   plantAllPictures = false;
   detailStats = { computes: 0, last_ms: 0, size: 0, candidates: 0 };
   private pointerNdc: [number, number] = [0, 0];
@@ -4027,6 +4049,10 @@ export class GraphView extends ItemView {
     // hovered nodes within a certain region of the mouse on the camera normal").
     const gBest: any[] = [], gDist: number[] = [];
     let gWorst = -1;
+    // And every node whose drawn disc covers the ray, however far its centre:
+    // a big node under the pointer must stay pickable (the raycast gate).
+    const covers = new Set<any>();
+    const rs = g.nodeRelSize();
     let worst = -1, candidates = 0;
     for (const n of g.graphData().nodes) {
       if (!Number.isFinite(n.x)) continue;
@@ -4037,6 +4063,9 @@ export class GraphView extends ItemView {
       // mouse ON SCREEN. The raw normal let nodes far down the ray -- specks --
       // take every slot from the ones under the cursor.
       const d2 = (vx * vx + vy * vy + vz * vz - t * t) / (t * t);
+      // An upper bound on the drawn radius: a sphere's, times a panel's gain.
+      const hr = Math.cbrt(Math.max(n.val ?? 1, 1e-9)) * rs * 1.75 * 1.4142;
+      if (d2 * t * t < hr * hr) covers.add(n);
       if (gBest.length < K) {
         gBest.push(n); gDist.push(d2);
         if (gBest.length === K) { gWorst = 0; for (let i = 1; i < K; i++) if (gDist[i] > gDist[gWorst]) gWorst = i; }
@@ -4062,6 +4091,12 @@ export class GraphView extends ItemView {
     const near = Math.sqrt(Math.min(...gDist)), far = Math.sqrt(Math.max(...gDist));
     const span = Math.max(1e-9, far - near);
     const was = this.glowNear;
+    this.pickNear = covers;
+    // One number per candidate, compared per proxy: a Set lookup per proxy per
+    // raycast was itself 7% of the CPU at 22k nodes.
+    const stamp = ++this.pickStamp;
+    for (const n of gBest) n.__pk = stamp;
+    for (const n of covers) n.__pk = stamp;
     this.glowNear = new Map(gBest.map((n, i) => [n, 1 - 0.75 * (Math.sqrt(gDist[i]) - near) / span]));
     // Only the nodes whose glow changed are rewritten, in place; a change of
     // which pictures are revealed changes what is drawn, and takes a full sync.
@@ -4070,6 +4105,13 @@ export class GraphView extends ItemView {
       const changed = new Set<any>([...was.keys(), ...this.glowNear.keys()]);
       const rs = g.nodeRelSize(), media = this.drawnMedia;
       if (this.batch.patch(changed, (n) => this.lookOf(n, rs, media)) > 0) this.batchDirty = true;
+    }
+    // The pointer move this frame answers, to the moment its glow is written:
+    // the hover latency the reader sees, minus the frame that draws it.
+    if (this.pointerAt) {
+      this.glowLatency.push(Math.round((performance.now() - this.pointerAt) * 10) / 10);
+      if (this.glowLatency.length > 300) this.glowLatency.shift();
+      this.pointerAt = 0;
     }
     this.detailStats = { computes: this.detailStats.computes + 1, last_ms: Math.round((performance.now() - t0) * 100) / 100,
                          size: best.length, candidates };
@@ -4086,6 +4128,7 @@ export class GraphView extends ItemView {
       if (!r.width || !r.height) return;
       this.pointerNdc = [((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1];
       this.detailDirty = true;
+      if (!this.pointerAt) this.pointerAt = e.timeStamp || performance.now();
       // Not a full re-sync per pointer move: the glow pass patches what changed
       // and asks for a sync only when the revealed pictures change.
       if (this.plantSlowGlow) this.batchDirty = true;
@@ -4168,6 +4211,7 @@ export class GraphView extends ItemView {
       if (this.lastFrameAt) {
         this.frameGaps.push(t - this.lastFrameAt);
         if (this.frameGaps.length > 600) this.frameGaps.splice(0, 100);
+        this.adaptPixelRatio(g, t);
       }
       this.lastFrameAt = t;
       const frames = info.render.frame - this.lastFrameNo;
@@ -4993,6 +5037,34 @@ export class GraphView extends ItemView {
       this.batch.setHue(Math.abs(h) < 1e-3 ? 0 : (h + 2 * Math.PI) % (2 * Math.PI));
     }
     this.driftStats.hue = Math.round(this.batch.hue * 1000) / 1000;
+  }
+
+  /**
+   * The pixel ratio follows the frame time (2026-10-11: "node hover and
+   * image/glow features ... noticeably slow latency" -- chunk view drew 70 ms
+   * frames at ratio 1.5 while the pointer moved, 47% of the time native and
+   * GPU: every glass orb is blended per pixel). Over the last 40 frames, a
+   * median above 28 ms drops the ratio to 1; under 12 ms for 5 s puts the
+   * screen's own ratio back. Planted: the ratio never moves.
+   */
+  plantFixedPixelRatio = false;
+  dprStats = { drops: 0, restores: 0, ratio: 0 };
+  private dprCheckAt = 0;
+  private dprFastSince = 0;
+  private adaptPixelRatio(g: any, now: number): void {
+    if (this.plantFixedPixelRatio || now - this.dprCheckAt < 500 || this.frameGaps.length < 40) return;
+    this.dprCheckAt = now;
+    const r = g.renderer();
+    const recent = this.frameGaps.slice(-40).sort((a, b) => a - b);
+    const p50 = recent[20];
+    const screen = window.devicePixelRatio || 1, cur = r.getPixelRatio();
+    if (p50 > 28 && cur > 1) {
+      r.setPixelRatio(1); this.dprStats.drops++; this.dprFastSince = 0;
+    } else if (p50 < 12 && cur < screen) {
+      if (!this.dprFastSince) this.dprFastSince = now;
+      else if (now - this.dprFastSince > 5000) { r.setPixelRatio(screen); this.dprStats.restores++; this.dprFastSince = 0; }
+    } else this.dprFastSince = 0;
+    this.dprStats.ratio = r.getPixelRatio();
   }
 
   /** Static scene ancestors whose matrices were composed once and frozen. */
