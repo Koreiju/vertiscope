@@ -2356,6 +2356,10 @@ def render_trie(
         headers = {} if PLANT_NAKED_ROWS else _table_headers(chunks)
         for chunk in chunks:
             chunk.lines = _tabulate(chunk.lines, headers)
+    # The page repeating itself, drawn once (`D-4`, `M-8`).
+    if not PLANT_STRUCTURAL_NOISE:
+        for chunk in chunks:
+            chunk.lines = _fold_structural(chunk.lines)
 
     _level_page(chunks)
     _number_parts(chunks)
@@ -2506,7 +2510,9 @@ def _tabulate(lines: List[MarkdownLine],
             out.extend(line for _tr, _c, line in run); i = j
             continue
         for k, (_tr, cells) in enumerate(rows):
-            texts = [" ".join(" ".join(l.text.split()) for l in ls).replace("|", "\\|") for _c, ls in cells]
+            # A cell's own-element label ("Sort ascending") is not its content.
+            texts = [_cell_text([l for l in ls if not l.address.xpath.endswith("/" + c)] or ls).replace("|", "\\|")
+                     for c, ls in cells]
             members = [l for _c, ls in cells for l in ls]
             head = members[0]
             extra: List[ContentAddress] = list(head.inline)
@@ -2524,6 +2530,88 @@ def _tabulate(lines: List[MarkdownLine],
                 row = replace(row, absorbed=tuple(a for l in members for a in getattr(l, "absorbed", ())))
             out.append(row)
         i = j
+    return out
+
+
+#: Planted (`D-4`): punctuation, a link's own icon and a cell's repeated
+#: label each drawn as a line of their own, as before.
+PLANT_STRUCTURAL_NOISE = False
+
+_PUNCT_ONLY = re.compile(r"^[\s*-]*([|.,:;?!·•–—/()\[\]]+)\s*$")
+_LINK_LABEL = re.compile(r"^\[([^\]]*)\]\(")
+_IMAGE_ALT = re.compile(r"^!\[([^\]]*)\]\(")
+# HEADER cells only: a `td` whose one line sits on the element is DATA ("Yes"
+# in a feature table -- 20 of them folded away on the first run).
+_CELL_OWN = re.compile(r"/th(?:\[\d+\])?$")
+
+
+def _absorb(into: MarkdownLine, line: MarkdownLine) -> MarkdownLine:
+    # On `inline`, not `absorbed`: in every fold below the folded words ARE
+    # visible in the line that takes them (the full stop appended, the icon's
+    # alt that is the link's label, the label already drawn once) -- which is
+    # what `inline` means. And `covered` then does not move with the window:
+    # on `absorbed` it shifted 42 addresses between windows 1200 and 200,
+    # because which neighbour a fold finds depends on where a chunk is cut.
+    more = (line.address,) + tuple(line.inline)
+    return replace(into, inline=tuple(into.inline) + more,
+                   absorbed=tuple(getattr(into, "absorbed", ())) + tuple(getattr(line, "absorbed", ())))
+
+
+def _fold_structural(lines: List[MarkdownLine]) -> List[MarkdownLine]:
+    """Draw once what the page only repeats for its own structure (`D-4`).
+
+    The goal: *"full deduplication of repeat substrings that are essentially
+    structural redundancies of the web pages themselves"* -- settled in
+    PLUGIN_GOAL as "when a page repeats itself structurally, the chunk shows
+    it once". Measured 2026-10-11 over six stored pages, 1,855 of 20,535 lines
+    repeated within their own chunk; three causes are structure, each folded
+    here into a line that already speaks for it, its address kept on that
+    line's `absorbed` (findable, its edge hung, `accounted` unchanged):
+
+    * a line of punctuation alone (`- .`, `- |`, `- ,`: 335) -- a sentence's
+      full stop or a navbox separator cut off from what it belongs to;
+    * an `<img>` inside a link whose alt IS the link's text (Wikipedia's edit
+      pencil, 42) -- one control drawn twice;
+    * a cell's own label repeated on its siblings ("Sort ascending" on every
+      sortable header, 67) -- drawn at the first.
+
+    NOT folded, though it repeats: data. "Yes"/"No" cells (741) and API type
+    links (`[<string>]`, 100+) are distinct facts at distinct places; a
+    repeated value is not a repeated structure.
+    """
+    out: List[MarkdownLine] = []
+    own_label: Dict[str, int] = {}
+    for line in lines:
+        text = " ".join(line.text.split())
+        prev = out[-1] if out else None
+        m = _PUNCT_ONLY.match(text)
+        # Never inside a table cell: a cell's "?" or "–" is a VALUE ("unknown",
+        # "none") -- folding them turned a feature table's "Yes" + "?" into
+        # "Yes?" on the first run.
+        in_cell = line.address is not None and _CELL.match(line.address.xpath) is not None
+        # Words only: a picture drawn as `![]` is made of punctuation characters
+        # and is not punctuation (it was glued onto apnews' "( More )").
+        media = line.address is not None and (line.address.tag.split(".")[0] in ("image", "media")
+                                              or text.startswith(("![", "[")))
+        if m and not in_cell and not media and prev is not None and not prev.text.lstrip().startswith("|"):
+            p = m.group(1)
+            sep = "" if p[0] in ".,:;?!)]" else " "
+            out[-1] = _absorb(replace(prev, text=prev.text.rstrip() + sep + p), line)
+            continue
+        mi = _IMAGE_ALT.match(text)
+        if (mi and prev is not None and line.address is not None and prev.address is not None
+                and line.address.xpath.rsplit("/", 1)[0] == prev.address.xpath):
+            ml = _LINK_LABEL.match(" ".join(prev.text.split()))
+            if ml and " ".join(ml.group(1).split()) == " ".join(mi.group(1).split()):
+                out[-1] = _absorb(prev, line)
+                continue
+        if line.address is not None and _CELL_OWN.search(line.address.xpath) and text:
+            first = own_label.get(text)
+            if first is not None:
+                out[first] = _absorb(out[first], line)
+                continue
+            own_label[text] = len(out)
+        out.append(line)
     return out
 
 
