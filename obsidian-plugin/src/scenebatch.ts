@@ -203,12 +203,14 @@ export class SceneBatch {
   private inFlight = 0;
   /** Planted: every picture fetched at once and failures retried each frame. */
   plantUnthrottled = false;
+  /** Planted: a picture not loaded yet draws as the old opaque sphere. */
+  plantSphereFallback = false;
   loadStats = { started: 0, placed: 0, failed: 0, maxInFlight: 0 };
   /** Told when a picture lands in the atlas: what is drawn has changed. */
   onPlaced: (() => void) | null = null;
   private nextCell = 0;
   private colours = new Map<string, THREE.Color>();
-  lastStats = { drawCalls: 3, opaque: 0, translucent: 0, glass: 0, lines: 0, atlasCells: 0, atlasFull: 0, syncMs: 0 };
+  lastStats = { drawCalls: 3, opaque: 0, translucent: 0, glass: 0, spheres: 0, pending_pictures: 0, lines: 0, atlasCells: 0, atlasFull: 0, syncMs: 0 };
 
   constructor(private scene: THREE.Scene, private renderer: THREE.WebGLRenderer,
               private load: (src: string) => Promise<Picture | null>) {
@@ -395,18 +397,26 @@ export class SceneBatch {
     this.grow(this.opaque, nodes.length);
     this.grow(this.clear, nodes.length);
     this.grow(this.glass, nodes.length);
-    let no = 0, nt = 0, ng = 0;
+    let no = 0, nt = 0, ng = 0, spheres = 0, pendingPics = 0;
     for (const n of nodes) {
       if (!Number.isFinite(n.x) || !Number.isFinite(n.y)) continue;
       const lk = look(n);
       if (!lk) continue;
-      const m = lk.glass ? this.glass : lk.translucent ? this.clear : this.opaque;
-      const i = lk.glass ? ng++ : lk.translucent ? nt++ : no++;
+      let cell: number | undefined;
+      if (lk.picture) cell = this.cellOf(lk.picture);
+      // A picture not in the atlas yet (or never: it failed) is the node's
+      // glowing orb meanwhile, not the old opaque sphere (2026-10-11: "still
+      // seeing older nodes" -- 282 url icons drew as flat spheres until their
+      // pictures landed). Planted: the old fallback.
+      const pending = !!lk.picture && cell === undefined && !lk.translucent && !this.plantSphereFallback;
+      const toGlass = lk.glass || pending;
+      const m = toGlass ? this.glass : lk.translucent ? this.clear : this.opaque;
+      const i = toGlass ? ng++ : lk.translucent ? nt++ : no++;
       m.offset.setXYZ(i, n.x, n.y, n.z || 0);
       m.size.setX(i, lk.half);
       const col = this.colour(lk.color);
-      let cell: number | undefined;
-      if (lk.picture) cell = this.cellOf(lk.picture);
+      if (pending) { pendingPics++; m.uv.setXYZW(i, 0, 0, -1, 0); m.color.setXYZW(i, col.r, col.g, col.b, 1); continue; }
+      if (!toGlass && !lk.translucent && cell === undefined) spheres++;     // the old opaque material
       if (cell !== undefined) {
         const u0 = (cell % PER_ROW) / PER_ROW, v0 = Math.floor(cell / PER_ROW) / PER_ROW;
         // Row 0 of the atlas is the picture's top: the quad's top corner reads v0.
@@ -449,7 +459,7 @@ export class SceneBatch {
     this.lines.geometry.setDrawRange(0, nl * 2);
     this.linePos.needsUpdate = true;
     this.lineCol.needsUpdate = true;
-    this.lastStats = { drawCalls: ng ? 4 : 3, opaque: no, translucent: nt, glass: ng, lines: nl, atlasCells: this.nextCell,
+    this.lastStats = { drawCalls: ng ? 4 : 3, opaque: no, translucent: nt, glass: ng, spheres, pending_pictures: pendingPics, lines: nl, atlasCells: this.nextCell,
                        atlasFull: this.lastStats.atlasFull, syncMs: Math.round((performance.now() - t0) * 100) / 100 };
   }
 

@@ -35,7 +35,7 @@ import { ChunkSurface, SurfaceHost } from "./surface";
 import { baseFor, faviconFor, getSnapshot, pictureFor, putSnapshot, renderSnapshot } from "./snapshot";
 import type { ActRecord, ActResult } from "./panelact";
 import { PANEL_VIEW, PanelView } from "./panelview";
-import { SearchField, brightness, type FieldHit, type FieldAnswer } from "./searchfield";
+import { SearchField, brightness, fade, type FieldHit, type FieldAnswer } from "./searchfield";
 
 export const GRAPH_VIEW = "domvec-graph-view";
 
@@ -450,7 +450,7 @@ export class GraphView extends ItemView {
     this.canvasEl = canvas;
     // The naked search field, middle-bottom of the 3D panel (PLUGIN_GOAL 84).
     this.searchField = new SearchField(canvas, (q, k) => this.searchAsk(q, k),
-                                       (hits, d) => this.showSearch(hits, d), () => this.clearSearch());
+                                       (hits, d, soft) => this.showSearch(hits, d, soft), () => this.clearSearch());
 
     const load = async () => {
       // Not over the force tree's caption: a retry every 3 s wrote
@@ -3654,16 +3654,30 @@ export class GraphView extends ItemView {
       // default"). Pictures stay pictures; a streaming node keeps its grey
       // translucence, so streaming still reads as streaming. Planted: the old
       // opaque spheres.
-      if (this.plantOpaqueOrbs || base.picture || base.translucent || n.hovered) return base;
+      if (this.plantOpaqueOrbs || n.hovered) return base;
+      // A REVEALED picture is the picture alone; unrevealed, the node is its
+      // orb -- the old switch between node and image (2026-10-11: "we dont need
+      // spheres over images ... we can switch between node and image reveals as
+      // was the same as the older functionality"). A streaming node is an orb
+      // with a dimmer glow, so streaming still reads (item 99: "some nodes are
+      // not the same level of glass and translucent").
+      if (base.picture) return base;
+      if (base.translucent) return { half: base.half, translucent: true, alpha: 0.4, color: base.color, glass: true };
       return { half: base.half, translucent: true, alpha: 1, color: base.color, glass: true };
     }
     const r = st.ranks.get(String(n.id));
+    if (r !== undefined && r < st.shown && fade(r, st.soft) < 0.999) {
+      // The frontier, part-way in: a glass orb gaining its own colour as the
+      // slider passes it, then lit (2026-10-11: "smoothly brighten on soft
+      // integer result nodes").
+      return { half: Math.max(base.half, st.minHalf), translucent: true, alpha: fade(r, st.soft), color: base.color, glass: true };
+    }
     if (r !== undefined && r < st.shown) {
       // A shown result, as itself, lit from within (item 88).
       // At least the scene's median size: a result is what the reader is
       // looking for, and chunk nodes drew as specks among the glass (seen
       // 2026-10-11).
-      return { ...base, half: Math.max(base.half, st.minHalf), translucent: false, alpha: 1, glow: brightness(r, st.shown) };
+      return { ...base, half: Math.max(base.half, st.minHalf), translucent: false, alpha: 1, glow: brightness(r, st.soft) };
     }
     // Everything else: colourless glass, no picture -- a lens the results'
     // lights reflect off ("These nodes are the only nodes visible while a
@@ -3675,16 +3689,27 @@ export class GraphView extends ItemView {
   /** Planted: the opaque lit spheres the glowing orbs replaced as the default. */
   plantOpaqueOrbs = false;
 
-  // ---- PLUGIN_GOAL 84-88: the search field, its results, glass and light ----
+  // ---- PLUGIN_GOAL 84-88, 94-97: the search field, its results, glass and light ----
+  //
+  // **Retrieval is a LOOK** (2026-10-11, item 96: "streaming and node layout
+  // pipelines ... that work unaffected by the retrieval results (since that's
+  // just a brightness and fly-to-node thing)"). A search places no node,
+  // moves none and removes none: each result lights the node that stands for
+  // it NOW -- its own chunk if drawn, else its page node, the fallback a hover
+  // takes -- re-resolved on every draw, so a stream adding nodes is picked up
+  // without the search touching it. (The first version placed undrawn
+  // results and removed them on clear: the layout changed with the query.)
 
   searchField: SearchField | null = null;
-  /** The ranked results and how many are shown; null when not searching. */
-  searchState: { query: string; ranks: Map<string, number>; hits: FieldHit[]; shown: number; at: number; minHalf: number } | null = null;
+  /** The ranked results, how many are shown, and the drawn node each resolves to. */
+  searchState: { query: string; hits: FieldHit[]; shown: number; soft: number; at: number; minHalf: number;
+                 ranks: Map<string, number>; targets: (any | null)[] } | null = null;
   /** Planted (item 88): results shown, but nothing turned to glass and no lights. */
   plantNoGlass = false;
-  searchStats = { asked: 0, placed: 0, shown: 0, lights: 0, last_ms: 0, missing: 0, removed: 0, web_merged: 0 };
-  /** Result chunks a search drew that their page did not: removed when it clears. */
-  private searchPlaced = new Set<string>();
+  /** Planted (item 96): the first version -- undrawn results PLACED in the scene. */
+  plantPlaceResults = false;
+  searchStats = { asked: 0, shown: 0, lights: 0, last_ms: 0, resolved_chunk: 0, resolved_page: 0, unresolved: 0,
+                  placed: 0, web_merged: 0, flown_top: 0 };
 
   /** Told the plugin, which tells the browser cell: search the web too (item 85). */
   onWebSearch: (query: string) => void = () => {};
@@ -3701,17 +3726,17 @@ export class GraphView extends ItemView {
     this.webTimer = window.setInterval(async () => {
       const f = this.searchField;
       if (!f || f.query !== query || --left < 0) { window.clearInterval(this.webTimer); return; }
-      const got: any = await this.sidecar.search(query, { k: f.k }).catch(() => null);
+      const got: any = await this.sidecar.search(query, { k: f.total }).catch(() => null);
       if (!got || f.query !== query) return;
       const hits: FieldHit[] = (got.hits || []).map((h: any) => ({ cid: String(h.cid), url: String(h.url || "") }));
       const fresh = hits.filter((h) => !f.hits.some((x) => x.cid === h.cid));
-      if (fresh.length) { await this.placeResults(fresh); this.searchStats.web_merged += fresh.length; }
+      this.searchStats.web_merged += fresh.length;
       f.extend(fresh, Number(got.n || 0));
     }, 3000);
   }
 
-  /** One query: the store's ranking, its undrawn results placed in the scene. */
-  private async searchAsk(query: string, k: number): Promise<FieldAnswer | null> {
+  /** One query: the store's ranking, `total` deep. Nothing in the scene changes. */
+  private async searchAsk(query: string, total: number): Promise<FieldAnswer | null> {
     const t0 = performance.now();
     this.searchStats.asked++;
     if (query !== this.webQuery) {
@@ -3719,31 +3744,50 @@ export class GraphView extends ItemView {
       this.onWebSearch(query);
       this.followWeb(query);
     }
-    const got: any = await this.sidecar.search(query, { k });
+    const got: any = await this.sidecar.search(query, { k: total });
     if (!got) return null;
     const hits: FieldHit[] = (got.hits || []).map((h: any) => ({ cid: String(h.cid), url: String(h.url || "") }));
-    await this.placeResults(hits);
+    if (this.plantPlaceResults) await this.placeResultsPlanted(hits);
     this.searchStats.last_ms = Math.round(performance.now() - t0);
     return { hits, n: Number(got.n || hits.length) };
   }
 
-  /** Results the scene does not draw yet are placed (the url view draws pages, not chunks). */
-  private async placeResults(hits: FieldHit[]): Promise<void> {
+  /** The planted first version: undrawn results placed into the scene. */
+  private async placeResultsPlanted(hits: FieldHit[]): Promise<void> {
     if (!this.graph || !hits.length) return;
     const have = new Set((this.graph.graphData() as any).nodes.map((n: any) => String(n.id)));
     const missing = hits.map((h) => h.cid).filter((c) => !have.has(c));
-    this.searchStats.missing = missing.length;
     if (!missing.length) return;
     const got: any = await this.sidecar.place(missing).catch(() => null);
     if (got && got.nodes && got.nodes.length) {
-      const keep = new Set(missing);
-      this.absorb(got.nodes, got.edges, undefined, { keep });
-      for (const c of missing) this.searchPlaced.add(c);
+      this.absorb(got.nodes, got.edges, undefined, { keep: new Set(missing) });
       this.searchStats.placed += got.nodes.length;
     }
   }
 
-  private showSearch(hits: FieldHit[], shown: number): void {
+  /** Each result to the drawn node standing for it: its chunk, else its page. */
+  private resolveSearch(): void {
+    const st = this.searchState;
+    if (!st || !this.graph) return;
+    const byId = new Map<string, any>(), pageOf = new Map<string, any>();
+    for (const n of (this.graph.graphData() as any).nodes as any[]) {
+      byId.set(String(n.id), n);
+      if (n.level === "page" && !n.force && n.url) pageOf.set(String(n.url).split("#")[0], n);
+    }
+    const ranks = new Map<string, number>();
+    let chunk = 0, page = 0, none = 0;
+    st.targets = st.hits.map((h, i) => {
+      let n = byId.get(h.cid);
+      if (n) chunk++;
+      else { n = pageOf.get(String(h.url).split("#")[0]); if (n) page++; else none++; }
+      if (n && !ranks.has(String(n.id))) ranks.set(String(n.id), i);    // the best rank wins
+      return n || null;
+    });
+    st.ranks = ranks;
+    this.searchStats.resolved_chunk = chunk; this.searchStats.resolved_page = page; this.searchStats.unresolved = none;
+  }
+
+  private showSearch(hits: FieldHit[], shown: number, soft = shown): void {
     let minHalf = this.searchState ? this.searchState.minHalf : 0;
     if (!this.searchState && this.graph) {
       const ns = (this.graph.graphData() as any).nodes as any[], rs = this.graph.nodeRelSize();
@@ -3752,32 +3796,34 @@ export class GraphView extends ItemView {
       hs.sort((a, b) => a - b);
       minHalf = hs.length ? hs[hs.length >> 1] : 0;
     }
-    this.searchState = { query: this.searchField?.query || "", hits, shown, minHalf,
-                         ranks: new Map(hits.map((h, i) => [h.cid, i])), at: performance.now() };
+    this.searchState = { query: this.searchField?.query || "", hits, shown, soft, minHalf,
+                         ranks: new Map(), targets: [], at: performance.now() };
+    this.resolveSearch();
     this.searchStats.shown = shown;
     this.updateSearchLights();
     this.batchDirty = true;
+    // A NEW query's top result is flown to and, when it is a chunk, its panel
+    // opened -- the hover's own path (focusOn, hoverPanel), so the same
+    // persistence and time-to-live (2026-10-11: "we should also fly to the top
+    // result similar to hover overlays and showing their panels and so on.
+    // same link and idea").
+    const q = this.searchState.query;
+    const top = this.searchState.targets[0];
+    if (top && q && q !== this.flownFor && !this.plantNoTopFlight) {
+      this.flownFor = q;
+      this.focusOn(top);
+      if (top.level !== "page" && top.level !== "path") this.hoverPanel(top);
+      this.searchStats.flown_top++;
+    }
   }
+  private flownFor = "";
+  /** Planted (item 94): a query flies nowhere and opens no panel. */
+  plantNoTopFlight = false;
 
   private clearSearch(): void {
     window.clearInterval(this.webTimer);
     this.webQuery = "";
-    if (this.graph && this.searchPlaced.size) {
-      const data: any = this.graph.graphData();
-      const openUrls = new Set<string>();
-      for (const u of this.openedByReader) openUrls.add(u);
-      const browsing = this.browsingUrl ? this.browsingUrl().split("#")[0] : "";
-      const keep = new Set<string>(this.billboards.keys() as any);
-      const gone = new Set<string>(data.nodes.filter((n: any) => this.searchPlaced.has(String(n.id)) && !keep.has(n.id)
-        && !openUrls.has(n.url) && !(browsing && String(n.url || "").split("#")[0] === browsing)).map((n: any) => n.id));
-      if (gone.size) {
-        const end = (x: any) => (typeof x === "object" && x ? x.id : x);
-        this.graph.graphData({ nodes: data.nodes.filter((n: any) => !gone.has(n.id)),
-                               links: data.links.filter((l: any) => !gone.has(end(l.source)) && !gone.has(end(l.target))) });
-        this.searchStats.removed += gone.size;
-      }
-      this.searchPlaced.clear();
-    }
+    this.flownFor = "";
     this.searchState = null;
     this.batch?.setLights([], 1);
     this.searchStats.shown = 0; this.searchStats.lights = 0;
@@ -3799,24 +3845,24 @@ export class GraphView extends ItemView {
     const st = this.searchState;
     if (!st || !this.batch || !this.graph) return;
     if (this.plantNoGlass) { this.batch.setLights([], 1); this.searchStats.lights = 0; return; }
-    const byId = new Map<string, any>();
-    for (const n of (this.graph.graphData() as any).nodes) if (st.ranks.has(String(n.id))) byId.set(String(n.id), n);
     const lights: { at: [number, number, number]; color: string; intensity: number; b: number }[] = [];
-    st.hits.slice(0, st.shown).forEach((h, i) => {
-      const n = byId.get(h.cid);
-      if (!n || !Number.isFinite(n.x)) return;
-      const b = brightness(i, st.shown);
+    const lit = new Set<any>();
+    st.targets.slice(0, st.shown).forEach((n, i) => {
+      if (!n || lit.has(n) || !Number.isFinite(n.x)) return;
+      const b = brightness(i, st.soft);
+      if (b <= 0) return;
+      lit.add(n);
       lights.push({ at: [n.x, n.y, n.z || 0], color: n.color || "#ffffff", intensity: 0.6 + 1.6 * b, b });
     });
     lights.sort((a, b) => b.b - a.b);
     // A light falls to half over a tenth of the scene: the scene's own scale,
     // so it reads the same at every zoom of the corpus.
     const ns = (this.graph.graphData() as any).nodes as any[];
-    let lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+    const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
     for (let i = 0; i < ns.length; i += Math.max(1, Math.floor(ns.length / 2000))) {
       const n = ns[i]; if (!Number.isFinite(n.x)) continue;
-      const p = [n.x, n.y, n.z || 0];
-      for (let a = 0; a < 3; a++) { lo[a] = Math.min(lo[a], p[a]); hi[a] = Math.max(hi[a], p[a]); }
+      const q = [n.x, n.y, n.z || 0];
+      for (let k = 0; k < 3; k++) { lo[k] = Math.min(lo[k], q[k]); hi[k] = Math.max(hi[k], q[k]); }
     }
     const span = Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]);
     this.batch.setLights(lights, Number.isFinite(span) && span > 0 ? span * 0.1 : 60);
@@ -4087,7 +4133,7 @@ export class GraphView extends ItemView {
       this.batchStats.synced++;
       const d = g.graphData();
       const rs = g.nodeRelSize();
-      if (this.searchState) this.updateSearchLights();
+      if (this.searchState) { this.resolveSearch(); this.updateSearchLights(); }
       this.batch.sync(d.nodes, d.links, (n) => this.lookOf(n, rs, media), this.searchLineAlpha());
     };
     this.batchRaf = requestAnimationFrame(tick);
@@ -4693,6 +4739,136 @@ export class GraphView extends ItemView {
    * how many chunks it stands for, and that statement survives wherever the
    * picture can afford it.
    */
+  // ---- chunk view: a bounded collision relax (2026-10-11) -------------------
+
+  /**
+   * Chunk view is UMAP-only (item 78), and UMAP puts near-duplicates almost on
+   * one point: 80% of 22,496 nodes sat at the shrink floor and the orbs still
+   * clumped (2026-10-11: "a little too clumped together ... perhaps *some*
+   * amount of force-directed is still worth, but not to the extent that we
+   * have to break our memory bank or see nodes exploding everywhere because of
+   * force superpositions"). So ONE relax after the layout lands -- not a live
+   * simulation: collision only (no charge, no springs, so no superposition),
+   * every node pulled back toward its own UMAP point each iteration, and none
+   * moved more than `relaxMaxShift` of its own radii. A spatial hash on
+   * integer keys, one iteration per frame, so the main thread is never held
+   * and the memory is three floats a node. The fit (`fitX/Y/Z`) is never
+   * written: the drawn place is the relaxed one, the fit stays the fit.
+   * Planted: no relax, the UMAP points as they are.
+   */
+  plantNoChunkRelax = false;
+  relaxIterations = 40;
+  relaxMaxShift = 4;
+  chunkRelaxStats = { runs: 0, iterations: 0, ms: 0, nodes: 0, overlaps_before: -1, overlaps_after: -1, max_shift_radii: 0, moved: 0 };
+  private relaxSeq = 0;
+  /** The relax's spacing, in drawn radii: a visible gap, not the collider's 2
+   *  (at 2, chunk view held 2.1 million overlapping pairs and one iteration took
+   *  300 ms). */
+  relaxSafety = 1.25;
+  /** Work per frame, ms: the relax yields to the renderer past this. */
+  relaxBudgetMs = 8;
+  private relaxChunkView(): void {
+    const g: any = this.graph;
+    if (!g || this.level !== "chunk" || this.plantNoChunkRelax) return;
+    const seq = ++this.relaxSeq;
+    const nodes = (g.graphData().nodes as any[]).filter((n) => Number.isFinite(n.fitX) && Number.isFinite(n.fitY));
+    const N = nodes.length;
+    if (N < 2) return;
+    const rs = g.nodeRelSize(), media = this.drawnMedia, S = this.relaxSafety;
+    const H = new Float64Array(N), P = new Float64Array(3 * N), F = new Float64Array(3 * N);
+    nodes.forEach((n, i) => {
+      H[i] = Math.max(1e-6, this.lookOf(n, rs, media).half);
+      F[3 * i] = n.fitX; F[3 * i + 1] = n.fitY; F[3 * i + 2] = n.fitZ ?? 0;
+      P[3 * i] = F[3 * i]; P[3 * i + 1] = F[3 * i + 1]; P[3 * i + 2] = F[3 * i + 2];
+    });
+    // The cell is a typical node's reach, not the largest one's: a few big
+    // pictures would make every cell hold the whole cloud.
+    const sorted = Array.from(H).sort((x, y) => x - y);
+    const cell = Math.max(1e-3, 2 * S * sorted[Math.floor(N * 0.9)]);
+    const hash = (cx: number, cy: number, cz: number) => ((cx * 73856093) ^ (cy * 19349663) ^ (cz * 83492791)) | 0;
+    const build = () => {
+      const grid = new Map<number, number[]>();
+      for (let i = 0; i < N; i++) {
+        const k = hash(Math.floor(P[3 * i] / cell), Math.floor(P[3 * i + 1] / cell), Math.floor(P[3 * i + 2] / cell));
+        const l = grid.get(k); if (l) l.push(i); else grid.set(k, [i]);
+      }
+      return grid;
+    };
+    // Overlap, SAMPLED: every pair of a sample of nodes against all their
+    // neighbours, as drawn (no safety). Exhaustive, it was one 1 s frame.
+    const sampleStep = Math.max(1, Math.floor(N / 3000));
+    const overlaps = (): number => {
+      const grid = build();
+      let o = 0;
+      for (let i = 0; i < N; i += sampleStep) {
+        const cx = Math.floor(P[3 * i] / cell), cy = Math.floor(P[3 * i + 1] / cell), cz = Math.floor(P[3 * i + 2] / cell);
+        for (let ox = -1; ox <= 1; ox++) for (let oy = -1; oy <= 1; oy++) for (let oz = -1; oz <= 1; oz++) {
+          for (const j of grid.get(hash(cx + ox, cy + oy, cz + oz)) || []) {
+            if (j === i) continue;
+            if (Math.hypot(P[3 * i] - P[3 * j], P[3 * i + 1] - P[3 * j + 1], P[3 * i + 2] - P[3 * j + 2]) < H[i] + H[j]) o++;
+          }
+        }
+      }
+      return o;
+    };
+    const t0 = performance.now();
+    const before = overlaps();
+    let it = 0, grid: Map<number, number[]> | null = null, cursor = 0, moved = 0, worst = 0;
+    const step = () => {
+      if (seq !== this.relaxSeq || this.level !== "chunk" || !this.graph) return;
+      const tf = performance.now();
+      if (!grid) { grid = build(); cursor = 0; moved = 0; }
+      // Pairs, until this frame's budget is spent; the iteration resumes next frame.
+      while (cursor < N && performance.now() - tf < this.relaxBudgetMs) {
+        const i = cursor++;
+        const cx = Math.floor(P[3 * i] / cell), cy = Math.floor(P[3 * i + 1] / cell), cz = Math.floor(P[3 * i + 2] / cell);
+        for (let ox = -1; ox <= 1; ox++) for (let oy = -1; oy <= 1; oy++) for (let oz = -1; oz <= 1; oz++) {
+          for (const j of grid.get(hash(cx + ox, cy + oy, cz + oz)) || []) {
+            if (j <= i) continue;
+            let dx = P[3 * j] - P[3 * i], dy = P[3 * j + 1] - P[3 * i + 1], dz = P[3 * j + 2] - P[3 * i + 2];
+            let d = Math.hypot(dx, dy, dz);
+            const want = S * (H[i] + H[j]);
+            if (d >= want) continue;
+            if (d < 1e-9) { dx = Math.cos(i * 2.399); dy = Math.sin(i * 2.399); dz = ((i % 7) - 3) / 7; d = Math.hypot(dx, dy, dz); }
+            const push = (want - d) / d * 0.5;
+            P[3 * i] -= dx * push; P[3 * i + 1] -= dy * push; P[3 * i + 2] -= dz * push;
+            P[3 * j] += dx * push; P[3 * j + 1] += dy * push; P[3 * j + 2] += dz * push;
+            moved++;
+          }
+        }
+      }
+      worst = Math.max(worst, performance.now() - tf);
+      if (cursor < N) { requestAnimationFrame(step); return; }
+      // The iteration's end: back toward each UMAP point, never past the leash.
+      for (let i = 0; i < N; i++) {
+        for (let a = 0; a < 3; a++) P[3 * i + a] += (F[3 * i + a] - P[3 * i + a]) * 0.04;
+        const dx = P[3 * i] - F[3 * i], dy = P[3 * i + 1] - F[3 * i + 1], dz = P[3 * i + 2] - F[3 * i + 2];
+        const d = Math.hypot(dx, dy, dz), lim = this.relaxMaxShift * H[i];
+        if (d > lim) { const f = lim / d; P[3 * i] = F[3 * i] + dx * f; P[3 * i + 1] = F[3 * i + 1] + dy * f; P[3 * i + 2] = F[3 * i + 2] + dz * f; }
+      }
+      it++;
+      grid = null;
+      if (moved && it < this.relaxIterations) { requestAnimationFrame(step); return; }
+      let maxShift = 0, shifted = 0;
+      nodes.forEach((n, i) => {
+        const x = P[3 * i], y = P[3 * i + 1], z = P[3 * i + 2];
+        const sh = Math.hypot(x - F[3 * i], y - F[3 * i + 1], z - F[3 * i + 2]);
+        if (sh > 1e-6) shifted++;
+        maxShift = Math.max(maxShift, sh / H[i]);
+        n.x = n.fx = x; n.y = n.fy = y; n.z = n.fz = z;
+        n.relaxHalf = H[i];                 // the radius the leash was measured in
+      });
+      const after = overlaps();
+      this.chunkRelaxStats = { runs: this.chunkRelaxStats.runs + 1, iterations: it, ms: Math.round(performance.now() - t0), nodes: N,
+                               overlaps_before: before, overlaps_after: after, sampled_every: sampleStep,
+                               max_shift_radii: Math.round(maxShift * 100) / 100, moved: shifted,
+                               worst_frame_ms: Math.round(worst * 10) / 10 } as any;
+      g.d3ReheatSimulation?.();          // two cool ticks move each pick proxy to its node
+      this.batchDirty = true;
+    };
+    requestAnimationFrame(step);
+  }
+
   // ---- PLUGIN_GOAL 83: idle drift ------------------------------------------
 
   /**
@@ -5766,6 +5942,7 @@ export class GraphView extends ItemView {
         n.x = n.fx = n.fitX; n.y = n.fy = n.fitY; n.z = n.fz = n.fitZ ?? 0;
       }
       this.umapOnly = true;
+      window.setTimeout(() => this.relaxChunkView(), 400);
     } else {
       this.umapOnly = false;
       graph.cooldownTicks(Infinity);

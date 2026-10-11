@@ -2826,6 +2826,81 @@ during a search the light sources are the results inside the scroll window.
 (83) restated: the idle turn rotates position AND colour -- "xyzhsv" -- and the
 colour turn applies to the orbs.*
 
+> we should also fly to the top result similar to hover overlays and showing
+> their panels and so on. same link and idea. but I also dont see more than
+> one glowing node in search results when there should be more. works at the
+> chunk view level though which is nice
+
+> also, lets add a soft brightness gradient to the scroll slider so that we
+> can smoothly brighten on soft integer result nodes
+
+> please also keep track of the rotating xyzhsv and the other comments ive
+> made in our most recent parts of our transcript. time profile,
+> responsiveness, translucent glass orbs as the norm with a latent glow when
+> none are retrieved, streaming and node layout pipelines time optimization
+> that work unaffected by the retrieval results (since that's just a
+> brightness and fly-to-node thing)
+
+> also seems like youre thresholding on the number of total results. perhaps
+> that could also be another user input field for total results.
+
+*Read as (2026-10-11): (94) a new query flies the camera to its top result and
+opens its panel, by the hover's own path. (95) the slider is SOFT: a continuous
+index, so the next result brightens in smoothly as the slider passes it, and
+the track itself carries the gradient. (96) **Retrieval is a look, not a
+change to the scene**: it brightens and flies, and the streaming and layout
+pipelines run exactly as they would without it -- no node placed, moved or
+removed for a search; a result whose chunk is not drawn lights the node that
+stands for it. (97) n -- the total results -- is a field the reader sets too,
+beside k. The rest restates (83) "xyzhsv", (90) responsiveness, (91) time
+profiles and (93) glass orbs with a latent glow as the norm when nothing is
+retrieved.*
+
+> tests should auto-resume after I interact with the GUI/plugin
+> some nodes are not the same level of glass and translucent, and are their
+> older materials without glow\
+
+*Read as (2026-10-11): (98) a check run PAUSES when the reader uses the app and
+RESUMES on its own after quiet -- not ends; a check the reader's input landed
+in is run again, its first verdict being the reader's as much as the app's.
+(99) every node is the same glowing glass: a picture is held inside an orb of
+its own colour, and a streaming node is an orb with a dimmer glow -- no node
+keeps the old opaque or plain-translucent material.*
+
+> we dont need spheres over images, but hovered-inner-glow works well. we can
+> switch between node and image reveals as was the same as the older
+> functionality
+
+*Read as (2026-10-11): (99) amended -- a REVEALED picture is drawn as the
+picture alone, no orb over it; unrevealed, the node is its glowing orb: the
+switch between node and image is the old one. The hovered node's inner glow
+stays.*
+
+> a little too clumped together... not sure what the stage of
+> projection/.update fitting we're at here, perhaps *some* amount of
+> force-directed is still worth, but not to the extent that we have to break
+> our memory bank or see nodes exploding everywhere because of force
+> superpositions
+
+*(Sent with a screenshot of chunk view: a page's orbs and pictures piled on
+one another around its url node.)*
+
+> still a few other features that were requested need following up on too.
+> just not to lose track of progress
+
+> still seeing older nodes in tests
+
+*(Sent with a screenshot of the url view: opaque spheres among the pictures.)*
+
+*Read as (2026-10-11): (100) chunk view gets SOME separation, bounded: one
+collision relax after its layout lands -- no live simulation, so no forces to
+superpose, each node leashed to its UMAP point, memory flat. Item (78)'s "UMAP
+only" stands for the simulation; this is a single bounded pass. (101) no node
+is drawn in the old material, in the app or in a check: a picture not yet
+loaded is its glowing orb meanwhile. (The checks' planted arms draw the old
+look on purpose, briefly.) And the requested features are tracked to the end:
+the list is the PRD rows G-155..G-171.*
+
 ---
 
 

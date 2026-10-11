@@ -37,6 +37,12 @@ export interface VerifyState {
   finishedAt: number;
   results: CheckResult[];
   stoppedBecause: string;
+  /** Why the run is waiting now ("" when it is not), how often it paused for
+   *  the reader, and how many checks it re-ran because the reader acted in
+   *  them (item 98). */
+  paused?: string;
+  pauses?: number;
+  resumed?: number;
   /** What the run read -- "fresh run_…, 12/12 pages seeded" or "working". */
   label: string;
   /** A fresh-store run's seeding, one row per page it browsed. */
@@ -197,6 +203,29 @@ export class Verifier {
   }
 
   /** The checks themselves, into `this.state`, which the caller set up. */
+  /** Quiet the run waits for after the reader acts, and the most it waits. */
+  resumeIdleMs = 30000;
+  resumeMaxMs = 30 * 60000;
+  /** Planted (item 98): the reader's input ENDS the run, as before. */
+  plantStopOnReader = false;
+
+  /** Wait for the reader to stop; false if they never do (or a stop is asked). */
+  private async waitForQuiet(): Promise<boolean> {
+    const t0 = performance.now();
+    this.state.paused = "the reader is using the app";
+    this.state.pauses = (this.state.pauses || 0) + 1;
+    try {
+      while (!this.stopWhy && performance.now() - t0 < this.resumeMaxMs) {
+        const idle = Date.now() - ((window as any).__domvecReaderAt || 0);
+        if (idle >= this.resumeIdleMs) return true;
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+      return false;
+    } finally {
+      this.state.paused = "";
+    }
+  }
+
   /** Asked to stop: the run ends before its next check. */
   private stopWhy = "";
   stop(why = "asked to stop"): void { this.stopWhy = why; }
@@ -207,15 +236,34 @@ export class Verifier {
     // The READER's last input when the run began: a run never goes on over
     // the reader (2026-10-10: a run drove the browser cell while the reader
     // navigated to archive.org). Its own synthetic hovers do not stamp this.
-    const reader0 = (window as any).__domvecReaderAt || 0;
+    //
+    // It PAUSES and RESUMES (2026-10-11, PLUGIN_GOAL 98: "tests should
+    // auto-resume after I interact with the GUI/plugin"): the reader's input
+    // stops the run where it is, it waits for `resumeIdleMs` of quiet, and it
+    // carries on -- re-running the check the reader's input landed in, whose
+    // verdict was measured over the reader and cannot be trusted. It gives up
+    // only after `resumeMaxMs` of waiting. Planted: the old stop.
+    const stamp = () => (window as any).__domvecReaderAt || 0;
+    let reader0 = stamp();
     await wakeProjector().catch(() => null);
     {
-      for (const check of chosen) {
-        const readerBack = ((window as any).__domvecReaderAt || 0) !== reader0;
-        if (this.stopWhy || readerBack) {
-          this.state.stoppedBecause = this.stopWhy || "the reader used the app";
+      const queue = [...chosen];
+      const retried = new Map<string, number>();
+      while (queue.length) {
+        const check = queue[0];
+        if (!this.stopWhy && stamp() !== reader0) {
+          if (this.plantStopOnReader || !(await this.waitForQuiet())) {
+            this.state.stoppedBecause = this.stopWhy || "the reader used the app";
+            break;
+          }
+          reader0 = stamp();
+          await wakeProjector().catch(() => null);
+        }
+        if (this.stopWhy) {
+          this.state.stoppedBecause = this.stopWhy;
           break;
         }
+        queue.shift();
         this.state.current = check.id;
         // Each check starts from the same UI, whatever the last one left.
         const reset = await this.isolate();
@@ -225,6 +273,14 @@ export class Verifier {
           got = await check.run();
         } catch (err: any) {
           got = { pass: false, evidence: { threw: String(err?.message || err).slice(0, 300) } };
+        }
+        // The reader acted DURING this check: its verdict is the reader's as
+        // much as the app's. Run it again once they are done (twice at most).
+        if (stamp() !== reader0 && !this.plantStopOnReader && (retried.get(check.id) || 0) < 2) {
+          retried.set(check.id, (retried.get(check.id) || 0) + 1);
+          this.state.resumed = (this.state.resumed || 0) + 1;
+          queue.unshift(check);
+          continue;
         }
         const result: CheckResult = {
           id: check.id, asks: check.asks, pass: !!got?.pass,

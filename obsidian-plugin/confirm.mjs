@@ -173,10 +173,14 @@ if (!started || started.error) {
 }
 console.log(`running ${started.total} checks inside the plugin (run ${started.run})`);
 let seen = 0;
+let pausedSaid = false;
 for (;;) {
   await new Promise((r) => setTimeout(r, 2000));
   const st = await evaluate("window.__domvec.verify.state()");
   for (const r of st.results.slice(seen)) { report(r); results.push(r); }
+  // Paused for the reader, and resumed (PLUGIN_GOAL 98): said once each way.
+  if (st.paused && !pausedSaid) { console.log(`paused: ${st.paused} -- resumes after quiet`); pausedSaid = true; }
+  if (!st.paused && pausedSaid) { console.log("resumed"); pausedSaid = false; }
   seen = st.results.length;
   if (!st.running) {
     if (st.stoppedBecause) {

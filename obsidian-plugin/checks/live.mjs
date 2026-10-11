@@ -3225,7 +3225,7 @@ export function makeChecks(env) {
     },
     {
       id: "G-166",
-      asks: "with no search, every plain node (no picture, not streaming) is drawn as a glowing glass orb in its own colour, in the batch's glass pass; pictures stay pictures; planted (plantOpaqueOrbs): the old opaque spheres",
+      asks: "with no search, every node is the same glowing glass (G-166, G-168): a plain node an orb in its own colour, a streaming node a dimmer orb, a REVEALED picture the picture alone (no orb over it) -- no non-picture node keeps the old material; planted (plantOpaqueOrbs): the old opaque spheres",
       async run() {
         // 2026-10-11: "lets standardize the latent glowing glass orbs as the
         // default, with the light sources adjusting per the query scroll window".
@@ -3239,26 +3239,32 @@ export function makeChecks(env) {
           try {
             await sleep(300); v.batchSync();
             const rs = v.graph.nodeRelSize(), d = v.graph.graphData();
-            let plain = 0, orbs = 0, own = 0, pictures = 0, pictureGlass = 0;
+            let plain = 0, orbs = 0, own = 0, pictures = 0, pictureGlass = 0, pictureOrbs = 0, streaming = 0, streamOrbs = 0, oldMaterial = 0;
             for (const n of d.nodes) {
               const base = v.baseLook(n, rs, v.drawnMedia), l = v.lookOf(n, rs, v.drawnMedia);
-              if (base.picture) { pictures++; if (l.glass) pictureGlass++; continue; }
-              if (base.translucent || n.hovered) continue;
+              if (n.hovered) continue;
+              // Item 99: no node keeps the old material -- a picture is held in
+              // an orb, a streaming node is a dimmer orb.
+              if (base.picture) { pictures++; if (l.glass) pictureGlass++; if (l.orb !== undefined) pictureOrbs++; continue; }
+              if (!l.glass) oldMaterial++;
+              if (base.translucent) { streaming++; if (l.glass && l.alpha > 0 && l.alpha < 1) streamOrbs++; continue; }
               plain++;
               if (l.glass && l.alpha === 1) { orbs++; if (l.color === base.color) own++; }
             }
-            return { planted: ${planted}, plain, orbs, own_colour: own, pictures, picture_glass: pictureGlass, batch: { ...v.batch.lastStats } };
+            return { planted: ${planted}, plain, orbs, own_colour: own, pictures, picture_glass: pictureGlass, picture_orbs: pictureOrbs,
+                     streaming, stream_orbs: streamOrbs, old_material: oldMaterial, batch: { ...v.batch.lastStats } };
           } finally { v.plantOpaqueOrbs = false; v.batchSync(); }
         })()`, { timeout: 60000 });
         const clean = await arm(false), planted = await arm(true);
         return { pass: clean.plain > 0 && clean.orbs === clean.plain && clean.own_colour === clean.plain && clean.picture_glass === 0
-                       && clean.batch.glass >= clean.plain && planted.orbs === 0,
+                       && clean.picture_orbs === 0 && clean.stream_orbs === clean.streaming && clean.old_material === 0
+                       && clean.batch.glass >= clean.plain && clean.batch.spheres <= 1 && planted.orbs === 0 && planted.old_material > 0,
                  evidence: { clean, planted } };
       },
     },
     {
       id: "G-157",
-      asks: "the naked search field on the 3D panel: typing a query shows 'showing k/n results' with k an editable top-k, a horizontal scroll from the very left governs how many results are drawn; while searching ONLY those are drawn as themselves, every other node is a colourless lens lit by the shown results' point lights, brightest at the scrolled index; cleared, every node is its own glowing orb again; planted (plantNoGlass): no lens, no lights",
+      asks: "the naked search field on the 3D panel: typing a query shows 'showing k/n results' with k an editable top-k, a horizontal scroll from the very left governs how many results are drawn; while searching ONLY those are drawn as themselves, every other node is a colourless lens lit by the shown results' point lights, brightest at the scrolled index; the top result is flown to and its panel opened; the slider is SOFT (at s=1.5 the second result is a half-coloured orb); cleared, every node is its own glowing orb again; planted (plantNoGlass, plantNoTopFlight): no lens, no lights, no flight",
       async run() {
         // 2026-10-11, PLUGIN_GOAL 84/86/87/88.
         const arm = (planted) => evaluate(`(async () => {
@@ -3268,13 +3274,30 @@ export function makeChecks(env) {
           for (let i = 0; i < 60 && !(v.graph && v.searchField); i++) await sleep(500);
           const f = v.searchField;
           if (!f) return { error: "no search field" };
-          v.plantNoGlass = ${planted};
+          // In CHUNK view: every result is its own drawn node there. In the url
+          // view a closed page's chunks are not drawn, so its results light the
+          // page node once (G-167) -- not what this check asks.
+          const unit = [...v.containerEl.querySelectorAll(".domvec-graph-bar button")].find((b) => /^(pages|chunks)$/.test(b.textContent.trim()));
+          const startLevel = v.level;
+          const settle = async () => { let last = -1; for (let i = 0; i < 90; i++) { await sleep(500); const c = v.graph ? v.graph.graphData().nodes.length : 0; if (c && c === last) break; last = c; } };
+          if (v.level !== "chunk" && unit) {
+            unit.click();
+            // Chunk view has ARRIVED: UMAP-only and its whole node set drawn, not
+            // merely a count that held still while the old graph was up.
+            for (let i = 0; i < 240 && !(v.level === "chunk" && v.umapOnly && v.graph && v.graph.graphData().nodes.length > 2000); i++) await sleep(500);
+            await settle();
+          }
+          v.plantNoGlass = ${planted}; v.plantNoTopFlight = ${planted};
+          // The web half (G-158) stays out of this check: it would take the browser cell.
+          const bv = app.workspace.getLeavesOfType("domvec-browser-view")[0]?.view;
+          if (bv) bv.plantNoWebSearch = true;
+          const flown0 = v.searchStats.flown_top;
           try {
             const box = f.el.getBoundingClientRect(), cv = v.canvasEl.getBoundingClientRect();
             const placement = { centre_off: Math.round((box.left + box.width / 2) - (cv.left + cv.width / 2)),
                                 bottom_gap: Math.round(cv.bottom - box.bottom), placeholder: f.input.placeholder,
                                 naked: !f.el.classList.contains("is-active") };
-            f.input.value = "protocol"; f.kInput.value = "12"; f.k = 12;
+            f.input.value = "protocol"; f.k = 12;
             await f.run();
             for (let i = 0; i < 20 && !v.searchState; i++) await sleep(250);
             await sleep(600); v.batchSync();
@@ -3284,32 +3307,152 @@ export function makeChecks(env) {
             // Which nodes draw as themselves: the shown results, and nothing else.
             const rs = v.graph.nodeRelSize(), d = v.graph.graphData();
             const asSelf = d.nodes.filter((n) => { const l = v.lookOf(n, rs, v.drawnMedia); return !l.glass; }).map((n) => String(n.id));
-            const shownIds = f.hits.slice(0, f.shown).map((h) => h.cid);
+            const shownIds = v.searchState.targets.slice(0, f.shown).filter(Boolean).map((n) => String(n.id));
             left.self_ids = asSelf.length; left.self_are_shown = asSelf.every((id) => shownIds.includes(id));
             // Colourless lenses: glass with no glow of its own -- what a search
             // turns every other node into (the default orb glows, alpha 1).
             const lensCount = () => d.nodes.filter((n) => { const l = v.lookOf(n, rs, v.drawnMedia); return l.glass && l.alpha === 0; }).length;
             left.colourless = lensCount();
+            // The top result flown to and its panel opened, as a hover does (item 94).
+            await sleep(700);
+            left.flown_top = v.searchStats.flown_top - flown0;
+            left.top_panel = !!(f.hits[0] && v.billboards.has(f.hits[0].cid));
+            // The soft index: at s = 1.5 the second result is part-way in -- a
+            // half-coloured orb, not yet lit (2026-10-11: "smoothly brighten on
+            // soft integer result nodes").
+            const span = f.scroller.scrollWidth - f.scroller.clientWidth;
+            f.scroller.scrollLeft = Math.round(span * 0.5 / Math.max(1, f.window.length - 1));
+            f.scroller.dispatchEvent(new Event("scroll"));
+            await sleep(400);
+            const second = v.searchState.targets[1];
+            const sl = second ? v.lookOf(second, rs, v.drawnMedia) : null;
+            left.soft = { s: Math.round(f.soft * 100) / 100, second_glass: sl ? !!sl.glass : null, second_alpha: sl ? Math.round(sl.alpha * 100) / 100 : null };
             // Scrolled to the right: more shown, the brightest at the scrolled index.
             f.scroller.scrollLeft = f.scroller.scrollWidth; f.scroller.dispatchEvent(new Event("scroll"));
             await sleep(500); v.batchSync();
-            const glowOf = (cid) => { const n = d.nodes.find((x) => String(x.id) === cid); return n ? (v.lookOf(n, rs, v.drawnMedia).glow || 0) : null; };
-            const right = { shown: f.shown, ...v.batch.lastStats, lights: v.batch.lightStats.lights,
-                            glow_first: glowOf(f.hits[0] && f.hits[0].cid), glow_last: glowOf(f.hits[f.shown - 1] && f.hits[f.shown - 1].cid) };
+            const glowOf = (n) => (n ? (v.lookOf(n, rs, v.drawnMedia).glow || 0) : null);
+            const tg = v.searchState.targets;
+            const right = { shown: f.shown, window: f.window.length, ...v.batch.lastStats, lights: v.batch.lightStats.lights,
+                            glow_first: glowOf(tg[0]), glow_last: glowOf(tg[f.shown - 1]), distinct_last: tg.indexOf(tg[f.shown - 1]) === f.shown - 1 };
             f.input.value = ""; await f.run(); await sleep(300); v.batchSync();
             const cleared = { colourless: lensCount(), orbs: v.batch.lastStats.glass, lights: v.batch.lightStats.lights, state: !!v.searchState };
-            return { planted: ${planted}, placement, left, right, cleared, stats: { ...v.searchStats } };
-          } finally { v.plantNoGlass = false; f.input.value = ""; await f.run(); }
+            return { planted: ${planted}, level: v.level, placement, left, right, cleared, stats: { ...v.searchStats } };
+          } finally {
+            v.plantNoGlass = false; v.plantNoTopFlight = false; if (bv) bv.plantNoWebSearch = false; f.input.value = ""; await f.run();
+            if (v.level !== startLevel && unit) { unit.click(); await settle(); }
+          }
         })()`, { timeout: 90000 });
         const clean = await arm(false), planted = await arm(true);
         const c = clean;
         const pass = !c.error && c.placement.naked && c.placement.placeholder === "search" && Math.abs(c.placement.centre_off) <= 4 && c.placement.bottom_gap < 60
-          && c.left.hits >= 2 && c.left.shown === 1 && /^showing.*\/\s*\d+ results$/.test(c.left.count_text) && c.left.n >= c.left.hits
+          && c.left.hits >= 2 && c.left.shown === 1 && /^showing \/ results · \d+ matching$/.test(c.left.count_text)
           && c.left.colourless > 0 && c.left.lights === 1 && c.left.self_are_shown
-          && c.right.shown === c.left.hits && c.right.lights === Math.min(16, c.right.shown) && c.right.glow_last === 1 && c.right.glow_first < c.right.glow_last
+          && c.right.shown === c.right.window && c.right.window === Math.min(12, c.left.hits) && c.right.lights >= 1 && c.right.lights <= 16
+          && (!c.right.distinct_last || (c.right.glow_last === 1 && c.right.glow_first < c.right.glow_last))
           && c.cleared.colourless === 0 && c.cleared.orbs > 0 && !c.cleared.state
-          && !planted.error && planted.left.colourless === 0 && planted.left.lights === 0;
+          && c.left.flown_top === 1 && c.left.top_panel && c.left.soft.second_glass === true && c.left.soft.second_alpha > 0.2 && c.left.soft.second_alpha < 0.8
+          && !planted.error && planted.left.colourless === 0 && planted.left.lights === 0 && planted.left.flown_top === 0;
         return { pass, evidence: { clean, planted } };
+      },
+    },
+    {
+      id: "G-167",
+      asks: "retrieval is a LOOK: in the url view a search adds, moves and removes no node -- the scene's node set is the same before, during and after, and results whose chunk is not drawn light their page node; planted (plantPlaceResults): the first version placed undrawn results and the node set changed",
+      async run() {
+        // 2026-10-11, PLUGIN_GOAL 96: "streaming and node layout pipelines
+        // ... that work unaffected by the retrieval results (since that's just
+        // a brightness and fly-to-node thing)".
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          await window.__domvec.act("open", "graph");
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          for (let i = 0; i < 60 && !(v.graph && v.searchField); i++) await sleep(500);
+          const f = v.searchField;
+          const bv = app.workspace.getLeavesOfType("domvec-browser-view")[0]?.view;
+          if (bv) bv.plantNoWebSearch = true;
+          const unit = [...v.containerEl.querySelectorAll(".domvec-graph-bar button")].find((b) => /^(pages|chunks)$/.test(b.textContent.trim()));
+          const start = v.level;
+          const settle = async () => { let last = -1; for (let i = 0; i < 60; i++) { await sleep(500); const n = v.graph ? v.graph.graphData().nodes.length : 0; if (n && n === last) break; last = n; } };
+          if (v.level !== "" && unit) {
+            unit.click();
+            // The url view has ARRIVED: not UMAP-only, and the chunk view's
+            // tens of thousands of nodes gone.
+            for (let i = 0; i < 240 && !(v.level === "" && !v.umapOnly && v.graph && v.graph.graphData().nodes.length < 5000); i++) await sleep(500);
+            await settle();
+          }
+          v.plantPlaceResults = ${planted};
+          const ids = () => new Set(v.graph.graphData().nodes.map((n) => String(n.id)));
+          const same = (a, b) => a.size === b.size && [...a].every((x) => b.has(x));
+          try {
+            await sleep(1500);
+            const before = ids();
+            f.input.value = "dril"; f.k = 12; await f.run(); await sleep(1200);
+            f.scroller.scrollLeft = f.scroller.scrollWidth; f.scroller.dispatchEvent(new Event("scroll")); await sleep(400);
+            const during = ids();
+            const st = { ...v.searchStats }, glowing = v.graph.graphData().nodes.filter((n) => (v.lookOf(n, v.graph.nodeRelSize(), v.drawnMedia).glow || 0) > 0).length;
+            f.input.value = ""; await f.run(); await sleep(800);
+            const after = ids();
+            return { planted: ${planted}, level: v.level, nodes: before.size, during_same: same(before, during), after_same: same(before, after),
+                     added: [...during].filter((x) => !before.has(x)).length, resolved_page: st.resolved_page, resolved_chunk: st.resolved_chunk, glowing };
+          } finally {
+            v.plantPlaceResults = false; if (bv) bv.plantNoWebSearch = false;
+            if (f.input.value) { f.input.value = ""; await f.run(); }
+            if (v.level !== start && unit) { unit.click(); await settle(); }
+          }
+        })()`, { timeout: 120000 });
+        const clean = await arm(false), planted = await arm(true);
+        return { pass: clean.level === "" && clean.during_same && clean.after_same && clean.resolved_page >= 1 && clean.glowing >= 1
+                       && planted.added > 0 && !planted.during_same,
+                 evidence: { clean, planted } };
+      },
+    },
+    {
+      id: "G-170",
+      asks: "chunk view runs ONE bounded collision relax after its layout lands: overlapping pairs fall, no node moves more than its leash (4 of its radii) from its UMAP point, the fit itself is unwritten, and the frames keep flowing; planted (plantNoChunkRelax): the UMAP points as they are",
+      async run() {
+        // 2026-10-11: "a little too clumped together ... perhaps *some* amount
+        // of force-directed is still worth, but not to the extent that we have
+        // to break our memory bank or see nodes exploding everywhere".
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          await window.__domvec.act("open", "graph");
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          for (let i = 0; i < 60 && !v.graph; i++) await sleep(500);
+          const unit = [...v.containerEl.querySelectorAll(".domvec-graph-bar button")].find((b) => /^(pages|chunks)$/.test(b.textContent.trim()));
+          const start = v.level;
+          const chunkView = () => v.level === "chunk" && v.umapOnly && v.graph && v.graph.graphData().nodes.length > 2000;
+          if (!chunkView() && unit) { unit.click(); for (let i = 0; i < 240 && !chunkView(); i++) await sleep(500); }
+          if (!chunkView()) return { error: "chunk view did not arrive", level: v.level };
+          v.plantNoChunkRelax = ${planted};
+          try {
+            const ns = v.graph.graphData().nodes.filter((n) => Number.isFinite(n.fitX));
+            const fit0 = ns.slice(0, 3000).map((n) => n.fitX + n.fitY);
+            for (const n of ns) { n.x = n.fx = n.fitX; n.y = n.fy = n.fitY; n.z = n.fz = n.fitZ ?? 0; }
+            const runs0 = v.chunkRelaxStats.runs;
+            const gap0 = v.frameGaps.length;
+            v.relaxChunkView();
+            for (let i = 0; i < 120 && v.chunkRelaxStats.runs === runs0; i++) await sleep(250);
+            await sleep(500);
+            const gaps = v.frameGaps.slice(gap0).sort((a, b) => a - b);
+            const rs = v.graph.nodeRelSize();
+            let maxShift = 0;
+            // In the radius each node had WHEN the relax measured its leash: the
+            // spacing pass may shrink it afterwards.
+            for (const n of ns) { const h = n.relaxHalf || v.lookOf(n, rs, v.drawnMedia).half || 1e-6; maxShift = Math.max(maxShift, Math.hypot(n.x - n.fitX, n.y - n.fitY, (n.z || 0) - (n.fitZ ?? 0)) / h); }
+            const fitKept = ns.slice(0, 3000).every((n, i) => n.fitX + n.fitY === fit0[i]);
+            return { planted: ${planted}, ran: v.chunkRelaxStats.runs - runs0, stats: { ...v.chunkRelaxStats }, max_shift_radii: Math.round(maxShift * 100) / 100,
+                     fit_kept: fitKept, frames: gaps.length, frame_p99: gaps[Math.floor(gaps.length * 0.99)] ?? null, frame_max: gaps[gaps.length - 1] ?? null };
+          } finally {
+            v.plantNoChunkRelax = false;
+            if (${planted}) v.relaxChunkView();               // leave the reader the relaxed picture
+            if (v.level !== start && unit) { unit.click(); }
+          }
+        })()`, { timeout: 240000 });
+        const clean = await arm(false), planted = await arm(true);
+        const c = clean;
+        return { pass: !c.error && c.ran === 1 && c.stats.overlaps_after < 0.5 * c.stats.overlaps_before && c.max_shift_radii <= 4.05 && c.fit_kept
+                       && (c.frame_max ?? 0) < 120 && (c.stats.worst_frame_ms ?? 99) < 40 && !planted.error && planted.ran === 0 && planted.max_shift_radii < 1e-6,
+                 evidence: { clean, planted } };
       },
     },
     {

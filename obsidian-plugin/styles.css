@@ -889,3 +889,11 @@ button.domvec-run-fence:hover {
 .domvec-search3d-track { height: 1px; }
 /* The browser's own search row moved to the 3D panel (item 84). */
 .domvec-browser-search { display: none; }
+/* The slider's soft brightness gradient: dim at the left (the first result
+   alone), bright at the right (all k) -- the same ramp the results follow. */
+.domvec-search3d-scroll { border-radius: 6px;
+  background: linear-gradient(90deg, rgba(255,255,255,0.02), rgba(255,255,255,0.10) 55%, rgba(255,255,255,0.26)); }
+.domvec-search3d-scroll::-webkit-scrollbar { height: 10px; }
+.domvec-search3d-scroll::-webkit-scrollbar-track { background: transparent; }
+.domvec-search3d-scroll::-webkit-scrollbar-thumb { border-radius: 5px; background: rgba(255,255,255,0.55);
+  box-shadow: 0 0 10px 2px rgba(255,255,255,0.35); }
