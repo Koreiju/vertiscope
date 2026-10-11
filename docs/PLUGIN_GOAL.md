@@ -2596,6 +2596,14 @@ phantom anchors, after every projection, local update and global update;
 (65) no link is drawn to a node that is not where its page is; (66) a hover
 flight lands on a node the reader can see.*
 
+> Please ensure everything is processing async and as fast as possible
+> everywhere that these processes and links apply between our various
+> interfaces and intricacies.
+
+*Read as: (67) every stage between the page, the plugin, the sidecar, the store
+and the fit runs asynchronously -- none waits on another it does not need --
+and each is measured and made as fast as it can be.*
+
 ---
 
 

@@ -2640,6 +2640,13 @@ export function makeChecks(env) {
               await b.webview.executeJavaScript("document.querySelectorAll('tbody tr')[1].scrollIntoView({block:'center'}); 1");
               await sleep(700);
               const geo = JSON.parse(await b.webview.executeJavaScript("(function(){var r=document.querySelectorAll('tbody tr')[1];var c=r.querySelectorAll('td')[2];var rb=r.getBoundingClientRect(),cb=c.getBoundingClientRect();return JSON.stringify({row_w:rb.width,cx:cb.x+cb.width/2,cy:cb.y+cb.height/2,cell_w:cb.width});})()"));
+              // Off the page first: the sensor pushes only when the chunk under
+              // the pointer CHANGES, so an arm hovering the point the last arm
+              // left the pointer on read that arm's outline (2026-10-10).
+              wc.sendInputEvent({ type: "mouseMove", x: -8, y: -8 });
+              wc.sendInputEvent({ type: "mouseLeave", x: -8, y: -8 });
+              await sleep(400);
+              b.pipebox.hover = null;
               wc.sendInputEvent({ type: "mouseMove", x: Math.round(geo.cx), y: Math.round(geo.cy) });
               await sleep(40);
               wc.sendInputEvent({ type: "mouseMove", x: Math.round(geo.cx) + 1, y: Math.round(geo.cy) });

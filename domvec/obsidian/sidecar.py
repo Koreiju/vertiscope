@@ -1935,6 +1935,20 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send(200, doc)
             return
 
+        if segments[0] == "local_quality":
+            from .projector import projector as _get_projector
+            proj = _get_projector()
+            url = (parse_qs(parts.query).get("url") or [""])[0]
+            if proj is None or not hasattr(proj, "local_quality"):
+                self._send(503, {"error": "no page projector"})
+            elif url:
+                self._send(200, proj.local_quality(url))
+            else:
+                with proj.lock:
+                    urls = sorted(proj.local, key=lambda u: -len(proj.local[u]["cids"]))[:12]
+                self._send(200, {"pages": [proj.local_quality(u) for u in urls]})
+            return
+
         if segments[0] == "snapshot_coverage":
             from . import snapshots as _snaps
             url = (parse_qs(parts.query).get("url") or [""])[0]

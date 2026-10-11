@@ -179,6 +179,17 @@ class _RowMap:
         self.free = list(plan["free"]) + freed
 
 
+def latent_refit_due(quiet_s: float, queued: int, chunks_now: int, fitted_chunks: int,
+                     latent_s: float = 120.0, growth: float = 1.25) -> bool:
+    """Should the GLOBAL fit refit now, the app being latent? (G-129,
+    2026-10-10: "ensure that we still run global umapping when there is
+    latent activity in the app that doesn't stream new chunk diffs".) Yes when
+    no chunk diff has arrived for `latent_s`, nothing waits to be placed, and
+    the corpus has grown by `growth` since the fit -- before the 2x rule."""
+    return (quiet_s > latent_s and queued == 0 and fitted_chunks > 0
+            and chunks_now >= growth * fitted_chunks)
+
+
 class ChunkProjector:
     """Positions for every drawable chunk, kept current by a stream."""
 
@@ -189,6 +200,8 @@ class ChunkProjector:
         self.seed = seed
         self.lock = threading.RLock()
         self.projection = None
+        #: Planted: the drain takes the work lock, as before (placement waits for captures).
+        self.plant_drain_locks = False
         #: When the stream last delivered chunks (monotonic), and how many
         #: global refits ran because the app went latent.
         self.last_drain_at = time.monotonic()
@@ -529,9 +542,18 @@ class ChunkProjector:
             while not self._stop.is_set():
                 self.wanted.wait(timeout=1.0)
                 self.wanted.clear()
+                # The drain only READS -- chunk rows and vectors, on the store's
+                # own read connection -- and with the semantic centroid it
+                # touches no shared in-memory index a capture mutates. So it
+                # does not wait out a capture's write (2026-10-10: "ensure
+                # everything is processing async"): it took the work lock and
+                # every placement queued behind the store write in progress.
+                lockfree = (getattr(self, "centroid", "") == "semantic"
+                            and getattr(workspace.store, "_read_conn", None) is not None
+                            and not self.plant_drain_locks)
                 while self.queue and not self._stop.is_set():
                     try:
-                        with (self.work_lock or nullcontext()):
+                        with (nullcontext() if lockfree else (self.work_lock or nullcontext())):
                             got = self.drain(workspace)
                     except Exception:               # noqa: BLE001
                         break
@@ -559,10 +581,10 @@ class ChunkProjector:
                             # 2x (2026-10-10: "ensure that we still run global
                             # umapping when there is latent activity in the
                             # app that doesn't stream new chunk diffs").
-                            latent = (time.monotonic() - self.last_drain_at > self.LATENT_S
-                                      and not self.queue)
-                            if (not due and latent and bool(self.fitted_chunks)
-                                    and self.chunks_now >= self.LATENT_GROWTH * self.fitted_chunks):
+                            if not due and latent_refit_due(
+                                    time.monotonic() - self.last_drain_at, len(self.queue),
+                                    self.chunks_now, self.fitted_chunks,
+                                    self.LATENT_S, self.LATENT_GROWTH):
                                 due = True
                                 self.latent_refits += 1
                     except Exception:               # noqa: BLE001
@@ -1524,6 +1546,41 @@ class PageProjector(ChunkProjector):
             self.local_stats["last"] = {"url": u, "n": len(lf["cids"]), "ms": lf["ms"], "moved": moved,
                                         "at": round(time.time(), 3)}
             self._save_local()
+
+    def local_quality(self, url: str, k: int = 10, seed: int = 0) -> Dict:
+        """How much of a page's embedding neighbourhoods each placement keeps
+        (G-128): for every chunk, the share of its k nearest in embedding space
+        (cosine) that are among its k nearest in (a) the url's LOCAL fit,
+        (b) the page fit's transform (`raw_pos`, the old placement), (c)
+        random positions -- the floor any placement must beat. The measure
+        `_local_positions` used on RFC 9110 (0.507 / 0.086 / 0.035)."""
+        with self.lock:
+            lf = self.local.get(url)
+            cids = [c for c in (lf["cids"] if lf else sorted(self.by_url.get(url) or ())) if c in self.vec]
+            if len(cids) <= k + 1:
+                return {"url": url, "n": len(cids), "why": "too few chunks"}
+            V = np.asarray([self.vec[c] for c in cids], dtype=np.float64)
+            local = (np.asarray([lf["coords"][lf["index"][c]] for c in cids], dtype=np.float64)
+                     if lf else None)
+            raw = [self.raw_pos.get(c) for c in cids]
+        V = V / np.maximum(np.linalg.norm(V, axis=1, keepdims=True), 1e-12)
+        S = V @ V.T
+        np.fill_diagonal(S, -np.inf)
+        truth = np.argsort(-S, axis=1)[:, :k]
+
+        def kept(P):
+            D = ((P[:, None, :] - P[None, :, :]) ** 2).sum(-1)
+            np.fill_diagonal(D, np.inf)
+            near = np.argsort(D, axis=1)[:, :k]
+            return round(float(np.mean([len(set(truth[i]) & set(near[i])) / k for i in range(len(P))])), 3)
+
+        out = {"url": url, "n": len(cids), "k": k}
+        if local is not None:
+            out["local_fit"] = kept(local)
+        if all(r is not None for r in raw):
+            out["page_fit_transform"] = kept(np.asarray(raw, dtype=np.float64))
+        out["random"] = kept(np.random.default_rng(seed).normal(size=(len(cids), 3)))
+        return out
 
     def _save_local(self) -> None:
         import pickle
