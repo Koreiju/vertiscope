@@ -35,6 +35,7 @@ import { ChunkSurface, SurfaceHost } from "./surface";
 import { baseFor, faviconFor, getSnapshot, pictureFor, putSnapshot, renderSnapshot } from "./snapshot";
 import type { ActRecord, ActResult } from "./panelact";
 import { PANEL_VIEW, PanelView } from "./panelview";
+import { SearchField, brightness, type FieldHit, type FieldAnswer } from "./searchfield";
 
 export const GRAPH_VIEW = "domvec-graph-view";
 
@@ -447,6 +448,9 @@ export class GraphView extends ItemView {
     // and the caption bar sits above it -- anchoring to the pane would
     // have drawn every panel one bar-height below its node.
     this.canvasEl = canvas;
+    // The naked search field, middle-bottom of the 3D panel (PLUGIN_GOAL 84).
+    this.searchField = new SearchField(canvas, (q, k) => this.searchAsk(q, k),
+                                       (hits, d) => this.showSearch(hits, d), () => this.clearSearch());
 
     const load = async () => {
       // Not over the force tree's caption: a retry every 3 s wrote
@@ -3642,6 +3646,184 @@ export class GraphView extends ItemView {
    * READS the node; writes nothing the layout uses.
    */
   private lookOf(n: any, relSize: number, media: boolean): NodeLook {
+    const base = this.baseLook(n, relSize, media);
+    const st = this.searchState;
+    if (!st || this.plantNoGlass) {
+      // The DEFAULT look: a glowing glass orb in the node's own colour
+      // (2026-10-11: "standardize the latent glowing glass orbs as the
+      // default"). Pictures stay pictures; a streaming node keeps its grey
+      // translucence, so streaming still reads as streaming. Planted: the old
+      // opaque spheres.
+      if (this.plantOpaqueOrbs || base.picture || base.translucent || n.hovered) return base;
+      return { half: base.half, translucent: true, alpha: 1, color: base.color, glass: true };
+    }
+    const r = st.ranks.get(String(n.id));
+    if (r !== undefined && r < st.shown) {
+      // A shown result, as itself, lit from within (item 88).
+      // At least the scene's median size: a result is what the reader is
+      // looking for, and chunk nodes drew as specks among the glass (seen
+      // 2026-10-11).
+      return { ...base, half: Math.max(base.half, st.minHalf), translucent: false, alpha: 1, glow: brightness(r, st.shown) };
+    }
+    // Everything else: colourless glass, no picture -- a lens the results'
+    // lights reflect off ("These nodes are the only nodes visible while a
+    // user searches. All other nodes become *translucent-ish* ... colorless
+    // but still applying a glassy lens material effect").
+    return { half: base.half, translucent: true, alpha: 0, color: "#ffffff", glass: true };
+  }
+
+  /** Planted: the opaque lit spheres the glowing orbs replaced as the default. */
+  plantOpaqueOrbs = false;
+
+  // ---- PLUGIN_GOAL 84-88: the search field, its results, glass and light ----
+
+  searchField: SearchField | null = null;
+  /** The ranked results and how many are shown; null when not searching. */
+  searchState: { query: string; ranks: Map<string, number>; hits: FieldHit[]; shown: number; at: number; minHalf: number } | null = null;
+  /** Planted (item 88): results shown, but nothing turned to glass and no lights. */
+  plantNoGlass = false;
+  searchStats = { asked: 0, placed: 0, shown: 0, lights: 0, last_ms: 0, missing: 0, removed: 0, web_merged: 0 };
+  /** Result chunks a search drew that their page did not: removed when it clears. */
+  private searchPlaced = new Set<string>();
+
+  /** Told the plugin, which tells the browser cell: search the web too (item 85). */
+  onWebSearch: (query: string) => void = () => {};
+  private webQuery = "";
+  private webTimer = 0;
+  /**
+   * The web half's results land in the store as the browser's capture
+   * streams: the store is asked again while they arrive, and what is new is
+   * merged into the field without moving its scroll.
+   */
+  private followWeb(query: string): void {
+    window.clearInterval(this.webTimer);
+    let left = 10;
+    this.webTimer = window.setInterval(async () => {
+      const f = this.searchField;
+      if (!f || f.query !== query || --left < 0) { window.clearInterval(this.webTimer); return; }
+      const got: any = await this.sidecar.search(query, { k: f.k }).catch(() => null);
+      if (!got || f.query !== query) return;
+      const hits: FieldHit[] = (got.hits || []).map((h: any) => ({ cid: String(h.cid), url: String(h.url || "") }));
+      const fresh = hits.filter((h) => !f.hits.some((x) => x.cid === h.cid));
+      if (fresh.length) { await this.placeResults(fresh); this.searchStats.web_merged += fresh.length; }
+      f.extend(fresh, Number(got.n || 0));
+    }, 3000);
+  }
+
+  /** One query: the store's ranking, its undrawn results placed in the scene. */
+  private async searchAsk(query: string, k: number): Promise<FieldAnswer | null> {
+    const t0 = performance.now();
+    this.searchStats.asked++;
+    if (query !== this.webQuery) {
+      this.webQuery = query;
+      this.onWebSearch(query);
+      this.followWeb(query);
+    }
+    const got: any = await this.sidecar.search(query, { k });
+    if (!got) return null;
+    const hits: FieldHit[] = (got.hits || []).map((h: any) => ({ cid: String(h.cid), url: String(h.url || "") }));
+    await this.placeResults(hits);
+    this.searchStats.last_ms = Math.round(performance.now() - t0);
+    return { hits, n: Number(got.n || hits.length) };
+  }
+
+  /** Results the scene does not draw yet are placed (the url view draws pages, not chunks). */
+  private async placeResults(hits: FieldHit[]): Promise<void> {
+    if (!this.graph || !hits.length) return;
+    const have = new Set((this.graph.graphData() as any).nodes.map((n: any) => String(n.id)));
+    const missing = hits.map((h) => h.cid).filter((c) => !have.has(c));
+    this.searchStats.missing = missing.length;
+    if (!missing.length) return;
+    const got: any = await this.sidecar.place(missing).catch(() => null);
+    if (got && got.nodes && got.nodes.length) {
+      const keep = new Set(missing);
+      this.absorb(got.nodes, got.edges, undefined, { keep });
+      for (const c of missing) this.searchPlaced.add(c);
+      this.searchStats.placed += got.nodes.length;
+    }
+  }
+
+  private showSearch(hits: FieldHit[], shown: number): void {
+    let minHalf = this.searchState ? this.searchState.minHalf : 0;
+    if (!this.searchState && this.graph) {
+      const ns = (this.graph.graphData() as any).nodes as any[], rs = this.graph.nodeRelSize();
+      const hs: number[] = [];
+      for (let i = 0; i < ns.length; i += Math.max(1, Math.floor(ns.length / 1500))) hs.push(this.baseLook(ns[i], rs, this.drawnMedia).half);
+      hs.sort((a, b) => a - b);
+      minHalf = hs.length ? hs[hs.length >> 1] : 0;
+    }
+    this.searchState = { query: this.searchField?.query || "", hits, shown, minHalf,
+                         ranks: new Map(hits.map((h, i) => [h.cid, i])), at: performance.now() };
+    this.searchStats.shown = shown;
+    this.updateSearchLights();
+    this.batchDirty = true;
+  }
+
+  private clearSearch(): void {
+    window.clearInterval(this.webTimer);
+    this.webQuery = "";
+    if (this.graph && this.searchPlaced.size) {
+      const data: any = this.graph.graphData();
+      const openUrls = new Set<string>();
+      for (const u of this.openedByReader) openUrls.add(u);
+      const browsing = this.browsingUrl ? this.browsingUrl().split("#")[0] : "";
+      const keep = new Set<string>(this.billboards.keys() as any);
+      const gone = new Set<string>(data.nodes.filter((n: any) => this.searchPlaced.has(String(n.id)) && !keep.has(n.id)
+        && !openUrls.has(n.url) && !(browsing && String(n.url || "").split("#")[0] === browsing)).map((n: any) => n.id));
+      if (gone.size) {
+        const end = (x: any) => (typeof x === "object" && x ? x.id : x);
+        this.graph.graphData({ nodes: data.nodes.filter((n: any) => !gone.has(n.id)),
+                               links: data.links.filter((l: any) => !gone.has(end(l.source)) && !gone.has(end(l.target))) });
+        this.searchStats.removed += gone.size;
+      }
+      this.searchPlaced.clear();
+    }
+    this.searchState = null;
+    this.batch?.setLights([], 1);
+    this.searchStats.shown = 0; this.searchStats.lights = 0;
+    this.batchDirty = true;
+  }
+
+  /** During a search an edge is drawn only between two shown results; every
+   *  other edge is a trace (the glass is what stays visible, item 88). */
+  private searchLineAlpha(): ((l: any) => number) | null {
+    const st = this.searchState;
+    if (!st || this.plantNoGlass) return null;
+    const end = (x: any) => String(typeof x === "object" && x ? x.id : x);
+    const shown = (id: string) => { const r = st.ranks.get(id); return r !== undefined && r < st.shown; };
+    return (l: any) => (shown(end(l.source)) && shown(end(l.target)) ? 0.35 : 0.025);
+  }
+
+  /** The shown results' lights, brightest first, where their nodes ARE now. */
+  private updateSearchLights(): void {
+    const st = this.searchState;
+    if (!st || !this.batch || !this.graph) return;
+    if (this.plantNoGlass) { this.batch.setLights([], 1); this.searchStats.lights = 0; return; }
+    const byId = new Map<string, any>();
+    for (const n of (this.graph.graphData() as any).nodes) if (st.ranks.has(String(n.id))) byId.set(String(n.id), n);
+    const lights: { at: [number, number, number]; color: string; intensity: number; b: number }[] = [];
+    st.hits.slice(0, st.shown).forEach((h, i) => {
+      const n = byId.get(h.cid);
+      if (!n || !Number.isFinite(n.x)) return;
+      const b = brightness(i, st.shown);
+      lights.push({ at: [n.x, n.y, n.z || 0], color: n.color || "#ffffff", intensity: 0.6 + 1.6 * b, b });
+    });
+    lights.sort((a, b) => b.b - a.b);
+    // A light falls to half over a tenth of the scene: the scene's own scale,
+    // so it reads the same at every zoom of the corpus.
+    const ns = (this.graph.graphData() as any).nodes as any[];
+    let lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+    for (let i = 0; i < ns.length; i += Math.max(1, Math.floor(ns.length / 2000))) {
+      const n = ns[i]; if (!Number.isFinite(n.x)) continue;
+      const p = [n.x, n.y, n.z || 0];
+      for (let a = 0; a < 3; a++) { lo[a] = Math.min(lo[a], p[a]); hi[a] = Math.max(hi[a], p[a]); }
+    }
+    const span = Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]);
+    this.batch.setLights(lights, Number.isFinite(span) && span > 0 ? span * 0.1 : 60);
+    this.searchStats.lights = Math.min(lights.length, 16);
+  }
+
+  private baseLook(n: any, relSize: number, media: boolean): NodeLook {
     if (n.force) {
       return { half: n.level === "page" ? STREAM.RADIUS * 1.6 : STREAM.RADIUS, translucent: true,
                alpha: n.hovered ? 0.9 : (n.projected ? 0.75 : STREAM.OPACITY), color: n.hovered ? "#ffffff" : (n.color || "#9aa0a6") };
@@ -3886,6 +4068,7 @@ export class GraphView extends ItemView {
       }
       this.batch.setVisible(!this.plantPerNode);
       if (this.plantPerNode) return;
+      this.idleDrift(g, t);
       if (media && !this.plantAllPictures) this.refreshDetail(g);
       // Only when something drawn has changed (2026-10-11, measured in chunk
       // view: 4.7 s of every 5 s of script at 22.8k nodes, with nothing on
@@ -3904,7 +4087,8 @@ export class GraphView extends ItemView {
       this.batchStats.synced++;
       const d = g.graphData();
       const rs = g.nodeRelSize();
-      this.batch.sync(d.nodes, d.links, (n) => this.lookOf(n, rs, media));
+      if (this.searchState) this.updateSearchLights();
+      this.batch.sync(d.nodes, d.links, (n) => this.lookOf(n, rs, media), this.searchLineAlpha());
     };
     this.batchRaf = requestAnimationFrame(tick);
   }
@@ -4509,6 +4693,67 @@ export class GraphView extends ItemView {
    * how many chunks it stands for, and that statement survives wherever the
    * picture can afford it.
    */
+  // ---- PLUGIN_GOAL 83: idle drift ------------------------------------------
+
+  /**
+   * With no reader activity, the scene turns: the camera orbits its target
+   * about the vertical, and the colours turn about the grey axis (2026-10-11:
+   * "a latent feature that rotates both cartesian and color coordinates slowly
+   * but noticeably whenever there is no user activity"). Both are DRAWN, never
+   * written: the layout keeps its coordinates and the store its colours, so
+   * the moment the reader acts the turn stops where it is and the colours ease
+   * back to the fit's own. Activity is the plugin's own reader clock
+   * (`__domvecReaderAt`, stamped on every input in the app).
+   */
+  idleDriftAfterMs = 20000;
+  /** Camera orbit, radians a second: a full turn in about 100 s. */
+  driftOrbitRate = 0.063;
+  /** Hue turn, radians a second: the full colour wheel in about 2 minutes. */
+  driftHueRate = 0.052;
+  /** Planted: no drift at all. */
+  plantNoDrift = false;
+  driftStats = { active: false, turned: 0, hue: 0, started: 0, stopped: 0 };
+  /** Set by the drift's own check: drift although a check is running. */
+  driftInCheck = false;
+  private driftAt = 0;
+  private idleDrift(g: any, now: number): void {
+    if (!this.batch) return;
+    const dt = this.driftAt ? Math.min(0.1, (now - this.driftAt) / 1000) : 0;
+    this.driftAt = now;
+    const readerAt = (window as any).__domvecReaderAt || 0;
+    const idle = Date.now() - readerAt >= this.idleDriftAfterMs;
+    const visible = !!this.canvasEl && this.canvasEl.offsetWidth > 0;
+    // Not under a check or a stress run (their idle is not the reader's, and a
+    // turning camera moves every screen position they measure) -- unless the
+    // drift's own check asks for it.
+    const w: any = window;
+    const checking = (!!w.__domvec?.verify?.state?.()?.running || !!w.__domvecStressing) && !this.driftInCheck;
+    const on = idle && visible && !checking && !this.plantNoDrift && !this.searchState;
+    if (on !== this.driftStats.active) {
+      this.driftStats.active = on;
+      if (on) this.driftStats.started++; else this.driftStats.stopped++;
+    }
+    if (on && dt > 0) {
+      const cam = g.camera(), ctl = g.controls();
+      const tgt = ctl && ctl.target ? ctl.target : { x: 0, y: 0, z: 0 };
+      const a = this.driftOrbitRate * dt;
+      const dx = cam.position.x - tgt.x, dz = cam.position.z - tgt.z;
+      cam.position.x = tgt.x + dx * Math.cos(a) - dz * Math.sin(a);
+      cam.position.z = tgt.z + dx * Math.sin(a) + dz * Math.cos(a);
+      cam.lookAt(tgt.x, tgt.y, tgt.z);
+      this.driftStats.turned += a;
+      this.batch.setHue((this.batch.hue + this.driftHueRate * dt) % (2 * Math.PI));
+    } else if (this.batch.hue !== 0 && dt > 0) {
+      // Back to the fit's colours the short way round, in about a second.
+      let h = this.batch.hue;
+      if (h > Math.PI) h -= 2 * Math.PI;
+      const step = Math.sign(h) * Math.min(Math.abs(h), 3.2 * dt);
+      h -= step;
+      this.batch.setHue(Math.abs(h) < 1e-3 ? 0 : (h + 2 * Math.PI) % (2 * Math.PI));
+    }
+    this.driftStats.hue = Math.round(this.batch.hue * 1000) / 1000;
+  }
+
   /** Static scene ancestors whose matrices were composed once and frozen. */
   frozenAncestors = 0;
   /** Something drawn changed since the last batch sync (see the frame loop). */
@@ -4812,7 +5057,7 @@ export class GraphView extends ItemView {
    */
   absorb(incoming: LayoutNode[],
          edges?: { source: string; target: string }[],
-         traceId?: string, opts: { pagesOnly?: boolean } = {}):
+         traceId?: string, opts: { pagesOnly?: boolean; keep?: Set<string> } = {}):
       { added: number; moved: number; edges: number } {
     if (this.forceSpecs.size) {
       // Chunks placed just now carry their NEW content: a force node pending
@@ -4847,6 +5092,8 @@ export class GraphView extends ItemView {
       const t = Date.now();
       incoming = incoming.filter((n) => {
         if ((n.level ?? "chunk") === "page") return true;
+        // A search's results are drawn whatever page they are on (item 87).
+        if (opts.keep && n.cid && opts.keep.has(n.cid)) return true;
         const shown = open(n.url || "");
         if (n.cid && !this.life.placed.has(n.cid)) this.life.placed.set(n.cid, { at: t, drawn: shown, url: n.url || "" });
         if (!shown) this.life.folded_unopened++;
@@ -5044,6 +5291,8 @@ export class GraphView extends ItemView {
     this.graph?._destructor?.();
     this.graph = null;
     canvas.empty();
+    // The search field lives on the canvas too (item 84): put back.
+    if (this.searchField) canvas.appendChild(this.searchField.el);
     const nodes = layout.nodes.map((n) => this.nodeFrom(n));
 
     // **A page node is held at the position the fit gave it.**
@@ -5547,6 +5796,9 @@ export class GraphView extends ItemView {
     // point; without a reheat it was the finishing point too.
     graph.d3ReheatSimulation();
     this.graph = graph;
+    // The search field over the canvas (item 84): `ForceGraph3D(canvas)` empties
+    // its element, so the field is put back AFTER the graph is built.
+    if (this.searchField && !canvas.contains(this.searchField.el)) canvas.appendChild(this.searchField.el);
     this.calmFrom = performance.now() + 6000;
     graph.onEngineTick(() => { this.batchDirty = true; this.govern(); });
     this.startBatch(graph, media);

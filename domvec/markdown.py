@@ -2744,6 +2744,11 @@ def _number_parts(chunks: List[MarkdownChunk]) -> None:
         seen[key] = chunk.part + 1
 
 
+#: Planted (R-K1): depths compacted over the PAGE, as before -- empty indent
+#: levels wherever a depth branches elsewhere on the page.
+PLANT_PAGE_LEVELS = False
+
+
 def _level_page(chunks: List[MarkdownChunk]) -> None:
     """Put the page on the margin, and give each nesting level one step.
 
@@ -2759,9 +2764,27 @@ def _level_page(chunks: List[MarkdownChunk]) -> None:
     nesting relationship -- deeper stays deeper, siblings stay level -- while
     a chain of five wrappers costs one step instead of five.
 
-    Done per page, after chunking, because it is a property of the document
-    and not of any chunk.
+    **Per chunk, from each line's own parent** (R-K1, 2026-10-11). Mapping
+    the depths that occur ON THE PAGE onto consecutive integers removed a
+    chain of wrappers only when its depths occurred nowhere else on the page;
+    on a real page they do, so a depth that branches in one chunk still spent
+    an empty indent in another -- 39.0% of exported chunks carried one, and a
+    chunk deep in the page started indented. Now a line sits one step below
+    the nearest preceding line drawn shallower than it, and a line with none
+    sits at the margin. Deeper stays deeper along every ancestor chain, so an
+    element inside another stays drawn inside it; siblings stay level.
+    `domvec.analytics.levels` scores it. Planted: the page-wide mapping.
     """
+    if not PLANT_PAGE_LEVELS:
+        for chunk in chunks:
+            stack: List[Tuple[int, int]] = []     # (original depth, new depth)
+            for line in chunk.lines:
+                d = line.depth
+                while stack and stack[-1][0] >= d:
+                    stack.pop()
+                line.depth = stack[-1][1] + 1 if stack else 0
+                stack.append((d, line.depth))
+        return
     by_url: Dict[str, List[MarkdownChunk]] = {}
     for chunk in chunks:
         by_url.setdefault(chunk.url, []).append(chunk)

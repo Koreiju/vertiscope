@@ -581,6 +581,8 @@ export function makeChecks(env) {
   // The browser cell, fronted, attached and sized, with `land(url, ms)`
   // waiting for a load to finish at that url. Shared by the Addendum IX
   // checks, which drive the cell the way a reader does.
+  // Points over the page's own chunks, the smallest chunk at each (G-125, G-124).
+  const SCAN_POINTS = "(function(){var h=window.__domvecSensor;var a=[];for(var y=40;y<innerHeight-30;y+=30)for(var x=40;x<Math.min(innerWidth,760);x+=90){var st=document.elementsFromPoint(x,y),bb=null,ba=Infinity;for(var i=0;i<st.length&&i<12;i++){var c=null;try{c=h.at(st[i]);}catch(e){}if(c&&c.box){var ar=c.box[2]*c.box[3];if(ar>0&&ar<ba){ba=ar;bb=c;}}}if(bb)a.push({x:x,y:y,id:bb.id});}return JSON.stringify(a);})()";
   const PREP = `
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     await window.__domvec.act("open", "graph");
@@ -2648,6 +2650,8 @@ export function makeChecks(env) {
             }
             out.stored = cids.length;
             if (cids.length < 3) return { ...out, error: "the page never reached the store" };
+            // From the top: a check before this one may leave the page scrolled.
+            await b.webview.executeJavaScript("window.scrollTo(0,0); 1"); await sleep(400);
             // A point over a chunk the browser can resolve to a stored cid.
             const pts = JSON.parse(await b.webview.executeJavaScript("(function(){var h=window.__domvecSensor;var vw=innerWidth,vh=innerHeight,a=[];for(var y=30;y<vh;y+=40)for(var x=30;x<vw;x+=60){var st=document.elementsFromPoint(x,y),bb=null,ba=Infinity;for(var i=0;i<st.length&&i<12;i++){var c=null;try{c=h.at(st[i]);}catch(e){}if(c&&c.box){var ar=c.box[2]*c.box[3];if(ar>0&&ar<ba){ba=ar;bb=c;}}}if(bb)a.push({x:x,y:y,id:bb.id,frac:ba/(vw*vh)});}return JSON.stringify(a);})()"));
             // The planted arm hovers the CLEAN arm's point: the same chunk, so a
@@ -2707,11 +2711,14 @@ export function makeChecks(env) {
         const planted = await arm(true, clean && clean.pick ? clean.pick : null);
         const works = (x) => !x.error && x.flown >= 1 && x.flew_to === x.pick.stored && !!x.panel
           && x.panel.from_hover && x.panel.text > 0 && (x.panel.first_paint_ms ?? 1e9) <= 500
-          && x.outline_frac !== null && x.outline_frac < 1 && x.closed_after_leave === true;
+          && x.outline_frac !== null && x.outline_frac < 1;
+        // Closing on leave was REPLACED by G-125 (2026-10-10: "showing hovered panels ...
+        // should persist, but disappear after a minute maybe"): the panel outlives the
+        // hover, and G-125's check holds that. `closed_after_leave` stays as evidence.
         return {
           pass: works(clean) && !planted.error && planted.flown === 0 && !planted.panel,
           evidence: { clean, planted,
-                      bar: "clean: the camera flew to the hovered chunk's stored node, its panel opened from the hover with text within 500 ms, the outline is smaller than the viewport, and the panel closed after the pointer left; planted (plantNoFocus): no flight, no panel" },
+                      bar: "clean: the camera flew to the hovered chunk's stored node, its panel opened from the hover with text within 500 ms, the outline is smaller than the viewport (the panel then PERSISTS after leave, per G-125, which replaced close-on-leave); planted (plantNoFocus): no flight, no panel" },
         };
       },
     },
@@ -3133,7 +3140,29 @@ export function makeChecks(env) {
     {
       id: "G-62",
       asks: "with the cell offline (Chromium's own network emulation), a stored page that was never saved fails to load and opens rebuilt from the scan trace, as a local scrollable file; null arm: a url the store never traced opens nothing",
-      async run() { return offlineArm("traced"); },
+      async run() {
+        const got = await offlineArm("traced");
+        // And offline ENDS when the reader goes to a live page by any route, not
+        // only the button (2026-10-11: a cell left "offline" docked and pinned
+        // every hover panel after, so none ever expired -- found by G-125).
+        // Planted (plantStickyOffline): only the button ends it.
+        const fixtures = await serveFixtures();
+        try {
+          const leave = (planted) => evaluate(`(async () => {
+            ${PREP}
+            b.plantStickyOffline = ${planted};
+            try {
+              b.offlineFor = ${JSON.stringify(OKAPI)};
+              const ok = await land(${JSON.stringify(fixtures.origin + "/shadow_catalogue.html")}, 30000);
+              return { planted: ${planted}, landed: ok, offline_after: b.offlineFor };
+            } finally { b.plantStickyOffline = false; b.offlineFor = ""; }
+          })()`, { timeout: 60000 });
+          const left = { clean: await leave(false), planted: await leave(true) };
+          got.evidence = { ...got.evidence, leaving: left };
+          got.pass = got.pass && left.clean.landed && left.clean.offline_after === "" && left.planted.offline_after !== "";
+          return got;
+        } finally { await fixtures.close(); }
+      },
     },
     {
       id: "G-61",
@@ -3146,11 +3175,202 @@ export function makeChecks(env) {
       async run() { return offlineArm("dock"); },
     },
     {
+      id: "G-156",
+      asks: "with no reader activity the scene turns -- the camera orbits its target and the colours turn about the grey axis -- drawn only (no node's colour or layout written); the reader acting stops the turn and the colours ease back to the fit's own; planted (plantNoDrift): nothing turns",
+      async run() {
+        // 2026-10-11, PLUGIN_GOAL 83: "a latent feature that rotates both
+        // cartesian and color coordinates slowly but noticeably whenever there
+        // is no user activity".
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          await window.__domvec.act("open", "graph");
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          for (let i = 0; i < 60 && !(v.graph && v.batch); i++) await sleep(500);
+          const stamp0 = window.__domvecReaderAt;
+          const after0 = v.idleDriftAfterMs;
+          v.plantNoDrift = ${planted}; v.driftInCheck = true; v.idleDriftAfterMs = 3000;
+          const g = v.graph;
+          const az = () => { const c = g.camera().position, t = g.controls().target; return Math.atan2(c.z - t.z, c.x - t.x); };
+          const turn = (a, b) => { let d = b - a; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI; return d; };
+          const colours = () => g.graphData().nodes.slice(0, 400).map((n) => n.color).join("|");
+          const dist = () => { const c = g.camera().position, t = g.controls().target; return Math.hypot(c.x - t.x, c.y - t.y, c.z - t.z); };
+          const mine = [Date.now() - 60000];
+          try {
+            window.__domvecReaderAt = mine[0];
+            await sleep(500);
+            const a0 = az(), c0 = colours(), d0 = dist();
+            await sleep(3000);
+            const idle = { turned: turn(a0, az()), hue: v.batch.hue, active: v.driftStats.active,
+                           glass_hue: v.batch.glass.mesh.material.uniforms.uHue.value,
+                           colours_written: colours() !== c0, distance_kept: Math.abs(dist() - d0) < 0.01 * d0 };
+            mine.push(Date.now()); window.__domvecReaderAt = mine[1];   // the reader acts
+            await sleep(200);
+            const a1 = az();
+            await sleep(1500);
+            const acted = { turned: turn(a1, az()), hue: v.batch.hue, active: v.driftStats.active };
+            return { planted: ${planted}, idle, acted };
+          } finally {
+            v.plantNoDrift = false; v.driftInCheck = false; v.idleDriftAfterMs = after0;
+            // Put back only a stamp this check wrote: a real input meanwhile stays.
+            if (mine.includes(window.__domvecReaderAt)) window.__domvecReaderAt = stamp0;
+          }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        const c = clean;
+        return { pass: c.idle.active && Math.abs(c.idle.turned) > 0.1 && c.idle.hue > 0.08 && !c.idle.colours_written && c.idle.distance_kept && c.idle.glass_hue === c.idle.hue
+                       && !c.acted.active && Math.abs(c.acted.turned) < 0.005 && c.acted.hue === 0
+                       && !planted.idle.active && Math.abs(planted.idle.turned) < 0.005 && planted.idle.hue === 0,
+                 evidence: { clean, planted } };
+      },
+    },
+    {
+      id: "G-166",
+      asks: "with no search, every plain node (no picture, not streaming) is drawn as a glowing glass orb in its own colour, in the batch's glass pass; pictures stay pictures; planted (plantOpaqueOrbs): the old opaque spheres",
+      async run() {
+        // 2026-10-11: "lets standardize the latent glowing glass orbs as the
+        // default, with the light sources adjusting per the query scroll window".
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          await window.__domvec.act("open", "graph");
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          for (let i = 0; i < 60 && !(v.graph && v.batch); i++) await sleep(500);
+          if (v.searchField) { v.searchField.input.value = ""; await v.searchField.run(); }
+          v.plantOpaqueOrbs = ${planted};
+          try {
+            await sleep(300); v.batchSync();
+            const rs = v.graph.nodeRelSize(), d = v.graph.graphData();
+            let plain = 0, orbs = 0, own = 0, pictures = 0, pictureGlass = 0;
+            for (const n of d.nodes) {
+              const base = v.baseLook(n, rs, v.drawnMedia), l = v.lookOf(n, rs, v.drawnMedia);
+              if (base.picture) { pictures++; if (l.glass) pictureGlass++; continue; }
+              if (base.translucent || n.hovered) continue;
+              plain++;
+              if (l.glass && l.alpha === 1) { orbs++; if (l.color === base.color) own++; }
+            }
+            return { planted: ${planted}, plain, orbs, own_colour: own, pictures, picture_glass: pictureGlass, batch: { ...v.batch.lastStats } };
+          } finally { v.plantOpaqueOrbs = false; v.batchSync(); }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        return { pass: clean.plain > 0 && clean.orbs === clean.plain && clean.own_colour === clean.plain && clean.picture_glass === 0
+                       && clean.batch.glass >= clean.plain && planted.orbs === 0,
+                 evidence: { clean, planted } };
+      },
+    },
+    {
+      id: "G-157",
+      asks: "the naked search field on the 3D panel: typing a query shows 'showing k/n results' with k an editable top-k, a horizontal scroll from the very left governs how many results are drawn; while searching ONLY those are drawn as themselves, every other node is a colourless lens lit by the shown results' point lights, brightest at the scrolled index; cleared, every node is its own glowing orb again; planted (plantNoGlass): no lens, no lights",
+      async run() {
+        // 2026-10-11, PLUGIN_GOAL 84/86/87/88.
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          await window.__domvec.act("open", "graph");
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          for (let i = 0; i < 60 && !(v.graph && v.searchField); i++) await sleep(500);
+          const f = v.searchField;
+          if (!f) return { error: "no search field" };
+          v.plantNoGlass = ${planted};
+          try {
+            const box = f.el.getBoundingClientRect(), cv = v.canvasEl.getBoundingClientRect();
+            const placement = { centre_off: Math.round((box.left + box.width / 2) - (cv.left + cv.width / 2)),
+                                bottom_gap: Math.round(cv.bottom - box.bottom), placeholder: f.input.placeholder,
+                                naked: !f.el.classList.contains("is-active") };
+            f.input.value = "protocol"; f.kInput.value = "12"; f.k = 12;
+            await f.run();
+            for (let i = 0; i < 20 && !v.searchState; i++) await sleep(250);
+            await sleep(600); v.batchSync();
+            const left = { shown: f.shown, k: f.k, n: f.n, hits: f.hits.length,
+                           count_text: f.el.querySelector(".domvec-search3d-count").innerText.replace(/\\s+/g, " ").trim(),
+                           ...v.batch.lastStats, lights: v.batch.lightStats.lights, scroll_left: f.scroller.scrollLeft };
+            // Which nodes draw as themselves: the shown results, and nothing else.
+            const rs = v.graph.nodeRelSize(), d = v.graph.graphData();
+            const asSelf = d.nodes.filter((n) => { const l = v.lookOf(n, rs, v.drawnMedia); return !l.glass; }).map((n) => String(n.id));
+            const shownIds = f.hits.slice(0, f.shown).map((h) => h.cid);
+            left.self_ids = asSelf.length; left.self_are_shown = asSelf.every((id) => shownIds.includes(id));
+            // Colourless lenses: glass with no glow of its own -- what a search
+            // turns every other node into (the default orb glows, alpha 1).
+            const lensCount = () => d.nodes.filter((n) => { const l = v.lookOf(n, rs, v.drawnMedia); return l.glass && l.alpha === 0; }).length;
+            left.colourless = lensCount();
+            // Scrolled to the right: more shown, the brightest at the scrolled index.
+            f.scroller.scrollLeft = f.scroller.scrollWidth; f.scroller.dispatchEvent(new Event("scroll"));
+            await sleep(500); v.batchSync();
+            const glowOf = (cid) => { const n = d.nodes.find((x) => String(x.id) === cid); return n ? (v.lookOf(n, rs, v.drawnMedia).glow || 0) : null; };
+            const right = { shown: f.shown, ...v.batch.lastStats, lights: v.batch.lightStats.lights,
+                            glow_first: glowOf(f.hits[0] && f.hits[0].cid), glow_last: glowOf(f.hits[f.shown - 1] && f.hits[f.shown - 1].cid) };
+            f.input.value = ""; await f.run(); await sleep(300); v.batchSync();
+            const cleared = { colourless: lensCount(), orbs: v.batch.lastStats.glass, lights: v.batch.lightStats.lights, state: !!v.searchState };
+            return { planted: ${planted}, placement, left, right, cleared, stats: { ...v.searchStats } };
+          } finally { v.plantNoGlass = false; f.input.value = ""; await f.run(); }
+        })()`, { timeout: 90000 });
+        const clean = await arm(false), planted = await arm(true);
+        const c = clean;
+        const pass = !c.error && c.placement.naked && c.placement.placeholder === "search" && Math.abs(c.placement.centre_off) <= 4 && c.placement.bottom_gap < 60
+          && c.left.hits >= 2 && c.left.shown === 1 && /^showing.*\/\s*\d+ results$/.test(c.left.count_text) && c.left.n >= c.left.hits
+          && c.left.colourless > 0 && c.left.lights === 1 && c.left.self_are_shown
+          && c.right.shown === c.left.hits && c.right.lights === Math.min(16, c.right.shown) && c.right.glow_last === 1 && c.right.glow_first < c.right.glow_last
+          && c.cleared.colourless === 0 && c.cleared.orbs > 0 && !c.cleared.state
+          && !planted.error && planted.left.colourless === 0 && planted.left.lights === 0;
+        return { pass, evidence: { clean, planted } };
+      },
+    },
+    {
+      id: "G-162",
+      asks: "a browser toggle hides the overlay's chunk boxes by ALPHA only: off, the hover outline is placed but drawn at opacity 0 and the hover still reaches the 3D view; on, opacity 1; planted (plantBoxesStopHover): off also stops the hover",
+      async run() {
+        // 2026-10-11 (PLUGIN_GOAL 89): "a toggle to the browser overlay that
+        // *shows* the overlay chunk bounding boxes as on or off, while keeping
+        // the regular functionality the same, just a difference basically of
+        // the alpha-ing".
+        const fixtures = await serveFixtures();
+        const page = fixtures.origin + "/shadow_catalogue.html";
+        try {
+          const arm = (planted) => evaluate(`(async () => {
+            ${PREP}
+            const PAGE = ${JSON.stringify(page)};
+            const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+            const wc = window.require("@electron/remote").webContents.fromId(b.webview.getWebContentsId());
+            const was = b.boxesShown();
+            b.plantBoxesStopHover = ${planted};
+            try {
+              try { b.setLive(true); } catch (e) {}
+              await land(PAGE, 30000);
+              for (let i = 0; i < 90 && !(b.pipebox.map.url === PAGE && b.pipebox.map.chunks > 0); i++) await sleep(500);
+              await b.webview.executeJavaScript("window.scrollTo(0,0); 1"); await sleep(400);
+              const outlineEl = b.pipebox.outline;
+              const hoverOnce = async (x, y) => {
+                const a0 = v.focusStats.asked, p0 = b.pipebox.pushedHovers;
+                wc.sendInputEvent({ type: "mouseMove", x: -8, y: -8 }); wc.sendInputEvent({ type: "mouseLeave", x: -8, y: -8 }); await sleep(300);
+                wc.sendInputEvent({ type: "mouseMove", x, y }); await sleep(30); wc.sendInputEvent({ type: "mouseMove", x: x + 1, y }); await sleep(900);
+                return { pushed: b.pipebox.pushedHovers - p0, hovered: !!b.pipebox.hover, asked: v.focusStats.asked - a0,
+                         shown: outlineEl.style.display !== "none" && !!b.pipebox.hover,
+                         opacity: Number(getComputedStyle(outlineEl).opacity) };
+              };
+              await b.toggleBoxes(false);
+              const off = await hoverOnce(60, 120);
+              await b.toggleBoxes(true);
+              const on = await hoverOnce(60, 120);
+              return { planted: ${planted}, off, on };
+            } finally {
+              b.plantBoxesStopHover = false;
+              await b.toggleBoxes(was);
+              wc.sendInputEvent({ type: "mouseMove", x: -8, y: -8 }); wc.sendInputEvent({ type: "mouseLeave", x: -8, y: -8 });
+            }
+          })()`, { timeout: 90000 });
+          const clean = await arm(false), planted = await arm(true);
+          return { pass: clean.off.hovered && clean.off.asked >= 1 && clean.off.shown && clean.off.opacity === 0
+                         && clean.on.hovered && clean.on.opacity === 1 && !planted.off.hovered && planted.off.asked === 0,
+                   evidence: { clean, planted, purged: await tidyFixtures(fixtures.origin) } };
+        } finally { await fixtures.close(); }
+      },
+    },
+    {
       id: "G-125",
       asks: "ONE hover panel persists: hovering a second chunk replaces the first; after the pointer leaves it stays, and closes itself after its time-to-live; planted (plantCloseOnLeave): it closes when the hover ends",
       async run() {
         const fixtures = await serveFixtures();
-        const page = fixtures.origin + "/practice_rows.html";
+        // A page the store cuts into SEVERAL chunks: `practice_rows` is two, and one
+        // holds its heading, table and nav, so every hover there resolves to it
+        // (2026-10-11, once hovers resolve by address). The catalogue is eight.
+        const page = fixtures.origin + "/shadow_catalogue.html";
         try {
           const arm = (planted) => evaluate(`(async () => {
             ${PREP}
@@ -3170,13 +3390,33 @@ export function makeChecks(env) {
               const pts = JSON.parse(await b.webview.executeJavaScript("(function(){var h=window.__domvecSensor;var a=[];for(var y=40;y<innerHeight-30;y+=30)for(var x=40;x<Math.min(innerWidth,760);x+=90){var st=document.elementsFromPoint(x,y),bb=null,ba=Infinity;for(var i=0;i<st.length&&i<12;i++){var c=null;try{c=h.at(st[i]);}catch(e){}if(c&&c.box){var ar=c.box[2]*c.box[3];if(ar>0&&ar<ba){ba=ar;bb=c;}}}if(bb)a.push({x:x,y:y,id:bb.id});}return JSON.stringify(a);})()"));
               let A = null, B = null;
               for (const p of pts) { const st = b.storedCidFor("f:" + b.session + "#" + p.id, b.session); if (!st) continue; if (!A) A = { ...p, st }; else if (st !== A.st) { B = { ...p, st }; break; } }
-              if (!A || !B) return { planted: ${planted}, error: "two stored chunks under the pointer not found", points: pts.length };
+              if (!A) return { planted: ${planted}, error: "no point under the pointer resolves to a stored chunk", points: pts.length };
               const open = () => [...v.billboards.values()].filter((e) => e.fromHover).length;
-              wc.sendInputEvent({ type: "mouseMove", x: A.x, y: A.y }); await sleep(30); wc.sendInputEvent({ type: "mouseMove", x: A.x + 1, y: A.y });
-              await sleep(1300);
+              // The stored chunk a hover OPENS is the one the host resolved from the
+              // hovered element's own address (P-B7, 2026-10-11) -- finer than the
+              // in-page chunk's, so it is read from the hover, not predicted from
+              // the id. B is the first point whose hover resolves elsewhere.
+              const hoverAt = async (q) => { wc.sendInputEvent({ type: "mouseMove", x: q.x, y: q.y }); await sleep(30); wc.sendInputEvent({ type: "mouseMove", x: q.x + 1, y: q.y }); await sleep(250);
+                                             return (b.pipebox.hover && b.pipebox.hover.stored) || q.st; };
+              A = { ...A, st: await hoverAt(A) };
+              await sleep(1050);
               const aOpen = v.billboards.has(A.st);
-              wc.sendInputEvent({ type: "mouseMove", x: B.x, y: B.y }); await sleep(30); wc.sendInputEvent({ type: "mouseMove", x: B.x + 1, y: B.y });
-              await sleep(1300);
+              B = null;
+              // On a narrow pane one chunk can fill the viewport: the search scrolls
+              // a viewport at a time (A's panel persists through it -- the point).
+              const seen = [];
+              for (let page = 0; page < 5 && !B; page++) {
+                if (page) { await b.webview.executeJavaScript("window.scrollBy(0, Math.round(innerHeight * 0.8)); 1"); await sleep(500); }
+                // elementsFromPoint stops at a shadow host, which has no chunk of its
+                // own, so below the fold the scan finds nothing; the hover itself
+                // resolves through shadow roots, so a plain grid is hovered there.
+                const grid = []; for (let y = 60; y < 760; y += 120) for (let x = 60; x < 340; x += 120) grid.push({ x, y });
+                const here = page ? grid : pts;
+                seen.push({ page, points: here.length, stored: [] });
+                for (const p of here) { const st = await hoverAt({ ...p, st: "" }); seen[seen.length - 1].stored.push(String(st).slice(0, 8)); if (st && st !== A.st) { B = { ...p, st }; break; } }
+              }
+              if (!B) return { planted: ${planted}, error: "no second point resolves to another stored chunk", a: A.st, seen };
+              await sleep(1050);
               const bOpen = v.billboards.has(B.st), aAfter = v.billboards.has(A.st), afterB = open();
               wc.sendInputEvent({ type: "mouseMove", x: -8, y: -8 });
               wc.sendInputEvent({ type: "mouseLeave", x: -8, y: -8 });

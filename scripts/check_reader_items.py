@@ -51,9 +51,15 @@ return JSON.stringify(out)})()""" % V
 
 def clump_arm(p, plant):
     """Item (80): an open page's chunks do not overlap AS DRAWN, nor sit in
-    the url node's drawn body. Planted `plantNoRelax`: the targets are not
-    relaxed, and the cloud overlaps."""
-    p.ev("(()=>{const v=%s;v.plantNoRelax=%s;v.fitChunkSizes(v.graph.graphData());v.graph.d3ReheatSimulation();return 1})()" % (V, "true" if plant else "false"))
+    the url node's drawn body. Planted: the clump the reader saw (2026-10-11,
+    "Giant clumping problem") -- chunks at FULL size (`plantBigChunks`, no
+    shrink to the room) and not relaxed (`plantNoRelax`). The first plant was
+    `plantNoRelax` alone, and it read 0 overlaps like the clean arm: with the
+    chunks shrunk to their room the telescope alone keeps them apart, so that
+    arm could not fail."""
+    p.ev("(()=>{const v=%s,P=%s,d=v.graph.graphData();v.plantBigChunks=false;v.plantNoRelax=P;v.fitChunkSizes(d);"
+         "if(P){for(const n of d.nodes){if(n.level!=='page'&&!n.force&&n.fullVal!==undefined)n.val=n.fullVal;}v.plantBigChunks=true;v.graph.nodeVal(v.graph.nodeVal());}"
+         "v.graph.d3ReheatSimulation();return 1})()" % (V, "true" if plant else "false"))
     time.sleep(8)
     for _ in range(30):
         time.sleep(1); p.guard()
@@ -83,9 +89,20 @@ def main():
         out["opened_for_check"] = opened_here
         if url and p.ev(OPEN):
             out["G-149"] = [toggle_arm(p, url, False), toggle_arm(p, url, True)]
-            out["(80) no clump"] = [clump_arm(p, True), clump_arm(p, False)]
         if opened_here and p.ev(OPEN):
             p.ev("(async()=>{%s.plantToggleByDrawn=false;await %s.togglePage(%s);return 1})()" % (V, V, page))
+        # Item (80) on a CROWDED page: the stored page with the most chunks
+        # (a page node's val is sqrt of its chunk count). On the 8-chunk
+        # fixture both arms read 0 -- full-size chunks still fit its room, so
+        # that page cannot show a clump either way.
+        big = p.ev("(()=>{const d=%s.graph.graphData();const ps=d.nodes.filter(n=>n.level==='page'&&/^https?:/.test(n.url||'')&&!/127[.]0[.]0[.]1|localhost/.test(n.url)).sort((a,b)=>(b.fullVal??b.val)-(a.fullVal??a.val));return ps.length?ps[0].url:''})()" % V)
+        if big:
+            bigNode = "%s.graph.graphData().nodes.find(n=>n.level==='page'&&n.url===%s)" % (V, json.dumps(big))
+            p.ev("(async()=>{await %s.togglePage(%s);return 1})()" % (V, bigNode))
+            time.sleep(10); p.guard()
+            out["(80) no clump"] = {"url": big, "arms": [clump_arm(p, True), clump_arm(p, False)]}
+            p.ev("(async()=>{await %s.togglePage(%s);return 1})()" % (V, bigNode))
+            time.sleep(3)
         out["G-146 pages view"] = json.loads(p.ev(PICS))
         load_level(p, "chunk"); time.sleep(3)
         out["G-146 chunk view"] = json.loads(p.ev(PICS))
@@ -94,7 +111,7 @@ def main():
     except ReaderActed as e:
         out["stopped"] = str(e)
     finally:
-        p.ev("(()=>{const v=%s;v.plantToggleByDrawn=false;v.plantNoRelax=false;v.plantAllPictures=false;return 1})()" % V)
+        p.ev("(()=>{const v=%s;v.plantToggleByDrawn=false;v.plantNoRelax=false;v.plantBigChunks=false;v.plantAllPictures=false;return 1})()" % V)
         try:
             if p.ev("%s.level" % V) == "":
                 p.ev("(()=>{const v=%s;v.fitChunkSizes(v.graph.graphData());return 1})()" % V)

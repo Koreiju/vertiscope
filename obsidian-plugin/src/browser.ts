@@ -325,6 +325,12 @@ export class BrowserView extends ItemView {
     // `G-62`: the page with no connection -- saved as presented, or rebuilt
     // from the scan trace. Pressed again, back to the live page.
     const offlineBtn = bar.createEl("button", { text: "offline" });
+    // Item 89: the outlines shown or not -- by ALPHA only (a class on the wrap,
+    // opacity 0 on the boxes). Hover, the 3D flight, panels, pins and the
+    // stream behave the same either way. Planted (plantBoxesStopHover): off
+    // also stops the hover, which is what "the same" forbids.
+    this.boxesButton = bar.createEl("button");
+    this.boxesButton.onclick = () => { void this.toggleBoxes(); };
     offlineBtn.onclick = () => {
       if (this.offlineFor) { const u = this.offlineFor; this.offlineFor = ""; this.go(u); }
       else void this.openOffline(this.webview?.getURL() || "");
@@ -390,6 +396,7 @@ export class BrowserView extends ItemView {
       // The outline's unit is the STORED chunk once the store knows the page.
       this.pipebox.storedFor = (cid, url) => this.storedCidFor(cid, url);
       this.pipebox.setPins(this.pinList());
+      this.paintBoxes();
     } catch (err) {
       console.error("domvec: the pipeline box failed to build", err);
       this.pipeboxError = String((err as any)?.stack || err).slice(0, 400);
@@ -439,7 +446,16 @@ export class BrowserView extends ItemView {
     // is still doing; a new main-frame navigation (not an in-page one) resets it.
     view.addEventListener("dom-ready", () => { this.domReady = true; });
     view.addEventListener("did-start-navigation", (e: any) => {
-      if (e && e.isMainFrame && !e.isInPlace && !e.isSameDocument) { this.domReady = false; this.loadFailedUrl = ""; }
+      if (e && e.isMainFrame && !e.isInPlace && !e.isSameDocument) {
+        this.domReady = false; this.loadFailedUrl = "";
+        // Leaving the offline form for a LIVE page ends offline (G-62). Only
+        // the button cleared it, so any other navigation left the cell
+        // "offline" for good: every hover panel was then docked, pinned and
+        // never expired (2026-10-11, G-125's check -- offlineFor named a
+        // fixture page two runs gone). The offline form itself is a file:
+        // url and keeps it. Planted: only the button clears it.
+        if (this.offlineFor && /^https?:/.test(String(e.url || "")) && !this.plantStickyOffline) this.offlineFor = "";
+      }
     });
     view.addEventListener("did-stop-loading", () => {
       if (this.saveOfflineOn()) this.scheduleOfflineSave();
@@ -515,7 +531,7 @@ export class BrowserView extends ItemView {
       if (e.errorCode !== -3) this.say(`did not load: ${e.errorDescription}`);
       if (e.errorCode !== -3 && e.isMainFrame !== false) this.loadFailedUrl = String(e.validatedURL || "");
       // No connection: the page opens from what the store holds (`G-62`).
-      if (BrowserView.NO_CONNECTION.has(e.errorCode) && e.isMainFrame !== false
+      if ((BrowserView.NO_CONNECTION.has(e.errorCode) || (this.plantRefusedIsOffline && e.errorCode === -102)) && e.isMainFrame !== false
           && /^https?:/.test(String(e.validatedURL || ""))) {
         void this.openOffline(String(e.validatedURL));
       }
@@ -1148,6 +1164,69 @@ export class BrowserView extends ItemView {
     this.address.value = url;
     this.webview.loadURL(url);
     this.layoutSide();
+  }
+
+  // ---- PLUGIN_GOAL 85: the web half of a search ---------------------------
+
+  /**
+   * A query searched on DuckDuckGo, in THIS cell, so the results page is
+   * captured like any page and streams into the store and the 3D view as a
+   * diff. The cell scrolls to the end and presses "More results", `rounds`
+   * times: real pointer input at the button's place on the page, the way the
+   * reader's mouse arrives (nothing is written into the document; scrolling
+   * moves the viewport). A newer query cancels an older one. Bot checks are
+   * never answered: a page with no results and no button just ends the run.
+   */
+  webSearchStats = { asked: 0, rounds: 0, clicked: 0, results: 0, last: "", ms: 0, stopped: "" };
+  private webSeq = 0;
+  /** Planted (item 85): the web half never runs. */
+  plantNoWebSearch = false;
+  async searchWeb(query: string, rounds = 3): Promise<any> {
+    const wv = this.webview;
+    if (!wv || !query.trim() || this.plantNoWebSearch) return null;
+    const seq = ++this.webSeq;
+    const t0 = performance.now();
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    const url = "https://duckduckgo.com/?q=" + encodeURIComponent(query.trim()) + "&ia=web";
+    this.webSearchStats.asked++;
+    this.webSearchStats.last = query.trim();
+    this.webSearchStats.stopped = "";
+    this.go(url);
+    for (let i = 0; i < 80; i++) {
+      await sleep(150);
+      if (seq !== this.webSeq) return null;
+      try { if (!wv.isLoading() && /duckduckgo\.com/.test(wv.getURL())) break; } catch { /* not attached */ }
+    }
+    const wc = (window as any).require("@electron/remote").webContents.fromId(wv.getWebContentsId());
+    const count = async () => Number(await wv.executeJavaScript(
+      "document.querySelectorAll('article[data-testid=\"result\"], li[data-layout=\"organic\"]').length").catch(() => 0)) || 0;
+    for (let r = 0; r < rounds; r++) {
+      await sleep(900);
+      if (seq !== this.webSeq) return null;
+      // To the end of the list: the viewport moves, the page does not change.
+      await wv.executeJavaScript("window.scrollTo(0, document.documentElement.scrollHeight); 1").catch(() => 0);
+      await sleep(700);
+      // The button's place on the page, read; then pressed by pointer input.
+      const at = await wv.executeJavaScript(`(function(){
+        var b = document.getElementById('more-results') || Array.prototype.slice.call(document.querySelectorAll('button, a'))
+          .filter(function(x){ return /^\\s*more results\\s*$/i.test(x.textContent || ''); })[0];
+        if (!b) return null;
+        b.scrollIntoView({ block: 'center' });
+        var r = b.getBoundingClientRect();
+        return r.width > 0 ? [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)] : null;
+      })()`).catch(() => null);
+      this.webSearchStats.rounds++;
+      if (!at) { this.webSearchStats.stopped = "no more-results button"; break; }
+      await sleep(250);
+      wc.sendInputEvent({ type: "mouseMove", x: at[0], y: at[1] });
+      wc.sendInputEvent({ type: "mouseDown", x: at[0], y: at[1], button: "left", clickCount: 1 });
+      wc.sendInputEvent({ type: "mouseUp", x: at[0], y: at[1], button: "left", clickCount: 1 });
+      this.webSearchStats.clicked++;
+    }
+    await sleep(800);
+    this.webSearchStats.results = await count();
+    this.webSearchStats.ms = Math.round(performance.now() - t0);
+    return { ...this.webSearchStats, url: wv.getURL() };
   }
 
   /** Restrict the ranking to one shadow DOM, or release it (`G-70`). */
@@ -2112,9 +2191,15 @@ export class BrowserView extends ItemView {
   // ---- offline (`G-59`..`G-62`) ---------------------------------------------
 
   /** Chromium's net errors that mean "no connection", not "no such page". */
-  static NO_CONNECTION = new Set([-106, -105, -109, -118, -21, -102, -137, -130]);
+  // Not -102 (CONNECTION_REFUSED): a server that refused is up-network and
+  // down itself, and a closed local fixture server put the cell into its
+  // offline form for good (2026-10-11). Planted: -102 counts again.
+  static NO_CONNECTION = new Set([-106, -105, -109, -118, -21, -137, -130]);
+  plantRefusedIsOffline = false;
   /** The url whose offline form the cell is showing, "" when live. */
   offlineFor = "";
+  /** Planted: a navigation to a live page leaves the cell offline (only the button ends it). */
+  plantStickyOffline = false;
   offlineStats = { saved: 0, save_failed: 0, opened_saved: 0, opened_infilled: 0, opened_traced: 0, nothing: 0, last: null as any };
   private saveOfflineButton: HTMLButtonElement | null = null;
   private offlineSavedThisVisit = new Set<string>();
@@ -2124,6 +2209,23 @@ export class BrowserView extends ItemView {
 
   private plugin(): any { return (this.app as any).plugins.getPlugin("domvec-bridge"); }
   private saveOfflineOn(): boolean { return !!this.plugin()?.settings?.saveOffline; }
+  private boxesButton: HTMLButtonElement | null = null;
+  /** Planted (item 89): turning the boxes off also stops the hover. */
+  plantBoxesStopHover = false;
+  boxesShown(): boolean { return this.plugin()?.settings?.showBoxes !== false; }
+  paintBoxes(): void {
+    const on = this.boxesShown();
+    if (this.boxesButton) this.boxesButton.setText(on ? "boxes ●" : "boxes ○");
+    this.browserWrap?.toggleClass("domvec-boxes-off", !on);
+    if (this.pipebox) this.pipebox.paused = !on && this.plantBoxesStopHover;
+  }
+  async toggleBoxes(on?: boolean): Promise<void> {
+    const p = this.plugin();
+    if (!p) return;
+    p.settings.showBoxes = on ?? !this.boxesShown();
+    await p.saveSettings();
+    this.paintBoxes();
+  }
   private paintSaveOffline(): void {
     if (this.saveOfflineButton) this.saveOfflineButton.setText(this.saveOfflineOn() ? "save offline ●" : "save offline ○");
   }

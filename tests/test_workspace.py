@@ -285,7 +285,11 @@ class _FakeEmbedder:
         for i, text in enumerate(texts):
             digest = hashlib.sha1(text.encode("utf-8")).digest()
             seed = int.from_bytes(digest[:8], "big")
-            out[i] = np.random.default_rng(seed).standard_normal(self.dim)
+            # Non-negative: a cosine of signed random vectors is negative half
+            # the time, and the product ranking vetoes it, so whether a test
+            # found ANY hit was a coin flip on the text's hash -- re-indenting
+            # the markdown (R-K1) flipped both "books" chunks to negative.
+            out[i] = np.abs(np.random.default_rng(seed).standard_normal(self.dim))
         return out
 
     def embed_query(self, query):

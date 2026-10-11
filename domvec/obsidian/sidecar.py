@@ -908,7 +908,15 @@ def search_payload(workspace, query: str, k: int = 8, *,
     # end -- and that bound was the defect: RFC 9110's 1,173 chunks rank
     # below the bound globally, so scoping to the largest page in the store
     # returned 0 hits for every query.
-    hits = workspace.search(query, k=want, scope_url=url or "")
+    # `n` for "showing {k}/{n} results" (PLUGIN_GOAL 86): the chunks the
+    # ranking gives a positive score at all -- before duplicate content and
+    # merge groups collapse, so it bounds what scrolling can reach from above.
+    from ..search import SearchDiagnostics
+    diag = SearchDiagnostics()
+    try:
+        hits = workspace.search(query, k=want, scope_url=url or "", diagnostics=diag)
+    except TypeError:                       # an index without diagnostics
+        hits = workspace.search(query, k=want, scope_url=url or "")
     out = []
     spent = 0
     seen_groups = set()
@@ -970,7 +978,8 @@ def search_payload(workspace, query: str, k: int = 8, *,
             "tokens": spent if budget else sum(r["tokens"] for r in out),
             #: True while the ranking still had more to give at this depth,
             #: so a scrolling overlay knows whether to keep asking.
-            "more": len(hits) >= want}
+            "more": len(hits) >= want,
+            "n": int(getattr(diag, "survivors", 0) or 0)}
 
 
 class _Handler(BaseHTTPRequestHandler):

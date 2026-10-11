@@ -229,6 +229,14 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
         // same session, scrolled to the chunk, rather than a second
         // rendering of the page beside the first. Brokered for the same
         // reason -- a projector with no browser open must still work.
+        // A query from the 3D search field also searches the web in the
+        // browser cell (PLUGIN_GOAL 85), when the setting allows it.
+        view.onWebSearch = (query: string) => {
+          if (!this.settings.webSearch) return;
+          const l = this.app.workspace.getLeavesOfType(BROWSER_VIEW)[0];
+          const browser = l?.view as BrowserView | undefined;
+          if (browser && typeof browser.searchWeb === "function") void browser.searchWeb(query);
+        };
         view.onReveal = (url: string, xpath: string) => {
           for (const l of this.app.workspace.getLeavesOfType(BROWSER_VIEW)) {
             const browser = l.view as BrowserView;

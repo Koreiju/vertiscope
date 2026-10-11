@@ -199,6 +199,21 @@ export interface DomvecSettings {
    * Off by default: a saved page is a whole copy of the page on disk.
    */
   saveOffline: boolean;
+  /**
+   * The browser overlay's chunk outlines DRAWN or not (2026-10-11, PLUGIN_GOAL
+   * 89: "a toggle to the browser overlay that *shows* the overlay chunk
+   * bounding boxes as on or off, while keeping the regular functionality the
+   * same, just a difference basically of the alpha-ing").
+   */
+  showBoxes: boolean;
+  /**
+   * Each query from the 3D search field ALSO searches DuckDuckGo in the
+   * browser cell (2026-10-11, PLUGIN_GOAL 85: "search duckduckgo
+   * automatically, following a simple auto-scroll and clicking 'more results'
+   * each time"). This sends the query off the machine -- the one thing the
+   * plugin transmits on its own -- so it is a setting, on as asked.
+   */
+  webSearch: boolean;
 }
 
 export const DEFAULTS: DomvecSettings = {
@@ -207,6 +222,8 @@ export const DEFAULTS: DomvecSettings = {
   loadRemoteMedia: false,
   retrievalLimit: 8,
   saveOffline: false,
+  showBoxes: true,
+  webSearch: true,
 };
 
 /** One command's result, from `POST /shell`. */

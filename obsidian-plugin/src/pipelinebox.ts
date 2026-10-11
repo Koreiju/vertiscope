@@ -668,7 +668,10 @@ export class PipelineBox {
    * crossing to make (2026-09-27: 65-138 ms from pointer move to outline).
    * The store's chunk is still resolved by the poll, for the ring in 3D.
    */
+  /** Set only by the browser's planted `plantBoxesStopHover` (item 89). */
+  paused = false;
   pushedHover(body: string, url: string): void {
+    if (this.paused) return;
     const t0 = performance.now();
     this.pushedHovers++;
     this.pushedAt = t0;

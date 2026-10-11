@@ -2673,6 +2673,159 @@ sphere around a url node; its chunks keep clear of its DRAWN body only, as any
 two nodes keep clear of each other; (80) a page's chunks are not drawn as a
 clump of large overlapping spheres: no two chunks of a page overlap as drawn.*
 
+> Repulsion sphere is still there... You can see the ring. Please ensure that
+> the ring feature is removed and we just have regular functionality
+
+*(Sent with a screenshot of the url view: an arc of url nodes across the top,
+and an open page's chunks around their url node.)*
+
+> Double check the repulsion sphere is gone. I think it is now.
+
+> why are nodes different sizes in the chunk view? I'd like consistent node
+> sizes if possible
+
+> if its an image size thing then okay, no worries
+
+> Try again
+
+*Read as (2026-10-11): (81) no ring -- nothing is pushed onto a shell around an
+open url node. The sphere is gone from the loaded code (checked live). The
+other thing that can draw a ring is the room pass (D-49), which moves CLOSED url
+nodes out to twice an open page's bound; whether it is "the ring feature" was
+asked and is not answered, so it stands until the reader rules. (82) chunk view
+draws its nodes at one size "if possible". Measured: the variation is mostly
+NOT image size -- the spacing pass shrinks 96.5% of nodes, by their nearest
+neighbour; pictures are 1.24x; copies up to 1.41x. One size costs overlap in
+the densest clusters; asked, not answered. "Try again" re-ran the checks the
+reader's activity had stopped.*
+
+> We want to push this to a remote branch. We already have a mothership repo
+> on "mortegon" but we should open a new repo for this one too. We should name
+> the project different from domvec, remove all secrets and personal info, and
+> then push to the new repo. I think the name of the project should be named
+> "labyrintalis". before we push, we should add a latent feature that rotates
+> both cartesian and color coordinates slowly but noticeably whenever there is
+> no user activity. also, let's bring our retrieval bar as instead a
+> middle-bottom field/panel that is 'naked' meaning just showing the search
+> box itself with maybe a translucent "search" prompt for the user to fill in
+> that is replaced by the user's input. also, we will add a search rule to our
+> retrieval that means we both do a global search over our database, and also
+> search duckduckgo automatically, following a simple auto-scroll and clicking
+> 'more results' each time. while the diff streams, we have a specific overlay
+> rule for search and retrieval; a horizontal scroll bar accompanies below the
+> user search input overlay on the 3D graph panel. It begins at the very left.
+> The number of search results (i.e. 'top k' in backend terms) is reported
+> beside the search bubble as "showing {k}/{n} results". the 'k' value is a
+> field the user can input new integers for to get current top-k. Then, as the
+> user scrolls horizontally, that governs how many chunks in the top-k results
+> are actually visible on screen. These nodes are the only nodes visible while
+> a user searches. All other nodes become *translucent-ish* in a way that makes
+> them colorless but still applying a glassy lens material effect while the
+> 'result' chunk nodes apply a "brightening" or "point source light" effect
+> from their original nodes that reflects off the glassy lensing of the nodes
+> that aren't shown in the results. This requires specialized materials
+> libraries and rendering engines... Perhaps there's a simple blender add to
+> our obsidian plugin's 3D view that would work for this? The closer to the
+> user's scrolled delta index, the brighter. We also add a toggle to the
+> browser overlay that *shows* the overlay chunk bounding boxes as on or off,
+> while keeping the regular functionality the same, just a difference
+> basically of the alpha-ing. And also, the current bounding boxes are slow in
+> their responses quite generally (scrolling, updating, streaming, identifying
+> chunk regions, etc) and I think now would be a good time for all the
+> speedups and optimizations that you can think of applying to our current
+> chunking algorithm and diff streaming mechanism that works still in
+> O(delta), gets correct and full set of content detections right (even for
+> nested shadow nodes and their resulting location and coordinates on overlays
+> which aren't always accurate for a few pages so test on them all, like
+> archive etc), and also hovering over the overlays and seeing their panels in
+> the 3D graph view are not immediate for new diff streams, and have a
+> specific latency at nominal operation after the chunks are fully streamed
+> into their end result HTML panels and their nodes are projected, fitted, and
+> updated. so, latency on opening the fully rendered panels and some spotty
+> nonbehavior when the diff is streamed into its grey-nodes, projected nodes,
+> local url updated nodes, and the full umap update (also make sure each of
+> these are actually working and running and updates are making it to the 3D
+> panel view through some harness/mcp links if you need, for each of these
+> steps, getting the time profiles reported directly at the point of the
+> interface, but still carrying provenance on the time profile over the
+> backend and so on).
+
+*Read as (2026-10-11), in the order given -- the push is LAST ("before we push,
+we should add ..."):*
+
+*(83) **Idle drift.** With no reader activity, the 3D scene's positions AND
+its colours rotate, slowly but noticeably; any activity stops it.*
+
+*(84) **The naked search field.** The retrieval bar becomes one field at the
+middle-bottom of the 3D panel: the input alone, a translucent "search"
+placeholder replaced by what the reader types.*
+
+*(85) **Two sources per search.** A query searches the whole store AND
+DuckDuckGo, automatically: the browser cell scrolls the results and presses
+"more results" each time, and what it finds streams in as a diff. (Pressing a
+page's button is acting on the page -- `G-46`'s direction, asked for here by
+name; nothing is written into the page's document.)*
+
+*(86) **k and n, beside the field.** "showing {k}/{n} results"; k is an
+integer field the reader edits to set top-k.*
+
+*(87) **A horizontal scroll under the field**, starting at the very left. Its
+position decides how many of the top-k result nodes are drawn: during a search
+ONLY those are drawn as themselves.*
+
+*(88) **Glass and light.** Every other node is colourless, translucent, glassy
+-- a lens; each shown result is a point light at its own node, lighting the
+glass; the nearer a result is to the scrolled index, the brighter. The reader
+asks whether a "simple blender add" would do it: that is a question to answer,
+not an instruction -- Blender does not run inside Obsidian's renderer, and the
+3D view is three.js, whose physical materials (transmission, IOR) and point
+lights are where this has to be built.*
+
+*(89) **An overlay toggle** in the browser cell: the chunk outlines shown or
+not, by alpha only; hover, pins and every function behave the same.*
+
+*(90) **Speed and correctness of the overlay and the stream**: outlines respond
+at once to scrolling, updates, streaming and region identification; the
+chunking and diff stream stay O(delta); every content detection is found,
+nested shadow roots included, and its overlay coordinates are right -- tested
+on EVERY corpus page, archive.org among them.*
+
+*(91) **The hover-to-panel path is immediate at every stage of a stream** --
+grey (streamed) nodes, projected nodes, the url's local update, the full UMAP
+refit -- and at nominal operation after; each stage is shown to RUN and to
+reach the 3D panel, with its time profile reported at the interface and its
+provenance carried back through the backend.*
+
+*(92) **Then the push.** The project is renamed **labyrintalis**, every secret
+and personal detail is removed, and it is pushed to a NEW repository, separate
+from the mothership on "mortegon". Creating and pushing are outward-facing:
+the repository's owner and visibility are confirmed with the reader first.*
+
+> showing 12/11 results, and I'm seeing a lot more chunks than that... and
+> I'm sure there's more results that return... all disconnected, but the
+> rendering looks really amazing, scrolling works perfect, and i can still
+> see images on overlays, so excellent progress there.
+
+*(Sent with a screenshot of the 3D panel mid-search: glass orbs, a few lit
+results, the field reading "protocol · showing 12 / 11 results".)*
+
+> at the same time, I think we're supposed to still see "all the nodes" just
+> translucent for not in scroll
+
+> lets standardize the latent glowing glass orbs as the default, with the
+> light sources adjusting per the query scroll window. pls dont forget about
+> the rotating xyzhsv
+
+*Read as (2026-10-11): (86) amended -- k is never shown above n, and n is the
+ranking's own count of matching chunks (the sidecar answering it had not been
+restarted, so the field counted its 11 hits). (88) amended -- every node stays
+visible during a search: those outside the scroll window as translucent glass,
+not hidden. (93) **The glowing glass orb is the default look of a node**,
+search or no search: each in its own colour, glowing faintly from within;
+during a search the light sources are the results inside the scroll window.
+(83) restated: the idle turn rotates position AND colour -- "xyzhsv" -- and the
+colour turn applies to the orbs.*
+
 ---
 
 

@@ -48,6 +48,15 @@ void main() {
 
 const FRAG = `
 uniform sampler2D atlas;
+uniform float uHue;
+// The colour coordinates turned about the grey axis by uHue (PLUGIN_GOAL 83:
+// "rotates both cartesian and color coordinates ... whenever there is no user
+// activity"). 0 is the fit's own colour.
+vec3 turnHue(vec3 c, float a) {
+  const vec3 k = vec3(0.57735027);
+  float ca = cos(a);
+  return c * ca + cross(k, c) * sin(a) + k * dot(k, c) * (1.0 - ca);
+}
 varying vec2 vCorner;
 varying vec4 vColor;
 varying vec4 vUv;
@@ -58,13 +67,92 @@ void main() {
     if (r2 > 1.0) discard;
     vec3 n = vec3(vCorner, sqrt(1.0 - r2));
     float l = 0.38 + 0.62 * max(dot(n, normalize(vec3(-0.35, 0.55, 0.75))), 0.0);
-    gl_FragColor = vec4(vColor.rgb * l, vColor.a);
+    // A search result's own light (PLUGIN_GOAL 88): vUv.x is its glow, 0 for
+    // every other node -- brightened from within, with a white core.
+    float g = vUv.x;
+    vec3 base = uHue == 0.0 ? vColor.rgb : clamp(turnHue(vColor.rgb, uHue), 0.0, 1.0);
+    gl_FragColor = vec4(base * l * (1.0 + 1.4 * g) + g * 0.45 * pow(n.z, 3.0), vColor.a);
   } else {
     vec2 t = vCorner * 0.5 + 0.5;
     vec4 c = texture2D(atlas, vec2(mix(vUv.x, vUv.z, t.x), mix(vUv.y, vUv.w, t.y)));
     if (c.a < 0.04) discard;
     gl_FragColor = vec4(c.rgb, c.a * vColor.a);
   }
+  #include <colorspace_fragment>
+}`;
+
+/** Point lights the glass is lit by: the shown search results (item 88). */
+export const MAX_LIGHTS = 16;
+
+const GLASS_VERT = `
+attribute vec3 iOffset;
+attribute float iSize;
+attribute vec4 iColor;
+varying vec2 vCorner;
+varying vec3 vCenterW;
+varying float vR;
+varying vec4 vTint;
+void main() {
+  vCorner = position.xy;
+  vR = iSize;
+  vTint = iColor;
+  vec4 w = modelMatrix * vec4(iOffset, 1.0);
+  vCenterW = w.xyz;
+  vec4 mv = viewMatrix * w;
+  mv.xy += position.xy * iSize;
+  gl_Position = projectionMatrix * mv;
+}`;
+
+// A lens, not a ball (PLUGIN_GOAL 88: "colorless but still applying a glassy
+// lens material effect"): almost clear at its centre, a fresnel rim at its
+// edge, and each result's point light reflected off it as a highlight -- the
+// "point source light ... that reflects off the glassy lensing". Computed per
+// fragment on the impostor's own sphere normal, in WORLD space, so the lights
+// are uniforms set when the results change, not every frame.
+const GLASS_FRAG = `
+uniform vec3 uLightPos[${MAX_LIGHTS}];
+uniform vec3 uLightCol[${MAX_LIGHTS}];
+uniform float uLightI[${MAX_LIGHTS}];
+uniform int uLights;
+uniform float uFall;
+uniform float uHue;
+varying vec2 vCorner;
+varying vec3 vCenterW;
+varying float vR;
+varying vec4 vTint;
+vec3 turnHue(vec3 c, float a) {
+  const vec3 k = vec3(0.57735027);
+  float ca = cos(a);
+  return c * ca + cross(k, c) * sin(a) + k * dot(k, c) * (1.0 - ca);
+}
+void main() {
+  float r2 = dot(vCorner, vCorner);
+  if (r2 > 1.0) discard;
+  vec3 nV = vec3(vCorner, sqrt(1.0 - r2));
+  vec3 n = normalize((vec4(nV, 0.0) * viewMatrix).xyz);
+  vec3 P = vCenterW + n * vR;
+  vec3 V = normalize(cameraPosition - P);
+  float fres = pow(1.0 - max(dot(n, V), 0.0), 3.0);
+  // The orb's own colour and how much it glows (iColor.a): 1 for the default
+  // glowing orb (2026-10-11: "standardize the latent glowing glass orbs as the
+  // default"), 0 for the colourless lens a search turns the rest into.
+  float glow = vTint.a;
+  vec3 tint = uHue == 0.0 ? vTint.rgb : clamp(turnHue(vTint.rgb, uHue), 0.0, 1.0);
+  vec3 glassC = mix(vec3(0.82, 0.88, 1.0), tint, glow);
+  vec3 col = glassC * (0.05 + 0.55 * fres) + tint * glow * (0.10 + 0.30 * (1.0 - fres));
+  float a = 0.05 + 0.42 * fres + 0.20 * glow;
+  for (int i = 0; i < ${MAX_LIGHTS}; i++) {
+    if (i >= uLights) break;
+    vec3 L = uLightPos[i] - P;
+    float d = length(L);
+    L /= max(d, 1e-4);
+    float att = uLightI[i] / (1.0 + (d / uFall) * (d / uFall));
+    float spec = pow(max(dot(reflect(-L, n), V), 0.0), 40.0);
+    float lens = pow(max(dot(-L, V), 0.0), 6.0) * (1.0 - fres);
+    col += uLightCol[i] * (1.7 * spec + 0.35 * fres * max(dot(n, L), 0.0) + 0.3 * lens) * att;
+    a += (0.7 * spec + 0.12 * lens) * att;
+  }
+  gl_FragColor = vec4(col, clamp(a, 0.0, 0.92));
   #include <colorspace_fragment>
 }`;
 
@@ -88,11 +176,16 @@ export interface NodeLook {
   color: string;
   /** A picture's src, when the node shows one. */
   picture?: string;
+  /** Drawn as glass: colourless, a lens lit by the search's lights (item 88). */
+  glass?: boolean;
+  /** A search result's own brightness, 0..1 (item 88). */
+  glow?: number;
 }
 
 export class SceneBatch {
   private opaque: Mesh;
   private clear: Mesh;
+  private glass: Mesh;
   private lines: THREE.LineSegments;
   private linePos: THREE.BufferAttribute;
   private lineCol: THREE.BufferAttribute;
@@ -115,28 +208,43 @@ export class SceneBatch {
   onPlaced: (() => void) | null = null;
   private nextCell = 0;
   private colours = new Map<string, THREE.Color>();
-  lastStats = { drawCalls: 3, opaque: 0, translucent: 0, lines: 0, atlasCells: 0, atlasFull: 0, syncMs: 0 };
+  lastStats = { drawCalls: 3, opaque: 0, translucent: 0, glass: 0, lines: 0, atlasCells: 0, atlasFull: 0, syncMs: 0 };
 
   constructor(private scene: THREE.Scene, private renderer: THREE.WebGLRenderer,
               private load: (src: string) => Promise<Picture | null>) {
     this.atlas = new THREE.DataTexture(new Uint8Array(4), 1, 1);   // replaced on first use
     this.opaque = this.makeMesh(512, false);
     this.clear = this.makeMesh(128, true);
+    this.glass = this.makeMesh(128, true, true);
     this.lines = this.makeLines(1024);
     this.linePos = this.lines.geometry.getAttribute("position") as THREE.BufferAttribute;
     this.lineCol = this.lines.geometry.getAttribute("color") as THREE.BufferAttribute;
-    scene.add(this.opaque.mesh, this.clear.mesh, this.lines);
+    scene.add(this.opaque.mesh, this.clear.mesh, this.glass.mesh, this.lines);
   }
 
-  private material(translucent: boolean): THREE.ShaderMaterial {
+  private material(translucent: boolean, glass = false): THREE.ShaderMaterial {
+    if (glass) {
+      return new THREE.ShaderMaterial({
+        vertexShader: GLASS_VERT, fragmentShader: GLASS_FRAG,
+        uniforms: {
+          uLightPos: { value: Array.from({ length: MAX_LIGHTS }, () => new THREE.Vector3()) },
+          uLightCol: { value: Array.from({ length: MAX_LIGHTS }, () => new THREE.Vector3()) },
+          uLightI: { value: new Array(MAX_LIGHTS).fill(0) },
+          uLights: { value: 0 },
+          uFall: { value: 60 },
+          uHue: { value: 0 },
+        },
+        transparent: true, depthWrite: false,
+      });
+    }
     return new THREE.ShaderMaterial({
       vertexShader: VERT, fragmentShader: FRAG,
-      uniforms: { atlas: { value: this.atlas } },
+      uniforms: { atlas: { value: this.atlas }, uHue: { value: 0 } },
       transparent: translucent, depthWrite: !translucent,
     });
   }
 
-  private makeMesh(cap: number, translucent: boolean): Mesh {
+  private makeMesh(cap: number, translucent: boolean, glass = false): Mesh {
     const geo = new THREE.InstancedBufferGeometry();
     geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array([-1, -1, 0, 1, -1, 0, 1, 1, 0, -1, 1, 0]), 3));
     geo.setIndex([0, 1, 2, 0, 2, 3]);
@@ -149,9 +257,9 @@ export class SceneBatch {
     geo.setAttribute("iOffset", m.offset); geo.setAttribute("iSize", m.size);
     geo.setAttribute("iColor", m.color); geo.setAttribute("iUv", m.uv);
     geo.instanceCount = 0;
-    m.mesh = new THREE.Mesh(geo, this.material(translucent));
+    m.mesh = new THREE.Mesh(geo, this.material(translucent, glass));
     m.mesh.frustumCulled = false;           // instances span the whole cloud
-    m.mesh.renderOrder = translucent ? 2 : 1;
+    m.mesh.renderOrder = glass ? 3 : translucent ? 2 : 1;
     (m.mesh as any).__batch = true;          // not a node: never picked
     m.mesh.raycast = () => {};
     return m;
@@ -281,17 +389,19 @@ export class SceneBatch {
   }
 
   /** One frame: every node and edge written into the three batches. */
-  sync(nodes: any[], links: any[], look: (n: any) => NodeLook | null): void {
+  sync(nodes: any[], links: any[], look: (n: any) => NodeLook | null,
+       lineAlpha: ((l: any) => number) | null = null): void {
     const t0 = performance.now();
     this.grow(this.opaque, nodes.length);
     this.grow(this.clear, nodes.length);
-    let no = 0, nt = 0;
+    this.grow(this.glass, nodes.length);
+    let no = 0, nt = 0, ng = 0;
     for (const n of nodes) {
       if (!Number.isFinite(n.x) || !Number.isFinite(n.y)) continue;
       const lk = look(n);
       if (!lk) continue;
-      const m = lk.translucent ? this.clear : this.opaque;
-      const i = lk.translucent ? nt++ : no++;
+      const m = lk.glass ? this.glass : lk.translucent ? this.clear : this.opaque;
+      const i = lk.glass ? ng++ : lk.translucent ? nt++ : no++;
       m.offset.setXYZ(i, n.x, n.y, n.z || 0);
       m.size.setX(i, lk.half);
       const col = this.colour(lk.color);
@@ -304,11 +414,11 @@ export class SceneBatch {
         m.color.setXYZW(i, 1, 1, 1, lk.alpha);
         n.imgLoaded = true;
       } else {
-        m.uv.setXYZW(i, 0, 0, -1, 0);
+        m.uv.setXYZW(i, lk.glow || 0, 0, -1, 0);
         m.color.setXYZW(i, col.r, col.g, col.b, lk.alpha);
       }
     }
-    for (const [m, count] of [[this.opaque, no], [this.clear, nt]] as [Mesh, number][]) {
+    for (const [m, count] of [[this.opaque, no], [this.clear, nt], [this.glass, ng]] as [Mesh, number][]) {
       m.geo.instanceCount = count;
       m.offset.needsUpdate = true; m.size.needsUpdate = true; m.color.needsUpdate = true; m.uv.needsUpdate = true;
     }
@@ -329,27 +439,57 @@ export class SceneBatch {
       if (!Number.isFinite(s.x) || !Number.isFinite(t.x)) continue;
       this.linePos.setXYZ(nl * 2, s.x, s.y, s.z || 0);
       this.linePos.setXYZ(nl * 2 + 1, t.x, t.y, t.z || 0);
-      // 3d-force-graph's own link colour (#f0f0f0) at the pane's linkOpacity.
-      this.lineCol.setXYZW(nl * 2, 0.87, 0.87, 0.87, 0.25);
-      this.lineCol.setXYZW(nl * 2 + 1, 0.87, 0.87, 0.87, 0.25);
+      // 3d-force-graph's own link colour (#f0f0f0) at the pane's linkOpacity;
+      // during a search, the pane says how much of an edge to draw (item 88).
+      const a = lineAlpha ? lineAlpha(l) : 0.25;
+      this.lineCol.setXYZW(nl * 2, 0.87, 0.87, 0.87, a);
+      this.lineCol.setXYZW(nl * 2 + 1, 0.87, 0.87, 0.87, a);
       nl++;
     }
     this.lines.geometry.setDrawRange(0, nl * 2);
     this.linePos.needsUpdate = true;
     this.lineCol.needsUpdate = true;
-    this.lastStats = { drawCalls: 3, opaque: no, translucent: nt, lines: nl, atlasCells: this.nextCell,
+    this.lastStats = { drawCalls: ng ? 4 : 3, opaque: no, translucent: nt, glass: ng, lines: nl, atlasCells: this.nextCell,
                        atlasFull: this.lastStats.atlasFull, syncMs: Math.round((performance.now() - t0) * 100) / 100 };
+  }
+
+  /**
+   * The lights the glass is lit by, in WORLD space: one per shown search
+   * result, brightest first, at most `MAX_LIGHTS` (item 88). `fall` is the
+   * distance at which a light has fallen to half.
+   */
+  lightStats = { lights: 0, fall: 0 };
+  setLights(lights: { at: [number, number, number]; color: string; intensity: number }[], fall: number): void {
+    const u = (this.glass.mesh.material as THREE.ShaderMaterial).uniforms;
+    const use = lights.slice(0, MAX_LIGHTS);
+    use.forEach((l, i) => {
+      (u.uLightPos.value[i] as THREE.Vector3).set(l.at[0], l.at[1], l.at[2]);
+      const c = this.colour(l.color);
+      (u.uLightCol.value[i] as THREE.Vector3).set(c.r, c.g, c.b);
+      u.uLightI.value[i] = l.intensity;
+    });
+    u.uLights.value = use.length;
+    u.uFall.value = Math.max(1e-3, fall);
+    this.lightStats = { lights: use.length, fall: Math.round(fall * 10) / 10 };
+  }
+
+  /** The colours' turn about the grey axis, radians (item 83). */
+  hue = 0;
+  setHue(a: number): void {
+    this.hue = a;
+    for (const m of [this.opaque, this.clear, this.glass]) (m.mesh.material as THREE.ShaderMaterial).uniforms.uHue.value = a;
   }
 
   setVisible(on: boolean): void {
     this.opaque.mesh.visible = on;
     this.clear.mesh.visible = on;
+    this.glass.mesh.visible = on;
     this.lines.visible = on;
   }
 
   dispose(): void {
-    this.scene.remove(this.opaque.mesh, this.clear.mesh, this.lines);
-    for (const m of [this.opaque, this.clear]) { m.geo.dispose(); (m.mesh.material as THREE.Material).dispose(); }
+    this.scene.remove(this.opaque.mesh, this.clear.mesh, this.glass.mesh, this.lines);
+    for (const m of [this.opaque, this.clear, this.glass]) { m.geo.dispose(); (m.mesh.material as THREE.Material).dispose(); }
     this.lines.geometry.dispose(); (this.lines.material as THREE.Material).dispose();
     this.atlas.dispose();
   }
