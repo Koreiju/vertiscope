@@ -16,8 +16,8 @@ def test_an_idle_reader_with_polling_gets_a_fold():
     now = 100_000.0
     # Last write 30 minutes ago; the plugin polled 3 s ago.
     assert sc._checkpoint_due(200 * MB, now, now - 1800, now - 3)
-    # A poll in flight right now: wait for the lull.
-    assert not sc._checkpoint_due(200 * MB, now, now - 1800, now - 0.5)
+    # Polled a moment ago: still due -- the open pane polls about once a second.
+    assert sc._checkpoint_due(200 * MB, now, now - 1800, now - 0.2)
     # The reader is browsing (a write a minute ago): never mid-session.
     assert not sc._checkpoint_due(200 * MB, now, now - 60, now - 3)
 

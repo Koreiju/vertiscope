@@ -2775,6 +2775,51 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-154",
+      asks: "a sidecar that lost its session under an open page refuses the stale delta, the sensor resends everything, and captures resume with addresses the page holds; planted (no-resync): every capture after the loss is refused",
+      async run() {
+        const fixtures = await serveFixtures();
+        try {
+          const arm = (planted) => evaluate(`(async () => {
+            ${PREP}
+            const URL = ${JSON.stringify(fixtures.origin)} + "/busy_feed.html?every=120&rounds=200&g154=" + (${planted} ? "p" : "c") + Date.now();
+            if (${planted}) b.plant.add("no-resync");
+            try {
+              try { b.setLive(true); } catch (e) {}
+              await land(URL, 30000);
+              // A first capture, so the sidecar holds a session and the sensor's dictionary.
+              for (let i = 0; i < 80 && !b.capturedAt.has(URL); i++) await sleep(250);
+              if (!b.capturedAt.has(URL)) return { planted: ${planted}, error: "no first capture" };
+              const resyncs0 = b.resyncs;
+              // What a sidecar restart does to the session: gone. (The route's own
+              // restart flag; an empty payload, so nothing is written.)
+              await b.sidecar.capture(URL, { restart: true, payload: { v: 0, url: URL, dict: [], shapes: [], chunks: [], moves: [], removed: [], settled: false, stats: { dictSize: 0 } } });
+              const lostWall = Date.now();
+              await sleep(9000);
+              // Captures the SIDECAR stored after the loss (the plugin stamps
+              // its own clock before it reads the reply, refusals included).
+              const prof = await (await fetch(b.sidecar.base().trim().replace(/[/]+$/, "") + "/profile")).json();
+              const storedAfter = (prof.capture || []).filter((r) => r.url === URL && r.at * 1000 > lostWall).length;
+              const refusedAfter = (prof.capture_refused || []).filter((r) => r.url === URL && r.at * 1000 > lostWall).length;
+              const map = await b.sidecar.pageMap(URL);
+              const xs = map && map.chunks ? Object.values(map.chunks).flat().slice(0, 300) : [];
+              const held = xs.length ? JSON.parse(await b.webview.executeJavaScript("(function(xs){var h=window.__domvecSensor;var n=0;for(var i=0;i<xs.length;i++){try{if(h.node(xs[i]))n++;}catch(e){}}return JSON.stringify(n);})(" + JSON.stringify(xs) + ")")) : 0;
+              return { planted: ${planted}, resyncs: b.resyncs - resyncs0, stored_after_loss: storedAfter, refused_after_loss: refusedAfter,
+                       stored_addresses: xs.length, page_holds: held };
+            } finally { b.plant.delete("no-resync"); }
+          })()`, { timeout: 120000 });
+          const clean = await arm(false);
+          const planted = await arm(true);
+          return {
+            pass: !clean.error && clean.resyncs >= 1 && clean.refused_after_loss >= 1 && clean.stored_after_loss >= 1
+                  && clean.stored_addresses > 0 && clean.page_holds >= 0.9 * clean.stored_addresses
+                  && !planted.error && planted.resyncs === 0 && planted.refused_after_loss >= 1 && planted.stored_after_loss === 0,
+            evidence: { clean, planted, purged: await tidyFixtures(fixtures.origin) },
+          };
+        } finally { await fixtures.close(); }
+      },
+    },
+    {
       id: "G-125",
       asks: "ONE hover panel persists: hovering a second chunk replaces the first; after the pointer leaves it stays, and closes itself after its time-to-live; planted (plantCloseOnLeave): it closes when the hover ends",
       async run() {

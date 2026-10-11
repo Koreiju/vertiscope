@@ -2199,7 +2199,7 @@ export class BrowserView extends ItemView {
       prof.stage(trace, "capture", captureMs);
       if (reply) prof.sidecar(trace, reply.phases, reply.ms, captureMs);
       if (!reply || reply.error) {
-        if (reply && (reply as any).resync) { void this.resyncSensor(); return; }
+        if (reply && (reply as any).resync && !this.plant.has("no-resync")) { void this.resyncSensor(); return; }
         this.say(`capture: ${reply ? reply.error : "no reply"}`);
         return;
       }
@@ -2412,7 +2412,7 @@ export class BrowserView extends ItemView {
       const reply = await this.sidecar.capture(
         url, { payload, title: this.webview?.getTitle() || "" });
       if (!reply || reply.error) {
-        if (reply && (reply as any).resync) { void this.resyncSensor(); return; }
+        if (reply && (reply as any).resync && !this.plant.has("no-resync")) { void this.resyncSensor(); return; }
         this.say(`capture failed: ${reply ? reply.error : "no reply"}`);
         return;
       }

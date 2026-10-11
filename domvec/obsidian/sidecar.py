@@ -180,10 +180,12 @@ def _cache_health(body: Dict, key: object = None) -> Dict:
 _CHECKPOINT_QUIET_S = 120.0
 _CHECKPOINT_MIN_WAL = 8 << 20
 _CHECKPOINT_CEILING = 256 << 20
-#: Writes stopped this long: the reader is not browsing, and a lull between
-#: the plugin's background polls is quiet enough (`_checkpoint_due`).
+#: Writes stopped this long: the reader is not browsing, so the fold runs
+#: whatever is polling (`_checkpoint_due`). A two-second lull between polls
+#: was asked for at first and never came -- the open pane polls about once a
+#: second -- so the WAL grew on (2026-10-11). Reads wait out the fold.
 _CHECKPOINT_IDLE_WRITE_S = 600.0
-_CHECKPOINT_POLL_GAP_S = 2.0
+_CHECKPOINT_POLL_GAP_S = 0.0
 #: Planted: the old rule -- quiet only with no REQUEST of any kind for 120 s.
 _PLANT_REQUEST_QUIET = [False]
 
@@ -196,9 +198,9 @@ def _checkpoint_due(size: int, now: float, last_write: float, last_request: floa
     which the plugin's own background polls never allow: through 2.8 hours of
     an idle reader on 2026-10-11 the WAL grew to 249 MB unfolded, every byte
     of it at risk to a native crash (the `.unreplayable` logs). So a second
-    quiet: no WRITE for ten minutes -- nobody is browsing -- and a two-second
-    lull between polls. Reads pause for the fold (10-19 s on a 32 GB store),
-    which an idle reader does not see.
+    quiet: no WRITE for ten minutes -- nobody is browsing -- polls or not.
+    Reads pause for the fold (10-19 s on a 32 GB store), which an idle reader
+    does not see.
     """
     if size >= _CHECKPOINT_CEILING:
         return True
