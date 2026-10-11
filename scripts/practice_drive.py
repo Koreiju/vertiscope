@@ -96,8 +96,18 @@ def stage_store(session, wait_s=90):
         await sleep(1500);
       }
       if (readerBack()) return JSON.stringify({ stopped: "reader" });
-      // Placed by the fit: ask for every stored chunk, and draw what comes back.
-      const got = cids.length ? await v.sidecar.place(cids) : null;
+      // Placed by the fit: ask for every stored chunk, and draw what comes back
+      // -- once they are PLACEABLE. Stored is not placeable: a chunk needs its
+      // vector first, and asking at "the count held" (11 s on a new Axolotl
+      // page) placed 0 of 232 that a minute later all placed.
+      let got = null;
+      const t1 = performance.now();
+      while (cids.length && performance.now() - t1 < 120000) {
+        if (readerBack()) return JSON.stringify({ stopped: "reader" });
+        got = await v.sidecar.place(cids);
+        if (got && got.nodes && got.nodes.length >= 0.9 * cids.length) break;
+        await sleep(3000);
+      }
       if (got && got.nodes && got.nodes.length) v.absorb(got.nodes, got.edges);
       await sleep(3000);
       const all = v.graph.graphData().nodes;
@@ -113,7 +123,7 @@ def stage_store(session, wait_s=90):
         dOwn.push(a); dOther.push(o); if (a < o) nearerOwn++;
       }
       const q = (xs, p) => { const s = xs.slice().sort((a, c) => a - c); return s.length ? Math.round(s[Math.floor(p * (s.length - 1))] * 10) / 10 : null; };
-      return JSON.stringify({ stored: cids.length, waited_ms: Math.round(performance.now() - t0),
+      return JSON.stringify({ stored: cids.length, waited_ms: Math.round(performance.now() - t0), placeable_after_ms: Math.round(performance.now() - t1),
         placed_returned: got && got.nodes ? got.nodes.length : 0, drawn_placed: mine.length,
         page_node: !!own, nearer_own_page: nearerOwn,
         d_own_p50: q(dOwn, 0.5), d_own_p90: q(dOwn, 0.9), d_other_p10: q(dOther, 0.1), d_other_p50: q(dOther, 0.5),
@@ -226,10 +236,16 @@ def stage_panels(session, cap=40):
       for (const p of b.pinnedState()) b.unpin(p.cid);
       for (const bb of v.billboardState()) v.closeBillboard(bb.id);
       const cids = (await v.sidecar.pageCids(U).catch(() => [])).slice(0, %d);
+      // What a reader can SEE of a line: a link's text, never its destination.
+      // `](dest)` is dropped whatever the label holds -- a footnote nests its
+      // brackets (`[[ 33 ]](#cite_note-Bodmer-12)`) and the old pattern let
+      // "cite note bodmer" through as words the panel "missed" (Okapi,
+      // 2026-10-11: 24 of 40 panels read incomplete on destination words).
+      // The same rule as the panel's own complement (graph.ts `words`).
       const words = (t) => String(t || "")
         .replace(/!\[[^\]]*\]\([^)]*\)/g, " ")          // images
-        .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")        // links -> their text
-        .replace(/<[^>]+>/g, " ").replace(/https?:\/\/\S+/g, " ")
+        .replace(/\]\([^)]*\)/g, "] ")                  // any destination
+        .replace(/<[^>]+>/g, " ").replace(/(?:https?:)?\/\/\S+/g, " ")
         .toLowerCase().match(/[\p{L}\p{N}]{3,}/gu) || [];
       const rows = [];
       for (const cid of cids) {
