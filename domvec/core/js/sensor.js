@@ -941,6 +941,14 @@
       // which is every second image on the page going unrecorded.
       if (URL_SET[name] && MULTI_URL.test(val)) pushUrls(out, name, val, true);
     }
+    // A table cell's SPAN (`D-5`): which columns a cell under a rowspan fills
+    // is layout the markdown table needs, and nothing else carries it. Above
+    // 1 only; the denylist below keeps the attributes out of the URL scan.
+    if ((tag === 'TD' || tag === 'TH') && el.getAttribute) {
+      var rspan = +el.getAttribute('rowspan'), cspan = +el.getAttribute('colspan');
+      if (rspan > 1) (out || (out = [])).push([intern('rowspan'), String(rspan)]);
+      if (cspan > 1) (out || (out = [])).push([intern('colspan'), String(cspan)]);
+    }
     // Then everything the lists do not name, for URLs only. Bounded by the
     // denylist so a framework's own bookkeeping does not become content.
     var rest = el.attributes || [];

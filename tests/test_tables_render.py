@@ -43,16 +43,32 @@ def test_planted_no_tables_draws_a_cell_per_line(monkeypatch):
     assert sum(1 for l in lines if l.text.strip() in ("KHTML", "Gecko", "WebKit")) == 3
 
 
-def test_a_table_with_spans_stays_a_cell_per_line():
-    """A row under a rowspan has fewer cells, and nothing says which column
-    they fill: Konqueror's "Linux" went under "Name". Left a cell per line."""
-    html = ("<html><body><table><tr><th>Name</th><th>OS</th></tr>"
-            "<tr><td rowspan='2'>Konqueror</td><td>BSD</td></tr><tr><td>Linux</td></tr>"
+def _span_table():
+    html = ("<html><body><table><tr><th>Name</th><th>OS</th><th>Licence</th></tr>"
+            "<tr><td rowspan='3'>Konqueror</td><td>BSD</td><td rowspan='3'>GPL</td></tr>"
+            "<tr><td>Linux</td></tr><tr><td>macOS</td></tr>"
+            "<tr><td>Firefox</td><td>Windows</td><td>MPL</td></tr>"
             "</table></body></html>")
-    lines = [l for c in render_trie(StreamingScan("https://t.test/s", context_window=512).push(html, passno=0).trie,
-                                    context_window=512) for l in c.lines]
-    assert not any(l.text.startswith("|") for l in lines)
-    assert any(l.text.strip() == "Linux" for l in lines)
+    return [l for c in render_trie(StreamingScan("https://t.test/s", context_window=512).push(html, passno=0).trie,
+                                   context_window=512) for l in c.lines]
+
+
+def test_a_cell_under_a_rowspan_lands_in_its_own_column():
+    """`D-5`: the sensor and the tagger report spans, and the table is laid out
+    as a browser lays it out. "Linux" sits under "OS", not under "Name"."""
+    rows = [l.text for l in _span_table() if l.text.startswith("|")]
+    assert rows[0] == "| Name | OS | Licence |", rows
+    assert "| Konqueror | BSD | GPL |" in rows
+    assert "|  | Linux |  |" in rows and "|  | macOS |  |" in rows
+    assert "| Firefox | Windows | MPL |" in rows
+    # The span itself is layout, never a line of its own.
+    assert not any(l.text.strip() in ("3",) for l in _span_table())
+
+
+def test_planted_no_spans_puts_linux_under_name(monkeypatch):
+    monkeypatch.setattr(md, "PLANT_NO_SPANS", True)
+    rows = [l.text for l in _span_table() if l.text.startswith("|")]
+    assert any(r.startswith("| Linux |") for r in rows), rows
 
 
 def _long_table(window):

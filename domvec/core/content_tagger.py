@@ -968,6 +968,15 @@ class ContentTagger:
 					if media_cat:
 						self._add('media', media_cat, xpath, u[:500], 'style', at)
 
+			# A table cell's SPAN is layout the markdown table needs (`D-5`):
+			# which column a cell under a rowspan fills. Above 1 only -- a span
+			# of one says nothing. Ahead of `_SKIP_ATTRS`, which drops it.
+			if tag in ('td', 'th') and attr_lower in ('rowspan', 'colspan'):
+				v = attr_value.strip()
+				if v.isdigit() and int(v) > 1:
+					self._add('text', 'metadata', xpath, str(int(v)), attr_lower)
+				continue
+
 			if attr_lower in _SKIP_ATTRS:
 				continue
 			# Prefix-based skip for framework/test/state attrs. ``str.startswith``

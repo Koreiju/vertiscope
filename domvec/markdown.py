@@ -991,6 +991,9 @@ def _collect(node: TrieNode, url_depth: int) -> List[Tuple[ContentAddress, str, 
 
     def walk(n: TrieNode, label: str, depth: int) -> None:
         if n.is_leaf and n.address is not None:
+            # A cell's rowspan/colspan is layout for `_tabulate`, not a line.
+            if _is_span(n.address):
+                return
             out.append((n.address, n.value, label, depth))
             return
         for child in _own_units_first(n.ordered_children()):
@@ -2353,9 +2356,9 @@ def render_trie(
     if not PLANT_NO_TABLES:
         # Each table's header row, from wherever on the page it was drawn --
         # read before any chunk is rewritten (`D-9`).
-        headers = {} if PLANT_NAKED_ROWS else _table_headers(chunks)
+        layouts = _table_layouts(chunks, {} if PLANT_NO_SPANS else _cell_spans(trie))
         for chunk in chunks:
-            chunk.lines = _tabulate(chunk.lines, headers)
+            chunk.lines = _tabulate(chunk.lines, layouts)
     # The page repeating itself, drawn once (`D-4`, `M-8`).
     if not PLANT_STRUCTURAL_NOISE:
         for chunk in chunks:
@@ -2393,61 +2396,154 @@ def _cell_text(ls: List[MarkdownLine]) -> str:
     return " ".join(" ".join(l.text.split()) for l in ls)
 
 
-def _table_headers(chunks: List[MarkdownChunk]) -> Dict[str, List[str]]:
-    """Each table's column names: the first row whose cells are all `<th>`.
+_SPAN_ACCESSORS = frozenset({"rowspan", "colspan"})
 
-    Collected across every chunk of the page, because the row that needs them
-    is usually not in the chunk that holds them (`D-9`: 44 of 79 row chunks
-    carried bare values -- `0.14%`, `$455.28M` -- whose names were in the
-    table's header row, one chunk away).
+#: Planted (`D-5`): spans ignored -- a cell under a rowspan lands in the
+#: first free column, as it did ("Linux" under "Name").
+PLANT_NO_SPANS = False
+
+
+def _is_span(address: ContentAddress) -> bool:
+    return (getattr(address, "accessor", "") or "").split("|")[0] in _SPAN_ACCESSORS
+
+
+def _one_is_bare(xpath: str) -> str:
+    """`td[1]` and `td` name one element; the two paths spell it both ways."""
+    return re.sub(r"\[1\](?=/|$)", "", xpath)
+
+
+def _ordinal(step: str) -> int:
+    m = re.search(r"\[(\d+)\]$", step)
+    return int(m.group(1)) if m else 1
+
+
+def _cell_spans(trie: AddressTrie) -> Dict[str, Tuple[int, int]]:
+    """Every spanned cell's (rowspan, colspan), by its element's xpath."""
+    out: Dict[str, Tuple[int, int]] = {}
+    for leaf in trie.leaves():
+        a = leaf.address
+        if a is None or not _is_span(a):
+            continue
+        try:
+            v = max(1, int(str(leaf.value).strip()))
+        except ValueError:
+            continue
+        key = _one_is_bare(a.xpath)
+        rs, cs = out.get(key, (1, 1))
+        if a.accessor.split("|")[0] == "rowspan":
+            rs = v
+        else:
+            cs = v
+        out[key] = (rs, cs)
+    return out
+
+
+def _table_layouts(chunks: List[MarkdownChunk],
+                   spans: Dict[str, Tuple[int, int]]) -> Dict[str, Dict]:
+    """Each table laid out once for the page, as a browser lays it out.
+
+    A cell takes the first column its row has free; a rowspan/colspan holds
+    the cells below and beside it (`D-5`: under a five-row span Konqueror's
+    "Linux" went under "Name"). Read across every chunk of the page, because
+    a fragment's rows sit under spans from rows another chunk holds. A row's
+    cells are its `th`s then its `td`s by ordinal, so an empty cell -- which
+    draws no line -- still takes its column.
+
+    Returns table -> {width, pos: (row, cell) -> (column, colspan), names}:
+    the column names from the first all-`th` row (`D-9`), a `colspan` header
+    naming every column it covers.
     """
-    rows: Dict[str, Dict[str, List[Tuple[str, List[MarkdownLine]]]]] = {}
-    order: Dict[str, List[str]] = {}
+    rows_by_table: Dict[str, Dict[str, Dict[str, List[MarkdownLine]]]] = {}
     for chunk in chunks:
         for line in chunk.lines:
             m = _CELL.match(line.address.xpath) if line.address else None
             if not m:
                 continue
-            table, tr, cell = m.groups()
-            by_tr = rows.setdefault(table, {})
-            if tr not in by_tr:
-                by_tr[tr] = []
-                order.setdefault(table, []).append(tr)
-            cells = by_tr[tr]
-            if not cells or cells[-1][0] != cell:
-                cells.append((cell, []))
-            cells[-1][1].append(line)
-    out: Dict[str, List[str]] = {}
-    for table, trs in order.items():
-        for tr in trs:
-            cells = rows[table][tr]
-            if len(cells) >= 2 and all(c.startswith("th") for c, _ls in cells):
-                # A column's NAME is its cell's content, not the cell's own
-                # attributes: a sortable header's `th` carries "Sort ascending".
-                def name(cell: str, ls: List[MarkdownLine]) -> str:
-                    inner = [l for l in ls if not l.address.xpath.endswith("/" + cell)]
-                    # A linked header names the column by its label, not its url.
-                    return re.sub(r"!?\[([^\]]*)\](\([^)]*\)|<[^>]*>)", r"\1", _cell_text(inner or ls))
-                out[table] = [name(c, ls) for c, ls in cells]
+            table, rowkey, cell = m.groups()
+            cell = _one_is_bare(cell)
+            rows_by_table.setdefault(table, {}).setdefault(rowkey, {}).setdefault(cell, []).append(line)
+    out: Dict[str, Dict] = {}
+    for table, rows in rows_by_table.items():
+        held = set()
+        pos: Dict[Tuple[str, str], Tuple[int, int]] = {}
+        width = 0
+        for ri, (rowkey, cells) in enumerate(rows.items()):
+            nth = max((_ordinal(c) for c in cells if c.startswith("th")), default=0)
+            ntd = max((_ordinal(c) for c in cells if c.startswith("td")), default=0)
+            seq = ([("th" if k == 1 else "th[%d]" % k) for k in range(1, nth + 1)]
+                   + [("td" if k == 1 else "td[%d]" % k) for k in range(1, ntd + 1)])
+            col = 0
+            for cell in seq:
+                while (ri, col) in held:
+                    col += 1
+                rs, cs = spans.get(_one_is_bare(table + "/" + rowkey + "/" + cell), (1, 1))
+                for dr in range(rs):
+                    for dc in range(cs):
+                        held.add((ri + dr, col + dc))
+                pos[(rowkey, cell)] = (col, cs)
+                col += cs
+                width = max(width, col)
+        names: Optional[List[str]] = None
+        for rowkey, cells in rows.items():
+            if len(cells) >= 2 and all(c.startswith("th") for c in cells):
+                names = [""] * width
+                for cell, ls in cells.items():
+                    # A column's NAME is its cell's content, not the cell's own
+                    # attributes: a sortable header's `th` carries "Sort ascending".
+                    inner = [l for l in ls if not _one_is_bare(l.address.xpath).endswith("/" + cell)]
+                    nm = re.sub(r"!?\[([^\]]*)\](\([^)]*\)|<[^>]*>)", r"\1", _cell_text(inner or ls))
+                    col, cs = pos[(rowkey, cell)]
+                    for dc in range(cs):
+                        if col + dc < width:
+                            names[col + dc] = nm
                 break
+        out[table] = {"width": width, "pos": pos, "names": names}
     return out
 
 
+def _row_head(members: List[MarkdownLine]) -> Optional[MarkdownLine]:
+    """The member whose address a row line carries: the first one drawn as
+    content. A control's address names a control, and a row line carrying it
+    repaints as one -- GitHub's file table drew `Name: ( View all files )` and
+    read it back as `( Name: ( View all files ) )`. None when every member is
+    a control or a picture: that row is not a row of values."""
+    for l in members:
+        t = l.text.strip()
+        if t and not _drawn_as_control(t) and not t.startswith("!["):
+            return l
+    return None
+
+
+def _row_line(members: List[MarkdownLine], text: str) -> MarkdownLine:
+    head = _row_head(members) or members[0]
+    extra: List[ContentAddress] = list(head.inline)
+    for l in members:
+        if l is head:
+            continue
+        extra.append(l.address)
+        extra.extend(l.inline)
+    # Depth 0: indented four spaces, a pipe table is a code block.
+    row = replace(head, depth=0, text=text, inline=tuple(extra))
+    if hasattr(head, "absorbed"):
+        row = replace(row, absorbed=tuple(a for l in members for a in getattr(l, "absorbed", ())))
+    return row
+
+
 def _tabulate(lines: List[MarkdownLine],
-              headers: Optional[Dict[str, List[str]]] = None) -> List[MarkdownLine]:
+              layouts: Optional[Dict[str, Dict]] = None) -> List[MarkdownLine]:
     """Draw a table's cells as a markdown table, one line per row (`D-5`).
 
     The goal names "a hierarchically-header-structured markdown document with
-    tables, images, web links", and a table arrived as one line per cell -- a
-    reader of the markdown form, or a model reading the chunk, saw a column of
-    words with the grid gone. A run of lines whose addresses sit in one
-    table's cells becomes pipe rows: the first row is the header, a cell's
-    several lines join with spaces, and a literal `|` is escaped. Only a
-    rectangular table: one with spans stays a cell per line (see below).
+    tables, images, web links", and a table arrived as one line per cell. A
+    run of one table's cell lines becomes pipe rows placed by the table's
+    layout (`_table_layouts`): each value in the column the page shows it in,
+    a column a span holds left blank. A fragment AWAY from its header names
+    each value by its column instead (`D-9`): `Name: value · Name: value`.
+    No separator row: lines pair one-to-one with addresses in the printed
+    form, and it is drawn where markdown is displayed (`with_table_separators`).
 
     No address is lost: the row line keeps its first cell's address and every
-    other cell's -- and everything they had inline -- rides on its `inline`,
-    the field that already lets one line carry several handles.
+    other cell's -- and everything they had inline -- rides on its `inline`.
     """
     out: List[MarkdownLine] = []
     i = 0
@@ -2455,7 +2551,8 @@ def _tabulate(lines: List[MarkdownLine],
     while i < n:
         m = _CELL.match(lines[i].address.xpath) if lines[i].address else None
         if not m:
-            out.append(lines[i]); i += 1
+            out.append(lines[i])
+            i += 1
             continue
         table = m.group(1)
         run: List[Tuple[str, str, MarkdownLine]] = []
@@ -2465,7 +2562,7 @@ def _tabulate(lines: List[MarkdownLine],
             mm = _CELL.match(a.xpath) if a else None
             if not mm or mm.group(1) != table:
                 break
-            run.append((mm.group(2), mm.group(3), lines[j]))
+            run.append((mm.group(2), _one_is_bare(mm.group(3)), lines[j]))
             j += 1
         rows: List[Tuple[str, List[Tuple[str, List[MarkdownLine]]]]] = []
         for tr, cell, line in run:
@@ -2475,60 +2572,45 @@ def _tabulate(lines: List[MarkdownLine],
             if not cells or cells[-1][0] != cell:
                 cells.append((cell, []))
             cells[-1][1].append(line)
-        width = max(len(c) for _tr, c in rows)
-        names = (headers or {}).get(table)
-        has_header = all(c.startswith("th") for c, _ls in rows[0][1])
-        # A fragment AWAY from its header, whose rows match the header's
-        # width: each value is named by the header at its own position
-        # (`D-9`, `M-10`, `M-11` -- "the chunk is what gets embedded", and a
-        # row of bare numbers embeds as almost nothing). One line a row,
-        # `Name: value · Name: value`, keeping every cell's address.
-        if (names and not has_header and len(names) == width
-                and all(len(c) == width for _tr, c in rows)):
-            for _tr, cells in rows:
-                members = [l for _c, ls in cells for l in ls]
-                head = members[0]
-                extra = list(head.inline)
-                for l in members[1:]:
-                    extra.append(l.address)
-                    extra.extend(l.inline)
-                pairs = [(h, _cell_text(ls)) for h, (_c, ls) in zip(names, cells)]
-                text = " · ".join((h + ": " + v) if h else v for h, v in pairs if v)
-                row = replace(head, depth=0, text=text, inline=tuple(extra))
-                if hasattr(head, "absorbed"):
-                    row = replace(row, absorbed=tuple(a for l in members for a in getattr(l, "absorbed", ())))
-                out.append(row)
+        lay = (layouts or {}).get(table)
+        placed = lay is not None and all((tr, c) in lay["pos"] for tr, cells in rows for c, _ls in cells)
+        if not placed:
+            out.extend(line for _tr, _c, line in run)
             i = j
             continue
-        # RECTANGULAR tables only. A row with fewer cells sits under a
-        # `rowspan`/`colspan` the addresses do not record, and padding it put
-        # Konqueror's "Linux" under "Name" (Comparison_of_web_browsers,
-        # 2026-10-11): a grid that files a value in the wrong column misleads
-        # where a cell per line did not. Such a table stays a cell per line
-        # until the sensor reports spans.
-        if len(rows) < 2 or width < 2 or any(len(c) != width for _tr, c in rows):
-            out.extend(line for _tr, _c, line in run); i = j
+        width, names = lay["width"], lay["names"]
+        has_header = all(c.startswith("th") for c, _ls in rows[0][1])
+        if any(_row_head([l for _c, ls in cells for l in ls]) is None for _tr, cells in rows):
+            out.extend(line for _tr, _c, line in run)
+            i = j
             continue
-        for k, (_tr, cells) in enumerate(rows):
+
+        def text_of(c: str, ls: List[MarkdownLine]) -> str:
             # A cell's own-element label ("Sort ascending") is not its content.
-            texts = [_cell_text([l for l in ls if not l.address.xpath.endswith("/" + c)] or ls).replace("|", "\\|")
-                     for c, ls in cells]
-            members = [l for _c, ls in cells for l in ls]
-            head = members[0]
-            extra: List[ContentAddress] = list(head.inline)
-            for l in members[1:]:
-                extra.append(l.address)
-                extra.extend(l.inline)
-            text = "| " + " | ".join(texts) + " |"
-            # No separator row here: lines pair one-to-one with addresses in
-            # the printed form (`MarkdownChunk.from_json`), and a separator has
-            # no address. It is drawn where markdown is DISPLAYED
-            # (`with_table_separators`, and the panel's markdown form).
-            # Depth 0: indented four spaces, a pipe table is a code block.
-            row = replace(head, depth=0, text=text, inline=tuple(extra))
-            if hasattr(head, "absorbed"):
-                row = replace(row, absorbed=tuple(a for l in members for a in getattr(l, "absorbed", ())))
-            out.append(row)
+            return _cell_text([l for l in ls if not _one_is_bare(l.address.xpath).endswith("/" + c)] or ls)
+
+        if names and not has_header and not PLANT_NAKED_ROWS:
+            for tr, cells in rows:
+                pairs = []
+                for c, ls in cells:
+                    col, _cs = lay["pos"][(tr, c)]
+                    pairs.append((col, names[col] if col < len(names) else "", text_of(c, ls)))
+                pairs.sort(key=lambda t: t[0])
+                text = " · ".join((h + ": " + v) if h else v for _col, h, v in pairs if v)
+                out.append(_row_line([l for _c, ls in cells for l in ls], text))
+            i = j
+            continue
+        if len(rows) < 2 or width < 2:
+            out.extend(line for _tr, _c, line in run)
+            i = j
+            continue
+        for tr, cells in rows:
+            slots = [""] * width
+            for c, ls in cells:
+                col, _cs = lay["pos"][(tr, c)]
+                if col < width:
+                    slots[col] = text_of(c, ls).replace("|", "\\|")
+            out.append(_row_line([l for _c, ls in cells for l in ls], "| " + " | ".join(slots) + " |"))
         i = j
     return out
 
