@@ -72,6 +72,10 @@ def main(argv=None) -> int:
                          "and runs no process -- but because writing takes "
                          "the store's WRITER lock, which excludes every other "
                          "reader, an MCP server included.")
+    sv.add_argument("--allow-probe-captures", action="store_true",
+                    help="accept captures from any client, not only the "
+                         "plugin's browser cell. For a SCRATCH store a probe "
+                         "writes into; never the reader's (D-39).")
     sv.add_argument("--kernel-timeout", type=float, default=None,
                     help="seconds one cell may run before its kernel is "
                          "killed (default 60)")
@@ -129,7 +133,8 @@ def main(argv=None) -> int:
                      " + ".join(powers) if powers else "read-only"))
             serve(ws, port=args.port, enact=args.enact,
                   capture=args.capture,
-                  kernel=args.kernel, kernel_timeout=args.kernel_timeout)
+                  kernel=args.kernel, kernel_timeout=args.kernel_timeout,
+                  plugin_captures_only=bool(args.capture and not args.allow_probe_captures))
             return 0
 
         if not args.url and not args.all_pages:

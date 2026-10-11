@@ -980,6 +980,8 @@ class _Handler(BaseHTTPRequestHandler):
     #: different permissions: enact presses controls on live pages, capture
     #: only writes down what the browser cell read.
     capture_allowed = False
+    #: `D-39`: refuse captures that do not come from the plugin.
+    plugin_captures_only = False
     kernel_pool = None          # set by serve(); None means --kernel was off
     shell_pool = None           # set by serve(); shares --kernel's gate
 
@@ -1028,7 +1030,7 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Domvec-Client")
         self.send_header("Access-Control-Max-Age", "600")
         self.send_header("Content-Length", "0")
         self.end_headers()
@@ -1373,6 +1375,18 @@ class _Handler(BaseHTTPRequestHandler):
                            "Start it with --capture to let the browser cell "
                            "scan into it; that takes the store's writer lock "
                            "and excludes other readers.",
+                })
+                return
+            # Only the plugin's browser cell writes the reader's store (`D-39`:
+            # two DuckDuckGo queries a terminal probe ran were stored as pages
+            # and drawn among the reader's). A probe uses a test store.
+            if (self.plugin_captures_only
+                    and self.headers.get("X-Domvec-Client") != "obsidian-plugin"):
+                self._send(403, {
+                    "error": "captures come from the plugin's browser cell",
+                    "why": "this sidecar writes the reader's store; a probe "
+                           "runs against a test store (a sidecar started with "
+                           "--allow-probe-captures, or the Verifier's) (D-39)",
                 })
                 return
             self._post_capture()
@@ -2873,7 +2887,8 @@ class _Handler(BaseHTTPRequestHandler):
 
 def serve(workspace, port: int = 8787, *, block: bool = True,
           enact: bool = False, capture: bool = False, kernel: bool = False,
-          kernel_timeout: Optional[float] = None):
+          kernel_timeout: Optional[float] = None,
+          plugin_captures_only: bool = False):
     """Answer on loopback until stopped.
 
     Returns the server so a caller that passed ``block=False`` can shut it
@@ -2983,6 +2998,7 @@ def serve(workspace, port: int = 8787, *, block: bool = True,
     handler = type("_Bound", (_Handler,),
                    {"workspace": workspace, "enact_allowed": bool(enact),
                     "capture_allowed": bool(capture),
+                    "plugin_captures_only": bool(plugin_captures_only),
                     "kernel_pool": pool, "shell_pool": shells})
 
     class _Server(ThreadingHTTPServer):

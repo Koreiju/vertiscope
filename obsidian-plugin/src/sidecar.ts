@@ -435,7 +435,8 @@ export class Sidecar {
     try {
       const res = await fetch(`${base}/capture`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        // The reader's sidecar takes captures from the plugin only (D-39).
+        headers: { "Content-Type": "application/json", "X-Domvec-Client": "obsidian-plugin" },
         body: JSON.stringify({ url, ...what }),
       });
       const body = await res.json();
