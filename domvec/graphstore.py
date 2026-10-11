@@ -339,6 +339,31 @@ def _index_spellings(url: str):
     return ()
 
 
+#: Planted (2026-10-11): containment read from the STORED edges, which a page
+#: streamed in drains holds only within each drain.
+PLANT_STORED_CONTAINMENT = [False]
+
+
+def _nearest_enclosing(rows) -> List[Tuple[str, str]]:
+    """(parent cid, child cid) for each chunk under the chunk rooted at the
+    longest proper prefix of its root xpath -- the patricia trie's own parent,
+    restricted to chunks. Chunks sharing a root (a long element cut in parts)
+    hang from the same parent; the first of them stands for the root.
+    """
+    roots: Dict[str, str] = {}
+    for cid, xpath in rows:
+        roots.setdefault(xpath, cid)
+    pairs: List[Tuple[str, str]] = []
+    for cid, xpath in rows:
+        parts = xpath.strip("/").split("/")
+        for cut in range(len(parts) - 1, 0, -1):
+            parent = roots.get("/" + "/".join(parts[:cut]))
+            if parent is not None and parent != cid:
+                pairs.append((parent, cid))
+                break
+    return pairs
+
+
 class GraphStore:
     """Kuzu-backed unified store. Use as ``with GraphStore(path) as gs:``."""
 
@@ -1349,10 +1374,27 @@ class GraphStore:
         answers the same question for the whole corpus and routes hyperlinks
         as well, which is what PageRank wants and not what a pane unfolding
         one page wants.
+
+        **Read from the page's chunk roots, not the stored edges** (2026-10-11:
+        "it looks like a shortcut where there's just all the recursive chunks
+        linked to their root URL node"). `_link_containment` links a chunk to
+        its nearest enclosing chunk only among the chunks of ONE write, and a
+        streamed page is written a drain at a time: RFC 9110's 1,172 chunks
+        held 0 Contains edges between them although a chunk is rooted at
+        `/html/body`, above every one, so the pane hung all 1,172 off the url
+        node. Here each chunk's parent is the chunk rooted at the longest
+        proper prefix of its root xpath, over the page's chunks as they stand
+        -- whatever order the drains brought them in. One read, nothing
+        written. Planted (`PLANT_STORED_CONTAINMENT`): the stored edges.
         """
-        return [(a, b) for a, b in self._rows(
-            "MATCH (a:Chunk {url: $url})-[:Contains]->(b:Chunk {url: $url}) "
-            "RETURN a.cid, b.cid", {"url": url}) if a and b]
+        if PLANT_STORED_CONTAINMENT[0]:
+            return [(a, b) for a, b in self._rows(
+                "MATCH (a:Chunk {url: $url})-[:Contains]->(b:Chunk {url: $url}) "
+                "RETURN a.cid, b.cid", {"url": url}) if a and b]
+        rows = [(c, x) for c, x in self._rows(
+            "MATCH (c:Chunk {url: $url}) RETURN c.cid, c.xpath ORDER BY c.cid",
+            {"url": url}) if c and x]
+        return _nearest_enclosing(rows)
 
     def page_vectors(self):
         """Everything the page-level fit needs, in ONE query.

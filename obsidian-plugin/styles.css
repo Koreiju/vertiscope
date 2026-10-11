@@ -897,3 +897,10 @@ button.domvec-run-fence:hover {
 .domvec-search3d-scroll::-webkit-scrollbar-track { background: transparent; }
 .domvec-search3d-scroll::-webkit-scrollbar-thumb { border-radius: 5px; background: rgba(255,255,255,0.55);
   box-shadow: 0 0 10px 2px rgba(255,255,255,0.35); }
+/* Item 91: the page's stages, left to right, each with its hover-to-panel time. */
+.domvec-profile-stage-row { display: flex; gap: 4px; margin: 2px 0 8px; }
+.domvec-profile-stage { flex: 1; min-width: 0; padding: 3px 4px; border-radius: 4px; background: rgba(255,255,255,0.04); font-size: 10px; }
+.domvec-profile-stage.is-done { background: rgba(120,200,140,0.12); }
+.domvec-profile-stage-name { color: var(--text-muted); }
+.domvec-profile-stage-at { font-variant-numeric: tabular-nums; font-size: 12px; }
+.domvec-profile-stage-hover { color: var(--text-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

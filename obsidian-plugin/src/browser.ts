@@ -448,6 +448,7 @@ export class BrowserView extends ItemView {
     view.addEventListener("did-start-navigation", (e: any) => {
       if (e && e.isMainFrame && !e.isInPlace && !e.isSameDocument) {
         this.domReady = false; this.loadFailedUrl = "";
+        profiler().visitStart(String(e.url || ""));
         // Leaving the offline form for a LIVE page ends offline (G-62). Only
         // the button cleared it, so any other navigation left the cell
         // "offline" for good: every hover panel was then docked, pinned and

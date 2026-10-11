@@ -605,6 +605,7 @@ export function installHarness(app: App, sidecarBase: () => string) {
     profile: {
       summary: () => profiler().summary(),
       traces: (n = 20) => profiler().list().slice(-n),
+      visits: () => profiler().visits(),
       reset: () => { profiler().reset(); return true; },
     },
     trace: {

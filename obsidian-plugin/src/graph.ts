@@ -505,7 +505,13 @@ export class GraphView extends ItemView {
         this.redrawForce();
         this.collapseCovered();
       }
+      const epochWas = this.projEpoch;
       this.projEpoch = layout.source === "projector" ? (layout.epoch ?? -1) : -1;
+      // A full refit landed (a new epoch, not the first): the stage of the page
+      // being browsed, with the fit's own identity as provenance.
+      if (epochWas > 0 && this.projEpoch > 0 && this.projEpoch !== epochWas && this.browsingUrl) {
+        profiler().mark(this.browsingUrl(), "refit", { epoch: this.projEpoch, fit_sample: (layout as any).projector?.fit_sample ?? null });
+      }
       this.projSeq = layout.seq ?? 0;
       this.projStatus = layout.projector ?? null;
       // What the reader had open before a new fit, placed again in it.
@@ -723,6 +729,7 @@ export class GraphView extends ItemView {
    * a drain reaches the picture through the stream.
    */
   forceDelta(d: ForceNodeDelta): void {
+    if (d && d.url && d.added && d.added.length) profiler().mark(d.url, "grey", { nodes: d.added.length });
     if (!this.canvasEl) return;
     const t0 = performance.now();
     if (!this.graph) {
@@ -2263,6 +2270,7 @@ export class GraphView extends ItemView {
     // camera alternate between the chunk and its page on every poll
     // (measured 4-6 flights per hover, ending on the page).
     const isChunk = !!target && target.level !== "page" && target.level !== "path";
+    if (cid && url) { this.hoverAskAt = performance.now(); this.hoverAskUrl = url; }
     if (!cid || isChunk) {
       this.focusOn(cid ? target : null);
       this.hoverPanel(cid ? target : null);
@@ -2288,7 +2296,17 @@ export class GraphView extends ItemView {
     }
   }
 
+  /** The dwell before a hover opens its panel: long enough that sweeping the
+   *  pointer across a page does not open one per chunk passed, short enough to
+   *  read as immediate (2026-10-11, item 91: hover-to-panel was 209 ms at the
+   *  stored stage, 150 of them this dwell). Was 150. */
+  hoverDwellMs = 60;
+  /** How long the first paint waits for the page form before drawing the markdown (was 80). */
+  pageFormWaitMs = 30;
   private hoverSeq = 0;
+  /** When the last hover reached the 3D view, and on which page (item 91). */
+  private hoverAskAt = 0;
+  private hoverAskUrl = "";
   private hoverBbTimer = 0;
   private hoverBbPending = "";
   /** The billboard a hover opened (closed when the hover moves on or ends). */
@@ -2388,7 +2406,7 @@ export class GraphView extends ItemView {
       const e: any = this.billboards.get(target.id);
       if (e) e.hoverAt = performance.now();
       this.expireHoverPanels();
-    }, 150);
+    }, this.hoverDwellMs);
   }
 
   /** Open/close timings of hover panels, for the harness (`app_anomalies`). */
@@ -2700,9 +2718,13 @@ export class GraphView extends ItemView {
     const pageAttempt = this.plantSerialPanel ? null : this.tryPageForm(entry);
     const quick = this.plantSerialPanel
       ? await this.tryPageForm(entry)
-      : await Promise.race([pageAttempt!, new Promise<string>((r) => window.setTimeout(() => r("slow"), 80))]);
+      : await Promise.race([pageAttempt!, new Promise<string>((r) => window.setTimeout(() => r("slow"), this.pageFormWaitMs))]);
     if (quick !== true && entry.form !== "page") await this.renderForm(entry, "markdown", false);
     entry.firstPaintMs = Math.round(performance.now() - entry.openedAt);
+    if (fromHover && this.hoverAskAt) {
+      profiler().hover(this.hoverAskUrl || node.url || "", performance.now() - this.hoverAskAt, entry.firstPaintMs);
+      this.hoverAskAt = 0;
+    }
     this.panelTimes.first_paint.push(entry.firstPaintMs);
     if (this.panelTimes.first_paint.length > 200) this.panelTimes.first_paint.shift();
     const settle = this.plantSerialPanel ? this.upgradeToPage(entry) : pageAttempt!.then((ok: boolean) => {
@@ -3311,8 +3333,10 @@ export class GraphView extends ItemView {
    * leaves it alone.
    */
   projectStats = { batches: 0, nodes: 0, provisional_pages: 0 };
+  /** Planted (item 91): projected nodes never reach the graph -- the stage clock must show the gap. */
+  plantNoProjected = false;
   applyProjected(url: string, got: any): void {
-    if (!this.graph || !got || !got.pos) return;
+    if (!this.graph || !got || !got.pos || this.plantNoProjected) return;
     const data: any = this.graph.graphData();
     let n0 = 0;
     const touched: any[] = [];
@@ -3329,6 +3353,7 @@ export class GraphView extends ItemView {
       n0++;
     }
     if (!n0) return;
+    profiler().mark(url, "projected", { nodes: n0, provisional_page: !!got.provisional_page });
     this.projectStats.batches++; this.projectStats.nodes += n0;
     if (got.provisional_page) this.projectStats.provisional_pages++;
     this.fitChunkSizes(data);
@@ -3971,6 +3996,8 @@ export class GraphView extends ItemView {
   glowNear = new Map<any, number>();
   /** Planted (item 102): no hover glow. */
   plantNoHoverGlow = false;
+  /** Planted (2026-10-11): the slow glow -- an 80 ms throttle and a full re-sync per change. */
+  plantSlowGlow = false;
   plantAllPictures = false;
   detailStats = { computes: 0, last_ms: 0, size: 0, candidates: 0 };
   private pointerNdc: [number, number] = [0, 0];
@@ -3984,7 +4011,9 @@ export class GraphView extends ItemView {
     const p = cam.position, q = cam.quaternion;
     const camKey = `${p.x.toFixed(1)},${p.y.toFixed(1)},${p.z.toFixed(1)},${q.x.toFixed(3)},${q.y.toFixed(3)},${q.z.toFixed(3)}`;
     if (camKey !== this.detailCam) { this.detailCam = camKey; this.detailDirty = true; }
-    if (!this.detailDirty || now - this.detailAt < 80) return;
+    // Once a frame at most: the ranking costs ~3.5 ms over 22k nodes, and the
+    // 80 ms this used to wait was most of a hover's latency (2026-10-11).
+    if (!this.detailDirty || now - this.detailAt < (this.plantSlowGlow ? 80 : 16)) return;
     this.detailDirty = false;
     this.detailAt = now;
     const t0 = now;
@@ -4025,13 +4054,23 @@ export class GraphView extends ItemView {
         worst = 0; for (let i = 1; i < K; i++) if (dist[i] > dist[worst]) worst = i;
       }
     }
-    this.detail = new Set(best);
+    const pictures = new Set(best);
+    const picturesChanged = pictures.size !== this.detail.size || [...pictures].some((n) => !this.detail.has(n));
+    this.detail = pictures;
     // Graded: 1 for the node nearest the pointer, falling to 0.25 at the edge
     // of the region.
     const near = Math.sqrt(Math.min(...gDist)), far = Math.sqrt(Math.max(...gDist));
     const span = Math.max(1e-9, far - near);
+    const was = this.glowNear;
     this.glowNear = new Map(gBest.map((n, i) => [n, 1 - 0.75 * (Math.sqrt(gDist[i]) - near) / span]));
-    this.batchDirty = true;
+    // Only the nodes whose glow changed are rewritten, in place; a change of
+    // which pictures are revealed changes what is drawn, and takes a full sync.
+    if (picturesChanged || this.plantSlowGlow || !this.batch) this.batchDirty = true;
+    else {
+      const changed = new Set<any>([...was.keys(), ...this.glowNear.keys()]);
+      const rs = g.nodeRelSize(), media = this.drawnMedia;
+      if (this.batch.patch(changed, (n) => this.lookOf(n, rs, media)) > 0) this.batchDirty = true;
+    }
     this.detailStats = { computes: this.detailStats.computes + 1, last_ms: Math.round((performance.now() - t0) * 100) / 100,
                          size: best.length, candidates };
   }
@@ -4047,7 +4086,9 @@ export class GraphView extends ItemView {
       if (!r.width || !r.height) return;
       this.pointerNdc = [((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1];
       this.detailDirty = true;
-      this.batchDirty = true;
+      // Not a full re-sync per pointer move: the glow pass patches what changed
+      // and asks for a sync only when the revealed pictures change.
+      if (this.plantSlowGlow) this.batchDirty = true;
     }, { passive: true });
     this.batch = new SceneBatch(graph.scene(), graph.renderer(), (src) => this.decoded(src));
     this.frameGaps = [];
@@ -5404,6 +5445,19 @@ export class GraphView extends ItemView {
     }
     this.graph.d3ReheatSimulation();
     this.sayCounts();
+    // The STORED stage reached the 3D view for each page whose stored chunks
+    // just joined the drawn graph (item 91). Marked here, where they arrive --
+    // a capture's reply carries no placed nodes any more (the projector places
+    // them later), so a trace watching the reply ended "nothing placed" 287
+    // times of 300. Provenance: the page's latest drain trace, its sidecar phases.
+    const storedUrls = new Set<string>();
+    for (const n of arrived) if (n && !n.force && n.level !== "page" && n.url) storedUrls.add(n.url);
+    for (const u of storedUrls) {
+      const tr = prof.lastFor(u);
+      prof.mark(u, "stored", { nodes: arrived.filter((n: any) => n.url === u).length, trace: tr ? tr.id : null,
+                               capture: tr ? tr.stages.capture : null, sidecar_total: tr ? tr.stages["sidecar.total"] : null,
+                               transport: tr ? tr.stages.transport : null });
+    }
     return out;
   }
 

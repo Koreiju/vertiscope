@@ -3539,6 +3539,65 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-164",
+      asks: "a page never stored, streamed in: each stage -- drain, grey nodes, projected nodes, stored chunks drawn -- is marked the first time it reaches the 3D view, in order, with its provenance (the drain trace and the sidecar's phases); hovers throughout are timed hover-to-panel per stage; and the stage strip in the browser's readout shows it; planted (plantNoProjected): the projected stage never arrives and the clock says so",
+      async run() {
+        // 2026-10-11, PLUGIN_GOAL 91.
+        const fixtures = await serveFixtures();
+        const page = fixtures.origin + "/catalog.html";
+        try {
+          const arm = (planted, path) => evaluate(`(async () => {
+            ${PREP}
+            const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+            const wc = window.require("@electron/remote").webContents.fromId(b.webview.getWebContentsId());
+            v.plantNoProjected = ${planted};
+            try { b.setLive(true); } catch (e) {}
+            const PAGE = ${JSON.stringify(page)} + ${JSON.stringify(path)};
+            try {
+              b.go(PAGE);
+              // Hover over the page all the way through, so every stage gets hovers.
+              const t0 = performance.now();
+              let k = 0;
+              while (performance.now() - t0 < 25000) {
+                await sleep(400);
+                const x = 60 + (k % 4) * 70, y = 90 + (Math.floor(k / 4) % 5) * 70; k++;
+                try { wc.sendInputEvent({ type: "mouseMove", x, y }); wc.sendInputEvent({ type: "mouseMove", x: x + 1, y }); } catch (e) {}
+                const vis = window.__domvec.profile.visits().slice(-1)[0];
+                if (vis && vis.marks.stored !== undefined && performance.now() - t0 > 12000) break;
+              }
+              wc.sendInputEvent({ type: "mouseMove", x: -8, y: -8 }); wc.sendInputEvent({ type: "mouseLeave", x: -8, y: -8 });
+              const vis = window.__domvec.profile.visits().find((x) => x.url === PAGE) || null;
+              // The interface: the readout's stage strip, as drawn.
+              // The box opened, as the reader opens it, and the strip read as drawn.
+              const box = b.pipebox;
+              const wasOpen = !!(box && box.userOpen);
+              let strip = null;
+              try {
+                if (box) box.setExpanded(true);
+                for (let i = 0; i < 20 && !strip; i++) {
+                  await sleep(300);
+                  try { box.readout && box.readout.draw(); } catch (e) {}
+                  const stEl = box && box.el.querySelector(".domvec-profile-stages");
+                  strip = stEl ? stEl.innerText.replace(/\\s+/g, " ").trim().slice(0, 300) : null;
+                }
+              } finally { if (box && !wasOpen) box.setExpanded(false); }
+              return { planted: ${planted}, visit: vis, strip };
+            } finally { v.plantNoProjected = false; }
+          })()`, { timeout: 90000 });
+          const clean = await arm(false, "?stages=" + Date.now().toString(36));
+          const planted = await arm(true, "?stages=" + Date.now().toString(36) + "p");
+          const m = (clean.visit && clean.visit.marks) || {};
+          const ordered = ["drain", "grey", "projected", "stored"].every((k) => m[k] !== undefined)
+            && m.drain <= m.grey && m.grey <= m.stored;
+          const hovered = clean.visit ? Object.values(clean.visit.hover || {}).reduce((a, h) => a + h.n, 0) : 0;
+          const prov = clean.visit && clean.visit.prov.stored && clean.visit.prov.stored.trace && clean.visit.prov.stored.sidecar_total !== null;
+          return { pass: ordered && !!prov && hovered >= 1 && !!clean.strip && /stored/.test(clean.strip)
+                         && planted.visit && planted.visit.marks.projected === undefined && planted.visit.marks.stored !== undefined,
+                   evidence: { clean, planted, readout_seen: clean.strip, purged: await tidyFixtures(fixtures.origin) } };
+        } finally { await fixtures.close(); }
+      },
+    },
+    {
       id: "G-162",
       asks: "a browser toggle hides the overlay's chunk boxes by ALPHA only: off, the hover outline is placed but drawn at opacity 0 and the hover still reaches the 3D view; on, opacity 1; planted (plantBoxesStopHover): off also stops the hover",
       async run() {

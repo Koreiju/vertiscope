@@ -31,7 +31,7 @@
  */
 
 import type { Sidecar } from "./sidecar";
-import { profiler } from "./profile";
+import { profiler, VISIT_STAGES } from "./profile";
 
 /** Pipeline order, grouped the way a drain passes through them. */
 const GROUPS: { name: string; where: string; stages: [string, string][] }[] = [
@@ -184,6 +184,29 @@ export class ProfileReadout {
     if (!summary.traces) {
       outcomes.createEl("span", { cls: "domvec-profile-muted",
         text: "browse in the browser cell to record drains" });
+    }
+
+    // ---- this page, by stage (PLUGIN_GOAL 91) ------------------------------
+    // When each stage first reached the 3D view on the page being browsed, and
+    // how long a hover took to paint its panel at each stage. The provenance
+    // (the drain trace and the sidecar's own phases, the fit epoch) is on hover.
+    const visits = profiler().visits();
+    const cur = visits[visits.length - 1];
+    if (cur) {
+      const strip = body.createDiv({ cls: "domvec-profile-stages" });
+      strip.createDiv({ cls: "domvec-profile-group", text: `this page, by stage · ${cur.url.replace(/^https?:\/\//, "").slice(0, 48)}` });
+      const row = strip.createDiv({ cls: "domvec-profile-stage-row" });
+      for (const st of VISIT_STAGES) {
+        const at = cur.marks[st];
+        const cell = row.createDiv({ cls: `domvec-profile-stage ${at === undefined ? "is-pending" : "is-done"}` });
+        cell.createDiv({ cls: "domvec-profile-stage-name", text: st });
+        cell.createDiv({ cls: "domvec-profile-stage-at", text: at === undefined ? "—" : fmt(at) });
+        const h = cur.hover[st];
+        cell.createDiv({ cls: "domvec-profile-stage-hover", text: h ? `hover→panel ${fmt(h.p50)} (${h.n})` : "" });
+        const prov = cur.prov[st];
+        if (prov) cell.title = Object.entries(prov).filter(([, v]) => v !== undefined && v !== null)
+          .map(([k, v]) => `${k}: ${typeof v === "number" ? fmt(v as number) : String(v)}`).join("\n");
+      }
     }
 
     // ---- waterfall --------------------------------------------------------

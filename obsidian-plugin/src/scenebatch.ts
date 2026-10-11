@@ -416,6 +416,7 @@ export class SceneBatch {
       const toGlass = lk.glass || pending;
       const m = toGlass ? this.glass : lk.translucent ? this.clear : this.opaque;
       const i = toGlass ? ng++ : lk.translucent ? nt++ : no++;
+      n.__bm = toGlass ? 2 : lk.translucent ? 1 : 0; n.__bi = i; n.__bpic = cell !== undefined;
       m.offset.setXYZ(i, n.x, n.y, n.z || 0);
       m.size.setX(i, lk.half);
       const col = this.colour(lk.color);
@@ -493,6 +494,48 @@ export class SceneBatch {
   setHue(a: number): void {
     this.hue = a;
     for (const m of [this.opaque, this.clear, this.glass]) (m.mesh.material as THREE.ShaderMaterial).uniforms.uHue.value = a;
+  }
+
+  /**
+   * A LOOK change for a few nodes, written into their slots in place -- not a
+   * full sync of every node (2026-10-11: "node hover and image/glow features
+   * ... have a noticeably slow latency": a glow change re-synced all 22,663
+   * nodes, 13.8 ms, to change about 64). Only colour and glow move; a node
+   * whose look would change pass (glass/opaque/clear) or picture-ness is left
+   * for the next full sync, and says so in the return value.
+   */
+  patchStats = { patches: 0, nodes: 0, deferred: 0, last_ms: 0 };
+  patch(nodes: Iterable<any>, look: (n: any) => NodeLook | null): number {
+    const t0 = performance.now();
+    let done = 0, deferred = 0;
+    const touched = new Set<Mesh>();
+    for (const n of nodes) {
+      if (n.__bi === undefined) { deferred++; continue; }
+      const lk = look(n);
+      if (!lk) { deferred++; continue; }
+      const cell = lk.picture ? this.cells.get(lk.picture) : undefined;
+      const pending = !!lk.picture && cell === undefined && !lk.translucent && !this.plantSphereFallback;
+      const want = (lk.glass || pending) ? 2 : lk.translucent ? 1 : 0;
+      if (want !== n.__bm || (cell !== undefined) !== !!n.__bpic) { deferred++; continue; }
+      const m = want === 2 ? this.glass : want === 1 ? this.clear : this.opaque;
+      const i = n.__bi;
+      if (i >= m.geo.instanceCount) { deferred++; continue; }
+      if (cell !== undefined) {
+        const pg = lk.glow || 0;
+        m.color.setXYZW(i, 1 + pg, 1, 1, lk.alpha);
+      } else {
+        const col = this.colour(lk.color);
+        m.color.setXYZW(i, col.r, col.g, col.b, pending ? 1 : lk.alpha);
+        if (!pending) m.uv.setX(i, lk.glow || 0);
+      }
+      m.size.setX(i, lk.half);
+      touched.add(m);
+      done++;
+    }
+    for (const m of touched) { m.color.needsUpdate = true; m.uv.needsUpdate = true; m.size.needsUpdate = true; }
+    this.patchStats = { patches: this.patchStats.patches + 1, nodes: this.patchStats.nodes + done,
+                        deferred: this.patchStats.deferred + deferred, last_ms: Math.round((performance.now() - t0) * 100) / 100 };
+    return deferred;
   }
 
   setVisible(on: boolean): void {

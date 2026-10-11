@@ -50,10 +50,45 @@ export interface Trace {
 
 const CAP = 300;
 
+/**
+ * One page visit, by STAGE (2026-10-11, PLUGIN_GOAL 91: "the diff is streamed
+ * into its grey-nodes, projected nodes, local url updated nodes, and the full
+ * umap update (also make sure each of these are actually working and running
+ * and updates are making it to the 3D panel view ... getting the time
+ * profiles reported directly at the point of the interface, but still
+ * carrying provenance on the time profile over the backend").
+ *
+ * Every mark is the renderer's clock since the navigation began, the FIRST
+ * time that stage reached the 3D view for this page:
+ *
+ *   drain      the sensor's first delta left the page
+ *   grey       the first streamed (grey) node joined the graph
+ *   projected  the first streamed node was placed by the projector
+ *   stored     the first stored chunk was DRAWN (the drain trace's observed
+ *              "visible" -- its sidecar phases are the provenance)
+ *   refit      a full UMAP refit landed while the page was open
+ *
+ * And each hover on the page, timed from the hover reaching the 3D view to
+ * its panel's first paint, tagged with the stage the page had reached -- so
+ * "the panel is slow while streaming" is a number per stage, not a feeling.
+ */
+export const VISIT_STAGES = ["drain", "grey", "projected", "stored", "refit"] as const;
+export interface Visit {
+  url: string;
+  t0: number;
+  marks: Record<string, number>;
+  /** Where each mark's time came from: a drain trace id, the sidecar's own phases, a fit epoch. */
+  prov: Record<string, Record<string, unknown>>;
+  hovers: { stage: string; ms: number; paint_ms: number | null; at: number }[];
+}
+const VISIT_CAP = 40;
+const key = (url: string) => String(url || "").split("#")[0];
+
 /** Why a trace ended without a node on screen. */
 type Outcome = "visible" | "nothing_placed" | "not_seen" | "no_graph";
 
 export class PipelineProfiler {
+  private visitsList: Visit[] = [];
   private traces: Trace[] = [];
   private live = new Map<string, Trace>();
   private counter = 0;
@@ -68,7 +103,64 @@ export class PipelineProfiler {
       kind, url, t0: performance.now(), stages: {}, facts: {}, done: false,
     };
     this.live.set(t.id, t);
+    // A drain is traced as "land" (the first) or "live" (each after).
+    if (kind === "land" || kind === "live") this.mark(url, "drain", { trace: t.id, kind });
     return t;
+  }
+
+  // ---- visits by stage (item 91) ------------------------------------------
+
+  /** A navigation began: a new visit, its clock at zero. */
+  visitStart(url: string): void {
+    if (!/^https?:/.test(url || "")) return;
+    this.visitsList.push({ url: key(url), t0: performance.now(), marks: {}, prov: {}, hovers: [] });
+    if (this.visitsList.length > VISIT_CAP) this.visitsList.shift();
+  }
+
+  /** The latest visit to this page, or none. */
+  visit(url: string): Visit | undefined {
+    const k = key(url);
+    for (let i = this.visitsList.length - 1; i >= 0; i--) if (this.visitsList[i].url === k) return this.visitsList[i];
+    return undefined;
+  }
+
+  /** The FIRST time a stage reached the 3D view on this visit; later ones are not marks. */
+  mark(url: string, stage: string, prov: Record<string, unknown> = {}): void {
+    const v = this.visit(url);
+    if (!v || v.marks[stage] !== undefined) return;
+    v.marks[stage] = Math.round(performance.now() - v.t0);
+    v.prov[stage] = prov;
+  }
+
+  /** The stage this page has reached: the last of `VISIT_STAGES` it has a mark for. */
+  stageOf(url: string): string {
+    const v = this.visit(url);
+    if (!v) return "none";
+    let at = "navigating";
+    for (const s of VISIT_STAGES) if (v.marks[s] !== undefined) at = s;
+    return at;
+  }
+
+  /** A hover's panel painted: how long from the hover to the paint, at which stage. */
+  hover(url: string, ms: number, paintMs: number | null): void {
+    const v = this.visit(url);
+    if (!v) return;
+    v.hovers.push({ stage: this.stageOf(url), ms: Math.round(ms), paint_ms: paintMs, at: Math.round(performance.now() - v.t0) });
+    if (v.hovers.length > 200) v.hovers.shift();
+  }
+
+  /** Every visit, newest last, with hover latency per stage (p50, max, n). */
+  visits(): any[] {
+    return this.visitsList.map((v) => {
+      const by: Record<string, number[]> = {};
+      for (const h of v.hovers) (by[h.stage] = by[h.stage] || []).push(h.ms);
+      const hover: Record<string, unknown> = {};
+      for (const [k, a] of Object.entries(by)) {
+        const s = a.slice().sort((x, y) => x - y);
+        hover[k] = { n: s.length, p50: s[Math.floor((s.length - 1) / 2)], max: s[s.length - 1] };
+      }
+      return { url: v.url, marks: { ...v.marks }, prov: v.prov, hover, hovers: v.hovers.length };
+    });
   }
 
   get(id: string): Trace | undefined {
@@ -173,7 +265,10 @@ export class PipelineProfiler {
       for (const n of g.graphData().nodes as any[]) {
         if (!want.has(n.id)) continue;
         const obj = n.__threeObj;
-        if (!obj || obj.visible === false) continue;
+        // Since the scene batch (`G-107`) a node's own object is an INVISIBLE
+        // pick proxy and the batch draws the node: a hidden proxy is not a
+        // hidden node. Refusing it closed 0 of 300 drains "visible" (2026-10-11).
+        if (!obj || (obj.visible === false && !obj.__proxy)) continue;
         const clip = mul(proj, mul(view, [n.x ?? 0, n.y ?? 0, n.z ?? 0, 1]));
         const w = clip[3];
         if (!(w > 0)) continue;
@@ -205,9 +300,28 @@ export class PipelineProfiler {
     if (t.done) return;
     t.done = true;
     this.fact(t, "outcome", outcome);
+    // The stored stage reached the 3D view: observed, with the sidecar's own
+    // phases as its provenance.
+    if (outcome === "visible" && (t.kind === "land" || t.kind === "live")) {
+      this.mark(t.url, "stored", { trace: t.id, end_to_end: t.stages.end_to_end, capture: t.stages.capture,
+                                    sidecar_total: t.stages["sidecar.total"], place: t.stages["sidecar.place"],
+                                    transport: t.stages.transport });
+    }
     this.live.delete(t.id);
     this.traces.push(t);
     if (this.traces.length > CAP) this.traces.shift();
+  }
+
+  /** The latest trace for a page, finished or live: the provenance of a stage. */
+  lastFor(url: string): Trace | undefined {
+    const k = key(url);
+    let best: Trace | undefined;
+    for (const t of this.live.values()) if (key(t.url) === k && (!best || t.t0 > best.t0)) best = t;
+    for (let i = this.traces.length - 1; i >= 0; i--) {
+      const t = this.traces[i];
+      if (key(t.url) === k) { if (!best || t.t0 > best.t0) best = t; break; }
+    }
+    return best;
   }
 
   list(): Trace[] {
@@ -255,6 +369,14 @@ export class PipelineProfiler {
 /** One per window, so the browser view and the graph view share it. */
 export function profiler(): PipelineProfiler {
   const w = window as any;
-  if (!w.__domvecProfiler) w.__domvecProfiler = new PipelineProfiler();
+  // The window outlives a plugin reload: an instance built by an OLDER build
+  // lacks what this one added (2026-10-11: "visits is not a function" after a
+  // reload). Replaced, keeping the traces it holds.
+  const old = w.__domvecProfiler;
+  if (!(old instanceof PipelineProfiler)) {
+    const fresh = new PipelineProfiler();
+    try { for (const t of (old?.list?.() || [])) (fresh as any).traces.push(t); } catch { /* an older shape */ }
+    w.__domvecProfiler = fresh;
+  }
   return w.__domvecProfiler as PipelineProfiler;
 }
