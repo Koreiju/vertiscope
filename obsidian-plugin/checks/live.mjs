@@ -2693,13 +2693,21 @@ export function makeChecks(env) {
               const cids = await v.sidecar.pageCids(PAGE);
               let pick = null;
               for (const c of cids) { const p = await v.chunkPayload(c); const md = p && p.lines ? p.lines.map((l) => l.text).join(" ") : ""; if (/Monarch butterflies/.test(md)) { pick = c; break; } }
+              if (!pick) return { planted: ${planted}, error: "no stored prose chunk", cov, stored: cids.length };
+              // Placeable FIRST, while the page is still open: embedding is
+              // asynchronous, and a fresh store's chunk had no vector yet the
+              // moment its form was saved (2026-10-11: "not placeable").
+              let n = v.graph.graphData().nodes.find((x) => x.id === pick);
+              for (let i = 0; !n && i < 60; i++) {
+                const got = await v.sidecar.place([pick]).catch(() => null);
+                if (got && got.nodes && got.nodes.length) v.absorb(got.nodes, got.edges);
+                n = v.graph.graphData().nodes.find((x) => x.id === pick);
+                if (!n) await sleep(1000);
+              }
+              if (!n) return { planted: ${planted}, error: "not placeable in 60 s", cov };
               b.go("about:blank");
               await sleep(1500);
               for (const bb of v.billboardState()) v.closeBillboard(bb.id);
-              if (!pick) return { planted: ${planted}, error: "no stored prose chunk", cov, stored: cids.length };
-              let n = v.graph.graphData().nodes.find((x) => x.id === pick);
-              if (!n) { const got = await v.sidecar.place([pick]); if (got && got.nodes) v.absorb(got.nodes, got.edges); n = v.graph.graphData().nodes.find((x) => x.id === pick); }
-              if (!n) return { planted: ${planted}, error: "not placeable", cov };
               await v.openBillboard(n);
               await sleep(3500);
               const e = v.billboards.get(pick);

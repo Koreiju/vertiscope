@@ -650,6 +650,46 @@ _AGGREGATE_AFTER: Dict[str, float] = {}
 _AGGREGATE_DEBOUNCE = 1.5
 
 
+#: Each page's CONTROLS (element xpath -> its first control address), read
+#: once per page per capture. The lookup was a scan of the whole Address
+#: table -- a flat ~50 ms per panel whatever the chunk's size, the bulk of
+#: every panel's payload (2026-10-11, `/chunk` `_ms`: controls 46-104 of
+#: 51-110 ms). A capture that writes the page drops its entry.
+_CONTROLS: Dict[str, Dict[str, object]] = {}
+_CONTROLS_LOCK = threading.Lock()
+#: Planted: every panel scans the Address table for its controls, as before.
+_PLANT_CONTROL_SCAN = [False]
+
+
+def _forget_controls(url: str) -> None:
+    with _CONTROLS_LOCK:
+        _CONTROLS.pop(url, None)
+
+
+def _page_controls(workspace, url: str) -> Dict[str, object]:
+    with _CONTROLS_LOCK:
+        got = _CONTROLS.get(url)
+    if got is not None:
+        return got
+    from ..address import ContentAddress
+    out: Dict[str, object] = {}
+    for xpath, key in workspace.store._rows(
+            "MATCH (a:Address) WHERE a.url = $url RETURN a.xpath, a.akey ORDER BY a.akey", {"url": url}):
+        if not key or xpath in out:
+            continue
+        try:
+            a = ContentAddress.parse(key)
+        except Exception:                           # noqa: BLE001
+            continue
+        if a.is_control:
+            out[xpath] = a
+    with _CONTROLS_LOCK:
+        _CONTROLS[url] = out
+        while len(_CONTROLS) > 64:
+            _CONTROLS.pop(next(iter(_CONTROLS)))
+    return out
+
+
 def chunk_payload(workspace, cid: str) -> Optional[Dict]:
     """One chunk as the plugin's `ChunkPayload`.
 
@@ -659,12 +699,17 @@ def chunk_payload(workspace, cid: str) -> Optional[Dict]:
     tests; if it ever breaks, this silently mislabels every line, which is why
     the zip is strict about length rather than truncating.
     """
+    _t0 = time.perf_counter()
+    _ms: Dict[str, float] = {}
     stored = workspace.store.chunk(cid)
     if stored is None:
         return None
+    _ms["chunk"] = round((time.perf_counter() - _t0) * 1000, 1)
     self_window = getattr(workspace, "context_window", 0)
 
+    _t = time.perf_counter()
     addresses = workspace.addresses_for(cid)
+    _ms["addresses"] = round((time.perf_counter() - _t) * 1000, 1)
     # Re-indented by nesting LEVEL before anyone sees it.
     #
     # The renderer indents by depth in the DOM, so a chunk rooted a few
@@ -696,9 +741,18 @@ def chunk_payload(workspace, cid: str) -> Optional[Dict]:
     # one query per element cost a panel 0.36-2.0 s on the working store.
     elements = [a.xpath.split("/text()")[0] for a, _v in addresses]
     many = getattr(workspace.store, "addresses_at_many", None)
-    if many is not None and elements:
-        for element, found_at in many(elements, stored.url).items():
-            control_cache[element] = next((a for a, _v in found_at if a.is_control), None)
+    _t = time.perf_counter()
+    if _PLANT_CONTROL_SCAN[0]:
+        # The old path: a scan for the chunk's elements, or one per element
+        # (`control_at`, lazily, below) when the batched scan is off.
+        if many is not None and elements:
+            for element, found_at in many(elements, stored.url).items():
+                control_cache[element] = next((a for a, _v in found_at if a.is_control), None)
+    elif elements:
+        page = _page_controls(workspace, stored.url)
+        for element in elements:
+            control_cache[element] = page.get(element)
+    _ms["controls"] = round((time.perf_counter() - _t) * 1000, 1)
 
     def control_at(element: str):
         if element not in control_cache:
@@ -743,6 +797,7 @@ def chunk_payload(workspace, cid: str) -> Optional[Dict]:
     # addresses are its own -- with the group named beside it so the surface
     # can offer the merged reading without pretending the parts are gone.
     group: Optional[Dict] = None
+    _t = time.perf_counter()
     if stored.group_of:
         members = workspace.store.group_members(stored.group_of)
         if len(members) > 1:
@@ -758,7 +813,10 @@ def chunk_payload(workspace, cid: str) -> Optional[Dict]:
                     workspace.merged_markdown(stored.group_of)),
             }
 
+    _ms["group"] = round((time.perf_counter() - _t) * 1000, 1)
+    _ms["total"] = round((time.perf_counter() - _t0) * 1000, 1)
     return {
+        "_ms": _ms,
         "cid": stored.cid,
         "url": stored.url,
         "xpath": stored.xpath,
@@ -906,6 +964,15 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.wfile.write(raw)
+
+    def _send_bytes(self, code: int, data: bytes, content_type: str) -> None:
+        self.send_response(code)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Cache-Control", "max-age=86400")
+        self.end_headers()
+        self.wfile.write(data)
 
     def do_OPTIONS(self) -> None:                   # noqa: N802 (stdlib name)
         """Answer the CORS preflight, or every POST fails before it is sent.
@@ -1078,6 +1145,28 @@ class _Handler(BaseHTTPRequestHandler):
                                  "asked": len(cids), "pages": len(urls)})
             except Exception as exc:                # noqa: BLE001
                 self._send(500, {"error": "%s: %s" % (type(exc).__name__, exc)})
+            return
+
+        # A picture a saved page form draws, its bytes as the page loaded them
+        # (`snapshots.save_media`). Body: the raw bytes; ?url= the picture's url.
+        if route == "media":
+            if self.workspace is None:
+                self._send(503, {"error": "no workspace"})
+                return
+            from . import snapshots as _snaps
+            url = (parse_qs(parts.query).get("url") or [""])[0]
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                if length > _snaps.MEDIA_MAX:
+                    self._send(413, {"saved": False, "why": "too large"})
+                    return
+                data = self.rfile.read(length)
+            except Exception as exc:                # noqa: BLE001
+                self._send(400, {"error": "bad body: %s" % exc})
+                return
+            got = _snaps.save_media(self.workspace, url, data, self.headers.get("Content-Type") or "")
+            _profile("media", {"bytes": len(data), **{k: v for k, v in got.items() if k != "key"}})
+            self._send(200, got)
             return
 
         # Streamed chunks placed BEFORE the store holds them (PLUGIN_GOAL 48):
@@ -1577,6 +1666,7 @@ class _Handler(BaseHTTPRequestHandler):
                     with _WORK_LOCK:
                         self.workspace.ingest(
                             url, spine.trie, title=(body.get("title") or ""))
+                    _forget_controls(url)
                 # Durability is the checkpoint thread's (`_checkpoint_forever`):
                 # on this 32 GB store a checkpoint took 10-19 s, and run here
                 # it held the write lock through every settle (2026-10-07).
@@ -1675,6 +1765,7 @@ class _Handler(BaseHTTPRequestHandler):
                     pass
                 _EMBED_WANTED.set()
                 _LAST_WRITE[0] = time.time()
+                _forget_controls(url)
                 # And the page's merge groups are now out of date (`G-65`).
                 # Each drain pushes the deadline out, so this lands when the
                 # reader pauses rather than while they are still scrolling.
@@ -1932,7 +2023,19 @@ class _Handler(BaseHTTPRequestHandler):
             if doc is None:
                 self._send(404, {"error": "no saved page form", "cid": segments[1]})
             else:
-                self._send(200, doc)
+                # Pictures the sidecar holds are drawn from its copy: the form
+                # renders with the connection down ("Even media", 2026-10-10).
+                base = "http://%s" % (self.headers.get("Host") or "127.0.0.1")
+                self._send(200, _snaps.localize(self.workspace, doc, base))
+            return
+
+        if segments[0] == "media" and len(segments) == 2:
+            from . import snapshots as _snaps
+            got = _snaps.load_media(self.workspace, segments[1]) if self.workspace is not None else None
+            if got is None:
+                self._send(404, {"error": "no saved media"})
+            else:
+                self._send_bytes(200, got[0], got[1])
             return
 
         if segments[0] == "local_quality":
@@ -1967,8 +2070,13 @@ class _Handler(BaseHTTPRequestHandler):
                 # and an HTML form fetched at different moments, which is two
                 # renderings of possibly two states. They are one
                 # distillation; they travel together.
+                _t = time.perf_counter()
                 payload["html"] = render_lines(payload["lines"],
                                                base=payload.get("url", ""))
+                ms = dict(payload.get("_ms") or {})
+                ms["html"] = round((time.perf_counter() - _t) * 1000, 1)
+                payload["_ms"] = ms
+                _profile("chunk_route", ms)
                 self._send(200, payload)
             return
 
@@ -2197,6 +2305,15 @@ class _Handler(BaseHTTPRequestHandler):
             if not url:
                 self._send(400, {"error": "no url"})
                 return
+            # The reader just landed: warm this page's controls now, off the
+            # request, so the first panel does not pay the read (119-382 ms).
+            ws = self.workspace
+            def _warm():
+                try:
+                    _page_controls(ws, url)
+                except Exception:                   # noqa: BLE001
+                    pass
+            threading.Thread(target=_warm, name="domvec-warm-controls", daemon=True).start()
             _t0 = time.perf_counter()
             rows = self.workspace.store._rows(
                 "MATCH (c:Chunk)-[:Anchors]->(a:Address) WHERE c.url = $u "

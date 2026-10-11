@@ -31,7 +31,7 @@ import { isolate } from "./isolate";
 import { ForceTree, type ForceNodeDelta } from "./forcetree";
 import { PipelineBox } from "./pipelinebox";
 import { profiler } from "./profile";
-import { Component, ItemView, MarkdownRenderer, Menu, WorkspaceLeaf } from "obsidian";
+import { Component, ItemView, MarkdownRenderer, Menu, WorkspaceLeaf, requestUrl } from "obsidian";
 import { putBase, putFavicon, putPictures } from "./snapshot";
 import { Snapshot, dropSnapshot, getSnapshot, putSnapshot, renderSnapshot, snapshotScript, xpathsOfLines } from "./snapshot";
 
@@ -921,7 +921,12 @@ export class BrowserView extends ItemView {
   lastDrainAt = 0;
   private savedFormsUrl = "";
   private saverTimer = 0;
-  saverStats = { taken: 0, saved: 0, failed: 0, batches: 0, last_ms: 0, url: "" };
+  saverStats = { taken: 0, saved: 0, failed: 0, batches: 0, last_ms: 0, url: "", media: 0, media_refused: 0, media_failed: 0 };
+  /** Pictures waiting to be saved, and every one already asked for. */
+  private mediaQueue = new Set<string>();
+  private mediaSaved = new Set<string>();
+  /** Planted: page forms saved without their pictures (they render only online). */
+  plantNoMedia = false;
   /** Streamed chunks placed before the store: the hook and its record. */
   onProjected: (url: string, got: any) => void = () => {};
   transientStats = { asked: 0, placed: 0, last_ms: 0 };
@@ -970,15 +975,36 @@ export class BrowserView extends ItemView {
         if (snap && snap.html) { items.push({ cid, snap }); putSnapshot(cid, snap as Snapshot); this.saverStats.taken++; }
       } catch { this.saverStats.failed++; }
     }
+    // The pictures these forms draw, queued to be saved too ("Even media").
+    for (const it of items) {
+      String(it.snap.html || "").replace(/<(?:img|video|audio|source)\b[^>]*?\bsrc=["'](https?:\/\/[^"']+)["']/gi,
+        (_m: string, u: string) => { if (!this.mediaSaved.has(u)) this.mediaQueue.add(u); return ""; });
+    }
     if (items.length) {
       const got: any = await this.sidecar.saveSnapshots(items);
       if (got && !got.error) this.saverStats.saved += got.mapped || 0;
       else { this.saverStats.failed += items.length; for (const it of items) this.savedForms.delete(it.cid); }
       this.saverStats.batches++;
     }
+    // Up to four pictures a slice, fetched as the page loaded them (Obsidian's
+    // own request, not the page's -- nothing is written into the page).
+    if (!this.plantNoMedia) {
+      for (const u of [...this.mediaQueue].slice(0, 4)) {
+        this.mediaQueue.delete(u);
+        this.mediaSaved.add(u);
+        try {
+          const r = await requestUrl({ url: u, throw: false });
+          const ct = String((r.headers && (r.headers["content-type"] || r.headers["Content-Type"])) || "");
+          if (r.status >= 200 && r.status < 300 && r.arrayBuffer && r.arrayBuffer.byteLength) {
+            const got: any = await this.sidecar.saveMedia(u, r.arrayBuffer, ct);
+            if (got && got.saved) this.saverStats.media++; else this.saverStats.media_refused++;
+          } else this.saverStats.media_failed++;
+        } catch { this.saverStats.media_failed++; }
+      }
+    }
     this.saverStats.last_ms = Math.round(performance.now() - t0);
     this.saverStats.url = map.url;
-    if (map.cids().some((c) => !this.savedForms.has(c))) this.scheduleFormSaver(2500);
+    if (map.cids().some((c) => !this.savedForms.has(c)) || this.mediaQueue.size) this.scheduleFormSaver(2500);
   }
 
   async snapshotChunk(cid: string, url: string, again = false): Promise<boolean> {
@@ -998,7 +1024,12 @@ export class BrowserView extends ItemView {
     if (local.length) {
       await this.takeSnapshot({ cid, url: here, matched: "", markdown: "", head: "",
                                 xpaths: local, addrs: {} } as any);
-      if (getSnapshot(cid)) return true;
+      // The map KNOWS this chunk's elements: if the page drew nothing for
+      // them, the store's copy of the same addresses finds nothing either.
+      // Falling through cost a 137 ms sidecar fetch and a second in-page
+      // clone per panel, twice per panel (2026-10-11: first paint 222-763 ms,
+      // "Overlay panel showing in the 3D GUI is now extremely slow").
+      return !!getSnapshot(cid);
     }
     const payload: any = await this.sidecar.chunk(cid).catch(() => null);
     const lines = (payload && payload.lines) || [];

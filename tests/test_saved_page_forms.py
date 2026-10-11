@@ -37,3 +37,24 @@ def test_planted_never_saved_reads_back_nothing(tmp_path):
         cid = ws.store._rows("MATCH (c:Chunk {url: $u}) RETURN c.cid LIMIT 1", {"u": URL})[0][0]
         assert snapshots.load(ws, cid) is None
         assert snapshots.save(ws, [{"cid": cid, "snap": {"html": ""}}])["skipped"] == 1
+
+
+def test_a_saved_form_draws_its_saved_pictures_from_the_sidecar(tmp_path):
+    """"Even media" (2026-10-10): with the connection down the form still
+    draws its pictures. Planted: a picture never saved stays remote."""
+    with Workspace(tmp_path) as ws:
+        ws.index_html(HTML, URL)
+        cid = ws.store._rows("MATCH (c:Chunk {url: $u}) RETURN c.cid LIMIT 1", {"u": URL})[0][0]
+        snap = _snap(0)
+        snapshots.save(ws, [{"cid": cid, "snap": snap}])
+        assert snapshots.media_urls(snap["html"]) == ["http://a.test/i0.png"]
+        before = snapshots.localize(ws, snapshots.load(ws, cid), "http://127.0.0.1:8788")
+        assert before["media"] == {"local": 0, "remote": 1}           # planted: not saved
+        got = snapshots.save_media(ws, "http://a.test/i0.png", b"\x89PNG....", "image/png")
+        assert got["saved"]
+        after = snapshots.localize(ws, snapshots.load(ws, cid), "http://127.0.0.1:8788")
+        assert after["media"] == {"local": 1, "remote": 0}
+        assert "http://127.0.0.1:8788/media/" + snapshots.media_key("http://a.test/i0.png") in after["html"]
+        data, ct = snapshots.load_media(ws, snapshots.media_key("http://a.test/i0.png"))
+        assert data == b"\x89PNG...." and ct == "image/png"
+        assert not snapshots.save_media(ws, "http://a.test/x", b"<html>", "text/html")["saved"]

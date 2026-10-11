@@ -4,6 +4,7 @@ working store came from one `addresses_at` scan per element)."""
 
 import pathlib
 
+from domvec.obsidian import sidecar
 from domvec.obsidian.sidecar import chunk_payload
 from domvec.workspace import Workspace
 
@@ -21,6 +22,7 @@ def test_batched_lookups_give_the_same_payload(tmp_path):
         calls = {"n": 0}
         try:
             ws.store.addresses_at_many = None          # the old path: one query per element
+            sidecar._PLANT_CONTROL_SCAN[0] = True
             orig = ws.store.addresses_at
 
             def counted(*a, **k):
@@ -30,6 +32,9 @@ def test_batched_lookups_give_the_same_payload(tmp_path):
             single = [chunk_payload(ws, c) for c in cids]
         finally:
             ws.store.addresses_at_many = many
-        assert batched == single
+            sidecar._PLANT_CONTROL_SCAN[0] = False
+        # Timings differ run to run; the payload itself must not.
+        strip = lambda ps: [{k: v for k, v in p.items() if k != "_ms"} for p in ps]  # noqa: E731
+        assert strip(batched) == strip(single)
         # The planted comparison does what it claims: per-element queries ran.
         assert calls["n"] > 1

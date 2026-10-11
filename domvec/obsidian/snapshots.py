@@ -106,3 +106,93 @@ def coverage(workspace, url: str) -> Dict:
     """How many of a page's chunks have a saved page form."""
     rows = workspace.store._rows("MATCH (c:Chunk {url: $u}) RETURN c.snap", {"u": url})
     return {"url": url, "chunks": len(rows), "saved": sum(1 for (h,) in rows if h)}
+
+
+# -- media: the pictures a saved page form draws ---------------------------
+#
+# "Even media" (2026-10-10). A page form keeps each picture's absolute url,
+# so with the connection down it drew empty frames. The pictures themselves
+# are kept as blobs keyed by their url's hash, and a saved form read back
+# points every picture that has one at the sidecar's own copy.
+
+#: One picture at most this large; a page's pictures at most this many bytes.
+MEDIA_MAX = 8 << 20
+_MEDIA_TYPES = ("image/", "video/", "audio/")
+
+
+def _media_dir(workspace) -> Optional[Path]:
+    base = getattr(workspace, "path", None)
+    return Path(base) / "media" if base else None
+
+
+def media_key(url: str) -> str:
+    return hashlib.sha1(str(url or "").encode("utf-8")).hexdigest()
+
+
+def save_media(workspace, url: str, data: bytes, content_type: str) -> Dict:
+    root = _media_dir(workspace)
+    if root is None or not url or not data:
+        return {"saved": False, "why": "nothing to save"}
+    ct = (content_type or "").split(";")[0].strip().lower()
+    if not ct.startswith(_MEDIA_TYPES):
+        return {"saved": False, "why": "not media: %s" % ct}
+    if len(data) > MEDIA_MAX:
+        return {"saved": False, "why": "too large: %d" % len(data)}
+    h = media_key(url)
+    path = root / h[:2] / (h + ".bin")
+    if path.exists():
+        return {"saved": True, "same": True, "key": h}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_bytes(data)
+    tmp.replace(path)
+    (root / h[:2] / (h + ".ct")).write_text(ct, encoding="utf-8")
+    return {"saved": True, "key": h, "bytes": len(data)}
+
+
+def load_media(workspace, key: str):
+    """(bytes, content type) of a saved picture, or None."""
+    root = _media_dir(workspace)
+    if root is None or not key or not all(c in "0123456789abcdef" for c in key):
+        return None
+    path = root / key[:2] / (key + ".bin")
+    if not path.exists():
+        return None
+    ct_path = root / key[:2] / (key + ".ct")
+    ct = ct_path.read_text(encoding="utf-8") if ct_path.exists() else "application/octet-stream"
+    return path.read_bytes(), ct
+
+
+def has_media(workspace, url: str) -> bool:
+    root = _media_dir(workspace)
+    if root is None:
+        return False
+    h = media_key(url)
+    return (root / h[:2] / (h + ".bin")).exists()
+
+
+def localize(workspace, doc: Dict, sidecar_base: str) -> Dict:
+    """A saved form whose pictures point at the sidecar's copies where it has
+    them; the page's own url where it does not."""
+    import re
+    html = str(doc.get("html") or "")
+    count = {"local": 0, "remote": 0}
+
+    def swap(m):
+        u = m.group(2)
+        if has_media(workspace, u):
+            count["local"] += 1
+            return m.group(1) + sidecar_base.rstrip("/") + "/media/" + media_key(u) + m.group(3)
+        count["remote"] += 1
+        return m.group(0)
+
+    doc = dict(doc)
+    doc["html"] = re.sub(r"""(<(?:img|video|audio|source)\b[^>]*?\bsrc=["'])([^"']+)(["'])""", swap, html)
+    doc["media"] = count
+    return doc
+
+
+def media_urls(html: str) -> List[str]:
+    """The absolute picture urls a page form draws."""
+    import re
+    return sorted({u for u in re.findall(r"""<(?:img|video|audio|source)\b[^>]*?\bsrc=["'](https?://[^"']+)["']""", html or "")})

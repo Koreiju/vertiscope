@@ -73,6 +73,19 @@ export class Sidecar {
     return this.get<any>(`/snapshot/${encodeURIComponent(cid)}`);
   }
 
+  /** Save one picture a saved page form draws: its bytes, as the page loaded them. */
+  async saveMedia(url: string, data: ArrayBuffer, contentType: string): Promise<any | null> {
+    const u = this.url("/media?url=" + encodeURIComponent(url));
+    if (!u || !data.byteLength) return null;
+    try {
+      const res = await fetch(u, { method: "POST", headers: { "Content-Type": contentType || "application/octet-stream" },
+                                   body: data, signal: AbortSignal.timeout(30000) });
+      return res.ok ? await res.json() : null;
+    } catch {
+      return null;
+    }
+  }
+
   /** Save page forms taken from the live page: `[{cid, snap}]`. */
   async saveSnapshots(items: { cid: string; snap: any }[]): Promise<any | null> {
     const url = this.url("/snapshots");

@@ -2647,12 +2647,27 @@ export class GraphView extends ItemView {
     // The PAGE form first when the chunk's page is the one in the cell: it is
     // read from the live page through the browser's chunk map in a few ms.
     // Otherwise (or if it shows nothing) the markdown form from the store.
-    const pageFirst = await this.tryPageForm(entry);
-    if (!pageFirst) await this.renderForm(entry, "markdown", false);
+    // First paint NEVER waits on the page form: it gets 80 ms (the live
+    // page's clone from the in-memory map is a few ms when the page draws the
+    // chunk); otherwise the markdown paints now and the page form replaces it
+    // the moment it arrives. ONE attempt per panel -- it is also the upgrade
+    // (2026-10-11: the attempt ran twice and first paint took 222-763 ms).
+    const pageAttempt = this.plantSerialPanel ? null : this.tryPageForm(entry);
+    const quick = this.plantSerialPanel
+      ? await this.tryPageForm(entry)
+      : await Promise.race([pageAttempt!, new Promise<string>((r) => window.setTimeout(() => r("slow"), 80))]);
+    if (quick !== true && entry.form !== "page") await this.renderForm(entry, "markdown", false);
     entry.firstPaintMs = Math.round(performance.now() - entry.openedAt);
     this.panelTimes.first_paint.push(entry.firstPaintMs);
     if (this.panelTimes.first_paint.length > 200) this.panelTimes.first_paint.shift();
-    void this.upgradeToPage(entry).then(() => this.noteBillboard(node, body, entry.form || "none"));
+    const settle = this.plantSerialPanel ? this.upgradeToPage(entry) : pageAttempt!.then((ok: boolean) => {
+      if (ok && entry.form === "page") {
+        entry.pagePaintMs = Math.round(performance.now() - entry.openedAt);
+        this.panelTimes.page_paint.push(entry.pagePaintMs);
+        if (this.panelTimes.page_paint.length > 200) this.panelTimes.page_paint.shift();
+      }
+    });
+    void Promise.resolve(settle).then(() => this.noteBillboard(node, body, entry.form || "none"));
   }
 
   /**
@@ -2767,7 +2782,13 @@ export class GraphView extends ItemView {
     const DEST = /(!?)\[([^\]]*)\]\(((?:[^()\s]|\((?:[^()\s]|\([^()\s]*\))*\))*)\)/g;
     const esc = (u: string) => u.replace(/"/g, "&quot;");
     return lines.filter((_l, i) => keep[i]).map((l) => {
-      const t = String(l.text || "").replace(/^\s+/, "");
+      // In-page footnote jumps (`[[32]](#cite_note-...)`) are drawn by the
+      // page as superscript marks; their nested brackets defeated the link
+      // pattern and the markdown form showed "32(#cite_note-...)" as text
+      // (Monarch_butterfly, 2026-10-11). The two forms match.
+      const t = String(l.text || "").replace(/^\s+/, "")
+        .replace(/\[\[([^\]]*)\]\]\(#[^)]*\)/g, (_m: string, n: string) => `<sup>[${n.trim()}]</sup>`)
+        .replace(/\[([^\]\[]*)\]\(#[^)]*\)/g, (_m: string, txt: string) => txt);
       return t.replace(DEST, (_m, bang: string, label: string, dest: string) => {
         const u = dest ? abs(dest) : dest;
         if (bang && /\.(mp4|webm|mov|m4v|ogv)(\?|#|$)/i.test(u)) {
@@ -3080,8 +3101,26 @@ export class GraphView extends ItemView {
           if (!q.homeFit) { q.homeFit = [q.fitX ?? q.x, q.fitY ?? q.y, q.fitZ ?? q.z ?? 0]; q.homeAnchor = q.anchorPos; }
           const f = want / d;
           q.fitX = px + dx * f; q.fitY = py + dy * f; q.fitZ = pz + dz * f;
+          // Its territory moves with it: `contain` holds a page near its
+          // anchor, and an anchor left at the fit pulled every moved page
+          // straight back (Monarch, 2026-10-11: targets ~288 out, drawn at
+          // 57-111). The fit's own anchor is kept in `homeAnchor`.
+          if (q.anchorPos) q.anchorPos = [q.fitX, q.fitY, q.fitZ];
           q.__freeUntil = performance.now() + 3000;
           this.roomStats.moved++;
+        }
+      }
+    }
+    // A page at rest is calm-pinned, and the home force does not move a pinned
+    // node: a target moved aside (or back to its phantom) was never reached --
+    // Monarch's 669 chunks, 48 nearer their own url node (2026-10-11). Every
+    // page whose drawn place is off its target GLIDES there.
+    if (!this.plantNoRoom) {
+      for (const q of pages) {
+        if (!Number.isFinite(q.x) || !Number.isFinite(q.fitX)) continue;
+        if (Math.hypot(q.x - q.fitX, q.y - q.fitY, (q.z || 0) - (q.fitZ || 0)) > 1) {
+          this.glide(q, [q.fitX, q.fitY, q.fitZ ?? 0]);
+          this.roomStats.glided++;
         }
       }
     }
@@ -3151,7 +3190,7 @@ export class GraphView extends ItemView {
   /** How far a closed neighbour is moved from an open page, in its bound B:
    *  2 guarantees every chunk is nearer its own url node than the neighbour. */
   roomFactor = 2;
-  roomStats = { moved: 0 };
+  roomStats = { moved: 0, glided: 0 };
 
   /** Planted by the telescope's check: chunks at their raw fit (the packed ball). */
   plantNoTelescope = false;
@@ -3209,6 +3248,8 @@ export class GraphView extends ItemView {
     this.graph.nodeColor(this.graph.nodeColor());
   }
 
+  /** Planted: first paint waits for the page form, then upgrades again (the slow panel). */
+  plantSerialPanel = false;
   /** Planted: telescope from the page point, as before -- the cloud off-centre. */
   plantOffCentre = false;
 
