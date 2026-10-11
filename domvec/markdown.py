@@ -2348,6 +2348,12 @@ def render_trie(
     # what the store persists and the crawl reads back.
     _carry_affordance(chunks, _suppressed_controls(trie))
 
+    # Tables as tables (`D-5`, `M-3`): after the affordances are carried, so a
+    # row line holds every cell's addresses, and before the depths are levelled.
+    if not PLANT_NO_TABLES:
+        for chunk in chunks:
+            chunk.lines = _tabulate(chunk.lines)
+
     _level_page(chunks)
     _number_parts(chunks)
     if memo is not None:
@@ -2361,6 +2367,102 @@ def render_trie(
         # emitted anchors against the trie is exact.
         _fill_report(trie, chunks, report)
     return chunks
+
+
+#: Planted (`D-5`): a table drawn one cell per line, as before.
+PLANT_NO_TABLES = False
+
+_CELL = re.compile(r"^(.*/table(?:\[\d+\])?)/(?:(?:thead|tbody|tfoot)(?:\[\d+\])?/)?"
+                   r"(tr(?:\[\d+\])?)/((?:td|th)(?:\[\d+\])?)(?:/|$)")
+
+
+def _tabulate(lines: List[MarkdownLine]) -> List[MarkdownLine]:
+    """Draw a table's cells as a markdown table, one line per row (`D-5`).
+
+    The goal names "a hierarchically-header-structured markdown document with
+    tables, images, web links", and a table arrived as one line per cell -- a
+    reader of the markdown form, or a model reading the chunk, saw a column of
+    words with the grid gone. A run of lines whose addresses sit in one
+    table's cells becomes pipe rows: the first row is the header, a cell's
+    several lines join with spaces, and a literal `|` is escaped. Only a
+    rectangular table: one with spans stays a cell per line (see below).
+
+    No address is lost: the row line keeps its first cell's address and every
+    other cell's -- and everything they had inline -- rides on its `inline`,
+    the field that already lets one line carry several handles.
+    """
+    out: List[MarkdownLine] = []
+    i = 0
+    n = len(lines)
+    while i < n:
+        m = _CELL.match(lines[i].address.xpath) if lines[i].address else None
+        if not m:
+            out.append(lines[i]); i += 1
+            continue
+        table = m.group(1)
+        run: List[Tuple[str, str, MarkdownLine]] = []
+        j = i
+        while j < n:
+            a = lines[j].address
+            mm = _CELL.match(a.xpath) if a else None
+            if not mm or mm.group(1) != table:
+                break
+            run.append((mm.group(2), mm.group(3), lines[j]))
+            j += 1
+        rows: List[Tuple[str, List[Tuple[str, List[MarkdownLine]]]]] = []
+        for tr, cell, line in run:
+            if not rows or rows[-1][0] != tr:
+                rows.append((tr, []))
+            cells = rows[-1][1]
+            if not cells or cells[-1][0] != cell:
+                cells.append((cell, []))
+            cells[-1][1].append(line)
+        width = max(len(c) for _tr, c in rows)
+        # RECTANGULAR tables only. A row with fewer cells sits under a
+        # `rowspan`/`colspan` the addresses do not record, and padding it put
+        # Konqueror's "Linux" under "Name" (Comparison_of_web_browsers,
+        # 2026-10-11): a grid that files a value in the wrong column misleads
+        # where a cell per line did not. Such a table stays a cell per line
+        # until the sensor reports spans.
+        if len(rows) < 2 or width < 2 or any(len(c) != width for _tr, c in rows):
+            out.extend(line for _tr, _c, line in run); i = j
+            continue
+        for k, (_tr, cells) in enumerate(rows):
+            texts = [" ".join(" ".join(l.text.split()) for l in ls).replace("|", "\\|") for _c, ls in cells]
+            members = [l for _c, ls in cells for l in ls]
+            head = members[0]
+            extra: List[ContentAddress] = list(head.inline)
+            for l in members[1:]:
+                extra.append(l.address)
+                extra.extend(l.inline)
+            text = "| " + " | ".join(texts) + " |"
+            # No separator row here: lines pair one-to-one with addresses in
+            # the printed form (`MarkdownChunk.from_json`), and a separator has
+            # no address. It is drawn where markdown is DISPLAYED
+            # (`with_table_separators`, and the panel's markdown form).
+            # Depth 0: indented four spaces, a pipe table is a code block.
+            row = replace(head, depth=0, text=text, inline=tuple(extra))
+            if hasattr(head, "absorbed"):
+                row = replace(row, absorbed=tuple(a for l in members for a in getattr(l, "absorbed", ())))
+            out.append(row)
+        i = j
+    return out
+
+
+def with_table_separators(markdown: str) -> str:
+    """The chunk's markdown as a reader's renderer needs it: a `| --- |` row
+    after the first row of every run of table rows (`_tabulate` leaves it out
+    of the lines, which pair one-to-one with addresses)."""
+    out: List[str] = []
+    prev_row = False
+    for raw in markdown.split("\n"):
+        row = raw.lstrip().startswith("|") and raw.rstrip().endswith("|")
+        out.append(raw)
+        if row and not prev_row:
+            cols = max(1, raw.strip().count("|") - raw.strip().count("\\|") - 1)
+            out.append("|" + "|".join([" --- "] * cols) + "|")
+        prev_row = row
+    return "\n".join(out)
 
 
 def _number_parts(chunks: List[MarkdownChunk]) -> None:

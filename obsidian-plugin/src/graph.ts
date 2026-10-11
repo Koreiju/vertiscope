@@ -2838,7 +2838,18 @@ export class GraphView extends ItemView {
         // `<...>` keeps a destination whole whatever it contains (CommonMark).
         return `${bang}[${label}](<${u}>)`;
       });
-    }).join("\n");
+    }).reduce((out: string[], line: string, i: number, all: string[]) => {
+      // A table's separator row, drawn here for the reader's renderer: the
+      // stored lines pair one-to-one with addresses and hold none (`D-5`,
+      // `markdown.py` `with_table_separators`).
+      out.push(line);
+      const row = (t: string) => /^\s*\|.*\|\s*$/.test(t || "");
+      if (row(line) && !row(all[i - 1])) {
+        const cols = Math.max(1, (line.trim().match(/(?<!\\)\|/g) || []).length - 1);
+        out.push("|" + Array(cols).fill(" --- ").join("|") + "|");
+      }
+      return out;
+    }, []).join("\n");
   }
 
   /**
