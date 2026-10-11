@@ -542,7 +542,8 @@ export class Verifier {
       // whatever flags the reader chose.
       "--enact",
     ], { cwd: base, windowsHide: true,
-         env: { ...(window as any).process.env, PYTHONIOENCODING: "utf-8" } });
+         // A latent window of seconds, so G-129's refit can be watched in a run.
+         env: { ...(window as any).process.env, PYTHONIOENCODING: "utf-8", DOMVEC_LATENT_S: "20" } });
     child.stdout?.pipe(log);
     child.stderr?.pipe(log);
     return child;

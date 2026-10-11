@@ -47,6 +47,7 @@ it hangs from. Nothing here writes to the store.
 
 from __future__ import annotations
 
+import os
 import threading
 import time
 from collections import deque
@@ -519,7 +520,10 @@ class ChunkProjector:
 
     #: Seconds without chunk diffs before the app counts as latent, and the
     #: growth since the global fit at which a latent app refits.
-    LATENT_S = 120.0
+    #: The Verifier's own test sidecar shortens the window
+    #: (`DOMVEC_LATENT_S`) so `G-129`'s live check waits seconds, not minutes;
+    #: the reader's sidecar is started without it.
+    LATENT_S = float(os.environ.get("DOMVEC_LATENT_S") or 120.0)
     LATENT_GROWTH = 1.25
 
     def start(self, workspace, *, work_lock=None, fit_lock=None) -> None:
@@ -728,6 +732,7 @@ class ChunkProjector:
             "last_batch": last, "last_fit": self.fits[-1] if self.fits else None,
             "latent_refits": self.latent_refits,
             "latent_s": round(time.monotonic() - self.last_drain_at, 1),
+            "latent_window_s": self.LATENT_S,
             "latent_refit_at": (round(self.LATENT_GROWTH * self.fitted_chunks)
                                 if self.fitted_chunks else None),
         }

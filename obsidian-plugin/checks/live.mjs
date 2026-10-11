@@ -2775,6 +2775,52 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-129",
+      asks: "the GLOBAL fit refits while the app is latent once the corpus has grown since the fit -- and not without the growth (null arm: latent, no growth, no refit)",
+      async run() {
+        const fixtures = await serveFixtures();
+        try {
+          const got = await evaluate(`(async () => {
+            ${PREP}
+            const base = b.sidecar.base().trim().replace(/[/]+$/, "");
+            const proj = async () => (await (await fetch(base + "/projector")).json());
+            try { b.setLive(true); } catch (e) {}
+            // A fit to start from.
+            let p0 = await proj();
+            for (let i = 0; i < 120 && !(p0.fitted && !p0.fitting); i++) { await sleep(1000); p0 = await proj(); }
+            if (!p0.fitted) return { error: "no fit", p0 };
+            // NULL ARM: latent past the window with no growth -- no refit.
+            await land("about:blank", 5000);
+            await sleep((p0.latent_window_s || 20) * 1000 + 8000);
+            const p1 = await proj();
+            // GROWTH: distinct busy pages until the corpus passes the latent target.
+            const target = p1.latent_refit_at || Math.ceil(1.25 * p1.fitted_chunks);
+            const t0 = performance.now();
+            let k = 0, pg = p1;
+            while (pg.chunks_now < target && performance.now() - t0 < 120000) {
+              const url = ${JSON.stringify(fixtures.origin)} + "/busy_feed.html?every=40&rounds=120&words=60&g129=" + (k++) + "-" + Date.now();
+              await land(url, 20000);
+              await sleep(7000);
+              pg = await proj();
+            }
+            const grown = pg.chunks_now;
+            // LATENT again: nothing streams.
+            await land("about:blank", 5000);
+            const refitsBefore = pg.latent_refits, epochBefore = pg.epoch;
+            let p2 = pg;
+            for (let i = 0; i < 90; i++) { await sleep(2000); p2 = await proj(); if (p2.latent_refits > refitsBefore && !p2.fitting) break; }
+            return { fitted_chunks: p1.fitted_chunks, target, grown, pages_landed: k,
+                     null_arm: { refits_before: p0.latent_refits, refits_after: p1.latent_refits, epoch_same: p1.epoch === p0.epoch },
+                     latent: { refits: p2.latent_refits - refitsBefore, epoch_moved: p2.epoch !== epochBefore, fitted_after: p2.fitted_chunks } };
+          })()`, { timeout: 400000 });
+          const ok = got && !got.error && got.grown >= got.target
+            && got.null_arm.refits_after === got.null_arm.refits_before && got.null_arm.epoch_same
+            && got.latent.refits >= 1 && got.latent.epoch_moved;
+          return { pass: !!ok, evidence: { ...got, purged: await tidyFixtures(fixtures.origin) } };
+        } finally { await fixtures.close(); }
+      },
+    },
+    {
       id: "G-154",
       asks: "a sidecar that lost its session under an open page refuses the stale delta, the sensor resends everything, and captures resume with addresses the page holds; planted (no-resync): every capture after the loss is refused",
       async run() {
