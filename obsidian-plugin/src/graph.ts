@@ -3654,16 +3654,18 @@ export class GraphView extends ItemView {
       // default"). Pictures stay pictures; a streaming node keeps its grey
       // translucence, so streaming still reads as streaming. Planted: the old
       // opaque spheres.
-      if (this.plantOpaqueOrbs || n.hovered) return base;
+      const hg = this.plantNoHoverGlow ? 0 : (n.hovered ? 1 : (this.glowNear.get(n) || 0));
+      if (this.plantOpaqueOrbs) return base;
+      if (n.hovered && !base.picture) return { half: base.half, translucent: true, alpha: 2.5, color: n.color || base.color, glass: true };
       // A REVEALED picture is the picture alone; unrevealed, the node is its
       // orb -- the old switch between node and image (2026-10-11: "we dont need
       // spheres over images ... we can switch between node and image reveals as
       // was the same as the older functionality"). A streaming node is an orb
       // with a dimmer glow, so streaming still reads (item 99: "some nodes are
       // not the same level of glass and translucent").
-      if (base.picture) return base;
-      if (base.translucent) return { half: base.half, translucent: true, alpha: 0.4, color: base.color, glass: true };
-      return { half: base.half, translucent: true, alpha: 1, color: base.color, glass: true };
+      if (base.picture) return hg > 0 ? { ...base, glow: hg } : base;
+      if (base.translucent) return { half: base.half, translucent: true, alpha: 0.4 + hg, color: base.color, glass: true };
+      return { half: base.half, translucent: true, alpha: 1 + 1.5 * hg, color: base.color, glass: true };
     }
     const r = st.ranks.get(String(n.id));
     if (r !== undefined && r < st.shown && fade(r, st.soft) < 0.999) {
@@ -3965,6 +3967,10 @@ export class GraphView extends ItemView {
    * every 80 ms. Planted: every picture, everywhere, as before.
    */
   private detail = new Set<any>();
+  /** Nodes near the pointer's ray and how much they glow, 0..1 (item 102). */
+  glowNear = new Map<any, number>();
+  /** Planted (item 102): no hover glow. */
+  plantNoHoverGlow = false;
   plantAllPictures = false;
   detailStats = { computes: 0, last_ms: 0, size: 0, candidates: 0 };
   private pointerNdc: [number, number] = [0, 0];
@@ -3987,10 +3993,14 @@ export class GraphView extends ItemView {
     const ox = p.x, oy = p.y, oz = p.z, dx = dir.x, dy = dir.y, dz = dir.z;
     const K = DETAIL_PICTURES;
     const best: any[] = [], dist: number[] = [];
+    // The glow's own ranking, over EVERY node, by the same nearness (2026-10-11:
+    // "nodes glow the same way as image billboards are revealed for their
+    // hovered nodes within a certain region of the mouse on the camera normal").
+    const gBest: any[] = [], gDist: number[] = [];
+    let gWorst = -1;
     let worst = -1, candidates = 0;
     for (const n of g.graphData().nodes) {
-      if (!n.image?.src || !Number.isFinite(n.x) || n.level === "page" || n.level === "path") continue;
-      candidates++;
+      if (!Number.isFinite(n.x)) continue;
       const vx = n.x - ox, vy = n.y - oy, vz = (n.z || 0) - oz;
       const t = vx * dx + vy * dy + vz * dz;
       if (t <= 0) continue;                         // behind the camera
@@ -3998,6 +4008,15 @@ export class GraphView extends ItemView {
       // mouse ON SCREEN. The raw normal let nodes far down the ray -- specks --
       // take every slot from the ones under the cursor.
       const d2 = (vx * vx + vy * vy + vz * vz - t * t) / (t * t);
+      if (gBest.length < K) {
+        gBest.push(n); gDist.push(d2);
+        if (gBest.length === K) { gWorst = 0; for (let i = 1; i < K; i++) if (gDist[i] > gDist[gWorst]) gWorst = i; }
+      } else if (d2 < gDist[gWorst]) {
+        gBest[gWorst] = n; gDist[gWorst] = d2;
+        gWorst = 0; for (let i = 1; i < K; i++) if (gDist[i] > gDist[gWorst]) gWorst = i;
+      }
+      if (!n.image?.src || n.level === "page" || n.level === "path") continue;
+      candidates++;
       if (best.length < K) {
         best.push(n); dist.push(d2);
         if (best.length === K) { worst = 0; for (let i = 1; i < K; i++) if (dist[i] > dist[worst]) worst = i; }
@@ -4007,6 +4026,11 @@ export class GraphView extends ItemView {
       }
     }
     this.detail = new Set(best);
+    // Graded: 1 for the node nearest the pointer, falling to 0.25 at the edge
+    // of the region.
+    const near = Math.sqrt(Math.min(...gDist)), far = Math.sqrt(Math.max(...gDist));
+    const span = Math.max(1e-9, far - near);
+    this.glowNear = new Map(gBest.map((n, i) => [n, 1 - 0.75 * (Math.sqrt(gDist[i]) - near) / span]));
     this.batchDirty = true;
     this.detailStats = { computes: this.detailStats.computes + 1, last_ms: Math.round((performance.now() - t0) * 100) / 100,
                          size: best.length, candidates };

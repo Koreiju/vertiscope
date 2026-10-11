@@ -2901,6 +2901,16 @@ loaded is its glowing orb meanwhile. (The checks' planted arms draw the old
 look on purpose, briefly.) And the requested features are tracked to the end:
 the list is the PRD rows G-155..G-171.*
 
+> there should be the glowing effect for when nodes are hovered over. for
+> images, keep the images but still add the glow effect. same idea though;
+> nodes glow the same way as image billboards are revealed for their hovered
+> nodes within a certain region of the mouse on the camera normal
+
+*Read as (2026-10-11): (102) nodes near the pointer's ray GLOW -- the same
+region that decides which pictures are revealed, graded by nearness to the
+ray: an orb glows brighter from within, a picture keeps its image and glows
+(brightened, a soft light at its edge).*
+
 ---
 
 

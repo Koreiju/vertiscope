@@ -76,7 +76,11 @@ void main() {
     vec2 t = vCorner * 0.5 + 0.5;
     vec4 c = texture2D(atlas, vec2(mix(vUv.x, vUv.z, t.x), mix(vUv.y, vUv.w, t.y)));
     if (c.a < 0.04) discard;
-    gl_FragColor = vec4(c.rgb, c.a * vColor.a);
+    // A hovered picture keeps its image and glows (item 102): vColor.r - 1 is
+    // the glow -- brighter, with a soft light at its edge.
+    float hg = max(vColor.r - 1.0, 0.0);
+    float edge = smoothstep(0.62, 1.0, max(abs(vCorner.x), abs(vCorner.y)));
+    gl_FragColor = vec4(c.rgb * (1.0 + 0.35 * hg) + vec3(0.9, 0.95, 1.0) * edge * hg * 0.85, c.a * vColor.a);
   }
   #include <colorspace_fragment>
 }`;
@@ -138,9 +142,9 @@ void main() {
   // default"), 0 for the colourless lens a search turns the rest into.
   float glow = vTint.a;
   vec3 tint = uHue == 0.0 ? vTint.rgb : clamp(turnHue(vTint.rgb, uHue), 0.0, 1.0);
-  vec3 glassC = mix(vec3(0.82, 0.88, 1.0), tint, glow);
+  vec3 glassC = mix(vec3(0.82, 0.88, 1.0), tint, min(glow, 1.0));
   vec3 col = glassC * (0.05 + 0.55 * fres) + tint * glow * (0.10 + 0.30 * (1.0 - fres));
-  float a = 0.05 + 0.42 * fres + 0.20 * glow;
+  float a = 0.05 + 0.42 * fres + 0.20 * min(glow, 2.5);
   for (int i = 0; i < ${MAX_LIGHTS}; i++) {
     if (i >= uLights) break;
     vec3 L = uLightPos[i] - P;
@@ -421,7 +425,8 @@ export class SceneBatch {
         const u0 = (cell % PER_ROW) / PER_ROW, v0 = Math.floor(cell / PER_ROW) / PER_ROW;
         // Row 0 of the atlas is the picture's top: the quad's top corner reads v0.
         m.uv.setXYZW(i, u0, v0 + 1 / PER_ROW, u0 + 1 / PER_ROW, v0);
-        m.color.setXYZW(i, 1, 1, 1, lk.alpha);
+        const pg = lk.glow || 0;
+        m.color.setXYZW(i, 1 + pg, 1, 1, lk.alpha);
         n.imgLoaded = true;
       } else {
         m.uv.setXYZW(i, lk.glow || 0, 0, -1, 0);

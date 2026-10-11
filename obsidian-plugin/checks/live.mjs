@@ -3249,7 +3249,7 @@ export function makeChecks(env) {
               if (!l.glass) oldMaterial++;
               if (base.translucent) { streaming++; if (l.glass && l.alpha > 0 && l.alpha < 1) streamOrbs++; continue; }
               plain++;
-              if (l.glass && l.alpha === 1) { orbs++; if (l.color === base.color) own++; }
+              if (l.glass && l.alpha >= 1) { orbs++; if (l.color === base.color) own++; }
             }
             return { planted: ${planted}, plain, orbs, own_colour: own, pictures, picture_glass: pictureGlass, picture_orbs: pictureOrbs,
                      streaming, stream_orbs: streamOrbs, old_material: oldMaterial, batch: { ...v.batch.lastStats } };
@@ -3452,6 +3452,89 @@ export function makeChecks(env) {
         const c = clean;
         return { pass: !c.error && c.ran === 1 && c.stats.overlaps_after < 0.5 * c.stats.overlaps_before && c.max_shift_radii <= 4.05 && c.fit_kept
                        && (c.frame_max ?? 0) < 120 && (c.stats.worst_frame_ms ?? 99) < 40 && !planted.error && planted.ran === 0 && planted.max_shift_radii < 1e-6,
+                 evidence: { clean, planted } };
+      },
+    },
+    {
+      id: "G-158",
+      asks: "a query from the 3D field also searches DuckDuckGo in the browser cell: it lands on the results, scrolls and presses 'More results', and the page is captured into the store as it streams; planted (plantNoWebSearch): the cell never leaves its page",
+      async run() {
+        // 2026-10-11, PLUGIN_GOAL 85: "search duckduckgo automatically,
+        // following a simple auto-scroll and clicking 'more results' each time".
+        const arm = (planted) => evaluate(`(async () => {
+          ${PREP}
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          for (let i = 0; i < 60 && !(v.graph && v.searchField); i++) await sleep(500);
+          const f = v.searchField;
+          const start = b.webview.getURL();
+          b.plantNoWebSearch = ${planted};
+          try { b.setLive(true); } catch (e) {}
+          const q = "okapi giraffe relative habitat " + (${planted} ? "b" : "a");
+          const asked0 = b.webSearchStats.asked, clicked0 = b.webSearchStats.clicked;
+          try {
+            f.input.value = q; await f.run();
+            let url = "";
+            for (let i = 0; i < 60; i++) { await sleep(500); url = b.webview.getURL(); if (b.webSearchStats.asked > asked0 && b.webSearchStats.ms && b.webSearchStats.last === q) break; }
+            await sleep(3000);
+            url = b.webview.getURL();
+            const onDdg = /duckduckgo\\.com/.test(url);
+            let stored = 0;
+            if (onDdg) for (let i = 0; i < 30; i++) { stored = (await v.sidecar.pageCids(url).catch(() => [])).length; if (stored) break; await sleep(1000); }
+            return { planted: ${planted}, asked: b.webSearchStats.asked - asked0, clicked: b.webSearchStats.clicked - clicked0,
+                     results: b.webSearchStats.results, stopped: b.webSearchStats.stopped, on_ddg: onDdg, url: url.slice(0, 80), stored_chunks: stored,
+                     merged: v.searchStats.web_merged };
+          } finally {
+            b.plantNoWebSearch = false;
+            f.input.value = ""; await f.run();
+            if (b.webview.getURL() !== start && /^https?:/.test(start)) { b.go(start); await sleep(1500); }
+          }
+        })()`, { timeout: 150000 });
+        const clean = await arm(false), planted = await arm(true);
+        return { pass: clean.asked === 1 && clean.on_ddg && clean.results > 0 && clean.clicked >= 1 && clean.stored_chunks > 0
+                       && planted.asked === 0 && !planted.on_ddg,
+                 evidence: { clean, planted } };
+      },
+    },
+    {
+      id: "G-172",
+      asks: "nodes near the pointer's ray glow -- the same region that reveals pictures, graded by nearness: an orb glows brighter, a picture keeps its image and glows at its edge; planted (plantNoHoverGlow): nothing glows",
+      async run() {
+        // 2026-10-11, PLUGIN_GOAL 102: "there should be the glowing effect for
+        // when nodes are hovered over. for images, keep the images but still
+        // add the glow effect ... within a certain region of the mouse on the
+        // camera normal".
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          await window.__domvec.act("open", "graph");
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          for (let i = 0; i < 60 && !(v.graph && v.batch); i++) await sleep(500);
+          if (v.searchField && v.searchField.input.value) { v.searchField.input.value = ""; await v.searchField.run(); }
+          v.plantNoHoverGlow = ${planted};
+          try {
+            // The pointer at the centre of the panel, the region recomputed now.
+            v.pointerNdc = [0, 0]; v.detailDirty = true; v.detailAt = 0;
+            v.refreshDetail(v.graph);
+            v.batchSync();
+            const rs = v.graph.nodeRelSize();
+            const near = [...v.glowNear.entries()].sort((a, b) => b[1] - a[1]);
+            let orbGlow = 0, picGlow = 0, picKept = 0;
+            for (const [n] of near) {
+              const l = v.lookOf(n, rs, v.drawnMedia);
+              if (l.glass && l.alpha > 1) orbGlow++;
+              if (l.picture) { picKept++; if ((l.glow || 0) > 0) picGlow++; }
+            }
+            const far = v.graph.graphData().nodes.filter((n) => !v.glowNear.has(n) && !n.hovered).slice(0, 2000)
+              .filter((n) => { const l = v.lookOf(n, rs, v.drawnMedia); return (l.glass && l.alpha > 1) || (l.glow || 0) > 0; }).length;
+            return { planted: ${planted}, region: near.length, top: near[0] ? Math.round(near[0][1] * 100) / 100 : null,
+                     edge: near.length ? Math.round(near[near.length - 1][1] * 100) / 100 : null,
+                     orbs_glowing: orbGlow, pictures: picKept, pictures_glowing: picGlow, glowing_outside: far };
+          } finally { v.plantNoHoverGlow = false; v.batchSync(); }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        const c = clean;
+        return { pass: c.region > 0 && c.top === 1 && c.edge < c.top && c.orbs_glowing + c.pictures_glowing > 0
+                       && c.pictures_glowing === c.pictures && c.glowing_outside === 0
+                       && planted.orbs_glowing === 0 && planted.pictures_glowing === 0,
                  evidence: { clean, planted } };
       },
     },
