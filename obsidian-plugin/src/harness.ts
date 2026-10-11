@@ -561,6 +561,7 @@ export function installHarness(app: App, sidecarBase: () => string) {
       start: (ids?: string[], label?: string) => verifier.start(ids, label || ""),
       /** Every check on a FRESH store this app starts and fills (`G-87`). */
       startFresh: (ids?: string[]) => verifier.startFresh(ids),
+      stop: (why?: string) => verifier.stop(why),
       state: () => verifier.state,
     },
     ui: () => uiState(app),

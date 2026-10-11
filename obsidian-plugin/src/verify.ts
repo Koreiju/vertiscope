@@ -197,11 +197,25 @@ export class Verifier {
   }
 
   /** The checks themselves, into `this.state`, which the caller set up. */
+  /** Asked to stop: the run ends before its next check. */
+  private stopWhy = "";
+  stop(why = "asked to stop"): void { this.stopWhy = why; }
+
   private async runChecks(chosen: any[], wakeProjector: () => Promise<any>): Promise<void> {
     this.state.total = chosen.length;
+    this.stopWhy = "";
+    // The READER's last input when the run began: a run never goes on over
+    // the reader (2026-10-10: a run drove the browser cell while the reader
+    // navigated to archive.org). Its own synthetic hovers do not stamp this.
+    const reader0 = (window as any).__domvecReaderAt || 0;
     await wakeProjector().catch(() => null);
     {
       for (const check of chosen) {
+        const readerBack = ((window as any).__domvecReaderAt || 0) !== reader0;
+        if (this.stopWhy || readerBack) {
+          this.state.stoppedBecause = this.stopWhy || "the reader used the app";
+          break;
+        }
         this.state.current = check.id;
         // Each check starts from the same UI, whatever the last one left.
         const reset = await this.isolate();

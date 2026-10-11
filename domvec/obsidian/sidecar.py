@@ -1798,7 +1798,12 @@ class _Handler(BaseHTTPRequestHandler):
             # it was storing a page. A fresh answer is cached for 30 s; while
             # the store is busy the last one is served, marked `busy`.
             now = time.time()
-            cached = _HEALTH_CACHE.get("body") if _HEALTH_CACHE.get("key") == id(self.server) else None
+            # A token of the server's own: `id()` is reused once a server is
+            # collected, and two test servers shared a cache that way.
+            hkey = getattr(self.server, "_domvec_health_key", None)
+            if hkey is None:
+                hkey = self.server._domvec_health_key = object()
+            cached = _HEALTH_CACHE.get("body") if _HEALTH_CACHE.get("key") is hkey else None
             if cached is not None and now - _HEALTH_CACHE.get("at", 0) < 30.0:
                 self._send(200, dict(cached, cached_s=round(now - _HEALTH_CACHE["at"], 1)))
                 return
@@ -1828,7 +1833,7 @@ class _Handler(BaseHTTPRequestHandler):
                     return self.workspace.store._rows(q)[0][0]
                 except Exception:               # noqa: BLE001
                     return None
-            self._send(200, _cache_health(key=id(self.server), body={"ok": True,
+            self._send(200, _cache_health(key=hkey, body={"ok": True,
                              "pages": len(self.workspace.pages()),
                              "addresses": _one(
                                  "MATCH (a:Address) RETURN count(a)"),

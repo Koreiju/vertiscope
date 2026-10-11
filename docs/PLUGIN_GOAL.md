@@ -2539,6 +2539,34 @@ complete and matching -- the page form is what the page drew (live or saved)
 plus every line it did not draw, or the store's own rendering when nothing
 was drawn; the markdown form is every line.*
 
+> Duplicate image found in the HTML render on ko.wikipedia on the higgs boson
+> *(a screenshot: the picture shown twice, then `[[ 77 ]](#cite_note-...)` lines)*
+
+> Not sure why this two-form appears here, whether new diff streams make it into
+> the projector's queue and re-fits okay *(a screenshot: a grey streamed tree
+> beside a coloured placed cloud)*
+
+> Navigated to the archive page. I think streaming update leakage is happening
+> during chunking and in the dual panel renderings. I have a feeling also
+> fly-to-hovered might have degraded here as well because of blockage in
+> graceful update registers to chunk diff streams and leakage between the two
+> panels. One, the web-panel, should gracefully update to new streamed diffs
+> while the markdown might be quicker to render. The faster render of the
+> possibly two dual diffs, along with the per-field chunk degradation on
+> overlay, tells me there's discontinuity and leakage somewhere in this
+> feature. Since the summary panel is probably within a safe margin of the
+> context window limit for chunks, I would suspect this is why the case is
+> present here. Again, fixing *and* testing for all of these things.
+> *(a screenshot: archive.org's item metadata list)*
+
+*Read as: (60) the complete page form never repeats what the page drew -- a
+picture at another size, a footnote mark; (61) every streamed diff reaches the
+queue, the fit and the fold, and it is SHOWN that it does; (62) the overlay
+and the panels show one unit for a field list that fits the window -- not one
+per field -- and the page form follows new streamed diffs gracefully while
+the markdown form may draw first; fly-to holds on such pages; every one of
+these fixed and tested.*
+
 ---
 
 

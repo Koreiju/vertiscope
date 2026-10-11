@@ -917,6 +917,8 @@ export class BrowserView extends ItemView {
   // beside the store, mapped as `Chunk.snap`), a few at a time and never
   // while the page scrolls; a chunk a capture rewrites is taken again.
   private savedForms = new Set<string>();
+  /** When the sensor last drained into the cell (performance.now). */
+  lastDrainAt = 0;
   private savedFormsUrl = "";
   private saverTimer = 0;
   saverStats = { taken: 0, saved: 0, failed: 0, batches: 0, last_ms: 0, url: "" };
@@ -947,9 +949,15 @@ export class BrowserView extends ItemView {
     try { here = wv.getURL(); } catch { return; }
     if (!map.url || docKey(map.url) !== docKey(here)) return;
     if (this.savedFormsUrl !== map.url) { this.savedForms.clear(); this.savedFormsUrl = map.url; }
-    // Not while the page moves: the clone reads computed styles.
-    if (performance.now() - (this.pipebox?.lastScrollAt || 0) < 500) { this.scheduleFormSaver(600); return; }
-    const todo = map.cids().filter((c) => !this.savedForms.has(c)).slice(0, 8);
+    // Only while the page is STILL. The clone runs in the page's own thread,
+    // the one the sensor drains from: eight chunks a slice held the page 14.7
+    // s of 40 while the reader browsed archive.org and streamed updates
+    // lagged behind it (2026-10-10: "Significant render lag on streamed
+    // updates"). Two a slice, never within 2 s of a scroll, a hover or a drain.
+    const now = performance.now();
+    const busy = Math.max(this.pipebox?.lastScrollAt || 0, this.pipebox?.hover?.at || 0, this.lastDrainAt || 0);
+    if (now - busy < 2000) { this.scheduleFormSaver(2500); return; }
+    const todo = map.cids().filter((c) => !this.savedForms.has(c)).slice(0, 2);
     if (!todo.length) return;
     const t0 = performance.now();
     const items: { cid: string; snap: any }[] = [];
@@ -970,7 +978,7 @@ export class BrowserView extends ItemView {
     }
     this.saverStats.last_ms = Math.round(performance.now() - t0);
     this.saverStats.url = map.url;
-    if (map.cids().some((c) => !this.savedForms.has(c))) this.scheduleFormSaver(400);
+    if (map.cids().some((c) => !this.savedForms.has(c))) this.scheduleFormSaver(2500);
   }
 
   async snapshotChunk(cid: string, url: string, again = false): Promise<boolean> {
@@ -1896,6 +1904,7 @@ export class BrowserView extends ItemView {
       let tree = this.forceTrees.get(url);
       if (!tree) { tree = new ForceTree(url); this.forceTrees.set(url, tree); }
       const delta = tree.apply(payload);
+      this.lastDrainAt = performance.now();
       if (delta) drainIds = delta.added.map((a) => a.id);
       // Placed through the fit NOW, not after the store (PLUGIN_GOAL 48):
       // the drain's new chunks, by their own text, in the delta only.

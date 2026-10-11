@@ -1,6 +1,12 @@
 """Drive the REAL app the way a reader does, on pages new to the store
 (2026-10-10, PLUGIN_GOAL items 30-34). Every reading is the app's own state.
 
+It never runs over the reader (G-135, 2026-10-10: it once cycled panels for
+minutes while the reader used the app). It marks itself as a stress run so its
+own synthetic hovers are not taken for the reader, records the reader's last
+input at the start, and every stage and every loop step stops the moment that
+stamp moves.
+
   python practice.py <url> [<url> ...]      -> practice_<host>.json + screenshots
 """
 import json, sys, time, re
@@ -21,11 +27,24 @@ PRE = r"""
   const v = gl.view, b = bl.view, wv = b.webview;
   const wc = window.require("@electron/remote").webContents.fromId(wv.getWebContentsId());
   const nodesOf = (u) => v.graph.graphData().nodes.filter((n) => n.url === u);
+  window.__domvecStressing = true;
+  const R0 = %READER0%;
+  const readerBack = () => (window.__domvecReaderAt || 0) !== R0;
 """
 
 
+READER0 = [0]
+
+
+class ReaderBack(Exception):
+    pass
+
+
 def js(body, timeout=240):
-    return L.evaluate("(async () => {" + PRE + body + "})()", timeout=timeout)
+    got = L.evaluate("(async () => {" + PRE.replace("%READER0%", str(READER0[0])) + body + "})()", timeout=timeout)
+    if isinstance(got, str) and '"stopped": "reader"' in got.replace('"stopped":"reader"', '"stopped": "reader"'):
+        raise ReaderBack()
+    return got
 
 
 def stage_land(url):
@@ -47,6 +66,7 @@ def stage_land(url):
       const r = wv.getBoundingClientRect();
       // Real wheel steps down the page, sampling the stream as it arrives.
       for (let i = 0; i < 14; i++) {
+        if (readerBack()) return JSON.stringify({ stopped: "reader" });
         wc.sendInputEvent({ type: "mouseWheel", x: Math.round(r.width / 2), y: Math.round(r.height / 2), deltaX: 0, deltaY: -700 });
         await sleep(650);
         const ns = nodesOf(U);
@@ -110,6 +130,7 @@ def stage_hover(session):
       const out = [];
       const f0 = { ...v.focusStats };
       for (let i = 0; i < 12; i++) {
+        if (readerBack()) return JSON.stringify({ stopped: "reader" });
         const x = Math.round(60 + (i * 137) %% Math.max(100, vp[0] - 120));
         const y = Math.round(80 + (i * 211) %% Math.max(100, vp[1] - 160));
         const flown0 = v.focusStats.flown;
@@ -207,6 +228,7 @@ def stage_panels(session, cap=40):
         .toLowerCase().match(/[\p{L}\p{N}]{3,}/gu) || [];
       const rows = [];
       for (const cid of cids) {
+        if (readerBack()) return JSON.stringify({ stopped: "reader" });
         const pay = await v.chunkPayload(cid);
         const md = pay && pay.lines ? pay.lines.map((l) => l.text).join("\n") : "";
         const want = words(md);
@@ -254,26 +276,32 @@ if __name__ == "__main__":
     if idle < 30000 and "--force" not in sys.argv:
         print("reader active (%d ms) -- not driving the app" % idle); sys.exit(2)
     urls = [u for u in sys.argv[1:] if not u.startswith("--")]
-    for url in urls:
-        host = re.sub(r"[^a-z0-9]+", "_", url.lower())[8:60]
-        rec = {"url": url, "at": time.strftime("%Y-%m-%d %H:%M:%S"), "projector_before": {k: projector().get(k) for k in ("epoch", "fitted_chunks", "chunks_now", "queue", "pages", "trained_pages")}}
-        print("==", url, flush=True)
-        rec["land"] = stage_land(url); print(" land", json.dumps(rec["land"]["samples"][-1]), rec["land"]["landed"], flush=True)
-        sess = rec["land"]["session"]
-        rec["store"] = stage_store(sess); print(" store", json.dumps(rec["store"]), flush=True)
-        rec["shot_graph"] = L.screenshot(str(OUT / ("%s_1_graph.png" % host)))
-        rec["hover"] = stage_hover(sess)
-        hv = rec["hover"]["hovers"]
-        print(" hover", json.dumps({"n": len(hv), "with_cid": sum(1 for h in hv if h["cid"]), "flew": rec["hover"]["focus_delta"], "panels": sum(1 for h in hv if h["panel"]), "panel_text>0": sum(1 for h in hv if h["panel"] and h["panel"]["text"] > 0), "open_after_leave": rec["hover"]["hover_panels_open_after_leave"]}), flush=True)
-        rec["pin"] = stage_pin(sess); print(" pin", json.dumps(rec["pin"])[:700], flush=True)
-        rec["shot_pin"] = L.screenshot(str(OUT / ("%s_2_pin.png" % host)))
-        rec["panels"] = stage_panels(sess)
-        rows = rec["panels"]["rows"]
-        cov = [r["coverage"] for r in rows if r.get("coverage") is not None]
-        withimg = [r for r in rows if r.get("md_images")]
-        print(" panels", json.dumps({"asked": rec["panels"]["asked"], "opened": len(cov), "coverage_min": min(cov) if cov else None,
-              "full(>=0.98)": sum(1 for c in cov if c >= 0.98), "chunks_with_images": len(withimg),
-              "panel_shows_image": sum(1 for r in withimg if r.get("panel_images_loaded", 0) >= 1),
-              "node_drawn_as_picture": sum(1 for r in withimg if r.get("node_drawn_as") == "picture")}), flush=True)
-        rec["projector_after"] = {k: projector().get(k) for k in ("epoch", "fitted_chunks", "chunks_now", "queue", "pages", "trained_pages", "last_online")}
-        (OUT / ("practice_%s.json" % host)).write_text(json.dumps(rec, indent=1, default=str))
+    READER0[0] = int(L.evaluate("window.__domvecReaderAt || 0") or 0)
+    try:
+      for url in urls:
+          host = re.sub(r"[^a-z0-9]+", "_", url.lower())[8:60]
+          rec = {"url": url, "at": time.strftime("%Y-%m-%d %H:%M:%S"), "projector_before": {k: projector().get(k) for k in ("epoch", "fitted_chunks", "chunks_now", "queue", "pages", "trained_pages")}}
+          print("==", url, flush=True)
+          rec["land"] = stage_land(url); print(" land", json.dumps(rec["land"]["samples"][-1]), rec["land"]["landed"], flush=True)
+          sess = rec["land"]["session"]
+          rec["store"] = stage_store(sess); print(" store", json.dumps(rec["store"]), flush=True)
+          rec["shot_graph"] = L.screenshot(str(OUT / ("%s_1_graph.png" % host)))
+          rec["hover"] = stage_hover(sess)
+          hv = rec["hover"]["hovers"]
+          print(" hover", json.dumps({"n": len(hv), "with_cid": sum(1 for h in hv if h["cid"]), "flew": rec["hover"]["focus_delta"], "panels": sum(1 for h in hv if h["panel"]), "panel_text>0": sum(1 for h in hv if h["panel"] and h["panel"]["text"] > 0), "open_after_leave": rec["hover"]["hover_panels_open_after_leave"]}), flush=True)
+          rec["pin"] = stage_pin(sess); print(" pin", json.dumps(rec["pin"])[:700], flush=True)
+          rec["shot_pin"] = L.screenshot(str(OUT / ("%s_2_pin.png" % host)))
+          rec["panels"] = stage_panels(sess)
+          rows = rec["panels"]["rows"]
+          cov = [r["coverage"] for r in rows if r.get("coverage") is not None]
+          withimg = [r for r in rows if r.get("md_images")]
+          print(" panels", json.dumps({"asked": rec["panels"]["asked"], "opened": len(cov), "coverage_min": min(cov) if cov else None,
+                "full(>=0.98)": sum(1 for c in cov if c >= 0.98), "chunks_with_images": len(withimg),
+                "panel_shows_image": sum(1 for r in withimg if r.get("panel_images_loaded", 0) >= 1),
+                "node_drawn_as_picture": sum(1 for r in withimg if r.get("node_drawn_as") == "picture")}), flush=True)
+          rec["projector_after"] = {k: projector().get(k) for k in ("epoch", "fitted_chunks", "chunks_now", "queue", "pages", "trained_pages", "last_online")}
+          (OUT / ("practice_%s.json" % host)).write_text(json.dumps(rec, indent=1, default=str))
+    except ReaderBack:
+        print("STOPPED: the reader is using the app", flush=True)
+    finally:
+        L.evaluate("window.__domvecStressing = false")

@@ -67,3 +67,47 @@ test("planted: always-zoom resets the reader's distance on every flight", () => 
   const again = zoomFor(st, "https://a.test/", 12000, 300, 45, { always: true });
   assert.deepEqual(again, { zoom: true, distance: 45 });
 });
+
+// relaxCloud: "the central URL node collision radius boundary was not
+// enforced" -- ko.wikipedia/물리학 drew 285 chunks, 2,069 overlapping pairs,
+// 68 inside its url node.
+import { relaxCloud } from "../src/camera.ts";
+
+const packed = [];
+for (let i = 0; i < 200; i++) {
+  const a = i * 2.399, z = 1 - (2 * i + 1) / 200, r = Math.sqrt(1 - z * z) * (3 + (i % 5));
+  packed.push([r * Math.cos(a), r * Math.sin(a), z * 6]);
+}
+const radii = packed.map(() => 2.3);
+
+test("relaxed: no overlapping spheres, none inside the url node, all inside the bound, near the phantoms", () => {
+  const out = relaxCloud([0, 0, 0], packed, radii, 10.3 * 2, 134, { safety: 2, iterations: 200 });
+  assert.ok(out.overlapsBefore > 100, "the start is packed: " + out.overlapsBefore);
+  assert.equal(out.overlapsAfter, 0);
+  assert.equal(out.insideAfter, 0);
+  assert.ok(out.pos.every((p) => Math.hypot(...p) <= 134 + 1e-6));
+  // The phantom: chunks stay on their side of the cloud (direction kept, coarse).
+  let same = 0;
+  for (let i = 0; i < packed.length; i++) {
+    const a = packed[i], b = out.pos[i];
+    const cos = (a[0] * b[0] + a[1] * b[1] + a[2] * b[2]) / (Math.hypot(...a) * Math.hypot(...b) || 1);
+    if (cos > 0.5) same++;
+  }
+  assert.ok(same / packed.length > 0.8, "directions kept: " + same);
+});
+
+test("planted: no relaxation leaves the packed cloud overlapping and inside the url node", () => {
+  const out = relaxCloud([0, 0, 0], packed, radii, 10.3 * 2, 134, { safety: 2, iterations: 0 });
+  assert.ok(out.overlapsAfter > 100 && out.insideAfter > 10);
+});
+
+test("uniform radius spreads a dense core through the ball; planted raw radii keep the knot", () => {
+  const core = [];
+  for (let i = 0; i < 100; i++) { const a = i * 2.399, z = 1 - (2 * i + 1) / 100, r = Math.sqrt(1 - z * z);
+    const s = i < 90 ? 1 : 30;                    // 90 in a tight core, 10 far out
+    core.push([s * r * Math.cos(a), s * r * Math.sin(a), s * z]); }
+  const nnMed = (ps) => { const nn = ps.map((a) => Math.min(...ps.filter((b) => b !== a).map((b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2])))); nn.sort((x, y) => x - y); return nn[nn.length >> 1]; };
+  const u = centredTelescope([0, 0, 0], core, 100, 5, false, true).pos;
+  const raw = centredTelescope([0, 0, 0], core, 100, 5, false, false).pos;
+  assert.ok(nnMed(u) > 3 * nnMed(raw), "uniform " + nnMed(u) + " vs raw " + nnMed(raw));
+});

@@ -15,7 +15,7 @@
  * and draws them.
  */
 
-import { centredTelescope, zoomFor, type V3 } from "./camera";
+import { centredTelescope, relaxCloud, zoomFor, type V3 } from "./camera";
 import { profiler } from "./profile";
 import { ItemView, MarkdownRenderer, WorkspaceLeaf, requestUrl } from "obsidian";
 import ForceGraph3D, { ForceGraph3DInstance } from "3d-force-graph";
@@ -1806,6 +1806,25 @@ export class GraphView extends ItemView {
         }
         pages++;
       }
+      // The fit's new coordinates are the PHANTOM, not the drawn place: an
+      // online update, a url's local refit or a streamed placement moved
+      // these, and they glided to the raw fit -- off-centre, packed, onto
+      // their url node -- until some other change re-ran the telescope
+      // (2026-10-10: 2,069 overlapping pairs and 68 chunks inside the url
+      // node on ko.wikipedia, gone the moment the pass ran by hand; "Weird
+      // phantom open-links": a page node moved without its cloud). The pass
+      // runs NOW and every moved node glides to its relaxed target.
+      if ((moved || pages) && !this.plantRawMoves) {
+        this.fitChunkSizes(data);
+        for (const [cid] of Object.entries<any>(d.chunks || {})) {
+          const node = byId.get(cid);
+          if (node && Number.isFinite(node.fitX)) this.glide(node, [node.fitX, node.fitY, node.fitZ ?? 0]);
+        }
+        for (const [url] of Object.entries<any>(d.pages || {})) {
+          const node = byId.get("page:" + url);
+          if (node && Number.isFinite(node.fitX)) this.glide(node, [node.fitX, node.fitY, node.fitZ ?? 0]);
+        }
+      }
       if (structural) this.graph.graphData(data);
       if (moved || gone || pages || structural) { this.collideSoon(); this.graph.d3ReheatSimulation(); }
       let added = 0;
@@ -3009,7 +3028,9 @@ export class GraphView extends ItemView {
       if ((n.force && !n.projected) || n.level === "page" || !n.url) continue;
       (byUrl.get(n.url) || byUrl.set(n.url, []).get(n.url)!).push(n);
     }
-    for (const [url, chunks] of byUrl) {
+    // Each open page's bound, from the FIT (before anything is moved aside).
+    const bounds = new Map<string, { B: number; R: number }>();
+    for (const [url] of byUrl) {
       const page = pages.find((p: any) => p.url === url);
       if (!page) continue;
       const [px, py, pz] = at(page);
@@ -3026,8 +3047,55 @@ export class GraphView extends ItemView {
       // 37 units against a raw p90 chunk distance of 31.5, so telescoping
       // could only shrink -- k 0.65 -- and the cluster stayed a small dense
       // ball; pages sit close in the page fit, and 0.45 x the gap is little).
-      const B = Math.max(R, 0.35 * sceneR);
-      this.telescope(page, chunks, B, relSize, media);
+      bounds.set(url, { B: Math.max(R, 0.35 * sceneR), R });
+    }
+    // ROOM for each open page, made by moving its NEIGHBOURS, never its own
+    // chunks (2026-10-10: "get umapped within their url domain node's scope";
+    // "force-directed post-umap ... with the original residual coordinates as
+    // phantom coordinates to keep the nodes closer to their original
+    // locations while enforcing collision ... with a radius/diameter safety
+    // factor on collision spheres"). Measured on Monarch_butterfly: 26 of 192
+    // chunks were nearer their own url node than any other. An open page
+    // claims a sphere of its bound B; a closed page inside it is pushed out
+    // radially to 2B + its radius (so every chunk within B of the open page
+    // is nearer it than the neighbour), two open pages until their spheres
+    // part. The moved page keeps its fit as `homeFit` -- the phantom it goes
+    // back to when the open page closes (the restore at the top of this pass).
+    if (!this.plantNoRoom && bounds.size) {
+      const open = [...bounds.entries()].sort((a, b) => b[1].B - a[1].B);
+      for (const [url, { B }] of open) {
+        const page = pages.find((p: any) => p.url === url);
+        if (!page) continue;
+        const [px, py, pz] = at(page);
+        for (const q of pages) {
+          if (q === page) continue;
+          const qb = bounds.get(q.url);
+          const rq = qb ? qb.B : drawnRadius({ ...q, val: q.fullVal ?? q.val }, relSize, media) * COLLIDER_SAFETY;
+          const want = (qb ? B + qb.B : this.roomFactor * B + rq) * 1.02;
+          const [qx, qy, qz] = at(q);
+          let dx = qx - px, dy = qy - py, dz = qz - pz;
+          let d = Math.hypot(dx, dy, dz);
+          if (d >= want) continue;
+          if (d < 1e-6) { dx = 1; dy = 0; dz = 0; d = 1; }
+          if (!q.homeFit) { q.homeFit = [q.fitX ?? q.x, q.fitY ?? q.y, q.fitZ ?? q.z ?? 0]; q.homeAnchor = q.anchorPos; }
+          const f = want / d;
+          q.fitX = px + dx * f; q.fitY = py + dy * f; q.fitZ = pz + dz * f;
+          q.__freeUntil = performance.now() + 3000;
+          this.roomStats.moved++;
+        }
+      }
+    }
+    for (const [url, chunks] of byUrl) {
+      const page = pages.find((p: any) => p.url === url);
+      if (!page) continue;
+      const bd = bounds.get(url);
+      if (!bd) continue;
+      const B = bd.B, R = bd.R;
+      const [px, py, pz] = at(page);
+      // The url node's own sphere: a third of the way to its nearest other url
+      // node (2026-10-10: "a healthy third or so from the minimum distance
+      // between any other URL nodes"); R is 0.45 of that distance.
+      this.telescope(page, chunks, B, relSize, media, this.rootShare * (R / 0.45));
       // A floor, so a crowded page's chunks stay visible: the fixed collider
       // margin could eat the whole room and leave specks (val ~ 0).
       const floor = 0.35 * relSize;
@@ -3073,10 +3141,22 @@ export class GraphView extends ItemView {
     }
   }
 
+  /** Planted: projector moves glide to the raw fit, never re-telescoped (the drift after every update). */
+  plantRawMoves = false;
+  /** Planted: the fit's raw radii (a dense core), and no relaxation (overlaps, chunks inside the url node). */
+  plantNoUniform = false;
+  plantNoRelax = false;
+  /** Planted: open pages make no room -- their clouds reach into their neighbours (D-49). */
+  plantNoRoom = false;
+  /** How far a closed neighbour is moved from an open page, in its bound B:
+   *  2 guarantees every chunk is nearer its own url node than the neighbour. */
+  roomFactor = 2;
+  roomStats = { moved: 0 };
+
   /** Planted by the telescope's check: chunks at their raw fit (the packed ball). */
   plantNoTelescope = false;
   /** Per open page, what the last telescope did (for the harness). */
-  teleStats = new Map<string, { n: number; raw_p90: number; bound: number; inner: number; k: number; clamped: number; centre_off?: number }>();
+  teleStats = new Map<string, { n: number; raw_p90: number; bound: number; inner: number; k: number; clamped: number; centre_off?: number; relax?: any; root_r?: number }>();
 
   /**
    * A page's chunks TELESCOPED radially about its node (2026-10-06: "the umap
@@ -3132,7 +3212,10 @@ export class GraphView extends ItemView {
   /** Planted: telescope from the page point, as before -- the cloud off-centre. */
   plantOffCentre = false;
 
-  private telescope(page: any, chunks: any[], bound: number, relSize: number, media: boolean): void {
+  /** The url node's exclusion sphere as a share of the distance to its nearest other url node. */
+  rootShare = 1 / 3;
+
+  private telescope(page: any, chunks: any[], bound: number, relSize: number, media: boolean, rootMin = 0): void {
     if (this.plantNoTelescope || !chunks.length || !(bound > 0)) return;
     const px = page.fitX ?? page.x, py = page.fitY ?? page.y, pz = page.fitZ ?? page.z ?? 0;
     if (![px, py, pz].every(Number.isFinite)) return;
@@ -3146,8 +3229,22 @@ export class GraphView extends ItemView {
     // Centred on the chunks' own centroid (`centredTelescope`, camera.ts):
     // the forum's 186 chunks drew as a ball 95 units off their url node when
     // offsets were taken from the page point (2026-10-10).
-    const inner = Math.min(0.3 * bound, 1.5 * drawnRadius({ ...page, val: page.fullVal ?? page.val }, relSize, media));
-    const t = centredTelescope([px, py, pz], raw, bound, inner, this.plantOffCentre);
+    const rootR = Math.max(drawnRadius({ ...page, val: page.val }, relSize, media) * COLLIDER_SAFETY,
+                           Math.min(rootMin, 0.6 * bound));
+    const inner = Math.max(Math.min(0.3 * bound, 1.5 * drawnRadius({ ...page, val: page.fullVal ?? page.val }, relSize, media)), rootR);
+    const t = centredTelescope([px, py, pz], raw, bound, inner, this.plantOffCentre, !this.plantNoUniform);
+    // The targets RELAXED: collision spheres at the safety factor, the url
+    // node's own sphere kept clear, each anchored to its fit (`relaxCloud`,
+    // 2026-10-10: "the central URL node collision radius boundary was not
+    // enforced" -- ko.wikipedia/물리학 drew 285 chunks with 2,069 overlapping
+    // pairs and 68 inside its url node).
+    let rel: any = null;
+    if (!this.plantNoRelax) {
+      const idx = t.pos.map((q, i) => (q ? i : -1)).filter((i) => i >= 0);
+      const radii = idx.map((i) => drawnRadius(chunks[i], relSize, media));
+      rel = relaxCloud([px, py, pz], idx.map((i) => t.pos[i] as V3), radii, rootR, bound, { safety: COLLIDER_SAFETY });
+      idx.forEach((i, j) => { t.pos[i] = rel.pos[j]; });
+    }
     chunks.forEach((c, i) => {
       const p = t.pos[i];
       if (!p) return;
@@ -3160,7 +3257,9 @@ export class GraphView extends ItemView {
     });
     this.teleStats.set(page.url, { n: chunks.length, raw_p90: Math.round(t.p90 * 10) / 10, bound: Math.round(bound),
                                    centre_off: Math.round(t.centreOff * 10) / 10,
-                                   inner: Math.round(inner), k: Math.round(t.k * 100) / 100, clamped: t.clamped });
+                                   inner: Math.round(inner), k: Math.round(t.k * 100) / 100, clamped: t.clamped,
+                                   root_r: Math.round(rootR * 10) / 10,
+                                   relax: rel ? { overlaps: [rel.overlapsBefore, rel.overlapsAfter], inside_root: [rel.insideBefore, rel.insideAfter], iterations: rel.iterations } : null });
   }
 
   // ---- G-107: the scene batch ------------------------------------------

@@ -26,7 +26,7 @@ print(L.evaluate(r"""(async () => {
     await w.loadURL(%s);
     await sleep(2500);
     const wc = w.webContents;
-    await wc.executeJavaScriptInIsolatedWorld(1033, [{ code: '(function(){window.__ff=(' + src + ')({known:[],variants:{}});return 1;})()' }]);
+    await wc.executeJavaScriptInIsolatedWorld(1033, [{ code: '(function(){window.__ff=(' + src + ')({known:[],variants:%s});return 1;})()' }]);
     await sleep(1200);
     await wc.executeJavaScriptInIsolatedWorld(1033, [{ code: 'window.__ff.drain();1' }]);
     const first = await wc.executeJavaScriptInIsolatedWorld(1033, [{ code: %s }]);
@@ -35,4 +35,4 @@ print(L.evaluate(r"""(async () => {
     const later = await wc.executeJavaScriptInIsolatedWorld(1033, [{ code: %s }]);
     return JSON.stringify({ first: JSON.parse(first), after_wait: JSON.parse(later) });
   } finally { w.destroy(); }
-})()""" % (json.dumps(open(__import__("os").environ["SENSOR_SRC"], encoding="utf-8").read() if __import__("os").environ.get("SENSOR_SRC") else ""), json.dumps(url), json.dumps(probe), int(float(sys.argv[4]) * 1000) if len(sys.argv) > 4 else 8000, json.dumps(probe)), timeout=90))
+})()""" % (json.dumps(open(__import__("os").environ["SENSOR_SRC"], encoding="utf-8").read() if __import__("os").environ.get("SENSOR_SRC") else ""), json.dumps(url), __import__("os").environ.get("VARIANTS", "{}"), json.dumps(probe), int(float(sys.argv[4]) * 1000) if len(sys.argv) > 4 else 8000, json.dumps(probe)), timeout=90))
