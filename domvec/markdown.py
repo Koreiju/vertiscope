@@ -2549,6 +2549,19 @@ MIN_FILL = 0.5
 LENIENCY = 1.5
 
 
+#: Planted (`G-143`): headings merge like any other piece, so a section's
+#: heading can close the chunk before it -- the culinarypedia defect.
+PLANT_TRAILING_HEADINGS = False
+
+_HEADING_FORM = re.compile(r"#{1,6} ")
+
+
+def _only_heading(piece: object) -> bool:
+    """Is this piece headings and nothing else -- nothing it heads yet?"""
+    lines = getattr(piece, "lines", None)
+    return bool(lines) and all(_HEADING_FORM.match(l.text or "") for l in lines)
+
+
 def _content_boundary(piece_hash: int, piece_chars: int, window: int,
                       buffered: int = 0) -> bool:
     """Should the chunk end after this sibling, judged from the sibling alone?
@@ -2952,15 +2965,36 @@ def _descend(
                        id(child) in records))
 
     buffer: List[MarkdownChunk] = []
+    sizes: List[int] = []
     buffered_chars = 0
+    # The chunk this loop emitted last, if a run of its own siblings: a short
+    # section tail may still go back to it when a heading arrives (`G-143`).
+    last_run: List[int] = []                 # [its size] or empty
 
-    def flush() -> None:
+    def flush(final: bool = False) -> None:
+        # A heading never CLOSES a chunk (`G-143`). When a run would end on
+        # headings, they -- with nothing they head arrived yet -- are carried
+        # into the next run rather than left as the last lines of the previous
+        # section's chunk. `final` emits them as they are: at the end of this
+        # node, or before a split or a record, there is nothing to carry to.
         nonlocal buffered_chars
         if not buffer:
             return
-        out.append(_merge(buffer, url, xpath, len(out)))
-        buffer.clear()
-        buffered_chars = 0
+        keep = len(buffer)
+        if not final and not PLANT_TRAILING_HEADINGS:
+            while keep > 1 and _only_heading(buffer[keep - 1]):
+                keep -= 1
+        out.append(_merge(buffer[:keep], url, xpath, len(out)))
+        last_run[:] = [sum(sizes[:keep]) + keep - 1]
+        del buffer[:keep]
+        del sizes[:keep]
+        buffered_chars = sum(sizes)
+
+    def take(piece: MarkdownChunk, chars: int) -> None:
+        nonlocal buffered_chars
+        buffer.append(piece)
+        sizes.append(chars)
+        buffered_chars += chars
 
     for kind, piece, piece_chars, piece_hash, is_record in pieces:
         if kind == "split":
@@ -2971,36 +3005,64 @@ def _descend(
                 first_cost = tokens.budget(sub[0].markdown)
                 if buffered_chars + len(buffer) + first_cost < LENIENCY * window:
                     buffer.append(sub[0])
-                    flush()
+                    sizes.append(first_cost)
+                    flush(final=True)
                     out.extend(sub[1:])
+                    if len(sub) > 1:
+                        last_run.clear()
                     continue
-            flush()
+            flush(final=True)
             out.extend(sub)
+            last_run.clear()
             continue
         if is_record:
             # A record stands alone. Flushed BEFORE as well as after, so a
             # record never shares a chunk with the heading or the stray promo
             # row that happened to precede it -- the run is "one chunk per
             # result", not "one chunk per result except the first".
-            flush()
-            buffer.append(piece)  # type: ignore[arg-type]
-            flush()
+            flush(final=True)
+            take(piece, piece_chars)  # type: ignore[arg-type]
+            flush(final=True)
+            last_run.clear()
             continue
+        # A BARE heading -- a sibling that is nothing but the heading, as in a
+        # flat `<h2><p><p><ul>` article. A piece that opens with its own
+        # heading (`<li><h3>..</h3><p>..</p></li>`) already carries what it
+        # heads, and cutting before every such piece turned the merge back
+        # into a running total: 37 new chunks for one inserted row of 400.
+        heads = not PLANT_TRAILING_HEADINGS and _only_heading(piece)
+        # A heading OPENS a chunk (`G-143`): the run before it ends here. A
+        # run shorter than a chunk's worth (`MIN_FILL`) -- a section's last
+        # list, say -- goes back into the chunk before it when the two fit the
+        # lenient bound, which is the leniency the rule asks for at the edges;
+        # it stands alone only when they do not. The boundary is a property
+        # of the heading itself, so an insertion elsewhere cannot move it.
+        if heads and buffer:
+            if (buffered_chars < window * MIN_FILL and last_run and out
+                    and last_run[0] + buffered_chars + len(buffer) < LENIENCY * window):
+                # A short tail of the section before: back into that
+                # section's chunk, within the lenient bound, rather than
+                # in front of this heading or standing alone.
+                tail = [out.pop()] + buffer
+                out.append(_merge(tail, url, xpath, len(out)))
+                last_run[:] = [last_run[0] + buffered_chars + len(buffer)]
+                buffer.clear(); sizes.clear(); buffered_chars = 0
+            else:
+                flush()
         # +len(buffer) for the newlines _merge inserts between parts. Omitting
         # them let a chunk exceed the window by one character per merged part,
         # which is small but is exactly the kind of drift that makes a
         # hyperparameter stop meaning what it says.
         size = buffered_chars + len(buffer) + piece_chars
         if buffer and size > window:
-            if size < LENIENCY * window:
+            if size < LENIENCY * window and not heads:
                 # Nearer the window than twice it: take the piece, end the run.
-                buffer.append(piece)  # type: ignore[arg-type]
-                buffered_chars += piece_chars
+                # Never a heading: it would end the run it should open.
+                take(piece, piece_chars)  # type: ignore[arg-type]
                 flush()
                 continue
             flush()
-        buffer.append(piece)  # type: ignore[arg-type]
-        buffered_chars += piece_chars
+        take(piece, piece_chars)  # type: ignore[arg-type]
         # The window stays a hard cap either way; what changes is whether a
         # chunk may end *before* it. The cap is still a running total, so a
         # perturbation can outlive one chunk -- but only until the next
@@ -3008,7 +3070,7 @@ def _descend(
         if CONTENT_BOUNDARIES and _content_boundary(piece_hash, piece_chars,
                                                     window, buffered_chars):
             flush()
-    flush()
+    flush(final=True)
     if key is not None:
         memo.put(key, out)
     return out

@@ -2604,6 +2604,63 @@ flight lands on a node the reader can see.*
 and the fit runs asynchronously -- none waits on another it does not need --
 and each is measured and made as fast as it can be.*
 
+> Overlay panel showing in the 3D GUI is now extremely slow... watch out for
+> that in time profiling
+
+> overlays flicker on github
+
+> chunking degradation seen in
+> https://culinarypedia.com/2026/05/01/the-best-chicken-dishes-from-diners-drive-ins-anddives/
+
+> open link degradation spotted on current page
+
+> obsidian froze
+
+> no longer frozen. really slow though. id like the same feature set with
+> significant speedups
+
+> not bad speedup for so many nodes. maybe we can render images within closest
+> distance to the ray normal projection of the mouse proximity at a time for
+> efficient details while staying fast
+
+> immediate lag after clicking a node. perhaps force-directed has something to
+> do with it
+
+*Read as (2026-10-11): (68) a hover draws ONE outline, once -- never the page's
+box first and the stored unit's after it; (69) a section heading opens the
+chunk of what it heads and never closes the chunk before it; (70) no drawn
+link ends where no node is drawn; (71) the app never freezes, and at tens of
+thousands of nodes keeps every feature it has while running markedly faster --
+no per-frame or per-tick work over nodes that cannot change; (72) pictures
+are drawn for the nodes nearest the pointer's ray -- the shortest distance
+from the node to the ray cast through the mouse -- a bounded set at a time,
+spheres elsewhere; (73) clicking a node responds at once: the force layout
+does not re-run over the whole graph for one click.*
+
+> force sphere does the opposite of what its intent is... linked nodes are
+> within the sphere because the boundary is too high maybe, or doesn't apply to
+> the linked chunks of the actual url node
+
+> hover images also only apply for chunk view. not url view.
+
+> chunking degradation and invisible panels spotted in the chunk node view.
+> image hovers and speed are back to normal. thank you!
+
+> re-right clicking doesn't open chunks back up in chunk view
+
+> force fields still broken
+
+> i dont think the chunk view needs force-directed, might also slow things
+> down and we can rely on UMAP only for this view
+
+*Read as (2026-10-11): (74) the url node's sphere is a third of the distance to
+its nearest url node as the nodes are DRAWN, and none of its own chunks is
+inside it; (75) the pointer-ray picture limit is for chunk view -- url nodes
+always draw their pictures; (76) a page's hover map and panels are there
+whenever its page is; (77) a second right-click on a folded url node opens it;
+(78) chunk view runs no force simulation: every node sits at its UMAP
+coordinates.*
+
 ---
 
 

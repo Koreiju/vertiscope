@@ -22,6 +22,11 @@ import * as THREE from "three";
 const ATLAS = 4096;
 const CELL = 64;
 const PER_ROW = ATLAS / CELL;               // 64 cells a row, 4,096 in the page
+/** Pictures decoded at once. Unbounded, 23k nodes asked for every picture in
+ *  the corpus in one frame and Obsidian froze (2026-10-11). */
+const MAX_LOADS = 4;
+/** A decoded picture: an `<img>` or an `ImageBitmap`. */
+export type Picture = CanvasImageSource & { width: number; height: number };
 
 const VERT = `
 attribute vec3 iOffset;
@@ -95,13 +100,23 @@ export class SceneBatch {
   private atlas: THREE.DataTexture;
   private atlasReady = false;
   private cells = new Map<string, number>();       // src -> cell index
-  private pending = new Set<string>();              // src being decoded
+  private pending = new Set<string>();              // src queued or being decoded
+  /** Pictures that would not load: never asked for again (2026-10-11, the
+   *  freeze -- every frame re-requested every failed picture). */
+  private failed = new Set<string>();
+  /** Decodes waiting their turn, and how many are running (`MAX_LOADS`). */
+  private queue: string[] = [];
+  private queueAt = 0;
+  private inFlight = 0;
+  /** Planted: every picture fetched at once and failures retried each frame. */
+  plantUnthrottled = false;
+  loadStats = { started: 0, placed: 0, failed: 0, maxInFlight: 0 };
   private nextCell = 0;
   private colours = new Map<string, THREE.Color>();
   lastStats = { drawCalls: 3, opaque: 0, translucent: 0, lines: 0, atlasCells: 0, atlasFull: 0, syncMs: 0 };
 
   constructor(private scene: THREE.Scene, private renderer: THREE.WebGLRenderer,
-              private load: (src: string) => Promise<HTMLImageElement | null>) {
+              private load: (src: string) => Promise<Picture | null>) {
     this.atlas = new THREE.DataTexture(new Uint8Array(4), 1, 1);   // replaced on first use
     this.opaque = this.makeMesh(512, false);
     this.clear = this.makeMesh(128, true);
@@ -174,7 +189,9 @@ export class SceneBatch {
     if (!c) {
       try { c = new THREE.Color(css || "#9aa0a6"); } catch { c = new THREE.Color("#9aa0a6"); }
       this.colours.set(css, c);
-      if (this.colours.size > 4096) this.colours.clear();
+      // Cleared only past what a corpus can hold: at 4,096 a 23k-node graph
+      // of distinct hues re-parsed every colour every frame (1.9 s in 7).
+      if (this.colours.size > 1 << 17) this.colours.clear();
     }
     return c;
   }
@@ -203,12 +220,36 @@ export class SceneBatch {
   private cellOf(src: string): number | undefined {
     const c = this.cells.get(src);
     if (c !== undefined) return c;
-    if (this.pending.has(src)) return undefined;
+    if (this.pending.has(src) || (this.failed.has(src) && !this.plantUnthrottled)) return undefined;
     if (this.nextCell >= PER_ROW * PER_ROW) { this.lastStats.atlasFull++; return undefined; }
     this.pending.add(src);
-    void this.load(src).then((img) => {
-      this.pending.delete(src);
-      if (!img || this.nextCell >= PER_ROW * PER_ROW) return;
+    this.queue.push(src);
+    this.pump();
+    return undefined;
+  }
+
+  /** Start queued decodes up to `MAX_LOADS` at once. */
+  private pump(): void {
+    const cap = this.plantUnthrottled ? Infinity : MAX_LOADS;
+    while (this.inFlight < cap && this.queueAt < this.queue.length) {
+      const src = this.queue[this.queueAt++];
+      this.inFlight++;
+      this.loadStats.started++;
+      this.loadStats.maxInFlight = Math.max(this.loadStats.maxInFlight, this.inFlight);
+      void this.load(src).then((img) => this.place(src, img), () => this.place(src, null));
+    }
+    if (this.queueAt > 256 && this.queueAt * 2 > this.queue.length) {
+      this.queue = this.queue.slice(this.queueAt); this.queueAt = 0;
+    }
+  }
+
+  /** A decode finished: copy it into the next cell, or remember it failed. */
+  private place(src: string, img: Picture | null): void {
+    this.inFlight--;
+    this.pending.delete(src);
+    try {
+      if (!img) { this.failed.add(src); this.loadStats.failed++; return; }
+      if (this.nextCell >= PER_ROW * PER_ROW) return;
       this.ensureAtlas();
       const cell = this.nextCell++;
       // Fit the picture into its cell, aspect kept, on a small canvas the
@@ -217,8 +258,9 @@ export class SceneBatch {
       cv.width = CELL; cv.height = CELL;
       const g = cv.getContext("2d");
       if (!g) return;
-      const k = Math.min(CELL / (img.naturalWidth || CELL), CELL / (img.naturalHeight || CELL));
-      const w = Math.max(1, Math.round((img.naturalWidth || CELL) * k)), h = Math.max(1, Math.round((img.naturalHeight || CELL) * k));
+      const iw = (img as any).naturalWidth || img.width || CELL, ih = (img as any).naturalHeight || img.height || CELL;
+      const k = Math.min(CELL / iw, CELL / ih);
+      const w = Math.max(1, Math.round(iw * k)), h = Math.max(1, Math.round(ih * k));
       g.drawImage(img, (CELL - w) / 2, (CELL - h) / 2, w, h);
       const small = new THREE.CanvasTexture(cv);
       small.flipY = false;
@@ -228,8 +270,11 @@ export class SceneBatch {
       catch { /* context lost: the cell stays a sphere */ }
       small.dispose();
       this.cells.set(src, cell);
-    });
-    return undefined;
+      this.loadStats.placed++;
+    } finally {
+      if (img && typeof (img as any).close === "function") (img as any).close();
+      this.pump();
+    }
   }
 
   /** One frame: every node and edge written into the three batches. */

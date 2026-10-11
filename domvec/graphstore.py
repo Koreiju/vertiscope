@@ -1181,6 +1181,15 @@ class GraphStore:
     def page_urls(self) -> List[str]:
         return [r[0] for r in self._rows("MATCH (p:Page) RETURN p.url")]
 
+    def chunk_mds(self, cids) -> Dict[str, str]:
+        """Each stored chunk's markdown by cid, by primary-key lookups (the
+        shape G-121 measured at 70 ms for 800 keys, against 631 for a scan)."""
+        cids = [c for c in dict.fromkeys(cids) if c]
+        if not cids:
+            return {}
+        return {cid: (md or "") for cid, md in self._rows(
+            "UNWIND $cids AS x MATCH (c:Chunk {cid: x}) RETURN c.cid, c.md", {"cids": cids})}
+
     def chunk(self, cid: str) -> Optional[StoredChunk]:
         rows = self._rows(
             "MATCH (c:Chunk {cid: $cid}) RETURN c.cid, c.url, c.xpath, "

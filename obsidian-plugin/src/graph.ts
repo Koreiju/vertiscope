@@ -26,7 +26,7 @@ import { forceCenter, forceCollide, forceManyBody } from "d3-force-3d";
 import type { ForceNodeDelta } from "./forcetree";
 import type { CentralDiff } from "./types";
 import * as THREE from "three";
-import { NodeLook, SceneBatch } from "./scenebatch";
+import { NodeLook, Picture, SceneBatch } from "./scenebatch";
 import { flushTiny, octreeVerdict } from "./octreeguard";
 import { MotionRecorder } from "./motion";
 
@@ -318,6 +318,11 @@ function drawnRadius(node: any, relSize: number, media: boolean): number {
   }
   return Math.cbrt(Math.max(node.val ?? 1, 1e-9)) * relSize;
 }
+
+/** Pictures drawn at once: the nodes nearest the pointer's ray (`refreshDetail`). */
+const DETAIL_PICTURES = 64;
+/** The least share of its drawn radius a node keeps when spacing shrinks it. */
+const MIN_SPACING_SHARE = 0.3;
 
 export class GraphView extends ItemView {
   /** Put the camera back outside the cloud, looking at the middle. */
@@ -642,7 +647,7 @@ export class GraphView extends ItemView {
     g.d3Force("charge", safeCharge);
     g.d3Force("center", forceCenter());
     g.d3Force("link")?.strength(0.9).distance(18);
-    g.d3AlphaDecay(0.0228).d3VelocityDecay(0.4);
+    g.d3AlphaDecay(0.0228).d3VelocityDecay(0.4).d3AlphaMin(this.plantNoAlphaMin ? 0 : 0.001);
     this.installHold();
     this.watchForces();
   }
@@ -1191,10 +1196,15 @@ export class GraphView extends ItemView {
       const f: any = g.d3Force(name);
       if (!f || f.__watched) continue;
       let nodes: any[] = [];
+      let calls = 0;
       const w: any = (alpha: number) => {
         const before = this.motion.forceBefore(nodes);
         f(alpha);
         this.motion.forceAfter(name, nodes, before, alpha);
+        // Which force made a velocity non-finite: a diagnosis, read every
+        // fourth call -- per force per tick it was 8 passes over 23k nodes.
+        // `sanitize` repairs every tick regardless.
+        if ((++calls & 3) !== 0) return;
         for (const n of nodes) {
           if (Number.isFinite(n.vx) && Number.isFinite(n.vy) && Number.isFinite(n.vz ?? 0)) continue;
           if (n.vx === undefined) continue;
@@ -1576,6 +1586,9 @@ export class GraphView extends ItemView {
    * Anything that is not a page node keeps its old meaning (release the
    * scope). Returns what was done, for the harness.
    */
+  /** Planted: a right-click folds whenever anything of the page is drawn. */
+  plantToggleByDrawn = false;
+
   async togglePage(node: any): Promise<{ action: string; url: string; nodes: number }> {
     if (this.plantNoToggle || !node || node.level !== "page" || !node.url) {
       this.onScope("");
@@ -1592,7 +1605,14 @@ export class GraphView extends ItemView {
     const drawn = this.graph.graphData().nodes
       // Force chunks count: the page being browsed is drawn by the stream.
       .some((n: any) => n.url === url && n.level !== "page");
-    if (drawn) {
+    // The READER's last gesture decides first (2026-10-11: "re-right clicking
+    // doesn't open chunks back up in chunk view"). A page the reader folded
+    // opens on the next right-click even while something of it is still drawn
+    // -- the page being browsed keeps drawing its stream's pending nodes, and
+    // a pinned chunk stays -- which made every right-click a fold of nothing.
+    // Planted: decided by what is drawn alone, as before.
+    const folded = !this.plantToggleByDrawn && this.collapsedByReader.has(url);
+    if (drawn && !folded) {
       this.openedByReader.delete(url);
       this.collapsedByReader.add(url);
       return out("collapse", this.foldChunks(url));
@@ -1995,9 +2015,11 @@ export class GraphView extends ItemView {
         if (type === "image/svg+xml" || /\.svg($|\?)/i.test(src)) {
           out = svgDataUrl(new TextDecoder().decode(bytes));
         } else {
+          // In 32 KB slices: one character at a time was the slowest thing
+          // on the main thread while a corpus's pictures loaded.
           let binary = "";
-          for (let i = 0; i < bytes.length; i++) {
-            binary += String.fromCharCode(bytes[i]);
+          for (let i = 0; i < bytes.length; i += 0x8000) {
+            binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000) as any);
           }
           out = `data:${type || "image/png"};base64,${btoa(binary)}`;
         }
@@ -3144,12 +3166,30 @@ export class GraphView extends ItemView {
       if (!page) continue;
       const bd = bounds.get(url);
       if (!bd) continue;
-      const B = bd.B, R = bd.R;
+      const R = bd.R;
+      let B = bd.B;
       const [px, py, pz] = at(page);
       // The url node's own sphere: a third of the way to its nearest other url
       // node (2026-10-10: "a healthy third or so from the minimum distance
-      // between any other URL nodes"); R is 0.45 of that distance.
-      this.telescope(page, chunks, B, relSize, media, this.rootShare * (R / 0.45));
+      // between any other URL nodes") -- measured where the url nodes ARE
+      // after the room pass above, not in the fit. Sized from the fit, it was
+      // a third of a distance that no longer existed: Comparison_of_web_browsers
+      // enforced 24.6 against a nearest url node 284 away, and 134 of its 314
+      // chunks sat inside the third (2026-10-11: "force fields still broken").
+      // And the cloud gets room OUTSIDE it: the telescope caps the sphere at
+      // 0.6 of the bound, so the bound is at least sphere / 0.6.
+      // Planted: the fit's distance, as before.
+      let nearestNow = Infinity;
+      for (const q of pages) {
+        if (q === page) continue;
+        const [qx, qy, qz] = at(q);
+        nearestNow = Math.min(nearestNow, Math.hypot(px - qx, py - qy, pz - qz));
+      }
+      const rootMin = this.plantFitSphere || !Number.isFinite(nearestNow)
+        ? this.rootShare * (R / 0.45) : this.rootShare * nearestNow;
+      if (!this.plantFitSphere) B = Math.max(B, rootMin / 0.6);
+      this.sphereStats.set(url, { nearest: Math.round(nearestNow), sphere: Math.round(rootMin), bound: Math.round(B) });
+      this.telescope(page, chunks, B, relSize, media, rootMin);
       // A floor, so a crowded page's chunks stay visible: the fixed collider
       // margin could eat the whole room and leave specks (val ~ 0).
       const floor = 0.35 * relSize;
@@ -3268,6 +3308,11 @@ export class GraphView extends ItemView {
   /** Planted: telescope from the page point, as before -- the cloud off-centre. */
   plantOffCentre = false;
 
+  /** Planted (2026-10-11): the sphere sized from the FIT's nearest url node. */
+  plantFitSphere = false;
+  /** Per open page: nearest url node now, the sphere and the bound used. */
+  sphereStats = new Map<string, { nearest: number; sphere: number; bound: number }>();
+
   /** The url node's exclusion sphere as a share of the distance to its nearest other url node. */
   rootShare = 1 / 3;
 
@@ -3345,6 +3390,38 @@ export class GraphView extends ItemView {
   /** Planted by the calm check: nothing pinned, every node free, as before. */
   plantNoCalm = false;
   calmStats = { pinned: 0, released: 0 };
+
+  /** Planted: collision over the whole graph on every pass, as before. */
+  plantFullCollide = false;
+  collideStats = { passes: 0, idle: 0, scoped: 0, whole: 0 };
+
+  /** The nodes a collision pass must see: the free ones, and all within reach. */
+  private collideScope(nodes: any[], force: any, maxRadius: number): any[] {
+    const free: any[] = [];
+    let x0 = Infinity, y0 = Infinity, z0 = Infinity, x1 = -Infinity, y1 = -Infinity, z1 = -Infinity, rFree = 0;
+    const radius = force.radius();
+    for (const n of nodes) {
+      if (n.fx != null || n.force) continue;
+      free.push(n);
+      const x = n.x, y = n.y, z = n.z || 0;
+      if (x < x0) x0 = x; if (x > x1) x1 = x;
+      if (y < y0) y0 = y; if (y > y1) y1 = y;
+      if (z < z0) z0 = z; if (z > z1) z1 = z;
+      const r = +radius(n) || 0; if (r > rFree) rFree = r;
+    }
+    if (!free.length) return free;
+    if (free.length * 2 > nodes.length) return nodes;
+    // A step's worth of travel too: a free node moves before the next pass.
+    const reach = rFree + maxRadius + 4;
+    x0 -= reach; y0 -= reach; z0 -= reach; x1 += reach; y1 += reach; z1 += reach;
+    const scope = free;
+    for (const n of nodes) {
+      if (n.fx == null || n.force) continue;
+      const z = n.z || 0;
+      if (n.x >= x0 && n.x <= x1 && n.y >= y0 && n.y <= y1 && z >= z0 && z <= z1) scope.push(n);
+    }
+    return scope;
+  }
 
   /**
    * A fit move is a GLIDE, not a jump (2026-09-29, the flight recorder: 31
@@ -3477,6 +3554,10 @@ export class GraphView extends ItemView {
 
   /** The 3D view's flight recorder (`motion.ts`): read by the harness. */
   motion = new MotionRecorder();
+  /** Planted (2026-10-11): the simulation never stops on its own (alphaMin 0). */
+  plantNoAlphaMin = false;
+  /** Planted (2026-10-11): pick proxies visible to the renderer's walk. */
+  plantVisibleProxies = false;
   /** Planted by G-107's check: pick proxies the raycaster cannot hit. */
   plantNoPick = false;
   /** Planted by G-81's check: chunk pictures kept on the node, never drawn. */
@@ -3516,6 +3597,10 @@ export class GraphView extends ItemView {
       GraphView.proxyMat = new THREE.MeshBasicMaterial({ visible: false });
     }
     const m = new THREE.Mesh(GraphView.proxyGeo, GraphView.proxyMat);
+    // Hidden as an OBJECT, not only by its material: the renderer walked all
+    // 23k proxies every frame to find each one drew nothing (0.7 s in 7).
+    // Raycasting ignores `visible`, so hover, click and drag still land.
+    if (!this.plantVisibleProxies) m.visible = false;
     m.scale.setScalar(this.lookOf(n, relSize, media).half);
     (m as any).__proxy = true;
     if (this.plantNoPick) m.raycast = () => {};
@@ -3534,25 +3619,154 @@ export class GraphView extends ItemView {
                alpha: n.hovered ? 0.9 : (n.projected ? 0.75 : STREAM.OPACITY), color: n.hovered ? "#ffffff" : (n.color || "#9aa0a6") };
     }
     const src = media && !(this.plantNoPicture && n.level !== "page") ? n.image?.src : undefined;
-    if (src) return { half: billboardEdge(n, relSize) / 2, translucent: false, alpha: 0.95,
-                      color: n.color || "#888888", picture: src };
+    if (src) {
+      const half = billboardEdge(n, relSize) / 2;
+      // Pictures near the pointer's ray only (`refreshDetail`); elsewhere the
+      // same size, as its colour -- so the collider, the pick proxy and the
+      // drawn extent never change with where the mouse is.
+      // Url (and branch) nodes always: the limit is for chunk view (2026-10-11:
+      // "hover images also only apply for chunk view. not url view.").
+      if (this.plantAllPictures || n.level === "page" || n.level === "path"
+          || this.detail.has(n) || n.hovered || this.billboards.has(n.id))
+        return { half, translucent: false, alpha: 0.95, color: n.color || "#888888", picture: src };
+      return { half, translucent: false, alpha: 1, color: n.color || "#888888" };
+    }
     return { half: Math.cbrt(Math.max(n.val ?? 1, 1e-9)) * relSize, translucent: false, alpha: 1,
              color: n.hovered ? "#ffffff" : (n.color || "#9aa0a6") };
   }
 
-  /** A picture decoded to an `<img>`, through the same CORS-free fetch. */
-  private decoded(src: string): Promise<HTMLImageElement | null> {
+  /**
+   * A picture decoded for the atlas, through the same CORS-free fetch.
+   *
+   * The bytes go to `createImageBitmap` as a Blob: decoded off the main
+   * thread and already scaled toward the atlas cell. It used to be a data
+   * url -- the bytes walked into a string one character at a time, base64'd,
+   * then parsed again by an `<img>` -- 2.8 s of every 11 s on the main
+   * thread with 23k nodes on screen, and Obsidian froze (2026-10-11). SVG,
+   * which the bitmap decoder refuses, still goes through an `<img>`, on a
+   * blob url rather than a data url. Planted: the old data-url path.
+   */
+  private async decoded(src: string): Promise<Picture | null> {
+    if (this.plantDataUrlDecode) return this.decodedViaDataUrl(src);
+    const got = await this.pictureBytes(src);
+    if (!got) return null;
+    const blob = new Blob([got.bytes as any], { type: got.type });
+    if (got.type !== "image/svg+xml") {
+      try { return await createImageBitmap(blob, { resizeWidth: 128, resizeQuality: "medium" }); }
+      catch { /* a format the bitmap decoder refuses: try an <img> */ }
+    }
+    const url = URL.createObjectURL(blob);
+    try {
+      return await new Promise<HTMLImageElement | null>((resolve) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = () => resolve(null);
+        img.src = url;
+      });
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+
+  /** Planted: the data-url decode the bitmap path replaced. */
+  plantDataUrlDecode = false;
+
+  private decodedViaDataUrl(src: string): Promise<HTMLImageElement | null> {
     return this.texture(src).then((url) => new Promise<HTMLImageElement | null>((resolve) => {
       if (!url) { resolve(null); return; }
       const img = new Image();
       img.onload = () => resolve(img);
-      img.onerror = () => { console.warn("domvec: picture would not decode", src); resolve(null); };
+      img.onerror = () => resolve(null);
       img.src = url;
     }), () => null);
   }
 
+  /** A picture's bytes and type, or null; refusals remembered (`textures`). */
+  private async pictureBytes(src: string): Promise<{ bytes: Uint8Array; type: string } | null> {
+    if (GraphView.textures.get(src) === null) return null;
+    try {
+      const res = await requestUrl({ url: src, method: "GET", throw: false } as any);
+      if (res.status && (res.status < 200 || res.status >= 300)) { GraphView.textures.set(src, null); return null; }
+      const bytes = new Uint8Array(res.arrayBuffer);
+      if (!bytes.byteLength || bytes.byteLength > MAX_TEXTURE_BYTES) { GraphView.textures.set(src, null); return null; }
+      let type = (res.headers?.["content-type"] || "").split(";")[0] || guessType(src);
+      if (/\.svg($|\?)/i.test(src)) type = "image/svg+xml";
+      return { bytes, type: type || "image/png" };
+    } catch {
+      GraphView.textures.set(src, null);
+      return null;
+    }
+  }
+
+  /**
+   * Pictures for the nodes nearest the pointer's RAY (2026-10-11: "render
+   * images within closest distance to the ray normal projection of the mouse
+   * proximity at a time for efficient details while staying fast"). The ray
+   * is cast from the camera through the mouse; a node's distance is the
+   * length of the normal from it to that ray. The `DETAIL_PICTURES` nearest,
+   * in front of the camera, draw their pictures; the rest draw as spheres of
+   * the same size. Recomputed when the pointer or the camera moves, at most
+   * every 80 ms. Planted: every picture, everywhere, as before.
+   */
+  private detail = new Set<any>();
+  plantAllPictures = false;
+  detailStats = { computes: 0, last_ms: 0, size: 0, candidates: 0 };
+  private pointerNdc: [number, number] = [0, 0];
+  private detailDirty = true;
+  private detailAt = 0;
+  private detailCam = "";
+
+  private refreshDetail(g: any): void {
+    const now = performance.now();
+    const cam = g.camera();
+    const p = cam.position, q = cam.quaternion;
+    const camKey = `${p.x.toFixed(1)},${p.y.toFixed(1)},${p.z.toFixed(1)},${q.x.toFixed(3)},${q.y.toFixed(3)},${q.z.toFixed(3)}`;
+    if (camKey !== this.detailCam) { this.detailCam = camKey; this.detailDirty = true; }
+    if (!this.detailDirty || now - this.detailAt < 80) return;
+    this.detailDirty = false;
+    this.detailAt = now;
+    const t0 = now;
+    cam.updateMatrixWorld();
+    const dir = new THREE.Vector3(this.pointerNdc[0], this.pointerNdc[1], 0.5).unproject(cam).sub(p).normalize();
+    const ox = p.x, oy = p.y, oz = p.z, dx = dir.x, dy = dir.y, dz = dir.z;
+    const K = DETAIL_PICTURES;
+    const best: any[] = [], dist: number[] = [];
+    let worst = -1, candidates = 0;
+    for (const n of g.graphData().nodes) {
+      if (!n.image?.src || !Number.isFinite(n.x) || n.level === "page" || n.level === "path") continue;
+      candidates++;
+      const vx = n.x - ox, vy = n.y - oy, vz = (n.z || 0) - oz;
+      const t = vx * dx + vy * dy + vz * dz;
+      if (t <= 0) continue;                         // behind the camera
+      // The normal to the ray, per unit of depth along it: nearness to the
+      // mouse ON SCREEN. The raw normal let nodes far down the ray -- specks --
+      // take every slot from the ones under the cursor.
+      const d2 = (vx * vx + vy * vy + vz * vz - t * t) / (t * t);
+      if (best.length < K) {
+        best.push(n); dist.push(d2);
+        if (best.length === K) { worst = 0; for (let i = 1; i < K; i++) if (dist[i] > dist[worst]) worst = i; }
+      } else if (d2 < dist[worst]) {
+        best[worst] = n; dist[worst] = d2;
+        worst = 0; for (let i = 1; i < K; i++) if (dist[i] > dist[worst]) worst = i;
+      }
+    }
+    this.detail = new Set(best);
+    this.detailStats = { computes: this.detailStats.computes + 1, last_ms: Math.round((performance.now() - t0) * 100) / 100,
+                         size: best.length, candidates };
+  }
+
   private startBatch(graph: any, media: boolean): void {
     this.stopBatch();
+    // On the pane, not the canvas: the panel and caption layers sit above the
+    // canvas and took the canvas's pointer moves.
+    const el: HTMLElement = graph.renderer().domElement;
+    const host: HTMLElement = this.canvasEl || this.contentEl;
+    host.addEventListener("pointermove", (e: PointerEvent) => {
+      const r = el.getBoundingClientRect();
+      if (!r.width || !r.height) return;
+      this.pointerNdc = [((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1];
+      this.detailDirty = true;
+    }, { passive: true });
     this.batch = new SceneBatch(graph.scene(), graph.renderer(), (src) => this.decoded(src));
     this.frameGaps = [];
     this.callsPerFrame = [];
@@ -3622,6 +3836,7 @@ export class GraphView extends ItemView {
       }
       this.batch.setVisible(!this.plantPerNode);
       if (this.plantPerNode) return;
+      if (media && !this.plantAllPictures) this.refreshDetail(g);
       const d = g.graphData();
       const rs = g.nodeRelSize();
       this.batch.sync(d.nodes, d.links, (n) => this.lookOf(n, rs, media));
@@ -4200,6 +4415,17 @@ export class GraphView extends ItemView {
    * how many chunks it stands for, and that statement survives wherever the
    * picture can afford it.
    */
+  /** Planted (2026-10-11): chunk view keeps the pages view's forces. */
+  plantChunkForces = false;
+  /** True while the drawn view is chunk view, positioned by UMAP alone. */
+  umapOnly = false;
+
+  /** Planted (2026-10-11): the all-pairs nearest-neighbour scan that froze the app. */
+  plantAllPairsSpacing = false;
+  /** Planted (2026-10-11): shrinking with no floor -- nodes down to specks. */
+  plantSpecks = false;
+  spacingStats = { runs: 0, ms: 0, nodes: 0 };
+
   private fitRadiiToSpacing(): boolean {
     if (!this.graph) return false;
     const data: any = this.graph.graphData();
@@ -4208,26 +4434,63 @@ export class GraphView extends ItemView {
     const relSize = (this.graph as any).nodeRelSize?.() ?? 1;
     const media = this.media();
     let changed = false;
+    const t0 = performance.now();
+    // Each node's nearest neighbour, through a grid (2026-10-11, the freeze:
+    // the all-pairs scan was 23k x 23k = 530 million distances, 34 s on the
+    // main thread every time the engine stopped). A node only needs its
+    // neighbours within `drawn / 0.45` -- farther, and it is not shrunk -- so
+    // the search covers that radius and no more, and the verdict is exactly
+    // the all-pairs one. Planted: the all-pairs scan.
+    const drawnOf = nodes.map((a) => drawnRadius(a, relSize, media));
+    const at = (a: any) => [a.x ?? 0, a.y ?? 0, a.z ?? 0];
+    const sorted = drawnOf.filter((r) => r > 0).sort((x, y) => x - y);
+    const typical = sorted.length ? sorted[Math.floor(sorted.length * 0.9)] : 1;
+    const cell = Math.max(1e-3, typical / 0.45);
+    const grid = new Map<string, number[]>();
+    const keyOf = (x: number, y: number, z: number) => `${Math.floor(x / cell)},${Math.floor(y / cell)},${Math.floor(z / cell)}`;
+    if (!this.plantAllPairsSpacing) {
+      nodes.forEach((a, i) => { const [x, y, z] = at(a); const k = keyOf(x, y, z); const l = grid.get(k); if (l) l.push(i); else grid.set(k, [i]); });
+    }
     for (let i = 0; i < nodes.length; i++) {
       const a = nodes[i];
+      const drawn = drawnOf[i];
+      if (drawn <= 0) continue;
+      const reach = drawn / 0.45;                // nearer than this and it shrinks
+      const [ax, ay, az] = at(a);
       let nearest = Infinity;
-      for (let j = 0; j < nodes.length; j++) {
-        if (i === j) continue;
-        const b = nodes[j];
-        const d = Math.hypot((a.x ?? 0) - (b.x ?? 0),
-                             (a.y ?? 0) - (b.y ?? 0),
-                             (a.z ?? 0) - (b.z ?? 0));
-        if (d > 1e-6 && d < nearest) nearest = d;
+      const rings = Math.ceil(reach / cell);
+      // A node so large its reach spans more cells than there are nodes (a
+      // big page node): one pass over the nodes is cheaper than the cells.
+      if (this.plantAllPairsSpacing || Math.pow(2 * rings + 1, 3) > nodes.length) {
+        for (let j = 0; j < nodes.length; j++) {
+          if (i === j) continue;
+          const [bx, by, bz] = at(nodes[j]);
+          const d = Math.hypot(ax - bx, ay - by, az - bz);
+          if (d > 1e-6 && d < nearest) nearest = d;
+        }
+      } else {
+        const cx = Math.floor(ax / cell), cy = Math.floor(ay / cell), cz = Math.floor(az / cell);
+        for (let ox = -rings; ox <= rings; ox++) for (let oy = -rings; oy <= rings; oy++) for (let oz = -rings; oz <= rings; oz++) {
+          for (const j of grid.get(`${cx + ox},${cy + oy},${cz + oz}`) || []) {
+            if (j === i) continue;
+            const [bx, by, bz] = at(nodes[j]);
+            const d = Math.hypot(ax - bx, ay - by, az - bz);
+            if (d > 1e-6 && d < nearest) nearest = d;
+          }
+        }
       }
       if (!Number.isFinite(nearest)) continue;
-      const allowed = nearest * 0.45;
-      const drawn = drawnRadius(a, relSize, media);
-      if (drawn <= allowed || drawn <= 0) continue;
+      // Never to a speck (2026-10-11: "empty nodes", hubs at val 0.0002
+      // with 450 links converging on nothing visible): a node keeps at least
+      // `MIN_SPACING_SHARE` of its drawn radius; the collider separates the rest.
+      const allowed = Math.max(nearest * 0.45, this.plantSpecks ? 0 : drawn * MIN_SPACING_SHARE);
+      if (drawn <= allowed) continue;
       // `val` is radius cubed, so a radius scale of k is k^3 on val.
       if (a.valFull === undefined) a.valFull = a.val;
       a.val = Math.max((a.val ?? 1) * Math.pow(allowed / drawn, 3), 1e-4);
       changed = true;
     }
+    this.spacingStats = { runs: this.spacingStats.runs + 1, ms: Math.round(performance.now() - t0), nodes: nodes.length };
     if (changed) {
       // **Refresh the SIZES, not the graph.** `graphData(data)` re-feeds the
       // layout engine and resets the cooldown, so calling this when the
@@ -5086,12 +5349,34 @@ export class GraphView extends ItemView {
       // number -- one the simulation has not placed yet included, which
       // d3-octree inserts at the origin and then cannot separate -- checked
       // before EVERY iteration, not once per tick.
+      // Only what can MOVE, and what it can touch (2026-10-11: "really slow
+      // ... the same feature set with significant speedups"). Collision moves
+      // free nodes only -- a pinned node's velocity is discarded -- so a pass
+      // over 23k nodes to move the forty a placement freed was 2.3 s of every
+      // 11. The scope is the free nodes plus every node within reach of them:
+      // a box around the free set grown by the largest two radii that can
+      // meet. Pairs outside it are pinned pairs, which cannot move each other,
+      // so the result is the same pass. Planted: the whole graph, as before.
+      const scope = this.plantFullCollide ? gatedNodes : this.collideScope(gatedNodes, collideForce, maxRadius);
+      if (!scope.length) { this.collideStats.idle++; return; }
+      if (scope !== scopeNodes) { collideForce.initialize(scope, ...initArgs); scopeNodes = scope; }
+      this.collideStats.passes++; this.collideStats.scoped += scope.length; this.collideStats.whole += gatedNodes.length;
       for (let k = 0; k < collideIterations; k++) {
-        if (!this.octreeOk(gatedNodes, "collide", true)) { this.sanitize(gatedNodes); break; }
+        if (!this.octreeOk(scope, "collide", true)) { this.sanitize(scope); break; }
         collideForce(alpha);
       }
     };
-    gated.initialize = (...a: any[]) => { gatedNodes = a[0] || []; return collideForce.initialize(...a); };
+    let initArgs: any[] = [];
+    let scopeNodes: any[] | null = null;
+    let maxRadius = 0;
+    gated.initialize = (...a: any[]) => {
+      gatedNodes = a[0] || []; initArgs = a.slice(1); scopeNodes = gatedNodes;
+      const r = collideForce.initialize(...a);
+      const radius = collideForce.radius();
+      maxRadius = 0;
+      for (const n of gatedNodes) { const v = +radius(n) || 0; if (v > maxRadius) maxRadius = v; }
+      return r;
+    };
     gated.radius = (...a: any[]) => { const r = collideForce.radius(...a); return a.length ? gated : r; };
     gated.strength = (...a: any[]) => { const r = collideForce.strength(...a); return a.length ? gated : r; };
     gated.iterations = (...a: any[]) => {
@@ -5101,11 +5386,39 @@ export class GraphView extends ItemView {
     };
     this.collideUntil = performance.now() + 3000;
     graph.d3Force("collide", gated);
+    // **Chunk view is UMAP alone** (2026-10-11: "i dont think the chunk view
+    // needs force-directed, might also slow things down and we can rely on
+    // UMAP only for this view"). Every force goes but the link force, held at
+    // strength 0 -- it is what resolves an edge's ids to the nodes the batch
+    // draws it between -- and every node is pinned at its fit, so the engine
+    // has nothing to integrate and stops on its first cool tick. The pages
+    // view gets its forces back on the next load (`draw` builds anew).
+    // Planted: the pages view's forces in chunk view, as before.
+    if (this.level === "chunk" && !this.plantChunkForces) {
+      for (const name of ["charge", "center", "home", "contain", "collide", "hold", "treeSpring"]) graph.d3Force(name, null);
+      graph.d3Force("link")?.strength(0);
+      for (const n of graph.graphData().nodes as any[]) {
+        if (!Number.isFinite(n.fitX)) continue;
+        n.x = n.fx = n.fitX; n.y = n.fy = n.fitY; n.z = n.fz = n.fitZ ?? 0;
+      }
+      this.umapOnly = true;
+    } else {
+      this.umapOnly = false;
+    }
     window.setTimeout(() => this.watchForces(), 0);
 
     // It has to be allowed to run, having been frozen. These are d3's own
     // defaults: the simulation cools over a few hundred ticks and stops.
-    graph.d3AlphaDecay(0.0228).d3VelocityDecay(0.4);
+    //
+    // And it has to STOP. 3d-force-graph's `d3AlphaMin` defaults to 0, so the
+    // engine ran out its whole 15 s `cooldownTime` after every reheat -- and
+    // every click's `dragend` restarts that countdown without heating
+    // anything, so one click on a node bought 15 s of ticks over all 23k
+    // nodes (2026-10-11: "immediate lag after clicking a node. perhaps
+    // force-directed has something to do with it"). d3's own `alphaMin`: a
+    // cool simulation stops on the next tick, a click on a still graph costs
+    // one. Planted: the old floor of 0.
+    graph.d3AlphaDecay(0.0228).d3VelocityDecay(0.4).d3AlphaMin(this.plantNoAlphaMin ? 0 : 0.001);
 
     // **And it has to be REHEATED, or the collider never acts.**
     //

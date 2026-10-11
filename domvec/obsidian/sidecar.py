@@ -659,6 +659,8 @@ _CONTROLS: Dict[str, Dict[str, object]] = {}
 _CONTROLS_LOCK = threading.Lock()
 #: Planted: every panel scans the Address table for its controls, as before.
 _PLANT_CONTROL_SCAN = [False]
+#: Planted: a capture re-writes chunks the store already holds identically.
+_PLANT_REWRITE_SAME = [False]
 
 
 def _forget_controls(url: str) -> None:
@@ -1740,7 +1742,22 @@ class _Handler(BaseHTTPRequestHandler):
             phases["diff"] = round((time.perf_counter() - mark) * 1000, 1)
             mark = time.perf_counter()
 
-            if dirty or retired:
+            # Only what the store does not already hold, written. A new capture
+            # session (a reload, a sensor restart) re-sends every chunk of a page
+            # as "added", and the store re-wrote identical chunks -- every anchor
+            # deleted and recreated: 52 chunks, 2.5 s on GitHub; 212 of 212 on a
+            # ScienceDirect article, 7-60 s a capture (2026-10-11). Same cid
+            # (the hash of its address span) and same markdown is the same chunk.
+            # They stay in `dirty` for the reply: panels and graph still hear.
+            write = dirty
+            if dirty and not _PLANT_REWRITE_SAME[0]:
+                try:
+                    held = self.workspace.store.chunk_mds([c.cid for c in dirty])
+                    write = [c for c in dirty if held.get(c.cid) != c.markdown]
+                    phases["unchanged_skipped"] = len(dirty) - len(write)
+                except Exception:                   # noqa: BLE001
+                    write = dirty
+            if write or retired:
                 # **The wait is not the work.** `_WORK_LOCK` is shared with
                 # the embed worker (per 64-chunk batch) and aggregation (per
                 # page), so a drain arriving mid-batch waits for someone
@@ -1751,7 +1768,7 @@ class _Handler(BaseHTTPRequestHandler):
                     phases["lock_wait"] = round(
                         (time.perf_counter() - asked) * 1000, 1)
                     _written, counts = self.workspace.ingest_chunks(
-                        url, dirty, complete=False, removed=retired,
+                        url, write, complete=False, removed=retired,
                         title=(body.get("title") or ""))
                 # The store's own breakdown, carried up. `store` was 96% of a
                 # capture and one number cannot say which statement it is.

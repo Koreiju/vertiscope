@@ -619,24 +619,37 @@ export class PipelineBox {
     this.hover = { xpath: "", cid, matched: "", walked: 0, source: "page",
                    rect: sameUnit && prev ? prev.rect : { x: b[0], y: b[1], w: b[2], h: b[3] },
                    lines: sameUnit && prev ? prev.lines : 0, at: t0, stored: stored || undefined };
-    // Drawn at once from the page's box; the stored unit replaces it a round
-    // trip later. Within one stored unit the outline does not flash back to
-    // the cell.
-    this.placeOutline();
+    // ONE outline per hover. When the stored unit is known its extent is
+    // drawn and nothing before it; the page's own box only if the stored one
+    // has not arrived in 40 ms. Drawing the page's box and then the stored
+    // unit's a few ms later flashed two sizes on every move (2026-10-11:
+    // "overlays flicker on github"). Within one stored unit the outline
+    // keeps its place.
+    const xs = stored && this.map.url === url ? this.map.xpaths(stored) : [];
+    if (!xs.length || sameUnit || this.plantTwoStep) this.placeOutline();
     this.pushedHandleMs.push(performance.now() - t0);
     if (this.pushedHandleMs.length > 200) this.pushedHandleMs.shift();
     if (changed) this.onHoverChunk(cid, url);
-    if (stored && this.map.url === url) {
-      const xs = this.map.xpaths(stored);
-      if (xs.length) void this.unionRect(xs).then((r) => {
-        if (!r || !this.hover || this.hover.at !== t0) return;
-        this.hover = { ...this.hover, rect: r, lines: xs.length };
+    if (xs.length) {
+      let drawn = !!sameUnit || this.plantTwoStep;
+      const fallback = drawn ? 0 : window.setTimeout(() => {
+        if (this.hover && this.hover.at === t0 && !drawn) { drawn = true; this.placeOutline(); this.twoStepFallbacks++; }
+      }, 40);
+      void this.unionRect(xs).then((r) => {
+        window.clearTimeout(fallback);
+        if (!this.hover || this.hover.at !== t0) return;
+        if (r) this.hover = { ...this.hover, rect: r, lines: xs.length };
+        drawn = true;
         this.placeOutline();
         this.storedUnitMs.push(performance.now() - t0);
         if (this.storedUnitMs.length > 200) this.storedUnitMs.shift();
       });
     }
   }
+  /** Planted: the page's box first, then the stored unit's (the flicker). */
+  plantTwoStep = false;
+  /** Hovers whose stored unit took longer than 40 ms (the page's box shown meanwhile). */
+  twoStepFallbacks = 0;
 
   /** In-page chunk -> the stored chunk it belongs to (set by the browser cell). */
   storedFor: (cid: string, url: string) => string = () => "";
@@ -715,7 +728,10 @@ export class PipelineBox {
   }
 
   /** The outline sits in the CELL over the webview, never in the page. */
+  /** Outline placements, for the harness: against `pushedHovers`, how many draws a hover costs. */
+  outlinePlacements = 0;
   private placeOutline() {
+    this.outlinePlacements++;
     const r = this.hover?.rect;
     const wv = this.webview();
     if (!r || !wv || r.w <= 0 || r.h <= 0) { this.outline.hide(); return; }

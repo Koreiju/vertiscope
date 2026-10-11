@@ -1644,7 +1644,25 @@ export class BrowserView extends ItemView {
       // The page's base url, for the markdown form's relative destinations.
       try { void this.webview?.executeJavaScript("document.baseURI").then((b: any) => putBase(url, String(b || ""))).catch(() => undefined); }
       catch { /* not attached */ }
-      void map.load(this.sidecar, url).then(() => {
+      // RETRIED while the answer is missing (2026-10-11: "invisible panels
+      // spotted in the chunk node view" -- Comparison_of_web_browsers sat with
+      // an EMPTY map for its whole visit: the one landing load failed while
+      // the app was frozen, the page was already stored so no capture came to
+      // patch it, and every hover resolved to nothing). Only while the map is
+      // still empty: a capture that patched it meanwhile is newer than a
+      // reload would be. Planted: one attempt, as before.
+      const loadMap = async (): Promise<boolean> => {
+        for (const wait of this.plant.has("map-once") ? [0] : [0, 1500, 4000, 10000, 25000]) {
+          if (wait) await new Promise((r) => window.setTimeout(r, wait));
+          if (map.url !== url && wait) return false;
+          if (wait && map.cids().length) return true;
+          if (await map.load(this.sidecar, url)) return true;
+          if (map.url !== url) return false;
+          this.mapRetries++;
+        }
+        return false;
+      };
+      void loadMap().then(() => {
         if (map.url !== url || this.session !== url) return;
         this.scheduleFormSaver();
         if (map.nodes.length) this.onChunks(map.nodes, [], "");
@@ -2067,6 +2085,9 @@ export class BrowserView extends ItemView {
       }
     }
   }
+
+  /** Landing map loads that failed and were asked again. */
+  mapRetries = 0;
 
   /** Drains that rode along in another drain's capture (merged ingest). */
   mergedCaptures = 0;
