@@ -3156,6 +3156,26 @@ export class GraphView extends ItemView {
         }
       }
     }
+    // Url nodes the fit put ON each other -- identical content lands at one
+    // point (2026-10-11: 30 coincident pairs, all copies of a fixture page
+    // from two ports; the same article on two mirrors would do it) -- and,
+    // pinned at rest, the collider never parts them (`G-21`). Their targets
+    // are relaxed like a page's chunks: spheres at the safety factor, each
+    // anchored to its fit. Planted: left where the fit put them.
+    if (!this.plantPagesTogether && pages.length > 1) {
+      const pos = pages.map((q: any) => at(q) as V3);
+      const radii = pages.map((q: any) => drawnRadius({ ...q, val: q.fullVal ?? q.val }, relSize, media));
+      // No root sphere here: a root out of reach, so only the collisions act.
+      const rel = relaxCloud([1e12, 1e12, 1e12], pos, radii, 0, Infinity, { safety: COLLIDER_SAFETY, anchor: 0 });
+      pages.forEach((q: any, i: number) => {
+        const [x, y, z] = rel.pos[i];
+        if (Math.hypot(x - pos[i][0], y - pos[i][1], z - pos[i][2]) < 1e-6) return;
+        if (!q.homeFit) { q.homeFit = [q.fitX ?? q.x, q.fitY ?? q.y, q.fitZ ?? q.z ?? 0]; q.homeAnchor = q.anchorPos; }
+        q.fitX = x; q.fitY = y; q.fitZ = z;
+        if (q.anchorPos) q.anchorPos = [x, y, z];
+        this.roomStats.parted++;
+      });
+    }
     // A page at rest is calm-pinned, and the home force does not move a pinned
     // node: a target moved aside (or back to its phantom) was never reached --
     // Monarch's 669 chunks, 48 nearer their own url node (2026-10-11). Every
@@ -3253,7 +3273,7 @@ export class GraphView extends ItemView {
   /** How far a closed neighbour is moved from an open page, in its bound B:
    *  2 guarantees every chunk is nearer its own url node than the neighbour. */
   roomFactor = 2;
-  roomStats = { moved: 0, glided: 0 };
+  roomStats = { moved: 0, glided: 0, parted: 0 };
 
   /** Planted by the telescope's check: chunks at their raw fit (the packed ball). */
   plantNoTelescope = false;
@@ -3316,6 +3336,8 @@ export class GraphView extends ItemView {
   /** Planted: telescope from the page point, as before -- the cloud off-centre. */
   plantOffCentre = false;
 
+  /** Planted (2026-10-11): url nodes the fit put on each other stay there. */
+  plantPagesTogether = false;
   /** Planted (2026-10-11): the sphere sized from the FIT's nearest url node. */
   plantFitSphere = false;
   /** Per open page: nearest url node now, the sphere and the bound used. */

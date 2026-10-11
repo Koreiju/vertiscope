@@ -111,3 +111,13 @@ test("uniform radius spreads a dense core through the ball; planted raw radii ke
   const raw = centredTelescope([0, 0, 0], core, 100, 5, false, false).pos;
   assert.ok(nnMed(u) > 3 * nnMed(raw), "uniform " + nnMed(u) + " vs raw " + nnMed(raw));
 });
+
+test("coincident url nodes part, and only they move (G-21, 2026-10-11)", async () => {
+  const far = [1e12, 1e12, 1e12];
+  const pos = [[0, 0, 0], [0, 0, 0], [50, 0, 0], [0, 80, 0]];
+  const r = relaxCloud(far, pos, [1, 1, 1, 1], 0, Infinity, { safety: 2, anchor: 0 });
+  const d01 = Math.hypot(...r.pos[0].map((v, k) => v - r.pos[1][k]));
+  assert.ok(d01 >= 3.99, "the coincident pair parted to the collider's spacing: " + d01);
+  assert.deepEqual(r.pos[2], [50, 0, 0]);
+  assert.deepEqual(r.pos[3], [0, 80, 0]);
+});
