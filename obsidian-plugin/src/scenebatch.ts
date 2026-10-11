@@ -111,6 +111,8 @@ export class SceneBatch {
   /** Planted: every picture fetched at once and failures retried each frame. */
   plantUnthrottled = false;
   loadStats = { started: 0, placed: 0, failed: 0, maxInFlight: 0 };
+  /** Told when a picture lands in the atlas: what is drawn has changed. */
+  onPlaced: (() => void) | null = null;
   private nextCell = 0;
   private colours = new Map<string, THREE.Color>();
   lastStats = { drawCalls: 3, opaque: 0, translucent: 0, lines: 0, atlasCells: 0, atlasFull: 0, syncMs: 0 };
@@ -271,6 +273,7 @@ export class SceneBatch {
       small.dispose();
       this.cells.set(src, cell);
       this.loadStats.placed++;
+      this.onPlaced?.();
     } finally {
       if (img && typeof (img as any).close === "function") (img as any).close();
       this.pump();

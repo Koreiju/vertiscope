@@ -2250,7 +2250,7 @@ export class GraphView extends ItemView {
     let changed = false;
     for (const n of data.nodes) {
       const want = !!target && n === target;
-      if (!!n.hovered !== want) { n.hovered = want; changed = true; }
+      if (!!n.hovered !== want) { n.hovered = want; changed = true; this.batchDirty = true; }
     }
     if (changed) this.graph.nodeColor(this.graph.nodeColor());
     // Only a CHUNK moves the camera and opens a panel: a page node is the
@@ -2556,6 +2556,7 @@ export class GraphView extends ItemView {
    */
   async openBillboard(node: any, fromBrowser = false, fromHover = false): Promise<void> {
     if (!node || !node.id || !this.graph) return;
+    this.batchDirty = true;
     const existing = this.billboards.get(node.id);
     if (existing) {
       // Asked for by the browser -- a pin, or a click on its card in the
@@ -3601,7 +3602,11 @@ export class GraphView extends ItemView {
     // 23k proxies every frame to find each one drew nothing (0.7 s in 7).
     // Raycasting ignores `visible`, so hover, click and drag still land.
     if (!this.plantVisibleProxies) m.visible = false;
+    // Its matrix is composed when it MOVES (`nodePositionUpdate`), not by the
+    // renderer every frame for 23k proxies that mostly hold still.
+    if (!this.plantProxyAutoMatrix) m.matrixAutoUpdate = false;
     m.scale.setScalar(this.lookOf(n, relSize, media).half);
+    m.updateMatrix();
     (m as any).__proxy = true;
     if (this.plantNoPick) m.raycast = () => {};
     return m;
@@ -3751,6 +3756,7 @@ export class GraphView extends ItemView {
       }
     }
     this.detail = new Set(best);
+    this.batchDirty = true;
     this.detailStats = { computes: this.detailStats.computes + 1, last_ms: Math.round((performance.now() - t0) * 100) / 100,
                          size: best.length, candidates };
   }
@@ -3766,6 +3772,7 @@ export class GraphView extends ItemView {
       if (!r.width || !r.height) return;
       this.pointerNdc = [((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1];
       this.detailDirty = true;
+      this.batchDirty = true;
     }, { passive: true });
     this.batch = new SceneBatch(graph.scene(), graph.renderer(), (src) => this.decoded(src));
     this.frameGaps = [];
@@ -3792,8 +3799,27 @@ export class GraphView extends ItemView {
     // Every graphData swap and reheat on the recorder's clock.
     const gd = graph.graphData.bind(graph), reheat = graph.d3ReheatSimulation?.bind(graph);
     graph.graphData = (...a: any[]) => {
-      if (a.length) this.motion.event("graphData", { nodes: a[0]?.nodes?.length, links: a[0]?.links?.length });
+      if (a.length) { this.motion.event("graphData", { nodes: a[0]?.nodes?.length, links: a[0]?.links?.length }); this.batchDirty = true; }
       return gd(...a);
+    };
+    for (const k of ["nodeVal", "nodeColor"]) {
+      const f = graph[k].bind(graph);
+      graph[k] = (...a: any[]) => { if (a.length) this.batchDirty = true; return f(...a); };
+    }
+    this.batch.onPlaced = () => { this.batchDirty = true; };
+    // The scene and the graph's root group never move, but each recomposed
+    // its matrix every frame -- and three.js then re-multiplies every child's
+    // world matrix: 23k proxies, 2.8 s of every 6 s in chunk view (2026-10-11).
+    // Composed once and left; the proxies compose theirs when they move.
+    // Planted with the proxies' (`plantProxyAutoMatrix`).
+    // Checked every frame, not once: the library adds its root group to the
+    // scene on a later tick than this, and a one-time pass missed it.
+    const freezeStatic = () => {
+      if (this.plantProxyAutoMatrix) return;
+      const freeze = (o: any) => { if (o && o.matrixAutoUpdate) { o.updateMatrix(); o.matrixAutoUpdate = false; o.updateMatrixWorld(true); this.frozenAncestors++; } };
+      const sc: any = graph.scene();
+      freeze(sc);
+      for (const c of sc.children || []) if (!c.isCamera && !c.isLight && (c.isGroup || c.type === "Object3D")) freeze(c);
     };
     if (reheat) graph.d3ReheatSimulation = (...a: any[]) => { this.motion.event("reheat"); return reheat(...a); };
     const V3 = new THREE.Vector3();
@@ -3802,6 +3828,7 @@ export class GraphView extends ItemView {
       const g: any = this.graph;
       if (!g || !this.batch) return;
       this.stepGlides();
+      freezeStatic();
       if (this.motion.recording) {
         const cam = g.camera(), el = g.renderer().domElement;
         const W = el.clientWidth || 1, H = el.clientHeight || 1;
@@ -3837,6 +3864,21 @@ export class GraphView extends ItemView {
       this.batch.setVisible(!this.plantPerNode);
       if (this.plantPerNode) return;
       if (media && !this.plantAllPictures) this.refreshDetail(g);
+      // Only when something drawn has changed (2026-10-11, measured in chunk
+      // view: 4.7 s of every 5 s of script at 22.8k nodes, with nothing on
+      // screen moving -- the batch rewrote and re-uploaded every node every
+      // frame). Changes mark it dirty: the engine ticking, a glide, a new node
+      // set, sizes or colours re-read, a hover, a picture landing, a panel.
+      // And every 250 ms regardless, so a change nothing marked is drawn a
+      // quarter-second late rather than never. Planted: every frame.
+      const now = performance.now();
+      if (!this.plantSyncEveryFrame && !this.batchDirty && !this.glides.size && now - this.batchSyncedAt < 250) {
+        this.batchStats.skipped++;
+        return;
+      }
+      this.batchDirty = false;
+      this.batchSyncedAt = now;
+      this.batchStats.synced++;
       const d = g.graphData();
       const rs = g.nodeRelSize();
       this.batch.sync(d.nodes, d.links, (n) => this.lookOf(n, rs, media));
@@ -3993,6 +4035,7 @@ export class GraphView extends ItemView {
     const obj = n.__threeObj;
     if (!obj || !(wasVal > 0) || !(n.val > 0)) return;
     obj.scale.multiplyScalar(Math.cbrt(n.val / wasVal));
+    if (!obj.matrixAutoUpdate) obj.updateMatrix();
   }
 
   /**
@@ -4006,11 +4049,12 @@ export class GraphView extends ItemView {
       const src = byCid[n.id];
       if (!src || n.force || (n.image && n.image.src === src)) continue;
       n.image = { src, alt: "" };
+      this.batchDirty = true;
       n.imgLoaded = false;
       any = true;
       // A picture changes what the node occupies (a panel's half-diagonal):
       // the proxy follows. The batch reads `n.image` on its next frame.
-      if (!this.plantPerNode) (n as any).__threeObj?.scale.setScalar(this.proxyRadius(n));
+      if (!this.plantPerNode) { const o = (n as any).__threeObj; if (o) { o.scale.setScalar(this.proxyRadius(n)); if (!o.matrixAutoUpdate) o.updateMatrix(); } }
     }
     if (any && this.plantPerNode) this.graph.nodeThreeObject(this.graph.nodeThreeObject());
   }
@@ -4171,6 +4215,7 @@ export class GraphView extends ItemView {
 
   /** Close one billboard and release its surface. */
   closeBillboard(id: string): void {
+    this.batchDirty = true;
     const entry: any = this.billboards.get(id);
     if (!entry) return;
     if (entry.surface) this.removeChild(entry.surface);
@@ -4415,6 +4460,17 @@ export class GraphView extends ItemView {
    * how many chunks it stands for, and that statement survives wherever the
    * picture can afford it.
    */
+  /** Static scene ancestors whose matrices were composed once and frozen. */
+  frozenAncestors = 0;
+  /** Something drawn changed since the last batch sync (see the frame loop). */
+  private batchDirty = true;
+  private batchSyncedAt = 0;
+  /** Planted (2026-10-11): the batch rewritten every frame, changed or not. */
+  plantSyncEveryFrame = false;
+  batchStats = { synced: 0, skipped: 0 };
+  /** Planted (2026-10-11): pick proxies recompose their matrix every frame. */
+  plantProxyAutoMatrix = false;
+
   /** Planted (2026-10-11): chunk view keeps the pages view's forces. */
   plantChunkForces = false;
   /** True while the drawn view is chunk view, positioned by UMAP alone. */
@@ -5114,6 +5170,14 @@ export class GraphView extends ItemView {
     graph.nodeThreeObject((n: any) => !this.plantPerNode ? this.pickProxy(n, relSize, media)
       : n.force ? this.streamingSphere(n)
       : (media ? this.billboard(n, relSize) : null));
+    // A proxy is placed, and its matrix composed, when the layout moves it --
+    // its `matrixAutoUpdate` is off (`pickProxy`). Raycasting reads the matrix.
+    graph.nodePositionUpdate((obj: any, c: any) => {
+      if (this.plantPerNode || !obj?.__proxy || obj.matrixAutoUpdate) return false;
+      obj.position.set(c.x, c.y || 0, c.z || 0);
+      obj.updateMatrix();
+      return true;
+    });
 
     // Relax overlaps, and nothing else (`G-20`, `G-21`).
     //
@@ -5397,6 +5461,8 @@ export class GraphView extends ItemView {
     if (this.level === "chunk" && !this.plantChunkForces) {
       for (const name of ["charge", "center", "home", "contain", "collide", "hold", "treeSpring"]) graph.d3Force(name, null);
       graph.d3Force("link")?.strength(0);
+      // Nothing to integrate: two ticks put each proxy where its node is.
+      graph.cooldownTicks(2);
       for (const n of graph.graphData().nodes as any[]) {
         if (!Number.isFinite(n.fitX)) continue;
         n.x = n.fx = n.fitX; n.y = n.fy = n.fitY; n.z = n.fz = n.fitZ ?? 0;
@@ -5404,6 +5470,7 @@ export class GraphView extends ItemView {
       this.umapOnly = true;
     } else {
       this.umapOnly = false;
+      graph.cooldownTicks(Infinity);
     }
     window.setTimeout(() => this.watchForces(), 0);
 
@@ -5432,7 +5499,7 @@ export class GraphView extends ItemView {
     graph.d3ReheatSimulation();
     this.graph = graph;
     this.calmFrom = performance.now() + 6000;
-    graph.onEngineTick(() => this.govern());
+    graph.onEngineTick(() => { this.batchDirty = true; this.govern(); });
     this.startBatch(graph, media);
     // The profiler's listener reads the scene through this, so "visible"
     // is decided by what is drawn and not by what `absorb` returned.
