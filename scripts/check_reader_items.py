@@ -3,8 +3,9 @@ is restored.
 
 G-149 a right-click reopens what the reader folded -- with one of its chunks
       pinned (still drawn), the old rule folded again (`plantToggleByDrawn`).
-G-147 no own chunk inside a third of the distance to the nearest url node as
-      drawn (`plantFitSphere`: sized from the fit).
+(80)  no two of an open page's chunks overlap as drawn, none in the url node's
+      drawn body (`plantNoRelax`: the cloud is not relaxed). Replaced G-147's
+      sphere arm when the sphere was removed (2026-10-11).
 G-146 pictures only near the pointer's ray, url nodes always
       (`plantAllPictures`: every picture node draws its picture)."""
 import json, sys, time
@@ -37,22 +38,28 @@ def toggle_arm(p, url, plant):
             "second": json.loads(second)["action"], "after_second": after_second}
 
 
-SPHERE = """(()=>{const v=%s,d=v.graph.graphData();const pages=d.nodes.filter(n=>n.level==='page'&&Number.isFinite(n.x));const out=[];
-for(const p of pages){const own=d.nodes.filter(n=>n.level!=='page'&&n.url===p.url&&Number.isFinite(n.x));if(own.length<5)continue;
-let nn=Infinity;for(const q of pages){if(q!==p)nn=Math.min(nn,Math.hypot(p.x-q.x,p.y-q.y,(p.z||0)-(q.z||0)));}
-const R=nn/3;out.push({url:p.url.slice(8,50),own:own.length,R:Math.round(R),inside:own.filter(c=>Math.hypot(c.x-p.x,c.y-p.y,(c.z||0)-(p.z||0))<R*0.98).length,
-targets_inside:own.filter(c=>Math.hypot(c.fitX-p.fitX,c.fitY-p.fitY,(c.fitZ||0)-(p.fitZ||0))<R*0.98).length});}
+CLUMP = """(()=>{const v=%s,d=v.graph.graphData(),rs=v.graph.nodeRelSize(),m=v.drawnMedia;const h=(n)=>v.lookOf(n,rs,m).half;
+const pages=d.nodes.filter(n=>n.level==='page'&&Number.isFinite(n.x));const out=[];
+for(const p of pages){const own=d.nodes.filter(n=>n.level!=='page'&&!n.force&&n.url===p.url&&Number.isFinite(n.x));if(own.length<5)continue;
+const hs=own.map(h);let over=0,deep=0;for(let i=0;i<own.length;i++)for(let j=i+1;j<own.length;j++){const a=own[i],b=own[j];
+const dd=Math.hypot(a.x-b.x,a.y-b.y,(a.z||0)-(b.z||0)),s=hs[i]+hs[j];if(dd<0.98*s){over++;if(dd<0.5*s)deep++;}}
+const hp=h(p);const inBody=own.filter((c,i)=>Math.hypot(c.x-p.x,c.y-p.y,(c.z||0)-(p.z||0))<0.98*(hp+hs[i])).length;
+const sorted=hs.slice().sort((x,y)=>x-y);
+out.push({url:p.url.slice(8,50),own:own.length,overlaps:over,deep,in_url_body:inBody,half_p50:Math.round(sorted[sorted.length>>1]*10)/10,half_max:Math.round(sorted[sorted.length-1]*10)/10,page_half:Math.round(hp*10)/10});}
 return JSON.stringify(out)})()""" % V
 
 
-def sphere_arm(p, plant):
-    p.ev("(()=>{const v=%s;v.plantFitSphere=%s;v.fitChunkSizes(v.graph.graphData());v.graph.d3ReheatSimulation();return 1})()" % (V, "true" if plant else "false"))
+def clump_arm(p, plant):
+    """Item (80): an open page's chunks do not overlap AS DRAWN, nor sit in
+    the url node's drawn body. Planted `plantNoRelax`: the targets are not
+    relaxed, and the cloud overlaps."""
+    p.ev("(()=>{const v=%s;v.plantNoRelax=%s;v.fitChunkSizes(v.graph.graphData());v.graph.d3ReheatSimulation();return 1})()" % (V, "true" if plant else "false"))
     time.sleep(8)
     for _ in range(30):
         time.sleep(1); p.guard()
         if not p.ev("%s.glides.size" % V): break
     time.sleep(1)
-    return {"plant": plant, "pages": json.loads(p.ev(SPHERE))}
+    return {"plant": plant, "pages": json.loads(p.ev(CLUMP))}
 
 
 PICS = """(()=>{const v=%s,g=v.graph,rs=g.nodeRelSize();let withImg=0,drawn=0,chunkDrawn=0;for(const n of g.graphData().nodes){if(!n.image||!n.image.src)continue;withImg++;
@@ -76,7 +83,7 @@ def main():
         out["opened_for_check"] = opened_here
         if url and p.ev(OPEN):
             out["G-149"] = [toggle_arm(p, url, False), toggle_arm(p, url, True)]
-            out["G-147"] = [sphere_arm(p, True), sphere_arm(p, False)]
+            out["(80) no clump"] = [clump_arm(p, True), clump_arm(p, False)]
         if opened_here and p.ev(OPEN):
             p.ev("(async()=>{%s.plantToggleByDrawn=false;await %s.togglePage(%s);return 1})()" % (V, V, page))
         out["G-146 pages view"] = json.loads(p.ev(PICS))
@@ -87,7 +94,7 @@ def main():
     except ReaderActed as e:
         out["stopped"] = str(e)
     finally:
-        p.ev("(()=>{const v=%s;v.plantToggleByDrawn=false;v.plantFitSphere=false;v.plantAllPictures=false;return 1})()" % V)
+        p.ev("(()=>{const v=%s;v.plantToggleByDrawn=false;v.plantNoRelax=false;v.plantAllPictures=false;return 1})()" % V)
         try:
             if p.ev("%s.level" % V) == "":
                 p.ev("(()=>{const v=%s;v.fitChunkSizes(v.graph.graphData());return 1})()" % V)

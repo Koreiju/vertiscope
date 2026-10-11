@@ -112,7 +112,19 @@ lesson: four spaces *inside a list* is nesting, and only four spaces
     **media billboards**. The distiller already draws `![alt](src)` with the
     page's own alt text, never the file name, so a billboard has a caption
     without guessing one.
-  - `retrieval.ts` — the **`/` gesture** through `EditorSuggest`. Typing
+  - `gesture.ts` + `linkgesture.ts` — **the `[]()` gesture, the retrieval
+    interface** (`R-1`..`R-4`; the reader: *"all retrieval comes from the
+    singular `[]()` interface"*). Typing `[query]()` in any note makes the
+    bracket contents a query against the one `/search` ranking -- web pages,
+    vault notes and source files together. The results open in a CodeMirror
+    6 **block widget** under the line, so the lines below move down and stay
+    editable (an `EditorSuggest` popup would cover them, which is why it is
+    not used here); the list scrolls and pages as it nears its foot; a click
+    infills the link between the parentheses -- a vault note's path, an
+    exported page's note, else the page's address. Live check `R-3`.
+  - `retrieval.ts` — the older **`/` gesture** through `EditorSuggest`, kept
+    until the reader rules on it (`R-5`: it is a second retrieval surface
+    beside `[]()`). Typing
     `/some query` offers the workspace's own chunks, ranked by three-form
     retrieval, and inserts the chosen passages inline with rules between
     them. What it inserts is ordinary markdown, which is the whole reason for

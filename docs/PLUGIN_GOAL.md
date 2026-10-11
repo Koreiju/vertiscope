@@ -2661,6 +2661,18 @@ whenever its page is; (77) a second right-click on a folded url node opens it;
 (78) chunk view runs no force simulation: every node sits at its UMAP
 coordinates.*
 
+> Remove the repulsion sphere entirely please
+
+> Giant clumping problem
+
+*(The second sent with a screenshot of the url view: one cloud of very large,
+overlapping chunk spheres around a url node, beside two clouds of small ones.)*
+
+*Read as (2026-10-11): (79) item (74) is withdrawn -- there is no exclusion
+sphere around a url node; its chunks keep clear of its DRAWN body only, as any
+two nodes keep clear of each other; (80) a page's chunks are not drawn as a
+clump of large overlapping spheres: no two chunks of a page overlap as drawn.*
+
 ---
 
 

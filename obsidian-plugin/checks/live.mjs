@@ -2968,6 +2968,88 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "P-B7",
+      asks: "hovering a chunk on the page outlines, besides it, the other chunks it is embedded among (its trie node's parent): each box inside the container's own box on the page, none of them the hovered chunk, all gone when the pointer leaves; planted (plantNoStructure): only the hovered chunk",
+      async run() {
+        const fixtures = await serveFixtures();
+        const page = fixtures.origin + "/shadow_catalogue.html";
+        const arm = (planted, given, byId) => evaluate(`(async () => {
+          ${PREP}
+          const PAGE = ${JSON.stringify(page)};
+          const out = { planted: ${planted} };
+          const wc = window.require("@electron/remote").webContents.fromId(b.webview.getWebContentsId());
+          const pb = b.pipebox;
+          try {
+            b.plant.clear();
+            try { b.setLive(true); } catch (e) {}
+            out.landed = await land(PAGE, 30000);
+            let cids = [];
+            for (let i = 0; i < 80; i++) { cids = await b.sidecar.pageCids(PAGE).catch(() => []); if (cids.length >= 3 && pb.map.url === PAGE && pb.map.chunks >= 3) break; await sleep(750); }
+            out.stored = cids.length;
+            if (pb.map.url !== PAGE) return { ...out, error: "the browser's chunk map never loaded" };
+            // A result card, by its address: the cards are in shadow roots, which
+            // elementsFromPoint does not pierce, so a point grid finds only the
+            // light-DOM header -- whose chunk spans /html/body, with nothing around it.
+            let pick = ${JSON.stringify(given || null)};
+            for (let tries = 0; !pick && tries < 40; tries++) {
+              const stored = pb.map.cids().find((c) => pb.map.xpaths(c).some((x) => x.includes("result-card[3]")));
+              if (stored) {
+                const x = pb.map.xpaths(stored)[0];
+                const r = JSON.parse(await b.webview.executeJavaScript("(function(x){var n=window.__domvecSensor.node(x);if(n&&n.nodeType===3)n=n.parentElement;if(!n)return 'null';var q=n.getBoundingClientRect();return JSON.stringify({x:q.left+q.width/2,y:q.top+q.height/2});})(" + JSON.stringify(x) + ")"));
+                if (r) pick = { x: Math.round(r.x), y: Math.round(r.y), stored };
+              }
+              if (!pick) await sleep(500);
+            }
+            if (!pick) return { ...out, error: "no result card in the chunk map" };
+            out.pick = pick;
+            pb.plantNoStructure = ${planted};
+            pb.plantHoverById = ${!!byId};
+            wc.sendInputEvent({ type: "mouseMove", x: pick.x, y: pick.y });
+            await sleep(40);
+            wc.sendInputEvent({ type: "mouseMove", x: pick.x + 2, y: pick.y + 1 });
+            await sleep(1800);
+            const st = pb.structure;
+            const shown = [...b.containerEl.querySelectorAll(".domvec-chunk-struct")].filter((el) => el.style.display !== "none" && el.getBoundingClientRect().width > 0).length;
+            out.structure = st ? { stored: st.stored, container: st.container, siblings: st.siblings.length, drawn: st.drawn, ms: st.ms } : null;
+            out.shown = shown;
+            out.hovered_outline = !!(pb.hover && pb.hover.rect);
+            out.hovered_stored = pb.hover ? pb.hover.stored || null : null;
+            out.by_address = !!(pb.hover && pb.hover.byAddress);
+            if (st && st.container) {
+              // The container's OWN box on the page, read independently through
+              // the sensor's resolver -- each sibling must be embedded in it.
+              const cb = JSON.parse(await b.webview.executeJavaScript("(function(x){var n=window.__domvecSensor.node(x);if(n&&n.nodeType===3)n=n.parentElement;if(!n)return 'null';var q=n.getBoundingClientRect();return JSON.stringify({x:q.left,y:q.top,w:q.width,h:q.height});})(" + JSON.stringify(st.container) + ")"));
+              out.container_box = cb;
+              const inside = (r) => r && cb && r.x >= cb.x - 2 && r.y >= cb.y - 2 && r.x + r.w <= cb.x + cb.w + 2 && r.y + r.h <= cb.y + cb.h + 2;
+              out.inside = st.rects.filter((r) => r && inside(r)).length;
+              out.measured = st.rects.filter((r) => r).length;
+              out.hovered_among = st.siblings.includes(st.stored);
+            }
+            wc.sendInputEvent({ type: "mouseMove", x: -8, y: -8 });
+            wc.sendInputEvent({ type: "mouseLeave", x: -8, y: -8 });
+            await sleep(1200);
+            out.shown_after_leave = [...b.containerEl.querySelectorAll(".domvec-chunk-struct")].filter((el) => el.style.display !== "none").length;
+            return out;
+          } finally { pb.plantNoStructure = false; pb.plantHoverById = false; }
+        })()`, { timeout: 180000 });
+        try {
+          const clean = await arm(false);
+          const planted = await arm(true, clean && clean.pick ? clean.pick : null);
+          // The hover's own resolution, planted back to the in-page id alone.
+          const byId = await arm(false, clean && clean.pick ? clean.pick : null, true);
+          return {
+            pass: !clean.error && clean.hovered_stored === clean.pick.stored && clean.by_address
+                  && clean.structure && clean.structure.drawn >= 1 && clean.shown === clean.structure.drawn
+                  && clean.measured >= 1 && clean.inside === clean.measured && clean.hovered_among === false
+                  && clean.hovered_outline && clean.shown_after_leave === 0
+                  && !planted.error && planted.shown === 0 && planted.hovered_outline
+                  && !byId.error && byId.hovered_stored !== clean.pick.stored,
+            evidence: { clean, planted, by_id: byId, purged: await tidyFixtures(fixtures.origin) },
+          };
+        } finally { await fixtures.close(); }
+      },
+    },
+    {
       id: "R-3",
       asks: "typing `[query]()` in a note opens ranked results in a block UNDER the line: the line below moves down by the block's height and is not covered (R-2/R-3), scrolling to the bottom fetches more (G-69), and clicking a result infills its link between the parentheses (R-4); planted (plantOverlay): the floating shape, the line below does not move and is covered",
       async run() {

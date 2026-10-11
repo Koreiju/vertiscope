@@ -296,8 +296,8 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
         (url, cids) => this.eachGraph((view) => void view.showHits(url, cids)));
         // Hovering a chunk in the browser rings its node in the projector
         // (`G-38`). Brokered like everything else across the two panes.
-        browser.onHover = (cid: string, url: string) =>
-          this.eachGraph((view) => view.highlightChunk(cid, url, browser.storedCidFor(cid, url)));
+        browser.onHover = (cid: string, url: string, stored?: string) =>
+          this.eachGraph((view) => view.highlightChunk(cid, url, stored || browser.storedCidFor(cid, url)));
         // Right-click pins a chunk: its billboard opens in the graph and
         // stays while the browser's markdown side holds it (`G-78`).
         // A capture rewrote chunks: their open billboards redraw. The

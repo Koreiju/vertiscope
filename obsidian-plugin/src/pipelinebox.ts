@@ -26,6 +26,7 @@
 import type { Sidecar } from "./sidecar";
 import { profiler } from "./profile";
 import { ProfileReadout } from "./profileview";
+import { embedded } from "./chunkstructure";
 import { ChunkMap } from "./chunkmap";
 
 /** A chunk the reader right-clicked: pinned until the markdown side lets
@@ -55,6 +56,16 @@ export interface HoverState {
   at: number;
   /** The stored chunk the outline stands for, when the store knows the page. */
   stored?: string;
+  /** The stored unit came from the hovered element's own address. */
+  byAddress?: boolean;
+}
+
+/** An address and every ancestor of it, leaf first -- the walk `/resolve` does. */
+function addressChain(addr: string): string[] {
+  const out: string[] = [];
+  let a = addr;
+  while (a && out.length < 60) { out.push(a); const cut = a.lastIndexOf("/"); if (cut <= 0) break; a = a.slice(0, cut); }
+  return out;
 }
 
 /**
@@ -126,7 +137,7 @@ export class PipelineBox {
 
   constructor(private wrap: HTMLElement, private sidecar: Sidecar,
               private webview: () => any,
-              private onHoverChunk: (cid: string, url: string) => void) {
+              private onHoverChunk: (cid: string, url: string, stored?: string) => void) {
     this.outline = wrap.createDiv({ cls: "domvec-chunk-outline" });
     this.outline.hide();
     this.el = wrap.createDiv({ cls: "domvec-pipebox" });
@@ -158,6 +169,7 @@ export class PipelineBox {
     this.readout?.destroy();
     this.el.remove();
     this.outline.remove();
+    for (const el of this.structEls) el.remove();
     for (const el of this.pinEls.values()) el.remove();
     this.pinEls.clear();
   }
@@ -250,7 +262,10 @@ export class PipelineBox {
       // STORED chunk it is, for the ring and hover-first. Two sources had
       // been trading the outline, and the poll's was 81-130 ms late.
       if (this.pushedAt) {
-        if (hit && (!this.hover || this.hover.source === "page")) this.onHoverChunk(hit.cid, url);
+        // Not over a push that already named its stored unit by address: the
+        // poll's chain stops at shadow roots and named the page header for
+        // every card of a shadow-DOM list.
+        if (hit && (!this.hover || (this.hover.source === "page" && !this.hover.byAddress))) this.onHoverChunk(hit.cid, url);
         return;
       }
       if (!hit && got && got.at && got.at.box && !this.plantStoreOnly) {
@@ -297,6 +312,7 @@ export class PipelineBox {
       const ms = performance.now() - t0;
       this.latencies.push(Math.round(ms * 10) / 10);
       if (this.latencies.length > 100) this.latencies.shift();
+      void this.placeStructure(hit.cid, url);
       if (changed) {
         this.onHoverChunk(hit.cid, url);
         // Hover-first (`G-80`): the chunk under the pointer goes to the front
@@ -336,10 +352,66 @@ export class PipelineBox {
       "return any?{x:l,y:t,w:r-l,h:b-t}:null;})(" + JSON.stringify(xpaths.slice(0, 400)) + ")"), 400);
   }
 
+  // ---- the chunk structure around a hover (`P-B7`) -------------------------
+
+  /** Planted: no structure, only the hovered chunk's outline (the shape before P-B7). */
+  plantNoStructure = false;
+  /** What the structure overlay last drew, for the harness. */
+  structure: { stored: string; container: string; siblings: string[]; drawn: number;
+               rects: ({ x: number; y: number; w: number; h: number } | null)[]; ms: number } | null = null;
+  private structEls: HTMLElement[] = [];
+  private structFor = "";
+
+  /**
+   * The chunks the hovered one is embedded among (`chunkstructure.ts`: its
+   * trie node's parent, and the other chunks under it), outlined faintly on
+   * the page's own layout -- one read of the page for all of them, drawn in
+   * the cell above the webview, nothing written into the page.
+   */
+  private async placeStructure(stored: string, url: string, force = false): Promise<void> {
+    if (this.plantNoStructure || !stored || this.map.url !== url) { this.clearStructure(); return; }
+    if (!force && stored === this.structFor) return;
+    this.structFor = stored;
+    const t0 = performance.now();
+    const got = embedded(stored, this.map.cids(), (c) => this.map.xpaths(c));
+    if (!got.siblings.length) { this.clearStructure(true); this.structure = { stored, ...got, drawn: 0, rects: [], ms: 0 }; return; }
+    const wv = this.webview();
+    if (!wv) return;
+    const groups = got.siblings.map((c) => this.map.xpaths(c).slice(0, 60));
+    const rects: ({ x: number; y: number; w: number; h: number } | null)[] | null = await within(wv.executeJavaScript(
+      "(function(gs){var h=window[" + JSON.stringify(SENSOR_HANDLE) + "];return gs.map(function(xs){" +
+      "var l=1e9,t=1e9,r=-1e9,b=-1e9,any=false;for(var i=0;i<xs.length;i++){var n=null;" +
+      "try{n=h&&h.node?h.node(xs[i]):null;}catch(e){}" +
+      "if(!n){try{n=document.evaluate(xs[i],document,null,9,null).singleNodeValue;}catch(e){}}" +
+      "if(n&&n.nodeType===3)n=n.parentElement;if(!n||!n.getBoundingClientRect)continue;" +
+      "var q=n.getBoundingClientRect();if(q.width<=0&&q.height<=0)continue;any=true;" +
+      "if(q.left<l)l=q.left;if(q.top<t)t=q.top;if(q.right>r)r=q.right;if(q.bottom>b)b=q.bottom;}" +
+      "return any?{x:l,y:t,w:r-l,h:b-t}:null;});})(" + JSON.stringify(groups) + ")"), 400);
+    // The pointer moved on while the page answered: this is not its structure.
+    if (this.structFor !== stored) return;
+    const rs = rects || [];
+    while (this.structEls.length < rs.length) this.structEls.push(this.wrap.createDiv({ cls: "domvec-chunk-struct" }));
+    let drawn = 0;
+    this.structEls.forEach((el, i) => {
+      const r = i < rs.length ? rs[i] : null;
+      // Counted as DRAWN only if it is on screen: a sibling below the fold is
+      // clipped to nothing by the webview's bounds.
+      if (r && r.w > 0 && r.h > 0) { this.placeBox(el, r); if (el.style.display !== "none") drawn++; } else el.hide();
+    });
+    this.structure = { stored, ...got, drawn, rects: rs, ms: Math.round(performance.now() - t0) };
+  }
+
+  private clearStructure(keepFor = false): void {
+    for (const el of this.structEls) el.hide();
+    if (!keepFor) this.structFor = "";
+  }
+
   private clearHover() {
     if (!this.hover) return;
     this.hover = null;
     this.outline.hide();
+    this.clearStructure();
+    this.structure = null;
     this.onHoverChunk("", "");
     if (this.expanded) this.draw();
   }
@@ -567,12 +639,13 @@ export class PipelineBox {
     // animates its styles sends this every frame (johnwick ~450 a session).
     const now = performance.now();
     if (this.scrollFrame || now - this.lastScrollMeasure < 50) return;
-    if (!this.pins.length && !this.streaming.size) return;
+    if (!this.pins.length && !this.streaming.size && !this.structFor) return;
     this.scrollFrame = window.requestAnimationFrame(() => {
       this.scrollFrame = 0;
       this.lastScrollMeasure = performance.now();
       this.keepOnMiss = true;
-      void Promise.all([this.placePins(), this.followStreaming()]).finally(() => { this.keepOnMiss = false; });
+      const struct = this.structFor && this.hover ? this.placeStructure(this.structFor, this.url(), true) : null;
+      void Promise.all([this.placePins(), this.followStreaming(), struct]).finally(() => { this.keepOnMiss = false; });
     });
   }
   private lastScrollMeasure = 0;
@@ -601,11 +674,10 @@ export class PipelineBox {
     this.pushedAt = t0;
     this.pushedUrl = url;
     if (body === "-" || !body) { this.clearHover(); return; }
-    const [id, box] = body.split(" ");
+    const [id, box, addr] = body.split(" ");
     const b = (box || "").split(",").map(Number);
     if (b.length !== 4 || b.some((x) => !Number.isFinite(x))) return;
     const cid = `f:${url}#${id}`;
-    const changed = !this.hover || this.hover.cid !== cid;
     // The STORED chunk this in-page chunk belongs to, when the store knows the
     // page. The page's own chunking cuts finer than the store's -- a forum
     // topic row is five in-page chunks, one per cell, and ONE stored chunk --
@@ -613,12 +685,21 @@ export class PipelineBox {
     // showed, the whole row (2026-10-10: "This should be all one chunk, but
     // it is erroneously split up into subchunks for the same card"; item 29:
     // the outlined unit is the stored chunk).
-    const stored = this.plantPageUnit ? "" : this.storedFor(cid, url);
+    //
+    // By the hovered element's OWN address first (the sensor sends it): the
+    // store's nearest-ancestor walk, in memory. The page's chunk can be
+    // COARSER than the store's -- one in-page chunk for a shadow-DOM list of
+    // six stored cards -- and from its id alone every card resolved to the
+    // page header (2026-10-11). The id is the fallback.
+    const byAddr = this.plantPageUnit || this.plantHoverById || !addr || this.map.url !== url ? null
+      : this.map.lookup(addressChain(addr));
+    const stored = this.plantPageUnit ? "" : (byAddr ? byAddr.cid : this.storedFor(cid, url));
+    const changed = !this.hover || this.hover.cid !== cid || (!!stored && this.hover.stored !== stored);
     const sameUnit = !!stored && !!this.hover && this.hover.stored === stored;
     const prev = this.hover;
-    this.hover = { xpath: "", cid, matched: "", walked: 0, source: "page",
+    this.hover = { xpath: addr || "", cid, matched: byAddr ? byAddr.matched : "", walked: byAddr ? byAddr.walked : 0, source: "page",
                    rect: sameUnit && prev ? prev.rect : { x: b[0], y: b[1], w: b[2], h: b[3] },
-                   lines: sameUnit && prev ? prev.lines : 0, at: t0, stored: stored || undefined };
+                   lines: sameUnit && prev ? prev.lines : 0, at: t0, stored: stored || undefined, byAddress: !!byAddr };
     // ONE outline per hover. When the stored unit is known its extent is
     // drawn and nothing before it; the page's own box only if the stored one
     // has not arrived in 40 ms. Drawing the page's box and then the stored
@@ -629,7 +710,7 @@ export class PipelineBox {
     if (!xs.length || sameUnit || this.plantTwoStep) this.placeOutline();
     this.pushedHandleMs.push(performance.now() - t0);
     if (this.pushedHandleMs.length > 200) this.pushedHandleMs.shift();
-    if (changed) this.onHoverChunk(cid, url);
+    if (changed) this.onHoverChunk(cid, url, stored || undefined);
     if (xs.length) {
       let drawn = !!sameUnit || this.plantTwoStep;
       const fallback = drawn ? 0 : window.setTimeout(() => {
@@ -641,11 +722,14 @@ export class PipelineBox {
         if (r) this.hover = { ...this.hover, rect: r, lines: xs.length };
         drawn = true;
         this.placeOutline();
+        if (stored) void this.placeStructure(stored, url);
         this.storedUnitMs.push(performance.now() - t0);
         if (this.storedUnitMs.length > 200) this.storedUnitMs.shift();
       });
     }
   }
+  /** Planted: resolve a pushed hover by its in-page chunk id only (before 2026-10-11). */
+  plantHoverById = false;
   /** Planted: the page's box first, then the stored unit's (the flicker). */
   plantTwoStep = false;
   /** Hovers whose stored unit took longer than 40 ms (the page's box shown meanwhile). */

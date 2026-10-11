@@ -3165,14 +3165,46 @@
         got = best;
       }
     } catch (e) { stats.errors++; }
-    var key = got && got.box ? got.id + ' ' + got.box.map(Math.round).join(',') : '-';
+    var key = hoverKey(got, target);
     if (key === lastHoverKey) return;
     lastHoverKey = key;
     try { SAY(SIGNAL + 'hover ' + key); } catch (e) { stats.errors++; }
   }
+  // `<id> <box>` -- and the hovered element's OWN address: the page's chunk
+  // can be coarser than the store's (a shadow-DOM result list is one in-page
+  // chunk and six stored cards), and from the chunk id alone the host
+  // resolved every card to the page header's stored chunk (2026-10-11, P-B7).
+  function hoverKey(got, target) {
+    if (!got || !got.box) return '-';
+    var key = got.id + ' ' + got.box.map(Math.round).join(',');
+    var addr = '';
+    try { addr = hoverAddress(target); } catch (e) { stats.errors++; }
+    return addr ? key + ' ' + addr : key;
+  }
+  // The composed-tree address of an element, spelled as the fold spells it
+  // (`stepFor`): `tag[k]` for the k-th same-tag sibling (k > 1), and an
+  // explicit `#shadow-root` step at a boundary. Read-only; a text node is
+  // addressed by its element.
+  function hoverAddress(node) {
+    if (node && node.nodeType === 3) node = node.parentNode;
+    var steps = [], guard = 0;
+    while (node && node.nodeType === 1 && guard++ < 200) {
+      var tag = node.tagName.toLowerCase(), k = 1, s = node.previousElementSibling;
+      while (s) { if (s.tagName === node.tagName) k++; s = s.previousElementSibling; }
+      steps.unshift(k > 1 ? tag + '[' + k + ']' : tag);
+      var p = node.parentNode;
+      if (p && p.nodeType === 11 && p.host) { steps.unshift('#shadow-root'); node = p.host; }
+      else node = p;
+    }
+    return steps.length ? '/' + steps.join('/') : '';
+  }
   function onPointerOut(ev) {
     if (!SAY || ev.relatedTarget) return;
     lastHoverKey = '-';
+    // The pointer left the page: coming back to the SAME element is a new
+    // hover. Kept, the dedupe swallowed it and nothing was outlined
+    // (2026-10-11, P-B7's second arm).
+    lastHoverTarget = null;
     try { SAY(SIGNAL + 'hover -'); } catch (e) { stats.errors++; }
   }
   // A scroll moves every box and mutates nothing, so no drain follows it and
@@ -3196,7 +3228,7 @@
     if (lastHoverTarget && lastHoverTarget.isConnected) {
       var got = null;
       try { got = at(lastHoverTarget); } catch (e) { stats.errors++; }
-      var key = got && got.box ? got.id + ' ' + got.box.map(Math.round).join(',') : '-';
+      var key = hoverKey(got, lastHoverTarget);
       if (key !== lastHoverKey) {
         lastHoverKey = key;
         try { SAY(SIGNAL + 'hover ' + key); } catch (e) { stats.errors++; }

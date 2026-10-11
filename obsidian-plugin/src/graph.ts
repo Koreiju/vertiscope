@@ -3209,29 +3209,16 @@ export class GraphView extends ItemView {
       const bd = bounds.get(url);
       if (!bd) continue;
       const R = bd.R;
-      let B = bd.B;
+      const B = bd.B;
       const [px, py, pz] = at(page);
-      // The url node's own sphere: a third of the way to its nearest other url
-      // node (2026-10-10: "a healthy third or so from the minimum distance
-      // between any other URL nodes") -- measured where the url nodes ARE
-      // after the room pass above, not in the fit. Sized from the fit, it was
-      // a third of a distance that no longer existed: Comparison_of_web_browsers
-      // enforced 24.6 against a nearest url node 284 away, and 134 of its 314
-      // chunks sat inside the third (2026-10-11: "force fields still broken").
-      // And the cloud gets room OUTSIDE it: the telescope caps the sphere at
-      // 0.6 of the bound, so the bound is at least sphere / 0.6.
-      // Planted: the fit's distance, as before.
-      let nearestNow = Infinity;
-      for (const q of pages) {
-        if (q === page) continue;
-        const [qx, qy, qz] = at(q);
-        nearestNow = Math.min(nearestNow, Math.hypot(px - qx, py - qy, pz - qz));
-      }
-      const rootMin = this.plantFitSphere || !Number.isFinite(nearestNow)
-        ? this.rootShare * (R / 0.45) : this.rootShare * nearestNow;
-      if (!this.plantFitSphere) B = Math.max(B, rootMin / 0.6);
-      this.sphereStats.set(url, { nearest: Math.round(nearestNow), sphere: Math.round(rootMin), bound: Math.round(B) });
-      this.telescope(page, chunks, B, relSize, media, rootMin);
+      // No exclusion sphere around the url node (2026-10-11: "Remove the
+      // repulsion sphere entirely please", then "Giant clumping problem").
+      // It was a third of the distance to the nearest url node, and it WIDENED
+      // the page's bound to make room outside itself -- a wider bound is a
+      // wider room per chunk, so chunks were no longer shrunk and drew at full
+      // size, packed into a cloud. The chunks keep clear of the url node's
+      // DRAWN body only, as any two nodes do (`telescope`, `relaxCloud`).
+      this.telescope(page, chunks, B, relSize, media);
       // A floor, so a crowded page's chunks stay visible: the fixed collider
       // margin could eat the whole room and leave specks (val ~ 0).
       const floor = 0.35 * relSize;
@@ -3352,15 +3339,7 @@ export class GraphView extends ItemView {
 
   /** Planted (2026-10-11): url nodes the fit put on each other stay there. */
   plantPagesTogether = false;
-  /** Planted (2026-10-11): the sphere sized from the FIT's nearest url node. */
-  plantFitSphere = false;
-  /** Per open page: nearest url node now, the sphere and the bound used. */
-  sphereStats = new Map<string, { nearest: number; sphere: number; bound: number }>();
-
-  /** The url node's exclusion sphere as a share of the distance to its nearest other url node. */
-  rootShare = 1 / 3;
-
-  private telescope(page: any, chunks: any[], bound: number, relSize: number, media: boolean, rootMin = 0): void {
+  private telescope(page: any, chunks: any[], bound: number, relSize: number, media: boolean): void {
     if (this.plantNoTelescope || !chunks.length || !(bound > 0)) return;
     const px = page.fitX ?? page.x, py = page.fitY ?? page.y, pz = page.fitZ ?? page.z ?? 0;
     if (![px, py, pz].every(Number.isFinite)) return;
@@ -3374,9 +3353,10 @@ export class GraphView extends ItemView {
     // Centred on the chunks' own centroid (`centredTelescope`, camera.ts):
     // the forum's 186 chunks drew as a ball 95 units off their url node when
     // offsets were taken from the page point (2026-10-10).
-    const rootR = Math.max(drawnRadius({ ...page, val: page.val }, relSize, media) * COLLIDER_SAFETY,
-                           Math.min(rootMin, 0.6 * bound));
-    const inner = Math.max(Math.min(0.3 * bound, 1.5 * drawnRadius({ ...page, val: page.fullVal ?? page.val }, relSize, media)), rootR);
+    // The url node's drawn body, at the collider's safety -- the only room it
+    // keeps; no hole beyond it (the repulsion sphere is gone, 2026-10-11).
+    const rootR = drawnRadius({ ...page, val: page.val }, relSize, media) * COLLIDER_SAFETY;
+    const inner = rootR;
     const t = centredTelescope([px, py, pz], raw, bound, inner, this.plantOffCentre, !this.plantNoUniform);
     // The targets RELAXED: collision spheres at the safety factor, the url
     // node's own sphere kept clear, each anchored to its fit (`relaxCloud`,

@@ -851,3 +851,8 @@ button.domvec-run-fence:hover {
 .domvec-linkgesture .domvec-lg-sub { color: var(--text-faint); font-size: 0.9em; }
 /* Planted only: the floating shape the design note rejected. */
 .domvec-linkgesture-overlay { position: absolute; z-index: 30; width: 420px; }
+
+/* P-B7: the chunks the hovered one is embedded among -- faint, behind the
+   hovered chunk's own outline, never taking the pointer. */
+.domvec-chunk-struct { position: fixed; z-index: 24; pointer-events: none;
+  border: 1px dashed rgba(200, 220, 255, 0.55); border-radius: 3px; box-sizing: border-box; }

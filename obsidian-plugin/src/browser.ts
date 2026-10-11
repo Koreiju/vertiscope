@@ -383,7 +383,7 @@ export class BrowserView extends ItemView {
     try {
       this.pipebox = new PipelineBox(this.browserWrap, this.sidecar,
                                      () => this.webview,
-                                     (cid, url) => this.onHover(cid, url));
+                                     (cid, url, stored) => this.onHover(cid, url, stored));
       // Hover-first (`G-80`): the pointer is over something the store does
       // not hold yet, so drain now instead of on the next tick.
       this.pipebox.onUnresolved = () => { if (!this.draining) void this.tick(); };
@@ -1153,7 +1153,7 @@ export class BrowserView extends ItemView {
   /** Restrict the ranking to one shadow DOM, or release it (`G-70`). */
   //: Told the plugin, which tells the projector (`G-38`). Brokered, like
   //  every other cross-pane signal here: neither pane may require the other.
-  onHover: (cid: string, url: string) => void = () => {};
+  onHover: (cid: string, url: string, stored?: string) => void = () => {};
   /** The pipeline overlay; see `pipelinebox.ts`. */
   pipebox: PipelineBox | null = null;
   /** Why the overlay did not build, if it did not -- read by the harness. */

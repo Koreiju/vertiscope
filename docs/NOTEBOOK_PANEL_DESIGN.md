@@ -96,7 +96,7 @@ is a **native Obsidian markdown editor** with three things added to it:
 │   | --- | ---- |                                              │
 │   <!-- /nb-output -->                                         │
 │                                                               │
-│   [[]]  ← retrieval gesture, unchanged (P-M2, R-1)            │
+│   [query]()  ← retrieval gesture, unchanged (P-M2, R-1)       │
 │                                                               │
 │  ─────────────────────────────────────────────  P-M4: bottom  │
 │   [+ code]  [+ terminal]  [+ browser cell]                    │
