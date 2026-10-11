@@ -39,6 +39,7 @@ from __future__ import annotations
 import time
 import hashlib
 import os
+import re
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -147,6 +148,9 @@ _MIGRATIONS = [
     "ALTER TABLE Chunk ADD group_of STRING",
     "ALTER TABLE Chunk ADD group_n INT64",
     f"ALTER TABLE Chunk ADD group_embedding FLOAT[{EMBED_DIM}]",
+    # The chunk's page form as scanned: the hash of its saved snapshot blob
+    # (`snapshots/`), so a panel renders it with the page gone (2026-10-10).
+    "ALTER TABLE Chunk ADD snap STRING",
 ]
 
 
@@ -389,6 +393,30 @@ class GraphStore:
         #: Re-entrant, because the read paths call each other.
         self._db_lock = threading.RLock()
         self.conn = kuzu.Connection(self.db)
+        #: READS on a connection of their own (2026-10-10: "retrieval
+        #: breakdown during a scan over a large page"). One shared connection
+        #: made every search wait out the write in progress -- a 100.6 s
+        #: capture of legislation.gov.uk, 77.9 s of it one class of statement.
+        #: Kuzu serves a reader on another connection from a snapshot while
+        #: one writer works (`scripts/store_read_concurrency.py`:
+        #: reads p50 15.7 ms beside the writes vs p95 4.9 s on the shared
+        #: connection). One thread at a time on it, as on the writer's.
+        #:
+        #: Two conditions make it safe, both measured on scratch: auto-
+        #: checkpointing OFF (a commit's own checkpoint timed out waiting for
+        #: the readers and FAILED the write, 1 of 14), and every checkpoint
+        #: taken holding the readers' lock (30 writes, 7 checkpoints, 4,473
+        #: reads, 0 errors). The sidecar checkpoints in quiet periods.
+        self._read_lock = threading.Lock()
+        self._read_conn = None
+        self.read_stats = {"split": 0, "fallback": 0, "last_error": ""}
+        if not self.read_only and os.environ.get("DOMVEC_SHARED_READS", "") != "1":
+            try:
+                self.conn.execute("CALL auto_checkpoint=false")
+                self._read_conn = kuzu.Connection(self.db)
+                self._read_conn.set_query_timeout(15000)
+            except Exception:                       # noqa: BLE001
+                self._read_conn = None
         # DDL is a write. A read-only open of an existing store has nothing to
         # create, and running it would turn a shared read into a lock error.
         if not self.read_only:
@@ -415,6 +443,11 @@ class GraphStore:
         any test that closes and reopens, impossible — and the failure comes
         from the second open, pointing away from the missing close.
         """
+        try:
+            if self._read_conn is not None:
+                self._read_conn.close()
+        except Exception:
+            pass
         try:
             self.conn.close()
         except Exception:
@@ -1056,7 +1089,24 @@ class GraphStore:
             _close(result)
             return None
 
+    _WRITES = re.compile(r"\b(CREATE|MERGE|SET|DELETE|DETACH|DROP|ALTER|COPY|CALL|CHECKPOINT|INSTALL|LOAD|REMOVE)\b", re.I)
+
     def _rows(self, query: str, params: Optional[dict] = None) -> List[list]:
+        rc = self._read_conn
+        if rc is not None and not self._WRITES.search(query):
+            try:
+                with self._read_lock:
+                    result = rc.execute(query, params or {})
+                    out = []
+                    while result.has_next():
+                        out.append(result.get_next())
+                    _close(result)
+                self.read_stats["split"] += 1
+                return out
+            except Exception as exc:                # noqa: BLE001
+                # A timeout or anything else: the shared path still answers.
+                self.read_stats["fallback"] += 1
+                self.read_stats["last_error"] = str(exc)[:160]
         # The result is drained INSIDE the lock. A kuzu QueryResult is a
         # cursor over the connection, so iterating it after releasing lets
         # another thread execute against the connection being read -- which
@@ -1278,7 +1328,9 @@ class GraphStore:
         a page SETTLES, so a crash costs at most the page in progress.
         """
         t0 = time.perf_counter()
-        self._execute("CHECKPOINT")
+        # No read may be open across it (see `_read_conn`).
+        with self._read_lock:
+            self._execute("CHECKPOINT")
         return round((time.perf_counter() - t0) * 1000, 1)
 
     def contains_within(self, url: str):

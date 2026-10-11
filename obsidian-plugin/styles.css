@@ -668,6 +668,9 @@ button.domvec-run-fence:hover {
   border: 1px solid var(--background-modifier-border); color: var(--text-normal);
 }
 .domvec-bb-form:hover { background: var(--background-modifier-hover); }
+/* The page form could not be read from the live page: still clickable (it retries), visibly so. */
+.domvec-bb-form.is-unavailable { opacity: 0.55; text-decoration: line-through; }
+.domvec-bb-note { font-size: 0.85em; color: var(--text-muted); border-left: 2px solid var(--text-warning, #e0a000); padding: 2px 6px; margin-bottom: 6px; }
 .domvec-bb-line { white-space: pre-wrap; }
 .domvec-bb-more { color: var(--text-faint); padding-top: 4px; }
 

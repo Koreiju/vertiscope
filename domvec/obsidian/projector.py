@@ -189,6 +189,10 @@ class ChunkProjector:
         self.seed = seed
         self.lock = threading.RLock()
         self.projection = None
+        #: When the stream last delivered chunks (monotonic), and how many
+        #: global refits ran because the app went latent.
+        self.last_drain_at = time.monotonic()
+        self.latent_refits = 0
         self.epoch = 0
         self.seq = 0
         #: cid -> [x, y, z]; the answer to "where is this chunk drawn".
@@ -500,6 +504,11 @@ class ChunkProjector:
         return bool(self.fitted_chunks) and (
             workspace.store.chunk_count() >= 2 * self.fitted_chunks)
 
+    #: Seconds without chunk diffs before the app counts as latent, and the
+    #: growth since the global fit at which a latent app refits.
+    LATENT_S = 120.0
+    LATENT_GROWTH = 1.25
+
     def start(self, workspace, *, work_lock=None, fit_lock=None) -> None:
         """The worker: fit once, then drain the queue; refit at 2x growth."""
         if self._thread is not None:
@@ -511,6 +520,11 @@ class ChunkProjector:
             # store; only a missing or unreadable one is refitted.
             if not self.load(workspace):
                 self.fit(workspace)
+            if hasattr(self, "_load_local"):
+                try:
+                    self.local_stats["loaded"] = self._load_local(workspace)
+                except Exception:                   # noqa: BLE001
+                    pass
             checked = 0.0
             while not self._stop.is_set():
                 self.wanted.wait(timeout=1.0)
@@ -523,6 +537,14 @@ class ChunkProjector:
                         break
                     if got is None:
                         break
+                    self.last_drain_at = time.monotonic()
+                    # Let a waiting request in between batches. Releasing the
+                    # work lock and taking it straight back starves every
+                    # request thread -- Python's locks are not FIFO: a 5,132-
+                    # chunk backlog after a restart held /pages past 30 s and
+                    # every hover's placement with it, so the camera stopped
+                    # flying to hovered chunks (2026-10-10).
+                    time.sleep(0.02)
                 if time.monotonic() - checked > 5.0:
                     checked = time.monotonic()
                     try:
@@ -531,6 +553,18 @@ class ChunkProjector:
                             due = self.projection is None or (
                                 bool(self.fitted_chunks)
                                 and self.chunks_now >= 2 * self.fitted_chunks)
+                            # LATENT: no chunk diffs for a while, and the
+                            # corpus has grown since the global fit -- refit
+                            # now, while nothing streams, rather than wait for
+                            # 2x (2026-10-10: "ensure that we still run global
+                            # umapping when there is latent activity in the
+                            # app that doesn't stream new chunk diffs").
+                            latent = (time.monotonic() - self.last_drain_at > self.LATENT_S
+                                      and not self.queue)
+                            if (not due and latent and bool(self.fitted_chunks)
+                                    and self.chunks_now >= self.LATENT_GROWTH * self.fitted_chunks):
+                                due = True
+                                self.latent_refits += 1
                     except Exception:               # noqa: BLE001
                         due = False
                     if due and not self.fitting:
@@ -670,7 +704,14 @@ class ChunkProjector:
             "projected": len(self.pos), "pages": len(self.page_pos),
             "queue": len(self.queue), "placed_total": self.placed_total,
             "last_batch": last, "last_fit": self.fits[-1] if self.fits else None,
+            "latent_refits": self.latent_refits,
+            "latent_s": round(time.monotonic() - self.last_drain_at, 1),
+            "latent_refit_at": (round(self.LATENT_GROWTH * self.fitted_chunks)
+                                if self.fitted_chunks else None),
         }
+        if hasattr(self, "local"):
+            out["local"] = {"fitted_urls": len(self.local), "pending": len(self.local_pending),
+                            **{k: v for k, v in self.local_stats.items()}}
         if url:
             out["page"] = {"url": url,
                            "projected": len(self.by_url.get(url) or ()),
@@ -838,6 +879,21 @@ class PageProjector(ChunkProjector):
         self.refit_cost = RefitCost()
         #: Chunks the online model has been trained on (chunk scope only).
         self.trained_chunks: set = set()
+        #: Per-url LOCAL fits (2026-10-10, PLUGIN_GOAL 47-49): a UMAP over one
+        #: url's own chunks, centred, p90 radius 1, persisted beside the store.
+        #: It decides how a page's chunks sit relative to each other; the page
+        #: fit decides where the page is. `_local_positions` measured why on
+        #: RFC 9110 (300 chunks, 10-NN kept): a fit on the page's own chunks
+        #: 0.507, a transform into the page-level fit 0.086, random 0.035 --
+        #: and the shipped path was the 0.086 one.
+        self.local: Dict[str, Dict] = {}
+        self.local_pending: set = set()
+        self.local_stats: Dict = {"fits": 0, "knn_placed": 0, "last": None, "errors": 0}
+        self._local_thread = None
+        self._local_workspace_path = None
+        #: Planted by the local-fit check: every chunk placed by the page fit's
+        #: transform, as before.
+        self.plant_no_local = False
 
     FILE = "page_projector.pkl"
     #: What one online update may cost before the scope falls back to pages.
@@ -1280,6 +1336,7 @@ class PageProjector(ChunkProjector):
             names = list(page_pos)
             P = np.asarray([page_pos[n] for n in names], dtype=np.float64)
             for u, items in offsets.items():
+                items = self._local_offsets(u, items)
                 here = np.asarray(page_pos[u], dtype=np.float64)
                 d = np.linalg.norm(P - here, axis=1)
                 d = d[d > 1e-9]
@@ -1304,6 +1361,220 @@ class PageProjector(ChunkProjector):
                         d = d * (room / norm)
                     pos[c] = [float(v) for v in here + d]
         return pos, hsv
+
+    def project_transient(self, url: str, vec: Dict[str, np.ndarray]) -> Dict:
+        """Streamed chunks placed BEFORE the store holds them (2026-10-10,
+        PLUGIN_GOAL 48: "async projections and fits for streamed deltas so that
+        we don't wait with grey force-directed while hierarchical fits are
+        happening"). Through the same placement every stored chunk takes --
+        the page's local fit by nearest neighbours where it has one, else the
+        page fit's transform -- around the page's fitted position, or around
+        the transform of these chunks' own centroid for a page the fit has
+        not met yet. Nothing is kept: the ids are the stream's, not the
+        store's, and the stored chunks replace them when the capture lands."""
+        with self.lock:
+            projection = self.projection
+            page_pos = dict(self.page_pos)
+            url_of = dict(self.url_of)
+        if projection is None or not vec or self.centroid != "semantic":
+            return {"pos": {}, "hsv": {}, "page": None, "why": "no fit yet"}
+        provisional = url not in page_pos
+        if provisional:
+            cent = self._semantic_centroid(list(vec), vec)
+            where, _c = projection.place(np.asarray([cent], dtype=np.float32))
+            if where is None:
+                return {"pos": {}, "hsv": {}, "page": None, "why": "the fit could not place the page"}
+            page_pos[url] = [float(v) for v in where[0][:self.dims]]
+        for c in vec:
+            url_of[c] = url
+        had_raw = set(self.raw_pos)
+        had_scale = self.page_scale.get(url)
+        pos, hsv = self._place_chunks(projection, vec, page_pos, url_of)
+        with self.lock:
+            for c in vec:
+                if c not in had_raw:
+                    self.raw_pos.pop(c, None)
+            if had_scale is None:
+                self.page_scale.pop(url, None)
+            else:
+                self.page_scale[url] = had_scale
+        return {"pos": pos, "hsv": hsv, "page": page_pos[url], "provisional_page": provisional,
+                "local": url in self.local}
+
+    # -- per-url local fits (PLUGIN_GOAL 47-49) ------------------------------
+    #: A page needs this many chunks before a local fit means anything.
+    LOCAL_MIN = 8
+    #: Refit when this share of a page's chunks is new since its fit.
+    LOCAL_REFIT_GROWTH = 0.25
+    LOCAL_FILE = "local_fits.pkl"
+
+    def _local_offsets(self, u: str, items):
+        """`items` ([(cid, offset in the page fit)]) with each offset replaced
+        by the url's LOCAL fit position, at the same overall reach, so the
+        neighbourhood scaling that follows is unchanged. A chunk the local fit
+        has not seen is placed by its nearest fitted neighbours (immediate --
+        nothing waits on a fit); a page with no local fit yet keeps the page
+        fit's offsets and is queued for one."""
+        members = self.by_url.get(u) or set()
+        lf = self.local.get(u)
+        if len(members) >= self.LOCAL_MIN and not self.plant_no_local:
+            unseen = sum(1 for c in members if not lf or c not in lf["index"])
+            if lf is None or unseen > self.LOCAL_REFIT_GROWTH * max(1, len(lf["cids"])):
+                self._schedule_local(u)
+        if lf is None or self.plant_no_local or not items:
+            return items
+        norms = np.asarray([np.linalg.norm(o) for _c, o in items])
+        reach = float(np.percentile(norms, 90)) if len(norms) else 0.0
+        if reach <= 1e-9:
+            return items
+        out = []
+        for c, o in items:
+            i = lf["index"].get(c)
+            if i is not None:
+                loc = lf["coords"][i]
+            else:
+                loc = self._local_knn(lf, self.vec.get(c))
+                if loc is not None:
+                    self.local_stats["knn_placed"] += 1
+            out.append((c, o if loc is None else np.asarray(loc, dtype=np.float64) * reach))
+        return out
+
+    def _local_knn(self, lf, v, k: int = 5):
+        """Where an unseen chunk sits in a local fit: the weighted mean of its
+        k most similar fitted chunks' positions (cosine, weights sim^2)."""
+        if v is None or lf.get("V") is None or not len(lf["V"]):
+            return None
+        x = np.asarray(v, dtype=np.float32)
+        n = float(np.linalg.norm(x))
+        if n <= 1e-9:
+            return None
+        sims = lf["V"] @ (x / n)
+        k = min(k, len(sims))
+        top = np.argpartition(-sims, k - 1)[:k]
+        w = np.clip(sims[top], 0.0, None) ** 2
+        if float(w.sum()) <= 1e-12:
+            w = np.ones(k)
+        return (lf["coords"][top] * w[:, None]).sum(axis=0) / w.sum()
+
+    def _schedule_local(self, u: str) -> None:
+        with self.lock:
+            self.local_pending.add(u)
+            if self._local_thread is not None and self._local_thread.is_alive():
+                return
+            import threading
+            self._local_thread = threading.Thread(target=self._local_worker, name="domvec-local-umap",
+                                                  daemon=True)
+            self._local_thread.start()
+
+    def _fit_local(self, u: str) -> Optional[Dict]:
+        from . import layout as L
+        with self.lock:
+            cids = sorted(c for c in (self.by_url.get(u) or ()) if c in self.vec)
+            if len(cids) < self.LOCAL_MIN:
+                return None
+            X = np.asarray([self.vec[c] for c in cids], dtype=np.float32)
+        V = L._unit_rows(X)
+        t = time.perf_counter()
+        with (self.fit_lock or nullcontext()):
+            got = L._umap(V, dims=3, seed=0, neighbors=min(15, max(2, len(cids) - 1)), min_dist=0.25)
+        coords = np.asarray(got, dtype=np.float64)[:, :3]
+        coords = coords - coords.mean(axis=0, keepdims=True)
+        r = np.linalg.norm(coords, axis=1)
+        p90 = float(np.percentile(r, 90)) if len(r) else 0.0
+        if p90 > 1e-9:
+            coords = coords / p90
+        return {"cids": cids, "coords": coords, "V": V, "index": {c: i for i, c in enumerate(cids)},
+                "at": time.time(), "ms": round((time.perf_counter() - t) * 1000, 1)}
+
+    def _local_worker(self) -> None:
+        while True:
+            with self.lock:
+                if not self.local_pending:
+                    self._local_thread = None
+                    return
+                u = self.local_pending.pop()
+            try:
+                lf = self._fit_local(u)
+            except Exception as exc:                # noqa: BLE001
+                self.local_stats["errors"] += 1
+                self.local_stats["last_error"] = "%s: %s" % (type(exc).__name__, str(exc)[:160])
+                continue
+            if lf is None:
+                continue
+            with self.lock:
+                self.local[u] = lf
+                again = {c: self.vec[c] for c in (self.by_url.get(u) or ()) if c in self.vec}
+                projection = self.projection
+            # Re-placed through the same path every placement takes, and
+            # streamed to the pane like an online update: a glide, not a jump.
+            moved = 0
+            if projection is not None and again:
+                cpos, chsv = self._place_chunks(projection, again)
+                with self.lock:
+                    for c, xyz in cpos.items():
+                        was = self.pos.get(c)
+                        self.pos[c] = xyz
+                        if c in chsv:
+                            self.hsv[c] = chsv[c]
+                        if was is None or float(np.linalg.norm(np.asarray(xyz) - np.asarray(was))) > 0.25:
+                            self.seq += 1
+                            self.log.append((self.seq, "chunk", c))
+                            moved += 1
+            self.local_stats["fits"] += 1
+            self.local_stats["last"] = {"url": u, "n": len(lf["cids"]), "ms": lf["ms"], "moved": moved,
+                                        "at": round(time.time(), 3)}
+            self._save_local()
+
+    def _save_local(self) -> None:
+        import pickle
+        from pathlib import Path
+        base = self._local_workspace_path
+        if base is None:
+            return
+        path = Path(base) / self.LOCAL_FILE
+        with self.lock:
+            state = {u: {"cids": lf["cids"], "coords": lf["coords"].astype(np.float32), "at": lf["at"],
+                         "ms": lf.get("ms")} for u, lf in self.local.items()}
+        try:
+            tmp = path.with_suffix(".tmp")
+            with open(tmp, "wb") as fh:
+                pickle.dump({"version": 1, "local": state}, fh, protocol=pickle.HIGHEST_PROTOCOL)
+            tmp.replace(path)
+        except Exception:                           # noqa: BLE001
+            pass
+
+    def _load_local(self, workspace) -> int:
+        """The persisted local fits, kept only for chunks the projector still
+        holds; written by this process's own code beside the store."""
+        import pickle
+        from pathlib import Path
+        from . import layout as L
+        base = getattr(workspace, "path", None)
+        self._local_workspace_path = base
+        if base is None:
+            return 0
+        path = Path(base) / self.LOCAL_FILE
+        if not path.exists():
+            return 0
+        try:
+            with open(path, "rb") as fh:
+                state = pickle.load(fh)
+        except Exception:                           # noqa: BLE001
+            return 0
+        n = 0
+        with self.lock:
+            for u, lf in (state.get("local") or {}).items():
+                keep = [i for i, c in enumerate(lf["cids"]) if c in self.vec]
+                if len(keep) < self.LOCAL_MIN:
+                    continue
+                cids = [lf["cids"][i] for i in keep]
+                coords = np.asarray(lf["coords"], dtype=np.float64)[keep]
+                V = L._unit_rows(np.asarray([self.vec[c] for c in cids], dtype=np.float32))
+                self.local[u] = {"cids": cids, "coords": coords, "V": V,
+                                 "index": {c: i for i, c in enumerate(cids)}, "at": lf.get("at"),
+                                 "ms": lf.get("ms")}
+                n += 1
+        return n
 
     #: How far toward the nearest other page an expanded page's chunks may
     #: reach (their p90), as a share of that distance.

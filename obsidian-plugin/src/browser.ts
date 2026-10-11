@@ -32,7 +32,7 @@ import { ForceTree, type ForceNodeDelta } from "./forcetree";
 import { PipelineBox } from "./pipelinebox";
 import { profiler } from "./profile";
 import { Component, ItemView, MarkdownRenderer, Menu, WorkspaceLeaf } from "obsidian";
-import { putFavicon, putPictures } from "./snapshot";
+import { putBase, putFavicon, putPictures } from "./snapshot";
 import { Snapshot, dropSnapshot, getSnapshot, putSnapshot, renderSnapshot, snapshotScript, xpathsOfLines } from "./snapshot";
 
 import { LayoutNode } from "./graph";
@@ -376,6 +376,8 @@ export class BrowserView extends ItemView {
       // Hover-first (`G-80`): the pointer is over something the store does
       // not hold yet, so drain now instead of on the next tick.
       this.pipebox.onUnresolved = () => { if (!this.draining) void this.tick(); };
+      // The outline's unit is the STORED chunk once the store knows the page.
+      this.pipebox.storedFor = (cid, url) => this.storedCidFor(cid, url);
       this.pipebox.setPins(this.pinList());
     } catch (err) {
       console.error("domvec: the pipeline box failed to build", err);
@@ -699,8 +701,25 @@ export class BrowserView extends ItemView {
     const id = tree.nodeId(Number(m[2]));
     const held = tree.held().filter((h: any) => h.id === id);
     if (!held.length) return "";
-    return this.coversFor(url, held)[id] || "";
+    const exact = this.coversFor(url, held)[id];
+    if (exact || this.plantNoAncestorHover) return exact || "";
+    // For a HOVER, the stored chunk that draws the element may be anchored
+    // ABOVE the page's own (finer) chunk -- a cast card in a stored grid.
+    // `coversFor` refuses ancestors on purpose (a new paragraph inside a
+    // stored section is the diff), so every hover on an already stored page
+    // resolved to nothing and the camera stopped flying (2026-10-10: "Fly to
+    // hovered degradation spotted as well when navigated to a new website").
+    // The map's own nearest-ancestor walk, the one `/resolve` does.
+    const map = this.pipebox?.map;
+    if (!map || docKey(map.url) !== docKey(url)) return "";
+    const chain: string[] = [];
+    let a = held[0].address;
+    while (a && chain.length < 40) { chain.push(a); const cut = a.lastIndexOf("/"); if (cut <= 0) break; a = a.slice(0, cut); }
+    const hit = map.lookup(chain);
+    return hit ? hit.cid : "";
   }
+  /** Planted: hovers resolve only where `coversFor` does (the dead fly-to). */
+  plantNoAncestorHover = false;
 
   private coversFor(url: string, items: { id: string; address: string }[]): Record<string, string> {
     const map = this.pipebox?.map;
@@ -886,6 +905,72 @@ export class BrowserView extends ItemView {
     await this.takeSnapshot({ cid, url: here, matched: "", markdown: "", head: "",
                               xpaths: xpathsOfLines(lines), addrs: addressTable(lines) });
     return !!getSnapshot(cid);
+  }
+
+  // ---- saved page forms (PLUGIN_GOAL 51) ---------------------------------
+  //
+  // "I should also never see the notification that something that we have
+  // already chunked and tracked is inaccessible ... we still can render the
+  // originally scanned chunk before the shadow scripts removed the
+  // informations" (2026-10-10). Every stored chunk of the open page has its
+  // page form taken while its elements are on the page and SAVED (the blob
+  // beside the store, mapped as `Chunk.snap`), a few at a time and never
+  // while the page scrolls; a chunk a capture rewrites is taken again.
+  private savedForms = new Set<string>();
+  private savedFormsUrl = "";
+  private saverTimer = 0;
+  saverStats = { taken: 0, saved: 0, failed: 0, batches: 0, last_ms: 0, url: "" };
+  /** Streamed chunks placed before the store: the hook and its record. */
+  onProjected: (url: string, got: any) => void = () => {};
+  transientStats = { asked: 0, placed: 0, last_ms: 0 };
+  /** Planted: streamed chunks wait grey for the store, as before. */
+  plantNoTransient = false;
+  /** Planted: no page form is ever saved (the banner's world). */
+  plantNoSaver = false;
+
+  scheduleFormSaver(delay = 1200): void {
+    if (this.saverTimer || this.plantNoSaver) return;
+    this.saverTimer = window.setTimeout(() => { this.saverTimer = 0; void this.saveFormsSlice(); }, delay);
+  }
+
+  /** A capture rewrote these: their saved forms are taken again. */
+  formsDirty(cids: string[]): void {
+    for (const c of cids) this.savedForms.delete(c);
+    this.scheduleFormSaver();
+  }
+
+  private async saveFormsSlice(): Promise<void> {
+    const map = this.pipebox?.map;
+    const wv = this.webview;
+    if (!map || !wv || this.plantNoSaver) return;
+    let here = "";
+    try { here = wv.getURL(); } catch { return; }
+    if (!map.url || docKey(map.url) !== docKey(here)) return;
+    if (this.savedFormsUrl !== map.url) { this.savedForms.clear(); this.savedFormsUrl = map.url; }
+    // Not while the page moves: the clone reads computed styles.
+    if (performance.now() - (this.pipebox?.lastScrollAt || 0) < 500) { this.scheduleFormSaver(600); return; }
+    const todo = map.cids().filter((c) => !this.savedForms.has(c)).slice(0, 8);
+    if (!todo.length) return;
+    const t0 = performance.now();
+    const items: { cid: string; snap: any }[] = [];
+    for (const cid of todo) {
+      this.savedForms.add(cid);
+      const xs = map.xpaths(cid);
+      if (!xs.length) continue;
+      try {
+        const snap = await wv.executeJavaScript(snapshotScript(xs, {}));
+        if (snap && snap.html) { items.push({ cid, snap }); putSnapshot(cid, snap as Snapshot); this.saverStats.taken++; }
+      } catch { this.saverStats.failed++; }
+    }
+    if (items.length) {
+      const got: any = await this.sidecar.saveSnapshots(items);
+      if (got && !got.error) this.saverStats.saved += got.mapped || 0;
+      else { this.saverStats.failed += items.length; for (const it of items) this.savedForms.delete(it.cid); }
+      this.saverStats.batches++;
+    }
+    this.saverStats.last_ms = Math.round(performance.now() - t0);
+    this.saverStats.url = map.url;
+    if (map.cids().some((c) => !this.savedForms.has(c))) this.scheduleFormSaver(400);
   }
 
   async snapshotChunk(cid: string, url: string, again = false): Promise<boolean> {
@@ -1501,8 +1586,12 @@ export class BrowserView extends ItemView {
       // The page's projected chunks come WITH its map (S-1): drawn the moment
       // the reader lands, from the projector's memory, not through the
       // placement queue behind the page's first capture.
+      // The page's base url, for the markdown form's relative destinations.
+      try { void this.webview?.executeJavaScript("document.baseURI").then((b: any) => putBase(url, String(b || ""))).catch(() => undefined); }
+      catch { /* not attached */ }
       void map.load(this.sidecar, url).then(() => {
         if (map.url !== url || this.session !== url) return;
+        this.scheduleFormSaver();
         if (map.nodes.length) this.onChunks(map.nodes, [], "");
         // A drain that beat the map here was checked against nothing, and
         // drew the page's stored chunks as pending (Trie: 133 force nodes
@@ -1808,6 +1897,25 @@ export class BrowserView extends ItemView {
       if (!tree) { tree = new ForceTree(url); this.forceTrees.set(url, tree); }
       const delta = tree.apply(payload);
       if (delta) drainIds = delta.added.map((a) => a.id);
+      // Placed through the fit NOW, not after the store (PLUGIN_GOAL 48):
+      // the drain's new chunks, by their own text, in the delta only.
+      if (delta && !this.plantNoTransient) {
+        const want = new Set(delta.added.filter((a) => !a.branch && a.parent).map((a) => a.id));
+        const items = (payload.chunks || []).map((c: any) => ({
+          id: tree!.nodeId(Number(c.id)),
+          text: (c.lines || []).map((l: any) => String((l && l[1]) || "")).join("\n"),
+        })).filter((it: any) => want.has(it.id) && it.text.trim().length > 8).slice(0, 300);
+        if (items.length) {
+          const asked = performance.now();
+          void this.sidecar.project(url, items).then((got: any) => {
+            if (!got || !got.pos) return;
+            this.transientStats.asked += items.length;
+            this.transientStats.placed += Object.keys(got.pos).length;
+            this.transientStats.last_ms = Math.round(performance.now() - asked);
+            this.onProjected(url, got);
+          });
+        }
+      }
       if (payload.pictures) {
         (payload.chunks || []).forEach((c: any, i: number) => {
           const pic = payload.pictures[i];
@@ -2059,6 +2167,7 @@ export class BrowserView extends ItemView {
       if (cids.length) {
         void this.refreshPins(cids);
         this.onDirty(cids);
+        this.formsDirty(cids);
       }
       if (!cids.length) {
         this.say(`live · ${reply.addresses} addresses`);

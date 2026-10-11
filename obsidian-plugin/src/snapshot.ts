@@ -126,6 +126,34 @@ export function pictureFor(cid: string): string {
   return picTable()[cid] || "";
 }
 
+/**
+ * Each page's BASE url (`document.baseURI`), recorded when the page loads. A
+ * relative destination resolves against the base, not the page url: johnwick
+ * .movie sets <base href="/">, so `assets/img/x.png` on /film/... is
+ * /assets/img/x.png -- resolved against the page it was /film/assets/...,
+ * and every picture in the markdown form broke (2026-10-10).
+ */
+const BASE_KEY = "domvec-bases";
+let bases: Record<string, string> | null = null;
+function baseTable(): Record<string, string> {
+  if (bases) return bases;
+  try { bases = JSON.parse(window.localStorage.getItem(BASE_KEY) || "{}"); } catch { bases = {}; }
+  return bases!;
+}
+const pageKey = (u: string) => String(u || "").split("#")[0];
+export function putBase(url: string, base: string): void {
+  if (!url || !/^https?:/.test(base) || pageKey(base) === pageKey(url)) return;
+  const t = baseTable();
+  if (t[pageKey(url)] === base) return;
+  t[pageKey(url)] = base;
+  const keys = Object.keys(t);
+  if (keys.length > 5000) for (const k of keys.slice(0, keys.length - 5000)) delete t[k];
+  try { window.localStorage.setItem(BASE_KEY, JSON.stringify(t)); } catch { /* full */ }
+}
+export function baseFor(url: string): string {
+  return baseTable()[pageKey(url)] || url;
+}
+
 /** Snapshots by chunk id, shared by both panels for the life of the app. */
 const STORE = new Map<string, Snapshot>();
 export function putSnapshot(cid: string, s: Snapshot | null): void {

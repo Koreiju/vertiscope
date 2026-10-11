@@ -15,6 +15,7 @@
  * and draws them.
  */
 
+import { centredTelescope, zoomFor, type V3 } from "./camera";
 import { profiler } from "./profile";
 import { ItemView, MarkdownRenderer, WorkspaceLeaf, requestUrl } from "obsidian";
 import ForceGraph3D, { ForceGraph3DInstance } from "3d-force-graph";
@@ -31,7 +32,7 @@ import { MotionRecorder } from "./motion";
 
 import { Sidecar } from "./sidecar";
 import { ChunkSurface, SurfaceHost } from "./surface";
-import { faviconFor, getSnapshot, pictureFor, renderSnapshot } from "./snapshot";
+import { baseFor, faviconFor, getSnapshot, pictureFor, putSnapshot, renderSnapshot } from "./snapshot";
 import type { ActRecord, ActResult } from "./panelact";
 
 export const GRAPH_VIEW = "domvec-graph-view";
@@ -892,10 +893,13 @@ export class GraphView extends ItemView {
     let below = new Map<string, number>();
     let siblings = new Map<string, number>();
     const spring: any = (alpha: number) => {
-      const bySource = new Map<string, any[]>();
+      const bySource = new Map<string, Set<any>>();
       for (const l of links) {
         const s = l.source, t = l.target;
         if (!t || !t.force || typeof s !== "object") continue;
+        // A streamed chunk the fit has already placed is not sprung back
+        // toward its parent: the fit says where it goes (PLUGIN_GOAL 48).
+        if (t.projected) continue;
         const dx = (t.x ?? 0) - (s.x ?? 0), dy = (t.y ?? 0) - (s.y ?? 0), dz = (t.z ?? 0) - (s.z ?? 0);
         const d = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
         // Room for what hangs below this child AND for the siblings sharing
@@ -906,16 +910,24 @@ export class GraphView extends ItemView {
         const rest = STREAM.LEGACY ? 12 : Math.max(STREAM.BASE + STREAM.PER * Math.sqrt(below.get(t.id) || 0), shell);
         const k = ((d - rest) / d) * alpha * (STREAM.LEGACY ? 0.6 : STREAM.PULL);
         t.vx = (t.vx ?? 0) - dx * k; t.vy = (t.vy ?? 0) - dy * k; t.vz = (t.vz ?? 0) - dz * k;
-        const kids = bySource.get(s.id) || [];
-        kids.push(t);
-        bySource.set(s.id, kids);
+        // Grouped by PAGE, not by parent: since the stream draws the trie's
+        // branches (G-116) a page's chunks hang under many parents, and
+        // cousins under neighbouring branches were never kept apart -- G-93
+        // measured 82 of 126 streamed nodes overlapping, nn p10 0.1 radii
+        // (2026-10-07), where it passed with every chunk a sibling.
+        const group = STREAM.LEGACY ? s.id : (t.url || s.id);
+        let kids = bySource.get(group);
+        if (!kids) { kids = new Set(); bySource.set(group, kids); }
+        kids.add(t);
+        if (!STREAM.LEGACY && s.force && s.url === t.url) kids.add(s);
       }
-      // SIBLINGS apart: with no charge and no collision room, the spring
-      // alone let force nodes under one parent settle on one point (G-4
-      // counted 8 coincident nodes). Short-range and among siblings only,
-      // so nothing the projector placed is touched.
+      // A PAGE's streamed nodes apart: with no charge and no collision room,
+      // the spring alone let force nodes under one parent settle on one point
+      // (G-4 counted 8 coincident nodes). Short-range and among force nodes
+      // only, so nothing the projector placed is touched.
       const clear = STREAM.LEGACY ? 8 : 2 * STREAM.RADIUS * STREAM.SAFETY + STREAM.MARGIN;
-      for (const kids of bySource.values()) {
+      for (const kidSet of bySource.values()) {
+        const kids = [...kidSet];
         if (kids.length < 2 || (STREAM.LEGACY && kids.length > 400)) continue;
         // A grid of cells one clearance wide: each node is compared with the
         // 27 cells around it, so a 1,260-sibling drain costs O(n), not O(n^2)
@@ -2241,25 +2253,64 @@ export class GraphView extends ItemView {
    * camera; the panel a hover opened closes when the hover moves on or stops
    * -- unless the reader pinned it (dragged it, or the browser holds it).
    */
+  /**
+   * Panels opened by hovering in the browser PERSIST after the hover ends and
+   * close themselves a minute after their chunk was last hovered (2026-10-10:
+   * "showing hovered panels in the 3D gui when hovered on the 2D browser
+   * should persist, but disappear after a minute maybe" -- replacing
+   * 2026-10-06's "closes them when the hovering stops"). Hovering it again
+   * renews the minute; at most `hoverPanelCap` stay open, oldest first out.
+   */
+  hoverPanelTtlMs = 60000;
+  /** ONE: only the most recently hovered panel persists (2026-10-10: "I should
+   *  only see a single most recently hovered and flown to panel persist its
+   *  billboard rendering, not multiple"). */
+  hoverPanelCap = 1;
+  /** Planted: the old close-on-hover-end behaviour. */
+  plantCloseOnLeave = false;
+  hoverStats = { empty_skipped: 0 };
+  private hoverSweep = 0;
+
+  private expireHoverPanels(): void {
+    const now = performance.now();
+    const open = [...this.billboards.entries()].filter(([, e]: [string, any]) => e.fromHover && !e.pinned && !e.fromBrowser);
+    for (const [id, e] of open as [string, any][]) {
+      if (id === this.hoverBb) continue;
+      if (now - (e.hoverAt ?? e.openedAt ?? now) > this.hoverPanelTtlMs) {
+        this.closeBillboard(id);
+        this.panelTimes.close.push(now - (e.hoverAt ?? now));
+        if (this.panelTimes.close.length > 200) this.panelTimes.close.shift();
+      }
+    }
+    const left = [...this.billboards.entries()].filter(([, e]: [string, any]) => e.fromHover && !e.pinned && !e.fromBrowser)
+      .sort((a: any, b: any) => (a[1].hoverAt ?? 0) - (b[1].hoverAt ?? 0));
+    while (left.length > this.hoverPanelCap) {
+      const [id] = left.shift() as [string, any];
+      if (id !== this.hoverBb) this.closeBillboard(id);
+    }
+    if (!this.hoverSweep && left.length) this.hoverSweep = window.setInterval(() => {
+      this.expireHoverPanels();
+      if (![...this.billboards.values()].some((e: any) => e.fromHover)) { window.clearInterval(this.hoverSweep); this.hoverSweep = 0; }
+    }, 1000);
+  }
+
   private hoverPanel(target: any): void {
     if (this.plantNoFocus) return;
     const isChunk = !!target && target.level !== "page" && target.level !== "path";
     const close = () => {
       const e: any = this.hoverBb ? this.billboards.get(this.hoverBb) : null;
-      if (e && e.fromHover && !e.pinned && !e.fromBrowser) this.closeBillboard(this.hoverBb);
+      if (e && e.fromHover && !e.pinned && !e.fromBrowser) {
+        if (this.plantCloseOnLeave) this.closeBillboard(this.hoverBb);
+        else e.hoverAt = performance.now();          // its minute starts now
+      }
       this.hoverBb = "";
+      if (!this.plantCloseOnLeave) this.expireHoverPanels();
     };
     if (!isChunk) {
       if (this.hoverBbPending === "-" || !this.hoverBb) return;
       window.clearTimeout(this.hoverBbTimer);
       this.hoverBbPending = "-";
-      const asked = performance.now();
-      this.hoverBbTimer = window.setTimeout(() => {
-        this.hoverBbPending = "";
-        const had = this.hoverBb;
-        close();
-        if (had) { this.panelTimes.close.push(performance.now() - asked); if (this.panelTimes.close.length > 200) this.panelTimes.close.shift(); }
-      }, 250);
+      this.hoverBbTimer = window.setTimeout(() => { this.hoverBbPending = ""; close(); }, 250);
       return;
     }
     // The open chunk asserted again CANCELS a pending close: without this a
@@ -2277,9 +2328,20 @@ export class GraphView extends ItemView {
     this.hoverBbTimer = window.setTimeout(async () => {
       this.hoverBbPending = "";
       close();
-      if (this.billboards.has(target.id)) return;
+      const had: any = this.billboards.get(target.id);
+      // Already open (an earlier hover's panel, still within its minute):
+      // renewed, not reopened.
+      if (had) { this.hoverBb = target.id; had.hoverAt = performance.now(); this.expireHoverPanels(); return; }
+      // Nothing to show -- no stored lines and no page form: a hover opens
+      // no panel ("(no lines stored for this chunk)", 2026-10-10).
+      const pay: any = await this.chunkPayload(target.id);
+      if (!(pay && pay.lines && pay.lines.length) && !getSnapshot(target.id)) { this.hoverStats.empty_skipped++; return; }
+      if (this.hoverBbPending) return;              // the pointer moved on meanwhile
       this.hoverBb = target.id;
       await this.openBillboard(target, false, true);
+      const e: any = this.billboards.get(target.id);
+      if (e) e.hoverAt = performance.now();
+      this.expireHoverPanels();
     }, 150);
   }
 
@@ -2299,9 +2361,16 @@ export class GraphView extends ItemView {
 
   /** Planted by the focus check: hover rings only, the camera stays. */
   plantNoFocus = false;
-  focusStats = { asked: 0, flown: 0, followed: 0, released: 0, last: "" };
+  focusStats = { asked: 0, flown: 0, followed: 0, released: 0, last: "", zoomed: 0, kept_zoom: 0, last_d: 0 };
+  /** The navigation the camera last zoomed for, and when (performance.now). */
+  private zoomState = { zoomedFor: "", zoomedAt: -1e9 };
+  /** Planted: every flight re-zooms (the old behaviour), and tracking copies every jitter. */
+  plantAlwaysZoom = false;
+  plantNoSmooth = false;
   private focusTimer = 0;
   private focusPending: any = null;
+  /** What the hover currently asks for, so a deferred flight can tell it is still wanted. */
+  private focusWant: any = null;
   private focusFrame = 0;
   private focusNode: any = null;
   private focusLast: number[] | null = null;
@@ -2319,6 +2388,7 @@ export class GraphView extends ItemView {
    */
   private focusOn(target: any): void {
     if (this.plantNoFocus || !this.graph) return;
+    this.focusWant = target || null;
     if (!target) { window.clearTimeout(this.focusTimer); this.focusPending = null; return; }
     // The SAME target asked again (every pushed and every polled hover asks)
     // leaves its dwell alone: resetting it on each ask meant it never ran --
@@ -2330,9 +2400,20 @@ export class GraphView extends ItemView {
     this.focusTimer = window.setTimeout(() => { this.focusPending = null; this.flyTo(target); }, 200);
   }
 
-  private flyTo(n: any): void {
+  private flyTo(n: any, waited = 0): void {
     const g: any = this.graph;
-    if (!g || !Number.isFinite(n.x)) return;
+    if (!g) return;
+    // A node just placed from the store has no position until the forces
+    // tick it, and the hover that asked for it has already stopped asking:
+    // returning here left the camera where it was, with the panel open
+    // (G-113 on the working store, 2026-10-07: panel yes, flights 0). Wait
+    // for the position for as long as this node is still what is hovered.
+    if (!Number.isFinite(n.x)) {
+      if (waited < 3000 && this.focusWant === n && !this.plantNoFocus) {
+        this.focusTimer = window.setTimeout(() => this.flyTo(n, waited + 100), 100);
+      }
+      return;
+    }
     if (!this.focusHooked) {
       const c: any = g.controls();
       if (c && c.addEventListener) {
@@ -2345,13 +2426,28 @@ export class GraphView extends ItemView {
     }
     const cam = g.camera().position;
     const r = drawnRadius(n, g.nodeRelSize(), this.media());
-    const D = Math.max(45, 10 * r);
+    // ZOOM on a new navigation only; after that the reader's own zoom is kept
+    // and the camera just re-aims (2026-10-10: "fly-to-node should zoom
+    // initially, but preserve user zoom while still tracking during
+    // fly-throughs"; "some kind of debounce on ... re-setting the zoom action
+    // for 'new navigations'"). A navigation is the browser cell's page; two
+    // within 1.5 s zoom once.
+    const bv: any = this.app.workspace.getLeavesOfType("domvec-browser-view")[0]?.view;
+    const nav = String((bv && bv.session) || n.url || "");
+    const ctl: any = g.controls();
+    const tgt = ctl && ctl.target ? ctl.target : null;
+    const userD = tgt ? Math.hypot(cam.x - tgt.x, cam.y - tgt.y, cam.z - tgt.z) : NaN;
+    const decided = zoomFor(this.zoomState, nav, performance.now(), userD, Math.max(45, 10 * r),
+                            { always: this.plantAlwaysZoom });
+    const D = decided.distance;
+    if (decided.zoom) this.focusStats.zoomed++; else this.focusStats.kept_zoom++;
     let dx = cam.x - n.x, dy = cam.y - n.y, dz = cam.z - (n.z || 0);
     const len = Math.hypot(dx, dy, dz) || 1;
     dx /= len; dy /= len; dz /= len;
     const to = { x: n.x + dx * D, y: n.y + dy * D, z: (n.z || 0) + dz * D };
     g.cameraPosition(to, { x: n.x, y: n.y, z: n.z || 0 }, 400);
     this.focusStats.flown++;
+    this.focusStats.last_d = Math.round(D * 10) / 10;
     this.focusStats.last = String(n.id).slice(0, 60);
     this.focusNode = null;
     window.setTimeout(() => {
@@ -2368,11 +2464,19 @@ export class GraphView extends ItemView {
       const ids = g.graphData().nodes;
       if (!ids.includes(n)) { this.focusNode = null; this.focusFrame = 0; return; }
       const [lx, ly, lz] = this.focusLast;
-      const ddx = n.x - lx, ddy = n.y - ly, ddz = (n.z || 0) - lz;
-      if (Math.abs(ddx) + Math.abs(ddy) + Math.abs(ddz) > 1e-3) {
+      // Debounced: a dead-band ignores the collider's sub-0.05 wobble, and
+      // the camera closes a quarter of the gap a frame -- it glides after the
+      // node instead of copying every jitter (2026-10-10: "some kind of
+      // debounce on continuous tracking"). The reader's distance is kept: the
+      // camera and its target move by the same step.
+      const ex = n.x - lx, ey = n.y - ly, ez = (n.z || 0) - lz;
+      if (Math.abs(ex) + Math.abs(ey) + Math.abs(ez) > (this.plantNoSmooth ? 1e-3 : 0.05)) {
+        const k = this.plantNoSmooth ? 1 : 0.25;
+        const ddx = ex * k, ddy = ey * k, ddz = ez * k;
         const cam = g.camera().position;
-        g.cameraPosition({ x: cam.x + ddx, y: cam.y + ddy, z: cam.z + ddz }, { x: n.x, y: n.y, z: n.z || 0 }, 0);
-        this.focusLast = [n.x, n.y, n.z || 0];
+        const to = [lx + ddx, ly + ddy, lz + ddz];
+        g.cameraPosition({ x: cam.x + ddx, y: cam.y + ddy, z: cam.z + ddz }, { x: to[0], y: to[1], z: to[2] }, 0);
+        this.focusLast = to;
         this.focusStats.followed++;
       }
       this.focusFrame = window.requestAnimationFrame(step);
@@ -2412,6 +2516,10 @@ export class GraphView extends ItemView {
       this.billboardLayer = host.createDiv({ cls: "domvec-bb-layer" });
     }
     const el = this.billboardLayer.createDiv({ cls: "domvec-bb" });
+    // Which chunk this panel is, readable without the view: a hover panel and
+    // a pinned one can be open at once, and "the first .domvec-bb" read the
+    // wrong one (D-36, 2026-10-07).
+    el.dataset.cid = String(node.id);
     const head = el.createDiv({ cls: "domvec-bb-head" });
     // The chunk's full patricia-trie address (2026-10-06: "the header of the
     // panel should show the full patricia trie address"): `url : xpath`,
@@ -2528,31 +2636,69 @@ export class GraphView extends ItemView {
     void this.upgradeToPage(entry).then(() => this.noteBillboard(node, body, entry.form || "none"));
   }
 
-  /** The page form at once, if the cell has the chunk's page and the
-   *  snapshot shows something. False otherwise; nothing drawn. */
-  private async tryPageForm(entry: any): Promise<boolean> {
+  /**
+   * The chunk's page form: read from the live page, else the one SAVED when
+   * it was scanned (`snapshots.py`, 2026-10-10: "I should also never see the
+   * notification that something that we have already chunked and tracked is
+   * inaccessible"). "live", "saved", or null when neither exists.
+   */
+  private async pageFormFor(entry: any, live = true): Promise<"live" | "saved" | null> {
+    const id = entry.node.id;
     const ask = this.snapshotFor || ((cid: string, url: string, again?: boolean) => {
       const b: any = this.app.workspace.getLeavesOfType("domvec-browser-view")[0]?.view;
       return b && typeof b.snapshotChunk === "function" ? b.snapshotChunk(cid, url, again) : Promise.resolve(false);
     });
-    try { await ask(entry.node.id, entry.node.url || "", true); } catch { return false; }
+    let fresh = false;
+    if (live) { try { fresh = !!(await ask(id, entry.node.url || "", true)); } catch { /* not on the page */ } }
+    if (fresh || (live && getSnapshot(id) && this.lastSnapOk(id))) return "live";
+    if (this.plantNoSaved) return null;            // nothing kept from the scan
+    const saved: any = await this.sidecar.savedSnapshot(id).catch(() => null);
+    if (saved && saved.html) { putSnapshot(id, saved); entry.savedForm = true; this.formStats.saved++; return "saved"; }
+    return getSnapshot(id) ? "live" : null;
+  }
+
+  private lastSnapOk(id: string): boolean {
+    const b: any = this.app.workspace.getLeavesOfType("domvec-browser-view")[0]?.view;
+    const last = b && b.lastSnapshot;
+    return !!last && last.cid === id && !!last.ok;
+  }
+
+  /** How much of the chunk the page form shows: the share of the markdown's
+   *  words in its text (link targets excluded -- a rendered link shows its
+   *  text). A page HIDES collapsed menus and language lists, and their page
+   *  form showed 5-25% of chunks the store holds whole (Monarch butterfly,
+   *  2026-10-10, 21 of 36 panels below 98%). */
+  private async pageCoverage(entry: any): Promise<number> {
     const snap = getSnapshot(entry.node.id);
+    if (!snap) return 0;
+    const payload: any = await this.chunkPayload(entry.node.id);
+    const md = payload && payload.lines ? payload.lines.map((l: any) => l.text).join("\n") : "";
+    const words = (t: string) => (String(t || "")
+      .replace(/!\[[^\]]*\]\([^)]*\)/g, " ").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+      .replace(/<[^>]+>/g, " ").replace(/https?:\/\/\S+/g, " ").toLowerCase().match(/[\p{L}\p{N}]{3,}/gu) || []);
+    const want = words(md);
+    if (!want.length) return 1;
+    const text = String(snap.html || "").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ");
+    const have = new Set(words(text));
+    return want.filter((w) => have.has(w)).length / want.length;
+  }
+
+  /** The page form at once, if it exists and shows the chunk; false otherwise, nothing drawn. */
+  private async tryPageForm(entry: any): Promise<boolean> {
+    const got = await this.pageFormFor(entry);
+    const snap = got ? getSnapshot(entry.node.id) : null;
     if (!snap || !this.billboards.has(entry.node.id)) return false;
     const html = String(snap.html || "");
     const text = html.replace(/<style[\s\S]*?<\/style>/gi, "").replace(/<[^>]+>/g, " ").replace(/&[a-z#0-9]+;/gi, " ").trim();
-    if (text.length < 3 && !/<(img|video|svg|canvas|picture)/i.test(html)) return false;
+    if (text.length < 3 && !/<(img|video|svg|canvas|picture)/i.test(html)) return false;
     return this.renderForm(entry, "page", false);
   }
 
-  /** The page form, if its snapshot shows something; else the markdown stays. */
+  /** The page form, if it exists and shows the chunk; else the markdown stays. */
   private async upgradeToPage(entry: any): Promise<void> {
-    if (!this.billboards.has(entry.node.id)) return;
-    const ask = this.snapshotFor || ((cid: string, url: string, again?: boolean) => {
-      const b: any = this.app.workspace.getLeavesOfType("domvec-browser-view")[0]?.view;
-      return b && typeof b.snapshotChunk === "function" ? b.snapshotChunk(cid, url, again) : Promise.resolve(false);
-    });
-    try { await ask(entry.node.id, entry.node.url || "", true); } catch { return; }
-    const snap = getSnapshot(entry.node.id);
+    if (!this.billboards.has(entry.node.id) || entry.form !== "markdown" || entry.userForm) return;
+    const got = await this.pageFormFor(entry);
+    const snap = got ? getSnapshot(entry.node.id) : null;
     if (!snap || !this.billboards.has(entry.node.id) || entry.form !== "markdown" || entry.userForm) return;
     const html = String(snap.html || "");
     const text = html.replace(/<style[\s\S]*?<\/style>/gi, "").replace(/<[^>]+>/g, " ").replace(/&[a-z#0-9]+;/gi, " ").trim();
@@ -2562,6 +2708,13 @@ export class GraphView extends ItemView {
     this.panelTimes.page_paint.push(entry.pagePaintMs);
     if (this.panelTimes.page_paint.length > 200) this.panelTimes.page_paint.shift();
   }
+
+  /** A panel OPENS in page form only when the page draws this share of the chunk. */
+  PAGE_FORM_COVERAGE = 0.9;
+  /** Planted: page form whatever share of the chunk it shows (the Monarch chrome panels). */
+  plantAnyCoverage = false;
+  /** Planted: no saved page form is ever read (the banner's world). */
+  plantNoSaved = false;
 
   /** The chunk's markdown, as Obsidian renders a note: one line per detection,
    *  its structural indent dropped (four spaces would make a code block). */
@@ -2590,7 +2743,7 @@ export class GraphView extends ItemView {
     // resolves them against the vault and every picture breaks. A video or
     // an audio file is a player, not a broken <img> (2026-10-06: "a lot of
     // rich video, audio, and images ... not registering").
-    const base = String((payload && payload.url) || "");
+    const base = baseFor(String((payload && payload.url) || ""));
     const abs = (u: string) => { try { return new URL(u, base).href; } catch { return u; } };
     const DEST = /(!?)\[([^\]]*)\]\(((?:[^()\s]|\((?:[^()\s]|\([^()\s]*\))*\))*)\)/g;
     const esc = (u: string) => u.replace(/"/g, "&quot;");
@@ -2616,6 +2769,87 @@ export class GraphView extends ItemView {
    * diff had rewritten showed its old rendering: "The html-side of the chunk
    * also doesn't update"). False when that form cannot be drawn.
    */
+  /**
+   * The page form, COMPLETE (2026-10-10: "The following method of feature
+   * degradation on the dual panel representation shall be deprecated, with
+   * full rendering, completeness, and matching guarantees as appropriate for
+   * both panel views"). What the page DREW -- live, or as saved at scan time --
+   * and beneath it every line of the chunk the page did not draw (a hidden
+   * menu, a collapsed list), so the page form holds everything the markdown
+   * form does. With nothing drawn or saved, the store's own HTML of the chunk.
+   * Null only when the store holds no lines at all.
+   */
+  private async completePageSnapshot(entry: any): Promise<any | null> {
+    const id = entry.node.id;
+    const payload: any = entry.payload || (await this.chunkPayload(id));
+    if (payload) entry.payload = payload;
+    const lines: any[] = (payload && payload.lines) || [];
+    const base = baseFor(String((payload && payload.url) || entry.node.url || ""));
+    const abs = (u: string) => { try { return new URL(u, base).href; } catch { return u; } };
+    const esc = (t: string) => String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    const DEST = /(!?)\[([^\]]*)\]\(((?:[^()\s]|\((?:[^()\s]|\([^()\s]*\))*\))*)\)/g;
+    const lineHtml = (t: string) => {
+      const txt = String(t || "").replace(/^\s+/, "").replace(/^#+\s*/, "").replace(/^[-*]\s+/, "");
+      let out = "", last = 0, m: RegExpExecArray | null;
+      DEST.lastIndex = 0;
+      while ((m = DEST.exec(txt))) {
+        out += esc(txt.slice(last, m.index));
+        const u = abs(m[3] || "");
+        if (m[1]) out += /^https?:/.test(u) ? `<img src="${esc(u)}" alt="${esc(m[2])}" style="max-width:100%;height:auto">` : "";
+        else out += /^https?:/.test(u) && !/^#/.test(m[3] || "") ? `<a href="${esc(u)}" data-href="${esc(u)}">${esc(m[2] || u)}</a>` : esc(m[2]);
+        last = m.index + m[0].length;
+      }
+      out += esc(txt.slice(last));
+      return out.trim() ? `<div style="margin:2px 0">${out}</div>` : "";
+    };
+    // Destinations are never content: `](dest)` is dropped whatever the
+    // brackets before it hold -- a footnote `[[ 77 ]](#cite_note-...)` nests
+    // them, and its "cite note" counted as undrawn words (ko.wikipedia, Higgs
+    // boson, 2026-10-10: the complement repeated what the page had drawn).
+    const words = (t: string) => (String(t || "").replace(/!\[[^\]]*\]\([^)]*\)/g, " ")
+      .replace(/\]\([^)]*\)/g, "] ").replace(/<[^>]+>/g, " ").replace(/https?:\/\/\S+/g, " ")
+      .toLowerCase().match(/[\p{L}\p{N}]{3,}/gu) || []);
+    // A picture is the same picture at any size: a page draws the thumbnail
+    // (`/thumb/.../250px-X.jpg`) of the file a line names (`X.jpg`).
+    const picName = (u: string) => {
+      let n = String(u || "").split("#")[0].split("?")[0];
+      try { n = decodeURIComponent(n); } catch { /* as is */ }
+      n = (n.split("/").pop() || "").toLowerCase().replace(/^\d+px-/, "");
+      return n.replace(/\.(png|jpe?g|gif|webp|svg)\.(png|jpe?g|gif|webp)$/, ".$1");
+    };
+    let snap: any = getSnapshot(id);
+    if (!snap) {
+      const html = String((payload && payload.html) || "");
+      const body = html.trim() ? html : lines.map((l) => lineHtml(l.text)).join("");
+      if (!body.trim()) return null;
+      this.formStats.from_store++;
+      return { html: body, bg: "", color: "", font: "", elements: 0, found: 0,
+               url: String((payload && payload.url) || entry.node.url || ""), at: Date.now() };
+    }
+    if (this.plantNoComplement || !lines.length) return snap;
+    const drawn = new Set(words(String(snap.html || "").replace(/<style[\s\S]*?<\/style>/gi, " ")));
+    const drawnPics = new Set<string>();
+    String(snap.html || "").replace(/<img[^>]*\bsrc="([^"]+)"/gi, (_m: string, u: string) => { drawnPics.add(picName(u)); return ""; });
+    const missing = lines.filter((l) => {
+      const t = String(l.text || "");
+      const img = /!\[[^\]]*\]\(([^)\s]+)/.exec(t);
+      if (img) return !drawnPics.has(picName(abs(img[1])));
+      // Only in-page jumps (`#cite_note-...`): the page drew them as marks.
+      const rest = t.replace(/\[[^\]]*\]?\]\(#[^)]*\)/g, " ").replace(/[\[\]\s,;.]/g, "");
+      if (!rest) return false;
+      const w = words(t);
+      return w.length > 0 && w.filter((x) => !drawn.has(x)).length / w.length > 0.5;
+    });
+    if (!missing.length) return snap;
+    this.formStats.complemented++;
+    entry.complemented = missing.length;
+    return { ...snap, html: String(snap.html) +
+      '<div class="domvec-complement" style="border-top:1px dashed rgba(128,128,128,.6);margin-top:8px;padding-top:6px">' +
+      missing.map((l) => lineHtml(l.text)).join("") + "</div>" };
+  }
+  /** Planted: the page form shows only what the page drew (the incomplete one). */
+  plantNoComplement = false;
+
   private async renderForm(entry: any, form: "page" | "markdown", fresh = true): Promise<boolean> {
     const body = entry.el.querySelector(".domvec-bb-body") as HTMLElement | null;
     if (!body) return false;
@@ -2626,7 +2860,7 @@ export class GraphView extends ItemView {
         return b && typeof b.snapshotChunk === "function" ? b.snapshotChunk(cid, url, again) : Promise.resolve(false);
       });
       try { await ask(id, entry.node.url || "", fresh); } catch { /* not open in the cell */ }
-      const snap = getSnapshot(id);
+      const snap = await this.completePageSnapshot(entry);
       if (!snap) return false;
       body.empty();
       renderSnapshot(body, snap, {
@@ -2662,13 +2896,32 @@ export class GraphView extends ItemView {
    * clicked at the top right corner of the panel to get the page and markdown
    * sizing unique").
    */
+  /** The page button's outcomes, for the harness: asked, shown, unavailable (with why). */
+  formStats = { asked: 0, shown: 0, unavailable: 0, saved: 0, from_store: 0, complemented: 0, last_why: "" };
+
   private async switchForm(entry: any, form: "page" | "markdown"): Promise<void> {
     const before = entry.el.getBoundingClientRect();
     const host = (this.billboardLayer as HTMLElement).getBoundingClientRect();
     const cx = before.left + before.width / 2 - host.left;
     const cy = before.top + before.height / 2 - host.top;
+    if (form === "page") {
+      // A FRESH read of the live page, else the form SAVED at scan time: the
+      // snapshot taken when the panel opened may have failed (the chunk
+      // scrolled out of a list since) and the button rendered only that
+      // cached one -- it did nothing (2026-10-10: "'Page' button doesn't
+      // work"), then said "scroll to where it was" ("I should also never see
+      // the notification ...").
+      this.formStats.asked++;
+      if (!this.plantDeadPageButton) await this.pageFormFor(entry);
+    }
     const ok = await this.renderForm(entry, form);
-    if (!ok) return;
+    if (!ok) {
+      // Only a chunk with NO stored lines lands here; the button is never
+      // shown as degraded (2026-10-10: that state "shall be deprecated").
+      if (form === "page") { this.formStats.unavailable++; this.formStats.last_why = "no lines stored"; }
+      return;
+    }
+    if (form === "page") this.formStats.shown++;
     const after = entry.el.getBoundingClientRect();
     const left = cx - after.width / 2, top = cy - after.height / 2;
     if (entry.pinned) {
@@ -2753,7 +3006,7 @@ export class GraphView extends ItemView {
     }
     const byUrl = new Map<string, any[]>();
     for (const n of data.nodes) {
-      if (n.force || n.level === "page" || !n.url) continue;
+      if ((n.force && !n.projected) || n.level === "page" || !n.url) continue;
       (byUrl.get(n.url) || byUrl.set(n.url, []).get(n.url)!).push(n);
     }
     for (const [url, chunks] of byUrl) {
@@ -2823,7 +3076,7 @@ export class GraphView extends ItemView {
   /** Planted by the telescope's check: chunks at their raw fit (the packed ball). */
   plantNoTelescope = false;
   /** Per open page, what the last telescope did (for the harness). */
-  teleStats = new Map<string, { n: number; raw_p90: number; bound: number; inner: number; k: number; clamped: number }>();
+  teleStats = new Map<string, { n: number; raw_p90: number; bound: number; inner: number; k: number; clamped: number; centre_off?: number }>();
 
   /**
    * A page's chunks TELESCOPED radially about its node (2026-10-06: "the umap
@@ -2840,39 +3093,74 @@ export class GraphView extends ItemView {
    * second pass never telescopes a telescoped position; a fit that changed
    * underneath (`fitX` no longer what was written) is taken as the new raw.
    */
+  /** Planted: the page button renders only the cached snapshot (the dead button). */
+  plantDeadPageButton = false;
+  /**
+   * Streamed chunks placed by the fit before the store holds them (2026-10-10,
+   * PLUGIN_GOAL 48: "so that we don't wait with grey force-directed while
+   * hierarchical fits are happening"). Each takes the fit's colour and glides
+   * to where the fit put it -- telescoped with its page's stored chunks, so it
+   * does not jump when the stored chunk replaces it -- and the stream's spring
+   * leaves it alone.
+   */
+  projectStats = { batches: 0, nodes: 0, provisional_pages: 0 };
+  applyProjected(url: string, got: any): void {
+    if (!this.graph || !got || !got.pos) return;
+    const data: any = this.graph.graphData();
+    let n0 = 0;
+    const touched: any[] = [];
+    for (const n of data.nodes) {
+      if (!n.force || n.url !== url) continue;
+      const p = got.pos[n.id];
+      if (!p || !p.every(Number.isFinite)) continue;
+      n.projected = true;
+      const hsv = got.hsv ? got.hsv[n.id] : null;
+      if (hsv) { n.hsv = hsv; n.color = colourOf({ hsv } as any); }
+      n.fitX = p[0]; n.fitY = p[1]; n.fitZ = p[2];
+      n.__tele = undefined; n.__raw = undefined;
+      touched.push(n);
+      n0++;
+    }
+    if (!n0) return;
+    this.projectStats.batches++; this.projectStats.nodes += n0;
+    if (got.provisional_page) this.projectStats.provisional_pages++;
+    this.fitChunkSizes(data);
+    for (const n of touched) this.glide(n, [n.fitX, n.fitY, n.fitZ ?? 0]);
+    this.graph.nodeColor(this.graph.nodeColor());
+  }
+
+  /** Planted: telescope from the page point, as before -- the cloud off-centre. */
+  plantOffCentre = false;
+
   private telescope(page: any, chunks: any[], bound: number, relSize: number, media: boolean): void {
     if (this.plantNoTelescope || !chunks.length || !(bound > 0)) return;
     const px = page.fitX ?? page.x, py = page.fitY ?? page.y, pz = page.fitZ ?? page.z ?? 0;
     if (![px, py, pz].every(Number.isFinite)) return;
-    const raw: number[][] = [];
+    const raw: V3[] = [];
     for (const c of chunks) {
       const tf = c.__tele;
       const moved = !tf || tf[0] !== c.fitX || tf[1] !== c.fitY || tf[2] !== c.fitZ;
       if (moved || !c.__raw) c.__raw = [c.fitX ?? c.x, c.fitY ?? c.y, c.fitZ ?? c.z ?? 0];
       raw.push(c.__raw);
     }
-    const d = raw.map((r) => Math.hypot(r[0] - px, r[1] - py, r[2] - pz));
-    const sorted = d.filter(Number.isFinite).sort((a, b) => a - b);
-    if (!sorted.length) return;
-    const p90 = Math.max(1e-6, sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.9))]);
+    // Centred on the chunks' own centroid (`centredTelescope`, camera.ts):
+    // the forum's 186 chunks drew as a ball 95 units off their url node when
+    // offsets were taken from the page point (2026-10-10).
     const inner = Math.min(0.3 * bound, 1.5 * drawnRadius({ ...page, val: page.fullVal ?? page.val }, relSize, media));
-    const k = Math.max(0, (0.85 * bound - inner) / p90);
-    let clamped = 0;
+    const t = centredTelescope([px, py, pz], raw, bound, inner, this.plantOffCentre);
     chunks.forEach((c, i) => {
-      const r = raw[i], di = d[i];
-      if (!Number.isFinite(di)) return;
-      let to = inner + k * di;
-      if (to > bound) { to = bound; clamped++; }
-      const f = di > 1e-9 ? to / di : 0;
-      const nx = px + (r[0] - px) * f, ny = py + (r[1] - py) * f, nz = pz + (r[2] - pz) * f;
+      const p = t.pos[i];
+      if (!p) return;
+      const [nx, ny, nz] = p;
       if (c.fitX !== nx || c.fitY !== ny || c.fitZ !== nz) {
         c.fitX = nx; c.fitY = ny; c.fitZ = nz;
         c.__freeUntil = performance.now() + 3000;
       }
       c.__tele = [nx, ny, nz];
     });
-    this.teleStats.set(page.url, { n: chunks.length, raw_p90: Math.round(p90 * 10) / 10, bound: Math.round(bound),
-                                   inner: Math.round(inner), k: Math.round(k * 100) / 100, clamped });
+    this.teleStats.set(page.url, { n: chunks.length, raw_p90: Math.round(t.p90 * 10) / 10, bound: Math.round(bound),
+                                   centre_off: Math.round(t.centreOff * 10) / 10,
+                                   inner: Math.round(inner), k: Math.round(t.k * 100) / 100, clamped: t.clamped });
   }
 
   // ---- G-107: the scene batch ------------------------------------------
@@ -3088,7 +3376,7 @@ export class GraphView extends ItemView {
   private lookOf(n: any, relSize: number, media: boolean): NodeLook {
     if (n.force) {
       return { half: n.level === "page" ? STREAM.RADIUS * 1.6 : STREAM.RADIUS, translucent: true,
-               alpha: n.hovered ? 0.9 : STREAM.OPACITY, color: n.hovered ? "#ffffff" : (n.color || "#9aa0a6") };
+               alpha: n.hovered ? 0.9 : (n.projected ? 0.75 : STREAM.OPACITY), color: n.hovered ? "#ffffff" : (n.color || "#9aa0a6") };
     }
     const src = media && !(this.plantNoPicture && n.level !== "page") ? n.image?.src : undefined;
     if (src) return { half: billboardEdge(n, relSize) / 2, translucent: false, alpha: 0.95,
@@ -3531,21 +3819,32 @@ export class GraphView extends ItemView {
    * Placed first if the graph does not draw it yet -- a right-click on a
    * page whose chunks are not in the picture still gets its billboard.
    */
+  /** Chunks the browser holds pinned, so a deferred placement knows it is still wanted. */
+  private pinWanted = new Set<string>();
+
   async pinChunk(cid: string): Promise<boolean> {
     if (!this.graph || !cid) return false;
+    this.pinWanted.add(cid);
     let node = this.graph.graphData().nodes.find((n: any) => n.id === cid);
-    if (!node) {
-      const got: any = await this.sidecar.place([cid]);
+    // A chunk pinned moments after its page landed is in the store but not
+    // yet VECTORISED -- embedding runs off the capture path by design -- so
+    // placement has nothing to put it at. Asking once left the pin with no
+    // billboard (D-36, 2026-10-07: 1 pin, 0 billboards on a fresh page). It
+    // is asked again until the vector arrives, for as long as it is pinned.
+    for (let i = 0; !node && i < 40 && this.pinWanted.has(cid); i++) {
+      const got: any = await this.sidecar.place([cid]).catch(() => null);
       if (got?.nodes?.length) this.absorb(got.nodes, got.edges);
       node = this.graph.graphData().nodes.find((n: any) => n.id === cid);
+      if (!node) await new Promise((r) => window.setTimeout(r, 500));
     }
-    if (!node) return false;
+    if (!node || !this.pinWanted.has(cid)) return false;
     await this.openBillboard(node, true);
     return true;
   }
 
   /** The browser let a chunk go: close its billboard. */
   unpinChunk(cid: string): void {
+    this.pinWanted.delete(cid);
     const entry: any = this.billboards.get(cid);
     if (entry && entry.fromBrowser) this.closeBillboard(cid);
   }

@@ -308,6 +308,8 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
           view.snapshotFor = (cid: string, url: string, again?: boolean) => browser.snapshotChunk(cid, url, !!again);
           view.onNavigate = (href: string) => browser.go(href);
         });
+        browser.onProjected = (url: string, got: any) =>
+          this.eachGraph((view) => view.applyProjected(url, got));
         browser.onUnpin = (cid: string) =>
           this.eachGraph((view) => view.unpinChunk(cid));
         return browser;

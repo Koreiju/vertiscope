@@ -21,7 +21,7 @@ export function snapshotScript(xpaths: string[],
     "border-top-left-radius","border-top-right-radius","border-bottom-left-radius","border-bottom-right-radius",
     "flex-direction","flex-wrap","justify-content","align-items","align-self","gap","column-gap","row-gap",
     "flex-grow","flex-shrink","flex-basis","grid-template-columns","grid-auto-flow",
-    "list-style-type","object-fit","opacity","box-shadow","overflow-x","overflow-y",
+    "list-style-type","object-fit","object-position","opacity","box-shadow","overflow-x","overflow-y",
     "-webkit-line-clamp","-webkit-box-orient","text-overflow","fill","stroke"];
   var SKIP = {"0px":1,"none":1,"normal":1,"auto":1,"rgba(0, 0, 0, 0)":1,"static":1,"visible":1,
               "start":1,"baseline":1,"repeat":1,"0% 0%":1,"content-box":1,"1":1,"0":1,"nowrap":1,
@@ -31,6 +31,17 @@ export function snapshotScript(xpaths: string[],
   function esc(t) { return String(t).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
   function attr(t) { return esc(t).replace(/"/g,"&quot;"); }
   function safe(u) { u = String(u || ""); return /^(https?:|mailto:)/i.test(u) ? u : ""; }
+  // The rendered box, kept as a RATIO: as wide as it was or the panel, and as
+  // tall as that width implies. A fixed pixel height under max-width:100%
+  // stretched every picture a narrower panel shrank (2026-10-10: "Image aspect
+  // ratio rendering is weird on the HTML rendering panel forms ... correct in
+  // markdown view, but not in HTML"), and a drawn shape whose size came from
+  // width/height -- a round play button -- reflowed to a flat line.
+  function ratio(r) {
+    var w = Math.round(r.width), h = Math.round(r.height);
+    if (!(w > 0 && h > 0)) return "";
+    return "width:" + w + "px;max-width:100%;height:auto;aspect-ratio:" + w + " / " + h + ";";
+  }
   function styleOf(el, cs) {
     var s = "";
     for (var i = 0; i < PROPS.length; i++) {
@@ -144,7 +155,7 @@ export function snapshotScript(xpaths: string[],
     }
     var r = el.getBoundingClientRect(), cs = getComputedStyle(el);
     c.setAttribute("width", Math.round(r.width)); c.setAttribute("height", Math.round(r.height));
-    c.setAttribute("style", "color:" + cs.color + ";fill:" + cs.fill + ";vertical-align:middle;");
+    c.setAttribute("style", "color:" + cs.color + ";fill:" + cs.fill + ";vertical-align:middle;" + ratio(r));
     return new XMLSerializer().serializeToString(c);
   }
   function clone(el, whole) {
@@ -160,6 +171,11 @@ export function snapshotScript(xpaths: string[],
     if (name.indexOf("-") > 0 || name === "slot") name = /inline/.test(cs.display) ? "span" : "div";
     if (name === "form") name = "div";
     var s = styleOf(el, cs), extra = "";
+    if (name !== "img" && name !== "video" && !(el.textContent || "").trim()
+        && (/url\\(/.test(cs.backgroundImage) || cs.borderTopLeftRadius !== "0px"
+            || cs.borderTopStyle !== "none" || cs.backgroundColor !== "rgba(0, 0, 0, 0)")) {
+      s += ratio(el.getBoundingClientRect());
+    }
     var ta = tagged.get(el), act = ta ? actOf(el, ta[1]) : "";
     if (ta) {
       extra += ' data-domvec-address="' + attr(ta[0]) + '" data-domvec-xpath="' + attr(ta[2]) + '"';
@@ -170,13 +186,13 @@ export function snapshotScript(xpaths: string[],
       var src = safe(el.currentSrc || el.src), r = el.getBoundingClientRect();
       if (!src) return "";
       extra += ' src="' + attr(src) + '" alt="' + attr(el.alt || "") + '"';
-      s += "width:" + Math.round(r.width) + "px;height:" + Math.round(r.height) + "px;max-width:100%;";
+      s += ratio(r);
     }
     if (name === "picture" || name === "source") { if (name === "source") return ""; }
     if (name === "video") {
       var poster = safe(el.poster), vr = el.getBoundingClientRect();
-      return '<img src="' + attr(poster) + '" alt="video" style="' + attr(s + "width:" + Math.round(vr.width) +
-             "px;height:" + Math.round(vr.height) + "px;max-width:100%;background:#000;") + '">';
+      return '<img src="' + attr(poster) + '" alt="video" style="' + attr(s + ratio(vr) +
+             "object-fit:" + (cs.objectFit || "contain") + ";background:#000;") + '">';
     }
     if (name === "input" || name === "textarea" || name === "select" || name === "button") {
       // Live only where the trie holds this element's address AND the element

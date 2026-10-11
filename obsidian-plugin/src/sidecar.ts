@@ -55,6 +55,37 @@ export class Sidecar {
     return this.get<ChunkPayload>(`/chunk/${encodeURIComponent(cid)}`);
   }
 
+  /** Streamed chunks placed through the fit before the store holds them (`/project`). */
+  async project(url: string, items: { id: string; text: string }[]): Promise<any | null> {
+    const u = this.url("/project");
+    if (!u || !items.length) return null;
+    try {
+      const res = await fetch(u, { method: "POST", headers: { "Content-Type": "application/json" },
+                                   body: JSON.stringify({ url, items }), signal: AbortSignal.timeout(8000) });
+      return res.ok ? await res.json() : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** A chunk's page form as SAVED at scan time (`snapshots.py`), or null. */
+  savedSnapshot(cid: string): Promise<any | null> {
+    return this.get<any>(`/snapshot/${encodeURIComponent(cid)}`);
+  }
+
+  /** Save page forms taken from the live page: `[{cid, snap}]`. */
+  async saveSnapshots(items: { cid: string; snap: any }[]): Promise<any | null> {
+    const url = this.url("/snapshots");
+    if (!url || !items.length) return null;
+    try {
+      const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" },
+                                     body: JSON.stringify({ items }), signal: AbortSignal.timeout(30000) });
+      return res.ok ? await res.json() : null;
+    } catch {
+      return null;
+    }
+  }
+
   /**
    * Where a link to each stored page should land.
    *
@@ -346,10 +377,14 @@ export class Sidecar {
     const base = this.base().trim().replace(/\/+$/, "");
     if (!base || !cids.length) return null;
     try {
+      // Bounded: a busy store answered never, and every hover that needed a
+      // node placed waited on it (2026-10-10). A caller that still wants the
+      // node asks again (the pin retries; the next hover re-asks).
       const res = await fetch(`${base}/place`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ cids }),
+        signal: AbortSignal.timeout(5000),
       });
       if (!res.ok) return null;
       return (await res.json()) as PlaceResult;

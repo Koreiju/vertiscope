@@ -53,6 +53,8 @@ export interface HoverState {
   rect: { x: number; y: number; w: number; h: number } | null;
   lines: number;
   at: number;
+  /** The stored chunk the outline stands for, when the store knows the page. */
+  stored?: string;
 }
 
 /**
@@ -323,8 +325,11 @@ export class PipelineBox {
     const wv = this.webview();
     if (!wv || !xpaths.length) return null;
     return await within(wv.executeJavaScript(
-      "(function(xs){var l=1e9,t=1e9,r=-1e9,b=-1e9,any=false;" +
-      "for(var i=0;i<xs.length;i++){var n=document.evaluate(xs[i],document,null,9,null).singleNodeValue;" +
+      // Through the sensor's own resolver where it is loaded: it crosses
+      // shadow roots, which document.evaluate cannot.
+      "(function(xs){var l=1e9,t=1e9,r=-1e9,b=-1e9,any=false,h=window[" + JSON.stringify(SENSOR_HANDLE) + "];" +
+      "for(var i=0;i<xs.length;i++){var n=null;try{n=h&&h.node?h.node(xs[i]):null;}catch(e){}" +
+      "if(!n){try{n=document.evaluate(xs[i],document,null,9,null).singleNodeValue;}catch(e){}}" +
       "if(n&&n.nodeType===3)n=n.parentElement;if(!n||!n.getBoundingClientRect)continue;" +
       "var q=n.getBoundingClientRect();if(q.width<=0&&q.height<=0)continue;any=true;" +
       "if(q.left<l)l=q.left;if(q.top<t)t=q.top;if(q.right>r)r=q.right;if(q.bottom>b)b=q.bottom;}" +
@@ -553,8 +558,11 @@ export class PipelineBox {
    *  most once per frame. */
   private scrollFrame = 0;
   scrolls = 0;
+  /** When the page last scrolled (performance.now), for work that must wait for stillness. */
+  lastScrollAt = 0;
   pageScrolled(): void {
     this.scrolls++;
+    this.lastScrollAt = performance.now();
     // At most every 50 ms, and only when something is outlined: a page that
     // animates its styles sends this every frame (johnwick ~450 a session).
     const now = performance.now();
@@ -598,13 +606,44 @@ export class PipelineBox {
     if (b.length !== 4 || b.some((x) => !Number.isFinite(x))) return;
     const cid = `f:${url}#${id}`;
     const changed = !this.hover || this.hover.cid !== cid;
+    // The STORED chunk this in-page chunk belongs to, when the store knows the
+    // page. The page's own chunking cuts finer than the store's -- a forum
+    // topic row is five in-page chunks, one per cell, and ONE stored chunk --
+    // and the outline drew the cell while the camera flew to, and the panel
+    // showed, the whole row (2026-10-10: "This should be all one chunk, but
+    // it is erroneously split up into subchunks for the same card"; item 29:
+    // the outlined unit is the stored chunk).
+    const stored = this.plantPageUnit ? "" : this.storedFor(cid, url);
+    const sameUnit = !!stored && !!this.hover && this.hover.stored === stored;
+    const prev = this.hover;
     this.hover = { xpath: "", cid, matched: "", walked: 0, source: "page",
-                   rect: { x: b[0], y: b[1], w: b[2], h: b[3] }, lines: 0, at: t0 };
+                   rect: sameUnit && prev ? prev.rect : { x: b[0], y: b[1], w: b[2], h: b[3] },
+                   lines: sameUnit && prev ? prev.lines : 0, at: t0, stored: stored || undefined };
+    // Drawn at once from the page's box; the stored unit replaces it a round
+    // trip later. Within one stored unit the outline does not flash back to
+    // the cell.
     this.placeOutline();
     this.pushedHandleMs.push(performance.now() - t0);
     if (this.pushedHandleMs.length > 200) this.pushedHandleMs.shift();
     if (changed) this.onHoverChunk(cid, url);
+    if (stored && this.map.url === url) {
+      const xs = this.map.xpaths(stored);
+      if (xs.length) void this.unionRect(xs).then((r) => {
+        if (!r || !this.hover || this.hover.at !== t0) return;
+        this.hover = { ...this.hover, rect: r, lines: xs.length };
+        this.placeOutline();
+        this.storedUnitMs.push(performance.now() - t0);
+        if (this.storedUnitMs.length > 200) this.storedUnitMs.shift();
+      });
+    }
   }
+
+  /** In-page chunk -> the stored chunk it belongs to (set by the browser cell). */
+  storedFor: (cid: string, url: string) => string = () => "";
+  /** Planted: outline the page's own (finer) chunk, never the stored unit. */
+  plantPageUnit = false;
+  /** Push -> stored-unit outline, ms, for the harness. */
+  storedUnitMs: number[] = [];
 
   /**
    * The two reads every box's position depends on, taken ONCE per batch: the

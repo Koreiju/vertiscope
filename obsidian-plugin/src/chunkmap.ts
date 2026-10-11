@@ -51,6 +51,8 @@ export class ChunkMap {
 
   get size(): number { return this.byXpath.size; }
   get chunks(): number { return this.byCid.size; }
+  /** Every stored chunk this page's map draws. */
+  cids(): string[] { return [...this.byCid.keys()]; }
 
   /** Replace the map with the store's for `url`: one call, on landing. */
   async load(sidecar: Sidecar, url: string): Promise<boolean> {

@@ -151,7 +151,11 @@ export function makeChecks(env) {
       l.detach();
     }
     await sleep(700);
-    const bleafFresh = app.workspace.getLeaf("tab");
+    const gFresh = app.workspace.getLeavesOfType("domvec-graph-view")[0];
+    // A SPLIT of the graph, not a tab beside it: a tab in the graph's group
+    // hid the graph for every check after this one (2026-10-07: G-94 read a
+    // 0x0 canvas, G-107 picked 0 of 10).
+    const bleafFresh = gFresh ? app.workspace.createLeafBySplit(gFresh, "vertical") : app.workspace.getLeaf("tab");
     await bleafFresh.setViewState({ type: "domvec-browser-view", active: true });
     app.workspace.revealLeaf(bleafFresh);
     await sleep(1800);
@@ -177,9 +181,10 @@ export function makeChecks(env) {
     const landed = b.webview.getURL();
 
     // The token is handed to the page rather than hardcoded in it, so each
-    // run looks for a string no previous run can have left behind.
-    await b.webview.executeJavaScript(
-      "window.__domvecToken = " + JSON.stringify(TOKEN) + "; true");
+    // run looks for a string no previous run can have left behind. It travels
+    // in the URL (PAGE carries ?token=): a global set from here lands in the
+    // sensor's isolated world (D-43), where the page's handler never sees it --
+    // the click appended "untokened" items and S-7 read as a sensor failure.
 
     const LIST = "/html/body/ul";
     const resolve = async () => {
@@ -353,7 +358,11 @@ export function makeChecks(env) {
       l.detach();
     }
     await sleep(700);
-    const bleafFresh = app.workspace.getLeaf("tab");
+    const gFresh = app.workspace.getLeavesOfType("domvec-graph-view")[0];
+    // A SPLIT of the graph, not a tab beside it: a tab in the graph's group
+    // hid the graph for every check after this one (2026-10-07: G-94 read a
+    // 0x0 canvas, G-107 picked 0 of 10).
+    const bleafFresh = gFresh ? app.workspace.createLeafBySplit(gFresh, "vertical") : app.workspace.getLeaf("tab");
     await bleafFresh.setViewState({ type: "domvec-browser-view", active: true });
     app.workspace.revealLeaf(bleafFresh);
     await sleep(1500);
@@ -377,8 +386,7 @@ export function makeChecks(env) {
       if (!b.webview.isLoading() && b.webview.getURL().indexOf(PAGE) === 0) break;
     }
     const landed = b.webview.getURL();
-    await b.webview.executeJavaScript(
-      "window.__domvecToken = " + JSON.stringify(TOKEN) + "; true");
+    // The token is in the URL (PAGE carries ?token=; see the mutate probe).
 
     const LIST = "/html/body/ul";
     const resolve = async () => {
@@ -424,10 +432,14 @@ export function makeChecks(env) {
     const boardText = () => {
       const e = g0 && g0.billboards && g0.billboards.get(cid);
       if (!e) return "";
-      const host = e.el.querySelector(".domvec-html-host");
+      // The panel's BODY: its header is the chunk's trie address, "url :
+      // xpath" (2026-10-06), and the url carries this run's token -- reading
+      // the whole element found the token before the click (2026-10-07).
+      const body = e.el.querySelector(".domvec-bb-body") || e.el;
+      const host = body.querySelector(".domvec-html-host");
       const sr = host && host.shadowRoot;
-      return (e.el.textContent || "") + String.fromCharCode(10) + (sr ? (sr.textContent || "") : "")
-        + String.fromCharCode(10) + frameText(e.el);
+      return (body.textContent || "") + String.fromCharCode(10) + (sr ? (sr.textContent || "") : "")
+        + String.fromCharCode(10) + frameText(body);
     };
     const pin = async () => {
       const got = await b.pinXpath(LIST);
@@ -577,7 +589,22 @@ export function makeChecks(env) {
     const bl = app.workspace.getLeavesOfType("domvec-browser-view")[0];
     if (bl.loadIfDeferred) await bl.loadIfDeferred();
     app.workspace.revealLeaf(bl);
-    const b = bl.view;
+    // Both panes ON SCREEN: a browser left in the graph's tab group hides the
+    // graph, and every check after that measured a 0x0 canvas (2026-10-07).
+    {
+      const gl0 = app.workspace.getLeavesOfType("domvec-graph-view")[0];
+      if (gl0 && bl.parent === gl0.parent) {
+        for (const l of app.workspace.getLeavesOfType("domvec-browser-view")) l.detach();
+        app.workspace.revealLeaf(gl0);
+        const nl = app.workspace.createLeafBySplit(gl0, "vertical");
+        await nl.setViewState({ type: "domvec-browser-view", active: true });
+        app.workspace.revealLeaf(nl);
+        await sleep(1500);
+      }
+    }
+    const bl2 = app.workspace.getLeavesOfType("domvec-browser-view")[0];
+    if (bl2.loadIfDeferred) await bl2.loadIfDeferred();
+    const b = bl2.view;
     for (let i = 0; i < 80; i++) {
       try { const sz = await b.webview.executeJavaScript("[innerWidth, innerHeight]"); if (sz[0] > 50 && sz[1] > 50) break; }
       catch (e) { /* not attached yet */ }
@@ -812,7 +839,10 @@ export function makeChecks(env) {
       l.detach();
     }
     await sleep(700);
-    const leaf = app.workspace.getLeaf("tab");
+    // A split of the graph, never a tab in its group (that hid the graph for
+    // every later check, 2026-10-07).
+    const gSplit = app.workspace.getLeavesOfType("domvec-graph-view")[0];
+    const leaf = gSplit ? app.workspace.createLeafBySplit(gSplit, "vertical") : app.workspace.getLeaf("tab");
     await leaf.setViewState({ type: "domvec-browser-view", active: true });
     app.workspace.revealLeaf(leaf);
     await sleep(1500);
@@ -905,7 +935,10 @@ export function makeChecks(env) {
       l.detach();
     }
     await sleep(700);
-    const leaf = app.workspace.getLeaf("tab");
+    // A split of the graph, never a tab in its group (that hid the graph for
+    // every later check, 2026-10-07).
+    const gSplit = app.workspace.getLeavesOfType("domvec-graph-view")[0];
+    const leaf = gSplit ? app.workspace.createLeafBySplit(gSplit, "vertical") : app.workspace.getLeaf("tab");
     await leaf.setViewState({ type: "domvec-browser-view", active: true });
     app.workspace.revealLeaf(leaf);
     await sleep(1500);
@@ -1008,7 +1041,10 @@ export function makeChecks(env) {
       l.detach();
     }
     await sleep(700);
-    const leaf = app.workspace.getLeaf("tab");
+    // A split of the graph, never a tab in its group (that hid the graph for
+    // every later check, 2026-10-07).
+    const gSplit = app.workspace.getLeavesOfType("domvec-graph-view")[0];
+    const leaf = gSplit ? app.workspace.createLeafBySplit(gSplit, "vertical") : app.workspace.getLeaf("tab");
     await leaf.setViewState({ type: "domvec-browser-view", active: true });
     app.workspace.revealLeaf(leaf);
     await sleep(1500);
@@ -1844,10 +1880,16 @@ export function makeChecks(env) {
             }
             for (let i = 0; i < 40 && !b.pinnedState().length; i++) await sleep(200);
             await sleep(2500);
+            // The PINNED chunk's own panels, by cid: since G-113 a hover panel
+            // can be open beside the pinned one, and the first .domvec-bb in
+            // the document was the hover panel (an empty board, 2026-10-07).
+            const pinCid = (b.pinnedState()[0] || {}).cid || "";
+            const boards = document.querySelectorAll(".domvec-bb").length;
             const read = (sel) => {
-              const f = document.querySelector(sel + " iframe.domvec-snapshot");
+              const own = sel + '[data-cid="' + pinCid + '"]';
+              const f = document.querySelector(own + " iframe.domvec-snapshot");
               if (!f || !f.contentDocument) {
-                const md = document.querySelector(sel === ".domvec-pin-card" ? ".domvec-pin-card .domvec-browser-mdbody" : ".domvec-bb .domvec-bb-body");
+                const md = document.querySelector(sel === ".domvec-pin-card" ? own + " .domvec-browser-mdbody" : own + " .domvec-bb-body");
                 const t = md ? md.innerText : "";
                 return { frame: false, text: t.slice(0, 600), in_order: inOrder(page.text, t), lofi: lofi(t) };
               }
@@ -1878,7 +1920,8 @@ export function makeChecks(env) {
               fromGraph = st ? { form: st.form, elements: st.elements } : { form: "none" };
               gv.closeBillboard(other.id);
             }
-            return { planted: ${planted}, pins: b.pinnedState().length, snapshot: b.lastSnapshot, page, card, board, from_graph: fromGraph };
+            return { planted: ${planted}, pins: b.pinnedState().length, pin_cid: pinCid, boards_open: boards,
+                     snapshot: b.lastSnapshot, page, card, board, from_graph: fromGraph };
           } finally {
             for (const p of b.pinnedState()) b.unpin(p.cid);
             b.plant.clear();
@@ -2570,6 +2613,296 @@ export function makeChecks(env) {
         };
       },
     },
+    // ---- 2026-10-10: the reader's day of practice (PLUGIN_GOAL 30-58) ------
+    //
+    // One fixture page, `practice_rows.html`: a forum-style table (cells the
+    // page's chunking splits, rows the store keeps), a mostly hidden menu, a
+    // picture drawn 700x200 and cropped to cover, and prose. Every check
+    // drives the real app with real pointer input and reads the app's own
+    // state; each has a planted arm that must fail it, or names the
+    // precondition that makes it able to.
+    {
+      id: "G-122",
+      asks: "the overlay outlines the STORED chunk -- one forum row is one card and one outline, though the page's own chunking cuts it into cells; planted (plantPageUnit): the cell",
+      async run() {
+        const fixtures = await serveFixtures();
+        const page = fixtures.origin + "/practice_rows.html";
+        try {
+          const arm = (planted) => evaluate(`(async () => {
+            ${PREP}
+            const PAGE = ${JSON.stringify(page)};
+            const wc = window.require("@electron/remote").webContents.fromId(b.webview.getWebContentsId());
+            b.pipebox.plantPageUnit = ${planted};
+            try {
+              try { b.setLive(true); } catch (e) {}
+              const landed = await land(PAGE, 30000);
+              for (let i = 0; i < 90 && !(b.pipebox.map.url === PAGE && b.pipebox.map.chunks > 0); i++) await sleep(500);
+              await b.webview.executeJavaScript("document.querySelectorAll('tbody tr')[1].scrollIntoView({block:'center'}); 1");
+              await sleep(700);
+              const geo = JSON.parse(await b.webview.executeJavaScript("(function(){var r=document.querySelectorAll('tbody tr')[1];var c=r.querySelectorAll('td')[2];var rb=r.getBoundingClientRect(),cb=c.getBoundingClientRect();return JSON.stringify({row_w:rb.width,cx:cb.x+cb.width/2,cy:cb.y+cb.height/2,cell_w:cb.width});})()"));
+              wc.sendInputEvent({ type: "mouseMove", x: Math.round(geo.cx), y: Math.round(geo.cy) });
+              await sleep(40);
+              wc.sendInputEvent({ type: "mouseMove", x: Math.round(geo.cx) + 1, y: Math.round(geo.cy) });
+              let h = null;
+              for (let i = 0; i < 25; i++) { await sleep(100); h = b.pipebox.hover; if (h && h.rect && (${planted} || h.stored)) break; }
+              await sleep(300);
+              h = b.pipebox.hover;
+              return { planted: ${planted}, landed, map_chunks: b.pipebox.map.chunks, row_w: Math.round(geo.row_w), cell_w: Math.round(geo.cell_w),
+                       outline_w: h && h.rect ? Math.round(h.rect.w) : null, stored: h ? (h.stored || null) : null,
+                       stored_unit_ms: b.pipebox.storedUnitMs.slice(-3).map(Math.round) };
+            } finally { b.pipebox.plantPageUnit = false; }
+          })()`, { timeout: 120000 });
+          const clean = await arm(false);
+          const planted = await arm(true);
+          const unit = (x) => x.outline_w !== null && x.outline_w >= 0.8 * x.row_w;
+          return { pass: unit(clean) && !!clean.stored && !unit(planted),
+                   evidence: { clean, planted, purged: await tidyFixtures(fixtures.origin),
+                               bar: "clean: the outline is >= 0.8 of the row's width and names a stored chunk; planted: the cell" } };
+        } finally { await fixtures.close(); }
+      },
+    },
+    {
+      id: "G-123",
+      asks: "a scanned chunk's page form is SAVED and renders with its page gone -- no 'unavailable' banner anywhere; planted (plantNoSaved): nothing kept from the scan, so no page form",
+      async run() {
+        const fixtures = await serveFixtures();
+        const page = fixtures.origin + "/practice_rows.html";
+        try {
+          const arm = (planted) => evaluate(`(async () => {
+            ${PREP}
+            const PAGE = ${JSON.stringify(page)};
+            const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+            const SIDE = ${JSON.stringify(SIDECAR)};
+            v.plantNoSaved = ${planted};
+            try {
+              try { b.setLive(true); } catch (e) {}
+              await land(PAGE, 30000);
+              let cov = null;
+              for (let i = 0; i < 90; i++) {
+                cov = await (await fetch(SIDE + "/snapshot_coverage?url=" + encodeURIComponent(PAGE))).json().catch(() => null);
+                if (cov && cov.chunks > 0 && cov.saved >= cov.chunks) break;
+                await sleep(1000);
+              }
+              const cids = await v.sidecar.pageCids(PAGE);
+              let pick = null;
+              for (const c of cids) { const p = await v.chunkPayload(c); const md = p && p.lines ? p.lines.map((l) => l.text).join(" ") : ""; if (/Monarch butterflies/.test(md)) { pick = c; break; } }
+              b.go("about:blank");
+              await sleep(1500);
+              for (const bb of v.billboardState()) v.closeBillboard(bb.id);
+              if (!pick) return { planted: ${planted}, error: "no stored prose chunk", cov, stored: cids.length };
+              let n = v.graph.graphData().nodes.find((x) => x.id === pick);
+              if (!n) { const got = await v.sidecar.place([pick]); if (got && got.nodes) v.absorb(got.nodes, got.edges); n = v.graph.graphData().nodes.find((x) => x.id === pick); }
+              if (!n) return { planted: ${planted}, error: "not placeable", cov };
+              await v.openBillboard(n);
+              await sleep(3500);
+              const e = v.billboards.get(pick);
+              const f = e && e.el.querySelector("iframe.domvec-snapshot");
+              const text = f && f.contentDocument ? (f.contentDocument.body.innerText || "") : "";
+              const out = { planted: ${planted}, cov, form: e ? e.form : null, saved_form: !!(e && e.savedForm),
+                            page_text_has: /Monarch butterflies/.test(text),
+                            banners: document.querySelectorAll(".domvec-bb-note").length };
+              v.closeBillboard(pick);
+              return out;
+            } finally { v.plantNoSaved = false; }
+          })()`, { timeout: 200000 });
+          const clean = await arm(false);
+          const planted = await arm(true);
+          return { pass: !clean.error && clean.cov && clean.cov.saved >= clean.cov.chunks && clean.form === "page" && clean.saved_form
+                         && clean.page_text_has && clean.banners === 0 && planted.form !== "page" && planted.banners === 0,
+                   evidence: { clean, planted, purged: await tidyFixtures(fixtures.origin) } };
+        } finally { await fixtures.close(); }
+      },
+    },
+    {
+      id: "G-130",
+      asks: "both panel forms are COMPLETE and match: a mostly hidden menu's page form shows every item the chunk holds (what the page drew, then what it did not); planted (plantNoComplement): only what the page drew",
+      async run() {
+        const fixtures = await serveFixtures();
+        const page = fixtures.origin + "/practice_rows.html";
+        try {
+          const arm = (planted) => evaluate(`(async () => {
+            ${PREP}
+            const PAGE = ${JSON.stringify(page)};
+            const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+            v.plantNoComplement = ${planted};
+            try {
+              try { b.setLive(true); } catch (e) {}
+              await land(PAGE, 30000);
+              for (let i = 0; i < 90 && !(b.pipebox.map.url === PAGE && b.pipebox.map.chunks > 0); i++) await sleep(500);
+              const cids = await v.sidecar.pageCids(PAGE);
+              let pick = null;
+              for (const c of cids) { const p = await v.chunkPayload(c); const md = p && p.lines ? p.lines.map((l) => l.text).join(" ") : ""; if (/Aardvark/.test(md) && /Tapir/.test(md)) { pick = c; break; } }
+              if (!pick) return { planted: ${planted}, error: "the hidden menu is not one stored chunk", stored: cids.length };
+              for (const bb of v.billboardState()) v.closeBillboard(bb.id);
+              let n = v.graph.graphData().nodes.find((x) => x.id === pick);
+              if (!n) { const got = await v.sidecar.place([pick]); if (got && got.nodes) v.absorb(got.nodes, got.edges); n = v.graph.graphData().nodes.find((x) => x.id === pick); }
+              if (!n) return { planted: ${planted}, error: "not placeable" };
+              await v.openBillboard(n);
+              await sleep(3000);
+              const e = v.billboards.get(pick);
+              if (e && e.form !== "page") await v.switchForm(e, "page");
+              await sleep(1500);
+              const f = e && e.el.querySelector("iframe.domvec-snapshot");
+              const text = f && f.contentDocument ? (f.contentDocument.body.innerText || "") : "";
+              const items = ["Aardvark", "Cassowary", "Hedgehog", "Pangolin", "Tapir"];
+              const out = { planted: ${planted}, form: e ? e.form : null, items_shown: items.filter((w) => text.includes(w)).length, of: items.length,
+                            complemented: e ? (e.complemented || 0) : 0, banners: document.querySelectorAll(".domvec-bb-note, .is-unavailable").length };
+              v.closeBillboard(pick);
+              return out;
+            } finally { v.plantNoComplement = false; }
+          })()`, { timeout: 150000 });
+          const clean = await arm(false);
+          const planted = await arm(true);
+          return { pass: !clean.error && clean.form === "page" && clean.items_shown === clean.of && clean.banners === 0
+                         && planted.items_shown < planted.of,
+                   evidence: { clean, planted, purged: await tidyFixtures(fixtures.origin) } };
+        } finally { await fixtures.close(); }
+      },
+    },
+    {
+      id: "G-125",
+      asks: "ONE hover panel persists: hovering a second chunk replaces the first; after the pointer leaves it stays, and closes itself after its time-to-live; planted (plantCloseOnLeave): it closes when the hover ends",
+      async run() {
+        const fixtures = await serveFixtures();
+        const page = fixtures.origin + "/practice_rows.html";
+        try {
+          const arm = (planted) => evaluate(`(async () => {
+            ${PREP}
+            const PAGE = ${JSON.stringify(page)};
+            const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+            const wc = window.require("@electron/remote").webContents.fromId(b.webview.getWebContentsId());
+            v.plantCloseOnLeave = ${planted};
+            v.hoverPanelTtlMs = 2500;
+            try {
+              try { b.setLive(true); } catch (e) {}
+              await land(PAGE, 30000);
+              for (let i = 0; i < 90 && !(b.pipebox.map.url === PAGE && b.pipebox.map.chunks > 0); i++) await sleep(500);
+              for (const bb of v.billboardState()) v.closeBillboard(bb.id);
+              await b.webview.executeJavaScript("window.scrollTo(0,0); 1");
+              await sleep(600);
+              // Two points over two DIFFERENT stored chunks, by the page's own chunking.
+              const pts = JSON.parse(await b.webview.executeJavaScript("(function(){var h=window.__domvecSensor;var a=[];for(var y=40;y<innerHeight-30;y+=30)for(var x=40;x<Math.min(innerWidth,760);x+=90){var st=document.elementsFromPoint(x,y),bb=null,ba=Infinity;for(var i=0;i<st.length&&i<12;i++){var c=null;try{c=h.at(st[i]);}catch(e){}if(c&&c.box){var ar=c.box[2]*c.box[3];if(ar>0&&ar<ba){ba=ar;bb=c;}}}if(bb)a.push({x:x,y:y,id:bb.id});}return JSON.stringify(a);})()"));
+              let A = null, B = null;
+              for (const p of pts) { const st = b.storedCidFor("f:" + b.session + "#" + p.id, b.session); if (!st) continue; if (!A) A = { ...p, st }; else if (st !== A.st) { B = { ...p, st }; break; } }
+              if (!A || !B) return { planted: ${planted}, error: "two stored chunks under the pointer not found", points: pts.length };
+              const open = () => [...v.billboards.values()].filter((e) => e.fromHover).length;
+              wc.sendInputEvent({ type: "mouseMove", x: A.x, y: A.y }); await sleep(30); wc.sendInputEvent({ type: "mouseMove", x: A.x + 1, y: A.y });
+              await sleep(1300);
+              const aOpen = v.billboards.has(A.st);
+              wc.sendInputEvent({ type: "mouseMove", x: B.x, y: B.y }); await sleep(30); wc.sendInputEvent({ type: "mouseMove", x: B.x + 1, y: B.y });
+              await sleep(1300);
+              const bOpen = v.billboards.has(B.st), aAfter = v.billboards.has(A.st), afterB = open();
+              wc.sendInputEvent({ type: "mouseMove", x: -8, y: -8 });
+              wc.sendInputEvent({ type: "mouseLeave", x: -8, y: -8 });
+              await sleep(1500);
+              const at1500 = open();
+              await sleep(2500);
+              const afterTtl = open();
+              return { planted: ${planted}, a_opened: aOpen, b_opened: bOpen, a_after_b: aAfter, open_after_b: afterB,
+                       open_1500_after_leave: at1500, open_after_ttl: afterTtl };
+            } finally { v.plantCloseOnLeave = false; v.hoverPanelTtlMs = 60000; }
+          })()`, { timeout: 150000 });
+          const clean = await arm(false);
+          const planted = await arm(true);
+          return { pass: !clean.error && clean.a_opened && clean.b_opened && !clean.a_after_b && clean.open_after_b === 1
+                         && clean.open_1500_after_leave === 1 && clean.open_after_ttl === 0 && planted.open_1500_after_leave === 0,
+                   evidence: { clean, planted, purged: await tidyFixtures(fixtures.origin) } };
+        } finally { await fixtures.close(); }
+      },
+    },
+    {
+      id: "G-124",
+      asks: "a navigation's first hover flight ZOOMS; later flights keep the reader's own zoom and only re-aim; planted (plantAlwaysZoom): every flight resets the distance",
+      async run() {
+        const fixtures = await serveFixtures();
+        const page = fixtures.origin + "/practice_rows.html";
+        try {
+          const arm = (planted) => evaluate(`(async () => {
+            ${PREP}
+            const PAGE = ${JSON.stringify(page)};
+            const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+            const wc = window.require("@electron/remote").webContents.fromId(b.webview.getWebContentsId());
+            v.plantAlwaysZoom = ${planted};
+            try {
+              try { b.setLive(true); } catch (e) {}
+              await land(PAGE, 30000);
+              for (let i = 0; i < 90 && !(b.pipebox.map.url === PAGE && b.pipebox.map.chunks > 0); i++) await sleep(500);
+              await b.webview.executeJavaScript("window.scrollTo(0,0); 1");
+              await sleep(600);
+              const pts = JSON.parse(await b.webview.executeJavaScript("(function(){var h=window.__domvecSensor;var a=[];for(var y=40;y<innerHeight-30;y+=30)for(var x=40;x<Math.min(innerWidth,760);x+=90){var st=document.elementsFromPoint(x,y),bb=null,ba=Infinity;for(var i=0;i<st.length&&i<12;i++){var c=null;try{c=h.at(st[i]);}catch(e){}if(c&&c.box){var ar=c.box[2]*c.box[3];if(ar>0&&ar<ba){ba=ar;bb=c;}}}if(bb)a.push({x:x,y:y,id:bb.id});}return JSON.stringify(a);})()"));
+              let A = null, B = null;
+              for (const p of pts) { const st = b.storedCidFor("f:" + b.session + "#" + p.id, b.session); if (!st) continue; if (!A) A = { ...p, st }; else if (st !== A.st) { B = { ...p, st }; break; } }
+              if (!A || !B) return { planted: ${planted}, error: "two stored chunks under the pointer not found" };
+              v.zoomState = { zoomedFor: "", zoomedAt: -1e9 };
+              const g = v.graph, dist = () => { const c = g.camera().position, t = g.controls().target; return Math.hypot(c.x - t.x, c.y - t.y, c.z - t.z); };
+              const f0 = { ...v.focusStats };
+              wc.sendInputEvent({ type: "mouseMove", x: A.x, y: A.y }); await sleep(30); wc.sendInputEvent({ type: "mouseMove", x: A.x + 1, y: A.y });
+              await sleep(1500);
+              const d0 = dist();
+              // The reader zooms out: three times as far along the view.
+              const c = g.camera().position, t = g.controls().target;
+              g.cameraPosition({ x: t.x + (c.x - t.x) * 3, y: t.y + (c.y - t.y) * 3, z: t.z + (c.z - t.z) * 3 }, { x: t.x, y: t.y, z: t.z }, 0);
+              await sleep(400);
+              const dUser = dist();
+              wc.sendInputEvent({ type: "mouseMove", x: B.x, y: B.y }); await sleep(30); wc.sendInputEvent({ type: "mouseMove", x: B.x + 1, y: B.y });
+              await sleep(1500);
+              const d1 = dist();
+              return { planted: ${planted}, flown: v.focusStats.flown - f0.flown, zoomed: v.focusStats.zoomed - f0.zoomed,
+                       kept: v.focusStats.kept_zoom - f0.kept_zoom, d_first: Math.round(d0), d_user: Math.round(dUser), d_after: Math.round(d1) };
+            } finally { v.plantAlwaysZoom = false; }
+          })()`, { timeout: 150000 });
+          const clean = await arm(false);
+          const planted = await arm(true);
+          const kept = (x) => x.d_user > 0 && Math.abs(x.d_after - x.d_user) / x.d_user < 0.15;
+          return { pass: !clean.error && clean.flown >= 2 && clean.zoomed === 1 && kept(clean) && !planted.error && !kept(planted),
+                   evidence: { clean, planted, purged: await tidyFixtures(fixtures.origin),
+                               bar: "clean: two flights, one zoom, the second keeps the reader's distance within 15%; planted: the distance resets" } };
+        } finally { await fixtures.close(); }
+      },
+    },
+    {
+      id: "G-132",
+      asks: "a picture keeps its aspect ratio in the page form at a panel narrower than the page drew it (700x200, object-fit cover)",
+      async run() {
+        const fixtures = await serveFixtures();
+        const page = fixtures.origin + "/practice_rows.html";
+        try {
+          const got = await evaluate(`(async () => {
+            ${PREP}
+            const PAGE = ${JSON.stringify(page)};
+            const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+            try { b.setLive(true); } catch (e) {}
+            await land(PAGE, 30000);
+            for (let i = 0; i < 90 && !(b.pipebox.map.url === PAGE && b.pipebox.map.chunks > 0); i++) await sleep(500);
+            const cids = await v.sidecar.pageCids(PAGE);
+            let pick = null;
+            for (const c of cids) { const p = await v.chunkPayload(c); const md = p && p.lines ? p.lines.map((l) => l.text).join(" ") : ""; if (/practice_hero|hero picture/.test(md)) { pick = c; break; } }
+            if (!pick) return { error: "no stored chunk holds the hero picture", stored: cids.length };
+            for (const bb of v.billboardState()) v.closeBillboard(bb.id);
+            let n = v.graph.graphData().nodes.find((x) => x.id === pick);
+            if (!n) { const got = await v.sidecar.place([pick]); if (got && got.nodes) v.absorb(got.nodes, got.edges); n = v.graph.graphData().nodes.find((x) => x.id === pick); }
+            if (!n) return { error: "not placeable" };
+            await v.openBillboard(n);
+            await sleep(3500);
+            const e = v.billboards.get(pick);
+            if (e && e.form !== "page") await v.switchForm(e, "page");
+            await sleep(1500);
+            const f = e && e.el.querySelector("iframe.domvec-snapshot");
+            const img = f && f.contentDocument ? [...f.contentDocument.images].find((i) => /practice_hero/.test(i.src)) : null;
+            const r = img ? img.getBoundingClientRect() : null;
+            const out = { form: e ? e.form : null, panel_w: f ? f.clientWidth : null, img: r ? [Math.round(r.width), Math.round(r.height)] : null,
+                          ratio: r && r.height ? Math.round(r.width / r.height * 100) / 100 : null };
+            v.closeBillboard(pick);
+            return out;
+          })()`, { timeout: 150000 });
+          // Non-vacuity is the PRECONDITION: the panel is narrower than the
+          // 700 px the page drew, so a fixed height under max-width would
+          // squeeze it (the defect: ratio 1.6 at a 320 px panel).
+          return { pass: !got.error && got.panel_w !== null && got.panel_w < 700 && got.ratio !== null && Math.abs(got.ratio - 3.5) / 3.5 < 0.06,
+                   evidence: { ...got, page_ratio: 3.5, purged: await tidyFixtures(fixtures.origin) } };
+        } finally { await fixtures.close(); }
+      },
+    },
     {
       id: "G-107",
       asks: "the 3D view draws every node and edge it holds in a bounded number of draw calls, each at the size the collider reserves, and the pointer still picks each node",
@@ -2739,10 +3072,17 @@ export function makeChecks(env) {
             for (const bb of v.billboardState()) v.closeBillboard(bb.id);
             await v.openBillboard(node);
             await sleep(3000);
-            const host = [...v.containerEl.querySelectorAll(".domvec-bb")]
-              .map((e) => e.querySelector(".domvec-html-host")).find(Boolean);
-            const root = host && host.shadowRoot;
+            // What the panel SHOWS, in whichever form it opened: the page form's
+            // frame, or the markdown Obsidian rendered. The shadow-DOM host this
+            // read until 2026-10-07 was retired with the form switch
+            // (2026-10-06: "rather than having this switching between markdown
+            // and 'shadow DOM'"), and read 0 elements from a panel showing 40.
+            const bb = v.containerEl.querySelector('.domvec-bb[data-cid="' + node.id + '"]');
+            const frame = bb && bb.querySelector("iframe.domvec-snapshot");
+            const fdoc = frame && frame.contentDocument;
+            const root = fdoc ? fdoc.body : (bb && bb.querySelector(".domvec-bb-body"));
             const out = { planted: ${planted}, tried, node: node.id, with_picture: sample.length, drawn_as_picture: drawn,
+                          panel_form: fdoc ? "page" : (root ? "markdown" : "none"),
                           shadow_elements: root ? root.querySelectorAll("*").length : 0,
                           shadow_images: root ? root.querySelectorAll("img").length : 0 };
             v.closeBillboard(node.id);
@@ -2826,14 +3166,21 @@ export function makeChecks(env) {
           }
           // "Drawn" is the word in the requirement, and endpoint resolution is
           // not it -- a link can resolve and still never reach the canvas.
-          const lines = after.links.filter(l => l.__lineObj && l.__lineObj.parent
-                                             && l.__lineObj.visible).length;
+          // Since the scene batch (G-107) every link is a segment of ONE
+          // LineSegments mesh, not a line object of its own: counting
+          // __lineObj read 0 drawn of 23 held (2026-10-07). The application's
+          // own sync says how many segments it drew; the per-object count
+          // stays for the per-node mode.
+          const synced = v.batchSync();
+          const lines = synced ? synced.lines
+            : after.links.filter(l => l.__lineObj && l.__lineObj.parent && l.__lineObj.visible).length;
           return {
             reset,
             returned_edges: (reply && reply.edges || []).length,
             links_before: linksBefore, links_after: after.links.length,
             nodes_before: nodesBefore, nodes_after: after.nodes.length,
             unresolved, dangling, line_objects_in_scene: lines,
+            drawn_by: synced ? "scene batch" : "per-link objects",
           };
         `);
         if (got.error) return { pass: false, evidence: got };
@@ -2978,9 +3325,12 @@ export function makeChecks(env) {
           //   drawnRadius   = billboardEdge * SQRT1_2 = sphere * PANEL_GAIN
           const PANEL_GAIN = 1.75;
           const sphereOf = (n) => Math.cbrt(Math.max(n.val ?? 1, 1e-9)) * rel;
-          const radius = (n) => (n.image && n.image.src)
-            ? sphereOf(n) * PANEL_GAIN
-            : sphereOf(n);
+          // And the pane's own function where it has one: pictures are sized
+          // by the media mode now, which the hand-kept formula above does not
+          // know (it read 183 overlaps, every one of them a picture,
+          // 2026-10-07). The formula stays only for a pane without it.
+          const radius = (n) => v.drawnRadiusOf ? v.drawnRadiusOf(n)
+            : (n.image && n.image.src) ? sphereOf(n) * PANEL_GAIN : sphereOf(n);
           // Projected nodes only: streaming (force) nodes are drawn as their
           // own small translucent spheres and spaced by G-93's rule, not by
           // this collider.
@@ -3007,7 +3357,8 @@ export function makeChecks(env) {
           return { sampled: sample.length,
                    checked: sample.length * (sample.length - 1) / 2,
                    overlapping: pairs, worst: Math.round(worst * 100) / 100,
-                   involving_a_panel: panels, inside_clearance_band: inBand };
+                   involving_a_panel: panels, inside_clearance_band: inBand,
+                   radius_from: v.drawnRadiusOf ? "pane" : "formula" };
         `);
         if (got.error) return { pass: false, evidence: got };
         return { pass: got.overlapping === 0, evidence: got };
@@ -4539,8 +4890,11 @@ export function makeChecks(env) {
           const rel = v.graph.nodeRelSize();
           const PANEL_GAIN = 1.75;
           const sphereOf = (n) => Math.cbrt(Math.max(n.val ?? 1, 1e-9)) * rel;
-          const radius = (n) => (n.image && n.image.src)
-            ? sphereOf(n) * PANEL_GAIN : sphereOf(n);
+          // The pane's own drawn radius where it has one (pictures are sized
+          // by the media mode, which this formula does not know -- G-21 read
+          // 183 phantom overlaps from it, 2026-10-07).
+          const radius = (n) => v.drawnRadiusOf ? v.drawnRadiusOf(n)
+            : (n.image && n.image.src) ? sphereOf(n) * PANEL_GAIN : sphereOf(n);
           const ns = d.nodes.filter(n => Number.isFinite(n.x));
           const nn = [];
           const fitNn = [];
@@ -4800,7 +5154,7 @@ export function makeChecks(env) {
         const fixtures = await serveFixtures();
         const token = "domvecprobe" + Date.now().toString(36);
         const pagesBefore = (await ask("/health")).pages;
-        const page = fixtures.origin + "/live_mutate.html";
+        const page = fixtures.origin + "/live_mutate.html?token=" + token;
         try {
           const got = await evaluate(mutateProbe(page, token, SIDECAR),
                                      { timeout: 600000 });
@@ -4835,7 +5189,7 @@ export function makeChecks(env) {
         const fixtures = await serveFixtures();
         const token = "domvecuniform" + Date.now().toString(36);
         const pagesBefore = (await ask("/health")).pages;
-        const page = fixtures.origin + "/live_mutate.html";
+        const page = fixtures.origin + "/live_mutate.html?token=" + token;
         try {
           const got = await evaluate(uniformProbe(page, token, SIDECAR),
                                      { timeout: 600000 });

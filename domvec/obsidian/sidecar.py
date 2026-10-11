@@ -104,6 +104,11 @@ def sensor_restarted(session: Dict, body: Dict) -> bool:
 #: against itself.
 _WORK_LOCK = threading.RLock()
 
+#: The encoder (one GPU model), shared by the embed worker and `/project`.
+#: Neither holds the store's lock while encoding, so a projection waits at
+#: most one embed batch -- never a capture's write.
+_ENCODER_LOCK = threading.Lock()
+
 #: Serialises LAYOUT FITTING, which `_WORK_LOCK` does not cover.
 #:
 #: `_WORK_LOCK` guards writes. A fit is a read, so it was taking nothing --
@@ -165,12 +170,16 @@ _LAST_REQUEST = [0.0]
 _HEALTH_CACHE: Dict[str, object] = {}
 
 
-def _cache_health(body: Dict) -> Dict:
+def _cache_health(body: Dict, key: object = None) -> Dict:
+    # Keyed by the SERVER that computed it: two sidecars in one process (the
+    # tests start several) must never answer with each other's flags.
     _HEALTH_CACHE["body"] = dict(body)
     _HEALTH_CACHE["at"] = time.time()
+    _HEALTH_CACHE["key"] = key
     return body
 _CHECKPOINT_QUIET_S = 120.0
 _CHECKPOINT_MIN_WAL = 8 << 20
+_CHECKPOINT_CEILING = 256 << 20
 
 
 def _checkpoint_forever(workspace, stop) -> None:
@@ -185,15 +194,87 @@ def _checkpoint_forever(workspace, stop) -> None:
     wal = Path(str(workspace.store.path) + ".wal")
     while not stop.wait(15.0):
         try:
-            if time.time() - max(_LAST_WRITE[0], _LAST_REQUEST[0]) < _CHECKPOINT_QUIET_S:
+            size = wal.stat().st_size if wal.exists() else 0
+            # Kuzu no longer checkpoints on its own (the store turns it off so
+            # its readers can run beside a write), so past a ceiling the WAL is
+            # folded in even mid-session: reads pause for it, nothing fails.
+            if size < _CHECKPOINT_CEILING and                     time.time() - max(_LAST_WRITE[0], _LAST_REQUEST[0]) < _CHECKPOINT_QUIET_S:
                 continue
-            if not wal.exists() or wal.stat().st_size < _CHECKPOINT_MIN_WAL:
+            if size < _CHECKPOINT_MIN_WAL:
                 continue
             with _WORK_LOCK:
                 ms = workspace.store.checkpoint()
             _profile("checkpoint", {"ms": ms, "wal_before": wal.stat().st_size if wal.exists() else 0})
         except Exception as exc:                    # noqa: BLE001
             _profile("checkpoint", {"error": str(exc)[:160]})
+
+#: Seconds between integrity records while the sidecar is quiet.
+_INTEGRITY_EVERY_S = 600.0
+_INTEGRITY_LAST: Dict[str, int] = {}
+
+
+def _integrity_counts(store) -> Dict[str, int]:
+    """The two string columns the store has been seen to LOSE: chunk markdown
+    (80.6% empty on 2026-09-23, 78.2% on 2026-10-07) and address keys
+    (145,618 blank on 2026-10-07), each with its integers intact beside it."""
+    def one(q):
+        rows = store._rows(q)
+        return int(rows[0][0] or 0) if rows else 0
+    return {
+        "chunks": one("MATCH (c:Chunk) RETURN count(c)"),
+        "empty_md": one("MATCH (c:Chunk) WHERE c.md IS NULL OR size(c.md) = 0 RETURN count(c)"),
+        "addresses": one("MATCH (a:Address) RETURN count(a)"),
+        "blank_akey": one("MATCH (a:Address) WHERE a.akey IS NULL OR a.akey = '' RETURN count(a)"),
+    }
+
+
+def _integrity_record(workspace, why: str) -> Optional[Dict]:
+    """Append one dated integrity record to `integrity.log` (D-48).
+
+    Twice the store has lost most of its markdown with no error anywhere, and
+    neither time could the loss be dated: a crash, a WAL set aside, a SET on
+    other columns -- each was tested on a scratch store on 2026-10-07 and none
+    reproduced it. So the store dates it itself: a record at every start (a
+    crash and its replay are bracketed by the record before and the one
+    after) and every ten quiet minutes, on disk beside `crashes.log` because
+    the in-memory profile dies with the process. A count that ROSE says so,
+    with the statement the store last ran."""
+    try:
+        with _WORK_LOCK:
+            t0 = time.perf_counter()
+            got = _integrity_counts(workspace.store)
+            ms = round((time.perf_counter() - t0) * 1000, 1)
+        rose = {k: got[k] - _INTEGRITY_LAST[k] for k in ("empty_md", "blank_akey")
+                if k in _INTEGRITY_LAST and got[k] > _INTEGRITY_LAST[k]}
+        record = {"at": time.strftime("%Y-%m-%d %H:%M:%S"), "why": why, **got, "ms": ms}
+        if rose:
+            record["ROSE"] = rose
+            try:
+                record["last_statement"] = (Path(workspace.path) / "last_statement.txt").read_text(
+                    encoding="utf-8", errors="replace").strip()[:300]
+            except OSError:
+                pass
+        _INTEGRITY_LAST.update(got)
+        with open(Path(workspace.path) / "integrity.log", "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record) + chr(10))
+        _profile("integrity", record)
+        return record
+    except Exception as exc:                        # noqa: BLE001
+        _profile("integrity", {"error": str(exc)[:160]})
+        return None
+
+
+def _integrity_forever(workspace, stop) -> None:
+    _integrity_record(workspace, "start")
+    last = time.time()
+    while not stop.wait(30.0):
+        if time.time() - last < _INTEGRITY_EVERY_S:
+            continue
+        if time.time() - max(_LAST_WRITE[0], _LAST_REQUEST[0]) < _CHECKPOINT_QUIET_S:
+            continue
+        _integrity_record(workspace, "quiet")
+        last = time.time()
+
 
 #: Token counts for the page the overlay is watching, keyed on its chunk set.
 _TOKEN_MEMO: Dict = {}
@@ -499,7 +580,8 @@ def _embed_forever(workspace, stop: threading.Event) -> None:
                     before = len(workspace.vectors)
                     taken = workspace.take_vectors(limit=_EMBED_BATCH)
                 enc_start = time.perf_counter()
-                produced = workspace.encode_taken(taken)
+                with _ENCODER_LOCK:
+                    produced = workspace.encode_taken(taken)
                 enc_ms = (time.perf_counter() - enc_start) * 1000
                 stood += _yield_to_foreground()
                 with _WORK_LOCK:
@@ -994,6 +1076,70 @@ class _Handler(BaseHTTPRequestHandler):
                             out.append({"source": a, "target": b})
                 self._send(200, {"edges": out, "n": len(out),
                                  "asked": len(cids), "pages": len(urls)})
+            except Exception as exc:                # noqa: BLE001
+                self._send(500, {"error": "%s: %s" % (type(exc).__name__, exc)})
+            return
+
+        # Streamed chunks placed BEFORE the store holds them (PLUGIN_GOAL 48):
+        # encoded and placed through the fit at once, no store read or write.
+        if route == "project":
+            if self.workspace is None or getattr(self.workspace, "embedder", None) is None:
+                self._send(503, {"error": "no encoder"})
+                return
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(length) or b"{}")
+            except Exception as exc:                # noqa: BLE001
+                self._send(400, {"error": "bad body: %s" % exc})
+                return
+            url = str(body.get("url") or "")
+            items = [it for it in (body.get("items") or []) if it.get("id") and str(it.get("text") or "").strip()][:400]
+            if not url or not items:
+                self._send(200, {"pos": {}, "hsv": {}})
+                return
+            try:
+                t0 = time.perf_counter()
+                with _ENCODER_LOCK:
+                    t1 = time.perf_counter()
+                    M = self.workspace.embedder.embed_texts([str(it["text"])[:4000] for it in items])
+                t2 = time.perf_counter()
+                import numpy as np
+                from .projector import projector as _get_projector
+                proj = _get_projector()
+                if proj is None or not hasattr(proj, "project_transient"):
+                    self._send(200, {"pos": {}, "hsv": {}, "why": "no page projector"})
+                    return
+                vec = {it["id"]: np.asarray(M[i], dtype=np.float32) for i, it in enumerate(items)}
+                got = proj.project_transient(url, vec)
+                got["ms"] = {"lock": round((t1 - t0) * 1000, 1), "encode": round((t2 - t1) * 1000, 1),
+                             "place": round((time.perf_counter() - t2) * 1000, 1)}
+                got["n"] = len(items)
+                _profile("project", {"url": url, "n": len(items), **got["ms"], "placed": len(got.get("pos") or {})})
+                self._send(200, got)
+            except Exception as exc:                # noqa: BLE001
+                self._send(500, {"error": "%s: %s" % (type(exc).__name__, exc)})
+            return
+
+        # A chunk's page form, saved while its elements are on the page
+        # (`snapshots.py`, PLUGIN_GOAL 51). Off the capture path: the cell
+        # sends them in small batches after the page is stored.
+        if route == "snapshots":
+            if self.workspace is None:
+                self._send(503, {"error": "no workspace"})
+                return
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(length) or b"{}")
+            except Exception as exc:                # noqa: BLE001
+                self._send(400, {"error": "bad body: %s" % exc})
+                return
+            from . import snapshots as _snaps
+            try:
+                _yield_to_foreground()
+                with _WORK_LOCK:
+                    got = _snaps.save(self.workspace, body.get("items") or [])
+                _profile("snapshots", got)
+                self._send(200, got)
             except Exception as exc:                # noqa: BLE001
                 self._send(500, {"error": "%s: %s" % (type(exc).__name__, exc)})
             return
@@ -1652,7 +1798,7 @@ class _Handler(BaseHTTPRequestHandler):
             # it was storing a page. A fresh answer is cached for 30 s; while
             # the store is busy the last one is served, marked `busy`.
             now = time.time()
-            cached = _HEALTH_CACHE.get("body")
+            cached = _HEALTH_CACHE.get("body") if _HEALTH_CACHE.get("key") == id(self.server) else None
             if cached is not None and now - _HEALTH_CACHE.get("at", 0) < 30.0:
                 self._send(200, dict(cached, cached_s=round(now - _HEALTH_CACHE["at"], 1)))
                 return
@@ -1682,7 +1828,7 @@ class _Handler(BaseHTTPRequestHandler):
                     return self.workspace.store._rows(q)[0][0]
                 except Exception:               # noqa: BLE001
                     return None
-            self._send(200, _cache_health({"ok": True,
+            self._send(200, _cache_health(key=id(self.server), body={"ok": True,
                              "pages": len(self.workspace.pages()),
                              "addresses": _one(
                                  "MATCH (a:Address) RETURN count(a)"),
@@ -1773,6 +1919,22 @@ class _Handler(BaseHTTPRequestHandler):
                              # is a feature nobody can confirm, and this one
                              # is invisible by design when it works.
                              "layouts": self._layout_count()}))
+            return
+
+        if segments[0] == "snapshot" and len(segments) == 2:
+            from . import snapshots as _snaps
+            doc = _snaps.load(self.workspace, segments[1]) if self.workspace is not None else None
+            if doc is None:
+                self._send(404, {"error": "no saved page form", "cid": segments[1]})
+            else:
+                self._send(200, doc)
+            return
+
+        if segments[0] == "snapshot_coverage":
+            from . import snapshots as _snaps
+            url = (parse_qs(parts.query).get("url") or [""])[0]
+            self._send(200, _snaps.coverage(self.workspace, url) if url and self.workspace is not None
+                       else {"error": "no url"})
             return
 
         if segments[0] == "chunk" and len(segments) == 2:
@@ -2534,6 +2696,8 @@ def serve(workspace, port: int = 8787, *, block: bool = True,
     if workspace is not None and not getattr(workspace, "read_only", False)             and hasattr(workspace.store, "checkpoint"):
         threading.Thread(target=_checkpoint_forever, args=(workspace, stop),
                          name="domvec-checkpoint", daemon=True).start()
+        threading.Thread(target=_integrity_forever, args=(workspace, stop),
+                         name="domvec-integrity", daemon=True).start()
 
     # **The chunk projector.** One fit over every drawable chunk, made off
     # the request path; then a worker that drains the stream the embedder and

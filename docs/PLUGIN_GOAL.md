@@ -2356,6 +2356,189 @@ current feature, including the page-original panel form on dynamic renders.*
 *Read as: (29) overlays look too large -- say what one outlines and its size
 limit, and make the outlined unit the stored chunk's size.*
 
+**2026-10-10** -- prove it in practice, end to end:
+
+> Let's return to our current task. Please bring everything back up and
+> continue your work using the app harness and tests etc. Please also check
+> whether or not what we're testing is really making it into our code in
+> practicality. That means perhaps use the harness to navigate new webpages
+> yourself, scrolling, hovering on overlays and pinning the relevant things to
+> the clipboard with a right-click, seeing all the nodes populate into the 3D
+> graph, get umapped within their url domain node's scope, perhaps also ensure
+> that we still run global umapping when there is latent activity in the app
+> that doesn't stream new chunk diffs to the 3D graph and database. Please also
+> verify rigorously that all content that is eventually streamed into their
+> full chunk form is properly and presently displayed in their panel form, and
+> that at least one image (if not the unique and identifying image of the
+> chunk) is also shown in the 3D graph billboard.
+
+*Read as: (30) a check passing is not the feature working -- drive the real
+app on pages new to the store (navigate, scroll, hover the overlays,
+right-click pin to the clipboard) and see the result in the GUI; (31) every
+streamed chunk reaches the 3D graph and is UMAP-placed inside its own url /
+domain node's scope; (32) when the app is idle -- no new chunk diffs reaching
+the graph or the store -- the GLOBAL UMAP still refits; (33) every chunk that
+finishes streaming shows its FULL content in its panel, present and correct;
+(34) a chunk's 3D billboard shows at least one of its images, ideally the one
+that identifies it.*
+
+**2026-10-10, continued** -- while the app was in use:
+
+> Flying to chunk nodes in the 3D project while hover on 2D browser overlays
+> has degraded in function quickly, but was working for a little bit
+
+> Also, overlay chunk feature degradation spotted on the same site. This
+> should be all one chunk, but it is erroneaously split up into subchunks for
+> the same card. *(a screenshot of one julialang.org/latest topic row)*
+
+> Not sure why there's this clumping happening, whether it's UMAP or something
+> else. If UMAP, ensure that it's a scaled local fit. If it's a global UMAP
+> fit, let's ensure the scale of the global map is correct, while keeping the
+> URL nodes close enough together to each other with their own zoom-out scale
+> map of their global nodes in the 3D projector. If possible, the global map
+> would be only on the chunks, with centroids still at the center. Ensure no
+> force-direction on attraction to the URL node is ever present, perhaps a
+> spherical threshold radius to the root node on chunks should this be the
+> case, should force-directed still influence node coordinates post-UMAP.
+> *(a screenshot: the forum's chunks packed in a ball on its page node)*
+
+*Read as: (35) hover-to-fly must not depend on a busy store; (36) the overlay
+outlines the stored chunk -- one topic row is one card, one outline; (37) say
+whether the clump is UMAP or the forces; a local fit is SCALED; a global fit
+has the right scale, url nodes near each other, each with its own zoom-out
+map; ideally the global map is fitted on CHUNKS, with each url's centroid at
+the centre of its chunks; (38) no force ever attracts a chunk to its url node
+after UMAP -- at most a spherical radius bound around the root.*
+
+> Also, fly-to-node should zoom initially, but preserve user zoom while still
+> tracking during fly-throughs
+
+> Perhaps we also do some kind of debounce on continuous tracking and
+> re-setting the zoom action for 'new navigations'
+
+> "Page" button doesn't work. Please also ensure you're writing test for these
+> to track the feature space as well, definitively. *(a screenshot: a forum
+> row's panel in its markdown form, header `.../tbody/tr[166]`, a "page" button)*
+
+> Also, retrieval breakdown during a scan over a large page. Perhaps a db lock
+> .wal issue *(a screenshot: legislation.gov.uk/ukpga/2018/12/contents, query
+> "science" everywhere, 1123 in the force tree)*
+
+> Also, zoom persistance with continuous fly-through debounce still doesn't
+> register.
+
+> For some reason I'm witnessing a contraction in what seem like UMAPped nodes.
+> This is where I think force-directed post-umap is warranted, but done with
+> the original residual coordinates as phantom coordinates to keep the nodes
+> closer to their original locations while enforcing collision and attraction
+> constraints with a radius/diameter safety factor on collision spheres. This
+> should not affect click and drag. Also, showing hovered panels in the 3D gui
+> when hovered on the 2D browser should persist, but disappear after a minute
+> maybe.
+
+> Please also ensure you attend to *all* my recent feedback i've provided on
+> this day and time in our transcripts.
+
+*Read as: (39) the first flight of a navigation zooms; later flights keep the
+reader's zoom and only re-aim; (40) tracking is debounced, and the zoom reset
+fires once per new navigation; (41) the panel's page button works or says why
+not, and every one of these behaviours has a test that tracks it; (42) search
+keeps answering while a large page is being stored; (43) = (39) seen working
+in the app; (44) after UMAP, a force layout keeps each node near its fit
+position (the fit as a phantom anchor), with collision spheres at a safety
+factor and attraction constraints -- no contraction -- and dragging a node is
+unaffected; (45) a panel opened by hovering in the browser stays open after
+the hover ends and closes by itself after about a minute (this replaces
+"closes when the hovering stops", 2026-10-06); (46) every item from today,
+(30)-(45), is attended to.*
+
+> Perhaps we can persist per-URL node fits (i.e., fitting UMAP within the full
+> chunk set within a url) and then call global updates more intermittently
+> with our umap-cuda package that I think is live. So, we fit umap first to the
+> per-url nodes that are newly scanned (also async projections and fits for
+> streamed deltas so that we don't wait with grey force-directed while
+> hierarchical fits are happening), and perhaps also thinking about how async
+> local-global fits can work more generally with projections intermittently
+> for scans and diff streams.
+
+*Read as: (47) a LOCAL UMAP per url, fitted over that url's full chunk set and
+persisted; the GLOBAL fit updated intermittently on the GPU (umap-cuda);
+(48) a newly scanned page is fitted locally first, and streamed deltas are
+projected into the local fit asynchronously, so nodes do not sit grey and
+force-directed while a hierarchical fit runs; (49) the general shape: local
+fits and projections per scan and per diff, a global fit refreshed
+intermittently -- designed, not improvised.*
+
+> Weird behavior where I click the markdown button to view the other rendered
+> form, I see it momentarily, but then the whole panel disappears, and returns
+> to the original *(a screenshot: a Monarch butterfly panel; it was the
+> harness's own drive cycling panels while the reader used the app)*
+
+> I should also never see the notification that something that we have already
+> chunked and tracked is inaccessible. All the data must be saved and mapped
+> fully and comprehensively across representations in our graph database. Even
+> media. The full set to render everything normally after scanning, so that even
+> when the connection isn't present, we still can render the originally scanned
+> chunk before the shadow scripts removed the informations. I'm talking about the
+> banner that says I need to scroll to the chunk back into view. I also thought
+> that this was done automically when clicked anyways. Perhaps this is another
+> feature degradation that should be fixed and tested for. *(a screenshot: a
+> johnwick.movie panel reading "Page form unavailable: none of its 6 elements
+> are on the page now -- scroll to where it was")*
+
+*Read as: (50) a harness drive never runs over the reader -- it stops the
+moment the reader is active; (51) no panel ever says a scanned chunk is
+unavailable: its page form, styles and media are SAVED at scan time and mapped
+in the graph, so it renders as scanned with the page gone, the connection
+down, or the page's own scripts having removed it; (52) clicking a chunk
+brings it into view on the page as well; (53) a test holds each of these.*
+
+> Buttons on the page aren't persisted to the HTML chunk, this should be present
+> and graceful to degradation since they seem like shadow DOM nodes *(screenshots:
+> johnwick.movie's footer -- Shop, Text Updates, Email Updates, LEGAL, FOLLOW)*
+
+> Image aspect ratio rendering is weird on the HTML rendering panel forms of the
+> chunk panel billboard views in the 3D browser. This is an open chunk whose
+> aspect ratio is correct in markdown view, but not in HTML. *(screenshots: the
+> Ballerina hero squeezed, its play button a flat line)*
+
+> Fly to hovered degradation spotted as well when navigated to a new website
+> *(screenshots: johnwick.movie's cast grid; a markdown panel of broken
+> `assets/img/...` pictures)*
+
+> Force-directed and UMAP fitted node renderins on diff streams problem;
+> force-directed is frozen and persists even after UMAP has projected/fitted on
+> .update() to umap-cuda. *(a screenshot: a grey star of streamed nodes on a
+> hi.wikipedia page beside its coloured placed chunks; a panel reading "(no
+> lines stored for this chunk)")*
+
+*Read as: (54) every control and picture of a chunk is in its page form,
+degrading gracefully at a panel's width; (55) a picture or drawn shape keeps
+its aspect ratio in the page form; (56) hover flies to the stored chunk on
+every page, a freshly navigated one included; relative pictures in the
+markdown form resolve against the page's base; (57) streamed nodes fold the
+moment their chunks are stored and placed -- none stays frozen beside the
+fit.*
+
+> I should only see a single most recently hovered and flown to panel persist
+> its billboard rendering, not multiple. Again, ensure you are building and
+> testing everything in our current transcripts. *(a screenshot: two
+> hi.wikipedia hover panels open at once, one reading "(no lines stored for
+> this chunk)")*
+
+> The following method of feature degradation on the dual panel representation
+> shall be deprecated, with full rendering, completeness, and matching
+> guarantees as appropriate for both panel views. *(a screenshot: a
+> legislation.gov.uk panel in markdown form with its "page" button struck
+> through)*
+
+*Read as: (58) at most ONE hover panel persists -- the most recent; a hover
+opens no panel for a chunk with nothing to show; every item of today is
+built and tested; (59) no degraded panel state: both forms always render,
+complete and matching -- the page form is what the page drew (live or saved)
+plus every line it did not draw, or the store's own rendering when nothing
+was drawn; the markdown form is every line.*
+
 ---
 
 

@@ -12,13 +12,16 @@ and a score against a moving page is the page's motion plus ours.</p>
 </ul>
 <button id="add" type="button">Add an item</button>
 <script>
-  // Deterministic: the token is supplied by the caller, so the check knows
-  // exactly what string to go looking for in the trie afterwards.
+  // Deterministic: the token is supplied by the caller in the page's own URL,
+  // so the check knows exactly what string to go looking for in the trie
+  // afterwards -- and hands it over without writing into the page (a global
+  // set from the plugin lands in the sensor's isolated world, D-43, where this
+  // handler never sees it).
   let n = 0;
   document.getElementById("add").addEventListener("click", function () {
     n += 1;
     var li = document.createElement("li");
-    li.textContent = (window.__domvecToken || "untokened")
+    li.textContent = (new URLSearchParams(location.search).get("token") || "untokened")
       + " item number " + n
       + ", appended by a click and by nothing else on this page.";
     document.getElementById("items").appendChild(li);
