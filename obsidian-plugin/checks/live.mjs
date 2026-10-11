@@ -623,6 +623,108 @@ export function makeChecks(env) {
     };
   `;
 
+  // Offline (`G-59`/`G-61`/`G-62`), the cell's own webContents taken offline
+  // through Chromium's protocol with its cache off -- a session-level
+  // emulation let pages load from the HTTP cache, so nothing failed. Okapi is
+  // saved (by `scripts/check_offline.py` with "save offline" on) and holds
+  // 0.875 of its trace; Axolotl is stored and was never saved. Always put back
+  // online, and the cell returned to where it was.
+  const OKAPI = "https://en.wikipedia.org/wiki/Okapi", AXOLOTL = "https://en.wikipedia.org/wiki/Axolotl";
+  const offlineArm = (which) => evaluate(`(async () => {
+    ${PREP}
+    const start = b.webview.getURL();
+    const wc = window.require("@electron/remote").webContents.fromId(b.webview.getWebContentsId());
+    const emulate = async (off) => {
+      const d = wc.debugger; if (!d.isAttached()) d.attach("1.3");
+      await d.sendCommand("Network.enable");
+      await d.sendCommand("Network.emulateNetworkConditions", { offline: off, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
+      await d.sendCommand("Network.setCacheDisabled", { cacheDisabled: off });
+      if (!off) d.detach();
+    };
+    const opened = async (url, ms) => {
+      const t = performance.now();
+      while (performance.now() - t < ms) {
+        await sleep(500);
+        try { if (b.offlineFor === url && b.webview.getURL().startsWith("file:") && !b.webview.isLoading()) return Math.round(performance.now() - t); } catch (e) {}
+      }
+      return null;
+    };
+    const look = () => b.webview.executeJavaScript("JSON.stringify({saved_layout: !!document.querySelector('#mw-content-text'), infill_chunks: document.querySelectorAll('.dv-infill .dv-chunk').length, traced_chunks: document.querySelectorAll('body > .dv-chunk').length, banner: ((document.querySelector('.dv-banner') || document.querySelector('.dv-infill-note') || {}).textContent || '').slice(0, 200), scrollable: document.documentElement.scrollHeight > innerHeight * 2})").then(JSON.parse);
+    const visit = async (url) => {
+      b.offlineFor = "";
+      await land("about:blank", 8000);
+      b.go(url);
+      const ms = await opened(url, 90000);
+      return { url, opened_ms: ms, form: b.offlineStats.last && b.offlineStats.last.form, open_ms: b.offlineStats.last && b.offlineStats.last.ms,
+               ...(ms != null ? await look() : {}) };
+    };
+    try {
+      await emulate(true);
+      if (${JSON.stringify(which)} === "traced") {
+        const nothing0 = b.offlineStats.nothing;
+        const clean = await visit(${JSON.stringify(AXOLOTL)});
+        b.offlineFor = "";
+        await land("about:blank", 8000);
+        const never = ${JSON.stringify(OKAPI)} + "?g62null=" + Date.now();
+        b.go(never);
+        for (let i = 0; i < 60 && b.offlineStats.nothing === nothing0; i++) await sleep(500);
+        return { clean, null_arm: { url: never, nothing: b.offlineStats.nothing - nothing0, offlineFor: b.offlineFor } };
+      }
+      if (${JSON.stringify(which)} === "infilled") {
+        return { clean: await visit(${JSON.stringify(OKAPI)}), null_arm: await visit(${JSON.stringify(AXOLOTL)}) };
+      }
+      // dock: offline, open a chunk's panel; then planted.
+      await visit(${JSON.stringify(OKAPI)});
+      const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+      const dock = async (plant) => {
+        v.plantOfflineBillboard = plant;
+        try {
+          const d0 = v.docked;
+          const cids = await v.sidecar.pageCids(${JSON.stringify(OKAPI)});
+          let n = null;
+          for (const id of cids.slice(0, 30)) {
+            n = v.graph.graphData().nodes.find((x) => x.id === id);
+            if (!n) { const g = await v.sidecar.place([id]); if (g && g.nodes) v.absorb(g.nodes, g.edges); n = v.graph.graphData().nodes.find((x) => x.id === id); }
+            if (n) break;
+          }
+          if (!n) return { error: "no placeable chunk" };
+          for (const bb of v.billboardState()) v.closeBillboard(bb.id);
+          await v.openBillboard(n); await sleep(2500);
+          const pane = app.workspace.getLeavesOfType("domvec-panel-view")[0];
+          const sel = '.domvec-bb[data-cid="' + n.id + '"]';
+          const inPane = !!(pane && pane.view.contentEl.querySelector(sel));
+          const out = { docked: v.docked - d0, in_pane: inPane, in_graph: !!v.containerEl.querySelector(sel),
+                        pane_chars: inPane ? pane.view.contentEl.innerText.trim().length : 0 };
+          v.closeBillboard(n.id);
+          return out;
+        } finally { v.plantOfflineBillboard = false; }
+      };
+      return { offline: b.offlineFor === ${JSON.stringify(OKAPI)}, clean: await dock(false), planted: await dock(true) };
+    } finally {
+      await emulate(false);
+      b.offlineFor = "";
+      app.workspace.detachLeavesOfType("domvec-panel-view");
+      if (start && /^https?:/.test(start)) await land(start, 30000);
+    }
+  })()`, { timeout: 300000 }).then((got) => {
+    if (!got || got.error) return { pass: false, evidence: got };
+    if (which === "traced") {
+      const c = got.clean;
+      return { pass: c.opened_ms != null && c.form === "traced" && c.traced_chunks > 0 && !c.saved_layout && c.scrollable
+                     && /rebuilt from the scan trace/.test(c.banner) && got.null_arm.nothing >= 1 && !got.null_arm.offlineFor,
+               evidence: got };
+    }
+    if (which === "infilled") {
+      const c = got.clean, n = got.null_arm;
+      return { pass: c.opened_ms != null && c.form === "infilled" && c.saved_layout && c.infill_chunks >= 1
+                     && n.form === "traced" && !n.saved_layout && n.infill_chunks === 0,
+               evidence: got };
+    }
+    return { pass: got.offline && got.clean.docked === 1 && got.clean.in_pane && !got.clean.in_graph && got.clean.pane_chars > 0
+                   && got.planted.docked === 0 && !got.planted.in_pane && got.planted.in_graph,
+             evidence: got };
+  });
+
   // The page's own changes, timed by an observer OF THE CHECK'S (2026-09-27:
   // "Tests aren't validating on the original websites"). A live site cannot be
   // made to log its own writes, so the check watches for them: when content
@@ -2864,6 +2966,102 @@ export function makeChecks(env) {
           };
         } finally { await fixtures.close(); }
       },
+    },
+    {
+      id: "R-3",
+      asks: "typing `[query]()` in a note opens ranked results in a block UNDER the line: the line below moves down by the block's height and is not covered (R-2/R-3), scrolling to the bottom fetches more (G-69), and clicking a result infills its link between the parentheses (R-4); planted (plantOverlay): the floating shape, the line below does not move and is covered",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const pl = app.plugins.getPlugin("domvec-bridge");
+          const g = pl.gesture;
+          const path = "domvec-checks/R-gesture-" + Date.now() + ".md";
+          if (!app.vault.getAbstractFileByPath("domvec-checks")) await app.vault.createFolder("domvec-checks");
+          const file = await app.vault.create(path, "first line of the note\\n[patricia trie]()\\nthe line below the gesture\\nand one more");
+          const leaf = app.workspace.getLeaf("tab");
+          g.plantOverlay = ${planted};
+          try {
+            await leaf.openFile(file, { state: { mode: "source" } });
+            await sleep(800);
+            const cm = leaf.view.editor.cm;
+            const below = () => cm.coordsAtPos(cm.state.doc.line(3).from);
+            const top0 = below().top;
+            const s0 = { ...g.stats };
+            cm.focus();
+            cm.dispatch({ selection: { anchor: cm.state.doc.line(2).to - 1 } });
+            let hits = [];
+            // Up to 60 s: after a plugin reload the sidecar is busy answering
+            // the projector and the first search waits behind it (20 s+).
+            for (let i = 0; i < 240; i++) { await sleep(250); hits = cm.dom.querySelectorAll(".domvec-linkgesture .domvec-lg-hit"); if (hits.length) break; }
+            await sleep(300);
+            const box = cm.dom.querySelector(".domvec-linkgesture");
+            if (!box || !hits.length) return { planted: ${planted}, error: "no results", box: !!box, stats: g.stats };
+            const r = box.getBoundingClientRect();
+            const b1 = below();
+            const lineRect = { top: b1.top, bottom: b1.bottom };
+            const covered = r.bottom > lineRect.top + 1 && r.top < lineRect.bottom - 1;
+            // More on scroll (G-69's paging, through this one interface).
+            const list = box.querySelector(".domvec-lg-list");
+            const n0 = hits.length, p0 = g.stats.pages;
+            list.scrollTop = list.scrollHeight;
+            list.dispatchEvent(new Event("scroll"));
+            for (let i = 0; i < 160 && g.stats.pages === p0; i++) await sleep(250);
+            await sleep(200);
+            const n1 = box.querySelectorAll(".domvec-lg-hit").length;
+            // Read BEFORE the click: an infill closes the block, and a detached
+            // list has no height (the first run read "not scrollable" so).
+            const scrollable = list.scrollHeight > list.clientHeight + 4;
+            // Infill: click the first result.
+            const first = box.querySelector(".domvec-lg-hit");
+            const cid = first.dataset.cid;
+            first.click();
+            await sleep(300);
+            const line2 = cm.state.doc.line(2).text;
+            return { planted: ${planted}, query: s0.last && s0.last.query, results: n0, after_scroll: n1,
+                     scrollable,
+                     block_height: Math.round(r.height), moved_by: Math.round(lineRect.top - top0), covered,
+                     line2, infilled: g.stats.infilled - s0.infilled, link: (g.stats.last || {}).dest || "",
+                     closed: !cm.dom.querySelector(".domvec-linkgesture") };
+          } finally {
+            g.plantOverlay = false;
+            // Save, close, THEN trash: the infill edited the note, and the
+            // editor's save landing after the trash wrote it back -- eight
+            // check notes were left in the vault that way (2026-10-11).
+            try { await leaf.view.save(); } catch (e) {}
+            leaf.detach();
+            await sleep(2500);
+            const f = app.vault.getAbstractFileByPath(path);
+            if (f) await app.vault.trash(f, true);
+            const dir = app.vault.getAbstractFileByPath("domvec-checks");
+            if (dir && dir.children && dir.children.length === 0) await app.vault.trash(dir, true);
+          }
+        })()`, { timeout: 90000 });
+        const clean = await arm(false);
+        const planted = await arm(true);
+        const ok = (x) => x && !x.error;
+        return {
+          pass: ok(clean) && clean.results > 0 && clean.scrollable && clean.after_scroll > clean.results
+                && !clean.covered && clean.moved_by >= 0.9 * clean.block_height
+                && clean.infilled === 1 && clean.link && clean.line2 === "[patricia trie](" + clean.link + ")" && clean.closed
+                && ok(planted) && planted.covered && planted.moved_by < 0.25 * planted.block_height,
+          evidence: { clean, planted },
+        };
+      },
+    },
+    {
+      id: "G-62",
+      asks: "with the cell offline (Chromium's own network emulation), a stored page that was never saved fails to load and opens rebuilt from the scan trace, as a local scrollable file; null arm: a url the store never traced opens nothing",
+      async run() { return offlineArm("traced"); },
+    },
+    {
+      id: "G-61",
+      asks: "offline, a saved page holding too little of its trace opens INFILLED: its own saved layout kept AND the traced chunks it lacked drawn into it; the traced page (G-62) has neither",
+      async run() { return offlineArm("infilled"); },
+    },
+    {
+      id: "G-59",
+      asks: "offline, a chunk's panel is docked into a main Obsidian pane, the same billboard element; planted (plantOfflineBillboard): it stays in the projector",
+      async run() { return offlineArm("dock"); },
     },
     {
       id: "G-125",

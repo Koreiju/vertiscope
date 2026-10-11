@@ -1002,12 +1002,16 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(raw)
 
-    def _send_bytes(self, code: int, data: bytes, content_type: str) -> None:
+    def _send_bytes(self, code: int, data: bytes, content_type: str, cache: bool = True) -> None:
+        """`cache` only for bytes that cannot change under their address -- a
+        media blob is keyed by its url's hash. An offline form is rebuilt from
+        a store that moves: cached a day, the cell opened Axolotl's traced
+        page as it was before the picture count was added (2026-10-11)."""
         self.send_response(code)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Cache-Control", "max-age=86400")
+        self.send_header("Cache-Control", "max-age=86400" if cache else "no-store")
         self.end_headers()
         self.wfile.write(data)
 
@@ -1186,6 +1190,30 @@ class _Handler(BaseHTTPRequestHandler):
 
         # A picture a saved page form draws, its bytes as the page loaded them
         # (`snapshots.save_media`). Body: the raw bytes; ?url= the picture's url.
+        # A page as the cell PRESENTED it (`G-60`): MHTML from
+        # `webContents.savePage`, with its visible text for the infill test.
+        if route == "offline":
+            if self.workspace is None:
+                self._send(503, {"error": "no workspace"})
+                return
+            from . import offline as _off
+            import base64 as _b64
+            url = (parse_qs(urlsplit(self.path).query).get("url") or [""])[0]
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                if length > 2 * _off.PAGE_MAX:
+                    self._send(413, {"saved": False, "why": "too large"})
+                    return
+                body = json.loads(self.rfile.read(length) or b"{}")
+                data = _b64.b64decode(body.get("mhtml_b64") or "")
+            except Exception as exc:                # noqa: BLE001
+                self._send(400, {"error": "bad body: %s" % exc})
+                return
+            got = _off.save_page(self.workspace, url, data, str(body.get("text") or ""))
+            _profile("offline_saved", {"url": url, **{k: v for k, v in got.items() if k != "key"}})
+            self._send(200, got)
+            return
+
         if route == "media":
             if self.workspace is None:
                 self._send(503, {"error": "no workspace"})
@@ -2117,6 +2145,39 @@ class _Handler(BaseHTTPRequestHandler):
                 # renders with the connection down ("Even media", 2026-10-10).
                 base = "http://%s" % (self.headers.get("Host") or "127.0.0.1")
                 self._send(200, _snaps.localize(self.workspace, doc, base))
+            return
+
+        # The page for when there is no connection (`G-59`..`G-62`): what
+        # there is for a url, the page as the cell presented it, and the page
+        # rebuilt from the scan trace alone.
+        if segments[0] == "offline" and len(segments) <= 2:
+            from . import offline as _off
+            url = (parse_qs(urlsplit(self.path).query).get("url") or [""])[0]
+            if self.workspace is None or not url:
+                self._send(400, {"error": "offline needs ?url="})
+                return
+            which = segments[1] if len(segments) == 2 else ""
+            if which == "saved":
+                data = _off.load_page(self.workspace, url)
+                if data is None:
+                    self._send(404, {"error": "no saved page", "url": url})
+                else:
+                    self._send_bytes(200, data, "multipart/related", cache=False)
+                return
+            if which == "infilled":
+                got = _off.infill(self.workspace, url)
+                if got is None:
+                    self._send(404, {"error": "no saved page", "url": url})
+                else:
+                    _profile("offline_infilled", {k: v for k, v in got.items() if k != "mhtml"})
+                    self._send_bytes(200, got["mhtml"], "multipart/related", cache=False)
+                return
+            if which == "traced":
+                got = _off.reconstruct(self.workspace, url)
+                _profile("offline_traced", {k: v for k, v in got.items() if k != "html"})
+                self._send_bytes(200, got["html"].encode("utf-8"), "text/html; charset=utf-8", cache=False)
+                return
+            self._send(200, _off.page_info(self.workspace, url))
             return
 
         if segments[0] == "media" and len(segments) == 2:

@@ -86,6 +86,38 @@ export class Sidecar {
     }
   }
 
+  /** What there is to show for `url` with no connection (`G-59`..`G-62`). */
+  async offlineInfo(url: string): Promise<any | null> {
+    return this.get("/offline?url=" + encodeURIComponent(url));
+  }
+
+  /** One offline form of `url`: the saved page's MHTML (as saved, or infilled), or the traced page's HTML. */
+  async offlineForm(url: string, which: "saved" | "infilled" | "traced"): Promise<ArrayBuffer | null> {
+    const u = this.url(`/offline/${which}?url=` + encodeURIComponent(url));
+    if (!u) return null;
+    try {
+      // Never from the HTTP cache: the store moves under these forms.
+      const res = await fetch(u, { cache: "no-store", signal: AbortSignal.timeout(60000) });
+      return res.ok ? await res.arrayBuffer() : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Keep a page as the cell presented it (`G-60`). */
+  async saveOfflinePage(url: string, mhtmlB64: string, text: string): Promise<any | null> {
+    const u = this.url("/offline?url=" + encodeURIComponent(url));
+    if (!u) return null;
+    try {
+      const res = await fetch(u, { method: "POST", headers: { "Content-Type": "application/json" },
+                                   body: JSON.stringify({ mhtml_b64: mhtmlB64, text }),
+                                   signal: AbortSignal.timeout(120000) });
+      return res.ok ? await res.json() : null;
+    } catch {
+      return null;
+    }
+  }
+
   /** Save page forms taken from the live page: `[{cid, snap}]`. */
   async saveSnapshots(items: { cid: string; snap: any }[]): Promise<any | null> {
     const url = this.url("/snapshots");

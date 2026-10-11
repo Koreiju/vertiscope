@@ -193,6 +193,12 @@ export interface DomvecSettings {
   loadRemoteMedia: boolean;
   /** How many hits the `/` retrieval gesture offers. */
   retrievalLimit: number;
+  /**
+   * Save each page as the browser cell PRESENTS it, for offline use (`G-60`:
+   * "toggle the option to save the full webpage as it is presented live").
+   * Off by default: a saved page is a whole copy of the page on disk.
+   */
+  saveOffline: boolean;
 }
 
 export const DEFAULTS: DomvecSettings = {
@@ -200,6 +206,7 @@ export const DEFAULTS: DomvecSettings = {
   interactiveByDefault: true,
   loadRemoteMedia: false,
   retrievalLimit: 8,
+  saveOffline: false,
 };
 
 /** One command's result, from `POST /shell`. */

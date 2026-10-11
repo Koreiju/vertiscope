@@ -823,3 +823,31 @@ button.domvec-run-fence:hover {
   color: var(--text-muted);
   border-top: 1px solid var(--background-modifier-border);
 }
+
+/* G-59: offline, a chunk panel is a main pane -- the same element, docked. */
+.domvec-panel-pane { padding: 0; overflow: auto; }
+.domvec-bb.domvec-bb-docked { position: static; width: auto; max-width: none; max-height: none;
+  height: 100%; box-shadow: none; transform: none; }
+.domvec-bb.domvec-bb-docked .domvec-bb-body { max-height: none; }
+
+/* The `[]()` gesture's results (`R-2`/`R-3`): a block IN the editor's flow,
+   so the lines below move down by its height and stay editable. */
+.domvec-linkgesture {
+  margin: 4px 0 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  background: var(--background-secondary);
+  font-size: var(--font-ui-small);
+}
+.domvec-linkgesture .domvec-lg-head {
+  padding: 4px 8px;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+.domvec-linkgesture .domvec-lg-list { max-height: 220px; overflow-y: auto; }
+.domvec-linkgesture .domvec-lg-hit { padding: 4px 8px; cursor: pointer; }
+.domvec-linkgesture .domvec-lg-hit:hover { background: var(--background-modifier-hover); }
+.domvec-linkgesture .domvec-lg-title { color: var(--text-normal); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.domvec-linkgesture .domvec-lg-sub { color: var(--text-faint); font-size: 0.9em; }
+/* Planted only: the floating shape the design note rejected. */
+.domvec-linkgesture-overlay { position: absolute; z-index: 30; width: 420px; }

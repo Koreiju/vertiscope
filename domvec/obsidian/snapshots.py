@@ -102,6 +102,30 @@ def load(workspace, cid: str) -> Optional[Dict]:
     return doc
 
 
+def load_page_forms(workspace, url: str) -> Dict[str, Dict]:
+    """Every saved page form of a page, by cid -- ONE query, not one a chunk.
+
+    The offline page read each chunk's form with its own query: 15-36 s to
+    open a page of 183-228 chunks (2026-10-11, `G-62`)."""
+    root = _dir(workspace)
+    out: Dict[str, Dict] = {}
+    if root is None or not url:
+        return out
+    for cid, h in workspace.store._rows("MATCH (c:Chunk {url: $u}) RETURN c.cid, c.snap", {"u": url}):
+        if not h:
+            continue
+        path = _blob(root, h)
+        if not path.exists():
+            continue
+        try:
+            doc = json.loads(gzip.decompress(path.read_bytes()).decode("utf-8"))
+        except Exception:                           # noqa: BLE001
+            continue
+        doc["saved"] = h
+        out[cid] = doc
+    return out
+
+
 def coverage(workspace, url: str) -> Dict:
     """How many of a page's chunks have a saved page form."""
     rows = workspace.store._rows("MATCH (c:Chunk {url: $u}) RETURN c.snap", {"u": url})

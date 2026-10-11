@@ -43,16 +43,20 @@ import { BROWSER_VIEW, BrowserView } from "./browser";
 import type { ActRecord } from "./panelact";
 import { GRAPH_VIEW, GraphView } from "./graph";
 import { RetrievalSuggest } from "./retrieval";
+import { GestureHost, linkGesture } from "./linkgesture";
 import { Sidecar } from "./sidecar";
 import { ChunkSurface, SurfaceHost } from "./surface";
 import { ChunkPayload, DEFAULTS, DomvecSettings, EnactResult, KernelReply }
   from "./types";
 import { VaultLinks } from "./vaultlinks";
+import { PANEL_VIEW, PanelView } from "./panelview";
 
 export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost {
   settings: DomvecSettings = DEFAULTS;
   sidecar!: Sidecar;
   links!: VaultLinks;
+  /** The `[]()` gesture's host: its counters and its planted arm (`R-1`..`R-4`). */
+  gesture!: GestureHost;
   /**
    * What the SERVER last said it allows. Refreshed on load and by the
    * connection check; never assumed, and never set from a plugin setting.
@@ -94,6 +98,21 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     }
     this.sidecar = new Sidecar(() => this.settings.sidecar);
     this.links = new VaultLinks(this.app, this.sidecar);
+    const links = this.links;
+    this.gesture = {
+      sidecar: this.sidecar,
+      stats: { opened: 0, pages: 0, infilled: 0, last: null },
+      plantOverlay: false,
+      onOpen: () => { void links.refresh(); },
+      destination: (hit) => {
+        // A vault note links by its path in the vault; a page with an
+        // exported note links to that note (a markdown panel link, as the
+        // verbatim asks); anything else by its own address.
+        if (hit.url.startsWith("vault://")) return encodeURI(decodeURIComponent(hit.url.replace(/^vault:\/\/[^/]*\//, "")));
+        const note = links.noteFor(hit.url);
+        return note ? encodeURI(note + ".md") : hit.url;
+      },
+    };
 
     this.registerMarkdownCodeBlockProcessor(
       "domvec",
@@ -110,6 +129,9 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     // DOM a post-processor can append to, live preview is CodeMirror and needs
     // a widget decoration. See `runbutton.ts`.
     // Where the chunker cut, in the editor's gutter (`P-N8`).
+    // The `[]()` gesture (`R-1`..`R-4`): results in a block under the line,
+    // a click infills the link between the parentheses.
+    this.registerEditorExtension(linkGesture(this.gesture));
     this.registerEditorExtension(chunkGutter());
     this.registerEvent(this.app.workspace.on("active-leaf-change",
                                              () => this.refreshChunkMarks()));
@@ -252,6 +274,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
 
     // The browser cell (`G-36`). A pane now; the same component becomes a
     // notebook cell, with the standalone being the expanded view.
+    this.registerView(PANEL_VIEW, (leaf: WorkspaceLeaf) => new PanelView(leaf));
     this.registerView(
       BROWSER_VIEW,
       (leaf: WorkspaceLeaf) => {

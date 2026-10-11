@@ -104,6 +104,12 @@ export class VaultLinks {
    * to a note that does not exist, which Obsidian draws as a dangling node
    * and puts in the graph as a dot nobody can open.
    */
+  /** The exported note a page's url resolves to, by basename, if any. */
+  noteFor(url: string): string | undefined {
+    const key = canonical(url);
+    return key ? this.map.get(key) : undefined;
+  }
+
   rewrite(markdown: string, base: string): { text: string; edges: number } {
     let edges = 0;
     const text = markdown.replace(LINK, (whole, words: string, target: string) => {

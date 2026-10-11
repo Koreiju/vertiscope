@@ -34,6 +34,7 @@ import { Sidecar } from "./sidecar";
 import { ChunkSurface, SurfaceHost } from "./surface";
 import { baseFor, faviconFor, getSnapshot, pictureFor, putSnapshot, renderSnapshot } from "./snapshot";
 import type { ActRecord, ActResult } from "./panelact";
+import { PANEL_VIEW, PanelView } from "./panelview";
 
 export const GRAPH_VIEW = "domvec-graph-view";
 
@@ -2614,6 +2615,8 @@ export class GraphView extends ItemView {
                          fromHover, openedAt: performance.now() };
     this.billboards.set(node.id, entry);
     this.positionBillboard(entry);
+    // Offline the panel is a MAIN pane, not a billboard (`G-59`).
+    if (this.offlineNow()) void this.dockPanel(entry);
     this.startBillboardLoop();
 
     // Dragging pins it. Pointer events rather than mouse, so a drag that
@@ -4327,6 +4330,32 @@ export class GraphView extends ItemView {
   }
 
   /** Put a billboard where its node is, in screen coordinates. */
+  /** Is the browser cell showing a page's offline form (`G-59`, `G-62`)? */
+  private offlineNow(): boolean {
+    const b: any = this.app.workspace.getLeavesOfType("domvec-browser-view")[0]?.view;
+    return !!(b && b.offlineFor) && !this.plantOfflineBillboard;
+  }
+  /** Planted (`G-59`): offline, the panel stays a projector billboard. */
+  plantOfflineBillboard = false;
+  docked = 0;
+
+  /** Move a panel into the main offline pane: the same element, re-parented. */
+  private async dockPanel(entry: any): Promise<void> {
+    const ws = this.app.workspace;
+    let leaf = ws.getLeavesOfType(PANEL_VIEW)[0];
+    if (!leaf) {
+      leaf = ws.getLeaf("tab");
+      await leaf.setViewState({ type: PANEL_VIEW, active: true });
+    }
+    ws.revealLeaf(leaf);
+    // One docked panel: the previous one goes back to being closed.
+    for (const [id, e] of this.billboards) if (e !== entry && (e as any).docked) this.closeBillboard(id as string);
+    (leaf.view as PanelView).dock(entry.el, String(entry.node.id));
+    entry.docked = true;
+    entry.pinned = true;
+    this.docked++;
+  }
+
   private positionBillboard(entry: { el: HTMLElement; node: any; pinned: boolean }): void {
     if (entry.pinned || !this.graph) return;
     const n = entry.node;

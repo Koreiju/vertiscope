@@ -318,6 +318,17 @@ export class BrowserView extends ItemView {
     this.address.placeholder = "url";
     const scan = bar.createEl("button", { text: "scan" });
     this.liveButton = bar.createEl("button", { text: "live ●" });
+    // `G-60`: save each page as presented, for offline use -- a toggle, as asked.
+    this.saveOfflineButton = bar.createEl("button");
+    this.paintSaveOffline();
+    this.saveOfflineButton.onclick = () => { void this.toggleSaveOffline(); };
+    // `G-62`: the page with no connection -- saved as presented, or rebuilt
+    // from the scan trace. Pressed again, back to the live page.
+    const offlineBtn = bar.createEl("button", { text: "offline" });
+    offlineBtn.onclick = () => {
+      if (this.offlineFor) { const u = this.offlineFor; this.offlineFor = ""; this.go(u); }
+      else void this.openOffline(this.webview?.getURL() || "");
+    };
 
     // The overlay, above the page and never inside it (`G-41`). This is
     // Obsidian's own DOM drawn over the webview, not script written into the
@@ -428,9 +439,10 @@ export class BrowserView extends ItemView {
     // is still doing; a new main-frame navigation (not an in-page one) resets it.
     view.addEventListener("dom-ready", () => { this.domReady = true; });
     view.addEventListener("did-start-navigation", (e: any) => {
-      if (e && e.isMainFrame && !e.isInPlace && !e.isSameDocument) this.domReady = false;
+      if (e && e.isMainFrame && !e.isInPlace && !e.isSameDocument) { this.domReady = false; this.loadFailedUrl = ""; }
     });
     view.addEventListener("did-stop-loading", () => {
+      if (this.saveOfflineOn()) this.scheduleOfflineSave();
       this.address.value = view.getURL();
       try {
         const u = view.getURL();
@@ -501,6 +513,12 @@ export class BrowserView extends ItemView {
       // -3 is ABORTED, which is what a redirect away from a page reports.
       // Showing it as a failure would make every redirect look broken.
       if (e.errorCode !== -3) this.say(`did not load: ${e.errorDescription}`);
+      if (e.errorCode !== -3 && e.isMainFrame !== false) this.loadFailedUrl = String(e.validatedURL || "");
+      // No connection: the page opens from what the store holds (`G-62`).
+      if (BrowserView.NO_CONNECTION.has(e.errorCode) && e.isMainFrame !== false
+          && /^https?:/.test(String(e.validatedURL || ""))) {
+        void this.openOffline(String(e.validatedURL));
+      }
     });
 
     back.onclick = () => { if (view.canGoBack()) view.goBack(); };
@@ -1830,6 +1848,8 @@ export class BrowserView extends ItemView {
     // 0 and 2 drains in 16 s -- the heavy live pages were barely scanned
     // (G-101, 2026-09-27).
     if (!url || url === "about:blank" || (wv.isLoading() && !this.domReady)) return;
+    // An offline view is a local file, not a page: nothing in it is captured.
+    if (!/^https?:/.test(url)) return;
     if (url !== this.session && docKey(url) !== docKey(this.session)) {
       this.lastRepairMs = undefined;
       await this.pageChanged(url);
@@ -2088,6 +2108,120 @@ export class BrowserView extends ItemView {
 
   /** Landing map loads that failed and were asked again. */
   mapRetries = 0;
+
+  // ---- offline (`G-59`..`G-62`) ---------------------------------------------
+
+  /** Chromium's net errors that mean "no connection", not "no such page". */
+  static NO_CONNECTION = new Set([-106, -105, -109, -118, -21, -102, -137, -130]);
+  /** The url whose offline form the cell is showing, "" when live. */
+  offlineFor = "";
+  offlineStats = { saved: 0, save_failed: 0, opened_saved: 0, opened_infilled: 0, opened_traced: 0, nothing: 0, last: null as any };
+  private saveOfflineButton: HTMLButtonElement | null = null;
+  private offlineSavedThisVisit = new Set<string>();
+  private offlineTimer = 0;
+  private loadFailedUrl = "";
+  private openingOffline = "";
+
+  private plugin(): any { return (this.app as any).plugins.getPlugin("domvec-bridge"); }
+  private saveOfflineOn(): boolean { return !!this.plugin()?.settings?.saveOffline; }
+  private paintSaveOffline(): void {
+    if (this.saveOfflineButton) this.saveOfflineButton.setText(this.saveOfflineOn() ? "save offline ●" : "save offline ○");
+  }
+  private async toggleSaveOffline(): Promise<void> {
+    const p = this.plugin();
+    if (!p) return;
+    p.settings.saveOffline = !p.settings.saveOffline;
+    await p.saveSettings();
+    this.paintSaveOffline();
+    if (p.settings.saveOffline) this.scheduleOfflineSave(500);
+  }
+
+  /** Once a page has stopped loading and the reader has let it settle. */
+  private scheduleOfflineSave(ms = 5000): void {
+    window.clearTimeout(this.offlineTimer);
+    this.offlineTimer = window.setTimeout(() => { void this.saveOfflinePage(); }, ms);
+  }
+
+  /**
+   * The page as the cell PRESENTS it (`G-60`): Chromium's MHTML serialisation
+   * of the live document -- its scripts already run, every resource inline --
+   * and its visible text, for the infill test. Read from the page, never
+   * written into it.
+   */
+  async saveOfflinePage(force = false): Promise<any> {
+    const wv = this.webview;
+    if (!wv || (!force && !this.saveOfflineOn())) return null;
+    const url = wv.getURL();
+    if (!/^https?:/.test(url) || this.offlineFor) return null;
+    if (!force && this.offlineSavedThisVisit.has(url)) return null;
+    // Never Chromium's error page: a failed load saved "no internet" as the
+    // page (Axolotl, 744 bytes, 2026-10-11).
+    if (this.loadFailedUrl === url) return null;
+    this.offlineSavedThisVisit.add(url);
+    try {
+      const req = (window as any).require;
+      const os = req("os"), path = req("path"), fsp = req("fs/promises");
+      const dir = path.join(os.tmpdir(), "domvec-offline");
+      await fsp.mkdir(dir, { recursive: true });
+      const file = path.join(dir, "save-" + Date.now() + ".mhtml");
+      const wc = req("@electron/remote").webContents.fromId(wv.getWebContentsId());
+      await wc.savePage(file, "MHTML");
+      const bytes: Buffer = await fsp.readFile(file);
+      await fsp.rm(file, { force: true });
+      // textContent, not innerText: the saved page holds hidden content too (a
+      // collapsed navbox), and the infill test asks what the SAVED page holds.
+      const text = String(await wv.executeJavaScript("document.body ? document.body.textContent : ''") || "");
+      if (text.trim().length < 200) { this.offlineStats.save_failed++; this.offlineStats.last = { url, skipped: "almost no text" }; return null; }
+      const got = await this.sidecar.saveOfflinePage(url, bytes.toString("base64"), text);
+      if (got && got.saved) this.offlineStats.saved++; else this.offlineStats.save_failed++;
+      this.offlineStats.last = { url, bytes: bytes.length, at: Date.now(), reply: got };
+      return got;
+    } catch (e) {
+      this.offlineStats.save_failed++;
+      this.offlineStats.last = { url, error: String(e).slice(0, 200) };
+      return null;
+    }
+  }
+
+  /**
+   * The page with no connection (`G-62`): the saved page when it holds what
+   * the scan traced, otherwise the page rebuilt from the trace (`G-61`'s
+   * infill) -- written to a local file, because Chromium opens MHTML only
+   * from one, and because with no network nothing else is reachable.
+   */
+  async openOffline(url: string): Promise<any> {
+    const wv = this.webview;
+    if (!wv || !/^https?:/.test(url)) return null;
+    // One at a time: a failed navigation reports more than once.
+    if (this.openingOffline === url) return null;
+    this.openingOffline = url;
+    try { return await this.openOfflineOnce(url); } finally { this.openingOffline = ""; }
+  }
+
+  private async openOfflineOnce(url: string): Promise<any> {
+    const wv = this.webview!;
+    const t0 = performance.now();
+    const info: any = await this.sidecar.offlineInfo(url);
+    if (!info || !info.opens) { this.offlineStats.nothing++; this.say("nothing kept for this page offline"); return info; }
+    const data = await this.sidecar.offlineForm(url, info.opens);
+    if (!data) { this.offlineStats.nothing++; return info; }
+    const req = (window as any).require;
+    const os = req("os"), path = req("path"), fsp = req("fs/promises");
+    const dir = path.join(os.tmpdir(), "domvec-offline");
+    await fsp.mkdir(dir, { recursive: true });
+    const file = path.join(dir, "open-" + Date.now() + (info.opens === "traced" ? ".html" : ".mhtml"));
+    await fsp.writeFile(file, Buffer.from(data));
+    this.offlineFor = url;
+    if (info.opens === "saved") this.offlineStats.opened_saved++;
+    else if (info.opens === "infilled") this.offlineStats.opened_infilled++;
+    else this.offlineStats.opened_traced++;
+    wv.loadURL("file:///" + file.replace(/\\/g, "/"));
+    this.say(info.opens === "saved" ? "offline · the page as it was saved"
+           : info.opens === "infilled" ? "offline · the page as it was saved, infilled from the scan trace"
+                                    : `offline · rebuilt from the scan trace (${info.chunks} chunks)`);
+    this.offlineStats.last = { opened: url, form: info.opens, ms: Math.round(performance.now() - t0) };
+    return info;
+  }
   /** Times the sidecar asked the sensor to send everything again. */
   resyncs = 0;
 
