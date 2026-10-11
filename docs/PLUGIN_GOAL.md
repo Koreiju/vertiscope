@@ -2567,6 +2567,35 @@ per field -- and the page form follows new streamed diffs gracefully while
 the markdown form may draw first; fly-to holds on such pages; every one of
 these fixed and tested.*
 
+> Significant render lag on streamed updates and saves to the 3D viewer from the
+> browser. Might be a blocking issue with data persistence versus immediate
+> diff-based updates and response in the app itself.
+
+> Phantom links and clumping tells me the central URL node collision radius
+> boundary was not enforced per a couple prompts ago
+
+> The collision boundary sphere on the central node should be scaled large
+> enough such that this overlap isn't an issue. I'd suggest this boundary is a
+> healthy third or so from the minimum distance between any other URL nodes
+> (same-level distance bounds on attraction). Again, remember that we need the
+> original UMAP coordinates to still persist as part of the force-directed
+> adjustments *from* the UMAP for these cases over overlaps. This should happen
+> for projections, local url node level .updates(), and global .update() calls,
+> all on umap-cuda.
+
+> Weird phantom open-links spotted...
+
+> It's an empty nodes problem maybe... Hovering on chunk overlays in the browser
+> flies to them
+
+*Read as: (63) diffs appear at once whatever the store is doing -- persistence
+never blocks the app's response; (64) the url node's collision sphere is about
+a third of the distance to its nearest url node and no chunk enters it; the
+post-UMAP adjustment starts FROM the UMAP coordinates, which persist as the
+phantom anchors, after every projection, local update and global update;
+(65) no link is drawn to a node that is not where its page is; (66) a hover
+flight lands on a node the reader can see.*
+
 ---
 
 
