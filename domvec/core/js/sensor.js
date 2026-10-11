@@ -96,6 +96,7 @@
 
   // --- chunking policy ----------------------------------------------------
   var USE_MERGE = !!V.merge;       // MERGE_AT hysteresis: fold tiny siblings
+  var PLANT_UNSEEN_MERGED = !!V.unseenmerged;  // planted: merged slots swept (G-142)
   var USE_SEMANTIC = !!V.semantic; // prefer heading/section boundaries
   var USE_RANK = !!V.rank;         // heaviest subtree first, not document order
   var WIDE = V.budget === 'wide', NARROW = V.budget === 'narrow';
@@ -1504,6 +1505,16 @@
     // the run has to be traced back to it. Bookkeeping beside the slot, never
     // in the payload.
     slot.tail = run[run.length - 1].node;
+    // The slot is LIVE whatever the gates below decide: its head is this
+    // run's first node, it is tracked, and it is seen. `at` resolved every
+    // member of archive.org's field list to no chunk (2026-10-11: `slotOf` ->
+    // tracked false, node null; `scripts/merge_at_probe.py`).
+    if (slot.node !== first.node) { chunkOf.set(first.node, slot); slot.node = first.node; }
+    if (!slot.tracked) { slot.tracked = true; if (chunkRoots.indexOf(slot) < 0) chunkRoots.push(slot); }
+    // SEEN in this repair, as `makeChunk` marks its slots: the sweep at the
+    // end of a fold untracks, nulls and reports REMOVED every slot not seen
+    // -- so every merged run was swept by the very fold that emitted it.
+    if (!PLANT_UNSEEN_MERGED) slot.seen = stats.repairs;
     var where = pathKey(parentPath);
     if (USE_GATE && slot.digest === d && slot.path === where) {
       stats.skipped++; return null;
@@ -3325,6 +3336,13 @@
     styles: styles,
     boxes: boxes,
     at: at,
+    // Read-only: which chunk slot an element maps to, for instruments that
+    // ask why `at` answers what it does (scripts/merge_at_probe.py).
+    slotOf: function (el) {
+      var s = el ? chunkOf.get(el) : null;
+      return s ? { id: s.id, tracked: !!s.tracked, own: s.node === el, tail: !!s.tail,
+                   connected: !!(s.node && s.node.isConnected) } : null;
+    },
     pictures: pictures,
     resolve: function (path) { return !!resolvePath(path); },
     // The node an address names, through shadow roots and slots -- read-only,

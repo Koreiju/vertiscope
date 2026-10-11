@@ -1724,6 +1724,16 @@ class _Handler(BaseHTTPRequestHandler):
             # because that is what it is, whatever the method is called.
             dirty = spine.dirty_chunks(update)
             phases["render"] = round((time.perf_counter() - mark) * 1000, 1)
+            # What KIND of change dirtied them: a page that inserts above the
+            # reader shifts every address below, and a pure move rewrites the
+            # chunk (2026-10-11: ScienceDirect re-dirtied 195-213 of 212 chunks
+            # on every capture, 7-60 s of store writes each).
+            try:
+                dl = update.delta
+                phases["delta"] = {"added": len(dl.added), "changed": len(dl.changed),
+                                   "removed": len(dl.removed), "moved": len(dl.moved)}
+            except Exception:                       # noqa: BLE001
+                pass
             mark = time.perf_counter()
             diff = _page_diff(session, url, passno, update.all_chunks, dirty)
             retired = list(diff["retired"]) if diff and RETIRE == "delete" else []

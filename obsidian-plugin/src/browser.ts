@@ -1057,6 +1057,22 @@ export class BrowserView extends ItemView {
   /** Named defects a check can plant through the plugin (non-vacuity arms). */
   plant = new Set<string>();
 
+  /**
+   * The live sensor's chunking policy. `merge` gathers small siblings into
+   * runs up to the budget, and `semantic` keeps a block a reader thinks of as
+   * one thing whole: a forum row or a field list is ONE in-page unit, as the
+   * store keeps it (2026-10-10: "This should be all one chunk, but it is
+   * erroneously split up into subchunks for the same card"; "per-field chunk
+   * degradation on overlay"). On since the sweep stopped untracking merged
+   * runs (G-142). Planted `no-merge`: one unit per element, as before.
+   */
+  sensorVariants(): string {
+    const v: string[] = [];
+    if (!this.plant.has("no-merge")) v.push("merge: true", "semantic: true");
+    if (this.plant.has("no-late-roots")) v.push("nolateroots: true");
+    return "{" + v.join(", ") + "}";
+  }
+
   /** The markdown side: one card per pinned chunk, natively rendered. */
   private async renderSide(): Promise<void> {
     this.markdownWrap.empty();
@@ -1419,7 +1435,7 @@ export class BrowserView extends ItemView {
   private sensorBoot(): string {
     return `if (!window[${JSON.stringify(HANDLE)}]) {
           var h = (${BrowserView.sensorSource})(
-            {budget: 0, debounce: 80, variants: ${this.plant.has("no-late-roots") ? "{nolateroots: true}" : "{}"}, known: [], signal: ${JSON.stringify(SIGNAL)},
+            {budget: 0, debounce: 80, variants: ${this.sensorVariants()}, known: [], signal: ${JSON.stringify(SIGNAL)},
              push: ${!this.plant.has("pull-drain")}});
           Object.defineProperty(window, ${JSON.stringify(HANDLE)},
             {value: h, enumerable: false, configurable: false});

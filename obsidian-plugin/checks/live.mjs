@@ -2919,6 +2919,47 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-142",
+      asks: "with the sensor's merge variant, every member of a re-rendered field list longer than the budget resolves to its merged chunk (at), stable across folds; planted (unseenmerged): the sweep untracks the merged run and its members resolve to nothing",
+      async run() {
+        const fixtures = await serveFixtures();
+        const page = fixtures.origin + "/field_list.html";
+        try {
+          const arm = (planted) => evaluate(`(async () => {
+            const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+            const v = app.workspace.getLeavesOfType("domvec-browser-view")[0].view;
+            const src = (await v.sidecar.sensor()).source;
+            const { BrowserWindow } = window.require("@electron/remote");
+            const w = new BrowserWindow({ show: false, width: 1200, height: 900 });
+            try {
+              await w.loadURL(${JSON.stringify(page)});
+              await sleep(900);                          // past the page's own re-render
+              const wc = w.webContents;
+              const variants = ${planted} ? "{merge:true,semantic:true,unseenmerged:true}" : "{merge:true,semantic:true}";
+              await wc.executeJavaScriptInIsolatedWorld(1036, [{ code: "(function(){window.__g142=(" + src + ")({known:[],variants:" + variants + "});return 1;})()" }]);
+              await sleep(600);
+              const ask = "JSON.stringify((function(){var h=window.__g142;h.drain();var out=[];document.querySelectorAll('#meta dt, #meta dd').forEach(function(e){var c=null;try{c=h.at(e);}catch(z){}out.push(c?c.id:null);});return out;})())";
+              const first = JSON.parse(await wc.executeJavaScriptInIsolatedWorld(1036, [{ code: ask }]));
+              await sleep(800);
+              const second = JSON.parse(await wc.executeJavaScriptInIsolatedWorld(1036, [{ code: ask }]));
+              return { planted: ${planted}, first, second };
+            } finally { w.destroy(); }
+          })()`, { timeout: 90000 });
+          const clean = await arm(false);
+          const planted = await arm(true);
+          const resolved = (x) => x.second.filter((i) => i !== null).length;
+          const units = (x) => new Set(x.second.filter((i) => i !== null)).size;
+          // A list longer than the budget is SEVERAL merged units, never one
+          // per field: at most a quarter as many units as members.
+          const ok = (x) => resolved(x) === x.second.length && units(x) <= Math.ceil(x.second.length / 4)
+            && JSON.stringify(x.first) === JSON.stringify(x.second);
+          return { pass: ok(clean) && resolved(planted) < planted.second.length / 2,
+                   evidence: { clean, planted, members: clean.second.length,
+                               bar: "clean: every field resolves, at most a quarter as many units as fields, the same across two folds; planted: fewer than half resolve" } };
+        } finally { await fixtures.close(); }
+      },
+    },
+    {
       id: "G-107",
       asks: "the 3D view draws every node and edge it holds in a bounded number of draw calls, each at the size the collider reserves, and the pointer still picks each node",
       async run() {
