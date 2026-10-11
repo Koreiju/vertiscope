@@ -867,6 +867,15 @@ def _join_media(lines: List[MarkdownLine]) -> List[MarkdownLine]:
     return out
 
 
+#: Accessors that name a target -- a place, a resource -- never words.
+_TARGET_ACCESSORS = frozenset({"href", "src", "srcset", "data-src", "data-srcset",
+                               "poster", "action", "formaction", "cite", "data",
+                               "xlink:href", "background"})
+
+#: Planted (`G-152`): a live-path href compared as prose, as before.
+PLANT_URL_AS_PROSE = False
+
+
 def _dedupe(units: List[Tuple[ContentAddress, str, str]],
             dropped_out: Optional[Dict[str, List[ContentAddress]]] = None
             ) -> List[Tuple[ContentAddress, str, str]]:
@@ -900,6 +909,21 @@ def _dedupe(units: List[Tuple[ContentAddress, str, str]],
     for i, (addr, _v, _l) in enumerate(units):
         by_node.setdefault(addr.xpath, []).append(i)
 
+    # A TARGET by its accessor as well as its category (`G-152`). The live
+    # path files a link's href under `link.anchor` -- category `link`, not
+    # `urls` -- so the href joined the prose comparison, its tokens (https en
+    # wikipedia org wiki konqueror) a strict superset of the title's
+    # (konqueror), and the title was "subsumed" by its own url. Every table
+    # link whose title matched its text vanished: Konqueror, KDE, KHTML on
+    # Comparison_of_web_browsers. The accessor is the same on both paths.
+    def is_target(addr: ContentAddress) -> bool:
+        if addr.category in ("urls", "media"):
+            return True
+        if PLANT_URL_AS_PROSE:
+            return False
+        head = (getattr(addr, "accessor", "") or "").split("|")[0].split("[")[0]
+        return head in _TARGET_ACCESSORS
+
     dropped = set()
     for indices in by_node.values():
         if len(indices) < 2:
@@ -907,7 +931,7 @@ def _dedupe(units: List[Tuple[ContentAddress, str, str]],
         textual = [
             (i, token_multiset(units[i][1]))
             for i in indices
-            if units[i][0].category not in ("urls", "media")
+            if not is_target(units[i][0])
         ]
         # multiset -> token set for the subset test; multiplicity stays in the
         # key so "buy buy" and "buy" are not merged by the exact-match branch.
@@ -939,7 +963,7 @@ def _dedupe(units: List[Tuple[ContentAddress, str, str]],
         seen_urls = set()
         for i in indices:
             addr, value, _ = units[i]
-            if addr.category not in ("urls", "media"):
+            if not is_target(addr):
                 continue
             if value in seen_urls:
                 dropped.add(i)
@@ -1241,7 +1265,12 @@ def _join_inline(units: List[Tuple[ContentAddress, str, str, int]]
             # Same flow owner and adjacency already mean one block's text.
         )
         if joinable:
-            merged = (prev[1].rstrip() + " " + value.lstrip()).strip()
+            # The same words twice is one spelling, not two (`G-152`): a link
+            # whose title IS its text joined to "Konqueror Konqueror".
+            if " ".join(value.split()).casefold() == " ".join(prev[1].split()).casefold():
+                merged = prev[1].strip()
+            else:
+                merged = (prev[1].rstrip() + " " + value.lstrip()).strip()
             out[-1] = (prev[0], merged, prev[2], min(prev[3], depth))
             continue
         out.append(unit)

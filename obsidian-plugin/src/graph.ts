@@ -2912,8 +2912,15 @@ export class GraphView extends ItemView {
       const t = String(l.text || "");
       const img = /!\[[^\]]*\]\(([^)\s]+)/.exec(t);
       if (img) return !drawnPics.has(picName(abs(img[1])));
-      // Only in-page jumps (`#cite_note-...`): the page drew them as marks.
-      const rest = t.replace(/\[[^\]]*\]?\]\(#[^)]*\)/g, " ").replace(/[\[\]\s,;.]/g, "");
+      // Only footnote MARKS (`[[ 33 ]](#cite_note-...)`, `[a](#...)`): the page
+      // drew them as superscripts. An in-page link that NAMES something is
+      // content -- a hidden menu or a table of contents of `#` anchors was
+      // read as all marks and never complemented (G-130, 2026-10-11: 0 of 5
+      // menu items shown). Planted with the complement (`plantNoComplement`).
+      const rest = t.replace(/\[(\[?[^\]]*\]?)\]\((#[^)]*)\)/g, (m0: string, label: string, dest: string) => {
+        const inner = String(label || "").replace(/[\[\]\s]/g, "");
+        return /^#cite/i.test(dest) || /^[\p{L}\p{N}]{0,3}$/u.test(inner) ? " " : m0;
+      }).replace(/[\[\]\s,;.]/g, "");
       if (!rest) return false;
       const w = words(t);
       return w.length > 0 && w.filter((x) => !drawn.has(x)).length / w.length > 0.5;

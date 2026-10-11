@@ -185,12 +185,22 @@ def test_table_rows_and_cells_read_in_order():
 #: same defect: the crumb's " › Tessil › hat-trie" follows an inline `<span>`
 #: and is filed under it, so its walk position lands after the snippet's --
 #: 4 inversions in 13 prose lines, all four the crumbs.
-_KNOWN_ORDER_DEFECTS = {"suffix_definition.html", "result_cards.html"}
+#: `practice_rows.html` (G-122/G-123's forum rows, 2026-10-10) is the ORACLE's,
+#: not the renderer's: `doc_pos` numbers the walk level by level -- a row is 20,
+#: its four cells 43-46, and only then their children, the excerpt `<div>` in
+#: the first cell at 76 -- so a block inside a cell reads as "after" the cells
+#: beside it. The drawn order is the page's: title, excerpt, avatar, count,
+#: date. 9 inversions in 41 prose lines, every one a cell child against the
+#: next cell (measured 2026-10-11). Strict: a document-order `doc_pos` turns it
+#: into a pass and this entry has to go.
+_KNOWN_ORDER_DEFECTS = {"suffix_definition.html", "result_cards.html", "practice_rows.html"}
 
 
 @pytest.mark.parametrize("path", [
     pytest.param(f, marks=pytest.mark.xfail(
-        reason="StreamingScan files tail text under the preceding inline element",
+        reason="StreamingScan files tail text under the preceding inline element"
+               if Path(f).name != "practice_rows.html"
+               else "doc_pos is level-order: a cell's block reads after the cells beside it",
         strict=True))
     if Path(f).name in _KNOWN_ORDER_DEFECTS else f
     for f in FIXTURES])

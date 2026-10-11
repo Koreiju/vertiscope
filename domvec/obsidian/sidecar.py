@@ -180,6 +180,36 @@ def _cache_health(body: Dict, key: object = None) -> Dict:
 _CHECKPOINT_QUIET_S = 120.0
 _CHECKPOINT_MIN_WAL = 8 << 20
 _CHECKPOINT_CEILING = 256 << 20
+#: Writes stopped this long: the reader is not browsing, and a lull between
+#: the plugin's background polls is quiet enough (`_checkpoint_due`).
+_CHECKPOINT_IDLE_WRITE_S = 600.0
+_CHECKPOINT_POLL_GAP_S = 2.0
+#: Planted: the old rule -- quiet only with no REQUEST of any kind for 120 s.
+_PLANT_REQUEST_QUIET = [False]
+
+
+def _checkpoint_due(size: int, now: float, last_write: float, last_request: float) -> bool:
+    """Fold the WAL in now?
+
+    Past the ceiling, always. Otherwise only with something to fold, and only
+    when quiet -- and "quiet" used to mean no request of any kind for 120 s,
+    which the plugin's own background polls never allow: through 2.8 hours of
+    an idle reader on 2026-10-11 the WAL grew to 249 MB unfolded, every byte
+    of it at risk to a native crash (the `.unreplayable` logs). So a second
+    quiet: no WRITE for ten minutes -- nobody is browsing -- and a two-second
+    lull between polls. Reads pause for the fold (10-19 s on a 32 GB store),
+    which an idle reader does not see.
+    """
+    if size >= _CHECKPOINT_CEILING:
+        return True
+    if size < _CHECKPOINT_MIN_WAL:
+        return False
+    since_write, since_request = now - last_write, now - last_request
+    if since_write >= _CHECKPOINT_QUIET_S and since_request >= _CHECKPOINT_QUIET_S:
+        return True
+    if _PLANT_REQUEST_QUIET[0]:
+        return False
+    return since_write >= _CHECKPOINT_IDLE_WRITE_S and since_request >= _CHECKPOINT_POLL_GAP_S
 
 
 def _checkpoint_forever(workspace, stop) -> None:
@@ -192,15 +222,14 @@ def _checkpoint_forever(workspace, stop) -> None:
     a crash costs at most what was written since the reader last paused, and
     browsing never waits on it."""
     wal = Path(str(workspace.store.path) + ".wal")
-    while not stop.wait(15.0):
+    while not stop.wait(1.0):
         try:
             size = wal.stat().st_size if wal.exists() else 0
             # Kuzu no longer checkpoints on its own (the store turns it off so
             # its readers can run beside a write), so past a ceiling the WAL is
             # folded in even mid-session: reads pause for it, nothing fails.
-            if size < _CHECKPOINT_CEILING and                     time.time() - max(_LAST_WRITE[0], _LAST_REQUEST[0]) < _CHECKPOINT_QUIET_S:
-                continue
-            if size < _CHECKPOINT_MIN_WAL:
+            # Checked every second, so a two-second lull between polls is seen.
+            if not _checkpoint_due(size, time.time(), _LAST_WRITE[0], _LAST_REQUEST[0]):
                 continue
             with _WORK_LOCK:
                 ms = workspace.store.checkpoint()
