@@ -3645,6 +3645,8 @@ export class GraphView extends ItemView {
    * (an invisible material is never queued). Shared geometry and material.
    */
   private pickProxy(n: any, relSize: number, media: boolean): any {
+    // For the harness: a ray cast as the pane's own picking casts it (G-174).
+    (window as any).__domvecRaycaster = THREE.Raycaster;
     if (!GraphView.proxyGeo) {
       GraphView.proxyGeo = new THREE.SphereGeometry(1, 8, 6);
       GraphView.proxyMat = new THREE.MeshBasicMaterial({ visible: false });
@@ -3657,6 +3659,11 @@ export class GraphView extends ItemView {
     // Its matrix is composed when it MOVES (`nodePositionUpdate`), not by the
     // renderer every frame for 23k proxies that mostly hold still.
     if (!this.plantProxyAutoMatrix) m.matrixAutoUpdate = false;
+    // And its WORLD matrix is written when it moves, never by the per-frame
+    // pass: three.js calls every child's updateMatrixWorld each frame, and an
+    // ancestor flagged changed made all 22k proxies multiply matrices --
+    // 21.7% of the CPU in chunk view with no input at all (2026-10-11).
+    if (!this.plantProxyWorldPass) m.updateMatrixWorld = () => {};
     m.scale.setScalar(this.lookOf(n, relSize, media).half);
     m.updateMatrix();
     (m as any).__proxy = true;
@@ -4017,6 +4024,7 @@ export class GraphView extends ItemView {
   pickNear = new Set<any>();
   /** The ranking's generation; a proxy is tested when its node carries it. */
   pickStamp = 0;
+  private lastRevealed = new Set<any>();
   /** Pointer move -> its glow written, ms, last 300 (item 104). */
   glowLatency: number[] = [];
   private pointerAt = 0;
@@ -4085,6 +4093,7 @@ export class GraphView extends ItemView {
     }
     const pictures = new Set(best);
     const picturesChanged = pictures.size !== this.detail.size || [...pictures].some((n) => !this.detail.has(n));
+    this.lastRevealed = this.detail;
     this.detail = pictures;
     // Graded: 1 for the node nearest the pointer, falling to 0.25 at the edge
     // of the region.
@@ -4100,9 +4109,12 @@ export class GraphView extends ItemView {
     this.glowNear = new Map(gBest.map((n, i) => [n, 1 - 0.75 * (Math.sqrt(gDist[i]) - near) / span]));
     // Only the nodes whose glow changed are rewritten, in place; a change of
     // which pictures are revealed changes what is drawn, and takes a full sync.
-    if (picturesChanged || this.plantSlowGlow || !this.batch) this.batchDirty = true;
+    if (this.plantSlowGlow || !this.batch) this.batchDirty = true;
     else {
+      // The revealed pictures that changed move between meshes in place too.
       const changed = new Set<any>([...was.keys(), ...this.glowNear.keys()]);
+      if (picturesChanged) for (const n of pictures) changed.add(n);
+      for (const n of this.lastRevealed) if (!pictures.has(n)) changed.add(n);
       const rs = g.nodeRelSize(), media = this.drawnMedia;
       if (this.batch.patch(changed, (n) => this.lookOf(n, rs, media)) > 0) this.batchDirty = true;
     }
@@ -4233,7 +4245,11 @@ export class GraphView extends ItemView {
       // And every 250 ms regardless, so a change nothing marked is drawn a
       // quarter-second late rather than never. Planted: every frame.
       const now = performance.now();
-      if (!this.plantSyncEveryFrame && !this.batchDirty && !this.glides.size && now - this.batchSyncedAt < 250) {
+      // The safety net for a change nothing marked: every 250 ms on a small
+      // graph, every 2 s on a large one -- a full sync of 22k nodes is ~25 ms,
+      // and four a second were a tenth of every second (2026-10-11).
+      const net = g.graphData().nodes.length > 5000 && !this.plantSyncEveryFrame ? 2000 : 250;
+      if (!this.plantSyncEveryFrame && !this.batchDirty && !this.glides.size && now - this.batchSyncedAt < net) {
         this.batchStats.skipped++;
         return;
       }
@@ -5077,6 +5093,8 @@ export class GraphView extends ItemView {
   batchStats = { synced: 0, skipped: 0 };
   /** Planted (2026-10-11): pick proxies recompose their matrix every frame. */
   plantProxyAutoMatrix = false;
+  /** Planted (2026-10-11): proxies take part in three.js's per-frame world-matrix pass. */
+  plantProxyWorldPass = false;
 
   /** Planted (2026-10-11): chunk view keeps the pages view's forces. */
   plantChunkForces = false;
@@ -5800,6 +5818,10 @@ export class GraphView extends ItemView {
       if (this.plantPerNode || !obj?.__proxy || obj.matrixAutoUpdate) return false;
       obj.position.set(c.x, c.y || 0, c.z || 0);
       obj.updateMatrix();
+      if (!this.plantProxyWorldPass) {
+        if (obj.parent) obj.matrixWorld.multiplyMatrices(obj.parent.matrixWorld, obj.matrix);
+        else obj.matrixWorld.copy(obj.matrix);
+      }
       return true;
     });
 

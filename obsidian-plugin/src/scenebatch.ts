@@ -209,6 +209,8 @@ export class SceneBatch {
   plantUnthrottled = false;
   /** Planted: a picture not loaded yet draws as the old opaque sphere. */
   plantSphereFallback = false;
+  /** Planted: a mesh change defers to a full sync, as before. */
+  plantNoMove = false;
   loadStats = { started: 0, placed: 0, failed: 0, maxInFlight: 0 };
   /** Told when a picture lands in the atlas: what is drawn has changed. */
   onPlaced: (() => void) | null = null;
@@ -402,6 +404,7 @@ export class SceneBatch {
     this.grow(this.clear, nodes.length);
     this.grow(this.glass, nodes.length);
     let no = 0, nt = 0, ng = 0, spheres = 0, pendingPics = 0;
+    this.slots = [[], [], []];
     for (const n of nodes) {
       if (!Number.isFinite(n.x) || !Number.isFinite(n.y)) continue;
       const lk = look(n);
@@ -417,6 +420,7 @@ export class SceneBatch {
       const m = toGlass ? this.glass : lk.translucent ? this.clear : this.opaque;
       const i = toGlass ? ng++ : lk.translucent ? nt++ : no++;
       n.__bm = toGlass ? 2 : lk.translucent ? 1 : 0; n.__bi = i; n.__bpic = cell !== undefined;
+      this.slots[n.__bm][i] = n;
       m.offset.setXYZ(i, n.x, n.y, n.z || 0);
       m.size.setX(i, lk.half);
       const col = this.colour(lk.color);
@@ -504,11 +508,50 @@ export class SceneBatch {
    * whose look would change pass (glass/opaque/clear) or picture-ness is left
    * for the next full sync, and says so in the return value.
    */
-  patchStats = { patches: 0, nodes: 0, deferred: 0, last_ms: 0 };
+  patchStats = { patches: 0, nodes: 0, deferred: 0, moved: 0, last_ms: 0 };
+  /** The node in each instance slot, per mesh (opaque, clear, glass), as of the last sync. */
+  private slots: any[][] = [[], [], []];
+  private meshOf(k: number): Mesh { return k === 2 ? this.glass : k === 1 ? this.clear : this.opaque; }
+  /** Write one node's look into slot `i` of `m`. */
+  private writeSlot(m: Mesh, i: number, n: any, lk: NodeLook, cell: number | undefined, pending: boolean): void {
+    m.offset.setXYZ(i, n.x, n.y, n.z || 0);
+    m.size.setX(i, lk.half);
+    if (cell !== undefined) {
+      const u0 = (cell % PER_ROW) / PER_ROW, v0 = Math.floor(cell / PER_ROW) / PER_ROW;
+      m.uv.setXYZW(i, u0, v0 + 1 / PER_ROW, u0 + 1 / PER_ROW, v0);
+      m.color.setXYZW(i, 1 + (lk.glow || 0), 1, 1, lk.alpha);
+    } else {
+      const col = this.colour(lk.color);
+      m.uv.setXYZW(i, pending ? 0 : (lk.glow || 0), 0, -1, 0);
+      m.color.setXYZW(i, col.r, col.g, col.b, pending ? 1 : lk.alpha);
+    }
+  }
+  /** Move a node's instance to another mesh: swap-remove, then append. */
+  private moveSlot(n: any, to: number): boolean {
+    const from = this.meshOf(n.__bm), dst = this.meshOf(to);
+    const i = n.__bi, last = from.geo.instanceCount - 1;
+    if (i > last || this.slots[n.__bm][i] !== n || dst.geo.instanceCount + 1 > dst.cap) return false;
+    if (i !== last) {
+      const other = this.slots[n.__bm][last];
+      for (const a of [from.offset, from.size, from.color, from.uv]) {
+        for (let c = 0; c < a.itemSize; c++) (a.array as Float32Array)[i * a.itemSize + c] = (a.array as Float32Array)[last * a.itemSize + c];
+      }
+      this.slots[n.__bm][i] = other; if (other) other.__bi = i;
+    }
+    // (A full destination was refused above: `grow` reallocates WITHOUT
+    // copying -- it precedes a full sync -- so that is the full sync's job.)
+    this.slots[n.__bm].length = last;
+    from.geo.instanceCount = last;
+    const j = dst.geo.instanceCount;
+    dst.geo.instanceCount = j + 1;
+    this.slots[to][j] = n;
+    n.__bm = to; n.__bi = j;
+    return true;
+  }
   patch(nodes: Iterable<any>, look: (n: any) => NodeLook | null): number {
     const t0 = performance.now();
-    let done = 0, deferred = 0;
-    const touched = new Set<Mesh>();
+    let done = 0, deferred = 0, moved = 0;
+    const touched = new Set<Mesh>([this.opaque, this.clear, this.glass].filter(() => false));
     for (const n of nodes) {
       if (n.__bi === undefined) { deferred++; continue; }
       const lk = look(n);
@@ -516,25 +559,25 @@ export class SceneBatch {
       const cell = lk.picture ? this.cells.get(lk.picture) : undefined;
       const pending = !!lk.picture && cell === undefined && !lk.translucent && !this.plantSphereFallback;
       const want = (lk.glass || pending) ? 2 : lk.translucent ? 1 : 0;
-      if (want !== n.__bm || (cell !== undefined) !== !!n.__bpic) { deferred++; continue; }
-      const m = want === 2 ? this.glass : want === 1 ? this.clear : this.opaque;
+      if (want !== n.__bm) {
+        // Revealed or hidden picture, hover in or out: the node changes mesh.
+        if (this.plantNoMove || !this.moveSlot(n, want)) { deferred++; continue; }
+        touched.add(this.meshOf(want)); touched.add(this.meshOf(n.__bm === want ? want : n.__bm));
+        moved++;
+      }
+      const m = this.meshOf(want);
       const i = n.__bi;
       if (i >= m.geo.instanceCount) { deferred++; continue; }
-      if (cell !== undefined) {
-        const pg = lk.glow || 0;
-        m.color.setXYZW(i, 1 + pg, 1, 1, lk.alpha);
-      } else {
-        const col = this.colour(lk.color);
-        m.color.setXYZW(i, col.r, col.g, col.b, pending ? 1 : lk.alpha);
-        if (!pending) m.uv.setX(i, lk.glow || 0);
-      }
-      m.size.setX(i, lk.half);
+      this.writeSlot(m, i, n, lk, cell, pending);
+      n.__bpic = cell !== undefined;
       touched.add(m);
       done++;
     }
-    for (const m of touched) { m.color.needsUpdate = true; m.uv.needsUpdate = true; m.size.needsUpdate = true; }
+    if (moved) { touched.add(this.opaque); touched.add(this.clear); touched.add(this.glass); }
+    for (const m of touched) { m.offset.needsUpdate = true; m.color.needsUpdate = true; m.uv.needsUpdate = true; m.size.needsUpdate = true; }
     this.patchStats = { patches: this.patchStats.patches + 1, nodes: this.patchStats.nodes + done,
-                        deferred: this.patchStats.deferred + deferred, last_ms: Math.round((performance.now() - t0) * 100) / 100 };
+                        deferred: this.patchStats.deferred + deferred, moved: this.patchStats.moved + moved,
+                        last_ms: Math.round((performance.now() - t0) * 100) / 100 };
     return deferred;
   }
 

@@ -3598,6 +3598,92 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-174",
+      asks: "in chunk view, a pointer sweeping the 3D panel has its glow written within a frame or two (in-app pointer-to-glow p50 under 40 ms), the changed nodes patched and moved between meshes in place with every slot consistent afterwards; planted (plantSlowGlow, plantFullPick: the 80 ms throttle, a full re-sync per change, the full raycast) at least 1.5x the frame per move",
+      async run() {
+        // 2026-10-11, PLUGIN_GOAL 104: "node hover and image/glow features
+        // seem to work but have a noticeably slow latency".
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          await window.__domvec.act("open", "graph");
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          for (let i = 0; i < 60 && !v.graph; i++) await sleep(500);
+          const unit = [...v.containerEl.querySelectorAll(".domvec-graph-bar button")].find((b) => /^(pages|chunks)$/.test(b.textContent.trim()));
+          const start = v.level;
+          const chunkView = () => v.level === "chunk" && v.umapOnly && v.graph && v.graph.graphData().nodes.length > 2000;
+          const runs0 = v.chunkRelaxStats.runs;
+          let switched = false;
+          if (!chunkView() && unit) { switched = true; unit.click(); for (let i = 0; i < 240 && !chunkView(); i++) await sleep(500); }
+          if (!chunkView()) return { error: "chunk view did not arrive" };
+          // THIS switch's relax done first (the counter outlives views): its
+          // frame slices and the rebuild would be measured otherwise.
+          if (switched) for (let i = 0; i < 160 && v.chunkRelaxStats.runs <= runs0; i++) await sleep(500);
+          await sleep(1500);
+          v.plantSlowGlow = ${planted}; v.plantFullPick = ${planted};
+          try {
+            const host = v.canvasEl, r = v.graph.renderer().domElement.getBoundingClientRect();
+            v.glowLatency = [];
+            const p0 = { ...v.batch.patchStats };
+            const t0 = performance.now();
+            for (let k = 0; k < 120; k++) {
+              const x = r.left + r.width * (0.3 + 0.4 * ((k % 40) / 40)), y = r.top + r.height * (0.4 + 0.2 * (Math.floor(k / 40) % 2));
+              host.dispatchEvent(new PointerEvent("pointermove", { clientX: x, clientY: y, bubbles: true }));
+              await new Promise((res) => requestAnimationFrame(() => res(0)));
+              await sleep(12);
+            }
+            // Each move waits for its frame: the sweep's time per move IS the
+            // frame the reader waits for, which the pacing would otherwise hide.
+            const perMove = (performance.now() - t0) / 120 - 12;
+            await sleep(300);
+            const a = v.glowLatency.slice().sort((x, y) => x - y);
+            // Every node's slot holds that node, inside its mesh's count, in the
+            // mesh its look routes it to.
+            const b = v.batch, rs = v.graph.nodeRelSize(), ms = [b.opaque, b.clear, b.glass];
+            let bad = 0, wrong = 0, outside = 0, checked = 0;
+            for (const n of v.graph.graphData().nodes) {
+              if (n.__bi === undefined) continue; checked++;
+              if (n.__bi >= ms[n.__bm].geo.instanceCount) outside++;
+              if (b.slots[n.__bm][n.__bi] !== n) bad++;
+              const lk = v.lookOf(n, rs, v.drawnMedia);
+              const cell = lk.picture ? b.cells.get(lk.picture) : undefined;
+              const pending = !!lk.picture && cell === undefined && !lk.translucent;
+              const want = (lk.glass || pending) ? 2 : lk.translucent ? 1 : 0;
+              if (want !== n.__bm && !v.batchDirty) wrong++;
+            }
+            // Picking still lands: for nodes drawn on screen, the pointer put on
+            // each one's own screen point, the ray there hits ITS proxy.
+            const cam = v.graph.camera(), scene = v.graph.scene();
+            const onScreen = v.graph.graphData().nodes.filter((nd) => nd.__threeObj && Number.isFinite(nd.x)).map((nd) => {
+              const q = { x: nd.x, y: nd.y, z: nd.z || 0 }; const vv = cam.position.clone().set(q.x, q.y, q.z).project(cam);
+              return { nd, x: vv.x, y: vv.y, z: vv.z };
+            }).filter((o) => Math.abs(o.x) < 0.8 && Math.abs(o.y) < 0.8 && o.z < 1).slice(0, 400);
+            let picked = 0, tried = 0;
+            for (let t = 0; t < onScreen.length && tried < 10; t += Math.max(1, Math.floor(onScreen.length / 10))) {
+              const o = onScreen[t]; tried++;
+              v.pointerNdc = [o.x, o.y]; v.detailDirty = true; v.detailAt = 0; v.refreshDetail(v.graph);
+              const rc = new window.__domvecRaycaster();
+              rc.setFromCamera({ x: o.x, y: o.y }, cam);
+              const hits = rc.intersectObjects(scene.children, true).filter((h) => h.object.__proxy);
+              if (hits.some((h) => h.object === o.nd.__threeObj)) picked++;
+            }
+            return { planted: ${planted}, n: a.length, p50: a[a.length >> 1] ?? null, p90: a[Math.floor(a.length * 0.9)] ?? null,
+                     picks: { tried, picked },
+                     frame_per_move_ms: Math.round(perMove * 10) / 10,
+                     patches: b.patchStats.patches - p0.patches, moved: b.patchStats.moved - p0.moved,
+                     integrity: { checked, slot_mismatch: bad, outside, wrong_mesh: wrong } };
+          } finally {
+            v.plantSlowGlow = false; v.plantFullPick = false;
+            if (v.level !== start && unit) unit.click();
+          }
+        })()`, { timeout: 300000 });
+        const clean = await arm(false), planted = await arm(true);
+        const c = clean, i = c.integrity || {};
+        return { pass: !c.error && c.n >= 20 && c.p50 < 40 && c.patches > 0 && c.picks && c.picks.tried >= 5 && c.picks.picked === c.picks.tried && i.slot_mismatch === 0 && i.outside === 0 && i.wrong_mesh === 0
+                       && !planted.error && planted.frame_per_move_ms >= 1.5 * c.frame_per_move_ms,
+                 evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-162",
       asks: "a browser toggle hides the overlay's chunk boxes by ALPHA only: off, the hover outline is placed but drawn at opacity 0 and the hover still reaches the 3D view; on, opacity 1; planted (plantBoxesStopHover): off also stops the hover",
       async run() {
