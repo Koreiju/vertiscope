@@ -2351,8 +2351,11 @@ def render_trie(
     # Tables as tables (`D-5`, `M-3`): after the affordances are carried, so a
     # row line holds every cell's addresses, and before the depths are levelled.
     if not PLANT_NO_TABLES:
+        # Each table's header row, from wherever on the page it was drawn --
+        # read before any chunk is rewritten (`D-9`).
+        headers = {} if PLANT_NAKED_ROWS else _table_headers(chunks)
         for chunk in chunks:
-            chunk.lines = _tabulate(chunk.lines)
+            chunk.lines = _tabulate(chunk.lines, headers)
 
     _level_page(chunks)
     _number_parts(chunks)
@@ -2372,11 +2375,62 @@ def render_trie(
 #: Planted (`D-5`): a table drawn one cell per line, as before.
 PLANT_NO_TABLES = False
 
-_CELL = re.compile(r"^(.*/table(?:\[\d+\])?)/(?:(?:thead|tbody|tfoot)(?:\[\d+\])?/)?"
-                   r"(tr(?:\[\d+\])?)/((?:td|th)(?:\[\d+\])?)(?:/|$)")
+# The row key keeps its section: `thead/tr` and `tbody/tr` are different rows
+# (one key merged a header with the first data row, 2026-10-11).
+_CELL = re.compile(r"^(.*/table(?:\[\d+\])?)/((?:(?:thead|tbody|tfoot)(?:\[\d+\])?/)?"
+                   r"tr(?:\[\d+\])?)/((?:td|th)(?:\[\d+\])?)(?:/|$)")
 
 
-def _tabulate(lines: List[MarkdownLine]) -> List[MarkdownLine]:
+#: Planted (`D-9`): a row away from its header carries bare values, as before.
+PLANT_NAKED_ROWS = False
+
+
+def _cell_text(ls: List[MarkdownLine]) -> str:
+    return " ".join(" ".join(l.text.split()) for l in ls)
+
+
+def _table_headers(chunks: List[MarkdownChunk]) -> Dict[str, List[str]]:
+    """Each table's column names: the first row whose cells are all `<th>`.
+
+    Collected across every chunk of the page, because the row that needs them
+    is usually not in the chunk that holds them (`D-9`: 44 of 79 row chunks
+    carried bare values -- `0.14%`, `$455.28M` -- whose names were in the
+    table's header row, one chunk away).
+    """
+    rows: Dict[str, Dict[str, List[Tuple[str, List[MarkdownLine]]]]] = {}
+    order: Dict[str, List[str]] = {}
+    for chunk in chunks:
+        for line in chunk.lines:
+            m = _CELL.match(line.address.xpath) if line.address else None
+            if not m:
+                continue
+            table, tr, cell = m.groups()
+            by_tr = rows.setdefault(table, {})
+            if tr not in by_tr:
+                by_tr[tr] = []
+                order.setdefault(table, []).append(tr)
+            cells = by_tr[tr]
+            if not cells or cells[-1][0] != cell:
+                cells.append((cell, []))
+            cells[-1][1].append(line)
+    out: Dict[str, List[str]] = {}
+    for table, trs in order.items():
+        for tr in trs:
+            cells = rows[table][tr]
+            if len(cells) >= 2 and all(c.startswith("th") for c, _ls in cells):
+                # A column's NAME is its cell's content, not the cell's own
+                # attributes: a sortable header's `th` carries "Sort ascending".
+                def name(cell: str, ls: List[MarkdownLine]) -> str:
+                    inner = [l for l in ls if not l.address.xpath.endswith("/" + cell)]
+                    # A linked header names the column by its label, not its url.
+                    return re.sub(r"!?\[([^\]]*)\](\([^)]*\)|<[^>]*>)", r"\1", _cell_text(inner or ls))
+                out[table] = [name(c, ls) for c, ls in cells]
+                break
+    return out
+
+
+def _tabulate(lines: List[MarkdownLine],
+              headers: Optional[Dict[str, List[str]]] = None) -> List[MarkdownLine]:
     """Draw a table's cells as a markdown table, one line per row (`D-5`).
 
     The goal names "a hierarchically-header-structured markdown document with
@@ -2418,6 +2472,30 @@ def _tabulate(lines: List[MarkdownLine]) -> List[MarkdownLine]:
                 cells.append((cell, []))
             cells[-1][1].append(line)
         width = max(len(c) for _tr, c in rows)
+        names = (headers or {}).get(table)
+        has_header = all(c.startswith("th") for c, _ls in rows[0][1])
+        # A fragment AWAY from its header, whose rows match the header's
+        # width: each value is named by the header at its own position
+        # (`D-9`, `M-10`, `M-11` -- "the chunk is what gets embedded", and a
+        # row of bare numbers embeds as almost nothing). One line a row,
+        # `Name: value · Name: value`, keeping every cell's address.
+        if (names and not has_header and len(names) == width
+                and all(len(c) == width for _tr, c in rows)):
+            for _tr, cells in rows:
+                members = [l for _c, ls in cells for l in ls]
+                head = members[0]
+                extra = list(head.inline)
+                for l in members[1:]:
+                    extra.append(l.address)
+                    extra.extend(l.inline)
+                pairs = [(h, _cell_text(ls)) for h, (_c, ls) in zip(names, cells)]
+                text = " · ".join((h + ": " + v) if h else v for h, v in pairs if v)
+                row = replace(head, depth=0, text=text, inline=tuple(extra))
+                if hasattr(head, "absorbed"):
+                    row = replace(row, absorbed=tuple(a for l in members for a in getattr(l, "absorbed", ())))
+                out.append(row)
+            i = j
+            continue
         # RECTANGULAR tables only. A row with fewer cells sits under a
         # `rowspan`/`colspan` the addresses do not record, and padding it put
         # Konqueror's "Linux" under "Name" (Comparison_of_web_browsers,

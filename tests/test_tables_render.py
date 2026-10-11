@@ -53,3 +53,33 @@ def test_a_table_with_spans_stays_a_cell_per_line():
                                     context_window=512) for l in c.lines]
     assert not any(l.text.startswith("|") for l in lines)
     assert any(l.text.strip() == "Linux" for l in lines)
+
+
+def _long_table(window):
+    rows = "".join("<tr><td>Browser %d</td><td>Engine %d</td><td>%d.%d%%</td></tr>" % (i, i % 4, i, i % 10) for i in range(80))
+    html = ("<html><body><main><table><tr><th>Name</th><th>Engine</th><th>Share</th></tr>" + rows
+            + "</table></main></body></html>")
+    return render_trie(StreamingScan("https://t.test/long", context_window=window).push(html, passno=0).trie,
+                       context_window=window)
+
+
+def test_rows_away_from_their_header_carry_its_names():
+    """`D-9`: a chunk of rows without the header row named nothing -- `0.14%`
+    with no subject. Each value is now named by the header at its position."""
+    chunks = _long_table(64)
+    assert len(chunks) > 3
+    away = [c for c in chunks if not any(l.text.startswith("| Name") for l in c.lines)
+            and any("Browser" in l.text for l in c.lines)]
+    assert away, "the table never split from its header"
+    for c in away:
+        for l in c.lines:
+            if "Browser" in l.text:
+                assert l.text.startswith("Name: Browser") and "Engine: Engine" in l.text and "Share: " in l.text, l.text
+                assert len(l.inline) >= 2      # every cell's address still on the line
+
+
+def test_planted_naked_rows_carry_bare_values(monkeypatch):
+    monkeypatch.setattr(md, "PLANT_NAKED_ROWS", True)
+    chunks = _long_table(64)
+    texts = [l.text for c in chunks for l in c.lines]
+    assert not any("Engine: " in t for t in texts)
