@@ -690,6 +690,8 @@ _CONTROLS_LOCK = threading.Lock()
 _PLANT_CONTROL_SCAN = [False]
 #: Planted: a capture re-writes chunks the store already holds identically.
 _PLANT_REWRITE_SAME = [False]
+#: Planted: a payload decoded against a dictionary it does not complete.
+_PLANT_NO_RESYNC = [False]
 
 
 def _forget_controls(url: str) -> None:
@@ -1667,6 +1669,22 @@ class _Handler(BaseHTTPRequestHandler):
                 session["stored"] = set()
                 session["stored_md"] = {}
             sessions[url] = session
+
+        # **The SIDECAR started over** -- the other direction. A restart under
+        # a page left open meets a sensor that has already sent its dictionary
+        # to the process that died, and now sends only additions; decoded
+        # against an empty one, the ids land on the wrong segments and
+        # plausible garbage reaches the store (/header/tr[2]/b/small/i[88] for
+        # a Wikipedia table row, 2026-10-11). The same arithmetic tells: the
+        # sensor's dictionary is larger than this session plus this payload.
+        # Refused, and the plugin asks its sensor to resend everything
+        # (`resync`). Planted: decoded anyway, as before.
+        if (not body.get("settle") and not _PLANT_NO_RESYNC[0]
+                and sensor_restarted(session, body)):
+            sessions.pop(url, None)
+            _profile("capture_refused", {"url": url, "why": "dictionary incomplete"})
+            self._send(409, {"error": "sensor dictionary incomplete", "resync": True, "url": url})
+            return
 
         started = time.perf_counter()
         try:

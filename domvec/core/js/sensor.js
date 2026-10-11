@@ -312,6 +312,13 @@
   var removedIds = [];
   var chunkRoots = [];           // live chunk-root slots, for the removal sweep
   var dict = [], dictIndex = new Map(), dictSent = 0;
+  // What "already sent" means. `resync` moves it on, and every gate that
+  // skips an unchanged chunk asks for the current generation too -- so the
+  // next fold sends the whole page, with the whole dictionary, to a receiver
+  // that lost its copy (a sidecar restarted under a page left open, 2026-10-11:
+  // ids decoded against an empty dictionary stored /header/tr[2]/b/small/i[88]
+  // for Wikipedia's table rows).
+  var EMIT_GEN = 0;
   var timer = null, chunkSeq = 1, version = 0;
   // Chunks whose content is unchanged and whose address moved.
   // Carried beside `chunks` and `removed`, and drained with them.
@@ -1383,7 +1390,7 @@
       var here = pathKey(path);
       if (prev) prev.seen = stats.repairs;
       if (USE_GATE && prev && prev.digest === rec.digest
-          && prev.path === here) {
+          && prev.path === here && prev.gen === EMIT_GEN) {
         stats.skipped++; return;
       }
       // Same content, new position: send where it went, not what it is.
@@ -1398,7 +1405,7 @@
       // holds the value, so the receiver can rebuild the shifted units from
       // its own store. The wire carries the address change; the content stays
       // where it already is.
-      if (USE_GATE && prev && prev.digest === rec.digest && prev.id) {
+      if (USE_GATE && prev && prev.digest === rec.digest && prev.id && prev.gen === EMIT_GEN) {
         moves.push([prev.id, path]);
         prev.path = here;
         stats.movedChunks++;
@@ -1433,7 +1440,7 @@
     // on every repair (measured: 89 gate-skips per idle drain on YouTube)
     // and only then finds nothing to say.
     var mine = pathKey(path);
-    if (USE_SUBTREEGATE && rec.emit === rec.digest && rec.emitPath === mine) {
+    if (USE_SUBTREEGATE && rec.emit === rec.digest && rec.emitPath === mine && rec.emitGen === EMIT_GEN) {
       stats.pruned++; return;
     }
     var kids = childrenOf(node), nsh = kids.shadowCount;
@@ -1478,6 +1485,7 @@
     if (USE_MERGE) flushRun();
     rec.emit = rec.digest;
     rec.emitPath = mine;
+    rec.emitGen = EMIT_GEN;
   }
 
   // One chunk made of several adjacent siblings. Its identity is the first
@@ -1516,13 +1524,13 @@
     // -- so every merged run was swept by the very fold that emitted it.
     if (!PLANT_UNSEEN_MERGED) slot.seen = stats.repairs;
     var where = pathKey(parentPath);
-    if (USE_GATE && slot.digest === d && slot.path === where) {
+    if (USE_GATE && slot.digest === d && slot.path === where && slot.gen === EMIT_GEN) {
       stats.skipped++; return null;
     }
     // The merged-run gate, and the same move rule as the one above it: the
     // run's digest is unchanged, so the receiver holds every line of it and
     // needs only the new address.
-    if (USE_GATE && slot.digest === d && slot.id) {
+    if (USE_GATE && slot.digest === d && slot.id && slot.gen === EMIT_GEN) {
       moves.push([slot.id, parentPath]);
       slot.path = where;
       slot.node = first.node;
@@ -1530,6 +1538,7 @@
       return null;
     }
     slot.digest = d;
+    slot.gen = EMIT_GEN;
     slot.path = where;
     slot.node = first.node;
     encodeLines(lines);
@@ -1722,6 +1731,7 @@
     slot.node = node;
     slot.tail = node;
     slot.digest = rec.digest;
+    slot.gen = EMIT_GEN;
     // Before the id-anchor rewrite below: the gate compares composed paths,
     // and an anchored address is stable under exactly the moves it needs to
     // notice.
@@ -3338,6 +3348,13 @@
     at: at,
     // Read-only: which chunk slot an element maps to, for instruments that
     // ask why `at` answers what it does (scripts/merge_at_probe.py).
+    // The receiver lost what it was sent: send everything again, dictionary
+    // and shapes from the start, every chunk as if new (see `EMIT_GEN`).
+    resync: function () {
+      dictSent = 0; shapesSent = 0; EMIT_GEN++;
+      stats.resyncs = (stats.resyncs || 0) + 1;
+      return EMIT_GEN;
+    },
     slotOf: function (el) {
       var s = el ? chunkOf.get(el) : null;
       return s ? { id: s.id, tracked: !!s.tracked, own: s.node === el, tail: !!s.tail,

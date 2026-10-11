@@ -439,7 +439,9 @@ export class Sidecar {
         body: JSON.stringify({ url, ...what }),
       });
       const body = await res.json();
-      if (!res.ok) return { error: body.error || `HTTP ${res.status}` } as
+      // `resync`: the sidecar cannot complete this sensor's dictionary (it
+      // restarted under the page) and wants everything sent again.
+      if (!res.ok) return { error: body.error || `HTTP ${res.status}`, resync: !!body.resync } as
         CaptureResult;
       return body as CaptureResult;
     } catch (e) {

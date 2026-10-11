@@ -2088,6 +2088,25 @@ export class BrowserView extends ItemView {
 
   /** Landing map loads that failed and were asked again. */
   mapRetries = 0;
+  /** Times the sidecar asked the sensor to send everything again. */
+  resyncs = 0;
+
+  /**
+   * The sidecar restarted under this page and cannot decode the sensor's
+   * next delta (its dictionary went with the old process): the sensor sends
+   * its whole dictionary and every chunk on the next drain (`resync` in
+   * sensor.js). A drain is asked for at once, so the store is whole again
+   * without the reader reloading anything.
+   */
+  private async resyncSensor(): Promise<void> {
+    const wv = this.webview;
+    if (!wv) return;
+    try {
+      await wv.executeJavaScript(`(function(){var h=window[${JSON.stringify(HANDLE)}];return h&&h.resync?h.resync():0;})()`);
+      this.resyncs++;
+      window.setTimeout(() => { if (!this.draining) void this.tick(); else this.drainAgain = true; }, 50);
+    } catch { /* the page went away; its next sensor starts whole */ }
+  }
 
   /** Drains that rode along in another drain's capture (merged ingest). */
   mergedCaptures = 0;
@@ -2180,6 +2199,7 @@ export class BrowserView extends ItemView {
       prof.stage(trace, "capture", captureMs);
       if (reply) prof.sidecar(trace, reply.phases, reply.ms, captureMs);
       if (!reply || reply.error) {
+        if (reply && (reply as any).resync) { void this.resyncSensor(); return; }
         this.say(`capture: ${reply ? reply.error : "no reply"}`);
         return;
       }
@@ -2392,6 +2412,7 @@ export class BrowserView extends ItemView {
       const reply = await this.sidecar.capture(
         url, { payload, title: this.webview?.getTitle() || "" });
       if (!reply || reply.error) {
+        if (reply && (reply as any).resync) { void this.resyncSensor(); return; }
         this.say(`capture failed: ${reply ? reply.error : "no reply"}`);
         return;
       }
