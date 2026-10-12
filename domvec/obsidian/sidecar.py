@@ -1044,7 +1044,8 @@ def search_payload(workspace, query: str, k: int = 8, *,
             #: True while the ranking still had more to give at this depth,
             #: so a scrolling overlay knows whether to keep asking.
             "more": len(hits) >= want,
-            "n": int(getattr(diag, "survivors", 0) or 0)}
+            "n": int(getattr(diag, "survivors", 0) or 0),
+            "code_partitions": getattr(diag, "code_partitions", None)}
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -1468,6 +1469,15 @@ class _Handler(BaseHTTPRequestHandler):
                 _yield_to_foreground()
 
             t0 = time.perf_counter()
+            if body.get("project"):
+                # Queue code pages already indexed (by `root` prefix) into the
+                # projector, without indexing again.
+                prefix = "code://" + str(body.get("project")).strip("/") + "/"
+                urls = [u for u in self.workspace.store.page_urls() if u.startswith(prefix)]
+                for u in urls:
+                    _project_page(self.workspace, u)
+                self._send(200, {"queued_pages": len(urls), "prefix": prefix})
+                return
             with _WORK_LOCK:
                 if body.get("repo"):
                     base = Path(__file__).resolve().parents[1]
@@ -1477,6 +1487,15 @@ class _Handler(BaseHTTPRequestHandler):
                     got = _pk.index_package(self.workspace, str(body.get("name") or ""), step=_step,
                                             limit=int(body.get("limit") or 0))
             _LAST_WRITE[0] = time.time()
+            # Into the projector, page by page, as a capture's pages go: the
+            # module pages reach the 3D view by the stream's own placement.
+            prefix = "code://%s/" % got.get("root", "")
+            queued = 0
+            for u in self.workspace.store.page_urls():
+                if u.startswith(prefix):
+                    _project_page(self.workspace, u)
+                    queued += 1
+            got["queued_pages"] = queued
             got["ms"] = round((time.perf_counter() - t0) * 1000, 1)
             _profile("package", {k: v for k, v in got.items() if k != "failed"})
             self._send(200, got)
