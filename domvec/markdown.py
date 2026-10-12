@@ -2367,6 +2367,13 @@ def render_trie(
             chunk.lines = _fold_structural(chunk.lines)
 
     _level_page(chunks)
+    # The lenient bound, held after every pass that can grow a chunk (`G-86`);
+    # a re-cut piece is levelled again on its own (R-K1: levels per chunk).
+    recut = _recut(chunks, context_window)
+    if len(recut) != len(chunks):
+        fresh = [c for c in recut if not any(c is k for k in chunks)]
+        _level_page(fresh)
+        chunks[:] = recut
     _number_parts(chunks)
     if memo is not None:
         memo.rotate()
@@ -3000,6 +3007,60 @@ LENIENCY = 1.5
 #: heading can close the chunk before it -- the culinarypedia defect.
 PLANT_TRAILING_HEADINGS = False
 
+#: Planted (`G-86`): a heading before a record set is flushed on its own.
+PLANT_HEADING_APART_FROM_RECORD = False
+
+#: Planted (`G-86`): a content boundary after a lone heading flushes it alone.
+PLANT_LONE_HEADING_FLUSH = False
+
+#: Planted (`G-86`): no last cut -- a chunk the post-passes grew past the
+#: lenient bound (a table's rows given their column names, `D-9`) stays so.
+PLANT_NO_RECUT = False
+
+
+def _recut(chunks: List[MarkdownChunk], window: int) -> List[MarkdownChunk]:
+    """The lenient bound held AFTER the post-passes (`G-86`).
+
+    The descent sizes a subtree before the page-wide passes rewrite it, and
+    some of those passes grow it: `_tabulate` gives every row its column names
+    (`D-9`), so a table sized as bare cells came out 400-730 tokens against a
+    256 window -- 33 multi-line chunks over 1.5x in the corpus, 26 of them
+    one Wikipedia comparison table. Such a chunk is cut again here, by lines,
+    by the descent's own rule: a run takes the next line past the window while
+    it stays under 1.5x, never ends on a heading, and a single line longer
+    than that stands alone (S-11). A chunk within the bound is returned as it
+    is, so nothing the descent got right moves.
+    """
+    out: List[MarkdownChunk] = []
+    for chunk in chunks:
+        if (PLANT_NO_RECUT or len(chunk.lines) < 2
+                or tokens.budget(chunk.markdown) < LENIENCY * window):
+            out.append(chunk)
+            continue
+        runs: List[List[MarkdownLine]] = [[]]
+        size = 0
+        for line in chunk.lines:
+            cost = tokens.budget(line.render()) + 1
+            run = runs[-1]
+            if run and size + cost > window:
+                if size + cost < LENIENCY * window and not _HEADING_FORM.match(line.text or ""):
+                    run.append(line)
+                    runs.append([])
+                    size = 0
+                    continue
+                # Never end on a heading: it opens the next run instead.
+                carried: List[MarkdownLine] = []
+                while len(run) > 1 and _HEADING_FORM.match(run[-1].text or ""):
+                    carried.insert(0, run.pop())
+                runs.append(carried)
+                size = sum(tokens.budget(l.render()) + 1 for l in carried)
+            runs[-1].append(line)
+            size += cost
+        for run in runs:
+            if run:
+                out.append(_part_of(chunk, run, 0))
+    return out
+
 _HEADING_FORM = re.compile(r"#{1,6} ")
 
 
@@ -3431,6 +3492,12 @@ def _descend(
         if not final and not PLANT_TRAILING_HEADINGS:
             while keep > 1 and _only_heading(buffer[keep - 1]):
                 keep -= 1
+            # A buffer of headings and nothing else is carried WHOLE (`G-86`):
+            # a content boundary firing right after a lone heading flushed it
+            # as a chunk of its own -- Python's `### Functions` over a 218-token
+            # `<dl>`, RFC 9110's section headings (2026-10-12).
+            if keep == 1 and _only_heading(buffer[0]) and not PLANT_LONE_HEADING_FLUSH:
+                return
         out.append(_merge(buffer[:keep], url, xpath, len(out)))
         last_run[:] = [sum(sizes[:keep]) + keep - 1]
         del buffer[:keep]
@@ -3464,9 +3531,22 @@ def _descend(
             continue
         if is_record:
             # A record stands alone. Flushed BEFORE as well as after, so a
-            # record never shares a chunk with the heading or the stray promo
-            # row that happened to precede it -- the run is "one chunk per
-            # result", not "one chunk per result except the first".
+            # record never shares a chunk with the stray promo row that
+            # happened to precede it -- the run is "one chunk per result",
+            # not "one chunk per result except the first".
+            #
+            # A HEADING is the exception (`G-86`): "Highlights" over a run of
+            # article cards heads them, and flushed on its own it was a chunk
+            # that is a heading alone -- 27 of the corpus's 43. Headings and
+            # nothing else in the buffer go with the first record, within the
+            # lenient bound; the chunk still holds one result.
+            if (buffer and not PLANT_HEADING_APART_FROM_RECORD
+                    and all(_only_heading(b) for b in buffer)
+                    and buffered_chars + len(buffer) + piece_chars < LENIENCY * window):
+                take(piece, piece_chars)  # type: ignore[arg-type]
+                flush(final=True)
+                last_run.clear()
+                continue
             flush(final=True)
             take(piece, piece_chars)  # type: ignore[arg-type]
             flush(final=True)
