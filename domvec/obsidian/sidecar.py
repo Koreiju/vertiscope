@@ -2829,9 +2829,14 @@ class _Handler(BaseHTTPRequestHandler):
                 # Store-wide anchor health (G-186): chunks holding more anchors
                 # than lines carry stale ones, which heal on the page's next
                 # capture. Read-only, one pass.
+                # Aggregated PER CHUNK (`WITH c, ...`): returning url and
+                # line_count beside count(e) grouped by THOSE -- every chunk
+                # of a page with the same line count pooled into one row --
+                # and reported 167,203 "stale" anchors that were not there
+                # (2026-10-12; per chunk there was 1).
                 rows = self.workspace.store._rows(
                     "MATCH (c:Chunk) OPTIONAL MATCH (c)-[e:Anchors]->(:Address) "
-                    "RETURN c.url, c.line_count, count(e)")
+                    "WITH c, count(e) AS k RETURN c.url, c.line_count, k")
                 over = [(u, int(n or 0), int(k or 0)) for u, n, k in rows if int(k or 0) > int(n or 0)]
                 pages = {}
                 for u, n, k in over:
