@@ -2439,6 +2439,8 @@ def projected_chunk_layout(workspace, proj=None) -> Optional[Dict]:
                 "pos": at, "source": "projector"}
         if placed is not None:
             node["drawn"] = placed
+            if len(drawn) >= 7:
+                node["drawn_half"] = float(drawn[6])
         if cid in hsv:
             node["hsv"] = hsv[cid]
         if picture is not None:

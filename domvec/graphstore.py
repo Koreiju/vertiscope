@@ -2035,11 +2035,13 @@ class GraphStore:
     def save_drawn(self, rows) -> int:
         """Each chunk's drawn place in chunk view, on the chunk (PLUGIN_GOAL 108).
 
-        `rows` is [(cid, [x, y, z, fx, fy, fz])]: the place the relax settled
-        on, and the fit point it was relaxed FROM -- which is what makes the
-        place reusable only while the fit still puts the chunk there.
+        `rows` is [(cid, [x, y, z, fx, fy, fz, half?])]: the place the relax
+        settled on, the fit point it was relaxed FROM -- which is what makes
+        the place reusable only while the fit still puts the chunk there --
+        and the drawn radius it was relaxed AT (a place spaced for another
+        size is not this size's place).
         """
-        data = [{"cid": str(c), "d": [float(v) for v in d][:6]} for c, d in rows
+        data = [{"cid": str(c), "d": [float(v) for v in d][:7]} for c, d in rows
                 if c and d is not None and len(d) >= 6]
         if not data:
             return 0

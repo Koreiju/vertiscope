@@ -4140,21 +4140,57 @@ export class GraphView extends ItemView {
   }
   /** Planted: chunk view sizes nodes by their member count, as before. */
   plantSizedInChunkView = false;
-  private unitValAt = { n: -1, v: 1 };
-  /** The median `val` of the drawn chunks, re-read when the count changes by a tenth. */
+  private unitValAt = { n: -1, v: 1, at: 0 };
+  /**
+   * Chunk view's ONE size, as a `val`: from the UMAP FIT, never from what is
+   * drawn. 45% of the median nearest-neighbour distance between chunks at
+   * their fit points -- the room the spacing rule gives a typical node -- so
+   * the size cannot feed on a layout spaced for an earlier size. Read from
+   * the drawn `val`s it did exactly that: places relaxed for orbs 14x too
+   * big left room for orbs 14x too big, and the median came back 1
+   * (2026-10-12). Re-read when the node count changes by a tenth.
+   */
   unitVal(): number {
-    const ns = this.graph ? (this.graph.graphData().nodes as any[]) : [];
+    const g: any = this.graph;
+    const ns = g ? (g.graphData().nodes as any[]) : [];
     if (this.unitValAt.n >= 0 && Math.abs(ns.length - this.unitValAt.n) < Math.max(50, this.unitValAt.n * 0.1)) return this.unitValAt.v;
-    const vals: number[] = [];
-    for (let i = 0; i < ns.length; i += Math.max(1, Math.floor(ns.length / 4000))) {
-      const n = ns[i];
-      if (n.level === "page" || n.force || !Number.isFinite(n.val) || n.val <= 0) continue;
-      vals.push(n.val);
+    const pts: number[][] = [];
+    for (const n of ns) if (n.level !== "page" && !n.force && Number.isFinite(n.fitX)) pts.push([n.fitX, n.fitY, n.fitZ ?? 0]);
+    let v = 1;
+    if (pts.length > 8 && g) {
+      // A grid at a cell the size of the typical spacing: estimated from the
+      // cloud's extent and count, then each sampled point's nearest within
+      // its 27 cells.
+      let lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+      for (const q of pts) for (let a = 0; a < 3; a++) { lo[a] = Math.min(lo[a], q[a]); hi[a] = Math.max(hi[a], q[a]); }
+      const vol = Math.max(1e-9, (hi[0] - lo[0]) * (hi[1] - lo[1]) * Math.max(hi[2] - lo[2], 1e-3));
+      const cell = Math.max(1e-6, 2 * Math.cbrt(vol / pts.length));
+      const key = (x: number, y: number, z: number) => `${Math.floor(x / cell)},${Math.floor(y / cell)},${Math.floor(z / cell)}`;
+      const grid = new Map<string, number[]>();
+      pts.forEach((q, i) => { const k = key(q[0], q[1], q[2]); const l = grid.get(k); if (l) l.push(i); else grid.set(k, [i]); });
+      const nn: number[] = [];
+      const step = Math.max(1, Math.floor(pts.length / 3000));
+      for (let i = 0; i < pts.length; i += step) {
+        const [x, y, z] = pts[i]; let best = Infinity;
+        const cx = Math.floor(x / cell), cy = Math.floor(y / cell), cz = Math.floor(z / cell);
+        for (let ox = -1; ox <= 1; ox++) for (let oy = -1; oy <= 1; oy++) for (let oz = -1; oz <= 1; oz++) {
+          for (const j of grid.get(`${cx + ox},${cy + oy},${cz + oz}`) || []) {
+            if (j === i) continue;
+            const d = Math.hypot(pts[j][0] - x, pts[j][1] - y, pts[j][2] - z);
+            if (d > 1e-9 && d < best) best = d;
+          }
+        }
+        if (Number.isFinite(best)) nn.push(best);
+      }
+      nn.sort((a, b) => a - b);
+      const rs = g.nodeRelSize ? g.nodeRelSize() : 1;
+      if (nn.length) { const half = 0.45 * nn[nn.length >> 1]; v = Math.max(1e-6, Math.pow(half / rs, 3)); }
     }
-    vals.sort((a, b) => a - b);
-    this.unitValAt = { n: ns.length, v: vals.length ? vals[vals.length >> 1] : 1 };
-    return this.unitValAt.v;
+    if (v !== this.unitValAt.v) this.batchDirty = true;
+    this.unitValAt = { n: ns.length, v, at: performance.now() };
+    return v;
   }
+
 
   /**
    * A picture decoded for the atlas, through the same CORS-free fetch.
@@ -5171,6 +5207,7 @@ export class GraphView extends ItemView {
   plantNoChunkRelax = false;
   /** Planted (PLUGIN_GOAL 108): stored drawn places ignored; relax from the fit every switch. */
   plantNoDrawn = false;
+  private relaxAfterSpacing = false;
   /** Planted: the relax moves stored places too, as before. */
   plantRelaxAll = false;
   drawnStats = { skipped: 0, posted: 0, saved: 0, free: 0, fixed: 0 };
@@ -5195,7 +5232,12 @@ export class GraphView extends ItemView {
     // layout is the one the reader saw last -- nothing to relax, nothing moves.
     // A page node is placed by the fit itself and has no stored place: it
     // counts as placed (one page node kept 22,648 stored chunks relaxing).
-    const placed = (n: any) => !this.plantNoDrawn && (!!n.drawnAt || n.level === "page");
+    // ...and a stored place counts only at the SIZE it was relaxed at: places
+    // spaced for orbs 14x too big are not this size's places (2026-10-12).
+    const rs0 = g.nodeRelSize(), media0 = this.drawnMedia;
+    const sameSize = (n: any) => Number.isFinite(n.drawnHalf)
+      && Math.abs(n.drawnHalf - this.lookOf(n, rs0, media0).half) <= 0.1 * Math.max(n.drawnHalf, 1e-6);
+    const placed = (n: any) => !this.plantNoDrawn && ((!!n.drawnAt && sameSize(n)) || n.level === "page");
     const stored = nodes.filter(placed).length;
     if (stored === N) {
       this.chunkRelaxStats = { ...this.chunkRelaxStats, runs: this.chunkRelaxStats.runs, from_store: N, relaxed: 0 } as any;
@@ -5299,10 +5341,12 @@ export class GraphView extends ItemView {
         // layout's frame (z without the pane's depth squash).
         const was = n.drawnAt;
         if (n.level !== "page" && !String(n.id).startsWith("page:")
-            && (!was || Math.hypot(x - was[0], y - was[1], z - was[2]) > 1e-6)) {
-          save.push([String(n.id), x, y, z / DEPTH, n.fitX, n.fitY, (n.fitZ ?? 0) / DEPTH]);
+            && (!was || Math.hypot(x - was[0], y - was[1], z - was[2]) > 1e-6
+                || !Number.isFinite(n.drawnHalf) || Math.abs(n.drawnHalf - H[i]) > 1e-6)) {
+          save.push([String(n.id), x, y, z / DEPTH, n.fitX, n.fitY, (n.fitZ ?? 0) / DEPTH, H[i]]);
         }
         n.drawnAt = [x, y, z];
+        n.drawnHalf = H[i];
         const sh = Math.hypot(x - F[3 * i], y - F[3 * i + 1], z - F[3 * i + 2]);
         if (sh > 1e-6) shifted++;
         maxShift = Math.max(maxShift, sh / H[i]);
@@ -5512,6 +5556,8 @@ export class GraphView extends ItemView {
       changed = true;
     }
     this.spacingStats = { runs: this.spacingStats.runs + 1, ms: Math.round(performance.now() - t0), nodes: nodes.length };
+    // Chunk view's one size is the median of these: read it again.
+    if (changed) this.unitValAt.at = 0;
     if (changed) {
       // **Refresh the SIZES, not the graph.** `graphData(data)` re-feeds the
       // layout engine and resets the cooldown, so calling this when the
@@ -5947,6 +5993,7 @@ export class GraphView extends ItemView {
       //: (PLUGIN_GOAL 108) -- present only while the fit is unchanged.
       drawnAt: Array.isArray((n as any).drawn)
         ? [(n as any).drawn[0], (n as any).drawn[1], ((n as any).drawn[2] ?? 0) * DEPTH] : undefined,
+      drawnHalf: (n as any).drawn_half,
       // The payload's own `val` when it has one, because a page node's size
       // is its CHUNK COUNT and it has no characters of its own. Deriving it
       // from `chars` gave every one of 96 pages the same radius -- a
@@ -6472,7 +6519,13 @@ export class GraphView extends ItemView {
         else { n.x = n.fx = n.fitX; n.y = n.fy = n.fitY; n.z = n.fz = n.fitZ ?? 0; }
       }
       this.umapOnly = true;
-      window.setTimeout(() => this.relaxChunkView(), 400);
+      // After the spacing pass, never before it: the relax spaces nodes at
+      // chunk view's one size, which is the median of the SPACED sizes -- a
+      // relax at 400 ms ran on the load's unspaced `val` (every chunk 1) and
+      // stored places spaced for orbs 14x too big (2026-10-12). The engine's
+      // stop runs the spacing; a fallback covers an engine that never stops.
+      this.relaxAfterSpacing = true;
+      window.setTimeout(() => { if (this.relaxAfterSpacing) { this.relaxAfterSpacing = false; this.relaxChunkView(); } }, 3000);
     } else {
       this.umapOnly = false;
       graph.cooldownTicks(Infinity);
@@ -6529,6 +6582,11 @@ export class GraphView extends ItemView {
       if (settles >= 3) return;
       settles += 1;
       if (this.fitRadiiToSpacing()) settles += 0;
+      if (this.relaxAfterSpacing && this.level === "chunk") {
+        this.relaxAfterSpacing = false;
+        this.unitValAt.at = 0;
+        window.setTimeout(() => this.relaxChunkView(), 50);
+      }
     });
 
     // Resizing the RENDERER is not resizing the CONTROLS, and missing the

@@ -1151,7 +1151,7 @@ class _Handler(BaseHTTPRequestHandler):
             if self.workspace is None:
                 self._send(503, {"error": "no workspace"})
                 return
-            rows = [(r[0], r[1:7]) for r in (body.get("rows") or [])
+            rows = [(r[0], r[1:8]) for r in (body.get("rows") or [])
                     if isinstance(r, list) and len(r) >= 7][:50000]
             t0 = time.perf_counter()
             with _foreground(), _WORK_LOCK:
