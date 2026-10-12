@@ -364,6 +364,9 @@ def anchor_sig(chunk) -> str:
     return hashlib.sha1(chr(10).join(keys).encode("utf-8")).hexdigest()[:16]
 
 
+#: Planted (G-186): stale anchors deleted by (chunk, address), any line.
+PLANT_STALE_BY_PAIR = [False]
+
 #: Planted (2026-10-12): one anchor per ADDRESS, the last line drawing it --
 #: a second line drawing the same address got no anchor.
 PLANT_ONE_ANCHOR_PER_ADDRESS = [False]
@@ -627,9 +630,17 @@ class GraphStore:
             # Only what actually moved. Re-indexing an unchanged page found
             # 5,841 of 5,841 anchors identical to what was stored, so the
             # delete-and-recreate was reaching a state already held.
-            stale_anchors = [{"cid": cid, "aid": aid}
-                             for cid, aid, _o in (before - incoming)]
+            # By the exact (chunk, address, LINE): an anchor at an old line
+            # number goes, the same address at its new line stays. Keyed on
+            # (chunk, address) it took both or left a line's old address
+            # beside its new one -- 25 of 27 arXiv chunks held lines anchored
+            # twice (2026-10-12, G-186).
+            stale_anchors = [{"cid": cid, "aid": aid, "ord": int(o)}
+                             for cid, aid, o in (before - incoming)]
             fresh_anchors = incoming - before
+            counts["anchors_before"] = len(before)
+            counts["anchors_stale"] = len(stale_anchors)
+            counts["anchors_fresh"] = len(fresh_anchors)
 
         # The same question for the addresses, which are the larger half of
         # the cost: the MERGE and its seven SETs is ~1,300ms of a 1,477ms
@@ -965,12 +976,27 @@ class GraphStore:
         # two together were most of a capture. `stale_anchors` is usually
         # empty; when it is not, it is small.
         if stale_anchors:
-            self._batch(
-                "UNWIND $rows AS r "
-                "MATCH (:Chunk {cid: r.cid})-[e:Anchors]->(:Address {aid: r.aid}) "
-                "DELETE e",
-                list(stale_anchors),
-            )
+            # FORWARD from the chunk, the address matched by a filter the
+            # planner cannot turn into a key lookup (`+ ''`), ONE STATEMENT A
+            # ROW. Bound by key at both ends -- and in an UNWIND, which plans
+            # the join from the address side -- the pattern matched NOTHING
+            # on the working store for anchors its walk from the chunk finds:
+            # the address-side adjacency lacks them. Every stale anchor
+            # survived its delete: 56 anchors on a 12-line arXiv chunk, three
+            # per line, and 741 "stale" deleted on each capture without one
+            # going (2026-10-12, G-186). Stale anchors are few in an ordinary
+            # write, so a statement each is cheap. Planted: the batched pair.
+            if PLANT_STALE_BY_PAIR[0]:
+                self._batch(
+                    "UNWIND $rows AS r "
+                    "MATCH (:Chunk {cid: r.cid})-[e:Anchors]->(:Address {aid: r.aid}) DELETE e",
+                    list(stale_anchors))
+            else:
+                for r in stale_anchors:
+                    self._execute(
+                        "MATCH (:Chunk {cid: $c})-[e:Anchors]->(a:Address) "
+                        "WHERE e.ord = $o AND a.aid + '' = $a DELETE e",
+                        {"c": r["cid"], "a": r["aid"], "o": int(r["ord"])})
 
         # A partial write retires exactly what its diff NAMES (2026-10-04,
         # the central diff: `retired` -- in this session's previous render
@@ -1283,14 +1309,18 @@ class GraphStore:
     def page_urls(self) -> List[str]:
         return [r[0] for r in self._rows("MATCH (p:Page) RETURN p.url")]
 
-    def chunk_sigs(self, cids) -> Dict[str, Tuple[str, str]]:
-        """Each stored chunk's (markdown, address signature) by cid: what a
-        write may skip only when BOTH are unchanged."""
+    def chunk_sigs(self, cids) -> Dict[str, Tuple[str, str, int]]:
+        """Each stored chunk's (markdown, address signature, anchor count) by
+        cid: a write may skip only when the first two are unchanged AND the
+        chunk holds exactly one anchor per addressed line -- a chunk carrying
+        stale anchors is rewritten, which is what deletes them."""
         cids = [c for c in dict.fromkeys(cids) if c]
         if not cids:
             return {}
-        return {cid: (md or "", sig or "") for cid, md, sig in self._rows(
-            "UNWIND $cids AS x MATCH (c:Chunk {cid: x}) RETURN c.cid, c.md, c.asig", {"cids": cids})}
+        return {cid: (md or "", sig or "", int(n or 0)) for cid, md, sig, n in self._rows(
+            "UNWIND $cids AS x MATCH (c:Chunk {cid: x}) "
+            "OPTIONAL MATCH (c)-[e:Anchors]->(:Address) "
+            "RETURN c.cid, c.md, c.asig, count(e)", {"cids": cids})}
 
     def chunk_mds(self, cids) -> Dict[str, str]:
         """Each stored chunk's markdown by cid, by primary-key lookups (the
@@ -1950,13 +1980,20 @@ class GraphStore:
         reads "Machine Learning", one line off for the rest of the chunk.
         """
         out: Dict[int, Tuple[ContentAddress, str]] = {}
+        seen: Dict[int, int] = {}
+        keys_at: Dict[int, List[str]] = {}
         for ordinal, key, value in self._rows(
                 "MATCH (c:Chunk {cid: $cid})-[r:Anchors]->(a:Address) "
                 "RETURN r.ord, a.akey, a.value ORDER BY r.ord", {"cid": cid}):
+            seen[int(ordinal)] = seen.get(int(ordinal), 0) + 1
+            keys_at.setdefault(int(ordinal), []).append(str(key or ""))
             try:
                 out[int(ordinal)] = (ContentAddress.parse(key), value)
             except Exception:                       # noqa: BLE001
                 continue
+        #: Lines anchored more than once: stale anchors never deleted (G-186).
+        self.last_duplicate_ords = sum(1 for n in seen.values() if n > 1)
+        self.last_duplicates = {o: ks for o, ks in keys_at.items() if len(ks) > 1}
         return out
 
     def addresses_of(self, cid: str) -> List[Tuple[ContentAddress, str]]:

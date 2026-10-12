@@ -804,6 +804,11 @@ def chunk_payload(workspace, cid: str) -> Optional[Dict]:
     else:
         by_line = store.anchors_by_line(cid)
         addresses = [by_line[i] for i in sorted(by_line)]
+        _ms["duplicate_ords"] = getattr(store, "last_duplicate_ords", 0)
+        dups = getattr(store, "last_duplicates", {}) or {}
+        if dups:
+            _ms["duplicates_sample"] = {str(o): [k.split("|")[1][-48:] for k in ks][:4]
+                                        for o, ks in list(sorted(dups.items()))[:4]}
     _ms["addresses"] = round((time.perf_counter() - _t) * 1000, 1)
     # Re-indented by nesting LEVEL before anyone sees it.
     #
@@ -1944,7 +1949,9 @@ class _Handler(BaseHTTPRequestHandler):
                         # stayed one sibling off on arXiv for every capture.
                         from domvec.graphstore import anchor_sig
                         sigs = self.workspace.store.chunk_sigs([c.cid for c in dirty])
-                        write = [c for c in dirty if sigs.get(c.cid) != (c.markdown, anchor_sig(c))]
+                        lines_of = lambda c: sum(1 for ln in c.lines if ln.address is not None)
+                        write = [c for c in dirty
+                                 if sigs.get(c.cid) != (c.markdown, anchor_sig(c), lines_of(c))]
                     phases["unchanged_skipped"] = len(dirty) - len(write)
                 except Exception:                   # noqa: BLE001
                     write = dirty
@@ -1965,7 +1972,7 @@ class _Handler(BaseHTTPRequestHandler):
                 # capture and one number cannot say which statement it is.
                 if isinstance(counts, dict):
                     phases.update({k: v for k, v in counts.items()
-                                   if str(k).startswith("ms_")})
+                                   if str(k).startswith("ms_") or str(k).startswith("anchors_")})
                     # A size, not a time, but it is what makes `ms_mirror`
                     # readable: the cost of the checkpoint is proportional
                     # to how much of the page it rewrote.
@@ -2743,6 +2750,22 @@ class _Handler(BaseHTTPRequestHandler):
             url = (query.get("url") or [""])[0]
             if not url:
                 self._send(400, {"error": "no url"})
+                return
+            if url == "*":
+                # Store-wide anchor health (G-186): chunks holding more anchors
+                # than lines carry stale ones, which heal on the page's next
+                # capture. Read-only, one pass.
+                rows = self.workspace.store._rows(
+                    "MATCH (c:Chunk) OPTIONAL MATCH (c)-[e:Anchors]->(:Address) "
+                    "RETURN c.url, c.line_count, count(e)")
+                over = [(u, int(n or 0), int(k or 0)) for u, n, k in rows if int(k or 0) > int(n or 0)]
+                pages = {}
+                for u, n, k in over:
+                    pages[u] = pages.get(u, 0) + 1
+                self._send(200, {"chunks": len(rows), "chunks_with_excess_anchors": len(over),
+                                 "excess_anchors": sum(k - n for _u, n, k in over),
+                                 "pages_affected": len(pages),
+                                 "worst_pages": sorted(pages.items(), key=lambda kv: -kv[1])[:8]})
                 return
             rows = self.workspace.store._rows(
                 "MATCH (c:Chunk {url: $u}) RETURN c.cid, c.md, c.line_count",

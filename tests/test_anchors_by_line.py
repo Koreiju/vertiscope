@@ -95,11 +95,26 @@ def test_same_markdown_with_moved_addresses_is_not_skipped(tmp_path):
     c = _chunk()
     store.ingest(URL, [(l.address, l.text, "") for l in c.lines], [c], complete=False)
     held = store.chunk_sigs([c.cid])[c.cid]
-    assert held == (c.markdown, anchor_sig(c))            # unchanged: skipped, rightly
+    assert held == (c.markdown, anchor_sig(c), 4)         # unchanged and one anchor a line: skipped
     shifted = MarkdownChunk(url=URL, xpath=c.xpath, lines=[
         MarkdownLine(depth=l.depth, text=l.text,
                      address=_addr(l.address.xpath.replace("div[2]", "div[4]"))) for l in c.lines])
     assert shifted.cid == c.cid and shifted.markdown == c.markdown
-    assert held != (shifted.markdown, anchor_sig(shifted))  # moved: written
+    assert held != (shifted.markdown, anchor_sig(shifted), 4)  # moved: written
     # Planted (`_PLANT_SKIP_BY_MD`): by markdown alone it would be skipped.
     assert store.chunk_mds([c.cid])[c.cid] == shifted.markdown
+
+
+def test_a_chunk_carrying_stale_anchors_is_not_skipped(tmp_path):
+    # The skip also counts anchors: one per addressed line, or the chunk is
+    # written again -- which is what deletes the extras.
+    store = GraphStore(tmp_path / "g.kuzu")
+    c = _chunk()
+    store.ingest(URL, [(l.address, l.text, "") for l in c.lines], [c], complete=False)
+    extra = _addr("/html/body/div[9]/text()[1]")
+    store.ingest(URL, [(extra, "x", "")], [], complete=False)
+    store._execute("MATCH (k:Chunk {cid: $c}), (a:Address {aid: $a}) CREATE (k)-[:Anchors {ord: 0}]->(a)",
+                   {"c": c.cid, "a": extra.aid})
+    assert store.chunk_sigs([c.cid])[c.cid][2] == 5       # 4 lines, 5 anchors: not skipped
+    store.ingest(URL, [(l.address, l.text, "") for l in c.lines], [c], complete=False)
+    assert store.chunk_sigs([c.cid])[c.cid][2] == 4       # written again: the stale one gone
