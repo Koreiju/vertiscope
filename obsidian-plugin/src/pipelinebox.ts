@@ -698,7 +698,12 @@ export class PipelineBox {
       : this.map.lookup(addressChain(addr));
     const stored = this.plantPageUnit ? "" : (byAddr ? byAddr.cid : this.storedFor(cid, url));
     const changed = !this.hover || this.hover.cid !== cid || (!!stored && this.hover.stored !== stored);
-    const sameUnit = !!stored && !!this.hover && this.hover.stored === stored;
+    // Within one stored unit the outline keeps its place -- if that place
+    // holds this element too: a kept live box (see below) belongs to the
+    // element it was drawn for.
+    const pr = this.hover && this.hover.rect;
+    const sameUnit = !!stored && !!this.hover && this.hover.stored === stored && !!pr
+      && pr.x < b[0] + b[2] && pr.x + pr.w > b[0] && pr.y < b[1] + b[3] && pr.y + pr.h > b[1];
     const prev = this.hover;
     this.hover = { xpath: addr || "", cid, matched: byAddr ? byAddr.matched : "", walked: byAddr ? byAddr.walked : 0, source: "page",
                    rect: sameUnit && prev ? prev.rect : { x: b[0], y: b[1], w: b[2], h: b[3] },
@@ -722,7 +727,17 @@ export class PipelineBox {
       void this.unionRect(xs).then((r) => {
         window.clearTimeout(fallback);
         if (!this.hover || this.hover.at !== t0) return;
-        if (r) this.hover = { ...this.hover, rect: r, lines: xs.length };
+        // The stored unit's outline must hold what is under the pointer. Its
+        // xpaths were recorded when the page was stored; on a page that has
+        // moved since (YouTube's feed, archive.org's cards) they resolve to
+        // OTHER elements, and the outline was drawn 40+ px from the pointer on
+        // 18 of 27 YouTube hovers (2026-10-11). Not touching the page's own
+        // live box for the hovered chunk, it is not this hover's outline: the
+        // live box is kept. Planted: the stored union, wherever it lands.
+        const live = { x: b[0], y: b[1], w: b[2], h: b[3] };
+        const meets = !!r && r.x < live.x + live.w && r.x + r.w > live.x && r.y < live.y + live.h && r.y + r.h > live.y;
+        if (r && !meets && !this.plantStaleUnion) this.unionFallbacks++;
+        else if (r) this.hover = { ...this.hover, rect: r, lines: xs.length };
         drawn = true;
         this.placeOutline();
         if (stored) void this.placeStructure(stored, url);
@@ -737,6 +752,10 @@ export class PipelineBox {
   plantTwoStep = false;
   /** Hovers whose stored unit took longer than 40 ms (the page's box shown meanwhile). */
   twoStepFallbacks = 0;
+  /** Hovers whose stored unit resolved away from the pointer: the live box kept. */
+  unionFallbacks = 0;
+  /** Planted (G-163): the stored unit's union drawn wherever its xpaths now land. */
+  plantStaleUnion = false;
 
   /** In-page chunk -> the stored chunk it belongs to (set by the browser cell). */
   storedFor: (cid: string, url: string) => string = () => "";

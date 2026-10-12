@@ -108,6 +108,47 @@ def page_hits(p, url, settle=10):
               "try{return %s}finally{if(h&&h.plants)h.plants.yclip=false}})()" % ("true" if yclip else "false", HITS % shift))
         got = p.ev("(async()=>%s.webview.executeJavaScript(%s))()" % (B, json.dumps(js)))
         out[arm] = json.loads(got) if got else None
+    out["drawn"] = drawn_hits(p)
+    return out
+
+
+# The outline the plugin actually DRAWS (on a stored page, the union of the
+# stored chunk's elements -- not the sensor's box): real pointer moves over a
+# coarser grid, the overlay's own rect read back after each.
+DRAWN = r"""(async () => {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const b = %s;
+  const wc = window.require("@electron/remote").webContents.fromId(b.webview.getWebContentsId());
+  const vp = JSON.parse(await b.webview.executeJavaScript("JSON.stringify([innerWidth, innerHeight])"));
+  let n = 0, inside = 0, none = 0, displaced = 0;
+  for (let y = 40; y < vp[1] - 20; y += 80) for (let x = 30; x < vp[0] - 20; x += 90) {
+    wc.sendInputEvent({ type: "mouseMove", x: x - 3, y }); await sleep(30);
+    wc.sendInputEvent({ type: "mouseMove", x, y }); await sleep(170);
+    const h = b.pipebox && b.pipebox.hover;
+    if (!h || !h.rect) { none++; continue; }
+    n++;
+    const r = h.rect;
+    if (x >= r.x - 1 && x <= r.x + r.w + 1 && y >= r.y - 1 && y <= r.y + r.h + 1) inside++;
+    else {
+      // Displaced: the outline does not even reach the pointer's row or column band.
+      const dx = Math.max(r.x - x, x - (r.x + r.w), 0), dy = Math.max(r.y - y, y - (r.y + r.h), 0);
+      if (Math.max(dx, dy) > 40) displaced++;
+    }
+  }
+  wc.sendInputEvent({ type: "mouseMove", x: -8, y: -8 }); wc.sendInputEvent({ type: "mouseLeave", x: -8, y: -8 });
+  return JSON.stringify({ moves: n + none, outlined: n, inside, displaced_over_40px: displaced, no_outline: none });
+})()"""
+
+
+def drawn_hits(p):
+    out = {}
+    for arm, plant in (("clean", False), ("planted_stale_union", True)):
+        p.ev("(()=>{const b=%s;if(b.pipebox)b.pipebox.plantStaleUnion=%s;return 1})()" % (B, "true" if plant else "false"))
+        try:
+            got = p.ev(DRAWN % B)
+        finally:
+            p.ev("(()=>{const b=%s;if(b.pipebox)b.pipebox.plantStaleUnion=false;return 1})()" % B)
+        out[arm] = json.loads(got) if got else None
     return out
 
 
@@ -126,7 +167,7 @@ def main(argv):
             pshare = (pl.get("inside", 0) / pl["on_chunk"]) if pl.get("on_chunk") else None
             rows.append({"url": url, "share_inside": None if share is None else round(share, 3),
                          "planted_share": None if pshare is None else round(pshare, 3),
-                         "planted_yclip_displaced": yc.get("displaced"), **{k: c.get(k) for k in
+                         "planted_yclip_displaced": yc.get("displaced"), "drawn": r.get("drawn"), **{k: c.get(k) for k in
                          ("points", "on_chunk", "inside", "tight", "displaced", "examples", "shadow_points", "shadow_inside", "miss_px_p50", "miss_px_max", "at_ms_p50", "at_ms_p99")}})
             print(json.dumps(rows[-1]))
     except ReaderActed as e:
