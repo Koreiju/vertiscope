@@ -3144,6 +3144,10 @@ was a measurement artifact, corrected in PRD G-186.)*
 (more of their colour shows) and links a little fainter/thinner -- still
 clearly visible.*
 
+> significant lag experienced here
+
+*(Said right after (115) went live: nodes 1.25x and brighter, links fainter.)*
+
 > clicking on a node after clicking on another node gives no response in the
 > browser, either scrolling to page or navigating to the url prior to
 

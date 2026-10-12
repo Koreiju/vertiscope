@@ -3179,6 +3179,14 @@ export class GraphView extends ItemView {
    */
   private fitChunkSizes(data: any): void {
     if (!this.graph || this.plantBigChunks) return;
+    // Url view's pass (an OPEN page's chunks sized and relaxed around its
+    // node), never chunk view's: there every chunk has a page, so every page
+    // read as open and the telescope and relaxCloud ran over all 26k chunks,
+    // synchronously, on every projector update and absorb -- frames of 5-7 s,
+    // 53% of the CPU (2026-10-12: "significant lag experienced here"). Chunk
+    // view has its own one size and its own bounded, time-sliced relax.
+    // Planted (`plantFitInChunkView`): the pass runs there too, as it did.
+    if (this.level === "chunk" && !this.plantFitInChunkView) { this.fitSkipped++; return; }
     this.collideSoon();
     const relSize = this.graph.nodeRelSize(), media = this.media();
     const pages = data.nodes.filter((n: any) => !n.force && n.level === "page" && Number.isFinite(n.fitX ?? n.x));
@@ -3373,6 +3381,8 @@ export class GraphView extends ItemView {
   plantNoRelax = false;
   /** Planted: open pages make no room -- their clouds reach into their neighbours (D-49). */
   plantNoRoom = false;
+  plantFitInChunkView = false;
+  fitSkipped = 0;
   /** Planted: the room pass pushes closed neighbours out to a shell -- the ring (removed 2026-10-12). */
   plantRoomRing = false;
   /** How far a closed neighbour is moved from an open page, in its bound B:
@@ -3751,8 +3761,15 @@ export class GraphView extends ItemView {
    * invisible spheres up to 21.5x the drawn node: 21,808 of 22,229 stale, and
    * a drag on empty space grabbed a node near the camera (2026-10-12).
    */
+  private fitProxyAt = 0;
   private fitProxies(nodes: any[], rs: number, media: boolean): void {
     if (this.plantPerNode) return;
+    // At most once a second: a second look pass over every node on every
+    // sync was a tenth of the CPU in chunk view (2026-10-12, "significant
+    // lag"), and a proxy a second stale picks within its old size, briefly.
+    const now = performance.now();
+    if (now - this.fitProxyAt < 1000) return;
+    this.fitProxyAt = now;
     for (const n of nodes) {
       const o = n.__threeObj;
       if (!o || !o.__proxy) continue;
