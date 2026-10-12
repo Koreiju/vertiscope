@@ -62,7 +62,7 @@ class _Store:
     def chunks_for_placement(self, cids):
         return [(c, self.chunks.get(c), self.vectors.get(c)) for c in cids]
 
-    def contains_within(self, url):
+    def contains_within(self, url, among=None):
         return []
 
 

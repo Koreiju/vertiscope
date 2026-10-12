@@ -372,8 +372,11 @@ export function profiler(): PipelineProfiler {
   // The window outlives a plugin reload: an instance built by an OLDER build
   // lacks what this one added (2026-10-11: "visits is not a function" after a
   // reload). Replaced, keeping the traces it holds.
+  // By CAPABILITY, not class: a listener left from the previous plugin load
+  // runs the OLD class, and an instanceof test there replaced the new
+  // instance with an old one -- the two loads thrashed, and visits vanished.
   const old = w.__domvecProfiler;
-  if (!(old instanceof PipelineProfiler)) {
+  if (!old || typeof old.visits !== "function" || typeof old.lastFor !== "function") {
     const fresh = new PipelineProfiler();
     try { for (const t of (old?.list?.() || [])) (fresh as any).traces.push(t); } catch { /* an older shape */ }
     w.__domvecProfiler = fresh;

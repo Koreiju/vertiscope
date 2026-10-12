@@ -2418,6 +2418,33 @@ export class GraphView extends ItemView {
     }, this.hoverDwellMs);
   }
 
+  /** Planted (item 91): payloads held 10 s and never prefetched, as before. */
+  plantShortPayloadCache = false;
+  prefetchStats = { pages: 0, asked: 0, done: 0 };
+  private prefetching = new Set<string>();
+  /** Every drawn chunk of a page, its payload fetched ahead: 400 at most, 4 at a time. */
+  private prefetchPayloads(url: string): void {
+    if (this.plantShortPayloadCache || !this.graph || this.prefetching.has(url)) return;
+    this.prefetching.add(url);
+    this.prefetchStats.pages++;
+    const cids = ((this.graph.graphData() as any).nodes as any[])
+      .filter((n) => n.url === url && !n.force && n.level !== "page" && !String(n.id).startsWith("path:"))
+      .map((n) => String(n.id)).filter((c) => !this.payloadCache.has(c)).slice(0, 400);
+    let next = 0;
+    const worker = async () => {
+      while (next < cids.length) {
+        const c = cids[next++];
+        this.prefetchStats.asked++;
+        await this.chunkPayload(c).catch(() => null);
+        this.prefetchStats.done++;
+      }
+    };
+    void Promise.all([worker(), worker(), worker(), worker()]).finally(() => {
+      // Again on the next landing: a page's chunks change as it streams.
+      window.setTimeout(() => this.prefetching.delete(url), 5000);
+    });
+  }
+
   /** Open/close timings of hover panels, for the harness (`app_anomalies`). */
   panelTimes = { first_paint: [] as number[], page_paint: [] as number[], close: [] as number[] };
   private payloadCache = new Map<string, { at: number; p: Promise<any> }>();
@@ -2425,10 +2452,13 @@ export class GraphView extends ItemView {
   chunkPayload(cid: string): Promise<any> {
     const now = performance.now();
     const hit = this.payloadCache.get(cid);
-    if (hit && now - hit.at < 10000) return hit.p;
+    // Held for a minute, not ten seconds: a chunk the stream rewrites is
+    // dropped from here the moment it is reported (`refreshBillboards`), so
+    // the age limit only guards against a change nothing reported.
+    if (hit && now - hit.at < (this.plantShortPayloadCache ? 10000 : 60000)) return hit.p;
     const p = this.sidecar.chunk(cid).catch(() => null);
     this.payloadCache.set(cid, { at: now, p });
-    if (this.payloadCache.size > 200) this.payloadCache.delete(this.payloadCache.keys().next().value as string);
+    if (this.payloadCache.size > 1200) this.payloadCache.delete(this.payloadCache.keys().next().value as string);
     return p;
   }
 
@@ -4578,6 +4608,7 @@ export class GraphView extends ItemView {
    */
   refreshBillboards(cids: string[]): void {
     const changed = new Set(cids);
+    for (const c of cids) this.payloadCache.delete(c);   // its payload is stale now
     for (const [id, entry] of this.billboards.entries() as any) {
       if (!changed.has(id)) continue;
       const body = entry.el.querySelector(".domvec-bb-body") as HTMLElement | null;
@@ -5551,6 +5582,11 @@ export class GraphView extends ItemView {
     // times of 300. Provenance: the page's latest drain trace, its sidecar phases.
     const storedUrls = new Set<string>();
     for (const n of arrived) if (n && !n.force && n.level !== "page" && n.url) storedUrls.add(n.url);
+    // The browsed page's panels prefetched, so a hover paints from memory
+    // (2026-10-11, item 91: of 169 ms hover-to-panel at the stored stage, ~110
+    // were this fetch).
+    const browsing = this.browsingUrl ? this.browsingUrl().split("#")[0] : "";
+    for (const u of storedUrls) if (u.split("#")[0] === browsing) this.prefetchPayloads(u);
     for (const u of storedUrls) {
       const tr = prof.lastFor(u);
       prof.mark(u, "stored", { nodes: arrived.filter((n: any) => n.url === u).length, trace: tr ? tr.id : null,
