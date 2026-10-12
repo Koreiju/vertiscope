@@ -3238,7 +3238,12 @@ export class GraphView extends ItemView {
     // is nearer it than the neighbour), two open pages until their spheres
     // part. The moved page keeps its fit as `homeFit` -- the phantom it goes
     // back to when the open page closes (the restore at the top of this pass).
-    if (!this.plantNoRoom && bounds.size) {
+    // REMOVED 2026-10-12 (the reader, asked "should the room-pass ring be
+    // removed?": "Remove it"): pushed out to 2B, the closed neighbours stood
+    // on a shell around every open page -- the ring. Pages stay at their fit;
+    // pages moved before glide home (the restore at the top of this pass).
+    // Planted (`plantRoomRing`): the push, as it was.
+    if (this.plantRoomRing && !this.plantNoRoom && bounds.size) {
       const open = [...bounds.entries()].sort((a, b) => b[1].B - a[1].B);
       for (const [url, { B }] of open) {
         const page = pages.find((p: any) => p.url === url);
@@ -3368,6 +3373,8 @@ export class GraphView extends ItemView {
   plantNoRelax = false;
   /** Planted: open pages make no room -- their clouds reach into their neighbours (D-49). */
   plantNoRoom = false;
+  /** Planted: the room pass pushes closed neighbours out to a shell -- the ring (removed 2026-10-12). */
+  plantRoomRing = false;
   /** How far a closed neighbour is moved from an open page, in its bound B:
    *  2 guarantees every chunk is nearer its own url node than the neighbour. */
   roomFactor = 2;

@@ -1452,6 +1452,27 @@ class _Handler(BaseHTTPRequestHandler):
         # An installed package, or this codebase, into the trie as module
         # pages (G-104): `{"name": "<package>"}` or `{"repo": true}`. Gated
         # with `capture`: it writes the workspace and presses nothing.
+        # Stale anchors deleted, a batch of chunks a call (G-186; the reader
+        # asked for it: "Clean them now"). Gated with `capture`.
+        if route == "heal_anchors":
+            if not self.capture_allowed or self.workspace is None:
+                self._send(403, {"error": "healing is off: start the sidecar with --capture"})
+                return
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(length) or b"{}")
+            except Exception:                       # noqa: BLE001
+                body = {}
+            t0 = time.perf_counter()
+            with _WORK_LOCK:
+                got = self.workspace.store.heal_anchors(int(body.get("limit") or 200),
+                                                        step=lambda _c: _yield_to_foreground())
+            _LAST_WRITE[0] = time.time()
+            got["ms"] = round((time.perf_counter() - t0) * 1000, 1)
+            _profile("heal_anchors", got)
+            self._send(200, got)
+            return
+
         if route == "package":
             if not self.capture_allowed or self.workspace is None:
                 self._send(403, {"error": "package indexing is off",

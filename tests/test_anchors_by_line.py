@@ -118,3 +118,25 @@ def test_a_chunk_carrying_stale_anchors_is_not_skipped(tmp_path):
     assert store.chunk_sigs([c.cid])[c.cid][2] == 5       # 4 lines, 5 anchors: not skipped
     store.ingest(URL, [(l.address, l.text, "") for l in c.lines], [c], complete=False)
     assert store.chunk_sigs([c.cid])[c.cid][2] == 4       # written again: the stale one gone
+
+
+def test_heal_keeps_the_anchor_that_matches_each_line(tmp_path):
+    # G-186's clean-up: a chunk carrying a stale anchor beside a line's own,
+    # and one past its last line. The anchor whose value reads like the line
+    # stays; the others go.
+    store = GraphStore(tmp_path / "g.kuzu")
+    c = _chunk()
+    store.ingest(URL, [(l.address, l.text, "") for l in c.lines], [c], complete=False)
+    stale = _addr("/html/body/aside/text()[1]")
+    beyond = _addr("/html/body/footer/text()[1]")
+    store.ingest(URL, [(stale, "Something else entirely", ""), (beyond, "Footer", "")], [], complete=False)
+    for a, o in ((stale, 0), (beyond, 9)):
+        store._execute("MATCH (k:Chunk {cid: $c}), (x:Address {aid: $a}) CREATE (k)-[:Anchors {ord: $o}]->(x)",
+                       {"c": c.cid, "a": a.aid, "o": o})
+    assert store.chunk_sigs([c.cid])[c.cid][2] == 6
+    got = store.heal_anchors()
+    assert got["chunks"] == 1 and got["beyond_last_line"] == 1 and got["duplicates_resolved"] == 1
+    assert store.chunk_sigs([c.cid])[c.cid][2] == 4
+    assert [a.key() for a, _v in (store.anchors_by_line(c.cid)[i] for i in range(4))] == [l.address.key() for l in c.lines]
+    # Healed: nothing left to do.
+    assert store.heal_anchors()["chunks"] == 0

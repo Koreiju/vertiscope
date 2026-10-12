@@ -1970,6 +1970,58 @@ class GraphStore:
         out["repaired"] = len(fixed)
         return out
 
+    def heal_anchors(self, limit: int = 200, step=None) -> Dict[str, int]:
+        """Delete stale anchors, chunk by chunk (G-186; the reader: "Clean them
+        now", 2026-10-12).
+
+        A chunk holding more anchors than lines carries anchors its earlier
+        renders left: an anchor at a line number past its last line goes; where
+        a line holds several, the one whose address's stored VALUE best matches
+        the line's text stays and the rest go (a tie stays as it is, counted).
+        Deleted forward from the chunk, one statement a row -- the only form
+        that removes them on a store whose address-side adjacency lacks them.
+        `limit` chunks per call; `step` runs before each (stand aside).
+        """
+        out = {"chunks": 0, "deleted": 0, "beyond_last_line": 0, "duplicates_resolved": 0, "ties": 0}
+        rows = self._rows(
+            "MATCH (c:Chunk) OPTIONAL MATCH (c)-[e:Anchors]->(:Address) "
+            "WITH c, count(e) AS k WHERE k > c.line_count "
+            "RETURN c.cid, c.md, c.line_count LIMIT $n", {"n": int(limit)})
+        words = lambda t: set(re.findall(r"[0-9A-Za-z\u00C0-\uffff]{2,}", (t or "").lower()))
+        for cid, md, n_lines in rows:
+            if step is not None:
+                step(cid)
+            lines = (md or "").split(chr(10))
+            n = int(n_lines or len(lines))
+            held: Dict[int, List[Tuple[str, str]]] = {}
+            for o, aid, value in self._rows(
+                    "MATCH (c:Chunk {cid: $c})-[e:Anchors]->(a:Address) RETURN e.ord, a.aid, a.value",
+                    {"c": cid}):
+                held.setdefault(int(o), []).append((str(aid), str(value or "")))
+            drop: List[Tuple[int, str]] = []
+            for o, anchors in held.items():
+                if o >= n:
+                    drop.extend((o, a) for a, _v in anchors)
+                    out["beyond_last_line"] += len(anchors)
+                    continue
+                if len(anchors) < 2:
+                    continue
+                lw = words(lines[o] if o < len(lines) else "")
+                scored = sorted(((len(words(v) & lw) / max(1, len(words(v))), a) for a, v in anchors), reverse=True)
+                if scored[0][0] == scored[1][0]:
+                    out["ties"] += 1
+                    continue
+                drop.extend((o, a) for _s, a in scored[1:])
+                out["duplicates_resolved"] += 1
+            for o, a in drop:
+                self._execute(
+                    "MATCH (:Chunk {cid: $c})-[e:Anchors]->(x:Address) "
+                    "WHERE e.ord = $o AND x.aid + '' = $a DELETE e",
+                    {"c": cid, "a": a, "o": int(o)})
+            out["deleted"] += len(drop)
+            out["chunks"] += 1
+        return out
+
     def anchors_by_line(self, cid: str) -> Dict[int, Tuple[ContentAddress, str]]:
         """The addresses a chunk anchors, BY LINE INDEX (`ord`).
 
