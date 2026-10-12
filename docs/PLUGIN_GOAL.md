@@ -3131,6 +3131,11 @@ at -- 21,808 of 22,229 stale, the worst 21.5x the drawn node -- and the
 "covers the ray" test sized nodes by `val`, not as drawn. Read as: a node is
 picked only where it is DRAWN.)*
 
+*The reader's answers, asked 2026-10-12 (AskUserQuestion): the room-pass
+"ring" -- "Remove it"; the sidecar -- "Yes, enable --enact"; stale anchors --
+"Clean them now". (The store-wide stale-anchor figure the question quoted
+was a measurement artifact, corrected in PRD G-186.)*
+
 > clicking on a node after clicking on another node gives no response in the
 > browser, either scrolling to page or navigating to the url prior to
 
