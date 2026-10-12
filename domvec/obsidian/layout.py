@@ -2181,7 +2181,7 @@ def place_into(workspace, cids) -> Dict:
     drawn = {n["cid"] for n in nodes}
     has_parent = set()
     for page in {n["url"] for n in nodes}:
-        for a, b in workspace.store.contains_within(page):
+        for a, b in workspace.store.contains_within(page, among=drawn):
             if a in drawn and b in drawn and a != b:
                 placed_edges.append({"source": a, "target": b})
                 has_parent.add(b)
@@ -2411,7 +2411,7 @@ def projected_chunk_layout(workspace, proj=None) -> Optional[Dict]:
     drawn = {n["cid"] for n in nodes}
     edges = []
     for page in {n["url"] for n in nodes}:
-        for a, b in workspace.store.contains_within(page):
+        for a, b in workspace.store.contains_within(page, among=drawn):
             if a in drawn and b in drawn and a != b:
                 edges.append({"source": a, "target": b})
     status = proj.status(workspace)
@@ -2522,7 +2522,7 @@ def place_projected(workspace, cids, proj) -> Dict:
     drawn = {n["cid"] for n in nodes}
     has_parent = set()
     for page in {n["url"] for n in nodes}:
-        for a, b in workspace.store.contains_within(page):
+        for a, b in workspace.store.contains_within(page, among=drawn):
             if a in drawn and b in drawn and a != b:
                 placed_edges.append({"source": a, "target": b})
                 has_parent.add(b)

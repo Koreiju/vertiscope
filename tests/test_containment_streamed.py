@@ -24,6 +24,13 @@ def test_nearest_enclosing_is_the_longest_proper_prefix():
     rows = [("body", "/html/body"), ("sec", "/html/body/div[2]"), ("deep", "/html/body/div[2]/section/p"),
             ("side", "/html/body/aside")]
     assert sorted(_nearest_enclosing(rows)) == sorted([("body", "sec"), ("sec", "deep"), ("body", "side")])
+    # By trie node: a part of /html/body whose own addresses all sit under
+    # div[5] is a child of the chunk on /html/body, not a sibling of it.
+    from domvec.graphstore import _trie_nodes
+    nodes = _trie_nodes([("body", "/html/body/h1/text()[1]"), ("body", "/html/body/p/text()[1]"),
+                         ("part2", "/html/body/div[5]/p/text()[1]"), ("part2", "/html/body/div[5]/ul/li/text()[1]")])
+    assert nodes["part2"] == ("html", "body", "div[5]")
+    assert _nearest_enclosing(nodes, ["body", "part2"]) == [("body", "part2")]
     # No enclosing chunk: no edge -- the page node takes it.
     assert _nearest_enclosing([("a", "/html/body/div"), ("b", "/html/body/nav")]) == []
 
@@ -44,3 +51,15 @@ def test_a_parent_streamed_after_its_children_still_holds_them(tmp_path):
         assert not (want & set(store.contains_within(URL)))
     finally:
         graphstore.PLANT_STORED_CONTAINMENT[0] = False
+
+
+def test_an_undrawn_owner_does_not_take_the_edge(tmp_path):
+    # Two chunks on one node (an element and its duplicate copy) and a child
+    # under it. Asked among what is DRAWN, the child hangs from the drawn one.
+    store = GraphStore(tmp_path / "g.kuzu")
+    dup = _chunk("/html/body/section", "one")
+    drawn_owner = _chunk("/html/body/section", "two")
+    child = _chunk("/html/body/section/ul/li", "three")
+    store.ingest(URL, [], [dup, drawn_owner, child], complete=False)
+    pairs = set(store.contains_within(URL, among={drawn_owner.cid, child.cid}))
+    assert (drawn_owner.cid, child.cid) in pairs

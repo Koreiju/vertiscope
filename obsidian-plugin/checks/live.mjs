@@ -3684,6 +3684,88 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-173",
+      asks: "an opened page's chunks are linked along the patricia trie -- each to the chunk whose trie node is the longest proper prefix of its own, computed here from each chunk's own addresses -- not all to the url node: on RFC 9110 (placed in slices), Dril, Okapi and the two largest other stored pages, at least 95% of chunks hang from the trie's parent and no more hang from the url node than the trie roots there; planted (plantSliceContainment): RFC's url-node links come back",
+      async run() {
+        // 2026-10-11, PLUGIN_GOAL 103: "it looks like a shortcut where there's
+        // just all the recursive chunks linked to their root URL node. Perhaps
+        // investigate further, since this is a recurring item that needs
+        // continuous clarity on its representations in the 3D graph viewer".
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          await window.__domvec.act("open", "graph");
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          for (let i = 0; i < 60 && !v.graph; i++) await sleep(500);
+          const unit = [...v.containerEl.querySelectorAll(".domvec-graph-bar button")].find((b) => /^(pages|chunks)$/.test(b.textContent.trim()));
+          const start = v.level;
+          const urlView = () => v.level === "" && !v.umapOnly && v.graph && v.graph.graphData().nodes.length < 5000;
+          if (!urlView() && unit) { unit.click(); for (let i = 0; i < 240 && !urlView(); i++) await sleep(500); }
+          if (!urlView()) return { error: "url view did not arrive" };
+          v.plantSliceContainment = ${planted};
+          const id = (x) => String(typeof x === "object" && x ? x.id : x);
+          const steps = (x) => String(x).split("/text()")[0].split("/@")[0].split("/").filter(Boolean);
+          const pages = v.graph.graphData().nodes.filter((n) => n.level === "page" && /^https?:/.test(n.url || "") && !/127[.]0[.]0[.]1|localhost/.test(n.url));
+          const want = ["https://www.rfc-editor.org/rfc/rfc9110.html", "https://en.wikipedia.org/wiki/Dril", "https://en.wikipedia.org/wiki/Okapi"];
+          const others = pages.filter((n) => !want.includes(n.url)).sort((a, b) => (b.fullVal ?? b.val) - (a.fullVal ?? a.val)).slice(0, 2).map((n) => n.url);
+          const urls = ${planted} ? [want[0]] : want.concat(others);
+          const out = [];
+          try {
+            for (const U of urls) {
+              const pg = pages.find((n) => n.url === U);
+              if (!pg) { out.push({ url: U, missing: true }); continue; }
+              const d0 = v.graph.graphData();
+              const wasOpen = d0.nodes.some((n) => n.url === U && n.level !== "page" && !n.force);
+              if (wasOpen) await v.togglePage(pg);          // folded first: measured from a fresh open
+              await v.togglePage(pg);
+              await sleep(1500);
+              const d = v.graph.graphData();
+              const mine = d.nodes.filter((n) => n.url === U && n.level !== "page" && !n.force).map((n) => String(n.id));
+              const set = new Set(mine), parentOf = {};
+              for (const l of d.links) { const s2 = id(l.source), t = id(l.target); if (set.has(t)) parentOf[t] = s2 === String(pg.id) ? "PAGE" : s2; }
+              // The trie's verdict, from each chunk's own addresses.
+              const nodeOf = {};
+              for (const c of mine) {
+                const pay = await v.sidecar.chunk(c).catch(() => null);
+                const xs = ((pay && pay.lines) || []).map((ln) => String(ln.key || "").split("|")[1] || "").filter(Boolean);
+                if (!xs.length) continue;
+                let pre = steps(xs[0]);
+                for (const x of xs.slice(1)) { const s2 = steps(x); let i = 0; while (i < pre.length && i < s2.length && pre[i] === s2[i]) i++; pre = pre.slice(0, i); }
+                nodeOf[c] = pre.join("/");
+              }
+              const owner = {};
+              for (const c of mine) if (nodeOf[c] !== undefined && owner[nodeOf[c]] === undefined) owner[nodeOf[c]] = c;
+              const trieParent = {};
+              for (const c of Object.keys(nodeOf)) {
+                const st = nodeOf[c].split("/"); let par = "PAGE";
+                for (let cut = st.length - 1; cut > 0; cut--) { const o = owner[st.slice(0, cut).join("/")]; if (o !== undefined && o !== c) { par = o; break; } }
+                trieParent[c] = par;
+              }
+              const known = Object.keys(trieParent);
+              // Same parent = same trie NODE: an element cut in parts is several
+              // chunks on one node, and which part stands for it is a tie-break.
+              const nodeAt = (x) => (x === "PAGE" || x === undefined ? x : nodeOf[x]);
+              const agree = known.filter((c) => parentOf[c] === trieParent[c] || (parentOf[c] !== "PAGE" && nodeAt(parentOf[c]) !== undefined && nodeAt(parentOf[c]) === nodeAt(trieParent[c]))).length;
+              const fromPage = mine.filter((c) => parentOf[c] === "PAGE").length;
+              const trieRoots = known.filter((c) => trieParent[c] === "PAGE").length;
+              out.push({ url: U, chunks: mine.length, resolved: known.length, agree, agree_share: known.length ? Math.round(agree / known.length * 1000) / 1000 : null,
+                         from_page: fromPage, trie_roots: trieRoots });
+              if (!wasOpen) await v.togglePage(pg);         // put back folded
+            }
+          } finally {
+            v.plantSliceContainment = false;
+            if (v.level !== start && unit) unit.click();
+          }
+          return JSON.stringify(out);
+        })()`, { timeout: 600000 });
+        const clean = JSON.parse(await arm(false)), planted = JSON.parse(await arm(true));
+        const good = (r) => !r.missing && r.agree_share >= 0.95 && r.from_page <= r.trie_roots + Math.max(1, Math.round(r.chunks * 0.02));
+        const rfcP = planted.find((r) => r.url.includes("rfc9110"));
+        return { pass: Array.isArray(clean) && clean.length >= 3 && clean.filter((r) => !r.missing).every(good)
+                       && !!rfcP && rfcP.from_page > (rfcP.trie_roots + 50),
+                 evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-162",
       asks: "a browser toggle hides the overlay's chunk boxes by ALPHA only: off, the hover outline is placed but drawn at opacity 0 and the hover still reaches the 3D view; on, opacity 1; planted (plantBoxesStopHover): off also stops the hover",
       async run() {

@@ -342,22 +342,58 @@ def _index_spellings(url: str):
 #: Planted (2026-10-11): containment read from the STORED edges, which a page
 #: streamed in drains holds only within each drain.
 PLANT_STORED_CONTAINMENT = [False]
+#: Planted (2026-10-11): parents by render ROOT xpath, not by trie node.
+PLANT_ROOT_CONTAINMENT = [False]
 
 
-def _nearest_enclosing(rows) -> List[Tuple[str, str]]:
-    """(parent cid, child cid) for each chunk under the chunk rooted at the
-    longest proper prefix of its root xpath -- the patricia trie's own parent,
-    restricted to chunks. Chunks sharing a root (a long element cut in parts)
-    hang from the same parent; the first of them stands for the root.
+def _steps(xpath: str) -> List[str]:
+    """An address's ELEMENT steps: the text node and attribute dropped."""
+    x = xpath.split("/text()")[0].split("/@")[0]
+    return [p for p in x.split("/") if p]
+
+
+def _trie_nodes(addresses) -> Dict[str, Tuple[str, ...]]:
+    """Each chunk's node in the patricia trie: the longest element prefix its
+    addresses share (P-B7's `chunkNode`). `addresses` is (cid, xpath) rows."""
+    nodes: Dict[str, Tuple[str, ...]] = {}
+    for cid, xpath in addresses:
+        st = tuple(_steps(xpath or ""))
+        if not st:
+            continue
+        was = nodes.get(cid)
+        if was is None:
+            nodes[cid] = st
+            continue
+        i = 0
+        while i < len(was) and i < len(st) and was[i] == st[i]:
+            i += 1
+        nodes[cid] = was[:i]
+    return nodes
+
+
+def _nearest_enclosing(nodes, order=None) -> List[Tuple[str, str]]:
+    """(parent cid, child cid): each chunk under the chunk whose trie node is
+    the LONGEST PROPER PREFIX of its own -- the patricia trie's parent,
+    restricted to chunks. `nodes` maps cid -> node (a tuple of element steps)
+    or, for the render-root form, rows of (cid, root xpath). Several chunks on
+    one node (an element cut in parts): the first in `order` stands for it.
     """
-    roots: Dict[str, str] = {}
-    for cid, xpath in rows:
-        roots.setdefault(xpath, cid)
+    if not isinstance(nodes, dict):
+        rows = list(nodes)
+        order = [c for c, _ in rows]
+        nodes = {c: tuple(p for p in x.strip("/").split("/") if p) for c, x in rows}
+    order = order or list(nodes)
+    owner: Dict[Tuple[str, ...], str] = {}
+    for cid in order:
+        if cid in nodes:
+            owner.setdefault(nodes[cid], cid)
     pairs: List[Tuple[str, str]] = []
-    for cid, xpath in rows:
-        parts = xpath.strip("/").split("/")
-        for cut in range(len(parts) - 1, 0, -1):
-            parent = roots.get("/" + "/".join(parts[:cut]))
+    for cid in order:
+        node = nodes.get(cid)
+        if node is None:
+            continue
+        for cut in range(len(node) - 1, 0, -1):
+            parent = owner.get(node[:cut])
             if parent is not None and parent != cid:
                 pairs.append((parent, cid))
                 break
@@ -1367,7 +1403,7 @@ class GraphStore:
             self._execute("CHECKPOINT")
         return round((time.perf_counter() - t0) * 1000, 1)
 
-    def contains_within(self, url: str):
+    def contains_within(self, url: str, among=None):
         """The containment edges among one page's chunks, as (cid, cid).
 
         The patricia structure, restricted to a page (`G-6`). `edges()`
@@ -1391,10 +1427,43 @@ class GraphStore:
             return [(a, b) for a, b in self._rows(
                 "MATCH (a:Chunk {url: $url})-[:Contains]->(b:Chunk {url: $url}) "
                 "RETURN a.cid, b.cid", {"url": url}) if a and b]
+        # In PART order, so the first part of an element cut in several stands
+        # for its root -- as on the write path, which sees them in document
+        # order. By cid (random) children hung from an arbitrary part: Dril's
+        # agreement with the trie fell 261 -> 134 of 263 (2026-10-11).
         rows = [(c, x) for c, x in self._rows(
-            "MATCH (c:Chunk {url: $url}) RETURN c.cid, c.xpath ORDER BY c.cid",
+            "MATCH (c:Chunk {url: $url}) RETURN c.cid, c.xpath ORDER BY c.part, c.cid",
             {"url": url}) if c and x]
-        return _nearest_enclosing(rows)
+        # Among the chunks actually DRAWN, when the caller says which: a node
+        # owned by a chunk that is never placed (a duplicate copy) otherwise
+        # took the edge, the edge was dropped as undrawn, and the child fell to
+        # the url node -- 22 of Monarch_butterfly's 655 (2026-10-11).
+        keep = set(among) if among is not None else None
+        if keep is not None:
+            rows = [(c, x) for c, x in rows if c in keep]
+        if PLANT_ROOT_CONTAINMENT[0]:
+            return _nearest_enclosing(rows)
+        # By TRIE NODE -- the common prefix of a chunk's own addresses, the node
+        # P-B7 outlines -- not by render root: a long element cut in parts has
+        # one root and many nodes (RFC 9110's 269 parts of `/html/body`), and by
+        # root they hung from the url node or from each other.
+        nodes = _trie_nodes(self._rows(
+            "MATCH (c:Chunk {url: $url})-[:Anchors]->(a:Address) RETURN c.cid, a.xpath",
+            {"url": url}))
+        if keep is not None:
+            nodes = {c: n for c, n in nodes.items() if c in keep}
+        # A chunk with no anchored address keeps its root as its node -- and so
+        # does one whose addresses reach ABOVE its root: a line can carry an
+        # address folded in from elsewhere, and the common prefix then climbed
+        # to `html`, where no chunk lives (Monarch_butterfly: 22 chunks under
+        # `section[N]` drawn off the url node). A chunk renders its root's
+        # subtree, so its node is never shallower than that root.
+        for c, x in rows:
+            root = tuple(p for p in x.strip("/").split("/") if p)
+            got = nodes.get(c)
+            if got is None or len(got) < len(root):
+                nodes[c] = root
+        return _nearest_enclosing(nodes, [c for c, _ in rows])
 
     def page_vectors(self):
         """Everything the page-level fit needs, in ONE query.

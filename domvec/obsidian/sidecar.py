@@ -1186,7 +1186,7 @@ class _Handler(BaseHTTPRequestHandler):
                     urls = set(self.workspace.pages())
                 out, seen = [], set()
                 for page in urls:
-                    for a, b in self.workspace.store.contains_within(page):
+                    for a, b in self.workspace.store.contains_within(page, among=drawn):
                         if a in drawn and b in drawn and a != b \
                                 and (a, b) not in seen:
                             seen.add((a, b))

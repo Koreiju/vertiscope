@@ -1641,6 +1641,13 @@ export class GraphView extends ItemView {
       const got: any = await this.sidecar.place(cids.slice(i, i + 400));
       if (got?.nodes?.length) placed += this.absorb(got.nodes, got.edges).added;
     }
+    // ONE containment pass over the whole page once every slice is in. Each
+    // slice's placement hung from the url node every chunk whose parent was
+    // in ANOTHER slice, and the per-slice passes ran before the later slices
+    // landed: RFC 9110 kept 269 of 1,172 chunks on its url node, where the
+    // trie has one (2026-10-11, "all the recursive chunks linked to their
+    // root URL node"). Planted: the per-slice passes only.
+    if (placed && !this.plantSliceContainment) await this.drawContainment();
     return out("expand", placed);
   }
 
@@ -2103,6 +2110,8 @@ export class GraphView extends ItemView {
 
   /** Planted by G-94's check: every containment edge kept (the web). */
   plantWeb = false;
+  /** Planted (2026-10-11): an opened page gets only its per-slice containment passes. */
+  plantSliceContainment = false;
 
   /**
    * A drawn page is a SIMPLE TREE (2026-09-27: "the densely packed maybe not
