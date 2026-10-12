@@ -78,6 +78,8 @@ class SearchDiagnostics:
     survivors: int = 0
     collapsed: int = 0
     semantic_available: bool = False
+    #: The code pre-filter (R-6): partitions total and kept, rows masked.
+    code_partitions: Optional[dict] = None
 
     def summary(self) -> Dict[str, object]:
         return {
@@ -242,6 +244,16 @@ class ThreeFormIndex:
                     mask[int(row)] = 1.0
             score = score * mask
 
+        # **Package retrieval: a vector-centroid pre-filter, then partition-wise
+        # ranking** (R-6). Each code root -- `code://pypi/<package>`,
+        # `code://repo` -- is a partition, its centroid the mean of its rows'
+        # embeddings; the query keeps the `CODE_PARTITIONS` partitions whose
+        # centroids are nearest it and ranks code only within those. Web and
+        # vault rows are untouched, and it is a mask inside THIS ranking: the
+        # filter is not a second interface.
+        if available and self.code_partitions > 0 and not scope_url:
+            score = self._prefilter_code(score, rows, diag)
+
         diag.survivors = int(np.sum(score > 0))
         if diag.survivors == 0:
             return []
@@ -278,6 +290,68 @@ class ThreeFormIndex:
             ))
         return hits
 
+    #: How many code partitions a query ranks within (R-6); 0 = no pre-filter.
+    code_partitions = 3
+
+    def _code_partitions(self, rows: int):
+        """row -> partition index, and each partition's unit centroid: cached
+        against both matrices' sizes, like `_embedding_rows`."""
+        key = (rows, int(self.embeddings.matrix.shape[0]) if self.embeddings.matrix is not None else 0)
+        got = getattr(self, "_code_parts", None)
+        if got is not None and got[0] == key:
+            return got[1], got[2], got[3]
+        part = np.full(rows, -1, dtype=np.int64)
+        names: List[str] = []
+        index: Dict[str, int] = {}
+        for row, meta in self._meta.items():
+            r = int(row)
+            if not meta or not (0 <= r < rows):
+                continue
+            url = meta[1] or ""
+            if not url.startswith("code://"):
+                continue
+            rest = url[len("code://"):].split("/")
+            root = "code://" + (rest[0] + "/" + rest[1] if rest[0] == "pypi" and len(rest) > 1 else rest[0])
+            if root not in index:
+                index[root] = len(names)
+                names.append(root)
+            part[r] = index[root]
+        cents = None
+        if names and self.embeddings.matrix is not None:
+            emb = self._embedding_rows(rows)
+            M = self.embeddings.matrix
+            dim = M.shape[1]
+            sums = np.zeros((len(names), dim), dtype=np.float64)
+            for r in np.nonzero(part >= 0)[0]:
+                e = emb[r]
+                if 0 <= e < M.shape[0]:
+                    v = np.asarray(M[e], dtype=np.float64)
+                    nrm = np.linalg.norm(v)
+                    if nrm > 1e-12:
+                        sums[part[r]] += v / nrm
+            nrm = np.linalg.norm(sums, axis=1, keepdims=True)
+            cents = sums / np.maximum(nrm, 1e-12)
+        self._code_parts = (key, part, names, cents)
+        return part, names, cents
+
+    def _prefilter_code(self, score: np.ndarray, rows: int, diag) -> np.ndarray:
+        part, names, cents = self._code_partitions(rows)
+        qv = getattr(self, "_last_query_vector", None)
+        if cents is None or qv is None or len(names) <= self.code_partitions:
+            diag.code_partitions = {"total": len(names), "kept": len(names)}
+            return score
+        q = np.asarray(qv, dtype=np.float64)
+        q = q / max(np.linalg.norm(q), 1e-12)
+        sims = cents @ q
+        keep = set(np.argsort(-sims)[: self.code_partitions].tolist())
+        mask = np.ones(rows, dtype=np.float32)
+        drop = (part >= 0) & ~np.isin(part, list(keep))
+        mask[drop] = 0.0
+        diag.code_partitions = {"total": len(names), "kept": len(keep),
+                                "kept_names": [names[i] for i in sorted(keep)],
+                                "rows_masked": int(np.sum(drop))}
+        return score * mask
+
     def _semantic(self, query: str, rows: int) -> Tuple[np.ndarray, bool]:
         """Semantic similarities, and whether they are real.
 
@@ -293,6 +367,7 @@ class ThreeFormIndex:
             vector = self.embedder.embed_query(query)
         except Exception:
             return np.zeros(rows, dtype=np.float32), False
+        self._last_query_vector = vector
         sims = self.embeddings.similarities(vector)
         # **Joined on cid, not on row number.** `similarities` answers in
         # the EMBEDDING matrix's row order -- the order vectors arrived in --
