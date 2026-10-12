@@ -97,6 +97,9 @@
   // --- chunking policy ----------------------------------------------------
   var USE_MERGE = !!V.merge;       // MERGE_AT hysteresis: fold tiny siblings
   var PLANT_UNSEEN_MERGED = !!V.unseenmerged;  // planted: merged slots swept (G-142)
+  // Planted arms a check flips at RUN time (the V flags are fixed at boot).
+  // Peripheral reads only -- nothing here touches the fold.
+  var RT_PLANTS = { yclip: false };
   var USE_SEMANTIC = !!V.semantic; // prefer heading/section boundaries
   var USE_RANK = !!V.rank;         // heaviest subtree first, not document order
   var WIDE = V.budget === 'wide', NARROW = V.budget === 'narrow';
@@ -3089,7 +3092,18 @@
     }
     if (own) {
       var il = Math.max(l, cl), it2 = Math.max(t, ct), ir = Math.min(r, cr), ib = Math.min(b, cb);
-      if (ir > il && ib > it2) { l = il; t = it2; r = ir; b = ib; }
+      if (RT_PLANTS.yclip) {
+        if (ir > il && ib > it2) { l = il; t = it2; r = ir; b = ib; }
+      } else {
+        // Across, always: a run clipped by its card (an ellipsis) is clipped
+        // sideways. Down, only where the run's own box really HOLDS its text:
+        // a container laid out at zero height with its children floated or
+        // positioned outside it (RFC 9110's metadata <dl>, height 0) clipped
+        // the text to a 6 px sliver above it -- 21 of 84 points on that page
+        // drew their outline off the element under the pointer (2026-10-11).
+        if (ir > il) { l = il; r = ir; }
+        if (ib > it2 && (ib - it2) >= 0.5 * (b - t)) { t = it2; b = ib; }
+      }
     }
     return [l, t, r - l, b - t];
   }
@@ -3386,6 +3400,7 @@
     styles: styles,
     boxes: boxes,
     at: at,
+    plants: RT_PLANTS,
     // Read-only: which chunk slot an element maps to, for instruments that
     // ask why `at` answers what it does (scripts/merge_at_probe.py).
     // The receiver lost what it was sent: send everything again, dictionary

@@ -57,6 +57,7 @@ HITS = r"""(function(shift){
     }
     return el;
   }
+  var tight = 0, displaced = 0, examples = [];
   var W = innerWidth, H = innerHeight, pts = 0, onChunk = 0, inside = 0, offBy = [], atMs = [], shadowPts = 0, shadowInside = 0;
   for (var y = 20; y < H - 10; y += 40) for (var x = 20; x < W - 10; x += 60) {
     pts++;
@@ -71,10 +72,18 @@ HITS = r"""(function(shift){
     if (inShadow) shadowPts++;
     var ok = x >= bx - 1 && x <= bx + b[2] + 1 && y >= by - 1 && y <= by + b[3] + 1;
     if (ok) { inside++; if (inShadow) shadowInside++; }
-    else offBy.push(Math.round(Math.max(bx - x, x - (bx + b[2]), by - y, y - (by + b[3]), 0)));
+    else {
+      offBy.push(Math.round(Math.max(bx - x, x - (bx + b[2]), by - y, y - (by + b[3]), 0)));
+      // TIGHT: the box overlaps the element under the pointer -- drawn round
+      // the chunk's content, the pointer on its container's padding. DISPLACED:
+      // the box does not touch that element at all -- drawn somewhere else.
+      var er = el.getBoundingClientRect();
+      var meets = bx < er.right && bx + b[2] > er.left && by < er.bottom && by + b[3] > er.top;
+      if (meets) tight++; else { displaced++; if (examples.length < 4) examples.push({ pt: [x, y], el: (el.tagName || '').toLowerCase(), el_rect: [er.left, er.top, er.width, er.height].map(Math.round), box: [bx, by, b[2], b[3]].map(Math.round) }); }
+    }
   }
   atMs.sort(function(a, b){ return a - b; }); offBy.sort(function(a, b){ return a - b; });
-  return JSON.stringify({ points: pts, on_chunk: onChunk, inside: inside, shadow_points: shadowPts, shadow_inside: shadowInside,
+  return JSON.stringify({ points: pts, on_chunk: onChunk, inside: inside, tight: tight, displaced: displaced, examples: examples, shadow_points: shadowPts, shadow_inside: shadowInside,
                           miss_px_p50: offBy.length ? offBy[offBy.length >> 1] : 0, miss_px_max: offBy.length ? offBy[offBy.length - 1] : 0,
                           at_ms_p50: atMs.length ? Math.round(atMs[atMs.length >> 1] * 1000) / 1000 : null,
                           at_ms_p99: atMs.length ? Math.round(atMs[Math.floor(atMs.length * 0.99)] * 1000) / 1000 : null });
@@ -93,8 +102,11 @@ def page_hits(p, url, settle=10):
             pass
     time.sleep(settle); p.guard()
     out = {}
-    for arm, shift in (("clean", 0), ("planted_shift40", 40)):
-        got = p.ev("(async()=>%s.webview.executeJavaScript(%s))()" % (B, json.dumps(HITS % shift)))
+    for arm, shift, yclip in (("clean", 0, False), ("planted_shift40", 40, False), ("planted_yclip", 0, True)):
+        # `planted_yclip`: the sensor's old vertical clip, flipped at run time.
+        js = ("(function(){var h=window.__domvecSensor;if(h&&h.plants)h.plants.yclip=%s;"
+              "try{return %s}finally{if(h&&h.plants)h.plants.yclip=false}})()" % ("true" if yclip else "false", HITS % shift))
+        got = p.ev("(async()=>%s.webview.executeJavaScript(%s))()" % (B, json.dumps(js)))
         out[arm] = json.loads(got) if got else None
     return out
 
@@ -109,11 +121,13 @@ def main(argv):
             r = page_hits(p, url)
             c = r.get("clean") or {}
             share = (c.get("inside", 0) / c["on_chunk"]) if c.get("on_chunk") else None
+            yc = r.get("planted_yclip") or {}
             pl = r.get("planted_shift40") or {}
             pshare = (pl.get("inside", 0) / pl["on_chunk"]) if pl.get("on_chunk") else None
             rows.append({"url": url, "share_inside": None if share is None else round(share, 3),
-                         "planted_share": None if pshare is None else round(pshare, 3), **{k: c.get(k) for k in
-                         ("points", "on_chunk", "inside", "shadow_points", "shadow_inside", "miss_px_p50", "miss_px_max", "at_ms_p50", "at_ms_p99")}})
+                         "planted_share": None if pshare is None else round(pshare, 3),
+                         "planted_yclip_displaced": yc.get("displaced"), **{k: c.get(k) for k in
+                         ("points", "on_chunk", "inside", "tight", "displaced", "examples", "shadow_points", "shadow_inside", "miss_px_p50", "miss_px_max", "at_ms_p50", "at_ms_p99")}})
             print(json.dumps(rows[-1]))
     except ReaderActed as e:
         print("stopped:", e)
