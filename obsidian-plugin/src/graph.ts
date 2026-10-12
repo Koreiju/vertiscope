@@ -4092,7 +4092,8 @@ export class GraphView extends ItemView {
     // fourteen times too big, a pile of overlapping orbs (2026-10-12).
     const sized = one ? { val: this.unitVal() } : n;
     if (src) {
-      const half = billboardEdge(sized, relSize) / 2;
+      // Pictures too: a page's favicon is most of the colour in url view.
+      const half = billboardEdge(sized, relSize) / 2 * this.nodeScale;
       // Pictures near the pointer's ray only (`refreshDetail`); elsewhere the
       // same size, as its colour -- so the collider, the pick proxy and the
       // drawn extent never change with where the mouse is.
@@ -4105,12 +4106,15 @@ export class GraphView extends ItemView {
       // panel's size it was 14x a chunk -- the DuckDuckGo page's 1,587 result
       // favicons as a pile of giant orbs (2026-10-11). Revealed, it opens to
       // its picture as before.
-      if (one) return { half: Math.cbrt(sized.val) * relSize, translucent: false, alpha: 1, color: n.color || "#888888" };
+      if (one) return { half: Math.cbrt(sized.val) * relSize * this.nodeScale, translucent: false, alpha: 1, color: n.color || "#888888" };
       return { half, translucent: false, alpha: 1, color: n.color || "#888888" };
     }
-    return { half: Math.cbrt(Math.max(sized.val ?? 1, 1e-9)) * relSize, translucent: false, alpha: 1,
+    return { half: Math.cbrt(Math.max(sized.val ?? 1, 1e-9)) * relSize * this.nodeScale, translucent: false, alpha: 1,
              color: n.hovered ? "#ffffff" : (n.color || "#9aa0a6") };
   }
+  /** Spheres drawn this much larger by default (2026-10-12, PLUGIN_GOAL 115:
+   *  "the nodes could be a little larger/brighter by default"). */
+  nodeScale = 1.25;
   private pointerOver = false;
   private panHeldSince = 0;
   /** One arrow step, as a share of the camera's distance to its target. */

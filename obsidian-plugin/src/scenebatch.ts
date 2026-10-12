@@ -120,6 +120,7 @@ uniform float uLightI[${MAX_LIGHTS}];
 uniform int uLights;
 uniform float uFall;
 uniform float uHue;
+uniform float uBright;
 varying vec2 vCorner;
 varying vec3 vCenterW;
 varying float vR;
@@ -143,8 +144,11 @@ void main() {
   float glow = vTint.a;
   vec3 tint = uHue == 0.0 ? vTint.rgb : clamp(turnHue(vTint.rgb, uHue), 0.0, 1.0);
   vec3 glassC = mix(vec3(0.82, 0.88, 1.0), tint, min(glow, 1.0));
-  vec3 col = glassC * (0.05 + 0.55 * fres) + tint * glow * (0.10 + 0.30 * (1.0 - fres));
-  float a = 0.05 + 0.42 * fres + 0.20 * min(glow, 2.5);
+  // uBright (2026-10-12: "the nodes could be a little larger/brighter by
+  // default ... so that I see more color"): the orb's own colour and its
+  // glow's opacity, scaled.
+  vec3 col = glassC * (0.05 + 0.55 * fres) + tint * glow * uBright * (0.10 + 0.30 * (1.0 - fres));
+  float a = 0.05 + 0.42 * fres + 0.20 * uBright * min(glow, 2.5);
   for (int i = 0; i < ${MAX_LIGHTS}; i++) {
     if (i >= uLights) break;
     vec3 L = uLightPos[i] - P;
@@ -205,6 +209,15 @@ export class SceneBatch {
   private queue: string[] = [];
   private queueAt = 0;
   private inFlight = 0;
+  /** The glass orbs' colour and glow, scaled (2026-10-12, PLUGIN_GOAL 115). */
+  nodeBright = 1.4;
+  /** A link's opacity (was 0.25): links visible, the nodes' colour first. */
+  linkAlpha = 0.14;
+  setBright(b: number): void {
+    this.nodeBright = b;
+    const m: any = this.glass && (this.glass.mesh.material as any);
+    if (m && m.uniforms && m.uniforms.uBright) m.uniforms.uBright.value = b;
+  }
   /** Planted: every picture fetched at once and failures retried each frame. */
   plantUnthrottled = false;
   /** Planted: a picture not loaded yet draws as the old opaque sphere. */
@@ -241,6 +254,7 @@ export class SceneBatch {
           uLights: { value: 0 },
           uFall: { value: 60 },
           uHue: { value: 0 },
+          uBright: { value: this.nodeBright },
         },
         transparent: true, depthWrite: false,
       });
@@ -461,7 +475,7 @@ export class SceneBatch {
       this.linePos.setXYZ(nl * 2 + 1, t.x, t.y, t.z || 0);
       // 3d-force-graph's own link colour (#f0f0f0) at the pane's linkOpacity;
       // during a search, the pane says how much of an edge to draw (item 88).
-      const a = lineAlpha ? lineAlpha(l) : 0.25;
+      const a = lineAlpha ? lineAlpha(l) : this.linkAlpha;
       this.lineCol.setXYZW(nl * 2, 0.87, 0.87, 0.87, a);
       this.lineCol.setXYZW(nl * 2 + 1, 0.87, 0.87, 0.87, a);
       nl++;

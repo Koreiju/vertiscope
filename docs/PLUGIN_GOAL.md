@@ -3136,6 +3136,14 @@ picked only where it is DRAWN.)*
 "Clean them now". (The store-wide stale-anchor figure the question quoted
 was a measurement artifact, corrected in PRD G-186.)*
 
+> the nodes could be a little larger/brighter by default and the links could
+> be a little smaller... so that I see more color and less of the links, while
+> still clearly seeing the links visible
+
+*Read as (2026-10-12): (115) by default, nodes a little larger and brighter
+(more of their colour shows) and links a little fainter/thinner -- still
+clearly visible.*
+
 > clicking on a node after clicking on another node gives no response in the
 > browser, either scrolling to page or navigating to the url prior to
 
