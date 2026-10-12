@@ -3078,6 +3078,63 @@ turn in about 5 minutes, not 100 s; the hue keeps its 30 s.*
 rad/s (a turn in about 3 minutes -- between the 5 minutes just set and the
 100 s that made the reader dizzy).*
 
+> glowing effects are completely invisible now
+
+*(Found: the cylinder at 4% of the cloud was about 40 px at the usual zoom,
+and the glow was graded by RANK among what fell inside -- one node at the
+pointer, no visible glow. Widened to 12% meanwhile.)*
+
+> more jumbling and the ray projections still span too far, and I think
+> previous versions before i had spotted the problem in the first place might
+> be best
+
+*(Sent with a screenshot of chunk view: large overlapping orbs. Found: the
+"one size" of item (G-181) was `val` 1 -- radius 2.65 -- against a median
+chunk's 0.19, every orb fourteen times too big; the relax then spaced them at
+that size.)*
+
+*The reader's answer, asked which earlier behaviour (2026-10-12): "Tight
+circle, glow too" -- the first bounded version (about a 40 px circle), with
+the glow kept visible in it, graded by distance. And the one size is the
+median chunk's.*
+
+> chunk overlay issue that might be overcomplicated compared to the original
+> context window cutoff rule at the very next parent level
+
+*(Sent with a screenshot of arXiv's stat.ML listing in the browser cell: a
+chunk's outline from the authors of entry [8] into the title of [9].
+Found on reading the stored chunk: its lines run in document order through
+[8] and [9], but the ADDRESSES they carry do not -- "Title: A Critical
+Look ..." keyed to `dd[6]`, its authors to `dd[7]`, its subjects to `dd[8]`,
+"[9]" to `dd[6]/.../a` -- so every box the overlay draws from them is
+elsewhere. Under investigation; the chunking rule itself is not yet shown to
+be at fault.)*
+
+> arrow keys while hovering on the 3D panel and not the search box should be
+> for precise panning
+
+*Read as (2026-10-12): (114) with the pointer over the 3D view and no text
+field focused, the arrow keys pan the camera -- small, precise steps across
+the screen, faster the longer a key is held (as item 109's fields step); in
+the search field they stay the field's.*
+
+> clicking and dragging empty space somehow drags a nearby (up close to the
+> camera) but distant node on xy coordinates for some reason
+
+*(Found, 2026-10-12: the invisible pick proxies kept the size they were made
+at -- 21,808 of 22,229 stale, the worst 21.5x the drawn node -- and the
+"covers the ray" test sized nodes by `val`, not as drawn. Read as: a node is
+picked only where it is DRAWN.)*
+
+> clicking on a node after clicking on another node gives no response in the
+> browser, either scrolling to page or navigating to the url prior to
+
+*(Sent with a screenshot: an IMDb chunk's panel open over the 3D view.)*
+
+*Read as (2026-10-12): every click on a node reaches the browser cell --
+navigating to its page, or scrolling to it when the page is already open --
+however many clicks came before.*
+
 ---
 
 

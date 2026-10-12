@@ -2384,14 +2384,38 @@ def projected_chunk_layout(workspace, proj=None) -> Optional[Dict]:
         pos = dict(proj.pos)
         hsv = dict(proj.hsv)
         epoch, seq = proj.epoch, proj.seq
+    import time as _time
+    timing: Dict[str, float] = {}
+    _t = _time.perf_counter()
+    # Without the markdown first: a chunk's title, picture and token count are
+    # functions of its markdown, kept per (cid, chars) -- read for EVERY chunk
+    # on every switch, and tokenized, they were most of a 30 s chunk-view
+    # layout (2026-10-12). Only the chunks not yet kept are read in full.
     rows = workspace.store._rows(
-        "MATCH (c:Chunk) RETURN c.cid, c.url, c.md, c.chars, c.group_n, c.dup_n, c.drawn")
+        "MATCH (c:Chunk) RETURN c.cid, c.url, c.chars, c.group_n, c.dup_n, c.drawn")
+    timing["ms_rows"] = round((_time.perf_counter() - _t) * 1000, 1)
+    _t = _time.perf_counter()
+    memo = _CHUNK_FACTS
+    from ..graphstore import CHUNK_WRITES
+    want = [cid for cid, _u, chars, *_r in rows
+            if cid in pos and (PLANT_NO_FACT_MEMO[0]
+                               or memo.get(cid, (None,))[0] != (int(chars or 0), CHUNK_WRITES.get(cid, 0)))]
+    for i in range(0, len(want), 2000):
+        part = want[i:i + 2000]
+        for cid, url, md, chars in workspace.store._rows(
+                "MATCH (c:Chunk) WHERE c.cid IN $cs RETURN c.cid, c.url, c.md, c.chars", {"cs": part}):
+            md = md or ""
+            memo[cid] = ((int(chars or 0), CHUNK_WRITES.get(cid, 0)), _title(md), tokens.budget(md), _first_image(md, url or ""))
+    timing["ms_facts"] = round((_time.perf_counter() - _t) * 1000, 1)
+    timing["facts_read"] = len(want)
+    _t = _time.perf_counter()
     nodes = []
     kept_drawn = stale_drawn = 0
-    for cid, url, md, chars, group_n, dup_n, drawn in rows:
+    for cid, url, chars, group_n, dup_n, drawn in rows:
         at = pos.get(cid)
         if at is None:
             continue
+        _c, title, n_tokens, picture = memo.get(cid, (0, "", 0, None))
         # The place chunk view drew it last, kept on the chunk (PLUGIN_GOAL
         # 108) -- only while the fit still puts the chunk where it was drawn
         # FROM; a chunk the projector has moved since is relaxed again.
@@ -2403,12 +2427,12 @@ def projected_chunk_layout(workspace, proj=None) -> Optional[Dict]:
             else:
                 stale_drawn += 1
         members = int(group_n or 1)
-        node = {"cid": cid, "url": url, "title": _title(md or ""),
+        node = {"cid": cid, "url": url, "title": title,
                 "rank": 0.0, "chars": int(chars or 0),
                 # How many identical renderings this node stands for (`G-25`).
                 # It was a constant 1 here, so the one node per distinct
                 # rendering never said it was one of several.
-                "tokens": tokens.budget(md or ""),
+                "tokens": n_tokens,
                 "copies": int(dup_n or 1),
                 "members": members, "level": "chunk",
                 "val": float(max(1.0, max(members, 1) ** 0.5)),
@@ -2417,16 +2441,18 @@ def projected_chunk_layout(workspace, proj=None) -> Optional[Dict]:
             node["drawn"] = placed
         if cid in hsv:
             node["hsv"] = hsv[cid]
-        picture = _first_image(md or "", url or "")
         if picture is not None:
             node["image"] = picture
         nodes.append(node)
+    timing["ms_nodes"] = round((_time.perf_counter() - _t) * 1000, 1)
+    _t = _time.perf_counter()
     drawn = {n["cid"] for n in nodes}
     edges = []
     for page in {n["url"] for n in nodes}:
         for a, b in workspace.store.contains_within(page, among=drawn):
             if a in drawn and b in drawn and a != b:
                 edges.append({"source": a, "target": b})
+    timing["ms_edges"] = round((_time.perf_counter() - _t) * 1000, 1)
     status = proj.status(workspace)
     return {"nodes": nodes, "edges": edges, "spaces": ["semantic"],
             "space": "euclidean", "n": len(nodes), "level": "chunk",
@@ -2435,8 +2461,15 @@ def projected_chunk_layout(workspace, proj=None) -> Optional[Dict]:
             "fitted_on": {"semantic": True}, "source": "projector",
             "epoch": epoch, "seq": seq, "projector": status,
             "images": sum(1 for n in nodes if n.get("image")),
-            "drawn_kept": kept_drawn, "drawn_stale": stale_drawn,
+            "drawn_kept": kept_drawn, "drawn_stale": stale_drawn, "timing": timing,
             "stale": False, "from_store": False}
+
+
+#: Each chunk's title, token count and first picture, by cid, with the
+#: `chars` they were read at (PLUGIN_GOAL 110): functions of its markdown.
+_CHUNK_FACTS: Dict[str, tuple] = {}
+#: Planted: every chunk's markdown read and tokenized on every layout.
+PLANT_NO_FACT_MEMO = [False]
 
 
 #: Planted (PLUGIN_GOAL 108): stored drawn places ignored -- chunk view

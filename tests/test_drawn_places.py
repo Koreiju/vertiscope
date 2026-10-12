@@ -67,3 +67,28 @@ def test_layout_hands_back_a_place_only_while_the_fit_is_unchanged(tmp_path):
         assert not any("drawn" in n for n in planted["nodes"])
     finally:
         layout.PLANT_NO_DRAWN[0] = False
+
+
+def test_chunk_facts_are_read_once_until_the_chunk_is_written(tmp_path):
+    # PLUGIN_GOAL 110: every chunk's markdown read and tokenized on every
+    # chunk-view layout was most of a 30 s switch. Kept per chunk, re-read
+    # when the chunk is written -- even at the same length.
+    store, a, b = _setup(tmp_path)
+    ws = SimpleNamespace(store=store)
+    layout._CHUNK_FACTS.clear()
+    proj = _Proj({a.cid: [0.5, 0.5, 0.5], b.cid: [0.9, 0.9, 0.9]})
+    assert layout.projected_chunk_layout(ws, proj)["timing"]["facts_read"] == 2
+    assert layout.projected_chunk_layout(ws, proj)["timing"]["facts_read"] == 0
+    # Rewritten at the same length ("alpha" -> "omega"): its title is re-read.
+    a2 = _chunk("/html/body/div[1]", "omega")
+    assert a2.cid == a.cid and len(a2.markdown) == len(a.markdown)
+    store.ingest(URL, [], [a2], complete=False)
+    got = layout.projected_chunk_layout(ws, proj)
+    assert got["timing"]["facts_read"] == 1
+    assert {n["cid"]: n["title"] for n in got["nodes"]}[a.cid] != ""
+    # Planted: no memo -- every chunk read every time.
+    layout.PLANT_NO_FACT_MEMO[0] = True
+    try:
+        assert layout.projected_chunk_layout(ws, proj)["timing"]["facts_read"] == 2
+    finally:
+        layout.PLANT_NO_FACT_MEMO[0] = False

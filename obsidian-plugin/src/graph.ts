@@ -35,7 +35,7 @@ import { ChunkSurface, SurfaceHost } from "./surface";
 import { baseFor, faviconFor, getSnapshot, pictureFor, putSnapshot, renderSnapshot } from "./snapshot";
 import type { ActRecord, ActResult } from "./panelact";
 import { PANEL_VIEW, PanelView } from "./panelview";
-import { SearchField, brightness, fade, type FieldHit, type FieldAnswer } from "./searchfield";
+import { SearchField, brightness, fade, holdStep, type FieldHit, type FieldAnswer } from "./searchfield";
 
 export const GRAPH_VIEW = "domvec-graph-view";
 
@@ -448,6 +448,13 @@ export class GraphView extends ItemView {
     // and the caption bar sits above it -- anchoring to the pane would
     // have drawn every panel one bar-height below its node.
     this.canvasEl = canvas;
+    // Arrow keys pan, precisely, while the pointer is over the 3D view and no
+    // text field has the keyboard (2026-10-12, PLUGIN_GOAL 114). A held key
+    // steps faster the longer it is held, as the k/n fields do (item 109).
+    canvas.addEventListener("pointerenter", () => { this.pointerOver = true; });
+    canvas.addEventListener("pointerleave", () => { this.pointerOver = false; });
+    this.registerDomEvent(window, "keydown", (e: KeyboardEvent) => this.arrowPan(e));
+    this.registerDomEvent(window, "keyup", (e: KeyboardEvent) => { if (e.key.startsWith("Arrow")) this.panHeldSince = 0; });
     // The naked search field, middle-bottom of the 3D panel (PLUGIN_GOAL 84).
     this.searchField = new SearchField(canvas, (q, k) => this.searchAsk(q, k),
                                        (hits, d, soft) => this.showSearch(hits, d, soft), () => this.clearSearch());
@@ -3699,6 +3706,59 @@ export class GraphView extends ItemView {
    * neighbours: G-107 found a pointer on a fixture page's node naming the
    * B-tree page beside it, 8 of 10 picks against the per-node sprites' 10.
    */
+  /** Planted: a chunk click reveals with the node's own `path` only, as before. */
+  plantRevealPathOnly = false;
+  revealStats = { clicks: 0, with_xpath: 0, from_payload: 0 };
+  /**
+   * A chunk's click takes the browser cell to the chunk: its page, scrolled to
+   * the element its FIRST line draws (2026-10-12: "clicking on a node after
+   * clicking on another node gives no response in the browser"). Chunk nodes
+   * carry no xpath -- 7 of 22,220 did -- so a click on a chunk of the page
+   * already open had nothing to scroll to. The first line's element, not the
+   * chunk's root: a merged chunk is rooted at the container of its run.
+   */
+  private async revealChunk(n: any): Promise<void> {
+    this.revealStats.clicks++;
+    let xpath = n.path || "";
+    if (!xpath && !this.plantRevealPathOnly) {
+      const pay: any = await Promise.race([
+        this.chunkPayload(String(n.id)).catch(() => null),
+        new Promise((r) => setTimeout(() => r(null), 1500)),
+      ]);
+      const key = String(pay?.lines?.find((l: any) => l && l.key)?.key || "");
+      const at = key.split("|")[1] || pay?.xpath || "";
+      xpath = at.replace(/\/(text\(\)|comment\(\))(\[\d+\])?$/, "").replace(/\/@[^/]+$/, "");
+      if (xpath) this.revealStats.from_payload++;
+    }
+    if (xpath) this.revealStats.with_xpath++;
+    this.onReveal(n.url, xpath);
+  }
+
+  /** Planted: proxies keep the size they were made at, as before. */
+  plantStaleProxies = false;
+  proxyStats = { resized: 0 };
+  /**
+   * Every pick proxy at its node's DRAWN size, on each sync. A proxy was
+   * sized only when made (and when a picture arrived), so a change of how a
+   * node is drawn -- chunk view's one size, a reveal, a plant flipped -- left
+   * invisible spheres up to 21.5x the drawn node: 21,808 of 22,229 stale, and
+   * a drag on empty space grabbed a node near the camera (2026-10-12).
+   */
+  private fitProxies(nodes: any[], rs: number, media: boolean): void {
+    if (this.plantPerNode) return;
+    for (const n of nodes) {
+      const o = n.__threeObj;
+      if (!o || !o.__proxy) continue;
+      const want = this.lookOf(n, rs, media).half;
+      if (Math.abs(o.scale.x - want) <= 1e-6 * Math.max(1, want)) continue;
+      o.scale.setScalar(want);
+      o.updateMatrix();
+      if (o.parent) o.matrixWorld.multiplyMatrices(o.parent.matrixWorld, o.matrix);
+      else o.matrixWorld.copy(o.matrix);
+      this.proxyStats.resized++;
+    }
+  }
+
   private proxyRadius(n: any): number {
     return this.graph ? this.lookOf(n, this.graph.nodeRelSize(), this.drawnMedia).half : 1;
   }
@@ -4008,7 +4068,7 @@ export class GraphView extends ItemView {
       // In chunk view a chunk still streaming is the size of a placed one:
       // at STREAM.RADIUS it was 10x the median chunk, a pile of giant orbs
       // over a page as it streamed (2026-10-11, PLUGIN_GOAL 110).
-      const streaming = this.level === "chunk" && !this.plantSizedInChunkView ? relSize : STREAM.RADIUS;
+      const streaming = this.level === "chunk" && !this.plantSizedInChunkView ? Math.cbrt(this.unitVal()) * relSize : STREAM.RADIUS;
       return { half: n.level === "page" && !(this.level === "chunk" && !this.plantSizedInChunkView) ? STREAM.RADIUS * 1.6 : streaming, translucent: true,
                alpha: n.hovered ? 0.9 : (n.projected ? 0.75 : STREAM.OPACITY), color: n.hovered ? "#ffffff" : (n.color || "#9aa0a6") };
     }
@@ -4020,7 +4080,10 @@ export class GraphView extends ItemView {
     // member count stops sizing it. Pictures keep their panel scale ("if its
     // an image size thing then okay"). Planted: sized by members, as before.
     const one = this.level === "chunk" && !this.plantSizedInChunkView;
-    const sized = one ? { val: 1 } : n;
+    // ONE size is the typical chunk's: the median `val` of the chunks drawn.
+    // `{ val: 1 }` drew every orb at 2.65 against a median chunk's 0.19 --
+    // fourteen times too big, a pile of overlapping orbs (2026-10-12).
+    const sized = one ? { val: this.unitVal() } : n;
     if (src) {
       const half = billboardEdge(sized, relSize) / 2;
       // Pictures near the pointer's ray only (`refreshDetail`); elsewhere the
@@ -4035,14 +4098,63 @@ export class GraphView extends ItemView {
       // panel's size it was 14x a chunk -- the DuckDuckGo page's 1,587 result
       // favicons as a pile of giant orbs (2026-10-11). Revealed, it opens to
       // its picture as before.
-      if (one) return { half: Math.cbrt(1) * relSize, translucent: false, alpha: 1, color: n.color || "#888888" };
+      if (one) return { half: Math.cbrt(sized.val) * relSize, translucent: false, alpha: 1, color: n.color || "#888888" };
       return { half, translucent: false, alpha: 1, color: n.color || "#888888" };
     }
     return { half: Math.cbrt(Math.max(sized.val ?? 1, 1e-9)) * relSize, translucent: false, alpha: 1,
              color: n.hovered ? "#ffffff" : (n.color || "#9aa0a6") };
   }
+  private pointerOver = false;
+  private panHeldSince = 0;
+  /** One arrow step, as a share of the camera's distance to its target. */
+  panStepShare = 0.006;
+  panStats = { steps: 0 };
+  arrowPan(e: KeyboardEvent): boolean {
+    const dir = ({ ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, 1], ArrowDown: [0, -1] } as any)[e.key];
+    if (!dir || !this.graph || !this.pointerOver) return false;
+    const t = e.target as HTMLElement | null;
+    const a = document.activeElement as HTMLElement | null;
+    const typing = (el: HTMLElement | null) => !!el && (/^(INPUT|TEXTAREA|SELECT|IFRAME)$/.test(el.tagName) || el.isContentEditable);
+    if (typing(t) || typing(a)) return false;
+    e.preventDefault();
+    e.stopPropagation();
+    const now = performance.now();
+    if (!e.repeat || !this.panHeldSince) this.panHeldSince = now;
+    const g: any = this.graph, cam = g.camera(), ctl = g.controls();
+    const tgt = ctl && ctl.target ? ctl.target : new THREE.Vector3();
+    const dist = cam.position.distanceTo(tgt);
+    // Capped well below the fields' 100: a pan that runs away is not precise.
+    const k = Math.min(12, holdStep(now - this.panHeldSince)) * this.panStepShare * dist;
+    cam.updateMatrixWorld();
+    const right = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 0).multiplyScalar(dir[0] * k);
+    const up = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 1).multiplyScalar(dir[1] * k);
+    const move = right.add(up);
+    cam.position.add(move);
+    tgt.add(move);
+    ctl?.update?.();
+    // The reader acted: the idle turn stops, as for any input.
+    (window as any).__domvecReaderAt = Date.now();
+    this.detailDirty = true;
+    this.panStats.steps++;
+    return true;
+  }
   /** Planted: chunk view sizes nodes by their member count, as before. */
   plantSizedInChunkView = false;
+  private unitValAt = { n: -1, v: 1 };
+  /** The median `val` of the drawn chunks, re-read when the count changes by a tenth. */
+  unitVal(): number {
+    const ns = this.graph ? (this.graph.graphData().nodes as any[]) : [];
+    if (this.unitValAt.n >= 0 && Math.abs(ns.length - this.unitValAt.n) < Math.max(50, this.unitValAt.n * 0.1)) return this.unitValAt.v;
+    const vals: number[] = [];
+    for (let i = 0; i < ns.length; i += Math.max(1, Math.floor(ns.length / 4000))) {
+      const n = ns[i];
+      if (n.level === "page" || n.force || !Number.isFinite(n.val) || n.val <= 0) continue;
+      vals.push(n.val);
+    }
+    vals.sort((a, b) => a - b);
+    this.unitValAt = { n: ns.length, v: vals.length ? vals[vals.length >> 1] : 1 };
+    return this.unitValAt.v;
+  }
 
   /**
    * A picture decoded for the atlas, through the same CORS-free fetch.
@@ -4144,7 +4256,11 @@ export class GraphView extends ItemView {
   /** Planted (item 112): the K nearest the ray, anywhere -- no bound. */
   plantUnboundedReveal = false;
   /** The cylinder's radius as a share of the cloud's size; 0 < f. */
-  revealShare = 0.12;   // 0.04 was ~40 px at the usual zoom: glow all but vanished (2026-10-12)
+  // ~40 px at the usual zoom. 0.12 spanned too far ("the ray projections
+  // still span too far", 2026-10-12); the reader chose the tight circle with
+  // the glow kept in it -- graded by distance, so a lone node under the
+  // pointer glows fully (it vanished when graded by rank).
+  revealShare = 0.04;
   private revealR = { at: 0, r: 0 };
   /** The reveal cylinder's radius, world units: `revealShare` of the cloud's
    *  extent (its p5-p95 span), re-measured at most every 2 s. */
@@ -4207,8 +4323,11 @@ export class GraphView extends ItemView {
       // take every slot from the ones under the cursor.
       const n2 = vx * vx + vy * vy + vz * vz - t * t;
       const d2 = n2 / (t * t);
-      // An upper bound on the drawn radius: a sphere's, times a panel's gain.
-      const hr = Math.cbrt(Math.max(n.val ?? 1, 1e-9)) * rs * 1.75 * 1.4142;
+      // The node's DRAWN radius (its proxy's): sized by `val` this was up to
+      // 19 world units for a page node drawn at chunk size, so the ray
+      // "covered" nodes far from the pointer near the camera (2026-10-12).
+      const hr = this.plantStaleProxies ? Math.cbrt(Math.max(n.val ?? 1, 1e-9)) * rs * 1.75 * 1.4142
+        : (n.__threeObj && n.__threeObj.__proxy ? n.__threeObj.scale.x : Math.cbrt(Math.max(n.val ?? 1, 1e-9)) * rs);
       if (n2 < hr * hr) covers.add(n);
       if (!this.plantUnboundedReveal && n2 > R2) continue;
       if (gBest.length < K) {
@@ -4403,6 +4522,7 @@ export class GraphView extends ItemView {
       const rs = g.nodeRelSize();
       if (this.searchState) { this.resolveSearch(); this.updateSearchLights(); }
       this.batch.sync(d.nodes, d.links, (n) => this.lookOf(n, rs, media), this.searchLineAlpha());
+      if (!this.plantStaleProxies) this.fitProxies(d.nodes, rs, media);
     };
     this.batchRaf = requestAnimationFrame(tick);
   }
@@ -5051,7 +5171,9 @@ export class GraphView extends ItemView {
   plantNoChunkRelax = false;
   /** Planted (PLUGIN_GOAL 108): stored drawn places ignored; relax from the fit every switch. */
   plantNoDrawn = false;
-  drawnStats = { skipped: 0, posted: 0, saved: 0 };
+  /** Planted: the relax moves stored places too, as before. */
+  plantRelaxAll = false;
+  drawnStats = { skipped: 0, posted: 0, saved: 0, free: 0, fixed: 0 };
   relaxIterations = 40;
   relaxMaxShift = 4;
   chunkRelaxStats = { runs: 0, iterations: 0, ms: 0, nodes: 0, overlaps_before: -1, overlaps_after: -1, max_shift_radii: 0, moved: 0 };
@@ -5071,7 +5193,10 @@ export class GraphView extends ItemView {
     if (N < 2) return;
     // Every node already has its stored drawn place (PLUGIN_GOAL 108): the
     // layout is the one the reader saw last -- nothing to relax, nothing moves.
-    const stored = this.plantNoDrawn ? 0 : nodes.filter((n) => n.drawnAt).length;
+    // A page node is placed by the fit itself and has no stored place: it
+    // counts as placed (one page node kept 22,648 stored chunks relaxing).
+    const placed = (n: any) => !this.plantNoDrawn && (!!n.drawnAt || n.level === "page");
+    const stored = nodes.filter(placed).length;
     if (stored === N) {
       this.chunkRelaxStats = { ...this.chunkRelaxStats, runs: this.chunkRelaxStats.runs, from_store: N, relaxed: 0 } as any;
       this.drawnStats.skipped++;
@@ -5079,6 +5204,14 @@ export class GraphView extends ItemView {
     }
     const rs = g.nodeRelSize(), media = this.drawnMedia, S = this.relaxSafety;
     const H = new Float64Array(N), P = new Float64Array(3 * N), F = new Float64Array(3 * N);
+    // Nodes with a stored place stay where they are; only the NEW ones are
+    // relaxed, against everything (2026-10-12: the relax moved all 22,648
+    // stored places again on every switch, 39-47 s, and re-saved them). With
+    // none stored, every node is free, as before.
+    const fixed = new Uint8Array(N);
+    if (stored > 0 && !this.plantRelaxAll) nodes.forEach((n, i) => { if (placed(n)) fixed[i] = 1; });
+    const free: number[] = [];
+    for (let i = 0; i < N; i++) if (!fixed[i]) free.push(i);
     nodes.forEach((n, i) => {
       H[i] = Math.max(1e-6, this.lookOf(n, rs, media).half);
       F[3 * i] = n.fitX; F[3 * i + 1] = n.fitY; F[3 * i + 2] = n.fitZ ?? 0;
@@ -5116,6 +5249,7 @@ export class GraphView extends ItemView {
       }
       return o;
     };
+    this.drawnStats.free = free.length; this.drawnStats.fixed = N - free.length;
     const t0 = performance.now();
     const before = overlaps();
     let it = 0, grid: Map<number, number[]> | null = null, cursor = 0, moved = 0, worst = 0;
@@ -5124,28 +5258,31 @@ export class GraphView extends ItemView {
       const tf = performance.now();
       if (!grid) { grid = build(); cursor = 0; moved = 0; }
       // Pairs, until this frame's budget is spent; the iteration resumes next frame.
-      while (cursor < N && performance.now() - tf < this.relaxBudgetMs) {
-        const i = cursor++;
+      while (cursor < free.length && performance.now() - tf < this.relaxBudgetMs) {
+        const i = free[cursor++];
         const cx = Math.floor(P[3 * i] / cell), cy = Math.floor(P[3 * i + 1] / cell), cz = Math.floor(P[3 * i + 2] / cell);
         for (let ox = -1; ox <= 1; ox++) for (let oy = -1; oy <= 1; oy++) for (let oz = -1; oz <= 1; oz++) {
           for (const j of grid.get(hash(cx + ox, cy + oy, cz + oz)) || []) {
-            if (j <= i) continue;
+            // A free pair is handled once (from its lower index); a fixed
+            // neighbour is handled from the free side, which takes it all.
+            if (j === i || (!fixed[j] && j < i)) continue;
             let dx = P[3 * j] - P[3 * i], dy = P[3 * j + 1] - P[3 * i + 1], dz = P[3 * j + 2] - P[3 * i + 2];
             let d = Math.hypot(dx, dy, dz);
             const want = S * (H[i] + H[j]);
             if (d >= want) continue;
             if (d < 1e-9) { dx = Math.cos(i * 2.399); dy = Math.sin(i * 2.399); dz = ((i % 7) - 3) / 7; d = Math.hypot(dx, dy, dz); }
-            const push = (want - d) / d * 0.5;
+            const share = fixed[j] ? 1 : 0.5;
+            const push = (want - d) / d * share;
             P[3 * i] -= dx * push; P[3 * i + 1] -= dy * push; P[3 * i + 2] -= dz * push;
-            P[3 * j] += dx * push; P[3 * j + 1] += dy * push; P[3 * j + 2] += dz * push;
+            if (!fixed[j]) { P[3 * j] += dx * push; P[3 * j + 1] += dy * push; P[3 * j + 2] += dz * push; }
             moved++;
           }
         }
       }
       worst = Math.max(worst, performance.now() - tf);
-      if (cursor < N) { requestAnimationFrame(step); return; }
+      if (cursor < free.length) { requestAnimationFrame(step); return; }
       // The iteration's end: back toward each UMAP point, never past the leash.
-      for (let i = 0; i < N; i++) {
+      for (const i of free) {
         for (let a = 0; a < 3; a++) P[3 * i + a] += (F[3 * i + a] - P[3 * i + a]) * 0.04;
         const dx = P[3 * i] - F[3 * i], dy = P[3 * i + 1] - F[3 * i + 1], dz = P[3 * i + 2] - F[3 * i + 2];
         const d = Math.hypot(dx, dy, dz), lim = this.relaxMaxShift * H[i];
@@ -5993,7 +6130,7 @@ export class GraphView extends ItemView {
           void this.unfoldNode(n);
           return;
         }
-        if (n.url) this.onReveal(n.url, n.path || "");
+        if (n.url) void this.revealChunk(n);
         // `G-57`: the panel opens HERE, beside the node, rather than taking
         // over an Obsidian pane. The pane remains what the structures look
         // like offline (`G-59`); it is no longer what a click in the

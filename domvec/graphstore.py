@@ -351,6 +351,10 @@ PLANT_ROOT_CONTAINMENT = [False]
 #: Planted (PLUGIN_GOAL 110): every page's trie nodes read fresh, every call.
 PLANT_NO_TNODE_MEMO = [False]
 
+#: How many times each chunk has been written in this process: what a cache
+#: of facts read from a chunk's markdown checks before it trusts them.
+CHUNK_WRITES: Dict[str, int] = {}
+
 
 def _steps(xpath: str) -> List[str]:
     """An address's ELEMENT steps: the text node and attribute dropped."""
@@ -556,8 +560,11 @@ class GraphStore:
         is the one guarantee the whole scheme exists to provide, silently
         pointing at the wrong element.
         """
-        # The page's trie nodes are re-read on its next layout (PLUGIN_GOAL 110).
+        # The page's trie nodes are re-read on its next layout (PLUGIN_GOAL 110),
+        # and what was read from these chunks' markdown is stale.
         self._tnode_forget(url)
+        for c in chunks or ():
+            CHUNK_WRITES[c.cid] = CHUNK_WRITES.get(c.cid, 0) + 1
         rows = rows or {}
         embeddings = embeddings or {}
         # Everything from here to `_reconcile` -- the anchor `before` set and
@@ -1419,7 +1426,9 @@ class GraphStore:
         return memo
 
     def _tnode_forget(self, url: str) -> None:
-        if self._tnode_memo().pop(url, None) is not None:
+        memo = self._tnode_memo()
+        memo.pop(("rows", url), None)
+        if memo.pop(url, None) is not None:
             self.tnode_stats["dropped"] += 1
 
     def contains_within(self, url: str, among=None):
@@ -1450,9 +1459,17 @@ class GraphStore:
         # for its root -- as on the write path, which sees them in document
         # order. By cid (random) children hung from an arbitrary part: Dril's
         # agreement with the trie fell 261 -> 134 of 263 (2026-10-11).
-        rows = [(c, x) for c, x in self._rows(
-            "MATCH (c:Chunk {url: $url}) RETURN c.cid, c.xpath ORDER BY c.part, c.cid",
-            {"url": url}) if c and x]
+        # Kept with the page's trie nodes, and dropped with them when the page
+        # is written: one query per page per layout was 3.2 s over 330 pages.
+        rmemo = self._tnode_memo()
+        rkey = ("rows", url)
+        rows = None if PLANT_NO_TNODE_MEMO[0] else rmemo.get(rkey)
+        if rows is None:
+            rows = [(c, x) for c, x in self._rows(
+                "MATCH (c:Chunk {url: $url}) RETURN c.cid, c.xpath ORDER BY c.part, c.cid",
+                {"url": url}) if c and x]
+            rmemo[rkey] = rows
+        rows = list(rows)
         # Among the chunks actually DRAWN, when the caller says which: a node
         # owned by a chunk that is never placed (a duplicate copy) otherwise
         # took the edge, the edge was dropped as undrawn, and the child fell to

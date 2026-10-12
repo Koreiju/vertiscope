@@ -319,6 +319,24 @@ def _warm_containment(workspace, stop) -> None:
         except Exception:                           # noqa: BLE001
             continue
     _profile("warm_containment", {"pages": done, "of": len(urls), "s": round(time.time() - t0, 1)})
+    # And each chunk's title, tokens and picture (`layout._CHUNK_FACTS`), so the
+    # first chunk-view switch after a start is not the one that reads them.
+    try:
+        from .layout import projected_chunk_layout
+        from .projector import projector as _get
+        proj = _get()
+        for _ in range(60):
+            if stop.is_set() or (proj is not None and proj.projection is not None):
+                break
+            stop.wait(5.0)
+        if proj is not None and proj.projection is not None and not stop.is_set():
+            _yield_to_foreground()
+            t1 = time.time()
+            got = projected_chunk_layout(workspace, proj)
+            _profile("warm_facts", {"n": (got or {}).get("n"), "s": round(time.time() - t1, 1),
+                                    "timing": (got or {}).get("timing")})
+    except Exception as exc:                        # noqa: BLE001
+        _profile("warm_facts", {"error": str(exc)[:160]})
 
 
 def _integrity_forever(workspace, stop) -> None:
@@ -2813,6 +2831,7 @@ class _Handler(BaseHTTPRequestHandler):
                         _profile("layout", {"kind": "projector", "level": level,
                                             "n": got.get("n"),
                                             "epoch": got.get("epoch"),
+                                            "phases": got.get("timing"),
                                             "ms": round((time.perf_counter() - _t0) * 1000, 1)})
                         self._send(200, got)
                         return

@@ -114,10 +114,24 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
       },
     };
 
-    this.registerMarkdownCodeBlockProcessor(
-      "domvec",
-      (source, el, ctx) => this.renderChunk(source, el, ctx),
-    );
+    // A load that never finished (2026-10-12: an enable that hung) leaves its
+    // registrations behind with no unload to remove them; the next onload
+    // then threw at the first one and registered NOTHING -- every reload
+    // after ran the stale views' old code. Its view types are cleared first;
+    // a code-block processor cannot be cleared from here, so a stale one is
+    // left handling fences rather than aborting this load.
+    const reg: any = (this.app as any).viewRegistry;
+    for (const t of [GRAPH_VIEW, BROWSER_VIEW, PANEL_VIEW, TERMINAL_VIEW]) {
+      try { if (reg?.viewByType?.[t]) reg.unregisterView(t); } catch { /* not ours to fail on */ }
+    }
+    try {
+      this.registerMarkdownCodeBlockProcessor(
+        "domvec",
+        (source, el, ctx) => this.renderChunk(source, el, ctx),
+      );
+    } catch (e) {
+      console.warn("domvec: a stale `domvec` fence processor is still registered; keeping it", e);
+    }
 
     this.registerEditorSuggest(
       new RetrievalSuggest(this.app, this.sidecar, () => this.settings,
