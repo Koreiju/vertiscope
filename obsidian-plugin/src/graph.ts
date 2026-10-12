@@ -3382,6 +3382,12 @@ export class GraphView extends ItemView {
   /** Planted: open pages make no room -- their clouds reach into their neighbours (D-49). */
   plantNoRoom = false;
   plantFitInChunkView = false;
+  /** Planted (G-94 with G-188): spacing measured without the node scale. */
+  plantUnscaledSpacing = false;
+  /** Planted (G-82): a pin on a chunk drawn through another finds no node, as before. */
+  plantNoPinAlias = false;
+  /** Planted (G-95): a page click unfolds step-wise and never collapses, as before. */
+  plantUnfoldOnClick = false;
   fitSkipped = 0;
   /** Planted: the room pass pushes closed neighbours out to a shell -- the ring (removed 2026-10-12). */
   plantRoomRing = false;
@@ -5002,27 +5008,42 @@ export class GraphView extends ItemView {
     // placement has nothing to put it at. Asking once left the pin with no
     // billboard (D-36, 2026-10-07: 1 pin, 0 billboards on a fresh page). It
     // is asked again until the vector arrives, for as long as it is pinned.
+    let drawnAs = cid;
     for (let i = 0; !node && i < 40 && this.pinWanted.has(cid); i++) {
       const got: any = await this.sidecar.place([cid]).catch(() => null);
       if (got?.nodes?.length) this.absorb(got.nodes, got.edges);
-      node = this.graph.graphData().nodes.find((n: any) => n.id === cid);
+      // A duplicate or a merge group's member is drawn by ANOTHER chunk: the
+      // pin's billboard opens on that one (G-82, 2026-10-12).
+      if (got?.aliases?.[cid] && !this.plantNoPinAlias) drawnAs = String(got.aliases[cid]);
+      node = this.graph.graphData().nodes.find((n: any) => n.id === drawnAs);
       if (!node) await new Promise((r) => window.setTimeout(r, 500));
     }
     if (!node || !this.pinWanted.has(cid)) return false;
     await this.openBillboard(node, true);
+    if (drawnAs !== cid) {
+      this.pinAlias.set(cid, drawnAs);
+      const entry: any = this.billboards.get(drawnAs);
+      if (entry) (entry.pins = entry.pins || new Set()).add(cid);
+    }
     return true;
   }
+  /** A pinned chunk -> the chunk whose billboard shows it (duplicates, group members). */
+  private pinAlias = new Map<string, string>();
 
   /** The browser let a chunk go: close its billboard. */
   unpinChunk(cid: string): void {
     this.pinWanted.delete(cid);
-    const entry: any = this.billboards.get(cid);
-    if (entry && entry.fromBrowser) this.closeBillboard(cid);
+    const id = this.pinAlias.get(cid) || cid;
+    this.pinAlias.delete(cid);
+    const entry: any = this.billboards.get(id);
+    if (entry && entry.pins) entry.pins.delete(cid);
+    // Another pin still shows through this billboard: it stays.
+    if (entry && entry.fromBrowser && !(entry.pins && entry.pins.size)) this.closeBillboard(id);
   }
 
   /** Which billboards are open, and which the browser holds -- for the
    *  harness, so a check reads the pane rather than re-deriving it. */
-  billboardState(): { id: string; fromBrowser: boolean; shadow: boolean; form: string; elements: number }[] {
+  billboardState(): { id: string; fromBrowser: boolean; shadow: boolean; form: string; elements: number; pins?: string[] }[] {
     return [...this.billboards.entries()].map(([id, e]: [string, any]) => {
       const host = e.el.querySelector(".domvec-html-host");
       const frame = e.el.querySelector("iframe.domvec-snapshot") as HTMLIFrameElement | null;
@@ -5034,7 +5055,7 @@ export class GraphView extends ItemView {
       // Two forms (D-36): the chunk as the PAGE draws it, when the page gave
       // one, else the distilled shadow-DOM form. Both are rendered HTML.
       return {
-        id, fromBrowser: !!e.fromBrowser, minimized: !!e.minimized,
+        id, fromBrowser: !!e.fromBrowser, minimized: !!e.minimized, pins: e.pins ? [...e.pins] : [],
         shadow: !!host?.shadowRoot || !!frame,
         form: frame ? "page" : (host?.shadowRoot ? "distilled" : "none"),
         elements,
@@ -5561,7 +5582,12 @@ export class GraphView extends ItemView {
     // neighbours within `drawn / 0.45` -- farther, and it is not shrunk -- so
     // the search covers that radius and no more, and the verdict is exactly
     // the all-pairs one. Planted: the all-pairs scan.
-    const drawnOf = nodes.map((a) => drawnRadius(a, relSize, media));
+    // As DRAWN: `nodeScale` (G-188) enlarges every node, and spacing that
+    // ignored it left crowded nodes a quarter wider than their room -- they
+    // overlapped (G-94). Measured scaled, a node is larger where there is
+    // room and shrinks to fit where there is not.
+    const scale = this.plantUnscaledSpacing ? 1 : this.nodeScale;
+    const drawnOf = nodes.map((a) => drawnRadius(a, relSize, media) * scale);
     const at = (a: any) => [a.x ?? 0, a.y ?? 0, a.z ?? 0];
     const sorted = drawnOf.filter((r) => r > 0).sort((x, y) => x - y);
     const typical = sorted.length ? sorted[Math.floor(sorted.length * 0.9)] : 1;
@@ -6229,7 +6255,14 @@ export class GraphView extends ItemView {
           // And the browser follows the click (`G-40`, `G-58`). A page node
           // navigates; a branch or chunk node also scrolls to its address.
           if (n.url) this.onReveal(n.url, n.path || "");
-          void this.unfoldNode(n);
+          // A ROOT toggles its whole tree (G-95, Addendum IX: "When the roots
+          // are clicked, all nodes expand ... When the roots that are
+          // uncollapsed are clicked again, all the chunks for that page
+          // collapse back"): every stored chunk of the page at its UMAP
+          // place, or all folded back. The step-wise unfold (160 nodes,
+          // three levels) stays for branch nodes. Planted: as before.
+          if (n.level === "page" && !this.plantUnfoldOnClick) void this.togglePage(n);
+          else void this.unfoldNode(n);
           return;
         }
         if (n.url) void this.revealChunk(n);

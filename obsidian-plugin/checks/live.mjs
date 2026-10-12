@@ -3175,6 +3175,49 @@ export function makeChecks(env) {
       async run() { return offlineArm("dock"); },
     },
     {
+      id: "G-95",
+      asks: "clicking a page root toggles its whole tree: the first click draws every stored chunk of the page, the second folds them all back; planted (plantUnfoldOnClick): the step-wise unfold, which never collapses",
+      async run() {
+        // Addendum IX: "When the roots are clicked, all nodes expand ... When
+        // the roots that are uncollapsed are clicked again, all the chunks for
+        // that page collapse back."
+        const arm = (planted) => evaluate(`(async () => {
+          ${PREP}
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          for (let i = 0; i < 60 && !(v.graph && v.graph.graphData().nodes.length > 50); i++) await sleep(500);
+          if (v.level === "chunk") return { error: "in chunk view" };
+          const g = v.graph;
+          const drawnOf = (u) => g.graphData().nodes.filter((n) => n.url === u && n.level !== "page" && !n.force).length;
+          // A page with a moderate stored set, nothing of it drawn yet.
+          let page = null, stored = 0;
+          for (const n of g.graphData().nodes) {
+            if (n.level !== "page" || !n.url || drawnOf(n.url)) continue;
+            const k = (await v.sidecar.pageCids(n.url).catch(() => [])).length;
+            if (k >= 20 && k <= 150) { page = n; stored = k; break; }
+          }
+          if (!page) return { error: "no page with 20-150 stored chunks" };
+          const click = g.onNodeClick();
+          v.plantUnfoldOnClick = ${planted};
+          const scoped = v.onScope, revealed = v.onReveal;
+          v.onScope = () => {}; v.onReveal = () => {};      // the browser cell is not driven by this check
+          try {
+            click(page, new MouseEvent("click"));
+            let first = 0; for (let i = 0; i < 40; i++) { await sleep(250); first = drawnOf(page.url); if (first && i > 8) break; }
+            click(page, new MouseEvent("click"));
+            let second = first; for (let i = 0; i < 40; i++) { await sleep(250); second = drawnOf(page.url); if (second === 0) break; }
+            return { planted: ${planted}, url: page.url.slice(0, 60), stored, first, second };
+          } finally {
+            v.plantUnfoldOnClick = false; v.onScope = scoped; v.onReveal = revealed;
+            if (drawnOf(page.url)) await v.togglePage(page);
+          }
+        })()`, { timeout: 90000 });
+        const clean = await arm(false), planted = await arm(true);
+        return { pass: !clean.error && clean.first >= 0.8 * clean.stored && clean.second === 0
+                       && !planted.error && planted.second > 0,
+                 evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-185",
       asks: "the idle turn (camera orbit and hue) runs with a query standing too -- the search's lights ride on the turning scene; planted (plantDriftStopsOnSearch): a standing query stops it, as it did",
       async run() {
@@ -6867,7 +6910,9 @@ export function makeChecks(env) {
               page_shown: pageShown(),
               side_shown: !!(u.pinned && u.pinned.side_shown),
               cards: [...view.markdownWrap.querySelectorAll(".domvec-pin-card")].map((c) => c.dataset.cid),
-              billboards: (u.billboards || []).filter((b) => b.fromBrowser).map((b) => b.id),
+              // A billboard shows its own chunk and any pinned chunk drawn
+              // THROUGH it (a duplicate, a merge group's member).
+              billboards: (u.billboards || []).filter((b) => b.fromBrowser).flatMap((b) => [b.id].concat(b.pins || [])),
               outlines_shown: ((u.pipebox || {}).pins || []).filter((o) => o.shown).length,
             };
           };

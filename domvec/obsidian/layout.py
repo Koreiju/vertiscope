@@ -2507,16 +2507,32 @@ def place_projected(workspace, cids, proj) -> Dict:
                 "source": "projector"}
     _t = _time.perf_counter()
     rows, meta, missing = [], [], []
-    for cid, chunk, vector in workspace.store.chunks_for_placement(wanted):
-        if chunk is None or chunk.redundant:
-            continue
-        if chunk.group_of and chunk.group_of != cid:
-            continue
-        if not vector or not any(vector):
-            missing.append(cid)
-            continue
-        rows.append(vector)
-        meta.append(chunk)
+    # A chunk drawn THROUGH another -- a duplicate (`dup_of`) or a merge
+    # group's member (`group_of`) -- is never a node of its own: it is said
+    # so (`aliases`) and the one that draws it is placed instead. Skipped in
+    # silence, a pin on such a chunk found no node and opened no billboard
+    # (G-82, 2026-10-12: 2 pins, 1 billboard).
+    aliases: Dict[str, str] = {}
+
+    def _take(batch):
+        for cid, chunk, vector in workspace.store.chunks_for_placement(batch):
+            if chunk is None:
+                continue
+            if chunk.redundant or (chunk.group_of and chunk.group_of != cid):
+                aliases[cid] = chunk.dup_of if chunk.redundant else chunk.group_of
+                continue
+            if not vector or not any(vector):
+                missing.append(cid)
+                continue
+            if any(m.cid == cid for m in meta):
+                continue
+            rows.append(vector)
+            meta.append(chunk)
+
+    _take(wanted)
+    extra = [t for t in dict.fromkeys(aliases.values()) if t and t not in wanted]
+    if extra:
+        _take(extra)
     timing["ms_read"] = round((_time.perf_counter() - _t) * 1000, 1)
     timing["n_wanted"] = len(wanted)
     timing["n_placeable"] = len(rows)
@@ -2598,7 +2614,7 @@ def place_projected(workspace, cids, proj) -> Dict:
                 placed_edges.append({"source": pn["cid"], "target": n["cid"]})
     timing["ms_edges"] = round((_time.perf_counter() - _t) * 1000, 1)
     status = proj.status(workspace)
-    return {"timing": timing, "nodes": nodes, "edges": placed_edges,
+    return {"timing": timing, "nodes": nodes, "edges": placed_edges, "aliases": aliases,
             "unplaced": missing, "stale": False, "source": "projector",
             "epoch": status["epoch"], "seq": status["seq"],
             "fitted_n": status.get("fit_sample"),
