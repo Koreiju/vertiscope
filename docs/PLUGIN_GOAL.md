@@ -2929,6 +2929,155 @@ linked per drain). (104) hover, glow and picture reveal respond at once:
 pointer to glow measured 49-113 ms in chunk view, most of it an 80 ms throttle
 and a full re-sync per change.*
 
+> also, scrolling and 'more results' in search should be an exhaustive while
+> loop until no deltas or something like the more results button isn't there.
+
+*Read as (2026-10-11): (105) the web half of a search has no fixed round
+count: it scrolls and presses "More results" in a loop that ends only when a
+round adds no results (no delta) or the button is gone -- and says which of
+the two ended it. A newer query still cancels it.*
+
+> also, i notice no diff update on retrieval results and effects on the scroll
+> bar
+
+*(Sent with a screenshot of the search field: "monkey", "showing 20 / 50
+results · 55 matching", the scroll bar a flat grey track.)*
+
+*Read as (2026-10-11): (106) while a query stands, what streams in (the web
+half's pages, any capture) updates the RESULTS as a diff -- the matching
+count, the ranks, the lights -- without the reader asking again; and the
+scroll bar SHOWS it: the soft brightness gradient of item (97) drawn on the
+track, moving with the window and the result count.*
+
+> also, the search button should trigger web search, not auto-updates piped
+> also to the search browser
+
+*Read as (2026-10-11): (107) typing ranks the store as it goes (the field's
+auto-update) and touches the browser cell NOT AT ALL; the web half runs only
+when the reader presses the search button -- read here as the button beside
+the field and Enter in it, the keyboard's form of the same press.*
+
+> i can't interact with the result boxes. i type a number and am instantly
+> kicked out
+
+*(Sent with a screenshot of the field holding a live check's query, "okapi
+giraffe relative habitat a", showing 8 / 50.)*
+
+*Read as (2026-10-11): a field the reader is typing in keeps the keyboard:
+the browser cell navigating or pressing "More results" for a search never
+takes focus from it; and no check types into the reader's field while they
+use it.*
+
+> also i keep switching to 'chunk' view and re-fitting keeps re-running, but
+> we should be persisting these layouts to the entities in our database.
+
+*Read as (2026-10-11): (108) a layout, once fitted, is STORED on the
+entities it places -- each chunk's (and page's) position in the database
+beside it -- and switching to a view reads the stored positions instead of
+fitting again; a fit runs only for what has no stored position yet, or when
+the reader asks for a refit.*
+
+*(Found on reading the code: the server does not refit on a switch -- 0
+latent refits, the fit loaded from its stored pickle -- but the CLIENT does
+two things every switch: item (100)'s collision relax runs again from the
+UMAP points, moving every node, and the status reads "fitting…" while it
+only reads positions.)*
+
+> also, up and down arrow keys when the cursor is in the integer boxes should
+> modify the values up and down at adaptive speeds depending on how long the
+> hold has been
+
+*Read as (2026-10-11): (109) in the k and n fields, Up and Down step the
+value by one, and holding the key steps faster the longer it is held; the
+view follows as it steps.*
+
+> why are some of the spheres like GIANT?
+
+*Read as (2026-10-11), with the reader's earlier "I'd like consistent node
+sizes if possible" / "if its an image size thing then okay": chunk view
+draws every sphere at one size, pages among them; only pictures differ.
+(Measured live: the DuckDuckGo page node, 605 members, radius 9.43 against a
+median chunk's 0.22.)*
+
+> also, both jumbling and extreme latency on the diff streams
+
+*(Sent with a screenshot: the DuckDuckGo page's chunks as large overlapping
+translucent orbs, piled over the page node.)*
+
+*Read as (2026-10-11): (110) a page streaming in -- the web half's results
+page above all, growing with every "More results" -- places each NEW chunk
+once and leaves the ones already placed where they are (no jumbling), and
+reaches the view with low latency however large the page grows. Measured
+live before any change: the projector's per-page local fit last ran on the
+DuckDuckGo page -- 534 chunks, 1,072 ms -- and moved 598.*
+
+> new streams work a little better but still some leftover jumbling
+
+> but the latency is still pretty rough
+
+*(Found on reading the live state: the plugin then running was the build
+before the size fixes; streaming placeholders drew at 10x a chunk and 1,587
+unrevealed favicon chunks at 14x; a chunk-view layout cost 42-66 s in the
+sidecar, reading every page's anchors, and a capture waited 21 s in
+transport behind it -- end to end 45.8 s for one drain.)*
+
+> I can't enter things in the search bar but I should be able to through the
+> patricia trie
+
+*(Sent with a screenshot of a hovered chunk's panel on the DuckDuckGo page:
+the page form with its search box holding "okapi giraffe relative habi", and
+the markdown below it, `[ ] okapi giraffe relative habitat a` and
+`( Clear )`.)*
+
+*Read as (2026-10-11): (111) a field drawn in a panel -- the page form's
+input and the markdown's `[ ]` -- is typed into IN PLACE, and what is typed
+reaches the live page's element through its trie address (the panel's line
+names the address; the browser cell holds the element), the way the
+reader's own keyboard would.*
+
+> more jumbling
+
+*(Sent with a screenshot of the build then running -- before the size fixes
+were loaded: the page sphere and the favicon orbs at their old sizes.)*
+
+> i don't think the mouse needs to be revealing images a long ways away. the
+> mouse was in the top right corner of the screen, and it was like no matter
+> how far, the images from a far-away url would still reveal, which I think
+> means ray projection vs regular cylindrical bounds on the mouse with ray
+> projection in a similar manner.
+
+*(Sent with a screenshot of url view, pictures revealed across the whole
+pane.)*
+
+*Read as (2026-10-11): (112) the region around the pointer's ray is
+BOUNDED: a cylinder about the ray, so a node is revealed (and glows) only
+within a fixed distance of the ray; with nothing in it, nothing is revealed.
+The ranking inside it stays by nearness to the ray. (The code then took the K
+nearest with no bound at all, so K pictures were always revealed somewhere.)*
+
+> also not sure if I'm seeing the xyzhsv rotations taking effect yet
+
+*(Found on reading the live state: 0 drift starts since the reload -- the
+drift was gated off whenever a query stood in the field, and one did.)*
+
+> hsv rotation seems pretty slow
+
+*Read as (2026-10-12): the idle turn runs with a query standing too (item
+83 with 93's "pls dont forget about the rotating xyzhsv"), and the hue turns
+faster: the wheel in about 30 s, not 2 minutes.*
+
+> physical rotation could be slower... im feeling dizzy
+
+*Read as (2026-10-12): the camera's orbit turns a third as fast -- a full
+turn in about 5 minutes, not 100 s; the hue keeps its 30 s.*
+
+> hsv rotation could be a lot faster, physical rotation could be somewhat
+> faster
+
+*Read as (2026-10-12): hue 0.8 rad/s (the wheel in about 8 s); orbit 0.035
+rad/s (a turn in about 3 minutes -- between the 5 minutes just set and the
+100 s that made the reader dizzy).*
+
 ---
 
 

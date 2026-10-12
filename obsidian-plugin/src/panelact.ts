@@ -29,6 +29,9 @@ export interface ActRecord {
   action: PanelAction;
   /** The text typed or the option chosen. */
   value?: string;
+  /** The reader pressed Enter in the field: the page's Enter follows the
+   *  typing, as their own keyboard's would (PLUGIN_GOAL 111). */
+  enter?: boolean;
 }
 
 /** What `actOn` reports, stage by stage, so a refusal and a failure differ. */
@@ -107,13 +110,17 @@ export function actFromEvent(kind: "click" | "change", el: PanelEl): ActRecord |
  * `perform` takes `{xpath}` targets (the trie's own spelling) and refuses what
  * the never-press set names, element by element, at the moment of the act.
  */
-export function chainFor(kind: string, xpath: string, value?: string):
+export function chainFor(kind: string, xpath: string, value?: string, enter = false):
     { ticks: { kind: string; xpath: string; text?: string }[] } {
   const ticks: { kind: string; xpath: string; text?: string }[] =
     [{ kind: "scrollIntoView", xpath }];
   const act: { kind: string; xpath: string; text?: string } = { kind, xpath };
   if (kind === "type" || kind === "choose") act.text = String(value ?? "");
   ticks.push(act);
+  // Enter in a typed field: the key the page's own handler listens for (a
+  // search box submits on it), on the same element -- not a form submit
+  // invented here.
+  if (enter && kind === "type") ticks.push({ kind: "key", xpath, text: "Enter" });
   return { ticks };
 }
 

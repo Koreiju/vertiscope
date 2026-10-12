@@ -63,3 +63,27 @@ def test_an_undrawn_owner_does_not_take_the_edge(tmp_path):
     store.ingest(URL, [], [dup, drawn_owner, child], complete=False)
     pairs = set(store.contains_within(URL, among={drawn_owner.cid, child.cid}))
     assert (drawn_owner.cid, child.cid) in pairs
+
+
+def test_trie_nodes_are_read_once_per_page_until_it_is_written(tmp_path):
+    # PLUGIN_GOAL 110: a chunk-view layout asked every page's anchors fresh --
+    # 42-66 s over 294 pages. Kept per page, dropped when the page is written.
+    store = GraphStore(tmp_path / "g.kuzu")
+    kids = [_chunk("/html/body/div[2]", "alpha")]
+    parent = _chunk("/html/body", "gamma")
+    store.ingest(URL, [], kids + [parent], complete=False)
+    first = set(store.contains_within(URL))
+    again = set(store.contains_within(URL))
+    assert first == again and store.tnode_stats["computed"] == 1 and store.tnode_stats["reused"] == 1
+    # A write to the page drops its nodes: the next read sees the new chunk.
+    more = _chunk("/html/body/div[3]", "beta")
+    store.ingest(URL, [], [more], complete=False)
+    assert (parent.cid, more.cid) in set(store.contains_within(URL))
+    assert store.tnode_stats["computed"] == 2
+    # Planted: no memo -- every call reads the anchors again.
+    graphstore.PLANT_NO_TNODE_MEMO[0] = True
+    try:
+        store.contains_within(URL)
+        assert store.tnode_stats["computed"] == 3
+    finally:
+        graphstore.PLANT_NO_TNODE_MEMO[0] = False

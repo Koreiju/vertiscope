@@ -70,6 +70,41 @@ BATCH = 256
 LOG_CAP = 50000
 
 
+def _keep_placed(cids, coords: np.ndarray, old: Dict):
+    """A page's refit that moves nothing already placed (PLUGIN_GOAL 110).
+
+    The new fit is laid onto the old one's frame -- scale, rotation and
+    translation by least squares (Procrustes/Umeyama) over the chunks both
+    hold -- so the new chunks land beside the neighbours they were fitted
+    with; then every chunk the old fit held takes back its old place EXACTLY.
+    A page that grows as it streams (the web half's results, ten more per
+    "More results") then only gains nodes: before, each quarter of growth
+    re-ran UMAP from scratch and every chunk on the page jumped (measured live
+    on DuckDuckGo: 598 moved in one refit). Returns (coords, kept).
+    """
+    idx = old.get("index") or {}
+    shared = [(i, idx[c]) for i, c in enumerate(cids) if c in idx]
+    if not shared:
+        return coords, 0
+    A = np.asarray([coords[i] for i, _ in shared], dtype=np.float64)
+    B = np.asarray([old["coords"][j] for _, j in shared], dtype=np.float64)
+    out = np.array(coords, dtype=np.float64, copy=True)
+    if len(shared) >= 4:
+        ma, mb = A.mean(axis=0), B.mean(axis=0)
+        A0, B0 = A - ma, B - mb
+        U, S, Vt = np.linalg.svd(A0.T @ B0)
+        D = np.eye(3)
+        if np.linalg.det(U @ Vt) < 0:
+            D[2, 2] = -1.0
+        R = U @ D @ Vt
+        va = float((A0 ** 2).sum())
+        scale = float((S * np.diag(D)).sum()) / va if va > 1e-12 else 1.0
+        out = (out - ma) @ R * scale + mb
+    for i, j in shared:
+        out[i] = old["coords"][j]
+    return out, len(shared)
+
+
 def _next_epoch(previous: int) -> int:
     """An epoch no pane can already hold.
 
@@ -1434,6 +1469,9 @@ class PageProjector(ChunkProjector):
     #: Refit when this share of a page's chunks is new since its fit.
     LOCAL_REFIT_GROWTH = 0.25
     LOCAL_FILE = "local_fits.pkl"
+    #: Planted (PLUGIN_GOAL 110): a refit replaces every chunk's local
+    #: position -- the page jumbles each time it grows by a quarter.
+    plant_local_jumble = False
 
     def _local_offsets(self, u: str, items):
         """`items` ([(cid, offset in the page fit)]) with each offset replaced
@@ -1500,6 +1538,7 @@ class PageProjector(ChunkProjector):
             if len(cids) < self.LOCAL_MIN:
                 return None
             X = np.asarray([self.vec[c] for c in cids], dtype=np.float32)
+            old = self.local.get(u)
         V = L._unit_rows(X)
         t = time.perf_counter()
         with (self.fit_lock or nullcontext()):
@@ -1510,8 +1549,11 @@ class PageProjector(ChunkProjector):
         p90 = float(np.percentile(r, 90)) if len(r) else 0.0
         if p90 > 1e-9:
             coords = coords / p90
+        kept = 0
+        if old is not None and not self.plant_local_jumble:
+            coords, kept = _keep_placed(cids, coords, old)
         return {"cids": cids, "coords": coords, "V": V, "index": {c: i for i, c in enumerate(cids)},
-                "at": time.time(), "ms": round((time.perf_counter() - t) * 1000, 1)}
+                "at": time.time(), "ms": round((time.perf_counter() - t) * 1000, 1), "kept": kept}
 
     def _local_worker(self) -> None:
         while True:
@@ -1549,7 +1591,7 @@ class PageProjector(ChunkProjector):
                             moved += 1
             self.local_stats["fits"] += 1
             self.local_stats["last"] = {"url": u, "n": len(lf["cids"]), "ms": lf["ms"], "moved": moved,
-                                        "at": round(time.time(), 3)}
+                                        "kept": lf.get("kept", 0), "at": round(time.time(), 3)}
             self._save_local()
 
     def local_quality(self, url: str, k: int = 10, seed: int = 0) -> Dict:

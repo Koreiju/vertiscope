@@ -904,3 +904,11 @@ button.domvec-run-fence:hover {
 .domvec-profile-stage-name { color: var(--text-muted); }
 .domvec-profile-stage-at { font-variant-numeric: tabular-nums; font-size: 12px; }
 .domvec-profile-stage-hover { color: var(--text-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Item 107: the search button -- the one thing that asks the web. Naked like the field. */
+.domvec-search3d-go { background: transparent !important; border: 1px solid rgba(255,255,255,0.18) !important;
+  box-shadow: none !important; color: var(--text-muted); font-size: 11px; padding: 2px 8px; border-radius: 10px;
+  cursor: pointer; }
+.domvec-search3d-go:hover { color: var(--text-normal); border-color: rgba(255,255,255,0.4) !important; }
+/* Item 106: what a re-rank changed, bright for a moment. */
+.domvec-search3d-diff { color: var(--text-faint); transition: color 1.2s ease; }
+.domvec-search3d-diff.is-fresh { color: var(--text-accent); transition: none; }

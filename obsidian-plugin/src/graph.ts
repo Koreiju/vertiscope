@@ -451,11 +451,16 @@ export class GraphView extends ItemView {
     // The naked search field, middle-bottom of the 3D panel (PLUGIN_GOAL 84).
     this.searchField = new SearchField(canvas, (q, k) => this.searchAsk(q, k),
                                        (hits, d, soft) => this.showSearch(hits, d, soft), () => this.clearSearch());
+    // The web half on the search BUTTON (and Enter) only -- typing never
+    // reaches the browser cell (item 107).
+    this.searchField.onSubmit = (q) => { this.searchStats.web_asked++; this.onWebSearch(q); this.followStore(q); };
 
     const load = async () => {
       // Not over the force tree's caption: a retry every 3 s wrote
       // "fitting…" across a pane that was drawing (`G-89`).
-      if (this.layoutMode !== "force") status.setText("fitting…");
+      // "loading", not "fitting": this reads stored positions; a fit is
+      // reported only when the sidecar says one is running (PLUGIN_GOAL 108).
+      if (this.layoutMode !== "force") status.setText("loading…");
       const asked = this.space;
       const asking = this.level;
       const layout = (await this.sidecar.layout(3, asked, asking)) as
@@ -3049,6 +3054,7 @@ export class GraphView extends ItemView {
       renderSnapshot(body, snap, {
         maxHeight: 420, onLink: (h) => this.onNavigate(h), cid: id,
         onAct: (rec) => this.onAct(id, rec),
+        onFieldDone: () => this.releaseHeld(entry),
       });
     } else {
       if (fresh || !entry.payload) entry.payload = (await this.chunkPayload(id)) || entry.payload;
@@ -3814,42 +3820,63 @@ export class GraphView extends ItemView {
   /** Planted (item 96): the first version -- undrawn results PLACED in the scene. */
   plantPlaceResults = false;
   searchStats = { asked: 0, shown: 0, lights: 0, last_ms: 0, resolved_chunk: 0, resolved_page: 0, unresolved: 0,
-                  placed: 0, web_merged: 0, flown_top: 0 };
+                  placed: 0, web_merged: 0, flown_top: 0, web_asked: 0, reranks: 0, rerank_changed: 0 };
 
   /** Told the plugin, which tells the browser cell: search the web too (item 85). */
   onWebSearch: (query: string) => void = () => {};
-  private webQuery = "";
   private webTimer = 0;
+  private followQuery = "";
+  private followQuiet = 0;
+  private followBusy = false;
+  /** Planted (item 107): every typed query also goes to the web, as before. */
+  plantWebOnType = false;
+  /** Planted (item 106): the ranking is asked once and never again. */
+  plantNoRerank = false;
+  /** How often a standing query is re-ranked, and how many unchanged rounds end it. */
+  rerankMs = 3000;
+  rerankQuietRounds = 20;
   /**
-   * The web half's results land in the store as the browser's capture
-   * streams: the store is asked again while they arrive, and what is new is
-   * merged into the field without moving its scroll.
+   * While a query stands, what streams into the store -- the web half's
+   * pages, any capture -- re-ranks it, applied as a DIFF (item 106): the
+   * field's `update` swaps in the new order, keeps the reader's scroll, says
+   * what moved; the lights follow through `onShow`. Asked every `rerankMs`
+   * and at once when the store hands the view new nodes (`absorb`); it rests
+   * after `rerankQuietRounds` unchanged rounds and wakes on the next write.
    */
-  private followWeb(query: string): void {
-    window.clearInterval(this.webTimer);
-    let left = 10;
-    this.webTimer = window.setInterval(async () => {
-      if (this.closed) { GraphView.closedTick(); return; }
-      const f = this.searchField;
-      if (!f || f.query !== query || --left < 0) { window.clearInterval(this.webTimer); return; }
-      const got: any = await this.sidecar.search(query, { k: f.total }).catch(() => null);
-      if (!got || f.query !== query) return;
-      const hits: FieldHit[] = (got.hits || []).map((h: any) => ({ cid: String(h.cid), url: String(h.url || "") }));
-      const fresh = hits.filter((h) => !f.hits.some((x) => x.cid === h.cid));
-      this.searchStats.web_merged += fresh.length;
-      f.extend(fresh, Number(got.n || 0));
-    }, 3000);
+  private followStore(query: string): void {
+    if (this.plantNoRerank || !query) return;
+    if (this.followQuery !== query) { window.clearInterval(this.webTimer); this.webTimer = 0; }
+    this.followQuery = query;
+    this.followQuiet = 0;
+    if (this.webTimer) return;
+    this.webTimer = window.setInterval(() => { void this.rerank(); }, this.rerankMs);
+  }
+  private async rerank(): Promise<void> {
+    if (this.closed) { GraphView.closedTick(); window.clearInterval(this.webTimer); return; }
+    const f = this.searchField;
+    const q = this.followQuery;
+    if (!f || !q || f.query !== q) { window.clearInterval(this.webTimer); this.webTimer = 0; return; }
+    if (this.followBusy) return;
+    this.followBusy = true;
+    try {
+      const d = await f.update().catch(() => null);
+      this.searchStats.reranks++;
+      if (d && (d.added || d.removed || d.moved)) {
+        this.searchStats.rerank_changed++;
+        this.searchStats.web_merged += d.added;
+        this.followQuiet = 0;
+      } else if (++this.followQuiet >= this.rerankQuietRounds) {
+        window.clearInterval(this.webTimer); this.webTimer = 0;
+      }
+    } finally { this.followBusy = false; }
   }
 
   /** One query: the store's ranking, `total` deep. Nothing in the scene changes. */
   private async searchAsk(query: string, total: number): Promise<FieldAnswer | null> {
     const t0 = performance.now();
     this.searchStats.asked++;
-    if (query !== this.webQuery) {
-      this.webQuery = query;
-      this.onWebSearch(query);
-      this.followWeb(query);
-    }
+    if (this.plantWebOnType) { this.searchStats.web_asked++; this.onWebSearch(query); }
+    this.followStore(query);
     const got: any = await this.sidecar.search(query, { k: total });
     if (!got) return null;
     const hits: FieldHit[] = (got.hits || []).map((h: any) => ({ cid: String(h.cid), url: String(h.url || "") }));
@@ -3928,7 +3955,8 @@ export class GraphView extends ItemView {
 
   private clearSearch(): void {
     window.clearInterval(this.webTimer);
-    this.webQuery = "";
+    this.webTimer = 0;
+    this.followQuery = "";
     this.flownFor = "";
     this.searchState = null;
     this.batch?.setLights([], 1);
@@ -3977,12 +4005,24 @@ export class GraphView extends ItemView {
 
   private baseLook(n: any, relSize: number, media: boolean): NodeLook {
     if (n.force) {
-      return { half: n.level === "page" ? STREAM.RADIUS * 1.6 : STREAM.RADIUS, translucent: true,
+      // In chunk view a chunk still streaming is the size of a placed one:
+      // at STREAM.RADIUS it was 10x the median chunk, a pile of giant orbs
+      // over a page as it streamed (2026-10-11, PLUGIN_GOAL 110).
+      const streaming = this.level === "chunk" && !this.plantSizedInChunkView ? relSize : STREAM.RADIUS;
+      return { half: n.level === "page" && !(this.level === "chunk" && !this.plantSizedInChunkView) ? STREAM.RADIUS * 1.6 : streaming, translucent: true,
                alpha: n.hovered ? 0.9 : (n.projected ? 0.75 : STREAM.OPACITY), color: n.hovered ? "#ffffff" : (n.color || "#9aa0a6") };
     }
     const src = media && !(this.plantNoPicture && n.level !== "page") ? n.image?.src : undefined;
+    // Chunk view draws every node at ONE size (2026-10-11: "I'd like
+    // consistent node sizes if possible"; "why are some of the spheres like
+    // GIANT?" -- the DuckDuckGo page node, 605 members, at 43x the median
+    // chunk). A page there is one node among chunks, not a cluster: its
+    // member count stops sizing it. Pictures keep their panel scale ("if its
+    // an image size thing then okay"). Planted: sized by members, as before.
+    const one = this.level === "chunk" && !this.plantSizedInChunkView;
+    const sized = one ? { val: 1 } : n;
     if (src) {
-      const half = billboardEdge(n, relSize) / 2;
+      const half = billboardEdge(sized, relSize) / 2;
       // Pictures near the pointer's ray only (`refreshDetail`); elsewhere the
       // same size, as its colour -- so the collider, the pick proxy and the
       // drawn extent never change with where the mouse is.
@@ -3991,11 +4031,18 @@ export class GraphView extends ItemView {
       if (this.plantAllPictures || n.level === "page" || n.level === "path"
           || this.detail.has(n) || n.hovered || this.billboards.has(n.id))
         return { half, translucent: false, alpha: 0.95, color: n.color || "#888888", picture: src };
+      // Unrevealed, in chunk view: an orb the size of every other orb. At the
+      // panel's size it was 14x a chunk -- the DuckDuckGo page's 1,587 result
+      // favicons as a pile of giant orbs (2026-10-11). Revealed, it opens to
+      // its picture as before.
+      if (one) return { half: Math.cbrt(1) * relSize, translucent: false, alpha: 1, color: n.color || "#888888" };
       return { half, translucent: false, alpha: 1, color: n.color || "#888888" };
     }
-    return { half: Math.cbrt(Math.max(n.val ?? 1, 1e-9)) * relSize, translucent: false, alpha: 1,
+    return { half: Math.cbrt(Math.max(sized.val ?? 1, 1e-9)) * relSize, translucent: false, alpha: 1,
              color: n.hovered ? "#ffffff" : (n.color || "#9aa0a6") };
   }
+  /** Planted: chunk view sizes nodes by their member count, as before. */
+  plantSizedInChunkView = false;
 
   /**
    * A picture decoded for the atlas, through the same CORS-free fetch.
@@ -4094,6 +4141,29 @@ export class GraphView extends ItemView {
   private detailAt = 0;
   private detailCam = "";
 
+  /** Planted (item 112): the K nearest the ray, anywhere -- no bound. */
+  plantUnboundedReveal = false;
+  /** The cylinder's radius as a share of the cloud's size; 0 < f. */
+  revealShare = 0.12;   // 0.04 was ~40 px at the usual zoom: glow all but vanished (2026-10-12)
+  private revealR = { at: 0, r: 0 };
+  /** The reveal cylinder's radius, world units: `revealShare` of the cloud's
+   *  extent (its p5-p95 span), re-measured at most every 2 s. */
+  revealRadius(g: any): number {
+    const now = performance.now();
+    if (this.revealR.r > 0 && now - this.revealR.at < 2000) return this.revealR.r;
+    const ns = g.graphData().nodes as any[];
+    const step = Math.max(1, Math.floor(ns.length / 2000));
+    const xs: number[] = [], ys: number[] = [], zs: number[] = [];
+    for (let i = 0; i < ns.length; i += step) {
+      const n = ns[i]; if (!Number.isFinite(n.x)) continue;
+      xs.push(n.x); ys.push(n.y); zs.push(n.z || 0);
+    }
+    const span = (a: number[]) => { if (a.length < 2) return 0; a.sort((x, y) => x - y); return a[Math.floor(a.length * 0.95)] - a[Math.floor(a.length * 0.05)]; };
+    const ext = Math.max(span(xs), span(ys), span(zs), 1e-6);
+    this.revealR = { at: now, r: ext * this.revealShare };
+    return this.revealR.r;
+  }
+
   private refreshDetail(g: any): void {
     const now = performance.now();
     const cam = g.camera();
@@ -4114,13 +4184,19 @@ export class GraphView extends ItemView {
     // The glow's own ranking, over EVERY node, by the same nearness (2026-10-11:
     // "nodes glow the same way as image billboards are revealed for their
     // hovered nodes within a certain region of the mouse on the camera normal").
-    const gBest: any[] = [], gDist: number[] = [];
+    const gBest: any[] = [], gDist: number[] = [], gN: number[] = [];
     let gWorst = -1;
     // And every node whose drawn disc covers the ray, however far its centre:
     // a big node under the pointer must stay pickable (the raycast gate).
     const covers = new Set<any>();
     const rs = g.nodeRelSize();
     let worst = -1, candidates = 0;
+    // The region is a CYLINDER about the ray (item 112, 2026-10-11: "the mouse
+    // was in the top right corner of the screen ... the images from a far-away
+    // url would still reveal"): a node further than `revealRadius` from the
+    // ray -- in world units, the normal's own length -- is outside it, however
+    // few are inside. The K nearest took whatever was nearest, anywhere.
+    const R = this.revealRadius(g), R2 = R * R;
     for (const n of g.graphData().nodes) {
       if (!Number.isFinite(n.x)) continue;
       const vx = n.x - ox, vy = n.y - oy, vz = (n.z || 0) - oz;
@@ -4129,15 +4205,17 @@ export class GraphView extends ItemView {
       // The normal to the ray, per unit of depth along it: nearness to the
       // mouse ON SCREEN. The raw normal let nodes far down the ray -- specks --
       // take every slot from the ones under the cursor.
-      const d2 = (vx * vx + vy * vy + vz * vz - t * t) / (t * t);
+      const n2 = vx * vx + vy * vy + vz * vz - t * t;
+      const d2 = n2 / (t * t);
       // An upper bound on the drawn radius: a sphere's, times a panel's gain.
       const hr = Math.cbrt(Math.max(n.val ?? 1, 1e-9)) * rs * 1.75 * 1.4142;
-      if (d2 * t * t < hr * hr) covers.add(n);
+      if (n2 < hr * hr) covers.add(n);
+      if (!this.plantUnboundedReveal && n2 > R2) continue;
       if (gBest.length < K) {
-        gBest.push(n); gDist.push(d2);
+        gBest.push(n); gDist.push(d2); gN.push(n2);
         if (gBest.length === K) { gWorst = 0; for (let i = 1; i < K; i++) if (gDist[i] > gDist[gWorst]) gWorst = i; }
       } else if (d2 < gDist[gWorst]) {
-        gBest[gWorst] = n; gDist[gWorst] = d2;
+        gBest[gWorst] = n; gDist[gWorst] = d2; gN[gWorst] = n2;
         gWorst = 0; for (let i = 1; i < K; i++) if (gDist[i] > gDist[gWorst]) gWorst = i;
       }
       if (!n.image?.src || n.level === "page" || n.level === "path") continue;
@@ -4156,7 +4234,7 @@ export class GraphView extends ItemView {
     this.detail = pictures;
     // Graded: 1 for the node nearest the pointer, falling to 0.25 at the edge
     // of the region.
-    const near = Math.sqrt(Math.min(...gDist)), far = Math.sqrt(Math.max(...gDist));
+    const near = gDist.length ? Math.sqrt(Math.min(...gDist)) : 0, far = gDist.length ? Math.sqrt(Math.max(...gDist)) : 0;
     const span = Math.max(1e-9, far - near);
     const was = this.glowNear;
     this.pickNear = covers;
@@ -4165,7 +4243,13 @@ export class GraphView extends ItemView {
     const stamp = ++this.pickStamp;
     for (const n of gBest) n.__pk = stamp;
     for (const n of covers) n.__pk = stamp;
-    this.glowNear = new Map(gBest.map((n, i) => [n, 1 - 0.75 * (Math.sqrt(gDist[i]) - near) / span]));
+    // Graded by the distance to the ray against the cylinder's radius: 1 on
+    // the ray, 0.25 at the cylinder's wall -- so a lone node near the pointer
+    // glows as brightly as one in a crowd (item 112). Planted (unbounded): by
+    // rank among the K, as before.
+    this.glowNear = new Map(gBest.map((n, i) => [n, this.plantUnboundedReveal
+      ? 1 - 0.75 * (Math.sqrt(gDist[i]) - near) / span
+      : 1 - 0.75 * Math.min(1, Math.sqrt(Math.max(0, gN[i])) / Math.max(R, 1e-9))]));
     // Only the nodes whose glow changed are rewritten, in place; a change of
     // which pictures are revealed changes what is drawn, and takes a full sync.
     if (this.plantSlowGlow || !this.batch) this.batchDirty = true;
@@ -4596,6 +4680,7 @@ export class GraphView extends ItemView {
     renderSnapshot(body, snap, {
       maxHeight: 420, onLink: (h) => this.onNavigate(h), cid: entry.node.id,
       onAct: (rec) => this.onAct(entry.node.id, rec),
+      onFieldDone: () => this.releaseHeld(entry),
     });
     const toggle = entry.el.querySelector(".domvec-bb-head") as HTMLElement | null;
     if (toggle && !toggle.querySelector(".domvec-bb-form")) {
@@ -4626,6 +4711,20 @@ export class GraphView extends ItemView {
    * open shadow-DOM form never shows what the page used to say (`S-12`; it
    * was the chunk pane's `refreshIf`, and the pane is gone).
    */
+  /** Planted (item 111): a panel redraws even while the reader types in it. */
+  plantRedrawWhileTyping = false;
+  panelStats = { held: 0, released: 0 };
+  private typingIn(body: HTMLElement): boolean {
+    const f = body.querySelector("iframe") as any;
+    try { return !!(f && typeof f.domvecTyping === "function" && f.domvecTyping()); } catch { return false; }
+  }
+  private releaseHeld(entry: any): void {
+    if (!entry || !entry.heldRefresh) return;
+    entry.heldRefresh = false;
+    this.panelStats.released++;
+    this.refreshBillboards([entry.node.id]);
+  }
+
   refreshBillboards(cids: string[]): void {
     const changed = new Set(cids);
     for (const c of cids) this.payloadCache.delete(c);   // its payload is stale now
@@ -4633,6 +4732,14 @@ export class GraphView extends ItemView {
       if (!changed.has(id)) continue;
       const body = entry.el.querySelector(".domvec-bb-body") as HTMLElement | null;
       if (!body) continue;
+      // The reader is typing in this panel: its redraw waits until they
+      // leave the field (PLUGIN_GOAL 111) -- re-mounting replaced the field
+      // under their fingers on every capture of a streaming page.
+      if (!this.plantRedrawWhileTyping && this.typingIn(body)) {
+        entry.heldRefresh = true;
+        this.panelStats.held++;
+        continue;
+      }
       // The diff rewrote this chunk: its form is drawn again from the PAGE
       // (re-read) or the store, never from what was held.
       if (entry.form) { void this.renderForm(entry, entry.form, true); continue; }
@@ -4942,6 +5049,9 @@ export class GraphView extends ItemView {
    * Planted: no relax, the UMAP points as they are.
    */
   plantNoChunkRelax = false;
+  /** Planted (PLUGIN_GOAL 108): stored drawn places ignored; relax from the fit every switch. */
+  plantNoDrawn = false;
+  drawnStats = { skipped: 0, posted: 0, saved: 0 };
   relaxIterations = 40;
   relaxMaxShift = 4;
   chunkRelaxStats = { runs: 0, iterations: 0, ms: 0, nodes: 0, overlaps_before: -1, overlaps_after: -1, max_shift_radii: 0, moved: 0 };
@@ -4959,12 +5069,22 @@ export class GraphView extends ItemView {
     const nodes = (g.graphData().nodes as any[]).filter((n) => Number.isFinite(n.fitX) && Number.isFinite(n.fitY));
     const N = nodes.length;
     if (N < 2) return;
+    // Every node already has its stored drawn place (PLUGIN_GOAL 108): the
+    // layout is the one the reader saw last -- nothing to relax, nothing moves.
+    const stored = this.plantNoDrawn ? 0 : nodes.filter((n) => n.drawnAt).length;
+    if (stored === N) {
+      this.chunkRelaxStats = { ...this.chunkRelaxStats, runs: this.chunkRelaxStats.runs, from_store: N, relaxed: 0 } as any;
+      this.drawnStats.skipped++;
+      return;
+    }
     const rs = g.nodeRelSize(), media = this.drawnMedia, S = this.relaxSafety;
     const H = new Float64Array(N), P = new Float64Array(3 * N), F = new Float64Array(3 * N);
     nodes.forEach((n, i) => {
       H[i] = Math.max(1e-6, this.lookOf(n, rs, media).half);
       F[3 * i] = n.fitX; F[3 * i + 1] = n.fitY; F[3 * i + 2] = n.fitZ ?? 0;
-      P[3 * i] = F[3 * i]; P[3 * i + 1] = F[3 * i + 1]; P[3 * i + 2] = F[3 * i + 2];
+      // A stored place starts where it was left; only the new nodes start at their fit.
+      const d = !this.plantNoDrawn && n.drawnAt;
+      P[3 * i] = d ? d[0] : F[3 * i]; P[3 * i + 1] = d ? d[1] : F[3 * i + 1]; P[3 * i + 2] = d ? d[2] : F[3 * i + 2];
     });
     // The cell is a typical node's reach, not the largest one's: a few big
     // pictures would make every cell hold the whole cloud.
@@ -5035,8 +5155,17 @@ export class GraphView extends ItemView {
       grid = null;
       if (moved && it < this.relaxIterations) { requestAnimationFrame(step); return; }
       let maxShift = 0, shifted = 0;
+      const save: (string | number)[][] = [];
       nodes.forEach((n, i) => {
         const x = P[3 * i], y = P[3 * i + 1], z = P[3 * i + 2];
+        // Kept on the chunk when new or moved (PLUGIN_GOAL 108), in the
+        // layout's frame (z without the pane's depth squash).
+        const was = n.drawnAt;
+        if (n.level !== "page" && !String(n.id).startsWith("page:")
+            && (!was || Math.hypot(x - was[0], y - was[1], z - was[2]) > 1e-6)) {
+          save.push([String(n.id), x, y, z / DEPTH, n.fitX, n.fitY, (n.fitZ ?? 0) / DEPTH]);
+        }
+        n.drawnAt = [x, y, z];
         const sh = Math.hypot(x - F[3 * i], y - F[3 * i + 1], z - F[3 * i + 2]);
         if (sh > 1e-6) shifted++;
         maxShift = Math.max(maxShift, sh / H[i]);
@@ -5050,6 +5179,10 @@ export class GraphView extends ItemView {
                                worst_frame_ms: Math.round(worst * 10) / 10 } as any;
       g.d3ReheatSimulation?.();          // two cool ticks move each pick proxy to its node
       this.batchDirty = true;
+      if (save.length && !this.plantNoDrawn) {
+        this.drawnStats.posted += save.length;
+        void this.sidecar.saveDrawn(save).then((n) => { this.drawnStats.saved += n; });
+      }
     };
     requestAnimationFrame(step);
   }
@@ -5067,12 +5200,17 @@ export class GraphView extends ItemView {
    * (`__domvecReaderAt`, stamped on every input in the app).
    */
   idleDriftAfterMs = 20000;
-  /** Camera orbit, radians a second: a full turn in about 100 s. */
-  driftOrbitRate = 0.063;
-  /** Hue turn, radians a second: the full colour wheel in about 2 minutes. */
-  driftHueRate = 0.052;
+  /** Camera orbit, radians a second: a full turn in about 5 minutes. It was
+   *  0.063 (100 s) -- "physical rotation could be slower... im feeling dizzy"
+   *  (2026-10-12). */
+  driftOrbitRate = 0.035;   // "somewhat faster" (2026-10-12): ~3 min a turn
+  /** Hue turn, radians a second: the full colour wheel in about 30 s. It was
+   *  0.052 (2 minutes) -- "hsv rotation seems pretty slow" (2026-10-12). */
+  driftHueRate = 0.8;       // "a lot faster" (2026-10-12): the wheel in ~8 s
   /** Planted: no drift at all. */
   plantNoDrift = false;
+  /** Planted: a standing query stops the drift, as it did. */
+  plantDriftStopsOnSearch = false;
   driftStats = { active: false, turned: 0, hue: 0, started: 0, stopped: 0 };
   /** Set by the drift's own check: drift although a check is running. */
   driftInCheck = false;
@@ -5089,7 +5227,12 @@ export class GraphView extends ItemView {
     // drift's own check asks for it.
     const w: any = window;
     const checking = (!!w.__domvec?.verify?.state?.()?.running || !!w.__domvecStressing) && !this.driftInCheck;
-    const on = idle && visible && !checking && !this.plantNoDrift && !this.searchState;
+    // A standing query does NOT stop it (2026-10-11: "lets standardize the
+    // latent glowing glass orbs as the default, with the light sources
+    // adjusting per the query scroll window. pls dont forget about the
+    // rotating xyzhsv"): the lights ride on the turning scene. Gated on the
+    // search, it never ran once a query had been typed. Planted: gated again.
+    const on = idle && visible && !checking && !this.plantNoDrift && !(this.plantDriftStopsOnSearch && this.searchState);
     if (on !== this.driftStats.active) {
       this.driftStats.active = on;
       if (on) this.driftStats.started++; else this.driftStats.stopped++;
@@ -5450,6 +5593,11 @@ export class GraphView extends ItemView {
          edges?: { source: string; target: string }[],
          traceId?: string, opts: { pagesOnly?: boolean; keep?: Set<string> } = {}):
       { added: number; moved: number; edges: number } {
+    // New nodes from the store: a standing query is re-ranked at once (item 106).
+    if (this.followQuery && incoming && incoming.length && !this.plantNoRerank) {
+      this.followStore(this.followQuery);
+      if (!this.followBusy) window.setTimeout(() => { void this.rerank(); }, 0);
+    }
     if (this.forceSpecs.size) {
       // Chunks placed just now carry their NEW content: a force node pending
       // on a changed chunk may collapse into it from here on.
@@ -5658,6 +5806,10 @@ export class GraphView extends ItemView {
       fitX: n.pos[0],
       fitY: n.pos[1],
       fitZ: (n.pos[2] ?? 0) * DEPTH,
+      //: Where chunk view drew it last, kept on the chunk in the store
+      //: (PLUGIN_GOAL 108) -- present only while the fit is unchanged.
+      drawnAt: Array.isArray((n as any).drawn)
+        ? [(n as any).drawn[0], (n as any).drawn[1], ((n as any).drawn[2] ?? 0) * DEPTH] : undefined,
       // The payload's own `val` when it has one, because a page node's size
       // is its CHUNK COUNT and it has no characters of its own. Deriving it
       // from `chars` gave every one of 96 pages the same radius -- a
@@ -6176,7 +6328,11 @@ export class GraphView extends ItemView {
       graph.cooldownTicks(2);
       for (const n of graph.graphData().nodes as any[]) {
         if (!Number.isFinite(n.fitX)) continue;
-        n.x = n.fx = n.fitX; n.y = n.fy = n.fitY; n.z = n.fz = n.fitZ ?? 0;
+        // The stored drawn place first (PLUGIN_GOAL 108): the switch shows
+        // where the reader last saw the chunk, not the fit before relaxing.
+        const d = !this.plantNoDrawn && n.drawnAt;
+        if (d) { n.x = n.fx = d[0]; n.y = n.fy = d[1]; n.z = n.fz = d[2]; }
+        else { n.x = n.fx = n.fitX; n.y = n.fy = n.fitY; n.z = n.fz = n.fitZ ?? 0; }
       }
       this.umapOnly = true;
       window.setTimeout(() => this.relaxChunkView(), 400);

@@ -151,6 +151,10 @@ _MIGRATIONS = [
     # The chunk's page form as scanned: the hash of its saved snapshot blob
     # (`snapshots/`), so a panel renders it with the page gone (2026-10-10).
     "ALTER TABLE Chunk ADD snap STRING",
+    # Where chunk view DRAWS the chunk and the fit point it was drawn from
+    # (PLUGIN_GOAL 108, 2026-10-11: "we should be persisting these layouts to
+    # the entities in our database"): [x, y, z, fit x, fit y, fit z].
+    "ALTER TABLE Chunk ADD drawn DOUBLE[]",
 ]
 
 
@@ -344,6 +348,8 @@ def _index_spellings(url: str):
 PLANT_STORED_CONTAINMENT = [False]
 #: Planted (2026-10-11): parents by render ROOT xpath, not by trie node.
 PLANT_ROOT_CONTAINMENT = [False]
+#: Planted (PLUGIN_GOAL 110): every page's trie nodes read fresh, every call.
+PLANT_NO_TNODE_MEMO = [False]
 
 
 def _steps(xpath: str) -> List[str]:
@@ -550,6 +556,8 @@ class GraphStore:
         is the one guarantee the whole scheme exists to provide, silently
         pointing at the wrong element.
         """
+        # The page's trie nodes are re-read on its next layout (PLUGIN_GOAL 110).
+        self._tnode_forget(url)
         rows = rows or {}
         embeddings = embeddings or {}
         # Everything from here to `_reconcile` -- the anchor `before` set and
@@ -1403,6 +1411,17 @@ class GraphStore:
             self._execute("CHECKPOINT")
         return round((time.perf_counter() - t0) * 1000, 1)
 
+    def _tnode_memo(self) -> Dict[str, Dict[str, Tuple[str, ...]]]:
+        memo = getattr(self, "_tnodes", None)
+        if memo is None:
+            memo = self._tnodes = {}
+            self.tnode_stats = {"computed": 0, "reused": 0, "dropped": 0}
+        return memo
+
+    def _tnode_forget(self, url: str) -> None:
+        if self._tnode_memo().pop(url, None) is not None:
+            self.tnode_stats["dropped"] += 1
+
     def contains_within(self, url: str, among=None):
         """The containment edges among one page's chunks, as (cid, cid).
 
@@ -1447,9 +1466,23 @@ class GraphStore:
         # P-B7 outlines -- not by render root: a long element cut in parts has
         # one root and many nodes (RFC 9110's 269 parts of `/html/body`), and by
         # root they hung from the url node or from each other.
-        nodes = _trie_nodes(self._rows(
-            "MATCH (c:Chunk {url: $url})-[:Anchors]->(a:Address) RETURN c.cid, a.xpath",
-            {"url": url}))
+        # Kept per page until the page is next written (PLUGIN_GOAL 110): read
+        # fresh for every page on every chunk-view layout, this was every
+        # anchor in the store -- 42-66 s a layout over 294 pages, holding the
+        # read lock every capture also needs (a drain waited 21 s in
+        # transport behind one). A page's nodes change only when its anchors
+        # are written, and `ingest`/`purge_page` drop its entry when they are.
+        memo = self._tnode_memo()
+        got = None if PLANT_NO_TNODE_MEMO[0] else memo.get(url)
+        if got is None:
+            got = _trie_nodes(self._rows(
+                "MATCH (c:Chunk {url: $url})-[:Anchors]->(a:Address) RETURN c.cid, a.xpath",
+                {"url": url}))
+            memo[url] = got
+            self.tnode_stats["computed"] += 1
+        else:
+            self.tnode_stats["reused"] += 1
+        nodes = dict(got)
         if keep is not None:
             nodes = {c: n for c, n in nodes.items() if c in keep}
         # A chunk with no anchored address keeps its root as its node -- and so
@@ -1928,6 +1961,20 @@ class GraphStore:
             out.setdefault(xpath, []).append((ContentAddress.parse(key), value))
         return out
 
+    def save_drawn(self, rows) -> int:
+        """Each chunk's drawn place in chunk view, on the chunk (PLUGIN_GOAL 108).
+
+        `rows` is [(cid, [x, y, z, fx, fy, fz])]: the place the relax settled
+        on, and the fit point it was relaxed FROM -- which is what makes the
+        place reusable only while the fit still puts the chunk there.
+        """
+        data = [{"cid": str(c), "d": [float(v) for v in d][:6]} for c, d in rows
+                if c and d is not None and len(d) >= 6]
+        if not data:
+            return 0
+        self._batch("UNWIND $rows AS r MATCH (c:Chunk {cid: r.cid}) SET c.drawn = r.d", data)
+        return len(data)
+
     def save_layout(self, key: str, payload: str, n: int = 0) -> None:
         """Keep a fitted layout under `key` (`G-12`).
 
@@ -2103,6 +2150,7 @@ class GraphStore:
     # -- deletes -----------------------------------------------------------
     def purge_page(self, url: str) -> int:
         """Remove a page, its chunks and its addresses. Returns chunks removed."""
+        self._tnode_forget(url)
         cids = [r[0] for r in self._rows(
             "MATCH (c:Chunk {url: $url}) RETURN c.cid",
             {"url": url})]

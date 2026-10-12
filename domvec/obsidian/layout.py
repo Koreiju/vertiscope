@@ -2385,12 +2385,23 @@ def projected_chunk_layout(workspace, proj=None) -> Optional[Dict]:
         hsv = dict(proj.hsv)
         epoch, seq = proj.epoch, proj.seq
     rows = workspace.store._rows(
-        "MATCH (c:Chunk) RETURN c.cid, c.url, c.md, c.chars, c.group_n, c.dup_n")
+        "MATCH (c:Chunk) RETURN c.cid, c.url, c.md, c.chars, c.group_n, c.dup_n, c.drawn")
     nodes = []
-    for cid, url, md, chars, group_n, dup_n in rows:
+    kept_drawn = stale_drawn = 0
+    for cid, url, md, chars, group_n, dup_n, drawn in rows:
         at = pos.get(cid)
         if at is None:
             continue
+        # The place chunk view drew it last, kept on the chunk (PLUGIN_GOAL
+        # 108) -- only while the fit still puts the chunk where it was drawn
+        # FROM; a chunk the projector has moved since is relaxed again.
+        placed = None
+        if drawn is not None and len(drawn) >= 6 and not PLANT_NO_DRAWN[0]:
+            if max(abs(float(drawn[3 + i]) - float(at[i])) for i in range(min(3, len(at)))) < 1e-3:
+                placed = [float(v) for v in drawn[:3]]
+                kept_drawn += 1
+            else:
+                stale_drawn += 1
         members = int(group_n or 1)
         node = {"cid": cid, "url": url, "title": _title(md or ""),
                 "rank": 0.0, "chars": int(chars or 0),
@@ -2402,6 +2413,8 @@ def projected_chunk_layout(workspace, proj=None) -> Optional[Dict]:
                 "members": members, "level": "chunk",
                 "val": float(max(1.0, max(members, 1) ** 0.5)),
                 "pos": at, "source": "projector"}
+        if placed is not None:
+            node["drawn"] = placed
         if cid in hsv:
             node["hsv"] = hsv[cid]
         picture = _first_image(md or "", url or "")
@@ -2422,7 +2435,13 @@ def projected_chunk_layout(workspace, proj=None) -> Optional[Dict]:
             "fitted_on": {"semantic": True}, "source": "projector",
             "epoch": epoch, "seq": seq, "projector": status,
             "images": sum(1 for n in nodes if n.get("image")),
+            "drawn_kept": kept_drawn, "drawn_stale": stale_drawn,
             "stale": False, "from_store": False}
+
+
+#: Planted (PLUGIN_GOAL 108): stored drawn places ignored -- chunk view
+#: relaxes from the fit on every switch, as before.
+PLANT_NO_DRAWN = [False]
 
 
 def place_projected(workspace, cids, proj) -> Dict:

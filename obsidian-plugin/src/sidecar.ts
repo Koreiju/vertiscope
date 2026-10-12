@@ -418,6 +418,21 @@ export class Sidecar {
     }
   }
 
+  /** Chunk view's drawn places, kept on the chunks (PLUGIN_GOAL 108):
+   *  rows of [cid, x, y, z, fit x, fit y, fit z], in the layout's frame. */
+  async saveDrawn(rows: (string | number)[][]): Promise<number> {
+    const base = this.base().trim().replace(/\/+$/, "");
+    if (!base || !rows.length) return 0;
+    try {
+      const res = await fetch(`${base}/drawn`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rows }), signal: AbortSignal.timeout(60000),
+      });
+      if (!res.ok) return 0;
+      return Number((await res.json())?.saved || 0);
+    } catch { return 0; }
+  }
+
   async place(cids: string[]): Promise<PlaceResult | null> {
     const base = this.base().trim().replace(/\/+$/, "");
     if (!base || !cids.length) return null;

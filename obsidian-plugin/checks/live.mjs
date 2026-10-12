@@ -3175,6 +3175,46 @@ export function makeChecks(env) {
       async run() { return offlineArm("dock"); },
     },
     {
+      id: "G-185",
+      asks: "the idle turn (camera orbit and hue) runs with a query standing too -- the search's lights ride on the turning scene; planted (plantDriftStopsOnSearch): a standing query stops it, as it did",
+      async run() {
+        // 2026-10-11/12: "pls dont forget about the rotating xyzhsv"; "also
+        // not sure if I'm seeing the xyzhsv rotations taking effect yet" --
+        // measured then: 0 starts since the reload, a query standing.
+        const arm = (planted) => evaluate(`(async () => {
+          ${PREP}
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          for (let i = 0; i < 60 && !(v.graph && v.batch && v.searchField); i++) await sleep(500);
+          const f = v.searchField, g = v.graph;
+          const stamp0 = window.__domvecReaderAt, after0 = v.idleDriftAfterMs;
+          const was = v.onWebSearch; v.onWebSearch = () => {};
+          const az = () => { const c = g.camera().position, t = g.controls().target; return Math.atan2(c.z - t.z, c.x - t.x); };
+          const turn = (a, b) => { let d = b - a; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI; return d; };
+          const mine = [Date.now() - 60000];
+          v.plantDriftStopsOnSearch = ${planted}; v.driftInCheck = true; v.idleDriftAfterMs = 3000;
+          try {
+            f.input.value = "wikipedia history"; await f.run();
+            await sleep(400);
+            const standing = !!v.searchState;
+            window.__domvecReaderAt = mine[0];
+            await sleep(400);
+            const a0 = az(), h0 = v.batch.hue;
+            await sleep(2500);
+            return { planted: ${planted}, standing, turned: turn(a0, az()), hue_moved: v.batch.hue !== h0, active: v.driftStats.active,
+                     lights: v.searchStats.lights };
+          } finally {
+            v.plantDriftStopsOnSearch = false; v.driftInCheck = false; v.idleDriftAfterMs = after0;
+            if (mine.includes(window.__domvecReaderAt)) window.__domvecReaderAt = stamp0;
+            v.onWebSearch = was; f.input.value = ""; await f.run();
+          }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        return { pass: clean.standing && clean.active && Math.abs(clean.turned) > 0.02 && clean.hue_moved
+                       && planted.standing && !planted.active && Math.abs(planted.turned) < 0.005,
+                 evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-156",
       asks: "with no reader activity the scene turns -- the camera orbits its target and the colours turn about the grey axis -- drawn only (no node's colour or layout written); the reader acting stops the turn and the colours ease back to the fit's own; planted (plantNoDrift): nothing turns",
       async run() {
@@ -3474,7 +3514,7 @@ export function makeChecks(env) {
           try {
             f.input.value = q; await f.run();
             let url = "";
-            for (let i = 0; i < 60; i++) { await sleep(500); url = b.webview.getURL(); if (b.webSearchStats.asked > asked0 && b.webSearchStats.ms && b.webSearchStats.last === q) break; }
+            for (let i = 0; i < 360; i++) { await sleep(500); url = b.webview.getURL(); if (b.webSearchStats.asked > asked0 && b.webSearchStats.ms && b.webSearchStats.last === q) break; if (${planted} && i > 60) break; }
             await sleep(3000);
             url = b.webview.getURL();
             const onDdg = /duckduckgo\\.com/.test(url);
@@ -3488,11 +3528,115 @@ export function makeChecks(env) {
             f.input.value = ""; await f.run();
             if (b.webview.getURL() !== start && /^https?:/.test(start)) { b.go(start); await sleep(1500); }
           }
-        })()`, { timeout: 150000 });
+        })()`, { timeout: 300000 });
         const clean = await arm(false), planted = await arm(true);
         return { pass: clean.asked === 1 && clean.on_ddg && clean.results > 0 && clean.clicked >= 1 && clean.stored_chunks > 0
                        && planted.asked === 0 && !planted.on_ddg,
                  evidence: { clean, planted } };
+      },
+    },
+    {
+      id: "G-178",
+      asks: "typing in the 3D search field ranks the store and never reaches the browser cell; the search button (and Enter) sends it to the web; planted (plantWebOnType): every typed query goes to the web",
+      async run() {
+        // 2026-10-11, PLUGIN_GOAL 107: "the search button should trigger web
+        // search, not auto-updates piped also to the search browser".
+        const arm = (planted) => evaluate(`(async () => {
+          ${PREP}
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          for (let i = 0; i < 60 && !(v.graph && v.searchField); i++) await sleep(500);
+          const f = v.searchField;
+          const web = () => v.searchStats.web_asked;
+          v.plantWebOnType = ${planted};
+          // Not actually sent: the cell's web half is swapped for a counter.
+          const was = v.onWebSearch; let sent = 0; v.onWebSearch = () => { sent++; };
+          try {
+            const w0 = web();
+            for (const q of ["ok", "oka", "okapi"]) { f.input.value = q; await f.run(); }
+            const typed = sent;
+            f.input.value = "okapi habitat"; await f.submit();
+            const pressed = sent - typed;
+            return { planted: ${planted}, typed_sent: typed, pressed_sent: pressed, button: !!f.button, web_asked: web() - w0 };
+          } finally {
+            v.onWebSearch = was; v.plantWebOnType = false;
+            f.input.value = ""; await f.run();
+          }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        return { pass: clean.button && clean.typed_sent === 0 && clean.pressed_sent === 1 && planted.typed_sent === 3,
+                 evidence: { clean, planted } };
+      },
+    },
+    {
+      id: "G-177",
+      asks: "while a query stands, a re-ranking from the store is applied as a diff -- the new order shown, the reader's scroll kept, the change said -- and the bar carries the brightness gradient; planted (plantNoRerank): the ranking is asked once and never followed",
+      async run() {
+        // 2026-10-11, PLUGIN_GOAL 106: "i notice no diff update on retrieval
+        // results and effects on the scroll bar".
+        const arm = (planted) => evaluate(`(async () => {
+          ${PREP}
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          for (let i = 0; i < 60 && !(v.graph && v.searchField); i++) await sleep(500);
+          const f = v.searchField;
+          v.plantNoRerank = ${planted};
+          const was = v.onWebSearch; v.onWebSearch = () => {};
+          try {
+            f.input.value = "wikipedia history"; await f.run();
+            await sleep(300);
+            const following = !!v.webTimer;
+            // The store's answer is the truth; the field is given a stale
+            // copy (reversed), as if the store had moved since it asked.
+            const truth = f.hits.map((h) => h.cid);
+            f.hits = f.hits.slice().reverse();
+            f.scroller.scrollLeft = Math.min(56, f.scroller.scrollWidth);
+            const left = f.scroller.scrollLeft;
+            await v.rerank();
+            const now = f.hits.map((h) => h.cid);
+            const grad = String(f.scroller.style.backgroundImage || "");
+            return { planted: ${planted}, following, hits: now.length, restored: JSON.stringify(now) === JSON.stringify(truth),
+                     diff: f.stats.lastDiff, scroll_kept: f.scroller.scrollLeft === left,
+                     gradient_stops: (grad.match(/rgba/g) || []).length };
+          } finally {
+            v.onWebSearch = was; v.plantNoRerank = false;
+            f.input.value = ""; await f.run();
+          }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        return { pass: clean.following && clean.hits > 1 && clean.restored && clean.diff && clean.diff.moved > 0
+                       && clean.scroll_kept && clean.gradient_stops >= 2 && !planted.following,
+                 evidence: { clean, planted } };
+      },
+    },
+    {
+      id: "G-176",
+      asks: "the web half of a search is exhaustive: it scrolls and presses 'More results' until a round adds nothing or the button is gone, and says which ended it; planted (plantFixedRounds = 3): it stops after three rounds with results still to come",
+      async run() {
+        // 2026-10-11, PLUGIN_GOAL 105: "scrolling and 'more results' in search
+        // should be an exhaustive while loop until no deltas or something like
+        // the more results button isn't there."
+        // The same query in both arms, so the page's own supply is the
+        // denominator: the planted arm only discriminates if its cap FIRED
+        // (results were still coming), and then clean must hold more.
+        const arm = (cap) => evaluate(`(async () => {
+          ${PREP}
+          const start = b.webview.getURL();
+          b.plantFixedRounds = ${cap};
+          const s = b.webSearchStats;
+          try {
+            const t0 = Date.now();
+            const got = await b.searchWeb("okapi forest giraffe ecology");
+            return { cap: ${cap}, ok: !!got, rounds: s.rounds, clicked: s.clicked, results: s.results, stopped: s.stopped,
+                     deltas: s.deltas.slice(), ms: Date.now() - t0 };
+          } finally {
+            b.plantFixedRounds = 0;
+            if (/^https?:/.test(start) && b.webview.getURL() !== start) { b.go(start); await sleep(1500); }
+          }
+        })()`, { timeout: 600000 });
+        const clean = await arm(0), planted = await arm(3);
+        const exhausted = clean.stopped === "no delta" || clean.stopped === "no more-results button";
+        const capFired = planted.stopped === "fixed rounds (planted)" && planted.deltas.length && planted.deltas[planted.deltas.length - 1] > 0;
+        return { pass: clean.ok && exhausted && clean.results > 0 && capFired && clean.results > planted.results,
+                 evidence: { clean, planted, exhausted, cap_fired_with_results_coming: !!capFired } };
       },
     },
     {

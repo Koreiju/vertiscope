@@ -110,3 +110,16 @@ test("a refusal and a failure read differently in the panel", () => {
   assert.equal(describeResult(null), "no answer from the sidecar");
   assert.equal(describeResult({ ok: true, stage: "done", did: "press Go" }), "press Go");
 });
+
+// PLUGIN_GOAL 111: Enter in a typed field sends the page's own Enter after
+// the typing, on the same element; never for a press, and not without Enter.
+test("enter follows the typing on the same element", () => {
+  const x = "/html/body/form/div/textarea";
+  const plain = chainFor("type", x, "okapi");
+  assert.deepEqual(plain.ticks.map((t) => t.kind), ["scrollIntoView", "type"]);
+  const sent = chainFor("type", x, "okapi", true);
+  assert.deepEqual(sent.ticks.map((t) => t.kind), ["scrollIntoView", "type", "key"]);
+  assert.equal(sent.ticks[2].xpath, x);
+  assert.equal(sent.ticks[2].text, "Enter");
+  assert.deepEqual(chainFor("press", x, undefined, true).ticks.map((t) => t.kind), ["scrollIntoView", "press"]);
+});

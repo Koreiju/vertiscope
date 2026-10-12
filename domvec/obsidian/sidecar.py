@@ -295,6 +295,32 @@ def _integrity_record(workspace, why: str) -> Optional[Dict]:
         return None
 
 
+def _warm_containment(workspace, stop) -> None:
+    """Each page's trie nodes read once, in the background, after a start
+    (PLUGIN_GOAL 110): kept per page until the page is written, they make a
+    chunk-view layout cost its rows and not every anchor in the store -- but
+    the FIRST layout after a restart would still read them all (42-66 s,
+    2026-10-11). Page by page, standing aside for the reader's requests."""
+    if stop.wait(20.0):
+        return
+    t0 = time.time()
+    done = 0
+    try:
+        urls = [r[0] for r in workspace.store._rows("MATCH (p:Page) RETURN p.url") if r and r[0]]
+    except Exception:                               # noqa: BLE001
+        return
+    for url in urls:
+        if stop.is_set():
+            return
+        _yield_to_foreground()
+        try:
+            workspace.store.contains_within(url)
+            done += 1
+        except Exception:                           # noqa: BLE001
+            continue
+    _profile("warm_containment", {"pages": done, "of": len(urls), "s": round(time.time() - t0, 1)})
+
+
 def _integrity_forever(workspace, stop) -> None:
     _integrity_record(workspace, "start")
     last = time.time()
@@ -1078,6 +1104,29 @@ class _Handler(BaseHTTPRequestHandler):
         # Hover-first (`G-80`): the chunks under the reader's pointer jump the
         # encoder's queue and the projector's, so what they point at is what
         # is embedded and drawn next. Nothing is written; only order changes.
+        # Chunk view's drawn places, kept on the chunks (PLUGIN_GOAL 108): the
+        # pane relaxed them; the next switch reads them instead of relaxing
+        # again. Writes the workspace only, like a capture.
+        if route == "drawn":
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(length) or b"{}")
+            except Exception as exc:                # noqa: BLE001
+                self._send(400, {"error": "bad body: %s" % exc})
+                return
+            if self.workspace is None:
+                self._send(503, {"error": "no workspace"})
+                return
+            rows = [(r[0], r[1:7]) for r in (body.get("rows") or [])
+                    if isinstance(r, list) and len(r) >= 7][:50000]
+            t0 = time.perf_counter()
+            with _foreground(), _WORK_LOCK:
+                n = self.workspace.store.save_drawn(rows)
+            _LAST_WRITE[0] = time.time()
+            _profile("drawn", {"n": n, "ms": round((time.perf_counter() - t0) * 1000, 1)})
+            self._send(200, {"saved": n})
+            return
+
         if route == "focus":
             try:
                 length = int(self.headers.get("Content-Length") or 0)
@@ -2995,6 +3044,8 @@ def serve(workspace, port: int = 8787, *, block: bool = True,
                          name="domvec-checkpoint", daemon=True).start()
         threading.Thread(target=_integrity_forever, args=(workspace, stop),
                          name="domvec-integrity", daemon=True).start()
+        threading.Thread(target=_warm_containment, args=(workspace, stop),
+                         name="domvec-warm-containment", daemon=True).start()
 
     # **The chunk projector.** One fit over every drawable chunk, made off
     # the request path; then a worker that drains the stream the embedder and

@@ -53,8 +53,40 @@ export function brightness(rank: number, s: number): number {
   return f * (1 - 0.8 * Math.min(1, Math.abs(s - 1 - rank) / span));
 }
 
+/** One step of a held arrow key (item 109): 1 at first, then faster the
+ *  longer the hold -- doubling every 600 ms past the first 400, to 100. */
+export function holdStep(heldMs: number): number {
+  if (!(heldMs > 400)) return 1;
+  return Math.min(100, Math.max(1, Math.floor(2 ** ((heldMs - 400) / 600))));
+}
+
 export interface FieldHit { cid: string; url: string }
 export interface FieldAnswer { hits: FieldHit[]; n: number }
+
+/** What a re-ranking changed, against the ranking shown (item 106). */
+export interface RankDiff { added: number; removed: number; moved: number }
+export function rankDiff(was: FieldHit[], now: FieldHit[]): RankDiff {
+  const at = new Map(was.map((h, i) => [h.cid, i]));
+  const keep = new Set(now.map((h) => h.cid));
+  let added = 0, moved = 0;
+  now.forEach((h, i) => { const j = at.get(h.cid); if (j === undefined) added++; else if (j !== i) moved++; });
+  return { added, removed: was.filter((h) => !keep.has(h.cid)).length, moved };
+}
+
+/** The bar's gradient: one stop per result in the window, as bright as that
+ *  result is at soft index `s` -- the light the scene shows, drawn where the
+ *  reader's thumb is (items 97, 106). */
+export function barGradient(k: number, s: number): string {
+  if (!(k > 0)) return "none";
+  const stops: string[] = [];
+  for (let i = 0; i < k; i++) {
+    const x = k === 1 ? 50 : (100 * i) / (k - 1);
+    const a = 0.04 + 0.5 * brightness(i, s);
+    stops.push(`rgba(255,255,255,${a.toFixed(3)}) ${x.toFixed(2)}%`);
+  }
+  if (stops.length === 1) stops.push(stops[0]);
+  return `linear-gradient(90deg, ${stops.join(", ")})`;
+}
 
 export class SearchField {
   readonly el: HTMLElement;
@@ -65,6 +97,9 @@ export class SearchField {
    *  could also be another user input field for total results"). */
   readonly nInput: HTMLInputElement;
   private matchEl: HTMLElement;
+  private diffEl: HTMLElement;
+  /** The search button: the ONE thing that sends a query to the web (item 107). */
+  readonly button: HTMLButtonElement;
   private count: HTMLElement;
   readonly scroller: HTMLElement;
   private track: HTMLElement;
@@ -82,11 +117,16 @@ export class SearchField {
   /** The soft index the scroll stands at, 1..k. */
   soft = 0;
   private scrollRaf = 0;
-  stats = { queries: 0, answered: 0, lastMs: 0 };
+  stats = { queries: 0, answered: 0, lastMs: 0, submitted: 0, updates: 0, changed: 0,
+            added: 0, removed: 0, moved: 0, lastDiff: null as RankDiff | null, arrowSteps: 0 };
+  private diffTimer = 0;
+  private totalTimer = 0;
 
   private ask: (query: string, total: number) => Promise<FieldAnswer | null>;
   private onShow: (hits: FieldHit[], shown: number, soft: number) => void;
   private onClear: () => void;
+  /** Told when the reader presses search: the web half (item 107). */
+  onSubmit: (query: string) => void = () => {};
 
   constructor(host: HTMLElement,
               ask: (query: string, total: number) => Promise<FieldAnswer | null>,
@@ -99,6 +139,9 @@ export class SearchField {
     this.input.type = "text";
     this.input.placeholder = "search";
     this.input.spellcheck = false;
+    this.button = row.createEl("button", { cls: "domvec-search3d-go", text: "search" });
+    this.button.title = "search the web too";
+    this.button.addEventListener("click", () => { void this.submit(); });
     this.count = row.createDiv({ cls: "domvec-search3d-count" });
     const num = (v: number) => {
       const el = this.count.createEl("input", { cls: "domvec-search3d-k" });
@@ -111,6 +154,7 @@ export class SearchField {
     this.nInput = num(this.total);
     this.count.createSpan({ text: " results" });
     this.matchEl = this.count.createSpan({ cls: "domvec-search3d-match", text: "" });
+    this.diffEl = this.count.createSpan({ cls: "domvec-search3d-diff", text: "" });
     this.scroller = this.el.createDiv({ cls: "domvec-search3d-scroll" });
     this.track = this.scroller.createDiv({ cls: "domvec-search3d-track" });
     this.paint();
@@ -121,11 +165,37 @@ export class SearchField {
     });
     this.input.addEventListener("keydown", (e) => {
       if (e.key === "Escape") { this.input.value = ""; void this.run(); }
-      else if (e.key === "Enter") { window.clearTimeout(this.debounce); void this.run(); }
+      else if (e.key === "Enter") { void this.submit(); }
     });
     const read = (el: HTMLInputElement, was: number) => { const v = Math.floor(Number(el.value)); return Number.isFinite(v) && v >= 1 ? v : was; };
     this.kInput.addEventListener("change", () => this.setK(read(this.kInput, this.k)));
     this.nInput.addEventListener("change", () => this.setTotal(read(this.nInput, this.total)));
+    // Up/Down step the value; a held key steps faster the longer it is held
+    // (item 109). k follows at once (no ask); n asks the store once the keys
+    // rest, so a held key is not a query per repeat.
+    const arrows = (el: HTMLInputElement, isK: boolean) => {
+      let since = 0;
+      el.addEventListener("keydown", (e) => {
+        if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+        e.preventDefault();
+        const now = performance.now();
+        if (!e.repeat || !since) since = now;
+        const step = holdStep(now - since) * (e.key === "ArrowUp" ? 1 : -1);
+        const v = Math.max(1, Math.min(2000, read(el, isK ? this.k : this.total) + step));
+        el.value = String(v);
+        this.stats.arrowSteps++;
+        if (isK && v <= this.total) this.setK(v);
+        else {
+          // n, or k past n (which deepens n): one ask when the keys rest.
+          const apply = isK ? () => this.setK(read(el, this.k)) : () => this.setTotal(read(el, this.total));
+          window.clearTimeout(this.totalTimer);
+          this.totalTimer = window.setTimeout(apply, 300);
+        }
+      });
+      el.addEventListener("keyup", (e) => { if (e.key === "ArrowUp" || e.key === "ArrowDown") since = 0; });
+    };
+    arrows(this.kInput, true);
+    arrows(this.nInput, false);
     // Every scroll, once a frame: the soft index moves continuously.
     this.scroller.addEventListener("scroll", () => {
       if (this.scrollRaf) return;
@@ -174,13 +244,49 @@ export class SearchField {
     this.onScroll(true);
   }
 
-  /** Merge results that arrived later (a second source) without moving the scroll. */
-  extend(more: FieldHit[], n: number): void {
-    const have = new Set(this.hits.map((h) => h.cid));
-    for (const h of more) if (!have.has(h.cid) && this.hits.length < this.total) { this.hits.push(h); have.add(h.cid); }
-    this.matching = Math.max(this.matching, n, this.hits.length);
+  /** The search button (and Enter): the store ranked now, and the web asked
+   *  too. Typing alone never reaches the web (item 107). */
+  async submit(): Promise<void> {
+    window.clearTimeout(this.debounce);
+    const q = this.input.value.trim();
+    if (q && q !== this.query) await this.run();
+    if (!q) { await this.run(); return; }
+    this.stats.submitted++;
+    this.onSubmit(q);
+  }
+
+  /**
+   * The ranking asked again while the query stands -- what streamed into the
+   * store since -- applied as a DIFF (item 106): the new order replaces the
+   * old, the scroll stays where the reader put it, and the field says what
+   * moved. Returns the diff, or null when the query changed meanwhile.
+   */
+  async update(): Promise<RankDiff | null> {
+    const q = this.query;
+    if (!q) return null;
+    const seq = this.seq;
+    const got = await this.ask(q, this.total);
+    if (!got || seq !== this.seq || q !== this.query) return null;
+    const now = got.hits.slice(0, this.total);
+    const d = rankDiff(this.hits, now);
+    const n = Math.max(got.n || 0, now.length);
+    this.stats.updates++;
+    if (!d.added && !d.removed && !d.moved && n === this.matching) return d;
+    this.stats.changed++;
+    this.stats.added += d.added; this.stats.removed += d.removed; this.stats.moved += d.moved;
+    this.stats.lastDiff = d;
+    const left = this.scroller.scrollLeft;
+    this.hits = now;
+    this.matching = n;
     this.paint();
+    this.scroller.scrollLeft = left;              // the reader's place, kept
+    const parts = [d.added ? `+${d.added}` : "", d.removed ? `−${d.removed}` : "", d.moved ? `⇅${d.moved}` : ""].filter(Boolean);
+    this.diffEl.setText(parts.length ? ` · ${parts.join(" ")}` : "");
+    this.diffEl.addClass("is-fresh");
+    window.clearTimeout(this.diffTimer);
+    this.diffTimer = window.setTimeout(() => { this.diffEl.removeClass("is-fresh"); }, 1500);
     this.onScroll(true);
+    return d;
   }
 
   private onScroll(force = false): void {
@@ -192,6 +298,7 @@ export class SearchField {
     if (!force && shown === this.shown && Math.abs(soft - this.soft) < 1e-3) return;
     this.shown = shown;
     this.soft = soft;
+    this.scroller.style.backgroundImage = barGradient(win.length, soft);
     this.onShow(win, shown, soft);
   }
 
@@ -204,6 +311,7 @@ export class SearchField {
     if (document.activeElement !== this.kInput) this.kInput.value = String(active ? Math.min(this.k, got) : this.k);
     if (document.activeElement !== this.nInput) this.nInput.value = String(active ? got : this.total);
     this.matchEl.setText(active ? ` · ${this.matching} matching` : "");
+    if (!active) { this.diffEl.setText(""); this.scroller.style.backgroundImage = "none"; }
     // One step of scroll per result, so a flick is a few results, not all.
     const w = this.scroller.clientWidth || 320;
     this.track.style.width = `${Math.round(w + Math.max(0, this.window.length - 1) * 28)}px`;

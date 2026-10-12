@@ -377,6 +377,16 @@ export class BrowserView extends ItemView {
     // `main-world` restores the old routing for a check's planted arm.
     isolate(view, () => this.plant.has("main-world"));
     this.webview = view;
+    // The field the reader is typing in keeps the keyboard while the cell
+    // navigates or presses "More results" for a search (2026-10-11: "i type a
+    // number and am instantly kicked out"): a webview takes focus when it
+    // loads or takes input, so a field the reader was in is given it back --
+    // only when the cell's OWN action took it, never a click of the reader's.
+    this.registerDomEvent(document, "focusin", (e: FocusEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && t !== view && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) this.readerField = t;
+    });
+    view.addEventListener("focus", () => this.giveBackFocus());
     // The pipeline, over the page being browsed: a box in the cell's corner
     // and the hovered chunk's outline. Both live in the CELL, never in the
     // page (`G-41`). Hover rings the projector through the same `onHover`
@@ -1176,17 +1186,44 @@ export class BrowserView extends ItemView {
   /**
    * A query searched on DuckDuckGo, in THIS cell, so the results page is
    * captured like any page and streams into the store and the 3D view as a
-   * diff. The cell scrolls to the end and presses "More results", `rounds`
-   * times: real pointer input at the button's place on the page, the way the
-   * reader's mouse arrives (nothing is written into the document; scrolling
-   * moves the viewport). A newer query cancels an older one. Bot checks are
-   * never answered: a page with no results and no button just ends the run.
+   * diff. The cell scrolls to the end and presses "More results" in a loop
+   * that is EXHAUSTIVE (item 105): it ends only when a round adds no results
+   * (no delta) or the button is gone, and `stopped` says which. Real pointer
+   * input at the button's place on the page, the way the reader's mouse
+   * arrives (nothing is written into the document; scrolling moves the
+   * viewport). A newer query cancels an older one. Bot checks are never
+   * answered: a page with no results and no button just ends the run.
    */
-  webSearchStats = { asked: 0, rounds: 0, clicked: 0, results: 0, last: "", ms: 0, stopped: "" };
+  webSearchStats = { asked: 0, rounds: 0, clicked: 0, results: 0, last: "", ms: 0, stopped: "", deltas: [] as number[] };
   private webSeq = 0;
   /** Planted (item 85): the web half never runs. */
   plantNoWebSearch = false;
-  async searchWeb(query: string, rounds = 3): Promise<any> {
+  /** The field the reader last typed in, and when the cell last acted itself. */
+  private readerField: HTMLElement | null = null;
+  private selfActedAt = -1e9;
+  focusStats = { restored: 0, stolen: 0 };
+  /** Planted: the cell keeps the focus it took. */
+  plantKeepFocus = false;
+  private selfAct(): void {
+    this.selfActedAt = performance.now();
+    for (const ms of [30, 250, 800]) window.setTimeout(() => this.giveBackFocus(), ms);
+  }
+  private giveBackFocus(): void {
+    const view = this.webview;
+    if (!view || document.activeElement !== view) return;
+    if (performance.now() - this.selfActedAt > 1500) return;    // the reader's own click
+    const f = this.readerField;
+    if (!f || !f.isConnected) return;
+    this.focusStats.stolen++;
+    if (this.plantKeepFocus) return;
+    f.focus({ preventScroll: true });
+    if (document.activeElement === f) this.focusStats.restored++;
+  }
+  /** Planted (item 105): the old fixed count -- three rounds, then stop. */
+  plantFixedRounds = 0;
+  /** How long a round waits for its results to arrive before calling it no delta. */
+  webDeltaWaitMs = 4000;
+  async searchWeb(query: string): Promise<any> {
     const wv = this.webview;
     if (!wv || !query.trim() || this.plantNoWebSearch) return null;
     const seq = ++this.webSeq;
@@ -1196,19 +1233,42 @@ export class BrowserView extends ItemView {
     this.webSearchStats.asked++;
     this.webSearchStats.last = query.trim();
     this.webSearchStats.stopped = "";
+    this.webSearchStats.deltas = [];
+    this.webSearchStats.rounds = 0;
+    this.webSearchStats.ms = 0;
+    this.selfAct();
     this.go(url);
     for (let i = 0; i < 80; i++) {
       await sleep(150);
       if (seq !== this.webSeq) return null;
-      try { if (!wv.isLoading() && /duckduckgo\.com/.test(wv.getURL())) break; } catch { /* not attached */ }
+      if (i % 4 === 0) this.selfAct();          // a load in flight may take the keyboard late
+      try { if (!wv.isLoading() && /duckduckgo\.com/.test(wv.getURL())) { this.selfAct(); break; } } catch { /* not attached */ }
     }
     const wc = (window as any).require("@electron/remote").webContents.fromId(wv.getWebContentsId());
     const count = async () => Number(await wv.executeJavaScript(
       "document.querySelectorAll('article[data-testid=\"result\"], li[data-layout=\"organic\"]').length").catch(() => 0)) || 0;
-    for (let r = 0; r < rounds; r++) {
-      await sleep(900);
+    // Until the page stops growing or offers no more: no round count (item 105).
+    // The results arrive some time after the press, so a round waits for the
+    // count to move -- up to `webDeltaWaitMs` -- before it calls the round empty.
+    const grew = async (from: number) => {
+      for (let w = 0; w < this.webDeltaWaitMs; w += 250) {
+        await sleep(250);
+        if (seq !== this.webSeq) return -1;
+        const n = await count();
+        if (n > from) { await sleep(300); return await count(); }
+      }
+      return from;
+    };
+    await sleep(900);
+    let have = await count();
+    for (;;) {
       if (seq !== this.webSeq) return null;
+      if (this.plantFixedRounds && this.webSearchStats.rounds >= this.plantFixedRounds) {
+        this.webSearchStats.stopped = "fixed rounds (planted)";
+        break;
+      }
       // To the end of the list: the viewport moves, the page does not change.
+      // A page that loads more on scroll alone grows here.
       await wv.executeJavaScript("window.scrollTo(0, document.documentElement.scrollHeight); 1").catch(() => 0);
       await sleep(700);
       // The button's place on the page, read; then pressed by pointer input.
@@ -1221,12 +1281,27 @@ export class BrowserView extends ItemView {
         return r.width > 0 ? [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)] : null;
       })()`).catch(() => null);
       this.webSearchStats.rounds++;
-      if (!at) { this.webSearchStats.stopped = "no more-results button"; break; }
+      if (!at) {
+        // No button: the list may still have grown from the scroll itself.
+        const after = await grew(have);
+        if (after < 0) return null;
+        this.webSearchStats.deltas.push(after - have);
+        if (after > have) { have = after; continue; }
+        this.webSearchStats.stopped = "no more-results button";
+        break;
+      }
       await sleep(250);
+      this.selfAct();
       wc.sendInputEvent({ type: "mouseMove", x: at[0], y: at[1] });
       wc.sendInputEvent({ type: "mouseDown", x: at[0], y: at[1], button: "left", clickCount: 1 });
       wc.sendInputEvent({ type: "mouseUp", x: at[0], y: at[1], button: "left", clickCount: 1 });
       this.webSearchStats.clicked++;
+      const after = await grew(have);
+      if (after < 0) return null;
+      this.webSearchStats.deltas.push(after - have);
+      this.webSearchStats.results = after;
+      if (after <= have) { this.webSearchStats.stopped = "no delta"; break; }
+      have = after;
     }
     await sleep(800);
     this.webSearchStats.results = await count();
@@ -1437,7 +1512,7 @@ export class BrowserView extends ItemView {
         if (!h || !h.perform) return { nosensor: true };
         if (!h.xpathTicks) return { stale: true };
         return h.perform(c);
-      })(${JSON.stringify(chainFor(plan.kind, plan.xpath, rec.value))})`);
+      })(${JSON.stringify(chainFor(plan.kind, plan.xpath, rec.value, !!rec.enter))})`);
     } catch (e) {
       return { ok: false, stage: "perform", navigated: at.navigated, scrolled: at.found ?? undefined,
                error: `the page went away mid-gesture: ${String(e).slice(0, 80)}` };

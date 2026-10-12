@@ -29,3 +29,30 @@ test("the soft index brightens the frontier smoothly", () => {
   let last = -1;
   for (let s = 1; s <= 3.0001; s += 0.05) { const b = brightness(2, s); assert.ok(b >= last - 1e-9); last = b; }
 });
+
+// Item 109: a held arrow key steps faster the longer it is held.
+{
+  const { holdStep } = await import("../src/searchfield.ts");
+  assert.equal(holdStep(0), 1);
+  assert.equal(holdStep(400), 1);
+  assert.ok(holdStep(1600) > holdStep(1000) && holdStep(1000) >= holdStep(400));
+  assert.equal(holdStep(60000), 100);
+  // Monotone: never slows while held.
+  let last = 0;
+  for (let t = 0; t < 8000; t += 50) { const s = holdStep(t); assert.ok(s >= last); last = s; }
+}
+
+// Item 106: a re-rank diff counts what was added, removed and moved.
+{
+  const { rankDiff, barGradient } = await import("../src/searchfield.ts");
+  const h = (c) => ({ cid: c, url: "" });
+  assert.deepEqual(rankDiff([h("a"), h("b"), h("c")], [h("a"), h("b"), h("c")]), { added: 0, removed: 0, moved: 0 });
+  assert.deepEqual(rankDiff([h("a"), h("b"), h("c")], [h("d"), h("a"), h("c")]), { added: 1, removed: 1, moved: 1 });
+  // The bar's gradient: brightest stop at the scrolled index.
+  const g = barGradient(5, 3);
+  const alphas = [...g.matchAll(/rgba\(255,255,255,([\d.]+)\)/g)].map((m) => Number(m[1]));
+  assert.equal(alphas.length, 5);
+  assert.equal(alphas.indexOf(Math.max(...alphas)), 2);
+  assert.equal(barGradient(0, 0), "none");
+}
+console.log("searchfield: hold, diff, gradient ok");

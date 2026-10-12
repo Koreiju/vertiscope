@@ -179,6 +179,9 @@ export function renderSnapshot(host: HTMLElement, snap: Snapshot,
                                  /** A gesture on an element the trie addresses: carried out in the
                                   *  browser cell, on the live page. Absent -> controls stay inert. */
                                  onAct?: (rec: ActRecord) => Promise<ActResult | null>;
+                                 /** The reader left a field of this panel: a redraw held while
+                                  *  they typed may run now. */
+                                 onFieldDone?: () => void;
                                  /** The chunk, so the last gesture's outcome survives a re-draw. */
                                  cid?: string;
                                } = {}): HTMLIFrameElement {
@@ -266,15 +269,40 @@ export function renderSnapshot(host: HTMLElement, snap: Snapshot,
     // A reader who types and presses Enter has finished the field; the page's
     // own form would submit, which this panel does not do -- the value lands
     // as the `change` it is, and that is all.
+    // Enter in a field -- an <input> or a <textarea> (DuckDuckGo's search
+    // box is one) -- sends the value AND the page's Enter, which is what the
+    // reader's own keyboard does there (PLUGIN_GOAL 111). Shift+Enter in a
+    // textarea stays a newline.
     doc.addEventListener("keydown", (e) => {
       const ke = e as KeyboardEvent;
       const t = ke.target as HTMLInputElement | null;
-      if (ke.key === "Enter" && t && t.tagName === "INPUT" && elOf(t)) {
+      typingAt = Date.now();
+      if (ke.key === "Enter" && !ke.shiftKey && t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA") && elOf(t)) {
         ke.preventDefault();
-        run(actFromEvent("change", asEl(elOf(t)!)));
+        const rec = actFromEvent("change", asEl(elOf(t)!));
+        if (rec) rec.enter = true;
+        typingAt = 0;
+        run(rec);
       }
     }, true);
+    doc.addEventListener("input", () => { typingAt = Date.now(); }, true);
+    // Leaving the field is the end of typing: a redraw held meanwhile runs.
+    doc.addEventListener("focusout", () => {
+      typingAt = 0;
+      window.setTimeout(() => { if (!fieldActive()) opts.onFieldDone?.(); }, 0);
+    }, true);
   });
+  // The panel is being typed in: a field of its own has the keyboard. A
+  // redraw then would replace the field under the reader's fingers -- the
+  // page streams, its chunk is rewritten, the panel re-mounts (2026-10-11:
+  // "I can't enter things in the search bar").
+  let typingAt = 0;
+  const fieldActive = () => {
+    const d = frame.contentDocument;
+    const a = d && (d.activeElement as HTMLElement | null);
+    return !!a && document.activeElement === frame && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName);
+  };
+  (frame as any).domvecTyping = () => fieldActive() || Date.now() - typingAt < 1500;
   host.appendChild(frame);
   const readout = document.createElement("div");
   readout.className = "domvec-act-readout";
