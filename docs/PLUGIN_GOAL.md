@@ -3110,6 +3110,11 @@ Look ..." keyed to `dd[6]`, its authors to `dd[7]`, its subjects to `dd[8]`,
 elsewhere. Under investigation; the chunking rule itself is not yet shown to
 be at fault.)*
 
+*Read as (2026-10-12): (113) every line of a chunk names the element it
+draws, so its outline in the browser is where the line is. (Two causes fixed
+-- a lost anchor read positionally, and a write skipped while its addresses
+moved; one intermittent cause open, PRD G-186.)*
+
 > arrow keys while hovering on the 3D panel and not the search box should be
 > for precise panning
 

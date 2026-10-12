@@ -769,6 +769,13 @@ def _page_controls(workspace, url: str) -> Dict[str, object]:
     return out
 
 
+#: Planted (2026-10-12): lines zipped with the anchors by position.
+_PLANT_POSITIONAL_ANCHORS = [False]
+#: Planted (2026-10-12): a capture skips a chunk whose MARKDOWN is unchanged,
+#: whatever its addresses did.
+_PLANT_SKIP_BY_MD = [False]
+
+
 def chunk_payload(workspace, cid: str) -> Optional[Dict]:
     """One chunk as the plugin's `ChunkPayload`.
 
@@ -787,7 +794,16 @@ def chunk_payload(workspace, cid: str) -> Optional[Dict]:
     self_window = getattr(workspace, "context_window", 0)
 
     _t = time.perf_counter()
-    addresses = workspace.addresses_for(cid)
+    # By line index, never by position in the list: a line with no anchor
+    # left no slot, and zipping shifted every later line onto its neighbour's
+    # address (2026-10-12, arXiv). Planted: the positional zip.
+    store = workspace.store
+    if _PLANT_POSITIONAL_ANCHORS[0] or not hasattr(store, "anchors_by_line"):
+        addresses = list(workspace.addresses_for(cid))
+        by_line = {i: a for i, a in enumerate(addresses)}
+    else:
+        by_line = store.anchors_by_line(cid)
+        addresses = [by_line[i] for i in sorted(by_line)]
     _ms["addresses"] = round((time.perf_counter() - _t) * 1000, 1)
     # Re-indented by nesting LEVEL before anyone sees it.
     #
@@ -848,8 +864,8 @@ def chunk_payload(workspace, cid: str) -> Optional[Dict]:
     for i, text in enumerate(texts):
         entry: Dict[str, object] = {"text": text, "key": "", "cls": "text",
                                     "control": False}
-        if i < len(addresses):
-            address, value = addresses[i]
+        if i in by_line:
+            address, value = by_line[i]
             entry["key"] = address.key()
             # The template this line belongs to, beside the address that
             # identifies it. Two result rows share a shape and never share an
@@ -1919,8 +1935,16 @@ class _Handler(BaseHTTPRequestHandler):
             write = dirty
             if dirty and not _PLANT_REWRITE_SAME[0]:
                 try:
-                    held = self.workspace.store.chunk_mds([c.cid for c in dirty])
-                    write = [c for c in dirty if held.get(c.cid) != c.markdown]
+                    if _PLANT_SKIP_BY_MD[0] or not hasattr(self.workspace.store, "chunk_sigs"):
+                        held = self.workspace.store.chunk_mds([c.cid for c in dirty])
+                        write = [c for c in dirty if held.get(c.cid) != c.markdown]
+                    else:
+                        # The same markdown is not the same chunk when its
+                        # ADDRESSES moved (2026-10-12): skipped, its anchors
+                        # stayed one sibling off on arXiv for every capture.
+                        from domvec.graphstore import anchor_sig
+                        sigs = self.workspace.store.chunk_sigs([c.cid for c in dirty])
+                        write = [c for c in dirty if sigs.get(c.cid) != (c.markdown, anchor_sig(c))]
                     phases["unchanged_skipped"] = len(dirty) - len(write)
                 except Exception:                   # noqa: BLE001
                     write = dirty

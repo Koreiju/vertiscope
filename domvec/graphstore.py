@@ -155,6 +155,11 @@ _MIGRATIONS = [
     # (PLUGIN_GOAL 108, 2026-10-11: "we should be persisting these layouts to
     # the entities in our database"): [x, y, z, fit x, fit y, fit z].
     "ALTER TABLE Chunk ADD drawn DOUBLE[]",
+    # The hash of the chunk's address list, line by line (2026-10-12): the
+    # capture path skips a chunk whose markdown is unchanged, and a sibling
+    # shift that leaves every line's TEXT the same left its anchors stale for
+    # good -- arXiv's "View HTML" keyed to `a[3]`, which is the pdf link.
+    "ALTER TABLE Chunk ADD asig STRING",
 ]
 
 
@@ -350,6 +355,18 @@ PLANT_STORED_CONTAINMENT = [False]
 PLANT_ROOT_CONTAINMENT = [False]
 #: Planted (PLUGIN_GOAL 110): every page's trie nodes read fresh, every call.
 PLANT_NO_TNODE_MEMO = [False]
+
+def anchor_sig(chunk) -> str:
+    """A chunk's addresses, line by line, hashed: what says its anchors are
+    the ones stored, when its markdown alone cannot."""
+    import hashlib
+    keys = [line.address.key() if line.address is not None else "" for line in chunk.lines]
+    return hashlib.sha1(chr(10).join(keys).encode("utf-8")).hexdigest()[:16]
+
+
+#: Planted (2026-10-12): one anchor per ADDRESS, the last line drawing it --
+#: a second line drawing the same address got no anchor.
+PLANT_ONE_ANCHOR_PER_ADDRESS = [False]
 
 #: How many times each chunk has been written in this process: what a cache
 #: of facts read from a chunk's markdown checks before it trusts them.
@@ -702,11 +719,19 @@ class GraphStore:
         # Which chunk line anchors each address, so the address write can
         # create the edge while it still has the node bound. See the fused
         # statement below for why that is worth arranging.
-        anchor_of = {}
+        # EVERY line drawing an address, not the last one: keyed by address
+        # alone, two lines drawing one address kept one anchor, and the other
+        # line's slot became a gap (2026-10-12, arXiv's listing -- with the
+        # positional read, every later line took its neighbour's address).
+        anchor_of: Dict[str, List[Tuple[str, int]]] = {}
         for chunk in chunks:
             for ordinal, line in enumerate(chunk.lines):
                 if line.address is not None:
-                    anchor_of[line.address.aid] = (chunk.cid, ordinal)
+                    hits = anchor_of.setdefault(line.address.aid, [])
+                    if PLANT_ONE_ANCHOR_PER_ADDRESS[0]:
+                        hits[:] = [(chunk.cid, ordinal)]
+                    else:
+                        hits.append((chunk.cid, ordinal))
         counts["addresses"] = len(address_rows)
         counts["ms_addresses"] = round((time.perf_counter() - _t) * 1000, 1)
         _t = time.perf_counter()
@@ -736,6 +761,7 @@ class GraphStore:
                 "lines": len(chunk.lines), "row": int(rows.get(chunk.cid, -1)),
                 "dup": canonical.get(chunk.cid, ""),
                 "dupn": copies.get(chunk.cid, 1),
+                "asig": anchor_sig(chunk),
             }
             if has_vectors:
                 vector = list(embeddings.get(chunk.cid) or [])[:EMBED_DIM]
@@ -748,7 +774,7 @@ class GraphStore:
                 "UNWIND $rows AS r MERGE (c:Chunk {cid: r.cid}) "
                 "SET c.url = r.url, c.xpath = r.xp, c.part = r.part, "
                 "c.md = r.md, c.chars = r.chars, c.line_count = r.lines, "
-                "c.dup_of = r.dup, c.dup_n = r.dupn, "
+                "c.dup_of = r.dup, c.dup_n = r.dupn, c.asig = r.asig, "
                 "c.row = r.row" + (", c.embedding = r.emb" if has_vectors else ""),
                 chunk_rows,
             )
@@ -792,21 +818,20 @@ class GraphStore:
         # is why it used to cost as much as a new one.
         fused_rows, plain_rows, edge_rows = [], [], []
         for row in address_rows:
-            hit = anchor_of.pop(row["aid"], None)
+            hits = anchor_of.pop(row["aid"], None) or []
             needs_value = row["aid"] not in unchanged_addresses
-            needs_edge = hit is not None and (
-                (hit[0], row["aid"], hit[1]) in fresh_anchors)
-            if needs_value and needs_edge:
-                fused_rows.append(dict(row, cid=hit[0], ord=hit[1]))
+            fresh = [h for h in hits if (h[0], row["aid"], h[1]) in fresh_anchors]
+            if needs_value and fresh:
+                fused_rows.append(dict(row, cid=fresh[0][0], ord=fresh[0][1]))
+                fresh = fresh[1:]
             elif needs_value:
                 plain_rows.append(row)
-            elif needs_edge:
-                # The address is current and only the edge is missing, so
-                # there is nothing to MERGE -- just the two lookups. Rare, and
-                # the expensive shape, which is why it is the last case rather
-                # than the general one.
-                edge_rows.append({"cid": hit[0], "aid": row["aid"],
-                                  "ord": hit[1]})
+            # The address is current and only the edge is missing (or a second
+            # line draws it), so there is nothing to MERGE -- just the two
+            # lookups. Rare, and the expensive shape, which is why it is the
+            # last case rather than the general one.
+            for h in fresh:
+                edge_rows.append({"cid": h[0], "aid": row["aid"], "ord": h[1]})
 
         if fused_rows:
             self._batch(
@@ -839,7 +864,8 @@ class GraphStore:
         # write did not carry. Rare, and it still has to be created.
         anchor_rows = [
             {"cid": cid, "aid": aid, "ord": ordinal}
-            for aid, (cid, ordinal) in anchor_of.items()
+            for aid, hits in anchor_of.items()
+            for cid, ordinal in hits
             if (cid, aid, ordinal) in fresh_anchors
         ]
         if anchor_rows:
@@ -1256,6 +1282,15 @@ class GraphStore:
 
     def page_urls(self) -> List[str]:
         return [r[0] for r in self._rows("MATCH (p:Page) RETURN p.url")]
+
+    def chunk_sigs(self, cids) -> Dict[str, Tuple[str, str]]:
+        """Each stored chunk's (markdown, address signature) by cid: what a
+        write may skip only when BOTH are unchanged."""
+        cids = [c for c in dict.fromkeys(cids) if c]
+        if not cids:
+            return {}
+        return {cid: (md or "", sig or "") for cid, md, sig in self._rows(
+            "UNWIND $cids AS x MATCH (c:Chunk {cid: x}) RETURN c.cid, c.md, c.asig", {"cids": cids})}
 
     def chunk_mds(self, cids) -> Dict[str, str]:
         """Each stored chunk's markdown by cid, by primary-key lookups (the
@@ -1903,6 +1938,25 @@ class GraphStore:
                 "SET a.akey = r.akey",
                 fixed[i:i + batch])
         out["repaired"] = len(fixed)
+        return out
+
+    def anchors_by_line(self, cid: str) -> Dict[int, Tuple[ContentAddress, str]]:
+        """The addresses a chunk anchors, BY LINE INDEX (`ord`).
+
+        A line that draws no address has no anchor, so `addresses_of`'s list,
+        read in order, has no slot for it -- and a caller zipping that list
+        with the lines gives every later line its neighbour's address. arXiv's
+        listing, 2026-10-12: "Total of 341 entries" keyed to the `h1` that
+        reads "Machine Learning", one line off for the rest of the chunk.
+        """
+        out: Dict[int, Tuple[ContentAddress, str]] = {}
+        for ordinal, key, value in self._rows(
+                "MATCH (c:Chunk {cid: $cid})-[r:Anchors]->(a:Address) "
+                "RETURN r.ord, a.akey, a.value ORDER BY r.ord", {"cid": cid}):
+            try:
+                out[int(ordinal)] = (ContentAddress.parse(key), value)
+            except Exception:                       # noqa: BLE001
+                continue
         return out
 
     def addresses_of(self, cid: str) -> List[Tuple[ContentAddress, str]]:
