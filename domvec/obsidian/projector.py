@@ -1571,9 +1571,23 @@ class PageProjector(ChunkProjector):
             if lf is None:
                 continue
             with self.lock:
+                prev = self.local.get(u)
                 self.local[u] = lf
                 again = {c: self.vec[c] for c in (self.by_url.get(u) or ()) if c in self.vec}
                 projection = self.projection
+                # Placed chunks whose local place the refit KEPT stay where
+                # they are drawn (PLUGIN_GOAL 110): the page's anchor and
+                # scale are recomputed as it grows, and re-placing them slid
+                # every chunk of a growing page on each refit -- 24 of 24 on
+                # an infinite-scroll page while 18 had kept their local place
+                # (2026-10-12). Planted (`plant_local_jumble`): all re-placed.
+                stay = set()
+                if prev is not None and not self.plant_local_jumble:
+                    for c in again:
+                        i, j = lf["index"].get(c), prev["index"].get(c)
+                        if (i is not None and j is not None and c in self.pos
+                                and np.allclose(lf["coords"][i], prev["coords"][j])):
+                            stay.add(c)
             # Re-placed through the same path every placement takes, and
             # streamed to the pane like an online update: a glide, not a jump.
             moved = 0
@@ -1581,6 +1595,8 @@ class PageProjector(ChunkProjector):
                 cpos, chsv = self._place_chunks(projection, again)
                 with self.lock:
                     for c, xyz in cpos.items():
+                        if c in stay:
+                            continue
                         was = self.pos.get(c)
                         self.pos[c] = xyz
                         if c in chsv:
@@ -1591,7 +1607,8 @@ class PageProjector(ChunkProjector):
                             moved += 1
             self.local_stats["fits"] += 1
             self.local_stats["last"] = {"url": u, "n": len(lf["cids"]), "ms": lf["ms"], "moved": moved,
-                                        "kept": lf.get("kept", 0), "at": round(time.time(), 3)}
+                                        "kept": lf.get("kept", 0), "stayed": len(stay),
+                                        "at": round(time.time(), 3)}
             self._save_local()
 
     def local_quality(self, url: str, k: int = 10, seed: int = 0) -> Dict:
