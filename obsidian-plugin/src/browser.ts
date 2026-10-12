@@ -583,6 +583,10 @@ export class BrowserView extends ItemView {
   }
 
   async onClose(): Promise<void> {
+    // Timers this view started outside `registerInterval` stop with it (a
+    // closed view's code otherwise kept firing after a plugin reload).
+    window.clearInterval(this.placeTimer); this.placeTimer = 0 as any;
+    window.clearTimeout(this.offlineTimer); this.offlineTimer = 0;
     this.pipebox?.destroy();
     this.pipebox = null;
     // Settle whatever page was being captured. Per-drain writes are deltas;

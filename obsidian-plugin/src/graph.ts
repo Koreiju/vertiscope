@@ -1437,6 +1437,7 @@ export class GraphView extends ItemView {
     if (done.size || key !== this.lastExpanded) this.redrawForce(done);
     if (!this.settleTimer && this.forceSpecs.size) {
       this.settleTimer = window.setInterval(() => {
+        if (this.closed) { GraphView.closedTick(); return; }
         if (!this.forceSpecs.size) { window.clearInterval(this.settleTimer); this.settleTimer = 0; return; }
         this.collapseCovered();
       }, 1500);
@@ -1913,9 +1914,26 @@ export class GraphView extends ItemView {
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;
     this.stopBatch();
+    // Every timer this view started that the plugin did not register: left
+    // running, a closed view's code kept firing after a plugin RELOAD -- the
+    // old build's profiler replaced the new one's, and the two thrashed
+    // (2026-10-11). A relax in flight is abandoned by its sequence number.
+    if (!(window as any).__domvecPlantLeakTimers) {
+      window.clearInterval(this.settleTimer); this.settleTimer = 0 as any;
+      window.clearInterval(this.hoverSweep); this.hoverSweep = 0;
+      window.clearInterval(this.webTimer); this.webTimer = 0;
+      window.clearTimeout(this.hoverBbTimer); this.hoverBbTimer = 0;
+    }
+    this.relaxSeq++;
+    this.closed = true;
     this.graph?._destructor?.();
     this.graph = null;
   }
+  /** Set by `onClose`: a timer that outlived it has nothing to do. */
+  closed = false;
+  /** A timer firing on a CLOSED view, counted on the window, which outlives
+   *  the plugin (planted by `__domvecPlantLeakTimers`: the timers left on). */
+  static closedTick(): void { const w = window as any; w.__domvecClosedTicks = (w.__domvecClosedTicks || 0) + 1; }
 
   /**
    * A sprite carrying the chunk's first picture, or null for a plain node.
@@ -2362,6 +2380,7 @@ export class GraphView extends ItemView {
       if (id !== this.hoverBb) this.closeBillboard(id);
     }
     if (!this.hoverSweep && left.length) this.hoverSweep = window.setInterval(() => {
+      if (this.closed) { GraphView.closedTick(); return; }
       this.expireHoverPanels();
       if (![...this.billboards.values()].some((e: any) => e.fromHover)) { window.clearInterval(this.hoverSweep); this.hoverSweep = 0; }
     }, 1000);
@@ -3810,6 +3829,7 @@ export class GraphView extends ItemView {
     window.clearInterval(this.webTimer);
     let left = 10;
     this.webTimer = window.setInterval(async () => {
+      if (this.closed) { GraphView.closedTick(); return; }
       const f = this.searchField;
       if (!f || f.query !== query || --left < 0) { window.clearInterval(this.webTimer); return; }
       const got: any = await this.sidecar.search(query, { k: f.total }).catch(() => null);
