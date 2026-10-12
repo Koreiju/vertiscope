@@ -55,3 +55,20 @@ def test_planted_page_levels_leave_the_gap():
     # Page depths {3, 5, 7} -> {0, 1, 2}: chunk b draws 0 then 2.
     assert [ln.depth for ln in b.lines] == [0, 2]
     assert score([a, b])["with_gap"] == 1
+
+
+def test_a_contentless_line_folds_into_a_worded_line_of_its_element():
+    # R-K2a: `![]` and the worded line at the SAME element -> one line, the mark's
+    # address kept as an inline address (counted by `covered`). Planted: two lines.
+    from domvec.markdown import _fold_contentless
+    url = "https://example.org/"
+    img = ContentAddress(url=url, xpath="/html/body/figure/img", tag="media.images", accessor="text()")
+    cap = ContentAddress(url=url, xpath="/html/body/figure/img", tag="text.accessible", accessor="@alt")
+    lone = ContentAddress(url=url, xpath="/html/body/svg", tag="media.images", accessor="text()")
+    lines = [MarkdownLine(depth=0, text="![]", address=img), MarkdownLine(depth=0, text="A grazing okapi", address=cap),
+             MarkdownLine(depth=0, text="![]", address=lone)]
+    out = _fold_contentless(lines)
+    assert [ln.text for ln in out] == ["A grazing okapi", "![]"]      # the lone svg mark stays
+    assert img in out[0].inline
+    chunk = MarkdownChunk(url=url, xpath="/html/body", lines=out)
+    assert img.key() in chunk.covered

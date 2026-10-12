@@ -1698,6 +1698,8 @@ def _render_sized(
 
     lines = _draw_lines(kept, text_at=text_at, href_at=href_at,
                         depth_of=depth_of, base=base)
+    if not PLANT_KEEP_CONTENTLESS:
+        lines = _fold_contentless(lines)
     rendered = MarkdownChunk(url=url, xpath=xpath,
                              lines=_inline_flow(_join_labels(_join_media(lines))))
     # Measured in the window's unit, not in characters, and over the string
@@ -2747,6 +2749,49 @@ def _number_parts(chunks: List[MarkdownChunk]) -> None:
 #: Planted (R-K1): depths compacted over the PAGE, as before -- empty indent
 #: levels wherever a depth branches elsewhere on the page.
 PLANT_PAGE_LEVELS = False
+
+#: Planted (R-K2a): a line with no words and no target drawn on its own.
+PLANT_KEEP_CONTENTLESS = False
+
+#: What a bare mark is made of: nothing a reader can read, nowhere to go.
+_WORDLESS = re.compile(r"[A-Za-z0-9\u00C0-\uFFFF]")
+
+
+def _is_contentless(text: str) -> bool:
+    """A line that is only marks: `![]`, `<#>`, `[ ]`, `=== ===`. A target is
+    a word for this purpose (a url has letters), so `![](media/x.png)` stays."""
+    return not _WORDLESS.search(text or "")
+
+
+def _fold_contentless(lines: List[MarkdownLine]) -> List[MarkdownLine]:
+    """R-K2a: a line with neither words nor a target is not drawn -- its address
+    is FOLDED into a worded line of the SAME element, as an inline address.
+
+    Dropping it was built and reverted (PLUGIN_PRD R-K2a): its address went to
+    `absorbed`, which `covered` excludes, and 340 addresses that still exist
+    stopped being accounted for. Folded, it is `inline` -- which `covered`
+    counts -- so the line goes and the address stays accounted for. Scoped to
+    the element, inside one rendered subtree, which always holds every unit of
+    every element in it: the verdict is the same at every window. A bare mark
+    whose element has no worded line (an inline `<svg>`, a nameless form) is
+    the element's only address and is kept, as it is.
+    """
+    def element(line: MarkdownLine) -> str:
+        return line.address.xpath.split("/text()")[0].split("/@")[0] if line.address else ""
+
+    worded: Dict[str, MarkdownLine] = {}
+    for line in lines:
+        if not _is_contentless(line.text) and line.address is not None:
+            worded.setdefault(element(line), line)
+    out: List[MarkdownLine] = []
+    for line in lines:
+        host = worded.get(element(line)) if _is_contentless(line.text) and line.address is not None else None
+        if host is None or host is line:
+            out.append(line)
+            continue
+        host.inline = tuple(host.inline) + (line.address,) + tuple(line.inline or ())
+        host.absorbed = tuple(host.absorbed) + tuple(line.absorbed or ())
+    return out
 
 
 def _level_page(chunks: List[MarkdownChunk]) -> None:
