@@ -1448,6 +1448,40 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send(500, {"error": "%s: %s" % (type(exc).__name__, exc)})
             return
 
+        # An installed package, or this codebase, into the trie as module
+        # pages (G-104): `{"name": "<package>"}` or `{"repo": true}`. Gated
+        # with `capture`: it writes the workspace and presses nothing.
+        if route == "package":
+            if not self.capture_allowed or self.workspace is None:
+                self._send(403, {"error": "package indexing is off",
+                                 "why": "start the sidecar with --capture to let it write the workspace"})
+                return
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(length) or b"{}")
+            except Exception as exc:                # noqa: BLE001
+                self._send(400, {"error": "bad body: %s" % exc})
+                return
+            from .. import packages as _pk
+
+            def _step(_rel):
+                _yield_to_foreground()
+
+            t0 = time.perf_counter()
+            with _WORK_LOCK:
+                if body.get("repo"):
+                    base = Path(__file__).resolve().parents[1]
+                    got = _pk.index_tree(self.workspace, base, "repo", step=_step,
+                                         limit=int(body.get("limit") or 0))
+                else:
+                    got = _pk.index_package(self.workspace, str(body.get("name") or ""), step=_step,
+                                            limit=int(body.get("limit") or 0))
+            _LAST_WRITE[0] = time.time()
+            got["ms"] = round((time.perf_counter() - t0) * 1000, 1)
+            _profile("package", {k: v for k, v in got.items() if k != "failed"})
+            self._send(200, got)
+            return
+
         if route == "purge":
             # Drop one page, its chunks and its addresses (`store.purge_page`).
             #

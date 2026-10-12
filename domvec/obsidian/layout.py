@@ -2357,6 +2357,13 @@ def projected_page_layout(workspace, proj=None) -> Optional[Dict]:
     edges = [{"source": "page:" + s, "target": "page:" + t}
              for s, t in workspace.store.page_links()
              if s in known and t in known and s != t]
+    # Code pages hang in their DIRECTORY tree (G-104): module -> its folder's
+    # package -> the package above. With the import links above, the
+    # dependencies from variable to module to directory.
+    if not PLANT_NO_CODE_TREE[0]:
+        from ..packages import code_tree_edges
+        for child, parent in code_tree_edges(u for u in known if u.startswith("code://")):
+            edges.append({"source": "page:" + child, "target": "page:" + parent, "kind": "dir"})
     coords = (np.asarray([n["pos"] for n in nodes], dtype=np.float32)
               if nodes else np.zeros((0, 3), dtype=np.float32))
     status = proj.status(workspace)
@@ -2472,6 +2479,10 @@ def projected_chunk_layout(workspace, proj=None) -> Optional[Dict]:
 _CHUNK_FACTS: Dict[str, tuple] = {}
 #: Planted: every chunk's markdown read and tokenized on every layout.
 PLANT_NO_FACT_MEMO = [False]
+
+
+#: Planted (G-104): code pages drawn with no directory tree.
+PLANT_NO_CODE_TREE = [False]
 
 
 #: Planted (PLUGIN_GOAL 108): stored drawn places ignored -- chunk view
