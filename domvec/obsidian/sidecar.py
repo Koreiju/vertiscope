@@ -2527,14 +2527,33 @@ class _Handler(BaseHTTPRequestHandler):
             last = spine.updates[-1] if spine is not None and getattr(spine, "updates", None) else None
             chunks = getattr(last, "all_chunks", None) or []
             from .. import tokens as _tokens
+            # `keys=1`: each line with its address and the value the LIVE trie
+            # holds there (2026-10-12, G-186) -- whether a wrong pairing is
+            # the trie's (values entered under the wrong address) or the
+            # render's (right trie, lines paired wrongly). Read-only.
+            want_keys = (query.get("keys") or [""])[0] == "1"
+            held = {}
+            if want_keys and spine is not None and getattr(spine, "trie", None) is not None:
+                try:
+                    for leaf in spine.trie.leaves():
+                        if leaf.address is not None:
+                            held[leaf.address.key()] = str(leaf.value)
+                except Exception:                   # noqa: BLE001
+                    held = {}
             out = []
             for c in chunks:
                 md_text = c.markdown
                 if needle and needle not in md_text:
                     continue
-                out.append({"xpath": c.xpath, "part": getattr(c, "part", 0),
-                            "tokens": _tokens.budget(md_text), "lines": len(c.lines),
-                            "head": md_text[:240]})
+                row = {"xpath": c.xpath, "part": getattr(c, "part", 0),
+                       "tokens": _tokens.budget(md_text), "lines": len(c.lines),
+                       "head": md_text[:240]}
+                if want_keys:
+                    row["pairs"] = [[(ln.text or "")[:80],
+                                     ln.address.key() if ln.address is not None else "",
+                                     held.get(ln.address.key(), None) if ln.address is not None else None]
+                                    for ln in c.lines]
+                out.append(row)
             self._send(200, {"url": url, "session": session is not None,
                              "chunks_total": len(chunks), "chunks": out[:200]})
             return

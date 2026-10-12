@@ -4239,8 +4239,27 @@ export class GraphView extends ItemView {
   }
 
   /** A picture's bytes and type, or null; refusals remembered (`textures`). */
+  /** Planted (G-100): pictures from the web every load, as before -- no workspace store. */
+  plantNoMediaCache = !!(window as any).__domvecPlantNoMediaCache;   // set before a load, for its check
+  mediaStats = { from_store: 0, from_web: 0, saved: 0, failed: 0 };
   private async pictureBytes(src: string): Promise<{ bytes: Uint8Array; type: string } | null> {
     if (GraphView.textures.get(src) === null) return null;
+    // The workspace's media store first (G-100: "re-fetches aren't required
+    // by locally saving the media in a workspace cache"): a picture fetched
+    // once is read from the workspace on every later load, and saved there
+    // the first time it is fetched. Keyed as `snapshots.media_key`: sha1(url).
+    let key = "";
+    if (!this.plantNoMediaCache && /^https?:/i.test(src)) {
+      try {
+        const d = await crypto.subtle.digest("SHA-1", new TextEncoder().encode(src));
+        key = [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, "0")).join("");
+        const held = await this.sidecar.media(key);
+        if (held && held.bytes.byteLength) {
+          this.mediaStats.from_store++;
+          return { bytes: held.bytes, type: held.type || guessType(src) || "image/png" };
+        }
+      } catch { /* the web, below */ }
+    }
     try {
       const res = await requestUrl({ url: src, method: "GET", throw: false } as any);
       if (res.status && (res.status < 200 || res.status >= 300)) { GraphView.textures.set(src, null); return null; }
@@ -4248,6 +4267,14 @@ export class GraphView extends ItemView {
       if (!bytes.byteLength || bytes.byteLength > MAX_TEXTURE_BYTES) { GraphView.textures.set(src, null); return null; }
       let type = (res.headers?.["content-type"] || "").split(";")[0] || guessType(src);
       if (/\.svg($|\?)/i.test(src)) type = "image/svg+xml";
+      // A page where a picture should be (a missing favicon answered with
+      // HTML) is no picture: remembered as such, never decoded.
+      if (/^text\//i.test(type || "")) { GraphView.textures.set(src, null); this.mediaStats.failed++; return null; }
+      this.mediaStats.from_web++;
+      if (key && !this.plantNoMediaCache) {
+        void this.sidecar.saveMedia(src, bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer,
+                                    type || "image/png").then((got: any) => { if (got && got.saved) this.mediaStats.saved++; });
+      }
       return { bytes, type: type || "image/png" };
     } catch {
       GraphView.textures.set(src, null);

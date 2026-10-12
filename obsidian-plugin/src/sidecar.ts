@@ -73,6 +73,20 @@ export class Sidecar {
     return this.get<any>(`/snapshot/${encodeURIComponent(cid)}`);
   }
 
+  /** A picture from the workspace's media store by `sha1(url)` (G-100), or null. */
+  async media(key: string): Promise<{ bytes: Uint8Array; type: string } | null> {
+    const u = this.url("/media/" + encodeURIComponent(key));
+    if (!u) return null;
+    try {
+      const res = await fetch(u, { signal: AbortSignal.timeout(5000) });
+      if (!res.ok) return null;
+      const buf = new Uint8Array(await res.arrayBuffer());
+      return buf.byteLength ? { bytes: buf, type: (res.headers.get("content-type") || "").split(";")[0] } : null;
+    } catch {
+      return null;
+    }
+  }
+
   /** Save one picture a saved page form draws: its bytes, as the page loaded them. */
   async saveMedia(url: string, data: ArrayBuffer, contentType: string): Promise<any | null> {
     const u = this.url("/media?url=" + encodeURIComponent(url));
