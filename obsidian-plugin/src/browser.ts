@@ -1056,6 +1056,9 @@ export class BrowserView extends ItemView {
     if (map.cids().some((c) => !this.savedForms.has(c)) || this.mediaQueue.size) this.scheduleFormSaver(2500);
   }
 
+  /** Fast-path snapshots re-taken with their controls addressed (G-183). */
+  snapAddressed = 0;
+  private addrsFor = new Map<string, { addrs: any; at: number }>();
   async snapshotChunk(cid: string, url: string, again = false): Promise<boolean> {
     // `again`: re-read the live page even when a snapshot is held -- an open
     // panel after a diff, or a panel just opened (2026-10-06: the held one was
@@ -1071,14 +1074,42 @@ export class BrowserView extends ItemView {
     const map = this.pipebox?.map;
     const local = map && docKey(map.url) === docKey(here) ? map.xpaths(cid) : [];
     if (local.length) {
+      const known = this.addrsFor.get(cid);
+      const addrsNow = known && performance.now() - known.at < 60000 ? known.addrs : null;
       await this.takeSnapshot({ cid, url: here, matched: "", markdown: "", head: "",
-                                xpaths: local, addrs: {} } as any);
+                                xpaths: local, addrs: addrsNow || {} } as any);
       // The map KNOWS this chunk's elements: if the page drew nothing for
       // them, the store's copy of the same addresses finds nothing either.
       // Falling through cost a 137 ms sidecar fetch and a second in-page
       // clone per panel, twice per panel (2026-10-11: first paint 222-763 ms,
       // "Overlay panel showing in the 3D GUI is now extremely slow").
-      return !!getSnapshot(cid);
+      //
+      // But the map holds xpaths, not ADDRESSES: painted from it, nothing in
+      // the panel is tagged with its trie address, so every control is cloned
+      // DISABLED -- IMDb's search box could not be typed into (2026-10-12:
+      // "I can't enter things in the search bar but I should be able to
+      // through the patricia trie"). Where the snapshot holds a control, the
+      // addresses follow in the background and the panel is drawn again,
+      // live; a panel with none pays nothing.
+      const first = getSnapshot(cid);
+      if (!addrsNow && first && /<(input|textarea|select|button)\b/i.test(first.html) && !this.plant.has("fast-unaddressed")) {
+        void this.sidecar.chunk(cid).then(async (payload: any) => {
+          const lines = (payload && payload.lines) || [];
+          if (!lines.length) return;
+          let now = "";
+          try { now = this.webview?.getURL() || ""; } catch { return; }
+          if (docKey(now) !== docKey(here)) return;
+          const addrs = addressTable(lines);
+          // Kept a minute, so the redraw this asks for paints addressed at
+          // once instead of fetching again (and asking again, forever).
+          this.addrsFor.set(cid, { addrs, at: performance.now() });
+          await this.takeSnapshot({ cid, url: here, matched: "", markdown: "", head: "",
+                                    xpaths: local, addrs } as any);
+          this.snapAddressed++;
+          this.onDirty([cid]);
+        }).catch(() => { /* the unaddressed panel stays */ });
+      }
+      return !!first;
     }
     const payload: any = await this.sidecar.chunk(cid).catch(() => null);
     const lines = (payload && payload.lines) || [];
