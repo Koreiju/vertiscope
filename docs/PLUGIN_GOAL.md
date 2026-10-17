@@ -3427,6 +3427,25 @@ the nodes between the camera and it are drawn dark -- orb and glow.*
 reader is away -- nothing that is not the reader stops it -- and starts after
 a few seconds of quiet, not twenty.*
 
+*Asked (AskUserQuestion, 2026-10-17): which fraction the k/n fields read --
+the reader: "shown / retrieved"; uBlock's download -- "Yes, download it".
+Then, defining the two words:*
+
+> shown means all nodes present in the 3D ui. retrieved means the most recent
+> set of update retrieval results streaming over our efficient hierarchical
+> re-ranking and streaming retrieval updates adaptively, not necessarily
+> diffs, but diffs are integrated into re-ranking and re-url retrieval
+> updates (i.e. retrieval new URL nodes and re-rank, then retrieve their
+> containing chunks and re-rank, updating the current set of most recent
+> retrieved chunks for all current URLs)
+
+*Read as (2026-10-17): (142) k = SHOWN, every result node present in the 3D
+view; n = RETRIEVED, the current set from the hierarchical pipeline: rank url
+nodes (new ones retrieved and the set re-ranked), then retrieve each url's
+chunks and re-rank them, the current set replaced by the most recent ranks for
+all current urls -- streamed adaptively; a diff (what streamed into the store)
+feeds the next url and chunk re-rank, it is not itself the update.*
+
 *Where (131) meets "Keep current layout" (asked minutes earlier, about the
 quantile spread, containment and depth compression): (131) replaces the
 collision drift and, by the reader's "exact to the original UMAP
