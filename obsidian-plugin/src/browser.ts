@@ -27,6 +27,7 @@
  * that has never seen the site (`G-40`).
  */
 
+import { addressTarget } from "./address";
 import { isolate } from "./isolate";
 import { ForceTree, type ForceNodeDelta } from "./forcetree";
 import { PipelineBox } from "./pipelinebox";
@@ -552,7 +553,12 @@ export class BrowserView extends ItemView {
     fwd.onclick = () => { if (view.canGoForward()) view.goForward(); };
     reload.onclick = () => view.reload();
     this.address.addEventListener("keydown", (e: KeyboardEvent) => {
-      if (e.key === "Enter") this.go(this.address.value);
+      if (e.key !== "Enter") return;
+      // Words search DuckDuckGo; a place is gone to (G-202, `address.ts`).
+      const to = this.plant.has("address-literal") ? { url: this.address.value, search: false }
+        : addressTarget(this.address.value);
+      if (to.search) this.addressStats.searched++; else this.addressStats.went++;
+      if (to.url) this.go(to.url);
     });
     scan.onclick = () => this.scan();
 
@@ -1244,6 +1250,8 @@ export class BrowserView extends ItemView {
     }
   }
 
+  /** What the address bar sent where (G-202). */
+  addressStats = { searched: 0, went: 0 };
   /** Navigate. Bare hosts get https, because a reader types `arxiv.org`. */
   go(where: string): void {
     if (!this.webview || !where.trim()) return;

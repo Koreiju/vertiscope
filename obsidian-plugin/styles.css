@@ -912,3 +912,10 @@ button.domvec-run-fence:hover {
 /* Item 106: what a re-rank changed, bright for a moment. */
 .domvec-search3d-diff { color: var(--text-faint); transition: color 1.2s ease; }
 .domvec-search3d-diff.is-fresh { color: var(--text-accent); transition: none; }
+
+/* G-200 (2026-10-17: "there are two web-nav button-sets for going back and
+   forward"): the browser cell's own back/forward drive the PAGE; Obsidian's
+   header arrows walk the leaf's view history, which this view does not use. */
+.workspace-leaf-content[data-type="domvec-browser-view"] .view-header-nav-buttons {
+  display: none;
+}

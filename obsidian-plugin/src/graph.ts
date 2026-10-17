@@ -439,6 +439,14 @@ export class GraphView extends ItemView {
       unit.setText(this.level === "chunk" ? "chunks" : "pages");
       void load();
     };
+    // G-196 (2026-10-17: "a toggle to switch on and off the panels always
+    // opening on fly-to nodes and instead opening when a right-click action
+    // is made"). Remembered per viewer; the fly itself is unchanged.
+    const panels = bar.createEl("button", { text: this.panelsOn === "rightclick" ? "panels: right-click" : "panels: fly-to" });
+    panels.onclick = () => {
+      this.setPanelsOn(this.panelsOn === "rightclick" ? "flyto" : "rightclick");
+      panels.setText(this.panelsOn === "rightclick" ? "panels: right-click" : "panels: fly-to");
+    };
     const geometry = bar.createEl("button", { text: "euclidean" });
     geometry.onclick = () => {
       this.space = this.space ? "" : "S3";
@@ -2422,8 +2430,20 @@ export class GraphView extends ItemView {
     }, 1000);
   }
 
+  /** G-196: billboards open on a fly-to ("flyto", the default) or only on a right-click. */
+  panelsOn: "flyto" | "rightclick" = (() => {
+    try { return window.localStorage.getItem("domvec.panelsOn") === "rightclick" ? "rightclick" : "flyto"; }
+    catch { return "flyto"; }
+  })();
+  panelModeStats = { hover_skipped: 0, right_opened: 0 };
+  setPanelsOn(mode: "flyto" | "rightclick"): void {
+    this.panelsOn = mode;
+    try { window.localStorage.setItem("domvec.panelsOn", mode); } catch { /* a convenience only */ }
+  }
+
   private hoverPanel(target: any): void {
     if (this.plantNoFocus) return;
+    if (this.panelsOn === "rightclick") { this.panelModeStats.hover_skipped++; return; }
     const isChunk = !!target && target.level !== "page" && target.level !== "path";
     const close = () => {
       const e: any = this.hoverBb ? this.billboards.get(this.hoverBb) : null;
@@ -6337,7 +6357,16 @@ export class GraphView extends ItemView {
       // when drawn, the whole stored set at its UMAP positions when not
       // (`togglePage`). Anywhere else it releases the scope (`G-70`): back
       // to the corpus, from wherever the reader had narrowed to.
-      .onNodeRightClick((n: any) => { void this.togglePage(n); });
+      .onNodeRightClick((n: any) => {
+        // Right-click mode (G-196): a chunk's right-click opens its panel; a
+        // page's still folds or unfolds it.
+        if (this.panelsOn === "rightclick" && n && n.level !== "page" && n.level !== "path" && n.url) {
+          this.panelModeStats.right_opened++;
+          void this.openBillboard(n);
+          return;
+        }
+        void this.togglePage(n);
+      });
 
     // A chunk that showed a picture looks like the thing it showed.
     //
