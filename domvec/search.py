@@ -134,10 +134,17 @@ class ThreeFormIndex:
         self._ranks = pagerank(n, edges)
 
         self._meta = {}
+        # Each row's content hash, from the markdown this build reads anyway:
+        # the duplicate collapse needs only this, so a search reads the store
+        # for the hits it KEEPS and nothing else (it read every candidate --
+        # 50-117 reads a query, seconds to minutes on a 65k-chunk store,
+        # 2026-10-17).
+        self._digests = {}
         for chunk in self.store.chunks():
             row = row_of.get(chunk.cid)
             if row is not None:
                 self._meta[row] = (chunk.cid, chunk.url, chunk.xpath)
+                self._digests[row] = content_hash(getattr(chunk, "md", "") or "")
 
         # Rows that describe nothing. A retired row (see FreqMatrix.remove)
         # keeps its slot so the other rows are not renumbered, and it scores
@@ -297,43 +304,40 @@ class ThreeFormIndex:
         order = np.argsort(-score)
         hits: List[Hit] = []
         seen_content: set = set()
-        # Read the candidates' chunks in BLOCKS, not one query each: the
-        # collapse below needs every candidate's text, and duplicates mean
-        # many more candidates than hits (117 reads for 47 hits).
-        need = include_markdown or collapse
-        block: Dict[str, object] = {}
-        block_end = 0
-        for pos, row in enumerate(order):
-            if score[row] <= 0 or len(hits) >= max(k, 0):
+        digests = getattr(self, "_digests", None) or {}
+        # The rows KEPT (collapse by the build's content hashes -- no reads),
+        # then ONE read of just those, when markdown is wanted.
+        kept_rows = []
+        for row in order:
+            if score[row] <= 0 or len(kept_rows) >= max(k, 0):
                 break
+            if collapse:
+                fp = digests.get(int(row))
+                if fp is None:
+                    meta = self._meta.get(int(row))
+                    got = self.store.chunk(meta[0] if meta else self.freq.rows[int(row)])
+                    diag.select_reads += 1
+                    fp = content_hash(got.md if got else "")
+                if fp in seen_content:
+                    diag.collapsed += 1
+                    continue
+                seen_content.add(fp)
+            kept_rows.append(int(row))
+        block: Dict[str, object] = {}
+        if include_markdown and kept_rows:
+            cids = [(self._meta.get(r) or (self.freq.rows[r],))[0] for r in kept_rows]
+            many = getattr(self.store, "chunks_many", None)
+            block = many(cids) if many else {c: self.store.chunk(c) for c in cids}
+            diag.select_reads += 1
+            diag.read_chunks = dict(block)
+        for row in kept_rows:
             meta = self._meta.get(int(row))
             cid = meta[0] if meta else self.freq.rows[int(row)]
             url, xpath = (meta[1], meta[2]) if meta else ("", "")
-            if need and pos >= block_end and hasattr(self.store, "chunks_many"):
-                ahead = order[pos:pos + max(32, 2 * max(k, 0))]
-                block = self.store.chunks_many([
-                    (self._meta.get(int(r)) or (self.freq.rows[int(r)],))[0] for r in ahead if score[r] > 0])
-                block_end = pos + len(ahead)
-                diag.select_reads += 1
-                if diag.read_chunks is None:
-                    diag.read_chunks = {}
-                diag.read_chunks.update(block)
-            if need:
-                stored = block.get(cid) if hasattr(self.store, "chunks_many") else self.store.chunk(cid)
-                if not hasattr(self.store, "chunks_many"):
-                    diag.select_reads += 1
-            else:
-                stored = None
+            stored = block.get(cid) if include_markdown else None
             markdown = stored.md if stored else ""
-            if collapse:
-                # Keyed on the text, not on an embedding: the spec is explicit
-                # that deduplication must not use embeddings, and it does not
-                # need to — identical renderings are identical strings.
-                fingerprint = content_hash(markdown)
-                if fingerprint in seen_content:
-                    diag.collapsed += 1
-                    continue
-                seen_content.add(fingerprint)
+            # (Collapsed above, keyed on the text's hash, not on an embedding:
+            # the spec is explicit that deduplication must not use embeddings.)
             hits.append(Hit(
                 cid=cid, url=url, xpath=xpath,
                 score=float(score[row]), rank=float(ranks[row]),
