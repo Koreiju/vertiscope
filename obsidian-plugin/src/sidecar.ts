@@ -337,6 +337,12 @@ export class Sidecar {
    * something at that depth. `url` scopes to one shadow DOM; `coarse` false
    * ranks a merge group's members instead of the group.
    */
+  /** Tier 1 of a tiered search (G-210): the url nodes nearest the query. */
+  async searchPages(query: string, k = 12): Promise<{ pages: { url: string; score: number }[]; ms: number } | null> {
+    if (!query.trim()) return null;
+    return this.get<any>(`/search_pages?${new URLSearchParams({ q: query, k: String(k) }).toString()}`);
+  }
+
   async search(query: string, options: {
     k?: number; offset?: number; url?: string;
     coarse?: boolean; budget?: number;

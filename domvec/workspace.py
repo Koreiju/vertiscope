@@ -352,8 +352,13 @@ class Workspace:
         report: Optional[RenderReport] = None,
         title: str = "",
         defer: bool = False,
+        complete: bool = True,
     ) -> Tuple[List[MarkdownChunk], Dict[str, int]]:
         """Render, index and store one page's trie. The single write path.
+
+        `complete=False` writes the trie's chunks without retiring the page's
+        others: a page whose visit SAW more than its last DOM holds (a list
+        that recycles as it scrolls) keeps the union (G-216).
 
         Every caller — live scan, offline file, REPL re-scan — comes through
         here, so there is one place where a chunk gets its frequency row and
@@ -367,7 +372,7 @@ class Workspace:
             for node in trie.leaves() if node.address is not None
         ]
         return self.ingest_chunks(url, chunks, addresses, title=title,
-                                  root_hash=trie.root_hash, defer=defer)
+                                  root_hash=trie.root_hash, defer=defer, complete=complete)
 
     def ingest_chunks(
         self,

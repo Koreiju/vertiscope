@@ -60,7 +60,12 @@ export function holdStep(heldMs: number): number {
   return Math.min(100, Math.max(1, Math.floor(2 ** ((heldMs - 400) / 600))));
 }
 
-export interface FieldHit { cid: string; url: string }
+export interface FieldHit { cid: string; url: string; score?: number }
+/** The two tiers of a tiered search (G-210): url nodes, then each url's chunks. */
+export interface FieldTiers {
+  pages: (query: string, k: number) => Promise<{ url: string; score: number }[] | null>;
+  page: (query: string, url: string, k: number) => Promise<FieldAnswer | null>;
+}
 export interface FieldAnswer { hits: FieldHit[]; n: number }
 
 /** What a re-ranking changed, against the ranking shown (item 106). */
@@ -127,6 +132,63 @@ export class SearchField {
   private onClear: () => void;
   /** Told when the reader presses search: the web half (item 107). */
   onSubmit: (query: string) => void = () => {};
+  /** Tiered retrieval (G-210), when the host provides it. */
+  tiers: FieldTiers | null = null;
+  /** Planted: one ranking of every chunk, as before. */
+  plantSingleTier = false;
+  tierStats = { runs: 0, pages: 0, pages_done: 0, first_ms: 0, last_ms: 0, single_ms: 0 };
+
+  /**
+   * **Tiered retrieval** (2026-10-17, PLUGIN_GOAL 137/142: "retrieval new URL
+   * nodes and re-rank, then retrieve their containing chunks and re-rank,
+   * updating the current set of most recent retrieved chunks for all current
+   * URLs"). Tier 1 ranks the url nodes; tier 2 ranks each url's own chunks,
+   * three pages in flight, and after EVERY page the set retrieved so far is
+   * re-ranked by score and shown -- the readout and the 3D lights follow the
+   * most recent set (G-212) instead of waiting for one ranking of the corpus.
+   * `keepScroll` for an update while the query stands (item 106).
+   */
+  private async tiered(q: string, seq: number, keepScroll: boolean): Promise<FieldHit[] | null> {
+    const t0 = performance.now();
+    const tiers = this.tiers!;
+    const pages = await tiers.pages(q, Math.max(6, Math.min(40, Math.ceil(this.total / 6))));
+    if (seq !== this.seq || q !== this.input.value.trim()) return null;
+    if (!pages || !pages.length) return null;
+    this.tierStats.runs++; this.tierStats.pages = pages.length; this.tierStats.pages_done = 0; this.tierStats.first_ms = 0;
+    const per = Math.max(5, Math.ceil(this.total / pages.length) + 5);
+    const byCid = new Map<string, FieldHit>();
+    let first = true, matching = 0;
+    const apply = () => {
+      const now = [...byCid.values()].sort((a, b) => (b.score ?? 0) - (a.score ?? 0)).slice(0, this.total);
+      const left = this.scroller.scrollLeft;
+      this.hits = now;
+      this.matching = Math.max(matching, now.length);
+      this.paint();
+      this.scroller.scrollLeft = (first && !keepScroll) ? 0 : left;
+      first = false;
+      this.onScroll(true);
+    };
+    let next = 0;
+    const worker = async () => {
+      while (next < pages.length) {
+        const p = pages[next++];
+        const got = await tiers.page(q, p.url, per);
+        if (seq !== this.seq) return;
+        for (const h of got?.hits || []) {
+          const was = byCid.get(h.cid);
+          if (!was || (h.score ?? 0) > (was.score ?? 0)) byCid.set(h.cid, h);
+        }
+        matching += got?.n || 0;
+        this.tierStats.pages_done++;
+        if (!this.tierStats.first_ms) this.tierStats.first_ms = Math.round(performance.now() - t0);
+        apply();
+      }
+    };
+    await Promise.all([worker(), worker(), worker()]);
+    if (seq !== this.seq) return null;
+    this.tierStats.last_ms = Math.round(performance.now() - t0);
+    return this.hits;
+  }
 
   constructor(host: HTMLElement,
               ask: (query: string, total: number) => Promise<FieldAnswer | null>,
@@ -232,7 +294,13 @@ export class SearchField {
     }
     this.stats.queries++;
     const t0 = performance.now();
+    if (this.tiers && !this.plantSingleTier) {
+      const done = await this.tiered(q, seq, false);
+      if (seq !== this.seq) return;
+      if (done) { this.stats.answered++; this.stats.lastMs = Math.round(performance.now() - t0); return; }
+    }
     const got = await this.ask(q, this.total);
+    this.tierStats.single_ms = Math.round(performance.now() - t0);
     if (seq !== this.seq) return;                 // a newer query is in flight
     this.stats.lastMs = Math.round(performance.now() - t0);
     if (!got) return;
@@ -265,6 +333,17 @@ export class SearchField {
     const q = this.query;
     if (!q) return null;
     const seq = this.seq;
+    if (this.tiers && !this.plantSingleTier) {
+      // The update, tiered too: new url nodes retrieved and re-ranked, then
+      // their chunks -- the reader's scroll kept throughout.
+      const was = this.hits;
+      const done = await this.tiered(q, seq, true);
+      if (!done || seq !== this.seq || q !== this.query) return null;
+      const d = rankDiff(was, done);
+      this.stats.updates++;
+      if (d.added || d.removed || d.moved) { this.stats.changed++; this.stats.lastDiff = d; }
+      return d;
+    }
     const got = await this.ask(q, this.total);
     if (!got || seq !== this.seq || q !== this.query) return null;
     const now = got.hits.slice(0, this.total);

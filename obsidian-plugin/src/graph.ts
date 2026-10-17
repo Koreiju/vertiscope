@@ -473,6 +473,15 @@ export class GraphView extends ItemView {
     // The web half on the search BUTTON (and Enter) only -- typing never
     // reaches the browser cell (item 107).
     this.searchField.onSubmit = (q) => { this.searchStats.web_asked++; this.onWebSearch(q); this.followStore(q); };
+    // Tiered retrieval (G-210): url nodes first, then each url's chunks.
+    this.searchField.tiers = {
+      pages: async (q, k) => ((await this.sidecar.searchPages(q, k)) || { pages: null as any }).pages,
+      page: async (q, url, k) => {
+        const got: any = await this.sidecar.search(q, { k, url });
+        return got ? { hits: (got.hits || []).map((h: any) => ({ cid: String(h.cid), url: String(h.url || ""), score: Number(h.score) || 0 })),
+                       n: Number(got.n) || 0 } : null;
+      },
+    };
 
     const load = async () => {
       // Not over the force tree's caption: a retry every 3 s wrote

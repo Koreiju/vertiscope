@@ -196,11 +196,25 @@ class ThreeFormIndex:
             now = _time.perf_counter()
             ms[name] = round((now - _t) * 1000, 1)
             _t = now
-        lexical = self.freq.similarities(query)
-        lexical = _fit(lexical, rows)
-        _lap("lexical")
-
-        semantic, available = self._semantic(query, rows)
+        # The query's two factors over every row, memoised per QUERY: a tiered
+        # search asks one query scoped to page after page (G-210), and each
+        # scoped call recomputed both over all 62k rows only to mask to one
+        # page. A function of the query, the counts (`freq.version`) and the
+        # vectors (the matrix's size) -- named in the key, so a change in any
+        # recomputes (CLAUDE.md 5c).
+        emb_n = int(self.embeddings.matrix.shape[0]) if (self.embeddings is not None
+                                                          and self.embeddings.matrix is not None) else 0
+        fkey = (query, rows, getattr(self.freq, "version", 0), emb_n, id(self.embedder))
+        memo = getattr(self, "_factor_memo", None)
+        if memo is not None and memo[0] == fkey and not getattr(self, "plant_no_factor_memo", False):
+            lexical, semantic, available = memo[1]
+            ms["memo"] = 1
+        else:
+            lexical = self.freq.similarities(query)
+            lexical = _fit(lexical, rows)
+            _lap("lexical")
+            semantic, available = self._semantic(query, rows)
+            self._factor_memo = (fkey, (lexical, semantic, available))
         diag.semantic_available = available
         _lap("semantic")
 
@@ -255,9 +269,7 @@ class ThreeFormIndex:
         # page's own chunks, which is what "scoped" means.
         if scope_url:
             mask = np.zeros(rows, dtype=np.float32)
-            for row, meta in self._meta.items():
-                if meta and meta[1] == scope_url and 0 <= int(row) < rows:
-                    mask[int(row)] = 1.0
+            mask[self._rows_of_url(scope_url, rows)] = 1.0
             score = score * mask
 
         # **Package retrieval: a vector-centroid pre-filter, then partition-wise
@@ -443,6 +455,72 @@ class ThreeFormIndex:
                     mapping[i] = got
         self._emb_rows = (key, mapping)
         return mapping
+
+    def _rows_of_url(self, url: str, rows: int) -> np.ndarray:
+        """A url's frequency rows, from an index built once per content
+        change -- not a loop over every row per scoped search."""
+        key = (rows, len(self._meta), getattr(self.freq, "version", 0))
+        got = getattr(self, "_url_rows", None)
+        if got is None or got[0] != key:
+            by: Dict[str, List[int]] = {}
+            for row, meta in self._meta.items():
+                if meta and 0 <= int(row) < rows:
+                    by.setdefault(meta[1], []).append(int(row))
+            got = self._url_rows = (key, {u: np.asarray(r, dtype=np.int64) for u, r in by.items()})
+        return got[1].get(url, np.zeros(0, dtype=np.int64))
+
+    # -- tier 1: url nodes (G-210) ----------------------------------------
+    def page_centroids(self):
+        """Each url's semantic centroid: the normalised mean of its chunks'
+        unit vectors -- the url node a tiered search ranks first (2026-10-17,
+        PLUGIN_GOAL 137/142: "retrieval new URL nodes and re-rank, then
+        retrieve their containing chunks and re-rank"). Cached against both
+        matrices' sizes and the lexical version: content changing anywhere
+        changes one of the three."""
+        rows = len(self.freq.rows)
+        emb = self.embeddings.matrix if self.embeddings is not None else None
+        key = (rows, int(emb.shape[0]) if emb is not None else 0, getattr(self.freq, "version", 0))
+        got = getattr(self, "_page_cent", None)
+        if got is not None and got[0] == key:
+            return got[1], got[2]
+        if emb is None or not rows:
+            self._page_cent = (key, [], np.zeros((0, 0), dtype=np.float32))
+            return [], self._page_cent[2]
+        emb_rows = self._embedding_rows(rows)
+        url_of_row = {}
+        for row, meta in self._meta.items():
+            if meta and 0 <= int(row) < rows and emb_rows[int(row)] >= 0 and meta[1]:
+                url_of_row[int(row)] = meta[1]
+        urls = sorted(set(url_of_row.values()))
+        index = {u: i for i, u in enumerate(urls)}
+        if not urls:
+            self._page_cent = (key, [], np.zeros((0, emb.shape[1]), dtype=np.float32))
+            return [], self._page_cent[2]
+        sel = np.fromiter(url_of_row.keys(), dtype=np.int64)
+        which = np.fromiter((index[url_of_row[int(r)]] for r in sel), dtype=np.int64)
+        vecs = np.asarray(emb[emb_rows[sel]], dtype=np.float32)
+        norms = np.linalg.norm(vecs, axis=1, keepdims=True)
+        vecs = vecs / np.maximum(norms, 1e-9)
+        cent = np.zeros((len(urls), emb.shape[1]), dtype=np.float32)
+        np.add.at(cent, which, vecs)
+        cent /= np.maximum(np.linalg.norm(cent, axis=1, keepdims=True), 1e-9)
+        self._page_cent = (key, urls, cent)
+        return urls, cent
+
+    def search_pages(self, query: str, k: int = 10) -> List[Tuple[str, float]]:
+        """Tier 1: the url nodes nearest the query, by their centroid -- one
+        query embedding and one product over the pages, not a ranking of
+        every chunk."""
+        if self.embeddings is None or self.embedder is None:
+            return []
+        urls, cent = self.page_centroids()
+        if not urls:
+            return []
+        qv = np.asarray(self.embedder.embed_query(query), dtype=np.float32).ravel()
+        qv = qv / max(float(np.linalg.norm(qv)), 1e-9)
+        sims = cent @ qv
+        top = np.argsort(-sims)[:max(1, int(k))]
+        return [(urls[int(i)], float(sims[int(i)])) for i in top]
 
     # -- navigation --------------------------------------------------------
     def addresses_for(self, cid: str):

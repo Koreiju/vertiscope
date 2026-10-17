@@ -33,3 +33,10 @@ test("the latest content of a rewritten chunk wins", () => {
   const m = mergePayloads([{ chunks: [{ id: 5, v: "old" }] }, { chunks: [{ id: 5, v: "new" }] }]);
   assert.deepEqual(m.chunks, [{ id: 5, v: "new" }]);
 });
+
+import { removesCarried } from "../src/mergepayloads.ts";
+test("a drain removing what a queued job carries is not merged into it", () => {
+  assert.equal(removesCarried({ removed: [3] }, { chunks: [{ id: 3 }] }), true);
+  assert.equal(removesCarried({ removed: [4] }, { chunks: [{ id: 3 }] }), false);
+  assert.equal(removesCarried({ removed: [] }, { chunks: [{ id: 3 }] }), false);
+});

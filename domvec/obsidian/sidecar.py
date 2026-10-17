@@ -461,6 +461,14 @@ _DIFF_LOCK = threading.Lock()
 #: What a retired cid does to the store: "delete" (today's semantics, the
 #: same thing a settle does) -- Q.002 may make it "mark".
 RETIRE = "delete"
+#: **Within one visit the page is every unique chunk it showed** (Q.002 for
+#: a visit, ruled 2026-10-17 by the reader's "track the full set of unique
+#: chunks" / "persist chunk streams no matter how fast"). A chunk that drops
+#: out of the render -- archive.org's list recycles as it scrolls -- is KEPT
+#: (`session["kept"]`), not deleted; only a RENAMED chunk (the same markdown
+#: at a new address, one content) retires. The settle then writes its trie
+#: without retiring what the visit kept. Planted: the old in-session delete.
+_PLANT_RETIRE_IN_SESSION = [False]
 
 
 def _digest(markdown: str) -> str:
@@ -1949,9 +1957,12 @@ class _Handler(BaseHTTPRequestHandler):
                                      "skipped": sdiff["skipped"]})
                     return
                 if spine.trie is not None and len(spine.trie):
+                    # The visit kept chunks its last DOM no longer holds: the
+                    # settle adds the trie and retires none of them (G-216).
+                    union = bool(session.get("kept")) and not _PLANT_RETIRE_IN_SESSION[0]
                     with _WORK_LOCK:
                         self.workspace.ingest(
-                            url, spine.trie, title=(body.get("title") or ""))
+                            url, spine.trie, title=(body.get("title") or ""), complete=not union)
                     _forget_controls(url)
                 # Durability is the checkpoint thread's (`_checkpoint_forever`):
                 # on this 32 GB store a checkpoint took 10-19 s, and run here
@@ -2023,6 +2034,14 @@ class _Handler(BaseHTTPRequestHandler):
             mark = time.perf_counter()
             diff = _page_diff(session, url, passno, update.all_chunks, dirty)
             retired = list(diff["retired"]) if diff and RETIRE == "delete" else []
+            if diff and not _PLANT_RETIRE_IN_SESSION[0]:
+                renamed_old = set((diff.get("renamed") or {}).keys())
+                kept = [c for c in retired if c not in renamed_old]
+                if kept:
+                    session.setdefault("kept", set()).update(kept)
+                retired = [c for c in retired if c in renamed_old]
+                diff["retired"] = list(retired)
+                diff["kept"] = kept
             phases["diff"] = round((time.perf_counter() - mark) * 1000, 1)
             mark = time.perf_counter()
 
@@ -2546,6 +2565,23 @@ class _Handler(BaseHTTPRequestHandler):
         # search-based probes reported nothing wrong.
         # The sidecar's half of the pipeline profile, from its own clock.
         # `?reset=1` empties the rings so a run measures only itself.
+        if segments[0] == "search_pages":
+            # Tier 1 of a tiered search (G-210): the url nodes nearest the
+            # query; tier 2 is `/search?url=` per page, asked by the plugin.
+            params = parse_qs(parts.query)
+            query = (params.get("q") or [""])[0]
+            try:
+                k = max(1, min(int((params.get("k") or ["12"])[0]), 200))
+            except ValueError:
+                k = 12
+            t0 = time.perf_counter()
+            index = getattr(self.workspace, "index", None)
+            pages = index.search_pages(query, k) if (query and index is not None
+                                                    and hasattr(index, "search_pages")) else []
+            self._send(200, {"query": query, "pages": [{"url": u, "score": round(sc, 5)} for u, sc in pages],
+                             "ms": round((time.perf_counter() - t0) * 1000, 1)})
+            return
+
         if segments[0] == "checkpointing":
             # Never the store, never the work lock: answerable mid-checkpoint.
             self._send(200, {"checkpointing": bool(_CHECKPOINTING[0]),

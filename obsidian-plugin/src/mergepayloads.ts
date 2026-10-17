@@ -35,3 +35,12 @@ export function mergePayloads(ps: any[]): any {
   delete out.boxes; delete out.pictures; delete out.inpage;
   return out;
 }
+
+/** Does `later` remove any chunk `earlier` still carries? Then merging the
+ *  two would cancel that content before the store ever saw it (G-216). */
+export function removesCarried(later: any, earlier: any): boolean {
+  const gone = (later && later.removed) || [];
+  if (!gone.length || !earlier) return false;
+  const carried = new Set(((earlier.chunks || []) as any[]).map((c) => String(c.id)));
+  return gone.some((r: any) => carried.has(String(r)));
+}

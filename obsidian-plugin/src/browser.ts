@@ -27,7 +27,7 @@
  * that has never seen the site (`G-40`).
  */
 
-import { mergePayloads } from "./mergepayloads";
+import { mergePayloads, removesCarried } from "./mergepayloads";
 export { mergePayloads };
 import { addressTarget } from "./address";
 import { isolate } from "./isolate";
@@ -1424,7 +1424,7 @@ export class BrowserView extends ItemView {
   /** A grey (streamed, not yet stored) chunk's markdown, from its drain
    *  (PLUGIN_GOAL 125): the panel shows it at once, marked provisional. */
   forcePayload(id: string): any | null {
-    const m = /^f:(.*)#\d+$/.exec(id || "");
+    const m = /^f:(.*)#\d+(?:\.\d+)?$/.exec(id || "");
     if (!m || this.plant.has("no-force-panel")) return null;
     const tree = this.forceTrees.get(m[1]);
     const text = tree ? tree.linesOf(id) : null;
@@ -2433,6 +2433,11 @@ export class BrowserView extends ItemView {
     for (let i = this.captureQueue.length - 1; i >= 0; i--) {
       if (this.captureQueue[i].url === url) { into = this.captureQueue[i].settle ? -1 : i; break; }
     }
+    // Never merged across a REMOVAL of what the queued job still carries:
+    // merged, the two cancel and the store never sees that content -- a
+    // tile shown and recycled between two captures (G-216: the page is
+    // every chunk it showed). Queued after it instead.
+    if (into >= 0 && removesCarried(payload, this.captureQueue[into].payload)) into = -1;
     if (into >= 0 && !this.plant.has("no-enqueue-merge")) {
       const j = this.captureQueue[into];
       this.captureQueue[into] = { ...j, payload: mergePayloads([j.payload, payload]),
@@ -2653,6 +2658,7 @@ export class BrowserView extends ItemView {
             const c = this.captureQueue[i];
             if (c.url !== job.url) { i++; continue; }
             if (c.settle) break;
+            if (removesCarried(c.payload, mergePayloads([job, ...ride].map((j) => j.payload)))) break;
             ride.push(this.captureQueue.splice(i, 1)[0]);
           }
           if (ride.length) {

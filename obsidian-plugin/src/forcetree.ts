@@ -95,7 +95,9 @@ export class ForceTree {
 
   /** A live chunk's line texts by its node id, or null (gone, or a branch). */
   linesOf(id: string): string[] | null {
-    const m = /#(\d+)$/.exec(id || "");
+    const r = this.retained.get(id);
+    if (r) return r.text || null;
+    const m = /#(\d+)(?:\.\d+)?$/.exec(id || "");
     const h = m ? this.chunks.get(Number(m[1])) : undefined;
     return h && h.id === id && h.text ? h.text : null;
   }
@@ -159,7 +161,40 @@ export class ForceTree {
   constructor(url: string) { this.url = url; }
 
   static pageId(url: string): string { return `f:${url}`; }
-  nodeId(sensorId: number): string { return `f:${this.url}#${sensorId}`; }
+  /** A sensor id's node: generation 0 is `#sid`, a reused element's later
+   *  contents `#sid.g` -- each distinct content its own node (G-216). */
+  nodeId(sensorId: number): string {
+    const g = this.gen.get(sensorId) || 0;
+    return g ? `f:${this.url}#${sensorId}.${g}` : `f:${this.url}#${sensorId}`;
+  }
+  private gen = new Map<number, number>();
+
+  /**
+   * **The page is every unique chunk seen, not the last DOM** (G-216,
+   * 2026-10-17: "track the full set of unique chunks"; "archive still not
+   * registering correctly"). archive.org's result list recycles itself as it
+   * scrolls -- in 15 s, 698 chunks removed and 544 rewritten in place -- so a
+   * tile scrolled past vanished from the graph and a reused element
+   * overwrote the tile it had held. Bluesky's feed does the same ("nodes
+   * scanned temporarily are disappearing"). A chunk the page removes is
+   * RETAINED: its node stays, re-hung from the page root (its place in the
+   * DOM is gone). A reused element's new content is a new node and the old
+   * content is retained. Retained content seen again elsewhere is dropped, so
+   * each content keeps one node. Planted: `plantDropRemoved`, as before.
+   */
+  static plantDropRemoved = false;
+  private retained = new Map<string, Held>();
+  private retainedByText = new Map<string, string>();
+  retainStats = { retained: 0, recycled: 0, revived: 0 };
+  retainedCount(): number { return this.retained.size; }
+  private retain(h: Held, delta: ForceNodeDelta): void {
+    this.retained.set(h.id, h);
+    const key = (h.text || []).join("\n");
+    if (key) this.retainedByText.set(key, h.id);
+    const page = ForceTree.pageId(this.url);
+    if (h.parent !== page) { h.parent = page; delta.reparented.push({ id: h.id, parent: page }); }
+    this.retainStats.retained++;
+  }
 
   get size(): number { return this.chunks.size; }
 
@@ -256,18 +291,37 @@ export class ForceTree {
       const h = this.chunks.get(Number(rid));
       if (!h) continue;
       this.chunks.delete(Number(rid));
-      delta.removed.push(h.id);
       moved.push(h.address);
+      if (ForceTree.plantDropRemoved) delta.removed.push(h.id);
+      else this.retain(h, delta);
     }
     const fresh: number[] = [...adopted];
     for (const c of payload?.chunks || []) {
       const sid = Number(c.id);
       const { address, title } = this.address(c.lines || []);
-      const had = this.chunks.get(sid);
+      let had = this.chunks.get(sid);
       const digest = Number(c.digest) || 0;
+      const text = (c.lines || []).map((l: any) => String((l && l[1]) || ""));
+      // A reused element now holding DIFFERENT content: the old content is
+      // retained under its own node; the new content is a new node.
+      if (had && had.digest !== digest && !ForceTree.plantDropRemoved
+          && (had.text || []).join("\n") !== text.join("\n")) {
+        this.retain(had, delta);
+        this.gen.set(sid, (this.gen.get(sid) || 0) + 1);
+        this.retainStats.recycled++;
+        had = undefined;
+      }
+      // Content retained earlier and live again: one node per content.
+      const tkey = text.join("\n");
+      const back = tkey ? this.retainedByText.get(tkey) : undefined;
+      if (back && !had) {
+        this.retained.delete(back); this.retainedByText.delete(tkey);
+        delta.removed.push(back);
+        this.retainStats.revived++;
+      }
       const held: Held = { id: this.nodeId(sid), address, title,
                            lines: (c.lines || []).length, parent: had ? had.parent : "",
-                           digest, text: (c.lines || []).map((l: any) => String((l && l[1]) || "")) };
+                           digest, text };
       this.chunks.set(sid, held);
       if (!had) { fresh.push(sid); moved.push(address); }
       else {
