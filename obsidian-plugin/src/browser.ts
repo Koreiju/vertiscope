@@ -1875,7 +1875,7 @@ export class BrowserView extends ItemView {
       const left = this.session;
       this.session = "";
       if (left) {
-        this.onLeaving(left);
+        if (this.plant.has("drop-on-leave")) this.onLeaving(left);    // kept until settled (item 130)
         await this.settleQueued(left);
         if (this.session !== left) this.onLeft(left);
       }
@@ -1937,10 +1937,15 @@ export class BrowserView extends ItemView {
     // the page left behind is settled, not after: the next page's 3D used to
     // wait behind that settle, 6 s after a large page (S-3).
     void this.placeWholePage(url);
-    // The page left behind: its pending diff is not the reader's any more --
-    // drawn now it would hang in the graph until the settle is done (B-tree's
-    // 401 force nodes did, for the length of a long settle).
-    if (leaving) this.onLeaving(leaving);
+    // The page left behind KEEPS its grey nodes until its settle has stored
+    // them and they fold into its page node (`onLeft` below). Dropped here,
+    // at the moment of leaving, a fast reader lost every page's diff before
+    // it was stored or drawn (2026-10-17, PLUGIN_GOAL 130: "persist rendering
+    // on grey nodes streamed as diffs a few seconds ago on one page while the
+    // same thing happens on successive pages"). It replaces the drop made for
+    // B-tree's 401 nodes hanging through a long settle. Planted:
+    // `drop-on-leave`, as before.
+    if (leaving && this.plant.has("drop-on-leave")) this.onLeaving(leaving);
     if (leaving) {
       // The page left behind settles AFTER the new page's first capture
       // (D-35). A settle re-ingests the whole page under the store's lock;

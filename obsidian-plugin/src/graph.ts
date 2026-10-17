@@ -4245,8 +4245,14 @@ export class GraphView extends ItemView {
     // fourteen times too big, a pile of overlapping orbs (2026-10-12).
     const sized = one ? { val: this.unitVal() } : n;
     if (src) {
+      // A REVEALED picture -- under the pointer, hovered, its panel open --
+      // is presented at its own panel scale. At the one size it was half a
+      // world unit, about a pixel: in chunk view a hover showed no image at
+      // all (2026-10-17: "hovering over nodes shows no image overlays in the
+      // chunk view"). Unrevealed, it stays the one-size orb below.
+      const shown = this.detail.has(n) || n.hovered || this.billboards.has(n.id);
       // Pictures too: a page's favicon is most of the colour in url view.
-      const half = billboardEdge(sized, relSize) / 2 * this.nodeScale;
+      const half = billboardEdge(shown && !this.plantTinyReveal ? n : sized, relSize) / 2 * this.nodeScale;
       // Pictures near the pointer's ray only (`refreshDetail`); elsewhere the
       // same size, as its colour -- so the collider, the pick proxy and the
       // drawn extent never change with where the mouse is.
@@ -4265,6 +4271,8 @@ export class GraphView extends ItemView {
     return { half: Math.cbrt(Math.max(sized.val ?? 1, 1e-9)) * relSize * this.nodeScale, translucent: false, alpha: 1,
              color: n.hovered ? "#ffffff" : (n.color || "#9aa0a6") };
   }
+  /** Planted: a revealed picture at the one size (the invisible hover image). */
+  plantTinyReveal = false;
   /** Spheres drawn this much larger by default (2026-10-12, PLUGIN_GOAL 115:
    *  "the nodes could be a little larger/brighter by default"). */
   nodeScale = 1.25;

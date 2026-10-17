@@ -3382,6 +3382,37 @@ light -- emitted brightness, not only the glass lens's reflections.*
 writing alpha onto the transparent canvas; fixed, the glow widened and made
 mostly diffuse, the background black.)*
 
+> hovering over nodes shows no image overlays in the chunk view, but the light
+> distributions are much better.
+
+> i think the hovered node images should occlude other light sources so that
+> we can see the presented node images without the light-source occlusion
+
+*Read as (2026-10-17): (135) in chunk view a hovered node presents its picture
+at a size a reader can see (it was drawn at the one orb size, about a pixel,
+and pending in the atlas); a presented picture covers the glow of nodes
+around and in front of it.*
+
+> we should add the same glowing effect as the default for retrieval
+> renderings. retrieval takes quite a long time so perhaps we could try tiered
+> retrieval on url nodes that are most similar first and then per-node
+> sub-chunk re-ranking for later url nodes in the retrieval readout. also, the
+> way our result {k}/{n} modifiable fields are all out of whack (they don't
+> work for updates right, don't exceed a 50 result limit to cover the full set
+> of retrieved results, and the numerator and denominator are mixed up).
+> perhaps since we use a tiered result system here too, we modify updates on
+> the 3D graph according to most recent re-ranked set over the URL
+> similarities.
+
+*Read as (2026-10-17): (136) a search's rendering uses the same glow as the
+default view. (137) tiered retrieval: rank url nodes first (most similar
+pages), then re-rank each page's chunks, page by page, into the readout --
+the first results land fast, later pages refine. (138) the k/n fields: k the
+results shown (numerator), n the results retrieved (denominator), editable
+updates that take effect, no 50 cap -- n reaches the full retrieved set.
+(139) the 3D graph follows the most recent re-ranked set over the url
+similarities, tier by tier.*
+
 *Where (131) meets "Keep current layout" (asked minutes earlier, about the
 quantile spread, containment and depth compression): (131) replaces the
 collision drift and, by the reader's "exact to the original UMAP

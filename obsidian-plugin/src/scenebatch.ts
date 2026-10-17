@@ -44,7 +44,10 @@ void main() {
   vUv = iUv;
   vec4 mv = modelViewMatrix * vec4(iOffset, 1.0);
   // Camera-facing: the quad's corners are laid out in VIEW space.
-  mv.xy += position.xy * iSize * uZoom;
+  // A PICTURE keeps its size at every zoom: it is being presented (2026-10-17:
+  // "hovering over nodes shows no image overlays in the chunk view"); only
+  // orbs (iUv.z < 0) draw smaller at full view (G-206).
+  mv.xy += position.xy * iSize * (iUv.z < 0.0 ? uZoom : 1.0);
   gl_Position = projectionMatrix * mv;
 }`;
 
@@ -326,7 +329,11 @@ export class SceneBatch {
     });
     const m = new THREE.Mesh(this.glass.geo, mat);
     m.frustumCulled = false;
-    m.renderOrder = 4;
+    // FIRST, before every node: a picture drawn after it covers the light it
+    // added -- a presented image is not washed out by glows around or in
+    // front of it (2026-10-17: "the hovered node images should occlude other
+    // light sources"). The glass orbs, drawn later, sit over their own glow.
+    m.renderOrder = 0;
     (m as any).__batch = true;
     m.raycast = () => {};
     return m;
