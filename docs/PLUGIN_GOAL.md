@@ -3446,6 +3446,30 @@ chunks and re-rank them, the current set replaced by the most recent ranks for
 all current urls -- streamed adaptively; a diff (what streamed into the store)
 feeds the next url and chunk re-rank, it is not itself the update.*
 
+> panel fly to and right click on hovers doesn't function on the toggle
+
+*Read as (2026-10-17): (143) the G-196 toggle must govern the hover the
+reader actually makes -- the browser cell's chunk overlays -- not only the 3D
+pointer: in right-click mode a hover flies without opening a panel, and a
+right-click on the hovered chunk opens it.*
+
+> also, scrolling over archive org still throws tons of chunk leakage because
+> nested shadow nodes keep mutating older data in-place, but we need to
+> robustly queue/diff/and track the full set of unique chunks so we don't
+> have to wait for processes to complete. this might go along with the async
+> test/rendering streaming to panels prior to vectorization. The main point
+> should be that we ensure that we stream chunk diffs and update robustly for
+> the edge case of scrolling over archive. We also need to ensure that the
+> streamed diffs don't pipe-out because of constant mutation updates. ensure
+> to work this in with the rest of the things still open.
+
+*Read as (2026-10-17): (144) on archive.org, nested shadow roots rewrite
+already-seen content in place while the reader scrolls; the stream must keep
+the full set of UNIQUE chunks -- queued, diffed and tracked by identity -- so
+an in-place rewrite updates its chunk instead of leaking a new one, nothing
+waits on a slower stage to finish, and constant mutation never stalls or
+floods the diff stream (it must not "pipe out").*
+
 *Where (131) meets "Keep current layout" (asked minutes earlier, about the
 quantile spread, containment and depth compression): (131) replaces the
 collision drift and, by the reader's "exact to the original UMAP
