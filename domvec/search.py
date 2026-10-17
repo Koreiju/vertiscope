@@ -85,6 +85,9 @@ class SearchDiagnostics:
     #: ~1 s whether ranking the corpus or one page).
     ms: Optional[dict] = None
     select_reads: int = 0
+    #: The chunks the selection read, by cid -- handed on so the caller does
+    #: not read them again.
+    read_chunks: Optional[dict] = None
 
     def summary(self) -> Dict[str, object]:
         return {
@@ -312,6 +315,9 @@ class ThreeFormIndex:
                     (self._meta.get(int(r)) or (self.freq.rows[int(r)],))[0] for r in ahead if score[r] > 0])
                 block_end = pos + len(ahead)
                 diag.select_reads += 1
+                if diag.read_chunks is None:
+                    diag.read_chunks = {}
+                diag.read_chunks.update(block)
             if need:
                 stored = block.get(cid) if hasattr(self.store, "chunks_many") else self.store.chunk(cid)
                 if not hasattr(self.store, "chunks_many"):

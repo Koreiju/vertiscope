@@ -1403,6 +1403,8 @@ class GraphStore:
             found[r[0]] = (chunk, vector)
         return [(cid,) + found.get(cid, (None, None)) for cid in cids]
 
+    _MANY_LOOKUP_UP_TO = 200
+
     def chunks_many(self, cids: Sequence[str]) -> Dict[str, StoredChunk]:
         """Several chunks in one read: a lookup per cid below
         `_PLACEMENT_SCAN_AT`, one scan above (measured flat at ~20 ms where
@@ -1412,7 +1414,10 @@ class GraphStore:
         cids = [c for c in dict.fromkeys(cids) if c]
         if not cids:
             return {}
-        if len(cids) < self._PLACEMENT_SCAN_AT:
+        # Keyed lookups up to 200: the scan reads the whole Chunk table, markdown
+        # and all -- flat ~20 ms at 14k chunks, 0.9-3.3 s at 65k on the
+        # reader's store (2026-10-17), against ~1-2 ms a keyed lookup.
+        if len(cids) <= self._MANY_LOOKUP_UP_TO:
             return {c: ch for c in cids for ch in [self.chunk(c)] if ch is not None}
         rows = self._rows(
             "MATCH (c:Chunk) WHERE list_contains($cids, c.cid) RETURN c.cid, c.url, c.xpath, "

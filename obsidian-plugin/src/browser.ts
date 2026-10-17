@@ -180,6 +180,8 @@ interface CaptureJob {
   queuedAt?: number;
   /** Traces of the drains merged into this one capture. */
   merged?: any[];
+  /** Times this capture was tried and got no reply (re-queued, never dropped). */
+  attempts?: number;
 }
 
 
@@ -2629,6 +2631,8 @@ export class BrowserView extends ItemView {
   get captureBacklog(): number { return this.captureQueue.length; }
   /** Drains folded into an already-queued job of their page (G-217). */
   enqueueMerged = 0;
+  /** Captures re-queued after no reply or a retryable refusal. */
+  captureRetries = 0;
 
   /**
    * Send queued captures one at a time. The CURRENT page's go first; any
@@ -2718,6 +2722,20 @@ export class BrowserView extends ItemView {
       if (reply) prof.sidecar(trace, reply.phases, reply.ms, captureMs);
       if (!reply || reply.error) {
         if (reply && (reply as any).resync && !this.plant.has("no-resync")) { void this.resyncSensor(); return; }
+        // No reply (the sidecar restarting, busy, down) or a refusal asking
+        // for a retry: the capture goes BACK to the front of the queue, never
+        // dropped (2026-10-17: "persist chunk streams no matter how fast") --
+        // a failed capture was simply returned from, and its drains lost.
+        // Kept trying for up to 15 minutes, backing off to 5 s.
+        if ((!reply || (reply as any).retry) && !this.plant.has("drop-failed-capture")) {
+          job.attempts = (job.attempts || 0) + 1;
+          if (performance.now() - (job.queuedAt || performance.now()) < 15 * 60 * 1000) {
+            this.captureRetries++;
+            await new Promise((r) => window.setTimeout(r, Math.min(5000, 400 * job.attempts!)));
+            this.captureQueue.unshift(job);
+            return;
+          }
+        }
         this.say(`capture: ${reply ? reply.error : "no reply"}`);
         return;
       }

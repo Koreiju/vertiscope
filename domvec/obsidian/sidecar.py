@@ -29,6 +29,7 @@ a handle on it.
 from __future__ import annotations
 
 import json
+import os
 import re
 import threading
 from pathlib import Path
@@ -196,6 +197,11 @@ _PLANT_REQUEST_QUIET = [False]
 #: 8 MB" was taken to mean "safe". `/checkpointing` answers without touching
 #: the store, and the restart tools refuse while this is set.
 _CHECKPOINTING = [False]
+#: Set by POST /shutdown: writes are refused (retry) while the work lock is
+#: taken, then the process exits for its supervisor to restart. A killed
+#: process interrupted a capture's transaction (2026-10-17 19:35: an anchor
+#: DELETE, rolled back on replay) -- the restart now waits for the work.
+_SHUTTING = [False]
 
 
 def _checkpoint_due(size: int, now: float, last_write: float, last_request: float) -> bool:
@@ -1010,7 +1016,14 @@ def search_payload(workspace, query: str, k: int = 8, *,
     # One read for every hit (it was one query per hit, after the ranking had
     # already read them all once: 9-10 s cold, 2026-10-17).
     many = getattr(workspace.store, "chunks_many", None)
-    got = many([getattr(h, "cid", None) or getattr(h, "chunk", "") for h in hits]) if many else None
+    # The ranking already read these to collapse duplicates: reused, not read
+    # again (shape was 1.2-2.2 s of every search on 65k chunks, 2026-10-17).
+    got = dict(getattr(diag, "read_chunks", None) or {})
+    need = [c for c in (getattr(h, "cid", None) or getattr(h, "chunk", "") for h in hits) if c and c not in got]
+    if need and many:
+        got.update(many(need))
+    elif need:
+        got = None
     for hit in hits:
         cid = getattr(hit, "cid", None) or getattr(hit, "chunk", "")
         stored = (got.get(cid) if got is not None else workspace.store.chunk(cid)) if cid else None
@@ -1156,6 +1169,25 @@ class _Handler(BaseHTTPRequestHandler):
         _LAST_REQUEST[0] = time.time()
         parts = urlsplit(self.path)
         route = parts.path.strip("/")
+        if route == "shutdown":
+            if self.client_address[0] not in ("127.0.0.1", "::1"):
+                self._send(403, {"error": "loopback only"})
+                return
+            _SHUTTING[0] = True
+            asked = time.time()
+
+            def _exit_when_idle():
+                # Every capture, embed batch, settle and checkpoint in flight
+                # holds the work lock: taking it means none is mid-write.
+                with _WORK_LOCK:
+                    _profile("shutdown", {"waited_s": round(time.time() - asked, 1)})
+                    os._exit(0)
+            threading.Thread(target=_exit_when_idle, daemon=True).start()
+            self._send(200, {"shutting_down": True, "waits_for": "the work lock"})
+            return
+        if _SHUTTING[0]:
+            self._send(503, {"error": "shutting down", "retry": True})
+            return
         if route == "chunk_preview":
             self._post_chunk_preview()
             return

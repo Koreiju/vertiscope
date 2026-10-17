@@ -21,7 +21,8 @@ def test_many_equals_one_by_one(tmp_path):
     chunks = [_chunk(i) for i in range(20)]
     store.ingest(URL, [(c.lines[0].address, c.lines[0].text, "") for c in chunks], chunks, complete=False)
     cids = [c.cid for c in chunks]
-    for want in (cids[:5], cids):                       # below and above the scan threshold
+    store._MANY_LOOKUP_UP_TO = 10                       # so 20 cids take the scan
+    for want in (cids[:5], cids):                       # keyed lookups, then the scan
         got = store.chunks_many(want + ["0000dead0000beef"])
         assert set(got) == set(want)
         for cid in want:
