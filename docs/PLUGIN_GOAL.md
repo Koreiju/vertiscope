@@ -3470,6 +3470,15 @@ an in-place rewrite updates its chunk instead of leaking a new one, nothing
 waits on a slower stage to finish, and constant mutation never stalls or
 floods the diff stream (it must not "pipe out").*
 
+> remember, we have to persist chunk streams no matter how fast interactions
+> are on the page. we also have a lot of lag in hovering to rendering which
+> tells me we haven't reached that phase of the task set yet
+
+*Read as (2026-10-17): (145) a chunk stream is never dropped, however fast the
+reader acts on the page (scrolls, navigations, hovers) -- the bound is on
+cost, never on what is kept; and the hover-to-panel latency is measured and
+brought down, phase by phase.*
+
 *Where (131) meets "Keep current layout" (asked minutes earlier, about the
 quantile spread, containment and depth compression): (131) replaces the
 collision drift and, by the reader's "exact to the original UMAP

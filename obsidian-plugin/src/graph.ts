@@ -2437,6 +2437,17 @@ export class GraphView extends ItemView {
     catch { return "flyto"; }
   })();
   panelModeStats = { hover_skipped: 0, right_opened: 0 };
+  /** A right-click over the browser on a hovered chunk (G-215): in
+   *  right-click mode its panel opens, as a hover's would in fly-to mode. */
+  rightPanel(cid: string, url: string, stored: string): void {
+    if (this.panelsOn !== "rightclick" || !this.graph) return;
+    const nodes = this.graph.graphData().nodes;
+    const target = (stored && nodes.find((n: any) => String(n.id) === stored))
+      || nodes.find((n: any) => String(n.id) === cid);
+    if (!target) return;
+    this.panelModeStats.right_opened++;
+    void this.openBillboard(target, false, true);
+  }
   setPanelsOn(mode: "flyto" | "rightclick"): void {
     this.panelsOn = mode;
     try { window.localStorage.setItem("domvec.panelsOn", mode); } catch { /* a convenience only */ }
@@ -2525,7 +2536,12 @@ export class GraphView extends ItemView {
   panelTimes = { first_paint: [] as number[], page_paint: [] as number[], close: [] as number[] };
   private payloadCache = new Map<string, { at: number; p: Promise<any> }>();
   /** A chunk's payload, shared by the hover prefetch and the panel (10 s). */
+  /** A grey node's provisional payload, from the browser's drain (G-198). */
+  forcePayloadFor: (id: string) => any = () => null;
   chunkPayload(cid: string): Promise<any> {
+    // A grey node: its streamed markdown, now -- never cached, it is still
+    // being rewritten (PLUGIN_GOAL 125).
+    if (String(cid).startsWith("f:")) return Promise.resolve(this.forcePayloadFor(cid));
     const now = performance.now();
     const hit = this.payloadCache.get(cid);
     // Held for a minute, not ten seconds: a chunk the stream rewrites is

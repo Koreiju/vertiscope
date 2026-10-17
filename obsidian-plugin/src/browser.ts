@@ -400,7 +400,10 @@ export class BrowserView extends ItemView {
     try {
       this.pipebox = new PipelineBox(this.browserWrap, this.sidecar,
                                      () => this.webview,
-                                     (cid, url, stored) => this.onHover(cid, url, stored));
+                                     (cid, url, stored) => {
+                                       this.lastHovered = cid ? { cid, url, stored: stored || "" } : null;
+                                       this.onHover(cid, url, stored);
+                                     });
       // Hover-first (`G-80`): the pointer is over something the store does
       // not hold yet, so drain now instead of on the next tick.
       this.pipebox.onUnresolved = () => { if (!this.draining) void this.tick(); };
@@ -544,6 +547,15 @@ export class BrowserView extends ItemView {
         return;
       }
       this.lastRight = { at: now, x, y };
+      // The chunk under the pointer, to the graph at once: in right-click
+      // mode its panel opens (G-215, 2026-10-17: "panel fly to and right
+      // click on hovers doesn't function on the toggle" -- only a 3D node's
+      // right-click was wired). The menu and the double right-click pin are
+      // unchanged.
+      if (this.lastHovered && !this.plant.has("no-browser-right")) {
+        const h = this.lastHovered;
+        this.onRightChunk(h.cid, h.url, h.stored || this.storedCidFor(h.cid, h.url));
+      }
       window.clearTimeout(this.menuTimer);
       this.menuTimer = window.setTimeout(() => this.contextMenu(p, x, y),
                                          BrowserView.DOUBLE_RIGHT_MS);
@@ -1407,6 +1419,20 @@ export class BrowserView extends ItemView {
   //: Told the plugin, which tells the projector (`G-38`). Brokered, like
   //  every other cross-pane signal here: neither pane may require the other.
   onHover: (cid: string, url: string, stored?: string) => void = () => {};
+  /** Told on a right-click over the page with the chunk last hovered (G-215). */
+  onRightChunk: (cid: string, url: string, stored: string) => void = () => {};
+  private lastHovered: { cid: string; url: string; stored: string } | null = null;
+
+  /** A grey (streamed, not yet stored) chunk's markdown, from its drain
+   *  (PLUGIN_GOAL 125): the panel shows it at once, marked provisional. */
+  forcePayload(id: string): any | null {
+    const m = /^f:(.*)#\d+$/.exec(id || "");
+    if (!m || this.plant.has("no-force-panel")) return null;
+    const tree = this.forceTrees.get(m[1]);
+    const text = tree ? tree.linesOf(id) : null;
+    if (!text || !text.length) return null;
+    return { cid: id, url: m[1], provisional: true, lines: text.map((t) => ({ text: t })) };
+  }
   /** The pipeline overlay; see `pipelinebox.ts`. */
   pipebox: PipelineBox | null = null;
   /** Why the overlay did not build, if it did not -- read by the harness. */

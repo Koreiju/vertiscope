@@ -56,6 +56,9 @@ export interface ForceNodeDelta {
 
 interface Held {
   id: string; address: string; title: string; lines: number; parent: string; digest: number;
+  /** The chunk's line texts as the drain delivered them: a grey node shows
+   *  its markdown at once, before any store or vector (PLUGIN_GOAL 125). */
+  text?: string[];
 }
 
 const SHADOW = "#shadow-root";
@@ -72,6 +75,13 @@ export class ForceTree {
   static plantFlat = false;
 
   branchId(address: string): string { return `f:${this.url}@${address}`; }
+
+  /** A live chunk's line texts by its node id, or null (gone, or a branch). */
+  linesOf(id: string): string[] | null {
+    const m = /#(\d+)$/.exec(id || "");
+    const h = m ? this.chunks.get(Number(m[1])) : undefined;
+    return h && h.id === id && h.text ? h.text : null;
+  }
 
   /**
    * The patricia trie over the held chunks' addresses (2026-10-06: "The
@@ -234,7 +244,7 @@ export class ForceTree {
       const digest = Number(c.digest) || 0;
       const held: Held = { id: this.nodeId(sid), address, title,
                            lines: (c.lines || []).length, parent: had ? had.parent : "",
-                           digest };
+                           digest, text: (c.lines || []).map((l: any) => String((l && l[1]) || "")) };
       this.chunks.set(sid, held);
       if (!had) { fresh.push(sid); moved.push(address); }
       else {
