@@ -3201,6 +3201,173 @@ the probes stopped -- "Stopped now"; live probing -- "Yes, when I'm idle
 ---
 
 
+## Addendum X, 2026-10-17 - the phased projection pipeline, registered camera, panels, the browser, and scaling instead of collisions
+
+*Asked (AskUserQuestion, 2026-10-17) after G-93 was measured: a new page's
+grey tree cannot know its place until the projector answers (0.6-2.3 s);
+"Accept one glide / Wait for placement / Fade, don't glide". The reader
+chose the first and went on, verbatim:*
+
+> accept one glide. please ensure we are following our phased pipeline here
+> where we get complete projections over the page (with debounce that is
+> time-synched to the adaptive expected latency on umap-cuda.update() calls
+> on the local url node's domain) as the first priority for all chunks that
+> are vectorized to the url. Then we get local and global updates as
+> mentioned, with similar adaptive latency debounces that inform themselves
+> by the O-complexity of the local projections, local updates, and global
+> updates. One other thing I'll point out here is that when we currently
+> call a re-fit on the full set of UMAP chunks, our camera snaps to the
+> 're-center view'. Perhaps we could apply efficient scale-aware ICP over the
+> URL nodes so that we render the 3D coordinates from their closest most
+> previous registered camera pose. That way, things are less 'snappy'. I'm
+> also going to point out here that hovering over the browser chunk bboxes
+> works very well, and we want to keep this reliable and functional part of
+> our pipeline. However, I notice a few things that I think should be
+> brought up as feature updates for our current framework:
+>
+> 1 Hovering over chunk overlays is good latency and responds quickly to the
+> rendered set of 3D billboard panels in their dual-view form. I'd maybe add
+> a toggle to switch on and off the panels always opening on fly-to nodes
+> and instead opening when a right-click action is made.
+>
+> 2 some images in the rendered chunk panels don't show up, usually on
+> recipe websites I think, a few of them we already have in our db and 3D
+> graph, I'd suggest hooking up some kind of MCP interface, such as the once
+> suggested later, for unified and efficient (slim-surface) graph-rag-web
+> interactions, with your own development tools extensions to check the
+> content-completeness on rendering to streamed interactive chunk diffs.
+>
+> 3 I'm wondering if we could get async streaming on markdown and rendered
+> shadow DOM chunk panels so that we can view the base-content
+> extracted/detected on the diff tree in just their markdown form as
+> grey-nodes, with shadow-DOM streaming adaptively at this stage of diff
+> streaming to the 3D graph. depending on when/where vectorization happens,
+> likely at the very end since it's complete to the content-set with minimal
+> diff updates there too if those are truly present in measurements (i.e.
+> latent interactions that might retrieve new DOM components over the
+> network), we can efficiently demarcate rendering requirements as preceding
+> the vectorization and thus projection pass.
+>
+> 4 Currently, interacting with scans on bluesky show that nodes scanned
+> temporarily are disappearing, and also right/left clicking on the url
+> nodes don't explode/collapse as I would anticipate for scanned nodes.
+> also, embedded media is missing. the nodes are registered, but the content
+> is missing.
+>
+> 5 there are two web-nav button-sets for going "back and forward". please
+> fix.
+>
+> 6 please add uBlock origin to our browser immediately
+>
+> 7 please default natural-text inputs to the web-browser url bar as
+> duckduckgo search inputs (no need to scroll)
+>
+> 8 for multi-url and fast navigations on the 3D diff stream and layout
+> phases, I notice some diffs disappear from the rendering/layout queue, so
+> please make sure that we are able to persist rendering on grey nodes
+> streamed as diffs a few seconds ago on one page while the same thing
+> happens on successive pages.
+>
+> I will also ask here about the various hidden details that accompany our
+> main UMAP phased pipeline like boundaries and collisions. In our work with
+> the antigravity session, we explore the idea of staying exact to the
+> original UMAP projections without applying drift-based adjustments to
+> collisions on nodes.
+>
+> Instead, we will take a different approach. We will apply an adaptive
+> scaling at our two different levels: the url-nodes and their chunk
+> contents. We will first apply scaling at the url node level to ensure that
+> the nodes, retaining their constant diameter size, are scaled up from an
+> intentionally-kept centroid computed directly from the chunk coordinates
+> that sets the url node placements (which I will also mention here should
+> be double or triple the size of the chunk nodes so that interacting with
+> page expansion/collapsing is more accessible, and this is also part of the
+> chunk-level 3D rescale from the URL node centroid origin in their relative
+> coordinate frame of reference). So, the adaptive scaling *expands* (in
+> most cases, contracts otherwise) as necessary such that the minimum
+> separation distance between the chunk coordinates are twice the chunk node
+> diameters. In cases where the minimum is higher, we scale down. Then, we
+> apply similar per-diameter scaling on the larger set of URL nodes, with
+> their own diameter and separation distance constants that accompany
+> expansion/contraction rules. We, of course, perform this about an
+> instantiated centroid node that represents the web browser as a minimal
+> MCP surface with at most one tool call over the set of largely web browser
+> interaction from a graph-RAG interface on the vectorized DB.
+>
+> We will take some time to design the MCP tool space more specifically, so
+> we'll keep the centroid as just a gauge-point placeholder for now until we
+> are ready to really dive in to how the node interacts with its web-data
+> interfaces through an interactive extension to graph RAG over the patricia
+> trie with vector retrieval aspects and more attention to detail on URL
+> domain and web tree navigation with chunk-based retrieval managed with
+> regular web interactions such as scrolls and click, so we essentially
+> simulate the rendered minimal interactive webpage from the perspective of
+> the graph RAG database. If I remember correctly, we have some clear
+> interaction policies for webpages on the side of our tool already, so in
+> theory, we could even differ the way the results are presented depending
+> on which level of graph RAG query is set, whether at the web, domain, or
+> in-page scopes. In any case, we organize and present chunk interactions as
+> atomic units that enable their own per-page navigations as well as
+> navigation over the rendered/retrieved set of rendered inter-web chunk
+> results, where direct interactions with each chunk are enabled by
+> selection and interactions. this will be important for proving out
+> complex interactions over a set of chunks from different URL domains
+> efficiently. Moreover, re-rendering surfaces at different levels of the
+> interactive retrieval artifact (i.e. at the per-chunk level and following
+> up on deeper navigation traces) could accompany page navigations such as
+> "back" and "forward". So, for going "up" to the results and "down" to
+> their per-page traces are different somewhat from going 'back and
+> forward', but effectively trace back to the origin of the retrieval
+> artifact when going "up" from per-page trace navigations, which themselves
+> stream and render on the interactive retrieval artifact as diffs.
+
+*Asked in the same question set (G-94): pages buried behind others are
+spaced fine in 3D and line up in depth inside site clusters; "Judge it in
+3D / Flatter depth / Smaller at full view". The reader: "Smaller at full
+view".*
+
+*Read as (2026-10-17), mine, to be decomposed in the PRD as G-193 on:*
+
+*(120) the phased projection pipeline, in priority order: first a COMPLETE
+projection of every vectorised chunk of the page, debounced to the measured
+latency of the local fit's update for that url's domain; then local and
+global updates, each debounced by its own measured cost (which scales with
+its size). (121) a full refit does not snap the camera to "recentre": the new
+url-node coordinates are registered onto the previous ones (scale-aware
+ICP / similarity Procrustes over the url nodes) and the camera keeps its
+pose in that registered frame. (122) keep: hovering a browser chunk box
+drives the 3D billboards with good latency. (123) a toggle: billboards open
+on fly-to (as now) or only on a right-click. (124) images missing from chunk
+panels (recipe sites), including ones the store and graph already hold; a
+development tool (MCP) that checks a rendered panel's content-completeness
+against the streamed chunk. (125) grey nodes show their markdown at once;
+the shadow-DOM panel streams in after; vectorisation and projection come
+last, so rendering never waits for them. (126) Bluesky: scanned nodes
+vanish; left/right clicks on a scanned page's url node do not unfold or
+fold it; embedded media missing though the nodes are registered. (127) one
+set of back/forward buttons, not two. (128) uBlock Origin in the browser
+cell. (129) natural text typed in the url bar searches DuckDuckGo. (130)
+fast multi-page navigation: grey nodes streamed seconds ago on one page
+persist while the next page streams. (131) layout geometry: no collision
+drift -- positions stay the UMAP's; instead an adaptive SCALE about each url
+node's chunk centroid so the minimum chunk separation is twice the chunk
+diameter (expand or contract), then the same over the url nodes about a
+browser centroid node with their own constants; url nodes 2-3x a chunk's
+size. (132) the browser centroid is a gauge-point placeholder for a future
+one-tool MCP graph-RAG surface (web / domain / in-page scopes, chunks as
+atomic interactive units, "up"/"down" between results and per-page traces
+distinct from back/forward) -- to be DESIGNED with the reader before built.
+(133) at full view (the whole corpus in frame) nodes draw smaller; full size
+when zoomed in.*
+
+*Where (131) meets "Keep current layout" (asked minutes earlier, about the
+quantile spread, containment and depth compression): (131) replaces the
+collision drift and, by the reader's "exact to the original UMAP
+projections", the containment pull; the spread and DEPTH are not named
+again and stay until the reader says otherwise.*
+
+---
+
 ## Standing instructions carried in the verbatim
 
 Two of these are process rules, not features, and they bind every future
