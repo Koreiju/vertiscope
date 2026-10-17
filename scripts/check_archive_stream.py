@@ -41,7 +41,10 @@ JS = r"""(async (url, planted, plantName) => {
   v.forceDelta = (d) => { if (d && d.url && d.url.includes("archive.org")) drains.push({ at: performance.now(), added: d.added.length,
       again: d.added.filter((a) => a.again).length, removed: d.removed.length }); return origFD(d); };
   const samples = [];
-  if (planted) b.plant.add(plantName);
+  if (planted && plantName === "drop-removed") window.__dvDropRemoved = true;
+  else if (planted) b.plant.add(plantName);
+  const FT = (b.forceTrees.values().next().value || {}).constructor;
+  if (window.__dvDropRemoved && FT) FT.plantDropRemoved = true;
   const trees0 = new Set(b.forceTrees.keys()), ip0 = { ...b.inPageStats };
   // A fresh visit each run, so the list starts at its first page.
   url = url + (url.includes("?") ? "&" : "?") + "probe=" + Date.now();
@@ -79,12 +82,16 @@ JS = r"""(async (url, planted, plantName) => {
         await sleep(300);
       }
     }
+    const tEnd = b.forceTrees.get(b.session);
+    const greyDrawn = v.graph.graphData().nodes.filter((n) => n.force && n.url === b.session && n.level !== "page" && n.level !== "path").length;
     const trees = [...b.forceTrees.keys()].filter((u) => !trees0.has(u) && u.includes("archive.org"));
     return JSON.stringify({ samples, drains, after, lat, mode: v.panelsOn, dwell: v.hoverDwellMs, hoverStats: v.hoverStats,
                             trees: trees.length, inpage: { same_doc: b.inPageStats.same_doc - ip0.same_doc, new_page: b.inPageStats.new_page - ip0.new_page },
-                            session: b.session.slice(0, 90), enqueue_merged: b.enqueueMerged });
+                            session: b.session.slice(0, 90), enqueue_merged: b.enqueueMerged,
+                            grey_drawn: greyDrawn, retained: tEnd ? tEnd.retainedCount() : null, retain_stats: tEnd ? tEnd.retainStats : null });
   } finally {
     b.plant.delete(plantName);
+    if (FT) FT.plantDropRemoved = false; window.__dvDropRemoved = false;
     v.forceDelta = origFD;
     if (start && start.startsWith("http") && !start.includes("archive.org")) b.go(start);
   }
@@ -98,5 +105,6 @@ print(json.dumps({
     "push_queue_max": max((s["push"] for s in S), default=0), "capture_backlog_max": max((s["captures"] for s in S), default=0),
     "capture_backlog_end": S[-1]["captures"] if S else None,
     "live_chunks_end": r["after"]["chunks"], "dup_text_end": r["after"]["dupText"], "dup_text_max": max((s["dupText"] for s in S), default=0),
-    "planted": PLANT if PLANTED else False, "enqueue_merged": r.get("enqueue_merged"), "trees": r["trees"], "inpage": r["inpage"], "session": r["session"],
+    "planted": PLANT if PLANTED else False, "enqueue_merged": r.get("enqueue_merged"),
+    "grey_drawn_end": r.get("grey_drawn"), "retained_end": r.get("retained"), "retain_stats": r.get("retain_stats"), "trees": r["trees"], "inpage": r["inpage"], "session": r["session"],
     "hover_ms_grey": r["lat"]["grey"], "hover_ms_stored": r["lat"]["stored"], "mode": r["mode"], "dwell": r["dwell"], "hover": r["hoverStats"]}))
