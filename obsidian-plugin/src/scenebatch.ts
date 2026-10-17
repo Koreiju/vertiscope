@@ -269,6 +269,7 @@ export class SceneBatch {
   private queue: string[] = [];
   private queueAt = 0;
   private inFlight = 0;
+  plantFifoLoads = false;
   /** The glass orbs' colour and glow, scaled (2026-10-12, PLUGIN_GOAL 115). */
   nodeBright = 1.4;
   /** A link's opacity (was 0.25): links visible, the nodes' colour first. */
@@ -476,7 +477,11 @@ export class SceneBatch {
   private pump(): void {
     const cap = this.plantUnthrottled ? Infinity : MAX_LOADS;
     while (this.inFlight < cap && this.queueAt < this.queue.length) {
-      const src = this.queue[this.queueAt++];
+      // NEWEST first (2026-10-17): the picture under the pointer now is the
+      // one being presented; first-in-first-out left it behind every picture
+      // the pointer had swept past (3 of 6 hovered pictures still pending
+      // after 8 s). Planted `plantFifoLoads`: the old order.
+      const src = this.plantFifoLoads ? this.queue[this.queueAt++] : (this.queue.pop() as string);
       this.inFlight++;
       this.loadStats.started++;
       this.loadStats.maxInFlight = Math.max(this.loadStats.maxInFlight, this.inFlight);

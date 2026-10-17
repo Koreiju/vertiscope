@@ -429,10 +429,12 @@ export class BrowserView extends ItemView {
         this.pushedPayloads++;
         void this.onPushedDrain(payload);
       } else if (body === "dirty") {
+        this.pageMovedAt = Date.now();
         this.pushedDrains++;
         if (!this.draining) void this.tick();
         else this.drainAgain = true;
       } else if (body === "scroll") {
+        this.pageMovedAt = Date.now();
         // Every box moved and nothing mutated: the overlay re-measures what
         // it shows (pins, the streaming diff boxes) from the page's new place.
         this.pipebox?.pageScrolled();
@@ -442,8 +444,18 @@ export class BrowserView extends ItemView {
         // The reader's pointer moving over the page is the reader using the app
         // (unless a check or a stress run is going: their synthetic moves are
         // not the reader).
-        if (!(window as any).__domvec?.verify?.state?.()?.running && !(window as any).__domvecStressing) {
+        // ...but only if the PAGE did not just move: on a feed or a carousel
+        // the element under a still pointer keeps changing, the sensor
+        // reports a hover each time, and the idle turn never ran ("rotating
+        // xyzhsv stalls out after some time", 2026-10-17). A page that
+        // scrolled or mutated in the last 400 ms moved itself. Planted:
+        // `hover-always-reader`.
+        const by: Record<string, number> = ((window as any).__domvecReaderBy = (window as any).__domvecReaderBy || {});
+        const pageMoved = Date.now() - this.pageMovedAt < 400 && !this.plant.has("hover-always-reader");
+        if (pageMoved) by["hover-page-moved"] = (by["hover-page-moved"] || 0) + 1;
+        else if (!(window as any).__domvec?.verify?.state?.()?.running && !(window as any).__domvecStressing) {
           (window as any).__domvecReaderAt = Date.now();
+          by["hover"] = (by["hover"] || 0) + 1;
         }
         this.pipebox?.pushedHover(body.slice(6), this.session || "");
       }
@@ -1250,6 +1262,8 @@ export class BrowserView extends ItemView {
     }
   }
 
+  /** When the page last scrolled or mutated itself (its pushed signals). */
+  private pageMovedAt = 0;
   /** What the address bar sent where (G-202). */
   addressStats = { searched: 0, went: 0 };
   /** Navigate. Bare hosts get https, because a reader types `arxiv.org`. */

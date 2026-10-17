@@ -4323,6 +4323,8 @@ export class GraphView extends ItemView {
     ctl?.update?.();
     // The reader acted: the idle turn stops, as for any input.
     (window as any).__domvecReaderAt = Date.now();
+    const by: Record<string, number> = ((window as any).__domvecReaderBy = (window as any).__domvecReaderBy || {});
+    by["arrow-pan"] = (by["arrow-pan"] || 0) + 1;
     this.detailDirty = true;
     this.panStats.steps++;
     return true;
@@ -5640,7 +5642,8 @@ export class GraphView extends ItemView {
    * back to the fit's own. Activity is the plugin's own reader clock
    * (`__domvecReaderAt`, stamped on every input in the app).
    */
-  idleDriftAfterMs = 20000;
+  /** 4 s of quiet, not 20 (2026-10-17: "it could debounce a lot faster"). */
+  idleDriftAfterMs = 4000;
   /** Camera orbit, radians a second: a full turn in about 5 minutes. It was
    *  0.063 (100 s) -- "physical rotation could be slower... im feeling dizzy"
    *  (2026-10-12). */

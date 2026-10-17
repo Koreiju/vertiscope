@@ -82,9 +82,13 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     // window, so an in-app run waited an hour for a reader typing elsewhere).
     // Keys, clicks, wheel and pointer in the Obsidian window; pointer moves in
     // the browser cell arrive as the sensor's pushed hovers (browser.ts).
-    const touch = () => { (window as any).__domvecReaderAt = Date.now(); };
+    // Each stamp says what made it (`__domvecReaderBy`): the idle turn
+    // "stalls out after some time" (2026-10-17) when something that is not
+    // the reader keeps stamping, and the tally is how that is found.
+    const by: Record<string, number> = ((window as any).__domvecReaderBy = (window as any).__domvecReaderBy || {});
     for (const ev of ["keydown", "pointerdown", "wheel", "pointermove"] as const) {
-      this.registerDomEvent(window, ev, touch, { capture: true, passive: true } as any);
+      this.registerDomEvent(window, ev, () => { (window as any).__domvecReaderAt = Date.now(); by[ev] = (by[ev] || 0) + 1; },
+                            { capture: true, passive: true } as any);
     }
 
     this.settings = Object.assign({}, DEFAULTS, await this.loadData());

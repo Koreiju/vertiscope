@@ -3420,6 +3420,13 @@ similarities, tier by tier.*
 *Read as (2026-10-17): (140) while a picture is presented under the pointer,
 the nodes between the camera and it are drawn dark -- orb and glow.*
 
+> rotating xyzhsv stalls out after some time, and it could debounce a lot
+> faster
+
+*Read as (2026-10-17): (141) the idle turn keeps turning for as long as the
+reader is away -- nothing that is not the reader stops it -- and starts after
+a few seconds of quiet, not twenty.*
+
 *Where (131) meets "Keep current layout" (asked minutes earlier, about the
 quantile spread, containment and depth compression): (131) replaces the
 collision drift and, by the reader's "exact to the original UMAP
