@@ -307,10 +307,14 @@ export class SearchField {
     this.el.toggleClass("is-active", active);
     // The fields say what is TRUE: k at most the results there are, n at most
     // what matched ("showing 12/11", 2026-10-11).
+    // The fields hold what the READER set -- k shown of n asked -- and what
+    // came back is said beside them. Writing the returned count into n made
+    // an edit snap back whenever fewer came back (2026-10-17: "they don't
+    // work for updates right").
     const got = this.hits.length;
-    if (document.activeElement !== this.kInput) this.kInput.value = String(active ? Math.min(this.k, got) : this.k);
-    if (document.activeElement !== this.nInput) this.nInput.value = String(active ? got : this.total);
-    this.matchEl.setText(active ? ` · ${this.matching} matching` : "");
+    if (document.activeElement !== this.kInput) this.kInput.value = String(this.k);
+    if (document.activeElement !== this.nInput) this.nInput.value = String(this.total);
+    this.matchEl.setText(active ? ` · ${got} retrieved of ${this.matching} matching` : "");
     if (!active) { this.diffEl.setText(""); this.scroller.style.backgroundImage = "none"; }
     // One step of scroll per result, so a flick is a few results, not all.
     const w = this.scroller.clientWidth || 320;
