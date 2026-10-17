@@ -329,6 +329,10 @@ const MIN_SPACING_SHARE = 0.3;
 export class GraphView extends ItemView {
   /** Put the camera back outside the cloud, looking at the middle. */
   private reframe: (() => void) | null = null;
+  /** Planted (item 116): every framing aims at the origin, as before. */
+  plantOriginFrame = false;
+  /** How much of the pane the cloud fills and how far off-centre it sits. */
+  screenCoverage: (() => { w: number; h: number; dx: number; dy: number } | null) | null = null;
   /** Frame what an expansion just opened. Set in `draw`. */
   private frameOn: ((subset: any[]) => void) | null = null;
   /**
@@ -6735,9 +6739,10 @@ export class GraphView extends ItemView {
     let placed: { x: number; y: number; z: number } | null = null;
     const place = () => {
       try {
-        const z = frameDistance();
-        graph.cameraPosition({ x: 0, y: 0, z }, { x: 0, y: 0, z: 0 }, 0);
-        placed = { x: 0, y: 0, z };
+        const c = centre();
+        const z = c.z + frameDistance(c);
+        graph.cameraPosition({ x: c.x, y: c.y, z }, c, 0);
+        placed = { x: c.x, y: c.y, z };
       } catch {
         /* an empty scene has nothing to fit */
       }
@@ -6824,7 +6829,28 @@ export class GraphView extends ItemView {
     // The binding angle is the smaller of the two: the vertical fov is what
     // three.js stores, and the horizontal one is narrower whenever the pane
     // is taller than it is wide, which in a sidebar it usually is.
-    const frameDistance = () => {
+    // **Where the cloud IS, not where the origin is (item 116).** Every
+    // framing below aimed at (0,0,0) and measured the cloud's reach from it,
+    // which frames a cloud off the origin -- a fresh store with a page or
+    // two is the extreme -- as a corner of an empty frame. The camera moves
+    // to the cloud; the cloud is never moved to the camera, because its
+    // places are the map (stored `drawn` places, pins, anchors).
+    const centre = (): { x: number; y: number; z: number } => {
+      const pts = graph.graphData().nodes as any[];
+      if (this.plantOriginFrame || !pts.length) return { x: 0, y: 0, z: 0 };
+      const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+      for (const p of pts) {
+        const v = [p.x, p.y, p.z];
+        for (let i = 0; i < 3; i++) {
+          if (!Number.isFinite(v[i])) continue;
+          if (v[i] < lo[i]) lo[i] = v[i];
+          if (v[i] > hi[i]) hi[i] = v[i];
+        }
+      }
+      const mid = (i: number) => (lo[i] <= hi[i] ? (lo[i] + hi[i]) / 2 : 0);
+      return { x: mid(0), y: mid(1), z: mid(2) };
+    };
+    const frameDistance = (c = centre()) => {
       const pts = graph.graphData().nodes as any[];
       // The bounding BOX, not the bounding sphere.
       //
@@ -6843,9 +6869,9 @@ export class GraphView extends ItemView {
       let my = 0;
       let mz = 0;
       for (const p of pts) {
-        mx = Math.max(mx, Math.abs(p.x ?? 0));
-        my = Math.max(my, Math.abs(p.y ?? 0));
-        mz = Math.max(mz, Math.abs(p.z ?? 0));
+        mx = Math.max(mx, Math.abs((p.x ?? 0) - c.x));
+        my = Math.max(my, Math.abs((p.y ?? 0) - c.y));
+        mz = Math.max(mz, Math.abs((p.z ?? 0) - c.z));
       }
       let r = Math.max(mx, my, mz);
       if (!(r > 0)) { r = extent; mx = my = mz = extent; }
@@ -6881,7 +6907,7 @@ export class GraphView extends ItemView {
      * checks once reported 97 of 97 nodes on screen while the pane was
      * blank.
      */
-    const screenCoverage = (): { w: number; h: number } | null => {
+    const screenCoverage = (): { w: number; h: number; dx: number; dy: number } | null => {
       const g: any = graph;
       const cam: any = g.camera?.();
       const pts = g.graphData().nodes as any[];
@@ -6908,8 +6934,12 @@ export class GraphView extends ItemView {
         if (sy > maxY) maxY = sy;
       }
       if (seen < 2 || !isFinite(minX)) return null;
-      return { w: (maxX - minX) / W, h: (maxY - minY) / H };
+      // `dx`/`dy`: how far the picture's middle sits from the pane's, as a
+      // fraction of the pane -- 0 is centred, 0.5 is the middle on an edge.
+      return { w: (maxX - minX) / W, h: (maxY - minY) / H,
+               dx: (minX + maxX) / 2 / W - 0.5, dy: (minY + maxY) / 2 / H - 0.5 };
     };
+    this.screenCoverage = screenCoverage;
 
     /**
      * Close the gap between the framing the formula predicted and the
@@ -6930,7 +6960,8 @@ export class GraphView extends ItemView {
         // Already close enough; another step would only jitter the camera.
         if (ratio > 0.92 && ratio < 1.08) return;
         const cam: any = g.cameraPosition();
-        const d = Math.hypot(cam.x ?? 0, cam.y ?? 0, cam.z ?? 0);
+        const c = centre();
+        const d = Math.hypot((cam.x ?? 0) - c.x, (cam.y ?? 0) - c.y, (cam.z ?? 0) - c.z);
         if (!(d > 0)) return;
         // Screen span goes as 1/d, so scaling the distance by the shortfall
         // is the step that lands on target.
@@ -6939,10 +6970,10 @@ export class GraphView extends ItemView {
         // at this did not have, and it is why the pane went empty.
         const pts = g.graphData().nodes as any[];
         let frontmost = 0;
-        for (const n of pts) frontmost = Math.max(frontmost, n.z ?? 0);
+        for (const n of pts) frontmost = Math.max(frontmost, (n.z ?? 0) - c.z);
         const floor = frontmost + Math.max(20, frontmost * 0.15);
         if (next < floor) next = floor;
-        g.cameraPosition({ x: 0, y: 0, z: next }, { x: 0, y: 0, z: 0 }, 0);
+        g.cameraPosition({ x: c.x, y: c.y, z: c.z + next }, c, 0);
       }
     };
 
@@ -6994,8 +7025,8 @@ export class GraphView extends ItemView {
 
     this.reframe = () => {
       placed = null;              // an explicit reframe is always wanted
-      graph.cameraPosition({ x: 0, y: 0, z: frameDistance() },
-                           { x: 0, y: 0, z: 0 }, 400);
+      const c = centre();
+      graph.cameraPosition({ x: c.x, y: c.y, z: c.z + frameDistance(c) }, c, 400);
       // After the flight, not during it: the camera is animating for 400ms
       // and a measurement taken mid-flight frames the halfway point.
       window.setTimeout(() => {

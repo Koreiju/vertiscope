@@ -3157,6 +3157,37 @@ clearly visible.*
 navigating to its page, or scrolling to it when the page is already open --
 however many clicks came before.*
 
+### 2026-10-17
+
+> please continue. you've have to bring our app back up. we've added some
+> tools to our mcp surface to help. please use them and debug them as well.
+
+> we had some extra changes added since the last time we left off (last
+> week). I'd suggest reviewing some of those, noting we favored reverting to
+> the original state we (you and me) left off at before we made our changes.
+> I'd like you to have a look at our diff and see if you could build some of
+> the things back in, but with the design thinking in mind rather than the
+> code itself. the reason i say this is because the work that was attempted
+> was not the best quality.
+
+*The diff is `c4648c1` on `backup/ahead-conversation-20261015` (the MCP
+tools were carried back staged). The conversation that produced it left no
+record this repo can read, so what it was FOR is read off the diff, and every
+reading below is mine, not the reader's:*
+
+*(116) the cloud is framed where it is: a cloud whose middle is off the origin
+-- a fresh store with a page or two is the extreme -- is still framed whole
+(the diff moved every node to the origin, which breaks stored places; read
+as: the camera moves, the map does not). (117) the probe attaches to the
+workspace window, not the vault picker. (118) layout geometry "pure UMAP" --
+no quantile spread, no containment, no depth compression: a change to how
+EVERY layout looks, against deliberate earlier decisions; not rebuilt
+without the reader's word. (119) the MCP tools that start, stop and inspect
+the app: kept and debugged -- a status that called a busy sidecar dead, a
+start that killed a running store, a launch that would reset the reader's
+plugin settings, a reload that awaited the call that hangs, a reframe read
+mid-flight.*
+
 ---
 
 
