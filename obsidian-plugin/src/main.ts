@@ -344,7 +344,14 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
         browser.onPin = (cid: string) =>
           this.eachGraph((view) => {
             view.onNavigate = (href: string) => browser.go(href);
-            void view.pinChunk(cid);
+            // A pin whose chunk the store no longer holds (retired by a
+            // capture before any diff could say so) places nothing: the
+            // browser re-anchors it by its address (G-82, 2026-10-17).
+            void view.pinChunk(cid).then((ok) => {
+              if (!ok && !browser.plant.has("no-pin-reresolve")) {
+                void browser.reanchorPins([cid]);
+              }
+            });
           });
         browser.onPictures = (byCid: Record<string, string>) =>
           this.eachGraph((view) => view.setPictures(byCid));

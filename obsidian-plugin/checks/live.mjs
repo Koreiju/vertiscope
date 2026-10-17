@@ -6972,8 +6972,12 @@ export function makeChecks(env) {
           await d.act("unpin", "all");
           await sleep(800);
           const none = await state();
-          return { targets, pinned: [a.cid || null, b.cid || null], toggle: toggle(),
-                   before, two, away, back, one, none, closed: newest };
+          // Pins moved to the chunk that draws their address after a capture
+          // retired theirs (G-82, 2026-10-17): the evidence the path ran.
+          const now = (c) => { let k = 0; while (c && view.reanchored.has(c) && k++ < 8) c = view.reanchored.get(c); return c || null; };
+          return { targets, pinned: [now(a.cid), now(b.cid)], pinned_as: [a.cid || null, b.cid || null], toggle: toggle(),
+                   before, two, away, back, one, none, closed: newest,
+                   reanchor: { reresolved: view.diffsApplied.pins_reresolved, lost: view.diffsApplied.pins_lost } };
         })()`, { timeout: 180000 });
         if (got.error) return { pass: false, evidence: got };
         const [a, b] = got.pinned;

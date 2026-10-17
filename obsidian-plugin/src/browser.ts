@@ -801,7 +801,7 @@ export class BrowserView extends ItemView {
    *  view applies this one record (added / retired / renamed / known). */
   onDiff: (diff: CentralDiff) => void = () => {};
   /** Diffs this cell has applied, for the harness. */
-  diffsApplied = { seen: 0, retired: 0, renamed: 0, pins_rekeyed: 0 };
+  diffsApplied = { seen: 0, retired: 0, renamed: 0, pins_rekeyed: 0, pins_reresolved: 0, pins_lost: 0 };
 
   /**
    * Apply one central diff (`_page_diff`) to what THIS cell holds, then hand
@@ -811,6 +811,16 @@ export class BrowserView extends ItemView {
    * card and its billboard stay on the same content. A pin on a chunk that
    * was retired WITHOUT a successor is left as the reader set it: the reader
    * lets it go, the diff does not take a pin away.
+   *
+   * **But it is re-anchored by its ADDRESS** (G-82, 2026-10-17). A pin is
+   * the reader pointing at `url : xpath`; the chunk id is only which chunk
+   * drew that address when they pointed. A capture that re-cuts the page
+   * retires the id with no same-markdown successor, and the pin kept a cid
+   * the store no longer had: the graph's `/place` found nothing and the
+   * second of two pins opened no billboard (`561404dd`: "no such chunk").
+   * The pin's address is resolved again and the pin moves to the chunk that
+   * draws it now. Nothing draws it any more: left as the reader set it.
+   * Planted (`no-pin-reresolve`): the old behaviour.
    */
   private noteDiff(diff: CentralDiff | null | undefined): void {
     if (!diff || typeof diff !== "object" || !Array.isArray(diff.retired)) return;
@@ -835,7 +845,38 @@ export class BrowserView extends ItemView {
       }
       this.diffsApplied.pins_rekeyed += moved.length;
     }
+    const gone = new Set(diff.retired);
+    const lost = [...this.pinned.keys()].filter((c) => gone.has(c) && !renamed[c]);
+    if (lost.length && !this.plant.has("no-pin-reresolve")) void this.reanchorPins(lost);
     try { this.onDiff(diff); } catch (e) { console.error("domvec: onDiff failed", e); }
+  }
+
+  /** Pins whose chunk was retired, moved to whatever draws their address now. */
+  /** old cid -> the cid its pin moved to, for a check holding the old one. */
+  reanchored = new Map<string, string>();
+  async reanchorPins(lost: string[]): Promise<void> {
+    let changed = false;
+    for (const old of lost) {
+      const rec = this.pinned.get(old);
+      if (!rec) continue;
+      const read = await this.readPin(rec.url, rec.matched);
+      if ("error" in read || !read.cid || read.cid === old) { this.diffsApplied.pins_lost++; continue; }
+      if (!this.pinned.has(old)) continue;        // let go while this was asking
+      // Same slot in the stack: the reader's order is theirs.
+      // The page's own rendering of the chunk, as a fresh pin takes it (D-36).
+      await this.takeSnapshot(read).catch(() => undefined);
+      this.pinned = new Map([...this.pinned].map(([cid, r]): [string, PinRecord] =>
+        cid === old ? [read.cid, read] : [cid, r]));
+      this.onUnpin(old);
+      this.onPin(read.cid);
+      this.reanchored.set(old, read.cid);
+      this.diffsApplied.pins_reresolved++;
+      changed = true;
+    }
+    if (changed) {
+      this.pipebox?.setPins(this.pinList());
+      void this.renderSide();
+    }
   }
 
   /** Told by the plugin: a capture rewrote these chunks. */
