@@ -4009,7 +4009,14 @@ export class GraphView extends ItemView {
       // At least the scene's median size: a result is what the reader is
       // looking for, and chunk nodes drew as specks among the glass (seen
       // 2026-10-11).
-      return { ...base, half: Math.max(base.half, st.minHalf), translucent: false, alpha: 1, glow: brightness(r, st.soft) };
+      // A result glows as the default view glows (2026-10-17, PLUGIN_GOAL
+      // 136: "the same glowing effect as the default for retrieval
+      // renderings"): an orb in its own colour, brighter by its rank -- the
+      // halo reads the orb's alpha. Returned opaque, a result had no glow at
+      // all. Pictures stay pictures. Planted: `plantOpaqueResults`.
+      const half = Math.max(base.half, st.minHalf), b = brightness(r, st.soft);
+      if (base.picture || this.plantOpaqueResults) return { ...base, half, translucent: false, alpha: 1, glow: b };
+      return { half, translucent: true, alpha: 1 + 1.5 * b, color: base.color, glass: true };
     }
     // Everything else: colourless glass, no picture -- a lens the results'
     // lights reflect off ("These nodes are the only nodes visible while a
@@ -4020,6 +4027,8 @@ export class GraphView extends ItemView {
 
   /** Planted: the opaque lit spheres the glowing orbs replaced as the default. */
   plantOpaqueOrbs = false;
+  /** Planted (G-209): a search's results drawn opaque, without the glow. */
+  plantOpaqueResults = false;
 
   // ---- PLUGIN_GOAL 84-88, 94-97: the search field, its results, glass and light ----
   //

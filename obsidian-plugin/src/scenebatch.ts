@@ -465,7 +465,17 @@ export class SceneBatch {
   private cellOf(src: string): number | undefined {
     const c = this.cells.get(src);
     if (c !== undefined) return c;
-    if (this.pending.has(src) || (this.failed.has(src) && !this.plantUnthrottled)) return undefined;
+    if (this.pending.has(src)) {
+      // Asked for again while still queued: to the TOP of the stack, so the
+      // picture under the pointer now is not buried under the sweep that
+      // first queued it (two of three hovered pictures took 5 s, 2026-10-17).
+      if (!this.plantFifoLoads) {
+        const at = this.queue.lastIndexOf(src);
+        if (at >= 0 && at < this.queue.length - 4) { this.queue.splice(at, 1); this.queue.push(src); }
+      }
+      return undefined;
+    }
+    if (this.failed.has(src) && !this.plantUnthrottled) return undefined;
     if (this.nextCell >= PER_ROW * PER_ROW) { this.lastStats.atlasFull++; return undefined; }
     this.pending.add(src);
     this.queue.push(src);

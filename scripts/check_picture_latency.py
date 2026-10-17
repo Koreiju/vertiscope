@@ -26,6 +26,9 @@ JS = r"""(async (planted, skip) => {
   const fresh = g.graphData().nodes.filter((n) => n.image && n.image.src && n.level === "chunk" && Number.isFinite(n.x) && !n.__bpic
     && !v.batch.cells?.has?.(n.image.src)).filter((n) => { const s = at(n); return s.x > 80 && s.y > 100 && s.x < W - 80 && s.y < H - 100; });
   const out = [];
+  // Each arm starts from an empty decode queue: the arm before must not
+  // leave its backlog to this one (the first run's arms were confounded so).
+  for (let i = 0; i < 300 && v.batch.queue.length - (v.batch.queueAt || 0) > 0; i++) await sleep(100);
   try {
     for (let k = 0; k < 3; k++) {
       const target = fresh[skip + k * 37];
