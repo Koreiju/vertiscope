@@ -18,6 +18,7 @@
  * the native graph work for free.
  */
 
+import { UBLOCK_SHIM } from "./ublockshim";
 import { profiler } from "./profile";
 import {
   App,
@@ -75,6 +76,19 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
       if (have) { Object.assign(st, { loaded: true, name: have.name, version: have.version, already: true }); return; }
       const base = (this.app.vault.adapter as any).getBasePath?.() || "";
       const dir = `${base}/${this.manifest.dir}/extensions/ublock0-1.75.0/uBlock0.chromium`;
+      // The compatibility shim, first in the background page (`ublockshim.ts`):
+      // written whenever missing, so a fresh unpack works too.
+      try {
+        const fs = require("fs") as typeof import("fs");
+        const shimPath = `${dir}/js/domvec-electron-shim.js`;
+        if (!fs.existsSync(shimPath) || fs.readFileSync(shimPath, "utf8") !== UBLOCK_SHIM) fs.writeFileSync(shimPath, UBLOCK_SHIM, "utf8");
+        const bgPath = `${dir}/background.html`;
+        const bg = fs.readFileSync(bgPath, "utf8");
+        if (!bg.includes("domvec-electron-shim.js")) {
+          fs.writeFileSync(bgPath, bg.replace("<body>", '<body>' + String.fromCharCode(10) + '<script src="js/domvec-electron-shim.js"></script>'), "utf8");
+        }
+        st.shim = true;
+      } catch (e) { st.shim_error = String(e).slice(0, 200); }
       const ext = await exts.loadExtension(dir, { allowFileAccess: false });
       Object.assign(st, { loaded: true, name: ext?.name, version: ext?.version, id: ext?.id });
     } catch (e) {
