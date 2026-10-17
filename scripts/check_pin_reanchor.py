@@ -17,7 +17,7 @@ sys.path.insert(0, r"<home>\Documents\domvec")
 from domvec.obsidian.live import Live
 
 live = Live()
-JS = r"""(async (planted) => {
+JS = r"""(async (planted, waitUnknown) => {
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   if (window.__domvec.reader.idleMs() < 60000) return JSON.stringify({ aborted: "reader active" });
   const d = window.__domvec;
@@ -31,6 +31,7 @@ JS = r"""(async (planted) => {
   if (read.error) return JSON.stringify({ error: read.error });
   const real = read.cid, dead = "0000dead0000beef";
   if (planted) b.plant.add("no-pin-reresolve");
+  g.plantWaitUnknown = waitUnknown;
   try {
     b.pinned = new Map([[dead, { ...read, cid: dead }]]);
     b.pipebox?.setPins(b.pinList());
@@ -42,23 +43,29 @@ JS = r"""(async (planted) => {
       state = { pinned: [...b.pinned.keys()], billboards: bills, s: i + 1 };
       if (bills.includes(real) && !b.pinned.has(dead)) break;
     }
-    return JSON.stringify({ planted, real, dead, ...state, reanchored: b.reanchored.get(dead) || null,
+    return JSON.stringify({ planted, waitUnknown, real, dead, ...state, reanchored: b.reanchored.get(dead) || null,
                             counters: { reresolved: b.diffsApplied.pins_reresolved, lost: b.diffsApplied.pins_lost } });
   } finally {
     b.plant.delete("no-pin-reresolve");
+    g.plantWaitUnknown = false;
     b.reanchored.delete(dead);
     await d.act("unpin", "all");
     if (b.pinned.size) { b.pinned = new Map(); b.pipebox?.setPins(b.pinList()); }
   }
 })"""
 
+got = live.reload_plugin(settle=4, wait=True)
+if got.get("refused"):
+    print(got["refused"]); sys.exit(1)
 rows = []
-for planted in (False, True):
-    row = json.loads(live.evaluate(JS + "(%s)" % ("true" if planted else "false")))
+# clean; planted no-pin-reresolve; planted plantWaitUnknown (the 25 s wait)
+for planted, wait in ((False, False), (True, False), (False, True)):
+    row = json.loads(live.evaluate(JS + "(%s, %s)" % ("true" if planted else "false", "true" if wait else "false")))
     print(json.dumps(row))
     if row.get("aborted") or row.get("error"):
         sys.exit(1)
     rows.append(row)
-clean, plant = rows
+clean, plant, waited = rows
 ok = lambda r: r["real"] in r["billboards"] and r["dead"] not in r["pinned"]
-print("clean: billboard on the live chunk %s in %ss; planted: %s" % (ok(clean), clean["s"], ok(plant)))
+print("clean: billboard on the live chunk %s in %ss; no-pin-reresolve: %s; wait-unknown: %s in %ss"
+      % (ok(clean), clean["s"], ok(plant), ok(waited), waited["s"]))
