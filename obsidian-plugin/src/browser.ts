@@ -411,6 +411,7 @@ export class BrowserView extends ItemView {
         else this.drainAgain = true;
       } else if (body === "scroll") {
         this.pageMovedAt = Date.now();
+        this.pageScrolledAt = Date.now();
         // Every box moved and nothing mutated: the overlay re-measures what
         // it shows (pins, the streaming diff boxes) from the page's new place.
         this.pipebox?.pageScrolled();
@@ -1261,6 +1262,8 @@ export class BrowserView extends ItemView {
 
   /** When the page last scrolled or mutated itself (its pushed signals). */
   private pageMovedAt = 0;
+  /** When the page last scrolled (its pushed "scroll"). */
+  private pageScrolledAt = 0;
   /** Documents loaded in this cell, and which one the session belongs to. */
   private docSeq = 0;
   private sessionDocSeq = -1;
@@ -2228,7 +2231,14 @@ export class BrowserView extends ItemView {
           const live = tree ? tree.held().length : 0;
           const removed = (p.removed || []).length;
           if (this.pendingInPage === url) this.pendingInPage = "";
-          if (removed < 0.5 * live || live === 0) {
+          // A url rewritten WHILE THE PAGE SCROLLS is the page keeping its
+          // place in a list, never a new page: archive.org's list is
+          // virtualized and drops off-screen items as it scrolls, so half
+          // the live chunks went with every rewrite and three of four were
+          // taken for new pages (2026-10-17). Without a scroll, the content
+          // decides, as an app's route change requires.
+          const scrolling = Date.now() - this.pageScrolledAt < 1500 && !this.plant.has("inpage-ignore-scroll");
+          if (scrolling || removed < 0.5 * live || live === 0) {
             this.sessionAliases.set(url, this.session); this.inPageStats.same_doc++;
             url = this.session;
           } else {
