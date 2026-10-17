@@ -982,6 +982,8 @@ def search_payload(workspace, query: str, k: int = 8, *,
         hits = workspace.search(query, k=want, scope_url=url or "", diagnostics=diag)
     except TypeError:                       # an index without diagnostics
         hits = workspace.search(query, k=want, scope_url=url or "")
+    import time as _time
+    _t_shape = _time.perf_counter()
     out = []
     spent = 0
     seen_groups = set()
@@ -1045,7 +1047,11 @@ def search_payload(workspace, query: str, k: int = 8, *,
             #: so a scrolling overlay knows whether to keep asking.
             "more": len(hits) >= want,
             "n": int(getattr(diag, "survivors", 0) or 0),
-            "code_partitions": getattr(diag, "code_partitions", None)}
+            "code_partitions": getattr(diag, "code_partitions", None),
+            # Where the time went: the ranking's phases, its store reads, and
+            # this reshaping's own (one more read per hit).
+            "timing": dict(getattr(diag, "ms", None) or {}, select_reads=getattr(diag, "select_reads", 0),
+                           shape=round((_time.perf_counter() - _t_shape) * 1000, 1))}
 
 
 class _Handler(BaseHTTPRequestHandler):

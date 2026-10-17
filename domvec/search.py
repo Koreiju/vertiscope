@@ -80,6 +80,11 @@ class SearchDiagnostics:
     semantic_available: bool = False
     #: The code pre-filter (R-6): partitions total and kept, rows masked.
     code_partitions: Optional[dict] = None
+    #: Where a search's time went, ms per phase, and how many store reads the
+    #: selection made (2026-10-17: "retrieval takes quite a long time" --
+    #: ~1 s whether ranking the corpus or one page).
+    ms: Optional[dict] = None
+    select_reads: int = 0
 
     def summary(self) -> Dict[str, object]:
         return {
@@ -183,11 +188,21 @@ class ThreeFormIndex:
         if not rows:
             return []
 
+        import time as _time
+        _t = _time.perf_counter()
+        ms = diag.ms = {}
+        def _lap(name):
+            nonlocal _t
+            now = _time.perf_counter()
+            ms[name] = round((now - _t) * 1000, 1)
+            _t = now
         lexical = self.freq.similarities(query)
         lexical = _fit(lexical, rows)
+        _lap("lexical")
 
         semantic, available = self._semantic(query, rows)
         diag.semantic_available = available
+        _lap("semantic")
 
         ranks = _fit(self.ranks, rows)
 
@@ -226,6 +241,7 @@ class ThreeFormIndex:
         # the floor makes their factors look like.
         score = score * _fit(self._live if self._live is not None
                              else np.ones(rows, dtype=np.float32), rows)
+        _lap("fuse")
 
         # `scope_url` ranks WITHIN a page, which a filter cannot do.
         #
@@ -254,6 +270,7 @@ class ThreeFormIndex:
         if available and self.code_partitions > 0 and not scope_url:
             score = self._prefilter_code(score, rows, diag)
 
+        _lap("scope_and_code")
         diag.survivors = int(np.sum(score > 0))
         if diag.survivors == 0:
             return []
@@ -272,6 +289,7 @@ class ThreeFormIndex:
             cid = meta[0] if meta else self.freq.rows[int(row)]
             url, xpath = (meta[1], meta[2]) if meta else ("", "")
             stored = self.store.chunk(cid) if (include_markdown or collapse) else None
+            diag.select_reads += 1 if (include_markdown or collapse) else 0
             markdown = stored.md if stored else ""
             if collapse:
                 # Keyed on the text, not on an embedding: the spec is explicit
@@ -288,6 +306,7 @@ class ThreeFormIndex:
                 lexical=float(lexical[row]), semantic=float(semantic[row]),
                 markdown=markdown if include_markdown else "",
             ))
+        _lap("select")
         return hits
 
     #: How many code partitions a query ranks within (R-6); 0 = no pre-filter.
