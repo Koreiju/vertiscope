@@ -163,3 +163,89 @@ export function relaxCloud(root: V3, start: V3[], radii: number[], rootR: number
   const [o1, i1] = n <= 600 ? count() : [-1, -1];
   return { pos: p, overlapsBefore: o0, overlapsAfter: o1, insideBefore: i0, insideAfter: i1, iterations: it };
 }
+
+/**
+ * The similarity that carries one set of points onto another with KNOWN
+ * correspondences: dst ~= s * R * src + t (G-194, 2026-10-17: "apply
+ * efficient scale-aware ICP over the URL nodes so that we render the 3D
+ * coordinates from their closest most previous registered camera pose").
+ * The url nodes are matched by url, so the ICP's correspondence step is
+ * exact and one closed-form solve is the whole registration: Horn's
+ * quaternion method for R (the top eigenvector of a 4x4 symmetric matrix,
+ * found by shifted power iteration -- no SVD library), Umeyama's scale.
+ * `rms` is the residual, in dst units, so a caller can tell a real
+ * registration from a fit that changed shape.
+ */
+export interface Similarity { s: number; R: number[][]; t: V3; rms: number; n: number }
+export function similarityFit(src: V3[], dst: V3[]): Similarity | null {
+  const n = Math.min(src.length, dst.length);
+  if (n < 3) return null;
+  const ms: V3 = [0, 0, 0], md: V3 = [0, 0, 0];
+  for (let i = 0; i < n; i++) for (let k = 0; k < 3; k++) { ms[k] += src[i][k] / n; md[k] += dst[i][k] / n; }
+  // Cross-covariance S = sum (src - ms)(dst - md)^T, and the source spread.
+  const S = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+  let varS = 0;
+  for (let i = 0; i < n; i++) {
+    const a = [src[i][0] - ms[0], src[i][1] - ms[1], src[i][2] - ms[2]];
+    const b = [dst[i][0] - md[0], dst[i][1] - md[1], dst[i][2] - md[2]];
+    varS += a[0] * a[0] + a[1] * a[1] + a[2] * a[2];
+    for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) S[r][c] += a[r] * b[c];
+  }
+  if (!(varS > 1e-12)) return null;
+  const [[Sxx, Sxy, Sxz], [Syx, Syy, Syz], [Szx, Szy, Szz]] = S;
+  const N = [
+    [Sxx + Syy + Szz, Syz - Szy, Szx - Sxz, Sxy - Syx],
+    [Syz - Szy, Sxx - Syy - Szz, Sxy + Syx, Szx + Sxz],
+    [Szx - Sxz, Sxy + Syx, -Sxx + Syy - Szz, Syz + Szy],
+    [Sxy - Syx, Szx + Sxz, Syz + Szy, -Sxx - Syy + Szz],
+  ];
+  // Shift so the wanted (largest) eigenvalue is also the largest in size.
+  let shift = 0;
+  for (const row of N) for (const v of row) shift += Math.abs(v);
+  let q = [1, 0.01, 0.02, 0.03];
+  for (let it = 0; it < 200; it++) {
+    const nq = [0, 0, 0, 0];
+    for (let r = 0; r < 4; r++) { for (let c = 0; c < 4; c++) nq[r] += N[r][c] * q[c]; nq[r] += shift * q[r]; }
+    const len = Math.hypot(nq[0], nq[1], nq[2], nq[3]) || 1;
+    q = nq.map((v) => v / len);
+  }
+  const [w, x, y, z] = q;
+  const R = [
+    [w * w + x * x - y * y - z * z, 2 * (x * y - w * z), 2 * (x * z + w * y)],
+    [2 * (x * y + w * z), w * w - x * x + y * y - z * z, 2 * (y * z - w * x)],
+    [2 * (x * z - w * y), 2 * (y * z + w * x), w * w - x * x - y * y + z * z],
+  ];
+  const rot = (v: number[]): V3 => [R[0][0] * v[0] + R[0][1] * v[1] + R[0][2] * v[2],
+                                   R[1][0] * v[0] + R[1][1] * v[1] + R[1][2] * v[2],
+                                   R[2][0] * v[0] + R[2][1] * v[1] + R[2][2] * v[2]];
+  let dot = 0;
+  for (let i = 0; i < n; i++) {
+    const a = rot([src[i][0] - ms[0], src[i][1] - ms[1], src[i][2] - ms[2]]);
+    dot += a[0] * (dst[i][0] - md[0]) + a[1] * (dst[i][1] - md[1]) + a[2] * (dst[i][2] - md[2]);
+  }
+  const s = dot / varS;
+  const rm = rot(ms);
+  const t: V3 = [md[0] - s * rm[0], md[1] - s * rm[1], md[2] - s * rm[2]];
+  let sq = 0;
+  for (let i = 0; i < n; i++) {
+    const p = rot(src[i]);
+    sq += (s * p[0] + t[0] - dst[i][0]) ** 2 + (s * p[1] + t[1] - dst[i][1]) ** 2 + (s * p[2] + t[2] - dst[i][2]) ** 2;
+  }
+  return { s, R, t, rms: Math.sqrt(sq / n), n };
+}
+
+/** A point of the DST frame carried back into the SRC frame: R^T (p - t) / s. */
+export function similarityInverse(f: Similarity, p: V3): V3 {
+  const d = [p[0] - f.t[0], p[1] - f.t[1], p[2] - f.t[2]];
+  const R = f.R;
+  return [(R[0][0] * d[0] + R[1][0] * d[1] + R[2][0] * d[2]) / f.s,
+          (R[0][1] * d[0] + R[1][1] * d[1] + R[2][1] * d[2]) / f.s,
+          (R[0][2] * d[0] + R[1][2] * d[1] + R[2][2] * d[2]) / f.s];
+}
+/** A direction carried back (no scale, no translation): R^T v. */
+export function rotateInverse(f: Similarity, v: V3): V3 {
+  const R = f.R;
+  return [R[0][0] * v[0] + R[1][0] * v[1] + R[2][0] * v[2],
+          R[0][1] * v[0] + R[1][1] * v[1] + R[2][1] * v[2],
+          R[0][2] * v[0] + R[1][2] * v[1] + R[2][2] * v[2]];
+}

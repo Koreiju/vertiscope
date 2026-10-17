@@ -15,7 +15,7 @@
  * and draws them.
  */
 
-import { centredTelescope, relaxCloud, zoomFor, type V3 } from "./camera";
+import { centredTelescope, relaxCloud, zoomFor, similarityFit, similarityInverse, rotateInverse, type V3 } from "./camera";
 import { profiler } from "./profile";
 import { ItemView, MarkdownRenderer, WorkspaceLeaf, requestUrl } from "obsidian";
 import ForceGraph3D, { ForceGraph3DInstance } from "3d-force-graph";
@@ -1828,6 +1828,7 @@ export class GraphView extends ItemView {
           }
         }
         this.streamApplied.reloads++;
+        this.capturePose();              // G-194: the camera comes back registered, not reframed
         await reload();                  // re-places `reopen` once it draws
         return;
       }
@@ -3473,6 +3474,59 @@ export class GraphView extends ItemView {
   projectStats = { batches: 0, nodes: 0, provisional_pages: 0, roots_placed: 0 };
   /** Planted (item 91): projected nodes never reach the graph -- the stage clock must show the gap. */
   plantNoProjected = false;
+  /**
+   * **A refit does not snap the camera** (G-194, 2026-10-17: "when we
+   * currently call a re-fit on the full set of UMAP chunks, our camera snaps
+   * to the 're-center view'. Perhaps we could apply efficient scale-aware ICP
+   * over the URL nodes so that we render the 3D coordinates from their
+   * closest most previous registered camera pose"). Before a new epoch's
+   * redraw the url nodes' places and the camera's pose are kept; after it,
+   * the similarity carrying the new url nodes onto the old ones
+   * (`similarityFit`, matched by url, so one closed-form solve) carries the
+   * camera BACK into the new frame. Nothing in the cloud moves -- the camera
+   * is put where it sees the new fit as it saw the old. Planted:
+   * `plantSnapOnRefit` (the reframe, as before).
+   */
+  plantSnapOnRefit = false;
+  private priorPose: { pages: Map<string, V3>; cam: V3; target: V3; up: V3; fullViewDist: number } | null = null;
+  refitStats = { captured: 0, registered: 0, reframed: 0, last_rms: 0, last_matched: 0, last_scale: 0 };
+  capturePose(): void {
+    const g: any = this.graph;
+    if (!g) return;
+    const pages = new Map<string, V3>();
+    for (const n of g.graphData().nodes) {
+      if (n.level === "page" && !n.force && n.url && Number.isFinite(n.x)) pages.set(String(n.url), [n.x, n.y, n.z ?? 0]);
+    }
+    const c = g.camera(), t = g.controls()?.target;
+    if (!c || !t) return;
+    this.priorPose = { pages, cam: [c.position.x, c.position.y, c.position.z], target: [t.x, t.y, t.z],
+                       up: [c.up.x, c.up.y, c.up.z], fullViewDist: this.fullViewDist };
+    this.refitStats.captured++;
+  }
+  private registeredPose(): { x: number; y: number; z: number } | null {
+    const prior = this.priorPose;
+    this.priorPose = null;
+    const g: any = this.graph;
+    if (!prior || !g || this.plantSnapOnRefit) { if (prior) this.refitStats.reframed++; return null; }
+    const src: V3[] = [], dst: V3[] = [];
+    for (const n of g.graphData().nodes) {
+      if (n.level !== "page" || n.force || !Number.isFinite(n.x)) continue;
+      const o = prior.pages.get(String(n.url));
+      if (o) { src.push([n.x, n.y, n.z ?? 0]); dst.push(o); }
+    }
+    const f = similarityFit(src, dst);
+    if (!f || !(f.s > 0)) { this.refitStats.reframed++; return null; }
+    const p = similarityInverse(f, prior.cam), t = similarityInverse(f, prior.target), up = rotateInverse(f, prior.up);
+    g.camera().up.set(up[0], up[1], up[2]);
+    g.cameraPosition({ x: p[0], y: p[1], z: p[2] }, { x: t[0], y: t[1], z: t[2] }, 0);
+    if (prior.fullViewDist > 0) this.fullViewDist = prior.fullViewDist / f.s;
+    this.refitStats.registered++;
+    this.refitStats.last_rms = Math.round(f.rms * 100) / 100;
+    this.refitStats.last_matched = f.n;
+    this.refitStats.last_scale = Math.round(f.s * 1000) / 1000;
+    return { x: p[0], y: p[1], z: p[2] };
+  }
+
   /** Planted (G-93/G-94): the force root keeps its arbitrary birthplace. */
   plantRootUnplaced = false;
   applyProjected(url: string, got: any): void {
@@ -7111,7 +7165,13 @@ export class GraphView extends ItemView {
       }
     };
 
-    window.setTimeout(() => { place(); window.setTimeout(tighten, 120); }, 250);
+    // A refit comes back where the reader was looking (G-194), registered by
+    // the url nodes; a first draw, or no usable registration, frames anew.
+    window.setTimeout(() => {
+      const at = this.registeredPose();
+      if (at) { placed = at; return; }
+      place(); window.setTimeout(tighten, 120);
+    }, 250);
 
     // The same thing, on demand. A reader who has orbited into the middle of
     // the cloud has no way back otherwise, and "the graph went blank" is not
