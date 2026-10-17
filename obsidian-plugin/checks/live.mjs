@@ -2066,6 +2066,7 @@ export function makeChecks(env) {
             await land(target, 30000);
             await sleep(1500);
             const jitter0 = v.forceStats.jitter.length;
+            const held0 = v.forceStats.jitterHeld.length, glide0 = v.forceStats.glide.length;
             // Sample while the page streams under rapid scrolling: force nodes of THIS page only.
             let best = null;
             const t0 = performance.now();
@@ -2092,10 +2093,18 @@ export function makeChecks(env) {
               if (!best || snap.nodes >= best.nodes) best = snap;
             }
             // How far the already-drawn streaming nodes moved between updates.
-            const jit = v.forceStats.jitter.slice(jitter0).map((x) => x / P.RADIUS).sort((x, y) => x - y);
-            const qj = (p) => jit.length ? Math.round(jit[Math.min(jit.length - 1, Math.floor(p * jit.length))] * 100) / 100 : null;
+            // Calm reads the HELD motion: each node's one glide to its fit
+            // (PLUGIN_GOAL 48) is reported beside it, not hidden and not
+            // counted as re-shaking (2026-10-17).
+            const sorted = (a) => a.map((x) => x / P.RADIUS).sort((x, y) => x - y);
+            const q = (a, p) => a.length ? Math.round(a[Math.min(a.length - 1, Math.floor(p * a.length))] * 100) / 100 : null;
+            const all = sorted(v.forceStats.jitter.slice(jitter0));
+            const jit = sorted(v.forceStats.jitterHeld.slice(held0));
+            const gl = sorted(v.forceStats.glide.slice(glide0));
             return { planted: ${JSON.stringify(plant)} || false, best,
-                     calm: { updates: jit.length, move_p50_in_radii: qj(0.5), move_p90_in_radii: qj(0.9) } };
+                     calm: { updates: jit.length, move_p50_in_radii: q(jit, 0.5), move_p90_in_radii: q(jit, 0.9),
+                             all_moves_p90_in_radii: q(all, 0.9), glides: gl.length, glide_max_in_radii: q(gl, 1),
+                             roots_placed: v.projectStats.roots_placed } };
           } finally {
             Object.assign(P, saved);
             v.plantNoHold = false;

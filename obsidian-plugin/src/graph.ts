@@ -643,6 +643,10 @@ export class GraphView extends ItemView {
                  toScene: [] as number[],
                  /** Mean movement of the already-drawn streaming nodes between updates. */
                  jitter: [] as number[],
+                 /** `jitter` without each node's ONE move to its fit (G-93 calm). */
+                 jitterHeld: [] as number[],
+                 /** That one move, per update: how far projected nodes glided (radii x RADIUS). */
+                 glide: [] as number[],
                  /** [ms, nodes the drain touched] per drain: O(delta) is judged
                   *  per touched node, not per drain (a page's first drain
                   *  carries 500 chunks, later ones a handful). */
@@ -715,14 +719,22 @@ export class GraphView extends ItemView {
    *  far the held ones moved since the last update (`forceStats.jitter`). */
   private holdAll(nodes: any[], fresh: Set<string>): void {
     const now = performance.now();
-    let moved = 0, n = 0;
+    let moved = 0, n = 0, movedHeld = 0, nHeld = 0, glided = 0, nGlided = 0;
     for (const x of nodes) {
       if (!x.force || fresh.has(x.id) || !Number.isFinite(x.x)) continue;
       if (x.lastAt) {
-        moved += Math.hypot(x.x - x.lastAt[0], x.y - x.lastAt[1], (x.z ?? 0) - x.lastAt[2]);
+        const d = Math.hypot(x.x - x.lastAt[0], x.y - x.lastAt[1], (x.z ?? 0) - x.lastAt[2]);
+        moved += d;
         n++;
+        // A node whose projection landed since the last update made its one
+        // designed move -- grey force place to its fit (PLUGIN_GOAL 48). G-93's
+        // "too chaotic between scan updates" is the OTHER motion: re-shaking.
+        // Both are kept; the calm bar reads the second.
+        if (x.projectedAt && x.projectedAt > (x.lastAtT ?? 0)) { glided += d; nGlided++; }
+        else { movedHeld += d; nHeld++; }
       }
       x.lastAt = [x.x, x.y, x.z ?? 0];
+      x.lastAtT = now;
       if (this.plantNoHold) continue;
       x.holdAt = [x.x, x.y, x.z ?? 0];
       x.holdUntil = now + 1500;
@@ -730,6 +742,14 @@ export class GraphView extends ItemView {
     if (n) {
       this.forceStats.jitter.push(moved / n);
       if (this.forceStats.jitter.length > 500) this.forceStats.jitter.shift();
+    }
+    if (nHeld) {
+      this.forceStats.jitterHeld.push(movedHeld / nHeld);
+      if (this.forceStats.jitterHeld.length > 500) this.forceStats.jitterHeld.shift();
+    }
+    if (nGlided) {
+      this.forceStats.glide.push(glided / nGlided);
+      if (this.forceStats.glide.length > 500) this.forceStats.glide.shift();
     }
   }
 
@@ -1744,7 +1764,7 @@ export class GraphView extends ItemView {
     this.reopen.clear();
     this.collapsedByReader.clear();
     this.forceStats = { drains: 0, added: 0, removed: 0, reparented: 0, ms: [], toScene: [],
-                        jitter: [], sized: [] };
+                        jitter: [], jitterHeld: [], glide: [], sized: [] };
     this.forceSpecs.clear();
     this.layoutMode = "force";            // so setMode records the change
     this.setMode("empty", why);
@@ -3430,12 +3450,43 @@ export class GraphView extends ItemView {
    * does not jump when the stored chunk replaces it -- and the stream's spring
    * leaves it alone.
    */
-  projectStats = { batches: 0, nodes: 0, provisional_pages: 0 };
+  projectStats = { batches: 0, nodes: 0, provisional_pages: 0, roots_placed: 0 };
   /** Planted (item 91): projected nodes never reach the graph -- the stage clock must show the gap. */
   plantNoProjected = false;
+  /** Planted (G-93/G-94): the force root keeps its arbitrary birthplace. */
+  plantRootUnplaced = false;
   applyProjected(url: string, got: any): void {
     if (!this.graph || !got || !got.pos || this.plantNoProjected) return;
     const data: any = this.graph.graphData();
+    // **The root takes its projection, and its tree comes with it** (G-94:
+    // "a root that is not yet projected is itself force-directed; when a
+    // projection arrives it REPLACES the force position"). A new page's
+    // force root is born at an arbitrary point -- near the origin -- while
+    // its chunks' projections land where their meaning is, ~320 units away
+    // on the Julia forum; every chunk then glided across the cloud and the
+    // children of each collapsed parent were dragged after it: 37 of 42
+    // held nodes moved 131 radii in one update (G-93 calm p90 94 radii,
+    // 2026-10-17). `/project` answers with the page's position (provisional
+    // for a page the fit has not met). The first time it does, the root is
+    // pinned there and the part of its tree not yet projected moves with it
+    // rigidly, its shape kept; everything spawned after is born there. It
+    // lands within a few hundred ms of the first drain -- before any of
+    // that batch is held -- so it reads as the tree appearing in its place.
+    const page = got.page;
+    if (!this.plantRootUnplaced && Array.isArray(page) && page.length >= 3 && page.every(Number.isFinite)) {
+      const root = data.nodes.find((n: any) => n.force && n.url === url && n.level === "page");
+      if (root && !root.rootPlaced && Number.isFinite(root.x)) {
+        const dv = [page[0] - root.x, page[1] - root.y, page[2] - (root.z ?? 0)];
+        for (const n of data.nodes) {
+          if (!n.force || n.url !== url || n.projected || !Number.isFinite(n.x)) continue;
+          n.x += dv[0]; n.y += dv[1]; n.z = (n.z ?? 0) + dv[2];
+          if (n.holdAt) n.holdAt = [n.holdAt[0] + dv[0], n.holdAt[1] + dv[1], n.holdAt[2] + dv[2]];
+        }
+        root.fx = page[0]; root.fy = page[1]; root.fz = page[2];
+        root.rootPlaced = true;
+        this.projectStats.roots_placed++;
+      }
+    }
     let n0 = 0;
     const touched: any[] = [];
     for (const n of data.nodes) {
@@ -3443,6 +3494,7 @@ export class GraphView extends ItemView {
       const p = got.pos[n.id];
       if (!p || !p.every(Number.isFinite)) continue;
       n.projected = true;
+      n.projectedAt = performance.now();
       const hsv = got.hsv ? got.hsv[n.id] : null;
       if (hsv) { n.hsv = hsv; n.color = colourOf({ hsv } as any); }
       n.fitX = p[0]; n.fitY = p[1]; n.fitZ = p[2];
