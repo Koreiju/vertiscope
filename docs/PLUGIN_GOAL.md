@@ -3413,6 +3413,13 @@ updates that take effect, no 50 cap -- n reaches the full retrieved set.
 (139) the 3D graph follows the most recent re-ranked set over the url
 similarities, tier by tier.*
 
+> we should also darken nodes in front of the hovered node images (if they
+> are present, and there often is at least one icon image to present as the
+> node billboard).
+
+*Read as (2026-10-17): (140) while a picture is presented under the pointer,
+the nodes between the camera and it are drawn dark -- orb and glow.*
+
 *Where (131) meets "Keep current layout" (asked minutes earlier, about the
 quantile spread, containment and depth compression): (131) replaces the
 collision drift and, by the reader's "exact to the original UMAP

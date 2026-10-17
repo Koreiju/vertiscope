@@ -3985,6 +3985,7 @@ export class GraphView extends ItemView {
       // opaque spheres.
       const hg = this.plantNoHoverGlow ? 0 : (n.hovered ? 1 : (this.glowNear.get(n) || 0));
       if (this.plantOpaqueOrbs) return base;
+      if (this.dimFront.has(n) && !base.picture) return { half: base.half, translucent: true, alpha: 0.12, color: base.color, glass: true };
       if (n.hovered && !base.picture) return { half: base.half, translucent: true, alpha: 2.5, color: n.color || base.color, glass: true };
       // A REVEALED picture is the picture alone; unrevealed, the node is its
       // orb -- the old switch between node and image (2026-10-11: "we dont need
@@ -4252,7 +4253,20 @@ export class GraphView extends ItemView {
       // chunk view"). Unrevealed, it stays the one-size orb below.
       const shown = this.detail.has(n) || n.hovered || this.billboards.has(n.id);
       // Pictures too: a page's favicon is most of the colour in url view.
-      const half = billboardEdge(shown && !this.plantTinyReveal ? n : sized, relSize) / 2 * this.nodeScale;
+      let half = billboardEdge(shown && !this.plantTinyReveal ? n : sized, relSize) / 2 * this.nodeScale;
+      // Presented at a size a reader can see, on SCREEN: between
+      // `presentMinPx` and `presentMaxPx` of radius. A chunk's own panel
+      // scale follows its `val`, and small chunks presented at 2 px; right by
+      // the camera one filled the pane (1,204 px) (2026-10-17).
+      if (shown && !this.plantTinyReveal && this.graph && this.canvasEl) {
+        const cam: any = this.graph.camera(), P = cam.position, e = cam.matrixWorld.elements;
+        const depth = -((n.x - P.x) * e[8] + (n.y - P.y) * e[9] + ((n.z || 0) - P.z) * e[10]);
+        const yy = cam.projectionMatrix.elements[5], H = this.canvasEl.clientHeight;
+        if (depth > 0 && yy > 0 && H > 0) {
+          const perPx = depth * 2 / (H * yy);
+          half = Math.min(Math.max(half, this.presentMinPx * perPx), this.presentMaxPx * perPx);
+        }
+      }
       // Pictures near the pointer's ray only (`refreshDetail`); elsewhere the
       // same size, as its colour -- so the collider, the pick proxy and the
       // drawn extent never change with where the mouse is.
@@ -4271,6 +4285,9 @@ export class GraphView extends ItemView {
     return { half: Math.cbrt(Math.max(sized.val ?? 1, 1e-9)) * relSize * this.nodeScale, translucent: false, alpha: 1,
              color: n.hovered ? "#ffffff" : (n.color || "#9aa0a6") };
   }
+  /** A presented picture's largest radius on screen, px. */
+  presentMaxPx = 64;
+  presentMinPx = 12;
   /** Planted: a revealed picture at the one size (the invisible hover image). */
   plantTinyReveal = false;
   /** Spheres drawn this much larger by default (2026-10-12, PLUGIN_GOAL 115:
@@ -4467,6 +4484,9 @@ export class GraphView extends ItemView {
   private detail = new Set<any>();
   /** Nodes near the pointer's ray and how much they glow, 0..1 (item 102). */
   glowNear = new Map<any, number>();
+  /** Nodes between the camera and the presented picture, drawn dark. */
+  dimFront = new Set<any>();
+  plantNoFrontDim = false;
   /** Planted (item 102): no hover glow. */
   plantNoHoverGlow = false;
   /** Planted (2026-10-11): the slow glow -- an 80 ms throttle and a full re-sync per change. */
@@ -4583,6 +4603,24 @@ export class GraphView extends ItemView {
       }
     }
     const pictures = new Set(best);
+    // **What stands in front of the presented picture is darkened** (2026-10-17:
+    // "we should also darken nodes in front of the hovered node images (if
+    // they are present ...)"). The picture nearest the ray is the one being
+    // presented; every other node in the cylinder nearer the camera than it
+    // is dimmed, its glow with it. Planted: `plantNoFrontDim`.
+    const wasDim = this.dimFront;
+    this.dimFront = new Set<any>();
+    if (best.length && !this.plantNoFrontDim) {
+      let k = 0;
+      for (let i = 1; i < best.length; i++) if (dist[i] < dist[k]) k = i;
+      const P = best[k];
+      const tP = (P.x - ox) * dx + (P.y - oy) * dy + ((P.z || 0) - oz) * dz;
+      for (const n of [...gBest, ...covers]) {
+        if (pictures.has(n)) continue;
+        const t = (n.x - ox) * dx + (n.y - oy) * dy + ((n.z || 0) - oz) * dz;
+        if (t > 0 && t < tP) this.dimFront.add(n);
+      }
+    }
     const picturesChanged = pictures.size !== this.detail.size || [...pictures].some((n) => !this.detail.has(n));
     this.lastRevealed = this.detail;
     this.detail = pictures;
@@ -4609,7 +4647,7 @@ export class GraphView extends ItemView {
     if (this.plantSlowGlow || !this.batch) this.batchDirty = true;
     else {
       // The revealed pictures that changed move between meshes in place too.
-      const changed = new Set<any>([...was.keys(), ...this.glowNear.keys()]);
+      const changed = new Set<any>([...was.keys(), ...this.glowNear.keys(), ...wasDim, ...this.dimFront]);
       if (picturesChanged) for (const n of pictures) changed.add(n);
       for (const n of this.lastRevealed) if (!pictures.has(n)) changed.add(n);
       const rs = g.nodeRelSize(), media = this.drawnMedia;
