@@ -27,6 +27,8 @@
  * that has never seen the site (`G-40`).
  */
 
+import { mergePayloads } from "./mergepayloads";
+export { mergePayloads };
 import { addressTarget } from "./address";
 import { isolate } from "./isolate";
 import { ForceTree, type ForceNodeDelta } from "./forcetree";
@@ -180,35 +182,6 @@ interface CaptureJob {
   merged?: any[];
 }
 
-/**
- * Consecutive drains of one page as ONE capture (2026-09-28: "I'm also
- * surprised that the database ingests leave out so many diffed chunks for
- * *so long*"). Captures ran one per drain, one at a time -- 0.9 s p50 on a
- * small store, 5-6 s on the reader's -- while a scroll drains several times a
- * second, so the queue grew for as long as the reader scrolled and a diff
- * waited behind every drain before it. A sensor payload is incremental, so
- * drains merge in order: the dictionary, shapes and moves concatenated (the
- * last `stats.dictSize` is the running total, which is what the sidecar's
- * restart check compares); each chunk at its LATEST emission; a chunk emitted
- * and then removed dropped; the host's own fields (boxes, pictures) left out.
- */
-export function mergePayloads(ps: any[]): any {
-  if (ps.length === 1) return ps[0];
-  const last = ps[ps.length - 1];
-  const out: any = { ...last, dict: [], shapes: [], moves: [], removed: [], chunks: [] };
-  const byId = new Map<string, any>();
-  for (const p of ps) {
-    for (const d of p.dict || []) out.dict.push(d);
-    for (const x of p.shapes || []) out.shapes.push(x);
-    for (const m of p.moves || []) out.moves.push(m);
-    for (const r of p.removed || []) out.removed.push(r);
-    for (const c of p.chunks || []) { byId.delete(String(c.id)); byId.set(String(c.id), c); }
-  }
-  const removed = new Set(out.removed.map(String));
-  out.chunks = [...byId.values()].filter((c) => !removed.has(String(c.id)));
-  delete out.boxes; delete out.pictures; delete out.inpage;
-  return out;
-}
 
 export class BrowserView extends ItemView {
   /** Fetched once per app run and shared: it is one file on disk and it does
@@ -474,6 +447,9 @@ export class BrowserView extends ItemView {
     view.addEventListener("did-start-navigation", (e: any) => {
       if (e && e.isMainFrame && !e.isInPlace && !e.isSameDocument) {
         this.domReady = false; this.loadFailedUrl = "";
+        // A new DOCUMENT: no url of the old one stands for this session.
+        this.sessionAliases.clear(); this.pendingInPage = "";
+        this.docSeq++;
         profiler().visitStart(String(e.url || ""));
         // Leaving the offline form for a LIVE page ends offline (G-62). Only
         // the button cleared it, so any other navigation left the cell
@@ -512,7 +488,16 @@ export class BrowserView extends ItemView {
       }
       if (e && e.isMainFrame) {
         this.address.value = view.getURL();
-        void this.pageChanged(view.getURL());
+        // Not decided HERE (G-216, 2026-10-17). archive.org's search list
+        // rewrites its own url as it scrolls (`&page=2` ... `&page=7`); taken
+        // as seven pages, the same growing list was captured seven times, a
+        // settle queued per "left" page, and the capture backlog reached 80.
+        // A route change in an app (YouTube, Bluesky) is ALSO an in-page
+        // navigation, so the url cannot tell them apart -- the content can:
+        // the first drain under the new url says whether the page's chunks
+        // stayed (the same document, still growing) or went (a new page).
+        if (this.session && !this.plant.has("inpage-is-new-page")) this.pendingInPage = String(view.getURL());
+        else void this.pageChanged(view.getURL(), true);
       }
     });
     // Right-click pins the chunk under the cursor: its markdown beside the
@@ -1276,6 +1261,14 @@ export class BrowserView extends ItemView {
 
   /** When the page last scrolled or mutated itself (its pushed signals). */
   private pageMovedAt = 0;
+  /** Documents loaded in this cell, and which one the session belongs to. */
+  private docSeq = 0;
+  private sessionDocSeq = -1;
+  /** An in-page navigation waiting for its first drain to say what it is (G-216). */
+  private pendingInPage = "";
+  /** Urls the page took without leaving its document -> the session's url. */
+  private sessionAliases = new Map<string, string>();
+  inPageStats = { same_doc: 0, new_page: 0 };
   /** What the address bar sent where (G-202). */
   addressStats = { searched: 0, went: 0 };
   /** Navigate. Bare hosts get https, because a reader types `arxiv.org`. */
@@ -1907,7 +1900,13 @@ export class BrowserView extends ItemView {
    * so a page left without settling keeps whatever its last delta happened to
    * leave in the store -- which is a page half-rewritten by the one after it.
    */
-  private async pageChanged(url: string): Promise<void> {
+  private async pageChanged(url: string, force = false): Promise<void> {
+    // The same document under another url is not a page change (G-216); an
+    // in-page navigation not yet decided waits for its first drain.
+    url = this.sessionAliases.get(url) || url;
+    if (url && url === this.pendingInPage) return;
+    if (!force && this.session && url && url !== this.session && this.docSeq === this.sessionDocSeq
+        && !this.plant.has("inpage-is-new-page")) return;
     if (!url || url === "about:blank") {
       // Leaving for a blank page is still LEAVING: the page left behind is
       // settled and collapses like any other (G-91 -- it used to return here
@@ -1924,6 +1923,7 @@ export class BrowserView extends ItemView {
     if (url === this.session || (this.session && docKey(url) === docKey(this.session))) return;
     const leaving = this.session;
     this.session = url;
+    this.sessionDocSeq = this.docSeq;      // the document this session reads (G-216)
     // Sensor ids are per document: nothing streaming on the page left behind.
     this.pipebox?.clearStreaming();
     this.pipebox?.resetPush();
@@ -2126,7 +2126,10 @@ export class BrowserView extends ItemView {
   private async tick(): Promise<void> {
     if (!this.live || this.draining || !this.webview) return;
     const wv = this.webview;
-    const url = wv.getURL();
+    // Undecided in-page url: drained as the session's until a pushed drain
+    // decides (G-216) -- never a fresh tree for a url that may be an alias.
+    const here = wv.getURL();
+    const url = here === this.pendingInPage && this.session ? this.session : (this.sessionAliases.get(here) || here);
     // Drained once the DOCUMENT is ready, loading or not: YouTube and IMDb
     // never stop "loading" (streaming requests), and waiting for them to meant
     // 0 and 2 drains in 16 s -- the heavy live pages were barely scanned
@@ -2134,7 +2137,7 @@ export class BrowserView extends ItemView {
     if (!url || url === "about:blank" || (wv.isLoading() && !this.domReady)) return;
     // An offline view is a local file, not a page: nothing in it is captured.
     if (!/^https?:/.test(url)) return;
-    if (url !== this.session && docKey(url) !== docKey(this.session)) {
+    if (url !== this.session && docKey(url) !== docKey(this.session) && url !== this.pendingInPage) {
       this.lastRepairMs = undefined;
       await this.pageChanged(url);
       return;
@@ -2208,8 +2211,30 @@ export class BrowserView extends ItemView {
         const { payload: p, at } = this.pushQueue.shift()!;
         const wv = this.webview;
         if (!wv || !this.live) continue;
-        const url = String(p.url || wv.getURL() || "");
+        let url = String(p.url || wv.getURL() || "");
         if (!url || url === "about:blank") continue;
+        // An in-page url change, decided by this drain (see did-navigate-in-page):
+        // at least half the session's live chunks removed -> a new page;
+        // otherwise the same document under another url.
+        url = this.sessionAliases.get(url) || url;
+        // Same DOCUMENT (no new one has loaded since the session began) under
+        // another url: decided by this drain, whichever of it and the
+        // navigation event arrived first.
+        if (url !== this.session && this.session && this.docSeq === this.sessionDocSeq
+            && docKey(url) !== docKey(this.session) && !this.plant.has("inpage-is-new-page")) {
+          const tree = this.forceTrees.get(this.session);
+          const live = tree ? tree.held().length : 0;
+          const removed = (p.removed || []).length;
+          if (this.pendingInPage === url) this.pendingInPage = "";
+          if (removed < 0.5 * live || live === 0) {
+            this.sessionAliases.set(url, this.session); this.inPageStats.same_doc++;
+            url = this.session;
+          } else {
+            this.inPageStats.new_page++;
+            this.sessionDocSeq = -1;                 // let the switch below happen
+          }
+        }
+        if (url !== String(p.url || "")) p.url = url;
         if (url !== this.session && docKey(url) !== docKey(this.session)) {
           this.lastRepairMs = undefined;
           // Sets the session at once; the settle it starts runs behind.
@@ -2578,7 +2603,12 @@ export class BrowserView extends ItemView {
         // up to a settle of that page, which stays a barrier.
         if (!job.settle && !this.plant.has("serial-ingest")) {
           const ride: CaptureJob[] = [];
-          for (let i = k; i < this.captureQueue.length && ride.length < 40; ) {
+          // No cap: however long the store stalls (a checkpoint held it 195 s,
+          // 2026-10-17), a page's queued drains merge into ONE capture of its
+          // latest state, so the backlog is a job per page, never per drain.
+          // Planted `ride-cap-40`: the old cap.
+          const cap = this.plant.has("ride-cap-40") ? 40 : Infinity;
+          for (let i = k; i < this.captureQueue.length && ride.length < cap; ) {
             const c = this.captureQueue[i];
             if (c.url !== job.url) { i++; continue; }
             if (c.settle) break;

@@ -465,6 +465,10 @@ class Live:
             if isinstance(idle, (int, float)) and idle < 60000:
                 return {"reloaded": False, "refused": "reader active %.0f s ago" % (idle / 1000),
                         "hint": "pass force to reload anyway"}
+        # The reload is not the reader: it rebuilds the views, which stamps
+        # the reader clock, and the next idle-gated probe then aborted on it
+        # (2026-10-17). The stamp is put back afterwards.
+        stamp = self.evaluate("window.__domvecReaderAt || 0")
         before = self.evaluate(
             "(()=>{const p=app.plugins.getPlugin('domvec-bridge');"
             " return p && p.manifest ? p.manifest.version : null;})()")
@@ -504,6 +508,7 @@ class Live:
             views = json.loads(views) if isinstance(views, str) else views
         except ValueError:
             pass
+        self.evaluate("(()=>{window.__domvecReaderAt = %s; return 1})()" % json.dumps(stamp))
         return {"version_before": before, "enable": enabled, "views": views,
                 "harness_installed": bool(gestures), "settled_s": settle, "projector": drew}
 
