@@ -213,6 +213,26 @@ export class ForceTree {
     return typeof x === "number" && x >= 0 && x < this.dict.length ? this.dict[x] : "?";
   }
 
+  /**
+   * A drain line as panel markdown: a line an `<img>` draws is its picture,
+   * `![](src)` -- streamed as the bare url, a grey chunk's panel showed the
+   * address as text and no image (Bluesky, 2026-10-17: "embedded media is
+   * missing. the nodes are registered, but the content is missing").
+   */
+  private lineText(l: any): string {
+    const t = String((l && l[1]) || "");
+    const path = l && l[2];
+    if (!t || !Array.isArray(path) || ForceTree.plantImgAsText) return t;
+    let last = "";
+    for (let i = 0; i + 1 < path.length; i += 2) {
+      const tag = this.seg(path[i]);
+      if (tag === "#text" || tag === SHADOW) continue;
+      last = tag;
+    }
+    return (last === "img" || last === "image") && /^(https?:|data:image|\/)/.test(t) ? `![](${t})` : t;
+  }
+  static plantImgAsText = false;
+
   /** [tagId, ord, tagId, ord, ...] -> the element steps, text steps dropped. */
   private steps(path: any): string[] {
     const out = ["html"];
@@ -301,7 +321,7 @@ export class ForceTree {
       const { address, title } = this.address(c.lines || []);
       let had = this.chunks.get(sid);
       const digest = Number(c.digest) || 0;
-      const text = (c.lines || []).map((l: any) => String((l && l[1]) || ""));
+      const text = (c.lines || []).map((l: any) => this.lineText(l));
       // A reused element now holding DIFFERENT content: the old content is
       // retained under its own node; the new content is a new node.
       if (had && had.digest !== digest && !ForceTree.plantDropRemoved

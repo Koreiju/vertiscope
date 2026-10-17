@@ -1702,6 +1702,8 @@ export class GraphView extends ItemView {
     // trie has one (2026-10-11, "all the recursive chunks linked to their
     // root URL node"). Planted: the per-slice passes only.
     if (placed && !this.plantSliceContainment) await this.drawContainment();
+    // The page's streamed chunks come back with its stored ones (G-199).
+    if (!this.plantFoldForgets) { const before = this.graph.graphData().nodes.length; this.redrawForce(); placed += Math.max(0, this.graph.graphData().nodes.length - before); }
     return out("expand", placed);
   }
 
@@ -1731,7 +1733,13 @@ export class GraphView extends ItemView {
     }
     this.graph.graphData(next);
     this.graph.d3ReheatSimulation?.();
-    for (const [id, spec] of [...this.forceSpecs]) if (spec.url === url) this.forceSpecs.delete(id);
+    // A fold HIDES the page's streamed (grey) chunks -- `collapsedByReader`
+    // keeps them undrawn -- it does not forget them: deleting their specs
+    // here made a scanned page's unfold bring back only what the store held
+    // (Bluesky, 2026-10-17: 339 grey nodes folded, 1 chunk on unfold; "right/
+    // left clicking on the url nodes don't explode/collapse as I would
+    // anticipate for scanned nodes"). Planted: forgotten, as before.
+    if (this.plantFoldForgets) for (const [id, spec] of [...this.forceSpecs]) if (spec.url === url) this.forceSpecs.delete(id);
     this.collapsed.push({ at: Date.now(), url, nodes: gone.size });
     if (this.collapsed.length > 50) this.collapsed.shift();
     return gone.size;
@@ -4050,6 +4058,8 @@ export class GraphView extends ItemView {
     return { half: base.half, translucent: true, alpha: 0, color: "#ffffff", glass: true };
   }
 
+  /** Planted (G-199): a fold forgets the page's streamed chunks, as before. */
+  plantFoldForgets = false;
   /** Planted: the opaque lit spheres the glowing orbs replaced as the default. */
   plantOpaqueOrbs = false;
   /** Planted (G-209): a search's results drawn opaque, without the glow. */
