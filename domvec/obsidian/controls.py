@@ -81,6 +81,17 @@ def stop_sidecar(port: int = 8788, timeout_s: float = 5.0, force: bool = False) 
 
     procs = find_sidecars(port)
     ws = _workspace_of(procs)
+    # A checkpoint in progress: the WAL reads ~0 bytes DURING it, so the size
+    # test alone let a restart kill the fold twice (2026-10-17). A sidecar too
+    # busy to answer `/checkpointing` is treated as checkpointing.
+    if procs and not force:
+        try:
+            with urllib.request.urlopen("http://127.0.0.1:%d/checkpointing" % port, timeout=5.0) as res:
+                cp = json.loads(res.read().decode("utf-8"))
+        except Exception:                           # noqa: BLE001
+            cp = {"checkpointing": True, "why": "no answer (busy?)"}
+        if cp.get("checkpointing"):
+            return {"ok": False, "refused": "a checkpoint is running; wait for it to finish", "detail": cp}
     if procs and ws and not force and wal_bytes(ws) > WAL_LIMIT:
         return {"ok": False, "refused": "WAL is %.1f MB (limit %.0f MB); wait for the fold or pass force"
                 % (wal_bytes(ws) / 1e6, WAL_LIMIT / 1e6), "workspace": ws}

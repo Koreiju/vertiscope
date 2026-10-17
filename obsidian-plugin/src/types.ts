@@ -214,6 +214,8 @@ export interface DomvecSettings {
    * plugin transmits on its own -- so it is a setting, on as asked.
    */
   webSearch: boolean;
+  /** uBlock Origin in the browser cell's own session (G-201). */
+  adblock: boolean;
 }
 
 export const DEFAULTS: DomvecSettings = {
@@ -224,6 +226,7 @@ export const DEFAULTS: DomvecSettings = {
   saveOffline: false,
   showBoxes: true,
   webSearch: true,
+  adblock: true,
 };
 
 /** One command's result, from `POST /shell`. */

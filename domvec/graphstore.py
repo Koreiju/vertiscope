@@ -1403,6 +1403,23 @@ class GraphStore:
             found[r[0]] = (chunk, vector)
         return [(cid,) + found.get(cid, (None, None)) for cid in cids]
 
+    def chunks_many(self, cids: Sequence[str]) -> Dict[str, StoredChunk]:
+        """Several chunks in one read: a lookup per cid below
+        `_PLACEMENT_SCAN_AT`, one scan above (measured flat at ~20 ms where
+        per-cid grows ~1-2 ms a cid warm, ~100-200 ms cold). Search read its
+        hits one query each, twice -- 50-117 reads for a 50-hit page, 9-50 s
+        against a cold buffer pool (2026-10-17)."""
+        cids = [c for c in dict.fromkeys(cids) if c]
+        if not cids:
+            return {}
+        if len(cids) < self._PLACEMENT_SCAN_AT:
+            return {c: ch for c in cids for ch in [self.chunk(c)] if ch is not None}
+        rows = self._rows(
+            "MATCH (c:Chunk) WHERE list_contains($cids, c.cid) RETURN c.cid, c.url, c.xpath, "
+            "c.part, c.md, c.chars, c.line_count, c.row, c.dup_of, "
+            "c.dup_n, c.group_of, c.group_n", {"cids": cids})
+        return {r[0]: StoredChunk(*r[:8], r[8] or "", r[9] or 1, r[10] or "", r[11] or 1) for r in rows}
+
     def set_groups(self, url: str, groups) -> int:
         """Record stage two's verdict for one page (`G-26`).
 

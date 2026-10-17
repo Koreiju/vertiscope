@@ -190,6 +190,14 @@ _CHECKPOINT_POLL_GAP_S = 0.0
 _PLANT_REQUEST_QUIET = [False]
 
 
+#: True while a CHECKPOINT runs. A restart that kills the process then
+#: kills the fold mid-way: it happened twice on 2026-10-17 (14:35, 17:27),
+#: because the WAL file reads ~0 bytes DURING a checkpoint and "WAL under
+#: 8 MB" was taken to mean "safe". `/checkpointing` answers without touching
+#: the store, and the restart tools refuse while this is set.
+_CHECKPOINTING = [False]
+
+
 def _checkpoint_due(size: int, now: float, last_write: float, last_request: float) -> bool:
     """Fold the WAL in now?
 
@@ -233,8 +241,12 @@ def _checkpoint_forever(workspace, stop) -> None:
             # Checked every second, so a two-second lull between polls is seen.
             if not _checkpoint_due(size, time.time(), _LAST_WRITE[0], _LAST_REQUEST[0]):
                 continue
-            with _WORK_LOCK:
-                ms = workspace.store.checkpoint()
+            _CHECKPOINTING[0] = True
+            try:
+                with _WORK_LOCK:
+                    ms = workspace.store.checkpoint()
+            finally:
+                _CHECKPOINTING[0] = False
             _profile("checkpoint", {"ms": ms, "wal_before": wal.stat().st_size if wal.exists() else 0})
         except Exception as exc:                    # noqa: BLE001
             _profile("checkpoint", {"error": str(exc)[:160]})
@@ -987,9 +999,13 @@ def search_payload(workspace, query: str, k: int = 8, *,
     out = []
     spent = 0
     seen_groups = set()
+    # One read for every hit (it was one query per hit, after the ranking had
+    # already read them all once: 9-10 s cold, 2026-10-17).
+    many = getattr(workspace.store, "chunks_many", None)
+    got = many([getattr(h, "cid", None) or getattr(h, "chunk", "") for h in hits]) if many else None
     for hit in hits:
         cid = getattr(hit, "cid", None) or getattr(hit, "chunk", "")
-        stored = workspace.store.chunk(cid) if cid else None
+        stored = (got.get(cid) if got is not None else workspace.store.chunk(cid)) if cid else None
         if stored is None:
             continue
         if url and stored.url != url:
@@ -2530,6 +2546,12 @@ class _Handler(BaseHTTPRequestHandler):
         # search-based probes reported nothing wrong.
         # The sidecar's half of the pipeline profile, from its own clock.
         # `?reset=1` empties the rings so a run measures only itself.
+        if segments[0] == "checkpointing":
+            # Never the store, never the work lock: answerable mid-checkpoint.
+            self._send(200, {"checkpointing": bool(_CHECKPOINTING[0]),
+                             "since_write_s": round(time.time() - _LAST_WRITE[0], 1)})
+            return
+
         if segments[0] == "profile":
             query = parse_qs(parts.query)
             if (query.get("reset") or [""])[0]:

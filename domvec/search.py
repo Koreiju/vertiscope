@@ -282,14 +282,30 @@ class ThreeFormIndex:
         order = np.argsort(-score)
         hits: List[Hit] = []
         seen_content: set = set()
-        for row in order:
+        # Read the candidates' chunks in BLOCKS, not one query each: the
+        # collapse below needs every candidate's text, and duplicates mean
+        # many more candidates than hits (117 reads for 47 hits).
+        need = include_markdown or collapse
+        block: Dict[str, object] = {}
+        block_end = 0
+        for pos, row in enumerate(order):
             if score[row] <= 0 or len(hits) >= max(k, 0):
                 break
             meta = self._meta.get(int(row))
             cid = meta[0] if meta else self.freq.rows[int(row)]
             url, xpath = (meta[1], meta[2]) if meta else ("", "")
-            stored = self.store.chunk(cid) if (include_markdown or collapse) else None
-            diag.select_reads += 1 if (include_markdown or collapse) else 0
+            if need and pos >= block_end and hasattr(self.store, "chunks_many"):
+                ahead = order[pos:pos + max(32, 2 * max(k, 0))]
+                block = self.store.chunks_many([
+                    (self._meta.get(int(r)) or (self.freq.rows[int(r)],))[0] for r in ahead if score[r] > 0])
+                block_end = pos + len(ahead)
+                diag.select_reads += 1
+            if need:
+                stored = block.get(cid) if hasattr(self.store, "chunks_many") else self.store.chunk(cid)
+                if not hasattr(self.store, "chunks_many"):
+                    diag.select_reads += 1
+            else:
+                stored = None
             markdown = stored.md if stored else ""
             if collapse:
                 # Keyed on the text, not on an embedding: the spec is explicit

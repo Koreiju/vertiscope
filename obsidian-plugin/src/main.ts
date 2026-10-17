@@ -53,6 +53,34 @@ import { PANEL_VIEW, PanelView } from "./panelview";
 
 export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost {
   settings: DomvecSettings = DEFAULTS;
+
+  /**
+   * **uBlock Origin in the browser cell** (G-201, 2026-10-17: "please add
+   * uBlock origin to our browser immediately"). The official 1.75.0 chromium
+   * build, unpacked under this plugin's `extensions/`, loaded into the
+   * browser cell's OWN session (`persist:domvec`) -- never Obsidian's -- once
+   * per app run, without file access. Electron implements only part of the
+   * extension API, so what it actually blocks is measured, not assumed
+   * (`window.__domvecAdblock`). Off with the `adblock` setting.
+   */
+  async loadAdblock(): Promise<void> {
+    const st: any = ((window as any).__domvecAdblock = { wanted: !!this.settings.adblock, loaded: false });
+    if (!this.settings.adblock) return;
+    try {
+      const remote = (require("electron") as any).remote;
+      const ses = remote?.session?.fromPartition("persist:domvec");
+      const exts = ses?.extensions || ses;
+      if (!exts?.loadExtension) { st.error = "this Electron has no session.loadExtension"; return; }
+      const have = (exts.getAllExtensions?.() || []).find((e: any) => /uBlock/i.test(e.name || ""));
+      if (have) { Object.assign(st, { loaded: true, name: have.name, version: have.version, already: true }); return; }
+      const base = (this.app.vault.adapter as any).getBasePath?.() || "";
+      const dir = `${base}/${this.manifest.dir}/extensions/ublock0-1.75.0/uBlock0.chromium`;
+      const ext = await exts.loadExtension(dir, { allowFileAccess: false });
+      Object.assign(st, { loaded: true, name: ext?.name, version: ext?.version, id: ext?.id });
+    } catch (e) {
+      st.error = String(e).slice(0, 300);
+    }
+  }
   sidecar!: Sidecar;
   links!: VaultLinks;
   /** The `[]()` gesture's host: its counters and its planted arm (`R-1`..`R-4`). */
@@ -92,6 +120,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     }
 
     this.settings = Object.assign({}, DEFAULTS, await this.loadData());
+    void this.loadAdblock();
     // A test workspace outlives a plugin reload (`session.ts`): put it back,
     // and badge it in the status bar for as long as it lasts.
     const sw: any = (window as any).__domvec?.session?.switcher;

@@ -144,6 +144,13 @@ class FreqMatrix:
     _free: List[int] = field(default_factory=list)   # retired rows, reusable
     _csr: Optional[sparse.csr_matrix] = None
     _df: Optional[np.ndarray] = None
+    #: The weighted matrix, built once per mutation batch like `_csr`. It
+    #: was rebuilt on EVERY query -- copy, log, idf, normalise over 62k rows
+    #: -- and was the fixed ~0.8 s of every search, scoped or not
+    #: (2026-10-17, `/search` timing: lexical 750-930 ms). A function of the
+    #: counts and the vocabulary only, so `_invalidate` is its whole
+    #: invalidation.
+    _tfidf: Optional[sparse.csr_matrix] = None
 
     # -- build -------------------------------------------------------------
     def add(self, cid: str, text: str) -> int:
@@ -256,6 +263,7 @@ class FreqMatrix:
         # view of the counts; both are re-derived rather than patched.
         self._csr = None
         self._df = None
+        self._tfidf = None
         #: Bumped on every mutation, so a long-running owner can save only
         #: when something changed. See `Workspace.save_lexical`.
         self.version = getattr(self, "version", 0) + 1
@@ -315,6 +323,8 @@ class FreqMatrix:
         chunk is not ten times as much evidence; smoothed idf because an
         unseen term must not divide by zero.
         """
+        if self._tfidf is not None:
+            return self._tfidf
         csr = self._matrix().copy()
         if not csr.shape[0]:
             return csr
@@ -326,7 +336,8 @@ class FreqMatrix:
         norms = np.sqrt(csr.multiply(csr).sum(axis=1)).A.ravel()
         norms[norms == 0] = 1.0
         inv = sparse.diags((1.0 / norms).astype(np.float32))
-        return (inv @ csr).tocsr()
+        self._tfidf = (inv @ csr).tocsr()
+        return self._tfidf
 
     def query_vector(self, query: str) -> np.ndarray:
         """Dense query vector in the same space, L2-normalised.
