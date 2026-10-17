@@ -68,7 +68,11 @@ JS = r"""(async (shift, planted) => {
   move(1);
   try {
     v.reframe();
-    await sleep(1600);
+    // Read between the 400 ms flight and the reframe's own 450 ms pass,
+    // which re-faces every open page's disc (G-94): it releases page pins
+    // and recomputes chunk places from the stored layout, so any shift is
+    // undone BY DESIGN after it (traced: fx -> null, fitX 174 -> -795).
+    await sleep(430);
     const c = v.screenCoverage();
     // The shift must still be in place when the picture is scored.
     let off = 0; ns.forEach((n, i) => { off += n.x - home[i]; });
@@ -95,6 +99,8 @@ for shift in ([0, 0, 0], [900, 300, 0], [-600, 0, 400]):
         rows.append(row)
         print(json.dumps(row))
 rows = [r for r in rows if r["held"]]
+if not any(any(r["shift"]) for r in rows):
+    print("no shifted row held; no score"); sys.exit(1)
 
 worst = lambda planted, shifted: max(max(abs(r["dx"]), abs(r["dy"])) for r in rows
                                     if r["planted"] == planted and (any(r["shift"]) == shifted))

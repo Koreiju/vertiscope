@@ -3188,6 +3188,16 @@ start that killed a running store, a launch that would reset the reader's
 plugin settings, a reload that awaited the call that hangs, a reframe read
 mid-flight.*
 
+> experiencing significant and persistent un-settling on camera placement and
+> 3D coordinates
+
+*(Said while the framing probe ran with a once-only idle gate and a
+subtract-restore that threw nodes the other way; stopped, then asked.)*
+
+*The reader's answers, asked 2026-10-17 (AskUserQuestion): un-settling after
+the probes stopped -- "Stopped now"; live probing -- "Yes, when I'm idle
+(Recommended)"; pure UMAP (118) -- "Keep current layout".*
+
 ---
 
 
