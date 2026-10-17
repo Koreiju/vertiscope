@@ -2513,11 +2513,17 @@ def place_projected(workspace, cids, proj) -> Dict:
     # silence, a pin on such a chunk found no node and opened no billboard
     # (G-82, 2026-10-12: 2 pins, 1 billboard).
     aliases: Dict[str, str] = {}
+    # `unknown`: the store holds no such chunk -- retired by a re-cut, say --
+    # as against `unplaced`, a chunk not embedded YET. A pin on an unknown
+    # cid waited out 40 retries (25 s) for a vector that could never come
+    # before the browser re-anchored it by address (G-82, 2026-10-17).
+    held_cids: set = set()
 
     def _take(batch):
         for cid, chunk, vector in workspace.store.chunks_for_placement(batch):
             if chunk is None:
                 continue
+            held_cids.add(cid)
             if chunk.redundant or (chunk.group_of and chunk.group_of != cid):
                 aliases[cid] = chunk.dup_of if chunk.redundant else chunk.group_of
                 continue
@@ -2615,7 +2621,8 @@ def place_projected(workspace, cids, proj) -> Dict:
     timing["ms_edges"] = round((_time.perf_counter() - _t) * 1000, 1)
     status = proj.status(workspace)
     return {"timing": timing, "nodes": nodes, "edges": placed_edges, "aliases": aliases,
-            "unplaced": missing, "stale": False, "source": "projector",
+            "unplaced": missing, "unknown": [c for c in wanted if c not in held_cids],
+            "stale": False, "source": "projector",
             "epoch": status["epoch"], "seq": status["seq"],
             "fitted_n": status.get("fit_sample"),
             "fitted_chunks": status.get("fitted_chunks"),

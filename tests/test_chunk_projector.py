@@ -166,6 +166,18 @@ def test_place_returns_the_streams_position_verbatim(fitted):
     assert hub["pos"] == [float(v) for v in proj.page_pos[hub["url"]]]
 
 
+def test_place_says_which_cids_the_store_does_not_hold(fitted):
+    """G-82: a retired cid is `unknown`, not merely `unplaced` -- the pin
+    stops waiting for a vector that cannot come. Null arm: a held chunk is
+    never called unknown."""
+    from domvec.obsidian.layout import place_projected
+    ws, proj, _ = fitted
+    got = place_projected(ws, ["c030", "0000dead0000beef"], proj)
+    assert got["unknown"] == ["0000dead0000beef"]
+    assert any(n["cid"] == "c030" for n in got["nodes"])
+    assert place_projected(ws, ["c030"], proj)["unknown"] == []
+
+
 def test_a_kept_fit_restores_and_requeues_only_what_changed(fitted):
     ws, proj, _ = fitted
     assert proj.save(ws)

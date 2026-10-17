@@ -5002,6 +5002,8 @@ export class GraphView extends ItemView {
    */
   /** Chunks the browser holds pinned, so a deferred placement knows it is still wanted. */
   private pinWanted = new Set<string>();
+  /** Planted: an unknown cid is retried like an unembedded one (the 25 s wait). */
+  plantWaitUnknown = false;
 
   async pinChunk(cid: string): Promise<boolean> {
     if (!this.graph || !cid) return false;
@@ -5019,6 +5021,9 @@ export class GraphView extends ItemView {
       // A duplicate or a merge group's member is drawn by ANOTHER chunk: the
       // pin's billboard opens on that one (G-82, 2026-10-12).
       if (got?.aliases?.[cid] && !this.plantNoPinAlias) drawnAs = String(got.aliases[cid]);
+      // The store has no such chunk: no vector is coming, so stop asking and
+      // let the browser re-anchor the pin by its address (G-82).
+      else if (got?.unknown?.includes(cid) && !this.plantWaitUnknown) break;
       node = this.graph.graphData().nodes.find((n: any) => n.id === drawnAs);
       if (!node) await new Promise((r) => window.setTimeout(r, 500));
     }
