@@ -3360,6 +3360,28 @@ distinct from back/forward) -- to be DESIGNED with the reader before built.
 (133) at full view (the whole corpus in frame) nodes draw smaller; full size
 when zoomed in.*
 
+> we should also add a liminal diffuse-glow effect to our chunk nodes since
+> they're currently pretty small and only reflect light rays through each
+> other rather than something truly 'latent and luminal' where we can see the
+> chunk nodes as brightness points since they're so small
+
+*(Said 2026-10-17 while G-206 drew nodes at half size at full view.) Read as
+(134): every chunk node carries a soft, additive, diffuse glow in its own
+colour, sized so that even a node a pixel or two across reads as a point of
+light -- emitted brightness, not only the glass lens's reflections.*
+
+> way too low glow and dark halo rings around the nodes
+
+> also, perhaps ensure the background is also black and not grey
+
+> the node glow could be broader and less concentrated at their centers, or a
+> more smooth rolloff on the glow distance/luminosity and concentration (power
+> vs diffuse)
+
+*(Said 2026-10-17 over the first cut of (134): the dark rings were the halo
+writing alpha onto the transparent canvas; fixed, the glow widened and made
+mostly diffuse, the background black.)*
+
 *Where (131) meets "Keep current layout" (asked minutes earlier, about the
 quantile spread, containment and depth compression): (131) replaces the
 collision drift and, by the reader's "exact to the original UMAP

@@ -4743,7 +4743,7 @@ export class GraphView extends ItemView {
     const prevColor = new THREE.Color(); renderer.getClearColor(prevColor);
     const prevAlpha = renderer.getClearAlpha();
     renderer.setRenderTarget(this.inspectRT);
-    renderer.setClearColor(0x1e1e1e, 1);
+    renderer.setClearColor(this.plantGreyBackground ? 0x1e1e1e : 0x000000, 1);   // as the pane draws it
     renderer.clear();
     (renderer.__domvecDraw || renderer.render.bind(renderer))(g.scene(), cam);
     const px = new Uint8Array(size * size * 4);
@@ -5571,8 +5571,16 @@ export class GraphView extends ItemView {
   /** The camera's distance to its target when the whole cloud was framed. */
   fullViewDist = 0;
   plantNoZoomScale = false;
+  /** Planted: the transparent canvas over the pane's grey, as before. */
+  plantGreyBackground = false;
+  /** Planted (G-207): the chunk glow off -- orbs only reflect, as before. */
+  plantNoHalo = false;
   private zoomTick(g: any): void {
     if (!this.batch) return;
+    // The glow's pixel floor needs pixels -> view units (G-207).
+    const cam0 = g.camera();
+    if (this.canvasEl && cam0?.projectionMatrix) this.batch.setViewport(this.canvasEl.clientHeight, cam0.projectionMatrix.elements[5]);
+    this.batch.setHalo(!this.plantNoHalo);
     let f = 1;
     if (!this.plantNoZoomScale && this.fullViewDist > 0) {
       const cam = g.camera(), t = g.controls()?.target;
@@ -6359,7 +6367,9 @@ export class GraphView extends ItemView {
       // Edges are drawn by the batch's one line-segment set (`G-107`); the
       // per-link cylinders come back only under the planted arm.
       .linkVisibility(this.plantPerNode)
-      .backgroundColor("rgba(0,0,0,0)")
+      // Black, opaque (2026-10-17: "ensure the background is also black and
+      // not grey"): the glowing chunks read as points of light on it.
+      .backgroundColor(this.plantGreyBackground ? "rgba(0,0,0,0)" : "#000000")
       .onNodeClick((n: any) => {
         // A page or a branch unravels; a chunk opens (`G-54`). One gesture,
         // and which it means is a property of the node rather than of a mode

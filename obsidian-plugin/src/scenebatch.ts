@@ -167,6 +167,58 @@ void main() {
   #include <colorspace_fragment>
 }`;
 
+// **The liminal glow** (G-207, 2026-10-17: "a liminal diffuse-glow effect to
+// our chunk nodes since they're currently pretty small and only reflect light
+// rays through each other rather than something truly 'latent and luminal'
+// where we can see the chunk nodes as brightness points"). A soft additive
+// halo in the orb's own colour, drawn from the GLASS mesh's own instance
+// buffers -- no slots of its own, so it cannot fall out of step -- at the
+// orb's size times uHaloK but never under uMinPx on screen: a chunk too small
+// to draw as a sphere still shows as a point of light.
+const HALO_VERT = `
+attribute vec3 iOffset;
+attribute float iSize;
+attribute vec4 iColor;
+uniform float uZoom;
+uniform float uHaloK;
+uniform float uMinPx;
+uniform float uPxView;
+varying vec2 vCorner;
+varying vec4 vTint;
+void main() {
+  vCorner = position.xy;
+  vTint = iColor;
+  vec4 mv = modelViewMatrix * vec4(iOffset, 1.0);
+  float s = max(iSize * uZoom * uHaloK, uMinPx * max(-mv.z, 0.0) * uPxView);
+  mv.xy += position.xy * s;
+  gl_Position = projectionMatrix * mv;
+}`;
+const HALO_FRAG = `
+uniform float uHue;
+uniform float uHaloI;
+uniform float uCore;
+varying vec2 vCorner;
+varying vec4 vTint;
+vec3 turnHue(vec3 c, float a) {
+  const vec3 k = vec3(0.57735027);
+  float ca = cos(a);
+  return c * ca + cross(k, c) * sin(a) + k * dot(k, c) * (1.0 - ca);
+}
+void main() {
+  float r2 = dot(vCorner, vCorner);
+  if (r2 > 1.0) discard;
+  // Power vs diffuse (2026-10-17: "broader and less concentrated at their
+  // centers, or a more smooth rolloff"): a broad (1 - r^2)^2 that reaches
+  // zero smoothly at the edge, mixed with a little concentrated core by
+  // uCore. The first gaussian clipped every orb's centre at 255.
+  float diffuse = (1.0 - r2) * (1.0 - r2);
+  float core = exp(-14.0 * r2);
+  float f = mix(diffuse, core, uCore);
+  vec3 tint = uHue == 0.0 ? vTint.rgb : clamp(turnHue(vTint.rgb, uHue), 0.0, 1.0);
+  vec3 c = mix(tint, vec3(1.0), 0.12 * core);
+  gl_FragColor = vec4(c * f * uHaloI * min(vTint.a, 1.5), 1.0);
+}`;
+
 interface Mesh {
   geo: THREE.InstancedBufferGeometry;
   mesh: THREE.Mesh;
@@ -197,6 +249,8 @@ export class SceneBatch {
   private opaque: Mesh;
   private clear: Mesh;
   private glass: Mesh;
+  /** The glass orbs' glow (G-207): the glass geometry, an additive material. */
+  private halo: THREE.Mesh;
   private lines: THREE.LineSegments;
   private linePos: THREE.BufferAttribute;
   private lineCol: THREE.BufferAttribute;
@@ -243,8 +297,55 @@ export class SceneBatch {
     this.lines = this.makeLines(1024);
     this.linePos = this.lines.geometry.getAttribute("position") as THREE.BufferAttribute;
     this.lineCol = this.lines.geometry.getAttribute("color") as THREE.BufferAttribute;
-    scene.add(this.opaque.mesh, this.clear.mesh, this.glass.mesh, this.lines);
+    this.halo = this.makeHalo();
+    scene.add(this.opaque.mesh, this.clear.mesh, this.glass.mesh, this.halo, this.lines);
   }
+
+  /** Glow on screen: the halo's factor on the orb, its floor in pixels, its intensity. */
+  // 2026-10-17: "way too low glow" at 3.2 / 5 px / 0.55; then "broader and
+  // less concentrated at their centers": wider, a lower peak, mostly diffuse.
+  haloK = 6;
+  haloMinPx = 12;
+  haloI = 0.75;
+  /** 0 all diffuse, 1 all concentrated core. */
+  haloCore = 0.15;
+  private makeHalo(): THREE.Mesh {
+    const mat = new THREE.ShaderMaterial({
+      vertexShader: HALO_VERT, fragmentShader: HALO_FRAG,
+      uniforms: { uZoom: { value: this.zoom }, uHaloK: { value: this.haloK }, uMinPx: { value: this.haloMinPx },
+                  uPxView: { value: 0.002 }, uHue: { value: 0 }, uHaloI: { value: this.haloI }, uCore: { value: this.haloCore } },
+      transparent: true, depthWrite: false, depthTest: true,
+      // Colour ADDED, alpha left alone. The canvas is transparent over the
+      // pane, and AdditiveBlending also added the halo's alpha: its faint
+      // fringe turned opaque and nearly black over the pane's grey -- a dark
+      // disc round every node (2026-10-17: "dark halo rings around the
+      // nodes"). With alpha untouched the glow adds to whatever is behind.
+      blending: THREE.CustomBlending, blendEquation: THREE.AddEquation,
+      blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
+      blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: THREE.OneFactor,
+    });
+    const m = new THREE.Mesh(this.glass.geo, mat);
+    m.frustumCulled = false;
+    m.renderOrder = 4;
+    (m as any).__batch = true;
+    m.raycast = () => {};
+    return m;
+  }
+  /** Pixels -> view-space units at unit depth, for the halo's floor: 2 / (H * P[1][1]). */
+  setViewport(heightPx: number, projYY: number): void {
+    const u = (this.halo.material as THREE.ShaderMaterial).uniforms;
+    if (heightPx > 0 && projYY > 0) u.uPxView.value = 2 / (heightPx * projYY);
+  }
+  setHalo(on: boolean): void { this.halo.visible = on && this.glass.mesh.visible; this.haloOn = on; }
+  /** Tune the glow live: size factor, pixel floor, intensity, core share. */
+  tuneHalo(t: { k?: number; minPx?: number; i?: number; core?: number }): void {
+    const u = (this.halo.material as THREE.ShaderMaterial).uniforms;
+    if (t.k !== undefined) u.uHaloK.value = this.haloK = t.k;
+    if (t.minPx !== undefined) u.uMinPx.value = this.haloMinPx = t.minPx;
+    if (t.i !== undefined) u.uHaloI.value = this.haloI = t.i;
+    if (t.core !== undefined) u.uCore.value = this.haloCore = t.core;
+  }
+  private haloOn = true;
 
   private material(translucent: boolean, glass = false): THREE.ShaderMaterial {
     if (glass) {
@@ -516,8 +617,8 @@ export class SceneBatch {
   setZoom(f: number): void {
     if (Math.abs(f - this.zoom) < 1e-4) return;
     this.zoom = f;
-    for (const m of [this.opaque, this.clear, this.glass]) {
-      const u = (m.mesh.material as THREE.ShaderMaterial).uniforms;
+    for (const m of [this.opaque.mesh, this.clear.mesh, this.glass.mesh, this.halo]) {
+      const u = (m.material as THREE.ShaderMaterial).uniforms;
       if (u.uZoom) u.uZoom.value = f;
     }
   }
@@ -527,6 +628,7 @@ export class SceneBatch {
   setHue(a: number): void {
     this.hue = a;
     for (const m of [this.opaque, this.clear, this.glass]) (m.mesh.material as THREE.ShaderMaterial).uniforms.uHue.value = a;
+    (this.halo.material as THREE.ShaderMaterial).uniforms.uHue.value = a;
   }
 
   /**
@@ -614,12 +716,14 @@ export class SceneBatch {
     this.opaque.mesh.visible = on;
     this.clear.mesh.visible = on;
     this.glass.mesh.visible = on;
+    this.halo.visible = on && this.haloOn;
     this.lines.visible = on;
   }
 
   dispose(): void {
-    this.scene.remove(this.opaque.mesh, this.clear.mesh, this.glass.mesh, this.lines);
+    this.scene.remove(this.opaque.mesh, this.clear.mesh, this.glass.mesh, this.halo, this.lines);
     for (const m of [this.opaque, this.clear, this.glass]) { m.geo.dispose(); (m.mesh.material as THREE.Material).dispose(); }
+    (this.halo.material as THREE.Material).dispose();      // its geometry is the glass mesh's
     this.lines.geometry.dispose(); (this.lines.material as THREE.Material).dispose();
     this.atlas.dispose();
   }

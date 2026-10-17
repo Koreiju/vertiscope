@@ -166,7 +166,7 @@
    against the CANVAS, which is the frame `graph2ScreenCoords`
    answers in. Without it the panels escape to the nearest
    positioned ancestor and land a caption-bar below their nodes. */
-.domvec-graph-canvas { flex: 1; min-height: 0; position: relative; }
+.domvec-graph-canvas { flex: 1; min-height: 0; position: relative; background: #000; }
 
 /* --- the distilled HTML form ----------------------------------------------
    The other form a chunk has. `htmlform.py` emits a closed set of elements
