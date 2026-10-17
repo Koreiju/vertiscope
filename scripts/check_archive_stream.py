@@ -30,7 +30,8 @@ stamp = live.evaluate("window.__domvecReaderAt || 0")
 
 URL = sys.argv[1] if len(sys.argv) > 1 and sys.argv[1].startswith("http") else "https://archive.org/search?query=radio+drama"
 PLANTED = "--planted" in sys.argv
-JS = r"""(async (url, planted) => {
+PLANT = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--plant=")), "inpage-is-new-page")
+JS = r"""(async (url, planted, plantName) => {
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
   const b = app.workspace.getLeavesOfType("domvec-browser-view")[0].view;
@@ -40,7 +41,7 @@ JS = r"""(async (url, planted) => {
   v.forceDelta = (d) => { if (d && d.url && d.url.includes("archive.org")) drains.push({ at: performance.now(), added: d.added.length,
       again: d.added.filter((a) => a.again).length, removed: d.removed.length }); return origFD(d); };
   const samples = [];
-  if (planted) b.plant.add("inpage-is-new-page");
+  if (planted) b.plant.add(plantName);
   const trees0 = new Set(b.forceTrees.keys()), ip0 = { ...b.inPageStats };
   // A fresh visit each run, so the list starts at its first page.
   url = url + (url.includes("?") ? "&" : "?") + "probe=" + Date.now();
@@ -81,14 +82,14 @@ JS = r"""(async (url, planted) => {
     const trees = [...b.forceTrees.keys()].filter((u) => !trees0.has(u) && u.includes("archive.org"));
     return JSON.stringify({ samples, drains, after, lat, mode: v.panelsOn, dwell: v.hoverDwellMs, hoverStats: v.hoverStats,
                             trees: trees.length, inpage: { same_doc: b.inPageStats.same_doc - ip0.same_doc, new_page: b.inPageStats.new_page - ip0.new_page },
-                            session: b.session.slice(0, 90) });
+                            session: b.session.slice(0, 90), enqueue_merged: b.enqueueMerged });
   } finally {
-    b.plant.delete("inpage-is-new-page");
+    b.plant.delete(plantName);
     v.forceDelta = origFD;
     if (start && start.startsWith("http") && !start.includes("archive.org")) b.go(start);
   }
 })"""
-r = json.loads(live.evaluate(JS + "(%s, %s)" % (json.dumps(URL), "true" if PLANTED else "false")))
+r = json.loads(live.evaluate(JS + "(%s, %s, %s)" % (json.dumps(URL), "true" if PLANTED else "false", json.dumps(PLANT))))
 live.evaluate("(()=>{window.__domvecReaderAt = %s; return 1})()" % json.dumps(stamp))
 S, D = r["samples"], r["drains"]
 q = lambda xs, p: sorted(xs)[min(len(xs) - 1, int(p * len(xs)))] if xs else None
@@ -97,5 +98,5 @@ print(json.dumps({
     "push_queue_max": max((s["push"] for s in S), default=0), "capture_backlog_max": max((s["captures"] for s in S), default=0),
     "capture_backlog_end": S[-1]["captures"] if S else None,
     "live_chunks_end": r["after"]["chunks"], "dup_text_end": r["after"]["dupText"], "dup_text_max": max((s["dupText"] for s in S), default=0),
-    "planted": PLANTED, "trees": r["trees"], "inpage": r["inpage"], "session": r["session"],
+    "planted": PLANT if PLANTED else False, "enqueue_merged": r.get("enqueue_merged"), "trees": r["trees"], "inpage": r["inpage"], "session": r["session"],
     "hover_ms_grey": r["lat"]["grey"], "hover_ms_stored": r["lat"]["stored"], "mode": r["mode"], "dwell": r["dwell"], "hover": r["hoverStats"]}))

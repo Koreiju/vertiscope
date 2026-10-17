@@ -76,6 +76,23 @@ export class ForceTree {
 
   branchId(address: string): string { return `f:${this.url}@${address}`; }
 
+  /**
+   * Continue a DOCUMENT's stream under a new page (G-216/G-217). The
+   * sensor's dictionary and chunk ids belong to the document, not to the
+   * page the store files them under: a fresh tree for a page that began
+   * inside a running document could decode none of its drains ("mid-stream:
+   * cannot decode yet") and the stream was dropped -- archive.org's search
+   * list, 0 chunks held after a url rewrite (2026-10-17). The new tree takes
+   * the document's dictionary and its live chunks, which are still on the
+   * page, and reports them as added on its first drain.
+   */
+  adopt(from: ForceTree): void {
+    this.dict = [...from.dict];
+    for (const [sid, h] of from.chunks) this.chunks.set(sid, { ...h, id: this.nodeId(sid), parent: "" });
+    this.adoptPending = true;
+  }
+  private adoptPending = false;
+
   /** A live chunk's line texts by its node id, or null (gone, or a branch). */
   linesOf(id: string): string[] | null {
     const m = /#(\d+)$/.exec(id || "");
@@ -229,6 +246,12 @@ export class ForceTree {
       delta.added.push({ id: ForceTree.pageId(this.url), parent: "", title: this.url, lines: 0 });
     }
     const moved: string[] = [];              // addresses that came or went
+    // Adopted from the document's previous page: drawn as new here.
+    const adopted: number[] = [];
+    if (this.adoptPending) {
+      this.adoptPending = false;
+      for (const [sid, h] of this.chunks) { adopted.push(sid); moved.push(h.address); }
+    }
     for (const rid of payload?.removed || []) {
       const h = this.chunks.get(Number(rid));
       if (!h) continue;
@@ -236,7 +259,7 @@ export class ForceTree {
       delta.removed.push(h.id);
       moved.push(h.address);
     }
-    const fresh: number[] = [];
+    const fresh: number[] = [...adopted];
     for (const c of payload?.chunks || []) {
       const sid = Number(c.id);
       const { address, title } = this.address(c.lines || []);
@@ -280,7 +303,8 @@ export class ForceTree {
     }
     const freshIds = new Set(fresh);
     for (const sid of fresh) {
-      const h = this.chunks.get(sid)!;
+      const h = this.chunks.get(sid);
+      if (!h) continue;                      // adopted, then removed by this drain
       h.parent = sk ? (sk.parentOfChunk.get(sid) || ForceTree.pageId(this.url)) : this.parentOf(h.address, sid);
       delta.added.push({ id: h.id, parent: h.parent, title: h.title, lines: h.lines });
       delta.addresses.push(h.address);

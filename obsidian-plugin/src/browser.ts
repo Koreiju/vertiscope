@@ -1268,7 +1268,9 @@ export class BrowserView extends ItemView {
   private pendingInPage = "";
   /** Urls the page took without leaving its document -> the session's url. */
   private sessionAliases = new Map<string, string>();
-  inPageStats = { same_doc: 0, new_page: 0 };
+  inPageStats = { same_doc: 0, new_page: 0, adopted: 0 };
+  /** The tree that last decoded each document's stream (by `docSeq`). */
+  private docTrees = new Map<number, ForceTree>();
   /** What the address bar sent where (G-202). */
   addressStats = { searched: 0, went: 0 };
   /** Navigate. Bare hosts get https, because a reader types `arxiv.org`. */
@@ -2296,7 +2298,15 @@ export class BrowserView extends ItemView {
     // capture's round trip, so the graph shows the scan at once.
     if (payload && ((payload.chunks || []).length || (payload.removed || []).length)) {
       let tree = this.forceTrees.get(url);
-      if (!tree) { tree = new ForceTree(url); this.forceTrees.set(url, tree); }
+      if (!tree) {
+        tree = new ForceTree(url); this.forceTrees.set(url, tree);
+        // A page that began inside a running document continues its stream
+        // (G-216): the document's dictionary and live chunks, adopted.
+        const prev = this.docTrees.get(this.docSeq);
+        if (prev && !this.plant.has("no-adopt")) { tree.adopt(prev); this.inPageStats.adopted++; }
+      }
+      this.docTrees.set(this.docSeq, tree);
+      if (this.docTrees.size > 8) this.docTrees.delete(this.docTrees.keys().next().value as number);
       const delta = tree.apply(payload);
       this.lastDrainAt = performance.now();
       if (delta) drainIds = delta.added.map((a) => a.id);
@@ -2403,8 +2413,27 @@ export class BrowserView extends ItemView {
     // `draining` across the whole round trip, and a new page's first
     // capture (the whole page, 5-7 s to store) froze the overlay and the
     // 3D stream for exactly that long after every navigation.
-    this.captureQueue.push({ url, payload, trace, drainIds, queuedAt: performance.now(),
-                             title });
+    // Merged at ENQUEUE into the page's last queued job (not a settle, which
+    // stays a barrier): the queue holds at most one job per page between
+    // settles however fast the page mutates or however long the store is
+    // held -- a 195 s checkpoint grew it to 62-135 jobs (archive.org,
+    // 2026-10-17). Nothing is dropped: the merge replays the drains in order.
+    // Planted `no-enqueue-merge`: a job per drain.
+    let into = -1;
+    for (let i = this.captureQueue.length - 1; i >= 0; i--) {
+      if (this.captureQueue[i].url === url) { into = this.captureQueue[i].settle ? -1 : i; break; }
+    }
+    if (into >= 0 && !this.plant.has("no-enqueue-merge")) {
+      const j = this.captureQueue[into];
+      this.captureQueue[into] = { ...j, payload: mergePayloads([j.payload, payload]),
+                                  drainIds: [...(j.drainIds || []), ...(drainIds || [])],
+                                  merged: [...(j.merged || []), trace].filter(Boolean), title: title || j.title };
+      this.mergedCaptures++;
+      this.enqueueMerged++;
+    } else {
+      this.captureQueue.push({ url, payload, trace, drainIds, queuedAt: performance.now(),
+                               title });
+    }
     void this.pumpCaptures();
     // Planted by D-35's check: the old behaviour, the drain loop held
     // across the whole capture.
@@ -2583,6 +2612,8 @@ export class BrowserView extends ItemView {
   capturing = false;
   /** Queued captures, for the harness and the corner box. */
   get captureBacklog(): number { return this.captureQueue.length; }
+  /** Drains folded into an already-queued job of their page (G-217). */
+  enqueueMerged = 0;
 
   /**
    * Send queued captures one at a time. The CURRENT page's go first; any
