@@ -20,7 +20,10 @@ class ReaderActed(Exception):
 class Probe:
     def __init__(self, port: int = 9222):
         targets = json.load(urllib.request.urlopen("http://127.0.0.1:%d/json/list" % port, timeout=10))
-        page = next(t for t in targets if t["type"] == "page" and "Obsidian" in t["title"])
+        # The workspace window, never the vault picker (also an app:// page).
+        pages = [t for t in targets if t["type"] == "page"]
+        page = next((t for t in pages if t.get("url", "").startswith("app://") and "/index.html" in t["url"]),
+                    None) or next(t for t in pages if "Obsidian" in t["title"])
         self.ws = websocket.create_connection(page["webSocketDebuggerUrl"], timeout=300, suppress_origin=True)
         self.n = 0
         self.t0 = time.time()

@@ -1,0 +1,30 @@
+{
+  "mcpServers": {
+    "domvec": {
+      "command": "python",
+      "args": [
+        "-m",
+        "domvec.obsidian.mcp",
+        "--sidecar",
+        "http://127.0.0.1:8788",
+        "--cdp",
+        "http://127.0.0.1:9222"
+      ],
+      "env": {
+        "PYTHONPATH": "<home>\\Documents\\domvec"
+      }
+    },
+    "domvec-git": {
+      "command": "python",
+      "args": [
+        "-m",
+        "domvec.obsidian.git_mcp",
+        "--repo",
+        "<home>\\Documents\\domvec"
+      ],
+      "env": {
+        "PYTHONPATH": "<home>\\Documents\\domvec"
+      }
+    }
+  }
+}

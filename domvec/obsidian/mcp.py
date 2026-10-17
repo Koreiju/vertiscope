@@ -346,6 +346,114 @@ TOOLS: List[Dict] = [
         "description": "Every page the workspace holds.",
         "inputSchema": {"type": "object", "properties": {}},
     },
+    {
+        "name": "sidecar_start",
+        "title": "Start domvec sidecar",
+        "description": "Start the domvec sidecar server on a workspace with the full feature set (semantic, capture, enact, kernel, supervise).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "workspace": {"type": "string", "description": "Path to workspace (default: build/corpus123)"},
+                "stop_existing": {"type": "boolean", "default": False, "description": "Replace a sidecar already on the port (otherwise it is left running and reported)"},
+                "force": {"type": "boolean", "default": False, "description": "Start or stop even with the store's WAL over 8 MB"},
+                "port": {"type": "integer", "description": "Port to serve on (default: 8788)"},
+                "semantic": {"type": "boolean", "default": True},
+                "capture": {"type": "boolean", "default": True},
+                "enact": {"type": "boolean", "default": True},
+                "kernel": {"type": "boolean", "default": True},
+                "supervise": {"type": "boolean", "default": True},
+            },
+        },
+    },
+    {
+        "name": "sidecar_stop",
+        "title": "Stop domvec sidecar",
+        "description": "Stop any running sidecar and supervisor processes on the specified port. Refused while the store's WAL is over 8 MB unless forced.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "port": {"type": "integer", "default": 8788},
+                "force": {"type": "boolean", "default": False},
+            },
+        },
+    },
+    {
+        "name": "sidecar_status",
+        "title": "Status of domvec sidecar",
+        "description": "Check if the sidecar process is running and whether its HTTP endpoint is healthy.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "port": {"type": "integer", "default": 8788},
+            },
+        },
+    },
+    {
+        "name": "workspace_open",
+        "title": "Open workspace in vault",
+        "description": "Prepare a fresh workspace and vault, configure the domvec-bridge plugin, launch the sidecar with full powers, and open Obsidian with CDP debugging.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "workspace": {"type": "string", "description": "Path to workspace directory"},
+                "vault": {"type": "string", "description": "Path to Obsidian vault directory"},
+                "port": {"type": "integer", "default": 8788},
+                "cdp_port": {"type": "integer", "default": 9222},
+                "launch_obsidian": {"type": "boolean", "default": True},
+            },
+            "required": ["workspace", "vault"],
+        },
+    },
+    {
+        "name": "obsidian_launch",
+        "title": "Launch Obsidian with CDP",
+        "description": "Launch Obsidian with remote debugging enabled (--remote-debugging-port) and unthrottling flags, pointing to the vault.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "vault": {"type": "string", "description": "Path to vault directory"},
+                "cdp_port": {"type": "integer", "default": 9222},
+                "close_existing": {"type": "boolean", "default": True},
+            },
+        },
+    },
+    {
+        "name": "obsidian_close",
+        "title": "Close Obsidian",
+        "description": "Terminate any running Obsidian processes cleanly.",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "obsidian_eval",
+        "title": "Evaluate JavaScript in Obsidian",
+        "description": "Evaluate an arbitrary JavaScript expression in the Obsidian renderer window via CDP and return the evaluated result.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "expression": {"type": "string", "description": "JavaScript expression to evaluate"},
+            },
+            "required": ["expression"],
+        },
+    },
+    {
+        "name": "plugin_reload",
+        "title": "Reload domvec-bridge plugin",
+        "description": "Reload the domvec-bridge plugin inside the running Obsidian window without restarting Obsidian.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "settle": {"type": "number", "default": 3.0, "description": "Settling time in seconds after reload"},
+                "wait": {"type": "boolean", "default": False, "description": "Wait for projector to draw"},
+                "force": {"type": "boolean", "default": False, "description": "Reload even though the reader was active in the last minute"},
+            },
+        },
+    },
+    {
+        "name": "graph_reframe",
+        "title": "Reframe 3D graph camera",
+        "description": "Trigger the camera reframe/recenter in the 3D graph view to frame the entire cloud and report new camera coordinates.",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
 ]
 
 
@@ -382,6 +490,55 @@ class DomvecMCP:
                 self.live(), str(a.get("url") or ""), int(a.get("size") or 480), str(a.get("path") or "")),
             "verify_state": self._verify_state,
             "design_state": self._design_state,
+            "sidecar_start": lambda a: __import__("domvec.obsidian.controls", fromlist=["start_sidecar"]).start_sidecar(
+                workspace=a.get("workspace") or "build/corpus123",
+                stop_existing=bool(a.get("stop_existing", False)),
+                force=bool(a.get("force", False)),
+                port=int(a.get("port") or 8788),
+                semantic=bool(a.get("semantic", True)),
+                capture=bool(a.get("capture", True)),
+                enact=bool(a.get("enact", True)),
+                kernel=bool(a.get("kernel", True)),
+                supervise=bool(a.get("supervise", True)),
+            ),
+            "sidecar_stop": lambda a: __import__("domvec.obsidian.controls", fromlist=["stop_sidecar"]).stop_sidecar(
+                port=int(a.get("port") or 8788),
+                force=bool(a.get("force", False)),
+            ),
+            "sidecar_status": lambda a: __import__("domvec.obsidian.controls", fromlist=["sidecar_status"]).sidecar_status(
+                port=int(a.get("port") or 8788),
+            ),
+            "workspace_open": lambda a: __import__("domvec.obsidian.controls", fromlist=["open_workspace"]).open_workspace(
+                workspace=a["workspace"],
+                vault_path=a["vault"],
+                port=int(a.get("port") or 8788),
+                cdp_port=int(a.get("cdp_port") or 9222),
+                launch_app=bool(a.get("launch_obsidian", True)),
+            ),
+            "obsidian_launch": lambda a: __import__("domvec.obsidian.controls", fromlist=["launch_obsidian"]).launch_obsidian(
+                vault_path=a.get("vault"),
+                cdp_port=int(a.get("cdp_port") or 9222),
+                close_existing=bool(a.get("close_existing", True)),
+            ),
+            "obsidian_close": lambda a: __import__("domvec.obsidian.controls", fromlist=["close_obsidian"]).close_obsidian(),
+            "obsidian_eval": lambda a: {
+                "result": self.live().evaluate(str(a["expression"]))
+            },
+            "plugin_reload": lambda a: self.live().reload_plugin(
+                settle=float(a.get("settle") or 3.0),
+                wait=bool(a.get("wait", False)),
+                force=bool(a.get("force", False)),
+            ),
+            "graph_reframe": lambda a: self.live().json_eval(
+                "(async () => { const l = app.workspace.getLeavesOfType('domvec-graph-view')[0];"
+                " if (!l || !l.view) return { error: 'no graph view' };"
+                " l.view.reframe?.();"
+                # The reframe is a 400 ms camera flight; reading the camera
+                # straight after it reported the halfway point (2026-10-17).
+                " await new Promise((r) => setTimeout(r, 700));"
+                " const c = l.view.graph?.cameraPosition?.();"
+                " return { ok: true, camera: c }; })()"
+            ),
         }
         # Built lazily: the live endpoints may not be up, and a server that
         # refuses to start because the app is closed is useless for finding

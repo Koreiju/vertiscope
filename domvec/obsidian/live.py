@@ -77,7 +77,13 @@ class Live:
                  if t.get("type") == "page" and t.get("webSocketDebuggerUrl")]
         if not pages:
             raise RuntimeError("no debuggable page on " + self.cdp)
-        # Prefer the app window over any guest: the guest has no plugin on it.
+        # The workspace window first: the vault picker is ALSO an app://
+        # page (`starter.html`), has no plugin, and was taken whenever it was
+        # listed first. Then the app window over any guest: the guest has no
+        # plugin on it.
+        for t in pages:
+            if (t.get("url") or "").startswith("app://") and "/index.html" in t.get("url", ""):
+                return t["webSocketDebuggerUrl"]
         for t in pages:
             if "obsidian" in (t.get("url") or "").lower() or \
                (t.get("url") or "").startswith("app://"):
@@ -439,7 +445,7 @@ class Live:
         _t.sleep(settle)
         return {"reloaded": True, "alive": self.evaluate("1+1", timeout=15) == 2}
 
-    def reload_plugin(self, settle: float = 6.0, wait: bool = True) -> Dict:
+    def reload_plugin(self, settle: float = 6.0, wait: bool = True, force: bool = False) -> Dict:
         """Reload the plugin, WITHOUT going through the harness.
 
         The harness is what a reload replaces, so asking it to perform one is
@@ -451,13 +457,42 @@ class Live:
         the instrument is the current one.
         """
         import time
+        # Reader-idle gate: a reload under the reader's hands tears their
+        # panes down mid-gesture. `force` is for a probe the reader asked for.
+        if not force:
+            idle = self.evaluate(
+                "(()=>{try{return window.__domvec.reader.idleMs();}catch(e){return null;}})()")
+            if isinstance(idle, (int, float)) and idle < 60000:
+                return {"reloaded": False, "refused": "reader active %.0f s ago" % (idle / 1000),
+                        "hint": "pass force to reload anyway"}
         before = self.evaluate(
             "(()=>{const p=app.plugins.getPlugin('domvec-bridge');"
             " return p && p.manifest ? p.manifest.version : null;})()")
         self.evaluate(
-            "(async()=>{await app.plugins.disablePlugin('domvec-bridge');"
-            " await app.plugins.enablePlugin('domvec-bridge');"
-            " return 1;})()")
+            "(async()=>{await app.plugins.disablePlugin('domvec-bridge'); return 1;})()")
+        # Enable is FIRED, not awaited: awaiting it over CDP hung for the
+        # whole socket timeout more than once and left a half-loaded
+        # instance behind (2026-10-12). Poll a flag it sets instead.
+        self.evaluate(
+            "(()=>{window.__dvReload='start'; app.plugins.enablePlugin('domvec-bridge')"
+            ".then(()=>{window.__dvReload='done'},(e)=>{window.__dvReload='err '+e}); return 1;})()")
+        enabled = "start"
+        deadline = time.time() + 120
+        while time.time() < deadline and enabled == "start":
+            time.sleep(1.0)
+            enabled = self.evaluate("String(window.__dvReload)")
+        # Rebuild each view IN THE LEAF IT HAS. Disabling detaches the old
+        # view, and a leaf left that way keeps running the OLD instance's
+        # code or sits empty; never blank it and open another, which left
+        # 13 empty leaves splitting the window (2026-10-12).
+        views = self.evaluate(
+            "(async()=>{const out={}; const race=(pr)=>Promise.race([pr,new Promise((r)=>setTimeout(r,15000))]);"
+            " for (const [t,k] of [['domvec-graph-view','graph'],['domvec-browser-view','browser']]) {"
+            "  const ls=app.workspace.getLeavesOfType(t);"
+            "  for (const l of ls) await race(l.setViewState({type:t, active:false}));"
+            "  if (!app.workspace.getLeavesOfType(t).length) await race(window.__domvec.act('open',k));"
+            "  out[k]=app.workspace.getLeavesOfType(t).length; }"
+            " return JSON.stringify(out);})()")
         time.sleep(settle)
         gestures = self.evaluate(
             "(()=>{try{return !!(window.__domvec && window.__domvec.act);}"
@@ -465,8 +500,12 @@ class Live:
         # `wait=False` for a store that has nothing to draw yet: a fresh
         # test workspace, before it is seeded, would sit out the whole timeout.
         drew = self.wait_for_projector() if wait else None
-        return {"version_before": before, "harness_installed": bool(gestures),
-                "settled_s": settle, "projector": drew}
+        try:
+            views = json.loads(views) if isinstance(views, str) else views
+        except ValueError:
+            pass
+        return {"version_before": before, "enable": enabled, "views": views,
+                "harness_installed": bool(gestures), "settled_s": settle, "projector": drew}
 
     def wait_for_projector(self, timeout: float = 90.0) -> Dict:
         """Wait until the pane has actually DRAWN something.
@@ -528,7 +567,11 @@ class Live:
         """
         import time as _time
         if reload:
-            self.reload_plugin()
+            got = self.reload_plugin()
+            if got.get("refused"):
+                # Running anyway would score the build that was loaded
+                # before, which is the trap this reload exists to close.
+                return {"started": None, "refused": got["refused"]}
             _time.sleep(3)
         call = ("v.startFresh(%s)" % json.dumps(list(only or [])) if fresh
                 else "v.start(%s, %s)" % (json.dumps(list(only or [])), json.dumps(store)))
@@ -735,6 +778,10 @@ class Live:
             ui = self.ui()
             out["app"] = {
                 "harness": "error" not in ui,
+                # Before the layout is ready every pane reads "not open",
+                # which looked like a broken plugin straight after a launch
+                # (2026-10-17); this says which it is.
+                "layout_ready": self.evaluate("!!(app.workspace && app.workspace.layoutReady)"),
                 "panes": ui.get("panes"),
             }
         except Exception as exc:                    # noqa: BLE001
