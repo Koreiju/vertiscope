@@ -3855,7 +3855,7 @@ export class GraphView extends ItemView {
     for (const n of nodes) {
       const o = n.__threeObj;
       if (!o || !o.__proxy) continue;
-      const want = this.lookOf(n, rs, media).half;
+      const want = this.lookOf(n, rs, media).half * this.zoomScale;
       if (Math.abs(o.scale.x - want) <= 1e-6 * Math.max(1, want)) continue;
       o.scale.setScalar(want);
       o.updateMatrix();
@@ -3866,7 +3866,7 @@ export class GraphView extends ItemView {
   }
 
   private proxyRadius(n: any): number {
-    return this.graph ? this.lookOf(n, this.graph.nodeRelSize(), this.drawnMedia).half : 1;
+    return this.graph ? this.lookOf(n, this.graph.nodeRelSize(), this.drawnMedia).half * this.zoomScale : 1;
   }
 
   /**
@@ -4671,6 +4671,7 @@ export class GraphView extends ItemView {
       this.batch.setVisible(!this.plantPerNode);
       if (this.plantPerNode) return;
       this.idleDrift(g, t);
+      this.zoomTick(g);
       if (media && !this.plantAllPictures) this.refreshDetail(g);
       // Only when something drawn has changed (2026-10-11, measured in chunk
       // view: 4.7 s of every 5 s of script at 22.8k nodes, with nothing on
@@ -4907,7 +4908,9 @@ export class GraphView extends ItemView {
     const drawn: any[] = [];
     for (const n of g.graphData().nodes) {
       if (n.force || typeof n.x !== "number") continue;
-      const r = drawnRadius(n, relSize, media);
+      // AS DRAWN: the batch's own size (nodeScale, one size in chunk view)
+      // times the zoom factor (G-206) -- `drawnRadius` left both out.
+      const r = this.lookOf(n, relSize, media).half * this.zoomScale;
       const c = g.graph2ScreenCoords(n.x, n.y, n.z || 0);
       const q = g.graph2ScreenCoords(n.x + right[0] * r, n.y + right[1] * r, (n.z || 0) + right[2] * r);
       const rp = Math.hypot(q.x - c.x, q.y - c.y);
@@ -5552,6 +5555,39 @@ export class GraphView extends ItemView {
   driftStats = { active: false, turned: 0, hue: 0, started: 0, stopped: 0 };
   /** Set by the drift's own check: drift although a check is running. */
   driftInCheck = false;
+  /**
+   * **Smaller at full view** (G-206, 2026-10-17, the reader's answer for
+   * G-94: "Shrink nodes when the whole corpus is in frame, back to full size
+   * when zoomed in"). Pages buried behind pages at full view are spaced fine
+   * in 3D -- 0 of 179 buried pairs within 2 radii -- they line up in depth
+   * inside site clusters; drawing smaller there uncovers them. DISPLAY only:
+   * a uniform in the batch's shaders, so the layout, the colliders and the
+   * stored places never change with zoom. Full size at a quarter of the
+   * full-view distance or closer, `zoomMin` at it or beyond, eased in log
+   * distance between. Planted: `plantNoZoomScale`.
+   */
+  zoomMin = 0.5;
+  zoomScale = 1;
+  /** The camera's distance to its target when the whole cloud was framed. */
+  fullViewDist = 0;
+  plantNoZoomScale = false;
+  private zoomTick(g: any): void {
+    if (!this.batch) return;
+    let f = 1;
+    if (!this.plantNoZoomScale && this.fullViewDist > 0) {
+      const cam = g.camera(), t = g.controls()?.target;
+      const d = t ? cam.position.distanceTo(t) : cam.position.length();
+      const near = this.fullViewDist / 4;
+      const k = Math.min(1, Math.max(0, Math.log(d / near) / Math.log(this.fullViewDist / near)));
+      f = 1 + (this.zoomMin - 1) * k;
+    }
+    if (Math.abs(f - this.zoomScale) < 1e-3) return;
+    // Picking follows what is drawn: the proxies refit early on a real change.
+    if (Math.abs(f - this.zoomScale) > 0.1 * this.zoomScale) this.fitProxyAt = 0;
+    this.zoomScale = f;
+    this.batch.setZoom(f);
+  }
+
   private driftAt = 0;
   private idleDrift(g: any, now: number): void {
     if (!this.batch) return;
@@ -6829,6 +6865,7 @@ export class GraphView extends ItemView {
         const z = c.z + frameDistance(c);
         graph.cameraPosition({ x: c.x, y: c.y, z }, c, 0);
         placed = { x: c.x, y: c.y, z };
+        this.fullViewDist = z - c.z;
       } catch {
         /* an empty scene has nothing to fit */
       }
@@ -7060,6 +7097,7 @@ export class GraphView extends ItemView {
         const floor = frontmost + Math.max(20, frontmost * 0.15);
         if (next < floor) next = floor;
         g.cameraPosition({ x: c.x, y: c.y, z: c.z + next }, c, 0);
+        this.fullViewDist = next;
       }
     };
 
@@ -7112,7 +7150,8 @@ export class GraphView extends ItemView {
     this.reframe = () => {
       placed = null;              // an explicit reframe is always wanted
       const c = centre();
-      graph.cameraPosition({ x: c.x, y: c.y, z: c.z + frameDistance(c) }, c, 400);
+      this.fullViewDist = frameDistance(c);
+      graph.cameraPosition({ x: c.x, y: c.y, z: c.z + this.fullViewDist }, c, 400);
       // After the flight, not during it: the camera is animating for 400ms
       // and a measurement taken mid-flight frames the halfway point.
       window.setTimeout(() => {

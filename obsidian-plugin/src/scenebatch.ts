@@ -33,6 +33,8 @@ attribute vec3 iOffset;
 attribute float iSize;
 attribute vec4 iColor;
 attribute vec4 iUv;
+// Display-only scale with the camera's distance (G-206: smaller at full view).
+uniform float uZoom;
 varying vec2 vCorner;
 varying vec4 vColor;
 varying vec4 vUv;
@@ -42,7 +44,7 @@ void main() {
   vUv = iUv;
   vec4 mv = modelViewMatrix * vec4(iOffset, 1.0);
   // Camera-facing: the quad's corners are laid out in VIEW space.
-  mv.xy += position.xy * iSize;
+  mv.xy += position.xy * iSize * uZoom;
   gl_Position = projectionMatrix * mv;
 }`;
 
@@ -92,18 +94,19 @@ const GLASS_VERT = `
 attribute vec3 iOffset;
 attribute float iSize;
 attribute vec4 iColor;
+uniform float uZoom;
 varying vec2 vCorner;
 varying vec3 vCenterW;
 varying float vR;
 varying vec4 vTint;
 void main() {
   vCorner = position.xy;
-  vR = iSize;
+  vR = iSize * uZoom;
   vTint = iColor;
   vec4 w = modelMatrix * vec4(iOffset, 1.0);
   vCenterW = w.xyz;
   vec4 mv = viewMatrix * w;
-  mv.xy += position.xy * iSize;
+  mv.xy += position.xy * iSize * uZoom;
   gl_Position = projectionMatrix * mv;
 }`;
 
@@ -255,13 +258,14 @@ export class SceneBatch {
           uFall: { value: 60 },
           uHue: { value: 0 },
           uBright: { value: this.nodeBright },
+          uZoom: { value: this.zoom },
         },
         transparent: true, depthWrite: false,
       });
     }
     return new THREE.ShaderMaterial({
       vertexShader: VERT, fragmentShader: FRAG,
-      uniforms: { atlas: { value: this.atlas }, uHue: { value: 0 } },
+      uniforms: { atlas: { value: this.atlas }, uHue: { value: 0 }, uZoom: { value: this.zoom } },
       transparent: translucent, depthWrite: !translucent,
     });
   }
@@ -505,6 +509,17 @@ export class SceneBatch {
     u.uLights.value = use.length;
     u.uFall.value = Math.max(1e-3, fall);
     this.lightStats = { lights: use.length, fall: Math.round(fall * 10) / 10 };
+  }
+
+  /** Display-only size factor with the camera's distance (G-206). */
+  zoom = 1;
+  setZoom(f: number): void {
+    if (Math.abs(f - this.zoom) < 1e-4) return;
+    this.zoom = f;
+    for (const m of [this.opaque, this.clear, this.glass]) {
+      const u = (m.mesh.material as THREE.ShaderMaterial).uniforms;
+      if (u.uZoom) u.uZoom.value = f;
+    }
   }
 
   /** The colours' turn about the grey axis, radians (item 83). */
