@@ -2614,9 +2614,26 @@ class _Handler(BaseHTTPRequestHandler):
                 k = 12
             t0 = time.perf_counter()
             index = getattr(self.workspace, "index", None)
-            pages = index.search_pages(query, k) if (query and index is not None
-                                                    and hasattr(index, "search_pages")) else []
-            self._send(200, {"query": query, "pages": [{"url": u, "score": round(sc, 5)} for u, sc in pages],
+            # Pages ranked by what they HOLD for the query (their best fused
+            # chunk score, the ranking tier 2 runs) and the corpus-wide match
+            # count -- the k/n fields' bound (PLUGIN_GOAL 154) -- in one pass,
+            # no chunk read. `centroid=1` (planted): the semantic centroids,
+            # which chose pages with nothing tier 2 lets through.
+            matching = None
+            pages = []
+            counts = {}
+            if query and index is not None:
+                centroid = (params.get("centroid") or ["0"])[0] == "1"
+                if not centroid and hasattr(index, "search_pages_matching"):
+                    from ..search import SearchDiagnostics
+                    diag = SearchDiagnostics()
+                    pages = index.search_pages_matching(query, k, diagnostics=diag)
+                    matching = int(diag.survivors)
+                    counts = dict(getattr(index, "last_page_counts", {}) or {})
+                elif hasattr(index, "search_pages"):
+                    pages = index.search_pages(query, k)
+            self._send(200, {"query": query, "pages": [{"url": u, "score": round(sc, 5), "n": counts.get(u)} for u, sc in pages],
+                             "matching": matching,
                              "ms": round((time.perf_counter() - t0) * 1000, 1)})
             return
 

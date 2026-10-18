@@ -62,6 +62,11 @@ class Hit:
         return "\n".join(self.markdown.split("\n")[:lines])
 
 
+#: Planted: duplicates keyed on the stored markdown (empty for chunks the
+#: store lost, so they all collapse into one).
+_PLANT_MD_DIGEST = [False]
+
+
 @dataclass
 class SearchDiagnostics:
     """What each factor did to the candidate set.
@@ -88,6 +93,9 @@ class SearchDiagnostics:
     #: The chunks the selection read, by cid -- handed on so the caller does
     #: not read them again.
     read_chunks: Optional[dict] = None
+    #: The fused score per row, kept by a ``count_only`` search so tier 1 can
+    #: rank pages by what they actually hold.
+    score: Optional[object] = None
 
     def summary(self) -> Dict[str, object]:
         return {
@@ -144,7 +152,7 @@ class ThreeFormIndex:
             row = row_of.get(chunk.cid)
             if row is not None:
                 self._meta[row] = (chunk.cid, chunk.url, chunk.xpath)
-                self._digests[row] = content_hash(getattr(chunk, "md", "") or "")
+                self._digests[row] = self._row_digest(row, getattr(chunk, "md", "") or "")
 
         # Rows that describe nothing. A retired row (see FreqMatrix.remove)
         # keeps its slot so the other rows are not renumbered, and it scores
@@ -159,6 +167,26 @@ class ThreeFormIndex:
             if not self.freq.rows[row] or row not in self._meta:
                 self._live[row] = 0.0
         return self
+
+    def _row_digest(self, row: int, md: str) -> str:
+        """The duplicate key of a row: its token multiset, as `content_hash`
+        means -- read from the lexical row the index already holds, which
+        exists for every indexed chunk. Hashing the STORED markdown keyed
+        every chunk whose markdown the store lost (67,040 of 70,083,
+        2026-10-18) on the empty string, so all of them were one "duplicate"
+        and a page with 457 matches returned 1 (PLUGIN_GOAL 152/154). A row
+        with no tokens and no markdown is unique: nothing is not a copy of
+        nothing. Planted `_PLANT_MD_DIGEST`: the stored markdown, as before.
+        """
+        if _PLANT_MD_DIGEST[0]:
+            return content_hash(md)
+        counts = self.freq._counts[row] if 0 <= row < len(self.freq._counts) else None
+        if counts:
+            import hashlib
+            return "t:" + hashlib.blake2b(repr(sorted(counts.items())).encode(), digest_size=12).hexdigest()
+        if md.strip():
+            return content_hash(md)
+        return "row:%d" % row
 
     @property
     def ranks(self) -> np.ndarray:
@@ -179,8 +207,14 @@ class ThreeFormIndex:
         collapse: bool = True,
         fuse: str = "product",
         scope_url: str = "",
+        count_only: bool = False,
     ) -> List[Hit]:
         """Rank chunks by the triple product.
+
+        ``count_only`` stops once the corpus-wide match count is known
+        (``diagnostics.survivors``) and reads no chunk: tier 1 of a tiered
+        search reports it as the k/n fields' bound (PLUGIN_GOAL 154).
+
 
         ``weights`` are exponents, not coefficients: the product is
         ``rank**wr * lexical**wl * semantic**ws``. Exponents because the
@@ -294,6 +328,9 @@ class ThreeFormIndex:
 
         _lap("scope_and_code")
         diag.survivors = int(np.sum(score > 0))
+        if count_only:
+            diag.score = score
+            return []
         if diag.survivors == 0:
             return []
 
@@ -480,6 +517,43 @@ class ThreeFormIndex:
         return got[1].get(url, np.zeros(0, dtype=np.int64))
 
     # -- tier 1: url nodes (G-210) ----------------------------------------
+    def search_pages_matching(self, query: str, k: int = 10, *,
+                              diagnostics: Optional[SearchDiagnostics] = None) -> List[Tuple[str, float]]:
+        """Tier 1 ranked by what each page HOLDS for this query: a page's
+        best fused chunk score -- the very ranking tier 2 runs per page -- and
+        the corpus-wide match count in ``diagnostics.survivors``. One pass over
+        the rows, no chunk read.
+
+        The centroid ranking (`search_pages`) chose pages near the query in
+        meaning that held no chunk the product lets through: for "the", a
+        Cloudflare challenge and an mp3 stream, each answering 0 in tier 2, and
+        37 results retrieved of 5,000 asked (2026-10-18, PLUGIN_GOAL 154).
+        """
+        diag = diagnostics if diagnostics is not None else SearchDiagnostics()
+        self.search(query, 1, diagnostics=diag, count_only=True)
+        score = getattr(diag, "score", None)
+        if score is None or not diag.survivors:
+            return []
+        rows = int(len(score))
+        best: Dict[str, float] = {}
+        count: Dict[str, int] = {}
+        hit_rows = np.nonzero(score > 0)[0]
+        for row in hit_rows:
+            meta = self._meta.get(int(row))
+            if not meta or not meta[1]:
+                continue
+            v = float(score[int(row)])
+            count[meta[1]] = count.get(meta[1], 0) + 1
+            if v > best.get(meta[1], 0.0):
+                best[meta[1]] = v
+        top = sorted(best.items(), key=lambda kv: -kv[1])[:max(1, int(k))]
+        diag.score = None
+        # Each page's own match count rides along: a caller asking for n
+        # results takes pages until their counts cover n (for "the", 31,413
+        # matches spread one or two a page -- twelve pages gave 18).
+        self.last_page_counts = {u: count[u] for u, _ in top}
+        return top
+
     def page_centroids(self):
         """Each url's semantic centroid: the normalised mean of its chunks'
         unit vectors -- the url node a tiered search ranks first (2026-10-17,

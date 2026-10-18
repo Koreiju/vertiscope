@@ -63,7 +63,9 @@ export function holdStep(heldMs: number): number {
 export interface FieldHit { cid: string; url: string; score?: number }
 /** The two tiers of a tiered search (G-210): url nodes, then each url's chunks. */
 export interface FieldTiers {
-  pages: (query: string, k: number) => Promise<{ url: string; score: number }[] | null>;
+  /** Tier 1: the pages, and (when the store says) the corpus-wide match count. */
+  pages: (query: string, k: number) => Promise<{ url: string; score: number; n?: number | null }[] | null>;
+  matching?: (query: string) => number | null;
   page: (query: string, url: string, k: number) => Promise<FieldAnswer | null>;
 }
 export interface FieldAnswer { hits: FieldHit[]; n: number }
@@ -147,6 +149,10 @@ export class SearchField {
   tiers: FieldTiers | null = null;
   /** Planted: one ranking of every chunk, as before. */
   plantSingleTier = false;
+  /** Planted: `matching` is the sum over tier 2's pages (what the top pages hold). */
+  plantPageSumMatching = false;
+  /** Planted: tier 1's page count from n alone (6-40), each asked an even share. */
+  plantFixedPages = false;
   tierStats = { runs: 0, pages: 0, pages_done: 0, first_ms: 0, last_ms: 0, single_ms: 0 };
 
   /**
@@ -162,18 +168,33 @@ export class SearchField {
   private async tiered(q: string, seq: number, keepScroll: boolean): Promise<FieldHit[] | null> {
     const t0 = performance.now();
     const tiers = this.tiers!;
-    const pages = await tiers.pages(q, Math.max(6, Math.min(40, Math.ceil(this.total / 6))));
+    // Enough pages to COVER n: tier 1 says how many matches each holds, and
+    // pages are taken in rank order until their counts reach n -- twelve
+    // pages of one or two matches each gave 18 of 5,000 asked (2026-10-18).
+    // Planted `plantFixedPages`: a page count from n alone, as before.
+    const asked = this.plantFixedPages ? Math.max(6, Math.min(40, Math.ceil(this.total / 6))) : 200;
+    let pages = await tiers.pages(q, asked);
     if (seq !== this.seq || q !== this.input.value.trim()) return null;
     if (!pages || !pages.length) return null;
+    if (!this.plantFixedPages && pages.every((p) => typeof p.n === "number")) {
+      let sum = 0, cut = pages.length;
+      for (let i = 0; i < pages.length; i++) { sum += pages[i].n!; if (sum >= this.total) { cut = i + 1; break; } }
+      pages = pages.slice(0, Math.max(1, cut));
+    }
     this.tierStats.runs++; this.tierStats.pages = pages.length; this.tierStats.pages_done = 0; this.tierStats.first_ms = 0;
     const per = Math.max(5, Math.ceil(this.total / pages.length) + 5);
+    // Each page asked for what it HOLDS (bounded by n), not an even share.
+    const perOf = (p: { n?: number | null }) => (!this.plantFixedPages && typeof p.n === "number") ? Math.max(1, Math.min(this.total, p.n)) : per;
     const byCid = new Map<string, FieldHit>();
     let first = true, matching = 0;
+    // The corpus's own count when tier 1 gave one; the per-page sum only
+    // counts what the top pages hold. Planted `plantPageSumMatching`.
+    const corpus = !this.plantPageSumMatching && tiers.matching ? tiers.matching(q) : null;
     const apply = () => {
       const now = [...byCid.values()].sort((a, b) => (b.score ?? 0) - (a.score ?? 0)).slice(0, this.total);
       const left = this.scroller.scrollLeft;
       this.hits = now;
-      this.matching = Math.max(matching, now.length);
+      this.matching = Math.max(corpus ?? matching, now.length);
       this.paint();
       this.scroller.scrollLeft = (first && !keepScroll) ? 0 : left;
       first = false;
@@ -183,7 +204,7 @@ export class SearchField {
     const worker = async () => {
       while (next < pages.length) {
         const p = pages[next++];
-        const got = await tiers.page(q, p.url, per);
+        const got = await tiers.page(q, p.url, perOf(p));
         if (seq !== this.seq) return;
         for (const h of got?.hits || []) {
           const was = byCid.get(h.cid);

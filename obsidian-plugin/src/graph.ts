@@ -476,7 +476,12 @@ export class GraphView extends ItemView {
     this.searchField.onSubmit = (q) => { this.searchStats.web_asked++; this.onWebSearch(q); this.followStore(q); };
     // Tiered retrieval (G-210): url nodes first, then each url's chunks.
     this.searchField.tiers = {
-      pages: async (q, k) => ((await this.sidecar.searchPages(q, k)) || { pages: null as any }).pages,
+      pages: async (q, k) => {
+        const got: any = (await this.sidecar.searchPages(q, k)) || { pages: null };
+        this.tierMatching = { q, n: typeof got.matching === "number" ? got.matching : null };
+        return got.pages;
+      },
+      matching: (q) => (this.tierMatching && this.tierMatching.q === q ? this.tierMatching.n : null),
       page: async (q, url, k) => {
         const got: any = await this.sidecar.search(q, { k, url });
         return got ? { hits: (got.hits || []).map((h: any) => ({ cid: String(h.cid), url: String(h.url || ""), score: Number(h.score) || 0 })),
@@ -2613,6 +2618,8 @@ export class GraphView extends ItemView {
     return !!this.graph && this.graph.graphData().nodes.some((n: any) => String(n.id) === id);
   }
   /** The chunk holding a hovered grey element's unit, and the unit. */
+  /** Tier 1's corpus-wide match count for the query it answered. */
+  private tierMatching: { q: string; n: number | null } | null = null;
   greyUnitFor: (cid: string) => { id: string; at: string } | null = () => null;
   /** Planted: a stored chunk's unit is shown even where the live page draws other content there. */
   plantTrustStored = false;
