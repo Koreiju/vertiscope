@@ -44,6 +44,10 @@ def _device():
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
+#: Called between optimiser steps when set: background training stands aside
+#: for foreground work (the sidecar sets it to yield to searches).
+TRAIN_YIELD = [None]
+
 class ParametricUMAP:
     """A small MLP trained on UMAP's objective; `transform` is its forward pass."""
 
@@ -204,6 +208,12 @@ class ParametricUMAP:
                 if max_steps is not None and done >= max_steps:
                     break
                 done += 1
+                # Steps aside while the reader is waiting on a search
+                # (`TRAIN_YIELD`, set by the sidecar): an online update ran
+                # 41-77 s back to back while pages streamed, and searches took
+                # up to 17 s behind it (2026-10-18, PLUGIN_GOAL 152).
+                if TRAIN_YIELD[0] is not None:
+                    TRAIN_YIELD[0]()
                 e = torch.multinomial(p, self.batch_edges, replacement=True, generator=g)
                 Z = self.net(Xt) if whole else None
                 zi = Z[H[e]] if whole else self.net(Xt[H[e]])

@@ -461,6 +461,10 @@ export class GraphView extends ItemView {
     // and the caption bar sits above it -- anchoring to the pane would
     // have drawn every panel one bar-height below its node.
     this.canvasEl = canvas;
+    // The reader moving the camera, for holding stream deltas (G-227).
+    const moved = () => { this.camMovedAt = performance.now(); };
+    canvas.addEventListener("wheel", moved, { passive: true, capture: true });
+    canvas.addEventListener("pointermove", (e) => { if (e.buttons) moved(); }, { passive: true, capture: true });
     // Arrow keys pan, precisely, while the pointer is over the 3D view and no
     // text field has the keyboard (2026-10-12, PLUGIN_GOAL 114). A held key
     // steps faster the longer it is held, as the k/n fields do (item 109).
@@ -474,6 +478,34 @@ export class GraphView extends ItemView {
     // The web half on the search BUTTON (and Enter) only -- typing never
     // reaches the browser cell (item 107).
     this.searchField.onSubmit = (q) => { this.searchStats.web_asked++; this.onWebSearch(q); this.followStore(q); };
+    // The results strip (G-222): each item named as its node is, and a hover
+    // on one takes the hover's own path -- the stored node placed if it is
+    // not drawn, flown to, its panel opened (PLUGIN_GOAL 151: "hovering scroll
+    // results includes the fly-to-node feature").
+    this.searchField.labelOf = (h) => {
+      const n: any = this.graph ? (this.graph.graphData() as any).nodes.find((x: any) => x.id === h.cid) : null;
+      const t = n && (n.name || n.title);
+      if (t) return String(t).slice(0, 60);
+      try { const u = new URL(h.url); return (u.hostname + u.pathname).slice(0, 60); } catch { return h.url.slice(0, 60); }
+    };
+    this.searchField.onHoverHit = (h) => {
+      if (!h) { this.focusOn(null); this.hoverPanel(null); return; }
+      this.searchStats.strip_hovers++;
+      // The node the search lit for this hit -- its chunk when drawn, else
+      // its page (`resolveSearch`) -- flown to as the top result is; a chunk
+      // also opens its panel. `highlightChunk` flies only to a DRAWN chunk,
+      // and in url view a result's chunk is not drawn: no flight at all.
+      const st = this.searchState;
+      const i = st ? st.hits.findIndex((x) => x.cid === h.cid) : -1;
+      const n = i >= 0 ? st!.targets[i] : null;
+      if (!n) { this.highlightChunk(h.cid, h.url, h.cid); return; }
+      this.focusOn(n);
+      // A chunk opens its own panel; a result standing in its PAGE (its chunk
+      // not drawn -- url view) opens the CHUNK's panel at the page's place,
+      // so each item shows its own result, not the page.
+      this.hoverPanel(n.level !== "page" && n.level !== "path" ? n
+        : { id: h.cid, url: h.url, level: "chunk", virtual: true, x: n.x, y: n.y, z: n.z ?? 0 });
+    };
     // Tiered retrieval (G-210): url nodes first, then each url's chunks.
     this.searchField.tiers = {
       pages: async (q, k) => {
@@ -787,7 +819,44 @@ export class GraphView extends ItemView {
    * redrawn). Ignored once the projector draws the pane (C7): from then on
    * a drain reaches the picture through the stream.
    */
+  /**
+   * A drain's delta, held while the reader's camera is MOVING and applied in
+   * one batch when it rests (2026-10-17, PLUGIN_GOAL 156: "zooming lags
+   * heavily for throughput streams (maybe some throttling here)"): each delta
+   * rebuilds the graph's data, and one per drain landed between zoom frames.
+   * Held at most `DELTA_DEFER_MAX_MS`, so the stream never waits on a zoom
+   * that does not end. Planted `plantNoDeltaDefer`: every delta at once.
+   */
   forceDelta(d: ForceNodeDelta): void {
+    if (this.plantNoDeltaDefer) { this.applyForceDelta(d); return; }
+    if (!this.deltaQueue.length) this.deltaQueuedAt = performance.now();
+    this.deltaQueue.push(d);
+    if (this.deltaTimer) return;
+    const flush = () => {
+      this.deltaTimer = 0;
+      const now = performance.now();
+      if (now - this.camMovedAt < 250 && now - this.deltaQueuedAt < GraphView.DELTA_DEFER_MAX_MS) {
+        this.deltaStats.deferred++;
+        this.deltaTimer = window.setTimeout(flush, 120);
+        return;
+      }
+      const q = this.deltaQueue;
+      this.deltaQueue = [];
+      if (q.length > 1) this.deltaStats.batched += q.length - 1;
+      for (const x of q) this.applyForceDelta(x);
+    };
+    this.deltaTimer = window.setTimeout(flush, 0);
+  }
+  static DELTA_DEFER_MAX_MS = 1500;
+  private deltaQueue: ForceNodeDelta[] = [];
+  private deltaQueuedAt = 0;
+  private deltaTimer = 0;
+  /** When the READER last moved the camera (wheel, drag) -- not the idle turn. */
+  camMovedAt = 0;
+  deltaStats = { deferred: 0, batched: 0 };
+  plantNoDeltaDefer = false;
+
+  private applyForceDelta(d: ForceNodeDelta): void {
     if (d && d.url && d.added && d.added.length) profiler().mark(d.url, "grey", { nodes: d.added.length });
     if (!this.canvasEl) return;
     const t0 = performance.now();
@@ -4176,7 +4245,7 @@ export class GraphView extends ItemView {
   plantNoGlass = false;
   /** Planted (item 96): the first version -- undrawn results PLACED in the scene. */
   plantPlaceResults = false;
-  searchStats = { asked: 0, shown: 0, lights: 0, last_ms: 0, resolved_chunk: 0, resolved_page: 0, unresolved: 0,
+  searchStats = { strip_hovers: 0, asked: 0, shown: 0, lights: 0, last_ms: 0, resolved_chunk: 0, resolved_page: 0, unresolved: 0,
                   placed: 0, web_merged: 0, flown_top: 0, web_asked: 0, reranks: 0, rerank_changed: 0 };
 
   /** Told the plugin, which tells the browser cell: search the web too (item 85). */

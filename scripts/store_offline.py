@@ -7,7 +7,7 @@ Refuses while the reader is active in Obsidian.
     from store_offline import offline
     with offline() as db_path: ...
 """
-import contextlib, subprocess, sys, time, urllib.request
+import contextlib, json, subprocess, sys, time, urllib.request
 from pathlib import Path
 
 REPO = Path(r"<home>\Documents\domvec")
@@ -38,6 +38,14 @@ def offline(workspace=REPO / "build" / "corpus123", idle_ms=120000, timings=None
         raise SystemExit("refused: the reader is active in Obsidian (%d s idle)" % (idle // 1000))
     running = procs()
     argv = next((a for _, c, a in running if " supervise" in c), None) or next((a for _, c, a in running), None)
+    # The command line is WRITTEN before anything stops: a helper killed
+    # between stop and start (2026-10-18) left the sidecar down with nothing
+    # to restart it from. A later call -- or a person -- starts it from here.
+    saved = Path(workspace) / "sidecar.argv.json"
+    if argv:
+        saved.write_text(json.dumps(argv), encoding="utf-8")
+    elif saved.exists():
+        argv = json.loads(saved.read_text(encoding="utf-8"))
     import psutil
     t0 = time.time()
     for pid, cmd, _ in running:

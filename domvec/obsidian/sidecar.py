@@ -2622,16 +2622,8 @@ class _Handler(BaseHTTPRequestHandler):
             matching = None
             pages = []
             counts = {}
-            if query and index is not None:
-                centroid = (params.get("centroid") or ["0"])[0] == "1"
-                if not centroid and hasattr(index, "search_pages_matching"):
-                    from ..search import SearchDiagnostics
-                    diag = SearchDiagnostics()
-                    pages = index.search_pages_matching(query, k, diagnostics=diag)
-                    matching = int(diag.survivors)
-                    counts = dict(getattr(index, "last_page_counts", {}) or {})
-                elif hasattr(index, "search_pages"):
-                    pages = index.search_pages(query, k)
+            with _foreground():
+                pages, matching, counts = _search_pages(index, query, k, params)
             self._send(200, {"query": query, "pages": [{"url": u, "score": round(sc, 5), "n": counts.get(u)} for u, sc in pages],
                              "matching": matching,
                              "ms": round((time.perf_counter() - t0) * 1000, 1)})
@@ -3286,12 +3278,33 @@ class _Handler(BaseHTTPRequestHandler):
             if not query:
                 self._send(400, {"error": "missing q"})
             else:
-                self._send(200, search_payload(
-                    self.workspace, query, k, offset=offset,
-                    url=scope, coarse=coarse, budget=budget))
+                # Foreground: background training and embedding stand aside
+                # while the reader waits on a search (PLUGIN_GOAL 152).
+                with _foreground():
+                    got = search_payload(
+                        self.workspace, query, k, offset=offset,
+                        url=scope, coarse=coarse, budget=budget)
+                self._send(200, got)
             return
 
         self._send(404, {"error": "no such route", "path": parts.path})
+
+
+def _search_pages(index, query: str, k: int, params) -> tuple:
+    """Tier 1: (pages, corpus match count, each page's count). `centroid=1`
+    (planted): the semantic centroids, which chose pages holding nothing
+    tier 2 lets through."""
+    if not query or index is None:
+        return [], None, {}
+    centroid = (params.get("centroid") or ["0"])[0] == "1"
+    if not centroid and hasattr(index, "search_pages_matching"):
+        from ..search import SearchDiagnostics
+        diag = SearchDiagnostics()
+        pages = index.search_pages_matching(query, k, diagnostics=diag)
+        return pages, int(diag.survivors), dict(getattr(index, "last_page_counts", {}) or {})
+    if hasattr(index, "search_pages"):
+        return index.search_pages(query, k), None, {}
+    return [], None, {}
 
 
 def serve(workspace, port: int = 8787, *, block: bool = True,
@@ -3309,6 +3322,14 @@ def serve(workspace, port: int = 8787, *, block: bool = True,
     here, and it is a SEPARATE flag from ``enact`` because a reader who wanted a
     notebook did not thereby ask for a vault that can drive the web.
     """
+    # Background training steps aside for searches (PLUGIN_GOAL 152).
+    # Planted: DOMVEC_PLANT_NO_TRAIN_YIELD=1.
+    if os.environ.get("DOMVEC_PLANT_NO_TRAIN_YIELD") != "1":
+        try:
+            from . import pumap as _pumap
+            _pumap.TRAIN_YIELD[0] = lambda: _yield_to_foreground(limit_s=2.0)
+        except Exception:                           # noqa: BLE001
+            pass
     pool = None
     shells = None
     if kernel:

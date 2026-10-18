@@ -61,6 +61,23 @@ export function holdStep(heldMs: number): number {
 }
 
 export interface FieldHit { cid: string; url: string; score?: number }
+
+/**
+ * The results STRIP's scroll for the bar's (PLUGIN_GOAL 151: "a horizontal
+ * overlay of retrieval results above the search bar that is linked to the
+ * scroll bar below the search and matches the scrolling scale"): one
+ * fraction drives both, so the strip stands where the bar stands.
+ */
+export function stripScrollFor(frac: number, scrollWidth: number, clientWidth: number): number {
+  const span = Math.max(0, scrollWidth - clientWidth);
+  const f = Number.isFinite(frac) ? Math.min(1, Math.max(0, frac)) : 0;
+  return Math.round(f * span);
+}
+
+/** A strip item's light: its node's (`brightness`), dim but legible unshown. */
+export function stripLight(rank: number, shown: number, soft: number): number {
+  return rank < shown ? Math.max(0.25, brightness(rank, soft)) : 0.18;
+}
 /** The two tiers of a tiered search (G-210): url nodes, then each url's chunks. */
 export interface FieldTiers {
   /** Tier 1: the pages, and (when the store says) the corpus-wide match count. */
@@ -228,6 +245,23 @@ export class SearchField {
               onClear: () => void) {
     this.ask = ask; this.onShow = onShow; this.onClear = onClear;
     this.el = host.createDiv({ cls: "domvec-search3d" });
+    // The results strip, above the input (G-222). Scrolled by the bar below
+    // and scrolling it back; each item lit as its node is; hovering one flies
+    // to its node.
+    this.strip = this.el.createDiv({ cls: "domvec-search3d-strip" });
+    this.strip.addEventListener("scroll", () => {
+      if (this.stripSyncing) return;
+      const span = this.strip.scrollWidth - this.strip.clientWidth;
+      const bar = this.scroller.scrollWidth - this.scroller.clientWidth;
+      if (span <= 0 || bar <= 0) return;
+      this.barSyncing = true;
+      this.scroller.scrollLeft = Math.round((this.strip.scrollLeft / span) * bar);
+      requestAnimationFrame(() => { this.barSyncing = false; });
+    }, { passive: true });
+    // A wheel over the strip scrolls it sideways, as over the bar.
+    this.strip.addEventListener("wheel", (e) => {
+      if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) { this.strip.scrollLeft += e.deltaY; e.preventDefault(); }
+    }, { passive: false });
     const row = this.el.createDiv({ cls: "domvec-search3d-row" });
     this.input = row.createEl("input", { cls: "domvec-search3d-input" });
     this.input.type = "text";
@@ -416,11 +450,52 @@ export class SearchField {
     const frac = span > 0 ? this.scroller.scrollLeft / span : 0;
     const shown = visibleCount(frac, win.length);
     const soft = softIndex(frac, win.length);
+    this.paintStrip(win, frac, shown, soft);
     if (!force && shown === this.shown && Math.abs(soft - this.soft) < 1e-3) return;
     this.shown = shown;
     this.soft = soft;
     this.scroller.style.backgroundImage = barGradient(win.length, soft);
     this.onShow(win, shown, soft);
+  }
+
+  readonly strip: HTMLElement;
+  private stripSyncing = false;
+  private barSyncing = false;
+  private stripKey = "";
+  /** A result's label in the strip (the graph supplies the node's title). */
+  labelOf: (hit: FieldHit) => string = (h) => { try { return new URL(h.url).hostname; } catch { return h.url; } };
+  /** A strip item hovered (or left, with null): the graph flies to its node. */
+  onHoverHit: (hit: FieldHit | null) => void = () => {};
+  stripStats = { renders: 0, hovers: 0, synced: 0 };
+  /** Planted: the strip stands still while the bar scrolls (not linked). */
+  plantStripUnlinked = false;
+
+  private paintStrip(win: FieldHit[], frac: number, shown: number, soft: number): void {
+    const key = win.map((h) => h.cid).join("|");
+    if (key !== this.stripKey) {
+      this.stripKey = key;
+      this.strip.empty();
+      win.forEach((h, i) => {
+        const it = this.strip.createDiv({ cls: "domvec-search3d-item" });
+        it.createSpan({ cls: "domvec-search3d-item-rank", text: String(i + 1) });
+        it.createSpan({ cls: "domvec-search3d-item-label", text: this.labelOf(h) });
+        it.title = h.url;
+        it.addEventListener("mouseenter", () => { this.stripStats.hovers++; this.onHoverHit(h); });
+        it.addEventListener("mouseleave", () => this.onHoverHit(null));
+      });
+      this.stripStats.renders++;
+    }
+    const items = this.strip.children;
+    for (let i = 0; i < items.length; i++) {
+      const el = items[i] as HTMLElement;
+      el.style.opacity = String(stripLight(i, shown, soft));
+      el.toggleClass("is-front", i === Math.max(0, Math.round(soft) - 1));
+    }
+    if (this.barSyncing || this.plantStripUnlinked) return;
+    this.stripSyncing = true;
+    this.strip.scrollLeft = stripScrollFor(frac, this.strip.scrollWidth, this.strip.clientWidth);
+    this.stripStats.synced++;
+    requestAnimationFrame(() => { this.stripSyncing = false; });
   }
 
   private paint(): void {

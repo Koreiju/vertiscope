@@ -14,10 +14,13 @@ if live.evaluate("window.__domvec.reader.idleMs()") < 60000:
     print("aborted: reader active"); sys.exit(1)
 stamp = live.evaluate("window.__domvecReaderAt || 0")
 PLANTED = "--planted" in sys.argv
-if "--restart" in sys.argv or PLANTED:
+ENV = dict(a[6:].split("=", 1) for a in sys.argv if a.startswith("--env="))
+if "--restart" in sys.argv or PLANTED or ENV:
     sys.path.insert(0, r"<home>\Documents\domvec\scripts")
     from store_offline import restart
-    print("restart", restart(env={"DOMVEC_PLANT_INDEX_REBUILD": "1"} if PLANTED else {"DOMVEC_PLANT_INDEX_REBUILD": "0"}))
+    env = {"DOMVEC_PLANT_INDEX_REBUILD": "1" if PLANTED else "0", "DOMVEC_PLANT_NO_TRAIN_YIELD": "0"}
+    env.update(ENV)
+    print("restart", restart(env=env))
     time.sleep(20)
 t_start = time.time()
 JS = r"""(async () => {
@@ -58,6 +61,6 @@ def win(kind, key):
 r["sidecar"] = {"capture_lock_wait_ms": win("capture", "lock_wait"), "capture_render_ms": win("capture", "render"),
                 "checkpoint_ms": win("checkpoint", "ms"), "embed_lock_wait_ms": win("embed", "lock_wait_ms"),
                 "project_train_ms": win("project", "ms_train")}
-r["planted"] = PLANTED
+r["planted"] = PLANTED or ENV
 print(json.dumps(r, indent=1))
 live.evaluate("(()=>{window.__domvecReaderAt = %s; return 1})()" % json.dumps(stamp))

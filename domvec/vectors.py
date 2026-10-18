@@ -38,6 +38,7 @@ import hashlib
 import json
 import math
 import re
+import threading
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -121,6 +122,23 @@ def tokens(text: str, ngram_max: int = 2) -> List[str]:
 # --- frequency ---------------------------------------------------------------
 
 
+
+def _locked(fn):
+    """Run under the matrix's own lock (re-entrant: derived reads nest)."""
+    import functools
+
+    @functools.wraps(fn)
+    def run(self, *a, **k):
+        if _PLANT_NO_LOCK[0]:
+            return fn(self, *a, **k)
+        with self._lock:
+            return fn(self, *a, **k)
+    return run
+
+
+#: Planted: the matrix unlocked, as before (the shapes race).
+_PLANT_NO_LOCK = [False]
+
 @dataclass
 class FreqMatrix:
     """Sparse tf-idf over chunk markdown, indexed by integer row.
@@ -151,8 +169,14 @@ class FreqMatrix:
     #: counts and the vocabulary only, so `_invalidate` is its whole
     #: invalidation.
     _tfidf: Optional[sparse.csr_matrix] = None
+    #: One lock for the counts and everything derived from them. A search
+    #: built its tf-idf while a capture added vocabulary, and the term matrix
+    #: and the document frequencies came from two moments: "inconsistent
+    #: shapes", the search answered with a closed connection (2026-10-18).
+    _lock: threading.RLock = field(default_factory=threading.RLock, repr=False, compare=False)
 
     # -- build -------------------------------------------------------------
+    @_locked
     def add(self, cid: str, text: str) -> int:
         """Index one chunk. Returns its row. Re-adding replaces in place.
 
@@ -193,6 +217,7 @@ class FreqMatrix:
     def add_many(self, pairs: Iterable[Tuple[str, str]]) -> List[int]:
         return [self.add(cid, text) for cid, text in pairs]
 
+    @_locked
     def remove(self, cid: str) -> bool:
         """Retire a chunk's row. Returns whether it was present.
 
@@ -216,6 +241,7 @@ class FreqMatrix:
         self._invalidate()
         return True
 
+    @_locked
     def forget_vocabulary(self) -> int:
         """Drop terms no surviving row contains. Returns terms dropped.
 
@@ -268,6 +294,7 @@ class FreqMatrix:
         #: when something changed. See `Workspace.save_lexical`.
         self.version = getattr(self, "version", 0) + 1
 
+    @_locked
     def _matrix(self) -> sparse.csr_matrix:
         """Raw term counts as CSR, built once per mutation batch."""
         if self._csr is not None:
@@ -299,6 +326,7 @@ class FreqMatrix:
     def shape(self) -> Tuple[int, int]:
         return (len(self._counts), max(len(self.vocab), 1) if self.vocab else 0)
 
+    @_locked
     def document_frequency(self) -> np.ndarray:
         """Per-term document count, recomputed when stale.
 
@@ -316,6 +344,7 @@ class FreqMatrix:
             ).astype(np.float32)
         return self._df
 
+    @_locked
     def tfidf(self) -> sparse.csr_matrix:
         """L2-normalised sublinear-tf x idf. Cosine similarity is then a dot.
 
@@ -339,6 +368,7 @@ class FreqMatrix:
         self._tfidf = (inv @ csr).tocsr()
         return self._tfidf
 
+    @_locked
     def query_vector(self, query: str) -> np.ndarray:
         """Dense query vector in the same space, L2-normalised.
 
@@ -365,6 +395,7 @@ class FreqMatrix:
         norm = float(np.linalg.norm(vec))
         return vec / norm if norm else vec
 
+    @_locked
     def similarities(self, query: str) -> np.ndarray:
         """Cosine similarity of every row against the query."""
         if not self.shape[0]:
@@ -385,6 +416,7 @@ class FreqMatrix:
         return np.asarray(self.tfidf() @ self.query_vector(query)).ravel()
 
     # -- persistence -------------------------------------------------------
+    @_locked
     def save(self, directory) -> None:
         """CSR triple as raw numpy arrays, vocabulary and rows as JSON."""
         path = Path(directory)

@@ -74,3 +74,21 @@ console.log("searchfield: hold, diff, gradient ok");
     assert.equal(fieldBounds(3000, 5000, 4200, true).n, 2000);
   });
 }
+
+// G-222 (PLUGIN_GOAL 151): the strip stands where the bar stands, and is lit
+// as the nodes are.
+{
+  const { stripScrollFor, stripLight, brightness } = await import("../src/searchfield.ts");
+  test("the strip's scroll follows the bar's fraction", () => {
+    assert.equal(stripScrollFor(0, 2000, 500), 0);
+    assert.equal(stripScrollFor(1, 2000, 500), 1500);
+    assert.equal(stripScrollFor(0.5, 2000, 500), 750);
+    assert.equal(stripScrollFor(0.5, 400, 500), 0);         // nothing to scroll
+    assert.equal(stripScrollFor(NaN, 2000, 500), 0);
+  });
+  test("a strip item is lit as its node: brightest at the frontier, dim past it", () => {
+    assert.equal(stripLight(4, 5, 5), brightness(4, 5));
+    assert.ok(stripLight(0, 5, 5) < stripLight(4, 5, 5));
+    assert.equal(stripLight(7, 5, 5), 0.18);
+  });
+}

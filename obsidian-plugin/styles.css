@@ -919,3 +919,16 @@ button.domvec-run-fence:hover {
 .workspace-leaf-content[data-type="domvec-browser-view"] .view-header-nav-buttons {
   display: none;
 }
+
+/* G-222: the results strip above the search bar, scroll-linked to the bar. */
+.domvec-search3d-strip { display: none; width: 100%; overflow-x: auto; overflow-y: hidden; white-space: nowrap;
+  pointer-events: auto; margin-bottom: 6px; scrollbar-width: none; }
+.domvec-search3d-strip::-webkit-scrollbar { display: none; }
+.domvec-search3d.is-active .domvec-search3d-strip { display: block; }
+.domvec-search3d-item { display: inline-flex; align-items: center; gap: 6px; max-width: 180px; margin-right: 6px;
+  padding: 3px 8px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.18); background: rgba(0,0,0,0.55);
+  color: var(--text-normal); font-size: 11px; cursor: pointer; transition: opacity 120ms linear; }
+.domvec-search3d-item.is-front { border-color: rgba(255,255,255,0.7); }
+.domvec-search3d-item:hover { border-color: var(--text-accent); opacity: 1 !important; }
+.domvec-search3d-item-rank { color: var(--text-faint); }
+.domvec-search3d-item-label { overflow: hidden; text-overflow: ellipsis; }
