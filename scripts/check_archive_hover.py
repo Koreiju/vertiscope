@@ -19,14 +19,15 @@ print(live.reload_plugin())  # score the loaded build
 ONLY_GEN = "--only-gen" in sys.argv
 ONLY_LIGHT = "--only-light" in sys.argv
 ONLY_PICK = "--only-pick" in sys.argv
+ONLY_LINK = "--only-link" in sys.argv     # G-242: planted __domvecPlantNoWrapLink only
 SCROLL = int(next((a.split("=")[1] for a in sys.argv if a.startswith("--scroll=")), "14"))
 START = next((a for a in sys.argv[1:] if a.startswith("http")), "https://archive.org/")
-JS = r"""(async (planted, start, onlyGen, scroll, onlyLight, onlyPick) => {
+JS = r"""(async (planted, start, onlyGen, scroll, onlyLight, onlyPick, onlyLink) => {
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
   const b = app.workspace.getLeavesOfType("domvec-browser-view")[0].view;
   const mode = v.panelsOn; v.panelsOn = "flyto";  // the reader's toggle, restored below
-  if (planted && onlyPick) { window.__domvecPlantPick = true; } else if (planted && onlyLight) { /* set in the page once its sensor runs */ } else if (planted && onlyGen) { window.__domvecPlantGen = true; } else if (planted) { b.plant.add("ancestor-over-grey"); b.plant.add("ancestor-any-depth"); b.plant.add("whole-grey-chunk"); b.plant.add("grey-unit-by-hover-chunk"); v.plantNoVirtualPanel = true; v.plantTrustStored = true; window.__domvecPlantGen = true; if (b.pipebox) { b.pipebox.plantAnyDepth = true; b.pipebox.plantChunkOnlyNotify = true; } window.__domvecPlantNoCanon = true; }
+  if (planted && onlyLink) { window.__domvecPlantNoWrapLink = true; } else if (planted && onlyPick) { window.__domvecPlantPick = true; } else if (planted && onlyLight) { /* set in the page once its sensor runs */ } else if (planted && onlyGen) { window.__domvecPlantGen = true; } else if (planted) { b.plant.add("ancestor-over-grey"); b.plant.add("ancestor-any-depth"); b.plant.add("whole-grey-chunk"); b.plant.add("grey-unit-by-hover-chunk"); v.plantNoVirtualPanel = true; v.plantTrustStored = true; window.__domvecPlantGen = true; if (b.pipebox) { b.pipebox.plantAnyDepth = true; b.pipebox.plantChunkOnlyNotify = true; } window.__domvecPlantNoCanon = true; }
   try {
     const url = start + (start.includes("?") ? "&" : "?") + "probe=" + Date.now();
     b.go(url); for (let i = 0; i < 60 && !(b.webview.getURL() || "").includes("probe="); i++) await sleep(500);
@@ -72,16 +73,16 @@ JS = r"""(async (planted, start, onlyGen, scroll, onlyLight, onlyPick) => {
       res.push({ pass, title: tile.t.slice(0, 40), panel: id.slice(-30), grey: id.startsWith("f:"),
                  has_title: slug ? text.includes(slug) || (slug === tile.href && words.every((w) => text.toLowerCase().includes(w))) : (words.length > 0 && words.every((w) => text.toLowerCase().includes(w))),
                  slug, listed_slug: tile.href,
-                 survey: /Feedback Survey/i.test(text), got: text.replace(/  +/g,' ').slice(0, 260) });
+                 survey: /Feedback Survey/i.test(text), link: !!slug && text.includes("/details/" + slug), got: text.replace(/  +/g,' ').slice(0, 260) });
     } }
     const box = (b.containerEl.querySelector(".domvec-pipebox") || {}).textContent || "";
     return JSON.stringify({ planted, stale_stored: v.hoverStats.stale_stored || 0, url: b.webview.getURL().slice(-50), session: b.session.slice(-50), tiles: tiles.length, res, box: box.slice(0, 80) });
-  } finally { v.panelsOn = mode; window.__domvecPlantPick = false; b.plant.delete("ancestor-over-grey"); b.plant.delete("ancestor-any-depth"); b.plant.delete("whole-grey-chunk"); b.plant.delete("grey-unit-by-hover-chunk"); v.plantNoVirtualPanel = false; v.plantTrustStored = false; window.__domvecPlantGen = false; if (b.pipebox) { b.pipebox.plantAnyDepth = false; b.pipebox.plantChunkOnlyNotify = false; } window.__domvecPlantNoCanon = false; for (const k of [...v.billboards.keys()]) v.closeBillboard(k); }
+  } finally { v.panelsOn = mode; window.__domvecPlantPick = false; b.plant.delete("ancestor-over-grey"); b.plant.delete("ancestor-any-depth"); b.plant.delete("whole-grey-chunk"); b.plant.delete("grey-unit-by-hover-chunk"); v.plantNoVirtualPanel = false; v.plantTrustStored = false; window.__domvecPlantGen = false; if (b.pipebox) { b.pipebox.plantAnyDepth = false; b.pipebox.plantChunkOnlyNotify = false; } window.__domvecPlantNoCanon = false; window.__domvecPlantNoWrapLink = false; for (const k of [...v.billboards.keys()]) v.closeBillboard(k); }
 })"""
 for planted in (False, True):
-    args = ("true" if planted else "false", json.dumps(START), "true" if ONLY_GEN else "false", SCROLL, "true" if ONLY_LIGHT else "false", "true" if ONLY_PICK else "false")
-    r = json.loads(live.evaluate(JS + "(%s, %s, %s, %d, %s, %s)" % args))
+    args = ("true" if planted else "false", json.dumps(START), "true" if ONLY_GEN else "false", SCROLL, "true" if ONLY_LIGHT else "false", "true" if ONLY_PICK else "false", "true" if ONLY_LINK else "false")
+    r = json.loads(live.evaluate(JS + "(%s, %s, %s, %d, %s, %s, %s)" % args))
     print(json.dumps(r))
     ok = sum(1 for x in r["res"] if x["has_title"])
-    print("%s: %d/%d tiles opened their own panel; %d opened the survey" % ("planted" if planted else "clean", ok, len(r["res"]), sum(1 for x in r["res"] if x["survey"])))
+    print("%s: %d/%d tiles opened their own panel; %d carried the tile's link; %d opened the survey" % ("planted" if planted else "clean", ok, len(r["res"]), sum(1 for x in r["res"] if x.get("link")), sum(1 for x in r["res"] if x["survey"])))
 live.evaluate("(()=>{window.__domvecReaderAt = %s; return 1})()" % json.dumps(stamp))
