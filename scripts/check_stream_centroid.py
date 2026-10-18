@@ -15,8 +15,9 @@ live = Live()
 if live.evaluate("window.__domvec.reader.idleMs()") < 60000:
     print("aborted: reader active"); sys.exit(1)
 stamp = live.evaluate("window.__domvecReaderAt || 0")
-PAGES = ["https://en.wikipedia.org/wiki/Skip_list", "https://en.wikipedia.org/wiki/Treap",
-         "https://en.wikipedia.org/wiki/Splay_tree", "https://en.wikipedia.org/wiki/Scapegoat_tree"]
+PAGES = ["https://en.wikipedia.org/wiki/AVL_tree", "https://en.wikipedia.org/wiki/Red%E2%80%93black_tree",
+         "https://en.wikipedia.org/wiki/B%2B_tree", "https://en.wikipedia.org/wiki/Rope_(data_structure)",
+         "https://en.wikipedia.org/wiki/Finger_tree", "https://en.wikipedia.org/wiki/Cartesian_tree"]
 B = "app.workspace.getLeavesOfType('domvec-browser-view')[0].view"
 G = "app.workspace.getLeavesOfType('domvec-graph-view')[0].view"
 was = live.evaluate(B + ".webview.getURL()")          # the reader's page, BEFORE the reload
@@ -45,7 +46,7 @@ M = r"""((url) => {
                           projected: part((n) => n.projected), stored: part((n) => !n.force && !n.projected) });
 })"""
 try:
-    for i, planted in enumerate([False, True, False, True][:int(sys.argv[1]) if len(sys.argv) > 1 else 4]):
+    for i, planted in enumerate([False, True, False, True, False, True][:int(sys.argv[1]) if len(sys.argv) > 1 else 6]):
         url = PAGES[i] + "?g245=%d" % int(time.time())      # never stored: a new page
         live.evaluate("(() => { %s.plantNoRecentre = %s; %s.plantTeleByForce = %s; return 1; })()" % (G, "true" if planted else "false", G, "true" if planted else "false"))
         g0 = live.evaluate(G + ".teleGlides")

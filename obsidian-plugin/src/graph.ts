@@ -4035,7 +4035,7 @@ export class GraphView extends ItemView {
   }
   /** Planted by the glide check: fit moves assigned outright, as before. */
   plantTeleport = false;
-  glideStats = { started: 0, done: 0 };
+  glideStats: { started: number; done: number; retargeted?: number } = { started: 0, done: 0 };
 
   private glide(n: any, to: number[], ms = 450): void {
     if (!to.every(Number.isFinite)) return;
@@ -4067,6 +4067,16 @@ export class GraphView extends ItemView {
         this.glides.delete(n);
         this.glideStats.done++;
         n.__calm = true; n.__calmFit = [n.fitX, n.fitY, n.fitZ];   // held where it landed
+        // Its TARGET moved while it flew (a telescope pass skips a node
+        // mid-glide): on to where it is wanted now, or the calm pin holds it
+        // at a stale place -- a new page's chunks sat 53-80 units off their
+        // centred targets 35 s after landing (2026-10-18, G-245). Not under
+        // the hover spread, whose glides are to its own homes.
+        if (!this.plantTeleByForce && !n.__spreadHome && [n.fitX, n.fitY].every(Number.isFinite)
+            && Math.hypot(n.x - n.fitX, n.y - n.fitY, (n.z || 0) - (n.fitZ || 0)) > 2) {
+          this.glide(n, [n.fitX, n.fitY, n.fitZ || 0]);
+          this.glideStats.retargeted = (this.glideStats.retargeted || 0) + 1;
+        }
       }
     }
   }
