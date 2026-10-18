@@ -97,3 +97,38 @@ test("a prose list that fits is ONE unit; a list too big for one keeps the item 
   for (let i = 1; i <= 30; i++) for (const s of ["a", "b", "c"]) grid.push(L(`/g/section/article[${i}]/${s}`, `t${i}${s}`));
   assert.equal(unitOf(grid, "/g/section/article[7]/b").at, "/g/section/article[7]");
 });
+
+// G-244 (2026-10-18, fastapi's README): an item made three lines by inline
+// code reached the line minimum by itself and opened alone. A list that fits
+// is the unit; a list too big for one (archive.org's grid) keeps its items.
+test("a short list whose items are several lines each is one unit", () => {
+  const lines = [], addrs = [];
+  for (let i = 1; i <= 4; i++) for (const part of ["text()[1]", "code", "text()[2]"]) {
+    lines.push({ text: `item ${i} ${part}` }); addrs.push(`/html/body/article/ol/li[${i}]/${part}`);
+  }
+  const got = unitOf(lines.map((l, i) => ({ ...l, key: "u|" + addrs[i] })), "/html/body/article/ol/li[2]/code");
+  assert.equal(got && got.at, "/html/body/article/ol");
+  assert.equal(got.lines.length, 12);
+  globalThis.__domvecPlantItemAlways = true;
+  try {
+    const planted = unitOf(lines.map((l, i) => ({ ...l, key: "u|" + addrs[i] })), "/html/body/article/ol/li[2]/code");
+    // Planted: the bullet (or less), never the list.
+    assert.ok(planted && planted.at.startsWith("/html/body/article/ol/li[2]") && planted.lines.length < 12);
+  } finally { globalThis.__domvecPlantItemAlways = false; }
+  // Too big to be one: 30 items x 3 lines > 60 -- the item stays the unit.
+  const big = [], bigA = [];
+  for (let i = 1; i <= 30; i++) for (const part of ["text()[1]", "code", "text()[2]"]) { big.push({ text: "x" }); bigA.push(`/html/body/ol/li[${i}]/${part}`); }
+  const g2 = unitOf(big.map((l, i) => ({ ...l, key: "u|" + bigA[i] })), "/html/body/ol/li[5]/code");
+  assert.equal(g2 && g2.at, "/html/body/ol/li[5]");
+});
+
+// ...and a small row of TILES stays one tile per panel (G-220): their items
+// hold images and headings, not inline prose.
+test("a small list of tiles keeps each tile its own unit", () => {
+  const lines = [], addrs = [];
+  for (let i = 1; i <= 4; i++) for (const part of ["a/img", "a/h3/text()", "div/span"]) {
+    lines.push({ text: `tile ${i} ${part}` }); addrs.push(`/html/body/section/ul/li[${i}]/${part}`);
+  }
+  const got = unitOf(lines.map((l, i) => ({ ...l, key: "u|" + addrs[i] })), "/html/body/section/ul/li[2]/a/h3/text()");
+  assert.equal(got && got.at, "/html/body/section/ul/li[2]");
+});

@@ -77,7 +77,16 @@ export function unitOf(lines: any[], element: string, min = 3, max = 60): { at: 
   while (at && at.length > 1) {
     const pick = lines.filter((_l, i) => addrs[i] && inUnit(addrs[i], at));
     if (pick.length > max) return null;
-    if (pick.length >= Math.min(min, lines.length)) return { at, lines: pick };
+    if (pick.length >= Math.min(min, lines.length)) {
+      // An item of a list that FITS is not the unit; the list is (see
+      // `ForceTree.chunkForElement`). Planted `__domvecPlantItemAlways`.
+      const cut0 = at.lastIndexOf("/"), up0 = cut0 > 0 ? at.slice(0, cut0) : "";
+      const itemAt = up0 && at.slice(0, at.indexOf("/", up0.length + 1) > 0 ? at.indexOf("/", up0.length + 1) : at.length);
+      if (up0 && !(globalThis as any).__domvecPlantItemAlways && isListAbove(up0, addrs.filter(Boolean))
+          && isProseItem(itemAt, addrs.filter(Boolean) as string[])
+          && addrs.filter((a) => a && (a === up0 || a.startsWith(up0 + "/"))).length <= max) { at = up0; continue; }
+      return { at, lines: pick };
+    }
     // A level holding a code block is a whole unit (G-233).
     if (pick.length && addrs.some((a, i) => pick.includes(lines[i]) && /\/pre(\[\d+\])?$/.test(a))) return { at, lines: pick };
     const cut = at.lastIndexOf("/");
@@ -92,6 +101,25 @@ export function unitOf(lines: any[], element: string, min = 3, max = 60): { at: 
     at = up;
   }
   return null;
+}
+
+/**
+ * Is `item` a PROSE bullet -- an `li` whose lines are all inline (text, code,
+ * links, emphasis) -- rather than a TILE (an `article`, or an item holding
+ * images, headings, blocks)? Only a prose bullet joins its whole list as one
+ * unit (G-244): archive.org's tiles are a list too, and each stays its own
+ * panel (G-220).
+ */
+const INLINE_STEP = /^(text\(\)|#text|code|a|em|strong|b|i|span|kbd|samp|var|sub|sup|mark|small|abbr|q|cite|br|tt|del|ins|s|u)(\[\d+\])?$/;
+export function isProseItem(item: string, under: string[]): boolean {
+  const last = item.slice(item.lastIndexOf("/") + 1);
+  if (!/^li(\[\d+\])?$/.test(last)) return false;
+  for (const a of under) {
+    if (a === item) continue;
+    if (!a.startsWith(item + "/")) continue;
+    for (const step of a.slice(item.length + 1).split("/")) if (step && !INLINE_STEP.test(step)) return false;
+  }
+  return true;
 }
 
 /**

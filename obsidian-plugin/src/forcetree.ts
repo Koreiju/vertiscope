@@ -1,4 +1,4 @@
-import { canonAddr, isListAbove } from "./address.ts";
+import { canonAddr, isListAbove, isProseItem } from "./address.ts";
 /**
  * The page's chunk tree, built in the RENDERER from the drain itself (`G-89`).
  *
@@ -187,7 +187,17 @@ export class ForceTree {
         for (const r of under) by.set(r.id, (by.get(r.id) || 0) + 1);
         return [...by.entries()].sort((x, y) => y[1] - x[1])[0][0];
       };
-      if (under.length >= min) return { id: pickChunk(), at };
+      if (under.length >= min) {
+        // An ITEM of a list that fits is not the unit -- the list is, however
+        // many lines the item has: inline code and links make a short bullet
+        // three lines, and it opened alone (fastapi's README, 2026-10-18:
+        // "Receives HTTP requests in the paths `/` and `/items/{item_id}`"
+        // one panel per bullet). Planted `plantItemAlways`.
+        const cut0 = at.lastIndexOf("/"), up0 = cut0 > 0 ? at.slice(0, cut0) : "";
+        if (up0 && !ForceTree.plantItemAlways && isListAbove(up0, all) && isProseItem(at, all)
+            && rows.filter((r) => r.a === up0 || r.a.startsWith(up0 + "/")).length <= max) { at = up0; continue; }
+        return { id: pickChunk(), at };
+      }
       // A level holding a CODE BLOCK is a whole unit -- the block with its
       // toolbar -- however few lines it has (G-233): one line is the code.
       if (under.some((r) => /\/pre(\[\d+\])?$/.test(r.a)) && !ForceTree.plantCodeAsText) return { id: pickChunk(), at };
