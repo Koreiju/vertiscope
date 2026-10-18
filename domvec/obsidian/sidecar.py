@@ -1181,6 +1181,10 @@ class _Handler(BaseHTTPRequestHandler):
                 # holds the work lock: taking it means none is mid-write.
                 with _WORK_LOCK:
                     _profile("shutdown", {"waited_s": round(time.time() - asked, 1)})
+                    # The reply first: with nothing in flight the lock was free
+                    # at once and the process left before answering (the
+                    # restart script read that as "did not answer").
+                    time.sleep(0.5)
                     os._exit(0)
             threading.Thread(target=_exit_when_idle, daemon=True).start()
             self._send(200, {"shutting_down": True, "waits_for": "the work lock"})
