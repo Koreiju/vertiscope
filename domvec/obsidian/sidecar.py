@@ -3044,11 +3044,34 @@ class _Handler(BaseHTTPRequestHandler):
 
         # `G-235`: a code file's property graph (AST, CFG, DFG, CALLS,
         # INHERITS), by the same addresses as its chunks; or the totals.
-        if segments[0] in ("cpg", "cpg_stats"):
+        if segments[0] in ("cpg", "cpg_stats", "cpg_vectors"):
             query = parse_qs(parts.query)
             store = self.workspace.store
             try:
-                if segments[0] == "cpg_stats":
+                if segments[0] == "cpg_vectors":
+                    # `G-241`'s measurement: each class/function of the code
+                    # pages under `prefix`, with the vector of the chunk that
+                    # holds its docstring (`G-52`: only prose is embedded) --
+                    # the chunk whose root xpath is the symbol's own, or the
+                    # nearest one inside it.
+                    prefix = (query.get("prefix") or ["code://repo/"])[0]
+                    syms = store._rows("MATCH (n:CodeNode) WHERE n.url STARTS WITH $p AND n.kind IN ['class', 'function'] "
+                                       "RETURN n.key, n.url, n.xpath, n.kind, n.qname", {"p": prefix})
+                    chunks: Dict[str, list] = {}
+                    for u, xp, emb in store._rows("MATCH (c:Chunk) WHERE c.url STARTS WITH $p AND c.embedding IS NOT NULL "
+                                                  "RETURN c.url, c.xpath, c.embedding", {"p": prefix}):
+                        chunks.setdefault(u, []).append((xp or "", emb))
+                    out = []
+                    for key, u, xp, kind, q in syms:
+                        best = None
+                        for cxp, emb in chunks.get(u, []):
+                            if cxp == xp or cxp.startswith(xp + "/"):
+                                if best is None or len(cxp) < len(best[0]):
+                                    best = (cxp, emb)
+                        out.append({"key": key, "url": u, "xpath": xp, "kind": kind, "qname": q,
+                                    "vector": [round(float(x), 5) for x in best[1]] if best and best[1] is not None and any(best[1]) else None})
+                    self._send(200, {"prefix": prefix, "symbols": out, "with_vector": sum(1 for o in out if o["vector"])})
+                elif segments[0] == "cpg_stats":
                     kinds = dict(store._rows("MATCH ()-[e:Cpg]->() RETURN e.kind, count(*)"))
                     nodes = dict(store._rows("MATCH (n:CodeNode) RETURN n.kind, count(*)"))
                     files = store._rows("MATCH (n:CodeNode {kind: 'module'}) RETURN count(*)")

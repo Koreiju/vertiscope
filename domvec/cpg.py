@@ -3,8 +3,8 @@
 dependence -- with calls and inheritance).
 
 **The AST is the address.** A function is `code://<root>/<path.py>` at
-`/module[1]/class[1]/function[2]`, exactly the xpath `source.tag_source` gives
-it (the same walk, the same per-parent ordinals), so a CPG node and the chunk
+`/module/class/function[2]` -- the xpath `source.tag_source` gives it, in the
+trie's canonical spelling (a first child has no `[1]`) (the same walk, the same per-parent ordinals), so a CPG node and the chunk
 a reader opens for it are one address. Below a function the address
 continues by the code's own syntax: its statements in source order,
 `.../function[2]/stmt[3]`, nested blocks counted in the same depth-first
@@ -52,13 +52,19 @@ def module_qname(rel_path: str) -> str:
 
 
 class _Counter:
+    """Per-parent, per-kind ordinals, spelled as the TRIE spells an address:
+    a first child carries no `[1]` (`/module/class/function[2]`), which is
+    the form the chunks are stored under -- so a code node and its chunk are
+    one address, not two spellings of it."""
+
     def __init__(self) -> None:
         self.c: Dict[Tuple[str, str], int] = {}
 
     def step(self, name: str, parent: str) -> str:
         k = (parent, name)
         self.c[k] = self.c.get(k, 0) + 1
-        return "%s/%s[%d]" % (parent, name, self.c[k])
+        n = self.c[k]
+        return "%s/%s" % (parent, name) if n == 1 else "%s/%s[%d]" % (parent, name, n)
 
 
 _BLOCKS = (ast.If, ast.For, ast.AsyncFor, ast.While, ast.With, ast.AsyncWith, ast.Try)

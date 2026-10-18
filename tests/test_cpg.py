@@ -1,6 +1,10 @@
 """G-235: the code property graph -- AST, CFG, DFG, CALLS, INHERITS -- by
 the same addresses as the chunks, stored per file, resolved across files."""
+import re
+
 from domvec.cpg import build_cpg
+
+canon = lambda xp: re.sub(r"\[1\](?=/|$)", "", xp)
 from domvec.source import source_url, tag_source
 from domvec.workspace import Workspace
 
@@ -42,23 +46,23 @@ def _edges(g, kind):
 def test_symbols_are_the_chunks_addresses():
     url = source_url("r", "pkg/a.py")
     g = build_cpg(A, url, "pkg/a.py")
-    tags = {t.xpath.rsplit("/name[", 1)[0] for t in tag_source(A, root="r", rel_path="pkg/a.py") if "/name[" in t.xpath}
+    tags = {canon(t.xpath.rsplit("/name[", 1)[0]) for t in tag_source(A, root="r", rel_path="pkg/a.py") if "/name[" in t.xpath}
     assert {n["xpath"] for n in g["nodes"] if n["kind"] in ("class", "function")} == tags
 
 
 def test_cfg_branches_loops_and_dfg_defs_to_uses():
     g = build_cpg(A, "code://r/a.py", "a.py")
-    run = "/module[1]/class[1]/function[1]"
+    run = "/module/class/function"
     cfg = _edges(g, "CFG")
-    assert (run, run + "/stmt[1]", "entry") in cfg                       # y = x + 1
-    assert (run + "/stmt[2]", run + "/stmt[2]/stmt[1]", "true") in cfg   # if -> z = helper(y)
+    assert (run, run + "/stmt", "entry") in cfg                       # y = x + 1
+    assert (run + "/stmt[2]", run + "/stmt[2]/stmt", "true") in cfg   # if -> z = helper(y)
     assert (run + "/stmt[2]", run + "/stmt[2]/stmt[2]", "false") in cfg  # if -> z = 0
-    assert (run + "/stmt[3]/stmt[1]", run + "/stmt[3]", "loop") in cfg   # loop body -> header
+    assert (run + "/stmt[3]/stmt", run + "/stmt[3]", "loop") in cfg   # loop body -> header
     dfg = _edges(g, "DFG")
-    assert (run, run + "/stmt[1]", "x") in dfg                           # parameter x -> its use
-    assert (run + "/stmt[1]", run + "/stmt[2]", "y") in dfg              # y defined -> if y > 2
+    assert (run, run + "/stmt", "x") in dfg                           # parameter x -> its use
+    assert (run + "/stmt", run + "/stmt[2]", "y") in dfg              # y defined -> if y > 2
     calls = _edges(g, "CALLS")
-    assert (run, "/module[1]/class[1]/function[2]", None) in [(a, b, None) for a, b, _ in calls]   # self.done
+    assert (run, "/module/class/function[2]", None) in [(a, b, None) for a, b, _ in calls]   # self.done
 
 
 def test_stored_and_resolved_across_files_whichever_comes_first(tmp_path):
@@ -69,8 +73,8 @@ def test_stored_and_resolved_across_files_whichever_comes_first(tmp_path):
         ws.index_source(B, "b.py", root="r")             # now it is: the pending edges resolve
         after = ws.store.cpg_of(source_url("r", "a.py"))
         cross = {(e["kind"], e["dst"].split("|")[1]) for e in after["edges"] if e["dst_url"] != e["src_url"]}
-        assert ("CALLS", "/module[1]/function[1]") in cross            # helper
-        assert ("INHERITS", "/module[1]/class[1]") in cross            # Base
+        assert ("CALLS", "/module/function") in cross            # helper
+        assert ("INHERITS", "/module/class") in cross            # Base
         # Re-indexing b (its nodes deleted and recreated) keeps a's edges into it.
         ws.index_source(B, "b.py", root="r")
         again = ws.store.cpg_of(source_url("r", "a.py"))
