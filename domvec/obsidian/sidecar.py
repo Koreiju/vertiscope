@@ -3044,11 +3044,42 @@ class _Handler(BaseHTTPRequestHandler):
 
         # `G-235`: a code file's property graph (AST, CFG, DFG, CALLS,
         # INHERITS), by the same addresses as its chunks; or the totals.
-        if segments[0] in ("cpg", "cpg_stats", "cpg_vectors"):
+        if segments[0] in ("cpg", "cpg_stats", "cpg_vectors", "cpg_edges"):
             query = parse_qs(parts.query)
             store = self.workspace.store
             try:
-                if segments[0] == "cpg_vectors":
+                if segments[0] == "cpg_edges":
+                    # The edges the 3D view DRAWS (G-241): CALLS and INHERITS
+                    # touching this file, each end mapped to the node that
+                    # draws it -- the chunk at that address, or the nearest
+                    # chunk above it, else the file's page node. Drawn, never
+                    # forces: the layout measurement says UMAP keeps meaning.
+                    url = (query.get("url") or [""])[0]
+                    rows = store._rows(
+                        "MATCH (a:CodeNode)-[e:Cpg]->(b:CodeNode) WHERE (a.url = $u OR b.url = $u) "
+                        "AND e.kind IN ['CALLS', 'INHERITS'] RETURN a.url, a.xpath, b.url, b.xpath, e.kind, e.line", {"u": url})
+                    urls = sorted({r[0] for r in rows} | {r[2] for r in rows} | {url})
+                    by_url: Dict[str, list] = {}
+                    for cu, cx, cid in store._rows("MATCH (c:Chunk) WHERE list_contains($us, c.url) RETURN c.url, c.xpath, c.cid", {"us": urls}):
+                        by_url.setdefault(cu, []).append((cx or "", cid))
+
+                    def drawn(u, xp):
+                        best = None
+                        for cx, cid in by_url.get(u, []):
+                            if xp == cx or xp.startswith(cx + "/"):
+                                if best is None or len(cx) > len(best[0]):
+                                    best = (cx, cid)
+                        return best[1] if best else "page:" + u
+                    edges, seen = [], set()
+                    for au, ax, bu, bx, kind, line in rows:
+                        s, t = drawn(au, ax), drawn(bu, bx)
+                        if s == t or (s, t, kind) in seen:
+                            continue
+                        seen.add((s, t, kind))
+                        edges.append({"source": s, "target": t, "kind": kind, "line": line,
+                                      "from": "%s|%s" % (au, ax), "to": "%s|%s" % (bu, bx)})
+                    self._send(200, {"url": url, "edges": edges, "rows": len(rows)})
+                elif segments[0] == "cpg_vectors":
                     # `G-241`'s measurement: each class/function of the code
                     # pages under `prefix`, with the vector of the chunk that
                     # holds its docstring (`G-52`: only prose is embedded) --

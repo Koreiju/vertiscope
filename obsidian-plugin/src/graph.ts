@@ -453,6 +453,16 @@ export class GraphView extends ItemView {
       this.setPanelsOn(this.panelsOn === "rightclick" ? "flyto" : "rightclick");
       panels.setText(this.panelsOn === "rightclick" ? "panels: right-click" : "panels: fly-to");
     };
+    // G-241: the code graph's edges, drawn between the chunks of an open
+    // code page -- each kind its own colour and its own switch.
+    for (const kind of ["CALLS", "INHERITS"] as const) {
+      const b = bar.createEl("button", { text: (this.codeEdgeKinds[kind] ? "" : "no ") + kind.toLowerCase() });
+      b.onclick = () => {
+        this.codeEdgeKinds[kind] = !this.codeEdgeKinds[kind];
+        b.setText((this.codeEdgeKinds[kind] ? "" : "no ") + kind.toLowerCase());
+        this.batchDirty = true;
+      };
+    }
     const geometry = bar.createEl("button", { text: "euclidean" });
     geometry.onclick = () => {
       this.space = this.space ? "" : "S3";
@@ -1782,6 +1792,7 @@ export class GraphView extends ItemView {
     }
     this.collapsedByReader.delete(url);
     this.openedByReader.add(url);
+    void this.loadCodeEdges(url);                  // G-241: a code page's calls and bases
     const cids = await this.sidecar.pageCids(url).catch(() => [] as string[]);
     let placed = 0;
     // 400 a request, as the reopen after a refit does: a 1,109-chunk page is
@@ -3682,6 +3693,45 @@ export class GraphView extends ItemView {
 
   /** Planted by the telescope's check: chunks at their raw fit (the packed ball). */
   plantNoTelescope = false;
+  // ---- G-241: the code property graph's edges in the view ----------------
+  /** Which code edge kinds are drawn. */
+  codeEdgeKinds: Record<"CALLS" | "INHERITS", boolean> = { CALLS: true, INHERITS: true };
+  static CODE_EDGE_COLOR: Record<string, string> = { CALLS: "#f5a623", INHERITS: "#7ed321" };
+  /** Per open code page, its edges by node id (from `/cpg_edges`). */
+  private codeEdges = new Map<string, { source: string; target: string; kind: string }[]>();
+  codeEdgeStats = { pages: 0, fetched: 0, drawn: { CALLS: 0, INHERITS: 0 } as Record<string, number> };
+  /** Planted: code edges are never fetched or drawn, as before. */
+  plantNoCodeEdges = false;
+  private async loadCodeEdges(url: string): Promise<void> {
+    if (this.plantNoCodeEdges || !url.startsWith("code://") || this.codeEdges.has(url)) return;
+    this.codeEdges.set(url, []);
+    const got: any = await this.sidecar.cpgEdges(url).catch(() => null);
+    const edges = (got && Array.isArray(got.edges)) ? got.edges : [];
+    this.codeEdges.set(url, edges);
+    this.codeEdgeStats.pages = this.codeEdges.size; this.codeEdgeStats.fetched += edges.length;
+    this.batchDirty = true;
+  }
+  /** The code edges to DRAW now: both ends drawn, the kind switched on.
+   *  Never in the graph's links -- drawn, not forces (G-241's measurement). */
+  private drawableCodeEdges(nodes: any[]): any[] {
+    if (this.plantNoCodeEdges || !this.codeEdges.size) { this.codeEdgeStats.drawn = { CALLS: 0, INHERITS: 0 }; return []; }
+    const byId = new Map<string, any>();
+    for (const n of nodes) byId.set(String(n.id), n);
+    const out: any[] = [], drawn: Record<string, number> = { CALLS: 0, INHERITS: 0 };
+    for (const [url, edges] of this.codeEdges) {
+      if (!nodes.some((n) => n.url === url && n.level !== "page")) continue;      // the page is not open
+      for (const e of edges) {
+        if (!(this.codeEdgeKinds as any)[e.kind]) continue;
+        const s = byId.get(String(e.source)), t = byId.get(String(e.target));
+        if (!s || !t || s === t) continue;
+        out.push({ source: s, target: t, color: GraphView.CODE_EDGE_COLOR[e.kind] || "#ffffff", alpha: 0.85, code: e.kind });
+        drawn[e.kind] = (drawn[e.kind] || 0) + 1;
+      }
+    }
+    this.codeEdgeStats.drawn = drawn;
+    return out;
+  }
+
   /** Planted (G-245): the cloud left where the rank radii put its mass, off its url node. */
   plantNoRecentre = false;
   /** Planted (G-245): a telescoped target is reached by the forces alone, as before. */
@@ -5144,7 +5194,7 @@ export class GraphView extends ItemView {
       const d = g.graphData();
       const rs = g.nodeRelSize();
       if (this.searchState) { this.resolveSearch(); this.updateSearchLights(); }
-      this.batch.sync(d.nodes, d.links, (n) => this.lookOf(n, rs, media), this.searchLineAlpha());
+      this.batch.sync(d.nodes, d.links.concat(this.drawableCodeEdges(d.nodes)), (n) => this.lookOf(n, rs, media), this.searchLineAlpha());
       if (!this.plantStaleProxies) this.fitProxies(d.nodes, rs, media);
     };
     this.batchRaf = requestAnimationFrame(tick);
@@ -5220,7 +5270,7 @@ export class GraphView extends ItemView {
     const g: any = this.graph;
     if (!g || !this.batch || this.plantPerNode) return null;
     const d = g.graphData(), rs = g.nodeRelSize();
-    this.batch.sync(d.nodes, d.links, (n) => this.lookOf(n, rs, this.drawnMedia));
+    this.batch.sync(d.nodes, d.links.concat(this.drawableCodeEdges(d.nodes)), (n) => this.lookOf(n, rs, this.drawnMedia));
     return { ...this.batch.lastStats };
   }
 

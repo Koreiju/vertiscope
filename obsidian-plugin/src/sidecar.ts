@@ -430,6 +430,11 @@ export class Sidecar {
    * where these points land. `stale` coming back true means the corpus has
    * doubled since that fit and the pane should ask for a real layout.
    */
+  /** A code file's CALLS / INHERITS edges, mapped to the nodes that draw them (G-241). */
+  async cpgEdges(url: string): Promise<any | null> {
+    return this.get("/cpg_edges?url=" + encodeURIComponent(url));
+  }
+
   /** The page's element -> chunk map, for the overlay (DESIGN_VII §3). */
   async pageMap(url: string): Promise<any | null> {
     return this.get("/page_map?url=" + encodeURIComponent(url));

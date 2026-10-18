@@ -603,8 +603,15 @@ export class SceneBatch {
       // 3d-force-graph's own link colour (#f0f0f0) at the pane's linkOpacity;
       // during a search, the pane says how much of an edge to draw (item 88).
       const a = lineAlpha ? lineAlpha(l) : this.linkAlpha;
-      this.lineCol.setXYZW(nl * 2, 0.87, 0.87, 0.87, a);
-      this.lineCol.setXYZW(nl * 2 + 1, 0.87, 0.87, 0.87, a);
+      // A typed edge (G-241: a code CALLS / INHERITS) carries its own colour.
+      if (l.color) {
+        const c = this.colour(l.color), la = l.alpha ?? 0.85;
+        this.lineCol.setXYZW(nl * 2, c.r, c.g, c.b, la);
+        this.lineCol.setXYZW(nl * 2 + 1, c.r, c.g, c.b, la);
+      } else {
+        this.lineCol.setXYZW(nl * 2, 0.87, 0.87, 0.87, a);
+        this.lineCol.setXYZW(nl * 2 + 1, 0.87, 0.87, 0.87, a);
+      }
       nl++;
     }
     this.lines.geometry.setDrawRange(0, nl * 2);
