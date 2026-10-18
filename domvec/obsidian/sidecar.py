@@ -283,7 +283,7 @@ def _checkpoint_forever(workspace, stop) -> None:
 #: Compaction asked for when the store is this many times its last compacted
 #: size (G-218), and only after this long with no request: the supervisor
 #: rebuilds it with the sidecar down (~40 s for the working store).
-_COMPACT_RATIO = 3.0
+_COMPACT_RATIO = 2.0
 _COMPACT_FLOOR_MB = 1500.0
 _COMPACT_QUIET_S = 600.0
 _PLANT_NO_AUTOCOMPACT = [os.environ.get("DOMVEC_PLANT_NO_AUTOCOMPACT") == "1"]
@@ -1728,6 +1728,52 @@ class _Handler(BaseHTTPRequestHandler):
             got["ms"] = round((time.perf_counter() - t0) * 1000, 1)
             _profile("heal_anchors", got)
             self._send(200, got)
+            return
+
+        # `G-236`: a change as a mutation of the code graph -> a unified diff,
+        # compile-checked. Previewed unless `apply`; applied only to this
+        # repository's own files (`code://repo/`), never an installed
+        # package, and then re-ingested: chunks, CPG and projector follow.
+        if route == "cpg_mutate":
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(length) or b"{}")
+            except Exception as exc:                # noqa: BLE001
+                self._send(400, {"error": "bad body: %s" % exc})
+                return
+            from ..cpg_mutate import MutationError, mutate
+            from ..source import source_path_of
+            url = str(body.get("url") or "")
+            got_path = source_path_of(url)
+            if not got_path or not got_path[1].endswith(".py"):
+                self._send(400, {"error": "not a code:// python file"})
+                return
+            root, rel = got_path
+            base = Path(__file__).resolve().parents[1]
+            path = (base / rel).resolve() if root == "repo" else None
+            if path is None or base not in path.parents or not path.exists():
+                self._send(400, {"error": "only this repository's files (code://repo/...) are mutated"})
+                return
+            text = path.read_text(encoding="utf-8")
+            try:
+                out = mutate(text, list(body.get("mutations") or []), rel)
+            except (MutationError, KeyError, SyntaxError) as exc:
+                self._send(422, {"error": "%s: %s" % (type(exc).__name__, exc)})
+                return
+            res = {"url": url, "diff": out["diff"], "changed": out["changed"], "applied_ops": out["applied"], "written": False}
+            if body.get("apply") and out["changed"]:
+                if not self.capture_allowed or self.workspace is None:
+                    self._send(403, {"error": "writing is off (start with --capture)", **res})
+                    return
+                with _WORK_LOCK:
+                    path.write_text(out["text"], encoding="utf-8")
+                    self.workspace.index_source(out["text"], rel, root=root)
+                    res["cpg"] = getattr(self.workspace, "last_cpg", None)
+                _LAST_WRITE[0] = time.time()
+                _project_page(self.workspace, url)
+                res["written"] = True
+            _profile("cpg_mutate", {"url": url, "ops": out["applied"], "written": res["written"]})
+            self._send(200, res)
             return
 
         if route == "package":
