@@ -56,3 +56,21 @@ test("the soft index brightens the frontier smoothly", () => {
   assert.equal(barGradient(0, 0), "none");
 }
 console.log("searchfield: hold, diff, gradient ok");
+
+// PLUGIN_GOAL 154 (2026-10-17): "showing 2000 / 2000 results, 29 retrieved of
+// 587 matching" -- the fields' bound is what matches, not a fixed 2000.
+{
+  const { fieldBounds } = await import("../src/searchfield.ts");
+  test("k/n are bounded by the number matching", () => {
+    assert.deepEqual(fieldBounds(2000, 2000, 587), { k: 587, n: 587, cap: 587 });
+    assert.deepEqual(fieldBounds(20, 50, 587), { k: 20, n: 50, cap: 587 });
+    // more than 2000 match: n may go past 2000
+    assert.equal(fieldBounds(3000, 5000, 4200).n, 4200);
+    // before any answer: the ask's ceiling, never 2000
+    assert.equal(fieldBounds(20, 3000, 0).n, 3000);
+  });
+  test("planted (fixed cap): 2000 / 2000 over 587 matching, as the reader saw", () => {
+    assert.deepEqual(fieldBounds(2000, 2000, 587, true), { k: 2000, n: 2000, cap: 2000 });
+    assert.equal(fieldBounds(3000, 5000, 4200, true).n, 2000);
+  });
+}

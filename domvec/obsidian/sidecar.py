@@ -3249,7 +3249,10 @@ class _Handler(BaseHTTPRequestHandler):
             # reach the retrieved set (2026-10-17: "don't exceed a 50 result
             # limit to cover the full set of retrieved results"). A keystroke
             # still asks the field's default depth, not this.
-            k = max(1, min(k, 2000))
+            # The bound is what MATCHES, not a fixed 2000 (2026-10-17,
+            # PLUGIN_GOAL 154: "maxed out at 2000 rather than the proper upper
+            # limit"); this ceiling only stops a runaway request.
+            k = max(1, min(k, 20000))
             try:
                 offset = int((params.get("offset") or ["0"])[0])
             except ValueError:

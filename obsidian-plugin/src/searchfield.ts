@@ -93,6 +93,17 @@ export function barGradient(k: number, s: number): string {
   return `linear-gradient(90deg, ${stops.join(", ")})`;
 }
 
+/** The ask's own ceiling (the sidecar's): a runaway request, not a limit the reader meets. */
+const MAX_ASK = 20000;
+
+/** What the k/n fields show: the reader's k and n, bounded by what MATCHES
+ *  (`matching`, 0 before any answer) -- not a fixed 2000 (PLUGIN_GOAL 154). */
+export function fieldBounds(k: number, total: number, matching: number, fixedCap = false): { k: number; n: number; cap: number } {
+  const cap = fixedCap ? 2000 : (matching > 0 ? Math.min(MAX_ASK, matching) : MAX_ASK);
+  const n = Math.max(1, Math.min(total, cap));
+  return { k: Math.max(1, Math.min(k, n)), n, cap };
+}
+
 export class SearchField {
   readonly el: HTMLElement;
   readonly input: HTMLInputElement;
@@ -243,7 +254,7 @@ export class SearchField {
         const now = performance.now();
         if (!e.repeat || !since) since = now;
         const step = holdStep(now - since) * (e.key === "ArrowUp" ? 1 : -1);
-        const v = Math.max(1, Math.min(2000, read(el, isK ? this.k : this.total) + step));
+        const v = Math.max(1, Math.min(this.cap, read(el, isK ? this.k : this.total) + step));
         el.value = String(v);
         this.stats.arrowSteps++;
         if (isK && v <= this.total) this.setK(v);
@@ -265,19 +276,29 @@ export class SearchField {
     }, { passive: true });
   }
 
+  /**
+   * The fields' upper limit: the number of chunks that MATCH, once a ranking
+   * has said (2026-10-17, PLUGIN_GOAL 154: "maxed out at 2000 rather than
+   * the proper upper limit" -- "showing 2000 / 2000 results, 29 retrieved of
+   * 587 matching"). Before any answer, the ask's own ceiling. Planted:
+   * `plantFixedCap` (2000, as before).
+   */
+  get cap(): number { return fieldBounds(this.k, this.total, this.matching, this.plantFixedCap).cap; }
+  plantFixedCap = false;
+
   /** The top-k window the slider spans: never more than n. */
   get window(): FieldHit[] { return this.hits.slice(0, Math.min(this.k, this.total)); }
 
   /** k from the field: the slider's window, from the very left. No new ask. */
   setK(k: number): void {
-    this.k = Math.max(1, Math.min(2000, Math.floor(k)));
+    this.k = Math.max(1, Math.min(MAX_ASK, Math.floor(k)));
     if (this.k > this.total) this.setTotal(this.k);
     else { this.scroller.scrollLeft = 0; this.paint(); this.onScroll(true); }
   }
 
   /** n from the field: the ranking asked again, that deep. */
   setTotal(n: number): void {
-    this.total = Math.max(1, Math.min(2000, Math.floor(n)));
+    this.total = Math.max(1, Math.min(MAX_ASK, Math.floor(n)));
     if (this.k > this.total) this.k = this.total;
     void this.run();
   }
@@ -390,9 +411,13 @@ export class SearchField {
     // came back is said beside them. Writing the returned count into n made
     // an edit snap back whenever fewer came back (2026-10-17: "they don't
     // work for updates right").
+    // ...bounded by what MATCHES: the request stays as the reader set it (a
+    // later query with more matches gets it), the field shows what it can be.
     const got = this.hits.length;
-    if (document.activeElement !== this.kInput) this.kInput.value = String(this.k);
-    if (document.activeElement !== this.nInput) this.nInput.value = String(this.total);
+    const { k, n } = fieldBounds(this.k, this.total, this.matching, this.plantFixedCap);
+    if (document.activeElement !== this.kInput) this.kInput.value = String(k);
+    if (document.activeElement !== this.nInput) this.nInput.value = String(n);
+    this.kInput.max = this.nInput.max = String(this.cap);
     this.matchEl.setText(active ? ` · ${got} retrieved of ${this.matching} matching` : "");
     if (!active) { this.diffEl.setText(""); this.scroller.style.backgroundImage = "none"; }
     // One step of scroll per result, so a flick is a few results, not all.
