@@ -634,6 +634,18 @@ export class BrowserView extends ItemView {
   }
 
   async onClose(): Promise<void> {
+    // The capture pump stops with the view. It kept sending its queue -- and
+    // retrying refusals for up to 15 minutes -- after a plugin reload, beside
+    // the new view's pump: two sensors' drains for one url interleaved on the
+    // sidecar's session, each mismatch dropped the session, and both were
+    // refused in a loop, several a second (2026-10-18). The new view's sensor
+    // sends the shown page whole; what the old queue held is counted, not
+    // sent. Planted `pump-after-close`: as before.
+    if (!this.plant.has("pump-after-close")) {
+      this.closed = true;
+      this.abandonedOnClose = this.captureQueue.filter((c) => !c.settle).length;
+      this.captureQueue = this.captureQueue.filter((c) => c.settle);
+    }
     // Timers this view started outside `registerInterval` stop with it (a
     // closed view's code otherwise kept firing after a plugin reload).
     window.clearInterval(this.placeTimer); this.placeTimer = 0 as any;
@@ -2713,6 +2725,30 @@ export class BrowserView extends ItemView {
   enqueueMerged = 0;
   /** Captures re-queued after no reply or a retryable refusal. */
   captureRetries = 0;
+  /** The view closed: its pump sends nothing more but settles. */
+  private closed = false;
+  /** Drains a closed view held unsent (reported, not retried). */
+  abandonedOnClose = 0;
+  /** Refusals ("dictionary incomplete") for a page no longer shown: counted,
+   *  not answered with a rescan of the page that IS shown. */
+  refusedLeft = 0;
+
+  /**
+   * The sidecar refused a capture of `url` -- its session does not hold the
+   * dictionary the payload extends. Only the sensor of the page SHOWN can
+   * resend its dictionary, so only a refusal for that document resyncs it.
+   * A late drain of a page already left (its session settled and closed)
+   * resynced whatever page was on screen instead: a full drain of every
+   * chunk, captured again, for each such refusal -- 2026-10-18, after
+   * archive.org visits the sidecar logged a refusal every few seconds and
+   * the shown page rescanned each time (PLUGIN_GOAL 150/152). Planted
+   * `resync-any-refusal`: as before.
+   */
+  private onRefused(url: string): void {
+    const doc = (u: string) => this.sessionAliases.get(u) || u;
+    if (this.plant.has("resync-any-refusal") || doc(url) === this.currentPage()) { void this.resyncSensor(); return; }
+    this.refusedLeft++;
+  }
 
   /**
    * Send queued captures one at a time. The CURRENT page's go first; any
@@ -2725,7 +2761,7 @@ export class BrowserView extends ItemView {
     if (this.capturing) return;
     this.capturing = true;
     try {
-      while (this.captureQueue.length) {
+      while (this.captureQueue.length && !(this.closed && !this.captureQueue[0].settle)) {
         let k = this.captureQueue.findIndex((c) => c.url === this.session);
         if (k < 0) k = 0;
         let job = this.captureQueue.splice(k, 1)[0];
@@ -2801,13 +2837,13 @@ export class BrowserView extends ItemView {
       prof.stage(trace, "capture", captureMs);
       if (reply) prof.sidecar(trace, reply.phases, reply.ms, captureMs);
       if (!reply || reply.error) {
-        if (reply && (reply as any).resync && !this.plant.has("no-resync")) { void this.resyncSensor(); return; }
+        if (reply && (reply as any).resync && !this.plant.has("no-resync")) { this.onRefused(url); return; }
         // No reply (the sidecar restarting, busy, down) or a refusal asking
         // for a retry: the capture goes BACK to the front of the queue, never
         // dropped (2026-10-17: "persist chunk streams no matter how fast") --
         // a failed capture was simply returned from, and its drains lost.
         // Kept trying for up to 15 minutes, backing off to 5 s.
-        if ((!reply || (reply as any).retry) && !this.plant.has("drop-failed-capture")) {
+        if ((!reply || (reply as any).retry) && !this.plant.has("drop-failed-capture") && !this.closed) {
           job.attempts = (job.attempts || 0) + 1;
           if (performance.now() - (job.queuedAt || performance.now()) < 15 * 60 * 1000) {
             this.captureRetries++;
@@ -3028,7 +3064,7 @@ export class BrowserView extends ItemView {
       const reply = await this.sidecar.capture(
         url, { payload, title: this.webview?.getTitle() || "" });
       if (!reply || reply.error) {
-        if (reply && (reply as any).resync && !this.plant.has("no-resync")) { void this.resyncSensor(); return; }
+        if (reply && (reply as any).resync && !this.plant.has("no-resync")) { this.onRefused(url); return; }
         this.say(`capture failed: ${reply ? reply.error : "no reply"}`);
         return;
       }
