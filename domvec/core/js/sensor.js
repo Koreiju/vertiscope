@@ -99,7 +99,9 @@
   var PLANT_UNSEEN_MERGED = !!V.unseenmerged;  // planted: merged slots swept (G-142)
   // Planted arms a check flips at RUN time (the V flags are fixed at boot).
   // Peripheral reads only -- nothing here touches the fold.
-  var RT_PLANTS = { yclip: false, lightpath: false };
+  // `codespans` may also be set at boot (`variants.codespans`): chunks are
+  // emitted and cached at the first fold, before a run-time flip could act.
+  var RT_PLANTS = { yclip: false, lightpath: false, codespans: !!V.codespans };
   var USE_SEMANTIC = !!V.semantic; // prefer heading/section boundaries
   var USE_RANK = !!V.rank;         // heaviest subtree first, not document order
   var WIDE = V.budget === 'wide', NARROW = V.budget === 'narrow';
@@ -1392,6 +1394,12 @@
     if (rec.chars > limit && node.nodeType === 3) {
       limit = rec.chars;
     }
+    // A code block is one artifact (G-233): indivisible like an oversize
+    // text node, so it is never cut into its highlighting spans. Planted
+    // (run time): `plants.codespans`.
+    if (rec.chars > limit && node.nodeType === 1 && node.tagName === 'PRE' && !RT_PLANTS.codespans) {
+      limit = rec.chars;
+    }
     if (rec.chars <= limit) {
       // A chunk is emitted only when its digest differs from the one last
       // sent. The digest is already maintained by the fold, so this costs a
@@ -1932,6 +1940,22 @@
     // costs nothing. The risk this guards is the one DuckDuckGo's region
     // filter taught -- eighty option lines ahead of the first result --
     // and the number that would show it is `page->wireframe` precision.
+    // A CODE BLOCK is one line: its text whole, newlines kept, at the
+    // `pre`'s own address (G-233, PLUGIN_GOAL 162). Walked like prose, a
+    // highlighted sample arrived as its syntax spans -- `pre/code`,
+    // `pre/code/span[5]` -- split over two chunks, and its copy button was
+    // the chunk a hover found (huggingface, 2026-10-18). The receiver
+    // continues the address below the `pre` by the code's own syntax, as
+    // `code://` files are addressed. Planted (run time): `plants.codespans`.
+    if (node.tagName === 'PRE' && !RT_PLANTS.codespans) {
+      var code = '';
+      try { code = String(node.textContent || '').replace(/^[\r\n]+|\s+$/g, ''); } catch (e) { stats.errors++; }
+      if (code && !(USE_DEDUP && subsumed(rec, seen))) {
+        lines.push([depth, code, path, -1, 0, own[0], own[1]]);
+        seen.push(rec);
+      }
+      return;
+    }
     var diagram = node.tagName === 'svg' && node.querySelector
                   && node.querySelector('text');
     if (FOLDED[node.tagName] && !diagram) {

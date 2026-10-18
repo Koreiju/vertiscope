@@ -188,6 +188,9 @@ export class ForceTree {
         return [...by.entries()].sort((x, y) => y[1] - x[1])[0][0];
       };
       if (under.length >= min) return { id: pickChunk(), at };
+      // A level holding a CODE BLOCK is a whole unit -- the block with its
+      // toolbar -- however few lines it has (G-233): one line is the code.
+      if (under.some((r) => /\/pre(\[\d+\])?$/.test(r.a)) && !ForceTree.plantCodeAsText) return { id: pickChunk(), at };
       const cut = at.lastIndexOf("/");
       if (cut <= 0) break;
       const up = at.slice(0, cut);
@@ -369,8 +372,17 @@ export class ForceTree {
       if (tag === "#text" || tag === SHADOW) continue;
       last = tag;
     }
-    return (last === "img" || last === "image") && /^(https?:|data:image|\/)/.test(t) ? `![](${t})` : t;
+    if ((last === "img" || last === "image") && /^(https?:|data:image|\/)/.test(t)) return `![](${t})`;
+    // A code block (G-233): fenced, so a panel draws it as code.
+    if (last === "pre" && !ForceTree.plantCodeAsText) return "```\n" + t + "\n```";
+    // A control's existence marker (`@control` -> its element name) drawn as
+    // a control, not as the bare word "button" (G-233).
+    const acc = typeof l[3] === "number" && l[3] >= 0 ? this.seg(l[3]) : "";
+    // The stored markdown's lo-fi forms: a button `( · )`, a field `[ ]`.
+    if (acc === "@control") return t === "button" ? "( · )" : "[ ]";
+    return t;
   }
+  static plantCodeAsText = false;
   static plantImgAsText = false;
 
   /** [tagId, ord, tagId, ord, ...] -> the element steps, text steps dropped. */

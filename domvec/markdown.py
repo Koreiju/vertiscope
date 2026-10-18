@@ -458,7 +458,8 @@ _RENDER_FORM = {
     "row":     lambda v, t, l, u="": f"| {v or t}",
     "cell":    lambda v, t, l, u="": (v or t),
     "quote":   lambda v, t, l, u="": f"> {v or t}",
-    "code":    lambda v, t, l, u="": f"`{v or t}`",
+    # A code BLOCK (a whole `pre`, G-233) is fenced; inline code stays ticked.
+    "code":    lambda v, t, l, u="": (f"```\n{v or t}\n```" if "\n" in (v or t) else f"`{v or t}`"),
     # An image is its alt text and its source together, which is what makes
     # a stored chunk able to say what a picture showed.
     "image":   lambda v, t, l, u="": (

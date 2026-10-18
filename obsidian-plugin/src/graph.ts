@@ -16,7 +16,7 @@
  */
 
 import { spreadFactor } from "./spread.ts";
-import { unitOf, lineAddr } from "./address.ts";
+import { unitOf, lineAddr, inUnit } from "./address.ts";
 import { centredTelescope, relaxCloud, zoomFor, similarityFit, similarityInverse, rotateInverse, type V3 } from "./camera";
 import { profiler } from "./profile";
 import { ItemView, MarkdownRenderer, WorkspaceLeaf, requestUrl } from "obsidian";
@@ -2731,7 +2731,7 @@ export class GraphView extends ItemView {
       const base = String(cid).slice(0, bar), at = String(cid).slice(bar + 1);
       return this.chunkPayload(base).then((p: any) => {
         if (!p || !p.lines) return p;
-        const pick = p.lines.filter((l: any) => { const a = lineAddr(l); return a === at || a.startsWith(at + "/"); });
+        const pick = p.lines.filter((l: any) => inUnit(lineAddr(l), at));
         return pick.length ? { ...p, cid, lines: pick } : p;
       });
     }

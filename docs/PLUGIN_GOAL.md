@@ -3968,6 +3968,15 @@ triples. The layout question is: how the AST tree, the CFG's execution order
 and the PDG's data flow are drawn together with the docs/comments and the
 code, each as its own edge type.*
 
+> empty links on some archive nodes
+
+*(Sent 2026-10-18 with a screenshot: an archive.org search-result tile's
+panel -- picture, title, item stats -- with no link to the item.) Read as
+(171): a tile is an anchor to its item page, and the panel opened for any
+part of it must carry that link; a unit chosen INSIDE the anchor left the
+anchor's own href behind. (If the reader meant the 3D view's edges, this
+reading is to be corrected.)*
+
 ---
 
 ## Standing instructions carried in the verbatim

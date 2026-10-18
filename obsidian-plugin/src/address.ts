@@ -39,6 +39,20 @@ export function canonAddr(a: string): string {
   return String(a || "").replace(/\/#shadow-root\/slot(\[\d+\])?(?=\/|$)/g, "");
 }
 
+/**
+ * Does the line at `addr` belong to the unit at `at`? Inside it -- or on an
+ * ANCHOR that wraps it: a link is the whole of what it wraps, so a unit chosen
+ * inside one (archive.org's tile body, below its `<a href=/details/…>`) still
+ * carries the href (2026-10-18, PLUGIN_GOAL 171: "empty links on some
+ * archive nodes"). Only anchors: an ancestor's loose text is not the unit's.
+ * Planted `__domvecPlantNoWrapLink`: inside only.
+ */
+export function inUnit(addr: string, at: string): boolean {
+  if (addr === at || addr.startsWith(at + "/")) return true;
+  if ((globalThis as any).__domvecPlantNoWrapLink) return false;
+  return at.startsWith(addr + "/") && /\/a(\[\d+\])?$/.test(addr);
+}
+
 /** A payload line's element address: its `key` is `url|xpath|...`. */
 export function lineAddr(line: any): string {
   const k = String((line && line.key) || "");
@@ -61,9 +75,11 @@ export function unitOf(lines: any[], element: string, min = 3, max = 60): { at: 
   if (!addrs.some(Boolean)) return null;
   let at = canonAddr(element);
   while (at && at.length > 1) {
-    const pick = lines.filter((_l, i) => addrs[i] && (addrs[i] === at || addrs[i].startsWith(at + "/")));
+    const pick = lines.filter((_l, i) => addrs[i] && inUnit(addrs[i], at));
     if (pick.length > max) return null;
     if (pick.length >= Math.min(min, lines.length)) return { at, lines: pick };
+    // A level holding a code block is a whole unit (G-233).
+    if (pick.length && addrs.some((a, i) => pick.includes(lines[i]) && /\/pre(\[\d+\])?$/.test(a))) return { at, lines: pick };
     const cut = at.lastIndexOf("/");
     if (cut <= 0) break;
     const up = at.slice(0, cut);

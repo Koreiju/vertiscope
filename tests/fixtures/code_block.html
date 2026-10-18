@@ -1,0 +1,35 @@
+<!doctype html>
+<!--
+  Longer than any chunk budget the harness sets: the old walk descended into
+  an over-budget block's spans, which is the case huggingface's sample hit.
+  G-233 (2026-10-18): a code sample as huggingface draws one -- a <pre><code>
+  whose tokens are syntax-highlighting spans, and a copy button in an
+  overlay beside it. The fold must emit the block as ONE unit at the pre,
+  text whole with its newlines, and never cut it into its spans.
+-->
+<meta charset="utf-8">
+<title>Code block</title>
+<h1>CODE-PAGE-TITLE</h1>
+<p>CODE-PROSE-BEFORE. A sentence of prose before the sample, long enough to be
+its own unit in any budget the harness sets.</p>
+<div class="wrap">
+  <pre><code class="language-python"><span class="k">import</span> json
+<span class="k">from</span> transformers <span class="k">import</span> AutoModelForCausalLM
+
+<span class="k">def</span> <span class="nf">triplextract</span>(model, tokenizer, text):
+    input_format = <span class="s">"""**Text:** {text}"""</span>
+    message = input_format.format(text = text)
+    <span class="nb">print</span>(<span class="s">"step 1 of the extraction, kept long so the block overruns the budget"</span>)
+    <span class="nb">print</span>(<span class="s">"step 2 of the extraction, kept long so the block overruns the budget"</span>)
+    <span class="nb">print</span>(<span class="s">"step 3 of the extraction, kept long so the block overruns the budget"</span>)
+    <span class="nb">print</span>(<span class="s">"step 4 of the extraction, kept long so the block overruns the budget"</span>)
+    <span class="nb">print</span>(<span class="s">"step 5 of the extraction, kept long so the block overruns the budget"</span>)
+    <span class="nb">print</span>(<span class="s">"step 6 of the extraction, kept long so the block overruns the budget"</span>)
+    <span class="nb">print</span>(<span class="s">"step 7 of the extraction, kept long so the block overruns the budget"</span>)
+    <span class="nb">print</span>(<span class="s">"step 8 of the extraction, kept long so the block overruns the budget"</span>)
+    <span class="k">return</span> message
+</code></pre>
+  <div class="overlay"><button aria-hidden="true"><svg width="10" height="10"></svg></button></div>
+</div>
+<p>CODE-PROSE-AFTER. And prose after it, so the block sits between two
+paragraphs as it does on a model card.</p>

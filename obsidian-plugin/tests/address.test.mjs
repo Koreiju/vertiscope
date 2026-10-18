@@ -60,3 +60,25 @@ test("a unit stops below a list: an item with one streamed line is still the ite
   // a tile with its three lines: the tile
   assert.deepEqual(unitOf(lines, "/g/section/article[1]/div/b/span").lines.map((l) => l.text), ["first tile", "first count", "first pic"]);
 });
+
+import { inUnit } from "../src/address.ts";
+test("a unit inside a link carries the link (archive.org tiles, PLUGIN_GOAL 171)", () => {
+  const L = (a, t) => ({ text: t, key: "u|" + a });
+  const lines = [
+    L("/g/section/article[2]/a", "/details/oneman"),
+    L("/g/section/article[2]/a/item-tile/#shadow-root/div/h3", "One Man's Family"),
+    L("/g/section/article[2]/a/item-tile/#shadow-root/div/span", "17K"),
+    L("/g/section/article[2]/a/item-tile/#shadow-root/div/span[2]", "31"),
+    L("/g/section/article[2]/div", "loose text of the dispatcher"),
+  ];
+  const u = unitOf(lines, "/g/section/article[2]/a/item-tile/#shadow-root/div/h3");
+  assert.equal(u.at, "/g/section/article[2]/a/item-tile/#shadow-root/div");
+  const texts = u.lines.map((l) => l.text);
+  assert.ok(texts.includes("/details/oneman"), "the wrapping anchor's href is in the unit");
+  assert.ok(!texts.includes("loose text of the dispatcher"));
+  globalThis.__domvecPlantNoWrapLink = true;
+  try { assert.ok(!unitOf(lines, "/g/section/article[2]/a/item-tile/#shadow-root/div/h3").lines.map((l) => l.text).includes("/details/oneman")); }
+  finally { globalThis.__domvecPlantNoWrapLink = false; }
+  assert.equal(inUnit("/x/a[3]", "/x/a[3]/b"), true);
+  assert.equal(inUnit("/x/div", "/x/div/b"), false);
+});
