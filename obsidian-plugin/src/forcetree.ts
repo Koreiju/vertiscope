@@ -565,3 +565,6 @@ export class ForceTree {
     return delta;
   }
 }
+
+// Reachable by the live probes, to plant its static switches (G-233).
+(globalThis as any).__domvecForceTree = ForceTree;

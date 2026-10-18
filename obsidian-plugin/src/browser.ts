@@ -1272,6 +1272,8 @@ export class BrowserView extends ItemView {
     const v: string[] = [];
     if (!this.plant.has("no-merge")) v.push("merge: true", "semantic: true");
     if (this.plant.has("no-late-roots")) v.push("nolateroots: true");
+    // G-233's planted arm: a <pre> cut into its highlighting spans, as before.
+    if (this.plant.has("codespans")) v.push("codespans: true");
     return "{" + v.join(", ") + "}";
   }
 
