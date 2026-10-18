@@ -62,7 +62,7 @@ def compact(workspace: Path, *, keep_as: Optional[str] = None, pool_bytes: int =
     """Rebuild `workspace/graph.kuzu` compact. The store must not be open
     elsewhere. Returns what happened; `swapped` is False whenever anything
     did not match, and then the original is untouched."""
-    import kuzu
+    from ..graphstore import open_kuzu
 
     workspace = Path(workspace)
     db = workspace / "graph.kuzu"
@@ -72,8 +72,7 @@ def compact(workspace: Path, *, keep_as: Optional[str] = None, pool_bytes: int =
     out: Dict = {"at": time.strftime("%Y-%m-%d %H:%M:%S"), "before_mb": round(db.stat().st_size / 1e6, 1),
                  "swapped": False}
     t0 = time.time()
-    old = kuzu.Database(str(db), buffer_pool_size=pool_bytes)
-    oc = kuzu.Connection(old)
+    old, oc = open_kuzu(db, pool_bytes)
     oc.execute("CHECKPOINT")
     before = counts(oc)
     t["count"] = round(time.time() - t0, 1)
@@ -85,8 +84,7 @@ def compact(workspace: Path, *, keep_as: Optional[str] = None, pool_bytes: int =
         t["export"] = round(time.time() - t0, 1)
         t0 = time.time()
         new_path = work / "graph.kuzu"
-        new = kuzu.Database(str(new_path), buffer_pool_size=pool_bytes)
-        nc = kuzu.Connection(new)
+        new, nc = open_kuzu(new_path, pool_bytes)
         nc.execute("IMPORT DATABASE '%s'" % str(work / "export").replace("\\", "/"))
         nc.execute("CHECKPOINT")
         after = counts(nc)

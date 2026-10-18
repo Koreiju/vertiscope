@@ -569,6 +569,11 @@ class Workspace:
                 pass
         if isinstance(counts, dict):
             counts.update(_timed)
+        # G-233/G-235: a page's Python code blocks join the code graph.
+        try:
+            self.last_web_cpg = self.web_code_cpg(url, chunks)
+        except Exception as exc:                    # noqa: BLE001 -- never fails a capture
+            self.last_web_cpg = {"error": str(exc)[:160]}
         return chunks, counts
 
     def page_url(self, url: str) -> str:
@@ -679,6 +684,46 @@ class Workspace:
             lines=sum(len(c.lines) for c in chunks), passes=1,
             wire_bytes=len(html), document_bytes=len(html), report=report,
         )
+
+    def web_code_cpg(self, url: str, chunks) -> Dict[str, int]:
+        """The code blocks of a web page in the code property graph (G-233,
+        G-235: "then web code blocks"). A line drawn at a `<pre>` whose text
+        is Python (it parses, two lines or more) gets its graph BELOW that
+        address; calls into libraries resolve by qualified name against the
+        packages the store holds, as a `code://` file's do. Anything that
+        does not parse -- shell, JSON, another language -- is left alone."""
+        import ast as _ast
+        import re as _re
+        from .cpg import build_cpg
+
+        out = {"blocks": 0, "python": 0, "nodes": 0, "edges": 0, "cross_out": 0}
+        if not url or url.startswith(("code://", "vault://")):
+            return out
+        seen = set()
+        for chunk in chunks:
+            for line in getattr(chunk, "lines", []) or []:
+                addr = getattr(line, "address", None)
+                xp = getattr(addr, "xpath", "") if addr is not None else ""
+                if not xp or not _re.search(r"/pre(\[\d+\])?$", xp) or xp in seen:
+                    continue
+                seen.add(xp)
+                code = str(getattr(line, "text", "") or "")
+                code = _re.sub(r"^\s*```[^\n]*\n", "", code)
+                code = _re.sub(r"\n```\s*$", "", code)
+                out["blocks"] += 1
+                if code.count("\n") < 1:
+                    continue
+                try:
+                    _ast.parse(code)
+                except SyntaxError:
+                    continue
+                prefix = xp
+                g = build_cpg(code, url, prefix=prefix, qname="web")
+                got = self.store.upsert_cpg(g, scope="%s|%s/" % (url, prefix))
+                out["python"] += 1
+                for k in ("nodes", "edges", "cross_out"):
+                    out[k] += got.get(k, 0)
+        return out
 
     def index_pdf(self, data: bytes, url: str) -> Dict:
         """A PDF the reader reached, kept and chunked like a page (`G-248`).

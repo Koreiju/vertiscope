@@ -85,11 +85,16 @@ def _header(node) -> ast.AST:
     return node
 
 
-def build_cpg(text: str, url: str, rel_path: str = "") -> Dict:
+def build_cpg(text: str, url: str, rel_path: str = "", prefix: str = "", qname: str = "") -> Dict:
     """Nodes and edges of one file's CPG. Edges to nodes in THIS file are
-    resolved; calls and bases elsewhere are left as qualified names."""
+    resolved; calls and bases elsewhere are left as qualified names.
+
+    `prefix` puts the module BELOW an address: a web page's code block is
+    `<page url>|<the pre's xpath>/module/...` (G-233 -- "addressed below the
+    `pre` by its own syntax, as `code://` files are"). `qname` names its
+    module when no path does."""
     tree = ast.parse(text)
-    mod_q = module_qname(rel_path)
+    mod_q = qname or module_qname(rel_path)
     count = _Counter()
     nodes: List[Dict] = []
     edges: List[Dict] = []
@@ -105,7 +110,7 @@ def build_cpg(text: str, url: str, rel_path: str = "") -> Dict:
         edges.append({"kind": kind, "src": a, "dst": b, "var": props.get("var", ""), "line": int(props.get("line", 0)),
                       "label": props.get("label", "")})
 
-    module_xp = count.step("module", "")
+    module_xp = count.step("module", prefix)
     module_key = node(module_xp, "module", mod_q.rsplit(".", 1)[-1] if mod_q else "", mod_q, 1, len(text.splitlines()) or 1)
 
     # Imported names: local alias -> qualified name.

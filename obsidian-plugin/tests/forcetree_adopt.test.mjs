@@ -123,3 +123,24 @@ test("planted (plantClimbPastList): the empty item opens the whole list", () => 
   try { assert.equal(rewritten().chunkForElement("/html/body/main/section[4]/p", 3, 3).at, "/html/body/main"); }
   finally { ForceTree.plantClimbPastList = false; }
 });
+
+// 2026-10-18: "please ensure to resolve hyperlink tails to their domains" --
+// a streamed chunk's link line arrived as the page wrote it
+// (`/docs/transformers/...#transformers.Pipeline`) and its panel showed the tail.
+test("a link's relative destination reads as an absolute url on the page's domain", () => {
+  const D2 = ["body", "main", "p", "a", "#text"];
+  const P = "https://huggingface.co/docs/transformers/quicktour";
+  const drain = { v: 1, dict: D2, removed: [], stats: { dictSize: D2.length }, chunks: [{ id: 1, digest: 11, lines: [
+    [0, "run inference with", [0, 1, 1, 1, 2, 1, 4, 1]],
+    [0, "/docs/transformers/v5.20.1/en/main_classes/pipelines#transformers.Pipeline", [0, 1, 1, 1, 2, 1, 3, 1]],
+    [0, "Pipeline", [0, 1, 1, 1, 2, 1, 3, 1, 4, 1]],
+  ] }] };
+  const t = new ForceTree(P); t.apply(drain);
+  assert.deepEqual(t.linesOf(`f:${P}#1`), ["run inference with",
+    "https://huggingface.co/docs/transformers/v5.20.1/en/main_classes/pipelines#transformers.Pipeline", "Pipeline"]);
+  ForceTree.plantRelativeLinks = true;
+  try {
+    const u = new ForceTree(P); u.apply(drain);
+    assert.equal(u.linesOf(`f:${P}#1`)[1], "/docs/transformers/v5.20.1/en/main_classes/pipelines#transformers.Pipeline");
+  } finally { ForceTree.plantRelativeLinks = false; }
+});

@@ -397,9 +397,24 @@ export class ForceTree {
     const acc = typeof l[3] === "number" && l[3] >= 0 ? this.seg(l[3]) : "";
     // The stored markdown's lo-fi forms: a button `( · )`, a field `[ ]`.
     if (acc === "@control") return t === "button" ? "( · )" : "[ ]";
+    // A link's destination is the page's address for it, never a tail of it:
+    // `/docs/transformers/v5.20.1/...#transformers.Pipeline` reads as
+    // `https://huggingface.co/docs/...` (2026-10-18: "please ensure to
+    // resolve hyperlink tails to their domains"). Resolved against the base
+    // the page declared (`baseFor`), as the stored panels already are.
+    // Planted `plantRelativeLinks`.
+    if (!ForceTree.plantRelativeLinks && (acc === "href" || last === "a" || last === "area")
+        && /^(\/|\.\.?\/|\?|#)/.test(t) && !/\s/.test(t)) {
+      try { return new URL(t, ForceTree.baseOf(this.url)).href; } catch { return t; }
+    }
     return t;
   }
   static plantCodeAsText = false;
+  /** The base a page's relative links resolve against; the browser cell
+   *  sets it to the base each page declared (`snapshot.baseFor`). */
+  static baseOf: (url: string) => string = (u) => u;
+  /** Planted: a link's destination drawn as the page wrote it (a tail). */
+  static plantRelativeLinks = false;
   static plantImgAsText = false;
 
   /** [tagId, ord, tagId, ord, ...] -> the element steps, text steps dropped. */

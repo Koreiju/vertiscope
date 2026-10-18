@@ -455,8 +455,15 @@ export class GraphView extends ItemView {
     };
     // G-241: the code graph's edges, drawn between the chunks of an open
     // code page -- each kind its own colour and its own switch.
+    // Shown only while a code page is open: on web pages they switch nothing
+    // (2026-10-18: "what are the inherits and calls buttons for?").
     for (const kind of ["CALLS", "INHERITS"] as const) {
       const b = bar.createEl("button", { text: (this.codeEdgeKinds[kind] ? "" : "no ") + kind.toLowerCase() });
+      b.setAttr("title", kind === "CALLS"
+        ? "Code graph: draw a function's calls (orange) between the chunks of an open code page"
+        : "Code graph: draw a class's base classes (green) between the chunks of an open code page");
+      b.style.display = "none";
+      this.codeEdgeButtons.push(b);
       b.onclick = () => {
         this.codeEdgeKinds[kind] = !this.codeEdgeKinds[kind];
         b.setText((this.codeEdgeKinds[kind] ? "" : "no ") + kind.toLowerCase());
@@ -3700,6 +3707,10 @@ export class GraphView extends ItemView {
   /** Per open code page, its edges by node id (from `/cpg_edges`). */
   private codeEdges = new Map<string, { source: string; target: string; kind: string }[]>();
   codeEdgeStats = { pages: 0, fetched: 0, drawn: { CALLS: 0, INHERITS: 0 } as Record<string, number> };
+  private codeEdgeButtons: HTMLElement[] = [];
+  private showCodeButtons(on: boolean): void {
+    for (const b of this.codeEdgeButtons) { const d = on ? "" : "none"; if (b.style.display !== d) b.style.display = d; }
+  }
   /** Planted: code edges are never fetched or drawn, as before. */
   plantNoCodeEdges = false;
   private async loadCodeEdges(url: string): Promise<void> {
@@ -3714,6 +3725,8 @@ export class GraphView extends ItemView {
   /** The code edges to DRAW now: both ends drawn, the kind switched on.
    *  Never in the graph's links -- drawn, not forces (G-241's measurement). */
   private drawableCodeEdges(nodes: any[]): any[] {
+    // The switches appear while a code page's chunks are drawn.
+    this.showCodeButtons(!this.plantNoCodeEdges && nodes.some((n) => n.level !== "page" && String(n.url || "").startsWith("code://")));
     if (this.plantNoCodeEdges || !this.codeEdges.size) { this.codeEdgeStats.drawn = { CALLS: 0, INHERITS: 0 }; return []; }
     const byId = new Map<string, any>();
     for (const n of nodes) byId.set(String(n.id), n);

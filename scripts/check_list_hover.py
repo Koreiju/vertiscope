@@ -24,7 +24,9 @@ JS = r"""(async (planted, start) => {
   const b = app.workspace.getLeavesOfType("domvec-browser-view")[0].view;
   const mode = v.panelsOn; v.panelsOn = "flyto";
   const FT = window.__domvecForceTree;
-  if (planted) { if (FT) FT.plantItemAlways = true; globalThis.__domvecPlantItemAlways = true; }
+  const linksMode = start.includes("huggingface.co");
+  if (planted && linksMode) { if (FT) FT.plantRelativeLinks = true; }
+  else if (planted) { if (FT) FT.plantItemAlways = true; globalThis.__domvecPlantItemAlways = true; }
   try {
     const url = start + (start.includes("?") ? "&" : "?") + "g244=" + Date.now();
     b.go(url); for (let i = 0; i < 60 && !(b.webview.getURL() || "").includes("g244="); i++) await sleep(500);
@@ -56,13 +58,15 @@ JS = r"""(async (planted, start) => {
         for (let i = 0; i < 50; i++) { await sleep(100); const e = v.hoverBb && v.billboards.get(v.hoverBb); text = e ? (e.el.textContent || "") : ""; if (text.trim().length > 15) break; }
         const norm = (s) => s.replace(/\s+/g, "");
         res.push({ lines: blk.n, whole: !!text && norm(text).includes(norm(blk.first)) && norm(text).includes(norm(blk.last)),
-                   has_first: norm(text).includes(norm(blk.first)), has_last: norm(text).includes(norm(blk.last)), chars: text.length, first: blk.first, last: blk.last, panel: text.replace(/\s+/g, " ").slice(0, 160) });
+                   has_first: norm(text).includes(norm(blk.first)), has_last: norm(text).includes(norm(blk.last)), chars: text.length, first: blk.first, last: blk.last, panel: text.replace(/\s+/g, " ").slice(0, 160),
+                   abs_links: (text.match(/https:\/\/huggingface\.co\/docs\//g) || []).length,
+                   tails: (text.match(/(^|[\s>])\/docs\/[^\s]+/g) || []).length });
       }
       b.webview.sendInputEvent({ type: "mouseWheel", x: 400, y: 400, deltaX: 0, deltaY: -450 });
       await sleep(1500);
     }
     return JSON.stringify({ planted, blocks: blocks.length, whole: res.filter((r) => r.whole).length, res });
-  } finally { v.panelsOn = mode; if (FT) FT.plantItemAlways = false; globalThis.__domvecPlantItemAlways = false; for (const k of [...v.billboards.keys()]) v.closeBillboard(k); }
+  } finally { v.panelsOn = mode; if (FT) { FT.plantItemAlways = false; FT.plantRelativeLinks = false; } globalThis.__domvecPlantItemAlways = false; for (const k of [...v.billboards.keys()]) v.closeBillboard(k); }
 })"""
 try:
     for planted in (False, True):

@@ -35,7 +35,9 @@ import { ForceTree, type ForceNodeDelta } from "./forcetree";
 import { PipelineBox } from "./pipelinebox";
 import { profiler } from "./profile";
 import { Component, ItemView, MarkdownRenderer, Menu, WorkspaceLeaf, requestUrl } from "obsidian";
-import { putBase, putFavicon, putPictures } from "./snapshot";
+import { baseFor, putBase, putFavicon, putPictures } from "./snapshot";
+// A streamed link's destination resolves against the base its page declared.
+ForceTree.baseOf = baseFor;
 import { Snapshot, dropSnapshot, getSnapshot, putSnapshot, renderSnapshot, snapshotScript, xpathsOfLines } from "./snapshot";
 
 import { LayoutNode } from "./graph";

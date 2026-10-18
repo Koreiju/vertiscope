@@ -54,6 +54,15 @@ from .privacy import redact_url
 __all__ = ["GraphStore", "StoredChunk", "canonical_url"]
 
 
+def open_kuzu(path, pool_bytes: int):
+    """A database and a connection on `path`, for a caller that needs the
+    store as FILES (`obsidian/compact.py`'s EXPORT/IMPORT) -- so this module
+    stays the only one that imports kuzu (`test_architecture`)."""
+    import kuzu
+    db = kuzu.Database(str(path), buffer_pool_size=pool_bytes)
+    return db, kuzu.Connection(db)
+
+
 class StorePoisoned(RuntimeError):
     """The connection must not be used again (see `GraphStore.poisoned`)."""
 
@@ -1334,7 +1343,7 @@ class GraphStore:
             _close(result)
         return out
 
-    def upsert_cpg(self, g: Dict) -> Dict[str, int]:
+    def upsert_cpg(self, g: Dict, scope: str = "") -> Dict[str, int]:
         """One file's code property graph, replacing what the store held for
         it (`G-235`; the per-file `incremental_update` the reader named).
 
@@ -1347,7 +1356,14 @@ class GraphStore:
         """
         url = g["url"]
         out = {"nodes": 0, "edges": 0, "cross_out": 0, "cross_in": 0}
-        self._execute("MATCH (n:CodeNode {url: $u}) DETACH DELETE n", {"u": url})
+        # A web page holds many code blocks and a capture carries some of
+        # them: a block replaces ITS nodes (`scope`, a key prefix), never the
+        # page's others.
+        if scope:
+            self._execute("MATCH (n:CodeNode) WHERE n.url = $u AND n.key STARTS WITH $k DETACH DELETE n",
+                          {"u": url, "k": scope})
+        else:
+            self._execute("MATCH (n:CodeNode {url: $u}) DETACH DELETE n", {"u": url})
         if g["nodes"]:
             self._batch("UNWIND $rows AS r CREATE (:CodeNode {key: r.key, url: r.url, xpath: r.xpath, kind: r.kind, "
                         "name: r.name, qname: r.qname, line: r.line, end_line: r.end_line, "
