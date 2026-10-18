@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 
+import os
 import shutil
 import time
 from dataclasses import dataclass, field
@@ -542,7 +543,10 @@ class Workspace:
         _timed["ms_mirror"] = round((time.perf_counter() - _t) * 1000, 1)
         _timed["mirror_rows_written"] = (
             len(chunks) if complete else len(merged))
-        self._index = None      # ranks are stale once the graph changed
+        # The index takes the DELTA (the rows this write touched), not a
+        # rebuild on the next search (PLUGIN_GOAL 152). Planted
+        # `_PLANT_INDEX_REBUILD`: thrown away, as before.
+        self._index_changed(set(rows) | set(superseded))
         # A write that describes a whole page is a settled unit, and flushing
         # it is a batch — one embedder call for the page, which is what the
         # design asks for. A delta is not settled and stays queued. This is
@@ -1268,7 +1272,9 @@ class Workspace:
                 "SET c.embedding = r.emb",
                 rows,
             )
-            self._index = None       # scores are stale once vectors moved
+            # The embedding matrix is read live by the index: new vectors
+            # need no rebuild, only a fresh row mapping.
+            self._index_changed(set(produced))
         return self.vectors.report()
 
     # -- reading ----------------------------------------------------------
@@ -1374,7 +1380,19 @@ class Workspace:
         account, and this stops the expensive build happening twice as well.
         """
         if self._index is not None:
-            return self._index
+            if getattr(self, "_index_delta", None):
+                with self._index_lock:
+                    delta, self._index_delta = self._index_delta, set()
+                    if delta and self._index is not None:
+                        import time as _time
+                        t0 = _time.perf_counter()
+                        got = self._index.apply_delta(delta)
+                        self.index_builds = (getattr(self, "index_builds", []) + [{
+                            "delta": len(delta), **got,
+                            "ms_delta": round((_time.perf_counter() - t0) * 1000, 1),
+                            "at": round(_time.time(), 3)}])[-16:]
+            if self._index is not None:
+                return self._index
         with self._index_lock:
             # Re-checked inside: the thread that waited here wants the index
             # the first one built, not a second one.
@@ -1404,6 +1422,57 @@ class Workspace:
                     "ms_build": round((t3 - t2) * 1000, 1),
                     "at": round(_time.time(), 3)}])[-16:]
         return self._index
+
+    #: Planted: every write throws the index away (a full rebuild per search).
+    _PLANT_INDEX_REBUILD = [os.environ.get("DOMVEC_PLANT_INDEX_REBUILD") == "1"]
+    #: After this long with no write, the full index is rebuilt off the
+    #: request path (PageRank over the new edges) and swapped in.
+    INDEX_QUIET_REBUILD_S = 30.0
+
+    def _index_changed(self, cids) -> None:
+        if self._PLANT_INDEX_REBUILD[0] or getattr(self, "_index", None) is None:
+            self._index = None
+            return
+        with self._index_lock:
+            pending = getattr(self, "_index_delta", None)
+            if pending is None:
+                pending = self._index_delta = set()
+            pending.update(cids)
+            self._index_written_at = time.time()
+        self._schedule_index_rebuild()
+
+    def _schedule_index_rebuild(self) -> None:
+        """One background thread: once writes have been quiet for
+        `INDEX_QUIET_REBUILD_S`, build a fresh index, apply what was written
+        meanwhile, and swap it in."""
+        import threading
+        t = getattr(self, "_index_rebuilder", None)
+        if t is not None and t.is_alive():
+            return
+        def run():
+            while True:
+                time.sleep(2.0)
+                quiet = time.time() - getattr(self, "_index_written_at", 0)
+                if quiet < self.INDEX_QUIET_REBUILD_S:
+                    continue
+                started = time.time()
+                try:
+                    fresh = ThreeFormIndex(self.store, self.freq, self.embeddings, embedder=self.embedder).build()
+                except Exception:                    # noqa: BLE001
+                    return
+                with self._index_lock:
+                    late = [c for c in (getattr(self, "_index_delta", None) or ())]
+                    if getattr(self, "_index_written_at", 0) >= started and late:
+                        fresh.apply_delta(late)
+                    self._index = fresh
+                    self._index_delta = set()
+                    self.index_builds = (getattr(self, "index_builds", []) + [{
+                        "background": True, "ms_build": round((time.time() - started) * 1000, 1),
+                        "at": round(time.time(), 3)}])[-16:]
+                if time.time() - getattr(self, "_index_written_at", 0) >= self.INDEX_QUIET_REBUILD_S:
+                    return
+        self._index_rebuilder = threading.Thread(target=run, name="domvec-index-rebuild", daemon=True)
+        self._index_rebuilder.start()
 
     def search(self, query: str, k: int = 10, **kwargs) -> List[Hit]:
         return self.index.search(query, k=k, **kwargs)

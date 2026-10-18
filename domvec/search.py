@@ -142,6 +142,7 @@ class ThreeFormIndex:
         self._ranks = pagerank(n, edges)
 
         self._meta = {}
+        self._cid_row = None
         # Each row's content hash, from the markdown this build reads anyway:
         # the duplicate collapse needs only this, so a search reads the store
         # for the hits it KEEPS and nothing else (it read every candidate --
@@ -167,6 +168,62 @@ class ThreeFormIndex:
             if not self.freq.rows[row] or row not in self._meta:
                 self._live[row] = 0.0
         return self
+
+    def apply_delta(self, cids) -> Dict[str, int]:
+        """Bring the index up to date for the chunks a capture wrote or
+        retired -- O(delta), not O(corpus).
+
+        Every capture used to throw the index away, and the next search
+        rebuilt it: every chunk read back from the store for its metadata,
+        PageRank over every edge -- 2-9 s of wall time on each search while a
+        page streamed (2026-10-18, PLUGIN_GOAL 152: "retrieval is also back to
+        a slow response"). The trie's change is the delta: only those rows are
+        re-read. A row new to the index takes the mean PageRank until the next
+        full build (a zero would veto it under the product); the full build
+        runs off the request path.
+        """
+        if self._ranks is None:
+            self.build()
+            return {"rebuilt": 1}
+        n = len(self.freq.rows)
+        if n > len(self._ranks):
+            pos = self._ranks[self._ranks > 0]
+            fill = float(pos.mean()) if pos.size else 1.0 / max(n, 1)
+            self._ranks = np.concatenate([self._ranks, np.full(n - len(self._ranks), fill, dtype=self._ranks.dtype)])
+        if self._live is None or n > len(self._live):
+            grow = n - (0 if self._live is None else len(self._live))
+            self._live = np.concatenate([self._live if self._live is not None else np.zeros(0, dtype=np.float32),
+                                         np.zeros(grow, dtype=np.float32)])
+        cid_row = getattr(self, "_cid_row", None)
+        if cid_row is None:
+            cid_row = self._cid_row = {m[0]: r for r, m in self._meta.items() if m}
+        cids = [c for c in set(cids or ()) if c]
+        many = getattr(self.store, "chunks_many", None)
+        got = many(cids) if (many and cids) else {c: self.store.chunk(c) for c in cids}
+        pos = self._ranks[self._ranks > 0]
+        fill = float(pos.mean()) if pos.size else 1.0 / max(n, 1)
+        added = retired = 0
+        for cid in cids:
+            old = cid_row.pop(cid, None)
+            # Only while the row still names THIS chunk: a freed row reused by
+            # another chunk in the same delta must not be wiped by the retired
+            # one (the order of a set decided it).
+            if old is not None and old < n and (self._meta.get(old) or ("",))[0] == cid:
+                self._meta.pop(old, None); self._digests.pop(old, None); self._live[old] = 0.0
+            row = self.freq._row_of.get(cid)
+            chunk = got.get(cid) if got else None
+            if row is None or chunk is None or not self.freq.rows[row]:
+                retired += 1
+                continue
+            self._meta[row] = (chunk.cid, chunk.url, chunk.xpath)
+            self._digests[row] = self._row_digest(row, getattr(chunk, "md", "") or "")
+            self._live[row] = 1.0
+            if self._ranks[row] <= 0:
+                self._ranks[row] = fill
+            cid_row[cid] = row
+            added += 1
+        self._emb_rows = None                       # a reused row may map elsewhere now
+        return {"rows": added, "retired": retired}
 
     def _row_digest(self, row: int, md: str) -> str:
         """The duplicate key of a row: its token multiset, as `content_hash`

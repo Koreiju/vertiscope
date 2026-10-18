@@ -2623,6 +2623,8 @@ export class GraphView extends ItemView {
   greyUnitFor: (cid: string) => { id: string; at: string } | null = () => null;
   /** Planted: a stored chunk's unit is shown even where the live page draws other content there. */
   plantTrustStored = false;
+  /** Planted: the speck clamp pulls in a kept-zoom flight too (the reader's zoom-out lost). */
+  plantClampKeptZoom = false;
   /** The hovered element for a grey chunk (the browser's pipebox). */
   hoverElementOf: (cid: string) => string = () => "";
   /** Planted: a hovered undrawn grey chunk opens no panel (its page stands for it). */
@@ -2749,7 +2751,13 @@ export class GraphView extends ItemView {
     const fov = ((camObj && camObj.fov) || 50) * Math.PI / 180;
     const H = (g.renderer && g.renderer().domElement && g.renderer().domElement.clientHeight) || 800;
     const Dvisible = r * (H / 2) / (this.minTargetPx * Math.tan(fov / 2));
-    if (!this.plantSpeckFlights && Number.isFinite(Dvisible) && Dvisible > 0 && D > Dvisible) {
+    // ...on a flight that ZOOMS only. Applied to every flight, it pulled the
+    // camera in on each hover the search scroll made onto a small result, and
+    // the reader's zoom-out was lost (2026-10-17, PLUGIN_GOAL 158: "zooming
+    // out while scanning doesn't persist over later node hovers"). A kept
+    // zoom is the reader's. Planted `plantClampKeptZoom`: as before.
+    if (!this.plantSpeckFlights && (decided.zoom || this.plantClampKeptZoom)
+        && Number.isFinite(Dvisible) && Dvisible > 0 && D > Dvisible) {
       D = Dvisible; this.focusStats.clamped++;
     }
     let dx = cam.x - n.x, dy = cam.y - n.y, dz = cam.z - (n.z || 0);

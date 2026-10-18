@@ -513,7 +513,9 @@ export class Sidecar {
         CaptureResult;
       return body as CaptureResult;
     } catch (e) {
-      return { error: String(e) } as CaptureResult;
+      // Unreachable (down, restarting): said so, so the stream waits and
+      // retries instead of reading it as a refusal and dropping the drain.
+      return { error: String(e), unreachable: true } as CaptureResult;
     }
   }
 

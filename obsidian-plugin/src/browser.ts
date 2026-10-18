@@ -2843,9 +2843,13 @@ export class BrowserView extends ItemView {
         // dropped (2026-10-17: "persist chunk streams no matter how fast") --
         // a failed capture was simply returned from, and its drains lost.
         // Kept trying for up to 15 minutes, backing off to 5 s.
-        if ((!reply || (reply as any).retry) && !this.plant.has("drop-failed-capture") && !this.closed) {
+        const unreachable = !reply || !!(reply as any).unreachable;
+        if ((unreachable || (reply as any).retry) && !this.plant.has("drop-failed-capture") && !this.closed) {
           job.attempts = (job.attempts || 0) + 1;
-          if (performance.now() - (job.queuedAt || performance.now()) < 15 * 60 * 1000) {
+          // While the sidecar does not answer at all (down, restarting, its
+          // store being rebuilt) the stream waits however long that takes;
+          // only a sidecar that answers and keeps refusing gets 15 minutes.
+          if (unreachable || performance.now() - (job.queuedAt || performance.now()) < 15 * 60 * 1000) {
             this.captureRetries++;
             await new Promise((r) => window.setTimeout(r, Math.min(5000, 400 * job.attempts!)));
             this.captureQueue.unshift(job);
