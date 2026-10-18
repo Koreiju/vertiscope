@@ -99,7 +99,7 @@
   var PLANT_UNSEEN_MERGED = !!V.unseenmerged;  // planted: merged slots swept (G-142)
   // Planted arms a check flips at RUN time (the V flags are fixed at boot).
   // Peripheral reads only -- nothing here touches the fold.
-  var RT_PLANTS = { yclip: false };
+  var RT_PLANTS = { yclip: false, lightpath: false };
   var USE_SEMANTIC = !!V.semantic; // prefer heading/section boundaries
   var USE_RANK = !!V.rank;         // heaviest subtree first, not document order
   var WIDE = V.budget === 'wide', NARROW = V.budget === 'narrow';
@@ -3199,10 +3199,34 @@
   // (`stepFor`): `tag[k]` for the k-th same-tag sibling (k > 1), and an
   // explicit `#shadow-root` step at a boundary. Read-only; a text node is
   // addressed by its element.
+  //
+  // A SLOTTED element's parent in the fold is the slot that draws it (the
+  // last of a chain of slots, as `assignedNodes({flatten: true})` reads),
+  // and its ordinal counts among that slot's assigned nodes -- not its light
+  // parent and light siblings. Walking `parentNode` spelled a second address
+  // for the same element: archive.org's search tiles sit in light children
+  // of `tab-manager`, drawn through a slot in its shadow root, and every
+  // hover there named a path the trie did not hold (2026-10-18, PLUGIN_GOAL
+  // 149). Planted (run time): `plants.lightpath`.
   function hoverAddress(node) {
     if (node && node.nodeType === 3) node = node.parentNode;
     var steps = [], guard = 0;
     while (node && node.nodeType === 1 && guard++ < 200) {
+      var top = null, sl = RT_PLANTS.lightpath ? null : node.assignedSlot;
+      while (sl && guard++ < 200) { top = sl; sl = sl.assignedSlot; }
+      if (top) {
+        var an = null, j, kk = 1;
+        try { an = top.assignedNodes({ flatten: true }); } catch (e) { stats.errors++; an = null; }
+        if (an && an.length) {
+          for (j = 0; j < an.length && an[j] !== node; j++) {
+            if (an[j].nodeType === 1 && an[j].tagName === node.tagName) kk++;
+          }
+          var tg = node.tagName.toLowerCase();
+          steps.unshift(kk > 1 ? tg + '[' + kk + ']' : tg);
+          node = top;
+          continue;
+        }
+      }
       var tag = node.tagName.toLowerCase(), k = 1, s = node.previousElementSibling;
       while (s) { if (s.tagName === node.tagName) k++; s = s.previousElementSibling; }
       steps.unshift(k > 1 ? tag + '[' + k + ']' : tag);
@@ -3417,6 +3441,9 @@
     },
     pictures: pictures,
     resolve: function (path) { return !!resolvePath(path); },
+    // The address a hover on `el` reports (read-only), so a check can hold it
+    // against the fold's own address for the same element.
+    hoverAddress: function (el) { return hoverAddress(el); },
     // The node an address names, through shadow roots and slots -- read-only,
     // for instruments that check what the trie accounts for (2026-10-07:
     // media coverage read archive.org's shadow-DOM pictures as 0/115 because

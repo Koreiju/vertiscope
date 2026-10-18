@@ -63,3 +63,60 @@ test("a reused element's new content is a new node; the old content stays", () =
 test("null arm: a fresh tree cannot decode it (the dropped stream)", () => {
   assert.equal(new ForceTree(B).apply(next), null);
 });
+
+// 2026-10-17 (PLUGIN_GOAL 149): a REMOVED element whose sensor id the page
+// reuses must not take its kept version's node id -- lookups read the kept
+// version first, and a tile opened its slot's former occupant.
+function reused() {
+  const t = new ForceTree(A);
+  t.apply({ v: 1, dict: DICT, chunks: [chunk(7, at(1, 3), "Medical Heritage Library")], removed: [], stats: { dictSize: DICT.length } });
+  t.apply({ v: 1, dict: [], chunks: [], removed: [7], stats: { dictSize: DICT.length } });
+  t.apply({ v: 1, dict: [], chunks: [chunk(7, at(1, 3), "Archive Team: US Government")], removed: [], stats: { dictSize: DICT.length } });
+  return t;
+}
+test("a removed-then-reused sensor id is a new node; the kept version keeps its own", () => {
+  const t = reused();
+  const live = t.held().map((h) => h.id);
+  assert.equal(live.length, 1);
+  assert.notEqual(live[0], `f:${A}#7`, "the live content has a new id");
+  assert.deepEqual(t.linesOf(live[0]), ["Archive Team: US Government"]);
+  assert.deepEqual(t.linesOf(`f:${A}#7`), ["Medical Heritage Library"]);
+});
+test("planted (plantGenOnRewriteOnly): the live content collides with the kept id and reads the old tile", () => {
+  ForceTree.plantGenOnRewriteOnly = true;
+  try {
+    const t = reused();
+    const id = t.held()[0].id;
+    assert.equal(id, `f:${A}#7`);
+    assert.deepEqual(t.linesOf(id), ["Medical Heritage Library"], "the defect: the kept version answers for the live id");
+  } finally { ForceTree.plantGenOnRewriteOnly = false; }
+});
+
+// 2026-10-18 (PLUGIN_GOAL 149): archive.org's search list rewrites a tile in
+// place; a merged run still holds the tile's OLD line at that address while
+// the tile's own new chunk holds the new one. The page draws the new one.
+const multi = (id, parts) => ({ id, digest: digestOf(parts.map((p) => p[0]).join("|")), lines: parts.map(([t, k]) => line(t, at(k, 3))) });
+function rewritten() {
+  const t = new ForceTree(A);
+  t.apply({ v: 1, dict: DICT, chunks: [multi(1, [["old A", 1], ["old B", 2], ["old C", 3]])], removed: [], stats: { dictSize: DICT.length } });
+  t.apply({ v: 1, dict: [], chunks: [multi(2, [["new B", 2]])], removed: [], stats: { dictSize: DICT.length } });
+  return t;
+}
+test("an address two live chunks hold resolves to the newest content", () => {
+  const u = rewritten().chunkForElement("/html/body/main/section[2]/p");
+  assert.equal(u && u.id, `f:${A}#2`);
+  assert.equal(u.at, "/html/body/main/section[2]");
+});
+test("planted (plantMostLines): the stale run answers", () => {
+  ForceTree.plantMostLines = true;
+  try { assert.equal(rewritten().chunkForElement("/html/body/main/section[2]/p").id, `f:${A}#1`); }
+  finally { ForceTree.plantMostLines = false; }
+});
+test("an item with no lines yet has no unit -- never its neighbours", () => {
+  assert.equal(rewritten().chunkForElement("/html/body/main/section[4]/p"), null);
+});
+test("planted (plantClimbPastList): the empty item opens the whole list", () => {
+  ForceTree.plantClimbPastList = true;
+  try { assert.equal(rewritten().chunkForElement("/html/body/main/section[4]/p").at, "/html/body/main"); }
+  finally { ForceTree.plantClimbPastList = false; }
+});

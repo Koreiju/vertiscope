@@ -34,3 +34,29 @@ test("places are places: schemes, hosts, ports, paths", () => {
 test("null arm: empty is nothing, not a search for nothing", () => {
   assert.deepEqual(addressTarget("   "), { url: "", search: false });
 });
+
+import { canonAddr } from "../src/address.ts";
+test("a slotted element has one spelling: composed and light paths agree", () => {
+  const composed = "/html/body/app-root/#shadow-root/main/div/router-slot/#shadow-root/slot/home-page/#shadow-root/div[2]/article[25]";
+  const light = "/html/body/app-root/#shadow-root/main/div/router-slot/home-page/#shadow-root/div[2]/article[25]";
+  assert.equal(canonAddr(composed), canonAddr(light));
+  assert.ok(canonAddr(light + "/a").startsWith(canonAddr(composed) + "/"));
+  // null arm: a shadow root that is NOT a slot step is kept
+  assert.equal(canonAddr("/html/body/x-app/#shadow-root/div"), "/html/body/x-app/#shadow-root/div");
+  assert.equal(canonAddr("/a/#shadow-root/slot[2]/b"), "/a/b");
+});
+
+import { unitOf, isListAbove } from "../src/address.ts";
+test("a unit stops below a list: an item with one streamed line is still the item", () => {
+  const L = (a, t) => ({ text: t, key: "u|" + a });
+  const lines = [
+    L("/g/section/article[1]/div/a", "first tile"), L("/g/section/article[1]/div/b", "first count"), L("/g/section/article[1]/div/c", "first pic"),
+    L("/g/section/article[2]/div/a", "second tile"),
+  ];
+  assert.equal(isListAbove("/g/section", lines.map((l) => l.key.slice(2))), true);
+  const u = unitOf(lines, "/g/section/article[2]/div/a/img");
+  assert.equal(u.at, "/g/section/article[2]");
+  assert.deepEqual(u.lines.map((l) => l.text), ["second tile"]);
+  // a tile with its three lines: the tile
+  assert.deepEqual(unitOf(lines, "/g/section/article[1]/div/b/span").lines.map((l) => l.text), ["first tile", "first count", "first pic"]);
+});

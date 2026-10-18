@@ -21,6 +21,7 @@
  * sidecar does, but in memory.
  */
 
+import { canonAddr } from "./address.ts";
 import type { Sidecar } from "./sidecar";
 import type { CentralDiff } from "./types";
 
@@ -90,7 +91,9 @@ export class ChunkMap {
 
   apply(delta: Record<string, string[]> | null | undefined): void {
     if (!delta) return;
-    for (const [cid, xpaths] of Object.entries(delta)) {
+    for (const [cid, raw] of Object.entries(delta)) {
+      // One spelling for every address held here (`canonAddr`).
+      const xpaths = (raw || []).map(canonAddr);
       for (const old of this.byCid.get(cid) || []) {
         if (this.byXpath.get(old) === cid) this.byXpath.delete(old);
       }
@@ -197,6 +200,7 @@ export class ChunkMap {
    * `/resolve` reports `ancestors_walked`.
    */
   lookup(chain: string[]): { cid: string; matched: string; walked: number } | null {
+    chain = chain.map(canonAddr);
     for (let i = 0; i < chain.length; i++) {
       // The element itself anchored, else something anchored beneath it --
       // the two cases `/resolve` accepts, in its order.

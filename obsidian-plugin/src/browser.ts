@@ -814,9 +814,15 @@ export class BrowserView extends ItemView {
     // The map's own nearest-ancestor walk, the one `/resolve` does.
     const map = this.pipebox?.map;
     if (!map || docKey(map.url) !== docKey(url)) return "";
+    // Within THREE steps of the hovered element. Further up, a stored
+    // ancestor is a container standing for a whole region -- archive.org's
+    // tile resolved to the home page's root container (its search header)
+    // and the search page's tiles to its hidden feedback survey (2026-10-17).
+    // A card in a stored grid is a step or two up. Planted: any depth.
+    const steps = this.plant.has("ancestor-any-depth") ? 40 : 4;
     const chain: string[] = [];
     let a = held[0].address;
-    while (a && chain.length < 40) { chain.push(a); const cut = a.lastIndexOf("/"); if (cut <= 0) break; a = a.slice(0, cut); }
+    while (a && chain.length < steps) { chain.push(a); const cut = a.lastIndexOf("/"); if (cut <= 0) break; a = a.slice(0, cut); }
     const hit = map.lookup(chain);
     return hit ? hit.cid : "";
   }
@@ -1465,19 +1471,46 @@ export class BrowserView extends ItemView {
   //: Told the plugin, which tells the projector (`G-38`). Brokered, like
   //  every other cross-pane signal here: neither pane may require the other.
   onHover: (cid: string, url: string, stored?: string) => void = () => {};
+  /** For a hovered grey chunk: the chunk that holds the element's unit, and
+   *  the unit (`chunkForElement`), or null. */
+  greyUnitFor(cid: string): { id: string; at: string } | null {
+    const h = this.pipebox?.hover;
+    if (!h || h.cid !== cid || !h.xpath || this.plant.has("grey-unit-by-hover-chunk")) return null;
+    const m = /^f:(.*)#\d+(?:\.\d+)?$/.exec(cid);
+    const tree = m ? this.forceTrees.get(m[1]) : null;
+    // The sensor's own hovered chunk is preferred where it holds the unit.
+    const sid = Number((/#(\d+)(?:\.\d+)?$/.exec(cid) || [])[1]);
+    return tree ? tree.chunkForElement(String(h.xpath), 3, 60, Number.isFinite(sid) ? sid : -1) : null;
+  }
+  /** The element the reader's pointer is on, for the hovered grey chunk `cid`. */
+  hoverElementOf(cid: string): string {
+    const h = this.pipebox?.hover;
+    return h && h.cid === cid ? String(h.xpath || "") : "";
+  }
   /** Told on a right-click over the page with the chunk last hovered (G-215). */
   onRightChunk: (cid: string, url: string, stored: string) => void = () => {};
   private lastHovered: { cid: string; url: string; stored: string } | null = null;
 
   /** A grey (streamed, not yet stored) chunk's markdown, from its drain
    *  (PLUGIN_GOAL 125): the panel shows it at once, marked provisional. */
-  forcePayload(id: string): any | null {
+  forcePayload(key: string): any | null {
+    // `cid|element`: the lines of chunk `cid` under the hovered element --
+    // a tile, not the whole in-page container several tiles share
+    // (archive.org, 2026-10-17: "hovering over vhs vault inbox does not
+    // display the correct shadow chunk"). Planted: the whole chunk.
+    const bar = String(key || "").indexOf("|");
+    const id = bar >= 0 ? key.slice(0, bar) : key;
+    const el = bar >= 0 && !this.plant.has("whole-grey-chunk") ? key.slice(bar + 1) : "";
     const m = /^f:(.*)#\d+(?:\.\d+)?$/.exec(id || "");
     if (!m || this.plant.has("no-force-panel")) return null;
     const tree = this.forceTrees.get(m[1]);
-    const text = tree ? tree.linesOf(id) : null;
+    const text = tree ? (el ? (tree.linesForElement(el) || tree.linesUnder(id, el)) : tree.linesOf(id)) : null;
     if (!text || !text.length) return null;
-    return { cid: id, url: m[1], provisional: true, lines: text.map((t) => ({ text: t })) };
+    // Each line keyed like a stored line (`url|xpath`), so one rule finds the
+    // hovered element's unit in either (`unitOf`).
+    const addrs = !el && tree ? tree.addrsOf(id) : null;
+    return { cid: key, url: m[1], provisional: true,
+             lines: text.map((t, i) => ({ text: t, key: addrs && addrs[i] ? `${m[1]}|${addrs[i]}` : "" })) };
   }
   /** The pipeline overlay; see `pipelinebox.ts`. */
   pipebox: PipelineBox | null = null;

@@ -35,6 +35,7 @@ Two layers of check, because the interesting one needs a browser:
 
 import os
 import pathlib
+import re
 import time
 
 import pytest
@@ -105,6 +106,26 @@ function walk(node) {
     if (n.nodeType !== 1) continue;
     if ({SCRIPT: 1, STYLE: 1, NOSCRIPT: 1, TEMPLATE: 1, HEAD: 1}[n.tagName]) continue;
     walk(n);
+  }
+}
+walk(document.documentElement);
+return out;
+"""
+
+
+# Every MARK- text node's element, found through shadow roots, and the
+# address a hover on that element reports.
+_HOVER_JS = r"""
+var h = window['%s'], out = {};
+function walk(root) {
+  var w = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT);
+  var n = w.currentNode;
+  while (n) {
+    if (n.nodeType === 3) {
+      var t = (n.nodeValue || '').trim();
+      if (t.indexOf('MARK-') === 0 && n.parentNode && n.parentNode.nodeType === 1) out[t] = h.hoverAddress(n.parentNode);
+    } else if (n.shadowRoot) walk(n.shadowRoot);
+    n = w.nextNode();
   }
 }
 walk(document.documentElement);
@@ -202,6 +223,16 @@ def sensed():
                     "return window['%s'].resolve(arguments[0]);" % sensor.handle,
                     _as_path(address.xpath))
 
+        # The address a HOVER on each marker's element reports, held against
+        # the fold's address for it -- and again with the light-DOM walk
+        # planted, which must disagree somewhere (the fixture slots things).
+        hover = {}
+        for planted in (False, True):
+            driver.execute_script("window['%s'].plants.lightpath = arguments[0];" % sensor.handle, planted)
+            got = driver.execute_script(_HOVER_JS % sensor.handle)
+            hover["planted" if planted else "clean"] = dict(got or {})
+        driver.execute_script("window['%s'].plants.lightpath = false;" % sensor.handle)
+
         # The one mutation no MutationObserver reports: a node changes the
         # slot it is assigned to without moving in the light DOM.
         driver.execute_script("window.reassign();")
@@ -210,7 +241,7 @@ def sensed():
         after = [t for t in driver.execute_script(_REFERENCE_JS)
                  if t.startswith("MARK-")]
 
-        yield {"url": url, "reference": reference, "first": first,
+        yield {"url": url, "reference": reference, "first": first, "hover": hover,
                "second": second, "after": after, "resolved": resolved}
 
 
@@ -355,6 +386,34 @@ def test_every_composed_address_resolves_back_to_its_node(sensed):
     ``childNodes`` finds nothing there."""
     unresolved = [m for m, ok in sensed["resolved"].items() if not ok]
     assert not unresolved, f"addresses that do not resolve: {unresolved}"
+
+
+def _element_of(xpath):
+    """A text unit's xpath without its `text()` step: its element."""
+    return re.sub(r"/text\(\)(\[\d+\])?$", "", xpath or "")
+
+
+@LIVE
+def test_a_hover_names_the_address_the_fold_gave(sensed):
+    """One element, one address. A hover that walks the light DOM names a
+    slotted element by a path the trie never held (archive.org's search
+    tiles, 2026-10-18), and every hover there resolved to a neighbour."""
+    clean = sensed["hover"]["clean"]
+    rendered = [(m, _element_of(_address_of(sensed["first"].units, m)))
+                for m in _marks(sensed["first"].units)]
+    assert rendered, "no markers emitted"
+    wrong = [(m, a, clean.get(m)) for m, a in rendered if clean.get(m) != a]
+    assert not wrong, f"hover address differs from the fold's: {wrong[:3]}"
+
+
+@LIVE
+def test_the_hover_address_check_can_fail(sensed):
+    """Planted: the light-DOM walk. The fixture slots content, so it must
+    name at least one marker differently."""
+    planted = sensed["hover"]["planted"]
+    rendered = [(m, _element_of(_address_of(sensed["first"].units, m)))
+                for m in _marks(sensed["first"].units)]
+    assert any(planted.get(m) != a for m, a in rendered), "the planted walk agreed everywhere"
 
 
 @LIVE

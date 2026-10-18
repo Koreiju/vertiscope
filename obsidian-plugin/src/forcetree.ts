@@ -1,3 +1,4 @@
+import { canonAddr, isListAbove } from "./address.ts";
 /**
  * The page's chunk tree, built in the RENDERER from the drain itself (`G-89`).
  *
@@ -59,6 +60,12 @@ interface Held {
   /** The chunk's line texts as the drain delivered them: a grey node shows
    *  its markdown at once, before any store or vector (PLUGIN_GOAL 125). */
   text?: string[];
+  /** Each line's element address, so a panel can show the lines under the
+   *  element the reader hovers rather than the whole chunk. */
+  addrs?: string[];
+  /** When this content arrived (an apply counter): the newest content at an
+   *  address is what the page draws there now. */
+  seq?: number;
 }
 
 const SHADOW = "#shadow-root";
@@ -92,6 +99,120 @@ export class ForceTree {
     this.adoptPending = true;
   }
   private adoptPending = false;
+
+  /**
+   * The lines of a chunk under the element the reader hovers: the smallest
+   * ancestor of that element holding at least `min` of the chunk's lines --
+   * a tile, not the whole scroller section its in-page chunk is (archive.org,
+   * 2026-10-17: five tiles opened one 40-line container). All lines when the
+   * element is not inside the chunk.
+   */
+  linesUnder(id: string, element: string, min = 3): string[] | null {
+    const h = this.retained.get(id) || (() => { const m = /#(\d+)(?:\.\d+)?$/.exec(id || ""); const x = m ? this.chunks.get(Number(m[1])) : undefined; return x && x.id === id ? x : undefined; })();
+    if (!h || !h.text) return null;
+    if (!element || !h.addrs || h.addrs.length !== h.text.length) return h.text;
+    const ca = h.addrs.map(canonAddr);
+    let at = canonAddr(element);
+    while (at && at.length > 1) {
+      const pick = h.text.filter((_t, i) => ca[i] === at || ca[i].startsWith(at + "/"));
+      if (pick.length >= Math.min(min, h.text.length)) return pick;
+      const cut = at.lastIndexOf("/");
+      if (cut <= 0) break;
+      at = at.slice(0, cut);
+    }
+    return h.text;
+  }
+
+  /**
+   * The lines the page holds UNDER an element, from whichever live chunks
+   * hold them: the smallest ancestor of `element` with at least `min` lines
+   * under it, capped at `max` (past it, a container). The sensor's hovered
+   * in-page chunk often does not hold the tile at all -- a scroller section
+   * several tiles share, or a neighbour -- so looking only inside it opened
+   * other tiles (archive.org, 2026-10-17: 1 of 6 tiles right).
+   */
+  linesForElement(element: string, min = 3, max = 60): string[] | null {
+    if (!element) return null;
+    const all: { a: string; t: string }[] = [];
+    for (const h of this.chunks.values()) {
+      if (!h.text || !h.addrs || h.addrs.length !== h.text.length) continue;
+      h.addrs.forEach((a, i) => all.push({ a: canonAddr(a), t: h.text![i] }));
+    }
+    let at = canonAddr(element);
+    while (at && at.length > 1) {
+      const pick = all.filter((x) => x.a === at || x.a.startsWith(at + "/")).map((x) => x.t);
+      if (pick.length > max) return null;
+      if (pick.length >= min) return pick;
+      const cut = at.lastIndexOf("/");
+      if (cut <= 0) break;
+      at = at.slice(0, cut);
+    }
+    return null;
+  }
+
+  /**
+   * The live chunk holding an element's UNIT -- its nearest ancestor with at
+   * least `min` lines under it on the page -- and that unit's address. The
+   * sensor's hovered in-page chunk is often not it (a section several tiles
+   * share, or a neighbour): its own lines walked up past the tile and opened
+   * another tile (archive.org homepage, 2026-10-17).
+   */
+  chunkForElement(element: string, min = 3, max = 60, preferSid = -1): { id: string; at: string } | null {
+    if (!element) return null;
+    // One row per ADDRESS: where two live chunks hold the same address (a
+    // merged run not yet re-cut, and the tile's own new chunk), the one the
+    // sensor names for this hover wins, then the NEWEST -- the page draws one
+    // thing there. Most-lines-wins picked a stale run: archive.org's search
+    // list rewrites a tile in place and its old run kept the old title
+    // (2026-10-18, PLUGIN_GOAL 149). Planted: `plantMostLines`.
+    const best = new Map<string, { id: string; a: string; rank: number[] }>();
+    for (const [sid, h] of this.chunks) {
+      if (!h.addrs) continue;
+      const rank = (ForceTree.plantMostLines || (globalThis as any).__domvecPlantPick) ? [0, 0] : [sid === preferSid ? 1 : 0, h.seq || 0];
+      for (const a0 of h.addrs) {
+        const a = canonAddr(a0), had = best.get(a);
+        if (!had || rank[0] > had.rank[0] || (rank[0] === had.rank[0] && rank[1] > had.rank[1])) best.set(a, { id: h.id, a, rank });
+      }
+    }
+    const rows = (ForceTree.plantMostLines || (globalThis as any).__domvecPlantPick)
+      ? [...this.chunks.values()].flatMap((h) => (h.addrs || []).map((a) => ({ id: h.id, a: canonAddr(a) })))
+      : [...best.values()];
+    const all = rows.map((r) => r.a);
+    let at = canonAddr(element);
+    while (at && at.length > 1) {
+      const under = rows.filter((r) => r.a === at || r.a.startsWith(at + "/"));
+      if (under.length > max) return null;
+      const pickChunk = () => {
+        const by = new Map<string, number>();
+        for (const r of under) by.set(r.id, (by.get(r.id) || 0) + 1);
+        return [...by.entries()].sort((x, y) => y[1] - x[1])[0][0];
+      };
+      if (under.length >= min) return { id: pickChunk(), at };
+      const cut = at.lastIndexOf("/");
+      if (cut <= 0) break;
+      const up = at.slice(0, cut);
+      // Below a list, the item is the unit, however few of its lines streamed;
+      // and an item with NONE yet has no unit -- climbing on reads the other
+      // items (a whole section of neighbours, 2026-10-18). Planted:
+      // `plantClimbPastList`.
+      if (isListAbove(up, all)) {
+        if (under.length) return { id: pickChunk(), at };
+        if (!(ForceTree.plantClimbPastList || (globalThis as any).__domvecPlantPick)) return null;
+      }
+      at = up;
+    }
+    return null;
+  }
+
+
+  /** A chunk's line addresses by node id (live or retained), or null. */
+  addrsOf(id: string): string[] | null {
+    const r = this.retained.get(id);
+    if (r) return r.addrs || null;
+    const m = /#(\d+)(?:\.\d+)?$/.exec(id || "");
+    const h = m ? this.chunks.get(Number(m[1])) : undefined;
+    return h && h.id === id && h.addrs ? h.addrs : null;
+  }
 
   /** A live chunk's line texts by its node id, or null (gone, or a branch). */
   linesOf(id: string): string[] | null {
@@ -183,12 +304,31 @@ export class ForceTree {
    * each content keeps one node. Planted: `plantDropRemoved`, as before.
    */
   static plantDropRemoved = false;
+  /** Planted: every version of a re-cut element retained (the 40-line copies). */
+  static plantKeepVersions = false;
+  /** Planted: the generation advances only on an in-place rewrite (a removed-then-reused id collides with its kept version). */
+  static plantGenOnRewriteOnly = false;
+  /** Planted: the unit's chunk is the one with the most lines there (stale runs win). */
+  static plantMostLines = false;
+  /** Planted: an item with no lines yet climbs past its list (opens the neighbours). */
+  static plantClimbPastList = false;
+  private applySeq = 0;
   private retained = new Map<string, Held>();
   private retainedByText = new Map<string, string>();
   retainStats = { retained: 0, recycled: 0, revived: 0 };
   retainedCount(): number { return this.retained.size; }
   private retain(h: Held, delta: ForceNodeDelta): void {
     this.retained.set(h.id, h);
+    // The element's NEXT content is a new node: a kept version and a live
+    // one never share an id. Bumped only on an in-place rewrite before, so a
+    // REMOVED element whose sensor id came back took the kept version's id,
+    // and every lookup (kept first) served the old tile -- archive.org's
+    // "Archive Team: US Government" opened "Medical Heritage Library"
+    // (2026-10-17, PLUGIN_GOAL 149). Planted: `plantGenOnRewriteOnly`.
+    if (!ForceTree.plantGenOnRewriteOnly && !(globalThis as any).__domvecPlantGen) {
+      const m = /#(\d+)(?:\.\d+)?$/.exec(h.id);
+      if (m) { const sid = Number(m[1]); this.gen.set(sid, (this.gen.get(sid) || 0) + 1); }
+    }
     const key = (h.text || []).join("\n");
     if (key) this.retainedByText.set(key, h.id);
     const page = ForceTree.pageId(this.url);
@@ -322,12 +462,19 @@ export class ForceTree {
       let had = this.chunks.get(sid);
       const digest = Number(c.digest) || 0;
       const text = (c.lines || []).map((l: any) => this.lineText(l));
+      const addrs = (c.lines || []).map((l: any) => "/" + this.steps(l && l[2]).join("/"));
       // A reused element now holding DIFFERENT content: the old content is
       // retained under its own node; the new content is a new node.
+      // ...and only when the old content is mostly GONE: a container that
+      // grew (archive.org's scroller section, re-cut on every tile) is a
+      // superset of its old self, and keeping each version left dozens of
+      // near-identical 40-line nodes (2026-10-17). Planted: every version.
+      const lost = (old: string[]) => { const now = new Set(text); const o = old.filter((l) => l.trim());
+        return !o.length || o.filter((l) => !now.has(l)).length >= 0.5 * o.length; };
       if (had && had.digest !== digest && !ForceTree.plantDropRemoved
-          && (had.text || []).join("\n") !== text.join("\n")) {
+          && (had.text || []).join("\n") !== text.join("\n") && (ForceTree.plantKeepVersions || lost(had.text || []))) {
         this.retain(had, delta);
-        this.gen.set(sid, (this.gen.get(sid) || 0) + 1);
+        if (ForceTree.plantGenOnRewriteOnly || (globalThis as any).__domvecPlantGen) this.gen.set(sid, (this.gen.get(sid) || 0) + 1);
         this.retainStats.recycled++;
         had = undefined;
       }
@@ -341,7 +488,7 @@ export class ForceTree {
       }
       const held: Held = { id: this.nodeId(sid), address, title,
                            lines: (c.lines || []).length, parent: had ? had.parent : "",
-                           digest, text };
+                           digest, text, addrs, seq: had && had.digest === digest ? had.seq : ++this.applySeq };
       this.chunks.set(sid, held);
       if (!had) { fresh.push(sid); moved.push(address); }
       else {

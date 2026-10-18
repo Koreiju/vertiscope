@@ -3511,6 +3511,89 @@ navigation, loading and the sensor's messages -- tested as an edge case; and
 every check of "which page is this" agrees on the document, not on a url the
 page rewrote.*
 
+> hovering over vhs vault inbox does not display the correct shadow chunk
+
+*(Sent 2026-10-17 with a screenshot of the archive.org homepage.) Read as
+(148): hovering a tile inside archive.org's nested shadow roots opens THAT
+tile's chunk -- its own title, count and picture -- not a neighbour's, not
+the grid that holds it, not a stored container far above it.*
+
+> hovering on archive changes and is consistently incorrect. also going back
+> to previous pages repeats a scan entirely without efficient diff updates.
+> we should also add a horizontal overlay of retrieval results above the
+> search bar that is linked to the scroll bar below the search and matches
+> the scrolling scale over the overlay with the node highlights, and
+> hovering scroll results includes the fly-to-node feature. please work on
+> the existing task set and add each of these to the list of items still
+> open. retrieval is also back to a slow response, maybe some performance
+> updates there are in order, same goes for clicking nodes to see their
+> panels. also, result numerator and denominator work but are maxed out at
+> 2000 rather than the proper upper limit. also, scans are slow to register
+> older chunks. Perhaps priority on the oldest pushed diff updates and
+> vectorization/projection/fitting in batches is in order rather than having
+> to wait so long for things to register at the very end. also, zooming lags
+> heavily for throughput streams (maybe some throttling here) and for some
+> reason we have these huge nodes popping up in the way of tiny result nodes
+> and I'm wondering why the discrepancy and how well our scaling is
+> implemented for this. also, zooming out while scanning doesn't persist
+> over later node hovers by the search-scroll-scan. perhaps we can make the
+> adaptive scale adjustment include per-hover updates for url-contained node
+> coordinates such that hovered urls are temporarily re-scaled so that their
+> image overlays/billboards don't overlap with each other within an
+> increased separation distance. this re-sets to the older adaptive-scaled
+> transform that was set after the umap fits/projections at the url-node
+> containment level
+
+*(Sent 2026-10-17 with screenshots: archive.org tiles Podcasts, Radio
+Stations, Thingiverse Archive and Operating System Software each opened a
+DIFFERENT tile's panel -- Television Archive News Search Service, a bare
+"/details/podcasts" line set, APK Archive, Cratediggers; a search for
+"cowboy" reading "showing 2000 / 2000 results - 29 retrieved of 587
+matching" with very large page orbs in front of small result orbs; and
+billboards stacked over each other on a hovered url.) Read as, one item per
+request, each added to the open list:*
+
+*(149) archive.org hover is consistently a neighbour: the panel must be the
+hovered tile's own, and it must stay right as the page's virtual list
+rewrites its tiles in place (148 restated with evidence that it is
+systematic, not occasional).*
+
+*(150) going BACK to a page already scanned resumes from what was kept: the
+page's chunks are diffed against the new visit, not rescanned and re-sent
+whole.*
+
+*(151) a horizontal strip of retrieval results above the search bar, tied to
+the scroll bar below the search: its scroll position and scale match the
+strip, results in it are highlighted as their nodes are, and hovering a
+result there flies to its node.*
+
+*(152) retrieval is slow again: measure where the time goes and bring it
+down.*
+
+*(153) clicking a node to open its panel is slow: measure and bring it down.*
+
+*(154) k/n work but cap at 2000: the bound is the number actually matching
+(the "of N matching"), not a fixed 2000.*
+
+*(155) a scan registers its older chunks late: the OLDEST pushed diffs go
+first, and vectorization, projection and fitting run in batches as the scan
+goes, rather than everything landing at the very end.*
+
+*(156) zoom lags heavily while a stream is flowing: throttle the stream's
+work so a zoom stays smooth.*
+
+*(157) why are some nodes huge, in the way of tiny result nodes? Explain the
+size discrepancy and check how well the scaling is implemented for it.*
+
+*(158) a zoom-out made while scanning is lost at the next hover the
+search-scroll-scan makes: the reader's zoom persists.*
+
+*(159) adaptive scale per hover: a hovered url's contained nodes are
+temporarily spread so their pictures and panels do not overlap within a
+larger separation distance; when the hover ends they return to the
+adaptive-scaled transform set after the UMAP fit, at the url-node
+containment level.*
+
 *Where (131) meets "Keep current layout" (asked minutes earlier, about the
 quantile spread, containment and depth compression): (131) replaces the
 collision drift and, by the reader's "exact to the original UMAP

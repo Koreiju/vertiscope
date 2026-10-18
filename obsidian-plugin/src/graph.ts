@@ -15,6 +15,7 @@
  * and draws them.
  */
 
+import { unitOf, lineAddr } from "./address.ts";
 import { centredTelescope, relaxCloud, zoomFor, similarityFit, similarityInverse, rotateInverse, type V3 } from "./camera";
 import { profiler } from "./profile";
 import { ItemView, MarkdownRenderer, WorkspaceLeaf, requestUrl } from "obsidian";
@@ -2358,6 +2359,30 @@ export class GraphView extends ItemView {
     // fallback when the hovered chunk is not drawn, and flying to it made the
     // camera alternate between the chunk and its page on every poll
     // (measured 4-6 flights per hover, ending on the page).
+    // No drawn node for the hovered chunk, only its page: a STREAMED chunk
+    // still shows its own content, at its page's place (PLUGIN_GOAL 125:
+    // "view the base-content extracted/detected on the diff tree in just
+    // their markdown form") -- not the page, and not a stored ancestor.
+    if (target && target.level === "page" && cid && cid.startsWith("f:") && !this.plantNoVirtualPanel
+        && this.forcePayloadFor(cid)) {
+      target = { id: cid, url, level: "chunk", virtual: true, x: target.x, y: target.y, z: target.z ?? 0 };
+    }
+    // A grey chunk hovered at an ELEMENT: the panel is that element's (a tile
+    // in a container chunk several tiles share), keyed `cid|element` so each
+    // tile opens its own, placed where the chunk is drawn.
+    // The panel is the hovered ELEMENT's unit, for a grey or a stored chunk:
+    // `base|element`, turned into `base|unit` when the panel opens.
+    const el = cid && target && target.level !== "page" && target.level !== "path" && !this.plantNoVirtualPanel
+      ? this.hoverElementOf(cid) : "";
+    // A GREY chunk: the unit's own chunk, found among the page's live chunks
+    // (the sensor's hovered chunk may not hold the tile at all).
+    const gu = cid && cid.startsWith("f:") && target && (target.force || target.virtual) && !this.plantNoVirtualPanel
+      ? this.greyUnitFor(cid) : null;
+    if (gu) {
+      target = { id: `${gu.id}|${gu.at}`, url, level: "chunk", virtual: true, x: target.x, y: target.y, z: target.z ?? 0 };
+    } else if (el && !String(target.id).includes("|")) {
+      target = { id: `${target.id}|${el}`, url, level: "chunk", virtual: true, base: target, hoverCid: cid, x: target.x, y: target.y, z: target.z ?? 0 };
+    }
     const isChunk = !!target && target.level !== "page" && target.level !== "path";
     if (cid && url) { this.hoverAskAt = performance.now(); this.hoverAskUrl = url; }
     if (!cid || isChunk) {
@@ -2421,7 +2446,7 @@ export class GraphView extends ItemView {
   hoverPanelCap = 1;
   /** Planted: the old close-on-hover-end behaviour. */
   plantCloseOnLeave = false;
-  hoverStats = { empty_skipped: 0 };
+  hoverStats: { empty_skipped: number; units?: number; stale_stored?: number } = { empty_skipped: 0 };
   private hoverSweep = 0;
 
   private expireHoverPanels(): void {
@@ -2504,6 +2529,36 @@ export class GraphView extends ItemView {
     void this.chunkPayload(target.id);
     this.hoverBbTimer = window.setTimeout(async () => {
       this.hoverBbPending = "";
+      // `base|element` -> `base|unit`: the element's tile within the chunk.
+      // A move inside one tile lands on the same unit and renews its panel.
+      if (String(target.id).includes("|")) {
+        const bar = String(target.id).indexOf("|");
+        const base = String(target.id).slice(0, bar), el = String(target.id).slice(bar + 1);
+        const bp: any = await this.chunkPayload(base);
+        const u = bp && bp.lines ? unitOf(bp.lines, el) : null;
+        let id = u ? `${base}|${u.at}` : base;
+        // A STORED chunk is a recording of what each address held when it was
+        // captured; a virtual list (archive.org's tiles) reuses addresses for
+        // other items, so the record can name a different tile than the page
+        // draws now -- every tile opened its slot's former occupant
+        // (2026-10-17, PLUGIN_GOAL 149). When the page's live tree holds
+        // the unit and its lines are not all in the stored unit, the live
+        // unit is the truth. Planted: `plantTrustStored`.
+        if (!base.startsWith("f:") && target.hoverCid && !this.plantTrustStored) {
+          const gu = this.greyUnitFor(target.hoverCid);
+          if (gu) {
+            const live: any = await this.chunkPayload(`${gu.id}|${gu.at}`);
+            const have = new Set((u ? u.lines : []).map((l: any) => String(l.text || "").trim()));
+            const fresh = (live && live.lines ? live.lines : []).map((l: any) => String(l.text || "").trim()).filter(Boolean);
+            if (fresh.length && fresh.some((t: string) => !have.has(t))) {
+              id = `${gu.id}|${gu.at}`;
+              this.hoverStats.stale_stored = (this.hoverStats.stale_stored || 0) + 1;
+            }
+          }
+        }
+        if (id !== target.id) target = { ...target, id };
+        if (u) this.hoverStats.units = (this.hoverStats.units || 0) + 1;
+      }
       close();
       const had: any = this.billboards.get(target.id);
       // Already open (an earlier hover's panel, still within its minute):
@@ -2557,9 +2612,27 @@ export class GraphView extends ItemView {
   hasNode(id: string): boolean {
     return !!this.graph && this.graph.graphData().nodes.some((n: any) => String(n.id) === id);
   }
+  /** The chunk holding a hovered grey element's unit, and the unit. */
+  greyUnitFor: (cid: string) => { id: string; at: string } | null = () => null;
+  /** Planted: a stored chunk's unit is shown even where the live page draws other content there. */
+  plantTrustStored = false;
+  /** The hovered element for a grey chunk (the browser's pipebox). */
+  hoverElementOf: (cid: string) => string = () => "";
+  /** Planted: a hovered undrawn grey chunk opens no panel (its page stands for it). */
+  plantNoVirtualPanel = false;
   /** A grey node's provisional payload, from the browser's drain (G-198). */
   forcePayloadFor: (id: string) => any = () => null;
   chunkPayload(cid: string): Promise<any> {
+    // `base|unit`: the base chunk's lines under that unit (a tile's).
+    const bar = String(cid).indexOf("|");
+    if (bar > 0) {
+      const base = String(cid).slice(0, bar), at = String(cid).slice(bar + 1);
+      return this.chunkPayload(base).then((p: any) => {
+        if (!p || !p.lines) return p;
+        const pick = p.lines.filter((l: any) => { const a = lineAddr(l); return a === at || a.startsWith(at + "/"); });
+        return pick.length ? { ...p, cid, lines: pick } : p;
+      });
+    }
     // A grey node: its streamed markdown, now -- never cached, it is still
     // being rewritten (PLUGIN_GOAL 125).
     if (String(cid).startsWith("f:")) return Promise.resolve(this.forcePayloadFor(cid));

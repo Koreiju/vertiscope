@@ -23,6 +23,7 @@
  * its xpath and its bounding rect. The page cannot see any of this.
  */
 
+import { canonAddr } from "./address.ts";
 import type { Sidecar } from "./sidecar";
 import { profiler } from "./profile";
 import { ProfileReadout } from "./profileview";
@@ -697,10 +698,20 @@ export class PipelineBox {
     // COARSER than the store's -- one in-page chunk for a shadow-DOM list of
     // six stored cards -- and from its id alone every card resolved to the
     // page header (2026-10-11). The id is the fallback.
-    const byAddr = this.plantPageUnit || this.plantHoverById || !addr || this.map.url !== url ? null
+    let byAddr = this.plantPageUnit || this.plantHoverById || !addr || this.map.url !== url ? null
       : this.map.lookup(addressChain(addr));
+    // Within THREE steps of the hovered element: further up, a stored chunk
+    // is a container standing for a whole region -- an archive.org tile
+    // walked 16 steps to the app's routed page, and its panel showed the
+    // search header and a hidden feedback survey (2026-10-17). Planted: any.
+    if (byAddr && (byAddr.walked || 0) > 3 && !this.plantAnyDepth) { this.farAncestors++; byAddr = null; }
     const stored = this.plantPageUnit ? "" : (byAddr ? byAddr.cid : this.storedFor(cid, url));
-    const changed = !this.hover || this.hover.cid !== cid || (!!stored && this.hover.stored !== stored);
+    // ...or the hovered ELEMENT moved: tiles sharing one in-page chunk and one
+    // stored chunk were never told apart, and the panel stayed on the first
+    // tile (archive.org, 2026-10-17). The graph keeps a panel per UNIT, so a
+    // move within one tile renews it rather than reopening.
+    const changed = !this.hover || this.hover.cid !== cid || (!!stored && this.hover.stored !== stored)
+      || (!this.plantChunkOnlyNotify && !!addr && canonAddr(addr) !== canonAddr(this.hover.xpath || ""));
     // Within one stored unit the outline keeps its place -- if that place
     // holds this element too: a kept live box (see below) belongs to the
     // element it was drawn for.
@@ -749,6 +760,12 @@ export class PipelineBox {
       });
     }
   }
+  /** Planted: the graph is told only when the hovered CHUNK changes (one panel for every tile). */
+  plantChunkOnlyNotify = false;
+  /** Planted: a stored ancestor at any depth covers a hover (the 16-step walk). */
+  plantAnyDepth = false;
+  /** Hovers whose nearest stored ancestor was too far up to stand for them. */
+  farAncestors = 0;
   /** Planted: resolve a pushed hover by its in-page chunk id only (before 2026-10-11). */
   plantHoverById = false;
   /** Planted: the page's box first, then the stored unit's (the flicker). */

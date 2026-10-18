@@ -22,3 +22,75 @@ export function addressTarget(text: string): { url: string; search: boolean } {
   if (!/\s/.test(t) && host.test(t)) return { url: (local ? "http://" : "https://") + t, search: false };
   return { url: "https://duckduckgo.com/?q=" + encodeURIComponent(t) + "&ia=web", search: true };
 }
+
+/**
+ * One spelling for an element's address. The store and the stream address a
+ * SLOTTED element through its host's shadow root and slot
+ * (`.../router-slot/#shadow-root/slot/home-page/...`, the composed path);
+ * the page's hover reports its light-DOM path (`.../router-slot/home-page/...`).
+ * Compared as-is, neither was a prefix of the other: every archive.org tile
+ * missed its own chunk and climbed 16 steps to `router-slot`, opening the
+ * page's header or its hidden feedback survey (2026-10-17). The slot step
+ * is dropped; the light path is also what a walk through `.shadowRoot`
+ * resolves on the page.
+ */
+export function canonAddr(a: string): string {
+  if ((globalThis as any).__domvecPlantNoCanon) return String(a || "");   // planted: two spellings, as before
+  return String(a || "").replace(/\/#shadow-root\/slot(\[\d+\])?(?=\/|$)/g, "");
+}
+
+/** A payload line's element address: its `key` is `url|xpath|...`. */
+export function lineAddr(line: any): string {
+  const k = String((line && line.key) || "");
+  const parts = k.split("|");
+  return parts.length > 1 ? canonAddr(parts[1]) : "";
+}
+
+/**
+ * The UNIT a hovered element stands in, within one chunk's lines: its nearest
+ * ancestor holding at least `min` of them (and no more than `max`, past which
+ * it is a container) -- a tile, not the grid. Returns that ancestor's address
+ * and its lines, or null when the element is not inside the chunk
+ * (archive.org, 2026-10-17: one stored chunk held five tiles and every tile
+ * opened the first; "hovering over vhs vault inbox does not display the
+ * correct shadow chunk").
+ */
+export function unitOf(lines: any[], element: string, min = 3, max = 60): { at: string; lines: any[] } | null {
+  if (!element || !lines || !lines.length) return null;
+  const addrs = lines.map(lineAddr);
+  if (!addrs.some(Boolean)) return null;
+  let at = canonAddr(element);
+  while (at && at.length > 1) {
+    const pick = lines.filter((_l, i) => addrs[i] && (addrs[i] === at || addrs[i].startsWith(at + "/")));
+    if (pick.length > max) return null;
+    if (pick.length >= Math.min(min, lines.length)) return { at, lines: pick };
+    const cut = at.lastIndexOf("/");
+    if (cut <= 0) break;
+    const up = at.slice(0, cut);
+    if (pick.length && isListAbove(up, addrs.filter(Boolean))) return { at, lines: pick };
+    at = up;
+  }
+  return null;
+}
+
+/**
+ * Is `parent` a LIST at this point -- do the addresses under it branch into
+ * two or more indexed siblings of one kind (`article[19]`, `article[20]`)?
+ * A unit search climbing from an item stops below a list: past it, the
+ * lines are other items' (a tile whose own lines had not all streamed yet
+ * climbed into the grid and showed a neighbour, 2026-10-17).
+ */
+export function isListAbove(parent: string, addrs: string[]): boolean {
+  const kinds = new Map<string, Set<string>>();
+  for (const a of addrs) {
+    if (!a.startsWith(parent + "/")) continue;
+    const step = a.slice(parent.length + 1).split("/")[0];
+    const m = /^([^\[]+)\[(\d+)\]$/.exec(step);
+    if (!m) continue;
+    const set = kinds.get(m[1]) || new Set<string>();
+    set.add(m[2]);
+    kinds.set(m[1], set);
+  }
+  for (const set of kinds.values()) if (set.size >= 2) return true;
+  return false;
+}
