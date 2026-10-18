@@ -3617,6 +3617,359 @@ again and stay until the reader says otherwise.*
 
 ---
 
+## Addendum XI, 2026-10-18 - code artifacts: chunking, the code property graph, local models, and through-stack agents
+
+*Sent with a screenshot: on huggingface.co/QuantFactory/Triplex-GGUF, the
+pointer over the page's Python code sample opened a panel reading only
+"button" -- the copy button's chunk, not the code. The reader then pasted
+two of their own earlier messages to another assistant, with that
+assistant's replies between them. The reader's words are transcribed here
+verbatim; the assistant's replies were AI-written, are NOT authority, and
+are summarised in one note below so the record says what was in front of
+the reader.*
+
+> code artifact chunking issue; a good time to begin entering the realm of
+> coding artifact chunking along our current recursive web chunking suite. I
+> also have a lot more ideas to share here:
+
+The reader's first pasted message, verbatim:
+
+> i just saw a video about self-evolving agent harnesses that I thought looked
+> cool. I learned about the "everything is a plugin" framework and would love
+> to learn more. ive also previously read about ways to represent python
+> codebases as knowledge graphs with several functions:
+>
+> 1. "Knowledge Graph" $\rightarrow$ Code Property Graph (CPG): We don't just
+> want a generic knowledge graph. We want a CPG, which combines three
+> structures: the Abstract Syntax Tree (AST) (syntactic hierarchy), the Control
+> Flow Graph (CFG) (execution order), and the Program Dependence Graph (PDG)
+> (what you aptly called "signal flow" or data flow).
+>
+> 2. "RDF Triples" $\rightarrow$ Property Graph Edges: Standard RDF triples
+> (Subject-Predicate-Object) are a bit too rigid. In a CPG, we use Property
+> Graphs (like Neo4j) where edges have context (e.g., (Node:Function_A)
+> -[CALLS {line: 42, arg_passed: 'user_id'}]-> (Node:Function_B)).
+>
+> 3. "Unified Diff Upsert": This is the hardest but most valuable part.
+> Instead of asking an SLM to rewrite a whole file, the SLM outputs a
+> topological change to the graph. The underlying Python engine uses ast and
+> difflib to parse the graph mutation back into source code and generate a
+> standard unified diff patch.
+>
+> ```json
+> {
+>   "toolkit_metadata": {
+>     "package_name": "slm-cpg-harness",
+>     "version": "1.0.0",
+>     "description": "A lightweight Code Property Graph (CPG) toolspace for SLM code generation, enabling semantic code retrieval, data flow tracing, and AST-aware graph diff upserts.",
+>     "core_ontology": {
+>       "nodes": ["Module", "ClassDef", "FunctionDef", "Variable", "AST_Snippet"],
+>       "edges": ["IMPORTS", "CONTAINS", "CALLS", "DATA_FLOWS_TO", "INHERITS"]
+>     }
+>   },
+>   "system_architecture": {
+>     "database_layer": "In-memory NetworkX or local Neo4j instance with pgvector for fused Cypher/Vector search.",
+>     "ast_parsing": "Python's native `ast` module combined with `tree-sitter` for cross-language support.",
+>     "mutation_engine": "AST-to-source unparsing (e.g., using `astor` or `unparse`) combined with Python's `difflib.unified_diff`."
+>   },
+>   "tools": [
+>     {
+>       "name": "query_cpg_signal_flow",
+>       "description": "Fuses natural language semantic search with Cypher graph traversal. Retrieves a topological code trace including dependencies, call chains, and data flow paths ('signal flow') for a specific concept.",
+>       "parameters": {
+>         "type": "object",
+>         "properties": {
+>           "natural_language_intent": {
+>             "type": "string",
+>             "description": "The semantic query to map to vector embeddings (e.g., 'Where is the user authentication token validated?')"
+>           },
+>           "cypher_structural_constraint": {
+>             "type": "string",
+>             "description": "Optional Cypher query to enforce graph structure. Example: MATCH (a:FunctionDef)-[r:DATA_FLOWS_TO*1..3]->(b:Variable {name: 'auth_token'}) RETURN a, b"
+>           },
+>           "max_depth": {
+>             "type": "integer",
+>             "default": 3,
+>             "description": "How deep to traverse the dependency graph and AST child nodes."
+>           }
+>         },
+>         "required": ["natural_language_intent"]
+>       },
+>       "returns": {
+>         "type": "object",
+>         "description": "A serialized CPG trace representing the execution and data flow.",
+>         "schema": {
+>           "trace_id": "string",
+>           "affected_modules": ["string"],
+>           "signal_flow_graph": [
+>             {
+>               "source_node": {"id": "string", "type": "string", "code_snippet": "string"},
+>               "edge_type": "string",
+>               "target_node": {"id": "string", "type": "string", "code_snippet": "string"}
+>             }
+>           ]
+>         }
+>       }
+>     },
+>     {
+>       "name": "upsert_graph_diff",
+>       "description": "Takes a list of graph edge mutations (representing the SLM's desired logic changes) and compiles them into a unified diff. It traverses the AST to safely apply 'signal flow' alterations without hallucinating syntax.",
+>       "parameters": {
+>         "type": "object",
+>         "properties": {
+>           "target_file_path": {
+>             "type": "string",
+>             "description": "The module being mutated."
+>           },
+>           "graph_mutations": {
+>             "type": "array",
+>             "description": "The property graph representations of the desired code changes.",
+>             "items": {
+>               "type": "object",
+>               "properties": {
+>                 "mutation_type": {
+>                   "type": "string",
+>                   "enum": ["ADD_NODE", "ADD_EDGE", "DELETE_NODE", "DELETE_EDGE", "MODIFY_PROPERTY"]
+>                 },
+>                 "subject_node_id": {"type": "string"},
+>                 "predicate": {"type": "string", "description": "e.g., CALLS, DATA_FLOWS_TO"},
+>                 "object_node_id": {"type": "string"},
+>                 "python_ast_payload": {
+>                   "type": "string",
+>                   "description": "The literal Python code snippet to inject if ADD_NODE (e.g., 'def new_validator(token): return True')"
+>                 }
+>               },
+>               "required": ["mutation_type", "subject_node_id"]
+>             }
+>           }
+>         },
+>         "required": ["target_file_path", "graph_mutations"]
+>       },
+>       "returns": {
+>         "type": "object",
+>         "description": "The resulting source code diffs to be applied to the filesystem.",
+>         "schema": {
+>           "status": "string",
+>           "unified_diff": "string",
+>           "compilation_check": "boolean"
+>         }
+>       }
+>     },
+>     {
+>       "name": "ingest_source_to_cpg",
+>       "description": "Parses raw source code into the Code Property Graph. Deconstructs regular code into its AST hierarchy, Control Flow Graph, and Program Dependence Graph.",
+>       "parameters": {
+>         "type": "object",
+>         "properties": {
+>           "file_paths": {
+>             "type": "array",
+>             "items": {"type": "string"},
+>             "description": "List of local file paths to ingest."
+>           },
+>           "incremental_update": {
+>             "type": "boolean",
+>             "default": true,
+>             "description": "If true, only recalculates the graph for modified files and their immediate dependency radius."
+>           }
+>         },
+>         "required": ["file_paths"]
+>       },
+>       "returns": {
+>         "type": "object",
+>         "schema": {
+>           "nodes_added": "integer",
+>           "edges_added": "integer",
+>           "orphaned_nodes_removed": "integer"
+>         }
+>       }
+>     }
+>   ]
+> }
+> ```
+>
+> also, I realize that the type-strict schema of a locally runnable openjev
+> model (https://huggingface.co/openjev/openjev-GGUF, OpenJev-Q4_K_M.gguf) would
+> enable simple categoricals and choices on graph-based data. we also have a
+> quantized coding agent
+> https://huggingface.co/TheBloke/deepseek-coder-6.7B-instruct-GGUF#:~:text=Each%20model%20is%20pre-trained%20on%20project-level%20code,data%20in%20both%20English%20and%20Chinese%20languages.
+> finally, we have a web browser scraper capable of extracting simple
+> interactive chunk-sets from webpages (in general) that we can apply a general
+> text knowledge graph extractor (quantized model) to
+> https://huggingface.co/QuantFactory/Triplex-GGUF#:~:text=List%20all%20available%20models%20*%20QuantFactory%2FTriplex-GGUF.%20*,quantized%20version%20of%20SciPhi%2FTriplex%20created%20using%20llama.cpp.
+> what I'm wondering is how semantic knowledge graph rag queries could inform
+> code autocomplete and prototyping via natural language docstrings and
+> code-type wireframes first, then autocompleting each code component. The
+> knowledge graph would consist of the code diff knowledge graph, the code
+> docstrings (semantic natural language, code documentation), and the original
+> semantic knowledge graph from queries on web source chunks. the eip harness
+> would be atomized on this simple through-stack chain of components that link
+> to other components with a similar structure.
+>
+> for interconnected through-stacks, agents-as-graph-rag-tools are structured
+> for recursive calls on queries to existing and hypothetical through-stack
+> agents, which are autonomously constructed upon query fields not resolving to
+> encourage agent "freedom of thought". the agent would be the through-stack and
+> a system prompt with its various self-harness mcp tool calls enabled and
+> integrated directly with their code. This means that agents keep context
+> structured to their atomized knowledge-based code harnesses at the quantized
+> model level with limited context windows and receptive fields. their
+> development space would be isolated to their personal terminals and still able
+> to aggregate over local code-knowledge harness bases. so, agent through-stacks
+> would be able to develop and debug on their isolated local code artifact and
+> remaining knowledge and documentation and experiment with the code component as
+> a primary mcp tool surface that calls and experiments through development
+> terminals as well. so each agent debugs its local feature/functionality within
+> its context and still aggregates global knowledge through self-discoverable
+> queries. recursive graph rag tool calls enforce feedback promises on finalized
+> artifacts as themselves aggregate of recursive calls over the code graph of
+> local knowledge tools that retains through-stacks the ability to accumulate the
+> progression of code components back to the base promise type/structure that
+> signifies feedback on a validated discovery of code transformation on
+> datatypes. the through-stacks integrate the code, documentation, knowledge
+> base, and context-wise workflows (debugging, calls, tests, new
+> developments/integrations on local components, navigating the web and
+> knowledge base and generating new knowledge graphs). each recursive graph rag
+> node call is part of the forward-propagating workflow on interconnecting
+> through-stacks within their localized contexts of their agents; it's a
+> communication link on the knowledge-based dependency graph and so on of the
+> overall code workspace itself. what would the design of all of this look like
+> in one simple demo code module?
+
+The reader's second pasted message, verbatim:
+
+> thanks. seems like we could improve on the clarity and completeness of the
+> full set of originally prompted/described features (we're making positive
+> progress thus far) and our meta-harnessing with residual-driven frozen
+> bases/dynamic contribution and skeleton/ephemerals. the deterministic
+> structure compilation, though, is where our own skeletal/ephemeral
+> architecture passes this boundary into a self-propagating recursive call set
+> that continues to morph and evolve and may then exhibit some form of
+> periodicity by recursive/recurrent calls to new instantiations of
+> through-stack agents that are dynamically reconstructed for the various
+> skeletal-to-ephemeral graph RAG queries. the promises coincide with queries on
+> novel recursive calls on through-stack agents in the code and knowledge graph.
+> a prompt is just another input to the same recursive tool call that holds the
+> through-stack's context and enables recursive calls to the same tool over
+> different graph RAG surfaces on through-stacks, both existing and newly
+> constructed. reconstruction and self-repair are also part of the same
+> meta-harness for through-stack agents. jev, deepseek-coder, and knowledge
+> graph models support the agent's workflow capabilities internally as
+> jev-directed workflow calls on the skeleton that pass messages over
+> ephemerals to other through-stacks, potentially. promises live at the local
+> through-stack mcp tool surface and auto-update. They represent components of
+> the tool call's I/O that are built-in to the local code modules and also
+> propagate as new features through the through-stack graph.
+>
+> You may generate as many modules as necesary, taking all my prompts and your
+> findings into consideration.
+
+And a moment later:
+
+> please also integrate with other notes on code artifact interactions and
+> interfaces per what the PRD has on record
+
+*Note on the pasted assistant replies (NOT authority -- AI-written): they
+proposed a "nine-layer through-stack" (model router, receptive field, system
+prompt + MCP surface, code artifact, local KG, workflow state, promise,
+communication ports, feedback sink), a uniform `WorkspaceNode` openable as a
+through-stack, a `Promise<T>` algebra (delegate / resolve / roll_up) with a
+base type `ValidatedCodeTransformation` carrying `learned` edges and
+`residuals`, a meta-harness (spawn from residual, repair, reconstruct,
+structural edits on detected periodicity), and finally a `PluginRegistry`
+whose plugins may only fill named slots. Those names are the other
+assistant's, not the reader's; where a row below uses one, it is marked as a
+reading to be confirmed.*
+
+*Read as (2026-10-18), each item tied to what is already on record:*
+
+*(162) **Web code blocks are code artifacts.** A `<pre>`/`<code>` sample on a
+page is one artifact, not syntax-highlighting spans: its text whole, and its
+address continued BELOW the `pre` by its own syntax -- the same addressing
+`domvec/source.py` gives `code://` files (`/module[1]/function[1]/code[1]`,
+`G-49`). A hover on it shows the code, never its copy button; an unlabeled
+control does not read as the word "button". This is the screenshot's defect
+and the "begin" of the request.*
+
+*(163) **One class of code artifact, one interface.** Web code blocks, the
+repository and installed packages (`code://`, `G-49`, `G-9`, `T-6`), and code
+cells in vault notes (`P-N5`) are chunked, addressed, vectorised (`G-52`:
+comments and docstrings only) and SHOWN the same way: the code artifact panel
+(`P-C1` viewable and editable standalone, `P-C2` a terminal below, `P-C5` live
+deltas) with the code-block toggle that opens a kernel or terminal (`P-N3`).*
+
+*(164) **A Code Property Graph in the store.** Over every code artifact: the
+AST hierarchy (CONTAINS), control flow (CFG), data flow (PDG,
+DATA_FLOWS_TO), CALLS, IMPORTS and INHERITS -- as property-graph edges with
+context (`{line, arg_passed}`), in the same kuzu property graph the trie
+already lives in; imports are already links (`G-8`, `G-51`).*
+
+*(165) **Unified-diff upsert from a graph mutation.** A change is expressed
+as a mutation of the CPG (ADD_NODE / ADD_EDGE / DELETE_* / MODIFY_PROPERTY),
+compiled back to source with `ast` and `difflib`, compile-checked, and
+applied as a unified diff -- which is also how `P-C5`'s live module deltas
+reach the store and the 3D view.*
+
+*(166) **Three local quantized models with distinct roles.** OpenJEV
+(type-strict categorical choices over graph data), DeepSeek-Coder 6.7B
+instruct (code), Triplex (text -> knowledge-graph triples over web chunks).
+On record already: nomic f16 for embeddings, and Nous Hermes 2 DPO 7B named
+for the chat (Addendum I, `L-1`, deferred). Whether the three add to or
+replace that choice is to be confirmed.*
+
+*(167) **Natural-language-first prototyping.** Docstrings and code-type
+wireframes come first, then each component is completed, informed by graph
+RAG over three graphs: the code-diff graph, the docstrings, and the web
+knowledge graph (Triplex triples). This meets `G-105` (package chunks as
+code prototypes in notebook cells) and `R-5` (one retrieval interface).*
+
+*(168) **Through-stack agents.** An agent is a through-stack: a quantized
+model, a bounded context, its own isolated terminal and local code artifact,
+and its MCP tools generated from that code. Agents call each other through
+recursive graph-RAG tool calls -- existing ones, or new ones constructed when
+a query does not resolve -- and each call is an edge on the workspace's
+dependency graph. A prompt is one more input to the same recursive tool
+call. Promises live at the stack's MCP surface, update with its code, and
+roll results up to a base promise: a validated code transformation on a
+datatype. A meta-harness reconstructs and repairs stacks; skeleton (frozen
+base) and ephemerals (dynamic contribution, messages between stacks) are
+kept apart; recurrence of the same stack is detected. To be designed WITH
+the reader before code.*
+
+*(169) **Everything is a plugin.** Extensions fill named slots of a stable
+core and may only tighten it; removing them leaves the core running.*
+
+And while that was being recorded:
+
+> there was also plans to include our locally installed pypi package base as
+> embedded and projected chunks in our 3D graph view. perhaps either umap or
+> just force-directed, what form works best for our triple-form knowledge
+> graph representation, code docs/code comments, and the code itself.
+> multiple edge types and specialized nodes and interfaces per the knowledge
+> graph form might be in order.
+
+*Read as (2026-10-18): (170) the installed PyPI package base is in the 3D view
+as embedded, projected chunks (on record: `G-9`, `T-6`, `G-104` -- each
+package a tree-shaped projection with dependencies variable -> module ->
+directory); the layout is CHOSEN for what the view carries -- the
+triple-form knowledge graph, the code's docs and comments (the vectorised
+surface, `G-52`), and the code itself (not vectorised) -- UMAP,
+force-directed, or a combination, decided by measurement; and the knowledge
+graph's form gets its own node kinds, edge types and interfaces rather than
+everything drawn as one kind of orb on one kind of line.*
+
+The reader, correcting the reading of "triple-form":
+
+> the triple-forms I'm talking about are the two others that accompany the AST
+
+*So (170)'s "triple-form knowledge graph" is the CODE PROPERTY GRAPH's three
+structures of (164): the AST, and with it the control-flow graph (CFG) and
+the program dependence graph (PDG, data flow) -- not subject-predicate-object
+triples. The layout question is: how the AST tree, the CFG's execution order
+and the PDG's data flow are drawn together with the docs/comments and the
+code, each as its own edge type.*
+
+---
+
 ## Standing instructions carried in the verbatim
 
 Two of these are process rules, not features, and they bind every future
