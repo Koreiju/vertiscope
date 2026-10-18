@@ -3479,6 +3479,19 @@ reader acts on the page (scrolls, navigations, hovers) -- the bound is on
 cost, never on what is kept; and the hover-to-panel latency is measured and
 brought down, phase by phase.*
 
+*Asked (AskUserQuestion, 2026-10-17): the graph store is 63 GB for 65k
+chunks and 1.5M addresses; checkpoints hold it 1-3 min and reads cost
+100-300 ms; may it be compacted? The reader:*
+
+> this is where our efficient data storage techniques shall now come into
+> play. optimization on performance in general as much as possible. thank you
+> for bringing this up.
+
+*Read as (2026-10-17): (146) the store is rebuilt compact, by efficient
+storage techniques measured against what the 63 GB actually holds, with
+performance optimised throughout; no write is lost in the switch and the
+original is kept until the reader says otherwise.*
+
 *Where (131) meets "Keep current layout" (asked minutes earlier, about the
 quantile spread, containment and depth compression): (131) replaces the
 collision drift and, by the reader's "exact to the original UMAP
