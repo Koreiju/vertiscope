@@ -500,6 +500,8 @@ export class BrowserView extends ItemView {
         if (/^https?:/.test(u)) (this.app as any).saveLocalStorage?.("domvec-browser-last", u);
       } catch { /* not attached */ }
       this.say(view.getTitle() || view.getURL());
+      // A PDF is read as a document, not folded as a viewer (G-248).
+      void this.maybePdf();
       // A load finishing is when a page becomes worth reading. Booting here
       // rather than on `did-navigate` means the sensor folds a document that
       // exists, instead of one still being parsed.
@@ -1331,6 +1333,10 @@ export class BrowserView extends ItemView {
   private docStatus = { seq: -1, status: 0 };
   /** The document's gate verdict, decided on its first drain (G-249). */
   private gate: { seq: number; v: GateVerdict } = { seq: -1, v: { why: "", kind: "" } };
+  /** The document that is a PDF (its viewer's DOM is not the page), by docSeq. */
+  private pdfDoc = -1;
+  /** PDFs read and chunked (G-248). Planted `no-pdf`: a PDF is left to the viewer, as before. */
+  pdfStats = { seen: 0, sent: 0, chunks: 0, pages: 0, last: "", error: "", ms: 0, read_ms: 0, bytes: 0, store_ms: 0 };
   /** Drains and documents kept out of the store as page STATES (G-249). */
   gateStats = { drains: 0, docs: 0, last: "", lastSeq: -1, at: 0 };
   private sessionDocSeq = -1;
@@ -2387,6 +2393,12 @@ export class BrowserView extends ItemView {
     // trie stays what it was and the real page's drains continue its stream
     // when it arrives (G-247: a DDoS-Guard check stored as the url's three
     // lines made the page come back as all new). Planted `store-gates`.
+    // A PDF's viewer is not the page: its text arrives through `/pdf`.
+    if (this.pdfDoc === this.docSeq && !this.plant.has("no-pdf")) {
+      prof.fact(trace, "why", "pdf viewer");
+      prof.finish(trace, "nothing_placed");
+      return;
+    }
     const gate = this.gateOf(payload, title);
     if (gate.why) {
       this.gateStats.drains++;
@@ -2864,6 +2876,50 @@ export class BrowserView extends ItemView {
     const v = pageGate(status, title, lines);
     this.gate = { seq: this.docSeq, v };
     return v;
+  }
+
+  /**
+   * A PDF the reader reached is downloaded and chunked like a page (G-248,
+   * PLUGIN_GOAL 177: "there isnt a download process for pdfs and subsequent
+   * chunking for us and there really should be"). The bytes are read BY THE
+   * PAGE from its own document -- the browser's own copy, usually its cache --
+   * so nothing new is asked of the host; the sidecar keeps the file and lays
+   * its text out as pages, headings and paragraphs (`domvec/pdf.py`), which
+   * the recursive chunker, the vectoriser and the graph take like any page.
+   */
+  private async maybePdf(): Promise<void> {
+    const wv: any = this.webview;
+    if (!wv || this.plant.has("no-pdf")) return;
+    const seq = this.docSeq;
+    let kind = "";
+    try { kind = String(await wv.executeJavaScript("document.contentType") || ""); } catch { return; }
+    if (kind !== "application/pdf" || this.pdfDoc === seq) return;
+    this.pdfDoc = seq;
+    const url = String(wv.getURL());
+    this.pdfStats.seen++;
+    this.say(`pdf · reading ${url.split("/").pop()}`);
+    const t0 = performance.now();
+    let b64 = "";
+    try {
+      b64 = String(await wv.executeJavaScript(`fetch(location.href).then((r) => r.arrayBuffer()).then((b) => {
+        if (b.byteLength > 80 * 1024 * 1024) return "";
+        const u = new Uint8Array(b); let s = "";
+        for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000));
+        return btoa(s); })`) || "");
+    } catch (e) { this.pdfStats.error = String(e).slice(0, 120); }
+    this.pdfStats.read_ms = Math.round(performance.now() - t0);
+    this.pdfStats.bytes = Math.round(b64.length * 3 / 4);
+    if (!b64 || this.docSeq !== seq) { if (!b64) this.say("pdf · could not read the document"); return; }
+    const ts = performance.now();
+    const got: any = await this.sidecar.pdf(url, b64);
+    this.pdfStats.store_ms = Math.round(performance.now() - ts);
+    this.pdfStats.ms = Math.round(performance.now() - t0);
+    if (!got || got.error) { this.pdfStats.error = String(got?.error || "no reply"); this.say(`pdf · ${this.pdfStats.error}`); return; }
+    this.pdfStats.sent++; this.pdfStats.chunks += Number(got.chunks || 0); this.pdfStats.pages += Number(got.pages || 0);
+    this.pdfStats.last = String(got.url || url); this.pdfStats.error = "";
+    this.say(`pdf · ${got.pages} pages · ${got.chunks} chunks · kept as ${got.kept}`);
+    // Drawn as the page's chunks are: the placement queue waits for vectors.
+    if (this.docSeq === seq) void this.placeWholePage(String(got.url || url));
   }
 
   /** Settle a page through the queue, after every capture of it already queued. */

@@ -68,6 +68,19 @@ export class Sidecar {
     }
   }
 
+  /** A PDF's bytes (base64), kept and chunked like a page (`/pdf`, G-248). */
+  async pdf(url: string, b64: string): Promise<any | null> {
+    const u = this.url("/pdf");
+    if (!u || !b64) return null;
+    try {
+      const res = await fetch(u, { method: "POST", headers: { "Content-Type": "application/json" },
+                                   body: JSON.stringify({ url, b64 }), signal: AbortSignal.timeout(180000) });
+      return await res.json();
+    } catch (e) {
+      return { error: String(e).slice(0, 120) };
+    }
+  }
+
   /** A chunk's page form as SAVED at scan time (`snapshots.py`), or null. */
   savedSnapshot(cid: string): Promise<any | null> {
     return this.get<any>(`/snapshot/${encodeURIComponent(cid)}`);

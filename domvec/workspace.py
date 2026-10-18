@@ -680,6 +680,25 @@ class Workspace:
             wire_bytes=len(html), document_bytes=len(html), report=report,
         )
 
+    def index_pdf(self, data: bytes, url: str) -> Dict:
+        """A PDF the reader reached, kept and chunked like a page (`G-248`).
+
+        The file is kept as `pdfs/<sha1>.pdf` in the workspace -- the download
+        -- and its text laid out as addressable HTML (`domvec.pdf`) goes
+        through `index_html`: the same chunker, vector queue and graph."""
+        from .pdf import pdf_to_html
+
+        page_html, info = pdf_to_html(data, url)
+        keep = self.path / "pdfs"
+        keep.mkdir(exist_ok=True)
+        f = keep / (info["sha1"] + ".pdf")
+        if not f.exists():
+            f.write_bytes(data)
+        got = self.index_html(page_html, url, title=info.get("title") or "")
+        info.update(url=got.url, chunks=got.chunks, lines=got.lines, addresses=got.addresses,
+                    kept=str(f.relative_to(self.path)), bytes=len(data))
+        return info
+
     def index_note(self, text: str, rel_path: str, *, vault: str = "vault",
                    title: str = "") -> ScanResult:
         """A vault note into the trie — no browser, no DOM (`T-5`).
