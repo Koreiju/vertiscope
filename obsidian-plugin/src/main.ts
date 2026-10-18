@@ -368,7 +368,17 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
         browser.onRightChunk = (cid: string, url: string, stored: string) =>
           this.eachGraph((view) => view.rightPanel(cid, url, stored));
         browser.onHover = (cid: string, url: string, stored?: string) =>
-          this.eachGraph((view) => view.highlightChunk(cid, url, stored || browser.storedCidFor(cid, url)));
+          this.eachGraph((view) => {
+            if (stored) { view.highlightChunk(cid, url, stored); return; }
+            // A stored ANCESTOR covers the hovered chunk only roughly -- the
+            // tile not yet stored resolved to archive.org's whole search-page
+            // container (a hidden feedback survey, 2026-10-17). The grey node
+            // with the chunk's exact streamed content wins when it is drawn;
+            // the ancestor is the fallback. Planted: `ancestor-over-grey`.
+            const cover = browser.storedCoverFor(cid, url);
+            const grey = !cover.exact && !browser.plant.has("ancestor-over-grey") && view.hasNode(cid);
+            view.highlightChunk(cid, url, grey ? "" : cover.cid);
+          });
         // Right-click pins a chunk: its billboard opens in the graph and
         // stays while the browser's markdown side holds it (`G-78`).
         // A capture rewrote chunks: their open billboards redraw. The

@@ -3492,6 +3492,25 @@ storage techniques measured against what the 63 GB actually holds, with
 performance optimised throughout; no write is lost in the switch and the
 original is kept until the reader says otherwise.*
 
+> still quite a bit of work to do with archive
+
+> will have to navigate back to archive and rerun, maybe the homepage and test
+> from there
+
+> very serious url and chunk degradation that must be fixed and tested for as
+> an edge case
+
+> ill keep the most recent one open for you to catch up with your mcp as well
+
+*(Sent 2026-10-17 with screenshots: on archive.org a hovered result tile
+opened the search page's hidden "Feedback Survey" container and the corner
+box read "0/0 in graph"; then, on a TMDB person page, a hover opened an
+archive.org chunk's panel.) Read as (147): a hover resolves only to a chunk
+of the page the browser shows -- never another page's, whatever the order of
+navigation, loading and the sensor's messages -- tested as an edge case; and
+every check of "which page is this" agrees on the document, not on a url the
+page rewrote.*
+
 *Where (131) meets "Keep current layout" (asked minutes earlier, about the
 quantile spread, containment and depth compression): (131) replaces the
 collision drift and, by the reader's "exact to the original UMAP

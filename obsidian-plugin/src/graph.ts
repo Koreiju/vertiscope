@@ -2553,6 +2553,10 @@ export class GraphView extends ItemView {
   panelTimes = { first_paint: [] as number[], page_paint: [] as number[], close: [] as number[] };
   private payloadCache = new Map<string, { at: number; p: Promise<any> }>();
   /** A chunk's payload, shared by the hover prefetch and the panel (10 s). */
+  /** Is a node with this id drawn? */
+  hasNode(id: string): boolean {
+    return !!this.graph && this.graph.graphData().nodes.some((n: any) => String(n.id) === id);
+  }
   /** A grey node's provisional payload, from the browser's drain (G-198). */
   forcePayloadFor: (id: string) => any = () => null;
   chunkPayload(cid: string): Promise<any> {

@@ -197,8 +197,11 @@ export class PipelineBox {
     void this.placePins();
   }
 
+  /** The page a url belongs to -- the browser's session for an url the page
+   *  took without leaving its document (G-216); "0/0 in graph" otherwise. */
+  urlOf: (raw: string) => string = (u) => u;
   private url(): string {
-    try { return this.webview()?.getURL() || ""; } catch { return ""; }
+    try { return this.urlOf(this.webview()?.getURL() || ""); } catch { return ""; }
   }
 
   private visible(): boolean {

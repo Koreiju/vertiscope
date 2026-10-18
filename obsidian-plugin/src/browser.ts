@@ -376,9 +376,23 @@ export class BrowserView extends ItemView {
       this.pipebox = new PipelineBox(this.browserWrap, this.sidecar,
                                      () => this.webview,
                                      (cid, url, stored) => {
+                                       // Only a hover ON THE PAGE SHOWN: while a new document
+                                       // loads, the session is still the old page, and a hover
+                                       // from the new page's sensor was looked up in the old
+                                       // page's tree -- a TMDB hover opened an archive.org
+                                       // chunk (2026-10-17, "very serious url and chunk
+                                       // degradation"). Planted: `cross-page-hover`.
+                                       const shown = this.currentPage();
+                                       if (cid && url && shown && docKey(url) !== docKey(shown) && !this.plant.has("cross-page-hover")) {
+                                         this.hoverStats.cross_page_refused++;
+                                         this.lastHovered = null;
+                                         this.onHover("", "", "");
+                                         return;
+                                       }
                                        this.lastHovered = cid ? { cid, url, stored: stored || "" } : null;
                                        this.onHover(cid, url, stored);
                                      });
+      this.pipebox.urlOf = (u: string) => this.sessionAliases.get(u) || u;
       // Hover-first (`G-80`): the pointer is over something the store does
       // not hold yet, so drain now instead of on the next tick.
       this.pipebox.onUnresolved = () => { if (!this.draining) void this.tick(); };
@@ -447,6 +461,15 @@ export class BrowserView extends ItemView {
     // The document is ready to read once dom-ready fires, whatever the network
     // is still doing; a new main-frame navigation (not an in-page one) resets it.
     view.addEventListener("dom-ready", () => { this.domReady = true; });
+    // The session follows the DOCUMENT the moment it commits, not when it
+    // finishes loading: in between, the new page's sensor already pushed
+    // hovers, and they were read against the old page (2026-10-17, a TMDB
+    // hover opened an archive.org chunk while TMDB loaded for 15 s).
+    view.addEventListener("did-navigate", (e: any) => {
+      if (!e || e.isMainFrame === false || this.plant.has("session-at-load")) return;
+      const u = String(e.url || "");
+      if (/^https?:/.test(u)) void this.pageChanged(u, true);
+    });
     view.addEventListener("did-start-navigation", (e: any) => {
       if (e && e.isMainFrame && !e.isInPlace && !e.isSameDocument) {
         this.domReady = false; this.loadFailedUrl = "";
@@ -760,15 +783,27 @@ export class BrowserView extends ItemView {
    * open the chunk the reader is pointing at, wherever it sits in the diff.
    * "" when the map does not know it yet.
    */
+  /** Like `storedCidFor`, and whether the cover is the chunk ITSELF or only
+   *  a stored ancestor (the nearest-ancestor walk). */
+  storedCoverFor(cid: string, url: string): { cid: string; exact: boolean } {
+    this.lastCoverExact = false;
+    const got = this.storedCidFor(cid, url);
+    return { cid: got, exact: this.lastCoverExact };
+  }
+  private lastCoverExact = false;
   storedCidFor(cid: string, url: string): string {
-    const m = /^f:(.*)#(\d+)$/.exec(cid || "");
+    const m = /^f:(.*)#(\d+)(?:\.\d+)?$/.exec(cid || "");
     if (!m) return "";
+    // A force id names its page: resolved only within THAT page, never
+    // through another page's tree or map (the cross-page hover, 2026-10-17).
+    if (docKey(m[1]) !== docKey(url) && !this.plant.has("cross-page-hover")) return "";
     const tree = this.forceTrees.get(url) || this.forceTrees.get(m[1]);
     if (!tree) return "";
     const id = tree.nodeId(Number(m[2]));
     const held = tree.held().filter((h: any) => h.id === id);
     if (!held.length) return "";
     const exact = this.coversFor(url, held)[id];
+    if (exact) this.lastCoverExact = true;
     if (exact || this.plantNoAncestorHover) return exact || "";
     // For a HOVER, the stored chunk that draws the element may be anchored
     // ABOVE the page's own (finer) chunk -- a cast card in a stored grid.
@@ -963,7 +998,7 @@ export class BrowserView extends ItemView {
     };
     if (!wv || !asked) { note(false, "no page or no xpaths"); return false; }
     let here = "";
-    try { here = wv.getURL(); } catch { /* not attached */ }
+    here = this.currentPage();
     if (here !== read.url) { note(false, "page not open"); return false; }
     if (this.plant.has("distilled-panels")) {
       dropSnapshot(read.cid);
@@ -1008,7 +1043,7 @@ export class BrowserView extends ItemView {
    *  are live (the fast path from the chunk map carries no addresses). */
   async snapshotAddressed(cid: string, lines: any[]): Promise<boolean> {
     let here = "";
-    try { here = this.webview?.getURL() || ""; } catch { return false; }
+    here = this.currentPage();
     if (!here || !lines || !lines.length) return false;
     await this.takeSnapshot({ cid, url: here, matched: "", markdown: "", head: "",
                               xpaths: xpathsOfLines(lines), addrs: addressTable(lines) });
@@ -1059,8 +1094,8 @@ export class BrowserView extends ItemView {
     const wv = this.webview;
     if (!map || !wv || this.plantNoSaver) return;
     let here = "";
-    try { here = wv.getURL(); } catch { return; }
-    if (!map.url || docKey(map.url) !== docKey(here)) return;
+    here = this.currentPage();
+    if (!here || !map.url || docKey(map.url) !== docKey(here)) return;
     if (this.savedFormsUrl !== map.url) { this.savedForms.clear(); this.savedFormsUrl = map.url; }
     // Only while the page is STILL. The clone runs in the page's own thread,
     // the one the sensor drains from: eight chunks a slice held the page 14.7
@@ -1125,7 +1160,7 @@ export class BrowserView extends ItemView {
     if (!cid) return false;
     if (!again && getSnapshot(cid)) return true;
     let here = "";
-    try { here = this.webview?.getURL() || ""; } catch { /* not attached */ }
+    here = this.currentPage();
     if (!here || docKey(here) !== docKey(url || "")) return false;
     // FAST: the chunk's elements from the browser's own chunk map -- no
     // sidecar round trip, which queued behind the capture's writes (panel
@@ -1156,7 +1191,7 @@ export class BrowserView extends ItemView {
           const lines = (payload && payload.lines) || [];
           if (!lines.length) return;
           let now = "";
-          try { now = this.webview?.getURL() || ""; } catch { return; }
+          now = this.currentPage();
           if (docKey(now) !== docKey(here)) return;
           const addrs = addressTable(lines);
           // Kept a minute, so the redraw this asks for paints addressed at
@@ -1269,6 +1304,17 @@ export class BrowserView extends ItemView {
   /** Documents loaded in this cell, and which one the session belongs to. */
   private docSeq = 0;
   private sessionDocSeq = -1;
+  /** The PAGE the cell shows: its url, or the session it is an alias of --
+   *  archive.org's list rewrites its url as it scrolls, and every check of
+   *  "is this page open" compared the raw url (`&page=7`) with the session's
+   *  and refused: snapshots, the page form, the form saver (2026-10-17). */
+  currentPage(): string {
+    let u = "";
+    try { u = this.webview?.getURL() || ""; } catch { return ""; }
+    if (u && u === this.pendingInPage && this.session) return this.session;   // undecided: still the session's
+    return this.sessionAliases.get(u) || u;
+  }
+  hoverStats = { cross_page_refused: 0 };
   /** An in-page navigation waiting for its first drain to say what it is (G-216). */
   private pendingInPage = "";
   /** Urls the page took without leaving its document -> the session's url. */
@@ -1683,7 +1729,8 @@ export class BrowserView extends ItemView {
       for (let i = 0; i < 6; i++) {
         await new Promise((r) => setTimeout(r, 250));
         let here = "";
-        try { here = wv.getURL(); } catch { break; }
+        here = this.currentPage();
+        if (!here) break;
         await this.takeSnapshot({ ...read, url: here });
         if ((getSnapshot(cid)?.html || "") !== before) break;
       }
@@ -1756,7 +1803,7 @@ export class BrowserView extends ItemView {
   private async portMarkdown(x: number, y: number): Promise<void> {
     const wv = this.webview;
     if (!wv) return;
-    const url = wv.getURL();
+    const url = this.currentPage();
     let xpath = "";
     try {
       xpath = await wv.executeJavaScript(
@@ -1864,7 +1911,7 @@ export class BrowserView extends ItemView {
   async pinXpath(xpath: string): Promise<{ cid: string } | { error: string }> {
     const wv = this.webview;
     if (!wv) return { error: "no browser" };
-    const url = wv.getURL();
+    const url = this.currentPage();
     const read = await this.readPin(url, xpath);
     if ("error" in read) {
       this.say(`no chunk draws ${xpath.slice(-48)}`);
