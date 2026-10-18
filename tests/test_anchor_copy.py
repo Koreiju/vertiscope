@@ -24,8 +24,19 @@ def _edges(gs):
 ROWS = [{"cid": "c%d" % (i % 10), "aid": "a%d" % i, "ord": i} for i in range(50)]
 
 
+def _copy(gs, rows):
+    """The opt-in COPY arm (`DOMVEC_ANCHOR_COPY=1`; off by default since the
+    2026-10-18 buffer-pool refusals -- `test_store_poison.py`)."""
+    was = GraphStore._ANCHOR_COPY[0]
+    GraphStore._ANCHOR_COPY[0] = True
+    try:
+        gs._create_anchors(rows)
+    finally:
+        GraphStore._ANCHOR_COPY[0] = was
+
+
 def test_copy_and_statement_write_the_same_edges():
-    a = _store(); a._create_anchors(ROWS)
+    a = _store(); _copy(a, ROWS)
     b = _store()
     GraphStore._PLANT_ANCHOR_MATCH[0] = True
     try:
@@ -37,5 +48,5 @@ def test_copy_and_statement_write_the_same_edges():
 
 def test_a_missing_endpoint_falls_back_without_duplicates():
     gs = _store()
-    gs._create_anchors(ROWS[:10] + [{"cid": "gone", "aid": "a1", "ord": 7}])
+    _copy(gs, ROWS[:10] + [{"cid": "gone", "aid": "a1", "ord": 7}])
     assert len(_edges(gs)) == 10

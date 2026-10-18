@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import time
 import hashlib
+import json
 import os
 import re
 import threading
@@ -51,6 +52,18 @@ from .markdown import MarkdownChunk
 from .privacy import redact_url
 
 __all__ = ["GraphStore", "StoredChunk", "canonical_url"]
+
+
+class StorePoisoned(RuntimeError):
+    """The connection must not be used again (see `GraphStore.poisoned`)."""
+
+
+#: What kuzu says when its buffer pool cannot serve a statement. After it, the
+#: NEXT statement on that connection segfaulted (2026-10-18: a COPY refused
+#: with "Unable to allocate memory! The buffer pool is full and no memory
+#: could be freed!", and the fallback statement that followed it crashed the
+#: process -- every restart, ~50 times, until the store was rebuilt).
+_POISON_MARKS = ("Buffer manager exception", "buffer pool is full")
 
 
 def _close(result) -> None:
@@ -500,6 +513,10 @@ class GraphStore:
         #: reads, 0 errors). The sidecar checkpoints in quiet periods.
         self._read_lock = threading.Lock()
         self._read_conn = None
+        #: Why this store's connection is no longer safe to use, or "". Set by
+        #: a buffer-pool exception; every later statement refuses rather than
+        #: segfault, and the sidecar's watchdog restarts the process.
+        self.poisoned = ""
         self.read_stats = {"split": 0, "fallback": 0, "last_error": ""}
         if not self.read_only and os.environ.get("DOMVEC_SHARED_READS", "") != "1":
             try:
@@ -1195,8 +1212,13 @@ class GraphStore:
         another thread" has a single answer instead of twelve.
         """
         with self._db_lock:
+            self._guard()
             self._breadcrumb(query, params)
-            result = self.conn.execute(query, params or {})
+            try:
+                result = self.conn.execute(query, params or {})
+            except Exception as exc:                # noqa: BLE001
+                self._poison_check(exc)
+                raise
             # **Closed inside the lock, never returned.** The live QueryResult
             # used to be handed back to a caller that dropped it at once --
             # so its native destructor ran on that thread OUTSIDE the lock,
@@ -1209,6 +1231,12 @@ class GraphStore:
 
     #: Planted: anchors created by the two-lookup statement, as before.
     _PLANT_ANCHOR_MATCH = [os.environ.get("DOMVEC_PLANT_ANCHOR_MATCH") == "1"]
+    #: COPY for anchors is OPT-IN (`DOMVEC_ANCHOR_COPY=1`). Appending to the
+    #: populated rel table needs buffer memory that grows with the TABLE, not
+    #: the batch: 41 rows on the 5.1 GB store were refused by a full 2 GiB
+    #: pool (2026-10-18), and that refusal is what crashed the process. The
+    #: statement form is slower per row and ran for weeks without it.
+    _ANCHOR_COPY = [os.environ.get("DOMVEC_ANCHOR_COPY") == "1"]
 
     def _create_anchors(self, rows: Sequence[dict]) -> None:
         """Anchors (Chunk -> Address, `ord`) for rows whose two endpoints
@@ -1225,7 +1253,7 @@ class GraphStore:
         """
         if not rows:
             return
-        if not self._PLANT_ANCHOR_MATCH[0] and len(rows) >= 8:
+        if self._ANCHOR_COPY[0] and not self._PLANT_ANCHOR_MATCH[0] and len(rows) >= 8:
             try:
                 import pandas as pd
                 df = pd.DataFrame({"from": [r["cid"] for r in rows], "to": [r["aid"] for r in rows],
@@ -1234,8 +1262,17 @@ class GraphStore:
                     self._breadcrumb("COPY Anchors FROM df", {"rows": rows[:1]})
                     _close(self.conn.execute("COPY Anchors FROM df"))
                 return
-            except Exception:                       # noqa: BLE001
-                pass
+            except Exception as exc:                # noqa: BLE001
+                self._poison_check(exc)
+                self.copy_errors.append("%s: %s" % (type(exc).__name__, str(exc)[:200]))
+                del self.copy_errors[:-20]
+                if self._DUMP_ROWS:
+                    try:
+                        with open(self._DUMP_ROWS, "a", encoding="utf-8") as fh:
+                            fh.write(json.dumps({"at": time.time(), "copy_error": self.copy_errors[-1]}) + chr(10))
+                    except OSError:
+                        pass
+                self._guard()                       # never the fallback after a refused pool
         self._batch(
             "UNWIND $rows AS r MATCH (c:Chunk {cid: r.cid}) "
             "MATCH (a:Address {aid: r.aid}) "
@@ -1246,6 +1283,7 @@ class GraphStore:
     _WRITES = re.compile(r"\b(CREATE|MERGE|SET|DELETE|DETACH|DROP|ALTER|COPY|CALL|CHECKPOINT|INSTALL|LOAD|REMOVE)\b", re.I)
 
     def _rows(self, query: str, params: Optional[dict] = None) -> List[list]:
+        self._guard()                               # both connections share the pool
         rc = self._read_conn
         if rc is not None and not self._WRITES.search(query):
             try:
@@ -1258,7 +1296,10 @@ class GraphStore:
                 self.read_stats["split"] += 1
                 return out
             except Exception as exc:                # noqa: BLE001
-                # A timeout or anything else: the shared path still answers.
+                # A timeout or anything else: the shared path still answers --
+                # unless the buffer pool refused, which is the DATABASE's, not
+                # this connection's, and poisons both.
+                self._poison_check(exc)
                 self.read_stats["fallback"] += 1
                 self.read_stats["last_error"] = str(exc)[:160]
         # The result is drained INSIDE the lock. A kuzu QueryResult is a
@@ -1267,13 +1308,30 @@ class GraphStore:
         # is the same race by a longer route. And closed inside it, for the
         # destructor reason given in `_execute`.
         with self._db_lock:
+            self._guard()
             self._breadcrumb(query, params)
-            result = self.conn.execute(query, params or {})
+            try:
+                result = self.conn.execute(query, params or {})
+            except Exception as exc:                # noqa: BLE001
+                self._poison_check(exc)
+                raise
             out = []
             while result.has_next():
                 out.append(result.get_next())
             _close(result)
         return out
+
+    def _poison_check(self, exc: BaseException) -> None:
+        text = str(exc)
+        if any(m in text for m in _POISON_MARKS) and not self._PLANT_NO_POISON[0]:
+            self.poisoned = "%s: %s" % (type(exc).__name__, text[:200])
+
+    def _guard(self) -> None:
+        if self.poisoned:
+            raise StorePoisoned(self.poisoned)
+
+    #: Planted: a buffer-pool refusal leaves the connection in use, as before.
+    _PLANT_NO_POISON = [os.environ.get("DOMVEC_PLANT_NO_POISON") == "1"]
 
     #: A fixed-size record of the statement about to run, rewritten in place
     #: before every statement: when kuzu segfaults (D-23) no Python frame can
@@ -1292,8 +1350,20 @@ class GraphStore:
             data = head.encode("utf-8", "replace")[:self._CRUMB_SIZE]
             os.lseek(fd, 0, os.SEEK_SET)
             os.write(fd, data.ljust(self._CRUMB_SIZE, b" "))
+            # Diagnosis only (`DOMVEC_DUMP_ROWS=1`): EVERY statement and its
+            # rows, in order, so a native crash can be replayed offline exactly
+            # (2026-10-18: the anchor crash could not be reproduced from the
+            # 512-byte head alone).
+            if self._DUMP_ROWS:
+                with open(self._DUMP_ROWS, "a", encoding="utf-8") as fh:
+                    fh.write(json.dumps({"at": time.time(), "query": query, "params": params or {}}, default=str) + chr(10))
+                    fh.flush(); os.fsync(fh.fileno())
         except Exception:                           # noqa: BLE001
             pass
+
+    _DUMP_ROWS = ""
+    #: Why each refused COPY refused (the fallback statement runs after it).
+    copy_errors: List[str] = []
 
     def enable_breadcrumb(self, path) -> None:
         """Record each statement's head to `path` before it runs (`D-23`)."""
@@ -1301,6 +1371,8 @@ class GraphStore:
             self._crumb_fd = os.open(str(path), os.O_RDWR | os.O_CREAT, 0o600)
         except OSError:
             self._crumb_fd = None
+        if os.environ.get("DOMVEC_DUMP_ROWS") == "1":
+            self._DUMP_ROWS = str(Path(str(path)).with_name("statements.jsonl"))
 
     def resolve_page(self, url: str) -> str:
         """The stored spelling of a page, or "" if it was never scanned.

@@ -364,6 +364,25 @@ def _warm_containment(workspace, stop) -> None:
         _profile("warm_facts", {"error": str(exc)[:160]})
 
 
+def _poison_watch(workspace, stop) -> None:
+    """A store whose connection is poisoned (`GraphStore.poisoned`: the
+    buffer pool refused a statement) restarts the process with the
+    supervisor's restart code BEFORE anything else runs on it: the next
+    statement after such a refusal segfaulted, ~50 times in an hour
+    (2026-10-18). The WAL holds only committed work; the plugin retries the
+    capture that was refused."""
+    while not stop.wait(0.5):
+        why = getattr(getattr(workspace, "store", None), "poisoned", "")
+        if why:
+            try:
+                with open(Path(workspace.path) / "crashes.log", "a", encoding="utf-8") as fh:
+                    fh.write(time.strftime("%Y-%m-%d %H:%M:%S") + " poisoned, restarting (75): " + why + chr(10))
+            except OSError:
+                pass
+            _profile("poisoned", {"why": why})
+            os._exit(75)
+
+
 def _integrity_last_on_disk(workspace) -> Dict[str, int]:
     """The counts of the last record in `integrity.log`, or {}."""
     try:
@@ -3406,6 +3425,8 @@ def serve(workspace, port: int = 8787, *, block: bool = True,
                          name="domvec-checkpoint", daemon=True).start()
         threading.Thread(target=_integrity_forever, args=(workspace, stop),
                          name="domvec-integrity", daemon=True).start()
+        threading.Thread(target=_poison_watch, args=(workspace, stop),
+                         name="domvec-poison-watch", daemon=True).start()
         threading.Thread(target=_warm_containment, args=(workspace, stop),
                          name="domvec-warm-containment", daemon=True).start()
 

@@ -39,8 +39,13 @@ except Exception:
                      stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                      creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(subprocess, "DETACHED_PROCESS", 0))
     time.sleep(2)
-live.reload_plugin()
+# The reader's page, read BEFORE the reload: after it the cell may show
+# whatever it last loaded, and a restore to that left the reader on this
+# probe's 502 fixture (2026-10-18).
 was = live.evaluate("app.workspace.getLeavesOfType('domvec-browser-view')[0].view.webview.getURL()")
+if not (was or "").startswith("http") or "127.0.0.1:8793" in (was or ""):
+    was = ""
+live.reload_plugin()
 
 def stored_text(url):
     cids = get(B + "/page_status?cids=1&url=" + urllib.request.quote(url, safe="")).get("cids") or []
