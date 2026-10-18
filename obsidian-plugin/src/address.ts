@@ -75,9 +75,30 @@ export function unitOf(lines: any[], element: string, min = 3, max = 60): { at: 
   if (!addrs.some(Boolean)) return null;
   let at = canonAddr(element);
   while (at && at.length > 1) {
-    const pick = lines.filter((_l, i) => addrs[i] && inUnit(addrs[i], at));
+    const pick: any[] = lines.filter((_l, i) => addrs[i] && inUnit(addrs[i], at));
     if (pick.length > max) return null;
     if (pick.length >= Math.min(min, lines.length)) {
+      // A SUB-COMPONENT is not the unit; the item it is part of is (G-251).
+      // Three lines are reached inside one bandcamp track row -- its title,
+      // "from", "by" -- and the row's image and its title opened two panels
+      // (2026-10-18: "hovering over sub-components of the same overall chunk
+      // only renders those components"). On up while the level above is not
+      // a list, holds no more than `max`, and the chunk is not yet whole.
+      // Planted `__domvecPlantSubUnit`: the first level with `min`, as before.
+      if (!(globalThis as any).__domvecPlantSubUnit) {
+        // Levels that add no line are passed through, not taken; a LINK
+        // ends the climb below it (its href joins by `inUnit`).
+        const A = addrs.filter(Boolean) as string[];
+        let cur = at;
+        while (pick.length < lines.length) {
+          const c = cur.lastIndexOf("/"), up = c > 0 ? cur.slice(0, c) : "";
+          if (!up || /\/a(\[\d+\])?$/.test(up) || isListAbove(up, A)) break;
+          const p2 = lines.filter((_l, i) => addrs[i] && inUnit(addrs[i], up));
+          if (p2.length > max) break;
+          cur = up;
+          if (p2.length > pick.length) { at = up; pick.splice(0, pick.length, ...p2); }
+        }
+      }
       // An item of a list that FITS is not the unit; the list is (see
       // `ForceTree.chunkForElement`). Planted `__domvecPlantItemAlways`.
       const cut0 = at.lastIndexOf("/"), up0 = cut0 > 0 ? at.slice(0, cut0) : "";

@@ -132,3 +132,30 @@ test("a small list of tiles keeps each tile its own unit", () => {
   const got = unitOf(lines.map((l, i) => ({ ...l, key: "u|" + addrs[i] })), "/html/body/section/ul/li[2]/a/h3/text()");
   assert.equal(got && got.at, "/html/body/section/ul/li[2]");
 });
+
+// G-251: a part of an item is not the unit. A bandcamp track row holds its
+// title, "from", "by" (three lines) inside a sub-block; the row's image and
+// its title opened two panels (2026-10-18).
+test("a track row's image and its title open the same unit -- the row", () => {
+  const lines = [], addrs = [];
+  for (let i = 1; i <= 5; i++) {
+    const li = `/html/body/ol/li${i > 1 ? `[${i}]` : ""}`;
+    for (const part of ["div/button/text()", "div/a", "div[2]/button/div/div/img", "div[2]/button/div/div[2]/text()[1]",
+                        "div[2]/button/div/div[2]/text()[2]", "div[2]/button/div/div[2]/text()[3]"]) {
+      lines.push({ text: `row ${i} ${part}` }); addrs.push(`${li}/${part}`);
+    }
+  }
+  const keyed = lines.map((l, i) => ({ ...l, key: "u|" + addrs[i] }));
+  const img = unitOf(keyed, "/html/body/ol/li[3]/div[2]/button/div/div/img");
+  const title = unitOf(keyed, "/html/body/ol/li[3]/div[2]/button/div/div[2]");
+  assert.equal(img && img.at, "/html/body/ol/li[3]");
+  assert.equal(title && title.at, "/html/body/ol/li[3]");
+  assert.equal(title.lines.length, 6);
+  // A chunk that IS one row (no list among its lines) is whole.
+  const one = keyed.filter((_l, i) => addrs[i].startsWith("/html/body/ol/li[2]/"));
+  assert.equal(unitOf(one, "/html/body/ol/li[2]/div[2]/button/div/div[2]").lines.length, 6);
+  // Planted: the first level with three lines -- the title block alone.
+  globalThis.__domvecPlantSubUnit = true;
+  try { assert.equal(unitOf(keyed, "/html/body/ol/li[3]/div[2]/button/div/div[2]").at, "/html/body/ol/li[3]/div[2]/button/div/div[2]"); }
+  finally { globalThis.__domvecPlantSubUnit = false; }
+});

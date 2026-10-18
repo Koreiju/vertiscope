@@ -144,3 +144,35 @@ test("a link's relative destination reads as an absolute url on the page's domai
     assert.equal(u.linesOf(`f:${P}#1`)[1], "/docs/transformers/v5.20.1/en/main_classes/pipelines#transformers.Pipeline");
   } finally { ForceTree.plantRelativeLinks = false; }
 });
+
+// G-251 (2026-10-18): one chunk per bandcamp track row; the row's title block
+// holds three lines of its own. The image and the title are PARTS of the row:
+// both resolve to the row, not to their own sub-blocks.
+function rowsTree() {
+  const t = new ForceTree(A);
+  const row = (k) => {
+    const S = [0, 1, 1, 1, 2, k];
+    return { id: k, digest: digestOf("row" + k), lines: [
+      line(`play ${k}`, [...S, 3, 1, 5, 1]),
+      line(`cover ${k}`, [...S, 4, 2, 4, 1, 4, 1, 5, 1]),
+      line(`title ${k}`, [...S, 4, 2, 4, 1, 3, 1, 5, 1]),
+      line(`from ${k}`, [...S, 4, 2, 4, 1, 3, 2, 5, 1]),
+      line(`by ${k}`, [...S, 4, 2, 4, 1, 3, 3, 5, 1]),
+    ] };
+  };
+  t.apply({ v: 1, dict: DICT, chunks: [1, 2, 3, 4].map(row), removed: [], stats: { dictSize: DICT.length } });
+  return t;
+}
+test("a row's cover and its title resolve to the same unit: the row", () => {
+  const t = rowsTree();
+  const addrs = t.addrsOf(t.held().find((h) => /#3$/.test(h.id)).id);
+  const parent = (a) => a.slice(0, a.lastIndexOf("/"));
+  const cover = parent(addrs[1]), title = parent(parent(addrs[2]));
+  const a = t.chunkForElement(cover), b = t.chunkForElement(title + "/p");
+  assert.ok(a && b, "both resolve");
+  assert.equal(a.at, b.at);
+  assert.ok(a.at.endsWith("/section[3]"), "the row itself: " + a.at);
+  ForceTree.plantSubUnit = true;
+  try { assert.notEqual(t.chunkForElement(title + "/p").at, a.at, "planted: the title block alone"); }
+  finally { ForceTree.plantSubUnit = false; }
+});

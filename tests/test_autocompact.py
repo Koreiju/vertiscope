@@ -69,7 +69,7 @@ def test_due_only_when_outgrown_quiet_and_supervised():
     due = sidecar._compact_due
     assert due(4600, 1440, now=1000, last_request=0, supervised=True)
     assert not due(4600, 1440, now=1000, last_request=900, supervised=True)    # reader active
-    assert not due(2000, 1440, now=1000, last_request=0, supervised=True)      # not 3x yet
+    assert not due(2800, 1440, now=1000, last_request=0, supervised=True)      # not 2x yet
     assert not due(4600, 1440, now=1000, last_request=0, supervised=False)     # nobody to act on 76
     assert not due(1200, 300, now=1000, last_request=0, supervised=True)       # under the floor
     sidecar._PLANT_NO_AUTOCOMPACT[0] = True

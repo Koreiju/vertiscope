@@ -1399,8 +1399,10 @@ class GraphStore:
     def cpg_of(self, url: str) -> Dict:
         """One file's CPG as stored: its nodes, its edges, and the edges that
         cross to or from other files (with those ends' addresses)."""
-        nodes = [dict(zip(("key", "xpath", "kind", "name", "qname", "line", "end_line"), r)) for r in self._rows(
-            "MATCH (n:CodeNode {url: $u}) RETURN n.key, n.xpath, n.kind, n.name, n.qname, n.line, n.end_line", {"u": url})]
+        nodes = [dict(zip(("key", "xpath", "kind", "name", "qname", "line", "end_line", "calls_out", "bases_out"), r))
+                 for r in self._rows(
+            "MATCH (n:CodeNode {url: $u}) RETURN n.key, n.xpath, n.kind, n.name, n.qname, n.line, n.end_line, "
+            "n.calls_out, n.bases_out", {"u": url})]
         edges = [dict(zip(("src", "dst", "kind", "var", "line", "label", "src_url", "dst_url"), r)) for r in self._rows(
             "MATCH (a:CodeNode)-[e:Cpg]->(b:CodeNode) WHERE a.url = $u OR b.url = $u "
             "RETURN a.key, b.key, e.kind, e.var, e.line, e.label, a.url, b.url", {"u": url})]

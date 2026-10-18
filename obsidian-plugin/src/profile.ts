@@ -80,6 +80,8 @@ export interface Visit {
   /** Where each mark's time came from: a drain trace id, the sidecar's own phases, a fit epoch. */
   prov: Record<string, Record<string, unknown>>;
   hovers: { stage: string; ms: number; paint_ms: number | null; at: number }[];
+  /** Other spellings this visit's page took in place (an app's route rewrite). */
+  aliases?: string[];
 }
 const VISIT_CAP = 40;
 const key = (url: string) => String(url || "").split("#")[0];
@@ -120,8 +122,27 @@ export class PipelineProfiler {
   /** The latest visit to this page, or none. */
   visit(url: string): Visit | undefined {
     const k = key(url);
-    for (let i = this.visitsList.length - 1; i >= 0; i--) if (this.visitsList[i].url === k) return this.visitsList[i];
+    for (let i = this.visitsList.length - 1; i >= 0; i--) {
+      const v = this.visitsList[i];
+      if (v.url === k || (v.aliases && v.aliases.includes(k))) return v;
+    }
     return undefined;
+  }
+
+  /**
+   * The page rewrote its own url in place (bandcamp: `radio?show=1010` ->
+   * `radio/1010`): the visit goes on under both. Its stages were marked
+   * under the new spelling, matched no visit, and a fresh page read as
+   * having reached no stage at all (2026-10-18). Planted `plantNoAlias`.
+   */
+  plantNoAlias = false;
+  visitAlias(url: string): void {
+    const v = this.visitsList[this.visitsList.length - 1];
+    if (!v || this.plantNoAlias || !/^https?:/.test(url || "")) return;
+    const k = key(url);
+    if (k === v.url) return;
+    (v.aliases = v.aliases || []).push(k);
+    if (v.aliases.length > 8) v.aliases.shift();
   }
 
   /** The FIRST time a stage reached the 3D view on this visit; later ones are not marks. */
@@ -159,7 +180,7 @@ export class PipelineProfiler {
         const s = a.slice().sort((x, y) => x - y);
         hover[k] = { n: s.length, p50: s[Math.floor((s.length - 1) / 2)], max: s[s.length - 1] };
       }
-      return { url: v.url, marks: { ...v.marks }, prov: v.prov, hover, hovers: v.hovers.length };
+      return { url: v.url, aliases: v.aliases || [], marks: { ...v.marks }, prov: v.prov, hover, hovers: v.hovers.length };
     });
   }
 
@@ -376,9 +397,13 @@ export function profiler(): PipelineProfiler {
   // runs the OLD class, and an instanceof test there replaced the new
   // instance with an old one -- the two loads thrashed, and visits vanished.
   const old = w.__domvecProfiler;
-  if (!old || typeof old.visits !== "function" || typeof old.lastFor !== "function") {
+  // `visitAlias` (2026-10-18) is the newest capability: an instance without
+  // it filed a redirected page's stages under no visit.
+  if (!old || typeof old.visits !== "function" || typeof old.lastFor !== "function"
+      || typeof old.visitAlias !== "function") {
     const fresh = new PipelineProfiler();
     try { for (const t of (old?.list?.() || [])) (fresh as any).traces.push(t); } catch { /* an older shape */ }
+    try { for (const v of (old?.visitsList || [])) (fresh as any).visitsList.push(v); } catch { /* an older shape */ }
     w.__domvecProfiler = fresh;
   }
   return w.__domvecProfiler as PipelineProfiler;

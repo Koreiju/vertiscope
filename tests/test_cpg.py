@@ -112,3 +112,59 @@ def test_a_web_pages_python_block_is_graphed_below_its_pre(tmp_path):
         ws.web_code_cpg(url, [MarkdownChunk(url=url, xpath="/html/body/main", lines=[line("/html/body/main/pre[3]", loop.replace("print(t)", "print(t.upper())"))])])
         after = {x for (x,) in ws.store._rows("MATCH (n:CodeNode {url: $u}) RETURN n.xpath", {"u": url})}
         assert "/html/body/main/pre/module/function" in after and before <= after
+
+
+
+def test_a_code_block_is_graphed_from_the_trie_value_not_its_markdown_line(tmp_path, monkeypatch):
+    """A chunk's markdown line holds a code block on ONE line (lines zip
+    one-to-one with addresses; a fenced block shifted every line after it --
+    huggingface 2026-10-18, a sample filed under the next paragraph's and a
+    button's addresses). The graph reads the trie's value, newlines kept.
+    Offline (`ingest`) and the live capture's path (`ingest_chunks` with
+    `raw_values`, as the sidecar calls it) both. Planted
+    `_PLANT_CODE_FROM_LINE`: the one-line markdown, and nothing is graphed."""
+    import domvec.workspace as wsmod
+    from domvec.address import ContentAddress
+    from domvec.markdown import MarkdownChunk, MarkdownLine
+    NL = chr(10)
+    html = ("<html><body><main><p>Use the pipeline here.</p><div><pre><code class='language-py'>"
+            "<span>from</span> mylib <span>import</span> pipeline" + NL + "pipe = pipeline('x')" + NL
+            + "def run(x):" + NL + "    return pipe(x)" + NL + "</code></pre></div><p>After.</p></main></body></html>")
+    url = "https://docs.example.org/fenced"
+    live = "https://docs.example.org/live"
+    addr = ContentAddress(url=live, xpath="/html/body/div/pre", tag="code", accessor="text()[0]")
+    raw = NL.join(["from mylib import pipeline", "def run(x):", "    return pipeline(x)"])
+    flat = "`" + " ".join(raw.split()) + "`"
+    got = {}
+    for planted in (False, True):
+        monkeypatch.setattr(wsmod, "_PLANT_CODE_FROM_LINE", planted)
+        with Workspace(tmp_path / ("p" if planted else "c")) as ws:
+            ws.index_html(html, url)
+            off = (ws.last_web_cpg.get("python"), len(ws.store.cpg_of(url)["nodes"]))
+            chunk = MarkdownChunk(url=live, xpath="/html/body/div", lines=[MarkdownLine(depth=0, text=flat, address=addr)])
+            ws.ingest_chunks(live, [chunk], complete=False, raw_values=lambda a: raw if a == addr else None)
+            on = (ws.last_web_cpg.get("python"), len(ws.store.cpg_of(live)["nodes"]))
+            got[planted] = (off, on)
+    assert got[False][0][0] == 1 and got[False][0][1] >= 3, got
+    assert got[False][1][0] == 1 and got[False][1][1] >= 3, got
+    assert got[True][0] == (0, 0) and got[True][1] == (0, 0), got
+
+
+def test_a_modules_own_statements_are_graphed(monkeypatch):
+    """A web sample is top-level code: its statements flow, define and use,
+    and call from the MODULE node. Planted `_PLANT_NO_MODULE_STMTS`: only
+    functions' statements, and the sample is an empty module."""
+    import domvec.cpg as cpgmod
+    NL = chr(10)
+    src = NL.join(["from mylib import pipeline", "pipe = pipeline('sentiment')", "out = pipe('hi')", "print(out)", ""])
+    got = {}
+    for planted in (False, True):
+        monkeypatch.setattr(cpgmod, "_PLANT_NO_MODULE_STMTS", planted)
+        g = build_cpg(src, "https://ex.test/p", prefix="/html/body/pre", qname="web")
+        mod = [n for n in g["nodes"] if n["kind"] == "module"][0]
+        got[planted] = (sum(1 for n in g["nodes"] if n["kind"] == "stmt"),
+                        {(e["var"]) for e in g["edges"] if e["kind"] == "DFG"},
+                        sum(1 for e in g["edges"] if e["kind"] == "CFG"), mod["calls_out"])
+    stmts, dfg, cfg, calls = got[False]
+    assert stmts == 4 and {"pipe", "out", "pipeline"} <= dfg and cfg >= 3 and "mylib.pipeline" in calls, got
+    assert got[True] == (0, set(), 0, []), got

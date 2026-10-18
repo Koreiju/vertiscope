@@ -1634,7 +1634,7 @@ export class GraphView extends ItemView {
     if (this.collapsedTo.size > 20000) this.collapsedTo.clear();
     const data: any = this.graph.graphData();
     const end = (x: any) => (typeof x === "object" && x ? x.id : x);
-    let nodes = data.nodes.filter((n: any) => !(n.force && !this.forceSpecs.has(n.id)));
+    let nodes = data.nodes.filter((n: any) => !(n.force && !n.unit && !this.forceSpecs.has(n.id)));
     let links = data.links.filter((l: any) => !l.force);
     const byId = new Map<string, any>(nodes.map((n: any) => [n.id, n]));
     // A page root is dropped once its page is drawn by the projector.
@@ -1663,10 +1663,10 @@ export class GraphView extends ItemView {
     // chunks of a page the reader folded by right-click, whatever the layout
     // mode (its root, if it has no page node yet, still is).
     const shown = (url: string, chunk: boolean) => visible(url) && !(chunk && this.readerCollapsed(url));
-    nodes = nodes.filter((n: any) => !n.force || shown(n.url, n.level !== "page"));
+    nodes = nodes.filter((n: any) => !n.force || n.unit || shown(n.url, n.level !== "page"));
     for (const id of [...byId.keys()]) {
       const n = byId.get(id);
-      if (n.force && !shown(n.url, n.level !== "page")) byId.delete(id);
+      if (n.force && !n.unit && !shown(n.url, n.level !== "page")) byId.delete(id);
     }
     for (const [id, spec] of this.forceSpecs) {
       if (!spec.parent && this.projectedPage(spec.url, byId)) continue;
@@ -1690,6 +1690,7 @@ export class GraphView extends ItemView {
       const to = this.parentFor(spec.parent, spec.url, byId, pageByUrl.get(spec.url) || null);
       if (to && to !== id) links.push({ source: to, target: id, force: true });
     }
+    this.keepUnits(nodes, links, byId);
     // Place a returning node beside its parent rather than at the origin.
     for (const l of links) {
       const t = byId.get(end(l.target)), s = byId.get(end(l.source));
@@ -2693,6 +2694,103 @@ export class GraphView extends ItemView {
     }, this.hoverDwellMs);
   }
 
+  /**
+   * **Unit nodes** (G-251, 2026-10-18: "hovering over sub-components of the
+   * same overall chunk only renders those components in the same node ...
+   * each panel comes from the same node"). A hovered unit -- a tile, a track
+   * row, a list -- is a node of its own, grey (no vector yet: it is drawn
+   * from the sensor's tree before anything is embedded, PLUGIN_GOAL 48/125),
+   * one level BELOW its chunk: hung from the chunk's node, or from the
+   * page's when the chunk is not drawn. Units of one chunk sit on a shell
+   * around it, so their panels leave from distinct places. Kept through
+   * redraws (they are not in `forceSpecs`, whose drain owns streamed
+   * chunks); the oldest beyond `unitNodeCap` go, never one with a panel
+   * open. Planted `plantSharedAnchor`: the panel hangs from a copy of the
+   * chunk's position, as before.
+   */
+  plantSharedAnchor = false;
+  unitNodeCap = 96;
+  unitStats = { made: 0, reused: 0, dropped: 0 };
+  private unitNodes = new Map<string, { base: string; url: string; at: number }>();
+  private unitParent(base: string, url: string, byId: Map<string, any>): any {
+    if (base && byId.has(base)) return byId.get(base);
+    const into = base ? (this.collapsedTo.get(base) || this.forceSpecs.get(base)?.cid) : undefined;
+    if (into && byId.has(into)) return byId.get(into);
+    const key = String(url || "").split("#")[0];
+    return [...byId.values()].find((n: any) => n.level === "page" && !n.force && String(n.url || "").split("#")[0] === key)
+      || [...byId.values()].find((n: any) => n.level === "page" && String(n.url || "").split("#")[0] === key) || null;
+  }
+  ensureUnitNode(v: any): any {
+    if (!this.graph || !v || !v.id) return v;
+    const id = String(v.id);
+    const data: any = this.graph.graphData();
+    const byId = new Map<string, any>(data.nodes.map((n: any) => [String(n.id), n]));
+    const had = byId.get(id);
+    if (had) {
+      const r = this.unitNodes.get(id);
+      if (r) r.at = performance.now();
+      this.unitStats.reused++;
+      return had;
+    }
+    const bar = id.indexOf("|");
+    const base = bar > 0 ? id.slice(0, bar) : (v.base && v.base.id ? String(v.base.id) : "");
+    const p = this.unitParent(base === id ? "" : base, v.url, byId);
+    const pid = p ? String(p.id) : "";
+    const k = this.childCount.get(pid || id) || 0;
+    this.childCount.set(pid || id, k + 1);
+    // The next direction of a Fibonacci sphere about the parent, as a
+    // streamed chunk is placed about its trie parent.
+    const zz = 1 - 2 * ((k % 24) + 0.5) / 24, rr = Math.sqrt(Math.max(0, 1 - zz * zz));
+    const th = k * Math.PI * (3 - Math.sqrt(5));
+    const R = STREAM.BASE * (p && p.level === "page" ? 1 : 0.7);
+    const cx = p && Number.isFinite(p.x) ? p.x : (v.x ?? 0), cy = p && Number.isFinite(p.y) ? p.y : (v.y ?? 0);
+    const cz = p && Number.isFinite(p.z) ? p.z : (v.z ?? 0);
+    const n: any = { id, level: "chunk", name: v.name || id, url: v.url, members: 1, tokens: 0,
+                     force: true, unit: true, val: 0.6, color: "#9aa0a6",
+                     x: cx + rr * Math.cos(th) * R, y: cy + rr * Math.sin(th) * R, z: cz + zz * R };
+    const nodes = data.nodes.slice();
+    const links = data.links.slice();
+    nodes.push(n);
+    if (pid) links.push({ source: pid, target: id, force: true, unit: true });
+    this.unitNodes.set(id, { base, url: String(v.url || ""), at: performance.now() });
+    this.unitStats.made++;
+    // The oldest units beyond the cap go -- never one a panel holds.
+    if (this.unitNodes.size > this.unitNodeCap) {
+      const old = [...this.unitNodes.entries()].filter(([u]) => !this.billboards.has(u) && u !== id)
+        .sort((a, b) => a[1].at - b[1].at).slice(0, this.unitNodes.size - this.unitNodeCap).map(([u]) => u);
+      const drop = new Set(old);
+      for (const u of old) this.unitNodes.delete(u);
+      this.unitStats.dropped += old.length;
+      const end = (x: any) => String(typeof x === "object" && x ? x.id : x);
+      const keepN = nodes.filter((m: any) => !drop.has(String(m.id)));
+      const keepL = links.filter((l: any) => !drop.has(end(l.source)) && !drop.has(end(l.target)));
+      this.graph.graphData({ nodes: keepN, links: keepL });
+    } else {
+      this.graph.graphData({ nodes, links });
+    }
+    if (this.layoutMode === "projector") this.treeSpring();
+    this.graph.d3ReheatSimulation?.();
+    this.batchDirty = true;
+    return n;
+  }
+  /** The unit nodes put back after a redraw that rebuilt the force picture. */
+  private keepUnits(nodes: any[], links: any[], byId: Map<string, any>): void {
+    if (!this.unitNodes.size) return;
+    const was: any[] = this.graph ? (this.graph.graphData() as any).nodes : [];
+    const prior = new Map<string, any>(was.filter((n: any) => n.unit).map((n: any) => [String(n.id), n]));
+    for (const [id, r] of this.unitNodes) {
+      let n = byId.get(id);
+      if (!n) {
+        n = prior.get(id);
+        if (!n) continue;                       // dropped by a fold: made again when hovered
+        nodes.push(n);
+        byId.set(id, n);
+      }
+      const p = this.unitParent(r.base, r.url, byId);
+      if (p && String(p.id) !== id) links.push({ source: String(p.id), target: id, force: true, unit: true });
+    }
+  }
+
   /** Planted (item 91): payloads held 10 s and never prefetched, as before. */
   plantShortPayloadCache = false;
   prefetchStats = { pages: 0, asked: 0, done: 0 };
@@ -3004,6 +3102,12 @@ export class GraphView extends ItemView {
     // `fromHover` is set NOW, not after the forms load: a hover that ended
     // while the panel was still loading found it unmarked and left it open
     // (2026-10-06: "Billboards don't close").
+    // A panel with no drawn node of its own -- a unit (`chunk|unit`) of a
+    // chunk several share, or a chunk whose page is not unfolded -- hangs
+    // from its OWN grey node, made now (G-251). It hung from a copy of its
+    // chunk's (or page's) position, so every track of a bandcamp list opened
+    // from one node (2026-10-18: "each panel comes from the same node").
+    if (node.virtual && !this.plantSharedAnchor) node = this.ensureUnitNode(node);
     const entry: any = { el, node, pinned: false, surface: null, fromBrowser, minimized: false,
                          fromHover, openedAt: performance.now() };
     this.billboards.set(node.id, entry);

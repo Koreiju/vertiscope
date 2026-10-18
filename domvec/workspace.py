@@ -51,6 +51,9 @@ __all__ = ["Workspace", "ScanResult"]
 
 #: `SET p.title` that keeps the stored title when the writer has none.
 _KEEP_TITLE = "CASE WHEN $title = '' THEN p.title ELSE $title END"
+#: Planted (G-233): a web code block is read from its one-line markdown, not
+#: from the trie's value -- as before 2026-10-18, when none was graphed.
+_PLANT_CODE_FROM_LINE = bool(os.environ.get("DOMVEC_PLANT_CODE_FROM_LINE"))
 
 ProgressFn = Callable[[str, str], None]
 
@@ -372,8 +375,12 @@ class Workspace:
             (node.address, node.value, node.content_hash)
             for node in trie.leaves() if node.address is not None
         ]
+        def held(a, _t=trie):
+            n = _t.find(a)
+            return n.value if n is not None else None
         return self.ingest_chunks(url, chunks, addresses, title=title,
-                                  root_hash=trie.root_hash, defer=defer, complete=complete)
+                                  root_hash=trie.root_hash, defer=defer, complete=complete,
+                                  raw_values=held)
 
     def ingest_chunks(
         self,
@@ -385,6 +392,7 @@ class Workspace:
         root_hash: str = "",
         complete: bool = True,
         removed: Optional[Sequence[str]] = None,
+        raw_values=None,
         defer: bool = False,
     ) -> Tuple[List[MarkdownChunk], Dict[str, int]]:
         """Write already-rendered chunks. The single write path's body.
@@ -571,7 +579,7 @@ class Workspace:
             counts.update(_timed)
         # G-233/G-235: a page's Python code blocks join the code graph.
         try:
-            self.last_web_cpg = self.web_code_cpg(url, chunks)
+            self.last_web_cpg = self.web_code_cpg(url, chunks, raw=raw_values)
         except Exception as exc:                    # noqa: BLE001 -- never fails a capture
             self.last_web_cpg = {"error": str(exc)[:160]}
         return chunks, counts
@@ -685,13 +693,19 @@ class Workspace:
             wire_bytes=len(html), document_bytes=len(html), report=report,
         )
 
-    def web_code_cpg(self, url: str, chunks) -> Dict[str, int]:
+    def web_code_cpg(self, url: str, chunks, raw=None) -> Dict[str, int]:
         """The code blocks of a web page in the code property graph (G-233,
         G-235: "then web code blocks"). A line drawn at a `<pre>` whose text
         is Python (it parses, two lines or more) gets its graph BELOW that
         address; calls into libraries resolve by qualified name against the
         packages the store holds, as a `code://` file's do. Anything that
-        does not parse -- shell, JSON, another language -- is left alone."""
+        does not parse -- shell, JSON, another language -- is left alone.
+
+        `raw(address)` is the code AS THE PAGE HOLDS IT: the trie's value,
+        newlines kept. A chunk's markdown line is the block on one line (its
+        lines zip one-to-one with addresses, so it cannot hold several), and
+        read from that the quicktour's 17 blocks graphed none (2026-10-18).
+        Planted `DOMVEC_PLANT_CODE_FROM_LINE`: the markdown line only."""
         import ast as _ast
         import re as _re
         from .cpg import build_cpg
@@ -707,11 +721,26 @@ class Workspace:
                 if not xp or not _re.search(r"/pre(\[\d+\])?$", xp) or xp in seen:
                     continue
                 seen.add(xp)
-                code = str(getattr(line, "text", "") or "")
+                held = None
+                if raw is not None and not _PLANT_CODE_FROM_LINE:
+                    try:
+                        held = raw(addr)
+                    except Exception:                    # noqa: BLE001
+                        held = None
+                code = str(held or getattr(line, "text", "") or "").strip("\n")
                 code = _re.sub(r"^\s*```[^\n]*\n", "", code)
                 code = _re.sub(r"\n```\s*$", "", code)
                 out["blocks"] += 1
                 if code.count("\n") < 1:
+                    continue
+                # Unchanged since it was graphed: nothing to rewrite. Every
+                # capture re-renders the page's dirty chunks, and each one
+                # deleted and re-wrote the same block's nodes -- a read
+                # between the two saw a block with edges and no nodes.
+                cache = self.__dict__.setdefault("_web_cpg_digest", {})
+                digest = hash(code)
+                if cache.get((url, xp)) == digest:
+                    out["unchanged"] = out.get("unchanged", 0) + 1
                     continue
                 try:
                     _ast.parse(code)
@@ -720,6 +749,9 @@ class Workspace:
                 prefix = xp
                 g = build_cpg(code, url, prefix=prefix, qname="web")
                 got = self.store.upsert_cpg(g, scope="%s|%s/" % (url, prefix))
+                cache[(url, xp)] = digest
+                if len(cache) > 20000:
+                    cache.clear()
                 out["python"] += 1
                 for k in ("nodes", "edges", "cross_out"):
                     out[k] += got.get(k, 0)

@@ -2353,9 +2353,15 @@ class _Handler(BaseHTTPRequestHandler):
                 with _foreground(), _WORK_LOCK:
                     phases["lock_wait"] = round(
                         (time.perf_counter() - asked) * 1000, 1)
+                    # A code block's text as the page holds it -- the
+                    # trie's value, newlines kept -- for the code graph
+                    # (G-233); the markdown line has it on one line.
+                    def _held(addr, _t=getattr(spine, "trie", None)):
+                        n = _t.find(addr) if _t is not None else None
+                        return n.value if n is not None else None
                     _written, counts = self.workspace.ingest_chunks(
                         url, write, complete=False, removed=retired,
-                        title=(body.get("title") or ""))
+                        title=(body.get("title") or ""), raw_values=_held)
                 # The store's own breakdown, carried up. `store` was 96% of a
                 # capture and one number cannot say which statement it is.
                 if isinstance(counts, dict):

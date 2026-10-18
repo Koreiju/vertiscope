@@ -88,6 +88,7 @@ def _index(tree: ast.Module) -> Dict[str, ast.AST]:
     for node, xp in symbols:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             number(node.body, xp)
+    number(tree.body, mod)                    # the module's own statements, numbered last (as `build_cpg`)
     return out
 
 

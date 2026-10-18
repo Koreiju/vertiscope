@@ -38,6 +38,10 @@ import ast
 from typing import Dict, List, Optional, Tuple
 
 KINDS = ("AST", "CFG", "DFG", "CALLS", "INHERITS")
+#: Planted (G-235): the module's own statements are not graphed -- only
+#: functions' -- as before 2026-10-18, when a web sample (`pipe =
+#: pipeline(...)`, all top level) graphed to an empty module.
+_PLANT_NO_MODULE_STMTS = False
 
 
 def module_qname(rel_path: str) -> str:
@@ -170,8 +174,14 @@ def build_cpg(text: str, url: str, rel_path: str = "", prefix: str = "", qname: 
         return None
 
     unresolved = 0
-    for fn, fxp, fq, cls_q in symbols:
-        fkey = local[fq]
+    # The MODULE is a scope too: its top-level statements are numbered, flow
+    # and call like a function's, from the module node -- a web page's sample
+    # is mostly top level (G-233/G-235, 2026-10-18).
+    scopes = list(symbols)
+    if not _PLANT_NO_MODULE_STMTS:
+        scopes.append((tree, module_xp, mod_q or "", None))
+    for fn, fxp, fq, cls_q in scopes:
+        fkey = module_key if fn is tree else local[fq]
         if isinstance(fn, ast.ClassDef):
             outs = []
             for b in fn.bases:
@@ -257,9 +267,11 @@ def build_cpg(text: str, url: str, rel_path: str = "", prefix: str = "", qname: 
 
         # DFG: each use from the latest preceding definition (document order),
         # a parameter's from the function itself.
-        params = {a.arg for a in (fn.args.posonlyargs + fn.args.args + fn.args.kwonlyargs)}
-        if fn.args.vararg: params.add(fn.args.vararg.arg)
-        if fn.args.kwarg: params.add(fn.args.kwarg.arg)
+        params = set()
+        if fn is not tree:
+            params = {a.arg for a in (fn.args.posonlyargs + fn.args.args + fn.args.kwonlyargs)}
+            if fn.args.vararg: params.add(fn.args.vararg.arg)
+            if fn.args.kwarg: params.add(fn.args.kwarg.arg)
         last_def: Dict[str, str] = {p: fkey for p in params}
         for s in order:
             k = stmt_keys[id(s)]
@@ -272,11 +284,17 @@ def build_cpg(text: str, url: str, rel_path: str = "", prefix: str = "", qname: 
             if isinstance(s, (ast.For, ast.AsyncFor)):
                 for v in _names(s.target, ast.Store):
                     last_def[v] = k
+            if isinstance(s, (ast.Import, ast.ImportFrom)):     # an import defines its names
+                for al in s.names:
+                    if al.name != "*":
+                        last_def[(al.asname or al.name).split(".")[0]] = k
 
         # CALLS, from the function (the node a reader opens), with the line.
         outs = []
         seen = set()
-        for n in ast.walk(fn):
+        # The module's calls are its own statements', not its functions'.
+        walked = ast.walk(fn) if fn is not tree else (x for s in order for x in ast.walk(s))
+        for n in walked:
             if not isinstance(n, ast.Call):
                 continue
             q = resolve(n.func, cls_q)

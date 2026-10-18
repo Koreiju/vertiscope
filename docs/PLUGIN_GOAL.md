@@ -4061,6 +4061,35 @@ view: two switches (`calls`, `inherits`, added for `G-241`'s code-graph
 edges) stood in the bar on every page, where they switch nothing and nothing
 said what they are.*
 
+> layered/nested subchunking error (i think) where hovering over
+> sub-components of the same overall chunk only renders those components in
+> the same node. also nodal collapse on hovering on other chunks. ensure
+> fixes are built and tested alongside the remainder of the trace of our new
+> tests and builds. Nodal collapse means hovering over different chunks
+> renders really fast and completely when the full-chunk region is hovered,
+> however each panel comes from the same node. I'm skeptical as well if you
+> also paid attention to some previous prompts in the transcript a few
+> compactions ago about making the rendering happen asynchronously *and*
+> prior to diff-updated vectorization, so seeing immediate response on
+> rendering first and getting vectorization and projection layouts as a
+> downstream task that doesn't block immediate diff rendering feedback and
+> response, but also serving as the primary step prior to vectorization.
+> So, the panels could theoretically render in their gray node layouts right
+> out the gate.
+
+*(Sent 2026-10-18 with three screenshots of bandcamp radio: a show card's
+panel, and two track rows' panels -- "Majid's Whisper", "Fire! Featuring
+Stacy Epps" -- each headed `https://bandcamp.com/radio/1010?from=bc_radio_page
+: /`, opened from one place in the 3D view.) Read as (180), three parts:
+(a) a hovered part of an item -- a track row's cover, its title block -- is
+not a unit; the item is, and every part of it opens the same panel;
+(b) each unit's panel leaves from a node of its OWN -- one level below its
+chunk, grey until the chunk is stored -- never from a position shared with
+the other units of its chunk or its page; (c) rendering is the FIRST step: a
+fresh page's chunks are drawn as grey nodes and their panels open from the
+sensor's tree before anything is stored, embedded or placed, and those
+follow without blocking it.*
+
 ---
 
 ## Standing instructions carried in the verbatim

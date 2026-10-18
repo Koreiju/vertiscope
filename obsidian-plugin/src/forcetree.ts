@@ -180,7 +180,7 @@ export class ForceTree {
     const all = rows.map((r) => r.a);
     let at = canonAddr(element);
     while (at && at.length > 1) {
-      const under = rows.filter((r) => r.a === at || r.a.startsWith(at + "/"));
+      const under: { id: string; a: string }[] = rows.filter((r) => r.a === at || r.a.startsWith(at + "/"));
       if (under.length > max) return null;
       const pickChunk = () => {
         const by = new Map<string, number>();
@@ -188,6 +188,25 @@ export class ForceTree {
         return [...by.entries()].sort((x, y) => y[1] - x[1])[0][0];
       };
       if (under.length >= min) {
+        // A SUB-COMPONENT is not the unit; its item is (G-251): on up while
+        // the level above is not a list, holds no more than `max`, and adds
+        // no other chunk's lines -- a bandcamp track row's image and title
+        // were two units, each a part of the row (2026-10-18). Planted
+        // `plantSubUnit`.
+        if (!ForceTree.plantSubUnit && !(globalThis as any).__domvecPlantSubUnit) {
+          // Levels that add no line are passed through, not taken; a link
+          // ends the climb below it (it is the whole of what it wraps).
+          const mine = new Set(under.map((r) => r.id));
+          let cur = at;
+          for (;;) {
+            const c = cur.lastIndexOf("/"), up = c > 0 ? cur.slice(0, c) : "";
+            if (!up || /\/a(\[\d+\])?$/.test(up) || isListAbove(up, all)) break;
+            const u2 = rows.filter((r) => r.a === up || r.a.startsWith(up + "/"));
+            if (u2.length > max || u2.some((r) => !mine.has(r.id))) break;
+            cur = up;
+            if (u2.length > under.length) { at = up; under.splice(0, under.length, ...u2); }
+          }
+        }
         // An ITEM of a list that fits is not the unit -- the list is, however
         // many lines the item has: inline code and links make a short bullet
         // three lines, and it opened alone (fastapi's README, 2026-10-18:
@@ -332,6 +351,8 @@ export class ForceTree {
   static plantClimbPastList = false;
   /** Planted: below any list the item is the unit (bullets one panel each). */
   static plantItemAlways = false;
+  /** Planted (G-251): a unit stops at its first level with `min` lines -- a part of its item. */
+  static plantSubUnit = false;
   private applySeq = 0;
   private retained = new Map<string, Held>();
   private retainedByText = new Map<string, string>();

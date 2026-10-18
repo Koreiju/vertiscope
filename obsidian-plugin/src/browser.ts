@@ -514,6 +514,11 @@ export class BrowserView extends ItemView {
     // lie. The sensor reports the page's own url in every payload for this
     // reason; the SESSION still has to move, or the new route's chunks are
     // filed under the old one.
+    // A server REDIRECT moves the visit to its target's address (bandcamp:
+    // `radio?show=1010` -> `/radio/1010`); its stages are marked there.
+    view.addEventListener("did-redirect-navigation", (e: any) => {
+      if (e && e.isMainFrame) profiler().visitAlias(String(e.url || ""));
+    });
     view.addEventListener("did-navigate-in-page", (e: any) => {
       // A #fragment is the SAME document: following an anchor link started
       // a new page ("Radix_tree#PATR" stored beside "Radix_tree", 2026-09-27).
@@ -524,6 +529,7 @@ export class BrowserView extends ItemView {
       }
       if (e && e.isMainFrame) {
         this.address.value = view.getURL();
+        profiler().visitAlias(String(view.getURL()));
         // Not decided HERE (G-216, 2026-10-17). archive.org's search list
         // rewrites its own url as it scrolls (`&page=2` ... `&page=7`); taken
         // as seven pages, the same growing list was captured seven times, a
