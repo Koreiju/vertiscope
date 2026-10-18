@@ -376,6 +376,10 @@ export class GraphView extends ItemView {
     /** Opened by a right-click in the browser (`G-78`): it stays until the
      *  markdown side lets it go, and a click on the node does not close it. */
     fromBrowser?: boolean;
+    /** Opened by a hover (a preview): it passes the pointer through (`G-243`). */
+    fromHover?: boolean;
+    minimized?: boolean;
+    openedAt?: number;
   }>();
   private billboardFrame = 0;
   private billboardLayer: HTMLElement | null = null;
@@ -2712,6 +2716,8 @@ export class GraphView extends ItemView {
   plantClampKeptZoom = false;
   /** Planted: a strip hover opens its panel in right-click mode too. */
   plantStripIgnoresToggle = false;
+  /** Planted: a hover preview takes the pointer (and blocks the nodes beneath). */
+  plantPreviewBlocks = false;
   /** A strip result's panel target: its chunk node, or -- standing in its
    *  page (url view) -- the CHUNK's panel at the page's place. */
   private stripTarget(h: { cid: string; url: string }, n: any): any {
@@ -2917,7 +2923,12 @@ export class GraphView extends ItemView {
     if (existing) {
       // Asked for by the browser -- a pin, or a click on its card in the
       // side panel: shown, and expanded if it had been minimized.
-      if (fromBrowser) { existing.fromBrowser = true; this.setMinimized(existing, false); return; }
+      if (fromBrowser) { existing.fromBrowser = true; existing.el.removeClass("is-preview"); this.setMinimized(existing, false); return; }
+      // A click on a node whose HOVER preview is open keeps it: the preview
+      // becomes an ordinary panel the pointer can use (G-243).
+      if (existing.fromHover && !fromHover && !existing.pinned) {
+        existing.fromHover = false; existing.pinned = true; existing.el.removeClass("is-preview"); return;
+      }
       // A second click closes it -- unless the browser's markdown side is
       // holding it open, in which case that side is where it closes.
       if (existing.fromBrowser) return;
@@ -2929,6 +2940,11 @@ export class GraphView extends ItemView {
       this.billboardLayer = host.createDiv({ cls: "domvec-bb-layer" });
     }
     const el = this.billboardLayer.createDiv({ cls: "domvec-bb" });
+    // A HOVER preview passes the pointer through to the graph: an open
+    // preview stood over the nodes beneath it and they could not be hovered
+    // (2026-10-18, PLUGIN_GOAL 172). A click keeps it (see above), and it is
+    // an ordinary panel from then on. Planted `plantPreviewBlocks`.
+    if (fromHover && !this.plantPreviewBlocks) el.addClass("is-preview");
     // Which chunk this panel is, readable without the view: a hover panel and
     // a pinned one can be open at once, and "the first .domvec-bb" read the
     // wrong one (D-36, 2026-10-07).
@@ -2985,6 +3001,7 @@ export class GraphView extends ItemView {
       const dy = down.clientY - box.top;
       const move = (m: PointerEvent) => {
         entry.pinned = true;
+        el.removeClass("is-preview");
         el.style.left = `${m.clientX - host.left - dx}px`;
         el.style.top = `${m.clientY - host.top - dy}px`;
       };
