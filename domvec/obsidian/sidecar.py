@@ -289,6 +289,13 @@ def _integrity_record(workspace, why: str) -> Optional[Dict]:
     the in-memory profile dies with the process. A count that ROSE says so,
     with the statement the store last ran."""
     try:
+        # The previous PROCESS's last record, so a loss that happened across
+        # a restart is flagged too. Every loss so far did (2026-09-23,
+        # 10-07, and 10-18: 180 -> 67,040 empty between the 22:36 start and
+        # the 00:44 one) and the in-memory baseline started empty each time,
+        # so ROSE never fired.
+        if not _INTEGRITY_LAST:
+            _INTEGRITY_LAST.update(_integrity_last_on_disk(workspace))
         with _WORK_LOCK:
             t0 = time.perf_counter()
             got = _integrity_counts(workspace.store)
@@ -357,15 +364,59 @@ def _warm_containment(workspace, stop) -> None:
         _profile("warm_facts", {"error": str(exc)[:160]})
 
 
+def _integrity_last_on_disk(workspace) -> Dict[str, int]:
+    """The counts of the last record in `integrity.log`, or {}."""
+    try:
+        with open(Path(workspace.path) / "integrity.log", "rb") as fh:
+            fh.seek(0, 2); fh.seek(max(0, fh.tell() - 4096))
+            tail = fh.read().decode("utf-8", "replace").splitlines()
+        for line in reversed(tail):
+            line = line.strip()
+            if line.startswith("{"):
+                rec = json.loads(line)
+                return {k: int(rec[k]) for k in ("chunks", "empty_md", "addresses", "blank_akey") if k in rec}
+    except (OSError, ValueError):
+        pass
+    return {}
+
+
+#: Markdown lost by this many chunks or more is refilled from the checkpoint
+#: at once (`Workspace.restore_markdown`: it fills only what is EMPTY, from
+#: the recorded value of the same cid). Planted `DOMVEC_PLANT_NO_MD_HEAL=1`:
+#: recorded only, as before.
+_MD_HEAL_AT = 500
+_PLANT_NO_MD_HEAL = [os.environ.get("DOMVEC_PLANT_NO_MD_HEAL") == "1"]
+
+
+def _heal_markdown(workspace, record: Optional[Dict]) -> Optional[Dict]:
+    rose = ((record or {}).get("ROSE") or {}).get("empty_md", 0)
+    if rose < _MD_HEAL_AT or _PLANT_NO_MD_HEAL[0]:
+        return None
+    try:
+        with _WORK_LOCK:
+            t0 = time.time()
+            got = workspace.restore_markdown()
+            # A chunk indexed while its markdown was empty has a lexical row
+            # with no terms; re-derived from the markdown now held.
+            if got.get("restored") and hasattr(workspace, "rebuild_lexical"):
+                got["lexical"] = workspace.rebuild_lexical()
+        got["s"] = round(time.time() - t0, 1)
+        _profile("md_heal", got)
+        return _integrity_record(workspace, "healed %d" % int(got.get("restored", 0)))
+    except Exception as exc:                        # noqa: BLE001
+        _profile("md_heal", {"error": str(exc)[:160]})
+        return None
+
+
 def _integrity_forever(workspace, stop) -> None:
-    _integrity_record(workspace, "start")
+    _heal_markdown(workspace, _integrity_record(workspace, "start"))
     last = time.time()
     while not stop.wait(30.0):
         if time.time() - last < _INTEGRITY_EVERY_S:
             continue
         if time.time() - max(_LAST_WRITE[0], _LAST_REQUEST[0]) < _CHECKPOINT_QUIET_S:
             continue
-        _integrity_record(workspace, "quiet")
+        _heal_markdown(workspace, _integrity_record(workspace, "quiet"))
         last = time.time()
 
 

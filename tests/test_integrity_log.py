@@ -42,3 +42,42 @@ def test_planted_blanked_markdown_is_flagged(tmp_path):
         assert got["ROSE"]["empty_md"] == got["chunks"]
         assert got["ROSE"]["blank_akey"] == got["addresses"] > 0
         assert _records(ws)[-1]["ROSE"] == got["ROSE"]
+
+
+def _blank_across_a_restart(tmp_path):
+    """A loss that happens BETWEEN two processes: the new process's baseline
+    is empty in memory, and only the log on disk knows what was there."""
+    sidecar._INTEGRITY_LAST.clear()
+    ws = Workspace(tmp_path)
+    ws.index_html(HTML, "http://a.test/p")
+    sidecar._integrity_record(ws, "start")
+    ws.store._execute("MATCH (c:Chunk) SET c.md = ''")
+    sidecar._INTEGRITY_LAST.clear()                       # "a new process"
+    return ws
+
+
+def test_a_loss_across_a_restart_is_flagged_and_healed(tmp_path, monkeypatch):
+    monkeypatch.setattr(sidecar, "_MD_HEAL_AT", 1)
+    ws = _blank_across_a_restart(tmp_path)
+    try:
+        rec = sidecar._integrity_record(ws, "start")
+        assert rec["ROSE"]["empty_md"] == rec["chunks"] > 0
+        healed = sidecar._heal_markdown(ws, rec)
+        assert healed is not None and healed["empty_md"] == 0
+        assert healed["why"].startswith("healed ")
+    finally:
+        ws.close()
+
+
+def test_planted_no_heal_leaves_it_empty(tmp_path, monkeypatch):
+    monkeypatch.setattr(sidecar, "_MD_HEAL_AT", 1)
+    sidecar._PLANT_NO_MD_HEAL[0] = True
+    ws = _blank_across_a_restart(tmp_path)
+    try:
+        rec = sidecar._integrity_record(ws, "start")
+        assert rec["ROSE"]["empty_md"] > 0                # still flagged
+        assert sidecar._heal_markdown(ws, rec) is None
+        assert sidecar._integrity_counts(ws.store)["empty_md"] == rec["chunks"]
+    finally:
+        sidecar._PLANT_NO_MD_HEAL[0] = False
+        ws.close()
