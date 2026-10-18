@@ -248,14 +248,77 @@ def _checkpoint_forever(workspace, stop) -> None:
             if not _checkpoint_due(size, time.time(), _LAST_WRITE[0], _LAST_REQUEST[0]):
                 continue
             _CHECKPOINTING[0] = True
+            db = Path(str(workspace.store.path))
+            before = db.stat().st_size if db.exists() else 0
             try:
                 with _WORK_LOCK:
                     ms = workspace.store.checkpoint()
             finally:
                 _CHECKPOINTING[0] = False
-            _profile("checkpoint", {"ms": ms, "wal_before": wal.stat().st_size if wal.exists() else 0})
+            after = db.stat().st_size if db.exists() else 0
+            _profile("checkpoint", {"ms": ms, "wal_before": size, "store_before": before, "store_after": after})
+            # Where the store GROWS (G-218): each checkpoint is when the WAL's
+            # writes land in the file, so its size before and after, with the
+            # WAL it folded in, dates and sizes every growth step on disk.
+            try:
+                with open(Path(workspace.path) / "store_growth.log", "a", encoding="utf-8") as fh:
+                    fh.write(json.dumps({"at": time.strftime("%Y-%m-%d %H:%M:%S"), "wal_mb": round(size / 1e6, 2),
+                                         "store_mb_before": round(before / 1e6, 1), "store_mb_after": round(after / 1e6, 1),
+                                         "grew_mb": round((after - before) / 1e6, 1), "ms": ms}) + chr(10))
+            except OSError:
+                pass
+            # Outgrown its last compaction, and the reader away: ask the
+            # supervisor to rebuild it (G-218). Taken under the work lock, so
+            # nothing is mid-write when the process leaves.
+            _maybe_compact(workspace, after / 1e6)
         except Exception as exc:                    # noqa: BLE001
             _profile("checkpoint", {"error": str(exc)[:160]})
+
+#: Compaction asked for when the store is this many times its last compacted
+#: size (G-218), and only after this long with no request: the supervisor
+#: rebuilds it with the sidecar down (~40 s for the working store).
+_COMPACT_RATIO = 3.0
+_COMPACT_FLOOR_MB = 1500.0
+_COMPACT_QUIET_S = 600.0
+_PLANT_NO_AUTOCOMPACT = [os.environ.get("DOMVEC_PLANT_NO_AUTOCOMPACT") == "1"]
+_COMPACT_BASE_MB: List[float] = []
+
+
+def _compact_due(store_mb: float, base_mb: float, now: float, last_request: float,
+                 supervised: bool) -> bool:
+    """Is the store big enough, against what it was after its last compaction,
+    and the reader away long enough, to rebuild it now?"""
+    return (supervised and not _PLANT_NO_AUTOCOMPACT[0] and store_mb >= _COMPACT_FLOOR_MB
+            and base_mb > 0 and store_mb >= _COMPACT_RATIO * base_mb
+            and now - last_request >= _COMPACT_QUIET_S)
+
+
+def _maybe_compact(workspace, store_mb: Optional[float] = None) -> None:
+    """After a checkpoint and on every quiet integrity record: if due, exit
+    76 under the work lock (nothing mid-write) for the supervisor."""
+    if store_mb is None:
+        try:
+            store_mb = (Path(workspace.path) / "graph.kuzu").stat().st_size / 1e6
+        except OSError:
+            return
+    if _compact_due(store_mb, _compact_base(workspace, store_mb), time.time(), _LAST_REQUEST[0],
+                    os.environ.get("DOMVEC_SUPERVISED") == "1"):
+        with _WORK_LOCK:
+            _profile("compact_asked", {"store_mb": round(store_mb, 1), "base_mb": _compact_base(workspace, store_mb)})
+            os._exit(76)
+
+
+def _compact_base(workspace, store_mb: float) -> float:
+    """The size the last compaction left (`compacted.json`), else this
+    process's first sight of the store."""
+    if not _COMPACT_BASE_MB:
+        base = store_mb
+        try:
+            base = float(json.loads((Path(workspace.path) / "compacted.json").read_text(encoding="utf-8"))["after_mb"])
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+        _COMPACT_BASE_MB.append(base)
+    return _COMPACT_BASE_MB[0]
 
 #: Seconds between integrity records while the sidecar is quiet.
 _INTEGRITY_EVERY_S = 600.0
@@ -303,6 +366,15 @@ def _integrity_record(workspace, why: str) -> Optional[Dict]:
         rose = {k: got[k] - _INTEGRITY_LAST[k] for k in ("empty_md", "blank_akey")
                 if k in _INTEGRITY_LAST and got[k] > _INTEGRITY_LAST[k]}
         record = {"at": time.strftime("%Y-%m-%d %H:%M:%S"), "why": why, **got, "ms": ms}
+        # The store's size on disk beside its counts (G-218: 1.44 -> 5.14 GB
+        # in 40 minutes after a rebuild, with no record of WHEN or by what).
+        try:
+            db = Path(workspace.path) / "graph.kuzu"
+            record["store_mb"] = round(db.stat().st_size / 1e6, 1)
+            wal = db.with_name("graph.kuzu.wal")
+            record["wal_mb"] = round(wal.stat().st_size / 1e6, 1) if wal.exists() else 0.0
+        except OSError:
+            pass
         if rose:
             record["ROSE"] = rose
             try:
@@ -376,11 +448,16 @@ def _poison_watch(workspace, stop) -> None:
         if why:
             try:
                 with open(Path(workspace.path) / "crashes.log", "a", encoding="utf-8") as fh:
-                    fh.write(time.strftime("%Y-%m-%d %H:%M:%S") + " poisoned, restarting (75): " + why + chr(10))
+                    fh.write(time.strftime("%Y-%m-%d %H:%M:%S") + " poisoned, compacting (76): " + why + chr(10))
             except OSError:
                 pass
             _profile("poisoned", {"why": why})
-            os._exit(75)
+            # 76, not 75: a plain restart replays the same WAL into the same
+            # pool and was refused again -- twice at 13:39 and 13:42 on
+            # 2026-10-18, with segfaults at CHECKPOINT between. The supervisor
+            # compacts with a larger pool (which folded that 50.9 MB WAL and
+            # took the store 5,143 -> 1,543 MB), then restarts.
+            os._exit(76)
 
 
 def _integrity_last_on_disk(workspace) -> Dict[str, int]:
@@ -436,6 +513,7 @@ def _integrity_forever(workspace, stop) -> None:
         if time.time() - max(_LAST_WRITE[0], _LAST_REQUEST[0]) < _CHECKPOINT_QUIET_S:
             continue
         _heal_markdown(workspace, _integrity_record(workspace, "quiet"))
+        _maybe_compact(workspace)
         last = time.time()
 
 
@@ -1505,6 +1583,41 @@ class _Handler(BaseHTTPRequestHandler):
                              "place": round((time.perf_counter() - t2) * 1000, 1)}
                 got["n"] = len(items)
                 _profile("project", {"url": url, "n": len(items), **got["ms"], "placed": len(got.get("pos") or {})})
+                self._send(200, got)
+            except Exception as exc:                # noqa: BLE001
+                self._send(500, {"error": "%s: %s" % (type(exc).__name__, exc)})
+            return
+
+        # A PDF the browser cell reached (G-248): its bytes, read by the page
+        # context from its own document, kept and chunked like a page.
+        if route == "pdf":
+            if self.workspace is None:
+                self._send(503, {"error": "no workspace"})
+                return
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                if length > 120 * 1024 * 1024:
+                    self._send(413, {"error": "a PDF over 80 MB is not taken"})
+                    return
+                body = json.loads(self.rfile.read(length) or b"{}")
+                import base64
+                data = base64.b64decode(body.get("b64") or "")
+                url = str(body.get("url") or "")
+            except Exception as exc:                # noqa: BLE001
+                self._send(400, {"error": "bad body: %s" % exc})
+                return
+            if not data.startswith(b"%PDF") or not url:
+                self._send(400, {"error": "not a PDF"})
+                return
+            try:
+                t0 = time.time()
+                with _foreground(), _WORK_LOCK:
+                    got = self.workspace.index_pdf(data, url)
+                    got["cids"] = [r[0] for r in self.workspace.store._rows(
+                        "MATCH (c:Chunk {url: $u}) RETURN c.cid", {"u": got["url"]})]
+                got["ms"] = round((time.time() - t0) * 1000)
+                _LAST_WRITE[0] = time.time()
+                _profile("pdf", {k: got.get(k) for k in ("url", "pages", "blocks", "chunks", "ms", "pages_without_text")})
                 self._send(200, got)
             except Exception as exc:                # noqa: BLE001
                 self._send(500, {"error": "%s: %s" % (type(exc).__name__, exc)})

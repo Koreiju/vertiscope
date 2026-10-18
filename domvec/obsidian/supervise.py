@@ -19,6 +19,8 @@ process that cannot stay up.
 
 from __future__ import annotations
 
+import json
+import os
 import subprocess
 import sys
 import time
@@ -38,6 +40,11 @@ FAILED_OPEN_S = 15.0
 #: supervisor starts it again without logging a crash or counting toward
 #: setting the write-ahead log aside. Exit 0 stays "stop".
 RESTART_CODE = 75
+
+#: The exit a sidecar makes when its store has outgrown its last compaction
+#: (`sidecar._compact_due`): the supervisor rebuilds the store compact while
+#: nothing has it open (`compact.compact`), then starts the sidecar again.
+COMPACT_CODE = 76
 
 def quarantine_wal(workspace: Path) -> Optional[Path]:
     """Set an unreplayable write-ahead log aside so the store can open.
@@ -70,6 +77,25 @@ def _statement(workspace: Path) -> str:
         return "(no breadcrumb)"
 
 
+def _compact_logged(workspace: Path, why: str) -> dict:
+    """Compact the store (nothing has it open) and say so in both logs."""
+    try:
+        from .compact import compact
+        got = compact(workspace)
+    except Exception as exc:                   # noqa: BLE001 -- never stays down for it
+        got = {"error": "%s: %s" % (type(exc).__name__, str(exc)[:200])}
+    rec = {k: got.get(k) for k in ("before_mb", "after_mb", "swapped", "why_not", "error", "s")}
+    for name, line in (("store_growth.log", json.dumps({"at": time.strftime("%Y-%m-%d %H:%M:%S"), "why": why, "compacted": rec})),
+                       ("crashes.log", "%s compacted (%s): %s" % (time.strftime("%Y-%m-%d %H:%M:%S"), why, json.dumps(rec)))):
+        try:
+            with (workspace / name).open("a", encoding="utf-8") as fh:
+                fh.write(line + chr(10))
+        except OSError:
+            pass
+    print("compacted (%s): %s" % (why, rec), flush=True)
+    return got
+
+
 def supervise(workspace: Path, serve_args: List[str], *,
               command: Optional[List[str]] = None, pause: float = 1.0) -> int:
     """Run `serve` with `serve_args` in a child process; restart it on a crash.
@@ -79,24 +105,52 @@ def supervise(workspace: Path, serve_args: List[str], *,
                           "domvec.obsidian", "serve", "--workspace",
                           str(workspace), *serve_args]
     crashes: List[float] = []
+    compacted_this_burst = False
     log = workspace / "crashes.log"
     while True:
         started = time.time()
-        code = subprocess.call(command)
+        # The child knows a supervisor will act on COMPACT_CODE.
+        code = subprocess.call(command, env={**os.environ, "DOMVEC_SUPERVISED": "1"})
         if code == 0:
             return 0                           # a clean stop is not a crash
         if code == RESTART_CODE:
             continue                           # asked for (POST /shutdown): not a crash
+        if code == COMPACT_CODE:               # asked for: outgrown, or its pool refused
+            _compact_logged(workspace, "asked")
+            continue
         now = time.time()
         crashes = [t for t in crashes if now - t < WINDOW_S] + [now]
+        if len(crashes) == 1:
+            compacted_this_burst = False
+        line = "%s exit=%s after=%.0fs statement=%s" % (
+            time.strftime("%Y-%m-%d %H:%M:%S"), code, now - started,
+            _statement(workspace)) + chr(10)
+        try:
+            with log.open("a", encoding="utf-8") as fh:
+                fh.write(line)
+        except OSError:
+            pass
+        print("sidecar crashed (%s); %s" % (code, line.strip()), flush=True)
+        # Two crashes inside a minute: the STORE, not the moment, is the
+        # problem -- 2026-10-18 13:39-13:44 every start segfaulted 22 s in, at
+        # CHECKPOINT, replaying a WAL its pool could not hold; compacted with
+        # a larger pool it opened, folded that WAL and shrank 5,143 -> 1,543
+        # MB. Tried once per burst, and BEFORE setting the WAL aside below,
+        # which loses what the WAL held. Planted `DOMVEC_PLANT_NO_CRASH_COMPACT`.
+        if len(crashes) >= 2 and not compacted_this_burst and os.environ.get("DOMVEC_PLANT_NO_CRASH_COMPACT") != "1":
+            compacted_this_burst = True
+            if _compact_logged(workspace, "two crashes in a minute").get("swapped"):
+                crashes = []
+                time.sleep(pause)
+                continue
         # Two starts in a row that could not even open the store, with a
         # write-ahead log present: the log is the thing that will not replay.
         quick = [t for t in crashes if now - t < WINDOW_S]
-        if code != 0 and now - started < FAILED_OPEN_S and len(quick) >= 2:
+        if now - started < FAILED_OPEN_S and len(quick) >= 2:
             aside = quarantine_wal(workspace)
             if aside is not None:
-                note = "%s store would not open twice; write-ahead log set aside as %s\n" % (
-                    time.strftime("%Y-%m-%d %H:%M:%S"), aside.name)
+                note = "%s store would not open twice; write-ahead log set aside as %s" % (
+                    time.strftime("%Y-%m-%d %H:%M:%S"), aside.name) + chr(10)
                 try:
                     with log.open("a", encoding="utf-8") as fh:
                         fh.write(note)
@@ -104,15 +158,6 @@ def supervise(workspace: Path, serve_args: List[str], *,
                     pass
                 print(note.strip(), flush=True)
                 crashes = []                 # a fresh chance to start
-        line = "%s exit=%s after=%.0fs statement=%s\n" % (
-            time.strftime("%Y-%m-%d %H:%M:%S"), code, now - started,
-            _statement(workspace))
-        try:
-            with log.open("a", encoding="utf-8") as fh:
-                fh.write(line)
-        except OSError:
-            pass
-        print("sidecar crashed (%s); %s" % (code, line.strip()), flush=True)
         if len(crashes) >= BURST:
             print("%d crashes inside %.0f s -- not restarting" % (BURST, WINDOW_S),
                   flush=True)

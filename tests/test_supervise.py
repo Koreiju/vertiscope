@@ -21,9 +21,14 @@ def test_a_crashing_child_is_restarted_logged_and_stopped_after_a_burst(tmp_path
         encoding="utf-8")
     code = supervise(tmp_path, [], command=CRASH, pause=0.0)
     assert code == 139
-    lines = (tmp_path / "crashes.log").read_text(encoding="utf-8").splitlines()
+    all_lines = (tmp_path / "crashes.log").read_text(encoding="utf-8").splitlines()
+    lines = [l for l in all_lines if "exit=" in l]
     assert len(lines) == BURST, "restarted %d times, not %d" % (len(lines), BURST)
     assert all("exit=139" in l and "UNWIND $rows" in l for l in lines)
+    # The second crash tried ONE compaction first (here there is no store,
+    # so it failed and the loop went on to the burst limit).
+    tried = [l for l in all_lines if "compacted (two crashes in a minute)" in l]
+    assert len(tried) == 1 and '"error"' in tried[0]
 
 
 def test_a_clean_stop_is_not_a_crash(tmp_path):
@@ -57,3 +62,28 @@ def test_planted_no_quarantine_gives_up(tmp_path, monkeypatch):
     code = sv.supervise(tmp_path, [], command=_fails_while_wal(tmp_path), pause=0.0)
     assert code != 0
     assert (tmp_path / "graph.kuzu.wal").exists()
+
+
+def test_two_crashes_compact_and_the_store_starts(tmp_path, monkeypatch):
+    """2026-10-18: every start died at CHECKPOINT on a WAL its pool could not
+    hold; compacted (with a larger pool) it opened. The child here starts only
+    once the store was compacted."""
+    import json
+    import domvec.obsidian.supervise as sv
+    done = tmp_path / "compacted.json"
+    monkeypatch.setattr("domvec.obsidian.compact.compact",
+                        lambda ws, **k: (done.write_text(json.dumps({"after_mb": 1})), {"swapped": True, "before_mb": 5, "after_mb": 1})[1])
+    child = [sys.executable, "-c", "import os,sys; sys.exit(0 if os.path.exists(%r) else 139)" % str(done)]
+    assert sv.supervise(tmp_path, [], command=child, pause=0.0) == 0
+    log = (tmp_path / "crashes.log").read_text(encoding="utf-8")
+    assert log.count("exit=139") == 2 and "compacted (two crashes in a minute)" in log
+
+
+def test_planted_no_crash_compact_gives_up(tmp_path, monkeypatch):
+    import domvec.obsidian.supervise as sv
+    monkeypatch.setenv("DOMVEC_PLANT_NO_CRASH_COMPACT", "1")
+    called = []
+    monkeypatch.setattr("domvec.obsidian.compact.compact", lambda ws, **k: called.append(1) or {"swapped": True})
+    child = [sys.executable, "-c", "import sys; sys.exit(139)"]
+    assert sv.supervise(tmp_path, [], command=child, pause=0.0) == 139
+    assert called == []
