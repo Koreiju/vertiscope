@@ -3678,8 +3678,14 @@ export class GraphView extends ItemView {
 
   /** Planted by the telescope's check: chunks at their raw fit (the packed ball). */
   plantNoTelescope = false;
+  /** Planted (G-245): the cloud left where the rank radii put its mass, off its url node. */
+  plantNoRecentre = false;
+  /** Planted (G-245): a telescoped target is reached by the forces alone, as before. */
+  plantTeleByForce = false;
+  /** Chunks glided to a telescoped target (G-245). */
+  teleGlides = 0;
   /** Per open page, what the last telescope did (for the harness). */
-  teleStats = new Map<string, { n: number; raw_p90: number; bound: number; inner: number; k: number; clamped: number; centre_off?: number; relax?: any; root_r?: number }>();
+  teleStats = new Map<string, { n: number; raw_p90: number; bound: number; inner: number; k: number; clamped: number; centre_off?: number; relax?: any; root_r?: number; recentred?: number }>();
 
   /**
    * A page's chunks TELESCOPED radially about its node (2026-10-06: "the umap
@@ -3858,6 +3864,26 @@ export class GraphView extends ItemView {
       rel = relaxCloud([px, py, pz], idx.map((i) => t.pos[i] as V3), radii, rootR, bound, { safety: COLLIDER_SAFETY });
       idx.forEach((i, j) => { t.pos[i] = rel.pos[j]; });
     }
+    // The url node AT the centroid of what is drawn (2026-10-18, PLUGIN_GOAL
+    // 174; Addendum IX's "centroid computed directly from the chunk
+    // coordinates that sets the url node placements"). Centring the RAW
+    // cloud is not enough: the radii are equalised by rank, so a lopsided
+    // fit -- a few far chunks on one side, the rest packed on the other --
+    // drew its mass to one side and the url node at the edge of its own fan
+    // (a new page: 0.59-0.71 of the cloud's radius off, until the projector
+    // compacted the raw positions). The whole cloud is shifted by what is
+    // left over; the shapes and distances among chunks are unchanged.
+    // Planted `plantNoRecentre`.
+    let recentred = 0;
+    if (!this.plantNoRecentre) {
+      const live = t.pos.filter(Boolean) as V3[];
+      if (live.length >= 2) {
+        const m = [0, 1, 2].map((k) => live.reduce((a, q) => a + q[k], 0) / live.length);
+        const d = [px - m[0], py - m[1], pz - m[2]];
+        recentred = Math.hypot(d[0], d[1], d[2]);
+        if (recentred > 1e-6) t.pos = t.pos.map((q) => (q ? [q[0] + d[0], q[1] + d[1], q[2] + d[2]] as V3 : q));
+      }
+    }
     chunks.forEach((c, i) => {
       const p = t.pos[i];
       if (!p) return;
@@ -3866,12 +3892,25 @@ export class GraphView extends ItemView {
         c.fitX = nx; c.fitY = ny; c.fitZ = nz;
         c.__freeUntil = performance.now() + 3000;
       }
+      // A chunk DRAWN far from its target glides there -- whoever set the
+      // target, and whether or not it changed now. Left to the home force a
+      // move is held to 2.5 units a tick under a cooling alpha, and a calm
+      // pin stops it outright: a new page's chunks drew 142-184 units from
+      // targets centred on their url node, pinned, for 25 s (2026-10-18,
+      // PLUGIN_GOAL 174: "url node centroids seem off in many cases"). Not
+      // while the hover spread holds the url apart, nor mid-glide. Planted
+      // `plantTeleByForce`: left to the forces, as before.
+      if (!this.plantTeleByForce && !c.__spreadHome && !c.__glide && Number.isFinite(c.x)
+          && Math.hypot(c.x - nx, c.y - ny, (c.z || 0) - nz) > Math.max(2, 0.05 * bound)) {
+        this.glide(c, [nx, ny, nz]);
+        this.teleGlides++;
+      }
       c.__tele = [nx, ny, nz];
     });
     this.teleStats.set(page.url, { n: chunks.length, raw_p90: Math.round(t.p90 * 10) / 10, bound: Math.round(bound),
                                    centre_off: Math.round(t.centreOff * 10) / 10,
                                    inner: Math.round(inner), k: Math.round(t.k * 100) / 100, clamped: t.clamped,
-                                   root_r: Math.round(rootR * 10) / 10,
+                                   root_r: Math.round(rootR * 10) / 10, recentred: Math.round(recentred * 10) / 10,
                                    relax: rel ? { overlaps: [rel.overlapsBefore, rel.overlapsAfter], inside_root: [rel.insideBefore, rel.insideAfter], iterations: rel.iterations } : null });
   }
 
