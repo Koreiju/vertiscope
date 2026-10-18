@@ -4047,6 +4047,20 @@ as the url's chunks, and the stream resumes on the real page when the site
 lets it through (with (176)). The check itself is the site's: the browser
 cell runs it as any browser would and nothing here works around it.*
 
+> please ensure to resolve hyperlink tails to their domains. also, what are
+> the "inherits" and "calls" buttons for?
+
+*(Sent 2026-10-18 with a screenshot: the transformers quicktour open in the
+browser cell, and a streamed chunk's panel reading "run inference with /
+/docs/transformers/v5.20.1/en/main_classes/pipelines#transformers.Pipeline /
+Pipeline" -- the link's destination shown as the page wrote it.) Read as
+(179): a link's destination is shown resolved against its page --
+`https://huggingface.co/docs/...`, never a bare `/docs/...` tail -- in every
+panel, streamed or stored. The question about the buttons is a defect of the
+view: two switches (`calls`, `inherits`, added for `G-241`'s code-graph
+edges) stood in the bar on every page, where they switch nothing and nothing
+said what they are.*
+
 ---
 
 ## Standing instructions carried in the verbatim
