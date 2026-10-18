@@ -1185,7 +1185,9 @@ class _Handler(BaseHTTPRequestHandler):
                     # at once and the process left before answering (the
                     # restart script read that as "did not answer").
                     time.sleep(0.5)
-                    os._exit(0)
+                    # 75: "restart me" to the supervisor (exit 0 is a stop,
+                    # and the first graceful restart left the sidecar down).
+                    os._exit(75)
             threading.Thread(target=_exit_when_idle, daemon=True).start()
             self._send(200, {"shutting_down": True, "waits_for": "the work lock"})
             return

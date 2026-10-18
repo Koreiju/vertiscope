@@ -33,6 +33,12 @@ WINDOW_S = 60.0
 FAILED_OPEN_S = 15.0
 
 
+
+#: The exit a sidecar makes when asked to RESTART (POST /shutdown): the
+#: supervisor starts it again without logging a crash or counting toward
+#: setting the write-ahead log aside. Exit 0 stays "stop".
+RESTART_CODE = 75
+
 def quarantine_wal(workspace: Path) -> Optional[Path]:
     """Set an unreplayable write-ahead log aside so the store can open.
 
@@ -79,6 +85,8 @@ def supervise(workspace: Path, serve_args: List[str], *,
         code = subprocess.call(command)
         if code == 0:
             return 0                           # a clean stop is not a crash
+        if code == RESTART_CODE:
+            continue                           # asked for (POST /shutdown): not a crash
         now = time.time()
         crashes = [t for t in crashes if now - t < WINDOW_S] + [now]
         # Two starts in a row that could not even open the store, with a

@@ -58,7 +58,12 @@ def find_sidecars(port: int = 8788) -> List[Dict]:
         try:
             cmd = p.info.get("cmdline") or []
             cmd_str = " ".join(cmd)
-            if ("domvec.obsidian" in cmd_str) and ("serve" in cmd_str or "supervise" in cmd_str) and port_str in cmd_str:
+            # A PYTHON process running the module -- a shell whose command
+            # line merely mentions it (this very tool's caller) is not one.
+            name = (p.info.get("name") or "").lower()
+            runs = any(cmd[i] == "-m" and i + 2 < len(cmd) and cmd[i + 1] == "domvec.obsidian"
+                       and cmd[i + 2] in ("serve", "supervise") for i in range(len(cmd)))
+            if name.startswith("python") and runs and port_str in cmd:
                 results.append({
                     "pid": p.info["pid"],
                     "ppid": p.info["ppid"],
@@ -153,7 +158,9 @@ def start_sidecar(
         return {"ok": "error" not in _health(port, 30.0), "already_running": True,
                 "workspace": _workspace_of(running), "processes": running,
                 "note": "left running; pass stop_existing to replace it"}
-    if not force and wal_bytes(workspace) > WAL_LIMIT:
+    # Only when REPLACING a running one: a sidecar that is down must open its
+    # store, replaying whatever WAL it left -- refusing that kept it down.
+    if running and not force and wal_bytes(workspace) > WAL_LIMIT:
         return {"ok": False, "refused": "WAL is %.1f MB (limit %.0f MB); wait for the fold or pass force"
                 % (wal_bytes(workspace) / 1e6, WAL_LIMIT / 1e6)}
     if running:
