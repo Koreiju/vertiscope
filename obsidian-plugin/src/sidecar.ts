@@ -471,6 +471,20 @@ export class Sidecar {
     } catch { return 0; }
   }
 
+  /** Told once a minute while the reader is idle: the sidecar may compact
+   *  its store then (a supervised exit 76 -- `_compact_due`). */
+  async maintenance(readerIdleMs: number): Promise<any> {
+    const base = this.base().trim().replace(/\/+$/, "");
+    if (!base) return null;
+    try {
+      const res = await fetch(`${base}/maintenance`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reader_idle_ms: Math.round(readerIdleMs) }), signal: AbortSignal.timeout(10000),
+      });
+      return res.ok ? await res.json() : null;
+    } catch { return null; }
+  }
+
   async place(cids: string[]): Promise<PlaceResult | null> {
     const base = this.base().trim().replace(/\/+$/, "");
     if (!base || !cids.length) return null;

@@ -1591,11 +1591,18 @@ export class GraphView extends ItemView {
     for (const [id, spec] of this.forceSpecs) {
       if (spec.cid && !spec.stale && drawn.has(spec.cid)) { done.add(id); continue; }
       // Not every sensor chunk is stored (the store drops what draws
-      // nothing), and not every stored chunk gets a vector. A pending node
-      // that nothing has covered in 20 s, or that was covered and never
-      // placed in 90 s, is not coming: it goes, and is counted.
+      // nothing), and not every stored chunk gets a vector. A capture's reply
+      // drops the ones it did not store (`onUnstored` -> `dropForceIds`), so
+      // an uncovered node waits for ITS capture, not a clock: under a slow
+      // store (captures p90 15 s, 55 s seen, 2026-10-18) a flat 20 s threw
+      // away grey nodes a capture was about to save -- 2,060 in one session,
+      // read as "a lot of diff scans not yet at least projected after
+      // vectorization". 120 s is the net for a page that never captures;
+      // covered and never placed, 90 s as before. Planted
+      // `plantUncoveredClock`: 20 s, as before.
       const age = now - (spec.born ?? now);
-      if (spec.parent && ((!spec.cid && age > 20000) || age > 90000)) {
+      const uncoveredMs = this.plantUncoveredClock ? 20000 : 120000;
+      if (spec.parent && ((!spec.cid && age > uncoveredMs) || (spec.cid && age > 90000))) {
         done.add(id);
         this.forceTimedOut++;
       }
@@ -1707,6 +1714,8 @@ export class GraphView extends ItemView {
     this.lastExpanded = [...expanded].sort().join("\n");
   }
 
+  /** Planted: an uncovered grey node goes after 20 s whatever its capture is doing. */
+  plantUncoveredClock = false;
   /** Pending force nodes dropped because nothing ever covered or placed them. */
   forceTimedOut = 0;
 
@@ -2745,8 +2754,11 @@ export class GraphView extends ItemView {
     const R = STREAM.BASE * (p && p.level === "page" ? 1 : 0.7);
     const cx = p && Number.isFinite(p.x) ? p.x : (v.x ?? 0), cy = p && Number.isFinite(p.y) ? p.y : (v.y ?? 0);
     const cz = p && Number.isFinite(p.z) ? p.z : (v.z ?? 0);
+    // A unit of a chunk the projector placed is a part of THAT chunk and
+    // takes its colour; only a unit of a grey (streamed) chunk is grey.
+    const color = p && !p.force && p.level !== "page" && p.color ? p.color : "#9aa0a6";
     const n: any = { id, level: "chunk", name: v.name || id, url: v.url, members: 1, tokens: 0,
-                     force: true, unit: true, val: 0.6, color: "#9aa0a6",
+                     force: true, unit: true, val: 0.6, color,
                      x: cx + rr * Math.cos(th) * R, y: cy + rr * Math.sin(th) * R, z: cz + zz * R };
     const nodes = data.nodes.slice();
     const links = data.links.slice();
@@ -5679,6 +5691,24 @@ export class GraphView extends ItemView {
     entry.el.remove();
     this.billboards.delete(id);
     this.stopBillboardLoop();
+    // A unit node exists for its panel: it goes with it (G-251). Kept, they
+    // stood as grey nodes no projection would ever place -- read as scans
+    // left unprojected (2026-10-18: "a lot of diff scans not yet at least
+    // projected after vectorization"). Planted `plantKeepUnits`.
+    if (this.unitNodes.has(id) && !this.plantKeepUnits) this.dropUnitNode(id);
+  }
+  /** Planted: a unit node outlives its panel (grey until the cap), as before. */
+  plantKeepUnits = false;
+  private dropUnitNode(id: string): void {
+    this.unitNodes.delete(id);
+    if (!this.graph) return;
+    const data: any = this.graph.graphData();
+    if (!data.nodes.some((n: any) => String(n.id) === id && n.unit)) return;
+    const end = (x: any) => String(typeof x === "object" && x ? x.id : x);
+    this.graph.graphData({ nodes: data.nodes.filter((n: any) => !(n.unit && String(n.id) === id)),
+                           links: data.links.filter((l: any) => end(l.source) !== id && end(l.target) !== id) });
+    this.unitStats.dropped++;
+    this.batchDirty = true;
   }
 
   /** Told when the reader closes a billboard with its x, so the browser can

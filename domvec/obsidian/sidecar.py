@@ -291,12 +291,30 @@ _COMPACT_BASE_MB: List[float] = []
 
 
 def _compact_due(store_mb: float, base_mb: float, now: float, last_request: float,
-                 supervised: bool) -> bool:
+                 supervised: bool, reader_idle_s: float = 0.0, last_write: float = 0.0) -> bool:
     """Is the store big enough, against what it was after its last compaction,
-    and the reader away long enough, to rebuild it now?"""
+    and the reader away long enough, to rebuild it now?
+
+    "Away" is either no request at all for `_COMPACT_QUIET_S`, or -- the one
+    that actually happens -- the PLUGIN reporting the reader idle in Obsidian
+    for that long (`POST /maintenance`) with no capture for
+    `_COMPACT_WRITE_QUIET_S`. The app's own polling never left the sidecar
+    quiet: the store grew 1.6 -> 8.8 GB in four hours and captures slowed
+    from 3-10 s to 15-26 s with compaction due the whole time (2026-10-18).
+    Planted `_PLANT_REQUEST_QUIET_ONLY`: the request clock alone, as before."""
+    away = now - last_request >= _COMPACT_QUIET_S
+    if not away and not _PLANT_REQUEST_QUIET_ONLY[0]:
+        away = reader_idle_s >= _COMPACT_QUIET_S and now - last_write >= _COMPACT_WRITE_QUIET_S
     return (supervised and not _PLANT_NO_AUTOCOMPACT[0] and store_mb >= _COMPACT_FLOOR_MB
-            and base_mb > 0 and store_mb >= _COMPACT_RATIO * base_mb
-            and now - last_request >= _COMPACT_QUIET_S)
+            and base_mb > 0 and store_mb >= _COMPACT_RATIO * base_mb and away)
+
+
+#: No capture or settle for this long, with the reader reported idle.
+_COMPACT_WRITE_QUIET_S = 120.0
+#: Planted: compaction waits for request silence only (never, in practice).
+_PLANT_REQUEST_QUIET_ONLY = [False]
+#: The reader's idle seconds as the plugin last reported them, and when.
+_READER_IDLE = [0.0, 0.0]
 
 
 def _maybe_compact(workspace, store_mb: Optional[float] = None) -> None:
@@ -307,8 +325,10 @@ def _maybe_compact(workspace, store_mb: Optional[float] = None) -> None:
             store_mb = (Path(workspace.path) / "graph.kuzu").stat().st_size / 1e6
         except OSError:
             return
+    # A report older than two minutes says nothing about now.
+    idle_s = _READER_IDLE[0] if time.time() - _READER_IDLE[1] < 120 else 0.0
     if _compact_due(store_mb, _compact_base(workspace, store_mb), time.time(), _LAST_REQUEST[0],
-                    os.environ.get("DOMVEC_SUPERVISED") == "1"):
+                    os.environ.get("DOMVEC_SUPERVISED") == "1", idle_s, _LAST_WRITE[0]):
         with _WORK_LOCK:
             _profile("compact_asked", {"store_mb": round(store_mb, 1), "base_mb": _compact_base(workspace, store_mb)})
             os._exit(76)
@@ -1664,6 +1684,35 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send(200, self.workspace.restore_markdown())
             except Exception as exc:                # noqa: BLE001
                 self._send(500, {"error": "%s: %s" % (type(exc).__name__, exc)})
+            return
+
+        if route == "maintenance":
+            # The plugin, once a minute while the reader is idle in Obsidian:
+            # the one signal that says nobody is using the app (see
+            # `_compact_due`). Answers what it decided; a due compaction exits
+            # 76 for the supervisor after the reply is sent.
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(length) or b"{}")
+            except Exception as exc:                # noqa: BLE001
+                self._send(400, {"error": "bad body: %s" % exc})
+                return
+            _READER_IDLE[0] = float(body.get("reader_idle_ms") or 0) / 1000.0
+            _READER_IDLE[1] = time.time()
+            if self.workspace is None:
+                self._send(503, {"error": "no workspace"})
+                return
+            try:
+                store_mb = (Path(self.workspace.path) / "graph.kuzu").stat().st_size / 1e6
+            except OSError:
+                store_mb = 0.0
+            base = _compact_base(self.workspace, store_mb) if store_mb else 0.0
+            due = _compact_due(store_mb, base, time.time(), 0.0, os.environ.get("DOMVEC_SUPERVISED") == "1",
+                               _READER_IDLE[0], _LAST_WRITE[0]) if store_mb else False
+            self._send(200, {"store_mb": round(store_mb, 1), "base_mb": round(base, 1), "compact": due,
+                             "supervised": os.environ.get("DOMVEC_SUPERVISED") == "1"})
+            if due:
+                threading.Thread(target=_maybe_compact, args=(self.workspace, store_mb), daemon=True).start()
             return
 
         if route == "relink":

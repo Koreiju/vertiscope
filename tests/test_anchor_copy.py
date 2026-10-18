@@ -25,8 +25,8 @@ ROWS = [{"cid": "c%d" % (i % 10), "aid": "a%d" % i, "ord": i} for i in range(50)
 
 
 def _copy(gs, rows):
-    """The opt-in COPY arm (`DOMVEC_ANCHOR_COPY=1`; off by default since the
-    2026-10-18 buffer-pool refusals -- `test_store_poison.py`)."""
+    """The opt-in COPY arm (`DOMVEC_ANCHOR_COPY=1`; off by default --
+    `graphstore._ANCHOR_COPY` says why)."""
     was = GraphStore._ANCHOR_COPY[0]
     GraphStore._ANCHOR_COPY[0] = True
     try:
@@ -50,3 +50,31 @@ def test_a_missing_endpoint_falls_back_without_duplicates():
     gs = _store()
     _copy(gs, ROWS[:10] + [{"cid": "gone", "aid": "a1", "ord": 7}])
     assert len(_edges(gs)) == 10
+
+
+def test_copy_holds_the_readers_lock_while_it_commits():
+    """COPY into a populated rel table checkpoints at its commit, and a
+    checkpoint waits for the reader connection's transactions: unlocked, 3 of
+    30 capture-sized COPYs on a 4.3 GB store timed out (2026-10-18). The lock
+    is held for the statement. Planted `_PLANT_COPY_NO_READ_LOCK`: not held."""
+    seen = {}
+    for planted in (False, True):
+        gs = _store()
+        if gs._read_conn is None:
+            import pytest
+            pytest.skip("shared reads: no reader connection to lock out")
+        real = gs.conn.execute
+
+        def spy(q, *a, _real=real, _gs=gs, **k):
+            if str(q).startswith("COPY Anchors"):
+                seen[planted] = _gs._read_lock.locked()
+            return _real(q, *a, **k)
+
+        gs.conn.execute = spy
+        GraphStore._PLANT_COPY_NO_READ_LOCK[0] = planted
+        try:
+            _copy(gs, ROWS[:20])
+        finally:
+            GraphStore._PLANT_COPY_NO_READ_LOCK[0] = False
+            gs.conn.execute = real
+    assert seen == {False: True, True: False}, seen

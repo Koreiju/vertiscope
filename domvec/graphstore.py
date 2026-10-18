@@ -1253,12 +1253,22 @@ class GraphStore:
 
     #: Planted: anchors created by the two-lookup statement, as before.
     _PLANT_ANCHOR_MATCH = [os.environ.get("DOMVEC_PLANT_ANCHOR_MATCH") == "1"]
-    #: COPY for anchors is OPT-IN (`DOMVEC_ANCHOR_COPY=1`). Appending to the
-    #: populated rel table needs buffer memory that grows with the TABLE, not
-    #: the batch: 41 rows on the 5.1 GB store were refused by a full 2 GiB
-    #: pool (2026-10-18), and that refusal is what crashed the process. The
-    #: statement form is slower per row and ran for weeks without it.
+    #: COPY for anchors is OPT-IN (`DOMVEC_ANCHOR_COPY=1`). It is 33x faster
+    #: a batch (447 ms vs 14.9 s for 290 anchors on a copy of the compacted
+    #: 4.3 GB store, reads alongside, 0 MB grown after a checkpoint --
+    #: `scripts/store_anchor_copy_trial.py`). Tried as the default on
+    #: 2026-10-18 and withdrawn within the hour: the live store took a full
+    #: buffer pool (poisoned, supervised compaction) seven minutes in. Not
+    #: shown to be COPY's -- the store had grown ~1.1 GB a checkpoint all
+    #: afternoon with COPY off (embedding SETs, `store_growth.log`) -- but not
+    #: shown not to be, so the default stays the form that ran for weeks.
+    #: Earlier: a 2 GiB pool refused 41 rows on a 5.1 GB store and the refusal
+    #: crashed the process. When on, COPY holds the readers' lock (its commit
+    #: checkpoints, and unlocked 3 of 30 timed out waiting on reads).
     _ANCHOR_COPY = [os.environ.get("DOMVEC_ANCHOR_COPY") == "1"]
+    #: Planted: COPY without the readers' lock (its checkpoint then waits on
+    #: open reads: 3 of 30 timed out, one for 172 s).
+    _PLANT_COPY_NO_READ_LOCK = [False]
 
     def _create_anchors(self, rows: Sequence[dict]) -> None:
         """Anchors (Chunk -> Address, `ord`) for rows whose two endpoints
@@ -1280,9 +1290,22 @@ class GraphStore:
                 import pandas as pd
                 df = pd.DataFrame({"from": [r["cid"] for r in rows], "to": [r["aid"] for r in rows],
                                    "ord": [int(r["ord"]) for r in rows]})
-                with self._db_lock:
-                    self._breadcrumb("COPY Anchors FROM df", {"rows": rows[:1]})
-                    _close(self.conn.execute("COPY Anchors FROM df"))
+                # COPY into a populated rel table checkpoints at its commit
+                # whatever `auto_checkpoint` says, and a checkpoint waits for
+                # the reader connection's transactions: 3 of 30 COPYs timed out
+                # that way on a 4.3 GB store (one took 172 s before falling
+                # back). Held under the READERS' lock too, as every checkpoint
+                # here is; reads wait the half second it takes.
+                rl = self._read_lock if (self._read_conn is not None and not self._PLANT_COPY_NO_READ_LOCK[0]) else None
+                if rl is not None:
+                    rl.acquire()
+                try:
+                    with self._db_lock:
+                        self._breadcrumb("COPY Anchors FROM df", {"rows": rows[:1]})
+                        _close(self.conn.execute("COPY Anchors FROM df"))
+                finally:
+                    if rl is not None:
+                        rl.release()
                 return
             except Exception as exc:                # noqa: BLE001
                 self._poison_check(exc)

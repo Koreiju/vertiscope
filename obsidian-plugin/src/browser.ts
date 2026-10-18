@@ -2823,6 +2823,18 @@ export class BrowserView extends ItemView {
         // page is one job, not one per drain. Planted `current-page-first`.
         let k = this.plant.has("current-page-first") ? this.captureQueue.findIndex((c) => c.url === this.session) : 0;
         if (k < 0) k = 0;
+        // A LEFT page's settle waits behind the page on screen (2026-10-18):
+        // oldest-first put bandcamp's settle -- its complete trie, 5-12 s on
+        // a store rewriting ~200 moved addresses -- ahead of the next page's
+        // first capture, and that page's chunks sat grey 30-75 s ("a lot of
+        // diff scans not yet at least projected after vectorization"). The
+        // settle is the left page's bookkeeping: nothing drawn waits on it.
+        // Its DRAINS keep their age order. Planted `settle-in-age-order`.
+        if (this.captureQueue[k] && this.captureQueue[k].settle && this.captureQueue[k].url !== this.session
+            && !this.plant.has("settle-in-age-order")) {
+          const cur = this.captureQueue.findIndex((c) => !c.settle && c.url === this.session);
+          if (cur >= 0) k = cur;
+        }
         let job = this.captureQueue.splice(k, 1)[0];
         // Every later drain of the same page queued meanwhile rides along --
         // up to a settle of that page, which stays a barrier.

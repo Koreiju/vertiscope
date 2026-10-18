@@ -77,3 +77,21 @@ def test_due_only_when_outgrown_quiet_and_supervised():
         assert not due(46000, 1440, now=1000, last_request=0, supervised=True)
     finally:
         sidecar._PLANT_NO_AUTOCOMPACT[0] = False
+
+
+def test_due_when_the_plugin_reports_the_reader_idle_though_requests_continue():
+    """The app's polling never left the sidecar request-quiet, so compaction
+    never ran (1.6 -> 8.8 GB, 2026-10-18). The plugin's report of the reader
+    idle in Obsidian counts as away -- if nothing was captured for two
+    minutes. Planted `_PLANT_REQUEST_QUIET_ONLY`: the request clock alone."""
+    due = sidecar._compact_due
+    busy = dict(now=10000, last_request=9999, supervised=True)
+    assert due(4600, 1440, reader_idle_s=900, last_write=9000, **busy)            # idle reader, no capture for 1000 s
+    assert not due(4600, 1440, reader_idle_s=900, last_write=9950, **busy)        # a capture 50 s ago
+    assert not due(4600, 1440, reader_idle_s=60, last_write=0, **busy)            # the reader is here
+    assert not due(4600, 1440, reader_idle_s=0, last_write=0, **busy)             # no report
+    sidecar._PLANT_REQUEST_QUIET_ONLY[0] = True
+    try:
+        assert not due(4600, 1440, reader_idle_s=900, last_write=9000, **busy)
+    finally:
+        sidecar._PLANT_REQUEST_QUIET_ONLY[0] = False

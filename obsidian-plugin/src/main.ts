@@ -144,6 +144,14 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
       sw.paint();
     }
     this.sidecar = new Sidecar(() => this.settings.sidecar);
+    // Once a minute while the reader has been idle five minutes: the sidecar
+    // may compact its store now, the only moment nobody waits on it (2026-10-18:
+    // 1.6 -> 8.8 GB uncompacted, captures 3-10 s -> 15-26 s). Never while the
+    // reader is here. Planted `__domvecPlantNoMaintenance`.
+    this.registerInterval(window.setInterval(() => {
+      const idle = Date.now() - ((window as any).__domvecReaderAt || 0);
+      if (idle >= 300000 && !(globalThis as any).__domvecPlantNoMaintenance) void this.sidecar.maintenance(idle);
+    }, 60000));
     this.links = new VaultLinks(this.app, this.sidecar);
     const links = this.links;
     this.gesture = {
