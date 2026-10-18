@@ -513,6 +513,10 @@ export class GraphView extends ItemView {
       // The panels toggle governs the strip as it governs the browser hover
       // (G-232, PLUGIN_GOAL 161): right-click mode flies without a panel.
       if (this.panelsOn === "rightclick" && !this.plantStripIgnoresToggle) { this.panelModeStats.strip_flown++; return; }
+      // Planted: the hover opens its panel whatever the toggle, as before.
+      // Straight to the panel: `hoverPanel` checks the mode too, and the
+      // planted arm went through it and could never fail (2026-10-18).
+      if (this.plantStripIgnoresToggle && this.panelsOn === "rightclick") { void this.openBillboard(this.stripTarget(h, n), false, true); return; }
       this.hoverPanel(this.stripTarget(h, n));
     };
     this.searchField.onRightHit = (h) => {
