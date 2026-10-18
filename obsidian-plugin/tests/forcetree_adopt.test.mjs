@@ -92,6 +92,8 @@ test("planted (plantGenOnRewriteOnly): the live content collides with the kept i
   } finally { ForceTree.plantGenOnRewriteOnly = false; }
 });
 
+// (max 2 below: a list too big to be one unit -- archive.org's grid, not a
+// prose list, PLUGIN_GOAL 173.)
 // 2026-10-18 (PLUGIN_GOAL 149): archive.org's search list rewrites a tile in
 // place; a merged run still holds the tile's OLD line at that address while
 // the tile's own new chunk holds the new one. The page draws the new one.
@@ -103,20 +105,21 @@ function rewritten() {
   return t;
 }
 test("an address two live chunks hold resolves to the newest content", () => {
-  const u = rewritten().chunkForElement("/html/body/main/section[2]/p");
+  const u = rewritten().chunkForElement("/html/body/main/section[2]/p", 3, 2);
   assert.equal(u && u.id, `f:${A}#2`);
   assert.equal(u.at, "/html/body/main/section[2]");
 });
 test("planted (plantMostLines): the stale run answers", () => {
   ForceTree.plantMostLines = true;
-  try { assert.equal(rewritten().chunkForElement("/html/body/main/section[2]/p").id, `f:${A}#1`); }
+  try { assert.equal(rewritten().chunkForElement("/html/body/main/section[2]/p", 3, 2).id, `f:${A}#1`); }
   finally { ForceTree.plantMostLines = false; }
 });
 test("an item with no lines yet has no unit -- never its neighbours", () => {
-  assert.equal(rewritten().chunkForElement("/html/body/main/section[4]/p"), null);
+  assert.equal(rewritten().chunkForElement("/html/body/main/section[4]/p", 3, 2), null);
 });
 test("planted (plantClimbPastList): the empty item opens the whole list", () => {
   ForceTree.plantClimbPastList = true;
-  try { assert.equal(rewritten().chunkForElement("/html/body/main/section[4]/p").at, "/html/body/main"); }
+  // max 3: the climb itself is what is planted (at max 2 the size cap stops it first)
+  try { assert.equal(rewritten().chunkForElement("/html/body/main/section[4]/p", 3, 3).at, "/html/body/main"); }
   finally { ForceTree.plantClimbPastList = false; }
 });

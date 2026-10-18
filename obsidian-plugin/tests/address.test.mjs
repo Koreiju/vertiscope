@@ -54,7 +54,8 @@ test("a unit stops below a list: an item with one streamed line is still the ite
     L("/g/section/article[2]/div/a", "second tile"),
   ];
   assert.equal(isListAbove("/g/section", lines.map((l) => l.key.slice(2))), true);
-  const u = unitOf(lines, "/g/section/article[2]/div/a/img");
+  // max 3: a grid too big to be one unit (the tile case, not a prose list)
+  const u = unitOf(lines, "/g/section/article[2]/div/a/img", 3, 3);
   assert.equal(u.at, "/g/section/article[2]");
   assert.deepEqual(u.lines.map((l) => l.text), ["second tile"]);
   // a tile with its three lines: the tile
@@ -81,4 +82,18 @@ test("a unit inside a link carries the link (archive.org tiles, PLUGIN_GOAL 171)
   finally { globalThis.__domvecPlantNoWrapLink = false; }
   assert.equal(inUnit("/x/a[3]", "/x/a[3]/b"), true);
   assert.equal(inUnit("/x/div", "/x/div/b"), false);
+});
+
+test("a prose list that fits is ONE unit; a list too big for one keeps the item (PLUGIN_GOAL 173)", () => {
+  const L = (a, t) => ({ text: t, key: "u|" + a });
+  const bullets = [L("/r/ul/li", "Familiarity with the terminal"), L("/r/ul/li[2]", "Ability to read and write code"),
+                   L("/r/ul/li[3]", "Basic software debugging"), L("/r/ul/li[4]", "Enough time to commit")];
+  assert.equal(unitOf(bullets, "/r/ul/li[2]").at, "/r/ul");
+  globalThis.__domvecPlantItemAlways = true;
+  try { assert.equal(unitOf(bullets, "/r/ul/li[2]").at, "/r/ul/li[2]"); }
+  finally { globalThis.__domvecPlantItemAlways = false; }
+  // a grid of 30 tiles x 3 lines (90 > 60): the tile stays the unit
+  const grid = [];
+  for (let i = 1; i <= 30; i++) for (const s of ["a", "b", "c"]) grid.push(L(`/g/section/article[${i}]/${s}`, `t${i}${s}`));
+  assert.equal(unitOf(grid, "/g/section/article[7]/b").at, "/g/section/article[7]");
 });

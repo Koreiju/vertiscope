@@ -83,7 +83,12 @@ export function unitOf(lines: any[], element: string, min = 3, max = 60): { at: 
     const cut = at.lastIndexOf("/");
     if (cut <= 0) break;
     const up = at.slice(0, cut);
-    if (pick.length && isListAbove(up, addrs.filter(Boolean))) return { at, lines: pick };
+    // Below a list the item is the unit -- unless the whole list fits in one
+    // (a prose list is one panel, PLUGIN_GOAL 173). Planted
+    // `__domvecPlantItemAlways`.
+    const listLines = addrs.filter((a) => a && (a === up || a.startsWith(up + "/"))).length;
+    if (pick.length && isListAbove(up, addrs.filter(Boolean))
+        && ((globalThis as any).__domvecPlantItemAlways || listLines > max)) return { at, lines: pick };
     at = up;
   }
   return null;

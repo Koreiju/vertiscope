@@ -3977,6 +3977,76 @@ part of it must carry that link; a unit chosen INSIDE the anchor left the
 anchor's own href behind. (If the reader meant the 3D view's edges, this
 reading is to be corrected.)*
 
+> hovering over non-imaged nodes still blocks un imaged nodes from being
+> effectively hovered over their panel previes
+
+> archive org updates may have broken suchunking to some extent
+
+*(Sent 2026-10-18 with a screenshot: on a github README, three hover panels
+open at once, each holding ONE bullet of a "Prerequisites" list, the panels
+stacked over the graph.) Read as (172): an open hover panel must not stop the
+pointer reaching the nodes beneath it -- a preview is not a wall; and (173)
+the list-item rule made for archive.org's tiles (an item is the unit however
+few lines it has) cut prose lists into one panel per bullet -- a list of
+small items is ONE unit.*
+
+> url node centroids seem off in many cases
+
+*(Screenshot: url nodes sitting at the edge of their chunks' fans, not
+among them.) Read as (174): a url node stands at the centroid of its
+chunks (on record, `G-106`: "its page at the centroid of its chunks").*
+
+> broken chunks spotted on anna's archive
+
+*(Screenshot: a search result's metadata line -- language, format, size,
+year -- framed by a chunk box that cuts across the result.) Read as (175):
+a result card on annas-archive is chunked across its boundaries; the box
+drawn does not match one unit.*
+
+> annas archive re sets from ddos guard
+
+*(Screenshot: the download page behind "Please wait 69 seconds".) Read as
+(176): a DDoS-guard check that reloads the page resets the scan; the stream
+must survive the guard's reload (the page is the same document once the
+check passes).*
+
+Also in this stretch, verbatim, so the record is whole:
+
+> Do this task here: “Fix failing moved-subtree re-address test”
+
+*(Done 2026-10-18, `8a262d0`/`4d50da4`: the receiver refused re-parented
+moves; `tests/test_composed_tree.py` 20 pass with two planted arms.)*
+
+The reader's `/compact` request (the command itself failed on a session
+limit; its words are direction):
+
+> with a focus on most recent progress on open items on your side, current
+> set of open items, new set of directions to add, and a set of priorities for
+> different tasks to complete and fully test/validate with your MCP tools for.
+
+> please ensure all recent messages are fully captured
+
+> there isnt a download process for pdfs and subsequent chunking for us and
+> there really should be
+
+*(Sent with a screenshot: annas-archive's "Download now" page and a copy
+field holding the file's url.) Read as (177): a PDF the reader reaches --
+a download link, a file url -- is fetched, kept, and chunked like a page:
+its text recursively chunked into the trie under its own url, vectorised
+and drawn, with the same panels.*
+
+> also getting 502 on annas archive
+
+> ddos guard on annas archive .pk
+
+*(Screenshots: annas-archive.gl answering "502 Bad Gateway / nginx", and
+annas-archive.pk showing DDoS-Guard's "Checking your browser before
+accessing".) Read as (178): a server error page and a bot-check
+interstitial are page STATES, not the page's content -- they are not stored
+as the url's chunks, and the stream resumes on the real page when the site
+lets it through (with (176)). The check itself is the site's: the browser
+cell runs it as any browser would and nothing here works around it.*
+
 ---
 
 ## Standing instructions carried in the verbatim

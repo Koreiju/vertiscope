@@ -198,7 +198,12 @@ export class ForceTree {
       // and an item with NONE yet has no unit -- climbing on reads the other
       // items (a whole section of neighbours, 2026-10-18). Planted:
       // `plantClimbPastList`.
-      if (isListAbove(up, all)) {
+      // ...unless the whole list fits in one unit: a prose list of bullets is
+      // ONE panel, not one per bullet (github README, 2026-10-18, PLUGIN_GOAL
+      // 173). The item rule is for lists too big to be a unit -- archive.org's
+      // grid. Planted `plantItemAlways`: the item, whatever the list's size.
+      const listFits = () => rows.filter((r) => r.a === up || r.a.startsWith(up + "/")).length <= max;
+      if (isListAbove(up, all) && (ForceTree.plantItemAlways || !listFits())) {
         if (under.length) return { id: pickChunk(), at };
         if (!(ForceTree.plantClimbPastList || (globalThis as any).__domvecPlantPick)) return null;
       }
@@ -315,6 +320,8 @@ export class ForceTree {
   static plantMostLines = false;
   /** Planted: an item with no lines yet climbs past its list (opens the neighbours). */
   static plantClimbPastList = false;
+  /** Planted: below any list the item is the unit (bullets one panel each). */
+  static plantItemAlways = false;
   private applySeq = 0;
   private retained = new Map<string, Held>();
   private retainedByText = new Map<string, string>();
