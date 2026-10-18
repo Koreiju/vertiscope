@@ -138,6 +138,11 @@ def _step_tag(step: str) -> str:
     return step if cut < 0 else step[:cut]
 
 
+#: Planted: a move is accepted only as a one-step re-index (a re-parented
+#: chunk -- slot reassignment -- keeps its old addresses).
+_PLANT_ONE_STEP_MOVES = [False]
+
+
 def _shifted_xpath(xpath: str, new_root: str) -> Optional[str]:
     """``xpath`` re-addressed for the node at ``new_root``, or None.
 
@@ -451,8 +456,30 @@ class Sensor:
             if not new_root:
                 continue
             rebuilt: List[Tuple[ContentAddress, str]] = []
+            # A RE-PARENTED chunk (a slot reassignment: `main/slot/section`
+            # drawn under `header/slot/section`) changes an ancestor's TAG,
+            # which the one-step re-index rule refuses -- and the trie kept the
+            # old addresses of a block the page drew elsewhere
+            # (test_a_large_moved_subtree_is_re_addressed, 2026-10-18). When
+            # every address this chunk holds shares ONE root at the move's
+            # depth, and that root names the same element as the new one, the
+            # chunk's own addresses define where it was: the whole root is
+            # substituted. Planted `_PLANT_ONE_STEP_MOVES`: refused, as before.
+            depth = new_root.count("/")
+            roots = {"/".join(a.xpath.split("/")[:depth + 1]) for a, _d in known
+                     if len(a.xpath.split("/")) > depth}
+            whole = None
+            if (not _PLANT_ONE_STEP_MOVES[0] and len(roots) == 1
+                    and all(len(a.xpath.split("/")) > depth for a, _d in known)):
+                old_root = next(iter(roots))
+                tag = lambda step: step.split("[")[0]
+                if old_root != new_root and tag(old_root.split("/")[-1]) == tag(new_root.split("/")[-1]):
+                    whole = old_root
             for address, digest in known:
-                moved_to = _shifted_xpath(address.xpath, new_root)
+                if whole is not None:
+                    moved_to = new_root + address.xpath[len(whole):]
+                else:
+                    moved_to = _shifted_xpath(address.xpath, new_root)
                 if moved_to is None:
                     rebuilt.append((address, digest))
                     continue

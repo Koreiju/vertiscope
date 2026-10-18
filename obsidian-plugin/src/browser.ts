@@ -2762,7 +2762,13 @@ export class BrowserView extends ItemView {
     this.capturing = true;
     try {
       while (this.captureQueue.length && !(this.closed && !this.captureQueue[0].settle)) {
-        let k = this.captureQueue.findIndex((c) => c.url === this.session);
+        // OLDEST first (2026-10-17, PLUGIN_GOAL 155: "scans are slow to
+        // register older chunks. Perhaps priority on the oldest pushed diff
+        // updates"): the current page went first, and a page scrolled past or
+        // left waited behind every drain of the page on screen. A page's later
+        // drains still ride with its oldest (merged below), so the current
+        // page is one job, not one per drain. Planted `current-page-first`.
+        let k = this.plant.has("current-page-first") ? this.captureQueue.findIndex((c) => c.url === this.session) : 0;
         if (k < 0) k = 0;
         let job = this.captureQueue.splice(k, 1)[0];
         // Every later drain of the same page queued meanwhile rides along --

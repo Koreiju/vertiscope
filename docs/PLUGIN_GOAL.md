@@ -3594,6 +3594,21 @@ larger separation distance; when the hover ends they return to the
 adaptive-scaled transform set after the UMAP fit, at the url-node
 containment level.*
 
+> retrieval usage is buggy. thanks for the excellent improvements though
+
+*(Sent 2026-10-18, after the store rebuild, the k/n bound, tiered pages by
+what they hold, the results strip and the zoom fixes.) Read as (160): using
+retrieval in the app misbehaves -- what exactly is to be found by using it as
+the reader does, and fixed.*
+
+> the fly-to/right-click should also toggle for hovering retrieval results on
+> their scrolled ranks
+
+*Read as (2026-10-18): (161) the panels toggle (G-196/G-215) governs the
+results strip as it governs the browser hover: in right-click mode hovering a
+result on the strip flies to it without a panel and a right-click on it opens
+the panel; in fly-to mode a hover flies and opens it.*
+
 *Where (131) meets "Keep current layout" (asked minutes earlier, about the
 quantile spread, containment and depth compression): (131) replaces the
 collision drift and, by the reader's "exact to the original UMAP

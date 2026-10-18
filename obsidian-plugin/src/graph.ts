@@ -15,6 +15,7 @@
  * and draws them.
  */
 
+import { spreadFactor } from "./spread.ts";
 import { unitOf, lineAddr } from "./address.ts";
 import { centredTelescope, relaxCloud, zoomFor, similarityFit, similarityInverse, rotateInverse, type V3 } from "./camera";
 import { profiler } from "./profile";
@@ -483,14 +484,19 @@ export class GraphView extends ItemView {
     // not drawn, flown to, its panel opened (PLUGIN_GOAL 151: "hovering scroll
     // results includes the fly-to-node feature").
     this.searchField.labelOf = (h) => {
+      // The result's OWN words first: a url names its page, and two pages
+      // held every result -- each item read "duckduckgo.com/" (2026-10-18).
+      const line = String(h.preview || "").split(String.fromCharCode(10)).map((x) => x.replace(/[#*>`_\[\]]/g, "").trim()).find((x) => x.length >= 3);
+      if (line) return line.slice(0, 60);
       const n: any = this.graph ? (this.graph.graphData() as any).nodes.find((x: any) => x.id === h.cid) : null;
       const t = n && (n.name || n.title);
       if (t) return String(t).slice(0, 60);
       try { const u = new URL(h.url); return (u.hostname + u.pathname).slice(0, 60); } catch { return h.url.slice(0, 60); }
     };
     this.searchField.onHoverHit = (h) => {
-      if (!h) { this.focusOn(null); this.hoverPanel(null); return; }
+      if (!h) { this.focusOn(null); this.hoverPanel(null); this.unspread(); return; }
       this.searchStats.strip_hovers++;
+      this.spreadUrl(h.url);
       // The node the search lit for this hit -- its chunk when drawn, else
       // its page (`resolveSearch`) -- flown to as the top result is; a chunk
       // also opens its panel. `highlightChunk` flies only to a DRAWN chunk,
@@ -500,11 +506,18 @@ export class GraphView extends ItemView {
       const n = i >= 0 ? st!.targets[i] : null;
       if (!n) { this.highlightChunk(h.cid, h.url, h.cid); return; }
       this.focusOn(n);
-      // A chunk opens its own panel; a result standing in its PAGE (its chunk
-      // not drawn -- url view) opens the CHUNK's panel at the page's place,
-      // so each item shows its own result, not the page.
-      this.hoverPanel(n.level !== "page" && n.level !== "path" ? n
-        : { id: h.cid, url: h.url, level: "chunk", virtual: true, x: n.x, y: n.y, z: n.z ?? 0 });
+      // The panels toggle governs the strip as it governs the browser hover
+      // (G-232, PLUGIN_GOAL 161): right-click mode flies without a panel.
+      if (this.panelsOn === "rightclick" && !this.plantStripIgnoresToggle) { this.panelModeStats.strip_flown++; return; }
+      this.hoverPanel(this.stripTarget(h, n));
+    };
+    this.searchField.onRightHit = (h) => {
+      const st = this.searchState;
+      const i = st ? st.hits.findIndex((x) => x.cid === h.cid) : -1;
+      const n = i >= 0 ? st!.targets[i] : null;
+      if (!n) return;
+      this.panelModeStats.strip_right++;
+      void this.openBillboard(this.stripTarget(h, n));
     };
     // Tiered retrieval (G-210): url nodes first, then each url's chunks.
     this.searchField.tiers = {
@@ -516,7 +529,8 @@ export class GraphView extends ItemView {
       matching: (q) => (this.tierMatching && this.tierMatching.q === q ? this.tierMatching.n : null),
       page: async (q, url, k) => {
         const got: any = await this.sidecar.search(q, { k, url });
-        return got ? { hits: (got.hits || []).map((h: any) => ({ cid: String(h.cid), url: String(h.url || ""), score: Number(h.score) || 0 })),
+        return got ? { hits: (got.hits || []).map((h: any) => ({ cid: String(h.cid), url: String(h.url || ""), score: Number(h.score) || 0,
+                                                                  preview: String(h.preview || "") })),
                        n: Number(got.n) || 0 } : null;
       },
     };
@@ -2394,6 +2408,8 @@ export class GraphView extends ItemView {
    */
   highlightChunk(cid: string, url = "", stored = ""): void {
     if (!this.graph) return;
+    // The hovered url spreads; off every chunk, it goes back (G-230).
+    if (cid && url) this.spreadUrl(url); else if (!cid) this.unspread();
     const data: any = this.graph.graphData();
     const seq = ++this.hoverSeq;
     // The stored chunk under the pointer, placed if it is not drawn yet, so
@@ -2552,7 +2568,7 @@ export class GraphView extends ItemView {
     try { return window.localStorage.getItem("domvec.panelsOn") === "rightclick" ? "rightclick" : "flyto"; }
     catch { return "flyto"; }
   })();
-  panelModeStats = { hover_skipped: 0, right_opened: 0 };
+  panelModeStats = { hover_skipped: 0, right_opened: 0, strip_flown: 0, strip_right: 0 };
   /** A right-click over the browser on a hovered chunk (G-215): in
    *  right-click mode its panel opens, as a hover's would in fly-to mode. */
   rightPanel(cid: string, url: string, stored: string): void {
@@ -2694,6 +2710,14 @@ export class GraphView extends ItemView {
   plantTrustStored = false;
   /** Planted: the speck clamp pulls in a kept-zoom flight too (the reader's zoom-out lost). */
   plantClampKeptZoom = false;
+  /** Planted: a strip hover opens its panel in right-click mode too. */
+  plantStripIgnoresToggle = false;
+  /** A strip result's panel target: its chunk node, or -- standing in its
+   *  page (url view) -- the CHUNK's panel at the page's place. */
+  private stripTarget(h: { cid: string; url: string }, n: any): any {
+    return n.level !== "page" && n.level !== "path" ? n
+      : { id: h.cid, url: h.url, level: "chunk", virtual: true, x: n.x, y: n.y, z: n.z ?? 0 };
+  }
   /** The hovered element for a grey chunk (the browser's pipebox). */
   hoverElementOf: (cid: string) => string = () => "";
   /** Planted: a hovered undrawn grey chunk opens no panel (its page stands for it). */
@@ -3905,6 +3929,54 @@ export class GraphView extends ItemView {
    * the node is held where it lands.
    */
   private glides = new Set<any>();
+
+  /**
+   * **Per-hover spread** (G-230, PLUGIN_GOAL 159): the hovered url's drawn
+   * nodes are scaled out about the page so their pictures and panels do not
+   * overlap; when the hover leaves the url they glide back to the place the
+   * fit gave them (`__spreadHome`). Planted `plantNoHoverSpread`.
+   */
+  private spread: { url: string; nodes: any[]; k: number } | null = null;
+  spreadStats = { spread: 0, restored: 0, last_k: 1, last_n: 0 };
+  plantNoHoverSpread = false;
+  spreadUrl(url: string): void {
+    if (this.plantNoHoverSpread || !this.graph) return;
+    const key = String(url || "").split("#")[0];
+    if (this.spread && this.spread.url === key) return;
+    this.unspread();
+    if (!key) return;
+    const all: any[] = (this.graph.graphData() as any).nodes;
+    const page = all.find((n: any) => n.level === "page" && !n.force && String(n.url || "").split("#")[0] === key);
+    const members = all.filter((n: any) => n !== page && n.level !== "page" && Number.isFinite(n.x)
+      && String(n.url || "").split("#")[0] === key);
+    if (members.length < 2 || members.length > 400) return;
+    const C = page && Number.isFinite(page.x) ? [page.x, page.y, page.z ?? 0]
+      : [0, 1, 2].map((a) => members.reduce((s: number, n: any) => s + ([n.x, n.y, n.z ?? 0][a]), 0) / members.length);
+    const homes = members.map((n: any) => n.__spreadHome || [n.x, n.y, n.z ?? 0]);
+    const rs = this.graph.nodeRelSize(), media = this.media();
+    const k = spreadFactor(homes, members.map((n: any) => drawnRadius(n, rs, media)));
+    this.spreadStats.last_k = Math.round(k * 100) / 100; this.spreadStats.last_n = members.length;
+    if (k <= 1.01) return;
+    members.forEach((n: any, i: number) => {
+      n.__spreadHome = homes[i];
+      this.glide(n, [0, 1, 2].map((a) => C[a] + (homes[i][a] - C[a]) * k), 300);
+    });
+    this.spread = { url: key, nodes: members, k };
+    this.spreadStats.spread++;
+  }
+  /** The spread url's nodes back where the fit put them. */
+  unspread(): void {
+    const sp = this.spread;
+    if (!sp) return;
+    this.spread = null;
+    for (const n of sp.nodes) {
+      const h = n.__spreadHome;
+      if (!h) continue;
+      delete n.__spreadHome;
+      this.glide(n, h, 300);
+    }
+    this.spreadStats.restored++;
+  }
   /** Planted by the glide check: fit moves assigned outright, as before. */
   plantTeleport = false;
   glideStats = { started: 0, done: 0 };

@@ -864,12 +864,7 @@ class GraphStore:
             )
 
         if edge_rows:
-            self._batch(
-                "UNWIND $rows AS r MATCH (c:Chunk {cid: r.cid}) "
-                "MATCH (a:Address {aid: r.aid}) "
-                "CREATE (c)-[:Anchors {ord: r.ord}]->(a)",
-                edge_rows,
-            )
+            self._create_anchors(edge_rows)
 
         # Whatever is left in `anchor_of` is an anchor whose address this
         # write did not carry. Rare, and it still has to be created.
@@ -893,12 +888,7 @@ class GraphStore:
             # every line after the first -- which is the failure
             # `ingest_chunks` was written to prevent. The two belong together
             # and this comment is the tie.
-            self._batch(
-                "UNWIND $rows AS r MATCH (c:Chunk {cid: r.cid}) "
-                "MATCH (a:Address {aid: r.aid}) "
-                "CREATE (c)-[:Anchors {ord: r.ord}]->(a)",
-                anchor_rows,
-            )
+            self._create_anchors(anchor_rows)
             counts["anchors"] = len(anchor_rows)
         counts["anchors"] = (counts.get("anchors", 0)
                              + len(fused_rows) + len(edge_rows))
@@ -1216,6 +1206,42 @@ class GraphStore:
             # from C would explain. No caller used the result.
             _close(result)
             return None
+
+    #: Planted: anchors created by the two-lookup statement, as before.
+    _PLANT_ANCHOR_MATCH = [os.environ.get("DOMVEC_PLANT_ANCHOR_MATCH") == "1"]
+
+    def _create_anchors(self, rows: Sequence[dict]) -> None:
+        """Anchors (Chunk -> Address, `ord`) for rows whose two endpoints
+        exist, by kuzu's BULK path: `COPY Anchors FROM` a frame.
+
+        The statement form -- `MATCH (c:Chunk {cid}) MATCH (a:Address {aid})
+        CREATE ...` -- cost 23 ms a row on the rebuilt store (1,000 edges in
+        23.0 s; COPY of the same 1,000: 0.37 s), and archive.org's in-place
+        rewrites send most anchors down it (the address is current, only its
+        edge is new): 201 s of 321 s of store time in ten minutes of
+        scrolling, captures queued 10-50 s behind it (2026-10-18, PLUGIN_GOAL
+        155). Falls back to the statement if COPY refuses (an endpoint gone
+        meanwhile), which skips a missing endpoint where COPY would fail.
+        """
+        if not rows:
+            return
+        if not self._PLANT_ANCHOR_MATCH[0] and len(rows) >= 8:
+            try:
+                import pandas as pd
+                df = pd.DataFrame({"from": [r["cid"] for r in rows], "to": [r["aid"] for r in rows],
+                                   "ord": [int(r["ord"]) for r in rows]})
+                with self._db_lock:
+                    self._breadcrumb("COPY Anchors FROM df", {"rows": rows[:1]})
+                    _close(self.conn.execute("COPY Anchors FROM df"))
+                return
+            except Exception:                       # noqa: BLE001
+                pass
+        self._batch(
+            "UNWIND $rows AS r MATCH (c:Chunk {cid: r.cid}) "
+            "MATCH (a:Address {aid: r.aid}) "
+            "CREATE (c)-[:Anchors {ord: r.ord}]->(a)",
+            rows,
+        )
 
     _WRITES = re.compile(r"\b(CREATE|MERGE|SET|DELETE|DETACH|DROP|ALTER|COPY|CALL|CHECKPOINT|INSTALL|LOAD|REMOVE)\b", re.I)
 

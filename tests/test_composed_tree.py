@@ -481,10 +481,19 @@ def moved_in_bulk():
         time.sleep(0.8)
         second = sensor.drain(1)
 
+    # The receiver as production runs it (`workspace.py`, `sidecar.py`):
+    # units, removals AND moves. An unchanged block that changed slots
+    # travels as a MOVE -- its content is not re-sent -- and a fixture that
+    # dropped the moves kept the old addresses and failed this file's claim
+    # against a sensor that had done its job (2026-10-18).
     scan = StreamingScan(url, context_window=200)
-    scan.absorb(first.units, 0, removed=first.removed_addresses)
-    scan.absorb(second.units, 1, removed=second.removed_addresses)
-    yield {"first": first, "second": second, "trie": scan.trie}
+    scan.absorb(first.units, 0, removed=first.removed_addresses, moved=first.moved_addresses)
+    scan.absorb(second.units, 1, removed=second.removed_addresses, moved=second.moved_addresses)
+    # Planted: the receiver without moves, as the fixture was.
+    blind = StreamingScan(url, context_window=200)
+    blind.absorb(first.units, 0, removed=first.removed_addresses)
+    blind.absorb(second.units, 1, removed=second.removed_addresses)
+    yield {"first": first, "second": second, "trie": scan.trie, "blind": blind.trie}
 
 
 @LIVE
@@ -505,6 +514,48 @@ def test_a_large_moved_subtree_is_re_addressed(moved_in_bulk):
     stale = [x for x in movable if "/main/" in x]
     assert not stale, f"addresses the page no longer draws: {stale}"
     assert all("/header/slot/" in x for x in movable), movable
+
+
+@LIVE
+def test_the_one_step_rule_alone_keeps_the_old_addresses():
+    """Planted `_PLANT_ONE_STEP_MOVES`: moves decoded by the re-index rule
+    alone, which refuses a re-parented chunk (main -> header). The moved
+    block's old addresses survive, so the re-address check can fail."""
+    import domvec.sensing as S
+    from domvec.browser import browser_session
+    from domvec.config import load_config
+    from domvec.sensing import Sensor
+    from domvec.stream import StreamingScan
+    url = BULK.as_uri()
+    S._PLANT_ONE_STEP_MOVES[0] = True
+    try:
+        with browser_session(load_config(), headless=True) as driver:
+            driver.get(url)
+            time.sleep(1.0)
+            sensor = Sensor(driver, url, budget=200)
+            sensor.boot()
+            time.sleep(0.7)
+            first = sensor.drain(0)
+            driver.execute_script("window.promote();")
+            time.sleep(0.8)
+            second = sensor.drain(1)
+    finally:
+        S._PLANT_ONE_STEP_MOVES[0] = False
+    scan = StreamingScan(url, context_window=200)
+    scan.absorb(first.units, 0, removed=first.removed_addresses, moved=first.moved_addresses)
+    scan.absorb(second.units, 1, removed=second.removed_addresses, moved=second.moved_addresses)
+    leaves = {n.address.xpath: (n.value or "").strip() for n in scan.trie.leaves()}
+    assert not any(v.startswith("BULK-MOVABLE") and "/header/" in x for x, v in leaves.items()),         "the one-step rule re-addressed the re-parented block: this arm cannot fail"
+
+
+@LIVE
+def test_without_the_moves_the_trie_keeps_the_old_addresses(moved_in_bulk):
+    """Planted: the receiver that ignores moves. The moved block's old
+    addresses survive -- so the check above can fail."""
+    leaves = {node.address.xpath: (node.value or "").strip()
+              for node in moved_in_bulk["blind"].leaves()}
+    stale = [x for x, v in leaves.items() if v.startswith("BULK-MOVABLE") and "/main/" in x]
+    assert stale, "the blind receiver re-addressed the block too: the check cannot fail"
 
 
 @LIVE

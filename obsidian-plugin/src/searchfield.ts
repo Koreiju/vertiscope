@@ -60,7 +60,7 @@ export function holdStep(heldMs: number): number {
   return Math.min(100, Math.max(1, Math.floor(2 ** ((heldMs - 400) / 600))));
 }
 
-export interface FieldHit { cid: string; url: string; score?: number }
+export interface FieldHit { cid: string; url: string; score?: number; preview?: string }
 
 /**
  * The results STRIP's scroll for the bar's (PLUGIN_GOAL 151: "a horizontal
@@ -170,6 +170,8 @@ export class SearchField {
   plantPageSumMatching = false;
   /** Planted: tier 1's page count from n alone (6-40), each asked an even share. */
   plantFixedPages = false;
+  /** Planted: a page counts (and is asked) for all it holds -- two pages took all of n. */
+  plantUncappedShare = false;
   tierStats = { runs: 0, pages: 0, pages_done: 0, first_ms: 0, last_ms: 0, single_ms: 0 };
 
   /**
@@ -193,15 +195,20 @@ export class SearchField {
     let pages = await tiers.pages(q, asked);
     if (seq !== this.seq || q !== this.input.value.trim()) return null;
     if (!pages || !pages.length) return null;
+    // Each page counted (and asked) for at most a SIXTH of n: pages holding
+    // thousands of matches (a search engine's result page) swallowed all of n
+    // and every result came from two pages (2026-10-18, PLUGIN_GOAL 160).
+    // Planted `plantUncappedShare`: a page counted for all it holds.
+    const share = this.plantUncappedShare ? Infinity : Math.max(5, Math.ceil(this.total / 6));
     if (!this.plantFixedPages && pages.every((p) => typeof p.n === "number")) {
       let sum = 0, cut = pages.length;
-      for (let i = 0; i < pages.length; i++) { sum += pages[i].n!; if (sum >= this.total) { cut = i + 1; break; } }
+      for (let i = 0; i < pages.length; i++) { sum += Math.min(pages[i].n!, share); if (sum >= this.total) { cut = i + 1; break; } }
       pages = pages.slice(0, Math.max(1, cut));
     }
     this.tierStats.runs++; this.tierStats.pages = pages.length; this.tierStats.pages_done = 0; this.tierStats.first_ms = 0;
     const per = Math.max(5, Math.ceil(this.total / pages.length) + 5);
     // Each page asked for what it HOLDS (bounded by n), not an even share.
-    const perOf = (p: { n?: number | null }) => (!this.plantFixedPages && typeof p.n === "number") ? Math.max(1, Math.min(this.total, p.n)) : per;
+    const perOf = (p: { n?: number | null }) => (!this.plantFixedPages && typeof p.n === "number") ? Math.max(1, Math.min(this.total, p.n, share)) : per;
     const byCid = new Map<string, FieldHit>();
     let first = true, matching = 0;
     // The corpus's own count when tier 1 gave one; the per-page sum only
@@ -466,7 +473,9 @@ export class SearchField {
   labelOf: (hit: FieldHit) => string = (h) => { try { return new URL(h.url).hostname; } catch { return h.url; } };
   /** A strip item hovered (or left, with null): the graph flies to its node. */
   onHoverHit: (hit: FieldHit | null) => void = () => {};
-  stripStats = { renders: 0, hovers: 0, synced: 0 };
+  /** A strip item right-clicked: the graph opens its panel. */
+  onRightHit: (hit: FieldHit) => void = () => {};
+  stripStats = { renders: 0, hovers: 0, synced: 0, right: 0 };
   /** Planted: the strip stands still while the bar scrolls (not linked). */
   plantStripUnlinked = false;
 
@@ -482,6 +491,8 @@ export class SearchField {
         it.title = h.url;
         it.addEventListener("mouseenter", () => { this.stripStats.hovers++; this.onHoverHit(h); });
         it.addEventListener("mouseleave", () => this.onHoverHit(null));
+        // Right-click: the result's panel (the right-click mode's open, G-232).
+        it.addEventListener("contextmenu", (e) => { e.preventDefault(); this.stripStats.right++; this.onRightHit(h); });
       });
       this.stripStats.renders++;
     }
