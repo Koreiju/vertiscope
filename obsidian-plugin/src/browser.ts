@@ -40,6 +40,7 @@ import { Snapshot, dropSnapshot, getSnapshot, putSnapshot, renderSnapshot, snaps
 
 import { LayoutNode } from "./graph";
 import { Sidecar } from "./sidecar";
+import { GATE_SMALL_LINES, GateVerdict, pageGate } from "./gate";
 import { CentralDiff, EnactResult, SearchHit } from "./types";
 import { ActRecord, ActResult, PanelAction, addressTable, chainFor, parseAddressKey } from "./panelact";
 
@@ -469,6 +470,11 @@ export class BrowserView extends ItemView {
       if (!e || e.isMainFrame === false || this.plant.has("session-at-load")) return;
       const u = String(e.url || "");
       if (/^https?:/.test(u)) void this.pageChanged(u, true);
+    });
+    // The main frame's status: `did-navigate` does not carry it on a webview,
+    // `did-frame-navigate` does (G-249 -- a 502 is not the page).
+    view.addEventListener("did-frame-navigate", (e: any) => {
+      if (e && e.isMainFrame) this.docStatus = { seq: this.docSeq, status: Number(e.httpResponseCode) || 0 };
     });
     view.addEventListener("did-start-navigation", (e: any) => {
       if (e && e.isMainFrame && !e.isInPlace && !e.isSameDocument) {
@@ -1321,6 +1327,12 @@ export class BrowserView extends ItemView {
   private pageScrolledAt = 0;
   /** Documents loaded in this cell, and which one the session belongs to. */
   private docSeq = 0;
+  /** The main frame's HTTP status, for the document it belongs to (G-249). */
+  private docStatus = { seq: -1, status: 0 };
+  /** The document's gate verdict, decided on its first drain (G-249). */
+  private gate: { seq: number; v: GateVerdict } = { seq: -1, v: { why: "", kind: "" } };
+  /** Drains and documents kept out of the store as page STATES (G-249). */
+  gateStats = { drains: 0, docs: 0, last: "", lastSeq: -1, at: 0 };
   private sessionDocSeq = -1;
   /** The PAGE the cell shows: its url, or the session it is an alias of --
    *  archive.org's list rewrites its url as it scrolls, and every check of
@@ -2370,6 +2382,22 @@ export class BrowserView extends ItemView {
   private async absorbDrain(payload: any, url: string, trace: any, drainStart: number,
                             drainBack: number, title: string): Promise<void> {
     const prof = profiler();
+    // A page STATE -- an error response, a bot check -- is not the page
+    // (G-249): it is not streamed, not outlined, not stored, so the url's
+    // trie stays what it was and the real page's drains continue its stream
+    // when it arrives (G-247: a DDoS-Guard check stored as the url's three
+    // lines made the page come back as all new). Planted `store-gates`.
+    const gate = this.gateOf(payload, title);
+    if (gate.why) {
+      this.gateStats.drains++;
+      if (this.gateStats.lastSeq !== this.docSeq) { this.gateStats.docs++; this.gateStats.lastSeq = this.docSeq; }
+      this.gateStats.last = gate.why; this.gateStats.at = Date.now();
+      this.say(`page state · ${gate.why} · not stored; the stream resumes on the page itself`);
+      this.capturedAt.set(url, performance.now());     // nothing to wait for
+      prof.fact(trace, "gated", gate.why);
+      prof.finish(trace, "nothing_placed");
+      return;
+    }
     // The host's wall clock at arrival: a page that logs its own mutations
     // can time the stream against ITS clock (D-40), not the sensor's.
     prof.fact(trace, "host_epoch", Date.now());
@@ -2814,6 +2842,28 @@ export class BrowserView extends ItemView {
     } finally {
       this.capturing = false;
     }
+  }
+
+  /**
+   * The gate verdict for the current document (G-249). Its status and title
+   * every drain; its LINES only on its first drain, which is the whole fold
+   * -- a later drain is a delta, and a few lines of one say nothing about
+   * the page. A document once gated stays gated.
+   */
+  private gateOf(payload: any, title: string): GateVerdict {
+    if (this.plant.has("store-gates")) return { why: "", kind: "" };
+    if (this.gate.seq === this.docSeq && this.gate.v.why) return this.gate.v;
+    const status = this.docStatus.seq === this.docSeq ? this.docStatus.status : 0;
+    const lines: string[] = [];
+    if (this.gate.seq !== this.docSeq && payload && payload.chunks) {
+      outer: for (const c of payload.chunks) for (const l of (c.lines || [])) {
+        lines.push(String((l && l[1]) || ""));
+        if (lines.length > GATE_SMALL_LINES) break outer;
+      }
+    }
+    const v = pageGate(status, title, lines);
+    this.gate = { seq: this.docSeq, v };
+    return v;
   }
 
   /** Settle a page through the queue, after every capture of it already queued. */
