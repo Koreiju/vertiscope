@@ -180,7 +180,13 @@ def _cache_health(body: Dict, key: object = None) -> Dict:
     return body
 _CHECKPOINT_QUIET_S = 120.0
 _CHECKPOINT_MIN_WAL = 8 << 20
-_CHECKPOINT_CEILING = 256 << 20
+#: Folded in past this whatever the reader is doing. 256 MB was too much:
+#: on 2026-10-18 continuous activity kept the WAL from quiet folds for 49
+#: minutes, it reached 201.5 MB, and replaying THAT at the next start
+#: overflowed the 2 GiB pool -- CHECKPOINT segfaulted twice and the store
+#: was poisoned until the supervisor compacted it. A fold of 64 MB is a few
+#: seconds of paused reads.
+_CHECKPOINT_CEILING = 64 << 20
 #: Writes stopped this long: the reader is not browsing, so the fold runs
 #: whatever is polling (`_checkpoint_due`). A two-second lull between polls
 #: was asked for at first and never came -- the open pane polls about once a
@@ -3036,6 +3042,28 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(200, got)
             return
 
+        # `G-235`: a code file's property graph (AST, CFG, DFG, CALLS,
+        # INHERITS), by the same addresses as its chunks; or the totals.
+        if segments[0] in ("cpg", "cpg_stats"):
+            query = parse_qs(parts.query)
+            store = self.workspace.store
+            try:
+                if segments[0] == "cpg_stats":
+                    kinds = dict(store._rows("MATCH ()-[e:Cpg]->() RETURN e.kind, count(*)"))
+                    nodes = dict(store._rows("MATCH (n:CodeNode) RETURN n.kind, count(*)"))
+                    files = store._rows("MATCH (n:CodeNode {kind: 'module'}) RETURN count(*)")
+                    cross = store._rows("MATCH (a:CodeNode)-[e:Cpg]->(b:CodeNode) WHERE a.url <> b.url RETURN e.kind, count(*)")
+                    self._send(200, {"edges": kinds, "nodes": nodes, "files": int(files[0][0]) if files else 0,
+                                     "cross_file": dict(cross)})
+                else:
+                    url = (query.get("url") or [""])[0]
+                    if not url:
+                        self._send(400, {"error": "no url"})
+                        return
+                    self._send(200, store.cpg_of(url))
+            except Exception as exc:                # noqa: BLE001
+                self._send(500, {"error": "%s: %s" % (type(exc).__name__, exc)})
+            return
         if segments[0] == "page_status":
             from .. import tokens as _tokens
             from .layout import (_ESTIMATED_PAGES, _PAGE_POS, live_projection)

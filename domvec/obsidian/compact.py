@@ -28,7 +28,7 @@ from typing import Dict, Optional
 #: Primary keys, so a relationship counts only when both its ends exist (an
 #: untyped `count(r)` also counts edges whose source was DELETED, which EXPORT
 #: rightly leaves out -- the first two manual runs aborted on exactly that).
-PK = {"Page": "url", "Chunk": "cid", "Address": "aid", "Layout": "key"}
+PK = {"Page": "url", "Chunk": "cid", "Address": "aid", "Layout": "key", "CodeNode": "key"}
 
 #: The previous file an AUTOMATIC compaction keeps. One, replaced each time:
 #: a store compacting itself every few hours must not fill the disk with

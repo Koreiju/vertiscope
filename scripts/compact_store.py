@@ -80,7 +80,7 @@ def counts(conn):
 
 
 COUNTS_ORPHANS = {}
-PK = {"Page": "url", "Chunk": "cid", "Address": "aid", "Layout": "key"}
+PK = {"Page": "url", "Chunk": "cid", "Address": "aid", "Layout": "key", "CodeNode": "key"}
 
 
 def reader_idle_ms():

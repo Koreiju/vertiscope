@@ -111,7 +111,11 @@ def _pool_for(path) -> int:
     a quarter of physical memory."""
     if os.environ.get("DOMVEC_KUZU_BUFFER_BYTES"):
         return _BUFFER_POOL
-    floor = 2 * 1024 * 1024 * 1024
+    # 4 GiB, not 2: on 2026-10-18 a CHECKPOINT folding a 72 MB WAL into a
+    # 1.9 GB store segfaulted in a 2 GiB pool (and a 201 MB one twice); the
+    # same folds in the compaction's 6 GiB pool did not. Still capped at a
+    # quarter of physical memory below.
+    floor = 4 * 1024 * 1024 * 1024
     try:
         size = os.path.getsize(str(path)) if os.path.exists(str(path)) else 0
     except OSError:
@@ -149,6 +153,15 @@ _SCHEMA = [
     """CREATE NODE TABLE IF NOT EXISTS Layout(
         key STRING, payload STRING, fitted_at DOUBLE,
         n INT64, PRIMARY KEY(key))""",
+    # `G-235`: the code property graph. A node is a code address
+    # (`url|xpath`: module, class, function, statement); an edge is one of
+    # AST / CFG / DFG / CALLS / INHERITS (`domvec/cpg.py`). Its own tables:
+    # the trie's chunks are what a reader opens, these are how code relates.
+    """CREATE NODE TABLE IF NOT EXISTS CodeNode(
+        key STRING, url STRING, xpath STRING, kind STRING, name STRING,
+        qname STRING, line INT64, end_line INT64,
+        calls_out STRING[], bases_out STRING[], PRIMARY KEY(key))""",
+    "CREATE REL TABLE IF NOT EXISTS Cpg(FROM CodeNode TO CodeNode, kind STRING, var STRING, line INT64, label STRING)",
 ]
 
 #: Columns added after stores already existed. Kuzu has no
@@ -1320,6 +1333,62 @@ class GraphStore:
                 out.append(result.get_next())
             _close(result)
         return out
+
+    def upsert_cpg(self, g: Dict) -> Dict[str, int]:
+        """One file's code property graph, replacing what the store held for
+        it (`G-235`; the per-file `incremental_update` the reader named).
+
+        Calls and bases into OTHER files resolve by qualified name both ways:
+        this file's outgoing ones against the nodes the store holds, and the
+        store's pending ones (`calls_out` / `bases_out` of other files) that
+        name a symbol this file defines -- the edges its DETACH DELETE just
+        removed come back, and a file indexed after its callers still gets
+        their edges. Statement form throughout (no COPY: see `_ANCHOR_COPY`).
+        """
+        url = g["url"]
+        out = {"nodes": 0, "edges": 0, "cross_out": 0, "cross_in": 0}
+        self._execute("MATCH (n:CodeNode {url: $u}) DETACH DELETE n", {"u": url})
+        if g["nodes"]:
+            self._batch("UNWIND $rows AS r CREATE (:CodeNode {key: r.key, url: r.url, xpath: r.xpath, kind: r.kind, "
+                        "name: r.name, qname: r.qname, line: r.line, end_line: r.end_line, "
+                        "calls_out: r.calls_out, bases_out: r.bases_out})", g["nodes"], size=500)
+            out["nodes"] = len(g["nodes"])
+        if g["edges"]:
+            self._batch("UNWIND $rows AS r MATCH (a:CodeNode {key: r.src}), (b:CodeNode {key: r.dst}) "
+                        "CREATE (a)-[:Cpg {kind: r.kind, var: r.var, line: r.line, label: r.label}]->(b)",
+                        g["edges"], size=500)
+            out["edges"] = len(g["edges"])
+        outgoing = [{"src": n["key"], "q": q, "kind": kind}
+                    for n in g["nodes"] for kind, field in (("CALLS", "calls_out"), ("INHERITS", "bases_out"))
+                    for q in n[field]]
+        if outgoing:
+            got = self._rows("UNWIND $rows AS r MATCH (a:CodeNode {key: r.src}), (b:CodeNode {qname: r.q}) "
+                             "WHERE b.url <> $u AND b.kind IN ['function', 'class'] "
+                             "CREATE (a)-[:Cpg {kind: r.kind, var: '', line: 0, label: ''}]->(b) RETURN count(*)",
+                             {"rows": outgoing, "u": url})
+            out["cross_out"] = int(got[0][0]) if got else 0
+        defined = [n["qname"] for n in g["nodes"] if n["kind"] in ("function", "class") and n["qname"]]
+        if defined:
+            got_c = self._rows("UNWIND $qs AS q MATCH (a:CodeNode), (b:CodeNode {qname: q}) "
+                               "WHERE a.url <> $u AND b.url = $u AND list_contains(a.calls_out, q) "
+                               "CREATE (a)-[:Cpg {kind: 'CALLS', var: '', line: 0, label: ''}]->(b) RETURN count(*)",
+                               {"qs": defined, "u": url})
+            got_b = self._rows("UNWIND $qs AS q MATCH (a:CodeNode), (b:CodeNode {qname: q}) "
+                               "WHERE a.url <> $u AND b.url = $u AND list_contains(a.bases_out, q) "
+                               "CREATE (a)-[:Cpg {kind: 'INHERITS', var: '', line: 0, label: ''}]->(b) RETURN count(*)",
+                               {"qs": defined, "u": url})
+            out["cross_in"] = (int(got_c[0][0]) if got_c else 0) + (int(got_b[0][0]) if got_b else 0)
+        return out
+
+    def cpg_of(self, url: str) -> Dict:
+        """One file's CPG as stored: its nodes, its edges, and the edges that
+        cross to or from other files (with those ends' addresses)."""
+        nodes = [dict(zip(("key", "xpath", "kind", "name", "qname", "line", "end_line"), r)) for r in self._rows(
+            "MATCH (n:CodeNode {url: $u}) RETURN n.key, n.xpath, n.kind, n.name, n.qname, n.line, n.end_line", {"u": url})]
+        edges = [dict(zip(("src", "dst", "kind", "var", "line", "label", "src_url", "dst_url"), r)) for r in self._rows(
+            "MATCH (a:CodeNode)-[e:Cpg]->(b:CodeNode) WHERE a.url = $u OR b.url = $u "
+            "RETURN a.key, b.key, e.kind, e.var, e.line, e.label, a.url, b.url", {"u": url})]
+        return {"url": url, "nodes": nodes, "edges": edges}
 
     def _poison_check(self, exc: BaseException) -> None:
         text = str(exc)

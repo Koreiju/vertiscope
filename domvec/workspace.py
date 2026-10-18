@@ -762,6 +762,17 @@ class Workspace:
             url, trie, report=report,
             title=title or PurePosixPath(
                 str(rel_path).replace("\\", "/")).name)
+        # `G-235`: the file's code property graph beside its chunks, by the
+        # same addresses. A file that does not parse has no graph, and its
+        # chunks are indexed regardless (`tag_source`'s rule).
+        self.last_cpg = None
+        if str(rel_path).endswith(".py"):
+            try:
+                from .cpg import build_cpg
+                g = build_cpg(text, url, str(rel_path).replace("\\", "/"))
+                self.last_cpg = {**g["stats"], **self.store.upsert_cpg(g)}
+            except SyntaxError:
+                self.last_cpg = {"error": "does not parse"}
         return ScanResult(
             url=url, addresses=len(trie), chunks=len(chunks),
             lines=sum(len(c.lines) for c in chunks), passes=1,
