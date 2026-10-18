@@ -793,7 +793,9 @@ export class BrowserView extends ItemView {
    *  landed on -- already transformed, so never pending. */
   private settledOf(url: string, covers: Record<string, string>): string[] {
     const map = this.pipebox?.map;
-    if (!map || map.url !== url) return [];
+    // Planted `no-settle` (G-221): a stored, unchanged chunk streams again as
+    // new -- going back to a page repeated its whole scan in the 3D view.
+    if (!map || map.url !== url || this.plant.has("no-settle")) return [];
     return Object.entries(covers).filter(([, cid]) => map.stored.has(cid)).map(([id]) => id);
   }
 
@@ -2052,6 +2054,7 @@ export class BrowserView extends ItemView {
     // read map_follows false 600 ms after an address-bar navigation).
     if (this.pipebox && url && url !== "about:blank") {
       const map = this.pipebox.map;
+      (map.constructor as any).plantNoCache = this.plant.has("no-map-cache");    // G-221's planted arm
       // The page's projected chunks come WITH its map (S-1): drawn the moment
       // the reader lands, from the projector's memory, not through the
       // placement queue behind the page's first capture.

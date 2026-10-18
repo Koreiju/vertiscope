@@ -55,8 +55,32 @@ export class ChunkMap {
   /** Every stored chunk this page's map draws. */
   cids(): string[] { return [...this.byCid.keys()]; }
 
+  /**
+   * The maps of the last pages left, by url (G-221, PLUGIN_GOAL 150: "going
+   * back to previous pages repeats a scan entirely without efficient diff
+   * updates"). Going back used to start from an EMPTY map until the store's
+   * answer came: the new document's first drains arrived before it, nothing
+   * could say they were already stored, and the page streamed again as new
+   * (79 grey nodes on one revisit). Restored synchronously on landing, then
+   * refreshed from the store as before. Planted `plantNoCache`.
+   */
+  private static cache = new Map<string, { byXpath: Map<string, string>; byPrefix: Map<string, string>;
+    byCid: Map<string, string[]>; nodes: any[]; stored: Set<string>; at: number }>();
+  static CACHE_PAGES = 8;
+  static plantNoCache = false;
+  cacheStats = { hits: 0, misses: 0 };
+
+  private remember(): void {
+    if (!this.url || !this.loadedAt) return;
+    ChunkMap.cache.delete(this.url);
+    ChunkMap.cache.set(this.url, { byXpath: new Map(this.byXpath), byPrefix: new Map(this.byPrefix),
+      byCid: new Map(this.byCid), nodes: this.nodes.slice(), stored: new Set(this.stored), at: this.loadedAt });
+    while (ChunkMap.cache.size > ChunkMap.CACHE_PAGES) ChunkMap.cache.delete(ChunkMap.cache.keys().next().value as string);
+  }
+
   /** Replace the map with the store's for `url`: one call, on landing. */
   async load(sidecar: Sidecar, url: string): Promise<boolean> {
+    if (this.url !== url) this.remember();
     // The map is THIS page's from the moment the page is landed on, even
     // when the store has nothing for it yet. It used to keep the previous
     // page's map on a page the store did not hold -- and since a capture
@@ -69,9 +93,16 @@ export class ChunkMap {
     this.byCid.clear();
     this.nodes = [];
     this.stored = new Set();
+    const hit = ChunkMap.plantNoCache ? undefined : ChunkMap.cache.get(url);
+    if (hit) {
+      this.byXpath = new Map(hit.byXpath); this.byPrefix = new Map(hit.byPrefix); this.byCid = new Map(hit.byCid);
+      this.nodes = hit.nodes.slice(); this.stored = new Set(hit.stored); this.loadedAt = hit.at;
+      this.cacheStats.hits++;
+    } else this.cacheStats.misses++;
     const got: any = await sidecar.pageMap(url).catch(() => null);
     if (this.url !== url) return false;          // the reader moved on
-    if (!got || !got.chunks) return false;
+    if (!got || !got.chunks) return !!hit;
+    this.byXpath.clear(); this.byPrefix.clear(); this.byCid.clear();
     this.apply(got.chunks);
     this.stored = new Set(Object.keys(got.chunks));
     this.nodes = Array.isArray(got.nodes) ? got.nodes : [];
