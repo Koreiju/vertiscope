@@ -3843,8 +3843,17 @@ export function makeChecks(env) {
           if (v.searchField && v.searchField.input.value) { v.searchField.input.value = ""; await v.searchField.run(); }
           v.plantNoHoverGlow = ${planted};
           try {
-            // The pointer at the centre of the panel, the region recomputed now.
-            v.pointerNdc = [0, 0]; v.detailDirty = true; v.detailAt = 0;
+            // The pointer ON a drawn node near the panel's centre, the region
+            // recomputed now. At the bare centre the nearest node's nearness
+            // was whatever the scene left there (0.38), and "top === 1" -- a
+            // node under the pointer glows fullest -- asked about no node.
+            const W = v.canvasEl.clientWidth, H = v.canvasEl.clientHeight;
+            const onScreen = v.graph.graphData().nodes.filter((n) => Number.isFinite(n.x) && !n.force)
+              .map((n) => ({ n, s: v.graph.graph2ScreenCoords(n.x, n.y, n.z || 0) }))
+              .filter((o) => o.s.x > 0.2 * W && o.s.x < 0.8 * W && o.s.y > 0.2 * H && o.s.y < 0.8 * H)
+              .sort((a, c) => Math.hypot(a.s.x - W / 2, a.s.y - H / 2) - Math.hypot(c.s.x - W / 2, c.s.y - H / 2));
+            const aim = onScreen[0] ? onScreen[0].s : { x: W / 2, y: H / 2 };
+            v.pointerNdc = [aim.x / W * 2 - 1, -(aim.y / H * 2 - 1)]; v.detailDirty = true; v.detailAt = 0;
             v.refreshDetail(v.graph);
             v.batchSync();
             const rs = v.graph.nodeRelSize();
@@ -3857,7 +3866,7 @@ export function makeChecks(env) {
             }
             const far = v.graph.graphData().nodes.filter((n) => !v.glowNear.has(n) && !n.hovered).slice(0, 2000)
               .filter((n) => { const l = v.lookOf(n, rs, v.drawnMedia); return (l.glass && l.alpha > 1) || (l.glow || 0) > 0; }).length;
-            return { planted: ${planted}, region: near.length, top: near[0] ? Math.round(near[0][1] * 100) / 100 : null,
+            return { planted: ${planted}, aimed_at_node: !!onScreen[0], region: near.length, top: near[0] ? Math.round(near[0][1] * 100) / 100 : null,
                      edge: near.length ? Math.round(near[near.length - 1][1] * 100) / 100 : null,
                      orbs_glowing: orbGlow, pictures: picKept, pictures_glowing: picGlow, glowing_outside: far };
           } finally { v.plantNoHoverGlow = false; v.batchSync(); }
