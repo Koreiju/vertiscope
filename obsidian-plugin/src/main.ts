@@ -318,7 +318,8 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
         // pin and its markdown too (`G-78`): one selection, three surfaces.
         view.browsingUrl = () => {
           const l = this.app.workspace.getLeavesOfType(BROWSER_VIEW)[0];
-          try { return (l?.view as any)?.webview?.getURL() || ""; } catch { return ""; }
+          const b: any = l?.view;
+          try { return (typeof b?.shownUrl === "function" ? b.shownUrl() : b?.webview?.getURL()) || ""; } catch { return ""; }
         };
         // A control in a billboard's chunk snapshot is the page's control seen
         // through its trie address: pressing it acts on the live page in the

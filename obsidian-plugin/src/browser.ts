@@ -396,6 +396,7 @@ export class BrowserView extends ItemView {
                                        this.onHover(cid, url, stored);
                                      });
       this.pipebox.urlOf = (u: string) => this.sessionAliases.get(u) || u;
+      this.pipebox.shownUrl = () => this.shownUrl();
       // Hover-first (`G-80`): the pointer is over something the store does
       // not hold yet, so drain now instead of on the next tick.
       this.pipebox.onUnresolved = () => { if (!this.draining) void this.tick(); };
@@ -468,6 +469,10 @@ export class BrowserView extends ItemView {
     // finishes loading: in between, the new page's sensor already pushed
     // hovers, and they were read against the old page (2026-10-17, a TMDB
     // hover opened an archive.org chunk while TMDB loaded for 15 s).
+    // The url the cell shows, kept from the webview's own commits (see
+    // `shownUrl`). Registered first, so every handler below reads the new one.
+    view.addEventListener("did-navigate", (e: any) => { if (e && e.isMainFrame !== false) this.noteShown(String(e.url || "")); });
+    view.addEventListener("did-navigate-in-page", (e: any) => { if (e && e.isMainFrame) this.noteShown(String(e.url || "")); });
     view.addEventListener("did-navigate", (e: any) => {
       if (!e || e.isMainFrame === false || this.plant.has("session-at-load")) return;
       const u = String(e.url || "");
@@ -1358,9 +1363,36 @@ export class BrowserView extends ItemView {
    *  archive.org's list rewrites its url as it scrolls, and every check of
    *  "is this page open" compared the raw url (`&page=7`) with the session's
    *  and refused: snapshots, the page form, the form saver (2026-10-17). */
+  /**
+   * **The url the cell shows, without asking the main process.** `getURL()`
+   * on a webview is a SYNCHRONOUS round trip to Electron's main process, and
+   * the graph asked it on every force tick (`calm` -> `browsingUrl`), the
+   * hover path on every push and the box on every paint: 1.0 s of 40 on the
+   * Julia forum in `invokeSync`, and while the main process was busy relaying
+   * the page's traffic each ask blocked the frame -- long tasks of 140-370 ms
+   * that held a hover's outline (D-40: ours p95 347 ms, 2026-10-19). The url
+   * changes only when the page commits a navigation, and the webview says so
+   * (`did-navigate`, `did-navigate-in-page`); it is kept from those, and read
+   * again at most once a second in case one was missed. Planted `sync-url`:
+   * asked every time, as before.
+   */
+  shownUrl(): string {
+    const now = performance.now();
+    if (this.plant.has("sync-url") || now - this.shownAt > 1000) {
+      try { this.shown = this.webview?.getURL() || ""; } catch { return this.shown; }
+      this.shownAt = now;
+      this.shownAsks++;
+    }
+    return this.shown;
+  }
+  private shown = "";
+  private shownAt = -Infinity;
+  /** Synchronous asks made (the harness reads it). */
+  shownAsks = 0;
+  private noteShown(u: string): void { if (u) { this.shown = u; this.shownAt = performance.now(); } }
   currentPage(): string {
     let u = "";
-    try { u = this.webview?.getURL() || ""; } catch { return ""; }
+    try { u = this.shownUrl(); } catch { return ""; }
     if (u && u === this.pendingInPage && this.session) return this.session;   // undecided: still the session's
     return this.sessionAliases.get(u) || u;
   }
@@ -2260,7 +2292,7 @@ export class BrowserView extends ItemView {
     const wv = this.webview;
     // Undecided in-page url: drained as the session's until a pushed drain
     // decides (G-216) -- never a fresh tree for a url that may be an alias.
-    const here = wv.getURL();
+    const here = this.shownUrl();
     const url = here === this.pendingInPage && this.session ? this.session : (this.sessionAliases.get(here) || here);
     // Drained once the DOCUMENT is ready, loading or not: YouTube and IMDb
     // never stop "loading" (streaming requests), and waiting for them to meant
@@ -2343,7 +2375,7 @@ export class BrowserView extends ItemView {
         const { payload: p, at } = this.pushQueue.shift()!;
         const wv = this.webview;
         if (!wv || !this.live) continue;
-        let url = String(p.url || wv.getURL() || "");
+        let url = String(p.url || this.shownUrl() || "");
         if (!url || url === "about:blank") continue;
         // An in-page url change, decided by this drain (see did-navigate-in-page):
         // at least half the session's live chunks removed -> a new page;

@@ -201,8 +201,10 @@ export class PipelineBox {
   /** The page a url belongs to -- the browser's session for an url the page
    *  took without leaving its document (G-216); "0/0 in graph" otherwise. */
   urlOf: (raw: string) => string = (u) => u;
+  /** The url the cell shows, kept from its navigations (no synchronous ask). */
+  shownUrl: (() => string) | null = null;
   private url(): string {
-    try { return this.urlOf(this.webview()?.getURL() || ""); } catch { return ""; }
+    try { return this.urlOf((this.shownUrl ? this.shownUrl() : this.webview()?.getURL()) || ""); } catch { return ""; }
   }
 
   private visible(): boolean {

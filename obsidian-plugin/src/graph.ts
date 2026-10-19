@@ -3618,6 +3618,11 @@ export class GraphView extends ItemView {
    * replaced the fit for every open page, and "I'm honestly unsure if the UMAP
    * layouts are being followed at all" (2026-09-28) was right: they were not.
    */
+  /** Telescope passes run and skipped (their inputs unchanged), for the harness. */
+  teleRan = 0;
+  teleSkipped = 0;
+  /** Planted (D-40): every open page re-telescoped on every pass, as before. */
+  plantRetelescopeAll = false;
   private fitChunkSizes(data: any): void {
     if (!this.graph || this.plantBigChunks) return;
     // Url view's pass (an OPEN page's chunks sized and relaxed around its
@@ -3769,7 +3774,22 @@ export class GraphView extends ItemView {
       // wider room per chunk, so chunks were no longer shrunk and drew at full
       // size, packed into a cloud. The chunks keep clear of the url node's
       // DRAWN body only, as any two nodes do (`telescope`, `relaxCloud`).
-      this.telescope(page, chunks, B, relSize, media);
+      // **Only a cloud whose inputs moved is telescoped again.** The pass runs
+      // on every projection of ANY url, and re-telescoping (and relaxing)
+      // every open page each time held the main thread: 5.2 s of 40 s on the
+      // Julia forum went to `relaxCloud` under `applyProjected` while one
+      // page streamed, and a hover's outline waited behind it (D-40: ours
+      // p95 347 ms, 2026-10-19). The targets are a function of the url
+      // node's place and drawn size, the bound, the scale, and each chunk's
+      // fit and size -- all in the signature, a chunk's fit by whether it
+      // still holds what the last pass gave it (`__tele`). Planted
+      // `plantRetelescopeAll`: every open page, every time, as before.
+      let vals = 0;
+      for (const c of chunks) vals += c.val ?? 0;
+      const sig = [B, px, py, pz, page.val, relSize, media ? 1 : 0, chunks.length, Math.round(vals * 1000)].join("|");
+      const still = chunks.every((c: any) => c.__tele && c.__tele[0] === c.fitX && c.__tele[1] === c.fitY && c.__tele[2] === c.fitZ);
+      if (!this.plantRetelescopeAll && page.__teleSig === sig && still) this.teleSkipped++;
+      else { this.telescope(page, chunks, B, relSize, media); page.__teleSig = sig; this.teleRan++; }
       // A floor, so a crowded page's chunks stay visible: the fixed collider
       // margin could eat the whole room and leave specks (val ~ 0).
       const floor = 0.35 * relSize;
