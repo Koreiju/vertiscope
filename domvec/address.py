@@ -421,8 +421,15 @@ class ContentAddress:
     # what it held (`urls.internal`), so "is this a link?" cannot be answered
     # from the tag any more — it is answered from the attribute the value came
     # out of, which is true on both paths.
+    #: Mirrors the sensor's `URL_ATTRS` (`sensor.js`) plus the srcset forms.
+    #: The lazy loaders' attributes were missing, so a WP Rocket photo
+    #: (`data-lazy-src`) was held and never read as a url -- its card drew
+    #: the empty stand-in from `src` (G-197, 2026-10-18).
     _URL_ATTRS = frozenset({"href", "src", "srcset", "action", "poster",
-                            "data-src", "data-href", "cite", "formaction"})
+                            "data-src", "data-href", "cite", "formaction",
+                            "data-lazy-src", "data-lazy-srcset", "data-srcset",
+                            "data-original", "data-original-src", "data-image",
+                            "longdesc"})
 
     @property
     def is_url(self) -> bool:

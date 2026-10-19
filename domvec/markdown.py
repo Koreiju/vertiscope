@@ -775,6 +775,38 @@ def _join_labels(lines: List[MarkdownLine]) -> List[MarkdownLine]:
     return out
 
 
+#: Planted (`G-197`): the first url at an element names it, stand-in or not.
+PLANT_PLACEHOLDER_TARGET = False
+
+_DRAWN_SVG = re.compile(r"<(path|image|circle|ellipse|rect|polygon|polyline|line|g|text|use)\b", re.I)
+
+
+def _is_placeholder(url: str) -> bool:
+    """A lazy loader's stand-in: an inline picture that draws nothing.
+
+    An SVG data url with no shape in it (`<svg viewBox='0 0 171 171'></svg>`,
+    sized to reserve the picture's box), or a raster data url too small to be
+    a picture (the 1x1 transparent GIF, ~70 bytes). A data url that draws is
+    content and stays.
+    """
+    u = (url or "").strip()
+    if not u.startswith("data:image/"):
+        return False
+    if u.startswith("data:image/svg+xml"):
+        body = u.split(",", 1)[1] if "," in u else ""
+        if ";base64" in u.split(",", 1)[0]:
+            try:
+                import base64
+                body = base64.b64decode(body + "===").decode("utf-8", "replace")
+            except Exception:                       # noqa: BLE001
+                return False
+        else:
+            from urllib.parse import unquote
+            body = unquote(body)
+        return not _DRAWN_SVG.search(body)
+    return len(u) < 200
+
+
 #: An image line, as `_RENDER["image"]` draws it: `![alt](url)` or `![alt]`.
 _MEDIA_LINE = re.compile(r"^!\[(?P<alt>[^\]]*)\](?:\((?P<url>[^)]*)\))?$")
 
@@ -871,7 +903,14 @@ def _join_media(lines: List[MarkdownLine]) -> List[MarkdownLine]:
 #: Accessors that name a target -- a place, a resource -- never words.
 _TARGET_ACCESSORS = frozenset({"href", "src", "srcset", "data-src", "data-srcset",
                                "poster", "action", "formaction", "cite", "data",
-                               "xlink:href", "background"})
+                               "xlink:href", "background",
+                               # the lazy loaders' (G-197), as the sensor names them
+                               "data-lazy-src", "data-lazy-srcset", "data-original",
+                               "data-original-src", "data-image", "longdesc"})
+
+#: Where a lazy loader keeps the real picture until it is scrolled to.
+_LAZY_ACCESSORS = frozenset({"data-src", "data-srcset", "data-lazy-src", "data-lazy-srcset",
+                             "data-original", "data-original-src", "data-image"})
 
 #: Planted (`G-152`): a live-path href compared as prose, as before.
 PLANT_URL_AS_PROSE = False
@@ -1528,7 +1567,20 @@ def _render_sized(
     text_at: Dict[str, str] = {}
     for a, v, _lbl, _d in units:
         if a.tag in ("link", "image", "media") and a.is_url:
-            href_at.setdefault(a.xpath.split("/text()")[0], v.strip())
+            if PLANT_PLACEHOLDER_TARGET and a.accessor.split("|", 1)[0].split("[", 1)[0] in _LAZY_ACCESSORS - {"data-src"}:
+                continue
+            # A lazy loader's stand-in never names the picture while the
+            # element holds a real one: WP Rocket writes an empty SVG to
+            # `src` and the photograph to `data-lazy-src`, and taking the
+            # first url drew every recipe card on copykat as the empty SVG
+            # -- 30 stand-ins on one page, the photographs' addresses kept
+            # and their urls never drawn (G-197, 2026-10-18). Planted:
+            # `PLANT_PLACEHOLDER_TARGET`.
+            k, u = a.xpath.split("/text()")[0], v.strip()
+            held = href_at.get(k)
+            if held is None or (not PLANT_PLACEHOLDER_TARGET
+                                and _is_placeholder(held) and not _is_placeholder(u)):
+                href_at[k] = u
     for a, v, _lbl, _d in units:
         if not v.strip():
             continue

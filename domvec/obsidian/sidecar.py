@@ -610,6 +610,12 @@ def _integrity_last_on_disk(workspace) -> Dict[str, int]:
 _MD_HEAL_AT = 500
 _PLANT_NO_MD_HEAL = [os.environ.get("DOMVEC_PLANT_NO_MD_HEAL") == "1"]
 
+#: Module flags a live check may plant through `POST /plant` -- the planted
+#: arm of a rule that runs in the sidecar's projection, not in the plugin.
+_PLANTABLE = {
+    "placeholder-target": ("domvec.markdown", "PLANT_PLACEHOLDER_TARGET"),   # G-197
+}
+
 
 def _heal_markdown(workspace, record: Optional[Dict]) -> Optional[Dict]:
     rose = ((record or {}).get("ROSE") or {}).get("empty_md", 0)
@@ -1837,6 +1843,27 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send(200, self.workspace.restore_markdown())
             except Exception as exc:                # noqa: BLE001
                 self._send(500, {"error": "%s: %s" % (type(exc).__name__, exc)})
+            return
+
+        if route == "plant":
+            # A live check's planted arm for a rule that runs HERE, in the
+            # sidecar's own projection: the check flips the module flag, runs
+            # its arm in the plugin, and flips it back. Only the flags named
+            # in `_PLANTABLE`; anything else is refused.
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(length) or b"{}")
+            except Exception as exc:                # noqa: BLE001
+                self._send(400, {"error": "bad body: %s" % exc})
+                return
+            name = str(body.get("name") or "")
+            if name not in _PLANTABLE:
+                self._send(400, {"error": "not plantable: %s" % name, "plantable": sorted(_PLANTABLE)})
+                return
+            mod, attr = _PLANTABLE[name]
+            module = __import__(mod, fromlist=[attr])
+            setattr(module, attr, bool(body.get("on")))
+            self._send(200, {"name": name, "on": getattr(module, attr)})
             return
 
         if route == "maintenance":

@@ -4034,6 +4034,75 @@ export class GraphView extends ItemView {
     for (const t of k.triples) box.createDiv({ cls: "domvec-file-href", text: `${t.s} \u2014 ${t.p} \u2192 ${t.o}` });
   }
 
+  /**
+   * **Panel content-completeness** (G-197, PLUGIN_GOAL 124: "a development MCP
+   * tool ... to check the content-completeness on rendering to streamed
+   * interactive chunk diffs"). Opens a chunk's panel, draws each form, and
+   * compares it with the stored chunk: every picture the chunk's lines name --
+   * rendered? loaded? broken? -- and how much of its text the form shows.
+   * The MCP tool `panel_completeness` calls this. Closes what it opened.
+   */
+  async panelCompleteness(cid: string, url = ""): Promise<any> {
+    const payload: any = await this.chunkPayload(cid);
+    const lines: any[] = (payload && payload.lines) || [];
+    const base = baseFor(String((payload && payload.url) || url || ""));
+    const abs = (u: string) => { try { return new URL(u, base).href; } catch { return u; } };
+    const tail = (u: string) => { try { const x = new URL(u); return (x.hostname + x.pathname).split("/").slice(-2).join("/").toLowerCase(); } catch { return String(u).toLowerCase(); } };
+    const IMG = /!\[[^\]]*\]\(<?([^)\s>]+)>?\)/g;
+    const expected = [...new Set(lines.flatMap((l: any) => [...String(l.text || "").matchAll(IMG)].map((m) => abs(m[1]))))];
+    const words = lines.map((l: any) => String(l.text || "").replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/[`*_#>|]/g, " ").replace(/\s+/g, " ").trim())
+      .filter((t: string) => t.length > 3);
+    const had = this.billboards.get(cid);
+    const node = this.graph?.graphData().nodes.find((n: any) => String(n.id) === cid)
+      || { id: cid, url: (payload && payload.url) || url, level: "chunk", virtual: true, x: 0, y: 0, z: 0 };
+    if (!had) await this.openBillboard(node, false, false);
+    const e: any = this.billboards.get(cid);
+    const out: any = { cid, url: (payload && payload.url) || url, lines: lines.length, images_expected: expected.length, forms: {} };
+    if (!e) return { ...out, error: "no panel" };
+    for (const form of ["markdown", "page"] as const) {
+      for (let i = 0; i < 6 && e.form !== form; i++) { await this.switchForm(e, form); await new Promise((r) => window.setTimeout(r, 300)); }
+      if (e.form !== form) { out.forms[form] = { drawn: false }; continue; }
+      // Read a render that has FINISHED, of the stored chunk as it is now: a
+      // panel that opened in this form may still be drawing an older payload
+      // (a fresh capture's check saw 3 of 4 pictures that way).
+      if (form === "markdown") await this.renderForm(e, "markdown", true);
+      const body: HTMLElement | null = e.el.querySelector(".domvec-bb-body");
+      // The page form draws its snapshot in an iframe (`domvec-snapshot`):
+      // its pictures and text are in THAT document, not the panel's.
+      const roots = (): HTMLElement[] => {
+        const out: HTMLElement[] = body ? [body] : [];
+        const frames: HTMLIFrameElement[] = body ? Array.from(body.querySelectorAll("iframe")) : [];
+        for (const f of frames) {
+          try { if (f.contentDocument?.body) out.push(f.contentDocument.body); } catch { /* cross-origin */ }
+        }
+        return out;
+      };
+      const imgsNow = (): HTMLImageElement[] => roots().flatMap((r) => Array.from(r.querySelectorAll("img")));
+      const deadline = performance.now() + 4000;
+      while (performance.now() < deadline) {
+        if (imgsNow().every((im) => im.complete)) break;
+        await new Promise((r) => window.setTimeout(r, 200));
+      }
+      const imgs = imgsNow();
+      const srcs = imgs.map((im) => im.currentSrc || im.src);
+      const rendered = new Set(srcs.map(tail));
+      const text = roots().map((r) => r.textContent || "").join(" ").replace(/\s+/g, " ");
+      const shown = words.filter((w: string) => text.includes(w.slice(0, 40))).length;
+      out.forms[form] = { drawn: true, images_rendered: imgs.length,
+                          images_loaded: imgs.filter((im) => im.complete && im.naturalWidth > 0).length,
+                          images_broken: imgs.filter((im) => im.complete && im.naturalWidth === 0).length,
+                          missing: expected.filter((u) => !rendered.has(tail(u))).slice(0, 12),
+                          // A lazy loader's stand-in -- an empty SVG the size of the
+                          // picture -- "loads" and shows nothing.
+                          placeholders: srcs.filter((u) => /^data:image\/svg\+xml/.test(u)
+                            && !/(<|%3C)(path|image|circle|ellipse|rect|polygon|polyline|line|g|text|use)\b/i.test(u)
+                            && !/<(path|image|circle|ellipse|rect|polygon|polyline|line|g|text|use)\b/i.test((() => { try { return decodeURIComponent(u); } catch { return u; } })())).length,
+                          text_cover: words.length ? Math.round((shown / words.length) * 1000) / 1000 : null };
+    }
+    if (!had) this.closeBillboard(cid);
+    return out;
+  }
+
   /** Planted: table rows of different widths share one table run, as before. */
   static plantOneTableRun = false;
   /** Planted: code edges are never fetched or drawn, as before. */

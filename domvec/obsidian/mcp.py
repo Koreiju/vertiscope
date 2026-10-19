@@ -251,6 +251,18 @@ TOOLS: List[Dict] = [
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
+        "name": "panel_completeness",
+        "description": (
+            "Is a chunk's panel COMPLETE against the stored chunk (G-197)? Opens "
+            "its panel, draws each form (markdown, page) and reports: the pictures "
+            "the chunk's lines name, how many each form rendered, loaded and broke, "
+            "which are missing, and the share of the chunk's text the form shows. "
+            "Closes what it opened."),
+        "inputSchema": {"type": "object", "properties": {
+            "cid": {"type": "string", "description": "The chunk id"},
+            "url": {"type": "string", "description": "Its page (optional)"}}, "required": ["cid"]},
+    },
+    {
         "name": "graph_inspect",
         "description": (
             "An off-screen camera framed on one page (default: the one browsed), "
@@ -486,6 +498,9 @@ class DomvecMCP:
             "graph_motion": self._graph_motion,
             "app_anomalies": lambda a: self.live().json_eval(
                 "(async () => JSON.stringify(await window.__domvec.anomalies()))()"),
+            "panel_completeness": lambda a: self.live().json_eval(
+                "(async () => JSON.stringify(await app.workspace.getLeavesOfType('domvec-graph-view')[0].view"
+                ".panelCompleteness(%s, %s)))()" % (json.dumps(str(a.get("cid") or "")), json.dumps(str(a.get("url") or "")))),
             "graph_inspect": lambda a: __import__("domvec.obsidian.motionfilm", fromlist=["inspect"]).inspect(
                 self.live(), str(a.get("url") or ""), int(a.get("size") or 480), str(a.get("path") or "")),
             "verify_state": self._verify_state,

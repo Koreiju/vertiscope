@@ -1269,6 +1269,82 @@ export function makeChecks(env) {
 
   const CHECKS = [
     {
+      id: "G-197",
+      asks: "a chunk panel shows every picture its chunk holds and none it does not: a lazy loader's photograph drawn, not its empty stand-in; an inline SVG's namespace never drawn as a picture; an inline picture that draws is kept -- read back through the panel the reader opens",
+      async run() {
+        // A recipe page as copykat draws one, served locally so the only
+        // motion is the check's: a share bar of inline SVGs declaring
+        // `xmlns:xlink`, a WP Rocket card (`src` an empty SVG, the photo in
+        // `data-lazy-src`), a lazysizes card (a 1x1 GIF, the photo in
+        // `data-src`), and a data-url SVG that DRAWS (a circle) -- which must
+        // survive, or "no stand-ins" was bought by dropping pictures.
+        // Planted, both halves of the old behaviour: the sensor's `xmlnsurl`
+        // and the sidecar's `placeholder-target` (`POST /plant`).
+        const fixtures = await serveFixtures();
+        const plant = async (on) => {
+          const res = await fetch(`${SIDECAR}/plant`, { method: "POST", headers: { "Content-Type": "application/json" },
+                                                       body: JSON.stringify({ name: "placeholder-target", on }) });
+          if (!res.ok) throw new Error("/plant -> " + res.status + " " + await res.text());
+        };
+        const arm = async (planted) => {
+          await plant(planted);
+          try {
+            return await evaluate(`(async () => {
+              ${PREP}
+              const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+              b.plant.delete("xmlnsurl");
+              if (${planted}) b.plant.add("xmlnsurl");
+              try {
+                const PAGE = ${JSON.stringify(fixtures.origin + "/recipe_images.html?g197=")} + (${planted} ? "p" : "c") + Date.now();
+                // A fresh realm, so the sensor boots under this arm's variants.
+                b.go("about:blank"); await sleep(800);
+                if (!(await land(PAGE, 30000))) return { error: "did not land", PAGE };
+                // Stored: the page's chunk set stops changing.
+                let cids = [], same = 0;
+                for (let i = 0; i < 60 && same < 4; i++) {
+                  await sleep(1000);
+                  const now = await v.sidecar.pageCids(PAGE);
+                  same = now.length && now.join() === cids.join() ? same + 1 : 0;
+                  cids = now;
+                }
+                const lines = [];
+                for (const c of cids) { const p = await v.chunkPayload(c); for (const l of (p && p.lines) || []) lines.push({ cid: c, t: String(l.text || "") }); }
+                const pics = lines.filter((l) => /!\\[[^\\]]*\\]\\(/.test(l.t));
+                const has = (s) => pics.filter((l) => l.t.includes(s));
+                const ant = has("Camponotus"), alp = has("Fronalpstock");
+                const out = {
+                  planted: ${planted}, PAGE, chunks: cids.length, picture_lines: pics.length,
+                  namespace_pictures: has("w3.org/1999/xlink").length,
+                  lazy_photo_drawn: ant.length > 0, data_src_photo_drawn: alp.length > 0,
+                  standins_drawn: pics.filter((l) => /\\((data:image\\/svg\\+xml[^)]*viewBox='0%200%20171%20171'%3E%3C\\/svg%3E|data:image\\/gif;base64,R0lGODlhAQABAAAAACH5)/.test(l.t)).length,
+                  drawing_svg_kept: has("%3Ccircle").length > 0,
+                  captions_kept: ["Roasted brussels sprouts", "Feta dip with pita", "a drawn dot"].filter((c) => pics.some((l) => l.t.includes(c))).length,
+                  panels: [],
+                };
+                // The panel the reader opens, for each card's chunk.
+                for (const c of [...new Set([...ant, ...alp].map((l) => l.cid))]) {
+                  const r = await v.panelCompleteness(c, PAGE);
+                  out.panels.push({ cid: c, md: r.forms && r.forms.markdown });
+                }
+                return out;
+              } finally { b.plant.delete("xmlnsurl"); }
+            })()`, { timeout: 180000 });
+          } finally { await plant(false); }
+        };
+        try {
+          const clean = await arm(false);
+          const planted = await arm(true);
+          const ok = (x) => !!x && !x.error && x.namespace_pictures === 0 && x.lazy_photo_drawn && x.data_src_photo_drawn
+            && x.standins_drawn === 0 && x.drawing_svg_kept && x.captions_kept === 3
+            && x.panels.length >= 1 && x.panels.every((p) => p.md && p.md.drawn && p.md.images_broken === 0
+                                                       && p.md.placeholders === 0 && p.md.missing.length === 0);
+          return { pass: ok(clean) && !ok(planted),
+                   evidence: { clean, planted,
+                               bar: "0 namespace pictures; both lazy photos drawn; 0 stand-ins drawn; the drawing SVG kept; 3 captions kept; each card's panel (markdown form): 0 broken, 0 stand-ins, nothing missing" } };
+        } finally { await fixtures.close(); }
+      },
+    },
+    {
       id: "G-89",
       asks: "the pending diff is drawn force-directed at once; transformed chunks collapse into the page view",
       async run() {

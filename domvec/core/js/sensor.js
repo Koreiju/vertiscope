@@ -101,7 +101,7 @@
   // Peripheral reads only -- nothing here touches the fold.
   // `codespans` may also be set at boot (`variants.codespans`): chunks are
   // emitted and cached at the first fold, before a run-time flip could act.
-  var RT_PLANTS = { yclip: false, lightpath: false, codespans: !!V.codespans };
+  var RT_PLANTS = { yclip: false, lightpath: false, codespans: !!V.codespans, xmlnsurl: !!V.xmlnsurl };
   var USE_SEMANTIC = !!V.semantic; // prefer heading/section boundaries
   var USE_RANK = !!V.rank;         // heaviest subtree first, not document order
   var WIDE = V.budget === 'wide', NARROW = V.budget === 'narrow';
@@ -298,6 +298,13 @@
 
   function agnosticSkip(name) {
     if (ATTR_SKIP[name]) return true;
+    // A namespace declaration names a vocabulary, never a resource. Only
+    // `xmlns` itself was denied, so every inline SVG declaring
+    // `xmlns:xlink` became a picture of `http://www.w3.org/1999/xlink` --
+    // eleven broken images in one copykat share bar (G-197, 2026-10-18).
+    // `content_tagger` denied it all along. Planted (run time):
+    // `plants.xmlnsurl`.
+    if (!RT_PLANTS.xmlnsurl && name.lastIndexOf('xmlns', 0) === 0) return true;
     for (var i = 0; i < ATTR_SKIP_PREFIX.length; i++)
       if (name.indexOf(ATTR_SKIP_PREFIX[i]) === 0) return true;
     return false;
