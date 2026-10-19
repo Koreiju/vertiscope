@@ -349,6 +349,18 @@ export class PipelineProfiler {
     return this.traces.slice();
   }
 
+  /**
+   * Finished traces AND the ones still open. A drain's trace closes when its
+   * nodes are seen in the 3D view or its deadline passes, so a check reading
+   * only `list()` a few seconds after a scroll missed every drain still
+   * waiting -- D-40 matched 0 of 15 new topics one run and 14 the next,
+   * depending on whether the graph happened to show them in time
+   * (2026-10-19). What a drain CARRIED is known the moment it is absorbed.
+   */
+  listAll(): Trace[] {
+    return [...this.traces, ...this.live.values()];
+  }
+
   reset() {
     this.traces = [];
     this.live.clear();
@@ -397,10 +409,10 @@ export function profiler(): PipelineProfiler {
   // runs the OLD class, and an instanceof test there replaced the new
   // instance with an old one -- the two loads thrashed, and visits vanished.
   const old = w.__domvecProfiler;
-  // `visitAlias` (2026-10-18) is the newest capability: an instance without
-  // it filed a redirected page's stages under no visit.
+  // `visitAlias` (2026-10-18): an instance without it filed a redirected
+  // page's stages under no visit. `listAll` (2026-10-19) is the newest.
   if (!old || typeof old.visits !== "function" || typeof old.lastFor !== "function"
-      || typeof old.visitAlias !== "function") {
+      || typeof old.visitAlias !== "function" || typeof old.listAll !== "function") {
     const fresh = new PipelineProfiler();
     try { for (const t of (old?.list?.() || [])) (fresh as any).traces.push(t); } catch { /* an older shape */ }
     try { for (const v of (old?.visitsList || [])) (fresh as any).visitsList.push(v); } catch { /* an older shape */ }

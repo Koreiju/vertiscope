@@ -763,7 +763,10 @@ export function makeChecks(env) {
       "delete window[" + JSON.stringify(KEY) + "]; return { muts: out, moves: d.moves.slice() }; })()");
     const dropPage = async (KEY) => { try { await b.webview.executeJavaScript("(function(){var d=window[" + JSON.stringify(KEY) + "];if(d){d.mo.disconnect();document.removeEventListener('pointermove',d.pm,{capture:true});delete window[" + JSON.stringify(KEY) + "];}return 1;})()"); } catch (e) {} };
     const matchSeen = (seen, prefix, from, to) => {
-      const traces = window.__domvecProfiler.list().filter((t) => t.url.startsWith(prefix) && t.kind === "live"
+      // Open traces too (listAll): a drain still waiting to be seen in 3D
+      // has already carried its chunks to the host.
+      const P = window.__domvecProfiler;
+      const traces = (P.listAll ? P.listAll() : P.list()).filter((t) => t.url.startsWith(prefix) && t.kind === "live"
         && Array.isArray(t.facts.chunk_ids) && typeof t.facts.host_epoch === "number")
         .sort((a, c) => a.facts.host_epoch - c.facts.host_epoch);
       const rows = [];
