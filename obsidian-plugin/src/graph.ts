@@ -3220,7 +3220,7 @@ export class GraphView extends ItemView {
     const quick = this.plantSerialPanel
       ? await this.tryPageForm(entry)
       : await Promise.race([pageAttempt!, new Promise<string>((r) => window.setTimeout(() => r("slow"), this.pageFormWaitMs))]);
-    if (quick !== true && entry.form !== "page") await this.renderForm(entry, "markdown", false);
+    if (quick !== true && entry.form !== "page") await this.renderForm(entry, "markdown", false, true);
     entry.firstPaintMs = Math.round(performance.now() - entry.openedAt);
     if (fromHover && this.hoverAskAt) {
       profiler().hover(this.hoverAskUrl || node.url || "", performance.now() - this.hoverAskAt, entry.firstPaintMs);
@@ -3418,7 +3418,17 @@ export class GraphView extends ItemView {
     const esc = (t: string) => String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
     const DEST = /(!?)\[([^\]]*)\]\(((?:[^()\s]|\((?:[^()\s]|\([^()\s]*\))*\))*)\)/g;
     const lineHtml = (t: string) => {
-      const txt = String(t || "").replace(/^\s+/, "").replace(/^#+\s*/, "").replace(/^[-*]\s+/, "");
+      let txt = String(t || "").replace(/^\s+/, "").replace(/^#+\s*/, "").replace(/^[-*]\s+/, "");
+      // A control's GLYPHS are the distilled view's, not the page's: the
+      // complement drew DuckDuckGo's hidden result menu as `( Only include
+      // results for this site )` in a panel that must read like the page
+      // (D-36, 2026-10-19). Its words stay; the marks go. Planted
+      // `plantComplementGlyphs`.
+      if (!this.plantComplementGlyphs) {
+        const ctl = /^\(\s(.+)\s\)$/.exec(txt);
+        if (ctl) txt = ctl[1];
+        txt = txt.replace(/^\[[ xX]\]\s+/, "").replace(/^===\s*(.*?)\s*===$/, "$1");
+      }
       let out = "", last = 0, m: RegExpExecArray | null;
       DEST.lastIndex = 0;
       while ((m = DEST.exec(txt))) {
@@ -3485,8 +3495,12 @@ export class GraphView extends ItemView {
   }
   /** Planted: the page form shows only what the page drew (the incomplete one). */
   plantNoComplement = false;
+  /** Planted (D-36): the complement keeps the distilled control glyphs. */
+  plantComplementGlyphs = false;
 
-  private async renderForm(entry: any, form: "page" | "markdown", fresh = true): Promise<boolean> {
+  /** Planted (D-36): the fallback markdown overwrites a page form that landed while it waited. */
+  plantPanelRace = false;
+  private async renderForm(entry: any, form: "page" | "markdown", fresh = true, fallback = false): Promise<boolean> {
     const body = entry.el.querySelector(".domvec-bb-body") as HTMLElement | null;
     if (!body) return false;
     const id = entry.node.id;
@@ -3506,6 +3520,12 @@ export class GraphView extends ItemView {
       });
     } else {
       if (fresh || !entry.payload) entry.payload = (await this.chunkPayload(id)) || entry.payload;
+      // The FALLBACK paint, while the page form was given its head start:
+      // if the page form landed while the payload was fetched, it stays. The
+      // markdown emptied the body after it and replaced a page form of 77
+      // elements with its own half a second after the panel opened (D-36,
+      // 2026-10-19: "form none" from the graph).
+      if (fallback && entry.form === "page" && !this.plantPanelRace) return true;
       body.empty();
       const host = body.createDiv({ cls: "domvec-bb-md markdown-rendered" });
       const md = this.chunkMarkdown(entry.payload);
