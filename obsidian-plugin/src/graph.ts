@@ -2760,7 +2760,7 @@ export class GraphView extends ItemView {
     // takes its colour; only a unit of a grey (streamed) chunk is grey.
     const color = v.color ? v.color : p && !p.force && p.level !== "page" && p.color ? p.color : "#9aa0a6";
     const n: any = { id, level: "chunk", name: v.name || id, url: v.url, members: 1, tokens: 0,
-                     force: true, unit: true, val: 0.6, color, fileRef: v.fileRef,
+                     force: true, unit: true, val: v.kgEntity ? 0.45 : 0.6, color, fileRef: v.fileRef, kgEntity: v.kgEntity,
                      x: cx + rr * Math.cos(th) * R, y: cy + rr * Math.sin(th) * R, z: cz + zz * R };
     const nodes = data.nodes.slice();
     const links = data.links.slice();
@@ -2770,7 +2770,7 @@ export class GraphView extends ItemView {
     this.unitStats.made++;
     // The oldest units beyond the cap go -- never one a panel holds.
     if (this.unitNodes.size > this.unitNodeCap) {
-      const old = [...this.unitNodes.entries()].filter(([u]) => !this.billboards.has(u) && u !== id)
+      const old = [...this.unitNodes.entries()].filter(([u]) => !this.billboards.has(u) && u !== id && !u.startsWith("file:") && !u.startsWith("kg:"))
         .sort((a, b) => a[1].at - b[1].at).slice(0, this.unitNodes.size - this.unitNodeCap).map(([u]) => u);
       const drop = new Set(old);
       for (const u of old) this.unitNodes.delete(u);
@@ -3165,6 +3165,7 @@ export class GraphView extends ItemView {
       return;
     }
     if (node.fileRef) { this.renderFilePanel(node, body, addr); return; }
+    if (node.kgEntity) { this.renderKgPanel(node, body, addr); return; }
     // The header's address fills in when the store answers -- NOT awaited:
     // the first paint must not wait for the sidecar (it queued behind
     // capture writes for 1.8 s at p90).
@@ -3185,6 +3186,15 @@ export class GraphView extends ItemView {
         addr.setAttr("title", full);
       }
     });
+    // A chunk's knowledge-graph triples, drawn as nodes hung from it (G-264,
+    // G-260): Triplex over a web chunk's prose, the compact code KG for a
+    // `code://` chunk. A field in the panel, not a verb typed anywhere.
+    if (!this.plantNoKg && !String(node.id).includes("|") && !String(node.id).startsWith("f:")) {
+      const kg = head.createSpan({ cls: "domvec-bb-kg", text: "triples" });
+      kg.setAttr("aria-label", "extract this chunk's knowledge-graph triples and draw them");
+      kg.onpointerdown = (e: PointerEvent) => e.stopPropagation();
+      kg.onclick = (e: MouseEvent) => { e.stopPropagation(); void this.chunkTriples(node, kg); };
+    }
     const toggle = head.createSpan({ cls: "domvec-bb-form" });
     toggle.onpointerdown = (e: PointerEvent) => e.stopPropagation();
     toggle.onclick = (e: MouseEvent) => {
@@ -3931,6 +3941,97 @@ export class GraphView extends ItemView {
   }
   static fmtBytes(n: number): string {
     return n >= 1e9 ? (n / 1e9).toFixed(2) + " GB" : n >= 1e6 ? (n / 1e6).toFixed(1) + " MB" : n >= 1e3 ? (n / 1e3).toFixed(0) + " KB" : n + " B";
+  }
+
+  /**
+   * **A chunk's knowledge graph, drawn** (G-264, G-260; PLUGIN_GOAL 186h,
+   * 186l): its entities as small nodes hung from the chunk -- force-directed
+   * about it, no embedding of their own -- and its triples as lines between
+   * them (drawn, never forces, like G-241's code edges). Planted `plantNoKg`.
+   */
+  plantNoKg = false;
+  kgStats = { asked: 0, done: 0, entities: 0, triples_drawn: 0, last_error: "", last_s: 0 };
+  private kgEdges = new Map<string, { source: string; target: string; p: string }[]>();
+  static KG_COLOUR = "#ffb86c";
+  async chunkTriples(node: any, button?: HTMLElement): Promise<any> {
+    const cid = String(node.id), url = String(node.url || "");
+    this.kgStats.asked++;
+    const say = (t: string) => { if (button) button.setText(t); };
+    let triples: { s: string; p: string; o: string }[] = [];
+    let entities: Record<string, { type: string; name: string }> = {};
+    if (url.startsWith("code://")) {
+      say("triples\u2026");
+      const got: any = await this.sidecar.codeKg(url).catch(() => null);
+      const payload: any = await this.chunkPayload(cid);
+      // The chunk's SCOPE: a code chunk sits on an element under its class or
+      // function (`/module/class/code`), the triples at the scope's own
+      // address and below (`/module/class/function[2]`). Cut back to the last
+      // module / class / function step; `[1]` dropped as the CPG spells it.
+      const steps = String((payload && payload.xpath) || "").replace(/\[1\](?=\/|$)/g, "").split("/");
+      while (steps.length > 1 && !/^(module|class|function)(\[\d+\])?$/.test(steps[steps.length - 1])) steps.pop();
+      const xp = steps.join("/");
+      const mine = ((got && got.triples) || []).filter((t: any) => {
+        const at = String(t.at || "").split("|")[1] || "";
+        return !xp || at === xp || at.startsWith(xp + "/");
+      }).slice(0, 120);
+      for (const t of mine) {
+        entities[t.s] = entities[t.s] || { type: "code", name: t.s };
+        entities[t.o] = entities[t.o] || { type: "code", name: t.o };
+        triples.push({ s: t.s, p: t.p, o: t.o });
+      }
+    } else {
+      say("triples: reading\u2026");
+      const job: any = await this.sidecar.modelRun({ role: "triplex", cid });
+      if (!job || !job.id) { this.kgStats.last_error = "not started"; say("triples: not started"); return null; }
+      let st: any = null;
+      for (let i = 0; i < 180; i++) {
+        await new Promise((r) => window.setTimeout(r, 1000));
+        st = await this.sidecar.modelJob(job.id);
+        if (st && st.state !== "running") break;
+        say(`triples: reading ${i + 1}s`);
+      }
+      const v = st && st.result && st.result.value;
+      if (!v) { this.kgStats.last_error = (st && st.error) || "no answer"; say("triples: " + this.kgStats.last_error.slice(0, 40)); return st; }
+      this.kgStats.last_s = st.s || 0;
+      for (const [k, e] of Object.entries(v.entities || {})) entities[(e as any).name] = { type: (e as any).type, name: (e as any).name };
+      triples = (v.triples || []).map((t: any) => ({ s: t.s, p: t.p, o: t.o }));
+    }
+    const ids: Record<string, string> = {};
+    for (const [name, e] of Object.entries(entities)) {
+      const id = `kg:${cid}:${name}`;
+      ids[name] = id;
+      this.ensureUnitNode({ id, url, virtual: true, parentId: cid, name: `${e.type}: ${name}`, color: GraphView.KG_COLOUR,
+                            kgEntity: { cid, name, type: e.type, triples: triples.filter((t) => t.s === name || t.o === name) } });
+    }
+    this.kgEdges.set(cid, triples.filter((t) => ids[t.s] && ids[t.o] && t.s !== t.o).map((t) => ({ source: ids[t.s], target: ids[t.o], p: t.p })));
+    this.kgStats.done++;
+    this.kgStats.entities += Object.keys(entities).length;
+    this.batchDirty = true;
+    say(`triples: ${Object.keys(entities).length} entities, ${triples.length} triples`);
+    return { entities: Object.keys(entities).length, triples: triples.length };
+  }
+  private drawableKgEdges(nodes: any[]): any[] {
+    if (this.plantNoKg || !this.kgEdges.size) { this.kgStats.triples_drawn = 0; return []; }
+    const byId = new Map<string, any>();
+    for (const n of nodes) byId.set(String(n.id), n);
+    const out: any[] = [];
+    for (const edges of this.kgEdges.values()) {
+      for (const e of edges) {
+        const s = byId.get(e.source), t = byId.get(e.target);
+        if (s && t) out.push({ source: s, target: t, color: GraphView.KG_COLOUR, alpha: 0.9, kg: e.p });
+      }
+    }
+    this.kgStats.triples_drawn = out.length;
+    return out;
+  }
+  private renderKgPanel(node: any, body: HTMLElement, addr: HTMLElement): void {
+    const k = node.kgEntity;
+    addr.setText(`${k.type}: ${k.name}`);
+    const box = body.createDiv({ cls: "domvec-file" });
+    box.createDiv({ cls: "domvec-file-kind", text: `entity \u00b7 ${k.type}` });
+    box.createDiv({ cls: "domvec-file-name", text: k.name });
+    if (!k.triples.length) box.createDiv({ cls: "domvec-file-status", text: "no triple names it" });
+    for (const t of k.triples) box.createDiv({ cls: "domvec-file-href", text: `${t.s} \u2014 ${t.p} \u2192 ${t.o}` });
   }
 
   /** Planted: table rows of different widths share one table run, as before. */
@@ -5431,7 +5532,7 @@ export class GraphView extends ItemView {
       const d = g.graphData();
       const rs = g.nodeRelSize();
       if (this.searchState) { this.resolveSearch(); this.updateSearchLights(); }
-      this.batch.sync(d.nodes, d.links.concat(this.drawableCodeEdges(d.nodes)), (n) => this.lookOf(n, rs, media), this.searchLineAlpha());
+      this.batch.sync(d.nodes, d.links.concat(this.drawableCodeEdges(d.nodes), this.drawableKgEdges(d.nodes)), (n) => this.lookOf(n, rs, media), this.searchLineAlpha());
       if (!this.plantStaleProxies) this.fitProxies(d.nodes, rs, media);
     };
     this.batchRaf = requestAnimationFrame(tick);
@@ -5507,7 +5608,7 @@ export class GraphView extends ItemView {
     const g: any = this.graph;
     if (!g || !this.batch || this.plantPerNode) return null;
     const d = g.graphData(), rs = g.nodeRelSize();
-    this.batch.sync(d.nodes, d.links.concat(this.drawableCodeEdges(d.nodes)), (n) => this.lookOf(n, rs, this.drawnMedia));
+    this.batch.sync(d.nodes, d.links.concat(this.drawableCodeEdges(d.nodes), this.drawableKgEdges(d.nodes)), (n) => this.lookOf(n, rs, this.drawnMedia));
     return { ...this.batch.lastStats };
   }
 
@@ -5803,7 +5904,7 @@ export class GraphView extends ItemView {
     // stood as grey nodes no projection would ever place -- read as scans
     // left unprojected (2026-10-18: "a lot of diff scans not yet at least
     // projected after vectorization"). Planted `plantKeepUnits`.
-    if (this.unitNodes.has(id) && !this.plantKeepUnits && !id.startsWith("file:")) this.dropUnitNode(id);
+    if (this.unitNodes.has(id) && !this.plantKeepUnits && !id.startsWith("file:") && !id.startsWith("kg:")) this.dropUnitNode(id);
   }
   /** Planted: a unit node outlives its panel (grey until the cap), as before. */
   plantKeepUnits = false;

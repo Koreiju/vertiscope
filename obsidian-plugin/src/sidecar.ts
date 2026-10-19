@@ -435,6 +435,26 @@ export class Sidecar {
     return this.get("/cpg_edges?url=" + encodeURIComponent(url));
   }
 
+  /** Run a model role (G-262/G-264): returns the job, followed by `modelJob`. */
+  async modelRun(body: Record<string, unknown>): Promise<any | null> {
+    const base = this.base().trim().replace(/\/+$/, "");
+    if (!base) return null;
+    try {
+      const res = await fetch(`${base}/model_run`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body), signal: AbortSignal.timeout(15000),
+      });
+      return await res.json();
+    } catch { return null; }
+  }
+  async modelJob(id: string): Promise<any | null> {
+    return this.get("/model_job?id=" + encodeURIComponent(id));
+  }
+  /** A `code://` module's compact code knowledge graph (G-260). */
+  async codeKg(url: string): Promise<any | null> {
+    return this.get("/code_kg?url=" + encodeURIComponent(url));
+  }
+
   /** Special files a page links to (PLUGIN_GOAL 186k). */
   async files(url: string): Promise<any | null> {
     return this.get("/files?url=" + encodeURIComponent(url));

@@ -949,3 +949,5 @@ button.domvec-run-fence:hover {
 .domvec-file-dl:hover { background: var(--background-modifier-hover); }
 .domvec-file-ask { flex-basis: 100%; }
 .domvec-file-status { opacity: 0.85; font-size: 11px; word-break: break-all; }
+.domvec-bb-kg { cursor: pointer; margin-right: 6px; padding: 0 6px; border: 1px solid var(--background-modifier-border); border-radius: 4px; font-size: 11px; color: #ffb86c; }
+.domvec-bb-kg:hover { background: var(--background-modifier-hover); }

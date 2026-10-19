@@ -28,6 +28,10 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 MODEL_DIR = Path(os.environ.get("DOMVEC_MODEL_DIR") or (Path.home() / ".cache" / "gpt4all"))
+#: The GPU by default: Triplex on a paragraph took 37-65 s on CPU and 1.8-3.2 s
+#: on CUDA (RTX 4070 Laptop, 2026-10-18). A model that will not load there
+#: (memory) falls back to CPU rather than failing the run.
+MODEL_DEVICE = os.environ.get("DOMVEC_MODEL_DEVICE") or "cuda"
 
 ROLES: Dict[str, Dict[str, Any]] = {
     "triplex": {"file": "triplex-Q4_K_M.gguf", "template": "<|user|>\n{msg}<|end|>\n<|assistant|>\n",
@@ -151,14 +155,20 @@ def parse_chat(raw: str) -> TypedResult:
 _LOADED: Dict[str, Any] = {}
 
 
-def _model(role: str, device: str):
+def _model(role: str, device: Optional[str] = None):
     from gpt4all import GPT4All
     spec = ROLES[role]
+    device = device or MODEL_DEVICE
     key = "%s@%s" % (spec["file"], device)
     if key not in _LOADED:
         if not (MODEL_DIR / spec["file"]).exists():
             raise FileNotFoundError("%s is not installed in %s" % (spec["file"], MODEL_DIR))
-        _LOADED[key] = GPT4All(spec["file"], model_path=str(MODEL_DIR), allow_download=False, device=device, n_ctx=4096)
+        try:
+            _LOADED[key] = GPT4All(spec["file"], model_path=str(MODEL_DIR), allow_download=False, device=device, n_ctx=4096)
+        except Exception:                           # noqa: BLE001 -- no room on the GPU: the CPU
+            if device == "cpu":
+                raise
+            return _model(role, "cpu")
     return _LOADED[key]
 
 
@@ -174,7 +184,7 @@ def plain(md: str) -> str:
     return re.sub(r"\s+", " ", t).strip()
 
 
-def run_triplex(text: str, entity_types: List[str], predicates: List[str], device: str = "cpu",
+def run_triplex(text: str, entity_types: List[str], predicates: List[str], device: Optional[str] = None,
                 max_tokens: int = 800) -> TypedResult:
     msg = TRIPLEX_INSTRUCTION.format(entity_types=json.dumps({"entity_types": entity_types}),
                                      predicates=json.dumps({"predicates": predicates}), text=text)
@@ -182,7 +192,7 @@ def run_triplex(text: str, entity_types: List[str], predicates: List[str], devic
     return parse_triplex(raw, predicates)
 
 
-def run_chat(prompt: str, device: str = "cpu", max_tokens: int = 800) -> TypedResult:
+def run_chat(prompt: str, device: Optional[str] = None, max_tokens: int = 800) -> TypedResult:
     raw = _model("chat", device).generate(ROLES["chat"]["template"].format(msg=prompt), max_tokens=max_tokens, temp=0.0)
     return parse_chat(raw)
 
