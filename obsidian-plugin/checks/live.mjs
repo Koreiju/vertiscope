@@ -1492,7 +1492,7 @@ export function makeChecks(env) {
             graph_ms: v && v.forceStats ? { n: v.forceStats.ms.length, p50: q(v.forceStats.ms, 0.5), p95: q(v.forceStats.ms, 0.95) } : null,
             frame_ms_p50: Math.round(fr[2]),
             // Where the slowest placements spent their time, by phase.
-            worst_placed: window.__domvecProfiler.list().filter((t) => typeof t.stages.overlay_placed === "number")
+            worst_placed: (window.__domvecProfiler.listAll ? window.__domvecProfiler.listAll() : window.__domvecProfiler.list()).filter((t) => typeof t.stages.overlay_placed === "number")
               .sort((a, c) => c.stages.overlay_placed - a.stages.overlay_placed).slice(0, 3)
               .map((t) => ({ url: t.url.slice(0, 60), chunks: t.facts.chunks_in_drain,
                              stages: Object.fromEntries(["pump_wait", "force_tree", "absorb.covers", "absorb.flash_prep", "overlay_placed", "drain_to_overlay"]
@@ -1651,7 +1651,7 @@ export function makeChecks(env) {
             const capturingAt = (t) => { let v = false; for (const [bt, on] of busy) { if (bt > t) break; v = on; } return v; };
             const during = m.rows.filter((r) => capturingAt(r.t)).map((r) => r.host);
             const hv = hovers.filter((x) => x.ms !== null).map((x) => x.ms);
-            const firstDrain = window.__domvecProfiler.list().filter((t) => t.kind === "live" && t.url === to
+            const firstDrain = (window.__domvecProfiler.listAll ? window.__domvecProfiler.listAll() : window.__domvecProfiler.list()).filter((t) => t.kind === "live" && t.url === to
               && (t.facts.chunks_in_drain || 0) > 0).map((t) => t.facts.host_epoch).filter(Boolean).sort((a, c) => a - c)[0];
             return { planted: ${planted}, observed, url: wv.getURL(),
                      first_drain_ms: firstDrain ? firstDrain - t0 : -1,
@@ -1839,7 +1839,7 @@ export function makeChecks(env) {
             while (Date.now() - t0 < 40000 && (b.capturing || (b.captureQueue || []).length)) await sleep(250);
             const drained = Date.now() - t0;
             await sleep(1500);
-            const T = window.__domvecProfiler.list().filter((t) => t.url === url && typeof t.stages.capture_queue_wait === "number");
+            const T = (window.__domvecProfiler.listAll ? window.__domvecProfiler.listAll() : window.__domvecProfiler.list()).filter((t) => t.url === url && typeof t.stages.capture_queue_wait === "number");
             const waits = T.map((t) => t.stages.capture_queue_wait);
             const life = v.lifecycleState(url);
             const base = app.plugins.plugins["domvec-bridge"].settings.sidecar.replace(/\\/+$/, "");
@@ -2003,7 +2003,7 @@ export function makeChecks(env) {
               maxShown = Math.max(maxShown, pb.streamingShown || 0);
               await sleep(100);
             }
-            const flash = window.__domvecProfiler.list().filter((t) => t.url === target && t.facts.flash).map((t) => t.facts.flash);
+            const flash = (window.__domvecProfiler.listAll ? window.__domvecProfiler.listAll() : window.__domvecProfiler.list()).filter((t) => t.url === target && t.facts.flash).map((t) => t.facts.flash);
             return { planted: ${planted}, before_scroll: before, max_visible_after_scroll: maxVisible,
                      max_following: maxShown, drains_with_new: flash.length, flash };
           } finally {
@@ -2465,7 +2465,7 @@ export function makeChecks(env) {
             // Every drain SINCE THE VISIT BEGAN, whatever url it was for: a
             // page that routes itself mid-visit (YouTube -> a Shorts page) left
             // its drains filed under the url it started on (2026-09-27).
-            const tr = P.list().filter((t) => t.kind === "live" && t.t0 >= t0 && t.url && !t.url.startsWith("about:"));
+            const tr = (P.listAll ? P.listAll() : P.list()).filter((t) => t.kind === "live" && t.t0 >= t0 && t.url && !t.url.startsWith("about:"));
             const ov = tr.map((t) => t.stages.drain_to_overlay).filter((x) => typeof x === "number").sort((a, c) => a - c);
             // The overlay's OWN cost -- placing the boxes, no frame waited for.
             const placed = tr.map((t) => t.stages.overlay_placed).filter((x) => typeof x === "number").sort((a, c) => a - c);
@@ -2493,9 +2493,9 @@ export function makeChecks(env) {
                 "login_wall:/log ?in|sign ?in|create (new )?account/i.test(t.slice(0,4000))&&t.length<6000}})()");
             } catch (e) { page = { error: String(e).slice(0, 80) }; }
             // The page's own motion, no gesture: drains with chunks in 5 s idle.
-            const before = P.list().filter((t) => t.kind === "live" && t.url === here && t.facts.chunks_in_drain).length;
+            const before = (P.listAll ? P.listAll() : P.list()).filter((t) => t.kind === "live" && t.url === here && t.facts.chunks_in_drain).length;
             await sleep(5000);
-            const idle = P.list().filter((t) => t.kind === "live" && t.url === here && t.facts.chunks_in_drain).length - before;
+            const idle = (P.listAll ? P.listAll() : P.list()).filter((t) => t.kind === "live" && t.url === here && t.facts.chunks_in_drain).length - before;
             return { url: ${JSON.stringify(url)}, landed: here, planted: ${planted},
                      drains: tr.length, drains_with_chunks: tr.filter((t) => t.facts.chunks_in_drain).length,
                      chunks_drained: tr.reduce((s, t) => s + (t.facts.chunks_in_drain || 0), 0),
