@@ -1272,6 +1272,63 @@ export function makeChecks(env) {
 
   const CHECKS = [
     {
+      id: "G-195",
+      asks: "kept: hovering a browser chunk box drives the 3D billboards with good latency -- a real pointer move onto another chunk of a stored page opens that chunk's panel, with its text, p50 < 250 ms and p90 < 600 ms; planted poll-hover (the hover found by the poll) does not",
+      async run() {
+        // A guard, not a feature (PLUGIN_GOAL 122: "keep"): the path is the
+        // pushed hover -> `onHover` -> `highlightChunk` -> the panel, timed
+        // from the move the reader makes (`sendInputEvent`) to the panel
+        // holding TEXT -- the address header is there at once and is not the
+        // chunk. On a page the store holds, so the panel has content to show.
+        // Panels in fly-to mode for the arm, the reader's mode put back.
+        const PAGE = "https://en.wikipedia.org/wiki/Trie";
+        const arm = (planted) => evaluate(`(async () => {
+          ${PREP}
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          const mode = v.panelsOn;
+          b.plant.delete("poll-hover");
+          try {
+            if (!(await land(${JSON.stringify(PAGE)}, 30000))) return { error: "did not land" };
+            await sleep(4000);
+            v.setPanelsOn("flyto");
+            if (${planted}) b.plant.add("poll-hover");
+            const wv = b.webview, r = wv.getBoundingClientRect(), out = [];
+            const texty = (e) => { const body = e && e.el && e.el.querySelector(".domvec-bb-body"); return !!body && (body.textContent || "").replace(/\\s+/g, " ").trim().length > 20; };
+            for (let i = 0; i < 16; i++) {
+              const x = Math.round(60 + (i * 97) % Math.max(100, r.width - 120));
+              const y = Math.round(90 + (i * 131) % Math.max(100, r.height - 160));
+              const prev = b.lastHovered ? b.lastHovered.cid : "";
+              const had = new Set(v.billboards.keys());
+              const t0 = performance.now();
+              wv.sendInputEvent({ type: "mouseMove", x, y });
+              let hovered = null, opened = null, ms = null;
+              while (performance.now() - t0 < 2500) {
+                await sleep(2);
+                if (!hovered && b.lastHovered && b.lastHovered.cid && b.lastHovered.cid !== prev) hovered = performance.now() - t0;
+                const fresh = [...v.billboards.entries()].find(([k, e]) => !had.has(k) && texty(e));
+                if (fresh) { opened = fresh[0]; ms = performance.now() - t0; break; }
+              }
+              // Only moves that landed on ANOTHER chunk ask for a panel.
+              if (hovered !== null || ms !== null) out.push({ ms: ms === null ? null : Math.round(ms), hovered_ms: hovered === null ? null : Math.round(hovered) });
+              await sleep(500);
+            }
+            const ok = out.filter((o) => o.ms !== null).map((o) => o.ms).sort((a, c) => a - c);
+            const q = (p) => ok.length ? ok[Math.min(ok.length - 1, Math.floor(p * ok.length))] : null;
+            return { planted: ${planted}, moves_on_new_chunk: out.length, opened: ok.length, p50: q(0.5), p90: q(0.9), out };
+          } finally {
+            b.plant.delete("poll-hover");
+            v.setPanelsOn(mode);
+          }
+        })()`, { timeout: 180000 });
+        const clean = await arm(false);
+        const planted = await arm(true);
+        const ok = (x) => !!x && !x.error && x.moves_on_new_chunk >= 6 && x.opened >= 0.8 * x.moves_on_new_chunk
+          && x.p50 !== null && x.p50 < 250 && x.p90 !== null && x.p90 < 600;
+        return { pass: ok(clean) && !ok(planted),
+                 evidence: { clean, planted, bar: ">= 6 moves onto another chunk, >= 80% open a panel with text, p50 < 250 ms, p90 < 600 ms from the move" } };
+      },
+    },
+    {
       id: "G-197",
       asks: "a chunk panel shows every picture its chunk holds and none it does not: a lazy loader's photograph drawn, not its empty stand-in; an inline SVG's namespace never drawn as a picture; an inline picture that draws is kept -- read back through the panel the reader opens",
       async run() {
