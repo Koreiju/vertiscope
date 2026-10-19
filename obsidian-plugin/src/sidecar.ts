@@ -435,6 +435,31 @@ export class Sidecar {
     return this.get("/cpg_edges?url=" + encodeURIComponent(url));
   }
 
+  /** Special files a page links to (PLUGIN_GOAL 186k). */
+  async files(url: string): Promise<any | null> {
+    return this.get("/files?url=" + encodeURIComponent(url));
+  }
+  /** A file's size and type, asked of its server without fetching it. */
+  async fileHead(href: string): Promise<any | null> {
+    return this.get("/file_head?href=" + encodeURIComponent(href));
+  }
+  /** A confirmed download's progress. */
+  async downloadStatus(href: string): Promise<any | null> {
+    return this.get("/download_status?href=" + encodeURIComponent(href));
+  }
+  /** Fetch a special file -- sent only after the reader confirmed it in its panel. */
+  async download(href: string, kind: string, name: string): Promise<any | null> {
+    const base = this.base().trim().replace(/\/+$/, "");
+    if (!base) return null;
+    try {
+      const res = await fetch(`${base}/download`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ href, kind, name, confirmed: true }), signal: AbortSignal.timeout(15000),
+      });
+      return await res.json();
+    } catch { return null; }
+  }
+
   /** The page's element -> chunk map, for the overlay (DESIGN_VII §3). */
   async pageMap(url: string): Promise<any | null> {
     return this.get("/page_map?url=" + encodeURIComponent(url));

@@ -290,6 +290,80 @@ _PLANT_NO_AUTOCOMPACT = [os.environ.get("DOMVEC_PLANT_NO_AUTOCOMPACT") == "1"]
 _COMPACT_BASE_MB: List[float] = []
 
 
+#: Confirmed downloads by href: state, bytes, total, path, error.
+_DOWNLOADS: Dict[str, Dict] = {}
+#: Where an installed model goes: the directory the GPT4All runtime loads from.
+MODEL_DIR = Path(os.environ.get("DOMVEC_MODEL_DIR") or (Path.home() / ".cache" / "gpt4all"))
+
+
+def _file_head(href: str) -> Dict:
+    """A file's size and type, asked of its server WITHOUT fetching it (HEAD,
+    redirects followed) -- what the panel shows before asking to download."""
+    import urllib.request
+    if not href.startswith(("http://", "https://")):
+        return {"error": "not an http(s) url"}
+    try:
+        req = urllib.request.Request(href, method="HEAD", headers={"User-Agent": "domvec"})
+        with urllib.request.urlopen(req, timeout=20) as res:
+            size = res.headers.get("Content-Length")
+            # Hugging Face answers a HEAD on `resolve/` with the LFS size here.
+            size = res.headers.get("X-Linked-Size") or size
+            return {"size": int(size) if size and str(size).isdigit() else None,
+                    "type": res.headers.get("Content-Type")}
+    except Exception as exc:                        # noqa: BLE001
+        return {"error": "%s: %s" % (type(exc).__name__, str(exc)[:160])}
+
+
+def _download_target(workspace, href: str, kind: str, name: str) -> Path:
+    from urllib.parse import unquote, urlsplit
+    name = name or unquote(urlsplit(href).path).rsplit("/", 1)[-1] or "download"
+    name = "".join(ch for ch in name if ch not in '<>:"/\\|?*') or "download"
+    if kind == "model" or name.lower().endswith(".gguf"):
+        return MODEL_DIR / name
+    return Path(workspace.path) / "downloads" / name
+
+
+def _download(workspace, href: str, kind: str, name: str) -> None:
+    """Fetch `href` to its destination, resumable, with progress in
+    `_DOWNLOADS`. A PDF is then chunked like a page (`index_pdf`)."""
+    import urllib.request
+    st = _DOWNLOADS[href]
+    try:
+        dest = _download_target(workspace, href, kind, name)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        part = dest.with_name(dest.name + ".part")
+        have = part.stat().st_size if part.exists() else 0
+        headers = {"User-Agent": "domvec"}
+        if have:
+            headers["Range"] = "bytes=%d-" % have
+        req = urllib.request.Request(href, headers=headers)
+        with urllib.request.urlopen(req, timeout=60) as res:
+            if have and res.status != 206:
+                have = 0                            # the server ignored the range: start over
+            total = res.headers.get("Content-Length")
+            st["total"] = (int(total) + have) if total and total.isdigit() else None
+            st["bytes"] = have
+            with open(part, "ab" if have else "wb") as fh:
+                while True:
+                    buf = res.read(1 << 20)
+                    if not buf:
+                        break
+                    fh.write(buf)
+                    st["bytes"] += len(buf)
+        part.replace(dest)
+        st.update(state="done", path=str(dest))
+        if kind == "pdf" or dest.suffix.lower() == ".pdf":
+            data = dest.read_bytes()
+            if data.startswith(b"%PDF"):
+                with _foreground(), _WORK_LOCK:
+                    got = workspace.index_pdf(data, href)
+                st["indexed"] = {k: got.get(k) for k in ("url", "pages", "chunks")}
+                _LAST_WRITE[0] = time.time()
+        _profile("download", {k: st.get(k) for k in ("href", "bytes", "path", "state")})
+    except Exception as exc:                        # noqa: BLE001
+        st.update(state="error", error="%s: %s" % (type(exc).__name__, str(exc)[:200]))
+
+
 def _compact_due(store_mb: float, base_mb: float, now: float, last_request: float,
                  supervised: bool, reader_idle_s: float = 0.0, last_write: float = 0.0) -> bool:
     """Is the store big enough, against what it was after its last compaction,
@@ -1616,6 +1690,37 @@ class _Handler(BaseHTTPRequestHandler):
 
         # A PDF the browser cell reached (G-248): its bytes, read by the page
         # context from its own document, kept and chunked like a page.
+        if route == "download":
+            # A special file fetched -- ONLY when the body says the reader
+            # confirmed it (2026-10-18: "prompt the user before applying a
+            # download on-click"; the panel asks, with the name, size and
+            # destination, before it sends this). A model goes to the model
+            # directory, a PDF through the PDF pipeline, anything else to the
+            # workspace's `downloads/`. Runs in a thread; `GET
+            # /download_status?href=` follows it.
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(length) or b"{}")
+            except Exception as exc:                # noqa: BLE001
+                self._send(400, {"error": "bad body: %s" % exc})
+                return
+            href = str(body.get("href") or "")
+            if body.get("confirmed") is not True:
+                self._send(400, {"error": "a download needs the reader's confirmation (confirmed: true)"})
+                return
+            if not href.startswith(("http://", "https://")) or self.workspace is None:
+                self._send(400, {"error": "an http(s) file, with a workspace"})
+                return
+            cur = _DOWNLOADS.get(href)
+            if cur and cur.get("state") == "running":
+                self._send(200, dict(cur))
+                return
+            _DOWNLOADS[href] = {"state": "running", "bytes": 0, "total": None, "href": href}
+            threading.Thread(target=_download, args=(self.workspace, href, str(body.get("kind") or ""),
+                                                     str(body.get("name") or "")), daemon=True).start()
+            self._send(202, dict(_DOWNLOADS[href]))
+            return
+
         if route == "pdf":
             if self.workspace is None:
                 self._send(503, {"error": "no workspace"})
@@ -3145,6 +3250,53 @@ class _Handler(BaseHTTPRequestHandler):
 
         # `G-235`: a code file's property graph (AST, CFG, DFG, CALLS,
         # INHERITS), by the same addresses as its chunks; or the totals.
+        if segments[0] in ("files", "file_head", "download_status"):
+            # Special files (PLUGIN_GOAL 186k): what a page links to, a file's
+            # size BEFORE anything is fetched, and a confirmed download's
+            # progress. Nothing here downloads.
+            q = parse_qs(parts.query)
+            if segments[0] == "files":
+                if self.workspace is None:
+                    self._send(503, {"error": "no workspace"})
+                    return
+                url = (q.get("url") or [""])[0]
+                self._send(200, {"url": url, "files": self.workspace.store.files_of(url)})
+                return
+            href = (q.get("href") or [""])[0]
+            if segments[0] == "file_head":
+                self._send(200, _file_head(href))
+                return
+            self._send(200, dict(_DOWNLOADS.get(href) or {"state": "none"}))
+            return
+
+        if segments[0] == "code_kg":
+            # The compact code knowledge graph of one `code://` module (PLUGIN_GOAL
+            # 186g, `domvec/code_kg.py`): read from the source it describes --
+            # this repository's (`code://repo/...`) or an installed package's.
+            from ..code_kg import compact
+            from ..source import source_path_of
+            url = (parse_qs(parts.query).get("url") or [""])[0]
+            got_path = source_path_of(url)
+            if not got_path or not got_path[1].endswith(".py"):
+                self._send(400, {"error": "not a code:// python file"})
+                return
+            root, rel = got_path
+            try:
+                if root == "repo":
+                    base = Path(__file__).resolve().parents[1]
+                else:
+                    import importlib.util
+                    spec = importlib.util.find_spec(root)
+                    base = Path(spec.origin).resolve().parent if spec and spec.origin else None
+                path = (base / rel).resolve() if base is not None else None
+                if path is None or base not in path.parents or not path.exists():
+                    self._send(404, {"error": "no source for %s" % url})
+                    return
+                self._send(200, compact(path.read_text(encoding="utf-8"), url, rel))
+            except Exception as exc:                # noqa: BLE001
+                self._send(500, {"error": "%s: %s" % (type(exc).__name__, exc)})
+            return
+
         if segments[0] in ("cpg", "cpg_stats", "cpg_vectors", "cpg_edges"):
             query = parse_qs(parts.query)
             store = self.workspace.store

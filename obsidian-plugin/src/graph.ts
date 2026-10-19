@@ -1810,6 +1810,7 @@ export class GraphView extends ItemView {
     this.collapsedByReader.delete(url);
     this.openedByReader.add(url);
     void this.loadCodeEdges(url);                  // G-241: a code page's calls and bases
+    void this.loadFiles(url);                      // 186k: the special files it links to
     const cids = await this.sidecar.pageCids(url).catch(() => [] as string[]);
     let placed = 0;
     // 400 a request, as the reopen after a refit does: a 1,109-chunk page is
@@ -2446,6 +2447,7 @@ export class GraphView extends ItemView {
     if (!this.graph) return;
     // The hovered url spreads; off every chunk, it goes back (G-230).
     if (cid && url) this.spreadUrl(url); else if (!cid) this.unspread();
+    if (cid && url) void this.loadFiles(url);
     const data: any = this.graph.graphData();
     const seq = ++this.hoverSeq;
     // The stored chunk under the pointer, placed if it is not drawn yet, so
@@ -2742,7 +2744,7 @@ export class GraphView extends ItemView {
       return had;
     }
     const bar = id.indexOf("|");
-    const base = bar > 0 ? id.slice(0, bar) : (v.base && v.base.id ? String(v.base.id) : "");
+    const base = v.parentId ? String(v.parentId) : bar > 0 ? id.slice(0, bar) : (v.base && v.base.id ? String(v.base.id) : "");
     const p = this.unitParent(base === id ? "" : base, v.url, byId);
     const pid = p ? String(p.id) : "";
     const k = this.childCount.get(pid || id) || 0;
@@ -2756,9 +2758,9 @@ export class GraphView extends ItemView {
     const cz = p && Number.isFinite(p.z) ? p.z : (v.z ?? 0);
     // A unit of a chunk the projector placed is a part of THAT chunk and
     // takes its colour; only a unit of a grey (streamed) chunk is grey.
-    const color = p && !p.force && p.level !== "page" && p.color ? p.color : "#9aa0a6";
+    const color = v.color ? v.color : p && !p.force && p.level !== "page" && p.color ? p.color : "#9aa0a6";
     const n: any = { id, level: "chunk", name: v.name || id, url: v.url, members: 1, tokens: 0,
-                     force: true, unit: true, val: 0.6, color,
+                     force: true, unit: true, val: 0.6, color, fileRef: v.fileRef,
                      x: cx + rr * Math.cos(th) * R, y: cy + rr * Math.sin(th) * R, z: cz + zz * R };
     const nodes = data.nodes.slice();
     const links = data.links.slice();
@@ -3162,6 +3164,7 @@ export class GraphView extends ItemView {
       body.setText("a page stands for its chunks -- click to unravel it");
       return;
     }
+    if (node.fileRef) { this.renderFilePanel(node, body, addr); return; }
     // The header's address fills in when the store answers -- NOT awaited:
     // the first paint must not wait for the sidecar (it queued behind
     // capture writes for 1.8 s at p90).
@@ -3827,6 +3830,99 @@ export class GraphView extends ItemView {
   private showCodeButtons(on: boolean): void {
     for (const b of this.codeEdgeButtons) { const d = on ? "" : "none"; if (b.style.display !== d) b.style.display = d; }
   }
+  /**
+   * **Special files as nodes** (PLUGIN_GOAL 186k, 2026-10-18). A file a page
+   * links to -- a model (.gguf), a table (.csv), JSON, an archive, a PDF --
+   * is drawn as its own node hung from the chunk whose line links it, in its
+   * kind's colour; its panel shows the file and a download field that ASKS
+   * before it fetches anything ("prompt the user before applying a download
+   * on-click"). Planted `plantNoFileNodes`: no file is drawn.
+   */
+  plantNoFileNodes = false;
+  fileStats = { pages: 0, drawn: 0, downloads_asked: 0, downloads_confirmed: 0, downloads_cancelled: 0 };
+  private filesLoadedAt = new Map<string, number>();
+  static FILE_COLOURS: Record<string, string> = { model: "#c58af9", weights: "#c58af9", table: "#81c995",
+                                                  json: "#fdd663", archive: "#f28b82", pdf: "#78d9ec" };
+  private async loadFiles(url: string): Promise<void> {
+    if (this.plantNoFileNodes || !url || /^(code|vault):\/\//.test(url)) return;
+    const k = url.split("#")[0];
+    const at = this.filesLoadedAt.get(k) || 0;
+    if (performance.now() - at < 60000) return;
+    this.filesLoadedAt.set(k, performance.now());
+    const got: any = await this.sidecar.files(k).catch(() => null);
+    const files: any[] = (got && Array.isArray(got.files)) ? got.files : [];
+    if (!files.length || !this.graph) return;
+    this.fileStats.pages++;
+    for (const f of files) {
+      this.ensureUnitNode({ id: "file:" + f.key, url: f.url, virtual: true, parentId: f.cid, name: f.name,
+                            color: GraphView.FILE_COLOURS[f.kind] || "#e8eaed", fileRef: f });
+      this.fileStats.drawn++;
+    }
+  }
+  /** A file node's panel: what the file is, and a download that asks first. */
+  private renderFilePanel(node: any, body: HTMLElement, addr: HTMLElement): void {
+    const f = node.fileRef;
+    addr.setText(`${f.url} : ${f.xpath || "/"}`);
+    addr.setAttr("title", `${f.url} : ${f.xpath || "/"}`);
+    const box = body.createDiv({ cls: "domvec-file" });
+    box.createDiv({ cls: "domvec-file-kind", text: `${f.kind} \u00b7 ${f.ext}` });
+    box.createDiv({ cls: "domvec-file-name", text: f.label && f.label !== f.name ? `${f.name} \u2014 ${f.label}` : f.name });
+    const link = box.createEl("a", { cls: "domvec-file-href", text: f.href, href: f.href });
+    link.setAttr("target", "_blank");
+    const size = box.createDiv({ cls: "domvec-file-size", text: "size: asking the server\u2026" });
+    let bytes: number | null = null;
+    void this.sidecar.fileHead(f.href).then((h: any) => {
+      bytes = h && typeof h.size === "number" ? h.size : null;
+      size.setText(bytes !== null ? `size: ${GraphView.fmtBytes(bytes)}` : `size: unknown${h && h.error ? " (" + h.error + ")" : ""}`);
+    });
+    const dest = f.kind === "model" ? "the model directory (~/.cache/gpt4all), installed as a model"
+      : f.kind === "pdf" ? "the workspace, then chunked into the store like a page" : "the workspace's downloads/ folder";
+    const row = box.createDiv({ cls: "domvec-file-actions" });
+    const field = row.createSpan({ cls: "domvec-file-dl", text: "download" });
+    const status = box.createDiv({ cls: "domvec-file-status" });
+    field.onpointerdown = (e: PointerEvent) => e.stopPropagation();
+    field.onclick = (e: MouseEvent) => {
+      e.stopPropagation();
+      // ASK first: name, size, destination -- and nothing is sent until the
+      // reader confirms.
+      this.fileStats.downloads_asked++;
+      row.empty();
+      row.createSpan({ cls: "domvec-file-ask",
+        text: `Download ${f.name}${bytes !== null ? " (" + GraphView.fmtBytes(bytes) + ")" : ""} to ${dest}?` });
+      const yes = row.createSpan({ cls: "domvec-file-dl", text: "confirm" });
+      const no = row.createSpan({ cls: "domvec-file-dl", text: "cancel" });
+      for (const b of [yes, no]) b.onpointerdown = (ev: PointerEvent) => ev.stopPropagation();
+      no.onclick = (ev: MouseEvent) => {
+        ev.stopPropagation();
+        this.fileStats.downloads_cancelled++;
+        row.empty(); row.appendChild(field);
+      };
+      yes.onclick = async (ev: MouseEvent) => {
+        ev.stopPropagation();
+        this.fileStats.downloads_confirmed++;
+        row.empty();
+        const started: any = await this.sidecar.download(f.href, f.kind, f.name);
+        if (!started || started.error) { status.setText(`not started: ${started ? started.error : "the sidecar did not answer"}`); return; }
+        const tick = async () => {
+          const st: any = await this.sidecar.downloadStatus(f.href);
+          if (!st) return;
+          if (st.state === "running") {
+            status.setText(`downloading ${GraphView.fmtBytes(st.bytes || 0)}${st.total ? " of " + GraphView.fmtBytes(st.total) : ""}`);
+            window.setTimeout(tick, 1000);
+          } else if (st.state === "done") {
+            status.setText(`saved: ${st.path}` + (st.indexed ? ` -- chunked: ${st.indexed.chunks} chunks` : ""));
+          } else if (st.state === "error") {
+            status.setText(`failed: ${st.error}`);
+          }
+        };
+        void tick();
+      };
+    };
+  }
+  static fmtBytes(n: number): string {
+    return n >= 1e9 ? (n / 1e9).toFixed(2) + " GB" : n >= 1e6 ? (n / 1e6).toFixed(1) + " MB" : n >= 1e3 ? (n / 1e3).toFixed(0) + " KB" : n + " B";
+  }
+
   /** Planted: code edges are never fetched or drawn, as before. */
   plantNoCodeEdges = false;
   private async loadCodeEdges(url: string): Promise<void> {
@@ -5695,7 +5791,7 @@ export class GraphView extends ItemView {
     // stood as grey nodes no projection would ever place -- read as scans
     // left unprojected (2026-10-18: "a lot of diff scans not yet at least
     // projected after vectorization"). Planted `plantKeepUnits`.
-    if (this.unitNodes.has(id) && !this.plantKeepUnits) this.dropUnitNode(id);
+    if (this.unitNodes.has(id) && !this.plantKeepUnits && !id.startsWith("file:")) this.dropUnitNode(id);
   }
   /** Planted: a unit node outlives its panel (grey until the cap), as before. */
   plantKeepUnits = false;

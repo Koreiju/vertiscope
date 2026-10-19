@@ -938,3 +938,14 @@ button.domvec-run-fence:hover {
    it, and it is an ordinary panel from then on), minimize or close it. */
 .domvec-bb.is-preview, .domvec-bb.is-preview * { pointer-events: none !important; }
 .domvec-bb.is-preview .domvec-bb-head, .domvec-bb.is-preview .domvec-bb-head * { pointer-events: auto !important; }
+
+/* A special file's panel (PLUGIN_GOAL 186k): what it is, and a download that asks first. */
+.domvec-file { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.domvec-file-kind { text-transform: uppercase; letter-spacing: 0.06em; opacity: 0.7; font-size: 10px; }
+.domvec-file-name { font-weight: 600; word-break: break-all; }
+.domvec-file-href { opacity: 0.75; word-break: break-all; font-size: 11px; }
+.domvec-file-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 4px; }
+.domvec-file-dl { cursor: pointer; padding: 1px 8px; border: 1px solid var(--background-modifier-border); border-radius: 4px; }
+.domvec-file-dl:hover { background: var(--background-modifier-hover); }
+.domvec-file-ask { flex-basis: 100%; }
+.domvec-file-status { opacity: 0.85; font-size: 11px; word-break: break-all; }

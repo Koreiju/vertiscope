@@ -166,6 +166,12 @@ _SCHEMA = [
     # (`url|xpath`: module, class, function, statement); an edge is one of
     # AST / CFG / DFG / CALLS / INHERITS (`domvec/cpg.py`). Its own tables:
     # the trie's chunks are what a reader opens, these are how code relates.
+    # A special FILE a page links to (PLUGIN_GOAL 186k): a .gguf, .csv, .json,
+    # archive... detected at the link's trie address, drawn as its own node
+    # with a panel for its kind. Keyed by the page and the destination.
+    """CREATE NODE TABLE IF NOT EXISTS FileRef(
+        key STRING, url STRING, cid STRING, xpath STRING, href STRING,
+        name STRING, ext STRING, kind STRING, label STRING, PRIMARY KEY(key))""",
     """CREATE NODE TABLE IF NOT EXISTS CodeNode(
         key STRING, url STRING, xpath STRING, kind STRING, name STRING,
         qname STRING, line INT64, end_line INT64,
@@ -1418,6 +1424,26 @@ class GraphStore:
                                {"qs": defined, "u": url})
             out["cross_in"] = (int(got_c[0][0]) if got_c else 0) + (int(got_b[0][0]) if got_b else 0)
         return out
+
+    def upsert_files(self, url: str, rows: List[Dict], cids: Sequence[str] = ()) -> int:
+        """The special files a page's chunks link to, replacing what the
+        chunks `cids` held before (scoped: a delta capture carries some
+        chunks, and the page's others keep their files)."""
+        cids = sorted(set(cids) | {r["cid"] for r in rows})
+        if cids:
+            self._execute("MATCH (f:FileRef) WHERE f.url = $u AND list_contains($cids, f.cid) DELETE f",
+                          {"u": url, "cids": cids})
+        if rows:
+            self._batch("UNWIND $rows AS r MERGE (f:FileRef {key: r.key}) SET f.url = r.url, f.cid = r.cid, "
+                        "f.xpath = r.xpath, f.href = r.href, f.name = r.name, f.ext = r.ext, f.kind = r.kind, "
+                        "f.label = r.label", rows)
+        return len(rows)
+
+    def files_of(self, url: str) -> List[Dict]:
+        cols = ("key", "url", "cid", "xpath", "href", "name", "ext", "kind", "label")
+        return [dict(zip(cols, r)) for r in self._rows(
+            "MATCH (f:FileRef {url: $u}) RETURN f.key, f.url, f.cid, f.xpath, f.href, f.name, f.ext, f.kind, f.label "
+            "ORDER BY f.kind, f.name", {"u": url})]
 
     def cpg_of(self, url: str) -> Dict:
         """One file's CPG as stored: its nodes, its edges, and the edges that

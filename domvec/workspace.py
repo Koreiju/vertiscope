@@ -54,6 +54,10 @@ _KEEP_TITLE = "CASE WHEN $title = '' THEN p.title ELSE $title END"
 #: Planted (G-233): a web code block is read from its one-line markdown, not
 #: from the trie's value -- as before 2026-10-18, when none was graphed.
 _PLANT_CODE_FROM_LINE = bool(os.environ.get("DOMVEC_PLANT_CODE_FROM_LINE"))
+#: Planted (186k): no special file is detected.
+_PLANT_NO_FILES = bool(os.environ.get("DOMVEC_PLANT_NO_FILES"))
+#: Planted (186k): a Hugging Face `/blob/` viewer link is taken as the file.
+_PLANT_HF_BLOB = bool(os.environ.get("DOMVEC_PLANT_HF_BLOB"))
 
 ProgressFn = Callable[[str, str], None]
 
@@ -577,6 +581,11 @@ class Workspace:
                 pass
         if isinstance(counts, dict):
             counts.update(_timed)
+        # PLUGIN_GOAL 186k: the special files a page links to.
+        try:
+            self.last_files = self.special_files(url, chunks)
+        except Exception as exc:                    # noqa: BLE001 -- never fails a capture
+            self.last_files = {"error": str(exc)[:160]}
         # G-233/G-235: a page's Python code blocks join the code graph.
         try:
             self.last_web_cpg = self.web_code_cpg(url, chunks, raw=raw_values)
@@ -692,6 +701,65 @@ class Workspace:
             lines=sum(len(c.lines) for c in chunks), passes=1,
             wire_bytes=len(html), document_bytes=len(html), report=report,
         )
+
+    #: Special files by extension (PLUGIN_GOAL 186k). A PDF is one too
+    #: (2026-10-18: "downloads for special files should include .pdf"); once
+    #: fetched it is chunked by its own pipeline (`index_pdf`, G-248).
+    SPECIAL_FILES = {
+        ".gguf": "model", ".safetensors": "weights", ".csv": "table", ".tsv": "table", ".parquet": "table",
+        ".json": "json", ".jsonl": "json", ".zip": "archive", ".tar": "archive", ".tgz": "archive",
+        ".tar.gz": "archive", ".7z": "archive", ".pdf": "pdf",
+    }
+
+    def special_files(self, url: str, chunks) -> Dict[str, int]:
+        """The special files a page links to, each at the address of the line
+        that links it: a link destination whose path ends in one of
+        `SPECIAL_FILES` (a query or fragment ignored -- Hugging Face's
+        `.../resolve/main/x.gguf?download=true`). Stored per chunk
+        (`GraphStore.upsert_files`); drawn as nodes by the plugin.
+        Planted `DOMVEC_PLANT_NO_FILES`: nothing detected."""
+        import re as _re
+        from urllib.parse import urljoin, urlsplit, unquote
+
+        out = {"files": 0}
+        if not url or url.startswith(("code://", "vault://")) or _PLANT_NO_FILES:
+            return out
+        # Absolute or page-relative (`/org/repo/resolve/main/x.gguf` on a
+        # Hugging Face file list), resolved against the page.
+        link = _re.compile(r"\]\(((?:https?://|/)[^)\s]+)\)|<(https?://[^>\s]+)>|\((https?://[^)\s]+)\)")
+        rows, seen, carried = [], set(), set()
+        for chunk in chunks:
+            carried.add(chunk.cid)
+            for line in getattr(chunk, "lines", []) or []:
+                text = str(getattr(line, "text", "") or "")
+                for m in link.finditer(text):
+                    href = urljoin(url, m.group(1) or m.group(2) or m.group(3))
+                    # Hugging Face lists each file twice -- `/blob/` (a viewer
+                    # PAGE) and `/resolve/` (the file). The file is the one
+                    # meant: its HEAD read 198 KB, the viewer's, for a 5.63 GB
+                    # GGUF (2026-10-18). Planted `_PLANT_HF_BLOB`.
+                    if not _PLANT_HF_BLOB and urlsplit(href).netloc.endswith("huggingface.co") and "/blob/" in href:
+                        href = href.replace("/blob/", "/resolve/", 1)
+                    raw_path = unquote(urlsplit(href).path)
+                    path = raw_path.lower()
+                    ext = next((e for e in sorted(self.SPECIAL_FILES, key=len, reverse=True) if path.endswith(e)), "")
+                    if not ext:
+                        continue
+                    name = raw_path.rsplit("/", 1)[-1]
+                    key = "%s|%s" % (url, href.split("?")[0])
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    addr = getattr(line, "address", None)
+                    lm = _re.match(r"^\s*\[([^\]]*)\]", text)
+                    rows.append({"key": key, "url": url, "cid": chunk.cid, "xpath": getattr(addr, "xpath", "") or "",
+                                 "href": href, "name": name, "ext": ext, "kind": self.SPECIAL_FILES[ext],
+                                 "label": (lm.group(1) if lm else name)[:120]})
+        if carried:
+            self.store.upsert_files(url, rows, sorted(carried))
+        real = rows
+        out["files"] = len(real)
+        return out
 
     def web_code_cpg(self, url: str, chunks, raw=None) -> Dict[str, int]:
         """The code blocks of a web page in the code property graph (G-233,
