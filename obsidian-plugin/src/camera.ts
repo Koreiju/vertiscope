@@ -103,6 +103,9 @@ export interface Relaxed {
  * force then glides each node there, so calm pins and dragging are untouched.
  * A grid one sphere wide keeps a pass O(n).
  */
+/** Planted (G-90): a touching pair counts as overlapping, so the relax never stops early, as before. */
+export const relaxConfig = { plantNoTouchTolerance: false };
+
 export function relaxCloud(root: V3, start: V3[], radii: number[], rootR: number, bound: number,
                            opts: { safety?: number; iterations?: number; anchor?: number } = {}): Relaxed {
   const S = opts.safety ?? 2, iters = opts.iterations ?? 60, anchor = opts.anchor ?? 0.04;
@@ -122,26 +125,64 @@ export function relaxCloud(root: V3, start: V3[], radii: number[], rootR: number
     return [o, ins];
   };
   const [o0, i0] = n <= 600 ? count() : [-1, -1];
+  const pushApart = (i: number, j: number, tolerance: number): number => {
+    let dx = p[j][0] - p[i][0], dy = p[j][1] - p[i][1], dz = p[j][2] - p[i][2];
+    let d = Math.hypot(dx, dy, dz);
+    const want = R[i] + R[j];
+    if (d >= want * tolerance) return 0;
+    if (d < 1e-9) { dx = Math.cos(i * 2.399); dy = Math.sin(i * 2.399); dz = ((i % 7) - 3) / 7; d = Math.hypot(dx, dy, dz); }
+    const push = (want - d) / d * 0.5;
+    p[i][0] -= dx * push; p[i][1] -= dy * push; p[i][2] -= dz * push;
+    p[j][0] += dx * push; p[j][1] += dy * push; p[j][2] += dz * push;
+    return 1;
+  };
+  // **The page pass** (no phantom: `anchor` 0) takes a fast grid -- integer
+  // keys, each sphere entered in every cell its box touches (two overlapping
+  // spheres share one), each pair stamped once -- and a pair that TOUCHES is
+  // apart (0.1%). A string per lookup and a touching pair pushed again every
+  // pass ran all 60 iterations: 445 ms on ~1,150 pages, 1.2 s of a 1.5 s
+  // absorb (2026-10-18, G-90); now ~11 iterations, ~25 ms. A chunk cloud
+  // keeps the original pass: its iterations are its pull toward the fit, and
+  // its direction-keeping is measured on that order (camera.test).
+  // Planted `plantNoTouchTolerance`: the original pass everywhere.
+  const fast = anchor === 0 && !relaxConfig.plantNoTouchTolerance;
+  const seen = fast ? new Int32Array(n).fill(-1) : null;
+  const hk = (x: number, y: number, z: number) => ((x * 73856093) ^ (y * 19349663) ^ (z * 83492791)) | 0;
   let it = 0;
   for (; it < iters; it++) {
     let moved = 0;
-    const grid = new Map<string, number[]>();
-    const key = (x: number, y: number, z: number) => `${Math.floor(x / cell)},${Math.floor(y / cell)},${Math.floor(z / cell)}`;
-    for (let i = 0; i < n; i++) { const k = key(p[i][0], p[i][1], p[i][2]); const l = grid.get(k); if (l) l.push(i); else grid.set(k, [i]); }
-    for (let i = 0; i < n; i++) {
-      const cx = Math.floor(p[i][0] / cell), cy = Math.floor(p[i][1] / cell), cz = Math.floor(p[i][2] / cell);
-      for (let ox = -1; ox <= 1; ox++) for (let oy = -1; oy <= 1; oy++) for (let oz = -1; oz <= 1; oz++) {
-        for (const j of grid.get(`${cx + ox},${cy + oy},${cz + oz}`) || []) {
-          if (j <= i) continue;
-          let dx = p[j][0] - p[i][0], dy = p[j][1] - p[i][1], dz = p[j][2] - p[i][2];
-          let d = Math.hypot(dx, dy, dz);
-          const want = R[i] + R[j];
-          if (d >= want) continue;
-          if (d < 1e-9) { dx = Math.cos(i * 2.399); dy = Math.sin(i * 2.399); dz = ((i % 7) - 3) / 7; d = Math.hypot(dx, dy, dz); }
-          const push = (want - d) / d * 0.5;
-          p[i][0] -= dx * push; p[i][1] -= dy * push; p[i][2] -= dz * push;
-          p[j][0] += dx * push; p[j][1] += dy * push; p[j][2] += dz * push;
-          moved++;
+    if (fast && seen) {
+      const grid = new Map<number, number[]>();
+      const lo = new Int32Array(n * 3), hi = new Int32Array(n * 3);
+      for (let i = 0; i < n; i++) {
+        for (let a = 0; a < 3; a++) { lo[i * 3 + a] = Math.floor((p[i][a] - R[i]) / cell); hi[i * 3 + a] = Math.floor((p[i][a] + R[i]) / cell); }
+        for (let x = lo[i * 3]; x <= hi[i * 3]; x++) for (let y = lo[i * 3 + 1]; y <= hi[i * 3 + 1]; y++) for (let z = lo[i * 3 + 2]; z <= hi[i * 3 + 2]; z++) {
+          const k = hk(x, y, z); const l = grid.get(k); if (l) l.push(i); else grid.set(k, [i]);
+        }
+      }
+      seen.fill(-1);
+      for (let i = 0; i < n; i++) {
+        for (let x = lo[i * 3]; x <= hi[i * 3]; x++) for (let y = lo[i * 3 + 1]; y <= hi[i * 3 + 1]; y++) for (let z = lo[i * 3 + 2]; z <= hi[i * 3 + 2]; z++) {
+          const l = grid.get(hk(x, y, z));
+          if (!l) continue;
+          for (const j of l) {
+            if (j <= i || seen[j] === i) continue;
+            seen[j] = i;
+            moved += pushApart(i, j, 0.999);
+          }
+        }
+      }
+    } else {
+      const grid = new Map<string, number[]>();
+      const key = (x: number, y: number, z: number) => `${Math.floor(x / cell)},${Math.floor(y / cell)},${Math.floor(z / cell)}`;
+      for (let i = 0; i < n; i++) { const k = key(p[i][0], p[i][1], p[i][2]); const l = grid.get(k); if (l) l.push(i); else grid.set(k, [i]); }
+      for (let i = 0; i < n; i++) {
+        const cx = Math.floor(p[i][0] / cell), cy = Math.floor(p[i][1] / cell), cz = Math.floor(p[i][2] / cell);
+        for (let ox = -1; ox <= 1; ox++) for (let oy = -1; oy <= 1; oy++) for (let oz = -1; oz <= 1; oz++) {
+          for (const j of grid.get(`${cx + ox},${cy + oy},${cz + oz}`) || []) {
+            if (j <= i) continue;
+            moved += pushApart(i, j, 1);
+          }
         }
       }
     }
