@@ -2519,9 +2519,32 @@ def _row_head(members: List[MarkdownLine]) -> Optional[MarkdownLine]:
     a control or a picture: that row is not a row of values."""
     for l in members:
         t = l.text.strip()
-        if t and not _drawn_as_control(t) and not t.startswith("!["):
+        if t and not _is_control_glyph(t) and not t.startswith("!["):
             return l
     return None
+
+
+_LINK_LINE = re.compile(r"^\[[^\]]*\]\(")
+
+
+def _is_control_glyph(t: str) -> bool:
+    """A row member drawn as a CONTROL -- a button `( label )`, a checkbox
+    `[ ] `, a select `=== `, a field `[ text ]` -- not merely a line that
+    starts with `[` or ends with ` )`. `_drawn_as_control`'s broad test took
+    a LINK (`[Space complexity](...)`) and Big-O (`O( n )`) for controls, and
+    Wikipedia's "Time complexity" table fell back to a cell per line
+    (2026-10-18). Planted `PLANT_BROAD_ROW_CONTROL`: the broad test."""
+    if PLANT_BROAD_ROW_CONTROL:
+        return _drawn_as_control(t)
+    if _LINK_LINE.match(t):
+        return False
+    return (t.startswith(("[ ] ", "[x] ", "=== ")) or t.endswith(" ===")
+            or (t.startswith("( ") and t.endswith(" )"))
+            or (t.startswith("[") and t.endswith("]")))
+
+
+#: Planted: a row's head is chosen by the broad control test, as before.
+PLANT_BROAD_ROW_CONTROL = False
 
 
 def _row_line(members: List[MarkdownLine], text: str) -> MarkdownLine:
@@ -2712,15 +2735,33 @@ def with_table_separators(markdown: str) -> str:
     after the first row of every run of table rows (`_tabulate` leaves it out
     of the lines, which pair one-to-one with addresses)."""
     out: List[str] = []
-    prev_row = False
+    prev_cols = 0
     for raw in markdown.split("\n"):
         row = raw.lstrip().startswith("|") and raw.rstrip().endswith("|")
+        cols = max(1, raw.strip().count("|") - raw.strip().count("\\|") - 1) if row else 0
+        # A row of ANOTHER width is another table -- a nested one (Wikipedia's
+        # infobox holds its "Time complexity" table in a cell): under one
+        # delimiter a renderer drops the cells past the first table's width,
+        # and "Worst case" vanished (2026-10-18). Planted `PLANT_ONE_TABLE_RUN`.
+        if row and prev_cols and cols != prev_cols and not PLANT_ONE_TABLE_RUN:
+            out.append("")
+            prev_cols = 0
+        # A table cannot interrupt a paragraph, and a plain line after one is
+        # read as its next row: a blank line on each side (the panel showed
+        # its rows as one paragraph of "| a | b |" text, 2026-10-18).
+        if row and not prev_cols and out and out[-1].strip():
+            out.append("")
+        if not row and prev_cols and raw.strip():
+            out.append("")
         out.append(raw)
-        if row and not prev_row:
-            cols = max(1, raw.strip().count("|") - raw.strip().count("\\|") - 1)
+        if row and not prev_cols:
             out.append("|" + "|".join([" --- "] * cols) + "|")
-        prev_row = row
+        prev_cols = cols
     return "\n".join(out)
+
+
+#: Planted: rows of different widths share one table, as before.
+PLANT_ONE_TABLE_RUN = False
 
 
 def _number_parts(chunks: List[MarkdownChunk]) -> None:

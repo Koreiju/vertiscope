@@ -3362,11 +3362,21 @@ export class GraphView extends ItemView {
       // A table's separator row, drawn here for the reader's renderer: the
       // stored lines pair one-to-one with addresses and hold none (`D-5`,
       // `markdown.py` `with_table_separators`).
-      out.push(line);
       const row = (t: string) => /^\s*\|.*\|\s*$/.test(t || "");
-      if (row(line) && !row(all[i - 1])) {
-        const cols = Math.max(1, (line.trim().match(/(?<!\\)\|/g) || []).length - 1);
-        out.push("|" + Array(cols).fill(" --- ").join("|") + "|");
+      const cols = (t: string) => Math.max(1, (String(t).trim().match(/(?<!\\)\|/g) || []).length - 1);
+      // A row of another width is another table (a nested one -- Wikipedia's
+      // infobox "Time complexity"): one delimiter for both dropped the cells
+      // past the first table's width (2026-10-18). Planted `plantOneTableRun`.
+      const newTable = row(line) && row(all[i - 1]) && cols(line) !== cols(all[i - 1]) && !GraphView.plantOneTableRun;
+      if (newTable) out.push("");
+      // A table cannot interrupt a paragraph, and a plain line after one is
+      // read as its next row: a blank line on each side (the panel drew the
+      // rows as one paragraph of "| a | b |" text, 2026-10-18).
+      else if (row(line) && !row(all[i - 1]) && out.length && String(out[out.length - 1]).trim()) out.push("");
+      if (!row(line) && row(all[i - 1]) && String(line).trim()) out.push("");
+      out.push(line);
+      if (row(line) && (!row(all[i - 1]) || newTable)) {
+        out.push("|" + Array(cols(line)).fill(" --- ").join("|") + "|");
       }
       return out;
     }, []).join("\n");
@@ -3923,6 +3933,8 @@ export class GraphView extends ItemView {
     return n >= 1e9 ? (n / 1e9).toFixed(2) + " GB" : n >= 1e6 ? (n / 1e6).toFixed(1) + " MB" : n >= 1e3 ? (n / 1e3).toFixed(0) + " KB" : n + " B";
   }
 
+  /** Planted: table rows of different widths share one table run, as before. */
+  static plantOneTableRun = false;
   /** Planted: code edges are never fetched or drawn, as before. */
   plantNoCodeEdges = false;
   private async loadCodeEdges(url: string): Promise<void> {

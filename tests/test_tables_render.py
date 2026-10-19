@@ -99,3 +99,45 @@ def test_planted_naked_rows_carry_bare_values(monkeypatch):
     chunks = _long_table(64)
     texts = [l.text for c in chunks for l in c.lines]
     assert not any("Engine: " in t for t in texts)
+
+
+def test_a_nested_table_is_its_own_table_when_displayed(monkeypatch):
+    """Wikipedia's infobox holds a 3-column "Time complexity" table inside a
+    2-column table. Under ONE delimiter row a renderer keeps only 2 columns
+    and "Worst case" is lost; a change of width starts a new table.
+    Planted `PLANT_ONE_TABLE_RUN`: one run, as before."""
+    import domvec.markdown as md
+    rows = "\n".join(["| Trie |  |", "| Invented | 1960 |", "| Operation | Average | Worst case |", "| Search | O(n) | O(n) |"])
+    got = md.with_table_separators(rows).split("\n")
+    assert got == ["| Trie |  |", "| --- | --- |", "| Invented | 1960 |", "",
+                   "| Operation | Average | Worst case |", "| --- | --- | --- |", "| Search | O(n) | O(n) |"], got
+    # And a table never runs into the prose around it.
+    NL = chr(10)
+    around = md.with_table_separators(NL.join(["Intro line", "| a | b |", "| 1 | 2 |", "After"])).split(NL)
+    assert around == ["Intro line", "", "| a | b |", "| --- | --- |", "| 1 | 2 |", "", "After"], around
+    monkeypatch.setattr(md, "PLANT_ONE_TABLE_RUN", True)
+    planted = md.with_table_separators(rows).split("\n")
+    assert planted.count("| --- | --- | --- |") == 0
+
+
+def test_a_row_of_links_and_big_o_values_is_still_a_row(monkeypatch):
+    """Wikipedia's "Time complexity" table: a row whose only member is a LINK
+    (`[Space complexity](...)`) and cells reading `O( n )` were taken for
+    controls, and the whole table fell back to a cell per line. Planted
+    `PLANT_BROAD_ROW_CONTROL`: the broad test, 19 loose lines."""
+    import domvec.markdown as md
+    from domvec.address import ContentAddress
+    from domvec.markdown import MarkdownChunk, MarkdownLine
+    T = "/html/body/table/tbody/tr[5]/td/table/tbody"
+    cells = [("tr[2]/th", "Operation"), ("tr[2]/td", "Average"), ("tr[2]/td[2]", "Worst case"),
+             ("tr[3]/th", "Search"), ("tr[3]/td", "O( n )"), ("tr[3]/td[2]", "O( n )"),
+             ("tr[6]/th/a", "[Space complexity](https://en.wikipedia.org/wiki/Space_complexity)"),
+             ("tr[7]/th", "Space"), ("tr[7]/td", "O( n )"), ("tr[7]/td[2]", "O( wn )")]
+    lines = [MarkdownLine(depth=0, text=t, address=ContentAddress(url="u", xpath="%s/%s" % (T, c), tag="", accessor=""))
+             for c, t in cells]
+    lay = md._table_layouts([MarkdownChunk(url="u", xpath="/", lines=lines)], {})
+    rows = [l.text for l in md._tabulate(lines, lay)]
+    assert "| Operation | Average | Worst case |" in rows and "| Search | O( n ) | O( n ) |" in rows, rows
+    assert any(r.startswith("| [Space complexity]") for r in rows), rows
+    monkeypatch.setattr(md, "PLANT_BROAD_ROW_CONTROL", True)
+    assert len(md._tabulate(lines, lay)) == len(lines)
