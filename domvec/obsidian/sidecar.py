@@ -290,6 +290,33 @@ _PLANT_NO_AUTOCOMPACT = [os.environ.get("DOMVEC_PLANT_NO_AUTOCOMPACT") == "1"]
 _COMPACT_BASE_MB: List[float] = []
 
 
+#: Model jobs by id: state, result (the role's typed value), error.
+_MODEL_JOBS: Dict[str, Dict] = {}
+
+
+def _model_job(workspace, jid: str, body: Dict) -> None:
+    from .. import models
+    job = _MODEL_JOBS[jid]
+    t0 = time.time()
+    try:
+        if job["role"] == "triplex":
+            cid = str(body.get("cid") or "")
+            rows = workspace.store._rows("MATCH (c:Chunk {cid: $c}) RETURN c.md, c.url", {"c": cid}) if cid else []
+            text = models.plain(rows[0][0]) if rows else str(body.get("text") or "")
+            if not text:
+                raise ValueError("no text for chunk %r" % cid)
+            res = models.run_triplex(text[:4000], list(body.get("entity_types") or ["PERSON", "ORGANIZATION", "LOCATION", "DATE", "CONCEPT", "PRODUCT"]),
+                                     list(body.get("predicates") or ["IS_A", "PART_OF", "LOCATED_IN", "CREATED_BY", "USED_FOR", "RELATED_TO"]))
+            job["source"] = {"cid": cid, "url": rows[0][1] if rows else ""}
+        else:
+            res = models.run_chat(str(body.get("prompt") or ""))
+        job.update(state="done" if res.ok else "error", result=res.to_json(), error=res.error,
+                   s=round(time.time() - t0, 1))
+    except Exception as exc:                        # noqa: BLE001
+        job.update(state="error", error="%s: %s" % (type(exc).__name__, str(exc)[:200]), s=round(time.time() - t0, 1))
+    _profile("model_run", {k: job.get(k) for k in ("role", "cid", "state", "s")})
+
+
 #: Confirmed downloads by href: state, bytes, total, path, error.
 _DOWNLOADS: Dict[str, Dict] = {}
 #: Where an installed model goes: the directory the GPT4All runtime loads from.
@@ -1690,6 +1717,27 @@ class _Handler(BaseHTTPRequestHandler):
 
         # A PDF the browser cell reached (G-248): its bytes, read by the page
         # context from its own document, kept and chunked like a page.
+        if route == "model_run":
+            # A model role run on a CHUNK (G-264: Triplex over a web text
+            # panel; `chat` over a prompt): in a thread, as its answer takes
+            # 20-40 s on CPU; `GET /model_job?id=` follows it. The answer is
+            # the role's TYPE or the reason it is not (`domvec/models.py`).
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(length) or b"{}")
+            except Exception as exc:                # noqa: BLE001
+                self._send(400, {"error": "bad body: %s" % exc})
+                return
+            role = str(body.get("role") or "")
+            if role not in ("triplex", "chat") or self.workspace is None:
+                self._send(400, {"error": "role triplex or chat, with a workspace"})
+                return
+            jid = "%s:%s:%d" % (role, body.get("cid") or "prompt", int(time.time() * 1000))
+            _MODEL_JOBS[jid] = {"state": "running", "id": jid, "role": role, "cid": body.get("cid")}
+            threading.Thread(target=_model_job, args=(self.workspace, jid, body), daemon=True).start()
+            self._send(202, dict(_MODEL_JOBS[jid]))
+            return
+
         if route == "download":
             # A special file fetched -- ONLY when the body says the reader
             # confirmed it (2026-10-18: "prompt the user before applying a
@@ -3250,6 +3298,17 @@ class _Handler(BaseHTTPRequestHandler):
 
         # `G-235`: a code file's property graph (AST, CFG, DFG, CALLS,
         # INHERITS), by the same addresses as its chunks; or the totals.
+        if segments[0] in ("models", "model_job"):
+            # The installed model roles and their types (G-262), and a model
+            # job's state (`POST /model_run`).
+            if segments[0] == "models":
+                from ..models import installed
+                self._send(200, {"dir": str(MODEL_DIR), "roles": installed()})
+                return
+            jid = (parse_qs(parts.query).get("id") or [""])[0]
+            self._send(200, dict(_MODEL_JOBS.get(jid) or {"state": "none"}))
+            return
+
         if segments[0] in ("files", "file_head", "download_status"):
             # Special files (PLUGIN_GOAL 186k): what a page links to, a file's
             # size BEFORE anything is fetched, and a confirmed download's
