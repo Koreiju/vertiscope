@@ -203,6 +203,9 @@ export class PipelineBox {
   urlOf: (raw: string) => string = (u) => u;
   /** The url the cell shows, kept from its navigations (no synchronous ask). */
   shownUrl: (() => string) | null = null;
+  private statusBusy = false;
+  /** Planted: a status question every tick, answered or not. */
+  plantStatusPileUp = false;
   private url(): string {
     try { return this.urlOf((this.shownUrl ? this.shownUrl() : this.webview()?.getURL()) || ""); } catch { return ""; }
   }
@@ -217,11 +220,18 @@ export class PipelineBox {
     const now = performance.now();
     // Every 2 s collapsed, every second open; always at once on a new page.
     const every = this.expanded ? 1000 : 2000;
-    if (url && url !== "about:blank" &&
+    // ONE question at a time: the tick fires every second whether or not
+    // the last answer came back, and against a slow store (0.6-3.9 s an
+    // answer) the box kept 8-9 /page_status requests in flight, piling onto
+    // a sidecar that then stopped answering (2026-10-19). Planted
+    // `plantStatusPileUp`: asked every tick, as before.
+    if (url && url !== "about:blank" && (!this.statusBusy || this.plantStatusPileUp) &&
         (url !== this.statusUrl || now - this.lastStatusPoll >= every)) {
       this.lastStatusPoll = now;
       this.statusUrl = url;
-      this.status = await this.sidecar.pageStatus(url).catch(() => null);
+      this.statusBusy = true;
+      try { this.status = await this.sidecar.pageStatus(url).catch(() => null); }
+      finally { this.statusBusy = false; }
     }
     this.draw();
   }

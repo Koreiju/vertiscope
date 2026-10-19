@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import re
 import threading
 from pathlib import Path
@@ -418,6 +419,75 @@ _PLANT_REQUEST_QUIET_ONLY = [False]
 _READER_IDLE = [0.0, 0.0]
 
 
+#: The native stacks the sidecar loads lazily, in the order they load each
+#: other: torch (the encoder), then UMAP's numba / sklearn / scipy.
+_PRELOAD = ("torch", "numba", "scipy.stats", "scipy.integrate", "scipy.sparse.csgraph",
+            "sklearn.utils", "sklearn.neighbors", "pynndescent", "umap")
+
+
+def preload_native() -> Dict[str, float]:
+    """Load the native libraries on the MAIN thread, before any worker runs.
+
+    2026-10-19: the sidecar wedged a minute after every start. The stack
+    dump showed a worker importing UMAP's sklearn -> scipy, stuck inside
+    `create_module` loading `scipy.integrate._odepack` (OpenBLAS / Fortran
+    DLLs) while another worker deep-copied torch tensors: a DLL loaded on a
+    worker thread, beside threads running other native runtimes, holds the
+    Windows loader lock through its initialisation -- and every new thread
+    (one per HTTP request), `ExitProcess`, and that load all waited on each
+    other at 0% CPU. Loaded here first, the DLLs initialise before there is
+    another thread to race. Returns ms per module. Planted
+    `DOMVEC_PLANT_LAZY_IMPORTS=1`: nothing loaded here, as before.
+    """
+    out: Dict[str, float] = {}
+    if os.environ.get("DOMVEC_PLANT_LAZY_IMPORTS") == "1":
+        return out
+    import importlib
+    for name in _PRELOAD:
+        t0 = time.perf_counter()
+        try:
+            importlib.import_module(name)
+            out[name] = round((time.perf_counter() - t0) * 1000, 1)
+        except Exception:                           # noqa: BLE001
+            out[name] = -1.0
+    return out
+
+
+def _exit_for_supervisor(code: int, workspace=None, checkpoint: bool = True) -> None:
+    """Leave with `code` for the supervisor -- without Windows' DLL teardown.
+
+    `os._exit` is `ExitProcess`: it ends the other threads and then runs
+    every loaded DLL's detach routine, and with the CUDA libraries loaded one
+    of those never returned (2026-10-19). The process sat with its socket
+    open, accepting connections it would never answer, at 0% CPU -- the
+    faulthandler timer found only "<freed thread state>" -- and the
+    supervisor, waiting for exit 76, never compacted. It wedged a minute
+    after every start, as soon as the plugin reported the reader idle and
+    the 5.8 GB store came due. `TerminateProcess` ends the process with the
+    code and runs no detach routine. The WAL is checkpointed first where the
+    store can take it, so what the supervisor opens next has nothing to
+    replay. Planted `DOMVEC_PLANT_EXIT_PROCESS=1`: `os._exit`, as before.
+    """
+    if checkpoint and workspace is not None:
+        try:
+            workspace.store.checkpoint()
+        except Exception:                           # noqa: BLE001
+            pass
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.flush()
+        except Exception:                           # noqa: BLE001
+            pass
+    if os.name == "nt" and os.environ.get("DOMVEC_PLANT_EXIT_PROCESS") != "1":
+        try:
+            import ctypes
+            k32 = ctypes.windll.kernel32
+            k32.TerminateProcess(k32.GetCurrentProcess(), int(code))
+        except Exception:                           # noqa: BLE001
+            pass
+    os._exit(code)
+
+
 def _maybe_compact(workspace, store_mb: Optional[float] = None) -> None:
     """After a checkpoint and on every quiet integrity record: if due, exit
     76 under the work lock (nothing mid-write) for the supervisor."""
@@ -432,7 +502,7 @@ def _maybe_compact(workspace, store_mb: Optional[float] = None) -> None:
                     os.environ.get("DOMVEC_SUPERVISED") == "1", idle_s, _LAST_WRITE[0]):
         with _WORK_LOCK:
             _profile("compact_asked", {"store_mb": round(store_mb, 1), "base_mb": _compact_base(workspace, store_mb)})
-            os._exit(76)
+            _exit_for_supervisor(76, workspace)
 
 
 def _compact_base(workspace, store_mb: float) -> float:
@@ -584,7 +654,8 @@ def _poison_watch(workspace, stop) -> None:
             # 2026-10-18, with segfaults at CHECKPOINT between. The supervisor
             # compacts with a larger pool (which folded that 50.9 MB WAL and
             # took the store 5,143 -> 1,543 MB), then restarts.
-            os._exit(76)
+            # No checkpoint: the pool already refused this store.
+            _exit_for_supervisor(76, workspace, checkpoint=False)
 
 
 def _integrity_last_on_disk(workspace) -> Dict[str, int]:
@@ -1372,8 +1443,98 @@ def search_payload(workspace, query: str, k: int = 8, *,
                            shape=round((_time.perf_counter() - _t_shape) * 1000, 1))}
 
 
+#: Requests in flight: thread id -> (started, request line). Read by the
+#: stall watchdog (`_stall_watchdog`), nothing else.
+_INFLIGHT: Dict[int, tuple] = {}
+_STALL_DUMPED = [0.0]
+#: Where `_reqlog` writes (set by `serve()`); None leaves it off.
+_REQLOG = [None]
+
+
+def _reqlog(what: str, tid: int, line: str) -> None:
+    """One line per request start and end, flushed at once (`requests.log`).
+
+    A stall the interpreter cannot report (2026-10-19: the C-level dump said
+    only "freed thread state") is found by what STARTED and never ended just
+    before it. Kept to ~2 MB: the file is cut to its last half when it grows.
+    """
+    path = _REQLOG[0]
+    if path is None:
+        return
+    try:
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write("%s %s %x %s\n" % (time.strftime("%H:%M:%S"), what, tid, line[:160]))
+        if path.stat().st_size > 2_000_000:
+            tail = path.read_text(encoding="utf-8", errors="replace")[-1_000_000:]
+            path.write_text(tail, encoding="utf-8")
+    except Exception:                               # noqa: BLE001
+        pass
+
+
+def _stall_watchdog(workspace_path: str, stall_s: float = 90.0, every_s: float = 600.0) -> None:
+    """Dump every thread's stack when a request has been in flight too long.
+
+    2026-10-19: the sidecar twice stopped answering a minute after it
+    started -- no CPU, connections piling up in CLOSE_WAIT, and even
+    `/sensor`, which reads a file, never returned. Nothing was logged, and a
+    stall without a stack can only be guessed at. When any request has been
+    in flight for `stall_s`, every thread's Python stack goes to
+    `stacks.log` in the workspace, at most once per `every_s`.
+    """
+    import faulthandler
+    # And a stall Python cannot see: a native call holding the GIL stops
+    # every Python thread, this one included (the second stall: no dump).
+    # `dump_traceback_later` runs its timer in C, without the GIL; this
+    # thread re-arms it every 15 s, so it fires only when Python has not run
+    # for 75 s -- and then names every thread's frame.
+    try:
+        gil_fh = open(Path(workspace_path) / "stacks.log", "a", encoding="utf-8")
+    except OSError:
+        gil_fh = None
+    while True:
+        if gil_fh is not None:
+            try:
+                faulthandler.dump_traceback_later(75, repeat=False, file=gil_fh, exit=False)
+            except Exception:                       # noqa: BLE001
+                pass
+        time.sleep(15)
+        try:
+            now = time.time()
+            old = [(t, line) for t, line in list(_INFLIGHT.values()) if now - t > stall_s]
+            if not old or now - _STALL_DUMPED[0] < every_s:
+                continue
+            _STALL_DUMPED[0] = now
+            with open(Path(workspace_path) / "stacks.log", "a", encoding="utf-8") as fh:
+                fh.write("\n==== %s: %d request(s) in flight > %ds, oldest %ds: %s\n" % (
+                    time.strftime("%Y-%m-%d %H:%M:%S"), len(old), stall_s,
+                    max(now - t for t, _ in old), "; ".join(line[:120] for _, line in old[:8])))
+                fh.flush()
+                faulthandler.dump_traceback(file=fh, all_threads=True)
+        except Exception:                           # noqa: BLE001
+            pass
+
+
 class _Handler(BaseHTTPRequestHandler):
     workspace = None            # set by serve()
+
+    def handle_one_request(self) -> None:
+        # In flight, for the stall watchdog: the request line once it is read.
+        me = threading.get_ident()
+        _INFLIGHT[me] = (time.time(), "(reading)")
+        try:
+            super().handle_one_request()
+        finally:
+            got = _INFLIGHT.pop(me, None)
+            if got and got[1] != "(reading)":
+                _reqlog("end %dms" % int((time.time() - got[0]) * 1000), me, got[1])
+
+    def parse_request(self) -> bool:
+        ok = super().parse_request()
+        me = threading.get_ident()
+        if me in _INFLIGHT:
+            _INFLIGHT[me] = (_INFLIGHT[me][0], str(getattr(self, "requestline", "")))
+            _reqlog("start", me, str(getattr(self, "requestline", "")))
+        return ok
     enact_allowed = False       # set by serve(); the write path's gate
     #: Set by `serve()`. Separate from `enact_allowed` because they are
     #: different permissions: enact presses controls on live pages, capture
@@ -1468,7 +1629,7 @@ class _Handler(BaseHTTPRequestHandler):
                     time.sleep(0.5)
                     # 75: "restart me" to the supervisor (exit 0 is a stop,
                     # and the first graceful restart left the sidecar down).
-                    os._exit(75)
+                    _exit_for_supervisor(75, self.workspace)
             threading.Thread(target=_exit_when_idle, daemon=True).start()
             self._send(200, {"shutting_down": True, "waits_for": "the work lock"})
             return
@@ -4055,6 +4216,12 @@ def serve(workspace, port: int = 8787, *, block: bool = True,
         daemon_threads = True
 
     server = _Server(("127.0.0.1", port), handler)
+    _REQLOG[0] = Path(workspace.path) / "requests.log"
+    try:
+        threading.Thread(target=_stall_watchdog, args=(str(workspace.path),),
+                         name="domvec-stall-watchdog", daemon=True).start()
+    except Exception:                               # noqa: BLE001
+        pass
     # The pool hangs off the server so a `block=False` caller can reach it, and
     # so nothing else has to remember it exists.
     server.kernel_pool = pool

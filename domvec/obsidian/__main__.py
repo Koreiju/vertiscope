@@ -106,6 +106,12 @@ def main(argv=None) -> int:
     read_only = not (getattr(args, "enact", False)
                      or getattr(args, "capture", False))
     embedder = None
+    if args.cmd == "serve":
+        # The native stacks first, on this thread, before the embedder or the
+        # workspace starts any other (`preload_native`: a DLL loaded later on
+        # a worker deadlocked the process on the Windows loader lock).
+        from .sidecar import preload_native
+        print("preloaded: %s" % preload_native())
     if getattr(args, "semantic", False):
         from ..core.embedding_service import get_default_service
 
