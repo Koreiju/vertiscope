@@ -172,6 +172,10 @@ export function getSnapshot(cid: string): Snapshot | null {
  * page laid out is wider still. A click on a link is handed to `onLink` --
  * the browser cell navigates; the frame never does.
  */
+/** Run-time plants for the snapshot frame (the harness flips them). */
+export const snapshotConfig = { plantInertLooksLive: false };
+try { (window as any).__domvecSnapshotConfig = snapshotConfig; } catch { /* no window */ }
+
 export function renderSnapshot(host: HTMLElement, snap: Snapshot,
                                opts: {
                                  maxHeight?: number;
@@ -221,6 +225,31 @@ export function renderSnapshot(host: HTMLElement, snap: Snapshot,
       doc.body.style.overflowY = h > max ? "auto" : "hidden";
     };
     fit();
+    // A control that cannot act SAYS so (G-102, Addendum IX: "the buttons are
+    // just stale"): a button, field or menu the trie holds no address for --
+    // or any control when there is no cell to act through -- is drawn dimmed
+    // with a not-allowed cursor and a title naming why, never as a live
+    // control that does nothing when pressed. A link with no address still
+    // opens its page, so links are not touched. Planted
+    // `snapshotConfig.plantInertLooksLive`: drawn as the page drew it.
+    if (!snapshotConfig.plantInertLooksLive) {
+      const CONTROL = "button, input, select, textarea, [role=button], [role=checkbox], [role=switch], [role=tab], [role=menuitem], [role=combobox], [role=slider]";
+      let inert = 0;
+      doc.querySelectorAll(CONTROL).forEach((el) => {
+        const h = el as HTMLElement;
+        if (h.closest("a[data-href]") && !h.matches("button, input, select, textarea")) return;
+        if (opts.onAct && h.closest("[data-domvec-act]")) return;
+        h.setAttribute("aria-disabled", "true");
+        h.setAttribute("data-domvec-inert", "");
+        h.setAttribute("title", opts.onAct ? "not reachable from here: the page's map holds no address for this control"
+                                           : "not live here: open the page in the browser cell to use it");
+        h.style.cursor = "not-allowed";
+        h.style.opacity = "0.55";
+        h.tabIndex = -1;
+        inert++;
+      });
+      frame.dataset.inert = String(inert);
+    }
     // Pictures change the height as they arrive.
     doc.querySelectorAll("img").forEach((img) => img.addEventListener("load", fit));
     // The frame never navigates and no control acts on its own: every event

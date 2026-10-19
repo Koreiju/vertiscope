@@ -1272,6 +1272,65 @@ export function makeChecks(env) {
 
   const CHECKS = [
     {
+      id: "G-102",
+      asks: "a billboard does not fake live controls: in the page form of a chunk, a control the trie addresses stays live (it acts on the page), and a control it holds no address for is drawn inert -- dimmed, not-allowed, aria-disabled, with a title saying why; planted (plantInertLooksLive) the dead control looks as pressable as the live one",
+      async run() {
+        // A newsletter box served locally: a labelled button (a unit, so an
+        // address) and an icon-only button with no words (no unit, so no
+        // address). Opened from the GRAPH in page form, read in its frame.
+        const fixtures = await serveFixtures();
+        const arm = (planted) => evaluate(`(async () => {
+          ${PREP}
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          const cfg = window.__domvecSnapshotConfig;
+          if (!cfg) return { error: "this build has no snapshot config" };
+          cfg.plantInertLooksLive = ${planted};
+          try {
+            const PAGE = ${JSON.stringify(fixtures.origin + "/controls_inert.html?g102=")} + (${planted} ? "p" : "c") + Date.now();
+            if (!(await land(PAGE, 30000))) return { error: "did not land" };
+            let cids = [];
+            for (let i = 0; i < 60 && !cids.length; i++) { await sleep(1000); cids = await v.sidecar.pageCids(PAGE); }
+            if (!cids.length) return { error: "not stored" };
+            await sleep(2500);
+            const node = v.graph.graphData().nodes.find((n) => cids.includes(String(n.id)))
+              || { id: cids[0], url: PAGE, level: "chunk", virtual: true, x: 0, y: 0, z: 0 };
+            for (const bb of v.billboardState()) v.closeBillboard(bb.id);
+            await v.openBillboard(node);
+            const e = v.billboards.get(String(node.id));
+            for (let i = 0; i < 6 && e && e.form !== "page"; i++) { await v.switchForm(e, "page"); await sleep(400); }
+            await sleep(2500);
+            const f = e && e.el.querySelector("iframe.domvec-snapshot");
+            const d = f && f.contentDocument;
+            if (!d) { v.closeBillboard(String(node.id)); return { error: "no page form", form: e ? e.form : null }; }
+            // The clone keeps no ids: the controls are found by what they show.
+            const ctl = [...d.querySelectorAll("button, input, [role=button]")];
+            const pick = { "#go": ctl.find((x) => /subscribe/i.test(x.textContent || "")),
+                           "#icon": ctl.find((x) => x.tagName === "BUTTON" && !(x.textContent || "").trim() && x.querySelector("svg")),
+                           "#email": ctl.find((x) => x.tagName === "INPUT") };
+            const read = (sel) => { const el = pick[sel]; if (!el) return null;
+              const cs = getComputedStyle(el);
+              return { live: !!el.closest("[data-domvec-act]"), inert_marked: el.hasAttribute("data-domvec-inert"),
+                       aria_disabled: el.getAttribute("aria-disabled") === "true", cursor: cs.cursor,
+                       opacity: Number(cs.opacity), title: el.getAttribute("title") || "" }; };
+            // The frame clones the page's chunk: the controls by their page ids.
+            const out = { planted: ${planted}, cid: String(node.id), inert_count: Number(f.dataset.inert || 0), controls: ctl.length,
+                          subscribe: read("#go"), icon: read("#icon"), email: read("#email") };
+            v.closeBillboard(String(node.id));
+            return out;
+          } finally { cfg.plantInertLooksLive = false; }
+        })()`, { timeout: 150000 });
+        try {
+          const clean = await arm(false);
+          const planted = await arm(true);
+          const deadSays = (x) => !!x && x.inert_marked && x.aria_disabled && x.cursor === "not-allowed" && x.opacity < 0.9 && x.title.length > 10;
+          const liveLooksLive = (x) => !!x && x.live && !x.inert_marked && x.cursor !== "not-allowed";
+          const ok = (r) => !!r && !r.error && liveLooksLive(r.subscribe) && deadSays(r.icon);
+          return { pass: ok(clean) && !ok(planted),
+                   evidence: { clean, planted, bar: "the addressed button live and unmarked; the icon-only button (no address) marked inert: aria-disabled, cursor not-allowed, dimmed, a title" } };
+        } finally { await fixtures.close(); }
+      },
+    },
+    {
       id: "G-195",
       asks: "kept: hovering a browser chunk box drives the 3D billboards with good latency -- a real pointer move onto another chunk of a stored page opens that chunk's panel, with its text, p50 < 250 ms and p90 < 600 ms; planted poll-hover (the hover found by the poll) does not",
       async run() {
