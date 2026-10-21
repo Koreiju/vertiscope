@@ -1,5 +1,10 @@
 # vertiscope
 
+<video width="640" height="360" controls>
+  <source src="assets/yes_compressed.mp4" type="video/mp4">
+  Your browser does not support the video tag.
+</video>
+
 Scan pages into a **universal content-address trie**, render them as markdown
 that links back to the DOM, index them three ways, and browse the result in an
 interactive terminal.
