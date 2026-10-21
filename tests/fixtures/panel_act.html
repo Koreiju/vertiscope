@@ -1,0 +1,34 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Panel act</title>
+<body>
+<h1>A page a chunk panel can act on</h1>
+<div id="panel">
+  <p>This fixture exists so that a check has a page whose only motion is the
+  motion the check causes: a button that counts its presses, a field whose
+  value the page echoes, and one control the never-press set must turn down.</p>
+  <button id="go" type="button">Pick me</button>
+  <p id="out">nothing yet</p>
+  <label for="word">Your word</label>
+  <input id="word" type="text" value="">
+  <p id="echo">echo: (empty)</p>
+  <button id="gate" type="button">Sign in</button>
+  <p id="gated">still signed out</p>
+</div>
+<script>
+  // Plain handlers, written the way a site writes them: the page reacts to the
+  // events it receives and knows nothing about who sent them.
+  var presses = 0;
+  document.getElementById("go").addEventListener("click", function () {
+    presses += 1;
+    document.getElementById("out").textContent = "button pressed " + presses + " times";
+  });
+  document.getElementById("word").addEventListener("change", function (e) {
+    document.getElementById("echo").textContent = "echo: " + e.target.value;
+  });
+  // Reached only if the refusal set failed: the planted defect's tell.
+  document.getElementById("gate").addEventListener("click", function () {
+    document.getElementById("gated").textContent = "signed in by mistake";
+  });
+</script>
+</body>

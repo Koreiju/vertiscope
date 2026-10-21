@@ -1,0 +1,24 @@
+{
+  "measures": {
+    "billboards_textured": 0.7380952380952381,
+    "chunk_tokens_median": 201,
+    "chunks": 3135,
+    "chunks_over_window": 0.012440191387559809,
+    "containment": 1.0,
+    "dangling_edges": 0,
+    "depth_rho": 1.0,
+    "duplicate_chunks": 0.1320574162679426,
+    "nodes_with_picture": 252,
+    "reach_mean": 0.37105252048387977,
+    "reach_median": 0.18518518518518517,
+    "reading_order": 1.0,
+    "resolved_edges": 624,
+    "scroll_port_exists": 0.0,
+    "shape_collapse": 0.8805257374693601,
+    "shape_field_exists": 0.0,
+    "shape_lossy": 0.8023346303501946,
+    "sprites": 252,
+    "sprites_textured": 186
+  },
+  "workspace": "build\\vaultws512"
+}

@@ -1,0 +1,30 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Mutating page</title>
+<body>
+<h1>A page that mutates when it is used</h1>
+<p>This fixture exists so that a live check has a page whose ONLY motion is
+the motion the check causes. A real page's ads and clocks move on their own,
+and a score against a moving page is the page's motion plus ours.</p>
+<ul id="items">
+  <li>the first item, present from the start</li>
+  <li>the second item, present from the start</li>
+</ul>
+<button id="add" type="button">Add an item</button>
+<script>
+  // Deterministic: the token is supplied by the caller in the page's own URL,
+  // so the check knows exactly what string to go looking for in the trie
+  // afterwards -- and hands it over without writing into the page (a global
+  // set from the plugin lands in the sensor's isolated world, D-43, where this
+  // handler never sees it).
+  let n = 0;
+  document.getElementById("add").addEventListener("click", function () {
+    n += 1;
+    var li = document.createElement("li");
+    li.textContent = (new URLSearchParams(location.search).get("token") || "untokened")
+      + " item number " + n
+      + ", appended by a click and by nothing else on this page.";
+    document.getElementById("items").appendChild(li);
+  });
+</script>
+</body>

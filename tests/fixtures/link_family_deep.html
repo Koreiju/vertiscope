@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>MARK-FAMILY-DEEP</title></head>
+<body>
+<!--
+  The residue case, built to the derivation rather than found on a page.
+
+  A link's scope is the node four levels above it, so #shallow -- two levels
+  down -- has the whole document for a scope and sees all three members of the
+  /item/# family. The two deep links are nested far enough that their own
+  scopes hold only each other, so they are never a family of three.
+
+  Remove one deep member and #shallow drops from three to two: re-classified,
+  while sitting in a branch that the mutation's own fourth ancestor does not
+  contain. An invalidation scoped to `subtree(anc4(T))` cannot reach it, which
+  is the whole point of this file.
+-->
+<a id="shallow" href="/item/1">shallow member of the numeric family</a>
+<div class="n1"><div class="n2"><div class="n3"><div class="n4">
+<div class="n5"><div class="n6"><div class="n7"><div class="n8">
+  <ul id="list">
+    <li><a id="deep2" href="/item/2">deep member two of the family</a></li>
+    <li><a id="deep3" href="/item/3">deep member three of the family</a></li>
+  </ul>
+</div></div></div></div></div></div></div></div>
+<div id="elsewhere">
+  <p id="pad-a">Filler, so the document is not one chunk at any budget.</p>
+</div>
+</body>
+</html>

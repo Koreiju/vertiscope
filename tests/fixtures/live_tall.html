@@ -1,0 +1,50 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>A tall page that arrives as you scroll</title>
+<style>
+  section { min-height: 40vh; padding: 1rem; border-bottom: 1px solid #ccc; }
+</style>
+<body>
+<h1>A tall page that arrives as you scroll</h1>
+<p>This fixture exists so a scroll can be measured against a page whose only
+motion is the motion the scan causes. A live site's ads and clocks move on
+their own, and a pacing score against a moving page is the page's motion plus
+ours.</p>
+<div id="body"></div>
+<script>
+  // Twelve sections up front, so there is real height to scroll through.
+  var host = document.getElementById("body");
+  for (var i = 0; i < 12; i++) {
+    var s = document.createElement("section");
+    s.innerHTML = "<h2>Section " + i + "</h2><p>" +
+      "Paragraph text for section " + i + ", long enough to be chunked " +
+      "rather than folded away into a neighbour, repeated a few times. " +
+      "Paragraph text for section " + i + ", again. " +
+      "Paragraph text for section " + i + ", once more.</p>";
+    host.appendChild(s);
+  }
+
+  // And a lazy loader: crossing each threshold appends more, AFTER a delay.
+  // That delay is the thing a fixed pause either overshoots or misses --
+  // a scan that drains the instant it scrolls sees a page that has not
+  // started loading yet and reads it as settled.
+  var loaded = 0;
+  addEventListener("scroll", function () {
+    var reached = Math.floor((scrollY + innerHeight) / (innerHeight * 1.5));
+    while (loaded < reached && loaded < 12) {   // 12: clearly past a fixed schedule's 8.2 viewports (S-8 flaked at 8)
+      loaded += 1;
+      (function (n) {
+        setTimeout(function () {
+          var s = document.createElement("section");
+          s.innerHTML = "<h2>Lazy block " + n + "</h2><p>" +
+            "This block did not exist when the page first painted. It was " +
+            "appended " + (150 * n) + " milliseconds after the scroll that " +
+            "asked for it, which is the arrival a paced scan has to wait " +
+            "for and a counted one cannot know about.</p>";
+          host.appendChild(s);
+        }, 150 * n);
+      })(loaded);
+    }
+  }, { passive: true });
+</script>
+</body>

@@ -1,0 +1,38 @@
+<!doctype html>
+<!--
+  Elements that draw text without generating a box of their own.
+
+  `display: contents` is defined as generating no box: the element's children
+  lay out in its parent's flow, and `getBoundingClientRect()` on the element
+  returns 0x0 while its text is plainly on the screen. It is also the UA
+  default for `<slot>`, which makes this the ordinary shape of a web
+  component rather than a curiosity.
+
+  A geometry probe that reads "no rect" as "not visible" therefore discards
+  the text of every such element. This fixture holds one of each, beside a
+  genuinely hidden control that must keep reading as hidden.
+-->
+<meta charset="utf-8">
+<title>No-box geometry</title>
+
+<div id="host-contents" style="display: contents">MARK-CONTENTS-TEXT</div>
+
+<div id="wrapper">
+  <span id="inner-contents" style="display: contents">MARK-INNER-CONTENTS</span>
+</div>
+
+<slot-box id="slotted"><span>MARK-SLOTTED-TEXT</span></slot-box>
+
+<div id="really-hidden" style="display: none">MARK-HIDDEN-TEXT</div>
+<div id="invisible" style="visibility: hidden">MARK-INVISIBLE-TEXT</div>
+<div id="ordinary">MARK-ORDINARY-TEXT</div>
+
+<script>
+customElements.define('slot-box', class extends HTMLElement {
+  connectedCallback() {
+    // The slot keeps its UA `display: contents`; the assigned span draws
+    // inside this component and the slot itself measures 0x0.
+    this.attachShadow({mode: 'open'}).innerHTML = '<slot></slot>';
+  }
+});
+</script>

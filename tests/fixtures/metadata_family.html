@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><title>MARK-METADATA-FAMILY</title>
+  <link rel="stylesheet" href="/head/stylesheet.css">
+</head>
+<body>
+<!--
+  One page carrying every form of machine bookkeeping the fold has been caught
+  treating as content, beside the reader-visible content it must still hold.
+
+  The principle under test, stated once: the trie holds an address per thing
+  the page PRESENTS TO A READER. Machine bookkeeping does not belong in that
+  address space, and content a reader can see must not be folded out of it.
+
+  Each of these was found separately, on a different real page, over the
+  course of one session. A regression in any of them should fail one test.
+-->
+<p id="prose">Readable prose the trie must hold.</p>
+
+<!-- 1. metadata content: a <link> in the body (Parsoid does this) -->
+<link rel="mw:PageProp/Category" href="./Category:Machine_only">
+
+<!-- 2. a form's machine payload: hidden inputs are not controls -->
+<form action="/submit">
+  <input type="hidden" name="csrf" value="tok-visible-as-content">
+  <input type="text" name="q" value="a real field" aria-label="Query">
+</form>
+
+<!-- 3. an annotation saying "no semantics here" -->
+<div role="presentation">Decorative wrapper text.</div>
+
+<!-- 4. a serialized payload whose urls are fields, not references -->
+<cite data-blob='{"parts":[{"template":{"url":"https://payload.test/inside"}}]}'>
+  Citation text a reader sees.
+</cite>
+
+<!-- 5. a diagram whose labels ARE the document -->
+<svg id="diagram" width="200" height="40" viewBox="0 0 200 40">
+  <title>a named diagram</title>
+  <rect x="2" y="8" width="60" height="20"></rect>
+  <text x="8" y="24">GRAMMAR-LABEL</text>
+</svg>
+
+<!-- and an icon, which must stay one picture -->
+<svg id="icon" width="16" height="16" viewBox="0 0 16 16">
+  <path d="M2 2 L14 2 L14 14 Z"></path>
+</svg>
+
+<p>A <a href="/reader/destination">real link</a> to follow.</p>
+</body>
+</html>

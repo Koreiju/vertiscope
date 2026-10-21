@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>MARK-FAMILY-PAGE</title></head>
+<body>
+<!--
+  Three links whose hrefs differ only in their digits: a numeric family, which
+  `numericFamily` calls `pagination.family` at three distinct members and not
+  at two. The classification is read from the fourth ancestor of each link
+  (a -> li -> ul -> pad -> scope), so every link here is decided by a query
+  over #scope and not by anything inside itself.
+
+  Break the family -- edit one href off the mask, or remove one link -- and
+  the two survivors are re-classified without their own values changing.
+-->
+<div id="scope">
+  <div class="pad">
+    <ul id="list">
+      <li><a id="l1" href="/page/1">first entry of the numeric family</a></li>
+      <li><a id="l2" href="/page/2">second entry of the numeric family</a></li>
+      <li><a id="l3" href="/page/3">third entry of the numeric family</a></li>
+    </ul>
+  </div>
+</div>
+<div id="elsewhere">
+  <p id="pad-a">Filler that shares no ancestor within four steps of the list.</p>
+  <p id="pad-b">Present so the document is not one chunk at any budget.</p>
+</div>
+</body>
+</html>

@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Busy feed</title>
+<style>
+  body { font: 15px/1.5 system-ui, sans-serif; margin: 24px; max-width: 760px; }
+  article { border-bottom: 1px solid #ddd; padding: 8px 0; }
+  article h3 { margin: 0 0 4px; font-size: 16px; }
+</style>
+</head>
+<body>
+<!--
+  D-40's page: the shape of discourse's /latest after a long scroll. Every
+  round, ONE task appends two topics and then queues the page's own long task
+  (150 ms of script), the way a framework renders a batch and then does its
+  bookkeeping. A drain PULLED by the host lands behind that task; one pushed
+  from the fold's own task does not. The page logs when it inserted each
+  batch (window.__born, epoch ms) so the check times the stream against the
+  page's clock, not the sensor's.
+-->
+<h1>Busy feed</h1>
+<p>Latest topics. New ones arrive in batches while the page keeps its main
+thread busy between them, which is what a long scroll through an
+infinite-scrolling forum looks like from inside the page.</p>
+<section id="feed"></section>
+<script>
+(function () {
+  var feed = document.getElementById("feed");
+  var words = ["radix", "patricia", "trie", "shadow", "affine", "fold", "drain",
+               "overlay", "stream", "vector", "chunk", "address", "markdown"];
+  function sentence(k, n) {
+    var out = [];
+    for (var i = 0; i < n; i++) out.push(words[(k * 7 + i * 3) % words.length]);
+    return out.join(" ");
+  }
+  var k = 0;
+  window.__born = [];
+  // `?shift=1` (G-109): each round re-homes the feed in a container of the
+  // OTHER tag (section <-> div), so every chunk already on the page changes
+  // its address and keeps its content. A pure prepend does not do this: the
+  // positional address of an existing chunk survives it (only the last
+  // sibling gains a new one), so nothing is retired and nothing renamed.
+  function rehome() {
+    var next = document.createElement(feed.tagName === "SECTION" ? "div" : "section");
+    while (feed.firstChild) next.appendChild(feed.firstChild);
+    feed.parentNode.replaceChild(next, feed);
+    feed = next;
+  }
+  function batch() {
+    if (shift) rehome();
+    for (var j = 0; j < 2; j++) {
+      k++;
+      var a = document.createElement("article");
+      a.innerHTML = "<h3>Topic " + k + ": " + sentence(k, 4) + "</h3>" +
+        "<p>" + sentence(k, perArticle) + ".</p>" +
+        "<a href=\"#topic-" + k + "\">" + (3 + k % 9) + " replies</a>";
+      // `?prepend=1` (G-109): each batch goes in at the TOP, so every chunk
+      // already on the page shifts one article down and its positional
+      // address (hence its cid) changes while its content does not -- the
+      // renames the central diff has to carry.
+      if (prepend && feed.firstChild) feed.insertBefore(a, feed.firstChild);
+      else feed.appendChild(a);
+    }
+    // The reader follows the feed down, as on a long scroll.
+    window.scrollTo(0, document.body.scrollHeight);
+    window.__born.push(Date.now());
+    // The page's own long task, queued behind the render.
+    setTimeout(function () { var e = Date.now() + 150; while (Date.now() < e) {} }, 0);
+  }
+  // `?every=ms&rounds=n` (D-42 drains it faster than a capture can store).
+  var q = new URLSearchParams(location.search);
+  var every = Number(q.get("every")) || 450, total = Number(q.get("rounds")) || 20;
+  var prepend = q.get("prepend") === "1";
+  var shift = q.get("shift") === "1";
+  // `?words=n`: words per article (G-109 sizes each article to about one chunk,
+  // so a shift renames whole chunks instead of re-cutting them).
+  var perArticle = Number(q.get("words")) || 38;
+  var rounds = 0;
+  function tick() {
+    if (rounds++ >= total) return;
+    batch();
+    setTimeout(tick, every);
+  }
+  // After the first read of the page has settled.
+  setTimeout(tick, 2500);
+})();
+</script>
+</body>
+</html>

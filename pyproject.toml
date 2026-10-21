@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vertiscope"
+version = "0.1.0"
+description = "Scrape URLs into chunked, vector-indexed, retrievable content."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "selenium>=4.20",
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "kuzu>=0.11",
+]
+
+[project.optional-dependencies]
+# Semantic rerank (`vertiscope search --semantic`). Needs the nomic GGUF.
+semantic = ["gpt4all>=2.7"]
+# The structural template miners (web_distiller_freq / tfidf_cheeger_miner)
+# use sklearn for spectral partitioning.
+mining = ["scikit-learn>=1.4"]
+dev = ["pytest>=8.0"]
+# The physical stage of scripts/mouse_probe.py only. Everything else about
+# the pointer path is proved without a device.
+pointer = ["pynput>=1.7"]
+
+[project.scripts]
+vertiscope = "vertiscope.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["vertiscope*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["error::SyntaxWarning"]

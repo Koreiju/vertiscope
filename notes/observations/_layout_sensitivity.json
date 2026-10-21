@@ -1,0 +1,19 @@
+{
+  "page": "catalog.html",
+  "instances": 43,
+  "surfaces": [
+    "info",
+    "ls",
+    "search a",
+    "search a --json",
+    "search per night",
+    "search per night --json",
+    "search policy",
+    "search policy --json",
+    "search spectrograph",
+    "search spectrograph --json",
+    "search telescope",
+    "search telescope --json"
+  ],
+  "leaks": {}
+}

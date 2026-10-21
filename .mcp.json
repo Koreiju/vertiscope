@@ -1,0 +1,24 @@
+{
+  "mcpServers": {
+    "vertiscope": {
+      "command": "python",
+      "args": [
+        "-m",
+        "vertiscope.obsidian.mcp",
+        "--sidecar",
+        "http://127.0.0.1:8788"
+      ],
+      "env": {}
+    },
+    "vertiscope-git": {
+      "command": "python",
+      "args": [
+        "-m",
+        "vertiscope.obsidian.git_mcp",
+        "--repo",
+        "."
+      ],
+      "env": {}
+    }
+  }
+}

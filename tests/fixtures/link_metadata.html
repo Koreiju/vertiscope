@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>MARK-LINK-METADATA</title>
+  <link rel="stylesheet" href="/style/main.css">
+  <link rel="canonical" href="https://example.test/canonical-target">
+</head>
+<body>
+<!--
+  Wikipedia's Parsoid output puts <link> elements in the *body* -- 377 of them
+  in one article, rel="mw:PageProp/Category", each of zero area. They are
+  metadata content by the HTML spec: machine references a reader never sees.
+  Capturing their hrefs put 377 addresses per page into the trie that nobody
+  can reach and that dilute what retrieval ranks over.
+
+  The anchor below is the other half. It carries an href too, and it must
+  still be captured, or the rule has stopped distinguishing metadata from a
+  link and started deleting the page.
+-->
+<p>Some prose a reader can see.</p>
+<link rel="mw:PageProp/Category" href="./Category:Articles_with_short_description">
+<link rel="mw:PageProp/Category" href="./Category:Short_description_matches">
+<ul>
+  <li><span><link rel="mw:referencedBy" href="#cite_ref-buried"></span></li>
+</ul>
+<p>A <a href="/real/destination">real link</a> a reader can follow.</p>
+</body>
+</html>

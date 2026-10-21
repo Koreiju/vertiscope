@@ -1,0 +1,953 @@
+/* The surface reads as part of the note, not as an embedded app: it borrows
+   Obsidian's own theme variables so it follows the user's theme rather than
+   imposing a second one. */
+
+.vertiscope-surface {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  margin: 0.5em 0;
+  overflow: hidden;
+}
+
+.vertiscope-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  padding: 0.25em 0.45em;
+  background: var(--background-secondary);
+  font-size: var(--font-smaller);
+}
+
+.vertiscope-cid {
+  font-family: var(--font-monospace);
+  color: var(--text-muted);
+}
+
+.vertiscope-url {
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+/* Stated in the warning colour: an unreachable sidecar and an empty chunk
+   otherwise render identically, and that ambiguity hides a dead pipeline. */
+.vertiscope-offline {
+  color: var(--text-warning, var(--text-muted));
+  flex: 1;
+}
+
+.vertiscope-toggle {
+  margin-left: auto;
+  font-size: var(--font-smaller);
+}
+
+/* Tight to the border. The distilled content brings its own structure --
+   cards have a border, groups have a rule -- so a wide gutter around all of
+   it only pushes that structure away from the frame that is already drawing
+   it. */
+.vertiscope-body { padding: 0.35em 0.45em; }
+.vertiscope-line { padding: 0.1em 0; }
+.vertiscope-text { color: var(--text-normal); }
+
+.vertiscope-hint,
+.vertiscope-readout {
+  color: var(--text-muted);
+  font-size: var(--font-smaller);
+}
+
+.vertiscope-readout {
+  font-family: var(--font-monospace);
+  margin-top: 0.5em;
+  padding-top: 0.4em;
+  border-top: 1px dashed var(--background-modifier-border);
+  word-break: break-all;
+}
+
+/* An affordance looks pressable; the class says which kind it is, so a
+   reader can tell a link from a button without pressing either. */
+.vertiscope-act {
+  cursor: pointer;
+  text-align: left;
+  font-size: inherit;
+}
+
+.vertiscope-link   { color: var(--text-accent); }
+.vertiscope-button { font-weight: 600; }
+.vertiscope-field  { font-style: italic; }
+
+.vertiscope-error { color: var(--text-error); }
+
+/* --- media billboards -----------------------------------------------------
+   The distiller already knows what a picture is OF -- it draws `![alt](src)`
+   with the page's own alt text, never the file name -- so a billboard has a
+   caption without guessing one. */
+
+.vertiscope-billboard {
+  margin: 0.4em 0;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--background-primary-alt);
+}
+
+.vertiscope-media {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+/* Shown when media is off, which is the default. A placeholder that still
+   says what the picture is beats a blank space: the reader knows something
+   is there and what it was. */
+.vertiscope-media-off {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5em;
+  padding: 0.7em 0.8em;
+  color: var(--text-muted);
+  font-size: var(--font-smaller);
+}
+
+.vertiscope-media-icon { font-size: 1.1em; color: var(--text-faint); }
+.vertiscope-media-why  { color: var(--text-faint); margin-left: auto; }
+
+.vertiscope-caption {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  padding: 0.35em 0.8em;
+  border-top: 1px solid var(--background-modifier-border);
+  font-size: var(--font-smaller);
+  color: var(--text-muted);
+}
+
+.vertiscope-open { margin-left: auto; font-size: var(--font-smaller); }
+
+/* --- the `/` retrieval gesture -------------------------------------------- */
+
+.vertiscope-suggestion-title {
+  color: var(--text-normal);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vertiscope-suggestion-sub {
+  color: var(--text-faint);
+  font-size: var(--font-smaller);
+}
+
+/* --- the 3D view ---------------------------------------------------------- */
+
+.vertiscope-graph-root { display: flex; flex-direction: column; height: 100%; }
+
+.vertiscope-graph-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.8em;
+  padding: 0.4em 0.8em;
+  border-bottom: 1px solid var(--background-modifier-border);
+  font-size: var(--font-smaller);
+  color: var(--text-muted);
+}
+
+/* Which spaces produced the picture, said on the bar rather than left
+   implicit: a layout fitted on frequency alone and one fitted on both are
+   different pictures, and a reader who cannot tell them apart will read a
+   lexical clustering as a semantic one. */
+/* One line, whatever it says: a caption that wraps grows the bar and pushes
+   (or, positioned, covers) the projector. The full text is the tooltip. */
+.vertiscope-graph-status { flex: 1; min-width: 0; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; }
+
+/* `position: relative` so the billboard layer (`G-57`) is placed
+   against the CANVAS, which is the frame `graph2ScreenCoords`
+   answers in. Without it the panels escape to the nearest
+   positioned ancestor and land a caption-bar below their nodes. */
+.vertiscope-graph-canvas { flex: 1; min-height: 0; position: relative; background: #000; }
+
+/* --- the distilled HTML form ----------------------------------------------
+   The other form a chunk has. `htmlform.py` emits a closed set of elements
+   under `dv-*` class names -- a private vocabulary, never the page's, so a
+   scraped stylesheet cannot reach in here and nothing a page calls its
+   classes can collide with Obsidian's.
+
+   Styled to read as a slim page rather than as a form: the point of this form
+   is the interface the page had, so a heading looks like a heading and a
+   button looks pressable, and nothing tries to reproduce the site's design. */
+
+.vertiscope-html { line-height: 1.5; }
+
+/* One step per nesting LEVEL of the distilled tree, not per DOM ancestor.
+   A site that nests five divs to centre a header costs one step. */
+.vertiscope-html .dv-n { padding-left: 0.9em; border-left: 1px solid var(--background-modifier-border); }
+
+.vertiscope-html .dv-p { margin: 0.25em 0; }
+.vertiscope-html .dv-h { margin: 0.6em 0 0.25em; line-height: 1.25; }
+.vertiscope-html .dv-ul { margin: 0.1em 0; padding-left: 1.1em; }
+.vertiscope-html .dv-li { margin: 0.1em 0; }
+.vertiscope-html .dv-a { color: var(--text-accent); }
+
+/* A control that will NOT act reads as inert, and one that will reads as
+   live. The difference is the server's `enact` flag, never a plugin setting:
+   a button that looks pressable and 403s is worse than one that says it is
+   only showing you an address. */
+.vertiscope-html .dv-b,
+.vertiscope-html .dv-f input {
+  font: inherit;
+  color: var(--text-muted);
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  padding: 0.1em 0.5em;
+}
+.vertiscope-html .dv-b { cursor: default; }
+.vertiscope-html .vertiscope-live .dv-b,
+.vertiscope-html .dv-b.vertiscope-live,
+.vertiscope-html .vertiscope-live input {
+  color: var(--text-normal);
+  border-color: var(--text-accent);
+  cursor: pointer;
+}
+.vertiscope-html .dv-f { display: inline-flex; align-items: center; gap: 0.4em; }
+.vertiscope-html .dv-f span { color: var(--text-muted); font-size: var(--font-smaller); }
+
+.vertiscope-html .dv-form {
+  border: 1px dashed var(--background-modifier-border);
+  border-radius: 4px;
+  padding: 0.1em 0.6em 0.4em;
+  margin: 0.3em 0;
+}
+.vertiscope-html .dv-form legend { color: var(--text-faint); font-size: var(--font-smaller); }
+
+.vertiscope-html .dv-fig { margin: 0.4em 0; }
+.vertiscope-html .dv-img { max-width: 100%; border-radius: 4px; display: block; }
+.vertiscope-html .dv-figcaption,
+.vertiscope-html figcaption { color: var(--text-muted); font-size: var(--font-smaller); }
+
+/* Where a picture would be, when the reader has remote media off or the
+   distiller found a picture it could not locate. Never an empty gap: a
+   missing billboard and a page that showed nothing must not look the same. */
+.vertiscope-html .dv-noimg,
+.dv-noimg {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.2em;
+  min-height: 2.2em;
+  color: var(--text-faint);
+  background: var(--background-secondary);
+  border: 1px dashed var(--background-modifier-border);
+  border-radius: 4px;
+}
+
+/* --- one chunk in its own pane -------------------------------------------- */
+
+.vertiscope-chunk-pane { padding: 0.6em 0.9em; overflow: auto; height: 100%; }
+
+.vertiscope-chunk-bar {
+  display: flex;
+  justify-content: flex-end;
+  padding-bottom: 0.4em;
+}
+
+/* How full the window this chunk was cut against actually is. On the bar
+   because it is the number that says whether the chunker is doing what its
+   knob claims, and a number nobody can see is a number nobody checks. */
+.vertiscope-size { color: var(--text-faint); font-size: var(--font-smaller); white-space: nowrap; }
+
+/* --- the switch at the top of every panel ---------------------------------
+   Both states shown, the live one marked. A lone button labelled with the
+   OTHER state is ambiguous exactly where it matters: "markdown" can equally
+   mean "you are looking at markdown" and "press for markdown", and the reader
+   cannot tell which form is on screen without recognising it.
+
+   Shaped after Obsidian's own segmented controls so it reads as part of the
+   app rather than as something a plugin bolted on. */
+
+.vertiscope-switch {
+  display: inline-flex;
+  margin-left: auto;
+  background: var(--background-modifier-form-field);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  overflow: hidden;
+}
+
+.vertiscope-switch .vertiscope-seg {
+  font-size: var(--font-smaller);
+  padding: 0.1em 0.6em;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.vertiscope-switch .vertiscope-seg.is-on {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  cursor: default;
+}
+
+/* The shadow root's host. The sheet that styles what is INSIDE it travels
+   with the markup -- see SHADOW_CSS in surface.ts -- because a page-level
+   stylesheet is precisely what a shadow boundary keeps out. */
+.vertiscope-html-host { display: block; }
+
+/* --- the run button, step 2 -------------------------------------------------
+ *
+ * One rule set for both rendering paths, because a button that looked
+ * different in reading view and live preview would read as two features.
+ *
+ * Reading view puts it inside the `<pre>`, which is `position: relative` here
+ * so the button can sit in the corner without being part of the code's text
+ * flow -- appending it inline would put "▶ run" into anything the reader
+ * copies out of the block.
+ */
+pre.vertiscope-has-run {
+  position: relative;
+}
+
+button.vertiscope-run-fence {
+  font-size: var(--font-ui-smaller);
+  font-family: var(--font-interface);
+  line-height: 1;
+  padding: 2px 7px;
+  border-radius: var(--radius-s);
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  cursor: pointer;
+  /* Not in the tab order. The button is an affordance ON a block, and a reader
+   * tabbing through a note of thirty cells would hit thirty of these before
+   * reaching the prose. Step 3 gives running a command, which is where a
+   * keyboard route belongs. */
+  user-select: none;
+}
+
+pre.vertiscope-has-run > button.vertiscope-run-fence {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  /* Above the code, below Obsidian's own copy button, which sits at the same
+   * corner and is added after ours. */
+  z-index: 1;
+  opacity: 0;
+  transition: opacity 90ms ease-in;
+}
+
+/* Revealed on hover or focus rather than always drawn: a note of many cells
+ * otherwise carries a column of buttons competing with the code for attention.
+ * Focus is included so the keyboard route still reaches it once step 3 exists. */
+pre.vertiscope-has-run:hover > button.vertiscope-run-fence,
+pre.vertiscope-has-run > button.vertiscope-run-fence:focus-visible {
+  opacity: 1;
+}
+
+button.vertiscope-run-fence:hover {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
+
+/* Live preview: the widget sits at the end of the opening fence line, so it is
+ * inline and needs its own breathing room rather than absolute placement. */
+.vertiscope-run-fence-wrap {
+  display: inline-block;
+  margin-left: 0.6em;
+  vertical-align: middle;
+}
+
+/* --- the command terminal, step 6 -------------------------------------------
+ *
+ * A `<pre>` and an `<input>`, not an emulator. The output IS text and xterm.js
+ * would be ~50MB to render text a `<pre>` already renders; what it would buy --
+ * cursor control and TUI programs -- needs a pty the sidecar does not provide,
+ * so the cost would buy nothing here. See src/terminal.ts.
+ */
+.vertiscope-terminal {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 8px;
+  gap: 6px;
+}
+
+.vertiscope-terminal-bar {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
+.vertiscope-terminal-log {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  margin: 0;
+  padding: 8px;
+  white-space: pre-wrap;
+  /* Wrapping long paths rather than scrolling sideways: a build log is read
+   * down, and a horizontal scrollbar hides the end of every line that has one. */
+  word-break: break-word;
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-smaller);
+  background: var(--background-primary-alt);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  color: var(--text-normal);
+}
+
+.vertiscope-terminal-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
+.vertiscope-terminal-prompt {
+  font-family: var(--font-monospace);
+  color: var(--text-accent);
+}
+
+.vertiscope-terminal-input {
+  flex: 1 1 auto;
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-smaller);
+}
+
+/* The standing caveat, on the bar rather than in the scrollback.
+ * `margin-left:auto` parks it at the far end so it never competes with the
+ * controls, and it is muted because it is a fact about the pane, not output. */
+.vertiscope-terminal-note {
+  margin-left: auto;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-faint);
+  cursor: help;
+}
+
+/* --- the chunk gutter, step 7 -----------------------------------------------
+ *
+ * Beside the text, never in it: marking the lines themselves would compete with
+ * Obsidian's own highlighting for the same pixels, and a reader would have to
+ * learn which colour meant what. See src/chunkgutter.ts.
+ */
+.vertiscope-chunk-gutter {
+  min-width: 2.6em;
+  /* Right-aligned so the token counts form a column that can be read down,
+   * rather than a ragged edge that has to be read one number at a time. */
+  text-align: right;
+  padding-right: 4px;
+}
+
+.vertiscope-chunk-mark {
+  font-size: 0.7em;
+  line-height: inherit;
+  color: var(--text-faint);
+  /* The bar is the boundary; the number is incidental. A left border drawn on
+   * every line of the span makes the EXTENT visible, which is the thing being
+   * communicated -- where one chunk ends and the next begins. */
+  border-left: 2px solid var(--text-faint);
+  padding-left: 4px;
+  opacity: 0.55;
+}
+
+/* The first line of a chunk carries its token count and a heavier cap, so the
+ * eye can find a boundary without counting. */
+.vertiscope-chunk-start {
+  border-top: 1px solid var(--text-faint);
+  color: var(--text-muted);
+  opacity: 0.85;
+}
+
+.vertiscope-chunk-end { border-bottom: 1px solid var(--text-faint); }
+
+/* Over the window is the one state worth a colour: it is the case S-11 is
+ * Partial for, and a reader seeing it can act on it by splitting the block. */
+.vertiscope-chunk-over {
+  border-left-color: var(--text-warning, var(--color-orange));
+  color: var(--text-warning, var(--color-orange));
+  opacity: 0.95;
+}
+
+/* The browser cell (`G-36`). The page fills what the panel gives it, which
+   is the whole reason this is a `<webview>` and not a `BrowserView`. */
+.vertiscope-browser {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 0;
+}
+.vertiscope-browser-bar {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  flex: 0 0 auto;
+}
+.vertiscope-browser-url {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12px;
+}
+.vertiscope-browser-page,
+.vertiscope-browser-md {
+  flex: 1 1 auto;
+  min-height: 0;      /* or the webview pushes the flex parent open */
+  overflow: auto;
+}
+.vertiscope-browser-page webview { display: flex; }
+.vertiscope-browser-md { padding: 8px 12px; }
+.vertiscope-browser-empty {
+  color: var(--text-faint);
+  font-size: 12px;
+}
+.vertiscope-browser-status {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+  border-top: 1px solid var(--background-modifier-border);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The merge layer (`G-26`, `G-27`). A chunk says it is part of a group and
+   can show the group; it is still served as itself. */
+.vertiscope-group {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  border: 1px solid var(--background-modifier-border);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.vertiscope-group.is-on {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border-color: var(--interactive-accent);
+}
+.vertiscope-merged-note {
+  font-size: 11px;
+  color: var(--text-faint);
+  margin-bottom: 6px;
+}
+.vertiscope-merged pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+  margin: 0;
+}
+
+/* The retrieval overlay (`G-42`, `G-63`, `G-69`). Obsidian's own DOM drawn
+   OVER the webview -- never script written into the page. */
+.vertiscope-browser-search {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  flex: 0 0 auto;
+}
+.vertiscope-query {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12px;
+}
+.vertiscope-browser-page { position: relative; }
+.vertiscope-overlay {
+  position: absolute;
+  inset: 0 0 auto 0;
+  /* Bounded, so the page stays visible underneath: an overlay that covers
+     what it is ranking is a list with no context. */
+  max-height: 62%;
+  display: flex;
+  z-index: 20;
+  background: var(--background-primary);
+  border-bottom: 1px solid var(--background-modifier-border);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+}
+.vertiscope-overlay-list {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+.vertiscope-hit {
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  cursor: pointer;
+}
+.vertiscope-hit:hover { background: var(--background-modifier-hover); }
+.vertiscope-hit-head {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.vertiscope-hit-rank { color: var(--text-faint); min-width: 1.4em; }
+.vertiscope-hit-url {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vertiscope-hit-tag {
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--background-modifier-border);
+}
+.vertiscope-hit-score { color: var(--text-faint); white-space: nowrap; }
+.vertiscope-hit-preview {
+  font-size: 12px;
+  margin-top: 2px;
+  white-space: pre-wrap;
+  max-height: 3.4em;
+  overflow: hidden;
+}
+
+
+/* `G-57`: a chunk's panel, drawn in the projector beside its node.
+   The layer does not take pointer events; the panels themselves do, so
+   orbiting the graph still works everywhere a panel is not. */
+.vertiscope-bb-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.vertiscope-bb {
+  position: absolute;
+  pointer-events: auto;
+  max-width: 320px;
+  max-height: 260px;
+  display: flex;
+  flex-direction: column;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+  font-size: var(--font-ui-smaller);
+  z-index: 20;
+}
+.vertiscope-bb-head {
+  cursor: grab;
+  padding: 4px 8px;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  color: var(--text-muted);
+  user-select: none;
+}
+.vertiscope-bb-head:active { cursor: grabbing; }
+.vertiscope-bb-close { cursor: pointer; opacity: 0.7; }
+.vertiscope-bb-close:hover { opacity: 1; }
+.vertiscope-bb-body { overflow: auto; padding: 6px 8px; }
+/* Two forms, each its own size (2026-10-06): the PAGE form as before, the
+   MARKDOWN form larger, drawn by Obsidian's own renderer. */
+.vertiscope-bb { width: 340px; max-width: 340px; max-height: 300px; }
+.vertiscope-bb.is-md { width: 500px; max-width: 500px; max-height: 440px; }
+.vertiscope-bb-md { font-size: var(--font-ui-small); user-select: text; }
+.vertiscope-bb-md img { max-width: 100%; height: auto; }
+.vertiscope-bb-md p { margin: 0.25em 0; }
+/* The header is the chunk's full patricia-trie address. */
+.vertiscope-bb-addr {
+  flex: 1 1 auto; min-width: 0;
+  font-family: var(--font-monospace); font-size: 10.5px; line-height: 1.3;
+  white-space: normal; word-break: break-all; color: var(--text-muted);
+  max-height: 3.9em; overflow: auto;
+}
+.vertiscope-bb-form {
+  flex: 0 0 auto; cursor: pointer; padding: 0 6px; border-radius: 4px;
+  border: 1px solid var(--background-modifier-border); color: var(--text-normal);
+}
+.vertiscope-bb-form:hover { background: var(--background-modifier-hover); }
+/* The page form could not be read from the live page: still clickable (it retries), visibly so. */
+.vertiscope-bb-form.is-unavailable { opacity: 0.55; text-decoration: line-through; }
+.vertiscope-bb-note { font-size: 0.85em; color: var(--text-muted); border-left: 2px solid var(--text-warning, #e0a000); padding: 2px 6px; margin-bottom: 6px; }
+.vertiscope-bb-line { white-space: pre-wrap; }
+.vertiscope-bb-more { color: var(--text-faint); padding-top: 4px; }
+
+
+/* ---- pipeline profile pane (profileview.ts) ---------------------------- */
+.vertiscope-profile { padding: 0 !important; display: flex; flex-direction: column; }
+.vertiscope-profile-bar { display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px; border-bottom: 1px solid var(--background-modifier-border); }
+.vertiscope-profile-title { font-weight: 600; flex: 1; }
+.vertiscope-profile-body { padding: 10px 12px; overflow-y: auto; font-size: var(--font-ui-small); }
+.vertiscope-profile-head { display: flex; align-items: center; gap: 16px; margin-bottom: 10px; flex-wrap: wrap; }
+.vertiscope-profile-e2e-value { font-size: 1.8em; font-weight: 600; font-variant-numeric: tabular-nums; }
+.vertiscope-profile-e2e-label { color: var(--text-muted); font-size: var(--font-ui-smaller); }
+.vertiscope-profile-outcomes { display: flex; gap: 6px; flex-wrap: wrap; }
+.vertiscope-profile-pill { padding: 1px 8px; border-radius: 10px; font-size: var(--font-ui-smaller);
+  background: var(--background-modifier-hover); }
+.vertiscope-profile-pill.is-visible { color: var(--color-green); }
+.vertiscope-profile-pill.is-not_seen, .vertiscope-profile-pill.is-no_graph { color: var(--color-red); }
+.vertiscope-profile-waterfall { display: flex; flex-direction: column; gap: 1px; }
+.vertiscope-profile-row { display: grid; grid-template-columns: minmax(150px, 1.4fr) 2fr 64px 64px 64px 36px;
+  gap: 8px; align-items: center; font-variant-numeric: tabular-nums; padding: 1px 0; }
+.vertiscope-profile-row > span:nth-child(n+3) { text-align: right; }
+.vertiscope-profile-row.is-header { color: var(--text-faint); font-size: var(--font-ui-smaller);
+  border-bottom: 1px solid var(--background-modifier-border); }
+.vertiscope-profile-row.depth-1 .vertiscope-profile-label { padding-left: 14px; color: var(--text-muted); }
+.vertiscope-profile-row.is-total { font-weight: 600; }
+.vertiscope-profile-group { margin-top: 6px; color: var(--text-faint); font-size: var(--font-ui-smaller);
+  text-transform: uppercase; letter-spacing: 0.04em; }
+.vertiscope-profile-track { height: 8px; background: var(--background-modifier-hover);
+  border-radius: 4px; overflow: hidden; }
+.vertiscope-profile-barfill { display: block; height: 100%; background: var(--interactive-accent);
+  border-radius: 4px; }
+.vertiscope-profile-row.depth-1 .vertiscope-profile-barfill { opacity: 0.55; }
+.vertiscope-profile-note { margin: 10px 0; padding: 6px 8px; border-left: 3px solid var(--interactive-accent);
+  background: var(--background-secondary); }
+.vertiscope-profile-section { margin-top: 14px; }
+.vertiscope-profile-section h4 { margin: 0 0 4px; font-size: var(--font-ui-small); }
+.vertiscope-profile-line { color: var(--text-normal); padding: 1px 0; }
+.vertiscope-profile-integ { padding: 1px 0; }
+.vertiscope-profile-integ.is-bad { color: var(--color-red); }
+.vertiscope-profile-integ.is-ok .vertiscope-profile-dot { color: var(--color-green); }
+.vertiscope-profile-dot { display: inline-block; width: 16px; }
+.vertiscope-profile-why { color: var(--text-muted); }
+.vertiscope-profile-bad { color: var(--color-red); }
+.vertiscope-profile-drain { padding: 1px 0; font-variant-numeric: tabular-nums; }
+.vertiscope-profile-drain.is-not_seen { color: var(--color-red); }
+.vertiscope-profile-drain.is-nothing_placed { color: var(--text-muted); }
+.vertiscope-profile-muted { color: var(--text-faint); }
+.vertiscope-profile-status { cursor: pointer; font-variant-numeric: tabular-nums; }
+
+
+/* ---- pipeline box over the browser cell (pipelinebox.ts) ----------------- */
+.vertiscope-pipebox { position: fixed; right: 10px; bottom: 10px; z-index: 30;
+  background: rgba(12, 12, 14, 0.88); color: #e8e8ea; border-radius: 8px;
+  font-size: 11px; line-height: 1.35; font-variant-numeric: tabular-nums;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35); max-width: 360px;
+  backdrop-filter: blur(4px); pointer-events: auto; }
+.vertiscope-pipebox-mini { display: flex; align-items: center; gap: 6px;
+  padding: 5px 9px; white-space: nowrap; cursor: default; }
+.vertiscope-pipebox-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+.vertiscope-pipebox-dot.is-ok { background: #3fb950; }
+.vertiscope-pipebox-dot.is-warn { background: #d29922; }
+.vertiscope-pipebox-dot.is-idle { background: #6e7681; }
+.vertiscope-pipebox-full { padding: 2px 10px 9px; width: 340px; max-height: calc(70vh); overflow-y: auto;
+  border-top: 1px solid rgba(255, 255, 255, 0.08); }
+.vertiscope-pipebox-h { margin-top: 8px; color: #9da5ae; font-size: 10px;
+  text-transform: uppercase; letter-spacing: 0.05em; }
+.vertiscope-pipebox-line { padding: 1px 0; }
+.vertiscope-pipebox-line.is-warn { color: #e3b341; }
+/* The run's verdicts, one line each, read off the app (G-75). */
+.vertiscope-pipebox-checks { margin: 2px 0 4px; }
+.vertiscope-pipebox-check { padding: 1px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vertiscope-pipebox-check.is-ok .vertiscope-pipebox-mark { color: #3fb950; }
+.vertiscope-pipebox-check.is-warn { color: #e3b341; white-space: normal; }
+.vertiscope-pipebox-mark { display: inline-block; width: 1.1em; }
+.vertiscope-pipebox-id { font-weight: 600; margin-right: 2px; }
+.vertiscope-pipebox-evidence { opacity: 0.8; font-size: 0.92em; padding-left: 1.1em; word-break: break-all; }
+.vertiscope-pipebox-muted { color: #7d8590; }
+.vertiscope-pipebox-chain, .vertiscope-pipebox-strip { display: flex; gap: 4px; margin-top: 3px; flex-wrap: wrap; }
+.vertiscope-pipebox-step, .vertiscope-pipebox-cell { flex: 1 1 0; min-width: 52px; padding: 3px 4px;
+  border-radius: 4px; background: rgba(255, 255, 255, 0.05); text-align: center; }
+.vertiscope-pipebox-step.is-ok { box-shadow: inset 0 -2px 0 #3fb950; }
+.vertiscope-pipebox-step.is-warn { box-shadow: inset 0 -2px 0 #d29922; }
+.vertiscope-pipebox-n { font-size: 12px; font-weight: 600; }
+.vertiscope-pipebox-l { color: #9da5ae; font-size: 9.5px; }
+.vertiscope-pipebox-growth { height: 4px; background: rgba(255, 255, 255, 0.08);
+  border-radius: 2px; margin: 4px 0 2px; overflow: hidden; }
+.vertiscope-pipebox-growthfill { height: 100%; background: #58a6ff; }
+/* Non-blinding: a thin outline and a faint wash, no animation. It sits in the
+   CELL above the webview and never catches the pointer, so the page under it
+   behaves exactly as it would without it. */
+/* 2026-09-28: "a very much lighter and un-tinted color but keeping some tint
+   and borders still, just fainter on tint/border but a little bit higher
+   luminosity while keeping translucency reasonable" -- each hue kept only as
+   a hint (hover blue, pin amber, diff green), all near-white. */
+.vertiscope-chunk-outline { position: fixed; z-index: 25; pointer-events: none;
+  border: 1.5px solid rgba(200, 220, 255, 0.9); background: rgba(225, 236, 255, 0.14);
+  border-radius: 3px; box-sizing: border-box; }
+
+
+/* ---- the browser cell's two sides (G-78) ---------------------------------- */
+.vertiscope-browser-split { flex: 1 1 auto; display: flex; flex-direction: row;
+  min-height: 0; }
+.vertiscope-browser-split > .vertiscope-browser-page { min-width: 0; }
+.vertiscope-browser-md.is-side { flex: 0 0 38%; max-width: 38%;
+  border-left: 1px solid var(--background-modifier-border); }
+.vertiscope-pin-card { margin-bottom: 12px; padding-bottom: 8px;
+  border-bottom: 1px solid var(--background-modifier-border); }
+.vertiscope-pin-card .vertiscope-browser-mdhead { display: flex; justify-content: space-between;
+  gap: 8px; font-size: 11px; color: var(--text-muted); word-break: break-all; }
+.vertiscope-pin-close { cursor: pointer; padding: 0 4px; color: var(--text-muted); }
+.vertiscope-pin-close:hover { color: var(--text-normal); }
+/* A pinned chunk: a clear, non-blinding outline over its on-screen box --
+   warmer than the hover outline so the two read apart, no animation, never
+   catches the pointer. */
+.vertiscope-chunk-pin { position: fixed; z-index: 16; pointer-events: none;
+  border: 2px solid rgba(255, 230, 180, 0.95); background: rgba(255, 244, 222, 0.14);
+  border-radius: 3px; box-sizing: border-box; }
+/* The last drain's diff (G-90): what the in-page chunking just changed,
+   outlined at once and faded -- green, apart from hover (blue) and pins. */
+.vertiscope-diff-box { position: fixed; z-index: 15; pointer-events: none;
+  border: 1.5px dashed rgba(190, 236, 198, 0.9); background: rgba(225, 248, 230, 0.12);
+  border-radius: 2px; box-sizing: border-box; }
+.vertiscope-pipebox-mini { cursor: pointer; }
+.vertiscope-pipebox.is-open { box-shadow: 0 2px 14px rgba(0, 0, 0, 0.45); }
+.vertiscope-pipebox-full { max-height: 70vh; overflow-y: auto; }
+.vertiscope-pipebox-profile .vertiscope-profile-bar { display: none; }
+
+.vertiscope-pipebox-run { margin-left: 8px; font-size: 10px; padding: 0 6px; height: 18px; }
+
+/* A minimized billboard: its title bar only (G-78). */
+.vertiscope-bb.is-min .vertiscope-bb-body { display: none; }
+.vertiscope-bb-min { float: right; margin-right: 10px; cursor: pointer; opacity: 0.7; }
+.vertiscope-bb-min:hover { opacity: 1; }
+.vertiscope-pin-card { cursor: pointer; }
+
+/* The empty-workspace switch: a test workspace is never ambiguous. */
+.vertiscope-session-test {
+  color: var(--text-on-accent);
+  background: var(--color-orange);
+  padding: 0 6px;
+  border-radius: 4px;
+}
+
+/* G-111: what the last gesture on a chunk panel said (pressed, refused, ...). */
+.vertiscope-act-readout {
+  display: none;
+  padding: 2px 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+/* G-59: offline, a chunk panel is a main pane -- the same element, docked. */
+.vertiscope-panel-pane { padding: 0; overflow: auto; }
+.vertiscope-bb.vertiscope-bb-docked { position: static; width: auto; max-width: none; max-height: none;
+  height: 100%; box-shadow: none; transform: none; }
+.vertiscope-bb.vertiscope-bb-docked .vertiscope-bb-body { max-height: none; }
+
+/* The `[]()` gesture's results (`R-2`/`R-3`): a block IN the editor's flow,
+   so the lines below move down by its height and stay editable. */
+.vertiscope-linkgesture {
+  margin: 4px 0 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  background: var(--background-secondary);
+  font-size: var(--font-ui-small);
+}
+.vertiscope-linkgesture .vertiscope-lg-head {
+  padding: 4px 8px;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+.vertiscope-linkgesture .vertiscope-lg-list { max-height: 220px; overflow-y: auto; }
+.vertiscope-linkgesture .vertiscope-lg-hit { padding: 4px 8px; cursor: pointer; }
+.vertiscope-linkgesture .vertiscope-lg-hit:hover { background: var(--background-modifier-hover); }
+.vertiscope-linkgesture .vertiscope-lg-title { color: var(--text-normal); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vertiscope-linkgesture .vertiscope-lg-sub { color: var(--text-faint); font-size: 0.9em; }
+/* Planted only: the floating shape the design note rejected. */
+.vertiscope-linkgesture-overlay { position: absolute; z-index: 30; width: 420px; }
+
+/* P-B7: the chunks the hovered one is embedded among -- faint, behind the
+   hovered chunk's own outline, never taking the pointer. */
+.vertiscope-chunk-struct { position: fixed; z-index: 24; pointer-events: none;
+  border: 1px dashed rgba(200, 220, 255, 0.55); border-radius: 3px; box-sizing: border-box; }
+
+/* Item 89: the browser overlay's boxes hidden by ALPHA only -- every box is
+   still placed, measured and updated, so turning them back on is instant and
+   nothing else changes. */
+.vertiscope-boxes-off .vertiscope-chunk-outline,
+.vertiscope-boxes-off .vertiscope-chunk-struct,
+.vertiscope-boxes-off .vertiscope-diff-box,
+.vertiscope-boxes-off .vertiscope-chunk-pin { opacity: 0 !important; }
+
+/* PLUGIN_GOAL 84-87: the naked search field, middle-bottom of the 3D panel.
+   Only the box until there are results; then "showing k/n results" beside it
+   and the horizontal scroll under it. */
+.vertiscope-search3d { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%);
+  z-index: 30; display: flex; flex-direction: column; align-items: center; gap: 6px;
+  width: min(520px, 80%); pointer-events: none; }
+.vertiscope-search3d-row { display: flex; align-items: center; gap: 10px; width: 100%; pointer-events: auto; }
+.vertiscope-search3d-input { flex: 1; min-width: 0; background: transparent !important;
+  border: none !important; border-bottom: 1px solid rgba(255,255,255,0.18) !important;
+  border-radius: 0 !important; box-shadow: none !important; color: var(--text-normal);
+  font-size: 15px; text-align: center; padding: 4px 6px; }
+.vertiscope-search3d-input::placeholder { color: var(--text-faint); opacity: 0.45; }
+.vertiscope-search3d-input:focus { border-bottom-color: rgba(255,255,255,0.4) !important; }
+.vertiscope-search3d-count { display: none; white-space: nowrap; font-size: 11px; color: var(--text-muted); }
+.vertiscope-search3d.is-active .vertiscope-search3d-count { display: inline-flex; align-items: center; gap: 2px; }
+.vertiscope-search3d-k { width: 44px; background: transparent !important; border: none !important;
+  border-bottom: 1px solid rgba(255,255,255,0.18) !important; border-radius: 0 !important;
+  box-shadow: none !important; color: var(--text-normal); font-size: 11px; text-align: center; padding: 0 2px; }
+.vertiscope-search3d-scroll { display: none; width: 100%; height: 12px; overflow-x: auto; overflow-y: hidden;
+  pointer-events: auto; }
+.vertiscope-search3d.is-active .vertiscope-search3d-scroll { display: block; }
+.vertiscope-search3d-track { height: 1px; }
+/* The browser's own search row moved to the 3D panel (item 84). */
+.vertiscope-browser-search { display: none; }
+/* The slider's soft brightness gradient: dim at the left (the first result
+   alone), bright at the right (all k) -- the same ramp the results follow. */
+.vertiscope-search3d-scroll { border-radius: 6px;
+  background: linear-gradient(90deg, rgba(255,255,255,0.02), rgba(255,255,255,0.10) 55%, rgba(255,255,255,0.26)); }
+.vertiscope-search3d-scroll::-webkit-scrollbar { height: 10px; }
+.vertiscope-search3d-scroll::-webkit-scrollbar-track { background: transparent; }
+.vertiscope-search3d-scroll::-webkit-scrollbar-thumb { border-radius: 5px; background: rgba(255,255,255,0.55);
+  box-shadow: 0 0 10px 2px rgba(255,255,255,0.35); }
+/* Item 91: the page's stages, left to right, each with its hover-to-panel time. */
+.vertiscope-profile-stage-row { display: flex; gap: 4px; margin: 2px 0 8px; }
+.vertiscope-profile-stage { flex: 1; min-width: 0; padding: 3px 4px; border-radius: 4px; background: rgba(255,255,255,0.04); font-size: 10px; }
+.vertiscope-profile-stage.is-done { background: rgba(120,200,140,0.12); }
+.vertiscope-profile-stage-name { color: var(--text-muted); }
+.vertiscope-profile-stage-at { font-variant-numeric: tabular-nums; font-size: 12px; }
+.vertiscope-profile-stage-hover { color: var(--text-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Item 107: the search button -- the one thing that asks the web. Naked like the field. */
+.vertiscope-search3d-go { background: transparent !important; border: 1px solid rgba(255,255,255,0.18) !important;
+  box-shadow: none !important; color: var(--text-muted); font-size: 11px; padding: 2px 8px; border-radius: 10px;
+  cursor: pointer; }
+.vertiscope-search3d-go:hover { color: var(--text-normal); border-color: rgba(255,255,255,0.4) !important; }
+/* Item 106: what a re-rank changed, bright for a moment. */
+.vertiscope-search3d-diff { color: var(--text-faint); transition: color 1.2s ease; }
+.vertiscope-search3d-diff.is-fresh { color: var(--text-accent); transition: none; }
+
+/* G-200 (2026-10-17: "there are two web-nav button-sets for going back and
+   forward"): the browser cell's own back/forward drive the PAGE; Obsidian's
+   header arrows walk the leaf's view history, which this view does not use. */
+.workspace-leaf-content[data-type="vertiscope-browser-view"] .view-header-nav-buttons {
+  display: none;
+}
+
+/* G-222: the results strip above the search bar, scroll-linked to the bar. */
+.vertiscope-search3d-strip { display: none; width: 100%; overflow-x: auto; overflow-y: hidden; white-space: nowrap;
+  pointer-events: auto; margin-bottom: 6px; scrollbar-width: none; }
+.vertiscope-search3d-strip::-webkit-scrollbar { display: none; }
+.vertiscope-search3d.is-active .vertiscope-search3d-strip { display: block; }
+.vertiscope-search3d-item { display: inline-flex; align-items: center; gap: 6px; max-width: 180px; margin-right: 6px;
+  padding: 3px 8px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.18); background: rgba(0,0,0,0.55);
+  color: var(--text-normal); font-size: 11px; cursor: pointer; transition: opacity 120ms linear; }
+.vertiscope-search3d-item.is-front { border-color: rgba(255,255,255,0.7); }
+.vertiscope-search3d-item:hover { border-color: var(--text-accent); opacity: 1 !important; }
+.vertiscope-search3d-item-rank { color: var(--text-faint); }
+.vertiscope-search3d-item-label { overflow: hidden; text-overflow: ellipsis; }
+
+/* G-243: a hover preview never blocks the pointer from the graph beneath.
+   Its title bar stays live, so the reader can still grab it (a drag keeps
+   it, and it is an ordinary panel from then on), minimize or close it. */
+.vertiscope-bb.is-preview, .vertiscope-bb.is-preview * { pointer-events: none !important; }
+.vertiscope-bb.is-preview .vertiscope-bb-head, .vertiscope-bb.is-preview .vertiscope-bb-head * { pointer-events: auto !important; }
+
+/* A special file's panel (PLUGIN_GOAL 186k): what it is, and a download that asks first. */
+.vertiscope-file { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.vertiscope-file-kind { text-transform: uppercase; letter-spacing: 0.06em; opacity: 0.7; font-size: 10px; }
+.vertiscope-file-name { font-weight: 600; word-break: break-all; }
+.vertiscope-file-href { opacity: 0.75; word-break: break-all; font-size: 11px; }
+.vertiscope-file-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 4px; }
+.vertiscope-file-dl { cursor: pointer; padding: 1px 8px; border: 1px solid var(--background-modifier-border); border-radius: 4px; }
+.vertiscope-file-dl:hover { background: var(--background-modifier-hover); }
+.vertiscope-file-ask { flex-basis: 100%; }
+.vertiscope-file-status { opacity: 0.85; font-size: 11px; word-break: break-all; }
+.vertiscope-bb-kg { cursor: pointer; margin-right: 6px; padding: 0 6px; border: 1px solid var(--background-modifier-border); border-radius: 4px; font-size: 11px; color: #ffb86c; }
+.vertiscope-bb-kg:hover { background: var(--background-modifier-hover); }

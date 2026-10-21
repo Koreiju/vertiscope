@@ -1,0 +1,73 @@
+# Measurement and scan artifacts — regenerable, large, and not source.
+build/
+build_live/
+build_sweep/
+build_analytics/
+logs/
+
+# Downloaded tooling, not source.
+drivers/
+
+# Python and tooling caches.
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+.mypy_cache/
+.ruff_cache/
+
+# Kuzu stores wherever they land.
+*.kuzu/
+kuzu_db/
+
+# Editor state.
+.obsidian/
+
+# Exported vault notes — regenerable from the store.
+pages/
+pages256/
+
+# ---- never published (prepare_release.py) ----------------------------------
+# Stores and their logs, wherever they land.
+*.kuzu
+*.kuzu.*
+*.wal
+*.wal.*
+*.db
+*.sqlite
+*.sqlite3
+*.duckdb
+# Models and fitted state.
+*.gguf
+*.safetensors
+*.bin
+*.pt
+*.onnx
+*.pkl
+*.npy
+*.npz
+models/
+# Built bundles and dependencies.
+node_modules/
+obsidian-plugin/main.js
+dist/
+# Workspaces, captures, media and analytics.
+build*/
+workspace*/
+media/
+snapshots/
+offline_pages/
+pdfs/
+downloads/
+test_runs/
+*.log
+# Third-party page corpora (fetched by scripts/fetch_corpus.py).
+tests/corpus/
+tests/snapshots/
+# Local secrets, should any ever appear.
+.env
+.env.*
+*.pem
+*.key
+# The scrub's own report stays local.
+SCRUB_REPORT.md

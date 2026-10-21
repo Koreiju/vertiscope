@@ -1,0 +1,9 @@
+{
+  "id": "vertiscope-bridge",
+  "name": "vertiscope bridge",
+  "version": "0.1.0",
+  "minAppVersion": "1.4.0",
+  "description": "Renders distilled web chunks as interactive surfaces inside notes, with the page's own links as vault edges.",
+  "author": "the maintainer",
+  "isDesktopOnly": true
+}

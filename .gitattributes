@@ -1,0 +1,17 @@
+# Source keeps LF, on every platform.
+#
+# `core.autocrlf false` stops git rewriting endings, which is what we want --
+# but Python's text mode writes os.linesep, so any file edited through
+# `write_text` on Windows came back CRLF and showed up as a whole-file diff.
+# One 44-line change read as 1,622 changed lines, which is the kind of noise
+# that makes a diff not worth reading.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.gz binary
+*.zip binary
+*.exe binary
+
+# Archived pages are artifacts, not source. Their bytes -- line endings
+# included -- are the test input, so nothing may rewrite them.
+tests/corpus/** -text

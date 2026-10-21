@@ -1,0 +1,23 @@
+{
+  "name": "vertiscope-bridge",
+  "version": "0.1.0",
+  "description": "Obsidian bridge for the vertiscope DOM distiller",
+  "main": "main.js",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+    "harness": "node harness.mjs ../pages"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "builtin-modules": "^3.3.0",
+    "esbuild": "^0.20.0",
+    "linkedom": "^0.18.13",
+    "obsidian": "latest",
+    "typescript": "^5.3.0"
+  },
+  "dependencies": {
+    "3d-force-graph": "^1.80.0",
+    "three": "^0.185.1"
+  }
+}
