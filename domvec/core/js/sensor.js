@@ -101,7 +101,7 @@
   // Peripheral reads only -- nothing here touches the fold.
   // `codespans` may also be set at boot (`variants.codespans`): chunks are
   // emitted and cached at the first fold, before a run-time flip could act.
-  var RT_PLANTS = { yclip: false, lightpath: false, codespans: !!V.codespans, xmlnsurl: !!V.xmlnsurl, nojson: !!V.nojson };
+  var RT_PLANTS = { yclip: false, lightpath: false, codespans: !!V.codespans, xmlnsurl: !!V.xmlnsurl, nojson: !!V.nojson, mergedlines: !!V.mergedlines };
   var USE_SEMANTIC = !!V.semantic; // prefer heading/section boundaries
   var USE_RANK = !!V.rank;         // heaviest subtree first, not document order
   var WIDE = V.budget === 'wide', NARROW = V.budget === 'narrow';
@@ -1631,10 +1631,17 @@
     }
     var d = 0, chars = 0, lines = [], i;
     if (!TAX_ROOT) TAX_ROOT = [intern('paragraph'), intern('text.visible'), 0];
+    // The digest from the members' records; their LINES only once the gates
+    // below have decided to send them. Collected first, every merged run on
+    // the page rebuilt every line it holds on every repair and threw them
+    // away at the gate -- 371 ms of 1,021 ms of sensor time in 13 s of
+    // scrolling discourse (2026-10-24, the page's own profile: collectLines
+    // -> flushRun -> makeMerged). The single-chunk path gates before
+    // `makeChunk` already. Planted (run time): `plants.mergedlines`.
     for (i = 0; i < run.length; i++) {
       d = mix(d, run[i].rec.digest);
       chars += run[i].rec.chars;
-      collectLines(run[i].node, run[i].seg, run[i].rec, 0, lines, [], TAX_ROOT);
+      if (RT_PLANTS.mergedlines) collectLines(run[i].node, run[i].seg, run[i].rec, 0, lines, [], TAX_ROOT);
     }
     d = d >>> 0;
     // The run's last node, for `at` (the hover peripheral): a merged run is
@@ -1670,6 +1677,9 @@
     slot.gen = EMIT_GEN;
     slot.path = where;
     slot.node = first.node;
+    if (!RT_PLANTS.mergedlines) {
+      for (i = 0; i < run.length; i++) collectLines(run[i].node, run[i].seg, run[i].rec, 0, lines, [], TAX_ROOT);
+    }
     encodeLines(lines);
     stats.chunks++;
     stats.merged += run.length;
@@ -2607,15 +2617,24 @@
     // are stale. Inside the timed region, because it is fold work and a phase
     // timing that hides its own cost is not a phase timing.
     reclassify();
+    // Each phase of this repair on its own clock (D-40, 2026-10-24: a repair
+    // of ~23 new topics on discourse cost 30-120 ms, most of page -> host,
+    // and one number could not say which phase). Sent with the drain.
+    var pclock = (typeof performance !== 'undefined' && performance.now)
+      ? function () { return performance.now(); } : Date.now;
+    var tw = pclock(), te = tw, ts = tw, roots_n = 0, foldMs = 0;
     familyMemo = (typeof Map === 'function') ? new Map() : null;
     try {
       stats.repairs++;
       var out = [];
       roots.forEach(function (_obs, root) {
+        roots_n++;
         var host = root.host || root;
         var node = root.nodeType === 9 ? root.documentElement : root;
         if (!node || node.nodeType !== 1) return;
+        var tf = pclock();
         var rec = fold(node);
+        foldMs += pclock() - tf;
         if (!rec) return;
         emitChunks(node, [], out);
       });
@@ -2626,6 +2645,7 @@
       if (USE_RANK) {
         out.sort(function (a, b) { return (b.chars || 0) - (a.chars || 0); });
       }
+      te = pclock();
       for (var i = 0; i < out.length; i++) front.push(out[i]);
       // Name what left. Without this the delta could only ever add: a chunk
       // whose node was deleted stayed in the store with an address that no
@@ -2662,6 +2682,7 @@
         removedIds.push(slot.id);
       }
       chunkRoots = live;
+      ts = pclock();
       sweepOpaque();
       sweepHosts();
       dirtySpans.clear();
@@ -2671,6 +2692,13 @@
     var t1 = (typeof performance !== 'undefined' && performance.now)
       ? performance.now() : Date.now();
     stats.repairMs = (stats.repairMs || 0) + (t1 - t0);
+    var r1 = function (x) { return Math.round(x * 10) / 10; };
+    // Summed over the repairs since the last drain (a drain can follow several).
+    var lp = stats.repairParts || (stats.repairParts = { reclassify: 0, walk: 0, fold: 0, emit: 0, sweep_roots: 0, sweep_hosts: 0, repairs: 0, chunk_roots: 0, roots: 0 });
+    lp.reclassify = r1(lp.reclassify + (tw - t0)); lp.walk = r1(lp.walk + (te - tw));
+    lp.fold = r1(lp.fold + foldMs); lp.emit = r1(lp.emit + (te - tw - foldMs));
+    lp.sweep_roots = r1(lp.sweep_roots + (ts - te)); lp.sweep_hosts = r1(lp.sweep_hosts + (t1 - ts));
+    lp.repairs++; lp.chunk_roots = chunkRoots.length; lp.roots = roots_n;
   }
 
   // ---- observation (§3 of the injection doc: one per root) -------------
@@ -2739,7 +2767,8 @@
       p.boxes = boxes(ids); t2 = clock();
       p.pictures = pictures(ids); t3 = clock();
     }
-    p.inpage = { drain: t1 - t0, boxes: t2 - t1, pictures: t3 - t2 };
+    p.inpage = { drain: t1 - t0, boxes: t2 - t1, pictures: t3 - t2, repair: stats.repairParts || null };
+    stats.repairParts = null;
     p.dirtyAt = since;
     p.sentAt = Date.now();
     if (PUSH && expect === SIGNAL && (ids.length || (p.removed || []).length || (p.moves || []).length

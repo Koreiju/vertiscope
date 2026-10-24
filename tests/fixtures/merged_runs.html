@@ -1,0 +1,32 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Merged runs</title>
+<body>
+<h1>A feed of short siblings</h1>
+<p>This fixture exists for G-66's check: a container far over the chunk budget
+whose children are each short, so the chunker merges them into runs. The only
+motion is the check's: one button appends five items, the other edits one.</p>
+<div id="feed"></div>
+<button id="add" type="button">Append five</button>
+<button id="edit" type="button">Edit the tenth</button>
+<script>
+  // Deterministic content: item i always reads the same, so two arms of the
+  // check see the same page.
+  var feed = document.getElementById("feed"), n = 0;
+  function item() {
+    n += 1;
+    var p = document.createElement("p");
+    p.textContent = "Feed item " + n + " about patricia tries and their keys.";
+    feed.appendChild(p);
+  }
+  for (var i = 0; i < 300; i++) item();
+  document.getElementById("add").addEventListener("click", function () {
+    for (var k = 0; k < 5; k++) item();
+  });
+  var edits = 0;
+  document.getElementById("edit").addEventListener("click", function () {
+    edits += 1;
+    feed.children[9].textContent = "Feed item 10, edited " + edits + " times by the check.";
+  });
+</script>
+</body>

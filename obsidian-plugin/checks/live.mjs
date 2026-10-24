@@ -1963,8 +1963,22 @@ export function makeChecks(env) {
             const to3d = m.rows.map((r) => r.to3d).filter((x) => x !== null);
             const ov = m.rows.map((r) => r.overlay).filter((x) => x !== null);
             const hv = (k) => hovers.filter((x) => (k === undefined || x.tag === k) && x.ms !== null).map((x) => x.ms);
+            // The fold's own wait: first mutation -> the drain sent, less the
+            // drain's in-page work, per pushed drain of this arm.
+            const armTraces = (window.__domvecProfiler.listAll ? window.__domvecProfiler.listAll() : []).filter((t) => t.kind === "live"
+                && t.url.startsWith("https://discourse.julialang.org/") && (t.facts.host_epoch || 0) >= phases[0] && (t.facts.host_epoch || 0) <= phases[3]
+                && typeof t.stages.push_transit === "number" && typeof t.stages.mutation_to_host === "number");
+            const foldWait = armTraces.map((t) => t.stages.mutation_to_host - t.stages.push_transit - (t.stages["drain.call"] || 0) - (t.stages["drain.boxes"] || 0) - (t.stages["drain.pictures"] || 0));
+            // ...and the fold's own phases, per drain (\`repair_parts\`).
+            const rp = armTraces.map((t) => t.facts.repair_parts).filter(Boolean);
+            const part = (k) => ({ p50: qq(rp.map((x) => x[k] || 0), 0.5), p95: qq(rp.map((x) => x[k] || 0), 0.95) });
+            const foldParts = rp.length ? { n: rp.length, fold_ms: { p50: qq(armTraces.map((t) => t.stages.fold || 0), 0.5), p95: qq(armTraces.map((t) => t.stages.fold || 0), 0.95) },
+              reclassify: part("reclassify"), walk: part("walk"), walk_fold: part("fold"), walk_emit: part("emit"), sweep_roots: part("sweep_roots"), sweep_hosts: part("sweep_hosts"),
+              repairs_per_drain: part("repairs"), chunk_roots: part("chunk_roots"), roots: part("roots") } : null;
             return {
               url: wv.getURL(), frame_ms_p50: Math.round(fr[2]),
+              fold_wait_ms: { n: foldWait.length, p50: qq(foldWait, 0.5), p95: qq(foldWait, 0.95) },
+              fold_parts: foldParts,
               seen: (seen || []).length, answered: m.rows.length, unmapped: m.unmapped, unanswered: m.unanswered,
               pushed_payloads: b.pushedPayloads,
               to_host_ms: { p50: qq(host(), 0.5), p95: qq(host(), 0.95),
@@ -6928,6 +6942,64 @@ export function makeChecks(env) {
             evidence: got,
           };
         } finally {
+          await fixtures.close();
+        }
+      },
+    },
+    {
+      id: "G-66",
+      asks: "the fold's own phases travel with every drain, and an unchanged merged run costs no lines: the same chunks are sent with the merged-run gate first or last, and the emit phase is cheaper; planted (mergedlines) every run's lines collected before its gate",
+      async run() {
+        // 2026-10-24, the page's own profile on discourse: 371 ms of 1,021 ms
+        // of sensor time was \`makeMerged\` collecting the lines of every
+        // merged run on the page, every repair, and dropping them at the gate.
+        // A feed of 300 short siblings (merged into runs), five appends and
+        // two edits; every pushed drain logged by its chunks' digests, sizes
+        // and line counts, and its repair's phases.
+        const fixtures = await serveFixtures();
+        const arm = (planted) => evaluate(`(async () => {
+          ${PREP}
+          b.plant.delete("mergedlines");
+          if (${planted}) b.plant.add("mergedlines");
+          const log = [];
+          const orig = b.onPushedDrain;
+          b.onPushedDrain = function (p) {
+            try { log.push({ chunks: (p.chunks || []).map((c) => [c.digest >>> 0, c.chars || 0, (c.lines || []).length]),
+                             parts: (p.inpage && p.inpage.repair) || null }); } catch (e) {}
+            return orig.call(this, p);
+          };
+          try {
+            const PAGE = ${JSON.stringify(fixtures.origin + "/merged_runs.html?g66=")} + (${planted} ? "p" : "c") + Date.now();
+            b.go("about:blank"); await sleep(800);
+            if (!(await land(PAGE, 30000))) return { error: "did not land" };
+            await sleep(2500);
+            const landed = log.length;
+            const click = (id) => b.webview.executeJavaScript("document.getElementById(" + JSON.stringify(id) + ").click(); true");
+            for (let i = 0; i < 5; i++) { await click("add"); await sleep(450); }
+            for (let i = 0; i < 2; i++) { await click("edit"); await sleep(450); }
+            await sleep(1500);
+            const after = log.slice(landed);
+            const sum = (k) => Math.round(after.reduce((a, d) => a + ((d.parts && d.parts[k]) || 0), 0) * 10) / 10;
+            // The chunks sent, as a multiset: two arms may split drains differently.
+            const sent = log.flatMap((d) => d.chunks.map((c) => c.join(":"))).sort();
+            return { planted: ${planted}, drains: log.length, after_landing: after.length, chunks_sent: sent.length,
+                     sent_key: sent.join("|").length + ":" + sent.slice(0, 4).join(","), sent,
+                     emit_ms: sum("emit"), fold_ms: sum("fold"), walk_ms: sum("walk"), reclassify_ms: sum("reclassify"),
+                     parts_present: after.filter((d) => d.parts).length };
+          } finally { b.onPushedDrain = orig; b.plant.delete("mergedlines"); }
+        })()`, { timeout: 120000 });
+        try {
+          const clean = await arm(false);
+          const planted = await arm(true);
+          const same = !!clean.sent && !!planted.sent && clean.sent.length > 0 && clean.sent.join("|") === planted.sent.join("|");
+          const strip = (x) => { const { sent, ...rest } = x || {}; return rest; };
+          return {
+            pass: !clean.error && !planted.error && clean.after_landing >= 5 && clean.parts_present === clean.after_landing
+               && same && clean.emit_ms < planted.emit_ms,
+            evidence: { same_chunks_sent: same, clean: strip(clean), planted: strip(planted) },
+          };
+        } finally {
+          await tidyFixtures(fixtures.origin);
           await fixtures.close();
         }
       },

@@ -1306,6 +1306,7 @@ export class BrowserView extends ItemView {
     if (this.plant.has("xmlnsurl")) v.push("xmlnsurl: true");
     // G-99's planted arm: every script skipped, its structured data with it.
     if (this.plant.has("nojson")) v.push("nojson: true");
+    if (this.plant.has("mergedlines")) v.push("mergedlines: true");
     return "{" + v.join(", ") + "}";
   }
 
@@ -2498,6 +2499,9 @@ export class BrowserView extends ItemView {
       prof.stage(trace, "drain.call", payload.inpage.drain);
       prof.stage(trace, "drain.boxes", payload.inpage.boxes);
       prof.stage(trace, "drain.pictures", payload.inpage.pictures);
+      // The repair's phases since the last drain (D-40): which part of the
+      // fold the page waited on.
+      if (payload.inpage.repair) prof.fact(trace, "repair_parts", payload.inpage.repair);
     }
     const repair = payload && payload.stats ? payload.stats.repairMs : undefined;
     if (typeof repair === "number") {
