@@ -434,6 +434,10 @@ export class PipelineBox {
 
   /** The last flash's own cost: placing the boxes, and the frame they paint in. */
   diffPlaced: number[] = [];
+  /** The trace each `diffPlaced` entry came from, same order (G-90's evidence). */
+  diffPlacedTraces: string[] = [];
+  /** When each `diffLatencies` entry's drain came back, same order. */
+  diffLatencyAt: number[] = [];
 
   /**
    * Outline a drain's diff from the boxes that came back WITH the drain
@@ -529,6 +533,7 @@ export class PipelineBox {
     // The drain's new chunks join the streaming set, which keeps them
     // outlined from here on; this call still paints them NOW, from the boxes
     // the drain brought, so the first paint stays in the same frame (G-90).
+    const tIn = performance.now();
     if (ids.length) this.markStreaming(ids.filter((_id, i) => !!boxes[i]));
     const rects = boxes.slice(0, 64);
     while (this.diffEls.length < rects.length) {
@@ -545,14 +550,19 @@ export class PipelineBox {
     });
     const placed = performance.now() - t0;
     this.diffPlaced.push(placed);
-    if (this.diffPlaced.length > 500) this.diffPlaced.shift();
+    this.diffPlacedTraces.push(traceId);
+    if (this.diffPlaced.length > 500) { this.diffPlaced.shift(); this.diffPlacedTraces.shift(); }
     window.requestAnimationFrame(() => {
       const ms = performance.now() - t0;
       this.diffLatencies.push(ms);
-      if (this.diffLatencies.length > 500) this.diffLatencies.shift();
+      this.diffLatencyAt.push(t0);
+      if (this.diffLatencies.length > 500) { this.diffLatencies.shift(); this.diffLatencyAt.shift(); }
       this.lastDiff = { at: Date.now(), asked: boxes.length, drawn, ms };
       const t = traceId ? profiler().get(traceId) : undefined;
-      if (t) { profiler().stage(t, "drain_to_overlay", ms); profiler().stage(t, "overlay_placed", placed); }
+      if (t) {
+        profiler().stage(t, "drain_to_overlay", ms); profiler().stage(t, "overlay_placed", placed);
+        profiler().stage(t, "overlay.place", placed - (tIn - t0));
+      }
     });
     window.clearTimeout(this.diffTimer);
     if (this.plantFlashOnly || !ids.length) {
@@ -592,7 +602,8 @@ export class PipelineBox {
     window.requestAnimationFrame(() => {
       const ms = performance.now() - t0;
       this.diffLatencies.push(ms);
-      if (this.diffLatencies.length > 500) this.diffLatencies.shift();
+      this.diffLatencyAt.push(t0);
+      if (this.diffLatencies.length > 500) { this.diffLatencies.shift(); this.diffLatencyAt.shift(); }
       this.lastDiff = { at: Date.now(), asked: addresses.length, drawn, ms };
       const t = traceId ? profiler().get(traceId) : undefined;
       if (t) profiler().stage(t, "drain_to_overlay", ms);

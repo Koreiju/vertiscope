@@ -94,6 +94,35 @@ export class PipelineProfiler {
   private traces: Trace[] = [];
   private live = new Map<string, Trace>();
   private counter = 0;
+  /**
+   * The renderer's long tasks (over 50 ms), on `performance.now()`'s clock
+   * (G-90): a paint that waited 230 ms for its frame waited on one of these,
+   * and the overlay's own timings cannot say which.
+   */
+  private longTasks: { at: number; ms: number }[] = [];
+  private longObserver: PerformanceObserver | null = null;
+
+  constructor() {
+    try {
+      this.longObserver = new PerformanceObserver((list) => {
+        for (const e of list.getEntries()) this.longTasks.push({ at: e.startTime, ms: e.duration });
+        if (this.longTasks.length > 400) this.longTasks.splice(0, this.longTasks.length - 400);
+      });
+      this.longObserver.observe({ entryTypes: ["longtask"] });
+    } catch { this.longObserver = null; }
+  }
+
+  /** Long tasks overlapping [from, to] (performance.now() ms). */
+  longTasksIn(from: number, to: number): { at: number; ms: number }[] {
+    return this.longTasks.filter((t) => t.at < to && t.at + t.ms > from)
+      .map((t) => ({ at: Math.round(t.at), ms: Math.round(t.ms) }));
+  }
+
+  /** The observer let go, when a newer build's instance takes over. */
+  stopObserving(): void {
+    try { this.longObserver?.disconnect(); } catch { /* gone */ }
+    this.longObserver = null;
+  }
   /** Set by the graph view, so the listener can read the scene. */
   graphSource: (() => any) | null = null;
   /** The graph VIEW, for what it knows beyond the renderer (`G-90`). */
@@ -412,7 +441,9 @@ export function profiler(): PipelineProfiler {
   // `visitAlias` (2026-10-18): an instance without it filed a redirected
   // page's stages under no visit. `listAll` (2026-10-19) is the newest.
   if (!old || typeof old.visits !== "function" || typeof old.lastFor !== "function"
-      || typeof old.visitAlias !== "function" || typeof old.listAll !== "function") {
+      || typeof old.visitAlias !== "function" || typeof old.listAll !== "function"
+      || typeof old.longTasksIn !== "function") {
+    try { old?.stopObserving?.(); } catch { /* an older shape */ }
     const fresh = new PipelineProfiler();
     try { for (const t of (old?.list?.() || [])) (fresh as any).traces.push(t); } catch { /* an older shape */ }
     try { for (const v of (old?.visitsList || [])) (fresh as any).visitsList.push(v); } catch { /* an older shape */ }

@@ -1563,9 +1563,15 @@ export function makeChecks(env) {
             let hung = null, mutated = false;
             const at = await b.webview.executeJavaScript("(function(){var e=document.getElementById('add');if(!e)return null;e.scrollIntoView({block:'center'});var r=e.getBoundingClientRect();return {x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)};})()");
             const count = () => b.webview.executeJavaScript("document.getElementById('items').children.length");
-            let second = null, secondGone = null;
+            let second = null, secondGone = null, afterClick = null, framePeak = 0;
             if (at) {
               const was = await count();
+              const clickedAt = Date.now();
+              // Every frame, not every 150 ms: a force node that the store
+              // answers for within a sample is drawn and gone unseen.
+              let watching = true;
+              const watch = () => { if (!watching) return; framePeak = Math.max(framePeak, mine()); requestAnimationFrame(watch); };
+              requestAnimationFrame(watch);
               b.webview.focus();
               for (const type of ["mouseDown", "mouseUp"]) b.webview.sendInputEvent({ type, x: at.x, y: at.y, button: "left", clickCount: 1 });
               await sleep(600);
@@ -1574,6 +1580,12 @@ export function makeChecks(env) {
               second = await until(() => mine() > 0, 20000);
               hung = hungFromPage();
               secondGone = await until(() => mine() === 0, 60000);
+              watching = false;
+              // What each drain after the click carried, and why it drew what it did.
+              afterClick = window.__domvecProfiler.listAll()
+                .filter((t) => t.url === b.webview.getURL() && (t.facts.host_epoch || 0) >= clickedAt)
+                .slice(0, 8).map((t) => ({ chunks: t.facts.chunks_in_drain ?? null, why: t.facts.why ?? null,
+                                           flash: t.facts.flash ?? null, outcome: t.facts.outcome ?? null }));
             }
             try { b.setLive(false); } catch (e) {}
             try { b.go("about:blank"); } catch (e) {}
@@ -1581,7 +1593,8 @@ export function makeChecks(env) {
             try { b.setLive(true); } catch (e) {}
             const ui = window.__domvec.ui();
             return { phases: st.phases || null, label: st.label, mode_at_start,
-                     c8: { appeared, collapsed, mutated, second, hung_from_page: hung, second_gone: secondGone },
+                     c8: { appeared, collapsed, mutated, second, hung_from_page: hung, second_gone: secondGone,
+                           frame_peak: framePeak, after_click: afterClick },
                      force: (ui.graph || {}).force || null,
                      pending: v.pendingState ? v.pendingState() : null };
           })()`, { timeout: 300000 });
@@ -1659,11 +1672,20 @@ export function makeChecks(env) {
             graph_ms: v && v.forceStats ? { n: v.forceStats.ms.length, p50: q(v.forceStats.ms, 0.5), p95: q(v.forceStats.ms, 0.95) } : null,
             frame_ms_p50: Math.round(fr[2]),
             // Where the slowest placements spent their time, by phase.
-            worst_placed: (window.__domvecProfiler.listAll ? window.__domvecProfiler.listAll() : window.__domvecProfiler.list()).filter((t) => typeof t.stages.overlay_placed === "number")
-              .sort((a, c) => c.stages.overlay_placed - a.stages.overlay_placed).slice(0, 3)
-              .map((t) => ({ url: t.url.slice(0, 60), chunks: t.facts.chunks_in_drain,
-                             stages: Object.fromEntries(["pump_wait", "force_tree", "absorb.covers", "absorb.flash_prep", "overlay_placed", "drain_to_overlay"]
-                               .filter((k) => typeof t.stages[k] === "number").map((k) => [k, Math.round(t.stages[k] * 10) / 10])) })),
+            // The slowest PAINTS, and the renderer's long tasks they waited on.
+            worst_overlay: (pb && pb.diffLatencyAt ? pb.diffLatencies.map((ms, i) => [ms, pb.diffLatencyAt[i]]) : [])
+              .sort((a, c) => c[0] - a[0]).slice(0, 3)
+              .map(([ms, at]) => ({ ms: Math.round(ms), long_tasks: window.__domvecProfiler.longTasksIn
+                ? window.__domvecProfiler.longTasksIn(at, at + ms) : null })),
+            // Of the drains SCORED above (\`diffPlaced\`), by their own trace: the
+            // profiler holds every trace of the session, and the slowest of
+            // those were a planted D-35 arm's 59 s queue (2026-10-19).
+            worst_placed: (pb ? pb.diffPlaced.map((ms, i) => [ms, pb.diffPlacedTraces ? pb.diffPlacedTraces[i] : ""]) : [])
+              .sort((a, c) => c[0] - a[0]).slice(0, 3)
+              .map(([ms, id]) => { const t = id ? window.__domvecProfiler.listAll().find((x) => x.id === id) : null;
+                return { placed: Math.round(ms * 10) / 10, url: t ? t.url.slice(0, 60) : null, chunks: t ? t.facts.chunks_in_drain : null,
+                         stages: t ? Object.fromEntries(["pump_wait", "absorb.queued", "absorb.pre", "absorb.apply", "absorb.transient", "absorb.covers", "absorb.flash_prep", "overlay.place", "overlay_placed", "drain_to_overlay"]
+                               .filter((k) => typeof t.stages[k] === "number").map((k) => [k, Math.round(t.stages[k] * 10) / 10])) : null }; }),
           };
         })()`);
         const flowing = got.frame_ms_p50 < 50;

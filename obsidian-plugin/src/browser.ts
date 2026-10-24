@@ -2437,6 +2437,10 @@ export class BrowserView extends ItemView {
   private async absorbDrain(payload: any, url: string, trace: any, drainStart: number,
                             drainBack: number, title: string): Promise<void> {
     const prof = profiler();
+    // From arrival to this drain's outlines, by step (G-90's evidence): the
+    // overlay's placement clock starts at `drainBack`, not here.
+    const tIn = performance.now();
+    prof.stage(trace, "absorb.queued", tIn - drainBack);
     // A page STATE -- an error response, a bot check -- is not the page
     // (G-249): it is not streamed, not outlined, not stored, so the url's
     // trie stays what it was and the real page's drains continue its stream
@@ -2500,28 +2504,12 @@ export class BrowserView extends ItemView {
       }
       this.docTrees.set(this.docSeq, tree);
       if (this.docTrees.size > 8) this.docTrees.delete(this.docTrees.keys().next().value as number);
+      const tApply = performance.now();
+      prof.stage(trace, "absorb.pre", tApply - tIn);
       const delta = tree.apply(payload);
       this.lastDrainAt = performance.now();
+      prof.stage(trace, "absorb.apply", this.lastDrainAt - tApply);
       if (delta) drainIds = delta.added.map((a) => a.id);
-      // Placed through the fit NOW, not after the store (PLUGIN_GOAL 48):
-      // the drain's new chunks, by their own text, in the delta only.
-      if (delta && !this.plantNoTransient) {
-        const want = new Set(delta.added.filter((a) => !a.branch && a.parent).map((a) => a.id));
-        const items = (payload.chunks || []).map((c: any) => ({
-          id: tree!.nodeId(Number(c.id)),
-          text: (c.lines || []).map((l: any) => String((l && l[1]) || "")).join("\n"),
-        })).filter((it: any) => want.has(it.id) && it.text.trim().length > 8).slice(0, 300);
-        if (items.length) {
-          const asked = performance.now();
-          void this.sidecar.project(url, items).then((got: any) => {
-            if (!got || !got.pos) return;
-            this.transientStats.asked += items.length;
-            this.transientStats.placed += Object.keys(got.pos).length;
-            this.transientStats.last_ms = Math.round(performance.now() - asked);
-            this.onProjected(url, got);
-          });
-        }
-      }
       if (payload.pictures) {
         (payload.chunks || []).forEach((c: any, i: number) => {
           const pic = payload.pictures[i];
@@ -2566,6 +2554,29 @@ export class BrowserView extends ItemView {
                                    (payload.chunks || []).map((c: any) => Number(c.id)));
         }
       }
+      // Placed through the fit NOW, not after the store (PLUGIN_GOAL 48) --
+      // but after the outlines (G-90): 2.3-2.7 ms of joining every chunk's
+      // text sat between the drain and its boxes (2026-10-24).
+      const tTransient = performance.now();
+      // the drain's new chunks, by their own text, in the delta only.
+      if (delta && !this.plantNoTransient) {
+        const want = new Set(delta.added.filter((a) => !a.branch && a.parent).map((a) => a.id));
+        const items = (payload.chunks || []).map((c: any) => ({
+          id: tree!.nodeId(Number(c.id)),
+          text: (c.lines || []).map((l: any) => String((l && l[1]) || "")).join("\n"),
+        })).filter((it: any) => want.has(it.id) && it.text.trim().length > 8).slice(0, 300);
+        if (items.length) {
+          const asked = performance.now();
+          void this.sidecar.project(url, items).then((got: any) => {
+            if (!got || !got.pos) return;
+            this.transientStats.asked += items.length;
+            this.transientStats.placed += Object.keys(got.pos).length;
+            this.transientStats.last_ms = Math.round(performance.now() - asked);
+            this.onProjected(url, got);
+          });
+        }
+      }
+      prof.stage(trace, "absorb.transient", performance.now() - tTransient);
       if (delta && (delta.added.length || delta.removed.length || delta.reparented.length)) {
         if (!payload.boxes) delta.covers = this.coversFor(url, tree.held().filter(
           (h) => delta.added.some((a) => a.id === h.id)));
