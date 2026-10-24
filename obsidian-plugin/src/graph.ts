@@ -2110,6 +2110,9 @@ export class GraphView extends ItemView {
   }
 
   async onClose() {
+    // Planted (G-175): the view is never closed -- nothing torn down -- as a
+    // view the workspace dropped without closing it.
+    if ((window as any).__domvecPlantSkipClose) return;
     // `_destructor` releases the WebGL context. Without it, reopening the
     // pane a few times exhausts the browser's context limit and every graph
     // after that renders black.
@@ -2136,6 +2139,8 @@ export class GraphView extends ItemView {
   }
   /** Set by `onClose`: a timer that outlived it has nothing to do. */
   closed = false;
+  /** The plugin load this view was born in (`__domvecLoadGen`, G-175). */
+  private loadGen: number = (window as any).__domvecLoadGen || 0;
   /** A timer firing on a CLOSED view, counted on the window, which outlives
    *  the plugin (planted by `__domvecPlantLeakTimers`: the timers left on). */
   static closedTick(): void { const w = window as any; w.__domvecClosedTicks = (w.__domvecClosedTicks || 0) + 1; }
@@ -5596,6 +5601,25 @@ export class GraphView extends ItemView {
     const V3 = new THREE.Vector3();
     const tick = (t: number) => {
       this.batchRaf = requestAnimationFrame(tick);
+      // **A view from an earlier load of the plugin stops itself.** One that
+      // was never closed kept its graph and this loop after reloads: a chunk
+      // view of 96k nodes from a load hours old synced every node every 2 s,
+      // 230-300 ms each time, in the window the reader's page and the new
+      // load share -- and every hover from the page waited behind it
+      // (2026-10-24, D-40: the crossing p95 228-460 ms). Planted
+      // `__domvecPlantOrphanLoop`: the loop runs on.
+      // Counted per frame when planted, so the probe sees the loop it let run
+      // (a script id cannot tell two loads of one build apart: V8 reuses it).
+      if (this.loadGen !== ((window as any).__domvecLoadGen || 0) && (window as any).__domvecPlantOrphanLoop) {
+        (window as any).__domvecOldGenFrames = ((window as any).__domvecOldGenFrames || 0) + 1;
+      } else if (this.loadGen !== ((window as any).__domvecLoadGen || 0)) {
+        (window as any).__domvecOrphanStops = ((window as any).__domvecOrphanStops || 0) + 1;
+        this.stopBatch();
+        this.closed = true;
+        try { this.graph?._destructor?.(); } catch { /* already gone */ }
+        this.graph = null;
+        return;
+      }
       const g: any = this.graph;
       if (!g || !this.batch) return;
       this.stepGlides();

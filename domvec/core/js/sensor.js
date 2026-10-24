@@ -3282,8 +3282,16 @@
     }
     return out;
   }
+  // The page's clock, as an epoch with sub-millisecond precision: the host
+  // reads a hover's stamps against its own (D-40: which part of a slow hover
+  // was this handler, which the crossing).
+  function epochNow() {
+    return (typeof performance !== 'undefined' && performance.now && performance.timeOrigin)
+      ? performance.timeOrigin + performance.now() : Date.now();
+  }
   function onPointer(ev) {
     if (!SAY) return;
+    var began = epochNow();
     var target = (ev.composedPath && ev.composedPath()[0]) || ev.target;
     // On the event itself, no frame waited for; at most one every 8 ms, and
     // not at all while the pointer stays on the same element.
@@ -3316,7 +3324,16 @@
     var key = hoverKey(got, target);
     if (key === lastHoverKey) return;
     lastHoverKey = key;
-    try { SAY(SIGNAL + 'hover ' + key); } catch (e) { stats.errors++; }
+    // ` ~began,sent` on the end: when this handler started and when it spoke.
+    // The host takes it off before reading the key.
+    var stamp = key === '-' ? '' : ' ~' + began.toFixed(1) + ',' + epochNow().toFixed(1);
+    var saying = epochNow();
+    try { SAY(SIGNAL + 'hover ' + key + stamp); } catch (e) { stats.errors++; }
+    // How long the console call itself held this handler: the part of the
+    // crossing spent inside the page (D-40). The last 64, in ms.
+    var said = stats.sayHover || (stats.sayHover = []);
+    said.push(Math.round((epochNow() - saying) * 10) / 10);
+    if (said.length > 64) said.shift();
   }
   // `<id> <box>` -- and the hovered element's OWN address: the page's chunk
   // can be coarser than the store's (a shadow-DOM result list is one in-page

@@ -2651,9 +2651,19 @@ class _Handler(BaseHTTPRequestHandler):
                     # The visit kept chunks its last DOM no longer holds: the
                     # settle adds the trie and retires none of them (G-216).
                     union = bool(session.get("kept")) and not _PLANT_RETIRE_IN_SESSION[0]
+                    # Timed (2026-10-24: captures waited 5-37 s on the write
+                    # lock while settles held it, and no record said so).
+                    _ts = time.perf_counter()
                     with _WORK_LOCK:
-                        self.workspace.ingest(
+                        _tl = time.perf_counter()
+                        _got = self.workspace.ingest(
                             url, spine.trie, title=(body.get("title") or ""), complete=not union)
+                    _te = time.perf_counter()
+                    _counts = _got[1] if isinstance(_got, tuple) and len(_got) > 1 and isinstance(_got[1], dict) else {}
+                    _profile("settle", {"url": url, "lock_wait": round((_tl - _ts) * 1000, 1),
+                                        "held": round((_te - _tl) * 1000, 1), "chunks": len(before),
+                                        **{k: v for k, v in _counts.items()
+                                           if k.startswith("ms_") or k in ("chunks", "anchors", "contains", "contains_parts", "retired")}})
                     _forget_controls(url)
                 # Durability is the checkpoint thread's (`_checkpoint_forever`):
                 # on this 32 GB store a checkpoint took 10-19 s, and run here

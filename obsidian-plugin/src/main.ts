@@ -108,6 +108,9 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
   private surfaces = new Set<ChunkSurface>();
 
   async onload() {
+    // This load's generation (G-175): a view born in an earlier load whose
+    // loop is still running reads a newer number and stops itself.
+    (window as any).__domvecLoadGen = ((window as any).__domvecLoadGen || 0) + 1;
 
     // **The harness: one wrapper over the UI layer (`D-24`).**
     //

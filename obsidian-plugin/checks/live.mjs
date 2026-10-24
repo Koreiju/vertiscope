@@ -798,6 +798,40 @@ export function makeChecks(env) {
       }
       return { n: ours.length, page_p50: qq(page, 0.5), page_p95: qq(page, 0.95), ours_p50: qq(ours, 0.5), ours_p95: qq(ours, 0.95) };
     };
+    // Electron's MAIN process, sampled (D-40): every message from the page to
+    // the host is routed through it, and \`webview.getURL()\` is a synchronous
+    // call into it, so its round trip is how long main takes to answer.
+    const mainRtt = [];
+    let mainTimer = 0;
+    const startMain = () => { const tick = () => { const t = performance.now(); try { b.webview.getURL(); } catch (e) {} mainRtt.push([performance.timeOrigin + t, performance.now() - t]); if (mainRtt.length > 20000) mainRtt.shift(); mainTimer = setTimeout(tick, 20); }; tick(); };
+    const stopMain = () => clearTimeout(mainTimer);
+    const mainIn = (lo, hi) => { let m = 0; for (const [t, ms] of mainRtt) if (t + ms >= lo && t <= hi) m = Math.max(m, ms); return Math.round(m * 10) / 10; };
+    // OUR share, by part, from the sensor's own stamps (one epoch clock): the
+    // handler in the page (began -> spoke), the crossing (spoke -> the host's
+    // console-message event ran), and how much of the crossing the host was
+    // busy absorbing pushed drains or in long tasks.
+    const hoverParts = (from, to) => {
+      const xs = (b.hoverStamps || []).filter((h) => h.began >= from && h.began <= to);
+      const f = (k) => xs.map(k);
+      const handler = f((h) => h.sent - h.began), crossing = f((h) => h.arrived - h.sent);
+      const r1 = (x) => Math.round(x * 10) / 10;
+      return { n: xs.length,
+               handler_p50: qq(handler, 0.5), handler_p95: qq(handler, 0.95),
+               crossing_p50: qq(crossing, 0.5), crossing_p95: qq(crossing, 0.95),
+               host_handle_p95: qq(f((h) => h.handled - h.arrived), 0.95),
+               drain_busy_p95: qq(f((h) => h.drain_busy), 0.95), long_busy_p95: qq(f((h) => h.long_busy), 0.95),
+               worst: xs.slice().sort((a, c) => (c.arrived - c.began) - (a.arrived - a.began)).slice(0, 4)
+                 .map((h) => ({ handler: r1(h.sent - h.began), crossing: r1(h.arrived - h.sent),
+                                drain_busy: h.drain_busy, long_busy: h.long_busy,
+                                drains_crossing: h.drains_crossing, drain_kb: h.drain_kb,
+                                main_max: mainRtt.length ? mainIn(h.sent, h.arrived) : null })),
+               main_rtt: mainRtt.length ? { n: mainRtt.length, p50: qq(mainRtt.map((x) => x[1]), 0.5),
+                                            p95: qq(mainRtt.map((x) => x[1]), 0.95), max: qq(mainRtt.map((x) => x[1]), 1) } : null,
+               // Hovers that shared their crossing with a drain, and those that did not.
+               crossing_with_drain_p95: qq(xs.filter((h) => h.drains_crossing > 0).map((h) => h.arrived - h.sent), 0.95),
+               crossing_alone_p95: qq(xs.filter((h) => !h.drains_crossing).map((h) => h.arrived - h.sent), 0.95),
+               with_drain: xs.filter((h) => h.drains_crossing > 0).length };
+    };
     // Pointer moves the way a reader makes them; each one that lands on
     // ANOTHER chunk is timed from the move to the outline.
     const hoverRun = async (n, tag) => {
@@ -1850,6 +1884,7 @@ export function makeChecks(env) {
                      all_ms: { n: m.rows.length, p50: qq(m.rows.map((r) => r.host), 0.5), p95: qq(m.rows.map((r) => r.host), 0.95) },
                      hover_ms: { asked: hovers.length, answered: hv.length, p50: qq(hv, 0.5), p95: qq(hv, 0.95),
                                  split: hoverSplit(hovers, got.moves),
+                                 parts: hoverParts(t0, Date.now()),
                                  sources: hovers.reduce((a, x) => { a[x.source || "none"] = (a[x.source || "none"] || 0) + 1; return a; }, {}) } };
           } finally {
             b.plant.clear(); pb.plantStoreOnly = false;
@@ -1902,6 +1937,7 @@ export function makeChecks(env) {
             await observePage(KEY);
             const wv = b.webview;
             const phases = [], hovers = [];
+            startMain();
             // Three thirds of a long scroll, hovers between the wheel steps.
             for (let ph = 0; ph < 3; ph++) {
               phases.push(Date.now());
@@ -1914,6 +1950,10 @@ export function makeChecks(env) {
               }
             }
             phases.push(Date.now());
+            stopMain();
+            // The console call's own time in the page, per hover (D-40).
+            let sayInPage = null;
+            try { sayInPage = await b.webview.executeJavaScript("(function(){var h=window.__domvecSensor;var s=h&&h.stats?h.stats():null;return s&&s.sayHover?s.sayHover.slice():null})()"); } catch (e) {}
             await sleep(3000);
             const got = await collectPage(KEY) || { muts: [], moves: [] };
             const seen = got.muts;
@@ -1935,6 +1975,8 @@ export function makeChecks(env) {
               hover_ms: { asked: hovers.length, answered: hv().length, p50: qq(hv(), 0.5), p95: qq(hv(), 0.95),
                           last_third_p95: qq(hv(2), 0.95),
                           split: hoverSplit(hovers, got.moves),
+                          parts: hoverParts(phases[0], phases[3]),
+                          say_in_page_ms: sayInPage && sayInPage.length ? { n: sayInPage.length, p50: qq(sayInPage, 0.5), p95: qq(sayInPage, 0.95), max: qq(sayInPage, 1) } : null,
                           split_last_third: hoverSplit(hovers.filter((x) => x.tag === 2), got.moves) },
             };
           } finally {

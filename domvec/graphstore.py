@@ -396,6 +396,9 @@ PLANT_STORED_CONTAINMENT = [False]
 PLANT_ROOT_CONTAINMENT = [False]
 #: Planted (PLUGIN_GOAL 110): every page's trie nodes read fresh, every call.
 PLANT_NO_TNODE_MEMO = [False]
+#: Planted: containment written by relationship MERGE, one scan of the
+#: parent's edges per pair, as before 2026-10-24.
+PLANT_MERGE_CONTAINS = [False]
 
 def anchor_sig(chunk) -> str:
     """A chunk's addresses, line by line, hashed: what says its anchors are
@@ -940,8 +943,11 @@ class GraphStore:
         counts["ms_anchors"] = round((time.perf_counter() - _t) * 1000, 1)
         _t = time.perf_counter()
 
+        self.last_contains = {}
         counts["contains"] = self._link_containment(chunks)
         counts["ms_contains"] = round((time.perf_counter() - _t) * 1000, 1)
+        # Its parts (2026-10-24: 32 s on one capture, after the bulk path).
+        counts["contains_parts"] = dict(self.last_contains)
         _t = time.perf_counter()
         counts["links"] = self._link_hyperlinks(url, addresses, chunks)
         counts["ms_links"] = round((time.perf_counter() - _t) * 1000, 1)
@@ -1089,12 +1095,64 @@ class GraphStore:
                 if parent is not None and parent != chunk.cid:
                     pairs.append({"a": parent, "b": chunk.cid})
                     break
-        if pairs:
+        if not pairs:
+            return 0
+        if PLANT_MERGE_CONTAINS[0]:
             self._batch(
                 "UNWIND $rows AS r MATCH (a:Chunk {cid: r.a}), "
                 "(b:Chunk {cid: r.b}) MERGE (a)-[:Contains]->(b)",
                 pairs,
             )
+            return len(pairs)
+        # **The edges the parents already have, read once; only the missing
+        # ones created.** A relationship MERGE scans the edges its node
+        # already has -- the anchors' lesson above -- and on a feed one list
+        # chunk is the parent of every topic, so each MERGE rescanned all of
+        # its children: a settle of discourse's /latest (364 chunks after a
+        # long scroll) held the write lock and the interpreter ~100 s, and
+        # the sidecar was called dead (2026-10-24). Same postcondition as
+        # MERGE: one edge per (parent, child). Planted `PLANT_MERGE_CONTAINS`.
+        _t = time.perf_counter()
+        parents = sorted({p["a"] for p in pairs})
+        have = set()
+        for i in range(0, len(parents), 2000):
+            for a, b in self._rows(
+                    "MATCH (a:Chunk)-[:Contains]->(b:Chunk) WHERE a.cid IN $ps "
+                    "RETURN a.cid, b.cid", {"ps": parents[i:i + 2000]}):
+                have.add((a, b))
+        new = []
+        for p in pairs:
+            key = (p["a"], p["b"])
+            if key not in have:
+                have.add(key)
+                new.append(p)
+        st = {"pairs": len(pairs), "new": len(new), "ms_read": round((time.perf_counter() - _t) * 1000, 1)}
+        _t = time.perf_counter()
+        # **By whichever path costs less, as measured.** A statement costs
+        # ~10 ms an edge (1,000 in 10.2 s beside 92k others); a COPY costs a
+        # CHECKPOINT, which kuzu forces when it commits into a populated rel
+        # table -- 273 ms on a small store, 6.5 s for 240 edges on the 1.8 GB
+        # live one (2026-10-24). So the bulk path pays only past the size
+        # where the edges would cost more than the checkpoint.
+        bulk = len(new) >= 8 and self._bulk_cheaper("Contains", len(new))
+        copied = bool(new) and bulk and self._copy_rel(
+            "Contains", {"from": [p["a"] for p in new], "to": [p["b"] for p in new]}, new)
+        if new and not copied:
+            _ts = time.perf_counter()
+            self._batch(
+                "UNWIND $rows AS r MATCH (a:Chunk {cid: r.a}), "
+                "(b:Chunk {cid: r.b}) CREATE (a)-[:Contains]->(b)",
+                new,
+            )
+            self._note_rel_cost("Contains", "row", (time.perf_counter() - _ts) * 1000, len(new))
+        elif copied:
+            self._note_rel_cost("Contains", "copy", (time.perf_counter() - _t) * 1000, len(new))
+        st.update(by="copy" if copied else ("statement" if new else "none"),
+                  ms_write=round((time.perf_counter() - _t) * 1000, 1),
+                  cost={"copy_ms": self._rel_cost["copy_ms"], "row_ms": dict(self._rel_cost["row_ms"])})
+        if new and not copied and len(new) >= 8 and self.copy_errors:
+            st["copy_error"] = self.copy_errors[-1][:160]
+        self.last_contains = st
         return len(pairs)
 
     def _link_hyperlinks(
@@ -1276,6 +1334,78 @@ class GraphStore:
     #: open reads: 3 of 30 timed out, one for 172 s).
     _PLANT_COPY_NO_READ_LOCK = [False]
 
+    #: Measured write costs (moving averages): a COPY's whole cost in ms --
+    #: mostly the checkpoint it forces, so one figure for the store -- and a
+    #: statement-written edge's ms, per rel table. Seeded with this store's
+    #: measurements (Contains ~10 ms, Anchors ~23 ms an edge); a COPY is tried
+    #: first, so the store measures its own.
+    _REL_COST_SEED = {"copy_ms": None, "row_ms": {"Contains": 10.0, "Anchors": 23.0}}
+    #: Planted: every rel write of 8+ rows by COPY, as before 2026-10-24.
+    PLANT_ALWAYS_COPY = [False]
+
+    @property
+    def _rel_cost(self) -> Dict[str, Optional[float]]:
+        got = getattr(self, "_rel_cost_d", None)
+        if got is None:
+            got = self._rel_cost_d = {"copy_ms": self._REL_COST_SEED["copy_ms"],
+                                      "row_ms": dict(self._REL_COST_SEED["row_ms"])}
+        return got
+
+    def _bulk_cheaper(self, table: str, n: int) -> bool:
+        if self.PLANT_ALWAYS_COPY[0]:
+            return True
+        c, r = self._rel_cost["copy_ms"], self._rel_cost["row_ms"].get(table)
+        if c is None or r is None:
+            return True                             # not measured yet: measure it
+        return c < r * n
+
+    def _note_rel_cost(self, table: str, kind: str, ms: float, n: int) -> None:
+        ema = lambda old, val: round(val if old is None else 0.7 * old + 0.3 * val, 2)  # noqa: E731
+        if kind == "copy":
+            self._rel_cost["copy_ms"] = ema(self._rel_cost["copy_ms"], ms)
+        elif n >= 4:                                # fewer cannot say what a row costs
+            rows = self._rel_cost["row_ms"]
+            rows[table] = ema(rows.get(table), ms / n)
+
+    def _copy_rel(self, table: str, columns: Dict[str, list], rows: Sequence[dict]) -> bool:
+        """`COPY <table> FROM` a frame of `columns` -- kuzu's bulk path for a
+        rel table, whose statement form costs ~10-23 ms a row on this store
+        (see `_create_anchors`). False when COPY refused; the caller then
+        writes by statement, which skips a missing endpoint where COPY fails.
+        """
+        try:
+            import pandas as pd
+            df = pd.DataFrame(columns)
+            # COPY into a populated rel table checkpoints at its commit
+            # whatever `auto_checkpoint` says, and a checkpoint waits for
+            # the reader connection's transactions: 3 of 30 COPYs timed out
+            # that way on a 4.3 GB store (one took 172 s before falling
+            # back). Held under the READERS' lock too, as every checkpoint
+            # here is; reads wait the half second it takes.
+            rl = self._read_lock if (self._read_conn is not None and not self._PLANT_COPY_NO_READ_LOCK[0]) else None
+            if rl is not None:
+                rl.acquire()
+            try:
+                with self._db_lock:
+                    self._breadcrumb("COPY %s FROM df" % table, {"rows": list(rows[:1])})
+                    _close(self.conn.execute("COPY %s FROM df" % table))
+            finally:
+                if rl is not None:
+                    rl.release()
+            return True
+        except Exception as exc:                # noqa: BLE001
+            self._poison_check(exc)
+            self.copy_errors.append("%s: %s" % (type(exc).__name__, str(exc)[:200]))
+            del self.copy_errors[:-20]
+            if self._DUMP_ROWS:
+                try:
+                    with open(self._DUMP_ROWS, "a", encoding="utf-8") as fh:
+                        fh.write(json.dumps({"at": time.time(), "copy_error": self.copy_errors[-1]}) + chr(10))
+                except OSError:
+                    pass
+            self._guard()                       # never the fallback after a refused pool
+            return False
+
     def _create_anchors(self, rows: Sequence[dict]) -> None:
         """Anchors (Chunk -> Address, `ord`) for rows whose two endpoints
         exist, by kuzu's BULK path: `COPY Anchors FROM` a frame.
@@ -1291,45 +1421,23 @@ class GraphStore:
         """
         if not rows:
             return
-        if self._ANCHOR_COPY[0] and not self._PLANT_ANCHOR_MATCH[0] and len(rows) >= 8:
-            try:
-                import pandas as pd
-                df = pd.DataFrame({"from": [r["cid"] for r in rows], "to": [r["aid"] for r in rows],
-                                   "ord": [int(r["ord"]) for r in rows]})
-                # COPY into a populated rel table checkpoints at its commit
-                # whatever `auto_checkpoint` says, and a checkpoint waits for
-                # the reader connection's transactions: 3 of 30 COPYs timed out
-                # that way on a 4.3 GB store (one took 172 s before falling
-                # back). Held under the READERS' lock too, as every checkpoint
-                # here is; reads wait the half second it takes.
-                rl = self._read_lock if (self._read_conn is not None and not self._PLANT_COPY_NO_READ_LOCK[0]) else None
-                if rl is not None:
-                    rl.acquire()
-                try:
-                    with self._db_lock:
-                        self._breadcrumb("COPY Anchors FROM df", {"rows": rows[:1]})
-                        _close(self.conn.execute("COPY Anchors FROM df"))
-                finally:
-                    if rl is not None:
-                        rl.release()
+        # By the cheaper path as measured (`_bulk_cheaper`): a COPY's forced
+        # checkpoint cost 4.4 s for one settle's anchors on the live store.
+        if (self._ANCHOR_COPY[0] and not self._PLANT_ANCHOR_MATCH[0] and len(rows) >= 8
+                and self._bulk_cheaper("Anchors", len(rows))):
+            _t = time.perf_counter()
+            if self._copy_rel("Anchors", {"from": [r["cid"] for r in rows], "to": [r["aid"] for r in rows],
+                                          "ord": [int(r["ord"]) for r in rows]}, rows):
+                self._note_rel_cost("Anchors", "copy", (time.perf_counter() - _t) * 1000, len(rows))
                 return
-            except Exception as exc:                # noqa: BLE001
-                self._poison_check(exc)
-                self.copy_errors.append("%s: %s" % (type(exc).__name__, str(exc)[:200]))
-                del self.copy_errors[:-20]
-                if self._DUMP_ROWS:
-                    try:
-                        with open(self._DUMP_ROWS, "a", encoding="utf-8") as fh:
-                            fh.write(json.dumps({"at": time.time(), "copy_error": self.copy_errors[-1]}) + chr(10))
-                    except OSError:
-                        pass
-                self._guard()                       # never the fallback after a refused pool
+        _t = time.perf_counter()
         self._batch(
             "UNWIND $rows AS r MATCH (c:Chunk {cid: r.cid}) "
             "MATCH (a:Address {aid: r.aid}) "
             "CREATE (c)-[:Anchors {ord: r.ord}]->(a)",
             rows,
         )
+        self._note_rel_cost("Anchors", "row", (time.perf_counter() - _t) * 1000, len(rows))
 
     _WRITES = re.compile(r"\b(CREATE|MERGE|SET|DELETE|DETACH|DROP|ALTER|COPY|CALL|CHECKPOINT|INSTALL|LOAD|REMOVE)\b", re.I)
 

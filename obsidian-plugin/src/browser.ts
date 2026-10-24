@@ -34,6 +34,10 @@ import { isolate } from "./isolate";
 import { ForceTree, type ForceNodeDelta } from "./forcetree";
 import { PipelineBox } from "./pipelinebox";
 import { profiler } from "./profile";
+
+/** The epoch with sub-millisecond precision: the sensor stamps hovers on the
+ *  same clock (`epochNow` in sensor.js). */
+const epochNow = (): number => performance.timeOrigin + performance.now();
 import { Component, ItemView, MarkdownRenderer, Menu, WorkspaceLeaf, requestUrl } from "obsidian";
 import { baseFor, putBase, putFavicon, putPictures } from "./snapshot";
 // A streamed link's destination resolves against the base its page declared.
@@ -417,6 +421,7 @@ export class BrowserView extends ItemView {
     view.addEventListener("console-message", (e: any) => {
       const m = String((e && e.message) || "");
       if (!m.startsWith(SIGNAL)) return;
+      const arrived = epochNow();
       const body = m.slice(SIGNAL.length);
       if (body.startsWith("drain ")) {
         // The drain itself, sent from the task that folded it.
@@ -424,6 +429,10 @@ export class BrowserView extends ItemView {
         try { payload = JSON.parse(body.slice(6)); } catch { return; }
         this.pushedPayloads++;
         void this.onPushedDrain(payload);
+        // How long this task held the host (parse + the absorb's synchronous
+        // part): a hover arriving behind it waited that long (D-40).
+        this.hostBusy.push([arrived, epochNow(), m.length, Number(payload.sentAt) || 0]);
+        if (this.hostBusy.length > 300) this.hostBusy.shift();
       } else if (body === "dirty") {
         this.pageMovedAt = Date.now();
         this.pushedDrains++;
@@ -454,7 +463,13 @@ export class BrowserView extends ItemView {
           (window as any).__domvecReaderAt = Date.now();
           by["hover"] = (by["hover"] || 0) + 1;
         }
-        this.pipebox?.pushedHover(body.slice(6), this.session || "");
+        // The sensor's stamps (` ~began,sent`, page clock), off before the
+        // key is read: an address-less key would take them for its address.
+        let key = body.slice(6);
+        const st = / ~(\d+(?:\.\d+)?),(\d+(?:\.\d+)?)$/.exec(key);
+        if (st) key = key.slice(0, st.index);
+        this.pipebox?.pushedHover(key, this.session || "");
+        if (st) this.noteHoverStamp(Number(st[1]), Number(st[2]), arrived);
       }
     });
     // The page's own icon, as the webview reports it for the tab (G-81).
@@ -2655,6 +2670,38 @@ export class BrowserView extends ItemView {
 
   /** Landing map loads that failed and were asked again. */
   mapRetries = 0;
+
+  /** Host tasks that handled a pushed drain, [start, end] on the epoch clock. */
+  private hostBusy: [number, number, number, number][] = [];
+  /**
+   * Each stamped hover, on one clock (D-40): when the page's handler began
+   * and spoke, when the host's console-message event ran, when the outline
+   * was handled, and how much of the crossing the host spent on drains and
+   * long tasks -- so a slow hover says whose it was.
+   */
+  hoverStamps: { began: number; sent: number; arrived: number; handled: number;
+                 drain_busy: number; long_busy: number; drains_crossing: number; drain_kb: number }[] = [];
+  private noteHoverStamp(began: number, sent: number, arrived: number): void {
+    const handled = epochNow();
+    const lo = sent, hi = arrived;
+    const overlap = (a: number, b: number) => Math.max(0, Math.min(b, hi) - Math.max(a, lo));
+    let drain = 0, crossing = 0, kb = 0;
+    for (const [a, b, bytes, sentAt] of this.hostBusy) {
+      drain += overlap(a, b);
+      // A drain the page sent before this hover and the host got after it
+      // shared the hover's crossing -- the channel carries both in order.
+      if (sentAt && sentAt <= sent + 1 && a >= sent) { crossing++; kb += bytes / 1024; }
+    }
+    let long = 0;
+    try {
+      const off = performance.timeOrigin;
+      for (const t of profiler().longTasksIn(lo - off, hi - off)) long += overlap(t.at + off, t.at + off + t.ms);
+    } catch { /* an older profiler */ }
+    this.hoverStamps.push({ began, sent, arrived, handled, drain_busy: Math.round(drain * 10) / 10,
+                            long_busy: Math.round(long * 10) / 10, drains_crossing: crossing,
+                            drain_kb: Math.round(kb) });
+    if (this.hoverStamps.length > 300) this.hoverStamps.shift();
+  }
 
   // ---- offline (`G-59`..`G-62`) ---------------------------------------------
 
