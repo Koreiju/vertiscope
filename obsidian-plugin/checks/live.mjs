@@ -6947,6 +6947,37 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-254",
+      asks: "loading takes seconds: the spacing verdicts every chunk-view settle computes are the same node for node by the fast path and the old one, and the fast path is many times quicker on the graph as drawn; planted (plantSlowSpacing) the old path",
+      async run() {
+        // 2026-10-24: entering chunk view drew in 5-7 s and the window then
+        // froze until 36-39 s -- \`fitRadiiToSpacing\` at 4.05 s a run,
+        // three runs. The whole switch is timed outside the plugin
+        // (scripts/check_loading.py: a reload would end this verifier).
+        const got = await evaluate(`(async () => {
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
+          if (!v || !v.graph) return { error: "no graph" };
+          const nodes = v.graph.graphData().nodes;
+          const rs = v.graph.nodeRelSize(), media = v.drawnMedia;
+          const scale = v.nodeScale;
+          const drawnOf = nodes.map((a) => { const lk = v.lookOf(a, rs, media); return lk ? lk.half / scale * scale : 0; });
+          const t0 = performance.now(); const fast = v.spacingAllowed(nodes, drawnOf, false); const t1 = performance.now();
+          const slow = v.spacingAllowed(nodes, drawnOf, true); const t2 = performance.now();
+          let differ = 0, shrink = 0;
+          for (let i = 0; i < nodes.length; i++) {
+            const a = fast[i], b = slow[i];
+            if (Number.isNaN(a) !== Number.isNaN(b)) { differ++; continue; }
+            if (!Number.isNaN(a)) { shrink++; if (Math.abs(a - b) > 1e-9 * Math.max(1, Math.abs(b))) differ++; }
+          }
+          return { level: v.level || "pages", nodes: nodes.length, shrink, differ,
+                   fast_ms: Math.round((t1 - t0) * 10) / 10, slow_ms: Math.round((t2 - t1) * 10) / 10,
+                   last_run: v.spacingStats };
+        })()`, { timeout: 120000 });
+        if (!got || got.error) return { pass: false, evidence: got };
+        return { pass: got.nodes > 100 && got.differ === 0 && got.fast_ms < got.slow_ms, evidence: got };
+      },
+    },
+    {
       id: "G-188",
       asks: "nodes a little larger and brighter by default, links a little fainter but still visible: drawn 1.25x, the glow x1.4, links at 0.14 -- and in the rendered pixels, more lit area and brighter nodes than the old values give, links still drawn; planted (the old 1 / 1 / 0.25) the pixels fall back",
       async run() {

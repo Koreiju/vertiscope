@@ -5576,6 +5576,7 @@ export class GraphView extends ItemView {
     const gd = graph.graphData.bind(graph), reheat = graph.d3ReheatSimulation?.bind(graph);
     graph.graphData = (...a: any[]) => {
       if (a.length) { this.motion.event("graphData", { nodes: a[0]?.nodes?.length, links: a[0]?.links?.length }); this.batchDirty = true; }
+      if (a.length && !this.plantSlowRemove) this.detachLeaving(gd().nodes, a[0]?.nodes || []);
       return gd(...a);
     };
     for (const k of ["nodeVal", "nodeColor"]) {
@@ -5762,6 +5763,36 @@ export class GraphView extends ItemView {
     const d = g.graphData(), rs = g.nodeRelSize();
     this.batch.sync(d.nodes, d.links.concat(this.drawableCodeEdges(d.nodes), this.drawableKgEdges(d.nodes)), (n) => this.lookOf(n, rs, this.drawnMedia));
     return { ...this.batch.lastStats };
+  }
+
+  /**
+   * **The nodes a data swap drops, detached from the scene in ONE pass.**
+   * The graph library removes each leaving node's object with three.js's
+   * `Object3D.remove` -- an `indexOf` and a `splice` on a parent holding every
+   * node -- so leaving chunk view (97k proxies) froze the window 8.2 s after
+   * the page view had already arrived (2026-10-24, G-254). Filtered out here,
+   * each later `remove` finds nothing and returns. Planted `plantSlowRemove`.
+   */
+  plantSlowRemove = false;
+  detachStats = { swaps: 0, detached: 0, ms: 0 };
+  private detachLeaving(cur: any[], next: any[]): void {
+    if (cur.length < 5000) return;
+    const t0 = performance.now();
+    const stay = new Set(next);
+    const leaving = new Set<any>();
+    let parent: any = null;
+    for (const n of cur) {
+      const o = n && n.__threeObj;
+      if (!o || stay.has(n) || !o.parent) continue;
+      if (parent === null) parent = o.parent;
+      if (o.parent === parent) leaving.add(o);
+    }
+    if (!parent || leaving.size < 2000) return;
+    parent.children = parent.children.filter((c: any) => !leaving.has(c));
+    for (const o of leaving) o.parent = null;
+    this.detachStats.swaps++;
+    this.detachStats.detached += leaving.size;
+    this.detachStats.ms = Math.round((performance.now() - t0) * 10) / 10;
   }
 
   private stopBatch(): void {
@@ -6700,6 +6731,117 @@ export class GraphView extends ItemView {
   plantSpecks = false;
   spacingStats = { runs: 0, ms: 0, nodes: 0 };
 
+  /** Planted: the spacing verdicts by the string-keyed grid and array
+   *  coordinates, as before 2026-10-24 (4.05 s a run at 97k nodes). */
+  plantSlowSpacing = false;
+
+  /**
+   * Each node's allowed drawn radius, or NaN where it keeps its own: a node
+   * whose nearest neighbour is nearer than `drawn / 0.45` shrinks to 0.45 of
+   * that distance (never below `MIN_SPACING_SHARE` of itself).
+   *
+   * Through a grid of cells `typical / 0.45` wide, searching the cells within
+   * a node's reach (2026-10-11: all pairs was 530 million distances, 34 s).
+   * **Integer cell keys, typed coordinates, squared distances** (2026-10-24:
+   * entering chunk view, 97k nodes, the window froze ~30 s -- this ran 4.05 s
+   * a time, three times, building ~2.6 million key strings and a coordinate
+   * array per lookup). Two cells may share a key; that only ADDS candidates
+   * from outside the search cube, which are never nearer than the reach, so
+   * no verdict changes -- the live check compares the two node by node.
+   */
+  spacingAllowed(nodes: any[], drawnOf: number[], slow = false): Float64Array {
+    const n = nodes.length;
+    const out = new Float64Array(n).fill(NaN);
+    const sorted = drawnOf.filter((r) => r > 0).sort((x, y) => x - y);
+    const typical = sorted.length ? sorted[Math.floor(sorted.length * 0.9)] : 1;
+    const cell = Math.max(1e-3, typical / 0.45);
+    const floorShare = this.plantSpecks ? 0 : MIN_SPACING_SHARE;
+    if (slow) {
+      const at = (a: any) => [a.x ?? 0, a.y ?? 0, a.z ?? 0];
+      const grid = new Map<string, number[]>();
+      const keyOf = (x: number, y: number, z: number) => `${Math.floor(x / cell)},${Math.floor(y / cell)},${Math.floor(z / cell)}`;
+      if (!this.plantAllPairsSpacing) {
+        nodes.forEach((a, i) => { const [x, y, z] = at(a); const k = keyOf(x, y, z); const l = grid.get(k); if (l) l.push(i); else grid.set(k, [i]); });
+      }
+      for (let i = 0; i < n; i++) {
+        const drawn = drawnOf[i];
+        if (drawn <= 0) continue;
+        const reach = drawn / 0.45;
+        const [ax, ay, az] = at(nodes[i]);
+        let nearest = Infinity;
+        const rings = Math.ceil(reach / cell);
+        if (this.plantAllPairsSpacing || Math.pow(2 * rings + 1, 3) > n) {
+          for (let j = 0; j < n; j++) {
+            if (i === j) continue;
+            const [bx, by, bz] = at(nodes[j]);
+            const d = Math.hypot(ax - bx, ay - by, az - bz);
+            if (d > 1e-6 && d < nearest) nearest = d;
+          }
+        } else {
+          const cx = Math.floor(ax / cell), cy = Math.floor(ay / cell), cz = Math.floor(az / cell);
+          for (let ox = -rings; ox <= rings; ox++) for (let oy = -rings; oy <= rings; oy++) for (let oz = -rings; oz <= rings; oz++) {
+            for (const j of grid.get(`${cx + ox},${cy + oy},${cz + oz}`) || []) {
+              if (j === i) continue;
+              const [bx, by, bz] = at(nodes[j]);
+              const d = Math.hypot(ax - bx, ay - by, az - bz);
+              if (d > 1e-6 && d < nearest) nearest = d;
+            }
+          }
+        }
+        if (!Number.isFinite(nearest)) continue;
+        const allowed = Math.max(nearest * 0.45, drawn * floorShare);
+        if (drawn > allowed) out[i] = allowed;
+      }
+      return out;
+    }
+    const xs = new Float64Array(n), ys = new Float64Array(n), zs = new Float64Array(n);
+    const cxs = new Int32Array(n), cys = new Int32Array(n), czs = new Int32Array(n);
+    const key = (x: number, y: number, z: number) => (Math.imul(x, 73856093) ^ Math.imul(y, 19349663) ^ Math.imul(z, 83492791));
+    const grid = new Map<number, number[]>();
+    for (let i = 0; i < n; i++) {
+      const a = nodes[i];
+      xs[i] = a.x ?? 0; ys[i] = a.y ?? 0; zs[i] = a.z ?? 0;
+      cxs[i] = Math.floor(xs[i] / cell); cys[i] = Math.floor(ys[i] / cell); czs[i] = Math.floor(zs[i] / cell);
+      if (this.plantAllPairsSpacing) continue;
+      const k = key(cxs[i], cys[i], czs[i]);
+      const l = grid.get(k); if (l) l.push(i); else grid.set(k, [i]);
+    }
+    const EPS2 = 1e-12;
+    for (let i = 0; i < n; i++) {
+      const drawn = drawnOf[i];
+      if (drawn <= 0) continue;
+      const reach = drawn / 0.45;
+      const ax = xs[i], ay = ys[i], az = zs[i];
+      let near2 = Infinity;
+      const rings = Math.ceil(reach / cell);
+      if (this.plantAllPairsSpacing || Math.pow(2 * rings + 1, 3) > n) {
+        for (let j = 0; j < n; j++) {
+          if (i === j) continue;
+          const dx = ax - xs[j], dy = ay - ys[j], dz = az - zs[j];
+          const d2 = dx * dx + dy * dy + dz * dz;
+          if (d2 > EPS2 && d2 < near2) near2 = d2;
+        }
+      } else {
+        const cx = cxs[i], cy = cys[i], cz = czs[i];
+        for (let ox = -rings; ox <= rings; ox++) for (let oy = -rings; oy <= rings; oy++) for (let oz = -rings; oz <= rings; oz++) {
+          const l = grid.get(key(cx + ox, cy + oy, cz + oz));
+          if (!l) continue;
+          for (let q = 0; q < l.length; q++) {
+            const j = l[q];
+            if (j === i) continue;
+            const dx = ax - xs[j], dy = ay - ys[j], dz = az - zs[j];
+            const d2 = dx * dx + dy * dy + dz * dz;
+            if (d2 > EPS2 && d2 < near2) near2 = d2;
+          }
+        }
+      }
+      if (!Number.isFinite(near2)) continue;
+      const allowed = Math.max(Math.sqrt(near2) * 0.45, drawn * floorShare);
+      if (drawn > allowed) out[i] = allowed;
+    }
+    return out;
+  }
+
   private fitRadiiToSpacing(): boolean {
     if (!this.graph) return false;
     const data: any = this.graph.graphData();
@@ -6721,52 +6863,14 @@ export class GraphView extends ItemView {
     // room and shrinks to fit where there is not.
     const scale = this.plantUnscaledSpacing ? 1 : this.nodeScale;
     const drawnOf = nodes.map((a) => drawnRadius(a, relSize, media) * scale);
-    const at = (a: any) => [a.x ?? 0, a.y ?? 0, a.z ?? 0];
-    const sorted = drawnOf.filter((r) => r > 0).sort((x, y) => x - y);
-    const typical = sorted.length ? sorted[Math.floor(sorted.length * 0.9)] : 1;
-    const cell = Math.max(1e-3, typical / 0.45);
-    const grid = new Map<string, number[]>();
-    const keyOf = (x: number, y: number, z: number) => `${Math.floor(x / cell)},${Math.floor(y / cell)},${Math.floor(z / cell)}`;
-    if (!this.plantAllPairsSpacing) {
-      nodes.forEach((a, i) => { const [x, y, z] = at(a); const k = keyOf(x, y, z); const l = grid.get(k); if (l) l.push(i); else grid.set(k, [i]); });
-    }
+    const allowedOf = this.spacingAllowed(nodes, drawnOf, this.plantSlowSpacing);
     for (let i = 0; i < nodes.length; i++) {
+      const allowed = allowedOf[i];
+      if (Number.isNaN(allowed)) continue;
       const a = nodes[i];
-      const drawn = drawnOf[i];
-      if (drawn <= 0) continue;
-      const reach = drawn / 0.45;                // nearer than this and it shrinks
-      const [ax, ay, az] = at(a);
-      let nearest = Infinity;
-      const rings = Math.ceil(reach / cell);
-      // A node so large its reach spans more cells than there are nodes (a
-      // big page node): one pass over the nodes is cheaper than the cells.
-      if (this.plantAllPairsSpacing || Math.pow(2 * rings + 1, 3) > nodes.length) {
-        for (let j = 0; j < nodes.length; j++) {
-          if (i === j) continue;
-          const [bx, by, bz] = at(nodes[j]);
-          const d = Math.hypot(ax - bx, ay - by, az - bz);
-          if (d > 1e-6 && d < nearest) nearest = d;
-        }
-      } else {
-        const cx = Math.floor(ax / cell), cy = Math.floor(ay / cell), cz = Math.floor(az / cell);
-        for (let ox = -rings; ox <= rings; ox++) for (let oy = -rings; oy <= rings; oy++) for (let oz = -rings; oz <= rings; oz++) {
-          for (const j of grid.get(`${cx + ox},${cy + oy},${cz + oz}`) || []) {
-            if (j === i) continue;
-            const [bx, by, bz] = at(nodes[j]);
-            const d = Math.hypot(ax - bx, ay - by, az - bz);
-            if (d > 1e-6 && d < nearest) nearest = d;
-          }
-        }
-      }
-      if (!Number.isFinite(nearest)) continue;
-      // Never to a speck (2026-10-11: "empty nodes", hubs at val 0.0002
-      // with 450 links converging on nothing visible): a node keeps at least
-      // `MIN_SPACING_SHARE` of its drawn radius; the collider separates the rest.
-      const allowed = Math.max(nearest * 0.45, this.plantSpecks ? 0 : drawn * MIN_SPACING_SHARE);
-      if (drawn <= allowed) continue;
       // `val` is radius cubed, so a radius scale of k is k^3 on val.
       if (a.valFull === undefined) a.valFull = a.val;
-      a.val = Math.max((a.val ?? 1) * Math.pow(allowed / drawn, 3), 1e-4);
+      a.val = Math.max((a.val ?? 1) * Math.pow(allowed / drawnOf[i], 3), 1e-4);
       changed = true;
     }
     this.spacingStats = { runs: this.spacingStats.runs + 1, ms: Math.round(performance.now() - t0), nodes: nodes.length };
