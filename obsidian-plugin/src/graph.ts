@@ -560,7 +560,24 @@ export class GraphView extends ItemView {
       },
     };
 
-    const load = async () => {
+    // **One load in flight** (2026-10-24: "the full chunks view doesn't load
+    // anymore"). The stream, the level switch and the retries each called
+    // `load`, and each sent its own `/layout`: four chunk-level layouts ran
+    // at once on a cold sidecar, each over every page, none finishing.
+    // Calls made while one is out become ONE reload after it, which reads
+    // whatever level and space the view holds by then. Planted
+    // `plantLoadPileUp`: every call its own request, as before.
+    let loading = false, loadAgain = false;
+    const load = async (): Promise<void> => {
+      if (loading && !this.plantLoadPileUp) { loadAgain = true; return; }
+      loading = true;
+      try { await loadOnce(); }
+      finally {
+        loading = false;
+        if (loadAgain) { loadAgain = false; void load(); }
+      }
+    };
+    const loadOnce = async () => {
       // Not over the force tree's caption: a retry every 3 s wrote
       // "fitting…" across a pane that was drawing (`G-89`).
       // "loading", not "fitting": this reads stored positions; a fit is
@@ -3638,6 +3655,8 @@ export class GraphView extends ItemView {
    * replaced the fit for every open page, and "I'm honestly unsure if the UMAP
    * layouts are being followed at all" (2026-09-28) was right: they were not.
    */
+  /** Planted: every `load` call sends its own layout request. */
+  plantLoadPileUp = false;
   /** Telescope passes run and skipped (their inputs unchanged), for the harness. */
   teleRan = 0;
   teleSkipped = 0;

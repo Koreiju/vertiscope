@@ -685,6 +685,7 @@ _PLANT_NO_MD_HEAL = [os.environ.get("DOMVEC_PLANT_NO_MD_HEAL") == "1"]
 #: arm of a rule that runs in the sidecar's projection, not in the plugin.
 _PLANTABLE = {
     "placeholder-target": ("domvec.markdown", "PLANT_PLACEHOLDER_TARGET"),   # G-197
+    "no-edge-memo": ("domvec.obsidian.layout", "PLANT_NO_EDGE_MEMO"),       # chunk view, 2026-10-24
 }
 
 
@@ -1447,6 +1448,14 @@ def search_payload(workspace, query: str, k: int = 8, *,
 #: stall watchdog (`_stall_watchdog`), nothing else.
 _INFLIGHT: Dict[int, tuple] = {}
 _STALL_DUMPED = [0.0]
+#: `/page_status` answers by (url, cids?), each with the time it was made,
+#: and one lock per key so concurrent asks share one scan.
+_STATUS_MEMO: Dict[tuple, tuple] = {}
+_STATUS_MEMO_GATES: Dict[tuple, threading.Lock] = {}
+_STATUS_MEMO_GUARD = threading.Lock()
+_STATUS_MEMO_S = 4.0
+#: Serialises chunk-level layouts (see the `/layout` route).
+_CHUNK_LAYOUT_LOCK = threading.Lock()
 #: Where `_reqlog` writes (set by `serve()`); None leaves it off.
 _REQLOG = [None]
 
@@ -2023,8 +2032,14 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             mod, attr = _PLANTABLE[name]
             module = __import__(mod, fromlist=[attr])
-            setattr(module, attr, bool(body.get("on")))
-            self._send(200, {"name": name, "on": getattr(module, attr)})
+            cur = getattr(module, attr)
+            if isinstance(cur, list):           # a one-element flag list
+                cur[0] = bool(body.get("on"))
+                now = cur[0]
+            else:
+                setattr(module, attr, bool(body.get("on")))
+                now = getattr(module, attr)
+            self._send(200, {"name": name, "on": now})
             return
 
         if route == "maintenance":
@@ -2885,6 +2900,82 @@ class _Handler(BaseHTTPRequestHandler):
         except Exception:                           # noqa: BLE001
             return 0
 
+    def _page_status_fresh(self, url: str, query: Dict, mkey, plant_scan: bool) -> None:
+        """`/page_status` computed (see the memo in `do_GET`)."""
+        from .. import tokens as _tokens
+        from .layout import (_ESTIMATED_PAGES, _PAGE_POS, live_projection)
+        store = self.workspace.store
+        rows = store._rows(
+            "MATCH (c:Chunk {url: $u}) RETURN c.cid, c.md, "
+            "c.embedding IS NOT NULL", {"u": url})
+        # The DRAWABLE chunks, which is the denominator "in the graph" is
+        # answerable for. A duplicate is drawn once as the copy it is
+        # (`G-25`) and a merge-group member through its lead (`G-27`), so
+        # neither ever gets a node of its own. Dividing by every stored
+        # chunk read a correct projector as missing 89 of 688.
+        drawable = store._rows(
+            "MATCH (c:Chunk {url: $u}) WHERE (c.dup_of IS NULL OR "
+            "c.dup_of = '') AND (c.group_of IS NULL OR c.group_of = '' "
+            "OR c.group_of = c.cid) RETURN count(c)", {"u": url})[0][0]
+        window = int(getattr(self.workspace, "context_window", 0) or 256)
+        key = (url, len(rows), sum(len(md or "") for _c, md, _e in rows))
+        toks = _TOKEN_MEMO.get(key)
+        if toks is None:
+            toks = sorted(_tokens.budget_for(md or "", url)
+                          for _c, md, _e in rows if (md or "").strip())
+            _TOKEN_MEMO.clear()
+            _TOKEN_MEMO[key] = toks
+        # The chunk projector is what the graph is drawn from, so it is
+        # what this page's "fit" is. The old page-mean fit is consulted
+        # only if the projector is not running in this process.
+        from .projector import projector as _get_projector
+        cp = _get_projector()
+        projection = (cp.projection if cp is not None and cp.projection
+                      is not None else live_projection())
+        total = store.chunk_count()
+        fitted = projection.fitted_chunks if projection else None
+        fits = [e for e in (_PROFILE.get("projector_fit") or _PROFILE.get("layout") or [])
+                if e.get("kind", "fit") == "fit"]
+        anchored = any(url in (t or {}) for t in _PAGE_POS.values()) or bool(
+            cp is not None and url in cp.page_pos)
+        out = {
+            "url": url,
+            "chunks": len(rows),
+            "drawable": int(drawable),
+            "empty_md": sum(1 for _c, md, _e in rows if not (md or "").strip()),
+            # What KINDS of content the page's chunks carry (G-99): a
+            # page that shows pictures and stores none has lost them.
+            "kinds": _content_kinds(md for _c, md, _e in rows),
+            "embedded": sum(1 for _c, _m, e in rows if e),
+            "window": window,
+            "tokens_max": toks[-1] if toks else 0,
+            "tokens_p50": toks[len(toks) // 2] if toks else 0,
+            "over_window": sum(1 for t in toks if t > window),
+            "fitted_chunks": fitted,
+            "chunks_now": total,
+            "growth": round(total / fitted, 3) if fitted else None,
+            "refit_at": 2 * fitted if fitted else None,
+            "stale": bool(projection and projection.stale(total)),
+            "last_fit_at": fits[-1].get("at") if fits else None,
+            "anchor": ("projector" if cp is not None and url in cp.page_pos
+                       else "estimated" if url in _ESTIMATED_PAGES
+                       else "fitted" if anchored else "none"),
+            "embed_queue": len(self.workspace.vectors),
+            #: This page's chunks with a position in the projector, and
+            #: the projector's own stream state.
+            "projected": (len(cp.by_url.get(url) or ()) if cp is not None else None),
+            "projector": (cp.brief() if cp is not None else None),
+            # Asked for when the browser lands on a page, so every chunk
+            # can be queued for the projector and not only the ones a
+            # drain happens to re-dirty.
+            **({"cids": [c for c, _m, _e in rows]}
+               if (query.get("cids") or [""])[0] else {}),
+        }
+        if not plant_scan:
+            _STATUS_MEMO[mkey] = (time.time(), out)
+        self._send(200, out)
+
+
     def do_GET(self) -> None:                       # noqa: N802 (stdlib name)
         _LAST_REQUEST[0] = time.time()
         parts = urlsplit(self.path)
@@ -3626,73 +3717,31 @@ class _Handler(BaseHTTPRequestHandler):
             if not url:
                 self._send(400, {"error": "no url"})
                 return
-            store = self.workspace.store
-            rows = store._rows(
-                "MATCH (c:Chunk {url: $u}) RETURN c.cid, c.md, "
-                "c.embedding IS NOT NULL", {"u": url})
-            # The DRAWABLE chunks, which is the denominator "in the graph" is
-            # answerable for. A duplicate is drawn once as the copy it is
-            # (`G-25`) and a merge-group member through its lead (`G-27`), so
-            # neither ever gets a node of its own. Dividing by every stored
-            # chunk read a correct projector as missing 89 of 688.
-            drawable = store._rows(
-                "MATCH (c:Chunk {url: $u}) WHERE (c.dup_of IS NULL OR "
-                "c.dup_of = '') AND (c.group_of IS NULL OR c.group_of = '' "
-                "OR c.group_of = c.cid) RETURN count(c)", {"u": url})[0][0]
-            window = int(getattr(self.workspace, "context_window", 0) or 256)
-            key = (url, len(rows), sum(len(md or "") for _c, md, _e in rows))
-            toks = _TOKEN_MEMO.get(key)
-            if toks is None:
-                toks = sorted(_tokens.budget_for(md or "", url)
-                              for _c, md, _e in rows if (md or "").strip())
-                _TOKEN_MEMO.clear()
-                _TOKEN_MEMO[key] = toks
-            # The chunk projector is what the graph is drawn from, so it is
-            # what this page's "fit" is. The old page-mean fit is consulted
-            # only if the projector is not running in this process.
-            from .projector import projector as _get_projector
-            cp = _get_projector()
-            projection = (cp.projection if cp is not None and cp.projection
-                          is not None else live_projection())
-            total = store.chunk_count()
-            fitted = projection.fitted_chunks if projection else None
-            fits = [e for e in (_PROFILE.get("projector_fit") or _PROFILE.get("layout") or [])
-                    if e.get("kind", "fit") == "fit"]
-            anchored = any(url in (t or {}) for t in _PAGE_POS.values()) or bool(
-                cp is not None and url in cp.page_pos)
-            self._send(200, {
-                "url": url,
-                "chunks": len(rows),
-                "drawable": int(drawable),
-                "empty_md": sum(1 for _c, md, _e in rows if not (md or "").strip()),
-                # What KINDS of content the page's chunks carry (G-99): a
-                # page that shows pictures and stores none has lost them.
-                "kinds": _content_kinds(md for _c, md, _e in rows),
-                "embedded": sum(1 for _c, _m, e in rows if e),
-                "window": window,
-                "tokens_max": toks[-1] if toks else 0,
-                "tokens_p50": toks[len(toks) // 2] if toks else 0,
-                "over_window": sum(1 for t in toks if t > window),
-                "fitted_chunks": fitted,
-                "chunks_now": total,
-                "growth": round(total / fitted, 3) if fitted else None,
-                "refit_at": 2 * fitted if fitted else None,
-                "stale": bool(projection and projection.stale(total)),
-                "last_fit_at": fits[-1].get("at") if fits else None,
-                "anchor": ("projector" if cp is not None and url in cp.page_pos
-                           else "estimated" if url in _ESTIMATED_PAGES
-                           else "fitted" if anchored else "none"),
-                "embed_queue": len(self.workspace.vectors),
-                #: This page's chunks with a position in the projector, and
-                #: the projector's own stream state.
-                "projected": (len(cp.by_url.get(url) or ()) if cp is not None else None),
-                "projector": (cp.brief() if cp is not None else None),
-                # Asked for when the browser lands on a page, so every chunk
-                # can be queued for the projector and not only the ones a
-                # drain happens to re-dirty.
-                **({"cids": [c for c, _m, _e in rows]}
-                   if (query.get("cids") or [""])[0] else {}),
-            })
+            # **One scan per url at a time, and its answer kept 4 s.** Each
+            # call scans every chunk for the url (no index on it, and the
+            # `HasChunk` edges disagree with the chunks' own urls) twice,
+            # holding the readers' lock 0.6-3.9 s on a 102k-chunk store; the
+            # pipeline box asks every second. Everything else that reads --
+            # the chunk view's layout, panels, the embed worker -- queued
+            # behind it, and chunk view did not load (2026-10-20). Concurrent
+            # asks for one url wait for the one scan. Planted
+            # `DOMVEC_PLANT_STATUS_SCAN=1`: a scan per ask, as before.
+            mkey = (url, bool((query.get("cids") or [""])[0]))
+            plant_scan = os.environ.get("DOMVEC_PLANT_STATUS_SCAN") == "1"
+            gate = None
+            if not plant_scan:
+                with _STATUS_MEMO_GUARD:
+                    gate = _STATUS_MEMO_GATES.setdefault(mkey, threading.Lock())
+                gate.acquire()
+            try:
+                hit = None if plant_scan else _STATUS_MEMO.get(mkey)
+                if hit is not None and time.time() - hit[0] < _STATUS_MEMO_S:
+                    self._send(200, dict(hit[1], memo_age_s=round(time.time() - hit[0], 2)))
+                    return
+                self._page_status_fresh(url, query, mkey, plant_scan)
+            finally:
+                if gate is not None:
+                    gate.release()
             return
 
         if segments[0] == "chunk_stats":
@@ -3845,9 +3894,15 @@ class _Handler(BaseHTTPRequestHandler):
                                      name="domvec-refit", daemon=True).start()
                 if proj is not None and proj.projection is not None:
                     _t0 = time.perf_counter()
-                    got = (projected_page_layout(self.workspace, proj)
-                           if level == "page"
-                           else projected_chunk_layout(self.workspace, proj))
+                    if level == "page":
+                        got = projected_page_layout(self.workspace, proj)
+                    else:
+                        # One chunk-level layout at a time: four at once on a
+                        # cold sidecar each walked every page's containment
+                        # and none finished (2026-10-24). The next one, after
+                        # it, reads the memos the first filled.
+                        with _CHUNK_LAYOUT_LOCK:
+                            got = projected_chunk_layout(self.workspace, proj)
                     if got is not None:
                         _profile("layout", {"kind": "projector", "level": level,
                                             "n": got.get("n"),

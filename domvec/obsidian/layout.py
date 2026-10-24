@@ -2382,6 +2382,13 @@ def projected_page_layout(workspace, proj=None) -> Optional[Dict]:
     }
 
 
+#: Each page's containment edges among its drawn chunks, with what they were
+#: computed from (see `projected_chunk_layout`).
+_PAGE_EDGES: Dict[str, tuple] = {}
+#: Planted: every page's edges recomputed on every chunk-view layout.
+PLANT_NO_EDGE_MEMO = [False]
+
+
 def projected_chunk_layout(workspace, proj=None) -> Optional[Dict]:
     """Every drawable chunk at its projector position (`?level=chunk`)."""
     proj = proj or _live_chunk_projector()
@@ -2457,10 +2464,31 @@ def projected_chunk_layout(workspace, proj=None) -> Optional[Dict]:
     _t = _time.perf_counter()
     drawn = {n["cid"] for n in nodes}
     edges = []
-    for page in {n["url"] for n in nodes}:
-        for a, b in workspace.store.contains_within(page, among=drawn):
-            if a in drawn and b in drawn and a != b:
-                edges.append({"source": a, "target": b})
+    # **A page's edges kept until the page is written.** Recomputed for
+    # every page on every switch, this was 11.9 s of a 13.7 s warm chunk-view
+    # layout over 1,288 pages (2026-10-24). `contains_within` reads its
+    # page from the store's per-page trie memo, which a write to the page
+    # drops -- so the memo entry's identity says whether the page changed,
+    # and the drawn set of that page whether the question did. Planted
+    # `PLANT_NO_EDGE_MEMO`: every page every time, as before.
+    tmemo = workspace.store._tnode_memo()
+    by_page: Dict[str, List[str]] = {}
+    for n in nodes:
+        by_page.setdefault(n["url"], []).append(n["cid"])
+    hits = 0
+    for page, cids in by_page.items():
+        tag = (id(tmemo.get(page)), id(tmemo.get(("rows", page))))
+        mine = frozenset(cids)
+        got = None if PLANT_NO_EDGE_MEMO[0] else _PAGE_EDGES.get(page)
+        if got is not None and got[0] == tag and got[1] == mine and tag[0] != id(None):
+            pairs = got[2]
+            hits += 1
+        else:
+            pairs = [(a, b) for a, b in workspace.store.contains_within(page, among=drawn)
+                     if a in mine and b in mine and a != b]
+            _PAGE_EDGES[page] = ((id(tmemo.get(page)), id(tmemo.get(("rows", page)))), mine, pairs)
+        edges.extend({"source": a, "target": b} for a, b in pairs)
+    timing["edge_pages_reused"] = hits
     timing["ms_edges"] = round((_time.perf_counter() - _t) * 1000, 1)
     status = proj.status(workspace)
     return {"nodes": nodes, "edges": edges, "spaces": ["semantic"],
