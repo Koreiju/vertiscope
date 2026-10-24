@@ -1289,6 +1289,8 @@ export class BrowserView extends ItemView {
     if (this.plant.has("codespans")) v.push("codespans: true");
     // G-197's planted arm: an SVG's `xmlns:xlink` taken as a picture, as before.
     if (this.plant.has("xmlnsurl")) v.push("xmlnsurl: true");
+    // G-99's planted arm: every script skipped, its structured data with it.
+    if (this.plant.has("nojson")) v.push("nojson: true");
     return "{" + v.join(", ") + "}";
   }
 

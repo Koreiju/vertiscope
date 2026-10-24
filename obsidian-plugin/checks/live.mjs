@@ -1272,6 +1272,57 @@ export function makeChecks(env) {
 
   const CHECKS = [
     {
+      id: "G-99",
+      asks: "a page's structured data is detected: a ld+json document's prose fields and the media it names, and media urls in an app-state JSON script, reach the store as addressed lines; a plain script, and the app state's ids and tokens, do not; planted (nojson) none of it",
+      async run() {
+        // A recipe page served locally: ld+json in HEAD (name, description,
+        // an image, a VideoObject with a contentUrl and thumbnail), an
+        // analytics script in HEAD, and an application/json state script in
+        // the body carrying a session id beside a hero picture.
+        const fixtures = await serveFixtures();
+        const arm = (planted) => evaluate(`(async () => {
+          ${PREP}
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          b.plant.delete("nojson");
+          if (${planted}) b.plant.add("nojson");
+          try {
+            const PAGE = ${JSON.stringify(fixtures.origin + "/structured_data.html?g99=")} + (${planted} ? "p" : "c") + Date.now();
+            b.go("about:blank"); await sleep(800);
+            if (!(await land(PAGE, 30000))) return { error: "did not land" };
+            let cids = [], same = 0;
+            for (let i = 0; i < 40 && same < 3; i++) {
+              await sleep(1000);
+              const now = await v.sidecar.pageCids(PAGE);
+              same = now.length && now.join() === cids.join() ? same + 1 : 0;
+              cids = now;
+            }
+            const lines = [];
+            for (const c of cids) { const p = await v.chunkPayload(c); for (const l of (p && p.lines) || []) lines.push(String(l.text || "")); }
+            const all = lines.join(String.fromCharCode(10));
+            const has = (x) => all.includes(x);
+            return { planted: ${planted}, chunks: cids.length, lines: lines.length,
+                     ld_name: has("Brown butter sugar cookies") && lines.filter((l) => l.includes("Brown butter sugar cookies")).length >= 2,
+                     ld_description: has("nutty browned butter"),
+                     ld_image: has("Fronalpstock_big.jpg"),
+                     ld_video: has("brown-butter.mp4"),
+                     ld_video_thumb: has("brown-butter-thumb.jpg"),
+                     app_hero: has("hero-cookies.webp"),
+                     leaked: ["a1b2c3d4e5f6", "9f8e7d", "UA-0000-1", "rcp-7f3a9c", "window.analytics"].filter(has),
+                     body_text: has("crisp at the edge") && has("smells like toffee"),
+                     sample: lines.filter((l) => /cookies|butter|mp4|webp/i.test(l)).slice(0, 8) };
+          } finally { b.plant.delete("nojson"); }
+        })()`, { timeout: 120000 });
+        try {
+          const clean = await arm(false);
+          const planted = await arm(true);
+          const ok = (x) => !!x && !x.error && x.ld_name && x.ld_description && x.ld_image && x.ld_video
+            && x.ld_video_thumb && x.app_hero && x.leaked.length === 0 && x.body_text;
+          return { pass: ok(clean) && !ok(planted),
+                   evidence: { clean, planted, bar: "ld+json name (beside the page's own h1), description, image, video url and thumbnail; the app-state script's picture; none of its ids, the analytics script, or a non-prose ld field; the page's own text intact" } };
+        } finally { await fixtures.close(); }
+      },
+    },
+    {
       id: "G-102",
       asks: "a billboard does not fake live controls: in the page form of a chunk, a control the trie addresses stays live (it acts on the page), and a control it holds no address for is drawn inert -- dimmed, not-allowed, aria-disabled, with a title saying why; planted (plantInertLooksLive) the dead control looks as pressable as the live one",
       async run() {

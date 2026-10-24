@@ -438,7 +438,27 @@ def _heading_mark(label: str) -> str:
 # needs a colour, a box-drawing character, or anything markdown cannot say.
 # The reader acts on these directly, so a control has to look like a control
 # without anyone having decided what it is for.
+_DATA_PICTURE = re.compile(r"\.(jpe?g|png|gif|webp|avif|svg)(\?|#|$)", re.I)
+_DATA_MEDIA = re.compile(r"\.(mp4|webm|m3u8|mov|mp3|ogg|oga|wav|m4a)(\?|#|$)", re.I)
+
+
+def _data_line(v: str) -> str:
+    """A field of the page's structured data (`data`, G-99): a picture it
+    names is drawn as one, a video or sound as media, any other url as a
+    link, and prose as itself."""
+    v = (v or "").strip()
+    if not re.match(r"^(https?:)?//", v, re.I):
+        return v
+    if _DATA_PICTURE.search(v):
+        return f"![]({v})"
+    if _DATA_MEDIA.search(v):
+        return f"(media)[{v}]"
+    return f"[{v}]({v})"
+
+
 _RENDER_FORM = {
+    # The page's structured data (`<script type=application/ld+json>`, G-99).
+    "data":    lambda v, t, l, u="": _data_line(v),
     # Every form takes (value, text, label, target). Links and media carry
     # their target *in the line*, not only on the address: markdown that
     # leaves the REPL -- into a chunk, into the index, into a retrieval hit

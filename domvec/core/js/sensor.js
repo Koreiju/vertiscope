@@ -101,7 +101,7 @@
   // Peripheral reads only -- nothing here touches the fold.
   // `codespans` may also be set at boot (`variants.codespans`): chunks are
   // emitted and cached at the first fold, before a run-time flip could act.
-  var RT_PLANTS = { yclip: false, lightpath: false, codespans: !!V.codespans, xmlnsurl: !!V.xmlnsurl };
+  var RT_PLANTS = { yclip: false, lightpath: false, codespans: !!V.codespans, xmlnsurl: !!V.xmlnsurl, nojson: !!V.nojson };
   var USE_SEMANTIC = !!V.semantic; // prefer heading/section boundaries
   var USE_RANK = !!V.rank;         // heaviest subtree first, not document order
   var WIDE = V.budget === 'wide', NARROW = V.budget === 'narrow';
@@ -186,6 +186,81 @@
   // one that did.
   var SKIP_TAGS = { SCRIPT: 1, STYLE: 1, NOSCRIPT: 1, TEMPLATE: 1,
                     HEAD: 1 };
+  // **Except the page's structured data** (G-99, Addendum IX: "all content
+  // that could possibly be detected, whether it be text; json; images;
+  // videos; media"). A `<script type="application/ld+json">` -- most often
+  // in HEAD -- names the page's article, product or video: its headline,
+  // description, image and video url. Skipped with every other script, none
+  // of it reached the trie (Instagram: 43 JSON scripts, 0 stored). A JSON
+  // script is addressed (`script[n]`, counted among ALL its script siblings,
+  // as `resolveStep` counts) and its record carries units from the PARSED
+  // document, never its text: ld+json's prose fields (the content tagger's
+  // list) and, in any JSON script, urls that name media. Capped per script.
+  // HEAD is entered for its scripts alone. Planted (run time):
+  // `plants.nojson` -- every script skipped, as before.
+  var JSON_TYPES = { 'application/ld+json': 'ld', 'application/json': 'app' };
+  var JSON_TEXT = { name: 1, headline: 1, description: 1, alternatename: 1,
+                    'abstract': 1, articlebody: 1, caption: 1,
+                    disambiguatingdescription: 1, keywords: 1, text: 1 };
+  var JSON_MEDIA = { image: 1, logo: 1, thumbnail: 1, thumbnailurl: 1,
+                     photo: 1, primaryimageofpage: 1, icon: 1, contenturl: 1,
+                     embedurl: 1, video: 1, trailer: 1, audio: 1 };
+  var JSON_MEDIA_EXT = /\.(jpe?g|png|gif|webp|avif|svg|mp4|webm|m3u8|mov|mp3|ogg|oga|wav|m4a)(\?|#|$)/i;
+  var JSON_MAX_CHARS = 400000, JSON_MAX_UNITS = 200;
+  function jsonKind(el) {
+    if (RT_PLANTS.nojson || !el || el.tagName !== 'SCRIPT' || !el.getAttribute) return '';
+    return JSON_TYPES[(el.getAttribute('type') || '').toLowerCase().trim()] || '';
+  }
+  function headHasJson(el) {
+    if (RT_PLANTS.nojson || !el || el.tagName !== 'HEAD' || !el.querySelector) return false;
+    try { return !!el.querySelector('script[type="application/ld+json"],script[type="application/json"]'); }
+    catch (e) { return false; }
+  }
+  function jsonPairs(el) {
+    var kind = jsonKind(el);
+    if (!kind) return null;
+    var raw = el.textContent || '';
+    if (!raw || raw.length > JSON_MAX_CHARS) return null;
+    var doc;
+    try { doc = JSON.parse(raw); } catch (e) { return null; }
+    var out = [], seen = {};
+    function esc(k) { return String(k).replace(/~/g, '~0').replace(/\//g, '~1'); }
+    function walk(o, key, ptr, depth) {
+      if (out.length >= JSON_MAX_UNITS || depth > 40 || o === null || o === undefined) return;
+      var i, k;
+      if (Array.isArray(o)) {
+        for (i = 0; i < o.length && out.length < JSON_MAX_UNITS; i++) walk(o[i], key, ptr + '/' + i, depth + 1);
+        return;
+      }
+      if (typeof o === 'object') {
+        for (k in o) {
+          if (Object.prototype.hasOwnProperty.call(o, k)) walk(o[k], k, ptr + '/' + esc(k), depth + 1);
+        }
+        return;
+      }
+      if (typeof o !== 'string') return;
+      // HTML entities in a JSON string are the publisher's encoding, not its
+      // text (Yoast writes "Alexandra&#039;s Kitchen"): decoded, so the line
+      // says what the page says.
+      var v = o.trim().replace(/&(#x?[0-9a-f]+|amp|lt|gt|quot|apos|nbsp);/gi, function (m, e) {
+        var l = e.toLowerCase();
+        if (l === 'amp') return '&'; if (l === 'lt') return '<'; if (l === 'gt') return '>';
+        if (l === 'quot') return '"'; if (l === 'apos') return "'"; if (l === 'nbsp') return ' ';
+        var n = l.charAt(1) === 'x' ? parseInt(l.slice(2), 16) : parseInt(l.slice(1), 10);
+        return isFinite(n) && n > 0 && n < 0x110000 ? String.fromCodePoint(n) : m;
+      }), lk = String(key).toLowerCase();
+      if (!v) return;
+      var isUrl = /^(https?:)?\/\//i.test(v);
+      if (kind === 'ld' && JSON_TEXT[lk] && !isUrl && /[A-Za-z\u00C0-\uFFFF]{2,}/.test(v)) {
+        out.push([intern('json.' + key + '@' + ptr), v.slice(0, 2000)]);
+      } else if (isUrl && (JSON_MEDIA[lk] || JSON_MEDIA_EXT.test(v)) && !seen[v]) {
+        seen[v] = 1;
+        out.push([intern('json.' + key + '@' + ptr), v]);
+      }
+    }
+    walk(doc, '', '', 0);
+    return out.length ? out : null;
+  }
   // Drawn as a single control, never descended into. Their children exist,
   // and a reader reaches them by acting on the control -- which is exactly
   // what a browser does with them.
@@ -768,6 +843,7 @@
   }
 
   function kindOf(el) {
+    if (el.tagName === 'SCRIPT') return ['data', 'data.json'];
     var role = roleOf(el);
     // An option inside a select is not a line of the page. A browser draws
     // the select collapsed, showing the one value it currently holds, and
@@ -899,6 +975,8 @@
   function detect(el, rec) {
     var out = null, i, name, val;
     var tag = el.tagName;
+    if (tag === 'SCRIPT') return jsonPairs(el);
+    if (tag === 'HEAD') return null;
     // <link> is metadata content, and a reader never sees one.
     //
     // Its href is a machine reference -- a stylesheet, a canonical url, a
@@ -1071,6 +1149,13 @@
 
   function childrenOf(node) {
     var kids = [], i;
+    if (node.nodeType === 1 && node.tagName === 'SCRIPT') { kids.shadowCount = 0; return kids; }
+    if (node.nodeType === 1 && node.tagName === 'HEAD') {
+      var hk = node.children || [];
+      for (i = 0; i < hk.length; i++) if (hk[i].tagName === 'SCRIPT') kids.push(hk[i]);
+      kids.shadowCount = 0;
+      return kids;
+    }
     if (node.shadowRoot) {
       var sk = node.shadowRoot.childNodes;
       for (i = 0; i < sk.length; i++) kids.push(sk[i]);
@@ -1193,6 +1278,17 @@
   function stepFor(kid, path, inShadow, counts, scounts) {
     var c = inShadow ? scounts : counts, key, tag;
     if (kid.nodeType === 1) {
+      if (kid.tagName === 'SCRIPT' && !RT_PLANTS.nojson) {
+        c.script = (c.script || 0) + 1;
+        if (!jsonKind(kid)) return null;
+        if (!inShadow) return path.concat([intern('script'), c.script]);
+        if (SHADOW_SEG === null) SHADOW_SEG = intern('#shadow-root');
+        return path.concat([SHADOW_SEG, 1, intern('script'), c.script]);
+      }
+      if (kid.tagName === 'HEAD' && headHasJson(kid)) {
+        c.head = (c.head || 0) + 1;
+        return path.concat([intern('head'), c.head]);
+      }
       if (SKIP_TAGS[kid.tagName]) return null;
       tag = kid.tagName.toLowerCase();
       key = tag;
@@ -1252,7 +1348,7 @@
       return rec;
     }
     if (type !== 1) return null;            // comments, doctype: no record
-    if (SKIP_TAGS[node.tagName]) return null;
+    if (SKIP_TAGS[node.tagName] && !jsonKind(node) && !headHasJson(node)) return null;
 
     rec = rec || newRecord();
     if (rec.sketch) rec.sketch.fill(0); else rec.sketch = new Uint16Array(SKETCH_W);
@@ -1405,6 +1501,13 @@
     // text node, so it is never cut into its highlighting spans. Planted
     // (run time): `plants.codespans`.
     if (rec.chars > limit && node.nodeType === 1 && node.tagName === 'PRE' && !RT_PLANTS.codespans) {
+      limit = rec.chars;
+    }
+    // So is a page's structured data (G-99): its units come from the parsed
+    // document, not from children, so splitting it emitted NOTHING -- a
+    // 22 KB Yoast graph over the budget left alexandracooks with no head
+    // chunk at all, while a small fixture merged into one and passed.
+    if (rec.chars > limit && node.nodeType === 1 && jsonKind(node)) {
       limit = rec.chars;
     }
     if (rec.chars <= limit) {
