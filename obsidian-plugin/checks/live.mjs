@@ -6947,6 +6947,104 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-188",
+      asks: "nodes a little larger and brighter by default, links a little fainter but still visible: drawn 1.25x, the glow x1.4, links at 0.14 -- and in the rendered pixels, more lit area and brighter nodes than the old values give, links still drawn; planted (the old 1 / 1 / 0.25) the pixels fall back",
+      async run() {
+        const got = await evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const gl = app.workspace.getLeavesOfType("domvec-graph-view")[0];
+          if (gl && gl.loadIfDeferred) await gl.loadIfDeferred();
+          const v = gl && gl.view;
+          if (!v || !v.graph || !v.batch) return { error: "no graph" };
+          for (let i = 0; i < 60 && v.graph.graphData().nodes.length < 20; i++) await sleep(500);
+          const d = v.graph.graphData();
+          // The page with the most drawn nodes: one off-screen camera on it.
+          const by = new Map();
+          for (const n of d.nodes) if (n.url && Number.isFinite(n.x)) by.set(n.url, (by.get(n.url) || 0) + 1);
+          const url = [...by.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+          if (!url) return { error: "nothing drawn" };
+          const mat = v.batch.glass && v.batch.glass.mesh && v.batch.glass.mesh.material;
+          const live = { nodeScale: v.nodeScale, nodeBright: v.batch.nodeBright,
+                         uBright: mat && mat.uniforms && mat.uniforms.uBright ? mat.uniforms.uBright.value : null,
+                         linkAlpha: v.batch.linkAlpha, links: d.links.length };
+          // Rendered pixels: lit area, the nodes' mean brightness, and the
+          // faint pixels where only links can be.
+          const pixels = async () => {
+            v.batchSync();
+            await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+            // CLOSE: framed at the default pad every orb sits on its pixel
+            // floor (uMinPx), and 1x and 1.25x draw the same (2026-10-24:
+            // 32,209 vs 32,260 lit). At pad 0.15 the nodes are past it.
+            const shot = v.inspect(url, 480, 0.15);
+            if (!shot || !shot.png) return null;
+            const img = new Image(); img.src = shot.png; await img.decode();
+            const c = document.createElement("canvas"); c.width = img.width; c.height = img.height;
+            const x = c.getContext("2d"); x.drawImage(img, 0, 0);
+            const px = x.getImageData(0, 0, c.width, c.height).data;
+            let lit = 0, bright = 0, faint = 0;
+            for (let i = 0; i < px.length; i += 4) {
+              const l = 0.2126 * px[i] + 0.7152 * px[i + 1] + 0.0722 * px[i + 2];
+              if (l > 40) { lit++; bright += l; } else if (l > 6) faint++;
+            }
+            return { lit, mean_lit: lit ? Math.round(bright / lit) : 0, faint, nodes: shot.nodes };
+          };
+          // What the GPU is GIVEN: each node's instance size, each link's
+          // alpha, the glass orbs' brightness uniform. (At the reader's own
+          // distance a node is under a pixel, so the view's pixels cannot
+          // tell 1x from 2x -- measured 2026-10-24: 3,286 lit pixels both.)
+          const drawn = () => {
+            const meshes = [v.batch.opaque, v.batch.clear, v.batch.glass];
+            const sizes = new Map();
+            for (const n of v.graph.graphData().nodes) {
+              const m = meshes[n.__bm];
+              if (m && typeof n.__bi === "number" && n.__bi < m.geo.instanceCount) sizes.set(n.id, m.size.getX(n.__bi));
+            }
+            const la = [];
+            const lc = v.batch.lineCol;
+            const nl = v.batch.lines && v.batch.lines.geometry.drawRange ? v.batch.lines.geometry.drawRange.count / 2 : 0;
+            for (let i = 0; i < Math.min(nl, 400); i++) la.push(lc.getW(i * 2));
+            la.sort((a, b) => a - b);
+            const m2 = v.batch.glass.mesh.material;
+            return { sizes, link_alpha: la.length ? la[Math.floor(la.length / 2)] : null, u: m2.uniforms.uBright.value };
+          };
+          const now = await pixels();
+          const dNow = drawn();
+          const keep = { s: v.nodeScale, b: v.batch.nodeBright, a: v.batch.linkAlpha };
+          let old = null, dOld = null;
+          try {
+            v.nodeScale = 1; v.batch.setBright(1); v.batch.linkAlpha = 0.25;
+            old = await pixels();
+            dOld = drawn();
+          } finally {
+            v.nodeScale = keep.s; v.batch.setBright(keep.b); v.batch.linkAlpha = keep.a;
+            v.batchSync();
+          }
+          const ratios = [];
+          for (const [id, sz] of dNow.sizes) { const o = dOld.sizes.get(id); if (o > 0) ratios.push(sz / o); }
+          ratios.sort((a, b) => a - b);
+          const gpu = { nodes: ratios.length, size_ratio_p50: ratios.length ? Math.round(ratios[Math.floor(ratios.length / 2)] * 1000) / 1000 : null,
+                        size_ratio_p5: ratios.length ? Math.round(ratios[Math.floor(ratios.length * 0.05)] * 1000) / 1000 : null,
+                        link_alpha_now: dNow.link_alpha, link_alpha_old: dOld.link_alpha, bright_now: dNow.u, bright_old: dOld.u };
+          return { url: url.slice(0, 70), live, gpu, now, old };
+        })()`, { timeout: 60000 });
+        if (!got || got.error || !got.now || !got.old) return { pass: false, evidence: got };
+        const L = got.live;
+        return {
+          pass: Math.abs(L.nodeScale - 1.25) < 1e-9 && Math.abs(L.nodeBright - 1.4) < 1e-9 && L.uBright === L.nodeBright
+             && Math.abs(L.linkAlpha - 0.14) < 1e-9
+             // as the GPU is given them: 1.25x every node, x1.4 the glow, links 0.14 not 0.25
+             && got.gpu.nodes > 0 && Math.abs(got.gpu.size_ratio_p50 - 1.25) < 0.01 && got.gpu.size_ratio_p5 > 1.2
+             && Math.abs(got.gpu.bright_now - 1.4) < 1e-6 && Math.abs(got.gpu.bright_old - 1) < 1e-6
+             && got.gpu.link_alpha_now !== null && got.gpu.link_alpha_now < got.gpu.link_alpha_old
+             // and in the pixels of a page close enough to resolve: more lit area
+             && got.now.lit > 1.03 * got.old.lit
+             // links still visible: faint pixels remain where only links draw
+             && (L.links === 0 || got.now.faint > 0),
+          evidence: got,
+        };
+      },
+    },
+    {
       id: "G-66",
       asks: "the fold's own phases travel with every drain, and an unchanged merged run costs no lines: the same chunks are sent with the merged-run gate first or last, and the emit phase is cheaper; planted (mergedlines) every run's lines collected before its gate",
       async run() {
