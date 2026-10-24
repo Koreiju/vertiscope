@@ -30,6 +30,7 @@ The plugin renders; it does not fit.
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from typing import Dict, List, Optional
 
 import numpy as np
@@ -2505,6 +2506,96 @@ def projected_chunk_layout(workspace, proj=None) -> Optional[Dict]:
 #: Each chunk's title, token count and first picture, by cid, with the
 #: `chars` they were read at (PLUGIN_GOAL 110): functions of its markdown.
 _CHUNK_FACTS: Dict[str, tuple] = {}
+
+#: Planted: the chunk view's memos start empty after every restart.
+PLANT_NO_VIEW_MEMO = [False]
+
+
+def save_view_memo(workspace) -> Optional[Dict]:
+    """The chunk view's memos to `view_memo.pkl`, each page's entries tagged
+    with its `scanned_at` (2026-10-24: the first chunk-view switch after a
+    restart took 54.5 s, re-reading every page's trie nodes and every
+    chunk's markdown that the process before had already read).
+
+    Valid by construction: `ingest` and `purge_page` are the only writers of
+    a page's chunks, `ingest` stamps `Page.scanned_at`, and both drop the
+    page's in-process entries -- so an entry held at save time agrees with
+    the page as stamped then, and `load_view_memo` keeps it only while the
+    stamp is unchanged.
+    """
+    if PLANT_NO_VIEW_MEMO[0]:
+        return None
+    import pickle, time as _t
+    store = workspace.store
+    stamps = {u: ts for u, ts in store._rows("MATCH (p:Page) RETURN p.url, p.scanned_at") if u}
+    tmemo = store._tnode_memo()
+    pages: Dict[str, Dict] = {}
+    for key, entry in list(tmemo.items()):
+        url = key[1] if isinstance(key, tuple) else key
+        if url not in stamps:
+            continue
+        slot = pages.setdefault(url, {"ts": stamps[url]})
+        slot["rows" if isinstance(key, tuple) else "nodes"] = entry
+    for url, (tag, mine, pairs) in list(_PAGE_EDGES.items()):
+        if url in pages:
+            pages[url]["edges"] = (mine, pairs)
+    by_url_facts: Dict[str, Dict] = {}
+    urls = {c: u for c, u in store._rows("MATCH (c:Chunk) RETURN c.cid, c.url")}
+    for cid, fact in list(_CHUNK_FACTS.items()):
+        u = urls.get(cid)
+        if u in stamps:
+            by_url_facts.setdefault(u, {})[cid] = fact
+    for u, facts in by_url_facts.items():
+        pages.setdefault(u, {"ts": stamps[u]})["facts"] = facts
+    path = Path(workspace.path) / "view_memo.pkl"
+    tmp = path.with_suffix(".tmp")
+    t0 = _t.perf_counter()
+    with open(tmp, "wb") as fh:
+        pickle.dump({"v": 1, "pages": pages}, fh, protocol=pickle.HIGHEST_PROTOCOL)
+    tmp.replace(path)
+    return {"pages": len(pages), "facts": sum(len(v.get("facts", {})) for v in pages.values()),
+            "ms": round((_t.perf_counter() - t0) * 1000, 1)}
+
+
+def load_view_memo(workspace) -> Optional[Dict]:
+    """`view_memo.pkl` back into the memos, page by page, only where the page's
+    `scanned_at` is the one it was saved with. Before any worker reads."""
+    if PLANT_NO_VIEW_MEMO[0]:
+        return None
+    import pickle
+    path = Path(workspace.path) / "view_memo.pkl"
+    if not path.exists():
+        return None
+    try:
+        with open(path, "rb") as fh:
+            got = pickle.load(fh)
+    except Exception:                               # noqa: BLE001
+        return None
+    if not isinstance(got, dict) or got.get("v") != 1:
+        return None
+    store = workspace.store
+    stamps = {u: ts for u, ts in store._rows("MATCH (p:Page) RETURN p.url, p.scanned_at") if u}
+    tmemo = store._tnode_memo()
+    kept = stale = facts = 0
+    for url, slot in (got.get("pages") or {}).items():
+        if stamps.get(url) != slot.get("ts"):
+            stale += 1
+            continue
+        kept += 1
+        if "nodes" in slot:
+            tmemo[url] = slot["nodes"]
+        if "rows" in slot:
+            tmemo[("rows", url)] = slot["rows"]
+        if "edges" in slot:
+            mine, pairs = slot["edges"]
+            _PAGE_EDGES[url] = ((id(tmemo.get(url)), id(tmemo.get(("rows", url)))), mine, pairs)
+        for cid, fact in (slot.get("facts") or {}).items():
+            # The write counter is this process's; a stamp-valid page has
+            # not been written, so the counter's place is 0.
+            (chars, _w), *rest = fact
+            _CHUNK_FACTS[cid] = ((chars, 0), *rest)
+            facts += 1
+    return {"pages_kept": kept, "pages_stale": stale, "facts": facts}
 #: Planted: every chunk's markdown read and tokenized on every layout.
 PLANT_NO_FACT_MEMO = [False]
 

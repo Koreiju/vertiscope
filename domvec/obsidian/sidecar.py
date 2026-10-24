@@ -595,6 +595,13 @@ def _warm_containment(workspace, stop) -> None:
     chunk-view layout cost its rows and not every anchor in the store -- but
     the FIRST layout after a restart would still read them all (42-66 s,
     2026-10-11). Page by page, standing aside for the reader's requests."""
+    # Last process's memos first (`layout.load_view_memo`): every page still
+    # stamped as it was saved needs no reading at all.
+    try:
+        from .layout import load_view_memo
+        _profile("view_memo_loaded", load_view_memo(workspace) or {})
+    except Exception as exc:                        # noqa: BLE001
+        _profile("view_memo_loaded", {"error": str(exc)[:160]})
     if stop.wait(20.0):
         return
     t0 = time.time()
@@ -629,6 +636,12 @@ def _warm_containment(workspace, stop) -> None:
             got = projected_chunk_layout(workspace, proj)
             _profile("warm_facts", {"n": (got or {}).get("n"), "s": round(time.time() - t1, 1),
                                     "timing": (got or {}).get("timing")})
+            # ...and kept for the next process, then every ten minutes.
+            from .layout import save_view_memo
+            _profile("view_memo_saved", save_view_memo(workspace) or {})
+            while not stop.wait(600.0):
+                _yield_to_foreground()
+                _profile("view_memo_saved", save_view_memo(workspace) or {})
     except Exception as exc:                        # noqa: BLE001
         _profile("warm_facts", {"error": str(exc)[:160]})
 
