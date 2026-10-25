@@ -7016,6 +7016,107 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "P-M4",
+      asks: "the buttons that add new structural cells sit at the very bottom of the NATIVE markdown (P-M1: the view is still Obsidian's own 'markdown'), in live preview and reading view: '+ code' appends a python cell with the cursor inside, and that cell typed and run at once stores its output in the note while the reader keeps typing (written into the open editor, not under it); '+ terminal' opens a terminal in its own pane; '+ browser cell' shows the browser cell; planted: __domvecPlantNoCellBar draws no strip, __domvecPlantFileOutput (written to the file, not the editor) races the autosave",
+      async run() {
+        const got = await evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const until = async (ok, ms) => { for (let t = 0; t < ms && !ok(); t += 250) await sleep(250); return ok(); };
+          const plugin = app.plugins.getPlugin("domvec-bridge");
+          const NL = String.fromCharCode(10);
+          const folder = "domvec-checks";
+          if (!app.vault.getAbstractFileByPath(folder)) await app.vault.createFolder(folder);
+          const bars = (view, sel) => [...view.containerEl.querySelectorAll(sel + " .domvec-cellbar")];
+          const arm = async (planted) => {
+            window.__domvecPlantNoCellBar = planted;
+            window.__domvecPlantFileOutput = planted;
+            const path = folder + "/pm4-" + (planted ? "p" : "c") + Date.now() + ".md";
+            const f = await app.vault.create(path, "# A note" + NL + NL + "Some prose." + NL);
+            const leaf = app.workspace.getLeaf("tab");
+            const out = { planted };
+            const terms0 = app.workspace.getLeavesOfType("domvec-terminal-view").length;
+            try {
+              await leaf.openFile(f, { state: { mode: "source", source: false } });
+              const view = leaf.view;
+              out.view_type = view.getViewType();
+              await until(() => bars(view, ".markdown-source-view").length > 0, planted ? 3500 : 8000);
+              const bar = bars(view, ".markdown-source-view")[0];
+              out.source_strip = !!bar;
+              if (bar) {
+                const content = view.containerEl.querySelector(".cm-contentContainer").getBoundingClientRect();
+                out.below_content = bar.getBoundingClientRect().top >= content.bottom - 1;
+                out.labels = [...bar.querySelectorAll("button")].map((b) => b.textContent);
+                [...bar.querySelectorAll("button")].find((b) => b.textContent === "+ code").click();
+              } else {
+                await plugin.addCodeCell(view);   // the same action, so the run arm still runs
+              }
+              await sleep(600);
+              const ed = view.editor;
+              out.cursor_in_cell = ed.getLine(ed.getCursor().line) === "" && ed.getLine(ed.getCursor().line - 1) === "${"`".repeat(3)}python";
+              ed.replaceSelection("print(6*7)");
+              await sleep(300);
+              const run = view.containerEl.querySelector(".domvec-run-fence");
+              out.run_button = !!run;
+              if (run) run.click();
+              // The reader keeps typing while the cell runs -- in the prose,
+              // away from the cell. A write to the FILE then races the
+              // editor's autosave; a write into the editor does not.
+              for (let k = 0; k < 16; k++) {
+                const line = 2;
+                ed.replaceRange("x", { line, ch: ed.getLine(line).length });
+                await sleep(400);
+              }
+              let stored = false;
+              for (let t = 0; t < 20000 && !stored; t += 500) { await sleep(500); stored = (await app.vault.read(f)).includes("nb-output"); }
+              await sleep(2500);    // past the editor's autosave, which is what overwrote it
+              const text = await app.vault.read(f);
+              out.output_stored = text.includes("nb-output") && text.includes("42");
+              // Reading view.
+              await leaf.setViewState({ type: "markdown", state: { file: path, mode: "preview" } });
+              await until(() => bars(leaf.view, ".markdown-reading-view").length > 0, planted ? 3500 : 8000);
+              const rbar = bars(leaf.view, ".markdown-reading-view")[0];
+              out.reading_strip = !!rbar;
+              if (rbar && !planted) {
+                const sizer = rbar.parentElement;
+                const after = [...sizer.children].slice([...sizer.children].indexOf(rbar) + 1).map((c) => c.className);
+                out.reading_last = after.every((c) => /mod-footer/.test(c));
+                [...rbar.querySelectorAll("button")].find((b) => b.textContent === "+ terminal").click();
+                await until(() => app.workspace.getLeavesOfType("domvec-terminal-view").length > terms0, 5000);
+                out.terminal_opened = app.workspace.getLeavesOfType("domvec-terminal-view").length > terms0;
+                [...rbar.querySelectorAll("button")].find((b) => b.textContent === "+ browser cell").click();
+                await sleep(800);
+                const br = app.workspace.getLeavesOfType("domvec-browser-view");
+                out.browser_shown = br.some((l) => l.view.containerEl.offsetWidth > 0);
+              }
+            } finally {
+              window.__domvecPlantNoCellBar = false;
+              window.__domvecPlantFileOutput = false;
+              const terms = app.workspace.getLeavesOfType("domvec-terminal-view");
+              for (const t of terms.slice(terms0)) { try { t.detach(); } catch (e) {} }
+              try { leaf.detach(); } catch (e) {}
+              try { await app.vault.delete(f); } catch (e) {}
+            }
+            return out;
+          };
+          try {
+            return { clean: await arm(false), planted: await arm(true) };
+          } finally {
+            try {
+              await sleep(1500);
+              const fo = app.vault.getAbstractFileByPath(folder);
+              if (fo && (!fo.children || !fo.children.length)) await app.vault.delete(fo, true);
+            } catch (e) {}
+          }
+        })()`, { timeout: 240000 });
+        if (!got || got.error || !got.clean || !got.planted) return { pass: false, evidence: got };
+        const c = got.clean, p = got.planted;
+        return { pass: c.view_type === "markdown" && c.source_strip && c.below_content && c.cursor_in_cell && c.run_button
+                   && c.output_stored && c.reading_strip && c.reading_last && c.terminal_opened && c.browser_shown
+                   && !p.source_strip && !p.reading_strip && !p.output_stored,
+                 evidence: got };
+      },
+    },
+    {
       id: "D-3",
       asks: "a chunk note's markdown half is the NATIVE, editable editor: in live preview the card half hides the note's body and draws the card; the switch's 'markdown' segment, clicked, folds the card to its bar (no read-only render in the fence) and shows the body as editable lines, and an edit typed there is saved to the note; reading view hides and shows the body the same way; planted (__domvecPlantNoHalves) the fence draws the read-only markdown and the body is never hidden",
       async run() {

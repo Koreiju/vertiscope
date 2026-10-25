@@ -41,6 +41,7 @@ import { cellSource, findFences } from "./fences";
 import { ChunkSpan, chunkGutter, setChunkSpans } from "./chunkgutter";
 import { EditorView } from "@codemirror/view";
 import { bodyHidden, chunkHalves, setBodyHidden } from "./chunkhalves";
+import { ensureCellBar } from "./cellbar";
 import { hashCell, renderOutput, withOutput } from "./outputs";
 import { BROWSER_VIEW, BrowserView } from "./browser";
 import type { ActRecord } from "./panelact";
@@ -230,6 +231,9 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
       this.registerEvent((this.app.workspace as any).on(ev, () => this.applyHalves()));
     }
     this.registerEvent(this.app.metadataCache.on("changed", () => this.applyHalves()));
+    // The structural-cell strip at the bottom of every note (`P-M4`); put
+    // back whenever Obsidian rebuilds a renderer under it.
+    this.registerInterval(window.setInterval(() => this.applyCellBars(), 1500));
     this.registerEvent(this.app.workspace.on("active-leaf-change",
                                              () => this.refreshChunkMarks()));
     this.registerEvent(this.app.workspace.on("editor-change",
@@ -652,28 +656,54 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     if (!(file instanceof TFile)) return "";
     const hash = await hashCell(req.code);
     let outcome = "";
+    const place = (text: string): string => {
+      const fences = findFences(text);
+      // Prefer the fence still at the clicked line; fall back to the only
+      // fence with this exact source. If neither is unambiguous, write
+      // nothing -- a misplaced output is worse than an absent one, because
+      // the reader would trust it.
+      let target = fences.find((f) => f.openLine === req.line
+                                   && cellSource(f.body) === req.code);
+      if (!target) {
+        const same = fences.filter((f) => cellSource(f.body) === req.code);
+        if (same.length === 1) target = same[0];
+      }
+      if (!target) {
+        outcome = "output not stored: the cell moved or changed";
+        return text;
+      }
+      return withOutput(text, target.closeLine, renderOutput(reply, hash));
+    };
     try {
+      // **Into the open editor when there is one.** A note open in an editor
+      // has two copies, the file and the editor's text, and a write to the
+      // FILE races the editor's autosave: a cell typed and run at once
+      // printed 42 and kept nothing, the editor's save of the older text
+      // landing after ours (2026-10-25, `+ code`, P-M4) -- and a save forced
+      // first did not close it. So the output is an edit in the editor (the
+      // changed span only, so the cursor and undo history survive), and the
+      // editor's own save persists it. Planted `__domvecPlantFileOutput`.
+      const open = (window as any).__domvecPlantFileOutput ? undefined
+        : this.app.workspace.getLeavesOfType("markdown").map((l) => l.view as MarkdownView)
+            .find((v) => v?.file?.path === note && v.getMode() === "source");
+      if (open) {
+        const ed = open.editor;
+        const before = ed.getValue();
+        const after = place(before);
+        if (after !== before) {
+          let a = 0;
+          while (a < before.length && a < after.length && before[a] === after[a]) a++;
+          let b = 0;
+          while (b < before.length - a && b < after.length - a
+                 && before[before.length - 1 - b] === after[after.length - 1 - b]) b++;
+          ed.replaceRange(after.slice(a, after.length - b), ed.offsetToPos(a), ed.offsetToPos(before.length - b));
+        }
+        return outcome;
+      }
       // `process` is read-modify-write under one lock. `read` then `modify`
       // would drop whatever the reader typed in between, which for a slow cell
       // is a real window and loses THEIR work rather than ours.
-      await this.app.vault.process(file, (text) => {
-        const fences = findFences(text);
-        // Prefer the fence still at the clicked line; fall back to the only
-        // fence with this exact source. If neither is unambiguous, write
-        // nothing -- a misplaced output is worse than an absent one, because
-        // the reader would trust it.
-        let target = fences.find((f) => f.openLine === req.line
-                                     && cellSource(f.body) === req.code);
-        if (!target) {
-          const same = fences.filter((f) => cellSource(f.body) === req.code);
-          if (same.length === 1) target = same[0];
-        }
-        if (!target) {
-          outcome = "output not stored: the cell moved or changed";
-          return text;
-        }
-        return withOutput(text, target.closeLine, renderOutput(reply, hash));
-      });
+      await this.app.vault.process(file, place);
     } catch (err) {
       outcome = `output not stored: ${
         err instanceof Error ? err.message : String(err)}`;
@@ -727,7 +757,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     this.app.workspace.revealLeaf(leaf);
   }
 
-  private async openTerminal() {
+  async openTerminal() {
     const leaf = this.app.workspace.getLeaf("split", "horizontal");
     await leaf.setViewState({ type: TERMINAL_VIEW, active: true });
     this.app.workspace.revealLeaf(leaf);
@@ -807,6 +837,45 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     }
     this.halvesStats.applied++;
     this.halvesStats.leaves = leaves;
+  }
+
+  // ---- structural cells at the bottom of the note (P-M4) ------------------
+  //
+  // Planted `__domvecPlantNoCellBar`: no strip anywhere.
+  cellBarStats = { placed: 0, code_cells: 0 };
+
+  applyCellBars(): void {
+    const on = !(window as any).__domvecPlantNoCellBar;
+    let placed = 0;
+    for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
+      const view = leaf.view as MarkdownView;
+      if (view?.file && ensureCellBar(view, this, on)) placed++;
+    }
+    this.cellBarStats.placed = placed;
+  }
+
+  /** `+ code`: a python fence at the end of the note, the cursor inside it.
+   *  In reading view the note is appended to and switched to editing, so the
+   *  new cell is where the reader's next keystroke goes. */
+  async addCodeCell(view: MarkdownView): Promise<void> {
+    const file = view.file;
+    if (!file) return;
+    const NL = "\n";
+    const FENCE = "```";
+    if (view.getMode() !== "source") {
+      await this.app.vault.process(file, (t) => t.replace(/\s*$/, "") + NL + NL + FENCE + "python" + NL + NL + FENCE + NL);
+      await view.leaf.setViewState({ type: "markdown", state: { file: file.path, mode: "source", source: false } });
+    }
+    const ed = (view.leaf.view as MarkdownView).editor;
+    const text = ed.getValue();
+    const trimmed = text.replace(/\s*$/, "");
+    if (!trimmed.endsWith(FENCE + "python" + NL + NL + FENCE)) {
+      ed.replaceRange(NL + NL + FENCE + "python" + NL + NL + FENCE + NL, ed.offsetToPos(trimmed.length), ed.offsetToPos(text.length));
+    }
+    const at = ed.getValue().replace(/\s*$/, "").length - (NL + FENCE).length;
+    ed.setCursor(ed.offsetToPos(at));
+    ed.focus();
+    this.cellBarStats.code_cells++;
   }
 
   respawnStats = { checks: 0, respawned: 0, last: null as any };

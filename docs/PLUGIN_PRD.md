@@ -518,10 +518,10 @@ axes: **structure, content, organizedness, completeness**.
 
 | id | requirement | status |
 |---|---|---|
-| P-M1 | The **original Obsidian markdown panel survives in native form**, distinct from the notebook panel | Open |
+| P-M1 | The **original Obsidian markdown panel survives in native form**, distinct from the notebook panel | **Confirm** 2026-10-25 -- by construction and seen: there is no notebook view type (`NOTEBOOK_PANEL_DESIGN` §2, *P-N is P-M grown*); every addition -- the `[]()` gesture, the run button, the chunk gutter, the structural-cell strip (`P-M4`), a chunk note's halves (`D-3`) -- is an extension on Obsidian's own `markdown` view, and live check `P-M4` asserts the view the strip sits in is still `getViewType() === "markdown"` |
 | P-M2 | The same retrieval is added to the native default | Confirm — the `[]()` gesture is a CodeMirror extension registered on Obsidian's own markdown editor (`registerEditorExtension(linkGesture(...))`), so it runs in every native note; `R-3`'s live check is in one (a scratch note under `domvec-checks/`, trashed after) |
 | P-M3 | Code, kernel and terminal options are built **on top of** the native form | Open |
-| P-M4 | Buttons that add new structural cells sit at the **very bottom** of the markdown | Open |
+| P-M4 | Buttons that add new structural cells sit at the **very bottom** of the markdown | **Confirm** 2026-10-25 -- live check `P-M4` (`checks/live.mjs`, both arms; `obsidian-plugin/src/cellbar.ts`). One strip after the note's last line in live preview (below CodeMirror's content) and in reading view (nothing after it but the footer): `+ code` appends a python fence with the cursor in it, `+ terminal` opens a command terminal in its own pane (§4a), `+ browser cell` shows the browser cell. The new cell typed and run at once, with the reader typing in the prose meanwhile, kept its output (42). Found by this check: a run's output was written to the FILE under an open editor and the editor's autosave of older text overwrote it -- intermittently with no typing, every time with typing; forcing a save first did not close it. The output is now an edit in the open editor (changed span only), persisted by the editor's own save. Planted: `__domvecPlantNoCellBar` no strip in either renderer; `__domvecPlantFileOutput` (the old file write) loses the output |
 | P-M5 | The hovering chat sits **below the boundary of the scrollable markdown window** | Open |
 
 **P-B — the browser notebook cell**
