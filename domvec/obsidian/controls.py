@@ -195,9 +195,13 @@ def start_sidecar(
     env["PYTHONIOENCODING"] = "utf-8"
     env["PYTHONPATH"] = str(REPO_ROOT)
 
+    # stdin NUL: inheriting this MCP server's stdin -- a pipe it is always
+    # blocked reading -- hung every child the supervisor started after its
+    # first (`supervise._run_child`, 2026-10-25).
     proc = subprocess.Popen(
         cmd,
         cwd=str(REPO_ROOT),
+        stdin=subprocess.DEVNULL,
         stdout=log_fh,
         stderr=err_fh,
         env=env,
@@ -389,13 +393,13 @@ def close_obsidian() -> Dict:
     # workspace (pane layout, open leaves). /F straight away lost it.
     graceful = False
     if sys.platform == "win32" and alive():
-        subprocess.run(["taskkill", "/IM", "Obsidian.exe"], capture_output=True)
+        subprocess.run(["taskkill", "/IM", "Obsidian.exe"], capture_output=True, stdin=subprocess.DEVNULL)
         deadline = time.time() + 10.0
         while time.time() < deadline and alive():
             time.sleep(0.5)
         graceful = not alive()
         if not graceful:
-            subprocess.run(["taskkill", "/F", "/IM", "Obsidian.exe", "/T"], capture_output=True)
+            subprocess.run(["taskkill", "/F", "/IM", "Obsidian.exe", "/T"], capture_output=True, stdin=subprocess.DEVNULL)
 
     for p in psutil.process_iter(["pid", "name"]):
         try:
@@ -464,6 +468,7 @@ def launch_obsidian(
 
     proc = subprocess.Popen(
         cmd,
+        stdin=subprocess.DEVNULL,
         stdout=log_fh,
         stderr=log_fh,
         creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0,

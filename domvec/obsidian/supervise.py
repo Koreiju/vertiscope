@@ -95,7 +95,20 @@ def _run_child(command: List[str], env: dict, port: Optional[int], *,
     """The child, run to its exit -- or killed as a STALLED start (early: no
     CPU to speak of after `EARLY_S`; late: no /health in `START_DEADLINE_S`
     and no CPU for `START_STALL_S`). With `capture`, (code, stdout)."""
-    proc = subprocess.Popen(command, env=env, stdout=subprocess.PIPE if capture else None, text=capture)
+    # **stdin is NUL, never inherited.** The cause of every start that hung
+    # (2026-10-23..25): a supervisor launched by the MCP server inherited
+    # that server's stdin -- a pipe it is always blocked READING, waiting
+    # for the next request -- and passed it to each child. On Windows a
+    # synchronous query on a pipe waits behind a pending read on it, so a
+    # child's interpreter startup (its check of the standard handles) sat in
+    # a kernel wait until the next MCP message arrived: 13 MB, one thread,
+    # no CPU. The first child started only because the server was busy
+    # answering `sidecar_start` at that moment. Reproduced in isolation
+    # (a blocked reader on the pipe: HUNG > 15 s; DEVNULL: 0.08 s).
+    # Planted: `DOMVEC_PLANT_INHERIT_STDIN=1`.
+    stdin = None if os.environ.get("DOMVEC_PLANT_INHERIT_STDIN") == "1" else subprocess.DEVNULL
+    proc = subprocess.Popen(command, env=env, stdin=stdin,
+                            stdout=subprocess.PIPE if capture else None, text=capture)
     started = time.time()
     planted = os.environ.get("DOMVEC_PLANT_NO_START_DEADLINE") == "1"
     healthy = port is None or planted

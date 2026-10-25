@@ -156,3 +156,33 @@ def test_three_stalls_in_a_row_give_up_with_a_marker(tmp_path, monkeypatch):
     got = _json.loads((tmp_path / "supervisor_gave_up.json").read_text(encoding="utf-8"))
     assert got["stalls"] == sv.GIVE_UP_STALLS
     assert "gave up" in (tmp_path / "crashes.log").read_text(encoding="utf-8")
+
+
+def test_a_child_starts_while_the_parents_stdin_pipe_is_being_read(monkeypatch):
+    """The stall's cause (2026-10-25): the MCP server is always blocked
+    reading its stdin pipe, and a supervisor it launched handed that pipe to
+    every child -- whose interpreter startup then waited behind the read.
+    Reproduced here: fd 0 replaced by a pipe a thread is blocked reading.
+    Clean, the child gets NUL and starts; planted, it inherits and hangs."""
+    import os
+    import threading
+    import pytest
+    from domvec.obsidian import supervise as sv
+    if sys.platform != "win32":
+        pytest.skip("the pipe wait is Windows' synchronous I/O")
+    r, w = os.pipe()
+    saved = os.dup(0)
+    os.dup2(r, 0)
+    threading.Thread(target=lambda: os.read(0, 1), daemon=True).start()
+    try:
+        time.sleep(0.3)
+        cmd = [sys.executable, "-c", "print(1)"]
+        t = time.time()
+        assert sv._run_child(cmd, dict(os.environ), None, timeout=10) == 0
+        assert time.time() - t < 8
+        monkeypatch.setenv("DOMVEC_PLANT_INHERIT_STDIN", "1")
+        assert sv._run_child(cmd, dict(os.environ), None, timeout=6) == sv.STUCK_CODE
+    finally:
+        os.write(w, b"x")
+        os.dup2(saved, 0)
+        os.close(saved); os.close(r); os.close(w)
