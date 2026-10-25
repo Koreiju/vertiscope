@@ -98,7 +98,7 @@ class _Store:
 
 def _fit(rows, budget=None):
     from domvec.obsidian.projector import PageProjector
-    proj = PageProjector(dims=3, centroid="semantic", seed=0)
+    proj = PageProjector(dims=3, centroid="semantic", seed=0, umap_scope="auto")
     if proj.engine != "parametric":
         pytest.skip("no CUDA/torch: the parametric engine is what has an update() to scope")
     if budget is not None:

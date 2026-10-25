@@ -7130,6 +7130,28 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-2",
+      asks: "chunk embeddings are UMAPped WITH their page's centroid -- two node kinds, one fit: the projector's model is the global scope, trained on page rows and chunk rows both; in the model's own coordinates (not the drawn ones, which put a chunk at its page by construction) a page's own chunks' centroid ranks near it -- median rank at most a fifth of the null arm's, where page positions are shuffled",
+      async run() {
+        // The user (2026-10-10): "the global map would be only on the chunks,
+        // with centroids still at the center"; G-2: "two node kinds, one fit".
+        // `page_frame` reads `raw_pos`, each chunk's own transform through the
+        // model the page rows were trained in, and carries its own null arm.
+        const got = await evaluate(`(async () => {
+          const SIDE = String(app.plugins.getPlugin("domvec-bridge").settings.sidecar).replace(/[/]+$/, "");
+          const d = await (await fetch(SIDE + "/projector?frame=1")).json();
+          const f = d.page_frame || {};
+          return { scope: d.scope, rows: d.global_rows, trained_pages: d.trained_pages, trained_chunks: d.trained_chunks,
+                   pages: f.pages, fit: f.fit, null_shuffled: f.null_shuffled,
+                   page_to_own_centroid_p50: f.page_to_own_centroid_p50 };
+        })()`, { timeout: 300000 });
+        if (!got || got.error || !got.fit || !got.null_shuffled) return { pass: false, evidence: got };
+        return { pass: got.scope === "global" && got.trained_pages > 0 && got.trained_chunks > 0
+                   && got.fit.own_rank_p50 * 5 <= got.null_shuffled.own_rank_p50,
+                 evidence: got };
+      },
+    },
+    {
       id: "G-269",
       asks: "url nodes are drawn two to three times their chunks' size in the view as it is, and the pick proxy with them: as the GPU is given them, page nodes 2.5x what they were, and where chunks are drawn, at least twice the median chunk; planted (plantSmallPages) the old sizes",
       async run() {

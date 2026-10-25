@@ -136,6 +136,11 @@ def _unit(v: np.ndarray) -> np.ndarray:
     return v / norm if norm > 1e-9 else v
 
 
+#: Planted (`G-2`, through the sidecar's `/plant`): a kept fit in another
+#: scope than the process wants is left as it is.
+PLANT_NO_SCOPE_SWITCH = [False]
+
+
 class _RowMap:
     """Which row of the global model is which chunk (and which page's centroid).
 
@@ -610,6 +615,13 @@ class ChunkProjector:
                 pass
         return record
 
+    #: Latent refits made because the kept fit is in the wrong scope.
+    scope_switches = 0
+
+    def scope_switch_due(self) -> bool:
+        """True when the fit held is not in the scope this process wants."""
+        return False
+
     def stale(self, workspace) -> bool:
         return bool(self.fitted_chunks) and (
             workspace.store.chunk_count() >= 2 * self.fitted_chunks)
@@ -704,6 +716,16 @@ class ChunkProjector:
                                     self.LATENT_S, self.LATENT_GROWTH):
                                 due = True
                                 self.latent_refits += 1
+                            # A kept fit made in another scope than this
+                            # process wants (the default became global on
+                            # 2026-10-25; a stored page fit would otherwise
+                            # hold until the corpus grew 25%): refit once,
+                            # latent, the same as growth would.
+                            if (not due and self.scope_switch_due()
+                                    and not self.queue
+                                    and time.monotonic() - self.last_drain_at >= self.LATENT_S):
+                                due = True
+                                self.scope_switches += 1
                     except Exception:               # noqa: BLE001
                         due = False
                     if due and not self.fitting:
@@ -843,7 +865,7 @@ class ChunkProjector:
             "projected": len(self.pos), "pages": len(self.page_pos),
             "queue": len(self.queue), "placed_total": self.placed_total,
             "last_batch": last, "last_fit": self.fits[-1] if self.fits else None,
-            "latent_refits": self.latent_refits,
+            "latent_refits": self.latent_refits, "scope_switches": self.scope_switches,
             "latent_s": round(time.monotonic() - self.last_drain_at, 1),
             "latent_window_s": self.LATENT_S,
             "latent_refit_at": (round(self.LATENT_GROWTH * self.fitted_chunks)
@@ -932,6 +954,47 @@ class ChunkProjector:
                 "kept": round(float(np.mean(kept)), 4),
                 "random": round(k / (len(cids) - 1), 5)}
 
+    def page_frame(self, seed: int = 2) -> Dict:
+        """`G-2`: are pages and chunks ONE fit? Read in the model's own
+        coordinates, not the drawn ones -- `pos` puts each chunk at its page
+        by construction (`_place_chunks`), so a drawn page sits at its
+        chunks' centroid whatever the fit. `raw_pos` is each chunk's own
+        transform through the model the page rows were trained in.
+
+        For every page with >= 3 raw chunks: the rank of its own chunks' raw
+        centroid among all pages' raw centroids by distance from the page's
+        fitted position (1 = its own is nearest). Null arm, same numbers:
+        page positions shuffled among pages. Two frames (pages fitted, chunks
+        transformed apart) put 36% of chunks nearest their page (2026-09-27).
+        """
+        with self.lock:
+            by: Dict[str, List[List[float]]] = {}
+            for c, xyz in (getattr(self, "raw_pos", None) or {}).items():
+                u = self.url_of.get(c)
+                if u in self.page_pos:
+                    by.setdefault(u, []).append(xyz[:self.dims])
+            pages = sorted(u for u, xs in by.items() if len(xs) >= 3)
+            P = np.asarray([self.page_pos[u][:self.dims] for u in pages], dtype=np.float64)
+        if len(pages) < 3:
+            return {"pages": len(pages)}
+        C = np.asarray([np.mean(by[u], axis=0) for u in pages], dtype=np.float64)
+
+        def ranks(Q):
+            r = []
+            for i in range(len(pages)):
+                d = np.linalg.norm(C - Q[i], axis=1)
+                r.append(int((d < d[i]).sum()) + 1)
+            r = np.asarray(r)
+            return {"own_rank_p50": int(np.median(r)), "own_rank_p90": int(np.percentile(r, 90)),
+                    "rank_1": round(float((r == 1).mean()), 3), "top_5": round(float((r <= 5).mean()), 3)}
+        spread = float(np.sqrt(((C - C.mean(0)) ** 2).sum(1).mean()))
+        gap = np.linalg.norm(P - C, axis=1)
+        return {"pages": len(pages), "raw_chunks": int(sum(len(by[u]) for u in pages)),
+                "fit": ranks(P),
+                "null_shuffled": ranks(P[np.random.default_rng(seed).permutation(len(pages))]),
+                "page_to_own_centroid_p50": round(float(np.median(gap)) / max(spread, 1e-9), 4),
+                "centroid_cloud_rms": round(spread, 3)}
+
     def chunk_pos(self, cid: str) -> Optional[List[float]]:
         return self.pos.get(cid)
 
@@ -987,10 +1050,15 @@ class PageProjector(ChunkProjector):
                  seed: int = 0, engine: str = "", umap_scope: str = "") -> None:
         super().__init__(dims, sample_cap=10 ** 9, seed=seed)
         import os
-        #: "global" -- ONE model over every chunk, a page's diff retrains only
-        #: that page's rows (`DOMVEC_UMAP_SCOPE=global`); "" -- the scope
-        #: chosen by what an update costs (G-106). Off unless asked for.
-        self.umap_scope = (umap_scope or os.environ.get("DOMVEC_UMAP_SCOPE", "")).strip().lower()
+        #: "global" -- ONE model over every chunk and page centroid (`G-2`),
+        #: a page's diff retrains only that page's rows; "auto" -- the scope
+        #: chosen by what an update costs (G-106), which on this store is
+        #: page centroids alone. Global by default since 2026-10-25, measured
+        #: live on 1,301 pages / 98,959 chunks, both arms refitted fresh:
+        #: a 193-chunk page trained in 1.63 s (pages: 12.2 s, and its chunks
+        #: only transformed), 8-NN kept 0.132 either way, first fit 56 s
+        #: (pages: 25 s). Only the parametric engine can take it.
+        self.umap_scope = (umap_scope or os.environ.get("DOMVEC_UMAP_SCOPE", "global")).strip().lower()
         self.rows = _RowMap()
         self.centroid = centroid if centroid in ("triple", "semantic") else "triple"
         #: "parametric" -- the online GPU model (`pumap.py`): a refit trains on
@@ -1118,6 +1186,15 @@ class PageProjector(ChunkProjector):
     #: A first fit over every chunk of a large corpus would run epochs x
     #: edges/batch steps (60,000 at 15,000 rows); the global scope caps it.
     GLOBAL_FIT_STEPS = 4000
+
+    def scope_switch_due(self) -> bool:
+        # Once per process: a fit that still lands elsewhere (no CUDA, the
+        # triple centroid) must not be retried every idle five seconds.
+        if self.scope_switches or self.fitting or self.projection is None:
+            return False
+        return (self.umap_scope == "global" and self.scope != "global"
+                and self.engine == "parametric" and self.centroid == "semantic"
+                and not PLANT_NO_SCOPE_SWITCH[0])
 
     def _first_fit(self, L, X, want: int, n_pages: int, max_steps=None):
         """The first fit of the page layout, by the configured engine."""

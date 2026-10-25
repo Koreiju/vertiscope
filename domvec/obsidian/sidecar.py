@@ -701,6 +701,7 @@ _PLANTABLE = {
     "no-edge-memo": ("domvec.obsidian.layout", "PLANT_NO_EDGE_MEMO"),       # chunk view, 2026-10-24
     "fixed-batch": ("domvec.obsidian.projector", "PLANT_FIXED_BATCH"),      # G-13, 2026-10-24
     "adaptive-window": ("domvec.obsidian.projector", "ADAPTIVE_WINDOW"),    # G-13, off by default
+    "no-scope-switch": ("domvec.obsidian.projector", "PLANT_NO_SCOPE_SWITCH"),  # G-2, 2026-10-25
 }
 
 
@@ -3481,6 +3482,8 @@ class _Handler(BaseHTTPRequestHandler):
             out = proj.status(self.workspace, url)
             if (query.get("quality") or [""])[0]:
                 out["neighbourhoods"] = proj.neighbourhoods_kept()
+            if (query.get("frame") or [""])[0]:
+                out["page_frame"] = proj.page_frame()
             if (query.get("drawable") or [""])[0]:
                 # The denominator for "every drawable chunk is projected",
                 # NOW -- not at the fit, which a merge or a retirement since

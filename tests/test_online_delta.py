@@ -38,7 +38,7 @@ def _setup(monkeypatch, scope, debounce=0.05):
     rows = make_rows()
     first = [r for r in rows if r[1] != NEW]
     ws = workspace(first)
-    proj = PageProjector(dims=3, centroid="semantic", seed=0, engine="parametric")
+    proj = PageProjector(dims=3, centroid="semantic", seed=0, engine="parametric", umap_scope="auto")
     if proj.engine != "parametric":
         pytest.skip("no CUDA/torch: the parametric engine is what has an online update")
     if scope == "pages":

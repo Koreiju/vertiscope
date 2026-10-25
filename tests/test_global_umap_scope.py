@@ -237,7 +237,7 @@ def test_a_mutated_page_retrains_its_own_rows_and_nothing_else_moves(monkeypatch
 def test_planted_the_chunk_scope_never_retrains_a_mutated_chunk(monkeypatch):
     """The contrast the global scope exists to remove (projector.py, drain: only
     pages / chunks the model has never seen are scheduled)."""
-    proj, ws, rows = _global(monkeypatch, scope="")
+    proj, ws, rows = _global(monkeypatch, scope="auto")
     assert proj.scope == "chunks"
     _mutate(rows, ws, proj, "https://p3.test/", "https://p9.test/")
     assert proj.drain(ws) is not None
@@ -290,3 +290,31 @@ def test_the_refit_path_retrains_only_the_pages_that_differ(monkeypatch):
     # An identical store: nothing differs, nothing is retrained.
     again = proj.fit(ws)
     assert again["global_refit"]["pages"] == 0
+
+
+def test_the_scope_is_global_unless_asked_otherwise(monkeypatch):
+    """G-2 (2026-10-25): one model over pages AND chunks is the default; the
+    cost-chosen scope -- page centroids alone on any real store -- is
+    `DOMVEC_UMAP_SCOPE=auto`. Planted arm: the opt-out is honoured."""
+    monkeypatch.delenv("DOMVEC_UMAP_SCOPE", raising=False)
+    assert PageProjector(dims=3, centroid="semantic", engine="umap").umap_scope == "global"
+    monkeypatch.setenv("DOMVEC_UMAP_SCOPE", "auto")
+    assert PageProjector(dims=3, centroid="semantic", engine="umap").umap_scope == "auto"
+
+
+def test_a_kept_fit_in_another_scope_is_refitted_once(monkeypatch):
+    """A store's page-scope fit, loaded by a process that wants global, asks
+    for one latent refit -- and only one, so a fit that still lands in pages
+    is not retried every idle tick. Planted: `PLANT_NO_SCOPE_SWITCH`."""
+    from domvec.obsidian import projector as P
+    monkeypatch.delenv("DOMVEC_UMAP_SCOPE", raising=False)
+    proj = PageProjector(dims=3, centroid="semantic", engine="umap")
+    proj.engine, proj.scope, proj.projection = "parametric", "pages", object()
+    assert proj.scope_switch_due()
+    monkeypatch.setattr(P, "PLANT_NO_SCOPE_SWITCH", [True])
+    assert not proj.scope_switch_due()
+    monkeypatch.setattr(P, "PLANT_NO_SCOPE_SWITCH", [False])
+    proj.scope_switches = 1
+    assert not proj.scope_switch_due()
+    proj.scope_switches, proj.scope = 0, "global"
+    assert not proj.scope_switch_due()
