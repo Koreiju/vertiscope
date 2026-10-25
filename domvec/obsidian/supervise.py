@@ -140,11 +140,31 @@ def _statement(workspace: Path) -> str:
         return "(no breadcrumb)"
 
 
+def _compact_in_child(workspace: Path) -> dict:
+    """`compact` run as its own process; its JSON result."""
+    run = subprocess.run([sys.executable, "-m", "domvec.obsidian.compact", str(workspace)],
+                         capture_output=True, text=True, timeout=3600)
+    lines = [ln for ln in (run.stdout or "").splitlines() if ln.strip().startswith("{")]
+    return json.loads(lines[-1]) if lines else {
+        "error": "compaction exited %s: %s" % (run.returncode, (run.stderr or "")[-200:])}
+
+
 def _compact_logged(workspace: Path, why: str) -> dict:
-    """Compact the store (nothing has it open) and say so in both logs."""
+    """Compact the store (nothing has it open) and say so in both logs.
+
+    In its OWN process, never in this one (2026-10-24): compacted in-process,
+    the supervisor held kuzu afterwards, and every child it started next hung
+    at interpreter startup -- 13 MB, one thread, inside the Store Python's
+    package lookup (`windows.staterepositorycore.dll`), 0.02 s of CPU --
+    four in a row at 22:43 and 23:23, while a Python started anywhere else
+    came up in 0.1 s. Planted `DOMVEC_PLANT_COMPACT_IN_PROCESS=1`.
+    """
     try:
-        from .compact import compact
-        got = compact(workspace)
+        if os.environ.get("DOMVEC_PLANT_COMPACT_IN_PROCESS") == "1":
+            from .compact import compact
+            got = compact(workspace)
+        else:
+            got = _compact_in_child(workspace)
     except Exception as exc:                   # noqa: BLE001 -- never stays down for it
         got = {"error": "%s: %s" % (type(exc).__name__, str(exc)[:200])}
     rec = {k: got.get(k) for k in ("before_mb", "after_mb", "swapped", "why_not", "error", "s")}

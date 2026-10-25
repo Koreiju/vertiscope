@@ -109,3 +109,11 @@ def compact(workspace: Path, *, keep_as: Optional[str] = None, pool_bytes: int =
         return out
     finally:
         shutil.rmtree(work, ignore_errors=True)
+
+
+if __name__ == "__main__":
+    # Run by the supervisor as its own process (`supervise._compact_logged`):
+    # the result, one JSON line on stdout.
+    import json as _json
+    import sys as _sys
+    print(_json.dumps(compact(Path(_sys.argv[1])), default=str), flush=True)

@@ -72,7 +72,8 @@ def test_two_crashes_compact_and_the_store_starts(tmp_path, monkeypatch):
     import json
     import domvec.obsidian.supervise as sv
     done = tmp_path / "compacted.json"
-    monkeypatch.setattr("domvec.obsidian.compact.compact",
+    # Compaction runs in its own process (`_compact_in_child`); replaced here.
+    monkeypatch.setattr(sv, "_compact_in_child",
                         lambda ws, **k: (done.write_text(json.dumps({"after_mb": 1})), {"swapped": True, "before_mb": 5, "after_mb": 1})[1])
     child = [sys.executable, "-c", "import os,sys; sys.exit(0 if os.path.exists(%r) else 139)" % str(done)]
     assert sv.supervise(tmp_path, [], command=child, pause=0.0) == 0
