@@ -65,6 +65,20 @@ SAMPLE_CAP = 4000
 #: batched), so small batches waste it and huge ones hold the lock.
 BATCH = 256
 
+#: G-13's window -- the queue waiting, from its oldest item, as long as a drain
+#: costs -- is OFF: measured 2026-10-24 on four streamed pages a side, it took
+#: chunks per drain 90.0 -> 95.6 and no drain away, and put ~240 ms on every
+#: chunk's wait (queue wait p50 70 -> 314 ms). A page's chunks arrive in one
+#: burst from the embedder, so the queue is batched already. Kept behind this
+#: flag so `scripts/check_batch_window.py` can measure it again.
+#: `PLANT_FIXED_BATCH` (sidecar `/plant fixed-batch`) stays the window's off
+#: switch for that script; the default is off either way.
+ADAPTIVE_WINDOW = [False]
+PLANT_FIXED_BATCH = [False]
+#: The batching window's ceiling: a drain costing more than this still waits
+#: no longer for company.
+WINDOW_CAP_S = 0.5
+
 #: How many changes the log keeps. A pane further behind than this is told
 #: to reload rather than handed a partial history.
 LOG_CAP = 50000
@@ -256,8 +270,13 @@ class ChunkProjector:
         self.page_hsv: Dict[str, List[float]] = {}
         #: (seq, kind, id) -- kind is "chunk", "gone" or "page".
         self.log: Deque[Tuple[int, str, str]] = deque(maxlen=LOG_CAP)
-        self.queue: Dict[str, None] = {}
+        self.queue: Dict[str, Optional[float]] = {}
         self.queue_lock = threading.Lock()
+        #: G-13: what a drain costs (moving average, ms), whether the next
+        #: drain is wanted at once (a hover), and what the window did.
+        self.cost_ms: Optional[float] = None
+        self.urgent = False
+        self.window_stats: Dict = {"drains": 0, "placed": 0, "waited_ms": 0.0, "windows": 0}
         self.wanted = threading.Event()
         self.fitted_chunks = 0
         self.fitted_points = 0
@@ -426,10 +445,11 @@ class ChunkProjector:
     def enqueue(self, cids: Iterable[str]) -> int:
         """Queue chunks whose vector or existence may have changed."""
         added = 0
+        now = time.monotonic()
         with self.queue_lock:
             for cid in cids:
                 if cid and cid not in self.queue:
-                    self.queue[cid] = None
+                    self.queue[cid] = now
                     added += 1
         if added:
             self.wanted.set()
@@ -441,9 +461,12 @@ class ChunkProjector:
         wanted = [c for c in dict.fromkeys(cids) if c]
         if not wanted:
             return 0
+        now = time.monotonic()
         with self.queue_lock:
-            rest = [c for c in self.queue if c not in set(wanted)]
-            self.queue = dict.fromkeys(wanted + rest)
+            rest = {c: t for c, t in self.queue.items() if c not in set(wanted)}
+            self.queue = {**{c: self.queue.get(c) or now for c in wanted}, **rest}
+            # A hover is waiting on these: no batching window.
+            self.urgent = True
         self.wanted.set()
         return len(wanted)
 
@@ -456,14 +479,52 @@ class ChunkProjector:
             held = set(self.by_url.get(url) or ())
         return self.enqueue(list(now | held))
 
+    def _take_batch(self) -> List[str]:
+        """The next batch off the queue, each item's wait noted (G-13)."""
+        now = time.monotonic()
+        with self.queue_lock:
+            batch = list(self.queue)[:BATCH]
+            self.window_stats["batched"] = self.window_stats.get("batched", 0) + len(batch)
+            for cid in batch:
+                t = self.queue.pop(cid, None)
+                if t:
+                    w = self.window_stats.setdefault("waits_ms", [])
+                    w.append(round((now - t) * 1000, 1))
+                    self.window_stats["waits_seen"] = self.window_stats.get("waits_seen", 0) + 1
+                    if len(w) > 2000:
+                        del w[:1000]
+        return batch
+
+    def batching_status(self) -> Dict:
+        """The G-13 window: what a drain costs, the window it sets, and how
+        long queued chunks waited for their drain."""
+        ws = self.window_stats
+        waits = sorted(ws.get("waits_ms") or [])
+        q = lambda p: waits[min(len(waits) - 1, int(p * len(waits)))] if waits else None  # noqa: E731
+        return {"cost_ms": self.cost_ms, "window_ms": round(self.batch_window_s() * 1000, 1),
+                "fixed": bool(PLANT_FIXED_BATCH[0]), "drains": ws["drains"], "placed": ws["placed"],
+                "per_drain": round(ws["placed"] / ws["drains"], 2) if ws["drains"] else None,
+                "batched": ws.get("batched", 0),
+                "chunks_per_drain": round(ws.get("batched", 0) / ws["drains"], 2) if ws["drains"] else None,
+                "windows": ws["windows"], "waited_ms": ws["waited_ms"],
+                "wait_p50_ms": q(0.5), "wait_p95_ms": q(0.95), "waits": len(waits),
+                "waits_seen": ws.get("waits_seen", 0), "waits_tail": (ws.get("waits_ms") or [])[-1500:]}
+
+    def batch_window_s(self) -> float:
+        """How long a woken queue waits for company: what a drain has been
+        costing (G-13, the verbatim: "batched in a queue at a latency that
+        adapts to match the time scaling of the umap updates"). Cheap
+        updates go at once; dear ones gather what arrives meanwhile, so
+        their fixed cost is paid once for more chunks."""
+        if not ADAPTIVE_WINDOW[0] or PLANT_FIXED_BATCH[0] or not self.cost_ms:
+            return 0.0
+        return min(self.cost_ms / 1000.0, WINDOW_CAP_S)
+
     def drain(self, workspace) -> Optional[Dict]:
         """Transform one batch from the queue into the fit."""
-        with self.queue_lock:
-            if not self.queue:
-                return None
-            batch = list(self.queue)[:BATCH]
-            for cid in batch:
-                self.queue.pop(cid, None)
+        if not self.queue:
+            return None
+        batch = self._take_batch()
         projection = self.projection
         if projection is None:
             # Nothing to place into yet; they wait for the first fit, which
@@ -581,6 +642,19 @@ class ChunkProjector:
             while not self._stop.is_set():
                 self.wanted.wait(timeout=1.0)
                 self.wanted.clear()
+                # The batching window (G-13): a small queue waits, from its
+                # OLDEST item, as long as a drain has been costing -- unless a
+                # hover asked for these chunks.
+                window = self.batch_window_s()
+                if window > 0 and self.queue and not self.urgent and len(self.queue) < BATCH:
+                    with self.queue_lock:
+                        oldest = min((t for t in self.queue.values() if t), default=time.monotonic())
+                    rest = oldest + window - time.monotonic()
+                    if rest > 0:
+                        self._stop.wait(rest)
+                        self.window_stats["windows"] += 1
+                        self.window_stats["waited_ms"] = round(self.window_stats["waited_ms"] + rest * 1000, 1)
+                self.urgent = False
                 # The drain only READS -- chunk rows and vectors, on the store's
                 # own read connection -- and with the semantic centroid it
                 # touches no shared in-memory index a capture mutates. So it
@@ -599,6 +673,10 @@ class ChunkProjector:
                     if got is None:
                         break
                     self.last_drain_at = time.monotonic()
+                    ms = float(got.get("ms") or 0.0)
+                    self.cost_ms = round(ms if self.cost_ms is None else 0.7 * self.cost_ms + 0.3 * ms, 2)
+                    self.window_stats["drains"] += 1
+                    self.window_stats["placed"] += int(got.get("placed") or 0)
                     # Let a waiting request in between batches. Releasing the
                     # work lock and taking it straight back starves every
                     # request thread -- Python's locks are not FIFO: a 5,132-
@@ -770,6 +848,7 @@ class ChunkProjector:
             "latent_window_s": self.LATENT_S,
             "latent_refit_at": (round(self.LATENT_GROWTH * self.fitted_chunks)
                                 if self.fitted_chunks else None),
+            "batching": self.batching_status(),
         }
         if hasattr(self, "local"):
             out["local"] = {"fitted_urls": len(self.local), "pending": len(self.local_pending),
@@ -1886,12 +1965,9 @@ class PageProjector(ChunkProjector):
     def drain(self, workspace) -> Optional[Dict]:
         """A batch of changed chunks re-derives the centroid of each PAGE they
         belong to, and only those pages are transformed into the fit."""
-        with self.queue_lock:
-            if not self.queue:
-                return None
-            batch = list(self.queue)[:BATCH]
-            for cid in batch:
-                self.queue.pop(cid, None)
+        if not self.queue:
+            return None
+        batch = self._take_batch()
         projection = self.projection
         if projection is None:
             return None

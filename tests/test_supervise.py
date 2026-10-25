@@ -8,6 +8,7 @@ stay up.
 """
 
 import sys
+import time
 
 from domvec.obsidian.supervise import BURST, supervise
 
@@ -87,3 +88,31 @@ def test_planted_no_crash_compact_gives_up(tmp_path, monkeypatch):
     child = [sys.executable, "-c", "import sys; sys.exit(139)"]
     assert sv.supervise(tmp_path, [], command=child, pause=0.0) == 139
     assert called == []
+
+
+# A child that never answers /health and spends no CPU: a STALLED start
+# (2026-10-24, a child after a compaction hung 10 min in the native preload).
+SLEEPER = [sys.executable, "-c", "import time; time.sleep(60)"]
+
+
+def test_a_stalled_start_is_killed_and_logged(tmp_path, monkeypatch):
+    import domvec.obsidian.supervise as sv
+    monkeypatch.setattr(sv, "START_DEADLINE_S", 1.0)
+    monkeypatch.setattr(sv, "START_STALL_S", 1.0)
+    monkeypatch.setattr(sv, "BURST", 2)
+    t0 = time.time()
+    code = sv.supervise(tmp_path, ["--port", "1"], command=SLEEPER, pause=0.0)
+    assert code == sv.STUCK_CODE
+    assert time.time() - t0 < 30                     # killed, not waited out
+    assert "start stalled" in (tmp_path / "crashes.log").read_text(encoding="utf-8")
+
+
+def test_planted_no_deadline_leaves_it_running(tmp_path, monkeypatch):
+    import domvec.obsidian.supervise as sv
+    monkeypatch.setattr(sv, "START_DEADLINE_S", 1.0)
+    monkeypatch.setattr(sv, "START_STALL_S", 1.0)
+    monkeypatch.setenv("DOMVEC_PLANT_NO_START_DEADLINE", "1")
+    short = [sys.executable, "-c", "import time; time.sleep(4)"]
+    t0 = time.time()
+    assert sv.supervise(tmp_path, ["--port", "1"], command=short, pause=0.0) == 0
+    assert time.time() - t0 >= 4

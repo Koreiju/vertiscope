@@ -46,6 +46,69 @@ RESTART_CODE = 75
 #: nothing has it open (`compact.compact`), then starts the sidecar again.
 COMPACT_CODE = 76
 
+#: A start that STALLED: no answer on /health inside `START_DEADLINE_S`, and
+#: no CPU spent for `START_STALL_S` -- killed and started again (2026-10-24:
+#: a child started after a compaction sat 10 min with torch and OpenBLAS
+#: loaded, 2.3 s of CPU, its main thread in a kernel wait, and the reader's
+#: sidecar was simply gone). Planted `DOMVEC_PLANT_NO_START_DEADLINE=1`.
+STUCK_CODE = 70
+START_DEADLINE_S = float(os.environ.get("DOMVEC_START_DEADLINE_S") or 240.0)
+START_STALL_S = float(os.environ.get("DOMVEC_START_STALL_S") or 60.0)
+
+
+def _port_of(args: List[str]) -> Optional[int]:
+    for i, a in enumerate(args):
+        if a == "--port" and i + 1 < len(args):
+            try:
+                return int(args[i + 1])
+            except ValueError:
+                return None
+    return None
+
+
+def _healthy(port: int) -> bool:
+    import urllib.request
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:%d/health" % port, timeout=5) as r:
+            return r.status == 200
+    except Exception:                               # noqa: BLE001
+        return False
+
+
+def _run_child(command: List[str], env: dict, port: Optional[int]) -> int:
+    """The child, run to its exit -- or killed as a STALLED start."""
+    proc = subprocess.Popen(command, env=env)
+    started = time.time()
+    healthy = port is None or os.environ.get("DOMVEC_PLANT_NO_START_DEADLINE") == "1"
+    try:
+        import psutil
+        ps = psutil.Process(proc.pid)
+    except Exception:                               # noqa: BLE001
+        ps = None
+    last_cpu, last_move = None, time.time()
+    while True:
+        try:
+            return proc.wait(timeout=2.0)
+        except subprocess.TimeoutExpired:
+            pass
+        if healthy:
+            continue
+        if _healthy(port):
+            healthy = True
+            continue
+        try:
+            t = ps.cpu_times() if ps is not None else None
+            cpu = (t.user + t.system) if t is not None else None
+        except Exception:                           # noqa: BLE001
+            cpu = None
+        if cpu is None or last_cpu is None or cpu - last_cpu > 0.5:
+            last_cpu, last_move = cpu, time.time()
+        now = time.time()
+        if now - started > START_DEADLINE_S and now - last_move > START_STALL_S:
+            proc.kill()
+            proc.wait()
+            return STUCK_CODE
+
 def quarantine_wal(workspace: Path) -> Optional[Path]:
     """Set an unreplayable write-ahead log aside so the store can open.
 
@@ -110,7 +173,7 @@ def supervise(workspace: Path, serve_args: List[str], *,
     while True:
         started = time.time()
         # The child knows a supervisor will act on COMPACT_CODE.
-        code = subprocess.call(command, env={**os.environ, "DOMVEC_SUPERVISED": "1"})
+        code = _run_child(command, {**os.environ, "DOMVEC_SUPERVISED": "1"}, _port_of(serve_args))
         if code == 0:
             return 0                           # a clean stop is not a crash
         if code == RESTART_CODE:
@@ -119,6 +182,15 @@ def supervise(workspace: Path, serve_args: List[str], *,
             _compact_logged(workspace, "asked")
             continue
         now = time.time()
+        if code == STUCK_CODE:
+            note = "%s start stalled: no /health in %.0f s, no CPU for %.0f s -- killed, starting again" % (
+                time.strftime("%Y-%m-%d %H:%M:%S"), now - started, START_STALL_S) + chr(10)
+            try:
+                with log.open("a", encoding="utf-8") as fh:
+                    fh.write(note)
+            except OSError:
+                pass
+            print(note.strip(), flush=True)
         crashes = [t for t in crashes if now - t < WINDOW_S] + [now]
         if len(crashes) == 1:
             compacted_this_burst = False

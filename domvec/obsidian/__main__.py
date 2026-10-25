@@ -12,7 +12,9 @@ explicit opt-out.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
+import time
 from pathlib import Path
 
 from ..workspace import Workspace
@@ -111,7 +113,22 @@ def main(argv=None) -> int:
         # workspace starts any other (`preload_native`: a DLL loaded later on
         # a worker deadlocked the process on the Windows loader lock).
         from .sidecar import preload_native
-        print("preloaded: %s" % preload_native())
+        # A start that hangs in the native preload says WHERE (2026-10-24: a
+        # child restarted after a compaction sat 10 min with torch and
+        # OpenBLAS loaded and numba not, 2.3 s of CPU, its main thread in a
+        # kernel wait -- and nothing named the import). The C timer dumps
+        # every thread's Python stack each minute until the preload returns.
+        import faulthandler
+        try:
+            start_fh = open(Path(args.workspace) / "stacks.log", "a", encoding="utf-8")
+            start_fh.write("==== %s: start, preloading (pid %d)" % (time.strftime("%Y-%m-%d %H:%M:%S"), os.getpid()) + chr(10))
+            start_fh.flush()
+            faulthandler.dump_traceback_later(60, repeat=True, file=start_fh, exit=False)
+        except Exception:                           # noqa: BLE001
+            start_fh = None
+        print("preloaded: %s" % preload_native(), flush=True)
+        if start_fh is not None:
+            faulthandler.cancel_dump_traceback_later()
     if getattr(args, "semantic", False):
         from ..core.embedding_service import get_default_service
 

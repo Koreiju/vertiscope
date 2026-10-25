@@ -699,6 +699,8 @@ _PLANT_NO_MD_HEAL = [os.environ.get("DOMVEC_PLANT_NO_MD_HEAL") == "1"]
 _PLANTABLE = {
     "placeholder-target": ("domvec.markdown", "PLANT_PLACEHOLDER_TARGET"),   # G-197
     "no-edge-memo": ("domvec.obsidian.layout", "PLANT_NO_EDGE_MEMO"),       # chunk view, 2026-10-24
+    "fixed-batch": ("domvec.obsidian.projector", "PLANT_FIXED_BATCH"),      # G-13, 2026-10-24
+    "adaptive-window": ("domvec.obsidian.projector", "ADAPTIVE_WINDOW"),    # G-13, off by default
 }
 
 
