@@ -6947,6 +6947,53 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-85",
+      asks: "an opened page's tree has MUCH longer links than the page layer's own spacing: the median tree link at least 3x the median gap between page nodes; the same tree drawn at the force tree's old 18-unit links fails that bar",
+      async run() {
+        // DESIGN_VII s6: "The link distance is set from the page layer's own
+        // spacing (not a constant), and a check asserts the drawn tree's
+        // median link length." The verbatim (VII): "max link lengths need to
+        // be much longer" -- 3x the page gap here, not merely >= it.
+        const got = await evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
+          if (!v || !v.graph) return { error: "no graph" };
+          if (v.level === "chunk") return { error: "in chunk view" };
+          const d0 = v.graph.graphData();
+          const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y, (a.z || 0) - (b.z || 0));
+          const pages = d0.nodes.filter((n) => n.level === "page" && Number.isFinite(n.x));
+          const gaps = pages.map((p) => { let m = Infinity; for (const q of pages) if (q !== p) m = Math.min(m, dist(p, q)); return m; })
+            .filter(Number.isFinite).sort((a, b) => a - b);
+          const gap = gaps.length ? gaps[Math.floor(gaps.length / 2)] : null;
+          // The stored page with the most chunks among a few known ones.
+          const page = d0.nodes.find((n) => n.level === "page" && String(n.url).endsWith("/wiki/Radix_tree"))
+            || d0.nodes.find((n) => n.level === "page" && String(n.url).includes("wikipedia.org/wiki/"));
+          if (!page) return { error: "no wikipedia page node" };
+          const url = page.url;
+          const already = d0.nodes.some((x) => x.url === url && x.level !== "page");
+          if (!already) await v.togglePage(page);
+          let links = [];
+          try {
+            for (let i = 0; i < 40; i++) {
+              await sleep(500);
+              const d = v.graph.graphData();
+              links = d.links.filter((l) => typeof l.source === "object" && typeof l.target === "object" && l.source.url === url && l.target.url === url);
+              if (links.length > 5 && i > 6) break;
+            }
+          } finally { if (!already) await v.togglePage(page); }
+          const lens = links.map((l) => dist(l.source, l.target)).sort((a, b) => a - b);
+          const med = lens.length ? lens[Math.floor(lens.length / 2)] : null;
+          // Non-vacuity: the same tree at the force tree's 18-unit links.
+          const old = 18;
+          return { url: url.slice(-40), links: lens.length, link_p50: med && Math.round(med * 100) / 100, page_gap_p50: gap && Math.round(gap * 100) / 100,
+                   ratio: med && gap ? Math.round(med / gap * 100) / 100 : null,
+                   ratio_at_old_18: gap ? Math.round(old / gap * 100) / 100 : null };
+        })()`, { timeout: 60000 });
+        if (!got || got.error) return { pass: false, evidence: got };
+        return { pass: got.links > 5 && got.ratio >= 3 && got.ratio_at_old_18 < 3, evidence: got };
+      },
+    },
+    {
       id: "G-269",
       asks: "url nodes are drawn two to three times their chunks' size in the view as it is, and the pick proxy with them: as the GPU is given them, page nodes 2.5x what they were, and where chunks are drawn, at least twice the median chunk; planted (plantSmallPages) the old sizes",
       async run() {
