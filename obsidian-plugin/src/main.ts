@@ -159,9 +159,11 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     }, 60000));
     // A supervisor that GAVE UP (every start stalled at the interpreter;
     // `supervisor_gave_up.json` in the workspace) is replaced by a fresh one
-    // started from here -- a fresh supervisor's first child always started,
-    // and its own children did not (2026-10-25). Only on that marker: a
-    // sidecar the reader stopped is left stopped. Planted
+    // started from here, outside whatever launched the old one. The stalls
+    // themselves were children inheriting the MCP server's stdin pipe
+    // (fixed in `supervise._run_child`, 2026-10-25); this stays as the
+    // fallback for a supervisor that gives up for any other reason. Only on
+    // that marker: a sidecar the reader stopped is left stopped. Planted
     // `__domvecPlantNoRespawn`.
     this.registerInterval(window.setInterval(() => { void this.watchSidecar(); }, 30000));
     this.links = new VaultLinks(this.app, this.sidecar);
