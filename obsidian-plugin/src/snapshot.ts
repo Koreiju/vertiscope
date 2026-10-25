@@ -52,7 +52,7 @@ export interface Snapshot {
   at: number;
 }
 
-export { snapshotScript } from "./snapshotscript";
+export { snapshotScript, SNAPSHOT_PLANTS } from "./snapshotscript";
 
 /** The xpaths a chunk's payload lines draw (`url|xpath|cls|accessor...` keys). */
 export function xpathsOfLines(lines: { key?: string }[]): string[] {

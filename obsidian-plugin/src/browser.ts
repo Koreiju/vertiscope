@@ -29,7 +29,7 @@
 
 import { mergePayloads, removesCarried } from "./mergepayloads";
 export { mergePayloads };
-import { addressTarget } from "./address";
+import { addressTarget, inUnit, lineAddr } from "./address";
 import { isolate } from "./isolate";
 import { ForceTree, type ForceNodeDelta } from "./forcetree";
 import { PipelineBox } from "./pipelinebox";
@@ -42,7 +42,7 @@ import { Component, ItemView, MarkdownRenderer, Menu, WorkspaceLeaf, requestUrl 
 import { baseFor, putBase, putFavicon, putPictures } from "./snapshot";
 // A streamed link's destination resolves against the base its page declared.
 ForceTree.baseOf = baseFor;
-import { Snapshot, dropSnapshot, getSnapshot, putSnapshot, renderSnapshot, snapshotScript, xpathsOfLines } from "./snapshot";
+import { SNAPSHOT_PLANTS, Snapshot, dropSnapshot, getSnapshot, putSnapshot, renderSnapshot, snapshotScript, xpathsOfLines } from "./snapshot";
 
 import { LayoutNode } from "./graph";
 import { Sidecar } from "./sidecar";
@@ -1209,6 +1209,10 @@ export class BrowserView extends ItemView {
   /** Fast-path snapshots re-taken with their controls addressed (G-183). */
   snapAddressed = 0;
   private addrsFor = new Map<string, { addrs: any; at: number }>();
+  /** Grey chunks snapshotted from this cell's own tree (G-119). */
+  greyPageForms = 0;
+  /** The snapshot script's host-side plants, for a check. */
+  snapshotPlants = SNAPSHOT_PLANTS;
   async snapshotChunk(cid: string, url: string, again = false): Promise<boolean> {
     // `again`: re-read the live page even when a snapshot is held -- an open
     // panel after a diff, or a panel just opened (2026-10-06: the held one was
@@ -1221,6 +1225,25 @@ export class BrowserView extends ItemView {
     // FAST: the chunk's elements from the browser's own chunk map -- no
     // sidecar round trip, which queued behind the capture's writes (panel
     // first paint p90 1.8 s while a page was being captured, 2026-10-07).
+    // A GREY chunk (the page's own, not stored yet): its elements from this
+    // cell's own tree -- the stored map and the sidecar know nothing of it,
+    // so its panel was markdown only on every fresh page (2026-10-24,
+    // johnwick.movie and archive.org: 17 grey panels, 0 in the page form).
+    // `base|unit`: the unit's lines only, as the markdown form takes them.
+    // Planted `no-grey-page-form`.
+    if (String(cid).startsWith("f:") && !this.plant.has("no-grey-page-form")) {
+      const bar = cid.indexOf("|");
+      const base = bar > 0 ? cid.slice(0, bar) : cid, at = bar > 0 ? cid.slice(bar + 1) : "";
+      const m = /^f:(.*)#\d+(?:\.\d+)?$/.exec(base);
+      const tree = m ? this.forceTrees.get(m[1]) : null;
+      const lines = ((tree && tree.addrsOf(base)) || []).map((a: string) => ({ key: `${m![1]}|${a}` }));
+      const unit = at ? lines.filter((l: any) => inUnit(lineAddr(l), at)) : lines;
+      const xpaths = xpathsOfLines(unit.length ? unit : lines);
+      if (!xpaths.length) return false;
+      await this.takeSnapshot({ cid, url: here, matched: "", markdown: "", head: "", xpaths, addrs: {} } as any);
+      this.greyPageForms++;
+      return !!getSnapshot(cid);
+    }
     const map = this.pipebox?.map;
     const local = map && docKey(map.url) === docKey(here) ? map.xpaths(cid) : [];
     if (local.length) {

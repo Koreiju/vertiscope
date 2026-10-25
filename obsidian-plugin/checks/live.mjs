@@ -6947,6 +6947,75 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-119",
+      asks: "johnwick.movie and archive.org, the reader's test pages, each run the core features live: the page captured into the store; hovering draws the outline on the page and opens the hovered chunk's panel with its own lines; panels show the page-original form on these dynamic renders",
+      async run() {
+        // 2026-10-06: "please use this and archive.org as pages to test all
+        // of our current features on". The reader's own page is put back.
+        const got = await evaluate(`(async () => {
+          ${PREP}
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          const pb = b.pipebox;
+          const was = b.webview.getURL();
+          const base = app.plugins.getPlugin("domvec-bridge").settings.sidecar.replace(/[/]+$/, "");
+          const shown = (el) => !!el && el.style.display !== "none" && el.offsetWidth > 0;
+          const txt = (p) => p && p.lines ? p.lines.map((l) => String(l.text || "").trim()).join("|") : "";
+          const visit = async (PAGE) => {
+            if (!(await land(PAGE, 45000))) return { page: PAGE, error: "did not land" };
+            await sleep(9000);
+            const r = b.webview.getBoundingClientRect();
+            const rows = [];
+            for (let i = 0; i < 10; i++) {
+              const x = Math.round(90 + (i % 5) * Math.max(60, (r.width - 180) / 4)), y = Math.round(140 + Math.floor(i / 5) * Math.max(120, r.height / 3));
+              b.webview.sendInputEvent({ type: "mouseMove", x, y });
+              await sleep(1100);
+              const h = pb && pb.hover;
+              if (!h || !h.cid) continue;
+              const bb = v.hoverBb;
+              const e = bb ? v.billboards.get(bb) : null;
+              const grey = String(bb || "").startsWith("f:");
+              const panel = bb ? await v.chunkPayload(bb) : null;
+              // RIGHT: the panel holds the words under the pointer (half or
+              // more of the hovered element's own words; an element with
+              // fewer than two words is not judged).
+              let under = "";
+              try { under = await b.webview.executeJavaScript("(function(){var x=" + x + ",y=" + y + ",e=document.elementFromPoint(x,y),g=0;while(e&&e.shadowRoot&&g++<20){var i=e.shadowRoot.elementFromPoint(x,y);if(!i||i===e)break;e=i;}if(!e)return '';var w=document.createTreeWalker(e,NodeFilter.SHOW_TEXT),t='',n;while((n=w.nextNode())&&t.length<400){var p=n.parentElement;if(p&&p.closest&&p.closest('svg,title,desc,script,style'))continue;t+=' '+n.nodeValue;}return t;})()"); } catch (err) {}
+              const words = (t) => (String(t || "").toLowerCase().match(/[a-z0-9]{3,}/g) || []);
+              const want = [...new Set(words(under))], have = new Set(words(txt(panel)));
+              const judged = want.length >= 2;
+              rows.push({ outline: shown(pb.outline), panel: !!bb, lines: panel && panel.lines ? panel.lines.length : 0,
+                          judged, right: !!bb && judged && want.filter((w) => have.has(w)).length >= 0.5 * want.length,
+                          grey, form: e ? e.form || "" : "" });
+            }
+            let stored = 0;
+            try { const st = await (await fetch(base + "/page_status?url=" + encodeURIComponent(b.webview.getURL()))).json(); stored = st.chunks || 0; } catch (e) {}
+            const n = rows.length;
+            return { page: PAGE, hovers: n, outlines: rows.filter((x) => x.outline).length, panels: rows.filter((x) => x.panel).length,
+                     judged: rows.filter((x) => x.judged).length, right: rows.filter((x) => x.right).length, grey: rows.filter((x) => x.grey).length,
+                     page_form: rows.filter((x) => x.form === "page").length, stored };
+          };
+          try {
+            const a = await visit("https://johnwick.movie/");
+            const c = await visit("https://archive.org/");
+            // Planted: grey panels without a page form, and shadow/slot paths
+            // by XPath alone -- the page form must go.
+            b.plant.add("no-grey-page-form"); b.snapshotPlants.xpathOnly = true;
+            let p;
+            try { p = await visit("https://archive.org/?g119p=" + Date.now()); }
+            finally { b.plant.delete("no-grey-page-form"); b.snapshotPlants.xpathOnly = false; }
+            return { johnwick: a, archive: c, planted_archive: p };
+          } finally {
+            if (was && /^https?:/.test(was)) await land(was, 45000);
+          }
+        })()`, { timeout: 300000 });
+        if (!got || got.error) return { pass: false, evidence: got };
+        const ok = (x) => !x.error && x.stored > 0 && x.hovers >= 4 && x.outlines >= 0.8 * x.hovers
+          && x.panels >= 0.8 * x.hovers && x.right >= 0.8 * x.judged && x.page_form >= 1;
+        return { pass: ok(got.johnwick) && ok(got.archive) && !!got.planted_archive && got.planted_archive.page_form === 0,
+                 evidence: got };
+      },
+    },
+    {
       id: "G-7",
       asks: "a retrieval link written into a vault note is drawn in 3D: the note, indexed as the gesture's infill indexes it, becomes a page whose link to a stored page is a drawn edge; planted (__domvecPlantNoNoteIndex) no page and no edge",
       async run() {

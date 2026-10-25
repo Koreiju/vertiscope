@@ -5,8 +5,12 @@
  */
 
 /** The page-side reader. `xs` is the chunk's element xpaths. */
+/** Planted (host side, G-119): addresses through shadow roots and slots are
+ *  not resolved by the sensor -- XPath alone, as before 2026-10-24. */
+export const SNAPSHOT_PLANTS = { xpathOnly: false };
 export function snapshotScript(xpaths: string[],
                                addrs: Record<string, [string, number]> = {}): string {
+  const viaSensor = !SNAPSHOT_PLANTS.xpathOnly;
   return `(function (xs, ad) {
   var MAX = 2500, count = 0;
   var PROPS = ["display","position","box-sizing","color","background-color","background-image",
@@ -62,11 +66,18 @@ export function snapshotScript(xpaths: string[],
     return '<span style="' + attr(styleOf(el, cs)) + '">' + esc(text) + "</span>";
   }
   function at(x) {
-    try {
-      var n = document.evaluate(x, document, null, 9, null).singleNodeValue;
-      if (n && n.nodeType === 3) n = n.parentElement;
-      return n && n.nodeType === 1 ? n : null;
-    } catch (e) { return null; }
+    var n = null;
+    try { n = document.evaluate(x, document, null, 9, null).singleNodeValue; } catch (e) { n = null; }
+    // An address through a shadow root or a slot ("#shadow-root", a slotted
+    // element named under the slot that draws it) is the SENSOR's spelling,
+    // and XPath cannot walk it: archive.org's grey panels found 0 of 5
+    // elements and never showed the page form (2026-10-24). The sensor's own
+    // resolver can; read-only. Planted (host side): SNAPSHOT_PLANTS.xpathOnly.
+    if (!n && ${viaSensor ? "true" : "false"}) {
+      try { var h = window.__domvecSensor; if (h && h.node) n = h.node(x); } catch (e) { n = null; }
+    }
+    if (n && n.nodeType === 3) n = n.parentElement;
+    return n && n.nodeType === 1 ? n : null;
   }
   // A line joined from inline fragments keeps its FIRST fragment's address --
   // "<b>Trie</b> implementation based on ..." is addressed at the <b> -- so
