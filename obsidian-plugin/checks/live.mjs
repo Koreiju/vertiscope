@@ -6947,6 +6947,124 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-269",
+      asks: "url nodes are drawn two to three times their chunks' size in the view as it is, and the pick proxy with them: as the GPU is given them, page nodes 2.5x what they were, and where chunks are drawn, at least twice the median chunk; planted (plantSmallPages) the old sizes",
+      async run() {
+        const got = await evaluate(`(async () => {
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
+          if (!v || !v.graph || !v.batch) return { error: "no graph" };
+          const read = () => {
+            v.batchDirty = true; v.batchSync();
+            const meshes = [v.batch.opaque, v.batch.clear, v.batch.glass];
+            const pages = [], chunks = [], proxies = [];
+            for (const n of v.graph.graphData().nodes) {
+              const m = meshes[n.__bm];
+              if (!m || typeof n.__bi !== "number" || n.__bi >= m.geo.instanceCount) continue;
+              const sz = m.size.getX(n.__bi);
+              if (n.level === "page") { pages.push([n.id, sz]); if (n.__threeObj && n.__threeObj.__proxy) proxies.push(sz); }
+              else if (n.level !== "path") chunks.push(sz);
+            }
+            return { pages, chunks };
+          };
+          const med = (xs) => { if (!xs.length) return null; const s = xs.slice().sort((a, b) => a - b); return s[Math.floor(s.length / 2)]; };
+          const now = read();
+          v.plantSmallPages = true;
+          let old;
+          try { old = read(); } finally { v.plantSmallPages = false; v.batchDirty = true; v.batchSync(); }
+          const oldBy = new Map(old.pages);
+          const ratios = now.pages.map(([id, s]) => oldBy.get(id) > 0 ? s / oldBy.get(id) : null).filter((x) => x !== null);
+          const pageMed = med(now.pages.map((p) => p[1])), chunkMed = med(now.chunks);
+          // The pick proxy takes the drawn size (\`fitProxies\`): a page is
+          // clicked at the size it is seen.
+          const pn = v.graph.graphData().nodes.find((n) => n.level === "page" && n.__threeObj && n.__threeObj.__proxy);
+          const lk = pn ? v.lookOf(pn, v.graph.nodeRelSize(), v.drawnMedia) : null;
+          return { level: v.level || "pages", pages: now.pages.length, chunks: now.chunks.length,
+                   page_vs_old_p50: med(ratios), page_vs_old_min: ratios.length ? Math.min(...ratios) : null,
+                   page_vs_chunk: pageMed && chunkMed ? Math.round(pageMed / chunkMed * 100) / 100 : null,
+                   proxy_half: pn ? Math.round(pn.__threeObj.scale.x * 100) / 100 : null, drawn_half: lk ? Math.round(lk.half * 100) / 100 : null };
+        })()`, { timeout: 60000 });
+        if (!got || got.error) return { pass: false, evidence: got };
+        return {
+          pass: got.pages > 0 && Math.abs(got.page_vs_old_p50 - 2.5) < 0.05
+             && (got.chunks < 20 || got.page_vs_chunk >= 2),
+          evidence: got,
+        };
+      },
+    },
+    {
+      id: "G-252",
+      asks: "with a second browser cell open on the same page, hovering a fresh page's grey chunks in the visible cell opens their panels from THAT cell's own tree -- the hovered element's unit, its lines -- none skipped; planted (__domvecPlantLastBrowser) the last-built cell answers and the panels are not the hovered ones",
+      async run() {
+        // 2026-10-24, reported by the reader with three cells open: grey
+        // nodes lit, panels missing (39 skipped) -- the cell built last
+        // answered every grey-panel lookup.
+        const fixtures = await serveFixtures();
+        try {
+          const got = await evaluate(`(async () => {
+            ${PREP}
+            const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+            const PAGE = ${JSON.stringify(fixtures.origin + "/result_cards.html?g252=")} + Date.now();
+            // A second cell, built AFTER the visible one, in the visible one's
+            // tab group as a background tab, on the same page.
+            const leaf2 = app.workspace.createLeafInParent(bl2.parent, bl2.parent.children.length);
+            await leaf2.setViewState({ type: "domvec-browser-view", active: false });
+            if (leaf2.loadIfDeferred) await leaf2.loadIfDeferred();
+            const b2 = leaf2.view;
+            try {
+              // A background tab's webview is not attached until shown once:
+              // shown, loaded with the page, then put behind the visible cell.
+              app.workspace.revealLeaf(leaf2);
+              for (let i = 0; i < 80 && !(b2 && b2.webview && b2.domReady); i++) await sleep(250);
+              b2.go(PAGE);
+              for (let i = 0; i < 80 && !(b2.webview.getURL() === PAGE && !b2.webview.isLoading()); i++) await sleep(250);
+              app.workspace.revealLeaf(bl2);
+              await sleep(800);
+              if (!(await land(PAGE, 30000))) return { error: "did not land" };
+              for (let i = 0; i < 40 && !(b.forceTrees.get(PAGE) && b2.forceTrees && b2.forceTrees.get(PAGE)); i++) await sleep(500);
+              await sleep(1500);
+              const r = b.webview.getBoundingClientRect();
+              const txt = (p) => p && p.lines ? p.lines.map((l) => String(l.text || "").trim()).join("|") : "";
+              const arm = async (planted) => {
+                window.__domvecPlantLastBrowser = planted;
+                const before = v.hoverStats.empty_skipped, rows = [];
+                try {
+                  for (let i = 0; i < 8; i++) {
+                    const x = 80 + (i % 4) * Math.max(60, (r.width - 160) / 3) + (planted ? 3 : 0), y = 90 + Math.floor(i / 4) * 160;
+                    b.webview.sendInputEvent({ type: "mouseMove", x: Math.round(x), y: Math.round(y) });
+                    await sleep(900);
+                    const h = b.pipebox && b.pipebox.hover;
+                    if (!h || !h.cid || !String(h.cid).startsWith("f:")) continue;
+                    const bb = v.hoverBb;
+                    const own = bb ? b.forcePayload(String(bb)) : null;
+                    const panel = bb ? await v.chunkPayload(bb) : null;
+                    rows.push({ hovered: String(h.cid).slice(-5), panel: bb ? String(bb).slice(-30) : "",
+                                right: !!bb && !!own && txt(own).length > 0 && txt(own) === txt(panel) });
+                  }
+                } finally { window.__domvecPlantLastBrowser = false; }
+                return { planted, hovers: rows.length, opened: rows.filter((x) => x.panel).length,
+                         right: rows.filter((x) => x.right).length, skipped: v.hoverStats.empty_skipped - before, rows: rows.slice(0, 4) };
+              };
+              const clean = await arm(false);
+              const planted = await arm(true);
+              return { cells: app.workspace.getLeavesOfType("domvec-browser-view").length, clean, planted };
+            } finally {
+              try { leaf2.detach(); } catch (e) {}
+              app.workspace.revealLeaf(bl2);
+            }
+          })()`, { timeout: 180000 });
+          if (!got || got.error) return { pass: false, evidence: got };
+          return {
+            pass: got.cells >= 2 && got.clean.hovers >= 3 && got.clean.right === got.clean.hovers && got.clean.skipped === 0
+               && got.planted.hovers >= 3 && got.planted.right < got.planted.hovers,
+            evidence: got,
+          };
+        } finally {
+          await tidyFixtures(fixtures.origin);
+          await fixtures.close();
+        }
+      },
+    },
+    {
       id: "G-254",
       asks: "loading takes seconds: the spacing verdicts every chunk-view settle computes are the same node for node by the fast path and the old one, and the fast path is many times quicker on the graph as drawn; planted (plantSlowSpacing) the old path",
       async run() {

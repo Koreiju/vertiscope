@@ -5093,12 +5093,19 @@ export class GraphView extends ItemView {
   }
 
   private baseLook(n: any, relSize: number, media: boolean): NodeLook {
+    // A PAGE (url) node is drawn `pageScale` times its size, in every view and
+    // every form (2026-10-24: "the main url nodes have to be maybe twice or
+    // three times as big to be seen and clickable to differentiate them from
+    // their connected chunk nodes when folding and unfolding graphs"). Chunk
+    // view's one size had made a page the size of each of its chunks.
+    // Planted `plantSmallPages`: the old sizes.
+    const ps = n.level === "page" && !this.plantSmallPages ? this.pageScale : 1;
     if (n.force) {
       // In chunk view a chunk still streaming is the size of a placed one:
       // at STREAM.RADIUS it was 10x the median chunk, a pile of giant orbs
       // over a page as it streamed (2026-10-11, PLUGIN_GOAL 110).
       const streaming = this.level === "chunk" && !this.plantSizedInChunkView ? Math.cbrt(this.unitVal()) * relSize : STREAM.RADIUS;
-      return { half: n.level === "page" && !(this.level === "chunk" && !this.plantSizedInChunkView) ? STREAM.RADIUS * 1.6 : streaming, translucent: true,
+      return { half: (n.level === "page" && !(this.level === "chunk" && !this.plantSizedInChunkView) ? STREAM.RADIUS * 1.6 : streaming) * ps, translucent: true,
                alpha: n.hovered ? 0.9 : (n.projected ? 0.75 : STREAM.OPACITY), color: n.hovered ? "#ffffff" : (n.color || "#9aa0a6") };
     }
     const src = media && !(this.plantNoPicture && n.level !== "page") ? n.image?.src : undefined;
@@ -5121,7 +5128,7 @@ export class GraphView extends ItemView {
       // chunk view"). Unrevealed, it stays the one-size orb below.
       const shown = this.detail.has(n) || n.hovered || this.billboards.has(n.id);
       // Pictures too: a page's favicon is most of the colour in url view.
-      let half = billboardEdge(shown && !this.plantTinyReveal ? n : sized, relSize) / 2 * this.nodeScale;
+      let half = billboardEdge(shown && !this.plantTinyReveal ? n : sized, relSize) / 2 * this.nodeScale * ps;
       // Presented at a size a reader can see, on SCREEN: between
       // `presentMinPx` and `presentMaxPx` of radius. A chunk's own panel
       // scale follows its `val`, and small chunks presented at 2 px; right by
@@ -5147,10 +5154,10 @@ export class GraphView extends ItemView {
       // panel's size it was 14x a chunk -- the DuckDuckGo page's 1,587 result
       // favicons as a pile of giant orbs (2026-10-11). Revealed, it opens to
       // its picture as before.
-      if (one) return { half: Math.cbrt(sized.val) * relSize * this.nodeScale, translucent: false, alpha: 1, color: n.color || "#888888" };
+      if (one) return { half: Math.cbrt(sized.val) * relSize * this.nodeScale * ps, translucent: false, alpha: 1, color: n.color || "#888888" };
       return { half, translucent: false, alpha: 1, color: n.color || "#888888" };
     }
-    return { half: Math.cbrt(Math.max(sized.val ?? 1, 1e-9)) * relSize * this.nodeScale, translucent: false, alpha: 1,
+    return { half: Math.cbrt(Math.max(sized.val ?? 1, 1e-9)) * relSize * this.nodeScale * ps, translucent: false, alpha: 1,
              color: n.hovered ? "#ffffff" : (n.color || "#9aa0a6") };
   }
   /** A presented picture's largest radius on screen, px. */
@@ -5161,6 +5168,10 @@ export class GraphView extends ItemView {
   /** Spheres drawn this much larger by default (2026-10-12, PLUGIN_GOAL 115:
    *  "the nodes could be a little larger/brighter by default"). */
   nodeScale = 1.25;
+  /** A page (url) node's size over its chunks' (2026-10-24: "twice or three times"). */
+  pageScale = 2.5;
+  /** Planted: page nodes at the old sizes -- in chunk view, a chunk's. */
+  plantSmallPages = false;
   private pointerOver = false;
   private panHeldSince = 0;
   /** One arrow step, as a share of the camera's distance to its target. */
@@ -6868,6 +6879,9 @@ export class GraphView extends ItemView {
       const allowed = allowedOf[i];
       if (Number.isNaN(allowed)) continue;
       const a = nodes[i];
+      // A page node keeps its size (`pageScale`): its own chunks hang right
+      // around it, and shrinking it to their spacing undid the enlargement.
+      if (a.level === "page" && !this.plantSmallPages) continue;
       // `val` is radius cubed, so a radius scale of k is k^3 on val.
       if (a.valFull === undefined) a.valFull = a.val;
       a.val = Math.max((a.val ?? 1) * Math.pow(allowed / drawnOf[i], 3), 1e-4);

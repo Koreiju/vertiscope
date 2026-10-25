@@ -4457,6 +4457,16 @@ row decomposed from them could be checked against them when it was written.*
 
 > please free up some disk space
 
+**2026-10-24** *(this session, in order)*
+
+> quite a bit of lag rendering chunk panels navigating to new pages currently.
+
+> as in, hovering overlays in the browser shows the nodes in the tree form, but the actual panels themselves that are supposed to be real-time streams from the page are missing.
+
+> why do the 3d nodes jump all over the place? during re-projecting diff streams? wouldn't local .update() calls keep most of the projected 3D nodes in the same place most of the time?
+
+> also, the main url nodes have to be maybe twice or three times as big to be seen and clickable to differentiate them from their connected chunk nodes when folding and unfolding graphs.
+
 ---
 
 ## Standing instructions carried in the verbatim
