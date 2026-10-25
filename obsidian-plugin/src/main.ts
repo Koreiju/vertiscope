@@ -427,12 +427,45 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
         browser.onPictures = (byCid: Record<string, string>) =>
           this.eachGraph((view) => view.setPictures(byCid));
         // Any billboard opened in 3D can ask for its chunk's page snapshot.
+        // **Asked of the browser cell that HOLDS the chunk, not the one built
+        // last.** Each cell, as it was built, rewired these to itself, so with
+        // three cells open every grey panel asked a cell that had never seen
+        // the page: its lines came back empty and the panel was skipped
+        // (2026-10-24: "hovering overlays in the browser shows the nodes in
+        // the tree form, but the actual panels ... are missing" -- 39 skipped,
+        // the reader's cell holding 14 lines for the chunk). Planted
+        // `__domvecPlantLastBrowser`: the last-built cell answers, as before.
+        // In order: the cell whose pointer is on that chunk, then the cells on
+        // screen, then the rest. Grey ids are numbered per cell (`#4` in one
+        // is not `#4` in another), and hidden cells left on the same page
+        // hold trees for the same url -- the first to answer was not
+        // necessarily the cell the reader hovered.
         this.eachGraph((view) => {
-          view.snapshotFor = (cid: string, url: string, again?: boolean) => browser.snapshotChunk(cid, url, !!again);
+          const cells = (cid = ""): any[] => {
+            if ((window as any).__domvecPlantLastBrowser) return [browser];
+            const all = this.app.workspace.getLeavesOfType(BROWSER_VIEW).map((l) => l.view as any)
+              .filter((b) => b && typeof b.forcePayload === "function");
+            const base = String(cid).split("|")[0];
+            const rank = (b: any) => (base && b.pipebox?.hover?.cid === base ? 0 : (b.containerEl?.offsetWidth || 0) > 0 ? 1 : 2);
+            return all.sort((x, y) => rank(x) - rank(y));
+          };
+          view.snapshotFor = async (cid: string, url: string, again?: boolean) => {
+            for (const b of cells(cid)) if (await b.snapshotChunk(cid, url, !!again)) return true;
+            return false;
+          };
           view.onNavigate = (href: string) => browser.go(href);
-          view.forcePayloadFor = (id: string) => browser.forcePayload(id);
-          view.hoverElementOf = (cid: string) => browser.hoverElementOf(cid);
-          view.greyUnitFor = (cid: string) => browser.greyUnitFor(cid);
+          view.forcePayloadFor = (id: string) => {
+            for (const b of cells(id)) { const p = b.forcePayload(id); if (p) return p; }
+            return null;
+          };
+          view.hoverElementOf = (cid: string) => {
+            for (const b of cells(cid)) { const e = b.hoverElementOf(cid); if (e) return e; }
+            return "";
+          };
+          view.greyUnitFor = (cid: string) => {
+            for (const b of cells(cid)) { const g = b.greyUnitFor(cid); if (g) return g; }
+            return null;
+          };
         });
         browser.onProjected = (url: string, got: any) =>
           this.eachGraph((view) => view.applyProjected(url, got));
