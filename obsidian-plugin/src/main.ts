@@ -39,6 +39,8 @@ import {
 } from "./runbutton";
 import { cellSource, findFences } from "./fences";
 import { ChunkSpan, chunkGutter, setChunkSpans } from "./chunkgutter";
+import { EditorView } from "@codemirror/view";
+import { bodyHidden, chunkHalves, setBodyHidden } from "./chunkhalves";
 import { hashCell, renderOutput, withOutput } from "./outputs";
 import { BROWSER_VIEW, BrowserView } from "./browser";
 import type { ActRecord } from "./panelact";
@@ -220,6 +222,12 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     // a click infills the link between the parentheses.
     this.registerEditorExtension(linkGesture(this.gesture));
     this.registerEditorExtension(chunkGutter());
+    // A chunk note's two halves, one at a time (`D-3`): `chunkhalves.ts`.
+    this.registerEditorExtension(chunkHalves());
+    for (const ev of ["layout-change", "file-open", "active-leaf-change"] as const) {
+      this.registerEvent((this.app.workspace as any).on(ev, () => this.applyHalves()));
+    }
+    this.registerEvent(this.app.metadataCache.on("changed", () => this.applyHalves()));
     this.registerEvent(this.app.workspace.on("active-leaf-change",
                                              () => this.refreshChunkMarks()));
     this.registerEvent(this.app.workspace.on("editor-change",
@@ -755,6 +763,50 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
   }
 
   // ---- a supervisor that gave up, replaced -----------------------------------
+  // ---- a chunk note's two halves (D-3) --------------------------------------
+  //
+  // One half on show per NOTE, whichever leaf shows it, and kept across the
+  // fence's redraws (live preview rebuilds a widget on every edit near it).
+  // Planted `__domvecPlantNoHalves`: a chunk note is treated as any other, so
+  // its fence draws the read-only markdown and the body stays on show -- the
+  // defect as it was.
+  noteHalves = new Map<string, boolean>();
+  halvesStats = { applied: 0, leaves: 0 };
+  noteHalf = {
+    get: (path: string) => this.noteHalves.get(path),
+    set: (path: string, card: boolean) => {
+      this.noteHalves.set(path, card);
+      for (const s of this.surfaces) if (s.note === path) s.showHalf(card);
+      this.applyHalves();
+    },
+  };
+
+  isChunkNote(path: string): boolean {
+    if ((window as any).__domvecPlantNoHalves) return false;
+    const f = this.app.vault.getAbstractFileByPath(path);
+    const fm = f instanceof TFile ? this.app.metadataCache.getFileCache(f)?.frontmatter : null;
+    return !!fm && fm.domvec === "chunk";
+  }
+
+  applyHalves(): void {
+    let leaves = 0;
+    for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
+      const view = leaf.view as MarkdownView;
+      const path = view?.file?.path;
+      if (!path) continue;
+      const chunk = this.isChunkNote(path);
+      const card = chunk ? (this.noteHalves.get(path) ?? this.settings.interactiveByDefault) : false;
+      view.containerEl.toggleClass("domvec-half-card", chunk && card);
+      view.containerEl.toggleClass("domvec-half-md", chunk && !card);
+      // @ts-ignore -- `editor.cm` is the CM6 EditorView; Obsidian does not type it.
+      const cm = view.editor?.cm as EditorView | undefined;
+      if (cm && bodyHidden(cm) !== (chunk && card)) cm.dispatch({ effects: setBodyHidden.of(chunk && card) });
+      if (chunk) leaves++;
+    }
+    this.halvesStats.applied++;
+    this.halvesStats.leaves = leaves;
+  }
+
   respawnStats = { checks: 0, respawned: 0, last: null as any };
   private respawning = false;
   async watchSidecar(): Promise<void> {
@@ -871,7 +923,11 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
       });
       return;
     }
-    const surface = new ChunkSurface(el, cid, this);
+    const surface = new ChunkSurface(el, cid, this,
+      // From the context's own frontmatter first: a note opened as it is
+      // created renders its fence before the metadata cache has read it.
+      { notePath: ((ctx.frontmatter?.domvec === "chunk" && !(window as any).__domvecPlantNoHalves)
+                   || this.isChunkNote(ctx.sourcePath)) ? ctx.sourcePath : undefined });
     // addChild ties the surface to the element's life: when the user edits
     // the note and this section is replaced, onunload runs. Without it an
     // aborted fetch resolves into a detached element.

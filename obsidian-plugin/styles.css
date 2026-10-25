@@ -11,6 +11,7 @@
 
 .domvec-bar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.5em;
   padding: 0.25em 0.45em;
@@ -951,3 +952,16 @@ button.domvec-run-fence:hover {
 .domvec-file-status { opacity: 0.85; font-size: 11px; word-break: break-all; }
 .domvec-bb-kg { cursor: pointer; margin-right: 6px; padding: 0 6px; border: 1px solid var(--background-modifier-border); border-radius: 4px; font-size: 11px; color: #ffb86c; }
 .domvec-bb-kg:hover { background: var(--background-modifier-hover); }
+
+/* A chunk note's two halves, one at a time (D-3, `chunkhalves.ts`). Reading
+   view only: live preview hides the body with a CodeMirror block decoration,
+   because lines hidden behind CodeMirror's back desync its height map. */
+.domvec-half-card .markdown-reading-view .markdown-preview-sizer > div:not(:has(.block-language-domvec)):not(.mod-header):not(.mod-footer):not(.markdown-preview-pusher) {
+  display: none;
+}
+.domvec-half-hidden {
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+  padding: 0.2em 0;
+}
+.domvec-surface.domvec-folded .domvec-body { padding-top: 0; }

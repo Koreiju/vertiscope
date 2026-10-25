@@ -446,26 +446,18 @@ def _note(chunk, body: str, place: Optional[_Place] = None) -> str:
     place the properties block used to occupy, which is where the goal asks
     for the markdown/shadow-DOM switch to live.
 
-    The prose is FOLDED into a collapsed callout under it, and that is the
-    change this docstring used to argue against.
-
-    The argument was that the prose has to stay because Obsidian's graph reads
-    links from the markdown body and not from anything a plugin draws. That is
-    still true. What was wrong was the conclusion: the note showed the same
-    chunk twice, once as the panel and once as prose underneath, and a reader
-    looking at it sees a page that repeats itself.
-
-    A callout is a blockquote, so everything that made the prose necessary
-    survives being inside one -- the wikilinks are still parsed into
-    `resolvedLinks`, Obsidian's search still finds the words, `grep` still
-    finds the file. The `-` suffix on the callout type is what collapses it by
-    default, so the reader gets one folded line instead of a second copy, and
-    can open it when they want the plain reading or a link to click.
-
-    Deleting the prose outright was the other option and costs more than it
-    saves: the graph would lose every edge unless the links were moved into
-    frontmatter, and the vault would stop being a plain-text archive of what
-    was scanned. Folding costs one line.
+    The prose follows as the note's own plain markdown: the native, EDITABLE
+    Obsidian editor is one half of the panel and the fence's card the other
+    (`P-W2`, `D-3`; the verbatim: panels "retrofitted to show their *base and
+    original* markdown editors with their interactive html cards"). It was
+    folded into a collapsed `[!quote]` callout, which hid the chunk's repeat
+    under its panel -- and left a read-only render inside the fence as the
+    only markdown on show. Hiding the repeat is the switch's job now: on a
+    chunk note the fence's markdown / shadow-DOM switch chooses which half is
+    drawn and hides the other (`obsidian-plugin/src/chunkhalves.ts`).
+    Unfolded, the body is also where the `[]()` gesture is typed -- "the
+    editable portion of the original obsidian markdown editor side of the
+    panels". The links Obsidian's graph reads from the body are unchanged.
     """
     head = [
         "---",
@@ -493,28 +485,8 @@ def _note(chunk, body: str, place: Optional[_Place] = None) -> str:
         "",
     ]
     fence = "```domvec\ncid: %s\n```\n\n" % chunk.cid
-    return "\n".join(head) + fence + _folded(body) + "\n"
-
-
-#: The callout the prose is folded into. `-` is what makes Obsidian render it
-#: collapsed; `[!quote]` reads as "this is the source text" rather than as a
-#: warning or a note.
-_FOLD = "> [!quote]- distilled markdown"
-
-
-def _folded(body: str) -> str:
-    """``body`` as a collapsed callout, or nothing when there is no body.
-
-    Every line takes the blockquote marker, blank lines included -- a bare
-    blank line ENDS a callout, so the rest of the prose would fall out of it
-    and render below the fold, which is the thing being fixed.
-    """
-    lines = body.rstrip().splitlines()
-    if not any(line.strip() for line in lines):
-        return ""
-    quoted = "\n".join(("> " + line) if line.strip() else ">"
-                        for line in lines)
-    return "%s\n%s\n" % (_FOLD, quoted)
+    prose = body.rstrip()
+    return "\n".join(head) + fence + (prose + "\n" if prose.strip() else "")
 
 
 def link_targets(workspace, urls: Optional[Sequence[str]] = None) -> List[dict]:

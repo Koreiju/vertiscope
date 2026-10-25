@@ -262,65 +262,36 @@ def test_a_resolved_link_still_wins_over_absolutising(ws, tmp_path):
 
 # --- the note reads once ------------------------------------------------------
 
-def test_the_prose_is_folded_rather_than_shown_beside_the_panel():
-    """The note showed the same chunk twice: the panel, then prose under it.
-
-    A callout is a blockquote, so folding costs nothing that made the prose
-    necessary -- links stay parsed, search still finds the words, the file is
-    still a plain-text archive -- and the `-` collapses it by default, so a
-    reader gets one folded line instead of a second copy.
-    """
-    from domvec.obsidian.export import _FOLD, _note
+def _chunk_note(body):
+    from domvec.obsidian.export import _note
 
     class Chunk:
         cid, url, xpath, part, chars = "c1", "https://x.test/", "/html", 0, 12
         md = markdown = "words"
 
-    note = _note(Chunk(), "a line\n\nanother [[note|line]]\n")
-    body = note.split("---", 2)[-1]
-    assert _FOLD in body
-    for line in body.splitlines():
-        if line.startswith(("```", "---")) or not line.strip():
-            continue
-        if line.startswith("cid:") or line == _FOLD:
-            continue
-        assert line.startswith(">"), \
-            "a prose line escaped the fold and renders below it: %r" % line
+    return _note(Chunk(), body).split("---", 2)[-1]
 
 
-def test_a_blank_line_does_not_break_the_fold():
-    """A bare blank line ENDS a callout.
-
-    The rest of the prose then falls out of it and renders below the fold,
-    which is the whole thing being fixed -- and it looks fine on a chunk that
-    happens to have no blank line in it.
-    """
-    from domvec.obsidian.export import _folded
-
-    out = _folded("first\n\nsecond\n")
-    assert "\n>\n" in out, out
-    assert not any(l and not l.startswith(">") for l in out.splitlines()[1:])
+def test_the_prose_is_the_notes_own_editable_markdown():
+    """`D-3`/`P-W2`: one half of a chunk panel is the NATIVE, editable editor,
+    so the chunk's markdown is the note's own body after the fence -- not a
+    collapsed `[!quote]` callout under it. Planted: a callout fold fails."""
+    after = _chunk_note("a line\n\nanother [[note|line]]\n").split("```", 2)[-1]
+    lines = [l for l in after.splitlines() if l.strip()]
+    assert lines == ["a line", "another [[note|line]]"], lines
+    assert not any(l.startswith(">") for l in lines)
+    assert "[!quote]" not in after
 
 
-def test_the_wikilinks_survive_the_fold():
-    """The edges the graph is built from are inside the quote now.
-
-    If they did not survive, every vault edge would vanish and the graph would
-    go empty -- silently, since a note with no links is a perfectly ordinary
-    note.
-    """
-    from domvec.obsidian.export import _folded
-
-    out = _folded("see [[other-note|Other]] for more\n")
-    assert "[[other-note|Other]]" in out
+def test_the_wikilinks_stay_in_the_body():
+    """The edges the graph is built from are the body's own links."""
+    assert "[[other-note|Other]]" in _chunk_note("see [[other-note|Other]] for more\n")
 
 
-def test_a_chunk_with_no_prose_gets_no_empty_callout():
-    """An empty fold is a line of chrome standing for nothing."""
-    from domvec.obsidian.export import _folded
-
-    assert _folded("") == ""
-    assert _folded("\n   \n") == ""
+def test_a_chunk_with_no_prose_ends_at_its_fence():
+    """No prose, no trailing blank lines standing for it."""
+    for empty in ("", "\n   \n"):
+        assert _chunk_note(empty).rstrip().endswith("```"), repr(_chunk_note(empty))
 
 
 # --- the page's own brackets are not wikilinks --------------------------------

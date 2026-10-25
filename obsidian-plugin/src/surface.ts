@@ -125,6 +125,9 @@ export interface SurfaceHost {
   canEnact(): boolean;
   enact(address: string, action?: string,
         text?: string): Promise<EnactResult | null>;
+  /** A chunk NOTE's half, kept per note across redraws (`D-3`): true when
+   *  the card is on show and the note's own body hidden. */
+  noteHalf?: { get(path: string): boolean | undefined; set(path: string, card: boolean): void };
 }
 
 export class ChunkSurface extends MarkdownRenderChild {
@@ -142,19 +145,38 @@ export class ChunkSurface extends MarkdownRenderChild {
     /** Force a form. The graph's billboard is the chunk's SHADOW-DOM form
      *  (`G-77`), whatever the note default is; the markdown form lives on
      *  the browser's markdown side. */
-    opts: { interactive?: boolean } = {},
+    opts: { interactive?: boolean; notePath?: string } = {},
   ) {
     super(containerEl);
-    this.interactive = opts.interactive ?? host.settings.interactiveByDefault;
+    this.notePath = opts.notePath;
+    this.interactive = opts.interactive
+      ?? (this.notePath ? host.noteHalf?.get(this.notePath) : undefined)
+      ?? host.settings.interactiveByDefault;
   }
+
+  /** Set on a chunk note's own fence: its markdown half is the NOTE (the
+   *  native, editable editor), not a render in here (`D-3`). */
+  private notePath?: string;
 
   async onload() {
     this.payload = await this.host.fetchChunk(this.cid);
     this.draw();
   }
 
+  /** The chunk note this fence belongs to, when it is one (`D-3`). */
+  get note(): string | undefined { return this.notePath; }
+
+  /** Follow the note's half when it was set elsewhere -- the plugin, or the
+   *  same note's fence in another leaf. */
+  showHalf(card: boolean) {
+    if (this.interactive === card) return;
+    this.interactive = card;
+    this.draw();
+  }
+
   toggle() {
     this.interactive = !this.interactive;
+    if (this.notePath) this.host.noteHalf?.set(this.notePath, this.interactive);
     this.draw();
   }
 
@@ -165,6 +187,7 @@ export class ChunkSurface extends MarkdownRenderChild {
     root.empty();
     this.readout = null;
     root.addClass("domvec-surface");
+    root.removeClass("domvec-folded");
 
     this.drawBar(root.createDiv({ cls: "domvec-bar" }));
 
@@ -193,7 +216,12 @@ export class ChunkSurface extends MarkdownRenderChild {
       return;
     }
     if (this.interactive) this.drawInteractive(body);
-    else this.drawMarkdown(body);
+    else if (this.notePath) {
+      // The markdown half of a chunk note is the note itself, in Obsidian's
+      // own editor, under this bar -- not a second, read-only copy here.
+      root.addClass("domvec-folded");
+      body.createDiv({ cls: "domvec-hint", text: "the note below is this chunk's markdown — edit it in place" });
+    } else this.drawMarkdown(body);
   }
 
   /**

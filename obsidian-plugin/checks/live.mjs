@@ -7016,6 +7016,99 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "D-3",
+      asks: "a chunk note's markdown half is the NATIVE, editable editor: in live preview the card half hides the note's body and draws the card; the switch's 'markdown' segment, clicked, folds the card to its bar (no read-only render in the fence) and shows the body as editable lines, and an edit typed there is saved to the note; reading view hides and shows the body the same way; planted (__domvecPlantNoHalves) the fence draws the read-only markdown and the body is never hidden",
+      async run() {
+        const got = await evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const plugin = app.plugins.getPlugin("domvec-bridge");
+          const NL = String.fromCharCode(10);
+          const FENCE = String.fromCharCode(96).repeat(3);
+          const res = ((await plugin.sidecar.search("radix tree compressed trie edges labelled", 20)) || {}).hits || [];
+          const hit = res.find((h) => String(h.url).includes("wikipedia.org/wiki/") && (h.tokens || 0) > 40) || res[0];
+          if (!hit) return { error: "no chunk to write a note of" };
+          const chunk = await plugin.sidecar.chunk(hit.cid);
+          const md = ((chunk && chunk.lines) || []).map((l) => l.text).join(NL);
+          const folder = "domvec-checks";
+          if (!app.vault.getAbstractFileByPath(folder)) await app.vault.createFolder(folder);
+          const visibleBody = (view) => [...view.editor.cm.contentDOM.querySelectorAll(".cm-line")]
+            .filter((l) => l.offsetHeight > 0 && l.textContent.trim().length > 20).length;
+          const readingShown = (view) => [...view.containerEl.querySelectorAll(".markdown-reading-view .markdown-preview-sizer > div")]
+            .filter((d) => !d.querySelector(".block-language-domvec, code.language-domvec") && !d.classList.contains("mod-header")
+                           && d.offsetHeight > 0 && d.textContent.trim().length > 20).length;
+          const until = async (ok, ms) => { for (let t = 0; t < ms && !ok(); t += 250) await sleep(250); return ok(); };
+          const arm = async (planted) => {
+            window.__domvecPlantNoHalves = planted;
+            const path = folder + "/d3-" + (planted ? "p" : "c") + Date.now() + ".md";
+            const text = ["---", "domvec: chunk", "cid: " + hit.cid, "---", "", FENCE + "domvec", "cid: " + hit.cid, FENCE, "", md, ""].join(NL);
+            const f = await app.vault.create(path, text);
+            const leaf = app.workspace.getLeaf("tab");
+            const out = { planted };
+            try {
+              await leaf.openFile(f, { state: { mode: "source", source: false } });
+              for (let i = 0; i < 20 && !app.metadataCache.getFileCache(f)?.frontmatter; i++) await sleep(200);
+              const view = leaf.view;
+              await until(() => view.containerEl.querySelectorAll(".block-language-domvec .domvec-seg").length > 0, 15000);
+              plugin.noteHalf.set(path, true);
+              await sleep(800);
+              out.card = { body_lines: visibleBody(view), placeholder: !!view.editor.cm.contentDOM.querySelector(".domvec-half-hidden"),
+                           card_drawn: !!view.containerEl.querySelector(".block-language-domvec .domvec-body .domvec-html, .block-language-domvec .domvec-body [class]") };
+              // Set from OUTSIDE the switch (the plugin, or another leaf of
+              // the note): the fence follows, so only one half is on show.
+              plugin.noteHalf.set(path, false);
+              await sleep(800);
+              out.external = { folded: !!view.containerEl.querySelector(".domvec-surface.domvec-folded"), body_lines: visibleBody(view) };
+              plugin.noteHalf.set(path, true);
+              await sleep(800);
+              const seg = [...view.containerEl.querySelectorAll(".block-language-domvec .domvec-seg")].find((b) => b.textContent === "markdown");
+              if (seg) seg.click();
+              await sleep(1200);
+              out.markdown = { clicked: !!seg, body_lines: visibleBody(view),
+                               read_only_render: !!view.containerEl.querySelector(".block-language-domvec pre.domvec-md"),
+                               folded: !!view.containerEl.querySelector(".domvec-surface.domvec-folded"),
+                               editable: view.editor.cm.contentDOM.contentEditable === "true" };
+              const mark = "typed in the native editor " + Date.now();
+              view.editor.replaceRange(NL + mark, view.editor.offsetToPos(view.editor.cm.state.doc.length));
+              let saved = false;
+              for (let t = 0; t < 10000 && !saved; t += 500) { await sleep(500); saved = (await app.vault.read(f)).includes(mark); }
+              out.markdown.saved = saved;
+              // Reading view, both halves.
+              await leaf.setViewState({ type: "markdown", state: { file: path, mode: "preview" } });
+              await until(() => !!leaf.view.containerEl.querySelector(".markdown-reading-view .block-language-domvec .domvec-seg"), 15000);
+              plugin.noteHalf.set(path, true); await sleep(800);
+              out.reading = { card_body_sections: readingShown(leaf.view) };
+              plugin.noteHalf.set(path, false); await sleep(600);
+              out.reading.markdown_body_sections = readingShown(leaf.view);
+            } finally {
+              window.__domvecPlantNoHalves = false;
+              plugin.noteHalves.delete(path);
+              try { leaf.detach(); } catch (e) {}
+              try { await app.vault.delete(f); } catch (e) {}
+            }
+            return out;
+          };
+          try {
+            return { cid: hit.cid, clean: await arm(false), planted: await arm(true) };
+          } finally {
+            try {
+              await sleep(1500);
+              const fo = app.vault.getAbstractFileByPath(folder);
+              if (fo && (!fo.children || !fo.children.length)) await app.vault.delete(fo, true);
+            } catch (e) {}
+          }
+        })()`, { timeout: 180000 });
+        if (!got || got.error || !got.clean || !got.planted) return { pass: false, evidence: got };
+        const c = got.clean, p = got.planted;
+        return { pass: c.card.body_lines === 0 && c.card.placeholder && c.card.card_drawn
+                   && c.external.folded && c.external.body_lines > 0 && !p.external.folded
+                   && c.markdown.clicked && c.markdown.body_lines > 0 && !c.markdown.read_only_render && c.markdown.folded
+                   && c.markdown.editable && c.markdown.saved
+                   && c.reading.card_body_sections === 0 && c.reading.markdown_body_sections > 0
+                   && p.card.body_lines > 0 && !p.card.placeholder && p.markdown.read_only_render && p.reading.card_body_sections > 0,
+                 evidence: got };
+      },
+    },
+    {
       id: "G-7",
       asks: "a retrieval link written into a vault note is drawn in 3D: the note, indexed as the gesture's infill indexes it, becomes a page whose link to a stored page is a drawn edge; planted (__domvecPlantNoNoteIndex) no page and no edge",
       async run() {
