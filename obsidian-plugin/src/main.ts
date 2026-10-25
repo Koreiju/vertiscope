@@ -155,6 +155,13 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
       const idle = Date.now() - ((window as any).__domvecReaderAt || 0);
       if (idle >= 300000 && !(globalThis as any).__domvecPlantNoMaintenance) void this.sidecar.maintenance(idle);
     }, 60000));
+    // A supervisor that GAVE UP (every start stalled at the interpreter;
+    // `supervisor_gave_up.json` in the workspace) is replaced by a fresh one
+    // started from here -- a fresh supervisor's first child always started,
+    // and its own children did not (2026-10-25). Only on that marker: a
+    // sidecar the reader stopped is left stopped. Planted
+    // `__domvecPlantNoRespawn`.
+    this.registerInterval(window.setInterval(() => { void this.watchSidecar(); }, 30000));
     this.links = new VaultLinks(this.app, this.sidecar);
     const links = this.links;
     // A note once indexed (it holds retrieval links) is indexed again when it
@@ -745,6 +752,46 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
       return;
     }
     await this.app.workspace.getLeaf(false).openFile(file);
+  }
+
+  // ---- a supervisor that gave up, replaced -----------------------------------
+  respawnStats = { checks: 0, respawned: 0, last: null as any };
+  private respawning = false;
+  async watchSidecar(): Promise<void> {
+    if (this.respawning) return;
+    this.respawnStats.checks++;
+    const h: any = await this.sidecar.health().catch(() => null);
+    if (h && h.launch && h.launch.python && Array.isArray(h.launch.argv)) {
+      const was = JSON.stringify(this.settings.sidecarLaunch || null);
+      if (was !== JSON.stringify(h.launch)) { this.settings.sidecarLaunch = h.launch; await this.saveSettings(); }
+      return;
+    }
+    const L = this.settings.sidecarLaunch;
+    if (h || !L || !L.workspace || (window as any).__domvecPlantNoRespawn) return;
+    const req = (window as any).require;
+    const fs = req("fs"), path = req("path"), cp = req("child_process");
+    const marker = path.join(L.workspace, "supervisor_gave_up.json");
+    if (!fs.existsSync(marker)) return;
+    this.respawning = true;
+    try {
+      const why = fs.readFileSync(marker, "utf8");
+      fs.unlinkSync(marker);
+      const argv = L.argv.slice();
+      const at = argv.indexOf("serve");
+      if (at >= 0) argv[at] = "supervise"; else argv.unshift("supervise");
+      const log = fs.openSync(path.join(L.workspace, "sidecar.log"), "a");
+      const child = cp.spawn(L.python, ["-X", "faulthandler", "-m", "domvec.obsidian", ...argv],
+        { cwd: L.cwd || undefined, detached: true, windowsHide: true, stdio: ["ignore", log, log],
+          env: { ...(window as any).process.env, PYTHONIOENCODING: "utf-8" } });
+      child.unref();
+      this.respawnStats.respawned++;
+      this.respawnStats.last = { at: Date.now(), pid: child.pid, why: why.slice(0, 200) };
+      new Notice("domvec: the sidecar's supervisor gave up -- started a fresh one");
+    } catch (e) {
+      this.respawnStats.last = { at: Date.now(), error: String(e).slice(0, 200) };
+    } finally {
+      this.respawning = false;
+    }
   }
 
   // ---- retrieval links drawn (G-7) -----------------------------------------

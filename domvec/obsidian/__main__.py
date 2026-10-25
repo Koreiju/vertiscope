@@ -17,10 +17,6 @@ import sys
 import time
 from pathlib import Path
 
-from ..workspace import Workspace
-from .export import export_vault
-from .sidecar import serve
-
 
 def main(argv=None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
@@ -35,6 +31,12 @@ def main(argv=None) -> int:
         i = rest.index("--workspace")
         workspace = Path(rest[i + 1])
         return supervise(workspace, rest[:i] + rest[i + 2:])
+    # Only past `supervise`: the supervisor must not load the store or the
+    # sidecar (numpy, scipy, kuzu and their thread pools) -- it starts and
+    # watches one child, nothing more.
+    from ..workspace import Workspace
+    from .export import export_vault
+    from .sidecar import serve
     parser = argparse.ArgumentParser(prog="python -m domvec.obsidian")
     sub = parser.add_subparsers(dest="cmd", required=True)
 

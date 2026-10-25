@@ -182,6 +182,9 @@ export interface DomvecSettings {
   /** Vault notes the reader wrote retrieval links into, kept in the store as
    *  pages and re-indexed when edited (G-7). */
   indexedNotes?: string[];
+  /** How the reader's sidecar was launched, as its `/health` last said
+   *  (python, argv, cwd, workspace): what a fresh supervisor is started with. */
+  sidecarLaunch?: { python: string; argv: string[]; cwd: string; workspace: string; supervised: boolean };
   /** Start in the interactive surface rather than the distilled markdown. */
   interactiveByDefault: boolean;
   /**

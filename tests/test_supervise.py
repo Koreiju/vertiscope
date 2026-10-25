@@ -141,3 +141,18 @@ def test_a_stalled_compaction_child_is_skipped_not_waited(tmp_path, monkeypatch)
     t0 = time.time()
     got = sv._compact_in_child(tmp_path)
     assert "stalled" in got.get("error", "") and time.time() - t0 < 30
+
+
+def test_three_stalls_in_a_row_give_up_with_a_marker(tmp_path, monkeypatch):
+    """Once one start hangs, later children of the same supervisor hung too;
+    after GIVE_UP_STALLS it leaves `supervisor_gave_up.json` and exits, for
+    the plugin to start a fresh one."""
+    import json as _json
+    import domvec.obsidian.supervise as sv
+    monkeypatch.setattr(sv, "EARLY_S", 1.0)
+    monkeypatch.setattr(sv, "BURST", 99)
+    code = sv.supervise(tmp_path, ["--port", "1"], command=SLEEPER, pause=0.0)
+    assert code == sv.STUCK_CODE
+    got = _json.loads((tmp_path / "supervisor_gave_up.json").read_text(encoding="utf-8"))
+    assert got["stalls"] == sv.GIVE_UP_STALLS
+    assert "gave up" in (tmp_path / "crashes.log").read_text(encoding="utf-8")

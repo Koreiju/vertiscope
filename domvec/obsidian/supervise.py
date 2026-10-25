@@ -63,6 +63,12 @@ START_STALL_S = float(os.environ.get("DOMVEC_START_STALL_S") or 60.0)
 #: timeout). Planted `DOMVEC_PLANT_NO_START_DEADLINE` covers both.
 EARLY_S = float(os.environ.get("DOMVEC_EARLY_S") or 25.0)
 EARLY_CPU_S = 0.5
+#: Stalled starts in a row after which this supervisor gives up: once one
+#: hangs, every later child of the same supervisor hung too (2026-10-25,
+#: five in a row), while a FRESH supervisor's first child always started. It
+#: leaves `supervisor_gave_up.json` in the workspace and exits; the plugin,
+#: seeing that and no sidecar, starts a fresh supervisor.
+GIVE_UP_STALLS = 3
 
 
 def _port_of(args: List[str]) -> Optional[int]:
@@ -224,6 +230,7 @@ def supervise(workspace: Path, serve_args: List[str], *,
                           "domvec.obsidian", "serve", "--workspace",
                           str(workspace), *serve_args]
     crashes: List[float] = []
+    stalls_in_a_row = 0
     compacted_this_burst = False
     log = workspace / "crashes.log"
     while True:
@@ -238,6 +245,18 @@ def supervise(workspace: Path, serve_args: List[str], *,
             _compact_logged(workspace, "asked")
             continue
         now = time.time()
+        stalls_in_a_row = stalls_in_a_row + 1 if code == STUCK_CODE else 0
+        if stalls_in_a_row >= GIVE_UP_STALLS:
+            note = {"at": time.strftime("%Y-%m-%d %H:%M:%S"), "stalls": stalls_in_a_row,
+                    "why": "every start of this supervisor stalled at the interpreter; a fresh one is wanted"}
+            try:
+                (workspace / "supervisor_gave_up.json").write_text(json.dumps(note), encoding="utf-8")
+                with log.open("a", encoding="utf-8") as fh:
+                    fh.write("%s supervisor gave up after %d stalled starts in a row" % (note["at"], stalls_in_a_row) + chr(10))
+            except OSError:
+                pass
+            print("supervisor gave up after %d stalled starts" % stalls_in_a_row, flush=True)
+            return STUCK_CODE
         if code == STUCK_CODE:
             note = "%s start stalled: no /health in %.0f s, no CPU for %.0f s -- killed, starting again" % (
                 time.strftime("%Y-%m-%d %H:%M:%S"), now - started, START_STALL_S) + chr(10)

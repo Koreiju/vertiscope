@@ -3186,7 +3186,14 @@ class _Handler(BaseHTTPRequestHandler):
                              # `kernel` are -- a feature nothing can observe
                              # is a feature nobody can confirm, and this one
                              # is invisible by design when it works.
-                             "layouts": self._layout_count()}))
+                             "layouts": self._layout_count(),
+                             # How this process was launched, so the plugin can
+                             # start a fresh supervisor when one gives up
+                             # (`supervisor_gave_up.json`, 2026-10-25).
+                             "launch": {"python": sys.executable, "argv": list(sys.argv[1:]),
+                                        "cwd": os.getcwd(),
+                                        "workspace": str(getattr(self.workspace, "path", "") or ""),
+                                        "supervised": os.environ.get("DOMVEC_SUPERVISED") == "1"}}))
             return
 
         if segments[0] == "snapshot" and len(segments) == 2:

@@ -55,7 +55,8 @@ def test_counts_that_differ_swap_nothing(tmp_path, monkeypatch):
 
 def test_the_supervisor_compacts_on_76_and_starts_again(tmp_path, monkeypatch):
     called = []
-    monkeypatch.setattr(C, "compact", lambda ws, **k: called.append(ws) or {"before_mb": 9, "after_mb": 1, "swapped": True})
+    # Compaction runs in its own process (`supervise._compact_in_child`).
+    monkeypatch.setattr(S, "_compact_in_child", lambda ws, **k: called.append(ws) or {"before_mb": 9, "after_mb": 1, "swapped": True})
     flag = tmp_path / "once"
     child = [sys.executable, "-c",
              "import os,sys; p=r'%s'; sys.exit(0 if os.path.exists(p) else (open(p,'w').close() or 76))" % flag]

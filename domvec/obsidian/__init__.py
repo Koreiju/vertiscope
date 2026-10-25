@@ -14,6 +14,16 @@ to an explicitly chosen set of pages. It never walks the whole workspace by
 default. See `export_vault`.
 """
 
-from .export import VaultExport, export_vault
-
 __all__ = ["VaultExport", "export_vault"]
+
+
+def __getattr__(name):
+    # Lazily: importing the package must not load the store (`graphstore`:
+    # kuzu, numpy). `python -m domvec.obsidian supervise` imports this package,
+    # and the supervisor -- whose only work is starting and watching a child --
+    # carried numpy's and scipy's OpenBLAS (117 modules, 53 threads) because
+    # of this line (2026-10-25).
+    if name in __all__:
+        from . import export
+        return getattr(export, name)
+    raise AttributeError(name)
