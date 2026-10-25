@@ -76,6 +76,8 @@ export interface GestureHost {
   plantOverlay: boolean;
   /** A gesture opened: a moment to learn which pages have notes. */
   onOpen?: () => void;
+  /** A result was infilled: the note now holds a retrieval link (G-7). */
+  onInfill?: () => void;
 }
 
 /** The results under one gesture: the DOM, the pages fetched so far, more on scroll. */
@@ -222,6 +224,7 @@ export function linkGesture(host: GestureHost): Extension {
         host.stats.infilled++;
         host.stats.last = { query: cur.query, cid: hit.cid, dest };
         view.focus();
+        host.onInfill?.();
       };
       const results = new Results(host, view, now.query, infill, host.plantOverlay);
       host.stats.opened++;

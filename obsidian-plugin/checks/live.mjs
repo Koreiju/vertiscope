@@ -6947,6 +6947,73 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-7",
+      asks: "a retrieval link written into a vault note is drawn in 3D: the note, indexed as the gesture's infill indexes it, becomes a page whose link to a stored page is a drawn edge; planted (__domvecPlantNoNoteIndex) no page and no edge",
+      async run() {
+        const got = await evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const plugin = app.plugins.getPlugin("domvec-bridge");
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
+          if (!plugin || !v || !v.graph) return { error: "no plugin or graph" };
+          const TARGET = "https://en.wikipedia.org/wiki/Radix_tree";
+          const drawnTarget = () => v.graph && v.graph.graphData().nodes.some((n) => n.level === "page" && n.url === TARGET);
+          for (let i = 0; i < 90 && !drawnTarget(); i++) await sleep(1000);      // a reloaded pane loads first
+          if (!drawnTarget()) return { error: "target page not drawn" };
+          const NL = String.fromCharCode(10);
+          const folder = "domvec-checks";
+          if (!app.vault.getAbstractFileByPath(folder)) await app.vault.createFolder(folder);
+          const arm = async (planted) => {
+            window.__domvecPlantNoNoteIndex = planted;
+            const path = folder + "/g7-" + (planted ? "p" : "c") + Date.now() + ".md";
+            const text = "# A retrieval note" + NL + NL + "What a [radix tree](" + TARGET + ") keeps of its keys." + NL;
+            const f = await app.vault.create(path, text);
+            const url = "vault://" + app.vault.getName() + "/" + path;
+            let answered = null, drawn = false, inLayout = false, t0 = Date.now();
+            try {
+              answered = await plugin.indexNote(f, "check");
+              for (let i = 0; i < 45 && !drawn; i++) {
+                await sleep(2000);
+                const lay = await (await fetch(plugin.settings.sidecar.replace(/[/]+$/, "") + "/layout?dims=3")).json();
+                inLayout = (lay.edges || []).some((e) => e.source === "page:" + url && e.target === "page:" + TARGET);
+                if (inLayout) {
+                  await v.reload();   // the view's loader (Component.load is not it)
+                  await sleep(1500);
+                  drawn = v.graph.graphData().links.some((l) => l.source && l.target && l.source.url === url && l.target.url === TARGET);
+                }
+                if (planted && i >= 10) break;
+              }
+            } finally {
+              window.__domvecPlantNoNoteIndex = false;
+              try { await app.vault.delete(f); } catch (e) {}
+              try { await fetch(plugin.settings.sidecar.replace(/[/]+$/, "") + "/purge", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url }) }); } catch (e) {}
+              plugin.settings.indexedNotes = (plugin.settings.indexedNotes || []).filter((p) => p !== path);
+              await plugin.saveSettings();
+            }
+            return { planted, url: url.slice(-40), indexed: !!(answered && answered.url),
+                     links: answered && answered.links ? answered.links.length : 0, in_layout: inLayout, drawn, s: Math.round((Date.now() - t0) / 1000) };
+          };
+          try {
+            const clean = await arm(false);
+            const planted = await arm(true);
+            return { clean, planted };
+          } finally {
+            // The folder too, once the vault has seen its notes go (an empty
+            // one was left behind when this ran at once).
+            try {
+              await sleep(1500);
+              const fo = app.vault.getAbstractFileByPath(folder);
+              if (fo && (!fo.children || !fo.children.length)) await app.vault.delete(fo, true);
+              else if (!fo && await app.vault.adapter.exists(folder)) await app.vault.adapter.rmdir(folder, false);
+            } catch (e) {}
+            await v.reload();   // the view's loader (Component.load is not it)
+          }
+        })()`, { timeout: 300000 });
+        if (!got || got.error) return { pass: false, evidence: got };
+        return { pass: got.clean.indexed && got.clean.links >= 1 && got.clean.drawn && !got.planted.indexed && !got.planted.drawn,
+                 evidence: got };
+      },
+    },
+    {
       id: "G-85",
       asks: "an opened page's tree has MUCH longer links than the page layer's own spacing: the median tree link at least 3x the median gap between page nodes; the same tree drawn at the force tree's old 18-unit links fails that bar",
       async run() {

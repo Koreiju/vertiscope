@@ -2086,6 +2086,53 @@ class _Handler(BaseHTTPRequestHandler):
                 threading.Thread(target=_maybe_compact, args=(self.workspace, store_mb), daemon=True).start()
             return
 
+        if route == "note":
+            # A vault NOTE into the store as a page (`G-7`, `Workspace.index_note`):
+            # the note a reader wrote retrieval links into, so its links are
+            # page links like any page's -- relinked, and drawn in 3D. Writes
+            # the reader's store, so gated as a capture is (`D-39`).
+            if self.workspace is None:
+                self._send(503, {"error": "no workspace"})
+                return
+            if not self.capture_allowed:
+                self._send(403, {"error": "capture is off"})
+                return
+            if self.plugin_captures_only and self.headers.get("X-Domvec-Client") != "obsidian-plugin":
+                self._send(403, {"error": "notes come from the plugin"})
+                return
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(length) or b"{}")
+                path = str(body.get("path") or "").replace("\\", "/").lstrip("/")
+                text = str(body.get("text") or "")
+                vault = str(body.get("vault") or "vault")
+            except Exception as exc:                # noqa: BLE001
+                self._send(400, {"error": "bad body: %s" % exc})
+                return
+            if not path.endswith(".md") or ".." in path.split("/"):
+                self._send(400, {"error": "a vault-relative .md path"})
+                return
+            try:
+                t0 = time.time()
+                with _foreground(), _WORK_LOCK:
+                    # Its links resolve at ingest, against the pages held now
+                    # (`_link_hyperlinks`); a whole-store relink added nothing
+                    # and cost 17 s (2026-10-24).
+                    got = self.workspace.index_note(text, path, vault=vault)
+                    out = {"url": got.url, "chunks": got.chunks, "lines": got.lines,
+                           "links": [t for s, t in self.workspace.store.page_links() if s == got.url]}
+                # Placed like a captured page: embedded, then projected. Without
+                # this the note was embedded and never placed, so no node and
+                # no edge (2026-10-24).
+                _project_page(self.workspace, got.url)
+                out["ms"] = round((time.time() - t0) * 1000)
+                _LAST_WRITE[0] = time.time()
+                _profile("note", {k: out.get(k) for k in ("url", "chunks", "ms")})
+                self._send(200, out)
+            except Exception as exc:                # noqa: BLE001
+                self._send(500, {"error": "%s: %s" % (type(exc).__name__, exc)})
+            return
+
         if route == "relink":
             if self.workspace is None:
                 self._send(503, {"error": "no workspace"})

@@ -81,6 +81,21 @@ export class Sidecar {
     }
   }
 
+  /** A vault note into the store as a page (`/note`, G-7): its retrieval
+   *  links become page links, drawn in 3D. */
+  async note(path: string, text: string, vault: string): Promise<any | null> {
+    const u = this.url("/note");
+    if (!u || !path) return null;
+    try {
+      const res = await fetch(u, { method: "POST",
+                                   headers: { "Content-Type": "application/json", "X-Domvec-Client": "obsidian-plugin" },
+                                   body: JSON.stringify({ path, text, vault }), signal: AbortSignal.timeout(120000) });
+      return await res.json();
+    } catch (e) {
+      return { error: String(e).slice(0, 120) };
+    }
+  }
+
   /** A chunk's page form as SAVED at scan time (`snapshots.py`), or null. */
   savedSnapshot(cid: string): Promise<any | null> {
     return this.get<any>(`/snapshot/${encodeURIComponent(cid)}`);

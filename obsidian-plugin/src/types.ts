@@ -179,6 +179,9 @@ export interface SearchResult {
 export interface DomvecSettings {
   /** Where the Python sidecar answers. Empty disables every lookup. */
   sidecar: string;
+  /** Vault notes the reader wrote retrieval links into, kept in the store as
+   *  pages and re-indexed when edited (G-7). */
+  indexedNotes?: string[];
   /** Start in the interactive surface rather than the distilled markdown. */
   interactiveByDefault: boolean;
   /**

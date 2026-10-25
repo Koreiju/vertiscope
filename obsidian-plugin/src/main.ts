@@ -157,11 +157,19 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     }, 60000));
     this.links = new VaultLinks(this.app, this.sidecar);
     const links = this.links;
+    // A note once indexed (it holds retrieval links) is indexed again when it
+    // is edited: its links are the store's, and the store follows the note.
+    this.registerEvent(this.app.vault.on("modify", (f) => {
+      if (f instanceof TFile && f.extension === "md" && (this.settings.indexedNotes || []).includes(f.path)) {
+        this.indexNoteSoon(f, "edited");
+      }
+    }));
     this.gesture = {
       sidecar: this.sidecar,
       stats: { opened: 0, pages: 0, infilled: 0, last: null },
       plantOverlay: false,
       onOpen: () => { void links.refresh(); },
+      onInfill: () => { const f = this.app.workspace.getActiveFile(); if (f) this.indexNoteSoon(f, "infill"); },
       destination: (hit) => {
         // A vault note links by its path in the vault; a page with an
         // exported note links to that note (a markdown panel link, as the
@@ -737,6 +745,37 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
       return;
     }
     await this.app.workspace.getLeaf(false).openFile(file);
+  }
+
+  // ---- retrieval links drawn (G-7) -----------------------------------------
+  //
+  // A note the reader wrote a retrieval link into (the `[]()` gesture) goes
+  // into the store as a page, through the sidecar's `/note`: its links become
+  // page links, relinked, and the 3D graph draws them as it draws any page's
+  // (2026-10-24: 890 page-to-page links drawn, 0 from a note -- no note was
+  // ever in the store, so no retrieval link could be). Planted
+  // `__domvecPlantNoNoteIndex`: nothing is indexed.
+  noteStats = { indexed: 0, errors: 0, last: null as any };
+  private noteTimers = new Map<string, number>();
+  indexNoteSoon(file: TFile, why: string, delayMs = 2500): void {
+    if ((window as any).__domvecPlantNoNoteIndex) return;
+    window.clearTimeout(this.noteTimers.get(file.path));
+    this.noteTimers.set(file.path, window.setTimeout(() => { this.noteTimers.delete(file.path); void this.indexNote(file, why); }, delayMs));
+  }
+  async indexNote(file: TFile, why: string): Promise<any> {
+    if ((window as any).__domvecPlantNoNoteIndex) return null;
+    const text = await this.app.vault.cachedRead(file);
+    const got = await this.sidecar.note(file.path, text, this.app.vault.getName());
+    if (!got || got.error) {
+      this.noteStats.errors++;
+      this.noteStats.last = { path: file.path, why, error: got ? got.error : "no answer" };
+      return got;
+    }
+    this.noteStats.indexed++;
+    this.noteStats.last = { path: file.path, why, url: got.url, chunks: got.chunks, links: (got.links || []).length, ms: got.ms };
+    const kept = this.settings.indexedNotes || [];
+    if (!kept.includes(file.path)) { this.settings.indexedNotes = [...kept, file.path]; await this.saveSettings(); }
+    return got;
   }
 
   async saveSettings() {

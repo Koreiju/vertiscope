@@ -2350,6 +2350,8 @@ export class GraphView extends ItemView {
    * node keeps ONE incoming edge: from the deepest container drawn (one that
    * no other container of it contains), chunks preferred over the page.
    */
+  /** Planted (G-7): the one-parent rule over page links too, as before. */
+  plantTreeOnlyPages = false;
   private treeOnly(data: any): void {
     if (this.plantWeb) return;
     const end = (x: any) => (typeof x === "object" && x ? x.id : x);
@@ -2359,6 +2361,13 @@ export class GraphView extends ItemView {
     for (const l of data.links) {
       if (l.force) continue;
       const s = end(l.source), t = end(l.target);
+      // **Containment only.** An edge INTO a page node is a web link (or a
+      // directory edge), not a container -- a page linked from many pages
+      // keeps them all. Run over every link, the one-parent rule kept one
+      // incoming link per page and drew 232 of the layout's 914 edges; a
+      // vault note's retrieval link to a well-linked page was never drawn
+      // (2026-10-24, G-7). Planted `plantTreeOnlyPages`.
+      if (byId.get(t)?.level === "page" && !this.plantTreeOnlyPages) continue;
       (into.get(t) || into.set(t, []).get(t)!).push(l);
       (outOf.get(s) || outOf.set(s, new Set()).get(s)!).add(t);
     }
