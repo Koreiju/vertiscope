@@ -54,6 +54,15 @@ COMPACT_CODE = 76
 STUCK_CODE = 70
 START_DEADLINE_S = float(os.environ.get("DOMVEC_START_DEADLINE_S") or 240.0)
 START_STALL_S = float(os.environ.get("DOMVEC_START_STALL_S") or 60.0)
+#: The EARLY stall: a child that has spent under `EARLY_CPU_S` of CPU after
+#: `EARLY_S` never got past the interpreter's own start. Every hung child on
+#: 2026-10-24/25 sat at 13 MB and 0.02 s of CPU inside the Store Python's
+#: package lookup, where a healthy start has spent seconds importing by then;
+#: waiting out `START_DEADLINE_S` for each cost 4 min a try, and they came in
+#: runs (a compaction child too, which held the sidecar down under a 1 h
+#: timeout). Planted `DOMVEC_PLANT_NO_START_DEADLINE` covers both.
+EARLY_S = float(os.environ.get("DOMVEC_EARLY_S") or 25.0)
+EARLY_CPU_S = 0.5
 
 
 def _port_of(args: List[str]) -> Optional[int]:
@@ -75,22 +84,44 @@ def _healthy(port: int) -> bool:
         return False
 
 
-def _run_child(command: List[str], env: dict, port: Optional[int]) -> int:
-    """The child, run to its exit -- or killed as a STALLED start."""
-    proc = subprocess.Popen(command, env=env)
+def _run_child(command: List[str], env: dict, port: Optional[int], *,
+               capture: bool = False, timeout: Optional[float] = None):
+    """The child, run to its exit -- or killed as a STALLED start (early: no
+    CPU to speak of after `EARLY_S`; late: no /health in `START_DEADLINE_S`
+    and no CPU for `START_STALL_S`). With `capture`, (code, stdout)."""
+    proc = subprocess.Popen(command, env=env, stdout=subprocess.PIPE if capture else None, text=capture)
     started = time.time()
-    healthy = port is None or os.environ.get("DOMVEC_PLANT_NO_START_DEADLINE") == "1"
+    planted = os.environ.get("DOMVEC_PLANT_NO_START_DEADLINE") == "1"
+    healthy = port is None or planted
+    early_done = planted
     try:
         import psutil
         ps = psutil.Process(proc.pid)
     except Exception:                               # noqa: BLE001
         ps = None
     last_cpu, last_move = None, time.time()
+
+    def done(code):
+        return (code, proc.stdout.read() if capture and proc.stdout else "") if capture else code
+
     while True:
         try:
-            return proc.wait(timeout=2.0)
+            code = proc.wait(timeout=2.0)
+            return done(code)
         except subprocess.TimeoutExpired:
             pass
+        if timeout and time.time() - started > timeout:
+            proc.kill(); proc.wait()
+            return done(STUCK_CODE)
+        if not early_done and time.time() - started > EARLY_S:
+            early_done = True
+            try:
+                t = ps.cpu_times() if ps is not None else None
+                if t is not None and (t.user + t.system) < EARLY_CPU_S:
+                    proc.kill(); proc.wait()
+                    return done(STUCK_CODE)
+            except Exception:                       # noqa: BLE001
+                pass
         if healthy:
             continue
         if _healthy(port):
@@ -107,7 +138,7 @@ def _run_child(command: List[str], env: dict, port: Optional[int]) -> int:
         if now - started > START_DEADLINE_S and now - last_move > START_STALL_S:
             proc.kill()
             proc.wait()
-            return STUCK_CODE
+            return done(STUCK_CODE)
 
 def quarantine_wal(workspace: Path) -> Optional[Path]:
     """Set an unreplayable write-ahead log aside so the store can open.
@@ -141,12 +172,17 @@ def _statement(workspace: Path) -> str:
 
 
 def _compact_in_child(workspace: Path) -> dict:
-    """`compact` run as its own process; its JSON result."""
-    run = subprocess.run([sys.executable, "-m", "domvec.obsidian.compact", str(workspace)],
-                         capture_output=True, text=True, timeout=3600)
-    lines = [ln for ln in (run.stdout or "").splitlines() if ln.strip().startswith("{")]
-    return json.loads(lines[-1]) if lines else {
-        "error": "compaction exited %s: %s" % (run.returncode, (run.stderr or "")[-200:])}
+    """`compact` run as its own process; its JSON result. Watched like a
+    sidecar start: a child stalled at its start is killed and tried once more,
+    and then the compaction is skipped -- the sidecar starts either way."""
+    for attempt in (1, 2):
+        code, out = _run_child([sys.executable, "-m", "domvec.obsidian.compact", str(workspace)],
+                               dict(os.environ), None, capture=True, timeout=3600)
+        if code == STUCK_CODE:
+            continue
+        lines = [ln for ln in (out or "").splitlines() if ln.strip().startswith("{")]
+        return json.loads(lines[-1]) if lines else {"error": "compaction exited %s" % code}
+    return {"error": "compaction child stalled at its start twice; skipped"}
 
 
 def _compact_logged(workspace: Path, why: str) -> dict:

@@ -117,3 +117,27 @@ def test_planted_no_deadline_leaves_it_running(tmp_path, monkeypatch):
     t0 = time.time()
     assert sv.supervise(tmp_path, ["--port", "1"], command=short, pause=0.0) == 0
     assert time.time() - t0 >= 4
+
+
+def test_an_early_stall_is_killed_before_the_deadline(tmp_path, monkeypatch):
+    """A child with almost no CPU after EARLY_S never got past its start
+    (2026-10-25: 13 MB, 0.02 s CPU, every time) -- killed then, not at the
+    four-minute deadline."""
+    import domvec.obsidian.supervise as sv
+    monkeypatch.setattr(sv, "EARLY_S", 2.0)
+    monkeypatch.setattr(sv, "START_DEADLINE_S", 600.0)
+    monkeypatch.setattr(sv, "BURST", 2)
+    t0 = time.time()
+    code = sv.supervise(tmp_path, ["--port", "1"], command=SLEEPER, pause=0.0)
+    assert code == sv.STUCK_CODE and time.time() - t0 < 20
+
+
+def test_a_stalled_compaction_child_is_skipped_not_waited(tmp_path, monkeypatch):
+    import domvec.obsidian.supervise as sv
+    monkeypatch.setattr(sv, "EARLY_S", 2.0)
+    monkeypatch.setattr(sv.sys, "executable", sys.executable)
+    real = sv._run_child
+    monkeypatch.setattr(sv, "_run_child", lambda cmd, env, port, **k: real(SLEEPER, env, port, **k))
+    t0 = time.time()
+    got = sv._compact_in_child(tmp_path)
+    assert "stalled" in got.get("error", "") and time.time() - t0 < 30
