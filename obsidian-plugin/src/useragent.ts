@@ -141,6 +141,8 @@ export class UserAgent {
   private lit = new Map<string, number>();
   /** The last key and the action it took (item 19), as the cockpit shows it. */
   lastAction = "";
+  /** The last keys and their actions, newest first: `{keys}`'s samples (G-280). */
+  keyLog: string[] = [];
 
   constructor(private host: AgentHost) {
     try {
@@ -395,7 +397,7 @@ export class UserAgent {
   private light(k: string): void {
     this.lit.set(k, Infinity);
     const cap = CAPS.find((c) => c[0] === k);
-    if (cap) this.lastAction = `${cap[1]}  ${cap[2]}`;
+    if (cap) { this.lastAction = `${cap[1]}  ${cap[2]}`; this.keyLog.unshift(this.lastAction); this.keyLog.length = Math.min(this.keyLog.length, 12); }
     this.draw();
   }
 

@@ -80,3 +80,14 @@ def test_signal_edges_name_every_runs_inputs_newest_first(tmp_path):
         assert store.signal_edges(1) and len(store.signal_edges(1)) == 1
     finally:
         store.close()
+
+
+def test_rank1_of_a_slate_is_its_first_level_and_of_prose_its_first_lines():
+    """G-278: internalizing a `{ref}` reveals the target's rank-1 lines only."""
+    from domvec.obsidian.refs import rank1
+    slate = "---\ndomvec: slate\n---\nego\n\tview\tego\n\tsearch\n\t\tquery\tradix\n\t\tk\t8\n\tthrottle\t25\n"
+    assert rank1(slate) == ["view\tego", "search\t{search}", "throttle\t25"]
+    prose = "# Radix tree\n\nA radix tree compresses chains.\n\n```python\nx = 1\n```\n\nSecond paragraph.\n"
+    assert rank1(prose) == ["Radix tree", "A radix tree compresses chains.", "x = 1", "Second paragraph."][:2] + rank1(prose)[2:]
+    assert rank1(prose)[:2] == ["Radix tree", "A radix tree compresses chains."]
+    assert len(rank1("\n".join("line %d" % i for i in range(40)))) == 12

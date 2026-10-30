@@ -3650,6 +3650,19 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(200, {"note": note, "runs": self.workspace.store.runs_of(note)})
             return
 
+        if segments[0] == "ref":
+            # A `{ref}` resolved through the store, with the rank-1 lines that
+            # internalizing it reveals (G-278; RESERVOIR_DESIGN §3.1-3.3).
+            from . import refs as _refs
+            name = (parse_qs(parts.query).get("name") or [""])[0]
+            got = _refs.resolve(self.workspace, name)
+            if got is None:
+                self._send(200, {"name": name, "resolved": False, "lines": []})
+                return
+            self._send(200, {"name": name, "resolved": True, "kind": got["kind"], "url": got["url"],
+                             "cids": got["cids"][:20], "lines": _refs.rank1(got["value"])})
+            return
+
         if segments[0] == "signal":
             # The reservoir's signal flow (G-292; RESERVOIR_DESIGN §5, DM
             # §6.6.4): every recorded run's inputs -> its cell note, most

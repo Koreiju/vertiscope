@@ -55,6 +55,7 @@ import { ChunkPayload, DEFAULTS, DomvecSettings, EnactResult, KernelReply }
 import { VaultLinks } from "./vaultlinks";
 import { PANEL_VIEW, PanelView } from "./panelview";
 import { Cockpit } from "./cockpit";
+import { slateFolds } from "./slatefold";
 
 export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost {
   settings: DomvecSettings = DEFAULTS;
@@ -243,6 +244,8 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     this.registerEditorExtension(chunkGutter());
     // A chunk note's two halves, one at a time (`D-3`): `chunkhalves.ts`.
     this.registerEditorExtension(chunkHalves());
+    // The slate's fold state, as decorations (G-278): `slatefold.ts`.
+    this.registerEditorExtension(slateFolds());
     for (const ev of ["layout-change", "file-open", "active-leaf-change"] as const) {
       this.registerEvent((this.app.workspace as any).on(ev, () => { this.applyHalves(); this.cockpit.decorate(); }));
     }
@@ -615,6 +618,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
   /** The `ego` slate, bound to the agent and the search (G-280). */
   cockpit: Cockpit = new Cockpit(this.app, {
     graph: () => this.app.workspace.getLeavesOfType(GRAPH_VIEW)[0]?.view as any,
+    ref: (name: string) => this.sidecar.ref(name),
     webSearch: (q: string) => {
       const browser = this.app.workspace.getLeavesOfType(BROWSER_VIEW)[0]?.view as BrowserView | undefined;
       if (!browser || typeof browser.searchWeb !== "function") return false;

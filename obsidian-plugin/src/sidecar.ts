@@ -446,6 +446,11 @@ export class Sidecar {
    * doubled since that fit and the pane should ask for a real layout.
    */
   /** A code file's CALLS / INHERITS edges, mapped to the nodes that draw them (G-241). */
+  /** A `{ref}` resolved through the store, with its rank-1 lines (G-278). */
+  async ref(name: string): Promise<{ resolved: boolean; kind?: string; url?: string; lines: string[] } | null> {
+    return this.get("/ref?name=" + encodeURIComponent(name));
+  }
+
   /** A note's recorded runs, newest first, each with its inputs (G-279). */
   async runsOf(note: string): Promise<{ runs: any[] } | null> {
     return this.get("/runs?note=" + encodeURIComponent(note));

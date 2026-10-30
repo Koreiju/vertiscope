@@ -1042,3 +1042,12 @@ button.domvec-run-fence:hover {
 .domvec-slate .cm-scroller { overflow-x: auto; font-size: 14px; }
 .domvec-slate .cm-sizer, .domvec-slate .cm-contentContainer { margin-left: 0 !important; margin-right: 0 !important; }
 .domvec-slate .cm-content { padding-left: 12px !important; }
+
+/* A revealed {ref}'s rank-1 lines (G-278): read-only, a step dimmer than the
+   slate's own text; the collapsed slate as its circular node. */
+.domvec-slate .domvec-slate-reveal { color: #c8c8c8; font-family: Georgia, "Times New Roman", serif; font-size: 13px; }
+.domvec-slate .domvec-slate-reveal-line { white-space: pre; }
+.domvec-slate .domvec-slate-circle { padding: 10px 12px; }
+.domvec-slate .domvec-slate-circle-dot { width: 76px; height: 76px; border-radius: 50%; border: 1px solid #b8b8b8;
+  display: flex; align-items: center; justify-content: center; text-align: center; color: #fff;
+  font-family: Georgia, "Times New Roman", serif; font-size: 12px; cursor: context-menu; }

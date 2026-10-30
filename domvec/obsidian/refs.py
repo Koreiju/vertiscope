@@ -62,6 +62,38 @@ def resolve(workspace, name: str) -> Optional[Dict]:
     return None
 
 
+def rank1(text: str, limit: int = 12) -> List[str]:
+    """A target's RANK-1 lines (UR O.1a, M.6; G-278): what internalizing a
+    `{ref}` reveals. A slate's first level of fields (`key<TAB>value`, the
+    title's children); any other text, its first lines -- headings and the
+    starts of paragraphs -- each cut to 120 characters. Frontmatter skipped."""
+    NL, TAB = chr(10), chr(9)
+    body = (text or "").replace(chr(13), "")
+    if body.startswith("---"):
+        end = body.find(NL + "---", 3)
+        if end >= 0:
+            body = body[end + 4:]
+    from domvec.slate import parse_slate
+    try:
+        fields = parse_slate(body.strip(NL), False)
+    except Exception:                               # noqa: BLE001
+        fields = []
+    if len(fields) == 1 and fields[0].children:
+        out = []
+        for f in fields[0].children[:limit]:
+            v = f.value if isinstance(f.value, str) else ("{%s}" % f.key if f.children else "")
+            out.append((f.key + (TAB + v if v else "")).replace(NL, " ")[:120])
+        return out
+    out = []
+    for line in body.splitlines():
+        t = line.strip()
+        if t and not t.startswith(("<!--", "```", "~~~", "|", "---")):
+            out.append(t.lstrip("#> ").replace(TAB, " ")[:120])
+        if len(out) >= limit:
+            break
+    return out
+
+
 def bind(workspace, names: List[str]) -> Dict:
     """The prelude that binds each named ref in a kernel, and what was bound."""
     lines, bound, inputs = [], [], []

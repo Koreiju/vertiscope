@@ -27,6 +27,7 @@
  * true -- typing alone never reaches the web (item 107).
  */
 import { App, MarkdownView, TFile } from "obsidian";
+import { FoldState, foldsOf, setFolds, titleLine } from "./slatefold";
 
 export const COCKPIT_PATH = "domvec/ego.md";
 const FOLD_KEY = "domvec.cockpit.results";
@@ -85,6 +86,31 @@ export function parseSlate(text: string): SlateLine[] {
   return out;
 }
 
+/** A slate's rank-1 lines (`refs.rank1` in Python): the title's first level
+ *  of fields, `key<TAB>value` (a field with children shows as `{key}`); any
+ *  other text, its first lines. */
+export function rank1Of(text: string, limit = 12): string[] {
+  const fs = parseSlate(text);
+  const top = fs.filter((f) => f.depth === 0);
+  if (top.length === 1) {
+    const kids = fs.filter((f) => f.depth === 1).slice(0, limit);
+    if (kids.length) return kids.map((f) => {
+      const hasKids = fs.some((x) => x.depth === 2 && x.path[1] === f.key);
+      const v = f.value || (hasKids ? "{" + f.key + "}" : "");
+      return (f.key + (v ? "\t" + v : "")).slice(0, 120);
+    });
+  }
+  const out: string[] = [];
+  let body = text;
+  if (body.startsWith("---")) { const e = body.indexOf("\n---", 3); if (e >= 0) body = body.slice(e + 4); }
+  for (const line of body.split("\n")) {
+    const t = line.trim();
+    if (t && !/^(<!--|```|~~~|\||---)/.test(t)) out.push(t.replace(/^[#> ]+/, "").replace(/\t/g, " ").slice(0, 120));
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
 export function isSlate(app: App, file: TFile | null): boolean {
   if (!file) return false;
   const fm = app.metadataCache.getFileCache(file)?.frontmatter;
@@ -96,6 +122,8 @@ export interface CockpitHost {
   graph(): any;
   /** Ask the browser cell's web search (the 3D search button's path). */
   webSearch(q: string): boolean;
+  /** A `{ref}` resolved through the store, with its rank-1 lines. */
+  ref(name: string): Promise<{ resolved: boolean; lines: string[] } | null>;
 }
 
 export class Cockpit {
@@ -158,14 +186,109 @@ export class Cockpit {
     return l && l.view instanceof MarkdownView ? l.view : null;
   }
 
-  /** The slate class on every leaf whose note asks for it, and the cockpit's gestures on its own. */
+  /** The slate class on every leaf whose note asks for it, the slate gestures
+   *  on each (G-278), and the cockpit's own on the cockpit. */
   decorate(): void {
     for (const l of this.app.workspace.getLeavesOfType("markdown")) {
       const v: any = l.view;
       const on = isSlate(this.app, v?.file || null);
       (l as any).containerEl?.toggleClass?.("domvec-slate", on);
+      if (on && v.contentEl && !this.slateHooked.has(v.contentEl)) this.hookSlate(v);
+      if (on) this.restoreFolds(v);
       if (v?.file?.path === COCKPIT_PATH && v.contentEl && !this.hooked.has(v.contentEl)) this.hook(v);
     }
+  }
+
+  // ---- the slate gestures, on every slate note (G-278) ----------------------
+  foldStats = { reveals: 0, folds: 0, collapses: 0, opens: 0, restored: 0, unresolved: 0 };
+  /** Planted (G-278): right-clicks on a slate do nothing. */
+  plantNoFolds = false;
+  /** Planted (G-278): a note's rank-1 read from the store's rendered markdown, as first built. */
+  plantRank1FromStore = false;
+  private slateHooked = new WeakSet<HTMLElement>();
+  private foldKey(path: string): string { return "domvec.slate.folds:" + path; }
+  private loadFolds(path: string): FoldState {
+    try { const s = JSON.parse(window.localStorage.getItem(this.foldKey(path)) || "null"); if (s && s.reveals) return s; } catch { /* a convenience */ }
+    return { reveals: {}, collapsed: false };
+  }
+  private saveFolds(path: string, st: FoldState): void {
+    try { window.localStorage.setItem(this.foldKey(path), JSON.stringify(st)); } catch { /* a convenience */ }
+  }
+  /** Put a note's kept fold state back on its editor -- whenever the editor
+   *  holds none of it: Obsidian loads a note's text AFTER the leaf opens and
+   *  replaces the editor state, so a restore at open was lost (G-278's check). */
+  restoreFolds(v: any): void {
+    const cm = v?.editor?.cm, path = v?.file?.path;
+    if (!cm || !path) return;
+    const st = this.loadFolds(path);
+    if (!(Object.keys(st.reveals).length || st.collapsed)) return;
+    const cur = foldsOf(cm);
+    if (Object.keys(cur.reveals).length || cur.collapsed) return;
+    cm.dispatch({ effects: setFolds.of(st) });
+    this.foldStats.restored++;
+  }
+  /** A `{ref}`'s rank-1 lines: the cockpit answers its own; a vault NOTE by
+   *  its own text (the slate's record, through the slate grammar -- the
+   *  store's rendered markdown leaked the frontmatter and flattened the tree);
+   *  the store the rest (a page by title, else retrieval's top hit). */
+  private async rank1(path: string, name: string): Promise<string[] | null> {
+    const g = this.host.graph();
+    if (path === COCKPIT_PATH && name === "keys") return g?.agent?.keyLog?.length ? g.agent.keyLog.slice() : ["(no key yet)"];
+    const want = name.trim().toLowerCase();
+    const note = this.app.vault.getMarkdownFiles().find((f) => f.basename.toLowerCase() === want);
+    if (note && !this.plantRank1FromStore) return rank1Of(await this.app.vault.cachedRead(note));
+    const got = await this.host.ref(name);
+    if (!got || !got.resolved) { this.foldStats.unresolved++; return null; }
+    return got.lines;
+  }
+  /** A right-click on a slate: a `{ref}` internalized / folded, or the title collapsed / opened. */
+  async slateGesture(v: any, x: number, y: number, target: HTMLElement | null): Promise<string> {
+    if (this.plantNoFolds) return "planted";
+    const cm = v?.editor?.cm, path = v?.file?.path;
+    if (!cm || !path) return "none";
+    const cur = foldsOf(cm);
+    const st: FoldState = { collapsed: cur.collapsed, reveals: { ...cur.reveals } };
+    if (target?.closest?.(".domvec-slate-circle")) {
+      st.collapsed = false; this.foldStats.opens++;
+    } else {
+      const pos = cm.posAtCoords({ x, y });
+      if (pos == null) return "none";
+      const ln = cm.state.doc.lineAt(pos);
+      const re = /\{([^}]+)\}/g;
+      let m: RegExpExecArray | null, hit = "";
+      while ((m = re.exec(ln.text))) { const a = ln.from + m.index, z = a + m[0].length; if (pos >= a && pos <= z) hit = m[1]; }
+      if (hit && !(path === COCKPIT_PATH && hit === "results")) {
+        if (hit in st.reveals) { delete st.reveals[hit]; this.foldStats.folds++; }
+        else {
+          const lines = await this.rank1(path, hit);
+          if (!lines) return "unresolved";
+          st.reveals[hit] = lines; this.foldStats.reveals++;
+        }
+      } else if (!hit && ln.number === titleLine(cm.state.doc)) {
+        st.collapsed = true; this.foldStats.collapses++;
+      } else return "none";
+    }
+    cm.dispatch({ effects: setFolds.of(st) });
+    this.saveFolds(path, st);
+    return "ok";
+  }
+  private hookSlate(v: any): void {
+    const el: HTMLElement = v.contentEl;
+    this.slateHooked.add(el);
+    this.restoreFolds(v);
+    el.addEventListener("contextmenu", (e: MouseEvent) => {
+      const t = e.target as HTMLElement | null;
+      const cm = v?.editor?.cm;
+      if (!cm) return;
+      // Only what is the slate's: a `{ref}`, the title, the circle.
+      const pos = cm.posAtCoords({ x: e.clientX, y: e.clientY });
+      const ln = pos != null ? cm.state.doc.lineAt(pos) : null;
+      const onRef = ln ? /\{[^}]+\}/.test(ln.text) : false;
+      const onTitle = ln ? ln.number === titleLine(cm.state.doc) : false;
+      if (!(t?.closest?.(".domvec-slate-circle") || onRef || onTitle)) return;
+      e.preventDefault(); e.stopPropagation();
+      void this.slateGesture(v, e.clientX, e.clientY, t);
+    }, true);
   }
 
   /** The note's text changed: read the fields into the agent and the search. */
@@ -246,6 +369,7 @@ export class Cockpit {
 
   /** Once a frame or so: the agent's state and the results, into the text. */
   sync(): void {
+    this.decorate();
     const v = this.view(), g = this.host.graph();
     if (!v || !g || this.plantUnbound) return;
     this.decorate();

@@ -7784,6 +7784,93 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-278",
+      asks: "slate notes in the native editor (RESERVOIR_DESIGN §3.1-3.3): in a slate note, a right-click on a {ref} naming another slate note internalizes it -- the target's rank-1 lines shown under the line, the braces dropped -- and a second folds it back; the reveal is kept when the note is closed and reopened; a right-click on the title collapses the slate to its circle and one on the circle opens it; nothing is written into the note; planted (cockpit.plantNoFolds) the right-clicks do nothing",
+      async run() {
+        const got = await evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const until = async (ok, ms) => { for (let t = 0; t < ms && !ok(); t += 200) await sleep(200); return ok(); };
+          const plugin = app.plugins.getPlugin("domvec-bridge"), c = plugin.cockpit;
+          const SIDE = String(plugin.settings.sidecar).replace(/[/]+$/, "");
+          const NL = String.fromCharCode(10), TB = String.fromCharCode(9);
+          const folder = "domvec-checks";
+          if (!app.vault.getAbstractFileByPath(folder)) await app.vault.createFolder(folder);
+          const vaultName = app.vault.getName(), urlOf = (path) => "vault://" + vaultName + "/" + path;
+          const stamp = Date.now();
+          const tName = "g278 target " + stamp;
+          const target = await app.vault.create(folder + "/" + tName + ".md", "---" + NL + "domvec: slate" + NL + "---" + NL + "target" + NL + TB + "marker" + TB + "m" + stamp + NL + TB + "depth" + NL + TB + TB + "hidden" + TB + "deep" + NL);
+          await plugin.indexNote(target, "check");
+          const slateText = "---" + NL + "domvec: slate" + NL + "---" + NL + "probe" + NL + TB + "input" + TB + "{" + tName + "}" + NL + TB + "note" + TB + "plain" + NL;
+          const slate = await app.vault.create(folder + "/g278 slate " + stamp + ".md", slateText);
+          const open = async () => {
+            const leaf = app.workspace.getLeaf("tab");
+            await leaf.openFile(slate, { state: { mode: "source", source: false } });
+            await sleep(800); c.decorate(); await sleep(300);
+            return leaf;
+          };
+          const right = (v, pos, el) => {
+            const cm = v.editor.cm, at = cm.coordsAtPos(pos);
+            const x = (at.left + at.right) / 2, y = (at.top + at.bottom) / 2;
+            const t = el || document.elementFromPoint(x, y) || v.contentEl;
+            t.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 2 }));
+          };
+          const tokenPos = (v) => { const tx = v.editor.cm.state.doc.toString(); return tx.indexOf("{" + tName + "}") + 3; };
+          const titlePos = (v) => v.editor.cm.state.doc.toString().indexOf("probe") + 2;
+          const out = {};
+          let leaf = null;
+          try {
+            for (const planted of [true, false]) {
+              c.plantNoFolds = planted;
+              leaf = await open();
+              const v = leaf.view;
+              const arm = {};
+              right(v, tokenPos(v));
+              await until(() => !!v.contentEl.querySelector(".domvec-slate-reveal"), planted ? 1500 : 8000);
+              const rv = v.contentEl.querySelector(".domvec-slate-reveal");
+              arm.revealed = !!rv;
+              arm.reveal_text = rv ? rv.textContent.slice(0, 120) : null;
+              const lineEl = [...v.contentEl.querySelectorAll(".cm-line")].find((l) => l.textContent.includes(tName));
+              arm.braces_shown = lineEl ? lineEl.textContent.includes("{") : null;
+              arm.text_unchanged = v.editor.getValue() === slateText;
+              if (!planted) {
+                // Kept across a close and reopen.
+                leaf.detach(); leaf = await open();
+                const v2 = leaf.view;
+                arm.kept = !!v2.contentEl.querySelector(".domvec-slate-reveal");
+                right(v2, tokenPos(v2)); await sleep(500);
+                arm.folded = !v2.contentEl.querySelector(".domvec-slate-reveal");
+                right(v2, titlePos(v2)); await sleep(500);
+                const circ = v2.contentEl.querySelector(".domvec-slate-circle");
+                arm.collapsed = !!circ && !v2.contentEl.querySelector(".cm-line") ? true : !!circ;
+                arm.circle_text = circ ? circ.textContent : null;
+                if (circ) { circ.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 1, clientY: 1, button: 2 })); await sleep(500); }
+                arm.reopened = !v2.contentEl.querySelector(".domvec-slate-circle");
+                arm.text_unchanged_after = v2.editor.getValue() === slateText;
+              }
+              out[planted ? "planted" : "clean"] = arm;
+              leaf.detach(); leaf = null;
+            }
+            out.stats = { ...c.foldStats };
+          } finally {
+            c.plantNoFolds = false;
+            try { leaf && leaf.detach(); } catch (e) {}
+            try { window.localStorage.removeItem("domvec.slate.folds:" + slate.path); } catch (e) {}
+            for (const f of [slate, target]) {
+              try { await fetch(SIDE + "/purge", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url: urlOf(f.path) }) }); } catch (e) {}
+              try { await app.vault.delete(f); } catch (e) {}
+            }
+          }
+          return out;
+        })()`, { timeout: 120000 });
+        if (!got || got.error) return { pass: false, evidence: got };
+        const c = got.clean, p = got.planted;
+        return { pass: c.revealed && /m[0-9]+/.test(c.reveal_text || "") && !/deep/.test(c.reveal_text || "") && c.braces_shown === false
+                   && c.text_unchanged && c.kept && c.folded && c.collapsed && c.reopened && c.text_unchanged_after
+                   && !p.revealed,
+                 evidence: got };
+      },
+    },
+    {
       id: "G-273",
       asks: "the user agent's views and keys: in MAP view a hover moves nothing and in EGO view it moves the camera; paused, no motion; Shift +5%, Ctrl -5%; Z, X and M do nothing (deprecated); arrows turn the camera about the focus (distance kept) and Q/R roll it about the view normal (view kept) -- 3-DOF rotation; each key held lit in the agent's state while pressed (its readout awaits the dialect card, G-274); planted (pointer away) the keys do nothing",
       async run() {
