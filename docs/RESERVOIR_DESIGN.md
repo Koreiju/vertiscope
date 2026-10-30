@@ -265,6 +265,20 @@ forms; nothing else unfolds.
 7. **Rollout** over `{chunk samples}`; flight plans on the same play/pause.
 8. **Halo transport** along cone rays.
 
+### 8b. Where the build stands (2026-10-30)
+
+| step | state | evidence |
+|---|---|---|
+| 0 defects | ego motion selective (G-285), chunk view real time (G-286), garbage 54 -> 13 MB a frame (G-290), url nodes 5x (G-269), only trusted input is the reader (G-289) | live checks, both arms |
+| 1 grammar | `domvec/slate.py` (G-277) and the TS `parseSlate` (cockpit.ts) | tests; G-280 |
+| 2 slate notes | the slate CLASS only (G-278 Partly); `{ref}` resolution and the title collapse are not built | G-280 screenshot |
+| 3 cells as nodes | `{ref}` binding, runs recorded, `Database` and `search(query, db, duckduckgo, k)` in every kernel (G-279, G-288) | live |
+| 4 cockpit | the `ego` slate bound both ways to the agent and the search; toggles, slider, rank-1 `{results}` (G-280 Partly) | live |
+| 5 graph form | not built (question 1 below) | -- |
+| 6 perimeter / bisector | the input -> cell signal network drawn and pulsing live (G-292); cell notes placed by UMAP (G-291); perimeter and bisector not built (G-282 Partly) | live |
+| 7 rollout / plans | flight plans through `{results}` on play/pause (G-283 Partly); the `{chunk samples}` rollout not built | live |
+| 8 halo transport | not built (G-284) | -- |
+
 ## 9. Yours to decide
 
 *Item 37 narrows questions 1 and 5: the 2D and 3D forms are one record in two places, so the
