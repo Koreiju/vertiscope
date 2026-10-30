@@ -1059,3 +1059,7 @@ button.domvec-run-fence:hover {
 .domvec-slate .domvec-slate-graph-node { fill: #fff; stroke: #b8b8b8; stroke-width: 1; }
 .domvec-slate .domvec-slate-graph-node.is-ref { fill: #000; }
 .domvec-slate .domvec-slate-graph-label { fill: #fff; font-family: Georgia, "Times New Roman", serif; font-size: 12px; }
+
+/* A wired link between two fields of one slate (G-281, UR N.4, O.1a). */
+.domvec-slate .domvec-slate-graph-link { stroke: #fff; stroke-width: 1.5; }
+.domvec-slate .domvec-slate-graph-node { cursor: grab; }

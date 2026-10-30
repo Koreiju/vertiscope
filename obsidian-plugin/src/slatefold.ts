@@ -113,7 +113,7 @@ class CircleWidget extends WidgetType {
 class GraphWidget extends WidgetType {
   constructor(readonly text: string) { super(); }
   eq(o: GraphWidget): boolean { return o.text === this.text; }
-  toDOM(): HTMLElement {
+  toDOM(view?: EditorView): HTMLElement {
     const fs = parseSlate(this.text);
     const NS = "http://www.w3.org/2000/svg";
     const el = document.createElement("div");
@@ -136,6 +136,24 @@ class GraphWidget extends WidgetType {
         break;
       }
     });
+    // A field whose value names another field of this slate by `{ref}` is
+    // WIRED to it: a solid line to a node already on screen (UR O.1a's
+    // resolved-external state).
+    const byKey = new Map<string, number>();
+    fs.forEach((f, i) => { if (!byKey.has(f.key)) byKey.set(f.key, i); });
+    fs.forEach((f, i) => {
+      const re = /\{([^}]+)\}/g;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(f.value))) {
+        const j = byKey.get(m[1]);
+        if (j === undefined || j === i) continue;
+        const ln = document.createElementNS(NS, "line");
+        ln.setAttribute("x1", String(at[i].x)); ln.setAttribute("y1", String(at[i].y));
+        ln.setAttribute("x2", String(at[j].x)); ln.setAttribute("y2", String(at[j].y));
+        ln.setAttribute("class", "domvec-slate-graph-link");
+        svg.appendChild(ln);
+      }
+    });
     fs.forEach((f, i) => {
       const c = document.createElementNS(NS, "circle");
       c.setAttribute("cx", String(at[i].x)); c.setAttribute("cy", String(at[i].y)); c.setAttribute("r", String(r));
@@ -150,9 +168,34 @@ class GraphWidget extends WidgetType {
       svg.appendChild(t);
     });
     el.appendChild(svg);
+    // Left-drag from one node onto another WIRES them (UR N.4): the dragged
+    // field gains `{target}` -- written into the slate's text, the record, so
+    // the panel form shows the same link. Planted `__domvecPlantNoWire`.
+    let from = -1;
+    svg.addEventListener("mousedown", (e) => {
+      const k = (e.target as Element)?.getAttribute?.("data-key");
+      if (e.button !== 0 || k == null) return;
+      from = fs.findIndex((f) => f.key === k);
+      e.preventDefault(); e.stopPropagation();
+    });
+    svg.addEventListener("mouseup", (e) => {
+      const k = (e.target as Element)?.getAttribute?.("data-key");
+      const src = from;
+      from = -1;
+      if (src < 0 || k == null || !view || (window as any).__domvecPlantNoWire) return;
+      const dst = fs.findIndex((f) => f.key === k);
+      if (dst < 0 || dst === src) return;
+      e.preventDefault(); e.stopPropagation();
+      const ref = "{" + fs[dst].key + "}";
+      if (fs[src].value.includes(ref)) return;
+      const line = view.state.doc.line(fs[src].line + 1);
+      const insert = fs[src].value ? " " + ref : "\t" + ref;
+      view.dispatch({ changes: { from: line.to, to: line.to, insert } });
+      ((window as any).__domvecWireStats = (window as any).__domvecWireStats || { wired: 0 }).wired++;
+    });
     return el;
   }
-  ignoreEvent(): boolean { return false; }
+  ignoreEvent(): boolean { return true; }
 }
 
 /** The decorations a fold state makes over a document. */

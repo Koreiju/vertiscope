@@ -7490,7 +7490,7 @@ export function makeChecks(env) {
     },
     {
       id: "G-280",
-      asks: "the cockpit is a node (items 10, 24, 30-33, 36-37): the ego slate opens as a vault note in the slate class (black fill, serif white); its throttle text sets the agent and Shift writes the new throttle and the lit key back into the text; its search query runs the search with the slate's k; a right-click on {results} internalizes the rank-1 rows and a hover on a row asks a flight to its node; a click on db's value toggles it and off clears the store's ranking; planted (cockpit.plantUnbound) the text binds nothing either way",
+      asks: "the cockpit is a node (items 10, 24, 30-33, 36-37): the ego slate opens as a vault note in the slate class (black fill, serif white); its throttle text sets the agent and Shift writes the new throttle and the lit key back into the text; its search query runs the search with the slate's k; a right-click on {results} internalizes the rank-1 rows and a hover on a row asks a flight to its node; a click on db's value toggles it and off clears the store's ranking; the cockpit's title collapses it to its circle and the circle opens it; {keys} referenced from ANOTHER slate reveals the key samples (planted plantKeysCockpitOnly: no key samples -- the name goes to the store instead); planted (cockpit.plantUnbound) the text binds nothing either way",
       async run() {
         const got = await evaluate(`(async () => {
           const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -7526,8 +7526,44 @@ export function makeChecks(env) {
             out.db = valOf("db"); out.query_db_off = g.searchField.query;
             return out;
           };
+          // The cockpit collapses to its circle like any slate, and {keys} is
+          // referenced from ANOTHER slate (item 22); planted: cockpit-only.
+          const extra = async () => {
+            const out = {};
+            const cv = c.view(), cm = cv.editor.cm;
+            const tpos = cm.state.doc.toString().indexOf(String.fromCharCode(10) + "ego") + 2;
+            const at = cm.coordsAtPos(tpos);
+            const rc = (el, x, y) => el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 2 }));
+            rc(document.elementFromPoint((at.left + at.right) / 2, (at.top + at.bottom) / 2) || cv.contentEl, (at.left + at.right) / 2, (at.top + at.bottom) / 2);
+            await sleep(500);
+            const circ = cv.contentEl.querySelector(".domvec-slate-circle");
+            out.cockpit_circle = circ ? circ.textContent : null;
+            if (circ) { rc(circ, 1, 1); await sleep(500); }
+            out.cockpit_reopened = !cv.contentEl.querySelector(".domvec-slate-circle");
+            const NL2 = String.fromCharCode(10), TB2 = String.fromCharCode(9);
+            const f = await app.vault.create("domvec-checks/g280 keys " + Date.now() + ".md", "---" + NL2 + "domvec: slate" + NL2 + "---" + NL2 + "listener" + NL2 + TB2 + "input" + TB2 + "{keys}" + NL2);
+            const leaf = app.workspace.getLeaf("tab");
+            try {
+              g.pointerOver = true; window.dispatchEvent(new KeyboardEvent("keydown", { key: "Shift", bubbles: true })); g.pointerOver = over0;
+              await leaf.openFile(f, { state: { mode: "source", source: false } }); await sleep(800); c.decorate(); await sleep(200);
+              for (const planted of [true, false]) {
+                c.plantKeysCockpitOnly = planted;
+                const r = await c.slateGesture(leaf.view, ...(() => { const cm2 = leaf.view.editor.cm, p2 = cm2.state.doc.toString().indexOf("{keys}") + 2, a2 = cm2.coordsAtPos(p2); return [(a2.left + a2.right) / 2, (a2.top + a2.bottom) / 2]; })(), null);
+                await sleep(400);
+                const rv = leaf.view.contentEl.querySelector(".domvec-slate-reveal");
+                out[planted ? "keys_planted" : "keys"] = { result: r, reveal: rv ? rv.textContent.slice(0, 60) : null };
+                if (rv) { await c.slateGesture(leaf.view, ...(() => { const cm2 = leaf.view.editor.cm, p2 = cm2.state.doc.toString().indexOf("{keys}") + 2, a2 = cm2.coordsAtPos(p2); return [(a2.left + a2.right) / 2, (a2.top + a2.bottom) / 2]; })(), null); await sleep(300); }
+              }
+            } finally {
+              c.plantKeysCockpitOnly = false;
+              try { leaf.detach(); } catch (e) {}
+              try { window.localStorage.removeItem("domvec.slate.folds:" + f.path); } catch (e) {}
+              try { await app.vault.delete(f); } catch (e) {}
+            }
+            return out;
+          };
           try {
-            return { clean: await arm(false), planted: await arm(true) };
+            return { clean: await arm(false), planted: await arm(true), extra: await extra() };
           } finally {
             c.plantUnbound = false; g.pointerOver = over0; c.resultsOpen = fold0;
             c.hoverRow(0);
@@ -7540,7 +7576,9 @@ export function makeChecks(env) {
         return { pass: c.slate && c.agent_throttle === 40 && c.text_throttle === "45" && /throttle up/.test(c.text_last)
                    && c.query === "radix tree" && c.k === 8 && c.rows >= 1 && c.row_flight >= 1
                    && c.db === "false" && c.query_db_off === ""
-                   && p.agent_throttle === 20 && p.text_throttle === "40",
+                   && p.agent_throttle === 20 && p.text_throttle === "40"
+                   && got.extra.cockpit_circle === "ego" && got.extra.cockpit_reopened
+                   && /throttle up/.test(got.extra.keys.reveal || "") && !/throttle up/.test(got.extra.keys_planted.reveal || ""),
                  evidence: got };
       },
     },
@@ -7909,7 +7947,7 @@ export function makeChecks(env) {
     },
     {
       id: "G-281",
-      asks: "graph form (UR M.7, O.16; item 37): a double left-click on a slate flips it to its graph form -- one circular node per field (node-count parity with the slate), one undirected line per non-root field to its parent, a {ref} field's node hollow -- and a second flips it back; the form is kept across a reopen; the note's text never changes; planted (cockpit.plantNoGraphForm) the double-click flips nothing",
+      asks: "graph form (UR M.7, O.16; item 37): a double left-click on a slate flips it to its graph form -- one circular node per field (node-count parity with the slate), one undirected line per non-root field to its parent, a {ref} field's node hollow -- and a second flips it back; the form is kept across a reopen; the note's text never changes by a flip; a left-drag from one node onto another WIRES them -- {target} written into the field, a solid link drawn (UR N.4; planted __domvecPlantNoWire: nothing written); planted (cockpit.plantNoGraphForm) the double-click flips nothing",
       async run() {
         const got = await evaluate(`(async () => {
           const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -7947,6 +7985,24 @@ export function makeChecks(env) {
                 dbl(leaf.view); await sleep(400);
                 arm.back = !read(leaf.view).graph && !!leaf.view.contentEl.querySelector(".cm-line");
                 arm.text_unchanged = leaf.view.editor.getValue() === text;
+                // Wire: drag query's node onto db's (UR N.4), then planted.
+                const wire = async (planted) => {
+                  window.__domvecPlantNoWire = planted;
+                  dbl(leaf.view); await sleep(400);
+                  const gEl = leaf.view.contentEl.querySelector(".domvec-slate-graph");
+                  const node = (k) => gEl && gEl.querySelector('circle[data-key="' + k + '"]');
+                  node("query")?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0 }));
+                  node("db")?.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, button: 0 }));
+                  await sleep(400);
+                  window.__domvecPlantNoWire = false;
+                  const g2 = leaf.view.contentEl.querySelector(".domvec-slate-graph");
+                  const res = { query_line: leaf.view.editor.getValue().split(NL).find((l) => l.trim().startsWith("query")),
+                                links: g2 ? g2.querySelectorAll("line.domvec-slate-graph-link").length : null };
+                  dbl(leaf.view); await sleep(300);                      // back to the panel
+                  return res;
+                };
+                arm.wire_planted = await wire(true);
+                arm.wire = await wire(false);
               }
               out[planted ? "planted" : "clean"] = arm;
               leaf.detach(); leaf = null;
@@ -7962,7 +8018,9 @@ export function makeChecks(env) {
         if (!got || got.error) return { pass: false, evidence: got };
         const c = got.clean, p = got.planted;
         return { pass: c.flipped.graph && c.flipped.nodes === got.fields && c.flipped.lines === got.fields - got.roots && c.flipped.hollow === 1
-                   && c.kept && c.back && c.text_unchanged && !p.flipped.graph,
+                   && c.kept && c.back && c.text_unchanged && !p.flipped.graph
+                   && /\{db\}/.test(c.wire.query_line || "") && c.wire.links === 1
+                   && !/\{db\}/.test(c.wire_planted.query_line || "") && c.wire_planted.links === 0,
                  evidence: got };
       },
     },

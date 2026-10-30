@@ -183,6 +183,8 @@ export class Cockpit {
     this.foldStats.flips++;
     return true;
   }
+  /** Planted (G-280): `{keys}` resolves only inside the cockpit. */
+  plantKeysCockpitOnly = false;
   /** Planted (G-278): right-clicks on a slate do nothing. */
   plantNoFolds = false;
   /** Planted (G-278): a note's rank-1 read from the store's rendered markdown, as first built. */
@@ -215,7 +217,10 @@ export class Cockpit {
    *  the store the rest (a page by title, else retrieval's top hit). */
   private async rank1(path: string, name: string): Promise<string[] | null> {
     const g = this.host.graph();
-    if (path === COCKPIT_PATH && name === "keys") return g?.agent?.keyLog?.length ? g.agent.keyLog.slice() : ["(no key yet)"];
+    // `{keys}` is the cockpit's sample stream, referenced from ANY node
+    // (item 22: keys are "computation graph inputs to the sticked
+    // node/panel dialect editor"): its current samples, newest first.
+    if (name === "keys" && (path === COCKPIT_PATH || !this.plantKeysCockpitOnly)) return g?.agent?.keyLog?.length ? g.agent.keyLog.slice() : ["(no key yet)"];
     const want = name.trim().toLowerCase();
     const note = this.app.vault.getMarkdownFiles().find((f) => f.basename.toLowerCase() === want);
     if (note && !this.plantRank1FromStore) return rank1Of(await this.app.vault.cachedRead(note));
