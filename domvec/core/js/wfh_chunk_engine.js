@@ -74,7 +74,8 @@
     ]);
     // Attrs that contribute to text/budget AND are kept as content_fields
     const TEXT_ATTRS = new Set([
-        'alt', 'title', 'aria-label', 'aria-describedby', 'aria-labelledby',
+        // aria-describedby / aria-labelledby are ID references, not text (M-11).
+        'alt', 'title', 'aria-label',
         'aria-roledescription', 'aria-valuetext', 'placeholder', 'label',
         'summary', 'caption', 'datetime', 'data-title', 'data-tooltip',
         'data-caption', 'data-description', 'data-text', 'data-name',

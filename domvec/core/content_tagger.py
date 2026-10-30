@@ -80,12 +80,19 @@ _ALL_MEDIA_EXTS = _IMAGE_EXTS | _VIDEO_EXTS | _AUDIO_EXTS | _ARCHIVE_EXTS
 _EXT_PATTERN = re.compile(r'\.([a-zA-Z0-9]{2,5})(?:[?#]|$)')
 
 # Attributes known to carry human-readable text
-_TEXT_ATTRS = frozenset({
-	'alt', 'title', 'placeholder', 'aria-label', 'aria-labelledby',
-	'aria-describedby', 'aria-description', 'aria-placeholder',
-	'aria-valuetext', 'aria-roledescription', 'aria-errormessage',
+# `aria-labelledby`, `aria-describedby`, `aria-errormessage` are ID
+# REFERENCES, not text -- as in the sensor (`sensor.js`, M-11): read as text
+# they put an element id ("link-aria-description") into labels and vectors.
+# Planted `PLANT_IDREF_TEXT`: read as text again, both paths together (a1).
+_IDREF_ATTRS = frozenset({'aria-labelledby', 'aria-describedby', 'aria-errormessage'})
+PLANT_IDREF_TEXT = [False]
+_TEXT_ATTRS_CLEAN = frozenset({
+	'alt', 'title', 'placeholder', 'aria-label',
+	'aria-description', 'aria-placeholder',
+	'aria-valuetext', 'aria-roledescription',
 	'label', 'summary', 'caption', 'abbr', 'acronym',
 })
+_TEXT_ATTRS = _TEXT_ATTRS_CLEAN
 
 # Metadata text attributes (less visible but still content).
 # ``datetime`` (ISO-8601 on <time>, <ins>, <del>) carries machine-
@@ -991,7 +998,7 @@ class ContentTagger:
 			# DOMAIN_MODEL §4.1: "The full set of 20+ text-bearing
 			# attributes tracked comprehensively." No length threshold
 			# beyond non-empty + has alphanumeric.
-			if attr_lower in _TEXT_ATTRS and val and _has_real_text(val):
+			if (attr_lower in _TEXT_ATTRS or (PLANT_IDREF_TEXT[0] and attr_lower in _IDREF_ATTRS)) and val and _has_real_text(val):
 				self._add('text', 'accessible', xpath, val, attr_name)
 			elif attr_lower in _META_TEXT_ATTRS and val and _has_real_text(val):
 				self._add('text', 'metadata', xpath, val, attr_name)

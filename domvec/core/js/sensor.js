@@ -101,7 +101,7 @@
   // Peripheral reads only -- nothing here touches the fold.
   // `codespans` may also be set at boot (`variants.codespans`): chunks are
   // emitted and cached at the first fold, before a run-time flip could act.
-  var RT_PLANTS = { yclip: false, lightpath: false, codespans: !!V.codespans, xmlnsurl: !!V.xmlnsurl, nojson: !!V.nojson, mergedlines: !!V.mergedlines };
+  var RT_PLANTS = { yclip: false, lightpath: false, codespans: !!V.codespans, xmlnsurl: !!V.xmlnsurl, nojson: !!V.nojson, mergedlines: !!V.mergedlines, idreftext: !!V.idreftext };
   var USE_SEMANTIC = !!V.semantic; // prefer heading/section boundaries
   var USE_RANK = !!V.rank;         // heaviest subtree first, not document order
   var WIDE = V.budget === 'wide', NARROW = V.budget === 'narrow';
@@ -293,11 +293,21 @@
   var URL_ATTRS = ['action', 'cite', 'data', 'data-image', 'data-lazy-src',
                    'data-original', 'data-original-src', 'data-src',
                    'formaction', 'href', 'longdesc', 'poster', 'src'];
-  var TEXT_ATTRS = ['abbr', 'acronym', 'alt', 'aria-describedby',
-                    'aria-description', 'aria-errormessage', 'aria-label',
-                    'aria-labelledby', 'aria-placeholder',
+  // `aria-describedby`, `aria-labelledby` and `aria-errormessage` are ID
+  // REFERENCES, not text: `aria-describedby="link-aria-description"` names the
+  // element whose words describe this one. Read as text, every archive.org
+  // tile carried the id "link-aria-description" into its label and its
+  // embedding -- 13,575 stored chunks, and a picture drawn
+  // `![logoTitleID logoDescID]` (M-11, 2026-10-30). The words they point at
+  // are captured where they live; resolving them here would make this node's
+  // value a function of another node, which the per-node fold cannot
+  // invalidate (`CLAUDE.md` 5c). Planted `V.idreftext`: read as text again.
+  var IDREF_ATTRS = ['aria-describedby', 'aria-errormessage', 'aria-labelledby'];
+  var TEXT_ATTRS = ['abbr', 'acronym', 'alt',
+                    'aria-description', 'aria-label', 'aria-placeholder',
                     'aria-roledescription', 'aria-valuetext', 'caption',
-                    'label', 'placeholder', 'summary', 'title'];
+                    'label', 'placeholder', 'summary', 'title']
+                    .concat(RT_PLANTS.idreftext ? IDREF_ATTRS : []);
   var META_ATTRS = ['content', 'data-alt', 'data-caption', 'data-description',
                     'data-label', 'data-name', 'data-placeholder',
                     'data-text', 'data-title', 'data-tooltip', 'data-value',
@@ -340,6 +350,7 @@
       + 'pubdate readonly required reversed role rows rowspan scope selected '
       + 'size start step wrap').split(' ');
     for (var i = 0; i < deny.length; i++) ATTR_SKIP[deny[i]] = 1;
+    if (!RT_PLANTS.idreftext) for (var r = 0; r < IDREF_ATTRS.length; r++) ATTR_SKIP[IDREF_ATTRS[r]] = 1;
   }());
   var ATTR_SKIP_PREFIX = ['data-testid', 'data-cy-', 'data-qa-',
                           'data-automation', 'data-react', 'data-radix',

@@ -256,7 +256,7 @@ def html_to_rendered_text(html: str) -> str:
 # Attributes whose VALUE is human-readable text when the node has no body
 # text of its own (img, input, svg, etc.).
 _TEXT_HINT_ATTRS = (
-    "alt", "aria-label", "aria-describedby", "title",
+    "alt", "aria-label", "title",
     "placeholder", "aria-roledescription",
 )
 
