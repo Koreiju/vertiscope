@@ -90,7 +90,9 @@ def run(limit=0):
             live = [c for c in chunks if c.lines]
             for i, c in enumerate(live):
                 t["chunks"] += 1
-                if all(_HEADING_FORM.match((ln.text or "").lstrip()) for ln in c.lines):
+                # Headings and their anchors only (a permalink `[¶](#x)` heads
+                # nothing): the live store kept `### Functions` + its `[¶]`.
+                if markdown._heads_only(c.lines):
                     t["heading_alone"] += 1
                     # WHY it stands alone (2026-10-30): the residue is a claim
                     # about the rule, so each one is classified, not argued.

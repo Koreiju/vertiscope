@@ -46,3 +46,12 @@ def test_planted_kept_apart():
         assert len(M._attach_lone_headings([h, body], 256)) == 2
     finally:
         M.PLANT_LONE_HEADING_KEPT_APART = False
+
+
+def test_a_heading_with_its_permalink_still_joins():
+    """Live, the store kept `### Functions` + `[¶](#functions)` apart from its
+    <dl>: a permalink heads nothing, so the pair is still a heading alone."""
+    h = _chunk("/html/body/section/h3", "### Functions", "[¶](#functions)")
+    body = _chunk("/html/body/section/dl", "- compile(pattern)")
+    out = M._attach_lone_headings([h, body], 256)
+    assert len(out) == 1 and out[0].lines[-1].text == "- compile(pattern)"

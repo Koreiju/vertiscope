@@ -3224,6 +3224,19 @@ _HEADING_FORM = re.compile(r"#{1,6} ")
 #: Planted (`G-86`): a heading the descent cut from what it heads stays alone.
 PLANT_LONE_HEADING_KEPT_APART = False
 
+#: A line that is only an in-page anchor -- a heading's permalink, `[¶](#x)`.
+#: It heads nothing, so a heading followed by it is still a heading alone
+#: (live, Python's `### Functions` was stored as heading + `[¶](#functions)`
+#: and escaped a rule that asked for headings only, 2026-10-30).
+_ANCHOR_ONLY = re.compile(r"^\s*\[[^\]]{0,3}\]\(#[^)\s]*\)\s*$")
+
+
+def _heads_only(lines) -> bool:
+    """Headings, and anchors that belong to them -- nothing they head."""
+    lines = [l for l in lines if (l.text or "").strip()]
+    return (bool(lines) and any(_HEADING_FORM.match(l.text or "") for l in lines)
+            and all(_HEADING_FORM.match(l.text or "") or _ANCHOR_ONLY.match(l.text or "") for l in lines))
+
 
 def _heading_level(text: str) -> int:
     m = re.match(r"(#{1,6}) ", (text or "").lstrip())
@@ -3263,8 +3276,8 @@ def _attach_lone_headings(chunks: List[MarkdownChunk], window: int) -> List[Mark
         c = chunks[i]
         nxt = chunks[i + 1] if i + 1 < len(chunks) else None
         if (nxt is not None and c.lines and nxt.lines and c.url == nxt.url
-                and all(_HEADING_FORM.match(l.text or "") for l in c.lines)):
-            mine = min(_heading_level(l.text) for l in c.lines)
+                and _heads_only(c.lines)):
+            mine = min(_heading_level(l.text) for l in c.lines if _heading_level(l.text))
             first = _heading_level(nxt.lines[0].text)
             heads = not (first and first <= mine)
             if heads and tokens.budget(c.markdown + "\n" + nxt.markdown) < LENIENCY * window:
