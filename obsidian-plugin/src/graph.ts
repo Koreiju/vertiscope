@@ -5259,6 +5259,94 @@ export class GraphView extends ItemView {
   }
 
   /** One query: the store's ranking, `total` deep. Nothing in the scene changes. */
+  /**
+   * **The halo's cone transport** (G-284; UR O.18, O.3, V.4; RESERVOIR_DESIGN
+   * §5). A field of a stuck slate, holding literal text, is the 2D query
+   * element: the APEX of a cone whose axis is the camera's view line. Its
+   * retrieved nodes are TRANSPORTED from their places onto that cone -- the
+   * more similar, the nearer the apex, both along the axis and in radius --
+   * each at the angle of its own direction about the axis. The cone is the
+   * camera's, so as the camera moves the halo slides with it; when the field
+   * is left, every node goes home. Planted `plantNoHaloTransport`.
+   */
+  plantNoHaloTransport = false;
+  halo: { query: string; items: { n: any; s: number; home: number[] }[] } | null = null;
+  haloStats = { fired: 0, ended: 0, nodes: 0, frames: 0 };
+  /** Apex distance in front of the camera, the cone's half-angle, its length. */
+  haloApex = 30;
+  haloHalfAngle = 0.35;
+  haloLength = 240;
+  private haloSeq = 0;
+  async haloFor(query: string): Promise<number> {
+    const q = (query || "").trim();
+    if (!q || this.plantNoHaloTransport || !this.graph) { this.haloEnd(); return 0; }
+    if (this.halo && this.halo.query === q) return this.halo.items.length;
+    const seq = ++this.haloSeq;
+    const got: any = await this.sidecar.search(q, { k: 12 });
+    if (seq !== this.haloSeq || !got || !this.graph) return 0;
+    this.haloEnd();
+    const ns = this.graph.graphData().nodes as any[];
+    const byId = new Map<string, any>(ns.map((n: any) => [String(n.id), n]));
+    const seen = new Set<any>();
+    const hits = (got.hits || []) as any[];
+    const items: { n: any; s: number; home: number[] }[] = [];
+    hits.forEach((h: any, i: number) => {
+      const n = byId.get(String(h.cid)) || (h.url ? byId.get("page:" + h.url) : null);
+      if (!n || seen.has(n) || !Number.isFinite(n.x)) return;
+      seen.add(n);
+      // Similarity, normalised over this halo: rank 0 is 1, the last is 0.
+      const s = hits.length > 1 ? 1 - i / (hits.length - 1) : 1;
+      items.push({ n, s, home: [n.x, n.y, n.z || 0, n.fx, n.fy, n.fz] });
+    });
+    this.halo = { query: q, items };
+    this.haloStats.fired++;
+    this.haloStats.nodes = items.length;
+    this.placeHalo();
+    return items.length;
+  }
+  haloEnd(): void {
+    if (!this.halo) return;
+    for (const it of this.halo.items) {
+      const [x, y, z, fx, fy, fz] = it.home;
+      it.n.x = x; it.n.y = y; it.n.z = z; it.n.fx = fx; it.n.fy = fy; it.n.fz = fz;
+      it.n.__halo = false;
+    }
+    this.halo = null;
+    this.haloStats.ended++;
+    this.posDirty = true;
+  }
+  /** Each halo node onto the camera's cone, now. */
+  placeHalo(): void {
+    const g: any = this.graph;
+    if (!g || !this.halo || !this.halo.items.length) return;
+    const cam = g.camera();
+    cam.updateMatrixWorld();
+    const e = cam.matrixWorld.elements;
+    const P = cam.position;
+    const fwd = [-e[8], -e[9], -e[10]];
+    const apex = [P.x + fwd[0] * this.haloApex, P.y + fwd[1] * this.haloApex, P.z + fwd[2] * this.haloApex];
+    const tanA = Math.tan(this.haloHalfAngle);
+    for (const it of this.halo.items) {
+      // The node's own bearing about the axis, from where it LIVES (its home),
+      // so the halo does not spin on itself as it slides.
+      const [hx, hy, hz] = it.home;
+      let vx = hx - apex[0], vy = hy - apex[1], vz = hz - apex[2];
+      const along = vx * fwd[0] + vy * fwd[1] + vz * fwd[2];
+      vx -= fwd[0] * along; vy -= fwd[1] * along; vz -= fwd[2] * along;
+      let vl = Math.hypot(vx, vy, vz);
+      if (vl < 1e-6) { vx = e[0]; vy = e[1]; vz = e[2]; vl = 1; }
+      vx /= vl; vy /= vl; vz /= vl;
+      // More similar, nearer the apex: along the axis, and so in radius.
+      const L = 8 + (1 - it.s) * this.haloLength;
+      const rad = L * tanA;
+      const x = apex[0] + fwd[0] * L + vx * rad, y = apex[1] + fwd[1] * L + vy * rad, z = apex[2] + fwd[2] * L + vz * rad;
+      it.n.x = it.n.fx = x; it.n.y = it.n.fy = y; it.n.z = it.n.fz = z;
+      it.n.__halo = true;
+    }
+    this.haloStats.frames++;
+    this.posDirty = true;
+  }
+
   private async searchAsk(query: string, total: number): Promise<FieldAnswer | null> {
     const t0 = performance.now();
     this.searchStats.asked++;
@@ -6112,6 +6200,8 @@ export class GraphView extends ItemView {
         this.agentAt = t;
         if (dt > 0) this.agent.tick(dt);
         this.applyZoomFloor(g);
+        // The halo rides the camera's cone (G-284).
+        if (this.halo) this.placeHalo();
       }
       freezeStatic();
       if (this.motion.recording) {

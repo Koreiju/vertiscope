@@ -8128,6 +8128,85 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-284",
+      asks: "the halo's cone transport (UR O.18, O.3): the cursor on a stuck slate's literal-text field fires a halo -- its retrieved nodes transported onto the camera's cone (every node at the cone's half-angle from the axis, the more similar nearer the apex); orbiting the camera 25 deg, they slide and stay on the new cone; the cursor on a pure {ref} field ends it and every node is home again; planted (plantNoHaloTransport) nothing moves",
+      async run() {
+        const got = await evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const until = async (ok, ms) => { for (let t = 0; t < ms && !ok(); t += 250) await sleep(250); return ok(); };
+          const plugin = app.plugins.getPlugin("domvec-bridge");
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
+          if (!v || !v.graph) return { error: "no graph" };
+          const g = v.graph, cam = g.camera(), ctl = g.controls();
+          const saved = { p: cam.position.clone(), t: ctl.target.clone() };
+          const NL = String.fromCharCode(10), TB = String.fromCharCode(9);
+          const folder = "domvec-checks";
+          if (!app.vault.getAbstractFileByPath(folder)) await app.vault.createFolder(folder);
+          const f = await app.vault.create(folder + "/g284 halo " + Date.now() + ".md", "---" + NL + "domvec: slate" + NL + "---" + NL + "halo probe" + NL + TB + "topic" + TB + "radix tree compression" + NL + TB + "source" + TB + "{somewhere}" + NL);
+          const leaf = app.workspace.getLeaf("tab");
+          await leaf.openFile(f, { state: { mode: "source", source: false } });
+          app.workspace.setActiveLeaf(leaf, { focus: true });
+          await sleep(600);
+          const ed = leaf.view.editor;
+          const lineOf = (k) => ed.getValue().split(NL).findIndex((l) => l.trim().startsWith(k));
+          const onCone = () => {
+            cam.updateMatrixWorld();
+            const e = cam.matrixWorld.elements, P = cam.position;
+            const fwd = [-e[8], -e[9], -e[10]];
+            const apex = [P.x + fwd[0] * v.haloApex, P.y + fwd[1] * v.haloApex, P.z + fwd[2] * v.haloApex];
+            return (v.halo ? v.halo.items : []).map((it) => {
+              const d = [it.n.x - apex[0], it.n.y - apex[1], it.n.z - apex[2]];
+              const along = d[0] * fwd[0] + d[1] * fwd[1] + d[2] * fwd[2], len = Math.hypot(...d);
+              return { s: it.s, along, ang: Math.acos(Math.min(1, along / len)) * 180 / Math.PI, at: [it.n.x, it.n.y, it.n.z], home: it.home.slice(0, 3) };
+            });
+          };
+          const out = { half_angle_deg: Math.round(v.haloHalfAngle * 1800 / Math.PI) / 10 };
+          try {
+            // Planted first.
+            v.plantNoHaloTransport = true;
+            ed.setCursor({ line: lineOf("topic"), ch: 3 }); await sleep(2500);
+            out.planted = { halo: !!v.halo };
+            ed.setCursor({ line: lineOf("source"), ch: 3 }); await sleep(800);
+            v.plantNoHaloTransport = false;
+            // Clean.
+            ed.setCursor({ line: lineOf("topic"), ch: 3 });
+            await until(() => !!v.halo && v.halo.items.length >= 3, 15000);
+            await sleep(1500);
+            const a = onCone();
+            out.nodes = a.length;
+            out.max_angle_err = a.length ? Math.round(Math.max(...a.map((x) => Math.abs(x.ang - out.half_angle_deg))) * 100) / 100 : null;
+            const bySim = a.slice().sort((x, y) => y.s - x.s);
+            out.nearer_when_similar = bySim.every((x, i) => i === 0 || x.along >= bySim[i - 1].along - 1e-6);
+            out.moved_from_home = a.length ? Math.round(Math.min(...a.map((x) => Math.hypot(x.at[0] - x.home[0], x.at[1] - x.home[1], x.at[2] - x.home[2])))) : null;
+            // Orbit the camera 25 deg about its target: the cone moves, the halo slides.
+            const t = ctl.target, ang = 25 * Math.PI / 180;
+            const rx = cam.position.x - t.x, rz = cam.position.z - t.z;
+            cam.position.set(t.x + rx * Math.cos(ang) - rz * Math.sin(ang), cam.position.y, t.z + rx * Math.sin(ang) + rz * Math.cos(ang));
+            cam.lookAt(t); ctl.update?.();
+            await sleep(2500);
+            const b = onCone();
+            out.slid = a.length && b.length ? Math.round(Math.min(...b.map((x, i) => Math.hypot(x.at[0] - a[i].at[0], x.at[1] - a[i].at[1], x.at[2] - a[i].at[2])))) : null;
+            out.max_angle_err_after = b.length ? Math.round(Math.max(...b.map((x) => Math.abs(x.ang - out.half_angle_deg))) * 100) / 100 : null;
+            // A pure {ref} field: no halo, every node home.
+            const items = v.halo ? v.halo.items.map((it) => ({ n: it.n, home: it.home.slice(0, 3) })) : [];
+            ed.setCursor({ line: lineOf("source"), ch: 3 }); await sleep(1200);
+            out.ended = !v.halo;
+            out.home_err = items.length ? Math.max(...items.map((it) => Math.hypot(it.n.x - it.home[0], it.n.y - it.home[1], (it.n.z || 0) - it.home[2]))) : null;
+          } finally {
+            v.plantNoHaloTransport = false; v.haloEnd();
+            cam.position.copy(saved.p); ctl.target.copy(saved.t); ctl.update?.();
+            try { leaf.detach(); } catch (e) {}
+            try { await app.vault.delete(f); } catch (e) {}
+          }
+          return out;
+        })()`, { timeout: 90000 });
+        if (!got || got.error) return { pass: false, evidence: got };
+        return { pass: got.nodes >= 3 && got.max_angle_err < 0.5 && got.nearer_when_similar && got.moved_from_home > 1
+                   && got.slid > 1 && got.max_angle_err_after < 0.5 && got.ended && got.home_err < 1e-3 && !got.planted.halo,
+                 evidence: got };
+      },
+    },
+    {
       id: "G-273",
       asks: "the user agent's views and keys: in MAP view a hover moves nothing and in EGO view it moves the camera; paused, no motion; Shift +5%, Ctrl -5%; Z, X and M do nothing (deprecated); arrows turn the camera about the focus (distance kept) and Q/R roll it about the view normal (view kept) -- 3-DOF rotation; each key held lit in the agent's state while pressed (its readout awaits the dialect card, G-274); planted (pointer away) the keys do nothing",
       async run() {

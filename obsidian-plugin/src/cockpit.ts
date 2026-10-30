@@ -370,9 +370,36 @@ export class Cockpit {
     } finally { this.writing = false; }
   }
 
+  /**
+   * The halo's trigger (G-284; UR O.3): the cursor on a field of a STUCK slate
+   * (any slate note but the cockpit, whose query already searches) that holds
+   * literal text fires a halo of that text -- a field mixing text and `{ref}`s
+   * asks with the ref names in place; a pure `{ref}` field fires none. Leaving
+   * the field ends it.
+   */
+  haloStats = { asked: 0, ended: 0, last: "" };
+  private haloQuery = "";
+  private haloTick(): void {
+    const g = this.host.graph();
+    if (!g || typeof g.haloFor !== "function") return;
+    const v: any = this.app.workspace.getActiveViewOfType(MarkdownView);
+    let q = "";
+    if (v && v.file && v.file.path !== COCKPIT_PATH && isSlate(this.app, v.file)) {
+      const cur = v.editor.getCursor();
+      const fl = parseSlate(v.editor.getValue()).find((f) => f.line === cur.line);
+      const val = (fl?.value || "").trim();
+      if (val && !/^\{[^}]+\}$/.test(val)) q = val.replace(/\{([^}]+)\}/g, "$1");
+    }
+    if (q === this.haloQuery) return;
+    this.haloQuery = q;
+    if (q) { this.haloStats.asked++; this.haloStats.last = q; void g.haloFor(q); }
+    else { this.haloStats.ended++; g.haloEnd(); }
+  }
+
   /** Once a frame or so: the agent's state and the results, into the text. */
   sync(): void {
     this.decorate();
+    this.haloTick();
     const v = this.view(), g = this.host.graph();
     if (!v || !g || this.plantUnbound) return;
     this.decorate();
