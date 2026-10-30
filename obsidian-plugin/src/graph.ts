@@ -873,7 +873,19 @@ export class GraphView extends ItemView {
       for (const n of held) {
         const at = n.holdAt;
         if (!at) continue;
-        if (now > n.holdUntil) { n.holdAt = undefined; continue; }
+        if (now > n.holdUntil) {
+          n.holdAt = undefined;
+          // Release only a pin the hold set: a glide, a fold or calm own theirs.
+          if (n.__heldFx) { n.fx = undefined; n.fy = undefined; n.fz = undefined; n.__heldFx = false; }
+          continue;
+        }
+        // HARD (2026-10-30): pinned where it was drawn. The spring below let
+        // charge, the links and collision move a held node 4-7 radii between
+        // updates 250 ms apart (G-93, move p90 7.2 radii against a bar of 1).
+        if (!this.plantSoftHold) {
+          if (n.fx == null && !n.__glide) { n.fx = at[0]; n.fy = at[1]; n.fz = at[2]; n.__heldFx = true; }
+          continue;
+        }
         n.vx = (n.vx ?? 0) * 0.2 + (at[0] - (n.x ?? 0)) * 0.5;
         n.vy = (n.vy ?? 0) * 0.2 + (at[1] - (n.y ?? 0)) * 0.5;
         n.vz = (n.vz ?? 0) * 0.2 + (at[2] - (n.z ?? 0)) * 0.5;
@@ -885,6 +897,12 @@ export class GraphView extends ItemView {
 
   /** Planted by G-93's check: no hold -- every update re-shakes the whole tree. */
   plantNoHold = false;
+  /** Planted (G-93): the hold is a spring, not a pin -- held nodes drift, as before. */
+  plantSoftHold = false;
+  /** Planted (G-93): a newborn streaming node is held at the next update, before it has spread. */
+  plantHoldNewborn = false;
+  /** How long a streaming node settles before it is held (G-93). */
+  static SETTLE_MS = 1200;
 
   /** Hold every streaming node already drawn (not `fresh`), and measure how
    *  far the held ones moved since the last update (`forceStats.jitter`). */
@@ -893,6 +911,7 @@ export class GraphView extends ItemView {
     let moved = 0, n = 0, movedHeld = 0, nHeld = 0, glided = 0, nGlided = 0;
     for (const x of nodes) {
       if (!x.force || fresh.has(x.id) || !Number.isFinite(x.x)) continue;
+      if (x.__bornT === undefined) x.__bornT = now;
       if (x.lastAt) {
         const d = Math.hypot(x.x - x.lastAt[0], x.y - x.lastAt[1], (x.z ?? 0) - x.lastAt[2]);
         moved += d;
@@ -900,15 +919,21 @@ export class GraphView extends ItemView {
         // A node whose projection landed since the last update made its one
         // designed move -- grey force place to its fit (PLUGIN_GOAL 48). G-93's
         // "too chaotic between scan updates" is the OTHER motion: re-shaking.
-        // Both are kept; the calm bar reads the second.
+        // Both are kept; the calm bar reads the second -- of nodes that were
+        // HELD (settled): a newcomer still settling is meant to move.
         if (x.projectedAt && x.projectedAt > (x.lastAtT ?? 0)) { glided += d; nGlided++; }
-        else { movedHeld += d; nHeld++; }
+        else if (x.__wasHeld) { movedHeld += d; nHeld++; }
       }
       x.lastAt = [x.x, x.y, x.z ?? 0];
       x.lastAtT = now;
       if (this.plantNoHold) continue;
-      x.holdAt = [x.x, x.y, x.z ?? 0];
+      // Held once SETTLED, not at the next update: a drain of 220 nodes
+      // pinned 250 ms after it spawned was frozen as a ball (2026-10-30).
+      // Planted `plantHoldNewborn`: held at once, as before.
+      if (!this.plantHoldNewborn && now - x.__bornT < GraphView.SETTLE_MS) continue;
+      x.holdAt = x.holdAt && x.__heldFx ? x.holdAt : [x.x, x.y, x.z ?? 0];
       x.holdUntil = now + 1500;
+      x.__wasHeld = true;
     }
     if (n) {
       this.forceStats.jitter.push(moved / n);

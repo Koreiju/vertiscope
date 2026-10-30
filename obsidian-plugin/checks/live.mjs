@@ -2390,6 +2390,7 @@ export function makeChecks(env) {
           // The spring this replaced: rest 12, pull 0.6, siblings apart inside 8.
           if (${JSON.stringify(plant)} === "legacy") P.LEGACY = true;
           v.plantNoHold = ${JSON.stringify(plant)} === "nohold";
+          v.plantSoftHold = ${JSON.stringify(plant)} === "softhold";
           try {
             const target = "https://discourse.julialang.org/latest?g93=" + (${JSON.stringify(plant)} || "c") + Date.now();
             b.go("about:blank"); await sleep(500);
@@ -2439,19 +2440,24 @@ export function makeChecks(env) {
           } finally {
             Object.assign(P, saved);
             v.plantNoHold = false;
+            v.plantSoftHold = false;
           }
         })()`, { timeout: 120000 });
         const clean = await arm("");
         const planted = await arm("legacy");
+        // The hold as it was: a spring held nodes drifted against (2026-10-30:
+        // move p90 7.2 radii). `nohold` is kept as evidence only -- it read
+        // CALM (0.34) because it is a ball that does not spread.
         const plantedNoHold = await arm("nohold");
+        const plantedSoft = await arm("softhold");
         // Spread: the closest tenth of nodes still >= 3 radii from their
         // nearest neighbour (a visible gap), under 5% touching; all translucent.
         const ok = (x) => !!x.best && x.best.nn_p10_in_radii >= 3
           && x.best.overlapping <= x.best.nodes * 0.05 && x.best.translucent === x.best.nodes;
         // Calm: between updates the drawn nodes move under one radius (p90).
         const calm = (x) => !!x.calm && x.calm.updates >= 5 && x.calm.move_p90_in_radii !== null && x.calm.move_p90_in_radii <= 1;
-        return { pass: ok(clean) && calm(clean) && !ok(planted) && !calm(plantedNoHold),
-                 evidence: { clean, planted_legacy: planted, planted_nohold: plantedNoHold,
+        return { pass: ok(clean) && calm(clean) && !ok(planted) && !calm(plantedSoft),
+                 evidence: { clean, planted_legacy: planted, planted_nohold: plantedNoHold, planted_softhold: plantedSoft,
                              bar: "nn p10 >= 3 radii, <= 5% touching, all translucent; drawn nodes move <= 1 radius (p90) between updates" } };
       },
     },
