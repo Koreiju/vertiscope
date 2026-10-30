@@ -627,10 +627,43 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     },
   });
 
+  /**
+   * The ROLLOUT (G-283; RESERVOIR_DESIGN §4; UR N.9, O.11, E.7): ▶▶ on a cell
+   * runs it once per sample of its first `{ref}` -- the sidecar binds that ref
+   * to one chunk a run -- so its output block shows ONE current readout and
+   * every sample's run is recorded with its own chunk as input, the signal
+   * pulsing in 3D per sample. ▶▶ again pauses; the next ▶▶ resumes where it
+   * stopped. Planted `__domvecPlantNoRollout`: one run, no samples.
+   */
+  rollouts = new Map<string, { at: number; playing: boolean; samples: number }>();
+  rolloutStats = { plays: 0, samples: 0, finished: 0, paused: 0 };
+  rolloutPaceMs = 400;
+  async onRolloutFence(req: RunRequest): Promise<void> {
+    const note = req.path || this.app.workspace.getActiveFile()?.path || "";
+    const key = note + "|" + req.line;
+    const r = this.rollouts.get(key) || { at: 0, playing: false, samples: -1 };
+    if (r.playing) { r.playing = false; this.rolloutStats.paused++; return; }
+    r.playing = true;
+    this.rollouts.set(key, r);
+    this.rolloutStats.plays++;
+    while (r.playing) {
+      if ((window as any).__domvecPlantNoRollout) { await this.onRunFence(req); r.playing = false; break; }
+      const reply: any = await this.onRunFence({ ...req, sample: r.at });
+      const b = (reply && reply.bound && reply.bound[0]) || null;
+      if (!b || typeof b.samples !== "number") { r.playing = false; break; }
+      r.samples = b.samples;
+      if (b.done) { r.playing = false; r.at = 0; this.rolloutStats.finished++; break; }
+      this.rolloutStats.samples++;
+      r.at++;
+      if (r.at >= r.samples) { r.playing = false; r.at = 0; this.rolloutStats.finished++; break; }
+      await new Promise((res) => window.setTimeout(res, this.rolloutPaceMs));
+    }
+  }
+
   /** A cell's asks of the app, carried out (G-288). */
   askStats = { web: 0, last: "" };
 
-  async onRunFence(req: RunRequest): Promise<void> {
+  async onRunFence(req: RunRequest): Promise<any> {
     const note = req.path || this.app.workspace.getActiveFile()?.path || "";
     if (!note) {
       new Notice("domvec: cannot run a cell outside a note — " +
@@ -643,7 +676,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     try {
       // The cell's `{ref}` inputs (G-279). Planted `__domvecPlantNoRefs`: none sent.
       const refs = (window as any).__domvecPlantNoRefs ? [] : (req.refs || []);
-      reply = await this.sidecar.runCell(note, req.code, req.lang, refs, req.line);
+      reply = await this.sidecar.runCell(note, req.code, req.lang, refs, req.line, req.sample);
     } finally {
       running.hide();
     }
@@ -700,6 +733,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
       : (last || "failed");
     new Notice(`domvec [${reply.count ?? "?"}] ${shown}` +
                (notes.length ? `\n(${notes.join("; ")})` : ""), 8000);
+    return reply;
   }
 
   /**

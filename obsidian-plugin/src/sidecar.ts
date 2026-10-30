@@ -714,14 +714,14 @@ export class Sidecar {
    * enabled" indistinguishable from "no sidecar".
    */
   async runCell(note: string, code: string,
-                lang = "python", refs: string[] = [], line = -1): Promise<KernelReply | null> {
+                lang = "python", refs: string[] = [], line = -1, sample?: number): Promise<KernelReply | null> {
     const base = this.base().trim().replace(/\/+$/, "");
     if (!base) return null;
     try {
       const res = await fetch(`${base}/kernel`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ note, code, lang, refs, line }),
+        body: JSON.stringify({ note, code, lang, refs, line, ...(sample === undefined ? {} : { sample }) }),
       });
       return (await res.json()) as KernelReply;
     } catch {

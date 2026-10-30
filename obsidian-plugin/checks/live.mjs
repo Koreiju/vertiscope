@@ -7721,7 +7721,7 @@ export function makeChecks(env) {
     },
     {
       id: "G-283",
-      asks: "a flight plan (items 8-9): in the cockpit, plan {results} and play true fly the craft through the search's results one leg at a time at the throttle, each leg ending on arrival -- at least two legs taken, the craft's look point on its last leg's node, and play written back false when the plan ends; a drag on the canvas stops the play and writes play false back into the slate; planted (agent.plantNoAdvance) the play stops after its first leg",
+      asks: "a flight plan (items 8-9): in the cockpit, plan {results} and play true fly the craft through the search's results one leg at a time at the throttle, each leg ending on arrival -- at least two legs taken, the craft's look point on its last leg's node, and play written back false when the plan ends; a drag on the canvas stops the play and writes play false back into the slate; plan {Radix tree} -- an anchored target through the store -- flies too; planted (agent.plantNoAdvance) the play stops after its first leg",
       async run() {
         const got = await evaluate(`(async () => {
           const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -7764,6 +7764,13 @@ export function makeChecks(env) {
               g.canvasEl.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true, button: 0 }));
               await sleep(800);
               out.playing_after_drag = a.playing; out.text_play_after_drag = valOf("play");
+              // An anchored plan: any {ref}, resolved through the store.
+              const l0 = a.planStats.legs;
+              setVal("play", "false"); await sleep(400);
+              setVal("plan", "{Radix tree}"); setVal("play", "true");
+              for (let i = 0; i < 40 && (a.playing || a.planStats.legs === l0); i++) await sleep(500);
+              out.anchored_resolved = c.planStats.resolved; out.anchored_legs = a.planStats.legs - l0;
+              a.play(false); setVal("play", "false"); setVal("plan", "{results}"); await sleep(400);
             }
             a.play(false); setVal("play", "false"); await sleep(400);
             return out;
@@ -7781,6 +7788,7 @@ export function makeChecks(env) {
         const c = got.clean, p = got.planted;
         return { pass: c.targets >= 3 && c.playing_at_start && c.legs >= 2 && c.on_last_leg !== null && c.on_last_leg < 2
                    && c.text_play_finished === "false" && c.replayed && !c.playing_after_drag && c.text_play_after_drag === "false"
+                   && c.anchored_resolved >= 1 && c.anchored_legs >= 1
                    && p.legs === 1,
                  evidence: got };
       },
@@ -8035,6 +8043,87 @@ export function makeChecks(env) {
                    && c.src_to_bis && c.bis_to_readout && c.picked && c.opened && c.graph_form && c.closed
                    && c.lines_open >= 2 && c.lines_planted_fold === c.lines_open && c.lines_folded === 0 && c.lines_unfolded === c.lines_open
                    && p.at_fit && !p.bisector,
+                 evidence: got };
+      },
+    },
+    {
+      id: "G-283-rollout",
+      asks: "the rollout (RESERVOIR_DESIGN §4): the ▶▶ play on a cell whose fence names a multi-chunk note by {ref} runs it once per sample -- one recorded run per chunk, each with that ONE chunk as its input, all chunks covered -- and the note keeps ONE readout block; ▶▶ again pauses it part-way; planted (__domvecPlantNoRollout) one run, no samples",
+      async run() {
+        const got = await evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const until = async (ok, ms) => { for (let t = 0; t < ms && !ok(); t += 250) await sleep(250); return ok(); };
+          const plugin = app.plugins.getPlugin("domvec-bridge");
+          const SIDE = String(plugin.settings.sidecar).replace(/[/]+$/, "");
+          const NL = String.fromCharCode(10), F = String.fromCharCode(96).repeat(3);
+          const folder = "domvec-checks";
+          if (!app.vault.getAbstractFileByPath(folder)) await app.vault.createFolder(folder);
+          const vaultName = app.vault.getName(), urlOf = (path) => "vault://" + vaultName + "/" + path;
+          const stamp = Date.now();
+          const srcName = "g283 samples " + stamp;
+          // Each section well past the chunker's 256-token merge limit, so
+          // each is its own chunk (short sections merge into one).
+          const words = (topic) => Array.from({ length: 320 }, (_, i) => topic + i).join(" ");
+          const body = ["# Samples " + stamp, "", "## One", "", words("radix"), "", "## Two", "", words("trie"), "", "## Three", "", words("patricia"), ""].join(NL);
+          const src = await app.vault.create(folder + "/" + srcName + ".md", body);
+          const made = [src];
+          await plugin.indexNote(src, "check");
+          const ref = await (await fetch(SIDE + "/ref?name=" + encodeURIComponent(srcName))).json();
+          const varName = srcName.replace(/[^A-Za-z0-9_]+/g, "_").replace(/^_+|_+$/g, "").toLowerCase();
+          const out = { chunks: (ref.cids || []).length };
+          const mkCell = async (tag) => {
+            const path = folder + "/g283 roll " + tag + " " + stamp + ".md";
+            const f = await app.vault.create(path, "# roll" + NL + NL + F + "python {" + srcName + "}" + NL + "print(len(" + varName + "))" + NL + F + NL);
+            made.push(f);
+            const leaf = app.workspace.getLeaf("tab");
+            await leaf.openFile(f, { state: { mode: "source", source: false } });
+            await until(() => !!leaf.view.containerEl.querySelector(".domvec-play-fence"), 8000);
+            return { f, leaf, path };
+          };
+          const runsOf = async (path) => (await (await fetch(SIDE + "/runs?note=" + encodeURIComponent(path))).json()).runs || [];
+          try {
+            // Clean: a whole rollout.
+            const c = await mkCell("c");
+            const f0 = plugin.rolloutStats.finished;
+            c.leaf.view.containerEl.querySelector(".domvec-play-fence").click();
+            await until(() => plugin.rolloutStats.finished > f0, 60000);
+            const runs = await runsOf(c.path);
+            out.clean = { runs: runs.length, one_input_each: runs.every((r) => r.inputs.length === 1),
+                          distinct_inputs: new Set(runs.map((r) => r.inputs[0] && r.inputs[0].cid)).size,
+                          readout_blocks: (c.leaf.view.editor.getValue().match(/<!-- nb-output /g) || []).length };
+            c.leaf.detach();
+            // Pause: play, then play again after the first sample.
+            const pz = await mkCell("p");
+            const s0 = plugin.rolloutStats.samples;
+            pz.leaf.view.containerEl.querySelector(".domvec-play-fence").click();
+            await until(() => plugin.rolloutStats.samples > s0, 30000);
+            pz.leaf.view.containerEl.querySelector(".domvec-play-fence").click();
+            await sleep(3000);
+            out.paused_runs = (await runsOf(pz.path)).length;
+            pz.leaf.detach();
+            // Planted: one run.
+            window.__domvecPlantNoRollout = true;
+            const pl = await mkCell("x");
+            pl.leaf.view.containerEl.querySelector(".domvec-play-fence").click();
+            await until(() => pl.leaf.view.editor.getValue().includes("nb-output"), 30000);
+            await sleep(1500);
+            out.planted_runs = (await runsOf(pl.path)).length;
+            out.planted_inputs = ((await runsOf(pl.path))[0] || { inputs: [] }).inputs.length;
+            pl.leaf.detach();
+          } finally {
+            window.__domvecPlantNoRollout = false;
+            for (const f of made) {
+              try { await fetch(SIDE + "/purge", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url: urlOf(f.path) }) }); } catch (e) {}
+              try { await app.vault.delete(f); } catch (e) {}
+            }
+          }
+          return out;
+        })()`, { timeout: 180000 });
+        if (!got || got.error) return { pass: false, evidence: got };
+        const c = got.clean;
+        return { pass: got.chunks >= 2 && c.runs === got.chunks && c.one_input_each && c.distinct_inputs === got.chunks
+                   && c.readout_blocks === 1 && got.paused_runs >= 1 && got.paused_runs < got.chunks
+                   && got.planted_runs === 1 && got.planted_inputs === got.chunks,
                  evidence: got };
       },
     },

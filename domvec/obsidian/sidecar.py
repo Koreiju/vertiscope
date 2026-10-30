@@ -2629,7 +2629,9 @@ class _Handler(BaseHTTPRequestHandler):
                 self.kernel_pool.run(note, _ko.boot("http://127.0.0.1:%d" % port))
             if names and not PLANT_NO_REF_BINDING[0]:
                 from . import refs as _refs
-                bound = _refs.bind(self.workspace, names)
+                sample = body.get("sample")
+                bound = _refs.bind(self.workspace, names,
+                                   sample=int(sample) if isinstance(sample, (int, float)) else None)
                 if bound["prelude"]:
                     self.kernel_pool.run(note, bound["prelude"])
             reply = self.kernel_pool.run(note, code)

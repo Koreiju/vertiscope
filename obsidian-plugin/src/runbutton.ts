@@ -39,6 +39,8 @@ export interface RunRequest {
   readonly path: string;
   /** The cell's `{ref}` inputs from its fence line (G-279). */
   readonly refs?: string[];
+  /** The rollout's sample of the first `{ref}` (G-283). */
+  readonly sample?: number;
 }
 
 export interface RunHost {
@@ -48,6 +50,20 @@ export interface RunHost {
   /** `P-N3`: the same cell to a command terminal in its OWN pane (§4a). The
    *  kernel runs in place; "both at once" is pressing both -- two panes. */
   onTerminalFence?(req: RunRequest): void | Promise<void>;
+  /** G-283: play / pause the cell over the samples of its first `{ref}`. */
+  onRolloutFence?(req: RunRequest): void | Promise<void>;
+}
+
+/** The rollout's play beside run (G-283), on a cell with a `{ref}` to iterate. */
+function playButton(doc: Document, onClick: () => void): HTMLButtonElement {
+  const btn = doc.createElement("button");
+  btn.className = "domvec-play-fence";
+  btn.type = "button";
+  btn.setAttribute("aria-label", "Run this block once per sample of its first ref");
+  btn.textContent = "\u25b6\u25b6 play";
+  btn.addEventListener("mousedown", (e) => e.preventDefault());
+  btn.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); onClick(); });
+  return btn;
 }
 
 /** The terminal button beside the run button (`P-N3`). Planted
@@ -168,6 +184,9 @@ class RunWidget extends WidgetType {
     const term = this.host.onTerminalFence
       ? termButton(view.dom.ownerDocument, () => this.host.onTerminalFence!(req())) : null;
     if (term) wrap.appendChild(term);
+    if (this.host.onRolloutFence && (this.fence.refs || []).length) {
+      wrap.appendChild(playButton(view.dom.ownerDocument, () => this.host.onRolloutFence!(req())));
+    }
     return wrap;
   }
 

@@ -94,17 +94,38 @@ def rank1(text: str, limit: int = 12) -> List[str]:
     return out
 
 
-def bind(workspace, names: List[str]) -> Dict:
-    """The prelude that binds each named ref in a kernel, and what was bound."""
+def bind(workspace, names: List[str], sample: Optional[int] = None) -> Dict:
+    """The prelude that binds each named ref in a kernel, and what was bound.
+
+    `sample` (G-283, the rollout; RESERVOIR_DESIGN §4: "a cell whose `{ref}`
+    points at an iterable runs once per sample on play ... Only an external
+    `{ref}` iterates"): the FIRST ref is the iterable -- bound to its
+    `sample`-th chunk alone, its input that one chunk -- and the reply says
+    how many samples it has. The other refs bind whole, as always.
+    """
     lines, bound, inputs = [], [], []
-    for name in dict.fromkeys(n for n in names if n and n.strip()):
+    for k, name in enumerate(dict.fromkeys(n for n in names if n and n.strip())):
         got = resolve(workspace, name)
         var = var_name(name)
         if got is None:
             bound.append({"name": name, "var": var, "kind": "unresolved"})
             continue
+        if k == 0 and sample is not None:
+            cids = got["cids"]
+            n = len(cids)
+            if 0 <= int(sample) < n:
+                c = workspace.store.chunk(cids[int(sample)])
+                value = (c.md or "") if c is not None else ""
+                lines.append("%s = %r" % (var, value))
+                bound.append({"name": name, "var": var, "kind": got["kind"], "url": got["url"],
+                              "chars": len(value), "sample": int(sample), "samples": n})
+                inputs.append((name, cids[int(sample)]))
+            else:
+                bound.append({"name": name, "var": var, "kind": got["kind"], "url": got["url"],
+                              "sample": int(sample), "samples": n, "done": True})
+            continue
         lines.append("%s = %r" % (var, got["value"]))
         bound.append({"name": name, "var": var, "kind": got["kind"], "url": got["url"],
                       "chars": len(got["value"])})
         inputs += [(name, cid) for cid in got["cids"]]
-    return {"prelude": "\n".join(lines), "bound": bound, "inputs": inputs}
+    return {"prelude": chr(10).join(lines), "bound": bound, "inputs": inputs}

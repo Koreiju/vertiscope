@@ -91,3 +91,20 @@ def test_rank1_of_a_slate_is_its_first_level_and_of_prose_its_first_lines():
     assert rank1(prose) == ["Radix tree", "A radix tree compresses chains.", "x = 1", "Second paragraph."][:2] + rank1(prose)[2:]
     assert rank1(prose)[:2] == ["Radix tree", "A radix tree compresses chains."]
     assert len(rank1("\n".join("line %d" % i for i in range(40)))) == 12
+
+
+def test_a_rollout_binds_one_sample_of_the_first_ref_and_says_when_it_is_done(tmp_path):
+    """G-283: the first ref iterates -- one chunk a run, that chunk the input."""
+    store, chunks = _store(tmp_path)
+    got = [R.bind(_WS(store), ["Radix tree"], sample=i) for i in range(3)]
+    texts = []
+    for g in got[:2]:
+        ns = {}
+        exec(g["prelude"], ns)
+        texts.append(ns["radix_tree"])
+        assert len(g["inputs"]) == 1 and g["bound"][0]["samples"] == 2
+    assert sorted(texts) == sorted(["A radix tree compresses chains.", "Each edge holds a string."])
+    assert {g["inputs"][0][1] for g in got[:2]} == {c.cid for c in chunks}
+    assert got[2]["bound"][0].get("done") and got[2]["inputs"] == [] and got[2]["prelude"] == ""
+    # Without `sample`, the whole page binds, as before.
+    assert len(R.bind(_WS(store), ["Radix tree"])["inputs"]) == 2

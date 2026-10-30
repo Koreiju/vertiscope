@@ -90,7 +90,7 @@ export interface CockpitHost {
   /** Ask the browser cell's web search (the 3D search button's path). */
   webSearch(q: string): boolean;
   /** A `{ref}` resolved through the store, with its rank-1 lines. */
-  ref(name: string): Promise<{ resolved: boolean; lines: string[] } | null>;
+  ref(name: string): Promise<{ resolved: boolean; lines: string[]; cids?: string[]; url?: string } | null>;
 }
 
 export class Cockpit {
@@ -103,6 +103,7 @@ export class Cockpit {
   resultsOpen = false;
   private writing = false;
   private playSeen = false;
+  planStats = { resolved: -1 };
   private seenSlateQuery = "";
   private seenEngineQuery = "";
   private lastQuery = "";
@@ -303,8 +304,23 @@ export class Cockpit {
     const play = (this.field(fs, "play")?.value || "").trim() === "true";
     if (play && !a.playing && !this.playSeen) {
       const plan = (this.field(fs, "plan")?.value || "").trim();
-      if (plan === "{results}" && g.searchState) a.setPlan(g.searchState.targets.filter(Boolean));
-      a.play(true);
+      if (plan === "{results}" && g.searchState) { a.setPlan(g.searchState.targets.filter(Boolean)); a.play(true); }
+      else {
+        // Any other `{ref}`: its target through the store -- the plan flies
+        // through its chunks' nodes, or its page's node when they are not
+        // drawn (anchored nodes, items 8-9). Asynchronous; play starts when
+        // the plan is known.
+        const m = /^\{([^}]+)\}$/.exec(plan);
+        if (m) void this.host.ref(m[1]).then((got: any) => {
+          if (!got || !got.resolved) return;
+          const ns = g.graph?.graphData?.().nodes || [];
+          const byId = new Map<string, any>(ns.map((n: any) => [String(n.id), n]));
+          const nodes = (got.cids || []).map((c: string) => byId.get(c)).filter(Boolean);
+          if (!nodes.length && got.url && byId.get("page:" + got.url)) nodes.push(byId.get("page:" + got.url));
+          this.planStats.resolved = nodes.length;
+          a.setPlan(nodes); a.play(true);
+        });
+      }
     } else if (!play && a.playing) a.play(false);
     this.playSeen = play;
     const thr = Number(this.field(fs, "throttle")?.value);
