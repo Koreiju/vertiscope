@@ -42,8 +42,8 @@ export interface AgentHost {
   controls(): any;
   /** Fly back out to the whole picture (the "recentre" action). */
   recentre(): void;
-  /** The reader acted: idle turns stop. */
-  touched(what: string): void;
+  /** The reader acted: idle turns stop. `trusted` false: a check's synthetic key, not the reader. */
+  touched(what: string, trusted?: boolean): void;
   /** World units: the nearest a camera may be to `n` and still see all of
    *  it (graph.ts: its drawn radius over the half field of view). */
   fit?(n: any): number;
@@ -293,7 +293,7 @@ export class UserAgent {
     if (took) {
       this.stats.keys++;
       this.light(k);
-      this.host.touched("user-agent");
+      this.host.touched("user-agent", e.isTrusted);
     }
     return took;
   }

@@ -5319,9 +5319,11 @@ export class GraphView extends ItemView {
     controls: () => (this.graph as any)?.controls(),
     recentre: () => this.reframe?.(),
     fit: (n: any) => this.fitDistance(n),
-    touched: (what: string) => {
-      (window as any).__domvecReaderAt = Date.now();
+    touched: (what: string, trusted = true) => {
       const by: Record<string, number> = ((window as any).__domvecReaderBy = (window as any).__domvecReaderBy || {});
+      // A synthetic key is a check's, not the reader's (see main.ts).
+      if (!trusted && !(window as any).__domvecPlantSyntheticReader) { by["synthetic:" + what] = (by["synthetic:" + what] || 0) + 1; return; }
+      (window as any).__domvecReaderAt = Date.now();
       by[what] = (by[what] || 0) + 1;
     },
   });

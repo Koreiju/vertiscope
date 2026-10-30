@@ -184,6 +184,8 @@ _WORK_LOCK = _HeldLock()
 PLANT_NO_REF_BINDING = [False]
 #: Planted (G-279): no base objects in a cell's kernel.
 PLANT_NO_BASE_OBJECTS = [False]
+#: Planted (G-288): a cell's asks of the app are dropped.
+PLANT_NO_ASKS = [False]
 
 #: The encoder (one GPU model), shared by the embed worker and `/project`.
 #: Neither holds the store's lock while encoding, so a projection waits at
@@ -785,6 +787,7 @@ _PLANTABLE = {
     "page-scoped-dedup": ("domvec.graphstore", "PLANT_PAGE_SCOPED_DEDUP"),     # 2026-10-29
     "no-ref-binding": ("domvec.obsidian.sidecar", "PLANT_NO_REF_BINDING"),     # G-279
     "no-base-objects": ("domvec.obsidian.sidecar", "PLANT_NO_BASE_OBJECTS"),   # G-279
+    "no-asks": ("domvec.obsidian.sidecar", "PLANT_NO_ASKS"),                   # G-288
 }
 
 
@@ -2630,6 +2633,14 @@ class _Handler(BaseHTTPRequestHandler):
                 if bound["prelude"]:
                     self.kernel_pool.run(note, bound["prelude"])
             reply = self.kernel_pool.run(note, code)
+            # What the cell's calls asked of the APP (a web search through the
+            # browser cell, `search(..., duckduckgo=True)`): drained from the
+            # kernel and handed back, for the plugin to carry out.
+            if not PLANT_NO_BASE_OBJECTS[0] and not PLANT_NO_ASKS[0] and isinstance(reply, dict):
+                from . import kernel_objects as _ko
+                asks = _ko.parse_asks(self.kernel_pool.run(note, _ko.DRAIN))
+                if asks:
+                    reply = dict(reply, asks=asks)
         except Exception as exc:                    # noqa: BLE001
             self._send(500, {"error": "%s: %s" % (type(exc).__name__, exc)})
             return

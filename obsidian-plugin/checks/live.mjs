@@ -7334,7 +7334,7 @@ export function makeChecks(env) {
     },
     {
       id: "G-287",
-      asks: "with no result hovered, the camera goes to the top-most ranked result in view of the scroll (2026-10-29, item 31): scrolling the bar so result 3 stands at the front asks a flight to result 3's node; with a strip item hovered the scroll asks none (the hover wins); planted (plantNoScrollFlight) the scroll asks none",
+      asks: "with no result hovered, the camera goes to the top-most ranked result in view of the scroll (2026-10-29, item 31): scrolling the bar so a result (3, or the next whose node is not result 1's) stands at the front asks a flight to its node; with a strip item hovered the scroll asks none (the hover wins); planted (plantNoScrollFlight) the scroll asks none",
       async run() {
         const got = await evaluate(`(async () => {
           const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -7349,7 +7349,9 @@ export function makeChecks(env) {
             const win = f.window.length, span = f.scroller.scrollWidth - f.scroller.clientWidth;
             // The soft index runs 1..k over the bar; put rank at the front.
             f.scroller.scrollLeft = Math.round(span * (rank - 1) / Math.max(1, win - 1));
-            f.scroller.dispatchEvent(new Event("scroll"));
+            // The scroll's own handler, called now: its rAF runs at 1 Hz in a
+            // minimized window, and the front did not move within the wait.
+            f.onScroll();
             await sleep(250);
           };
           const out = {};
@@ -7358,18 +7360,26 @@ export function makeChecks(env) {
             const st = v.searchState;
             out.results = st ? st.targets.filter(Boolean).length : 0;
             if (!st || out.results < 4) return { error: "too few results", out };
-            const want = String(st.targets[2]?.id);
-            asked.length = 0; await scrollTo(3);
+            // A rank whose NODE is not result 1's: in page view several
+            // results resolve to one page node, and the hover's own flight
+            // to result 1 then counted as the scroll's.
+            const r0 = String(st.targets[0]?.id);
+            let rank = 3;
+            while (rank <= st.targets.length && (!st.targets[rank - 1] || String(st.targets[rank - 1].id) === r0)) rank++;
+            if (rank > st.targets.length) return { error: "every result is one node", out };
+            const want = String(st.targets[rank - 1].id);
+            out.rank = rank;
+            asked.length = 0; await scrollTo(rank);
             out.front = f.strip.querySelector(".is-front")?.textContent?.slice(0, 40);
             out.clean_asked = asked.slice(); out.clean_hit = asked.includes(want);
             await scrollTo(1); asked.length = 0;
             v.searchField.onHoverHit(f.hits[0]);
-            await scrollTo(3);
+            await scrollTo(rank);
             out.hovered_asked = asked.filter((id) => id === want).length;
             v.searchField.onHoverHit(null);
             await scrollTo(1); asked.length = 0;
             v.plantNoScrollFlight = true;
-            await scrollTo(3);
+            await scrollTo(rank);
             out.planted_asked = asked.filter((id) => id === want).length;
           } finally {
             v.plantNoScrollFlight = false; v.focusOn = orig; v.focusOn(null);
@@ -7380,6 +7390,92 @@ export function makeChecks(env) {
         })()`, { timeout: 60000 });
         if (!got || got.error) return { pass: false, evidence: got };
         return { pass: got.clean_hit && got.hovered_asked === 0 && got.planted_asked === 0, evidence: got };
+      },
+    },
+    {
+      id: "G-288",
+      asks: "search is a function in every cell's kernel (item 32): a cell running search('radix tree', db=True, duckduckgo=True, k=3) gets the database's ranked hits and a pending web row, and the run's reply carries ONE web ask that the plugin hands to the browser cell's own searchWeb (stubbed here, so the reader's page is not navigated); planted (/plant no-asks) the ask is dropped and the browser cell is asked nothing",
+      async run() {
+        const got = await evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const until = async (ok, ms) => { for (let t = 0; t < ms && !ok(); t += 250) await sleep(250); return ok(); };
+          const plugin = app.plugins.getPlugin("domvec-bridge");
+          const SIDE = String(plugin.settings.sidecar).replace(/[/]+$/, "");
+          const NL = String.fromCharCode(10), F = String.fromCharCode(96).repeat(3);
+          const folder = "domvec-checks";
+          if (!app.vault.getAbstractFileByPath(folder)) await app.vault.createFolder(folder);
+          const stamp = Date.now();
+          const bl = app.workspace.getLeavesOfType("domvec-browser-view")[0];
+          const browser = bl && bl.view;
+          if (!browser || typeof browser.searchWeb !== "function") return { error: "no browser cell" };
+          const realSearch = browser.searchWeb;
+          const plant = (on) => fetch(SIDE + "/plant", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "no-asks", on }) });
+          const arm = async (planted) => {
+            await plant(planted);
+            const asked = [];
+            browser.searchWeb = async (q) => { asked.push(q); };
+            const path = folder + "/g288-" + (planted ? "p" : "c") + stamp + ".md";
+            const code = ["r = search('radix tree', db=True, duckduckgo=True, k=3)",
+                          "print(sum(1 for h in r if h['source'] == 'db'), sum(1 for h in r if h.get('pending')))"].join(NL);
+            const f = await app.vault.create(path, "# search" + NL + NL + F + "python" + NL + code + NL + F + NL);
+            const leaf = app.workspace.getLeaf("tab");
+            const out = { planted };
+            const web0 = plugin.askStats.web;
+            try {
+              await leaf.openFile(f, { state: { mode: "source", source: false } });
+              const view = leaf.view;
+              await until(() => !!view.containerEl.querySelector(".domvec-run-fence"), 8000);
+              view.containerEl.querySelector(".domvec-run-fence").click();
+              await until(() => view.editor.getValue().includes("nb-output"), 30000);
+              await sleep(300);
+              const text = view.editor.getValue();
+              const m = /([0-9]+) ([0-9]+)/.exec(text.split("nb-output")[1] || "");
+              out.db_hits = m ? Number(m[1]) : null;
+              out.pending = m ? Number(m[2]) : null;
+              out.asked = asked.slice();
+              out.ask_stats = plugin.askStats.web - web0;
+              out.undefined = /NameError/.test(text);
+            } finally {
+              browser.searchWeb = realSearch;
+              await plant(false);
+              try { leaf.detach(); } catch (e) {}
+              try { await app.vault.delete(f); } catch (e) {}
+            }
+            return out;
+          };
+          return { clean: await arm(false), planted: await arm(true) };
+        })()`, { timeout: 120000 });
+        if (!got || got.error) return { pass: false, evidence: got };
+        const c = got.clean, p = got.planted;
+        return { pass: c.db_hits >= 1 && c.pending === 1 && c.asked.length === 1 && c.asked[0] === "radix tree"
+                   && p.pending === 1 && p.asked.length === 0,
+                 evidence: got };
+      },
+    },
+    {
+      id: "G-289",
+      asks: "only the reader's TRUSTED input marks the reader active: a check's synthetic pointer move and key leave the reader's last-active time where it was and are tallied as synthetic; planted (__domvecPlantSyntheticReader) they stamp the reader, as when G-174's own sweep paused its run for 'the reader is using the app' in a minimized window",
+      async run() {
+        const got = await evaluate(`(async () => {
+          const canvas = document.querySelector(".domvec-graph-canvas") || document.body;
+          const fire = () => {
+            canvas.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, clientX: 10, clientY: 10 }));
+            window.dispatchEvent(new KeyboardEvent("keydown", { key: "F24", bubbles: true }));
+          };
+          const arm = (planted) => {
+            window.__domvecPlantSyntheticReader = planted;
+            const at0 = window.__domvecReaderAt = 1;            // a sentinel no real stamp equals
+            const by0 = { ...(window.__domvecReaderBy || {}) };
+            try { fire(); } finally { window.__domvecPlantSyntheticReader = false; }
+            const by = window.__domvecReaderBy || {};
+            return { stamped: window.__domvecReaderAt !== at0, synthetic: (by["synthetic:pointermove"] || 0) - (by0["synthetic:pointermove"] || 0) };
+          };
+          const saved = window.__domvecReaderAt;
+          try { return { clean: arm(false), planted: arm(true) }; }
+          finally { if (window.__domvecReaderAt === 1 || window.__domvecReaderAt > saved) window.__domvecReaderAt = saved; }
+        })()`, { timeout: 15000 });
+        if (!got || got.error) return { pass: false, evidence: got };
+        return { pass: !got.clean.stamped && got.clean.synthetic === 1 && got.planted.stamped, evidence: got };
       },
     },
     {

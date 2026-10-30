@@ -134,9 +134,17 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     // "stalls out after some time" (2026-10-17) when something that is not
     // the reader keeps stamping, and the tally is how that is found.
     const by: Record<string, number> = ((window as any).__domvecReaderBy = (window as any).__domvecReaderBy || {});
+    // Only TRUSTED input is the reader (2026-10-30): a check's own synthetic
+    // pointer sweep (G-174's, `isTrusted: false`, one move a frame) stamped
+    // the reader as active, the run paused itself for "the reader is using
+    // the app", and its sweep never finished -- in a MINIMIZED window. A
+    // synthetic event is tallied as `synthetic:<type>`, never as the reader.
+    // Planted `__domvecPlantSyntheticReader`: every event stamps, as before.
     for (const ev of ["keydown", "pointerdown", "wheel", "pointermove"] as const) {
-      this.registerDomEvent(window, ev, () => { (window as any).__domvecReaderAt = Date.now(); by[ev] = (by[ev] || 0) + 1; },
-                            { capture: true, passive: true } as any);
+      this.registerDomEvent(window, ev, (e: Event) => {
+        if (!e.isTrusted && !(window as any).__domvecPlantSyntheticReader) { by["synthetic:" + ev] = (by["synthetic:" + ev] || 0) + 1; return; }
+        (window as any).__domvecReaderAt = Date.now(); by[ev] = (by[ev] || 0) + 1;
+      }, { capture: true, passive: true } as any);
     }
 
     this.settings = Object.assign({}, DEFAULTS, await this.loadData());
@@ -590,6 +598,9 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
    * all — an output block scrolled off screen is indistinguishable from a button
    * that did nothing.
    */
+  /** A cell's asks of the app, carried out (G-288). */
+  askStats = { web: 0, last: "" };
+
   async onRunFence(req: RunRequest): Promise<void> {
     const note = req.path || this.app.workspace.getActiveFile()?.path || "";
     if (!note) {
@@ -630,6 +641,19 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
 
     const stored = await this.storeOutput(note, req, reply);
     if (stored) notes.push(stored);
+    // What the cell asked of the app (G-288): `search(..., duckduckgo=True)`
+    // asks the BROWSER CELL's web search, the same path as the 3D search
+    // button's -- the kernel never fetches the web itself.
+    for (const a of (reply.asks || []) as any[]) {
+      if (a && typeof a.web === "string" && a.web.trim()) {
+        this.askStats.web++;
+        this.askStats.last = a.web;
+        const l = this.app.workspace.getLeavesOfType(BROWSER_VIEW)[0];
+        const browser = l?.view as BrowserView | undefined;
+        if (browser && typeof browser.searchWeb === "function") { void browser.searchWeb(a.web); notes.push(`web: "${a.web}" asked of the browser cell`); }
+        else notes.push(`web: no browser cell open for "${a.web}"`);
+      }
+    }
 
     const last = (reply.error || "").trim().split("\n").pop();
     const shown = reply.ok
