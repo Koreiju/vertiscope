@@ -132,6 +132,34 @@ const ctx = await esbuild.context({
       });
     },
   }, {
+    // three-render-objects raycasts the WHOLE scene for the hover on every
+    // frame (its throttle defaults to 0), whether or not the pointer or the
+    // camera moved: in chunk view, 60k pick proxies walked per frame -- 3.3 s
+    // of a 10 s CPU profile during the collision relax (2026-10-30, G-170),
+    // frames at ~15 fps. Re-cast only when the pointer or the camera pose
+    // changed; a still pointer over a still camera keeps its last hover; and
+    // not at all while the pointer is off the canvas.
+    // Planted `globalThis.__domvecPlantRayEveryFrame`: every frame, as upstream.
+    name: "ray-on-change",
+    setup(build) {
+      build.onLoad({ filter: /three-render-objects[\\/]dist[\\/]three-render-objects\.mjs$/ }, async (args) => {
+        const src = await readFile(args.path, "utf8");
+        const head = "if (state.enablePointerInteraction && now - state.lastRaycasterCheck >= state.pointerRaycasterThrottleMs) {";
+        if (!src.includes(head)) throw new Error("ray-on-change: the raycast check not found in " + args.path);
+        const guard = "(function () { var S = globalThis.__domvecRayStats = globalThis.__domvecRayStats || { cast: 0, skipped: 0 };"
+          + " if (globalThis.__domvecPlantRayEveryFrame) { S.cast++; return true; }"
+          // Off the canvas, nothing is hovered: the idle turn moves the camera
+          // every frame and the pointer is elsewhere (2.2 s of every 5 s).
+          + " if (globalThis.__domvecPointerOver === false) { S.offCanvas = (S.offCanvas || 0) + 1; return false; }"
+          + " var c = state.camera, p = state.pointerPos, q = c.quaternion;"
+          + " var k = p.x + ',' + p.y + ',' + c.position.x.toFixed(3) + ',' + c.position.y.toFixed(3) + ',' + c.position.z.toFixed(3)"
+          + " + ',' + q.x.toFixed(5) + ',' + q.y.toFixed(5) + ',' + q.z.toFixed(5) + ',' + q.w.toFixed(5);"
+          + " if (k === state.__domvecRayKey) { S.skipped++; return false; } state.__domvecRayKey = k; S.cast++; return true; })()";
+        const patched = head.replace(") {", " && " + guard + ") {");
+        return { contents: src.replace(head, patched), loader: "js" };
+      });
+    },
+  }, {
     name: "deploy-to-vault",
     setup(build) {
       // `onEnd` rather than after `rebuild()`, so WATCH mode deploys on every

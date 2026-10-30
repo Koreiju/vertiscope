@@ -512,8 +512,9 @@ export class GraphView extends ItemView {
     // Arrow keys pan, precisely, while the pointer is over the 3D view and no
     // text field has the keyboard (2026-10-12, PLUGIN_GOAL 114). A held key
     // steps faster the longer it is held, as the k/n fields do (item 109).
-    canvas.addEventListener("pointerenter", () => { this.pointerOver = true; });
-    canvas.addEventListener("pointerleave", () => { this.pointerOver = false; });
+    // Also told to the hover raycast (esbuild `ray-on-change`): off the canvas, no raycast.
+    canvas.addEventListener("pointerenter", () => { this.pointerOver = true; (window as any).__domvecPointerOver = true; });
+    canvas.addEventListener("pointerleave", () => { this.pointerOver = false; (window as any).__domvecPointerOver = false; });
     // Arrows TURN the camera about the focus now, with Q/R rolling it (2026-10-29,
     // "full 3 DOF rotational motion control"), through the user agent. The
     // translating pan they did since 2026-10-12 is planted `plantArrowPan`.
@@ -7032,6 +7033,8 @@ export class GraphView extends ItemView {
    *  (at 2, chunk view held 2.1 million overlapping pairs and one iteration took
    *  300 ms). */
   relaxSafety = 1.25;
+  /** Planted (G-170): the relax's end in one frame, as before. */
+  plantRelaxEndInOneFrame = false;
   /** Work per frame, ms: the relax yields to the renderer past this. */
   relaxBudgetMs = 8;
   private relaxChunkView(): void {
@@ -7166,17 +7169,38 @@ export class GraphView extends ItemView {
         n.x = n.fx = x; n.y = n.fy = y; n.z = n.fz = z;
         n.relaxHalf = H[i];                 // the radius the leash was measured in
       });
-      const after = overlaps();
-      this.chunkRelaxStats = { runs: this.chunkRelaxStats.runs + 1, iterations: it, ms: Math.round(performance.now() - t0), nodes: N,
-                               overlaps_before: before, overlaps_after: after, sampled_every: sampleStep,
-                               max_shift_radii: Math.round(maxShift * 100) / 100, moved: shifted,
-                               worst_frame_ms: Math.round(worst * 10) / 10 } as any;
-      g.d3ReheatSimulation?.();          // two cool ticks move each pick proxy to its node
-      this.batchDirty = true;
-      if (save.length && !this.plantNoDrawn) {
-        this.drawnStats.posted += save.length;
-        void this.sidecar.saveDrawn(save).then((n) => { this.drawnStats.saved += n; });
+      // The end, spread over frames (2026-10-30, G-170 live: one 566 ms
+      // frame did it all -- a full re-sync, a 60k-cell overlap grid, a d3
+      // reheat and the save). Only POSITIONS changed, so the batch takes the
+      // positions write (G-286); the overlap count, the reheat and the save
+      // each take a frame of their own. Planted `plantRelaxEndInOneFrame`.
+      const ms = Math.round(performance.now() - t0);
+      const finish = (after: number) => {
+        this.chunkRelaxStats = { runs: this.chunkRelaxStats.runs + 1, iterations: it, ms, nodes: N,
+                                 overlaps_before: before, overlaps_after: after, sampled_every: sampleStep,
+                                 max_shift_radii: Math.round(maxShift * 100) / 100, moved: shifted,
+                                 worst_frame_ms: Math.round(worst * 10) / 10 } as any;
+      };
+      const post = () => {
+        if (save.length && !this.plantNoDrawn) {
+          this.drawnStats.posted += save.length;
+          void this.sidecar.saveDrawn(save).then((n) => { this.drawnStats.saved += n; });
+        }
+      };
+      if (this.plantRelaxEndInOneFrame) {
+        finish(overlaps());
+        g.d3ReheatSimulation?.();
+        this.batchDirty = true;
+        post();
+        return;
       }
+      this.posDirty = true;
+      requestAnimationFrame(() => {
+        if (seq !== this.relaxSeq) return;
+        finish(overlaps());
+        // Two cool ticks move each pick proxy to its node -- a frame later.
+        requestAnimationFrame(() => { g.d3ReheatSimulation?.(); window.setTimeout(post, 0); });
+      });
     };
     requestAnimationFrame(step);
   }

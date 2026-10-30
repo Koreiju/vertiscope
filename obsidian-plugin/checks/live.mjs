@@ -3840,6 +3840,13 @@ export function makeChecks(env) {
           if (!chunkView() && unit) { unit.click(); for (let i = 0; i < 240 && !chunkView(); i++) await sleep(500); }
           if (!chunkView()) return { error: "chunk view did not arrive", level: v.level };
           v.plantNoChunkRelax = ${planted};
+          // A hovered url SPREADS its chunks (G-230) -- a display state that
+          // moves them off their fit; the relax is measured without it.
+          v.unspread?.();
+          // A FRESH relax: since PLUGIN_GOAL 108 a node with a stored drawn
+          // place stays where the reader last saw it, so after any earlier
+          // relax nearly every node is fixed and there is nothing to measure.
+          v.plantNoDrawn = true;
           try {
             const ns = v.graph.graphData().nodes.filter((n) => Number.isFinite(n.fitX));
             const fit0 = ns.slice(0, 3000).map((n) => n.fitX + n.fitY);
@@ -3860,6 +3867,7 @@ export function makeChecks(env) {
                      fit_kept: fitKept, frames: gaps.length, frame_p99: gaps[Math.floor(gaps.length * 0.99)] ?? null, frame_max: gaps[gaps.length - 1] ?? null };
           } finally {
             v.plantNoChunkRelax = false;
+            v.plantNoDrawn = false;
             if (${planted}) v.relaxChunkView();               // leave the reader the relaxed picture
             if (v.level !== start && unit) { unit.click(); }
           }
@@ -7318,9 +7326,11 @@ export function makeChecks(env) {
           try {
             out.clean = await arm(false);
             out.planted = await arm(true);
-            // One positions write and one full sync, timed back to back.
-            const t0 = performance.now(); const ok = v.batch.positions(g.graphData().nodes); out.positions_ms = Math.round((performance.now() - t0) * 10) / 10; out.positions_ok = ok;
+            // One full sync, then one positions write over the layout it laid
+            // out, timed back to back (a node streamed in since the last sync
+            // makes positions refuse -- correctly -- so the sync comes first).
             const t1 = performance.now(); v.batchDirty = true; v.batchSync(); out.full_ms = Math.round((performance.now() - t1) * 10) / 10;
+            const t0 = performance.now(); const ok = v.batch.positions(g.graphData().nodes); out.positions_ms = Math.round((performance.now() - t0) * 10) / 10; out.positions_ok = ok;
           } finally {
             if (!wasChunk) toggle();
           }
