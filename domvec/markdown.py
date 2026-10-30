@@ -2475,6 +2475,12 @@ def render_trie(
         fresh = [c for c in recut if not any(c is k for k in chunks)]
         _level_page(fresh)
         chunks[:] = recut
+    # A heading cut from what it heads joins it (`G-86`).
+    joined = _attach_lone_headings(chunks, context_window)
+    if len(joined) != len(chunks):
+        fresh = [c for c in joined if not any(c is k for k in chunks)]
+        _level_page(fresh)
+        chunks[:] = joined
     _number_parts(chunks)
     if memo is not None:
         memo.rotate()
@@ -3214,6 +3220,63 @@ def _recut(chunks: List[MarkdownChunk], window: int) -> List[MarkdownChunk]:
     return out
 
 _HEADING_FORM = re.compile(r"#{1,6} ")
+
+#: Planted (`G-86`): a heading the descent cut from what it heads stays alone.
+PLANT_LONE_HEADING_KEPT_APART = False
+
+
+def _heading_level(text: str) -> int:
+    m = re.match(r"(#{1,6}) ", (text or "").lstrip())
+    return len(m.group(1)) if m else 0
+
+
+def _common_xpath(a: str, b: str) -> str:
+    sa, sb = [s for s in (a or "").split("/") if s], [s for s in (b or "").split("/") if s]
+    out = []
+    for x, y in zip(sa, sb):
+        if x != y:
+            break
+        out.append(x)
+    return "/" + "/".join(out)
+
+
+def _attach_lone_headings(chunks: List[MarkdownChunk], window: int) -> List[MarkdownChunk]:
+    """A chunk that is headings and nothing else joins the chunk after it
+    when it HEADS that chunk -- the next one does not open a section at its
+    level or above -- and the two together stay under the lenient bound
+    (`G-86`, the user's rule: "If this is closer to 512 than 256 in the merge
+    after the context limit, keep the previous, otherwise include the merge").
+
+    The descent decides a cut per subtree, so a heading that is a SIBLING of
+    what it heads -- Python's `### Functions` over its `<dl>`, Kubernetes'
+    `# Concepts` over its list -- came out alone however small the two were
+    together (11 + 218 tokens; 2 + 162). Measured over the corpus, 15 of 23
+    heading-alone chunks were such. A heading over nothing, or over a chunk
+    the join would push past the bound, stays where it is. The joined chunk
+    is rooted at the two roots' common ancestor.
+    """
+    if PLANT_LONE_HEADING_KEPT_APART or len(chunks) < 2:
+        return chunks
+    out: List[MarkdownChunk] = []
+    i = 0
+    while i < len(chunks):
+        c = chunks[i]
+        nxt = chunks[i + 1] if i + 1 < len(chunks) else None
+        if (nxt is not None and c.lines and nxt.lines and c.url == nxt.url
+                and all(_HEADING_FORM.match(l.text or "") for l in c.lines)):
+            mine = min(_heading_level(l.text) for l in c.lines)
+            first = _heading_level(nxt.lines[0].text)
+            heads = not (first and first <= mine)
+            if heads and tokens.budget(c.markdown + "\n" + nxt.markdown) < LENIENCY * window:
+                merged = MarkdownChunk(url=c.url, xpath=_common_xpath(c.xpath, nxt.xpath))
+                merged.lines.extend(c.lines)
+                merged.lines.extend(nxt.lines)
+                out.append(merged)
+                i += 2
+                continue
+        out.append(c)
+        i += 1
+    return out
 
 
 def _only_heading(piece: object) -> bool:
