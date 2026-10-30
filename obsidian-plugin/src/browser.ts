@@ -354,8 +354,9 @@ export class BrowserView extends ItemView {
     this.status = root.createDiv({ cls: "domvec-browser-status" });
     // The chat (`G-43`..`G-45`): a strip on the cell that opens on hover; its
     // context is the pins made since the last reply, each sent once.
-    root.addClass("domvec-has-chat");
-    this.chat = new ChatPanel(this.app, this as unknown as Component, root, this.sidecar,
+    // In the page area, not the cell: on the cell it sat over the status line.
+    this.split.addClass("domvec-has-chat");
+    this.chat = new ChatPanel(this.app, this as unknown as Component, this.split, this.sidecar,
       () => [...this.pinned.values()], () => { void this.renderSide(); });
 
     // Built with `createElement` rather than `createEl`: Obsidian's helper

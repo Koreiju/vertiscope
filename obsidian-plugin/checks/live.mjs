@@ -6365,6 +6365,112 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "L-2",
+      asks: "the notebook chat (L-2..L-9, G-44's notebook half): a panel at the foot of the selected cell that follows the scroll; a new rewind only when the cursor lands on a new cell; the rewind ends at that cell, goes backwards over the note as it stands (outputs included), is injected ahead of the prompt, @N limits it, and it stays within a safety share of the model's window; each cell reaches the conversation once; planted rewind-on-scroll and no-budget are caught",
+      async run() {
+        const got = await evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const plugin = app.plugins.getPlugin("domvec-bridge");
+          const chats = window.__domvecNbChats;
+          if (!chats) return { error: "no notebook chats" };
+          const NL = String.fromCharCode(10), F = String.fromCharCode(96).repeat(3);
+          const folder = "domvec-checks";
+          if (!app.vault.getAbstractFileByPath(folder)) await app.vault.createFolder(folder);
+          const path = folder + "/l2-" + Date.now() + ".md";
+          const para = (k) => "Paragraph " + k + ": " + "the okapi is a forest giraffe of the Congo basin, shy and striped. ".repeat(9);
+          const lines = ["# Loading data", "We read the sightings table.", "",
+            F + "python", "import pandas as pd", "df = pd.read_csv('sightings.csv')", F,
+            "<!-- nb-output hash=ab12 count=1 status=error -->", F, "FileNotFoundError: [Errno 2] No such file or directory: 'sightings.csv'", F, "<!-- /nb-output -->", "",
+            "Then we count sightings by year.", "",
+            F + "python", "df.groupby('year').size()", F, ""];
+          for (let k = 1; k <= 40; k++) lines.push(para(k), "");
+          lines.push(F + "python", "print('end')", F);
+          const f = await app.vault.create(path, lines.join(NL));
+          const url = "vault://" + app.vault.getName() + "/" + path;
+          const leaf = app.workspace.getLeaf("tab");
+          await leaf.openFile(f);
+          app.workspace.setActiveLeaf(leaf, { focus: true });
+          await sleep(1500);
+          const view = leaf.view, ed = view.editor;
+          const out = {};
+          try {
+            chats.onCursor();
+            const chat = chats.forActive();
+            if (!chat) return { error: "no chat on a notebook note" };
+            await chat.reset();
+            // Land on the code cell (line 4), then inside its OUTPUT: same cell.
+            ed.setCursor({ line: 4, ch: 0 }); await sleep(400);
+            const r0 = chat.rewinds;
+            out.landed_index = chat.landed && chat.landed.index;
+            ed.setCursor({ line: 9, ch: 3 }); await sleep(400);
+            out.same_cell_no_rewind = chat.rewinds === r0;
+            // At the cell's foot.
+            const cm = ed.cm, host = view.contentEl.getBoundingClientRect();
+            const foot = cm.coordsAtPos(cm.state.doc.line(12).to);
+            chat.place();
+            const top = parseFloat(chat.el.style.top);
+            out.at_cell_foot = !!foot && Math.abs((foot.bottom + 4 - host.top) - top) < 6;
+            // Scroll: the panel follows (stays in view), and there is no new rewind.
+            const r1 = chat.rewinds;
+            cm.scrollDOM.scrollTop += 900; await sleep(400);
+            const pr = chat.el.getBoundingClientRect(), vr = view.contentEl.getBoundingClientRect();
+            out.in_view_after_scroll = pr.top >= vr.top - 1 && pr.bottom <= vr.bottom + 1;
+            out.no_rewind_on_scroll = chat.rewinds === r1;
+            cm.scrollDOM.scrollTop = 0; await sleep(300);
+            // Hover opens it.
+            chat.el.dispatchEvent(new MouseEvent("mouseenter"));
+            out.opens_on_hover = chat.isOpen;
+            // A new cell: the paragraph after the code -- a new rewind.
+            ed.setCursor({ line: 13, ch: 2 }); await sleep(400);
+            out.new_cell_rewinds = chat.rewinds === r1 + 1 && chat.landed.index === 2;
+            // @2: the last two cells -- the code WITH its output, and this one.
+            const t1 = await chat.send("@2 What went wrong in the code above, and how would you fix it? Two sentences.");
+            if (!t1) return { error: "turn 1: " + chat.lastError, ...out };
+            out.t1 = { rewound: t1.cells, sent: t1.sent, dropped: t1.dropped, chars: t1.chars, limit: chat.lastRewind.limit, ms: Math.round(t1.ms), reply: t1.reply.slice(0, 220) };
+            out.output_in_context = /FileNotFoundError|sightings\\.csv|file/i.test(t1.reply);
+            // The same cells again: nothing reaches the conversation twice.
+            const t2 = await chat.send("@2 One word: is the file name the problem?");
+            out.t2 = t2 ? { rewound: t2.cells, sent: t2.sent, dropped: t2.dropped, chars: t2.chars } : null;
+            // The budget: the last paragraph -- 40 long cells above it.
+            ed.setCursor({ line: lines.length - 5, ch: 0 }); await sleep(400);
+            const full = chat.pendingRewind(null);
+            out.budget = { cells: full.cells.length, chars: full.chars, budget: full.budget, note_cells: 44 };
+            chat.plantNoBudget = true;
+            const nob = chat.pendingRewind(null);
+            chat.plantNoBudget = false;
+            out.planted_no_budget = { cells: nob.cells.length, chars: nob.chars };
+            // Planted: a rewind on every scroll.
+            chat.plantRewindOnScroll = true;
+            const r2 = chat.rewinds;
+            cm.scrollDOM.scrollTop += 600; await sleep(300); cm.scrollDOM.scrollTop += 600; await sleep(300);
+            chat.plantRewindOnScroll = false;
+            out.planted_scroll_rewinds = chat.rewinds - r2;
+            out.panel_in_view = chat.el.isConnected;
+            return out;
+          } finally {
+            try { const c = chats.forActive(); if (c) await c.reset(); } catch (e) {}
+            try { leaf.detach(); } catch (e) {}
+            try { await app.vault.delete(f); } catch (e) {}
+            try { await fetch(plugin.settings.sidecar.replace(/[/]+$/, "") + "/purge", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url }) }); } catch (e) {}
+            plugin.settings.indexedNotes = (plugin.settings.indexedNotes || []).filter((p) => p !== path);
+            await plugin.saveSettings();
+            await sleep(1200);
+            const fo = app.vault.getAbstractFileByPath(folder);
+            try { if (fo && (!fo.children || !fo.children.length)) await app.vault.delete(fo, true); } catch (e) {}
+          }
+        })()`, { timeout: 300000 });
+        if (!got || got.error) return { pass: false, evidence: got };
+        const ok = got.landed_index === 1 && got.same_cell_no_rewind && got.at_cell_foot
+          && got.in_view_after_scroll && got.no_rewind_on_scroll && got.opens_on_hover && got.new_cell_rewinds
+          && got.t1.rewound === 2 && got.t1.sent === 2 && got.t1.limit === 2 && got.t1.reply.length > 20
+          && !!got.t2 && got.t2.sent === 0 && got.t2.dropped === 2
+          && got.budget.chars <= got.budget.budget && got.budget.cells < got.budget.note_cells
+          && got.planted_no_budget.chars > got.budget.budget
+          && got.planted_scroll_rewinds >= 1;
+        return { pass: !!ok, evidence: got };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {

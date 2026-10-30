@@ -56,6 +56,8 @@ import { VaultLinks } from "./vaultlinks";
 import { PANEL_VIEW, PanelView } from "./panelview";
 import { Cockpit } from "./cockpit";
 import { slateFolds } from "./slatefold";
+import { NotebookChats } from "./notebookchat";
+import { EditorView as CmView } from "@codemirror/view";
 
 export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost {
   settings: DomvecSettings = DEFAULTS;
@@ -248,6 +250,17 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     // a click infills the link between the parentheses.
     this.registerEditorExtension(linkGesture(this.gesture));
     this.registerEditorExtension(chunkGutter());
+    // The notebook chat (L-2..L-9): a panel at the selected cell's foot; the
+    // cursor landing on a new cell is a new rewind, a scroll is not.
+    this.nbChats = new NotebookChats(this.app, this, this.sidecar);
+    (window as any).__domvecNbChats = this.nbChats;
+    let nbTimer = 0;
+    this.registerEditorExtension(CmView.updateListener.of((u) => {
+      if (!u.selectionSet && !u.docChanged) return;
+      window.clearTimeout(nbTimer);
+      nbTimer = window.setTimeout(() => this.nbChats?.onCursor(), 120);
+    }));
+    this.registerEvent(this.app.workspace.on("active-leaf-change", () => this.nbChats?.onCursor()));
     // A chunk note's two halves, one at a time (`D-3`): `chunkhalves.ts`.
     this.registerEditorExtension(chunkHalves());
     // The slate's fold state, as decorations (G-278): `slatefold.ts`.
@@ -825,7 +838,11 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     return outcome;
   }
 
+  /** The notebook chats, one per open notebook view (L-2). */
+  nbChats: NotebookChats | null = null;
+
   onunload() {
+    this.nbChats?.destroy();
     this.cockpit?.unload();
     this.surfaces.clear();
     // The view's own `onClose` releases the WebGL context; detaching leaves
