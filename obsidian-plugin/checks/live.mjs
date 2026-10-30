@@ -5669,34 +5669,61 @@ export function makeChecks(env) {
     },
     {
       id: "G-5",
-      asks: "every node is on screen at the default camera",
+      asks: "every node is on screen at the default camera (2026-10-30: at BOTH levels -- the row was Partly because the check only ever saw the level that happened to be open; planted plantFrameBulk, a frame fitted to the median offset per axis instead of the extremes, puts nodes off screen and is caught)",
       async run() {
         const got = await inPane(`
           for (let i = 0; i < 60 && !(v.graph && v.graph.graphData().nodes.length); i++) await sleep(500);
-          if (v.reframe) { v.reframe(); await sleep(1200); }
-          const cam = v.graph.camera();
-          const THREE = v.graph.constructor;
-          const d = v.graph.graphData();
           // Projected into normalised device coordinates: |x|,|y| <= 1 and
-          // 0 < z < 1 is "inside the frustum". Counting nodes rather than
+          // w > 0 is "inside the frustum". Counting nodes rather than
           // trusting the framing arithmetic that put them there.
-          cam.updateMatrixWorld();
-          const m = cam.projectionMatrix.clone().multiply(cam.matrixWorldInverse);
-          let onScreen = 0, behind = 0;
-          for (const n of d.nodes) {
-            const x = n.x, y = n.y, z = n.z;
+          const census = () => {
+            const cam = v.graph.camera();
+            cam.updateMatrixWorld();
+            const m = cam.projectionMatrix.clone().multiply(cam.matrixWorldInverse);
             const e = m.elements;
-            const cw = e[3]*x + e[7]*y + e[11]*z + e[15];
-            if (cw <= 0) { behind++; continue; }
-            const cx = (e[0]*x + e[4]*y + e[8]*z + e[12]) / cw;
-            const cy = (e[1]*x + e[5]*y + e[9]*z + e[13]) / cw;
-            if (Math.abs(cx) <= 1 && Math.abs(cy) <= 1) onScreen++;
+            const ns = v.graph.graphData().nodes.filter((n) => Number.isFinite(n.x));
+            let onScreen = 0, behind = 0;
+            for (const n of ns) {
+              const x = n.x, y = n.y, z = n.z || 0;
+              const cw = e[3]*x + e[7]*y + e[11]*z + e[15];
+              if (cw <= 0) { behind++; continue; }
+              const cx = (e[0]*x + e[4]*y + e[8]*z + e[12]) / cw;
+              const cy = (e[1]*x + e[5]*y + e[9]*z + e[13]) / cw;
+              if (Math.abs(cx) <= 1 && Math.abs(cy) <= 1) onScreen++;
+            }
+            const el = v.graph.renderer().domElement;
+            return { level: v.level || "pages", nodes: ns.length, onScreen, behind,
+                     pane: [el.clientWidth, el.clientHeight], dist: Math.round(v.fullViewDist) };
+          };
+          const toggle = () => [...v.contentEl.querySelectorAll("button")].find((x) => x.textContent === (v.level === "chunk" ? "chunks" : "pages"))?.click();
+          const reframe = async () => { v.reframe(); await sleep(1500); };
+          const out = {};
+          try {
+            if (v.level === "chunk") { toggle(); await sleep(6000); }
+            await reframe();
+            out.pages = census();
+            // The planted arm: framing the bulk puts the outer nodes off screen.
+            v.plantFrameBulk = true;
+            await reframe();
+            out.planted = census();
+            v.plantFrameBulk = false;
+            await reframe();
+            toggle();
+            for (let i = 0; i < 120; i++) { await sleep(500); if (v.level === "chunk" && v.graph && v.graph.graphData().nodes.length > 50) break; }
+            await sleep(9000);
+            await reframe();
+            out.chunk = census();
+          } finally {
+            v.plantFrameBulk = false;
+            await reframe();
+            if (v.level === "chunk") { toggle(); await sleep(6000); }
           }
-          return { nodes: d.nodes.length, onScreen, behind };
+          return out;
         `);
         if (got.error) return { pass: false, evidence: got };
+        const all = (c) => c && c.nodes > 0 && c.onScreen === c.nodes && c.behind === 0;
         return {
-          pass: got.nodes > 0 && got.onScreen === got.nodes && got.behind === 0,
+          pass: all(got.pages) && all(got.chunk) && !!got.planted && got.planted.onScreen < got.planted.nodes,
           evidence: got,
         };
       },
@@ -5841,49 +5868,91 @@ export function makeChecks(env) {
     },
     {
       id: "G-4",
-      asks: "inter-spatial normalization -- nodes are discernible, not a clump",
+      asks: "inter-spatial normalization -- nodes are discernible, not a clump (2026-10-30: scored on the DRAWN picture at both levels, at the pane's own radii -- at least 95% of nodes clear of their nearest neighbour's drawn sphere, no two different texts on one point; planted plantNoChunkRelax + plantNoDrawn, the raw UMAP points, is caught)",
       async run() {
+        // The verbatim (PLUGIN_GOAL, opening): "inter-spatial normalization on
+        // UMAP nodes since most are way too compressed together to see
+        // anything discernable". This scored /layout's FIT coordinates against
+        // a median neighbour distance of 1 -- a number in fit units with no
+        // relation to what is drawn, and it failed at 0.806 while the drawn
+        // picture held 0 overlaps (G-21). Discernible is a property of the
+        // picture: a node is discernible when its drawn sphere is clear of its
+        // nearest neighbour's. In WORLD space, so depth is not conflated
+        // (D-25) and the bar holds at every zoom; "most" read as 95%.
+        const got = await inPane(`
+          const census = () => {
+            const ns = v.graph.graphData().nodes.filter((n) => Number.isFinite(n.x) && !n.force);
+            const rad = ns.map((n) => v.drawnRadiusOf(n));
+            const rs = [...rad].sort((a, b) => a - b);
+            if (!rs.length) return { nodes: 0 };
+            const cell = Math.max(rs[Math.floor(rs.length * 0.99)] * 4, 1e-3);
+            const grid = new Map();
+            ns.forEach((n, i) => { const k = Math.floor(n.x / cell) + "," + Math.floor(n.y / cell) + "," + Math.floor(n.z / cell); (grid.get(k) || grid.set(k, []).get(k)).push(i); });
+            let clear = 0, touching = 0, coincident = 0;
+            const ratio = [];
+            ns.forEach((n, i) => {
+              const cx = Math.floor(n.x / cell), cy = Math.floor(n.y / cell), cz = Math.floor(n.z / cell);
+              let best = Infinity, bj = -1;
+              for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++)
+                for (const j of grid.get((cx + dx) + "," + (cy + dy) + "," + (cz + dz)) || []) {
+                  if (j === i) continue;
+                  const o = ns[j];
+                  const d = Math.hypot(o.x - n.x, o.y - n.y, o.z - n.z);
+                  if (d < best) { best = d; bj = j; }
+                }
+              // Nothing within four of the largest radii: clear by construction.
+              if (bj < 0) { clear++; return; }
+              if (best < 1e-6) coincident++;
+              const r = best / (rad[i] + rad[bj]);
+              ratio.push(r);
+              if (r >= 1) clear++; else touching++;
+            });
+            ratio.sort((a, b) => a - b);
+            return { level: v.level || "pages", nodes: ns.length, clear, touching, coincident,
+                     share: Math.round(clear / ns.length * 1000) / 1000,
+                     gap_over_radii_p50: ratio.length ? Math.round(ratio[Math.floor(ratio.length / 2)] * 100) / 100 : null };
+          };
+          const toggle = () => [...v.contentEl.querySelectorAll("button")].find((x) => x.textContent === (v.level === "chunk" ? "chunks" : "pages"))?.click();
+          const toChunk = async () => {
+            if (v.level !== "chunk") toggle();
+            for (let i = 0; i < 120; i++) { await sleep(500); if (v.level === "chunk" && v.graph && v.graph.graphData().nodes.length > 50) break; }
+            await sleep(9000);
+          };
+          const toPages = async () => { if (v.level === "chunk") toggle(); await sleep(6000); };
+          const out = {};
+          try {
+            await toPages();
+            out.pages = census();
+            await toChunk();
+            out.chunk = census();
+            await toPages();
+            v.plantNoChunkRelax = true; v.plantNoDrawn = true;
+            await toChunk();
+            out.planted = census();
+          } finally {
+            v.plantNoChunkRelax = false; v.plantNoDrawn = false;
+            await toPages();
+          }
+          return out;
+        `);
+        if (got.error) return { pass: false, evidence: got };
+        // And the fit itself: two DIFFERENT texts at one point are two things
+        // drawn as one whatever the relax does (the same text on several
+        // pages belongs at one point).
         const d = await ask("/layout?level=chunk");
-        const ns = (d.nodes || []).filter((n) => Array.isArray(n.pos));
-        if (ns.length < 50) {
-          return { pass: false, evidence: { why: "too few placed nodes", n: ns.length } };
+        const ns = (d.nodes || []).filter((n) => Array.isArray(n.pos)).slice(0, 400);
+        let differentText = 0;
+        for (let i = 0; i < ns.length; i++) for (let j = i + 1; j < ns.length; j++) {
+          const a = ns[i].pos, b = ns[j].pos;
+          if (Math.hypot(a[0]-b[0], a[1]-b[1], a[2]-b[2]) < 1e-6
+              && String(ns[i].title || "") !== String(ns[j].title || "")) differentText++;
         }
-        // Nearest-neighbour distance over a sample. The defect this guards is
-        // a cloud whose points sit on top of each other, which reads as one
-        // blob however well the fit separated them in six dimensions.
-        const sample = ns.slice(0, 400);
-        const nn = [];
-        let sameText = 0, differentText = 0;
-        const examples = [];
-        for (let i = 0; i < sample.length; i++) {
-          let best = Infinity, at = -1;
-          for (let j = 0; j < sample.length; j++) {
-            if (i === j) continue;
-            const a = sample[i].pos, b = sample[j].pos;
-            const dd = Math.hypot(a[0]-b[0], a[1]-b[1], a[2]-b[2]);
-            if (dd < best) { best = dd; at = j; }
-          }
-          if (Number.isFinite(best)) nn.push(best);
-          if (best < 1e-6 && at >= 0) {
-            // The SAME text on several pages (a navbox every tree page carries)
-            // embeds identically and belongs at one point of the fit; what
-            // this guards is DIFFERENT content collapsed together.
-            const same = String(sample[i].title || "") === String(sample[at].title || "");
-            if (same) sameText++; else differentText++;
-            if (examples.length < 4) examples.push([sample[i].url, sample[at].url, String(sample[i].title || "").slice(0, 40), same]);
-          }
-        }
-        nn.sort((a, b) => a - b);
-        const p50 = nn[Math.floor(nn.length / 2)];
-        const zero = nn.filter((x) => x < 1e-6).length;
+        got.fit_coincident_different_text = differentText;
+        const ok = (c) => c && c.nodes > 0 && c.share >= 0.95;
         return {
-          // A median neighbour distance of ~0 is the clump; exact zeros
-          // between DIFFERENT texts are two things drawn as one.
-          pass: p50 > 1 && differentText === 0,
-          evidence: { sampled: sample.length, nn_p50: +p50.toFixed(3),
-                      nn_min: +nn[0].toFixed(3), coincident: zero,
-                      coincident_same_text: sameText, coincident_different_text: differentText,
-                      examples },
+          pass: ok(got.pages) && ok(got.chunk) && differentText === 0
+             && !!got.planted && got.planted.share < got.chunk.share - 0.05,
+          evidence: got,
         };
       },
     },

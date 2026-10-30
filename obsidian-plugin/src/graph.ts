@@ -335,6 +335,14 @@ export class GraphView extends ItemView {
   private reframe: (() => void) | null = null;
   /** Planted (item 116): every framing aims at the origin, as before. */
   plantOriginFrame = false;
+  /** Planted (G-5): the frame is fitted to the BULK of the cloud -- the
+   *  median offset on each axis, and the servo (`tighten`) reads the middle
+   *  half of the picture -- not to its extremes, so the outer nodes fall off
+   *  screen. The servo is the guarantor: planting the distance alone, it
+   *  corrected 1,965 back to the frame. (A vertical-fov-only plant was tried first and bit only
+   *  when the horizontal term bound: 1,920 -> 987 in one state, 2,090 -> 1,918
+   *  in another, every node still on screen.) */
+  plantFrameBulk = false;
   /** How much of the pane the cloud fills and how far off-centre it sits. */
   screenCoverage: (() => { w: number; h: number; dx: number; dy: number } | null) | null = null;
   /** Frame what an expansion just opened. Set in `draw`. */
@@ -8843,6 +8851,10 @@ export class GraphView extends ItemView {
         my = Math.max(my, Math.abs((p.y ?? 0) - c.y));
         mz = Math.max(mz, Math.abs((p.z ?? 0) - c.z));
       }
+      if (this.plantFrameBulk && pts.length > 2) {
+        const med = (f: (p: any) => number) => { const a = pts.map(f).sort((x: number, y: number) => x - y); return a[Math.floor(a.length / 2)]; };
+        mx = med((p) => Math.abs((p.x ?? 0) - c.x)); my = med((p) => Math.abs((p.y ?? 0) - c.y)); mz = med((p) => Math.abs((p.z ?? 0) - c.z));
+      }
       let r = Math.max(mx, my, mz);
       if (!(r > 0)) { r = extent; mx = my = mz = extent; }
       const cam: any = graph.camera();
@@ -8888,6 +8900,7 @@ export class GraphView extends ItemView {
       cam.updateMatrixWorld?.();
       let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
       let seen = 0;
+      const bulkX: number[] = [], bulkY: number[] = [];
       for (const n of pts) {
         const v = new (cam.position.constructor as any)(
           n.x ?? 0, n.y ?? 0, n.z ?? 0);
@@ -8902,8 +8915,16 @@ export class GraphView extends ItemView {
         if (sx > maxX) maxX = sx;
         if (sy < minY) minY = sy;
         if (sy > maxY) maxY = sy;
+        if (this.plantFrameBulk) { bulkX.push(sx); bulkY.push(sy); }
       }
       if (seen < 2 || !isFinite(minX)) return null;
+      // Planted (G-5): the servo reads the middle half of the cloud, not its
+      // edges -- a "robust" coverage that leaves the outer nodes off screen.
+      if (this.plantFrameBulk && bulkX.length > 3) {
+        bulkX.sort((p, q) => p - q); bulkY.sort((p, q) => p - q);
+        const q = (a: number[], f: number) => a[Math.floor(a.length * f)];
+        minX = q(bulkX, 0.25); maxX = q(bulkX, 0.75); minY = q(bulkY, 0.25); maxY = q(bulkY, 0.75);
+      }
       // `dx`/`dy`: how far the picture's middle sits from the pane's, as a
       // fraction of the pane -- 0 is centred, 0.5 is the middle on an edge.
       return { w: (maxX - minX) / W, h: (maxY - minY) / H,
