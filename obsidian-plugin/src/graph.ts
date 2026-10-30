@@ -16,6 +16,7 @@
  */
 
 import { UserAgent } from "./useragent";
+import { setFolds as setFoldsEffect } from "./slatefold";
 import { spreadFactor } from "./spread.ts";
 import { unitOf, lineAddr, inUnit } from "./address.ts";
 import { centredTelescope, relaxCloud, zoomFor, similarityFit, similarityInverse, rotateInverse, type V3 } from "./camera";
@@ -494,7 +495,18 @@ export class GraphView extends ItemView {
     // The ego flight is selective (2026-10-30, items 39, 46): a drag on the
     // canvas is a hand on the stick -- the flight and its velocity dropped --
     // and the wheel re-reads the distance a flight in progress stops at.
-    canvas.addEventListener("pointerdown", () => { if (!this.plantHoldFlight) this.agent.release(); }, { passive: true, capture: true });
+    canvas.addEventListener("pointerdown", (e: PointerEvent) => { this.downAt = [e.clientX, e.clientY]; if (!this.plantHoldFlight) this.agent.release(); }, { passive: true, capture: true });
+    // A right-click on a bisector folds / unfolds what it dominates (G-282).
+    canvas.addEventListener("contextmenu", (e: MouseEvent) => {
+      const hit = this.bisectorAt(e.clientX, e.clientY);
+      if (hit && this.toggleDominance(hit)) { e.preventDefault(); e.stopPropagation(); }
+    }, true);
+    // A click (no drag) on a bisector opens / closes its graph in 2D (G-282).
+    canvas.addEventListener("pointerup", (e: PointerEvent) => {
+      if (!this.downAt || Math.hypot(e.clientX - this.downAt[0], e.clientY - this.downAt[1]) > 4) return;
+      const hit = this.bisectorAt(e.clientX, e.clientY);
+      if (hit) this.toggleBisector(hit);
+    }, { passive: true, capture: true });
     canvas.addEventListener("wheel", () => this.agent.zoomed(), { passive: true, capture: true });
     canvas.addEventListener("pointermove", (e) => { if (e.buttons) moved(); }, { passive: true, capture: true });
     // Arrow keys pan, precisely, while the pointer is over the 3D view and no
@@ -4171,6 +4183,125 @@ export class GraphView extends ItemView {
     this.signalStats.fired++;
     this.batchDirty = true;
   }
+  /**
+   * **Readouts on the perimeter, and the bisector** (G-282; RESERVOIR_DESIGN
+   * §5; DM §6.6.1, §6.6.4; UR P.3-P.10). A cell note is its graph's READOUT
+   * (its stored output is the terminal value): it is placed on the cloud's
+   * outer shell, along its own UMAP bearing from the centre, so its angle is
+   * still the fit's. Between the centroid of the run's inputs and the readout
+   * stands ONE bisector node per graph; the signal flows input -> bisector ->
+   * readout, a network independent of the fit. A click on the bisector opens
+   * the graph in 2D (the cell note in graph form), another closes it.
+   * Planted `plantNoPerimeter`, `plantNoBisector`.
+   */
+  plantNoPerimeter = false;
+  plantNoBisector = false;
+  /**
+   * Rank-dominance collapse, generalised to the bisector (UR Q.3-Q.5): a
+   * right-click on a bisector folds what it dominates -- its graph's input
+   * and readout lines -- and leaves it standing alone, ringed; another
+   * unfolds. Kept per graph. Planted `plantNoDominance`.
+   */
+  foldedGraphs = new Set<string>();
+  plantNoDominance = false;
+  toggleDominance(note: string): boolean {
+    if (this.plantNoDominance) return false;
+    if (this.foldedGraphs.has(note)) this.foldedGraphs.delete(note); else this.foldedGraphs.add(note);
+    const b = this.bisectors.get(note);
+    if (b) b.mesh.scale.setScalar(this.foldedGraphs.has(note) ? 1.8 : 1);
+    this.batchDirty = true;
+    return true;
+  }
+  perimeterStats = { readouts: 0, bisectors: 0, shell_r: 0, opened: 0, closed: 0 };
+  /** Each graph's bisector: its note, its point, its mesh. */
+  bisectors = new Map<string, { at: { x: number; y: number; z: number }; mesh: any }>();
+  private bisectorGroup: any = null;
+  private shell: { cx: number; cy: number; cz: number; r: number; at: number } | null = null;
+  /** The cloud's centre and outer radius (the 98th percentile distance), every 5 s at most. */
+  private shellOf(nodes: any[]): { cx: number; cy: number; cz: number; r: number } {
+    const now = performance.now();
+    if (this.shell && now - this.shell.at < 5000) return this.shell;
+    let n = 0, cx = 0, cy = 0, cz = 0;
+    const step = Math.max(1, Math.floor(nodes.length / 4000));
+    for (let i = 0; i < nodes.length; i += step) {
+      const q = nodes[i];
+      if (q.__perim || !Number.isFinite(q.x)) continue;
+      cx += q.x; cy += q.y; cz += q.z || 0; n++;
+    }
+    if (!n) return { cx: 0, cy: 0, cz: 0, r: 1 };
+    cx /= n; cy /= n; cz /= n;
+    const ds: number[] = [];
+    for (let i = 0; i < nodes.length; i += step) {
+      const q = nodes[i];
+      if (q.__perim || !Number.isFinite(q.x)) continue;
+      ds.push(Math.hypot(q.x - cx, q.y - cy, (q.z || 0) - cz));
+    }
+    ds.sort((a, b) => a - b);
+    const r = ds[Math.floor(ds.length * 0.98)] || 1;
+    this.shell = { cx, cy, cz, r, at: now };
+    this.perimeterStats.shell_r = Math.round(r);
+    return this.shell;
+  }
+  private toPerimeter(t: any, nodes: any[]): void {
+    const sh = this.shellOf(nodes);
+    // The bearing is the FIT's (its UMAP place), not wherever it was moved.
+    const fx = Number.isFinite(t.fitX) ? t.fitX : t.x, fy = Number.isFinite(t.fitY) ? t.fitY : t.y, fz = Number.isFinite(t.fitZ) ? t.fitZ : (t.z || 0);
+    let dx = fx - sh.cx, dy = fy - sh.cy, dz = fz - sh.cz;
+    const d = Math.hypot(dx, dy, dz) || 1;
+    dx /= d; dy /= d; dz /= d;
+    const R = sh.r * 1.05;
+    const x = sh.cx + dx * R, y = sh.cy + dy * R, z = sh.cz + dz * R;
+    if (t.__perim && Math.abs(t.x - x) + Math.abs(t.y - y) + Math.abs((t.z || 0) - z) < 1e-3) return;
+    t.x = t.fx = x; t.y = t.fy = y; t.z = t.fz = z;
+    t.__perim = true;
+  }
+  private bisectorMesh(note: string): any {
+    const g: any = this.graph;
+    if (!g) return null;
+    if (!this.bisectorGroup) { this.bisectorGroup = new THREE.Group(); g.scene().add(this.bisectorGroup); }
+    let b = this.bisectors.get(note);
+    if (!b) {
+      const mesh = new THREE.Mesh(new THREE.SphereGeometry(2.4, 16, 12), new THREE.MeshBasicMaterial({ color: GraphView.SIGNAL_COLOUR }));
+      (mesh as any).__bisector = note;
+      this.bisectorGroup.add(mesh);
+      b = { at: { x: 0, y: 0, z: 0 }, mesh };
+      this.bisectors.set(note, b);
+    }
+    return b;
+  }
+  private downAt: number[] | null = null;
+  /** The bisector under a screen point, by the scene's own raycaster. */
+  bisectorAt(clientX: number, clientY: number): string | null {
+    const g: any = this.graph;
+    if (!g || !this.bisectorGroup || !this.bisectorGroup.children.length) return null;
+    const el: HTMLElement = g.renderer().domElement, r = el.getBoundingClientRect();
+    const ndc = new THREE.Vector2(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1);
+    const rc = new THREE.Raycaster();
+    rc.setFromCamera(ndc, g.camera());
+    const hits = rc.intersectObjects(this.bisectorGroup.children, false);
+    return hits.length ? (hits[0].object as any).__bisector : null;
+  }
+  /** A click on a bisector: its graph opened in 2D, or closed if open. */
+  toggleBisector(note: string): "opened" | "closed" | "none" {
+    const leaves = this.app.workspace.getLeavesOfType("markdown").filter((l: any) => l.view?.file?.path === note);
+    if (leaves.length) { for (const l of leaves) l.detach(); this.perimeterStats.closed++; return "closed"; }
+    const f = this.app.vault.getAbstractFileByPath(note);
+    if (!f) return "none";
+    const leaf = this.app.workspace.getLeaf("split");
+    void (leaf as any).openFile(f, { state: { mode: "source", source: false } }).then(() => {
+      window.setTimeout(() => {
+        const cp: any = (this.app as any).plugins?.getPlugin?.("domvec-bridge")?.cockpit;
+        const v: any = leaf.view;
+        const cm = v?.editor?.cm;
+        // Graph form, the 2D graph (G-281) -- a cell note is not a slate, so the form is set directly.
+        if (cm) cm.dispatch({ effects: setFoldsEffect.of({ reveals: {}, collapsed: false, graph: true }) });
+        if (cp) cp.decorate();
+      }, 400);
+    });
+    this.perimeterStats.opened++;
+    return "opened";
+  }
+
   private drawableSignalEdges(nodes: any[]): any[] {
     if (this.plantNoSignal || !this.signalEdges.length) { this.signalStats.drawn = 0; return []; }
     const byId = new Map<string, any>();
@@ -4180,6 +4311,7 @@ export class GraphView extends ItemView {
     const out: any[] = [];
     const seen = new Set<string>();
     let pulsing = 0;
+    const graphs = new Map<string, { t: any; srcs: any[]; alpha: number }>();
     for (const e of this.signalEdges) {
       const key = e.note + "|" + e.cid;
       if (seen.has(key)) continue;
@@ -4194,8 +4326,37 @@ export class GraphView extends ItemView {
       const age = fired === undefined ? Infinity : now - fired;
       const pulse = age < this.signalPulseMs ? 1 - age / this.signalPulseMs : 0;
       if (pulse > 0) pulsing++;
-      out.push({ source: src, target: t, color: GraphView.SIGNAL_COLOUR, alpha: 0.45 + 0.55 * pulse, signal: true });
+      const alpha = 0.45 + 0.55 * pulse;
+      let gr = graphs.get(e.note);
+      if (!gr) { gr = { t, srcs: [], alpha }; graphs.set(e.note, gr); }
+      gr.srcs.push(src);
+      gr.alpha = Math.max(gr.alpha, alpha);
     }
+    let readouts = 0;
+    const live = new Set<string>();
+    for (const [note, gr] of graphs) {
+      if (!this.plantNoPerimeter) { this.toPerimeter(gr.t, nodes); readouts++; }
+      if (this.plantNoBisector) {
+        for (const src of gr.srcs) out.push({ source: src, target: gr.t, color: GraphView.SIGNAL_COLOUR, alpha: gr.alpha, signal: true });
+        continue;
+      }
+      // The bisector: midway between the inputs' centroid and the readout.
+      let cx = 0, cy = 0, cz = 0;
+      for (const q of gr.srcs) { cx += q.x; cy += q.y; cz += q.z || 0; }
+      cx /= gr.srcs.length; cy /= gr.srcs.length; cz /= gr.srcs.length;
+      const b = this.bisectorMesh(note);
+      if (!b) continue;
+      b.at.x = (cx + gr.t.x) / 2; b.at.y = (cy + gr.t.y) / 2; b.at.z = (cz + (gr.t.z || 0)) / 2;
+      b.mesh.position.set(b.at.x, b.at.y, b.at.z);
+      live.add(note);
+      // Folded by its dominator: the bisector stands alone.
+      if (this.foldedGraphs.has(note)) continue;
+      for (const src of gr.srcs) out.push({ source: src, target: b.at, color: GraphView.SIGNAL_COLOUR, alpha: gr.alpha, signal: true });
+      out.push({ source: b.at, target: gr.t, color: GraphView.SIGNAL_COLOUR, alpha: gr.alpha, signal: true });
+    }
+    for (const [note, b] of this.bisectors) if (!live.has(note)) { b.mesh.removeFromParent(); this.bisectors.delete(note); }
+    this.perimeterStats.readouts = readouts;
+    this.perimeterStats.bisectors = live.size;
     this.signalStats.drawn = out.length;
     this.signalStats.pulsing = pulsing;
     // While a pulse runs, its lines are re-coloured each frame; and while a

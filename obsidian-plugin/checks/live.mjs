@@ -7677,7 +7677,9 @@ export function makeChecks(env) {
             const t = ns.find((n) => n.id === "page:" + urlOf(cellPath));
             const s = ns.find((n) => n.id === "page:" + urlOf(src.path));
             if (!t || !s) return null;
-            return v.drawableSignalEdges(ns).find((e) => e.target === t && e.source === s) || null;
+            // Direct, or through the cell's bisector (G-282).
+            const bis = v.bisectors.get(cellPath);
+            return v.drawableSignalEdges(ns).find((e) => e.source === s && (e.target === t || (bis && e.target === bis.at))) || null;
           };
           try {
             await leaf.openFile(cell, { state: { mode: "source", source: false } });
@@ -7926,6 +7928,113 @@ export function makeChecks(env) {
         const c = got.clean, p = got.planted;
         return { pass: c.flipped.graph && c.flipped.nodes === got.fields && c.flipped.lines === got.fields - got.roots && c.flipped.hollow === 1
                    && c.kept && c.back && c.text_unchanged && !p.flipped.graph,
+                 evidence: got };
+      },
+    },
+    {
+      id: "G-282",
+      asks: "readouts on the perimeter and the bisector (RESERVOIR_DESIGN §5, DM §6.6.4): a cell run with the real Run button puts its note -- the readout -- on the cloud's outer shell (1.05 x the 98th-percentile radius) along its own UMAP bearing, and ONE bisector node midway between its input and its readout, the signal drawn input -> bisector -> readout; a click on the bisector opens the cell in 2D graph form, a second closes it; a right-click on it folds what it dominates (its lines) and another unfolds (planted plantNoDominance: no fold); planted (plantNoPerimeter + plantNoBisector) the readout stays at its fit and no bisector is drawn",
+      async run() {
+        const got = await evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const until = async (ok, ms) => { for (let t = 0; t < ms && !ok(); t += 250) await sleep(250); return ok(); };
+          const plugin = app.plugins.getPlugin("domvec-bridge");
+          const SIDE = String(plugin.settings.sidecar).replace(/[/]+$/, "");
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
+          if (!v || !v.graph) return { error: "no graph" };
+          const NL = String.fromCharCode(10), F = String.fromCharCode(96).repeat(3);
+          const folder = "domvec-checks";
+          if (!app.vault.getAbstractFileByPath(folder)) await app.vault.createFolder(folder);
+          const vaultName = app.vault.getName(), urlOf = (path) => "vault://" + vaultName + "/" + path;
+          const made = [];
+          const nodeOf = (path) => v.graph.graphData().nodes.find((n) => n.id === "page:" + urlOf(path));
+          const runCell = async (tag) => {
+            const stamp = Date.now() + tag;
+            const srcName = "g282 source " + stamp;
+            const src = await app.vault.create(folder + "/" + srcName + ".md", "# Source" + NL + NL + "Readout source " + stamp + "." + NL);
+            made.push(src);
+            await plugin.indexNote(src, "check");
+            const varName = srcName.replace(/[^A-Za-z0-9_]+/g, "_").replace(/^_+|_+$/g, "").toLowerCase();
+            const cellPath = folder + "/g282 cell " + stamp + ".md";
+            const cell = await app.vault.create(cellPath, "# cell" + NL + NL + F + "python {" + srcName + "}" + NL + "print(len(" + varName + "))" + NL + F + NL);
+            made.push(cell);
+            const leaf = app.workspace.getLeaf("tab");
+            await leaf.openFile(cell, { state: { mode: "source", source: false } });
+            await until(() => !!leaf.view.containerEl.querySelector(".domvec-run-fence"), 8000);
+            leaf.view.containerEl.querySelector(".domvec-run-fence").click();
+            await until(() => leaf.view.editor.getValue().includes("nb-output"), 30000);
+            leaf.detach();
+            await until(() => !!nodeOf(cellPath) && !!nodeOf(src.path), 40000);
+            await sleep(1500);                          // a few frames for the layout to apply
+            v.batchDirty = true; v.batchSync(); await sleep(300);
+            return { cellPath, src: src.path };
+          };
+          const out = {};
+          try {
+            // Planted first, on its own note.
+            v.plantNoPerimeter = true; v.plantNoBisector = true;
+            const pr = await runCell("p");
+            const pt = nodeOf(pr.cellPath);
+            out.planted = { at_fit: !!pt && Math.abs(pt.x - pt.fitX) + Math.abs(pt.y - pt.fitY) < 1, bisector: v.bisectors.has(pr.cellPath) };
+            v.plantNoPerimeter = false; v.plantNoBisector = false;
+            const cr = await runCell("c");
+            v.batchDirty = true; v.batchSync(); await sleep(300);
+            const t = nodeOf(cr.cellPath), s = nodeOf(cr.src);
+            const sh = v.shell;
+            const d = Math.hypot(t.x - sh.cx, t.y - sh.cy, (t.z || 0) - sh.cz);
+            const b1 = [t.x - sh.cx, t.y - sh.cy, (t.z || 0) - sh.cz], b2 = [t.fitX - sh.cx, t.fitY - sh.cy, (t.fitZ || 0) - sh.cz];
+            const cos = (b1[0]*b2[0] + b1[1]*b2[1] + b1[2]*b2[2]) / (Math.hypot(...b1) * Math.hypot(...b2));
+            const b = v.bisectors.get(cr.cellPath);
+            const mid = b ? Math.hypot(b.at.x - (s.x + t.x) / 2, b.at.y - (s.y + t.y) / 2, b.at.z - ((s.z || 0) + (t.z || 0)) / 2) : null;
+            const es = v.drawableSignalEdges(v.graph.graphData().nodes);
+            const clean = { shell_r: Math.round(sh.r), readout_r_ratio: Math.round(d / sh.r * 1000) / 1000, bearing_deg: Math.round(Math.acos(Math.min(1, cos)) * 1800 / Math.PI) / 10,
+                            bisector: !!b, bisector_off_mid: mid === null ? null : Math.round(mid * 100) / 100,
+                            src_to_bis: !!b && es.some((e) => e.source === s && e.target === b.at), bis_to_readout: !!b && es.some((e) => e.source === b.at && e.target === t) };
+            // A real click on the bisector: aim at it, then pointerdown/up on the canvas at its screen point.
+            if (b) {
+              const g = v.graph, cam = g.camera(), ctl = g.controls();
+              ctl.target.set(b.at.x, b.at.y, b.at.z);
+              cam.position.set(b.at.x + 40, b.at.y + 10, b.at.z + 40); cam.lookAt(b.at.x, b.at.y, b.at.z); ctl.update?.(); cam.updateMatrixWorld();
+              // Its screen point read afresh for each click: opening the cell in
+              // a split resizes the 3D canvas and moves the bisector on screen.
+              const pointOf = () => {
+                const el = g.renderer().domElement, r = el.getBoundingClientRect();
+                cam.updateMatrixWorld();
+                const q = b.mesh.position.clone().project(cam);
+                return [r.left + (q.x + 1) / 2 * r.width, r.top + (1 - q.y) / 2 * r.height];
+              };
+              const click = () => { const [x, y] = pointOf(); for (const type of ["pointerdown", "pointerup"]) v.canvasEl.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 0 })); };
+              clean.picked = v.bisectorAt(...pointOf());
+              click(); await sleep(1500);
+              const leaf = app.workspace.getLeavesOfType("markdown").find((l) => l.view?.file?.path === cr.cellPath);
+              clean.opened = !!leaf;
+              clean.graph_form = !!leaf && !!leaf.view.contentEl.querySelector(".domvec-slate-graph");
+              click(); await sleep(600);
+              clean.closed = !app.workspace.getLeavesOfType("markdown").some((l) => l.view?.file?.path === cr.cellPath);
+              // Rank-dominance: a right-click on the bisector folds its lines; another unfolds.
+              const lines = () => v.drawableSignalEdges(v.graph.graphData().nodes).filter((e) => e.source === b.at || e.target === b.at).length;
+              const rclick = (planted) => { v.plantNoDominance = planted; const [x, y] = pointOf(); v.canvasEl.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 2 })); v.plantNoDominance = false; };
+              clean.lines_open = lines();
+              rclick(true); clean.lines_planted_fold = lines();
+              rclick(false); clean.lines_folded = lines();
+              rclick(false); clean.lines_unfolded = lines();
+            }
+            out.clean = clean;
+          } finally {
+            v.plantNoPerimeter = false; v.plantNoBisector = false;
+            for (const f of made) {
+              try { await fetch(SIDE + "/purge", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url: urlOf(f.path) }) }); } catch (e) {}
+              try { await app.vault.delete(f); } catch (e) {}
+            }
+          }
+          return out;
+        })()`, { timeout: 180000 });
+        if (!got || got.error) return { pass: false, evidence: got };
+        const c = got.clean, p = got.planted;
+        return { pass: c && Math.abs(c.readout_r_ratio - 1.05) < 0.02 && c.bearing_deg < 1 && c.bisector && c.bisector_off_mid < 0.5
+                   && c.src_to_bis && c.bis_to_readout && c.picked && c.opened && c.graph_form && c.closed
+                   && c.lines_open >= 2 && c.lines_planted_fold === c.lines_open && c.lines_folded === 0 && c.lines_unfolded === c.lines_open
+                   && p.at_fit && !p.bisector,
                  evidence: got };
       },
     },
