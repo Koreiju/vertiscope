@@ -1223,6 +1223,18 @@ def _collapse_math(units: List[Tuple[ContentAddress, str, str, int]]
     return out
 
 
+#: Planted (`M-10`): a target unit (href, src) joins prose when its value
+#: does not look like a url -- archive.org's home link drawn `[/ Go home](/ Go home)`.
+PLANT_TARGET_JOINS_PROSE = False
+#: Planted (`M-10`): a control's href (a role="tab" anchor) keeps its own line
+#: and never reaches its label's -- `( https://... )` beside `( Web Sites )`.
+PLANT_CONTROL_HREF_OWN_LINE = False
+
+
+def _accessor_head(address: ContentAddress) -> str:
+    return (getattr(address, "accessor", "") or "").split("|")[0].split("[")[0]
+
+
 def _join_inline(units: List[Tuple[ContentAddress, str, str, int]]
                  ) -> List[Tuple[ContentAddress, str, str, int]]:
     """Sentences broken by inline markup are put back together.
@@ -1320,6 +1332,14 @@ def _join_inline(units: List[Tuple[ContentAddress, str, str, int]]
                  or _flow_owner(address.xpath) in mixed)
             and not _looks_like_url(value)
             and not _looks_like_url(prev[1])
+            # A TARGET by its accessor, whatever its value (`M-10`): an href of
+            # "/" is not a url by `_looks_like_url` -- rightly, for a "0 / 500"
+            # counter's text -- and archive.org's home link (href "/", title
+            # "Go home") joined into `[/ Go home](/ Go home)`, its target gone.
+            # Planted `PLANT_TARGET_JOINS_PROSE`.
+            and (PLANT_TARGET_JOINS_PROSE
+                 or not (_accessor_head(address) in _TARGET_ACCESSORS
+                         or _accessor_head(prev[0]) in _TARGET_ACCESSORS))
             # Depth is NOT asked (D-36). An inline element between two text
             # children adds an element step when the trie keeps it as its own
             # level -- the live capture's does; the Python scan's collapses
@@ -1586,7 +1606,8 @@ def _render_sized(
     href_at: Dict[str, str] = {}
     text_at: Dict[str, str] = {}
     for a, v, _lbl, _d in units:
-        if a.tag in ("link", "image", "media") and a.is_url:
+        if (a.tag in ("link", "image", "media") or (not PLANT_CONTROL_HREF_OWN_LINE and a.tag in _CONSUMING_CLASSES
+                                                     and _accessor_head(a) == "href")) and a.is_url:
             if PLANT_PLACEHOLDER_TARGET and a.accessor.split("|", 1)[0].split("[", 1)[0] in _LAZY_ACCESSORS - {"data-src"}:
                 continue
             # A lazy loader's stand-in never names the picture while the
@@ -1658,9 +1679,16 @@ def _render_sized(
         prefix = xpath + "/"
         return any(o.startswith(prefix) for o in spoken)
 
+    # A CONTROL's href too (`M-10`): an anchor with role="tab" is filed as a
+    # button, and archive.org's "Web Sites" tab drew two lines -- `( https://
+    # web.archive.org/web/*/radio drama )` and `( Web Sites )` -- its raw
+    # url as a label and its words with nowhere to go. Planted
+    # `PLANT_CONTROL_HREF_OWN_LINE`: the link-only rule, as before.
     hidden = {
         a.key() for a, v, _lbl, _d in units
-        if a.tag == "link" and a.is_url
+        if (a.tag == "link" or (not PLANT_CONTROL_HREF_OWN_LINE and a.tag in _CONSUMING_CLASSES
+                                and _accessor_head(a) == "href"))
+        and a.is_url
         and spoken_below(a.xpath.split("/text()")[0])
     }
 

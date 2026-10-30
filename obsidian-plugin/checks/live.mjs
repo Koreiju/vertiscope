@@ -8335,6 +8335,88 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "M-10",
+      asks: "full structural preservation along content links in nested shadow DOM: on archive.org's search page (results inside shadow roots nested 3+ deep), every link the composed tree holds at shadow depth >= 2 is in the trie (by its href), and at its EXACT depth -- its address crosses as many #shadow-root boundaries as the link does; read from the page in the browser cell (read-only) and from the store the running sidecar wrote; planted: a trie view with one shadow step stripped fails the depth arm, one with the deep links dropped fails recall",
+      async run() {
+        const got = await evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const plugin = app.plugins.getPlugin("domvec-bridge");
+          const SIDE = String(plugin.settings.sidecar).replace(/[/]+$/, "");
+          const b = app.workspace.getLeavesOfType("domvec-browser-view")[0]?.view;
+          if (!b || !b.webview) return { error: "no browser cell" };
+          const was = String(b.webview.getURL());
+          const url = "https://archive.org/search?query=radio+drama&m10=" + Date.now();
+          const cy = async (q) => { const r = await fetch(SIDE + "/cypher", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ query: q }) }); return (await r.json()).rows || []; };
+          let landed = url;
+          try {
+            b.go(url);
+            await sleep(45000);
+            landed = String(b.webview.getURL());
+            // The page's own composed tree, read only: every <a href> and how
+            // many shadow roots stand between it and the document.
+            // The FLATTENED composed tree, the sensor's own model: a host's
+            // shadow root stands in for its children, and a slot for the light
+            // children assigned to it (at the slot's depth); light children
+            // assigned to no slot are not rendered.
+            const truth = await b.webview.executeJavaScript("(function(){var out=[],closed=0;" +
+              "function one(e,d){if(e.tagName==='A'&&e.getAttribute('href'))out.push({href:e.getAttribute('href'),d:d,text:(e.textContent||'').trim().slice(0,40)});" +
+              "if(e.shadowRoot)walk(e.shadowRoot,d+1);else{if(e.tagName&&e.tagName.indexOf('-')>0)closed++;walk(e,d);}}" +
+              "function walk(n,d){var kids=n.children||[];for(var i=0;i<kids.length;i++){var e=kids[i];" +
+              "if(e.tagName==='SLOT'){var as=e.assignedElements?e.assignedElements({flatten:true}):[];if(as.length){for(var j=0;j<as.length;j++)one(as[j],d);}else walk(e,d);}else one(e,d);}}" +
+              "walk(document,0);return {links:out,custom_without_open_root:closed};})()");
+            // Let the capture settle: the page's link addresses stop growing.
+            // Settled: the count has grown past a first trickle and then held
+            // for two reads in a row (a capture lands over tens of seconds).
+            let addrs = [], prev = -1, held = 0;
+            for (let i = 0; i < 30; i++) {
+              // A link's href is in the drawn value: every [label](href) in it --
+              // an inline link sits mid-sentence on its paragraph's text unit --
+              // and a control's own href drawn ( href ) (a role=tab anchor).
+              addrs = [];
+              for (const [v, xp, acc] of await cy("MATCH (a:Address) WHERE a.url = '" + landed.replace(/'/g, "") + "' AND (a.tag IN ['link', 'text', 'button'] OR a.accessor STARTS WITH 'href') RETURN a.value, a.xpath, a.accessor")) {
+                const s = String(v);
+                const re = /\\]\\(([^)\\s]+)/g; let m;
+                while ((m = re.exec(s))) addrs.push([m[1], xp]);
+                if (String(acc).startsWith("href")) addrs.push([s.replace(/^\\(\\s*/, "").replace(/\\s*\\)$/, ""), xp]);
+              }
+              held = addrs.length === prev && addrs.length > 20 ? held + 1 : 0;
+              if (held >= 3) break;
+              prev = addrs.length; await sleep(5000);
+            }
+            // A link's address is often its label's text node, deeper inside
+            // the anchor (even inside further shadow roots): its depth is
+            // counted up to the anchor's own step.
+            const steps = (xp) => { const x = String(xp); let cut = x.length; const re = /\\/a(\\[\\d+\\])?(?=\\/|$)/g; let m; while ((m = re.exec(x))) cut = m.index + m[0].length; return (x.slice(0, cut).match(/#shadow-root/g) || []).length; };
+            const deep = truth.links.filter((l) => l.d >= 2);
+            const score = (view) => {
+              const byHref = new Map();
+              for (const [v, xp] of view) { const k = String(v); if (!byHref.has(k)) byHref.set(k, []); byHref.get(k).push(steps(xp)); }
+              let any = 0, exact = 0; const missing = [];
+              for (const l of deep) {
+                const ds = byHref.get(l.href);
+                if (ds) { any++; if (ds.includes(l.d)) exact++; } else if (missing.length < 5) missing.push(l);
+              }
+              return { any, exact, missing };
+            };
+            const clean = score(addrs);
+            const strip = score(addrs.map(([v, xp]) => [v, String(xp).replace("/#shadow-root", "")]));
+            const dropped = score(addrs.filter(([v, xp]) => steps(xp) < 2));
+            return { url: landed, links_total: truth.links.length, deep: deep.length, max_depth: Math.max(0, ...truth.links.map((l) => l.d)),
+                     custom_without_open_root: truth.custom_without_open_root, trie_link_addresses: addrs.length,
+                     clean, planted_strip: { any: strip.any, exact: strip.exact }, planted_drop: { any: dropped.any, exact: dropped.exact } };
+          } finally {
+            try { await fetch(SIDE + "/purge", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url: landed }) }); } catch (e) {}
+            b.go(was);
+          }
+        })()`, { timeout: 300000 });
+        if (!got || got.error) return { pass: false, evidence: got };
+        const c = got.clean;
+        return { pass: got.deep >= 20 && c.any === got.deep && c.exact === got.deep
+                   && got.planted_strip.exact < got.deep * 0.5 && got.planted_drop.any < got.deep * 0.5,
+                 evidence: got };
+      },
+    },
+    {
       id: "G-273",
       asks: "the user agent's views and keys: in MAP view a hover moves nothing and in EGO view it moves the camera; paused, no motion; Shift +5%, Ctrl -5%; Z, X and M do nothing (deprecated); arrows turn the camera about the focus (distance kept) and Q/R roll it about the view normal (view kept) -- 3-DOF rotation; each key held lit in the agent's state while pressed (its readout awaits the dialect card, G-274); planted (pointer away) the keys do nothing",
       async run() {

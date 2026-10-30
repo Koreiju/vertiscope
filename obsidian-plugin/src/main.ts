@@ -166,7 +166,13 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     // reader is here. Planted `__domvecPlantNoMaintenance`.
     this.registerInterval(window.setInterval(() => {
       const idle = Date.now() - ((window as any).__domvecReaderAt || 0);
-      if (idle >= 300000 && !(globalThis as any).__domvecPlantNoMaintenance) void this.sidecar.maintenance(idle);
+      // Not while the app is being exercised: a check run or a stress run is
+      // not the reader (G-289), so the reader looks idle, and a compaction
+      // asked for then restarted the sidecar under the check (2026-10-30, M-10
+      // run 52: "the sidecar died"). Planted `__domvecPlantMaintainDuringChecks`.
+      const busy = !!((window as any).__domvec?.verify?.state?.()?.running || (window as any).__domvecStressing);
+      if (idle >= 300000 && !(globalThis as any).__domvecPlantNoMaintenance
+          && (!busy || (globalThis as any).__domvecPlantMaintainDuringChecks)) void this.sidecar.maintenance(idle);
     }, 60000));
     // A supervisor that GAVE UP (every start stalled at the interpreter;
     // `supervisor_gave_up.json` in the workspace) is replaced by a fresh one
