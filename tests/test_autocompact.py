@@ -96,3 +96,30 @@ def test_due_when_the_plugin_reports_the_reader_idle_though_requests_continue():
         assert not due(4600, 1440, reader_idle_s=900, last_write=9000, **busy)
     finally:
         sidecar._PLANT_REQUEST_QUIET_ONLY[0] = False
+
+
+def test_a_store_with_runs_compacts_its_run_inputs_too(tmp_path):
+    """A table the hand-kept PK map did not know (`Run`, G-279) must not break
+    compaction: its key is read from the schema. Planted: the old lookup."""
+    db = kuzu.Database(str(tmp_path / "graph.kuzu")); c = kuzu.Connection(db)
+    c.execute("CREATE NODE TABLE Chunk(cid STRING, PRIMARY KEY (cid))")
+    c.execute("CREATE NODE TABLE Run(rid STRING, note STRING, PRIMARY KEY (rid))")
+    c.execute("CREATE REL TABLE RunInput(FROM Run TO Chunk, name STRING)")
+    c.execute("UNWIND range(0, 9) AS i CREATE (:Chunk {cid: 'c' + string(i)})")
+    c.execute("CREATE (:Run {rid: 'r1', note: 'n.md'})")
+    c.execute("MATCH (r:Run {rid: 'r1'}), (k:Chunk) WHERE k.cid IN ['c1', 'c2'] CREATE (r)-[:RunInput {name: 'x'}]->(k)")
+    del c, db
+    got = C.compact(tmp_path, log=lambda *_: None)
+    assert got["swapped"], got
+    assert got["counts_after"] == {"Chunk": 10, "Run": 1, "RunInput": 2}
+
+
+def test_planted_hand_kept_pk_breaks_on_an_unknown_table(tmp_path, monkeypatch):
+    db = kuzu.Database(str(tmp_path / "graph.kuzu")); c = kuzu.Connection(db)
+    c.execute("CREATE NODE TABLE Chunk(cid STRING, PRIMARY KEY (cid))")
+    c.execute("CREATE NODE TABLE Run(rid STRING, PRIMARY KEY (rid))")
+    c.execute("CREATE REL TABLE RunInput(FROM Run TO Chunk)")
+    monkeypatch.setattr(C, "_pk", lambda conn, t: C.PK.get(t, "rowid"))
+    import pytest
+    with pytest.raises(RuntimeError, match="rowid"):
+        C.counts(c)

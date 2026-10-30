@@ -41,6 +41,22 @@ AUTO_KEEP = "graph.kuzu.prev-auto"
 MARK = "compacted.json"
 
 
+def _pk(conn, table: str) -> str:
+    """A node table's primary key, READ FROM THE SCHEMA (`table_info`). The
+    hand-kept `PK` did not know `Run` (G-279, 2026-10-29): every compaction
+    after it died on `a.rowid` -- "Binder exception: Cannot find property
+    rowid" -- and the supervisor restarted the sidecar each minute the reader
+    was away (2026-10-30). `PK` stays as the fallback for a schema that
+    cannot be read."""
+    try:
+        for row in conn.execute("CALL table_info('%s') RETURN *" % table).get_all():
+            if row[4] is True:
+                return str(row[1])
+    except Exception:                               # noqa: BLE001
+        pass
+    return PK.get(table, "rowid")
+
+
 def counts(conn) -> Dict[str, int]:
     out: Dict[str, int] = {}
     for name, kind in sorted(conn.execute("CALL show_tables() RETURN name, type").get_all()):
@@ -49,7 +65,7 @@ def counts(conn) -> Dict[str, int]:
             continue
         n = 0
         for row in conn.execute("CALL show_connection('%s') RETURN *" % name).get_all():
-            ka, kb = PK.get(row[0], "rowid"), PK.get(row[1], "rowid")
+            ka, kb = _pk(conn, row[0]), _pk(conn, row[1])
             n += int(conn.execute(
                 "MATCH (a:%s)-[r:%s]->(b:%s) WHERE a.%s IS NOT NULL AND b.%s IS NOT NULL "
                 "WITH a.%s AS x RETURN count(x)" % (row[0], name, row[1], ka, kb, ka)).get_all()[0][0])
