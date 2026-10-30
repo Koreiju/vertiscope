@@ -27,7 +27,9 @@
  * true -- typing alone never reaches the web (item 107).
  */
 import { App, MarkdownView, TFile } from "obsidian";
-import { FoldState, foldsOf, setFolds, titleLine } from "./slatefold";
+import { FoldState, SlateLine, foldsOf, parseSlate, setFolds, titleLine } from "./slatefold";
+export { parseSlate } from "./slatefold";
+export type { SlateLine } from "./slatefold";
 
 export const COCKPIT_PATH = "domvec/ego.md";
 const FOLD_KEY = "domvec.cockpit.results";
@@ -50,41 +52,6 @@ export const COCKPIT_TEXT = [
   T + T + "results" + T + "{results}",
   "",
 ].join("\n");
-
-/** One field line of a slate: its depth, key, value, and where the value sits. */
-export interface SlateLine { line: number; depth: number; key: string; value: string; valueFrom: number; path: string[] }
-
-/**
- * The slate grammar, as `domvec/slate.py` has it: structure is indentation
- * (tabs, or a consistent run of spaces), a key and its value split by a tab
- * (or two or more spaces -- a name may hold single spaces). Frontmatter is
- * skipped.
- */
-export function parseSlate(text: string): SlateLine[] {
-  const lines = text.split("\n");
-  let i = 0;
-  if (lines[0] === "---") { i = 1; while (i < lines.length && lines[i] !== "---") i++; i++; }
-  const out: SlateLine[] = [];
-  const stack: string[] = [];
-  let unit = 0;
-  for (; i < lines.length; i++) {
-    const raw = lines[i];
-    if (!raw.trim()) continue;
-    const lead = /^[\t ]*/.exec(raw)![0];
-    let depth = 0;
-    if (lead.includes("\t")) depth = lead.split("\t").length - 1;
-    else if (lead.length) { if (!unit) unit = lead.length; depth = Math.round(lead.length / unit); }
-    const body = raw.slice(lead.length);
-    const m = /^(.*?)(?:\t+| {2,})(.*)$/.exec(body);
-    const key = (m ? m[1] : body).trim();
-    const value = m ? m[2] : "";
-    const valueFrom = m ? raw.length - m[2].length : raw.length;
-    stack.length = depth;
-    out.push({ line: i, depth, key, value, valueFrom, path: [...stack, key] });
-    stack.push(key);
-  }
-  return out;
-}
 
 /** A slate's rank-1 lines (`refs.rank1` in Python): the title's first level
  *  of fields, `key<TAB>value` (a field with children shows as `{key}`); any
@@ -200,7 +167,21 @@ export class Cockpit {
   }
 
   // ---- the slate gestures, on every slate note (G-278) ----------------------
-  foldStats = { reveals: 0, folds: 0, collapses: 0, opens: 0, restored: 0, unresolved: 0 };
+  foldStats = { reveals: 0, folds: 0, collapses: 0, opens: 0, restored: 0, unresolved: 0, flips: 0 };
+  /** Planted (G-281): a double-click on a slate flips nothing. */
+  plantNoGraphForm = false;
+  /** Double left-click: the slate flips between panel and graph form (G-281). */
+  flipForm(v: any): boolean {
+    if (this.plantNoGraphForm) return false;
+    const cm = v?.editor?.cm, path = v?.file?.path;
+    if (!cm || !path) return false;
+    const cur = foldsOf(cm);
+    const st: FoldState = { collapsed: false, reveals: { ...cur.reveals }, graph: !cur.graph };
+    cm.dispatch({ effects: setFolds.of(st) });
+    this.saveFolds(path, st);
+    this.foldStats.flips++;
+    return true;
+  }
   /** Planted (G-278): right-clicks on a slate do nothing. */
   plantNoFolds = false;
   /** Planted (G-278): a note's rank-1 read from the store's rendered markdown, as first built. */
@@ -221,9 +202,9 @@ export class Cockpit {
     const cm = v?.editor?.cm, path = v?.file?.path;
     if (!cm || !path) return;
     const st = this.loadFolds(path);
-    if (!(Object.keys(st.reveals).length || st.collapsed)) return;
+    if (!(Object.keys(st.reveals).length || st.collapsed || st.graph)) return;
     const cur = foldsOf(cm);
-    if (Object.keys(cur.reveals).length || cur.collapsed) return;
+    if (Object.keys(cur.reveals).length || cur.collapsed || cur.graph) return;
     cm.dispatch({ effects: setFolds.of(st) });
     this.foldStats.restored++;
   }
@@ -288,6 +269,12 @@ export class Cockpit {
       if (!(t?.closest?.(".domvec-slate-circle") || onRef || onTitle)) return;
       e.preventDefault(); e.stopPropagation();
       void this.slateGesture(v, e.clientX, e.clientY, t);
+    }, true);
+    el.addEventListener("dblclick", (e: MouseEvent) => {
+      if (e.button !== 0) return;
+      const t = e.target as HTMLElement | null;
+      if (!t?.closest?.(".cm-content, .domvec-slate-graph")) return;
+      if (this.flipForm(v)) { e.preventDefault(); e.stopPropagation(); }
     }, true);
   }
 

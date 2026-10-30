@@ -7871,6 +7871,65 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-281",
+      asks: "graph form (UR M.7, O.16; item 37): a double left-click on a slate flips it to its graph form -- one circular node per field (node-count parity with the slate), one undirected line per non-root field to its parent, a {ref} field's node hollow -- and a second flips it back; the form is kept across a reopen; the note's text never changes; planted (cockpit.plantNoGraphForm) the double-click flips nothing",
+      async run() {
+        const got = await evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const plugin = app.plugins.getPlugin("domvec-bridge"), c = plugin.cockpit;
+          const NL = String.fromCharCode(10), TB = String.fromCharCode(9);
+          const folder = "domvec-checks";
+          if (!app.vault.getAbstractFileByPath(folder)) await app.vault.createFolder(folder);
+          const stamp = Date.now();
+          const text = "---" + NL + "domvec: slate" + NL + "---" + NL + "probe" + NL + TB + "query" + TB + "radix" + NL + TB + "source" + TB + "{somewhere}" + NL + TB + "search" + NL + TB + TB + "db" + TB + "true" + NL + TB + TB + "k" + TB + "8" + NL;
+          const fields = 6, roots = 1;
+          const f = await app.vault.create(folder + "/g281 slate " + stamp + ".md", text);
+          const open = async () => { const leaf = app.workspace.getLeaf("tab"); await leaf.openFile(f, { state: { mode: "source", source: false } }); await sleep(800); c.decorate(); await sleep(300); return leaf; };
+          const dbl = (v) => {
+            const t = v.contentEl.querySelector(".domvec-slate-graph") || v.contentEl.querySelector(".cm-content");
+            t.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, cancelable: true, button: 0 }));
+          };
+          const read = (v) => {
+            const g = v.contentEl.querySelector(".domvec-slate-graph");
+            return g ? { graph: true, nodes: g.querySelectorAll("circle").length, lines: g.querySelectorAll("line").length,
+                         hollow: g.querySelectorAll("circle.is-ref").length, labels: [...g.querySelectorAll("text")].map((x) => x.textContent) }
+                     : { graph: false };
+          };
+          const out = { fields, roots };
+          let leaf = null;
+          try {
+            for (const planted of [true, false]) {
+              c.plantNoGraphForm = planted;
+              leaf = await open();
+              const v = leaf.view;
+              dbl(v); await sleep(400);
+              const arm = { flipped: read(v) };
+              if (!planted) {
+                leaf.detach(); leaf = await open();
+                arm.kept = read(leaf.view).graph;
+                dbl(leaf.view); await sleep(400);
+                arm.back = !read(leaf.view).graph && !!leaf.view.contentEl.querySelector(".cm-line");
+                arm.text_unchanged = leaf.view.editor.getValue() === text;
+              }
+              out[planted ? "planted" : "clean"] = arm;
+              leaf.detach(); leaf = null;
+            }
+          } finally {
+            c.plantNoGraphForm = false;
+            try { leaf && leaf.detach(); } catch (e) {}
+            try { window.localStorage.removeItem("domvec.slate.folds:" + f.path); } catch (e) {}
+            try { await app.vault.delete(f); } catch (e) {}
+          }
+          return out;
+        })()`, { timeout: 60000 });
+        if (!got || got.error) return { pass: false, evidence: got };
+        const c = got.clean, p = got.planted;
+        return { pass: c.flipped.graph && c.flipped.nodes === got.fields && c.flipped.lines === got.fields - got.roots && c.flipped.hollow === 1
+                   && c.kept && c.back && c.text_unchanged && !p.flipped.graph,
+                 evidence: got };
+      },
+    },
+    {
       id: "G-273",
       asks: "the user agent's views and keys: in MAP view a hover moves nothing and in EGO view it moves the camera; paused, no motion; Shift +5%, Ctrl -5%; Z, X and M do nothing (deprecated); arrows turn the camera about the focus (distance kept) and Q/R roll it about the view normal (view kept) -- 3-DOF rotation; each key held lit in the agent's state while pressed (its readout awaits the dialect card, G-274); planted (pointer away) the keys do nothing",
       async run() {
