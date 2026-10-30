@@ -601,7 +601,9 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     const running = new Notice(`domvec: running ${req.lang}…`, 0);
     let reply;
     try {
-      reply = await this.sidecar.runCell(note, req.code, req.lang);
+      // The cell's `{ref}` inputs (G-279). Planted `__domvecPlantNoRefs`: none sent.
+      const refs = (window as any).__domvecPlantNoRefs ? [] : (req.refs || []);
+      reply = await this.sidecar.runCell(note, req.code, req.lang, refs, req.line);
     } finally {
       running.hide();
     }

@@ -97,7 +97,9 @@ gives the cell its place:
 
 - **The granularity ladder.** Fine: a field or `{ref}` token. **Mid: a cell** — one fenced
   code block. Coarse: a slate (panel). Whole: the graph (reservoir).
-- **A cell is a functional-object node** (UR F.5, M.5, M.9). Its `{ref}` tokens are its inputs:
+- **A cell is a functional-object node** (UR F.5, M.5, M.9). Its `{ref}` tokens are its inputs,
+  declared on its FENCE LINE (```` ```python {Radix tree} {query} ````) and not in the code, where
+  braces are Python's own (decided 2026-10-29 while building G-279; yours to overturn):
   before the kernel runs it, each `{ref}` in the cell is resolved and bound into the kernel's
   namespace by name (a chunk as its markdown and record, a slate as its record, a code symbol
   as the imported object). The run is the forward call; the stored `nb-output` block is its

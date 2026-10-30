@@ -30,7 +30,7 @@
  */
 
 /** A fence opener: indent, three-or-more backticks or tildes, an info string. */
-const FENCE = /^(\s*)(`{3,}|~{3,})\s*(\S*)/;
+const FENCE = /^(\s*)(`{3,}|~{3,})\s*(\S*)(.*)$/;
 
 export interface Fence {
   /** 0-based line index of the opening fence. */
@@ -41,6 +41,9 @@ export interface Fence {
   readonly lang: string;
   /** The fence's content, without either fence line. */
   readonly body: string;
+  /** The `{ref}` tokens on the fence line after the language -- the cell's
+   *  declared inputs (G-279), bound into its kernel before it runs. */
+  readonly refs: string[];
 }
 
 /**
@@ -72,6 +75,7 @@ export function findFences(text: string): Fence[] {
       closeLine: Math.min(j, lines.length - 1),
       lang: (open[3] || "").toLowerCase(),
       body: lines.slice(i + 1, j).join("\n"),
+      refs: [...(open[4] || "").matchAll(/\{([^{}]+)\}/g)].map((m) => m[1].trim()).filter(Boolean),
     });
     i = j + 1;
   }

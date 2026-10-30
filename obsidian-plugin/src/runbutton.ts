@@ -37,6 +37,8 @@ export interface RunRequest {
   readonly line: number;
   /** Vault path of the note, when the renderer knew it. */
   readonly path: string;
+  /** The cell's `{ref}` inputs from its fence line (G-279). */
+  readonly refs?: string[];
 }
 
 export interface RunHost {
@@ -105,7 +107,14 @@ export function readingViewRunButtons(host: RunHost) {
       if (!isRunnable(lang)) return;
 
       pre.classList.add("domvec-has-run");
+      // The fence line's `{ref}` inputs (G-279): reading view renders no info
+      // string, so they are read from the section's source line.
+      const info = ctx.getSectionInfo(pre);
+      const fenceLine = info ? (info.text.split("\n")[info.lineStart] || "") : "";
+      const refs = [...fenceLine.replace(/^\s*(`{3,}|~{3,})\s*\S*/, "").matchAll(/\{([^{}]+)\}/g)]
+        .map((m) => m[1].trim()).filter(Boolean);
       const req = (): RunRequest => ({
+        refs,
         lang,
         code: cellSource(code.textContent || ""),
         // Reading view knows the section, not the line. `getSectionInfo` gives
@@ -153,6 +162,7 @@ class RunWidget extends WidgetType {
       code: cellSource(this.fence.body),
       line: this.fence.openLine,
       path: this.path(),
+      refs: this.fence.refs,
     });
     wrap.appendChild(runButton(view.dom.ownerDocument, () => this.host.onRunFence(req())));
     const term = this.host.onTerminalFence

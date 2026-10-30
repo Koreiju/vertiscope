@@ -7016,6 +7016,70 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-279",
+      asks: "a cell is a function node: the {ref} on its fence line names a vault note, which is resolved through the store and bound into the kernel as a variable before the cell runs -- the cell reads the note's text; the run is recorded with that note as its input (GET /runs); planted (__domvecPlantNoRefs) the cell meets an unbound name",
+      async run() {
+        const got = await evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const until = async (ok, ms) => { for (let t = 0; t < ms && !ok(); t += 250) await sleep(250); return ok(); };
+          const plugin = app.plugins.getPlugin("domvec-bridge");
+          const SIDE = String(plugin.settings.sidecar).replace(/[/]+$/, "");
+          const NL = String.fromCharCode(10), F = String.fromCharCode(96).repeat(3);
+          const folder = "domvec-checks";
+          if (!app.vault.getAbstractFileByPath(folder)) await app.vault.createFolder(folder);
+          const stamp = Date.now();
+          const srcName = "g279 source " + stamp;
+          const src = await app.vault.create(folder + "/" + srcName + ".md", "# Source" + NL + NL + "A radix tree compresses single-child chains, marker " + stamp + "." + NL);
+          const indexed = await plugin.indexNote(src, "check");
+          const srcUrl = indexed && indexed.url;
+          const v = srcName.replace(/[^A-Za-z0-9_]+/g, "_").replace(/^_+|_+$/g, "").toLowerCase();
+          const arm = async (planted) => {
+            window.__domvecPlantNoRefs = planted;
+            const path = folder + "/g279-" + (planted ? "p" : "c") + stamp + ".md";
+            const f = await app.vault.create(path, "# cell" + NL + NL + F + "python {" + srcName + "}" + NL + "print(len(" + v + ") > 0, '" + stamp + "' in " + v + ")" + NL + F + NL);
+            const leaf = app.workspace.getLeaf("tab");
+            const out = { planted };
+            try {
+              await leaf.openFile(f, { state: { mode: "source", source: false } });
+              const view = leaf.view;
+              await until(() => !!view.containerEl.querySelector(".domvec-run-fence"), 8000);
+              view.containerEl.querySelector(".domvec-run-fence").click();
+              await until(() => view.editor.getValue().includes("nb-output"), 20000);
+              const text = view.editor.getValue();
+              out.output = (text.split("nb-output")[1] || "").slice(0, 200);
+              out.read_the_note = /True True/.test(text);
+              out.unbound = /NameError/.test(text);
+              const runs = await (await fetch(SIDE + "/runs?note=" + encodeURIComponent(path))).json();
+              const r = (runs.runs || [])[0];
+              out.recorded = !!r;
+              out.input_urls = r ? [...new Set(r.inputs.map((i) => i.url))] : [];
+            } finally {
+              window.__domvecPlantNoRefs = false;
+              try { leaf.detach(); } catch (e) {}
+              try { await app.vault.delete(f); } catch (e) {}
+            }
+            return out;
+          };
+          try {
+            return { src: srcUrl, clean: await arm(false), planted: await arm(true) };
+          } finally {
+            try { await app.vault.delete(src); } catch (e) {}
+            if (srcUrl) { try { await fetch(SIDE + "/purge", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url: srcUrl }) }); } catch (e) {} }
+            plugin.settings.indexedNotes = (plugin.settings.indexedNotes || []).filter((p) => !p.includes("g279"));
+            await plugin.saveSettings();
+            await sleep(1500);
+            const fo = app.vault.getAbstractFileByPath(folder);
+            if (fo && (!fo.children || !fo.children.length)) await app.vault.delete(fo, true);
+          }
+        })()`, { timeout: 180000 });
+        if (!got || got.error || !got.clean) return { pass: false, evidence: got };
+        const c = got.clean, p = got.planted;
+        return { pass: !!got.src && c.read_the_note && c.recorded && c.input_urls.includes(got.src)
+                   && p.unbound && !p.read_the_note,
+                 evidence: got };
+      },
+    },
+    {
       id: "G-271",
       asks: "a hover starts a slow, STATEFUL flight: its speed is the throttle's whatever the distance (two starts 2x apart cruise within 15% of each other), it stops at the hard floor and never nearer, and a new hover BENDS the trajectory in flight -- the speed carries over (over half kept); planted (agent.plantRestart) a new hover starts from rest",
       async run() {

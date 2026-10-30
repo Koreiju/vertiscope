@@ -177,6 +177,16 @@ _SCHEMA = [
         qname STRING, line INT64, end_line INT64,
         calls_out STRING[], bases_out STRING[], PRIMARY KEY(key))""",
     "CREATE REL TABLE IF NOT EXISTS Cpg(FROM CodeNode TO CodeNode, kind STRING, var STRING, line INT64, label STRING)",
+    # `G-279`: the reservoir's recorded forward map (the mothership's R.6,
+    # its `FORWARD_MAPPED_TO`). A RUN is one forward call of a cell: the
+    # note it ran in, the cell's code hash, its output. `RunInput` is each
+    # `{ref}` it read, to the chunk the ref resolved to -- so a chunk can be
+    # asked "which runs consumed me, and what did they produce" (the
+    # inverse map) and a run "what was I given".
+    """CREATE NODE TABLE IF NOT EXISTS Run(
+        rid STRING, note STRING, line INT64, code_hash STRING,
+        at DOUBLE, ok BOOLEAN, output STRING, PRIMARY KEY(rid))""",
+    "CREATE REL TABLE IF NOT EXISTS RunInput(FROM Run TO Chunk, name STRING)",
 ]
 
 #: Columns added after stores already existed. Kuzu has no
@@ -2945,6 +2955,46 @@ class GraphStore:
                 "contents_drawn_twice": twice, "extra_drawn": extra,
                 "extra_drawn_plain": extra_plain, "extra_drawn_group_leads": extra - extra_plain,
                 "grouped_kept": grouped}
+
+    # -- the recorded forward map (G-279) -------------------------------------
+    def record_run(self, note: str, line: int, code: str, inputs, ok: bool,
+                   output: str) -> str:
+        """One forward call: its inputs (`[(name, cid)]`) and its output."""
+        import hashlib
+        h = hashlib.sha1(code.encode("utf-8")).hexdigest()[:16]
+        rid = "%s|%d|%s|%d" % (note, int(line), h, int(time.time() * 1000))
+        self._execute(
+            "CREATE (:Run {rid: $r, note: $n, line: $l, code_hash: $h, at: $t, ok: $ok, output: $o})",
+            {"r": rid, "n": note, "l": int(line), "h": h, "t": time.time(), "ok": bool(ok),
+             "o": (output or "")[:20000]})
+        rows = [{"r": rid, "c": cid, "name": name} for name, cid in inputs if cid]
+        if rows:
+            self._batch(
+                "UNWIND $rows AS x MATCH (r:Run {rid: x.r}), (c:Chunk {cid: x.c}) "
+                "CREATE (r)-[:RunInput {name: x.name}]->(c)", rows)
+        return rid
+
+    def runs_of(self, note: str, limit: int = 20) -> List[Dict]:
+        """A note's recent runs, each with what it read."""
+        rows = self._rows(
+            "MATCH (r:Run {note: $n}) RETURN r.rid, r.line, r.code_hash, r.at, r.ok, r.output "
+            "ORDER BY r.at DESC LIMIT $k", {"n": note, "k": int(limit)})
+        out = []
+        for rid, line, h, at, ok, output in rows:
+            ins = self._rows(
+                "MATCH (r:Run {rid: $r})-[e:RunInput]->(c:Chunk) RETURN e.name, c.cid, c.url", {"r": rid})
+            out.append({"rid": rid, "line": line, "code_hash": h, "at": at, "ok": ok,
+                        "output": (output or "")[:2000],
+                        "inputs": [{"name": a, "cid": b, "url": u} for a, b, u in ins]})
+        return out
+
+    def inverse_map(self, cid: str, limit: int = 20) -> List[Dict]:
+        """Every recorded run that consumed this chunk, and what it produced."""
+        rows = self._rows(
+            "MATCH (r:Run)-[e:RunInput]->(c:Chunk {cid: $c}) RETURN r.rid, r.note, e.name, r.ok, r.output, r.at "
+            "ORDER BY r.at DESC LIMIT $k", {"c": cid, "k": int(limit)})
+        return [{"rid": r, "note": n, "as": a, "ok": ok, "output": (o or "")[:2000], "at": t}
+                for r, n, a, ok, o, t in rows]
 
     def purge_page(self, url: str) -> int:
         """Remove a page, its chunks and its addresses. Returns chunks removed."""

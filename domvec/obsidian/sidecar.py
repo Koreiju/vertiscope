@@ -180,6 +180,9 @@ class _HeldLock:
 
 _WORK_LOCK = _HeldLock()
 
+#: Planted (G-279): a cell's `{ref}` inputs are not bound before it runs.
+PLANT_NO_REF_BINDING = [False]
+
 #: The encoder (one GPU model), shared by the embed worker and `/project`.
 #: Neither holds the store's lock while encoding, so a projection waits at
 #: most one embed batch -- never a capture's write.
@@ -778,6 +781,7 @@ _PLANTABLE = {
     "adaptive-window": ("domvec.obsidian.projector", "ADAPTIVE_WINDOW"),    # G-13, off by default
     "no-scope-switch": ("domvec.obsidian.projector", "PLANT_NO_SCOPE_SWITCH"),  # G-2, 2026-10-25
     "page-scoped-dedup": ("domvec.graphstore", "PLANT_PAGE_SCOPED_DEDUP"),     # 2026-10-29
+    "no-ref-binding": ("domvec.obsidian.sidecar", "PLANT_NO_REF_BINDING"),     # G-279
 }
 
 
@@ -2579,10 +2583,35 @@ class _Handler(BaseHTTPRequestHandler):
                           "pane and is not built yet"})
             return
 
+        # A cell is a function node (G-279, RESERVOIR_DESIGN §4): the `{ref}`
+        # tokens on its fence line are its inputs, resolved through the trie
+        # and bound into the kernel BEFORE the code runs; the run is recorded
+        # as a forward map, inputs -> output. Planted `PLANT_NO_REF_BINDING`:
+        # refs are ignored, so the cell meets an unbound name.
+        names = [str(n) for n in (body.get("refs") or []) if str(n).strip()]
+        bound = {"prelude": "", "bound": [], "inputs": []}
         try:
-            self._send(200, self.kernel_pool.run(note, code))
+            if names and not PLANT_NO_REF_BINDING[0]:
+                from . import refs as _refs
+                bound = _refs.bind(self.workspace, names)
+                if bound["prelude"]:
+                    self.kernel_pool.run(note, bound["prelude"])
+            reply = self.kernel_pool.run(note, code)
         except Exception as exc:                    # noqa: BLE001
             self._send(500, {"error": "%s: %s" % (type(exc).__name__, exc)})
+            return
+        if names and isinstance(reply, dict):
+            reply = dict(reply, bound=bound["bound"])
+            try:
+                out = "\n".join(str(reply.get(k) or "") for k in ("stdout", "value", "error")).strip()
+                if not getattr(self.workspace, "read_only", False):
+                    with _WORK_LOCK:
+                        reply["run"] = self.workspace.store.record_run(
+                            note, int(body.get("line") or -1), code, bound["inputs"],
+                            bool(reply.get("ok")), out)
+            except Exception as exc:                # noqa: BLE001
+                reply["run_error"] = "%s: %s" % (type(exc).__name__, exc)
+        self._send(200, reply)
 
     def _post_chunk_preview(self) -> None:
         """Where the chunker would cut this text (`P-N8`).
@@ -3571,6 +3600,18 @@ class _Handler(BaseHTTPRequestHandler):
         # chunk set.
         # The chunk projector: the fit every position in the graph comes
         # from, and the stream of what it has placed since a given point.
+        if segments[0] == "runs":
+            # A note's recorded forward calls, each with the refs it read (G-279).
+            note = (parse_qs(parts.query).get("note") or [""])[0]
+            self._send(200, {"note": note, "runs": self.workspace.store.runs_of(note)})
+            return
+
+        if segments[0] == "inverse_map":
+            # Every recorded run that consumed a chunk, and what it produced.
+            cid = (parse_qs(parts.query).get("cid") or [""])[0]
+            self._send(200, {"cid": cid, "runs": self.workspace.store.inverse_map(cid)})
+            return
+
         if segments[0] == "locks":
             # Who holds the work lock now, and who held it longest.
             self._send(200, _WORK_LOCK.report())
