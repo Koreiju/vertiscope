@@ -7016,6 +7016,119 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-270",
+      asks: "one content, one drawn chunk, store-wide: the store reports no content drawn twice, and the same text indexed under two pages adds COPIES, not drawn duplicates; the projector holds nothing the store calls a copy; planted (/plant page-scoped-dedup) the second page's text is drawn again",
+      async run() {
+        const got = await evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const plugin = app.plugins.getPlugin("domvec-bridge");
+          const SIDE = String(plugin.settings.sidecar).replace(/[/]+$/, "");
+          const NL = String.fromCharCode(10);
+          const dup = async () => (await fetch(SIDE + "/duplicates")).json();
+          const plant = (on) => fetch(SIDE + "/plant", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "page-scoped-dedup", on }) });
+          const purge = (url) => fetch(SIDE + "/purge", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url }) });
+          const before = await dup();
+          const proj = await (await fetch(SIDE + "/projector?drawable=1")).json();
+          const arm = async (planted) => {
+            const stamp = Date.now();
+            const text = "# Shared notes " + stamp + NL + NL + "A paragraph that two notes both hold, word for word, " + stamp + "." + NL + NL + "A second shared paragraph about tries and radix trees " + stamp + "." + NL;
+            const urls = [];
+            await plant(planted);
+            try {
+              const r0 = await dup();
+              for (const name of ["one", "two"]) {
+                const got = await plugin.sidecar.note("domvec-checks/g270-" + name + "-" + stamp + ".md", text, app.vault.getName());
+                if (got && got.url) urls.push(got.url);
+              }
+              const r1 = await dup();
+              return { planted, notes: urls.length, copies_added: r1.copies - r0.copies, extra_drawn_added: r1.extra_drawn_plain - r0.extra_drawn_plain };
+            } finally {
+              await plant(false);
+              for (const u of urls) await purge(u);
+            }
+          };
+          const clean = await arm(false);
+          const planted = await arm(true);
+          return { before,
+                   projected_not_drawable: proj.projected_not_drawable, drawable_unprojected: proj.drawable_unprojected, clean, planted };
+        })()`, { timeout: 300000 });
+        if (!got || got.error || !got.clean) return { pass: false, evidence: got };
+        return { pass: got.before.extra_drawn_plain === 0 && got.projected_not_drawable === 0
+                   && got.clean.notes === 2 && got.clean.copies_added > 0 && got.clean.extra_drawn_added === 0
+                   && got.planted.notes === 2 && got.planted.extra_drawn_added > 0,
+                 evidence: got };
+      },
+    },
+    {
+      id: "P-N3",
+      asks: "a code block opens a terminal or the kernel, or both at once: each runnable fence carries '▶ run' and '⌨ terminal' in live preview and reading view; '⌨ terminal' on a PowerShell cell opens a NEW terminal pane where the cell's command ran and printed; '▶ run' on a Python cell stores its output in place WHILE that terminal pane is open (both at once: two panes); planted (__domvecPlantNoTermFence) no terminal button",
+      async run() {
+        const got = await evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const until = async (ok, ms) => { for (let t = 0; t < ms && !ok(); t += 250) await sleep(250); return ok(); };
+          const NL = String.fromCharCode(10), F = String.fromCharCode(96).repeat(3);
+          const folder = "domvec-checks";
+          if (!app.vault.getAbstractFileByPath(folder)) await app.vault.createFolder(folder);
+          const terms = () => app.workspace.getLeavesOfType("domvec-terminal-view");
+          const arm = async (planted) => {
+            window.__domvecPlantNoTermFence = planted;
+            const mark = "dvpn3" + Date.now();
+            const path = folder + "/pn3-" + (planted ? "p" : "c") + Date.now() + ".md";
+            const text = ["# cells", "", F + "powershell", "Write-Output " + mark, F, "", F + "python", "print(" + "6*7" + ")", F, ""].join(NL);
+            const f = await app.vault.create(path, text);
+            const leaf = app.workspace.getLeaf("tab");
+            const t0 = terms().length;
+            const out = { planted };
+            try {
+              await leaf.openFile(f, { state: { mode: "source", source: false } });
+              const view = leaf.view;
+              await until(() => view.containerEl.querySelectorAll(".domvec-run-fence").length >= 2, 8000);
+              out.run_buttons = view.containerEl.querySelectorAll(".domvec-run-fence").length;
+              out.term_buttons = view.containerEl.querySelectorAll(".domvec-term-fence").length;
+              if (!planted) {
+                view.containerEl.querySelectorAll(".domvec-term-fence")[0].click();
+                const printed = () => terms().some((l) => (l.view.logText?.() || "").split(NL).some((x) => x.trim() === mark));
+                await until(printed, 20000);
+                out.terminal_pane = terms().length > t0;
+                out.terminal_printed = printed();
+                if (!out.terminal_printed) out.terminal_logs = terms().map((l) => (l.view.logText?.() || "").slice(-200));
+                // Both at once: the kernel runs the python cell in place while the terminal pane stays open.
+                view.containerEl.querySelectorAll(".domvec-run-fence")[1].click();
+                let stored = false;
+                for (let t = 0; t < 20000 && !stored; t += 500) { await sleep(500); stored = view.editor.getValue().includes("nb-output") && view.editor.getValue().includes("42"); }
+                out.kernel_output_in_place = stored;
+                out.both_open = stored && terms().length > t0;
+                await leaf.setViewState({ type: "markdown", state: { file: path, mode: "preview" } });
+                await until(() => leaf.view.containerEl.querySelectorAll(".markdown-reading-view .domvec-term-fence").length >= 2, 8000);
+                out.reading_term_buttons = leaf.view.containerEl.querySelectorAll(".markdown-reading-view .domvec-term-fence").length;
+              }
+            } finally {
+              window.__domvecPlantNoTermFence = false;
+              for (const t of terms().slice(t0)) { try { t.detach(); } catch (e) {} }
+              try { leaf.detach(); } catch (e) {}
+              try { await app.vault.delete(f); } catch (e) {}
+            }
+            return out;
+          };
+          try {
+            return { clean: await arm(false), planted: await arm(true) };
+          } finally {
+            try {
+              await sleep(1500);
+              const fo = app.vault.getAbstractFileByPath(folder);
+              if (fo && (!fo.children || !fo.children.length)) await app.vault.delete(fo, true);
+            } catch (e) {}
+          }
+        })()`, { timeout: 180000 });
+        if (!got || got.error || !got.clean || !got.planted) return { pass: false, evidence: got };
+        const c = got.clean, p = got.planted;
+        return { pass: c.run_buttons >= 2 && c.term_buttons >= 2 && c.terminal_pane && c.terminal_printed
+                   && c.kernel_output_in_place && c.both_open && c.reading_term_buttons >= 2
+                   && p.run_buttons >= 2 && p.term_buttons === 0,
+                 evidence: got };
+      },
+    },
+    {
       id: "P-M4",
       asks: "the buttons that add new structural cells sit at the very bottom of the NATIVE markdown (P-M1: the view is still Obsidian's own 'markdown'), in live preview and reading view: '+ code' appends a python cell with the cursor inside, and that cell typed and run at once stores its output in the note while the reader keeps typing (written into the open editor, not under it); '+ terminal' opens a terminal in its own pane; '+ browser cell' shows the browser cell; planted: __domvecPlantNoCellBar draws no strip, __domvecPlantFileOutput (written to the file, not the editor) races the autosave",
       async run() {

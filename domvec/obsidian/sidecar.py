@@ -104,7 +104,81 @@ def sensor_restarted(session: Dict, body: Dict) -> bool:
 #: threads at once, so every mutation goes through here. It is an `RLock`
 #: because `ingest` reaches `flush_vectors`, which would otherwise deadlock
 #: against itself.
-_WORK_LOCK = threading.RLock()
+class _HeldLock:
+    """`_WORK_LOCK`, saying who holds it and for how long (2026-10-29).
+
+    Captures waited 3-12 s for this lock (`lock_wait`) while their own work
+    took ~1 s, and hover and the panel stream queued behind them; 32 places
+    take it and nothing said which one was holding it. A re-entrant lock that
+    records, per OUTERMOST hold, the thread, the code that took it, how long
+    it waited and how long it held -- read at `GET /locks`. Holds over 0.2 s
+    are kept, the newest 200.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.RLock()
+        self._depth = 0
+        self.holder = None
+        self.since = 0.0
+        self.slow: "deque" = deque(maxlen=200)
+        self.totals: Dict[str, List[float]] = {}
+
+    @staticmethod
+    def _site() -> str:
+        f = sys._getframe(2)
+        while f is not None and f.f_code.co_filename == __file__ and f.f_code.co_name in (
+                "__enter__", "acquire", "_site"):
+            f = f.f_back
+        if f is None:
+            return "?"
+        return "%s:%d %s" % (os.path.basename(f.f_code.co_filename), f.f_lineno, f.f_code.co_name)
+
+    def acquire(self, blocking: bool = True, timeout: float = -1) -> bool:
+        t0 = time.perf_counter()
+        ok = self._lock.acquire(blocking, timeout)
+        if ok:
+            self._depth += 1
+            if self._depth == 1:
+                self.since = time.perf_counter()
+                self.holder = (threading.current_thread().name, self._site(),
+                               round((self.since - t0) * 1000, 1))
+        return ok
+
+    def release(self) -> None:
+        if self._depth == 1 and self.holder is not None:
+            held = (time.perf_counter() - self.since) * 1000
+            thread, site, waited = self.holder
+            tot = self.totals.setdefault(site, [0, 0.0, 0.0])
+            tot[0] += 1
+            tot[1] += held
+            tot[2] = max(tot[2], held)
+            if held > 200:
+                self.slow.append({"site": site, "thread": thread, "held_ms": round(held, 1),
+                                  "waited_ms": waited, "at": round(time.time(), 3)})
+            self.holder = None
+        self._depth -= 1
+        self._lock.release()
+
+    def __enter__(self):
+        self.acquire()
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.release()
+
+    def report(self) -> Dict:
+        holder = None
+        if self.holder is not None:
+            holder = {"thread": self.holder[0], "site": self.holder[1],
+                      "held_ms": round((time.perf_counter() - self.since) * 1000, 1)}
+        top = sorted(self.totals.items(), key=lambda kv: -kv[1][1])[:15]
+        return {"holder": holder,
+                "by_site": [{"site": k, "n": int(v[0]), "held_ms": round(v[1], 1), "max_ms": round(v[2], 1)}
+                            for k, v in top],
+                "slow": list(self.slow)[-25:]}
+
+
+_WORK_LOCK = _HeldLock()
 
 #: The encoder (one GPU model), shared by the embed worker and `/project`.
 #: Neither holds the store's lock while encoding, so a projection waits at
@@ -556,10 +630,11 @@ def _integrity_record(workspace, why: str) -> Optional[Dict]:
         # so ROSE never fired.
         if not _INTEGRITY_LAST:
             _INTEGRITY_LAST.update(_integrity_last_on_disk(workspace))
-        with _WORK_LOCK:
-            t0 = time.perf_counter()
-            got = _integrity_counts(workspace.store)
-            ms = round((time.perf_counter() - t0) * 1000, 1)
+        # Reads, on the store's read connection: no work lock. Under it the
+        # start-up count held every capture and hover for 25.7 s (2026-10-29).
+        t0 = time.perf_counter()
+        got = _integrity_counts(workspace.store)
+        ms = round((time.perf_counter() - t0) * 1000, 1)
         rose = {k: got[k] - _INTEGRITY_LAST[k] for k in ("empty_md", "blank_akey")
                 if k in _INTEGRITY_LAST and got[k] > _INTEGRITY_LAST[k]}
         record = {"at": time.strftime("%Y-%m-%d %H:%M:%S"), "why": why, **got, "ms": ms}
@@ -702,6 +777,7 @@ _PLANTABLE = {
     "fixed-batch": ("domvec.obsidian.projector", "PLANT_FIXED_BATCH"),      # G-13, 2026-10-24
     "adaptive-window": ("domvec.obsidian.projector", "ADAPTIVE_WINDOW"),    # G-13, off by default
     "no-scope-switch": ("domvec.obsidian.projector", "PLANT_NO_SCOPE_SWITCH"),  # G-2, 2026-10-25
+    "page-scoped-dedup": ("domvec.graphstore", "PLANT_PAGE_SCOPED_DEDUP"),     # 2026-10-29
 }
 
 
@@ -964,6 +1040,21 @@ def _project_page(workspace, url: str) -> None:
         got.enqueue_page(url, cids)
     except Exception:                               # noqa: BLE001
         pass
+    _project_dedup(workspace)
+
+
+def _project_dedup(workspace) -> int:
+    """Chunks on OTHER pages whose drawing a write changed (2026-10-29: one
+    content, one drawn chunk, store-wide) -- a copy promoted when its lead
+    went, a lead demoted -- to the projector, which adds or removes them."""
+    store = getattr(workspace, "store", None)
+    changed = getattr(store, "dedup_changed", None)
+    if not changed:
+        return 0
+    cids = list(changed)
+    changed.clear()
+    _project(cids)
+    return len(cids)
 
 
 _LEXICAL_SAVED_AT = [0.0]
@@ -2010,8 +2101,7 @@ class _Handler(BaseHTTPRequestHandler):
             from . import snapshots as _snaps
             try:
                 _yield_to_foreground()
-                with _WORK_LOCK:
-                    got = _snaps.save(self.workspace, body.get("items") or [])
+                got = _snaps.save(self.workspace, body.get("items") or [], lock=_WORK_LOCK)
                 _profile("snapshots", got)
                 self._send(200, got)
             except Exception as exc:                # noqa: BLE001
@@ -2056,6 +2146,20 @@ class _Handler(BaseHTTPRequestHandler):
                 setattr(module, attr, bool(body.get("on")))
                 now = getattr(module, attr)
             self._send(200, {"name": name, "on": now})
+            return
+
+        if route == "dedupe":
+            # One content, one drawn chunk, store-wide (2026-10-29): every
+            # chunk keyed by its markdown, one lead per content, the flipped
+            # chunks handed to the projector. A write, so the writer's lock.
+            if self.workspace is None or getattr(self.workspace, "read_only", False):
+                self._send(403, {"error": "dedupe writes the store; this sidecar is read-only"})
+                return
+            got = self.workspace.store.dedupe_store(lock=_WORK_LOCK)
+            got["projected"] = _project_dedup(self.workspace)
+            got["report"] = self.workspace.store.duplicate_report()
+            _profile("dedupe", got)
+            self._send(200, got)
             return
 
         if route == "maintenance":
@@ -2883,6 +2987,7 @@ class _Handler(BaseHTTPRequestHandler):
             # Retired ones too: the projector finds them gone from the store
             # and logs them `gone`, which is how the pane removes their nodes.
             _project(dirty_cids + retired)
+            _project_dedup(self.workspace)
             if diff is not None:
                 diff = _record_diff(diff)
         except Exception as exc:                    # noqa: BLE001
@@ -3466,6 +3571,17 @@ class _Handler(BaseHTTPRequestHandler):
         # chunk set.
         # The chunk projector: the fit every position in the graph comes
         # from, and the stream of what it has placed since a given point.
+        if segments[0] == "locks":
+            # Who holds the work lock now, and who held it longest.
+            self._send(200, _WORK_LOCK.report())
+            return
+
+        if segments[0] == "duplicates":
+            # The store's own verdict: contents drawn more than once (0 is the
+            # goal), copies marked, chunks kept drawn because they lead a group.
+            self._send(200, self.workspace.store.duplicate_report())
+            return
+
         if segments[0] == "projector":
             from .projector import projector as _get
             proj = _get()

@@ -44,10 +44,18 @@ def _blob(root: Path, h: str) -> Path:
     return root / h[:2] / (h + ".json.gz")
 
 
-def save(workspace, items: Iterable[Dict]) -> Dict:
+def save(workspace, items: Iterable[Dict], lock=None) -> Dict:
     """Write each `{cid, snap}` and map it on its Chunk. Returns counts.
 
-    Idempotent: an unchanged form re-hashes to the blob already written."""
+    Idempotent: an unchanged form re-hashes to the blob already written.
+
+    Only the MAPPING is a store write, so only it takes `lock` (the
+    sidecar's work lock): the blobs are hashed, compressed and written
+    before it, and a chunk whose stored hash already names this blob is not
+    written again. Holding the lock across the whole batch held it 24 s
+    (2026-10-29) while hover and captures waited, and re-SETting unchanged
+    hashes on every re-post grew the WAL the checkpoint then stalled on."""
+    from contextlib import nullcontext
     root = _dir(workspace)
     out = {"asked": 0, "written": 0, "same": 0, "skipped": 0, "mapped": 0}
     if root is None:
@@ -76,8 +84,15 @@ def save(workspace, items: Iterable[Dict]) -> Dict:
             out["written"] += 1
         rows.append({"cid": cid, "h": h})
     if rows:
-        workspace.store._batch(
-            "UNWIND $rows AS r MATCH (c:Chunk {cid: r.cid}) SET c.snap = r.h", rows)
+        have = dict(workspace.store._rows(
+            "UNWIND $cids AS x MATCH (c:Chunk {cid: x}) RETURN c.cid, c.snap",
+            {"cids": [r["cid"] for r in rows]}))
+        rows = [r for r in rows if r["cid"] in have and have[r["cid"]] != r["h"]]
+        out["unchanged_map"] = out["asked"] - out["skipped"] - len(rows)
+    if rows:
+        with (lock or nullcontext()):
+            workspace.store._batch(
+                "UNWIND $rows AS r MATCH (c:Chunk {cid: r.cid}) SET c.snap = r.h", rows)
         out["mapped"] = len(rows)
     return out
 

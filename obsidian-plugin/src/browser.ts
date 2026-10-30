@@ -207,6 +207,12 @@ export class BrowserView extends ItemView {
   private pendingPlace = new Map<string, { trace: string; since: number }>();
   private placeTimer = 0;
   private placing = false;
+  /** Pending placements settled as drawn through another chunk, or unknown. */
+  placeSettled = 0;
+  /** Ticks skipped because a visible cell is capturing the same page. */
+  skippedTwin = 0;
+  plantCaptureTwice = false;
+  plantKeepAliased = false;
   private webview: any = null;
   private address!: HTMLInputElement;
   private status!: HTMLElement;
@@ -2299,6 +2305,23 @@ export class BrowserView extends ItemView {
       const cids = [...this.pendingPlace.keys()];
       if (!cids.length) return;
       const got: any = await this.sidecar.place(cids);
+      // A chunk the store draws THROUGH another -- a copy of content held
+      // elsewhere, store-wide since 2026-10-29, or a merge-group member --
+      // is settled, not late: its lead is what is placed. Re-asking for it
+      // every tick held /place at 1.6 s (67 of 86 requests in 30 s were the
+      // same 25 and 16 chunks, 4 of them placeable). The same for a chunk
+      // the store does not hold. Planted `plantKeepAliased`.
+      if (!this.plantKeepAliased) {
+        const settled = [...Object.keys((got && got.aliases) || {}), ...(((got && got.unknown) || []) as string[])];
+        for (const cid of settled) {
+          const entry = this.pendingPlace.get(cid);
+          if (!entry) continue;
+          this.pendingPlace.delete(cid);
+          this.placeSettled++;
+          const t = prof.get(entry.trace);
+          if (t) { prof.fact(t, "why", "drawn through " + ((got.aliases || {})[cid] || "nothing: not stored")); prof.finish(t, "nothing_placed"); }
+        }
+      }
       const nodes = ((got && got.nodes) || []) as LayoutNode[];
       if (!nodes.length) return;
       // Group what landed by the trace that asked for it, so each drain's
@@ -2340,6 +2363,19 @@ export class BrowserView extends ItemView {
     // 0 and 2 drains in 16 s -- the heavy live pages were barely scanned
     // (G-101, 2026-09-27).
     if (!url || url === "about:blank" || (wv.isLoading() && !this.domReady)) return;
+    // A HIDDEN cell showing the page a visible cell is already capturing
+    // adds nothing but the same capture again: three cells on HN /newest,
+    // two hidden, captured every change three times and each capture waited
+    // ~3 s for the store behind the others -- hover and the panel stream
+    // waited behind all of them (2026-10-29). Planted `plantCaptureTwice`.
+    if (!this.plantCaptureTwice && !(this.containerEl.offsetWidth > 0)
+        && this.app.workspace.getLeavesOfType(BROWSER_VIEW).some((l) => {
+          const o = l.view as any;
+          return o !== this && o.live && o.containerEl?.offsetWidth > 0 && o.shownUrl?.() === here;
+        })) {
+      this.skippedTwin++;
+      return;
+    }
     // An offline view is a local file, not a page: nothing in it is captured.
     if (!/^https?:/.test(url)) return;
     if (url !== this.session && docKey(url) !== docKey(this.session) && url !== this.pendingInPage) {

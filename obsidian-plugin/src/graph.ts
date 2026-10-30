@@ -359,6 +359,7 @@ export class GraphView extends ItemView {
   /** Chunks the reader had open when a new fit was announced, kept until a
    *  picture in the NEW fit is actually drawn and they can be re-placed. */
   private reopen = new Set<string>();
+  reopenStats = { asked: 0, placed_again: 0 };
   private retryLoad = 0;
   //: The caption is written on load and the picture changes afterwards.
   //  Unfolding took 96 nodes to 122 and the bar still said "96 pages", which
@@ -643,7 +644,17 @@ export class GraphView extends ItemView {
       this.projStatus = layout.projector ?? null;
       // What the reader had open before a new fit, placed again in it.
       if (this.reopen.size && this.projEpoch >= 0) {
-        const open = [...this.reopen];
+        // Only what the new layout did not already draw. In the CHUNK view
+        // the layout is every drawable chunk, so nothing: re-placing the whole
+        // view after a refit sent 150 requests of 400 chunks (2026-10-29,
+        // ~99k "open", 40k of them copies the store no longer draws) and held
+        // /place at 1.1-9.9 s while hover and the panel stream waited behind
+        // it. Planted `__domvecPlantReopenAll`.
+        const drawn = new Set(((this.graph?.graphData().nodes ?? []) as any[]).map((n) => String(n.id)));
+        const all = (window as any).__domvecPlantReopenAll;
+        const open = this.level === "chunk" && !all ? []
+          : [...this.reopen].filter((id) => all || !drawn.has(id));
+        this.reopenStats = { asked: this.reopen.size, placed_again: open.length };
         this.reopen.clear();
         void (async () => {
           for (let i = 0; i < open.length; i += 400) {

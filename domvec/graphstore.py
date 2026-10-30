@@ -201,6 +201,9 @@ _MIGRATIONS = [
     # shift that leaves every line's TEXT the same left its anchors stale for
     # good -- arXiv's "View HTML" keyed to `a[3]`, which is the pdf link.
     "ALTER TABLE Chunk ADD asig STRING",
+    # The hash of the chunk's exact markdown (2026-10-29): its CONTENT
+    # identity, store-wide, which `_assign_content` keys one lead on.
+    "ALTER TABLE Chunk ADD mdkey STRING",
 ]
 
 
@@ -369,6 +372,79 @@ def _same_content(chunks) -> tuple:
             canonical[chunk.cid] = head
             counts[head] = counts.get(head, 1) + 1
     return canonical, {cid: n for cid, n in counts.items() if n > 1}
+
+
+#: Planted (2026-10-29): duplicates resolved within a page only, as before --
+#: the same content on two pages is drawn twice.
+PLANT_PAGE_SCOPED_DEDUP = [False]
+
+
+def content_key(md: str) -> str:
+    """A chunk's CONTENT identity: its exact markdown, hashed."""
+    import hashlib
+    return hashlib.sha1((md or "").encode("utf-8")).hexdigest()[:20]
+
+
+class _ContentIndex:
+    """Which chunks hold each content, store-wide, lead first (2026-10-29).
+
+    The reader: "I immediately see duplicate node chunks. perhaps make
+    something that fixes duplication everywhere at the db level." `G-24`
+    marked byte-identical chunks within ONE page; the same content on two
+    pages -- one article under three url spellings, a site's furniture on
+    every page -- was drawn once per page: 65,461 extra nodes of 99,448
+    drawn, by title, before this.
+
+    Marked, not merged, as `_same_content` argues: every chunk keeps its own
+    node, anchors and addresses, and `dup_of` names the chunk that draws the
+    content for all of them. The LEAD is stable: it keeps the content while
+    it holds it, and only when it is deleted or rewritten is the next member
+    elected -- so nodes do not trade places on every capture. A chunk in a
+    merge group (`group_of`) is never made a copy: its group speaks through
+    it, and stage two already leaves copies out of groups.
+    """
+
+    def __init__(self) -> None:
+        self.members: Dict[str, List[str]] = {}
+        self.key_of: Dict[str, str] = {}
+        self.dup: Dict[str, str] = {}
+        self.dupn: Dict[str, int] = {}
+        self.grouped: set = set()
+
+    def remove(self, cid: str) -> str:
+        key = self.key_of.pop(cid, "")
+        if key:
+            ms = self.members.get(key) or []
+            if cid in ms:
+                ms.remove(cid)
+            if not ms:
+                self.members.pop(key, None)
+        self.dup.pop(cid, None)
+        self.dupn.pop(cid, None)
+        return key
+
+    def add(self, cid: str, key: str) -> None:
+        self.key_of[cid] = key
+        self.members.setdefault(key, []).append(cid)
+
+    def wanted(self, key: str) -> Dict[str, Tuple[str, int]]:
+        """cid -> (dup_of, dup_n) for every member of this content."""
+        ms = self.members.get(key) or []
+        if not ms:
+            return {}
+        # A grouped member draws anyway (its group speaks through it), so it
+        # leads: the plain chunks become ITS copies rather than a second
+        # drawing beside it. Otherwise the longest-standing member leads.
+        lead = next((c for c in ms if c in self.grouped), ms[0])
+        out = {}
+        for cid in ms:
+            if cid == lead:
+                out[cid] = ("", len(ms))
+            elif cid in self.grouped:
+                out[cid] = ("", 1)
+            else:
+                out[cid] = (lead, 1)
+        return out
 
 
 def _index_spellings(url: str):
@@ -549,6 +625,16 @@ class GraphStore:
         #: segfault, and the sidecar's watchdog restarts the process.
         self.poisoned = ""
         self.read_stats = {"split": 0, "fallback": 0, "last_error": ""}
+        #: The store-wide content index (`_ContentIndex`), built on first use.
+        self._cindex: Optional[_ContentIndex] = None
+        #: Chunks OUTSIDE the write in hand whose drawing changed because of
+        #: it -- a copy promoted to lead, a lead that became a copy. The
+        #: sidecar hands them to the projector; the write's own chunks it
+        #: already queues.
+        self.dedup_changed: set = set()
+        self.dedup_stats = {"keys": 0, "copies": 0, "rewrites": 0, "promoted": 0, "demoted": 0}
+        #: The chunks the last `_reconcile` deleted.
+        self._last_gone: List[str] = []
         if not self.read_only and os.environ.get("DOMVEC_SHARED_READS", "") != "1":
             try:
                 self.conn.execute("CALL auto_checkpoint=false")
@@ -811,7 +897,12 @@ class GraphStore:
         # which an all-zero vector already qualified. `embedding()` gains the
         # NULL guard, since `list(None)` raises.
         has_vectors = bool(embeddings)
-        canonical, copies = _same_content(chunks)
+        if PLANT_PAGE_SCOPED_DEDUP[0]:
+            canonical, copies = _same_content(chunks)
+            elsewhere = []
+        else:
+            canonical, copies, elsewhere = self._assign_content(chunks, self._last_gone)
+        self._last_gone = []
         chunk_rows = []
         for chunk in chunks:
             row = {
@@ -821,6 +912,7 @@ class GraphStore:
                 "dup": canonical.get(chunk.cid, ""),
                 "dupn": copies.get(chunk.cid, 1),
                 "asig": anchor_sig(chunk),
+                "mdkey": content_key(chunk.markdown),
             }
             if has_vectors:
                 vector = list(embeddings.get(chunk.cid) or [])[:EMBED_DIM]
@@ -834,9 +926,13 @@ class GraphStore:
                 "SET c.url = r.url, c.xpath = r.xp, c.part = r.part, "
                 "c.md = r.md, c.chars = r.chars, c.line_count = r.lines, "
                 "c.dup_of = r.dup, c.dup_n = r.dupn, c.asig = r.asig, "
+                "c.mdkey = r.mdkey, "
                 "c.row = r.row" + (", c.embedding = r.emb" if has_vectors else ""),
                 chunk_rows,
             )
+            if elsewhere:
+                self._write_dups(elsewhere)
+                counts["dedup_elsewhere"] = len(elsewhere)
             self._batch(
                 "UNWIND $rows AS r MATCH (p:Page {url: r.url}), "
                 "(c:Chunk {cid: r.cid}) MERGE (p)-[:HasChunk]->(c)",
@@ -1046,6 +1142,7 @@ class GraphStore:
         gone = ([cid for cid in existing if cid not in keep_chunks]
                 if complete else
                 [cid for cid in dict.fromkeys(removed or ()) if cid not in keep_chunks])
+        self._last_gone = list(gone)
         if gone:
             self._batch(
                 "UNWIND $rows AS r MATCH (c:Chunk {cid: r.cid}) DETACH DELETE c",
@@ -1797,6 +1894,24 @@ class GraphStore:
             self._batch(
                 "UNWIND $rows AS r MATCH (c:Chunk {cid: r.cid}) "
                 "SET c.group_of = r.lead, c.group_n = r.n", rows)
+        if self._cindex is not None and not PLANT_PAGE_SCOPED_DEDUP[0]:
+            idx = self._cindex
+            page = {r[0] for r in self._rows("MATCH (c:Chunk {url: $url}) RETURN c.cid", {"url": url})}
+            with self._db_lock:
+                idx.grouped -= page
+                idx.grouped |= {r["cid"] for r in rows}
+                # A grouped member leads its content (`_ContentIndex.wanted`),
+                # so joining or leaving a group can move a lead.
+                changes = []
+                for key in {idx.key_of[c] for c in page if c in idx.key_of}:
+                    for cid, (dup, n) in idx.wanted(key).items():
+                        if (idx.dup.get(cid, ""), idx.dupn.get(cid, 1)) != (dup, n):
+                            if bool(idx.dup.get(cid, "")) != bool(dup):
+                                self.dedup_changed.add(cid)
+                            changes.append((cid, dup, n))
+                        idx.dup[cid], idx.dupn[cid] = dup, n
+            if changes:
+                self._write_dups(changes)
         return len(rows)
 
     def embeddings_for(self, url: str) -> Dict[str, List[float]]:
@@ -2672,6 +2787,165 @@ class GraphStore:
         }
 
     # -- deletes -----------------------------------------------------------
+    # -- one content, one drawn chunk, store-wide (2026-10-29) ------------------
+    def _content_index(self) -> "_ContentIndex":
+        """Built once from the store: lead first -- a grouped chunk, then one
+        already drawn, then by cid -- so a rebuild moves as little as it can."""
+        if self._cindex is not None:
+            return self._cindex
+        # Read OUTSIDE the connection lock -- on the read connection -- and
+        # swapped in under it: built inside, the first write after a start
+        # waited for 107k rows to be read, and every capture behind it.
+        rows = self._rows(
+            "MATCH (c:Chunk) WHERE c.mdkey IS NOT NULL AND c.mdkey <> '' "
+            "RETURN c.cid, c.mdkey, c.dup_of, c.dup_n, c.group_of")
+        with self._db_lock:
+            if self._cindex is not None:
+                return self._cindex
+            idx = _ContentIndex()
+            rows.sort(key=lambda r: (0 if r[4] else 1, 0 if not r[2] else 1, r[0]))
+            for cid, key, dup, dupn, group_of in rows:
+                idx.add(cid, key)
+                idx.dup[cid] = dup or ""
+                idx.dupn[cid] = int(dupn or 1)
+                if group_of:
+                    idx.grouped.add(cid)
+            self._cindex = idx
+            self.dedup_stats["keys"] = len(idx.members)
+            return idx
+
+    def _assign_content(self, chunks, gone=()):
+        """The store-wide verdict for a write: ``(canonical, copies,
+        elsewhere)`` -- the write's own chunks as `_same_content` returns
+        them, plus ``[(cid, dup_of, dup_n)]`` for chunks OUTSIDE the write
+        whose verdict it changed."""
+        idx = self._content_index()
+        with self._db_lock:
+            touched = set()
+            for cid in gone or ():
+                key = idx.remove(cid)
+                if key:
+                    touched.add(key)
+            mine = set()
+            for chunk in chunks:
+                key = content_key(chunk.markdown)
+                old = idx.key_of.get(chunk.cid)
+                if old != key:
+                    if old:
+                        idx.remove(chunk.cid)
+                        touched.add(old)
+                    idx.add(chunk.cid, key)
+                touched.add(key)
+                mine.add(chunk.cid)
+            canonical, copies, elsewhere = {}, {}, []
+            for key in touched:
+                for cid, (dup, n) in idx.wanted(key).items():
+                    if cid in mine:
+                        if dup:
+                            canonical[cid] = dup
+                        if n > 1:
+                            copies[cid] = n
+                    elif (idx.dup.get(cid, ""), idx.dupn.get(cid, 1)) != (dup, n):
+                        if bool(idx.dup.get(cid, "")) != bool(dup):
+                            self.dedup_changed.add(cid)
+                            self.dedup_stats["promoted" if not dup else "demoted"] += 1
+                        elsewhere.append((cid, dup, n))
+                    idx.dup[cid], idx.dupn[cid] = dup, n
+            self.dedup_stats["keys"] = len(idx.members)
+            return canonical, copies, elsewhere
+
+    def _write_dups(self, rows) -> None:
+        self.dedup_stats["rewrites"] += len(rows)
+        self._batch(
+            "UNWIND $rows AS r MATCH (c:Chunk {cid: r.cid}) "
+            "SET c.dup_of = r.dup, c.dup_n = r.n",
+            [{"cid": c, "dup": d, "n": int(n)} for c, d, n in rows])
+
+    def dedupe_store(self, batch: int = 4000, lock=None) -> Dict[str, int]:
+        """Bring the whole store to one lead per content: give every chunk
+        its `mdkey`, rebuild the index, and write each chunk whose verdict
+        differs. Idempotent; a second run writes nothing. `lock` (the
+        sidecar's work lock) is taken per WRITE batch, not for the run: held
+        throughout it was 88 s with every capture waiting."""
+        from contextlib import nullcontext
+        held = lock or nullcontext()
+        t0 = time.perf_counter()
+        keyed = 0
+        while True:
+            rows = self._rows(
+                "MATCH (c:Chunk) WHERE c.mdkey IS NULL OR c.mdkey = '' "
+                "RETURN c.cid, c.md LIMIT $n", {"n": int(batch)})
+            if not rows:
+                break
+            with held:
+                self._batch(
+                    "UNWIND $rows AS r MATCH (c:Chunk {cid: r.cid}) SET c.mdkey = r.k",
+                    [{"cid": cid, "k": content_key(md or "")} for cid, md in rows])
+            keyed += len(rows)
+        flipped = 0
+        self._cindex = None
+        idx = self._content_index()               # read outside the lock
+        with self._db_lock:
+            had_dup, had_n = dict(idx.dup), dict(idx.dupn)
+            changes = []
+            for key in list(idx.members):
+                for cid, (dup, n) in idx.wanted(key).items():
+                    if (had_dup.get(cid, ""), had_n.get(cid, 1)) != (dup, n):
+                        if bool(had_dup.get(cid, "")) != bool(dup):
+                            self.dedup_changed.add(cid)
+                            flipped += 1
+                        changes.append((cid, dup, n))
+                    idx.dup[cid], idx.dupn[cid] = dup, n
+        for lo in range(0, len(changes), batch):
+            with held:
+                self._write_dups(changes[lo:lo + batch])
+        copies = sum(1 for d in idx.dup.values() if d)
+        self.dedup_stats["copies"] = copies
+        return {"keyed": keyed, "contents": len(idx.members), "chunks": len(idx.key_of),
+                "copies": copies, "rewritten": len(changes), "flipped": flipped,
+                "ms": round((time.perf_counter() - t0) * 1000, 1)}
+
+    def duplicate_report(self) -> Dict[str, int]:
+        """Contents drawn more than once, read from the STORE -- not from the
+        index whose work it judges, which a write that bypassed it (the
+        planted page-scoped arm) would leave unaware. What the live check
+        reads; 0 is the goal. A merge-group MEMBER is drawn through its lead,
+        not on its own."""
+        rows = self._rows(
+            "MATCH (c:Chunk) RETURN c.cid, c.mdkey, c.dup_of, c.group_of")
+        # Per content: drawn group LEADS (kept by design -- their members speak
+        # through them) and drawn plain chunks (which the dedup answers for).
+        leads: Dict[str, int] = {}
+        plain: Dict[str, int] = {}
+        copies = grouped = 0
+        for cid, key, dup, group_of in rows:
+            if dup:
+                copies += 1
+                continue
+            if group_of:
+                grouped += 1
+                if group_of != cid:
+                    continue
+                if key:
+                    leads[key] = leads.get(key, 0) + 1
+                continue
+            if key:
+                plain[key] = plain.get(key, 0) + 1
+        keys = set(leads) | set(plain)
+        twice = extra = extra_plain = 0
+        for k in keys:
+            g, p = leads.get(k, 0), plain.get(k, 0)
+            if g + p > 1:
+                twice += 1
+                extra += g + p - 1
+            # A plain chunk beside a drawn group lead, or beside another plain
+            # one, is a copy the dedup failed to mark.
+            extra_plain += p if g else max(0, p - 1)
+        return {"contents": len(keys), "chunks": len(rows), "copies": copies,
+                "contents_drawn_twice": twice, "extra_drawn": extra,
+                "extra_drawn_plain": extra_plain, "extra_drawn_group_leads": extra - extra_plain,
+                "grouped_kept": grouped}
+
     def purge_page(self, url: str) -> int:
         """Remove a page, its chunks and its addresses. Returns chunks removed."""
         self._tnode_forget(url)
@@ -2684,4 +2958,9 @@ class GraphStore:
             "MATCH (c:Chunk {url: $url}) DETACH DELETE c", {"url": url})
         self._execute(
             "MATCH (p:Page {url: $url}) DETACH DELETE p", {"url": url})
+        # The page's chunks may have led content other pages copy.
+        if not PLANT_PAGE_SCOPED_DEDUP[0] and cids:
+            _c, _n, elsewhere = self._assign_content([], cids)
+            if elsewhere:
+                self._write_dups(elsewhere)
         return len(cids)

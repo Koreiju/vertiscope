@@ -4467,6 +4467,64 @@ row decomposed from them could be checked against them when it was written.*
 
 > also, the main url nodes have to be maybe twice or three times as big to be seen and clickable to differentiate them from their connected chunk nodes when folding and unfolding graphs.
 
+**2026-10-29** *(on bringing the app back up)*
+
+> I immediately see duplicate node chunks. perhaps make something that fixes duplication everywhere at the db level.
+
+*Read as: one content, one drawn node, across the whole store -- not only
+within a page. This REVERSES the scope `graphstore._same_content` chose
+(2026-09: "Scoped to one page ... collapsing across pages would make a hit
+on one page point into another"); the reader's words win. Kept from that
+design: copies are MARKED, not merged -- every chunk keeps its own node,
+anchors and addresses, so `url : xpath : markdown : content` still holds for
+each. Measured before building, on the chunk view (99,448 drawn): 7,437
+title groups and 65,461 extra nodes -- 36,735 the same page under another
+url spelling (most of them this work's own probe cache-busters, `?g193=`,
+`?np=`, `?probe=`, `?stress=`), 8,499 within a page, 20,227 across pages.*
+
+**2026-10-29** *(later, while the dedup ran)*
+
+> I'm wondering if we can add a very slow tracking fly-to-node as we hover over any one of the 3D nodes. the forward movement is of course stopped for some standard camera zoom (non adaptive, hard floor) so that zooming from a safe collision distance into modalities is possible. like very quick. and very slow flying, but perhaps actually still having some adaptive effect where the zoom-out and the camera ego motion work together in their view. my thinking is something like kerbal space program, where we can see from both first person view within a "cockpit" as well as a 3rd person view, but for a "craft" that is where our 3D computation graphs from our legacy mothership mortegon specs/docs/code comes in. So, we interact with the signal flow graph of computation in the panel dialect, being able to "stick" open panels in a standard 2D view with the same features. understanding the dialect and signal flow animations is extremely important to capture at the root of the actual computation in python behind the scenes, but still presentable in a code native or artifact-loyal view. we can use zoom to zoom "through" the cockpit. we can also draw flight plans for various searches and anchored nodes within different modes. We will have a throttle to set the speed, the pause, and be able to plan efficiently that way. these controls will be stickable components of the computation graph in the UI panel that can be readily accessed always in their 2D graph form, even if collapsed within the "ego" 2D node which corresponds to the cockpit. We can likely make use of wasd controls and shift/ctrl like in KSP for throttling. The full panel set of artifacts becomes, in fact, the various arranged cells and extensions of our jupyter kernel cells with native obsidian markdown reprsentations and frames that can extend back into their original 2D panels and tabs.
+
+> Also, hovering over nodes without images simply disappear them instead of their default views. So the hover radius should be connected to the image renderings methinks to balance the two views with mouse focus.
+
+*Read as, in order: (1) hovering a 3D node starts a VERY SLOW tracking
+flight toward it; (2) forward motion stops at a fixed, non-adaptive hard
+floor -- a safe collision distance -- from which a QUICK zoom carries into
+the node's modalities; (3) yet the zoom-out and the camera's own motion are
+still coupled adaptively in what they show; (4) the model is Kerbal Space
+Program: a first-person "cockpit" view and a third-person view of a "craft",
+the craft being the 3D COMPUTATION GRAPH of the mothership (mortegon) --
+its specs, docs and code; (5) that graph is worked in the panel dialect, its
+panels "stuck" open in a standard 2D view with the same features; (6) the
+dialect and its signal-flow animations are captured at the root of the
+actual Python computation, presented code-native / artifact-loyal; (7) zoom
+passes "through" the cockpit; (8) flight plans are drawn for searches and
+anchored nodes, per mode; (9) a throttle sets speed and pause, for
+planning; (10) those controls are themselves stickable components of the
+computation graph, always reachable in 2D, even collapsed inside the "ego"
+2D node that IS the cockpit; (11) WASD to steer, shift/ctrl to throttle, as
+in KSP; (12) the whole panel set of artifacts becomes the arranged cells and
+extensions of the Jupyter kernel cells, with native Obsidian markdown
+representations and frames that extend back into their original 2D panels
+and tabs. And a defect: (13) hovering a node that has no image makes it
+DISAPPEAR rather than show its default form -- the hover radius should be
+tied to how the image is rendered, balancing the two views under the
+mouse.*
+
+> along with a throttle, a switch to global map view and ego traversal view. This creates the "user agent"
+
+> motion latency in the chunk view is a little slow
+
+> I would suggest as many non blocking micro multiprocesses in the sidecar as you can manage.
+
+*Read as: (14) beside the throttle, a switch between a GLOBAL MAP view and
+an EGO TRAVERSAL view; throttle + view switch + the craft's controls
+together are the "user agent". (15) Motion in the chunk view lags -- a
+latency defect in the view as it stands. (16) The sidecar's work split into
+as many small, non-blocking PROCESSES as can be managed, rather than
+threads sharing one interpreter and its locks.*
+
 ---
 
 ## Standing instructions carried in the verbatim

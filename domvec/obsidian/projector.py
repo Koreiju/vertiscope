@@ -812,8 +812,9 @@ class ChunkProjector:
             self.fits = list(state.get("fits") or [])
             self.log.clear()
         t = time.perf_counter()
-        with (self.work_lock or nullcontext()):
-            rows = workspace.store.lead_vectors()
+        # A read, on the store's read connection: no work lock (it held every
+        # capture for 16.7 s at start, 2026-10-29).
+        rows = workspace.store.lead_vectors()
         now = {}
         changed = []
         for cid, url, vector in rows:
@@ -2236,8 +2237,9 @@ class PageProjector(ChunkProjector):
             self.rows = state.get("rows") or _RowMap()
             self.refit_cost.observed = list(state.get("refit_cost") or [])
             self.log.clear()
-        with (self.work_lock or nullcontext()):
-            rows = workspace.store.lead_vectors()
+        # A read, on the store's read connection: no work lock (it held every
+        # capture for 16.7 s at start, 2026-10-29).
+        rows = workspace.store.lead_vectors()
         changed = [c for c, u, v in rows
                    if c not in self.vec or self.url_of.get(c) != u
                    or not np.allclose(self.vec[c], np.asarray(v, dtype=np.float32), atol=1e-5)]
