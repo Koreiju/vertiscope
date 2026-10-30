@@ -7603,7 +7603,7 @@ export function makeChecks(env) {
     },
     {
       id: "G-291",
-      asks: "UMAP places the ego reservoir (item 43): a slate note and a note with a python cell that has RUN (a stored readout), created in the vault, are indexed on their own and arrive in the 3D graph as vault:// pages with a UMAP place (finite fit); a plain note and a never-run python block (a design doc's illustration) are not indexed; planted (__domvecPlantNoReservoirIndex) neither computation-graph note arrives",
+      asks: "UMAP places the ego reservoir (item 43): a slate note and a note with a python cell that has RUN (a stored readout), created in the vault, are indexed on their own and arrive in the 3D graph as vault:// pages with a UMAP place (finite fit); a plain note and a never-run python block (a design doc's illustration) are not indexed; planted (__domvecPlantNoReservoirIndex) neither computation-graph note arrives; a deleted reservoir note leaves the store even with an index pending (planted __domvecPlantKeepDeleted: it stays)",
       async run() {
         const got = await evaluate(`(async () => {
           const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -7651,11 +7651,28 @@ export function makeChecks(env) {
               }
             }
           };
-          return { clean: await arm(false), planted: await arm(true) };
-        })()`, { timeout: 150000 });
+          // Deleting a reservoir note takes it out of the store (and no late
+          // index brings it back); planted __domvecPlantKeepDeleted: it stays.
+          const inStore = async (url) => ((await (await fetch(SIDE + "/cypher", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ query: "MATCH (p:Page {url: '" + url.replace(/'/g, "") + "'}) RETURN count(p)" }) })).json()).rows || [[0]])[0][0];
+          const delArm = async (planted) => {
+            const path = folder + "/g291 del " + (planted ? "p" : "c") + Date.now() + ".md";
+            const f = await app.vault.create(path, "---" + NL + "domvec: slate" + NL + "---" + NL + "deleted probe" + NL + TB + "x" + TB + "1" + NL);
+            for (let i = 0; i < 40 && !nodeOf(urlOf(path)); i++) await sleep(1000);
+            const before = await inStore(urlOf(path));
+            window.__domvecPlantKeepDeleted = planted;
+            try { await app.vault.modify(f, "---" + NL + "domvec: slate" + NL + "---" + NL + "deleted probe" + NL + TB + "x" + TB + "2" + NL); await app.vault.delete(f); }
+            finally { window.__domvecPlantKeepDeleted = false; }
+            await sleep(7000);                       // past the 4 s index debounce
+            const after = await inStore(urlOf(path));
+            if (after) await fetch(SIDE + "/purge", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url: urlOf(path) }) });
+            return { before, after };
+          };
+          return { clean: await arm(false), planted: await arm(true), del: await delArm(false), del_planted: await delArm(true) };
+        })()`, { timeout: 240000 });
         if (!got || got.error) return { pass: false, evidence: got };
         const c = got.clean, p = got.planted;
-        return { pass: !!(c.slate && c.slate.placed && c.cell && c.cell.placed) && !c.plain && !c.unrun && !p.slate && !p.cell, evidence: got };
+        return { pass: !!(c.slate && c.slate.placed && c.cell && c.cell.placed) && !c.plain && !c.unrun && !p.slate && !p.cell
+                   && got.del.before >= 1 && got.del.after === 0 && got.del_planted.after >= 1, evidence: got };
       },
     },
     {
@@ -8139,12 +8156,13 @@ export function makeChecks(env) {
     },
     {
       id: "G-284",
-      asks: "the halo's cone transport (UR O.18, O.3): the cursor on a stuck slate's literal-text field fires a halo -- its retrieved nodes transported onto the camera's cone (every node at the cone's half-angle from the axis, the more similar nearer the apex); orbiting the camera 25 deg, they slide and stay on the new cone; the cursor on a pure {ref} field ends it and every node is home again; planted (plantNoHaloTransport) nothing moves",
+      asks: "the halo's cone transport (UR O.18, O.3): the cursor on a stuck slate's literal-text field fires a halo -- its retrieved nodes transported onto the camera's cone (every node at the cone's half-angle from the axis, the more similar nearer the apex); orbiting the camera 25 deg, they slide and stay on the new cone; each node's similarity is the three-part score pagerank x max(minmax(nomic), minmax(tfidf)) (O.22; planted plantHaloSearchOrder: the retrieval's ranks instead); a double right-click on a halo node sends it home and transports in the next from the queue (O.14; planted plantNoHaloQueue: the halo shrinks); the cursor on a pure {ref} field ends it and every node is home again; planted (plantNoHaloTransport) nothing moves",
       async run() {
         const got = await evaluate(`(async () => {
           const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
           const until = async (ok, ms) => { for (let t = 0; t < ms && !ok(); t += 250) await sleep(250); return ok(); };
           const plugin = app.plugins.getPlugin("domvec-bridge");
+          const SIDE = String(plugin.settings.sidecar).replace(/[/]+$/, "");
           const v = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
           if (!v || !v.graph) return { error: "no graph" };
           const g = v.graph, cam = g.camera(), ctl = g.controls();
@@ -8197,22 +8215,64 @@ export function makeChecks(env) {
             const b = onCone();
             out.slid = a.length && b.length ? Math.round(Math.min(...b.map((x, i) => Math.hypot(x.at[0] - a[i].at[0], x.at[1] - a[i].at[1], x.at[2] - a[i].at[2])))) : null;
             out.max_angle_err_after = b.length ? Math.round(Math.max(...b.map((x) => Math.abs(x.ang - out.half_angle_deg))) * 100) / 100 : null;
+            // The three-part similarity (O.22): each node's s is the app's own
+            // haloScores over the same hits.
+            // The very hits the halo scored (a second ask of /search can answer differently).
+            const hits = v.halo.hits || [];
+            const sc = v.constructor.haloScores(hits);
+            const want = new Map();
+            const ns2 = v.graph.graphData().nodes, byId = new Map(ns2.map((n) => [String(n.id), n]));
+            hits.forEach((h, i) => { const n = byId.get(String(h.cid)) || byId.get("page:" + h.url); if (n && !want.has(n)) want.set(n, sc[i]); });
+            out.score_err = Math.max(0, ...v.halo.items.map((it) => Math.abs((want.get(it.n) ?? -9) - it.s)));
+            out.queued = v.halo.queue.length;
+            // Delete the top node by a double right-click at its screen point.
+            const drop = async (planted) => {
+              v.plantNoHaloQueue = planted;
+              const top = v.halo.items.slice().sort((x, y) => y.s - x.s)[0];
+              const home = top.home.slice(0, 3), n0 = v.halo.items.length, q0 = v.halo.queue.length;
+              cam.updateMatrixWorld();
+              const el = g.renderer().domElement, r = el.getBoundingClientRect();
+              const q = cam.position.clone().set(top.n.x, top.n.y, top.n.z || 0).project(cam);
+              const x = r.left + (q.x + 1) / 2 * r.width, y = r.top + (1 - q.y) / 2 * r.height;
+              for (let k = 0; k < 2; k++) v.canvasEl.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 2 }));
+              await sleep(300);
+              const res = { home_err: Math.hypot(top.n.x - home[0], top.n.y - home[1], (top.n.z || 0) - home[2]), in_halo: v.halo.items.some((it) => it.n === top.n),
+                            items_delta: v.halo.items.length - n0, queue_delta: v.halo.queue.length - q0 };
+              v.plantNoHaloQueue = false;
+              return res;
+            };
+            out.drop = await drop(false);
+            out.drop_planted = await drop(true);
+            // Planted order: the retrieval's own ranks as similarity.
+            v.haloEnd(); v.plantHaloSearchOrder = true;
+            await v.haloFor("radix tree compression ");
+            // The planted halo's own hits, scored the three-part way, against its ranks.
+            const ph = v.halo.hits || [], psc = v.constructor.haloScores(ph), pwant = new Map();
+            ph.forEach((h, i) => { const n = byId.get(String(h.cid)) || byId.get("page:" + h.url); if (n && !pwant.has(n)) pwant.set(n, psc[i]); });
+            out.planted_score_err = Math.max(0, ...v.halo.items.map((it) => Math.abs((pwant.get(it.n) ?? -9) - it.s)));
+            v.plantHaloSearchOrder = false; v.haloEnd();
+            await v.haloFor("radix tree compression"); await sleep(400);
             // A pure {ref} field: no halo, every node home.
             const items = v.halo ? v.halo.items.map((it) => ({ n: it.n, home: it.home.slice(0, 3) })) : [];
             ed.setCursor({ line: lineOf("source"), ch: 3 }); await sleep(1200);
             out.ended = !v.halo;
             out.home_err = items.length ? Math.max(...items.map((it) => Math.hypot(it.n.x - it.home[0], it.n.y - it.home[1], (it.n.z || 0) - it.home[2]))) : null;
           } finally {
-            v.plantNoHaloTransport = false; v.haloEnd();
+            v.plantNoHaloTransport = false; v.plantNoHaloQueue = false; v.plantHaloSearchOrder = false; v.haloEnd();
             cam.position.copy(saved.p); ctl.target.copy(saved.t); ctl.update?.();
             try { leaf.detach(); } catch (e) {}
+            // The note was indexed as a reservoir node (G-291): out of the store too.
+            try { await fetch(SIDE + "/purge", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url: "vault://" + app.vault.getName() + "/" + f.path }) }); } catch (e) {}
             try { await app.vault.delete(f); } catch (e) {}
           }
           return out;
         })()`, { timeout: 90000 });
         if (!got || got.error) return { pass: false, evidence: got };
         return { pass: got.nodes >= 3 && got.max_angle_err < 0.5 && got.nearer_when_similar && got.moved_from_home > 1
-                   && got.slid > 1 && got.max_angle_err_after < 0.5 && got.ended && got.home_err < 1e-3 && !got.planted.halo,
+                   && got.slid > 1 && got.max_angle_err_after < 0.5 && got.ended && got.home_err < 1e-3 && !got.planted.halo
+                   && got.score_err < 1e-9 && got.planted_score_err > 1e-3
+                   && got.drop.home_err < 1e-3 && !got.drop.in_halo && got.drop.items_delta === 0 && got.drop.queue_delta === -1
+                   && got.drop_planted.items_delta === -1,
                  evidence: got };
       },
     },

@@ -496,6 +496,15 @@ export class GraphView extends ItemView {
     // canvas is a hand on the stick -- the flight and its velocity dropped --
     // and the wheel re-reads the distance a flight in progress stops at.
     canvas.addEventListener("pointerdown", (e: PointerEvent) => { this.downAt = [e.clientX, e.clientY]; if (!this.plantHoldFlight) this.agent.release(); }, { passive: true, capture: true });
+    // A double right-click on a halo node deletes it from the halo (G-284).
+    canvas.addEventListener("contextmenu", (e: MouseEvent) => {
+      const h = this.halo ? this.haloAt(e.clientX, e.clientY) : null;
+      if (!h) return;
+      e.preventDefault(); e.stopPropagation();
+      const now = performance.now();
+      if (now - this.haloRightAt < 450) { this.haloRightAt = 0; this.haloDrop(h); }
+      else this.haloRightAt = now;
+    }, true);
     // A right-click on a bisector folds / unfolds what it dominates (G-282).
     canvas.addEventListener("contextmenu", (e: MouseEvent) => {
       const hit = this.bisectorAt(e.clientX, e.clientY);
@@ -5271,8 +5280,27 @@ export class GraphView extends ItemView {
    * is left, every node goes home. Planted `plantNoHaloTransport`.
    */
   plantNoHaloTransport = false;
-  halo: { query: string; items: { n: any; s: number; home: number[] }[] } | null = null;
-  haloStats = { fired: 0, ended: 0, nodes: 0, frames: 0 };
+  halo: { query: string; items: { n: any; s: number; home: number[] }[]; queue: { n: any; s: number }[]; hits?: any[] } | null = null;
+  haloStats = { fired: 0, ended: 0, nodes: 0, frames: 0, dropped: 0, queued: 0 };
+  /** How many retrieved nodes the halo shows; the rest wait in its queue. */
+  haloShow = 10;
+  /** Planted (O.22): the halo ranks by the retrieval's own order, not the three-part score. */
+  plantHaloSearchOrder = false;
+  /** Planted (O.14): a dropped halo node is not replaced from the queue. */
+  plantNoHaloQueue = false;
+  /**
+   * The three-part similarity (UR O.22; §8.1): pagerank x max(minmax(nomic
+   * cosine), minmax(tf-idf cosine)), each cosine min-max normalised over the
+   * halo's OWN set before the max -- raw spaces at their own scales would let
+   * the wider one dominate -- and the product normalised to [0, 1] the same
+   * way, so it reads as the transport's similarity.
+   */
+  static haloScores(hits: { semantic?: number; lexical?: number; pagerank?: number }[]): number[] {
+    const mm = (xs: number[]) => { const lo = Math.min(...xs), hi = Math.max(...xs); return xs.map((x) => (hi > lo ? (x - lo) / (hi - lo) : 1)); };
+    const sem = mm(hits.map((h) => Number(h.semantic) || 0)), lex = mm(hits.map((h) => Number(h.lexical) || 0));
+    const raw = hits.map((h, i) => (Number(h.pagerank) || 0) * Math.max(sem[i], lex[i]));
+    return mm(raw);
+  }
   /** Apex distance in front of the camera, the cone's half-angle, its length. */
   haloApex = 30;
   haloHalfAngle = 0.35;
@@ -5283,28 +5311,65 @@ export class GraphView extends ItemView {
     if (!q || this.plantNoHaloTransport || !this.graph) { this.haloEnd(); return 0; }
     if (this.halo && this.halo.query === q) return this.halo.items.length;
     const seq = ++this.haloSeq;
-    const got: any = await this.sidecar.search(q, { k: 12 });
+    const got: any = await this.sidecar.search(q, { k: 24 });
     if (seq !== this.haloSeq || !got || !this.graph) return 0;
     this.haloEnd();
     const ns = this.graph.graphData().nodes as any[];
     const byId = new Map<string, any>(ns.map((n: any) => [String(n.id), n]));
     const seen = new Set<any>();
     const hits = (got.hits || []) as any[];
-    const items: { n: any; s: number; home: number[] }[] = [];
+    const scores = this.plantHaloSearchOrder ? hits.map((_h: any, i: number) => (hits.length > 1 ? 1 - i / (hits.length - 1) : 1)) : GraphView.haloScores(hits);
+    const ranked: { n: any; s: number }[] = [];
     hits.forEach((h: any, i: number) => {
       const n = byId.get(String(h.cid)) || (h.url ? byId.get("page:" + h.url) : null);
       if (!n || seen.has(n) || !Number.isFinite(n.x)) return;
       seen.add(n);
-      // Similarity, normalised over this halo: rank 0 is 1, the last is 0.
-      const s = hits.length > 1 ? 1 - i / (hits.length - 1) : 1;
-      items.push({ n, s, home: [n.x, n.y, n.z || 0, n.fx, n.fy, n.fz] });
+      ranked.push({ n, s: scores[i] });
     });
-    this.halo = { query: q, items };
+    ranked.sort((a, b) => b.s - a.s);
+    const items = ranked.slice(0, this.haloShow).map((r) => ({ n: r.n, s: r.s, home: [r.n.x, r.n.y, r.n.z || 0, r.n.fx, r.n.fy, r.n.fz] }));
+    this.halo = { query: q, items, queue: ranked.slice(this.haloShow), hits };
+    this.haloStats.queued = this.halo.queue.length;
     this.haloStats.fired++;
     this.haloStats.nodes = items.length;
     this.placeHalo();
     return items.length;
   }
+  /** A halo result deleted (UR N.13's double right-click): it goes home and
+   *  the next-most-similar in the queue is transported in (UR O.14, O.18). */
+  haloDrop(n: any): boolean {
+    if (!this.halo) return false;
+    const i = this.halo.items.findIndex((it) => it.n === n);
+    if (i < 0) return false;
+    const it = this.halo.items[i];
+    const [x, y, z, fx, fy, fz] = it.home;
+    n.x = x; n.y = y; n.z = z; n.fx = fx; n.fy = fy; n.fz = fz; n.__halo = false;
+    this.halo.items.splice(i, 1);
+    const next = this.plantNoHaloQueue ? undefined : this.halo.queue.shift();
+    if (next) this.halo.items.push({ n: next.n, s: next.s, home: [next.n.x, next.n.y, next.n.z || 0, next.n.fx, next.n.fy, next.n.fz] });
+    this.haloStats.dropped++;
+    this.haloStats.queued = this.halo.queue.length;
+    this.placeHalo();
+    return true;
+  }
+  /** The halo node drawn under a screen point (its disc, as projected). */
+  haloAt(clientX: number, clientY: number): any {
+    const g: any = this.graph;
+    if (!g || !this.halo) return null;
+    const cam = g.camera(), el: HTMLElement = g.renderer().domElement, r = el.getBoundingClientRect();
+    cam.updateMatrixWorld();
+    let best: any = null, bd = Infinity;
+    for (const it of this.halo.items) {
+      const q = new THREE.Vector3(it.n.x, it.n.y, it.n.z || 0).project(cam);
+      if (q.z > 1) continue;
+      const sx = r.left + (q.x + 1) / 2 * r.width, sy = r.top + (1 - q.y) / 2 * r.height;
+      const d = Math.hypot(sx - clientX, sy - clientY);
+      if (d < bd) { bd = d; best = it.n; }
+    }
+    return bd <= 24 ? best : null;
+  }
+  private haloRightAt = 0;
+
   haloEnd(): void {
     if (!this.halo) return;
     for (const it of this.halo.items) {

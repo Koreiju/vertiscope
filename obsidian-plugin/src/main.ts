@@ -271,6 +271,16 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     // being valid.
     this.registerEvent(this.app.vault.on("delete", (f) => {
       if (f.path.endsWith(".md")) void this.sidecar.restartKernel(f.path);
+      // A deleted note leaves the store (G-291): its pending index is
+      // cancelled -- one fired AFTER the delete and put the note back, six
+      // check notes on 2026-10-30 -- and its page purged, so its 3D node goes.
+      // Planted `__domvecPlantKeepDeleted`.
+      if (f.path.endsWith(".md") && !(window as any).__domvecPlantKeepDeleted) {
+        window.clearTimeout(this.noteTimers.get(f.path));
+        this.noteTimers.delete(f.path);
+        this.deletedNotes.add(f.path);
+        void this.sidecar.purge("vault://" + this.app.vault.getName() + "/" + f.path);
+      }
     }));
     this.registerEvent(this.app.vault.on("rename", (f, oldPath) => {
       // The OLD path, not the new one: the kernel is filed under where the note
@@ -1075,6 +1085,8 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     return n;
   }
   private noteTimers = new Map<string, number>();
+  /** Notes deleted this session: an index already in flight must not bring one back. */
+  private deletedNotes = new Set<string>();
   indexNoteSoon(file: TFile, why: string, delayMs = 2500): void {
     if ((window as any).__domvecPlantNoNoteIndex) return;
     window.clearTimeout(this.noteTimers.get(file.path));
@@ -1082,6 +1094,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
   }
   async indexNote(file: TFile, why: string): Promise<any> {
     if ((window as any).__domvecPlantNoNoteIndex) return null;
+    if (this.deletedNotes.has(file.path) && !this.app.vault.getAbstractFileByPath(file.path)) return null;
     const text = await this.app.vault.cachedRead(file);
     const got = await this.sidecar.note(file.path, text, this.app.vault.getName());
     if (!got || got.error) {

@@ -446,6 +446,18 @@ export class Sidecar {
    * doubled since that fit and the pane should ask for a real layout.
    */
   /** A code file's CALLS / INHERITS edges, mapped to the nodes that draw them (G-241). */
+  /** Drop a page from the store (its chunks and addresses): a deleted note's. */
+  async purge(url: string): Promise<any | null> {
+    const base = this.base().trim().replace(/\/+$/, "");
+    if (!base) return null;
+    try {
+      const res = await fetch(`${base}/purge`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url }) });
+      return await res.json();
+    } catch {
+      return null;
+    }
+  }
+
   /** A `{ref}` resolved through the store, with its rank-1 lines (G-278). */
   async ref(name: string): Promise<{ resolved: boolean; kind?: string; url?: string; lines: string[] } | null> {
     return this.get("/ref?name=" + encodeURIComponent(name));
