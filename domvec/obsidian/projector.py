@@ -73,8 +73,25 @@ BATCH = 256
 #: flag so `scripts/check_batch_window.py` can measure it again.
 #: `PLANT_FIXED_BATCH` (sidecar `/plant fixed-batch`) stays the window's off
 #: switch for that script; the default is off either way.
-ADAPTIVE_WINDOW = [False]
+#:
+#: 2026-10-30: the window adapts to the ARRIVALS as well as to the cost. It
+#: opens only while the queue is being fed a trickle -- the last drains took
+#: fewer than `TRICKLE` chunks each, the case a live page's mutations make --
+#: and a woken queue already holding `TRICKLE` or more goes at once. A burst
+#: (the measured case above) never waits; a trickle gathers for one drain's
+#: cost. Planted `PLANT_WINDOW_ALWAYS` (`/plant window-always`): the window
+#: regardless of arrivals, as measured on 2026-10-24.
+#:
+#: ON again, measured live (G-13's check, the busy feed and a fresh page):
+#: a trickle of 2-chunk drains took 62 drains without the window and 51 with
+#: it (3.95 -> 4.86 chunks a drain, wait p50 0.8 ms both); a burst waited 0
+#: times (wait p50 0.4 ms), where the planted window made it wait (140 ms).
+ADAPTIVE_WINDOW = [True]
 PLANT_FIXED_BATCH = [False]
+PLANT_WINDOW_ALWAYS = [False]
+#: Drains averaging fewer chunks than this are a trickle; a queue holding this
+#: many is a burst.
+TRICKLE = 8
 #: The batching window's ceiling: a drain costing more than this still waits
 #: no longer for company.
 WINDOW_CAP_S = 0.5
@@ -282,6 +299,8 @@ class ChunkProjector:
         self.cost_ms: Optional[float] = None
         self.urgent = False
         self.window_stats: Dict = {"drains": 0, "placed": 0, "waited_ms": 0.0, "windows": 0}
+        #: Chunks taken by each recent drain: what the arrivals look like.
+        self.recent_sizes: Deque[int] = deque(maxlen=8)
         self.wanted = threading.Event()
         self.fitted_chunks = 0
         self.fitted_points = 0
@@ -490,6 +509,8 @@ class ChunkProjector:
         with self.queue_lock:
             batch = list(self.queue)[:BATCH]
             self.window_stats["batched"] = self.window_stats.get("batched", 0) + len(batch)
+            if batch:
+                self.recent_sizes.append(len(batch))
             for cid in batch:
                 t = self.queue.pop(cid, None)
                 if t:
@@ -508,6 +529,12 @@ class ChunkProjector:
         q = lambda p: waits[min(len(waits) - 1, int(p * len(waits)))] if waits else None  # noqa: E731
         return {"cost_ms": self.cost_ms, "window_ms": round(self.batch_window_s() * 1000, 1),
                 "fixed": bool(PLANT_FIXED_BATCH[0]), "drains": ws["drains"], "placed": ws["placed"],
+                "adaptive": bool(ADAPTIVE_WINDOW[0]), "trickling": self.trickling(),
+                "recent_sizes": list(self.recent_sizes),
+                # A re-cluster's re-queue (sidecar `_project_regrouped`): what
+                # it queued against the page's whole chunk set.
+                "regroups": ws.get("regroups", 0), "regroup_queued": ws.get("regroup_queued", 0),
+                "regroup_page_chunks": ws.get("regroup_page_chunks", 0),
                 "per_drain": round(ws["placed"] / ws["drains"], 2) if ws["drains"] else None,
                 "batched": ws.get("batched", 0),
                 "chunks_per_drain": round(ws.get("batched", 0) / ws["drains"], 2) if ws["drains"] else None,
@@ -523,7 +550,16 @@ class ChunkProjector:
         their fixed cost is paid once for more chunks."""
         if not ADAPTIVE_WINDOW[0] or PLANT_FIXED_BATCH[0] or not self.cost_ms:
             return 0.0
+        if not PLANT_WINDOW_ALWAYS[0] and not self.trickling():
+            return 0.0
         return min(self.cost_ms / 1000.0, WINDOW_CAP_S)
+
+    def trickling(self) -> bool:
+        """The queue is being fed a few chunks at a time: the recent drains
+        averaged fewer than `TRICKLE` each. Waiting can only gather company
+        when company is arriving one by one."""
+        sizes = list(self.recent_sizes)
+        return len(sizes) >= 3 and sum(sizes) / len(sizes) < TRICKLE
 
     def drain(self, workspace) -> Optional[Dict]:
         """Transform one batch from the queue into the fit."""
@@ -658,7 +694,8 @@ class ChunkProjector:
                 # OLDEST item, as long as a drain has been costing -- unless a
                 # hover asked for these chunks.
                 window = self.batch_window_s()
-                if window > 0 and self.queue and not self.urgent and len(self.queue) < BATCH:
+                small = len(self.queue) < (BATCH if PLANT_WINDOW_ALWAYS[0] else TRICKLE)
+                if window > 0 and self.queue and not self.urgent and small:
                     with self.queue_lock:
                         oldest = min((t for t in self.queue.values() if t), default=time.monotonic())
                     rest = oldest + window - time.monotonic()

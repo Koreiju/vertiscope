@@ -186,6 +186,9 @@ PLANT_NO_REF_BINDING = [False]
 PLANT_NO_BASE_OBJECTS = [False]
 #: Planted (G-288): a cell's asks of the app are dropped.
 PLANT_NO_ASKS = [False]
+#: Planted (G-13, 2026-10-30): a re-cluster re-queues EVERY chunk of the page
+#: for re-projection, as before, instead of the ones whose group changed.
+PLANT_PROJECT_WHOLE_PAGE = [False]
 
 #: The encoder (one GPU model), shared by the embed worker and `/project`.
 #: Neither holds the store's lock while encoding, so a projection waits at
@@ -782,12 +785,14 @@ _PLANTABLE = {
     "placeholder-target": ("domvec.markdown", "PLANT_PLACEHOLDER_TARGET"),   # G-197
     "no-edge-memo": ("domvec.obsidian.layout", "PLANT_NO_EDGE_MEMO"),       # chunk view, 2026-10-24
     "fixed-batch": ("domvec.obsidian.projector", "PLANT_FIXED_BATCH"),      # G-13, 2026-10-24
-    "adaptive-window": ("domvec.obsidian.projector", "ADAPTIVE_WINDOW"),    # G-13, off by default
+    "adaptive-window": ("domvec.obsidian.projector", "ADAPTIVE_WINDOW"),    # G-13, on: opens for a trickle only
+    "window-always": ("domvec.obsidian.projector", "PLANT_WINDOW_ALWAYS"),  # G-13, the window regardless of arrivals
     "no-scope-switch": ("domvec.obsidian.projector", "PLANT_NO_SCOPE_SWITCH"),  # G-2, 2026-10-25
     "page-scoped-dedup": ("domvec.graphstore", "PLANT_PAGE_SCOPED_DEDUP"),     # 2026-10-29
     "no-ref-binding": ("domvec.obsidian.sidecar", "PLANT_NO_REF_BINDING"),     # G-279
     "no-base-objects": ("domvec.obsidian.sidecar", "PLANT_NO_BASE_OBJECTS"),   # G-279
     "no-asks": ("domvec.obsidian.sidecar", "PLANT_NO_ASKS"),                   # G-288
+    "project-whole-page": ("domvec.obsidian.sidecar", "PLANT_PROJECT_WHOLE_PAGE"),  # G-13
 }
 
 
@@ -1053,6 +1058,55 @@ def _project_page(workspace, url: str) -> None:
     _project_dedup(workspace)
 
 
+def _groups_of(workspace, url: str) -> dict:
+    """cid -> the chunk that leads its merge group ("" when it leads none)."""
+    return {r[0]: (r[1] or "") for r in workspace.store._rows(
+        "MATCH (c:Chunk {url: $u}) RETURN c.cid, c.group_of", {"u": url})}
+
+
+def _project_regrouped(workspace, url: str, before: dict) -> int:
+    """After a re-cluster, queue only what it CHANGED for re-projection
+    (G-13, 2026-10-30): a chunk whose group changed, the leads on both sides
+    of that change (their vectors are recomputed), a chunk the projector does
+    not place yet, and one it places that the page has lost.
+
+    `_project_page` here re-queued the whole page on every re-cluster, and a
+    re-cluster follows every quiet gap of a live page: drains of 60-129 chunks
+    for a feed adding two, measured on the busy feed -- O(page) per mutation
+    where the trie's fold is O(delta). Planted `PLANT_PROJECT_WHOLE_PAGE`."""
+    if PLANT_PROJECT_WHOLE_PAGE[0]:
+        _project_page(workspace, url)
+        return -1
+    try:
+        from .projector import projector as _get
+        got = _get()
+        if got is None or not url:
+            return 0
+        now = _groups_of(workspace, url)
+        with got.lock:
+            held = set(got.by_url.get(url) or ())
+            placed = set(c for c in now if c in got.pos)
+        changed = set()
+        for cid, lead in now.items():
+            if before.get(cid) != lead:
+                changed.add(cid)
+                changed.update(x for x in (lead, before.get(cid)) if x)
+        fresh = set(now) - placed
+        gone = held - set(now)
+        want = (changed | fresh | gone)
+        if want:
+            got.enqueue(sorted(want))
+        ws = got.window_stats
+        ws["regroups"] = ws.get("regroups", 0) + 1
+        ws["regroup_queued"] = ws.get("regroup_queued", 0) + len(want)
+        ws["regroup_page_chunks"] = ws.get("regroup_page_chunks", 0) + len(now)
+        _project_dedup(workspace)
+        return len(want)
+    except Exception:                               # noqa: BLE001
+        return 0
+
+
+
 def _project_dedup(workspace) -> int:
     """Chunks on OTHER pages whose drawing a write changed (2026-10-29: one
     content, one drawn chunk, store-wide) -- a copy promoted when its lead
@@ -1105,10 +1159,11 @@ def _aggregate_due(workspace) -> None:
             asked = time.perf_counter()
             with _WORK_LOCK:
                 got_lock = time.perf_counter()
+                grouped = _groups_of(workspace, url)
                 workspace.aggregate(url)
             # Merge groups changed, so which chunk leads and which vector it
-            # speaks with changed too: the projector re-places the page.
-            _project_page(workspace, url)
+            # speaks with changed too: the projector re-places what changed.
+            _project_regrouped(workspace, url, grouped)
             _profile("aggregate", {
                 "lock_wait_ms": round((got_lock - asked) * 1000, 1),
                 "ms": round((time.perf_counter() - got_lock) * 1000, 1),

@@ -5957,6 +5957,88 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-13",
+      asks: "re-projection batched in a queue whose latency adapts to the umap updates (2026-10-30: to the ARRIVALS as well as the cost) -- a trickle (a live page's mutations) waits up to one drain's cost and its drains carry more chunks than with no window; a burst (a fresh page) never waits; planted window-always: the burst waits",
+      async run() {
+        // The verbatim (PLUGIN_GOAL, opening): "Re-projections over umaps can
+        // be batched in a queue at a latency that adapts to match the time
+        // scaling of the umap updates." A window that waited on every wake
+        // was measured on bursts (2026-10-24: 90 -> 95.6 chunks a drain, wait
+        // p50 70 -> 314 ms) and switched off. The arrivals were the missing
+        // input: a page's chunks come in one burst and are batched already;
+        // a live page's mutations come a few at a time, and only there can
+        // waiting gather company. Served fixtures, so nothing else streams.
+        const fixtures = await serveFixtures();
+        const plant = (name, on) => fetch(SIDECAR + "/plant", {
+          method: "POST", headers: { "content-type": "application/json", "X-Domvec-Client": "obsidian-plugin" },
+          body: JSON.stringify({ name, on }) });
+        const batching = async () => (await ask("/projector")).batching;
+        const visit = (url, ms) => evaluate(`(async () => {
+          ${PREP}
+          await land(${JSON.stringify(url)}, 20000);
+          await sleep(${ms});
+          return b.webview.getURL();
+        })()`, { timeout: ms + 60000 });
+        const arm = async (flags, url, ms) => {
+          for (const [k, on] of Object.entries(flags)) await plant(k, on);
+          // Settled first: a backlog (a restart's, the previous arm's tail)
+          // drains in 256s and would be scored as this arm's batching.
+          for (let i = 0; i < 60; i++) { if (!(await ask("/projector")).queue) break; await new Promise((r) => setTimeout(r, 1000)); }
+          await new Promise((r) => setTimeout(r, 3000));
+          const s0 = await batching();
+          await visit(url, ms);
+          const s1 = await batching();
+          const drains = s1.drains - s0.drains, batched = s1.batched - s0.batched;
+          const fresh = s1.waits_seen - s0.waits_seen;
+          const waits = fresh > 0 ? s1.waits_tail.slice(-fresh).sort((a, b) => a - b) : [];
+          const q = (p) => waits.length ? waits[Math.min(waits.length - 1, Math.floor(p * waits.length))] : null;
+          return { flags, drains, batched, per_drain: drains ? Math.round(batched / drains * 100) / 100 : null,
+                   windows: s1.windows - s0.windows, waited_ms: Math.round(s1.waited_ms - s0.waited_ms),
+                   wait_p50_ms: q(0.5), wait_p95_ms: q(0.95), cost_ms: s1.cost_ms, trickling: s1.trickling,
+                   recent_sizes: s1.recent_sizes,
+                   regroups: (s1.regroups || 0) - (s0.regroups || 0),
+                   regroup_queued: (s1.regroup_queued || 0) - (s0.regroup_queued || 0),
+                   regroup_page_chunks: (s1.regroup_page_chunks || 0) - (s0.regroup_page_chunks || 0) };
+        };
+        const start = await evaluate(`(async () => { ${PREP} return b.webview.getURL(); })()`, { timeout: 60000 });
+        const O = fixtures.origin, T = Date.now();
+        const trickle = (tag) => O + "/busy_feed.html?every=600&rounds=40&words=120&g13=" + tag + T;
+        const burst = (tag) => O + "/nav_heavy.html?g13=" + tag + T;
+        const out = {};
+        try {
+          // A re-cluster follows every quiet gap of a live page; planted, it
+          // re-queues the whole page (regroup_queued is then -1 a call: the
+          // count is the delta path's, so the planted arm reads its drains).
+          out.trickle_whole = await arm({ "project-whole-page": true, "adaptive-window": false, "window-always": false }, trickle("w"), 28000);
+          await plant("project-whole-page", false);
+          out.trickle_off = await arm({ "adaptive-window": false, "window-always": false }, trickle("off"), 28000);
+          out.trickle_on = await arm({ "adaptive-window": true, "window-always": false }, trickle("on"), 28000);
+          out.burst_on = await arm({ "adaptive-window": true, "window-always": false }, burst("on"), 12000);
+          out.burst_planted = await arm({ "adaptive-window": true, "window-always": true }, burst("p"), 12000);
+        } finally {
+          await plant("window-always", false);
+          await plant("adaptive-window", true);           // the default (2026-10-30)
+          await plant("project-whole-page", false);
+          await evaluate(`(async () => { ${PREP} await land(${JSON.stringify(start)}, 20000); return 1; })()`, { timeout: 60000 }).catch(() => 0);
+          out.purged = await tidyFixtures(fixtures.origin);
+          await fixtures.close();
+        }
+        const t0 = out.trickle_off, t1 = out.trickle_on;
+        return {
+          // The mechanism, which is what the verbatim asks: on a trickle the
+          // window opens and the median chunk waits no longer than a drain
+          // costs; a burst never waits; planted window-always, it does. NOT
+          // the benefit: trickle arms stream different volumes from run to
+          // run (514 vs 188 chunks), and chunks a drain went 3.95 -> 4.86 in
+          // one run and 7.67 -> 3.69 in the next -- reported, not scored.
+          pass: t1.windows > 0 && t1.wait_p50_ms <= Math.max(5, t1.cost_ms || 0)
+             && out.burst_on.windows === 0 && out.burst_planted.windows > 0
+             && out.burst_planted.wait_p50_ms > out.burst_on.wait_p50_ms,
+          evidence: out,
+        };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {
