@@ -5763,7 +5763,11 @@ export class GraphView extends ItemView {
       const f = graph[k].bind(graph);
       graph[k] = (...a: any[]) => { if (a.length) this.batchDirty = true; return f(...a); };
     }
-    this.batch.onPlaced = () => { this.batchDirty = true; };
+    // A picture landing in the atlas re-draws the nodes that show it, in
+    // place, once a frame -- not a full sync of every node per picture
+    // (2026-10-30, item 44: 57.8 ms at 59,941 nodes, once per picture while
+    // 67k pictured chunks streamed). Planted `plantSyncPerPicture`: as before.
+    this.batch.onPlaced = (src: string) => { if (this.plantSyncPerPicture) this.batchDirty = true; else this.placedSrcs.add(src); };
     // The scene and the graph's root group never move, but each recomposed
     // its matrix every frame -- and three.js then re-multiplies every child's
     // world matrix: 23k proxies, 2.8 s of every 6 s in chunk view (2026-10-11).
@@ -5862,11 +5866,44 @@ export class GraphView extends ItemView {
       // The safety net for a change nothing marked: every 250 ms on a small
       // graph, every 2 s on a large one -- a full sync of 22k nodes is ~25 ms,
       // and four a second were a tenth of every second (2026-10-11).
-      const net = g.graphData().nodes.length > 5000 && !this.plantSyncEveryFrame ? 2000 : 250;
-      if (!this.plantSyncEveryFrame && !this.batchDirty && !this.glides.size && now - this.batchSyncedAt < net) {
+      const big = g.graphData().nodes.length > 5000;
+      const net = big && !this.plantSyncEveryFrame ? 2000 : 250;
+      // On a large graph the net ROLLS (2026-10-30, item 44): each frame
+      // re-reads the looks of a slice sized so a whole pass still takes `net`,
+      // patched in place -- a full sync there was 57.8 ms every 2 s at 60k
+      // nodes, a hitch the reader sees as a stutter. A slot the patch cannot
+      // settle falls back to the full sync. Planted `plantNetFullSync`.
+      const rolling = big && !this.plantNetFullSync && !!this.batchSyncedAt;
+      if (!this.plantSyncEveryFrame && !this.batchDirty && !this.glides.size && (rolling || now - this.batchSyncedAt < net)) {
+        if (rolling) {
+          const ns = g.graphData().nodes;
+          const dtf = this.netAt ? Math.min(500, now - this.netAt) : 16;
+          this.netAt = now;
+          const take = Math.min(ns.length, Math.ceil(ns.length * dtf / net));
+          if (this.netCursor >= ns.length) this.netCursor = 0;
+          const slice = ns.slice(this.netCursor, this.netCursor + take);
+          this.netCursor += take;
+          const rs = g.nodeRelSize();
+          if (slice.length && this.batch.patch(slice, (n) => this.lookOf(n, rs, media)) > 0) { this.batchDirty = true; return; }
+          this.batchStats.rolled = (this.batchStats.rolled || 0) + slice.length;
+        }
+        if (this.placedSrcs.size) {
+          const srcs = this.placedSrcs; this.placedSrcs = new Set();
+          const hit = g.graphData().nodes.filter((n: any) => n.image && srcs.has(n.image.src));
+          const rs = g.nodeRelSize();
+          if (hit.length && this.batch.patch(hit, (n) => this.lookOf(n, rs, media)) > 0) { this.batchDirty = true; return; }
+          this.batchStats.pictures = (this.batchStats.pictures || 0) + hit.length;
+        }
+        if (this.posDirty) {
+          this.posDirty = false;
+          if (!this.batch.positions(g.graphData().nodes)) { this.batchDirty = true; return; }
+          this.batchStats.moved = (this.batchStats.moved || 0) + 1;
+        }
         this.batchStats.skipped++;
         return;
       }
+      this.posDirty = false;
+      this.placedSrcs.clear();
       this.batchDirty = false;
       this.batchSyncedAt = now;
       this.batchStats.synced++;
@@ -6899,10 +6936,22 @@ export class GraphView extends ItemView {
   frozenAncestors = 0;
   /** Something drawn changed since the last batch sync (see the frame loop). */
   private batchDirty = true;
+  /** The forces moved nodes since the last write (positions only). */
+  private posDirty = false;
+  /** Pictures placed in the atlas since the last frame. */
+  private placedSrcs = new Set<string>();
+  /** Planted (item 44): every engine tick a full sync, as before. */
+  plantFullSyncOnTick = false;
+  /** Planted (item 44): every picture placed a full sync, as before. */
+  plantSyncPerPicture = false;
+  /** Planted (item 44): the large graph's safety net a full sync every 2 s, as before. */
+  plantNetFullSync = false;
+  private netCursor = 0;
+  private netAt = 0;
   private batchSyncedAt = 0;
   /** Planted (2026-10-11): the batch rewritten every frame, changed or not. */
   plantSyncEveryFrame = false;
-  batchStats = { synced: 0, skipped: 0 };
+  batchStats = { synced: 0, skipped: 0, moved: 0, pictures: 0, rolled: 0 };
   /** Planted (2026-10-11): pick proxies recompose their matrix every frame. */
   plantProxyAutoMatrix = false;
   /** Planted (2026-10-11): proxies take part in three.js's per-frame world-matrix pass. */
@@ -8087,7 +8136,10 @@ export class GraphView extends ItemView {
     // its element, so the field is put back AFTER the graph is built.
     if (this.searchField && !canvas.contains(this.searchField.el)) canvas.appendChild(this.searchField.el);
     this.calmFrom = performance.now() + 6000;
-    graph.onEngineTick(() => { this.batchDirty = true; this.govern(); });
+    // A tick MOVES nodes; it changes no look. Positions only, into the slots
+    // the last full sync laid out (`SceneBatch.positions`); planted
+    // `plantFullSyncOnTick`: a full sync per tick, as before.
+    graph.onEngineTick(() => { if (this.plantFullSyncOnTick) this.batchDirty = true; else this.posDirty = true; this.govern(); });
     this.startBatch(graph, media);
     // The profiler's listener reads the scene through this, so "visible"
     // is decided by what is drawn and not by what `absorb` returned.

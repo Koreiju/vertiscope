@@ -7287,6 +7287,52 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-286",
+      asks: "the full chunk view runs in real time while its layout moves (2026-10-30, item 44): over 12 s of a reheated chunk-view layout no frame pays a full sync of every node -- a tick writes positions only, a picture landing patches its own nodes, and the safety net rolls a slice a frame -- and a positions write costs under half a full sync; planted (plantFullSyncOnTick + plantNetFullSync + plantSyncPerPicture, the old paths) full syncs come back",
+      async run() {
+        const got = await evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
+          if (!v || !v.graph || !v.batch) return { error: "no graph" };
+          const wasChunk = v.level === "chunk";
+          const toggle = () => [...v.contentEl.querySelectorAll("button")].find((x) => x.textContent === (v.level === "chunk" ? "chunks" : "pages"))?.click();
+          if (!wasChunk) {
+            toggle();
+            for (let i = 0; i < 120; i++) { await sleep(500); if (v.level === "chunk" && v.graph && v.graph.graphData().nodes.length > 5000) break; }
+            await sleep(8000);
+          }
+          const g = v.graph;
+          const set = (on) => { v.plantFullSyncOnTick = on; v.plantNetFullSync = on; v.plantSyncPerPicture = on; };
+          const arm = async (planted) => {
+            set(planted);
+            let full = 0, fullMs = 0;
+            const orig = v.batch.sync.bind(v.batch);
+            v.batch.sync = (...a) => { const t = performance.now(); const r = orig(...a); full++; fullMs += performance.now() - t; return r; };
+            const s0 = { ...v.batchStats };
+            try { g.d3ReheatSimulation(); await sleep(12000); }
+            finally { v.batch.sync = orig; set(false); }
+            return { full_syncs: full, full_ms_avg: full ? Math.round(fullMs / full * 10) / 10 : null,
+                     moved: v.batchStats.moved - s0.moved, rolled: v.batchStats.rolled - s0.rolled };
+          };
+          const out = { nodes: g.graphData().nodes.length };
+          try {
+            out.clean = await arm(false);
+            out.planted = await arm(true);
+            // One positions write and one full sync, timed back to back.
+            const t0 = performance.now(); const ok = v.batch.positions(g.graphData().nodes); out.positions_ms = Math.round((performance.now() - t0) * 10) / 10; out.positions_ok = ok;
+            const t1 = performance.now(); v.batchDirty = true; v.batchSync(); out.full_ms = Math.round((performance.now() - t1) * 10) / 10;
+          } finally {
+            if (!wasChunk) toggle();
+          }
+          return out;
+        })()`, { timeout: 180000 });
+        if (!got || got.error) return { pass: false, evidence: got };
+        return { pass: got.nodes > 5000 && got.clean.full_syncs === 0 && got.clean.rolled > 0 && got.positions_ok
+                   && got.positions_ms < got.full_ms / 2 && got.planted.full_syncs >= 3,
+                 evidence: got };
+      },
+    },
+    {
       id: "G-273",
       asks: "the user agent's views and keys: in MAP view a hover moves nothing and in EGO view it moves the camera; paused, no motion; Shift +5%, Ctrl -5%; Z, X and M do nothing (deprecated); arrows turn the camera about the focus (distance kept) and Q/R roll it about the view normal (view kept) -- 3-DOF rotation; each key held lit in the agent's state while pressed (its readout awaits the dialect card, G-274); planted (pointer away) the keys do nothing",
       async run() {

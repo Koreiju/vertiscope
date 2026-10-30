@@ -118,6 +118,21 @@ gives the cell its place:
 
 ## 5. The 3D side of the reservoir
 
+- **One representation, two places** (item 37, 2026-10-30: "2D/3D representations are shared,
+  just differing on where they live in either interface"; UR R.1, O.19). A computation-graph
+  node is ONE record -- its slate text, its `{ref}` edges, its fold state, its current readout.
+  The 2D panel and the 3D node are two PLACEMENTS of that record, not two models kept in sync:
+  editing either writes the record, and the other redraws from it. Selection and view decide
+  which placement is shown (item 42): stuck, it is a 2D panel; in flight, a 3D node.
+- **UMAP over the ego reservoir** (item 43: "UMAP happens on the ego reservoir for all
+  computation graph nodes as artifacts of various kinds"). Every computation-graph node -- a
+  cell, a slate, a readout, the cockpit, a search and its results -- is an ARTIFACT with an
+  embedding (its rendered text through the same encoder the chunks use), placed by the same
+  global ParametricUMAP `transform` as pages and chunks (G-270's global scope). The reservoir is
+  therefore not a separate picture: its nodes sit among the web and vault chunks they read and
+  write, and a readout lands beside what it resembles. New nodes are a delta on the stream
+  (online `transform`, no refit).
+
 - **Readouts at the perimeter** (UR P.3–P.7, R.4; DM §6.6.1, §7.8.3): a node with no succeeding
   `{ref}` is terminal; its settled rendering is indexed as a chunk and placed on the projector's
   outer shell, asynchronously, as a delta on the existing stream. Hidden-state nodes never
@@ -140,6 +155,12 @@ gives the cell its place:
   throttle and independent of zoom, braking to a hard floor; the wheel zooms on its own.
   Motion keys act in the camera's own frame (item 23): W/S/A/D, arrows turning about the focus,
   Q/R rolling about the view normal. Shift/Ctrl throttle. Z, X, M deprecated (item 28).
+- **Selective, and at the reader's zoom** (items 38–39, 46–48, 2026-10-30; built and confirmed
+  live, G-285). A flight stops at the reader's OWN zoom distance (never nearer than the floor,
+  nor nearer than the node fits the view) and ENDS there: the target is released and nothing
+  moves the camera until the next hover or key. A drag on the canvas is a hand on the stick.
+  A hovered browser panel (a fresh target per poll) is matched by id, so the camera goes where
+  the hovered browser panel is. The wheel's floor keeps the zoomed node in view.
 - **The cockpit is a node, not a HUD** (items 10, 24–25): the deprecated strip becomes ONE slate
   in the dialect — collapsed, a circle reading `ego`; internalized, its fields:
 
@@ -167,6 +188,52 @@ gives the cell its place:
   query's results, or anchored nodes. Play flies the craft through them at the throttle (the
   rollout's play/pause, UR E.7, applied to the craft); pause holds at the current target.
 
+## 6b. `search` — the first computation-graph artifact (items 30–36)
+
+The reader's words (2026-10-29): the search input is "a part of the controls"; `search` is "one
+of the first computation graph artifacts". It is where the three forms meet, so it is built
+first and each later artifact copies its shape.
+
+**The slate** (panel form, in the cockpit — item 30):
+
+```
+search
+	query	{}
+	db	true
+	duckduckgo	false
+	k	8
+	results	{results}
+```
+
+**The minimal Python** it stands for (item 32), bound in every kernel beside `Database`:
+
+```python
+search(query, db=True, duckduckgo=False, k=8)
+```
+
+`db` runs `Database.search` (the app's own retrieval); `duckduckgo` routes the query through the
+BROWSER CELL (G-195's web search, captured and chunked like any page) — never a scraper of its
+own; both merge by rank. The cell's readout is `results`, an iterable of `{ref}`s.
+
+**Fields by type** (item 33): a boolean is a TOGGLE — a two-state node in graph form, a toggle
+field when hovered in panel form; a continuous value (`k`) gets a slider in the dialect (one
+slider, inside the slate — not the deprecated strip). A string (`query`) is the field itself.
+
+**Two kinds of link, kept apart** (item 34; UR T.7): the `{query}` and `{results}` braces are the
+dialect's markdown syntax (internalize/externalize, rank-1 folds); the call's own binding to
+`Database` and the browser cell is a CODE link (resolved by the kernel, shown in the code view).
+A gesture on one never acts on the other.
+
+**Signal flow governs layout** (item 35; UR O.9–O.10, P, R.7): the order is `query` → toggles →
+call → `results` → their nodes; the aggregate panels lay out in that order in 2D, and in 3D the
+results are readouts at the perimeter, revealed as the rollout walks them.
+
+**The camera** (item 31): a hovered result is flown to (selectively, §6); with none hovered,
+the top-most ranked result in view of the results' scroll is.
+
+**Gestures are local** (item 36): a click on an ancestor expands only its rank-1 links, in both
+forms; nothing else unfolds.
+
 ## 7. Deprecated, and why
 
 | what | by | replaced by |
@@ -179,6 +246,9 @@ gives the cell its place:
 
 ## 8. Build order — procedural, each step checked live with a planted arm
 
+0. **Defects first, jointly** (items 38–48, 2026-10-30): selective ego motion (G-285, done);
+   the full chunk view in real time (G-286: positions-only ticks, per-picture patches, a
+   rolling safety net); url nodes 5x (G-269).
 1. **Slate grammar** (`domvec/slate.py`): print(record) → text, parse(text) → record + `{ref}`
    edges; round-trip identity on names with spaces, `name {}`, kv-vs-multiline, typed vs
    type-stripped (BS §11.3). Tests golden; planted: a colon-splitting parser fails them.
@@ -187,7 +257,8 @@ gives the cell its place:
    circle. Live check per gesture.
 3. **Cells as nodes**: `{ref}` binding into the kernel; `FORWARD_MAPPED_TO` recorded per run;
    the three base objects in the namespace (Agent waits on the model download).
-4. **The cockpit node** (§6): replaces the deprecated strip; keys as `{keys}` samples.
+4. **The cockpit node** (§6) with **`search` in it** (§6b): replaces the deprecated strip; keys
+   as `{keys}` samples; `search(...)` bound in the kernel.
 5. **Graph form**: the 2D view (question 1) with circular nodes, undirected lines, node-count
    parity with the slate.
 6. **Readout perimeter and bisector** in 3D; rank-dominance collapse generalised.
@@ -195,6 +266,9 @@ gives the cell its place:
 8. **Halo transport** along cone rays.
 
 ## 9. Yours to decide
+
+*Item 37 narrows questions 1 and 5: the 2D and 3D forms are one record in two places, so the
+answer to "where" is a placement, not a second model.*
 
 1. **Where graph form lives.** An Obsidian view beside the 3D graph (as mortegon put it, GW §6),
    Obsidian's own Canvas (cards and edges native, but its file format owns the layout), or

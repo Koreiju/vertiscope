@@ -287,7 +287,7 @@ export class SceneBatch {
   plantNoMove = false;
   loadStats = { started: 0, placed: 0, failed: 0, maxInFlight: 0 };
   /** Told when a picture lands in the atlas: what is drawn has changed. */
-  onPlaced: (() => void) | null = null;
+  onPlaced: ((src: string) => void) | null = null;
   private nextCell = 0;
   private colours = new Map<string, THREE.Color>();
   lastStats = { drawCalls: 3, opaque: 0, translucent: 0, glass: 0, spheres: 0, pending_pictures: 0, lines: 0, atlasCells: 0, atlasFull: 0, syncMs: 0 };
@@ -530,7 +530,7 @@ export class SceneBatch {
       small.dispose();
       this.cells.set(src, cell);
       this.loadStats.placed++;
-      this.onPlaced?.();
+      this.onPlaced?.(src);
     } finally {
       if (img && typeof (img as any).close === "function") (img as any).close();
       this.pump();
@@ -546,6 +546,8 @@ export class SceneBatch {
     this.grow(this.glass, nodes.length);
     let no = 0, nt = 0, ng = 0, spheres = 0, pendingPics = 0;
     this.slots = [[], [], []];
+    this.syncedNodes = nodes; this.syncedCount = nodes.length;
+    const drawn: any[] = [];
     for (const n of nodes) {
       if (!Number.isFinite(n.x) || !Number.isFinite(n.y)) continue;
       const lk = look(n);
@@ -598,6 +600,7 @@ export class SceneBatch {
       const s = l.source, t = l.target;
       if (typeof s !== "object" || typeof t !== "object" || !s || !t) continue;
       if (!Number.isFinite(s.x) || !Number.isFinite(t.x)) continue;
+      drawn.push(l);
       this.linePos.setXYZ(nl * 2, s.x, s.y, s.z || 0);
       this.linePos.setXYZ(nl * 2 + 1, t.x, t.y, t.z || 0);
       // 3d-force-graph's own link colour (#f0f0f0) at the pane's linkOpacity;
@@ -617,8 +620,56 @@ export class SceneBatch {
     this.lines.geometry.setDrawRange(0, nl * 2);
     this.linePos.needsUpdate = true;
     this.lineCol.needsUpdate = true;
+    this.drawnLinks = drawn;
     this.lastStats = { drawCalls: ng ? 4 : 3, opaque: no, translucent: nt, glass: ng, spheres, pending_pictures: pendingPics, lines: nl, atlasCells: this.nextCell,
                        atlasFull: this.lastStats.atlasFull, syncMs: Math.round((performance.now() - t0) * 100) / 100 };
+  }
+
+  /** What the last full sync laid out: the node array and its length, and
+   *  the edges in the order their vertices were written. */
+  private syncedNodes: any[] | null = null;
+  private syncedCount = 0;
+  private drawnLinks: any[] = [];
+  positionStats = { runs: 0, refused: 0, nodes: 0, last_ms: 0 };
+
+  /**
+   * A POSITION change only -- the forces ticked -- written into the slots and
+   * edge vertices the last full sync laid out, with no look computed
+   * (2026-10-30, item 44: "memory degradation/latency lag significantly block
+   * smooth functionality in the full chunk view"). Measured at 59,941 nodes:
+   * a full sync 57.8 ms p50, 33 ms of it the look of every node, and every
+   * engine tick asked for one -- under 17 frames a second while the layout
+   * moved. False when the layout is not the one last synced (a node added or
+   * removed, a new array): that needs the full sync.
+   */
+  positions(nodes: any[]): boolean {
+    if (nodes !== this.syncedNodes || nodes.length !== this.syncedCount) { this.positionStats.refused++; return false; }
+    const t0 = performance.now();
+    let k = 0;
+    // Straight into the typed arrays: `setXYZ` is a checked call per vertex,
+    // and at 60k nodes and 50k edges it cost 26.7 ms of the pass.
+    const off = [this.opaque.offset.array, this.clear.offset.array, this.glass.offset.array] as Float32Array[];
+    const slots = this.slots;
+    for (let j = 0; j < nodes.length; j++) {
+      const n = nodes[j], bm = n.__bm, bi = n.__bi;
+      if (bi === undefined || slots[bm]?.[bi] !== n) continue;
+      const x = n.x, y = n.y;
+      if (!Number.isFinite(x) || !Number.isFinite(y)) { this.positionStats.refused++; return false; }
+      const a = off[bm], o = bi * 3;
+      a[o] = x; a[o + 1] = y; a[o + 2] = n.z || 0;
+      k++;
+    }
+    const lp = this.linePos.array as Float32Array, links = this.drawnLinks;
+    for (let j = 0, o = 0; j < links.length; j++, o += 6) {
+      const s = links[j].source, t = links[j].target;
+      lp[o] = s.x; lp[o + 1] = s.y; lp[o + 2] = s.z || 0;
+      lp[o + 3] = t.x; lp[o + 4] = t.y; lp[o + 5] = t.z || 0;
+    }
+    for (const m of [this.opaque, this.clear, this.glass]) m.offset.needsUpdate = true;
+    this.linePos.needsUpdate = true;
+    this.positionStats = { runs: this.positionStats.runs + 1, refused: this.positionStats.refused, nodes: k,
+                           last_ms: Math.round((performance.now() - t0) * 100) / 100 };
+    return true;
   }
 
   /**
