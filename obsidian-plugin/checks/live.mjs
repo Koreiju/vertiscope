@@ -7479,6 +7479,62 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-280",
+      asks: "the cockpit is a node (items 10, 24, 30-33, 36-37): the ego slate opens as a vault note in the slate class (black fill, serif white); its throttle text sets the agent and Shift writes the new throttle and the lit key back into the text; its search query runs the search with the slate's k; a right-click on {results} internalizes the rank-1 rows and a hover on a row asks a flight to its node; a click on db's value toggles it and off clears the store's ranking; planted (cockpit.plantUnbound) the text binds nothing either way",
+      async run() {
+        const got = await evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const p = app.plugins.getPlugin("domvec-bridge"), c = p.cockpit;
+          const g = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
+          if (!c || !g || !g.searchField) return { error: "no cockpit or graph" };
+          const v = await c.open(); await sleep(1200);
+          if (!v) return { error: "cockpit did not open" };
+          const ed = v.editor, saved = ed.getValue(), thr0 = g.agent.throttle, over0 = g.pointerOver, fold0 = c.resultsOpen;
+          const line = (k) => ed.getValue().split(String.fromCharCode(10)).findIndex((l) => l.trim().split(String.fromCharCode(9))[0] === k);
+          const valOf = (k) => { const l = ed.getLine(line(k)); const i = l.lastIndexOf(String.fromCharCode(9)); return l.slice(i + 1); };
+          const setVal = (k, val) => { const i = line(k), l = ed.getLine(i), at = l.lastIndexOf(String.fromCharCode(9)) + 1; ed.replaceRange(val, { line: i, ch: at }, { line: i, ch: l.length }); };
+          const fieldOf = (k) => { const i = line(k), l = ed.getLine(i), at = l.lastIndexOf(String.fromCharCode(9)) + 1; return { line: i, valueFrom: at, value: l.slice(at), key: k }; };
+          const arm = async (planted) => {
+            c.plantUnbound = planted;
+            const out = { planted };
+            const leaf = c.leaf(), cs = getComputedStyle(leaf.view.contentEl.querySelector(".cm-content"));
+            out.slate = leaf.containerEl.classList.contains("domvec-slate") && /Georgia|serif/.test(cs.fontFamily) && cs.color === "rgb(255, 255, 255)";
+            g.agent.setThrottle(0.2); await sleep(600);
+            setVal("throttle", "40"); await sleep(500);
+            out.agent_throttle = Math.round(g.agent.throttle * 100);
+            g.pointerOver = true;
+            window.dispatchEvent(new KeyboardEvent("keydown", { key: "Shift", bubbles: true }));
+            await sleep(700);
+            out.text_throttle = valOf("throttle"); out.text_last = valOf("last");
+            setVal("query", "radix tree"); await sleep(2500);
+            out.query = g.searchField.query; out.k = g.searchField.k;
+            c.resultsOpen = false; c.toggleResults(); await sleep(700);
+            out.rows = c.resultRows().length;
+            const f0 = g.focusStats.asked; c.hoverRow(2); await sleep(300); c.hoverRow(0);
+            out.row_flight = g.focusStats.asked - f0;
+            c.toggle(fieldOf("db")); await sleep(800);
+            out.db = valOf("db"); out.query_db_off = g.searchField.query;
+            return out;
+          };
+          try {
+            return { clean: await arm(false), planted: await arm(true) };
+          } finally {
+            c.plantUnbound = false; g.pointerOver = over0; c.resultsOpen = fold0;
+            c.hoverRow(0);
+            ed.setValue(saved); await sleep(500);
+            g.agent.setThrottle(thr0); g.searchField.input.value = ""; await g.searchField.run();
+          }
+        })()`, { timeout: 90000 });
+        if (!got || got.error) return { pass: false, evidence: got };
+        const c = got.clean, p = got.planted;
+        return { pass: c.slate && c.agent_throttle === 40 && c.text_throttle === "45" && /throttle up/.test(c.text_last)
+                   && c.query === "radix tree" && c.k === 8 && c.rows >= 1 && c.row_flight >= 1
+                   && c.db === "false" && c.query_db_off === ""
+                   && p.agent_throttle === 20 && p.text_throttle === "40",
+                 evidence: got };
+      },
+    },
+    {
       id: "G-273",
       asks: "the user agent's views and keys: in MAP view a hover moves nothing and in EGO view it moves the camera; paused, no motion; Shift +5%, Ctrl -5%; Z, X and M do nothing (deprecated); arrows turn the camera about the focus (distance kept) and Q/R roll it about the view normal (view kept) -- 3-DOF rotation; each key held lit in the agent's state while pressed (its readout awaits the dialect card, G-274); planted (pointer away) the keys do nothing",
       async run() {

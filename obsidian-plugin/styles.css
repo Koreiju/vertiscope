@@ -1019,3 +1019,26 @@ button.domvec-run-fence:hover {
   box-shadow: 0 0 8px 2px rgba(127, 208, 255, 0.7);
 }
 .domvec-agent-action { font-size: 10px; color: #bbb; }
+
+/* The black slate (G-278's visual; UR S.4, BS §0): black fill, a thin silver
+   border, serif white text, no chrome. On any note with `domvec: slate`. */
+.domvec-slate .view-content { background: #000; border: 1px solid #b8b8b8; }
+.domvec-slate .cm-editor, .domvec-slate .cm-scroller, .domvec-slate .markdown-source-view,
+.domvec-slate .markdown-preview-view { background: #000; }
+.domvec-slate .cm-content, .domvec-slate .markdown-preview-view {
+  font-family: Georgia, "Times New Roman", serif; color: #fff; caret-color: #fff; }
+.domvec-slate .cm-line { color: #fff; }
+.domvec-slate .inline-title, .domvec-slate .metadata-container, .domvec-slate .frontmatter-container,
+.domvec-slate .cm-line.HyperMD-frontmatter, .domvec-slate .domvec-cellbar { display: none; }
+.domvec-slate .cm-active, .domvec-slate .cm-activeLine { background: transparent; }
+/* The dialect's one slider: over a hovered number, gone when left (item 33). */
+.domvec-slate-slider { position: fixed; z-index: 1000; padding: 4px 8px; background: #000;
+  border: 1px solid #b8b8b8; }
+.domvec-slate-slider input { width: 120px; accent-color: #ddd; }
+/* The tree is tabs: narrow stops and no wrapping, or a key and its value break
+   apart in a sidebar (seen 2026-10-30: "query radix / tree"). */
+.domvec-slate .cm-content, .domvec-slate .cm-line { tab-size: 3; -moz-tab-size: 3; white-space: pre; }
+.domvec-slate .cm-sizer { max-width: none !important; }
+.domvec-slate .cm-scroller { overflow-x: auto; font-size: 14px; }
+.domvec-slate .cm-sizer, .domvec-slate .cm-contentContainer { margin-left: 0 !important; margin-right: 0 !important; }
+.domvec-slate .cm-content { padding-left: 12px !important; }

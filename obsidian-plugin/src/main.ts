@@ -54,6 +54,7 @@ import { ChunkPayload, DEFAULTS, DomvecSettings, EnactResult, KernelReply }
   from "./types";
 import { VaultLinks } from "./vaultlinks";
 import { PANEL_VIEW, PanelView } from "./panelview";
+import { Cockpit } from "./cockpit";
 
 export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost {
   settings: DomvecSettings = DEFAULTS;
@@ -236,9 +237,15 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     // A chunk note's two halves, one at a time (`D-3`): `chunkhalves.ts`.
     this.registerEditorExtension(chunkHalves());
     for (const ev of ["layout-change", "file-open", "active-leaf-change"] as const) {
-      this.registerEvent((this.app.workspace as any).on(ev, () => this.applyHalves()));
+      this.registerEvent((this.app.workspace as any).on(ev, () => { this.applyHalves(); this.cockpit.decorate(); }));
     }
-    this.registerEvent(this.app.metadataCache.on("changed", () => this.applyHalves()));
+    this.registerEvent(this.app.metadataCache.on("changed", () => { this.applyHalves(); this.cockpit.decorate(); }));
+    // The cockpit (G-280): the `ego` slate's fields bound both ways to the
+    // user agent and the search -- the text read on every edit, the agent's
+    // own changes written back a few times a second.
+    this.registerEvent(this.app.workspace.on("editor-change", (_e: any, info: any) => this.cockpit.onEdit(info?.file || null)));
+    this.registerInterval(window.setInterval(() => this.cockpit.sync(), 250));
+    this.addCommand({ id: "domvec-cockpit", name: "Open the cockpit (ego slate)", callback: () => { void this.cockpit.open(); } });
     // The structural-cell strip at the bottom of every note (`P-M4`); put
     // back whenever Obsidian rebuilds a renderer under it.
     this.registerInterval(window.setInterval(() => this.applyCellBars(), 1500));
@@ -598,6 +605,17 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
    * all — an output block scrolled off screen is indistinguishable from a button
    * that did nothing.
    */
+  /** The `ego` slate, bound to the agent and the search (G-280). */
+  cockpit: Cockpit = new Cockpit(this.app, {
+    graph: () => this.app.workspace.getLeavesOfType(GRAPH_VIEW)[0]?.view as any,
+    webSearch: (q: string) => {
+      const browser = this.app.workspace.getLeavesOfType(BROWSER_VIEW)[0]?.view as BrowserView | undefined;
+      if (!browser || typeof browser.searchWeb !== "function") return false;
+      void browser.searchWeb(q);
+      return true;
+    },
+  });
+
   /** A cell's asks of the app, carried out (G-288). */
   askStats = { web: 0, last: "" };
 
@@ -738,6 +756,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
   }
 
   onunload() {
+    this.cockpit?.unload();
     this.surfaces.clear();
     // The view's own `onClose` releases the WebGL context; detaching leaves
     // is Obsidian's job and doing it here is explicitly discouraged, because

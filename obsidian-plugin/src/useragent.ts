@@ -111,7 +111,8 @@ export class UserAgent {
   plantHoldTarget = false;
   private hud: HTMLElement | null = null;
   private lit = new Map<string, number>();
-  private lastAction = "";
+  /** The last key and the action it took (item 19), as the cockpit shows it. */
+  lastAction = "";
 
   constructor(private host: AgentHost) {
     try {
