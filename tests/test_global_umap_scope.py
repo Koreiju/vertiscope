@@ -318,3 +318,81 @@ def test_a_kept_fit_in_another_scope_is_refitted_once(monkeypatch):
     assert not proj.scope_switch_due()
     proj.scope_switches, proj.scope = 0, "global"
     assert not proj.scope_switch_due()
+
+
+def _capture_alongside(monkeypatch, kind, planted):
+    """update_subset's graph capture while another thread uses the GPU:
+    `stream` -- what the embedder (llama.cpp) does, work on its own stream and
+    a sync of it, taking no lock of ours; `transform` -- a placement, the
+    net's forward pass and a copy to the CPU."""
+    import threading
+    import torch
+    if planted:
+        monkeypatch.setenv("DOMVEC_PLANT_SHARED_CAPTURE", "1")
+    else:
+        monkeypatch.delenv("DOMVEC_PLANT_SHARED_CAPTURE", raising=False)
+    m, X, page_of = _fitted()
+    probe = _fitted()[0]                     # a second net, as the stream's copy is
+    errors, stop = [], threading.Event()
+    pre = torch.ones(4096, device="cuda")
+
+    def other():
+        s = torch.cuda.Stream()
+        while not stop.is_set():
+            try:
+                if kind == "stream":
+                    with torch.cuda.stream(s):
+                        pre.mul_(1.0)
+                    s.synchronize()
+                else:
+                    probe.transform(X[:256])
+            except Exception as exc:                # noqa: BLE001
+                errors.append(str(exc)[:120])
+    t = threading.Thread(target=other, daemon=True)
+    t.start()
+    graph_errors = 0
+    try:
+        for k in range(12):
+            rows = np.flatnonzero(page_of == (k % 8))
+            try:
+                m.update_subset(X[rows] + 0.01 * (k + 1), rows, steps=60)
+            except Exception as exc:                # noqa: BLE001
+                errors.append("update: " + str(exc)[:100])
+                break
+            graph_errors += bool(m.stats.get("graph_error"))
+            m.stats.pop("graph_error", None)
+    finally:
+        stop.set()
+        t.join(5)
+    try:
+        torch.cuda.synchronize()
+    except Exception as exc:                        # noqa: BLE001
+        errors.append("after: " + str(exc)[:100])
+    return errors, graph_errors
+
+
+@needs_cuda
+@pytest.mark.parametrize("kind", ["stream", "transform"])
+def test_the_graph_capture_shares_the_gpu_with_other_threads(monkeypatch, kind):
+    """2026-10-25: six sidecar aborts (exit 3) in 21 minutes -- the embedder's
+    stream sync on another thread hit "operation not permitted when stream is
+    capturing" while update_subset captured its step, and ggml aborts on any
+    CUDA error. Captured thread-locally and under GPU_LOCK (which `transform`
+    takes too), neither kind of neighbour collides. Planted
+    (`DOMVEC_PLANT_SHARED_CAPTURE=1`: global mode, no lock): both do. Run in
+    a FRESH process each, because a collided capture leaves CUDA unusable."""
+    import subprocess, sys
+    code = ("import sys; sys.path.insert(0, 'tests'); import pytest, os; "
+            "from test_global_umap_scope import _capture_alongside; import types; "
+            "mp = types.SimpleNamespace(setenv=lambda k, v: os.environ.__setitem__(k, v), "
+            "delenv=lambda k, raising=False: os.environ.pop(k, None)); "
+            "e, g = _capture_alongside(mp, %r, %s); print('RESULT', len(e), g, e[:2])")
+    out = {}
+    for planted in (False, True):
+        r = subprocess.run([sys.executable, "-c", code % (kind, planted)], capture_output=True, text=True,
+                           timeout=300, stdin=subprocess.DEVNULL, cwd=str(__import__("pathlib").Path(__file__).resolve().parents[1]))
+        line = [l for l in r.stdout.splitlines() if l.startswith("RESULT")]
+        out[planted] = (r.returncode, line[0] if line else r.stderr[-400:])
+    clean, planted_ = out[False], out[True]
+    assert clean[0] == 0 and clean[1].startswith("RESULT 0 0"), clean
+    assert planted_[0] != 0 or not planted_[1].startswith("RESULT 0 0"), planted_

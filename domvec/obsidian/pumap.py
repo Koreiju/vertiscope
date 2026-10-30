@@ -33,6 +33,9 @@ module falls back to the CPU when no GPU is present.
 """
 from __future__ import annotations
 
+import os
+from contextlib import nullcontext
+import threading
 import time
 from typing import Dict, Optional
 
@@ -47,6 +50,22 @@ def _device():
 #: Called between optimiser steps when set: background training stands aside
 #: for foreground work (the sidecar sets it to yield to searches).
 TRAIN_YIELD = [None]
+
+#: Held while a step is CAPTURED into a CUDA graph, and by every `transform`.
+#: A capture makes the GPU unsharable for its few milliseconds: work another
+#: thread allocates and then synchronizes -- a placement transform, which is
+#: a forward pass and a copy to the CPU -- invalidates it ("operation failed
+#: due to a previous error during capture"), and in the default "global"
+#: mode so does the embedder's stream sync, which ggml answers with abort():
+#: six sidecar exits (code 3) in 21 minutes on 2026-10-25. The replays that
+#: follow a capture are ordinary launches and run outside it.
+GPU_LOCK = threading.RLock()
+
+
+def _shared_capture_planted() -> bool:
+    """`DOMVEC_PLANT_SHARED_CAPTURE=1`: the capture as it was -- global mode,
+    no lock -- for the arm that shows the collision."""
+    return os.environ.get("DOMVEC_PLANT_SHARED_CAPTURE") == "1"
 
 class ParametricUMAP:
     """A small MLP trained on UMAP's objective; `transform` is its forward pass."""
@@ -99,7 +118,7 @@ class ParametricUMAP:
             raise RuntimeError("not fitted")
         self.net.eval()
         out = []
-        with torch.no_grad():
+        with (nullcontext() if _shared_capture_planted() else GPU_LOCK), torch.no_grad():
             for lo in range(0, len(X), 8192):
                 xb = torch.as_tensor(np.asarray(X[lo:lo + 8192], dtype=np.float32), device=_device())
                 out.append(self.net(xb).cpu().numpy())
@@ -436,22 +455,35 @@ class ParametricUMAP:
             # eagerly on a side stream as torch's capture recipe requires,
             # and are real steps.
             try:
-                sh, st_, sn = Hs[0].clone(), Ts[0].clone(), NEG[0].clone()
-                sl = LI[0].clone() if LI is not None else None
-                side = torch.cuda.Stream()
-                side.wait_stream(torch.cuda.current_stream())
-                with torch.cuda.stream(side):
-                    for done in range(3):
-                        opt.zero_grad(set_to_none=True)
-                        loss_of(Hs[done], Ts[done], NEG[done], LI[done] if LI is not None else None).backward()
+                # The warm-up and the capture under GPU_LOCK; the replays
+                # after it are ordinary launches and run outside.
+                with (nullcontext() if _shared_capture_planted() else GPU_LOCK):
+                    sh, st_, sn = Hs[0].clone(), Ts[0].clone(), NEG[0].clone()
+                    sl = LI[0].clone() if LI is not None else None
+                    side = torch.cuda.Stream()
+                    side.wait_stream(torch.cuda.current_stream())
+                    with torch.cuda.stream(side):
+                        for done in range(3):
+                            opt.zero_grad(set_to_none=True)
+                            loss_of(Hs[done], Ts[done], NEG[done], LI[done] if LI is not None else None).backward()
+                            opt.step()
+                        done = 3
+                    torch.cuda.current_stream().wait_stream(side)
+                    g = torch.cuda.CUDAGraph()
+                    opt.zero_grad(set_to_none=True)
+                    # THREAD-LOCAL capture. The default ("global") forbids
+                    # unsafe CUDA calls from EVERY thread while this one
+                    # captures, and the embedder (GPT4All's llama.cpp)
+                    # synchronizes its own stream on another thread:
+                    # "operation not permitted when stream is capturing" in
+                    # ggml_backend_cuda_synchronize, then GGML_ASSERT,
+                    # abort(), exit 3 -- six sidecar crashes in 21 minutes
+                    # once the global scope became the default (2026-10-25).
+                    # Planted `DOMVEC_PLANT_SHARED_CAPTURE=1`.
+                    mode = "global" if _shared_capture_planted() else "thread_local"
+                    with torch.cuda.graph(g, capture_error_mode=mode):
+                        loss_of(sh, st_, sn, sl).backward()
                         opt.step()
-                    done = 3
-                torch.cuda.current_stream().wait_stream(side)
-                g = torch.cuda.CUDAGraph()
-                opt.zero_grad(set_to_none=True)
-                with torch.cuda.graph(g):
-                    loss_of(sh, st_, sn, sl).backward()
-                    opt.step()
                 for done in range(3, steps):
                     sh.copy_(Hs[done]); st_.copy_(Ts[done]); sn.copy_(NEG[done])
                     if sl is not None:
