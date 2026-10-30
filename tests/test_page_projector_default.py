@@ -84,10 +84,15 @@ def test_a_drawn_chunk_sits_in_its_own_pages_neighbourhood():
 
 
 def test_planted_raw_placement_scatters_pages(monkeypatch):
+    # Spread 4.0, both arms on the SAME rows. At 2.0 the planted share sat on
+    # the line -- 0.865 alone, 0.96 after another test had loaded its numeric
+    # backend first (2026-10-30, one failed full run) -- so the arm could pass
+    # or fail by environment. At 4.0 the raw placement scatters clearly
+    # (0.65-0.68 in both environments) and the neighbourhood keeps 1.0.
+    rows = _rows(spread=4.0)
+    assert _own_page_share(_fit(rows), rows) >= 0.95
     monkeypatch.setattr(PageProjector, "NEIGHBOURHOOD", 1e6)
-    rows = _rows(spread=2.0)
-    proj = _fit(rows)
-    assert _own_page_share(proj, rows) < 0.95
+    assert _own_page_share(_fit(rows), rows) < 0.8
 
 
 def test_the_triple_centroid_leaves_chunks_to_the_tree():
