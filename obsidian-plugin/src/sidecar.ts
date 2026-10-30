@@ -447,6 +447,22 @@ export class Sidecar {
    */
   /** A code file's CALLS / INHERITS edges, mapped to the nodes that draw them (G-241). */
   /** Drop a page from the store (its chunks and addresses): a deleted note's. */
+  /** The browser cell's chat (`G-43`): one turn -- the prompt and the chunks
+   *  pinned since the last reply -- or a reset. The model's reply, the turn's
+   *  record, and every chunk the conversation has sent. */
+  async chat(session: string, prompt: string, context: { cid: string; url: string; markdown: string; head?: string }[],
+             reset = false): Promise<any | null> {
+    const base = this.base().trim().replace(/\/+$/, "");
+    if (!base) return null;
+    try {
+      const res = await fetch(`${base}/chat`, { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session, prompt, context, reset }) });
+      return await res.json();
+    } catch {
+      return null;
+    }
+  }
+
   async purge(url: string): Promise<any | null> {
     const base = this.base().trim().replace(/\/+$/, "");
     if (!base) return null;

@@ -33,6 +33,7 @@ import { addressTarget, inUnit, lineAddr } from "./address";
 import { isolate } from "./isolate";
 import { ForceTree, type ForceNodeDelta } from "./forcetree";
 import { PipelineBox } from "./pipelinebox";
+import { ChatPanel } from "./chatpanel";
 import { profiler } from "./profile";
 
 /** The epoch with sub-millisecond precision: the sensor stamps hovers on the
@@ -224,6 +225,8 @@ export class BrowserView extends ItemView {
    *  on the markdown side and open as a billboard in the graph -- one
    *  selection, three surfaces, closed together. */
   private pinned = new Map<string, PinRecord>();
+  /** The cell's chat (`G-43`). */
+  chat: ChatPanel | null = null;
 
   /** True while a drain is in flight, so a slow one cannot be lapped. */
   private draining = false;
@@ -349,6 +352,11 @@ export class BrowserView extends ItemView {
       "Double right-click a chunk in the browser to pin it here.");
 
     this.status = root.createDiv({ cls: "domvec-browser-status" });
+    // The chat (`G-43`..`G-45`): a strip on the cell that opens on hover; its
+    // context is the pins made since the last reply, each sent once.
+    root.addClass("domvec-has-chat");
+    this.chat = new ChatPanel(this.app, this as unknown as Component, root, this.sidecar,
+      () => [...this.pinned.values()], () => { void this.renderSide(); });
 
     // Built with `createElement` rather than `createEl`: Obsidian's helper
     // types against HTMLElementTagNameMap, and `webview` is not in it.
@@ -1342,9 +1350,12 @@ export class BrowserView extends ItemView {
   /** The markdown side: one card per pinned chunk, natively rendered. */
   private async renderSide(): Promise<void> {
     this.markdownWrap.empty();
+    this.chat?.refresh();
     if (!this.pinned.size) {
       this.markdownWrap.createDiv({ cls: "domvec-browser-empty" }).setText(
         "Double right-click a chunk in the browser to pin it here.");
+      // The conversation stays below, whatever is pinned now (G-44).
+      await this.chat?.renderInto(this.markdownWrap);
       return;
     }
     for (const pin of this.pinned.values()) {
@@ -1387,6 +1398,8 @@ export class BrowserView extends ItemView {
       await MarkdownRenderer.render(this.app, pin.markdown, body, "",
                                     this as unknown as Component);
     }
+    // The chat's outputs BELOW the selected markdown (G-44), in markdown.
+    await this.chat?.renderInto(this.markdownWrap);
   }
 
   /** When the page last scrolled or mutated itself (its pushed signals). */

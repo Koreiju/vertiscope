@@ -793,6 +793,7 @@ _PLANTABLE = {
     "no-base-objects": ("domvec.obsidian.sidecar", "PLANT_NO_BASE_OBJECTS"),   # G-279
     "no-asks": ("domvec.obsidian.sidecar", "PLANT_NO_ASKS"),                   # G-288
     "project-whole-page": ("domvec.obsidian.sidecar", "PLANT_PROJECT_WHOLE_PAGE"),  # G-13
+    "chat-resend": ("domvec.chat", "PLANT_RESEND"),                               # G-43
 }
 
 
@@ -2485,6 +2486,44 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(200, got)
             return
 
+        if route == "chat":
+            # The browser cell's chat (`G-43`..`G-45`, `domvec/chat.py`): a turn
+            # is the reader's prompt plus the chunks pinned since the last
+            # reply, each chunk at most once per conversation. Loopback only:
+            # it runs a local model and writes nothing to the workspace.
+            if self.client_address[0] not in ("127.0.0.1", "::1"):
+                self._send(403, {"error": "loopback only"})
+                return
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(length) or b"{}") or {}
+            except Exception as exc:                # noqa: BLE001
+                self._send(400, {"error": "bad body: %s" % exc})
+                return
+            from .. import chat as _chat
+            session = str(body.get("session") or "default")
+            try:
+                conv = _chat.conversation(session)
+                if body.get("reset"):
+                    conv.reset()
+                    self._send(200, conv.to_json())
+                    return
+                prompt = str(body.get("prompt") or "").strip()
+                if not prompt:
+                    self._send(400, {"error": "no prompt"})
+                    return
+                ctx = [c for c in (body.get("context") or []) if isinstance(c, dict)]
+                turn = conv.ask(prompt, ctx)
+            except Exception as exc:                # noqa: BLE001
+                self._send(500, {"error": "%s: %s" % (type(exc).__name__, str(exc)[:300])})
+                return
+            be = _chat._BACKEND[0]
+            _profile("chat", {"session": session, "delta_chars": turn.delta_chars, "context": len(turn.context),
+                              "dropped": len(turn.resent_dropped), "ms": round(turn.ms)})
+            self._send(200, {"turn": turn.to_json(), "sent": sorted(conv.sent), "turns": len(conv.turns),
+                             "model": _chat.MODEL_FILE, "device": getattr(be, "loaded_on", "")})
+            return
+
         if route == "purge":
             # Drop one page, its chunks and its addresses (`store.purge_page`).
             #
@@ -3666,6 +3705,13 @@ class _Handler(BaseHTTPRequestHandler):
                              "ms": round((time.perf_counter() - t0) * 1000, 1)})
             return
 
+        if segments[0] == "chat":
+            # A conversation's record: its turns and the chunks it has sent.
+            from .. import chat as _chat
+            q = parse_qs(parts.query)
+            conv = _chat._CONVERSATIONS.get((q.get("session") or ["default"])[0])
+            self._send(200, conv.to_json() if conv else {"session": None, "turns": [], "sent": []})
+            return
         if segments[0] == "checkpointing":
             # Never the store, never the work lock: answerable mid-checkpoint.
             self._send(200, {"checkpointing": bool(_CHECKPOINTING[0]),

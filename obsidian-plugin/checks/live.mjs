@@ -6256,6 +6256,115 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-43",
+      asks: "the browser cell's chat (G-43/G-44/G-45): a strip on the cell opens on hover; the chunks pinned since the last reply are pre-injected into the markdown and go with the next prompt, each AT MOST ONCE; the reply lands below the pinned markdown as markdown; planted: a panel that re-sends every pin has them dropped at the sidecar, and a sidecar that re-sends everything (chat-resend) grows the turn's delta",
+      async run() {
+        // The verbatim (PLUGIN_GOAL, O.2): "a hoverable chat panel on the
+        // standalone browser window ... collects the right-click selected
+        // *full* markdowns as context ... the same chunks are *never* re-sent
+        // to the context window"; "the right-clicked elements after the most
+        // previous response are included in the very next prompt
+        // (pre-injected into the markdown obsidian panel ...)"; "Chat outputs
+        // would be in a panel below the web-selected markdown". Pins are made
+        // by the double right-click's own path (`portMarkdown`) on a stored
+        // page; the model is L-1's Nous Hermes 2 DPO, local.
+        const PAGE = "https://en.wikipedia.org/wiki/Trie";
+        const plant = (name, on) => fetch(SIDECAR + "/plant", { method: "POST",
+          headers: { "content-type": "application/json", "X-Domvec-Client": "obsidian-plugin" }, body: JSON.stringify({ name, on }) });
+        try {
+          const got = await evaluate(`(async () => {
+            ${PREP}
+            const chat = b.chat;
+            if (!chat) return { error: "no chat panel on the cell" };
+            for (const cid of [...b.pinned.keys()]) b.unpin(cid);
+            await chat.reset();
+            if (!(await land(${JSON.stringify(PAGE)}, 30000))) return { error: "did not land" };
+            await sleep(3000);
+            const r = b.webview.getBoundingClientRect();
+            const pinAt = async (fx, fy) => { const before = b.pinned.size; await b.portMarkdown(Math.round(r.width * fx), Math.round(r.height * fy)); await sleep(400); return b.pinned.size > before; };
+            const out = {};
+            // Hover: the strip opens; leaving it closes it.
+            chat.el.dispatchEvent(new MouseEvent("mouseenter"));
+            out.opens_on_hover = chat.isOpen;
+            chat.el.dispatchEvent(new MouseEvent("mouseleave"));
+            out.closes_on_leave = !chat.isOpen;
+            // Two pins, then the first prompt.
+            let pins = 0;
+            for (const [fx, fy] of [[0.35, 0.35], [0.35, 0.6], [0.5, 0.8], [0.3, 0.45]]) { if (pins >= 2) break; if (await pinAt(fx, fy)) pins++; }
+            out.pinned_first = b.pinned.size;
+            const side = b.markdownWrap;
+            out.pre_injected = chat.pending().length === b.pinned.size
+              && /Next prompt includes/.test(side.innerText || "") && /Next prompt includes/.test(chat.el.innerText || "");
+            const t1 = await chat.send("In two sentences: what do the pinned passages say about tries?");
+            if (!t1) return { error: "first turn failed: " + chat.lastError, ...out };
+            await sleep(600);
+            out.t1_heads = t1.context.map((c) => String(c.head || ""));
+            out.t1 = { context: t1.context.length, delta: t1.delta_chars, dropped: t1.resent_dropped.length, reply_chars: t1.reply.length, ms: Math.round(t1.ms), reply: t1.reply.slice(0, 160) };
+            out.sent_after_t1 = chat.sent.size;
+            // The reply BELOW the pinned markdown, as markdown.
+            const cards = [...side.querySelectorAll(".domvec-pin-card")];
+            const tr = side.querySelector(".domvec-chat-transcript");
+            out.reply_below_pins = !!tr && cards.length > 0 && !!(cards[cards.length - 1].compareDocumentPosition(tr) & Node.DOCUMENT_POSITION_FOLLOWING)
+              && (tr.innerText || "").includes(t1.reply.slice(0, 30).trim());
+            out.reply_rendered_as_markdown = !!tr && !!tr.querySelector("blockquote, p, strong");
+            // One more pin: the next turn carries THAT one only.
+            const firstSent = new Set(chat.sent);
+            let third = false;
+            for (const [fx, fy] of [[0.55, 0.5], [0.4, 0.7], [0.6, 0.3], [0.45, 0.9]]) { if (await pinAt(fx, fy)) { third = true; break; } }
+            out.third_pinned = third;
+            out.pending_before_t2 = chat.pending().length;
+            const t2 = await chat.send("And what does the newest pinned passage add, in one sentence?");
+            if (!t2) return { error: "second turn failed: " + chat.lastError, ...out };
+            out.t2 = { context: t2.context.length, delta: t2.delta_chars, dropped: t2.resent_dropped.length, old_in_context: t2.context.filter((c) => firstSent.has(c.cid)).length, reply_chars: t2.reply.length };
+            // A bare follow-up: the smallest delta, nothing re-sent.
+            const t3 = await chat.send("Thanks -- one word: was that helpful?");
+            out.t3 = t3 ? { context: t3.context.length, delta: t3.delta_chars, dropped: t3.resent_dropped.length } : null;
+            // Planted: a panel that re-sends every pin -- the sidecar drops them.
+            chat.plantSendAllPins = true;
+            const t4 = await chat.send("One word: ok?");
+            chat.plantSendAllPins = false;
+            out.planted_panel = t4 ? { offered: b.pinned.size, context: t4.context.length, dropped: t4.resent_dropped.length } : null;
+            out.turns = chat.turns.length;
+            return out;
+          })()`, { timeout: 300000 });
+          if (!got || got.error) return { pass: false, evidence: got };
+          // Planted at the sidecar: a stateless chat sending everything each
+          // turn. Same pins, a fresh conversation; the bare follow-up's delta
+          // grows by the pinned markdown.
+          await plant("chat-resend", true);
+          let resend = null;
+          try {
+            resend = await evaluate(`(async () => {
+              const b = app.workspace.getLeavesOfType("domvec-browser-view")[0].view;
+              const chat = b.chat;
+              await chat.reset();
+              const a = await chat.send("One word: ready?");
+              const z = await chat.send("One word: still?");
+              return a && z ? { first: a.delta_chars, follow_up: z.delta_chars } : { error: chat.lastError };
+            })()`, { timeout: 200000 });
+          } finally { await plant("chat-resend", false); }
+          got.planted_sidecar = resend;
+          const ok = got.opens_on_hover && got.closes_on_leave && got.pinned_first >= 2 && got.pre_injected
+            && got.t1.context === got.pinned_first && got.t1.dropped === 0 && got.t1.reply_chars > 20
+            && got.t1_heads.every((h) => h && !h.startsWith("/html") && h.includes(" · "))
+            && got.reply_below_pins && got.reply_rendered_as_markdown
+            && got.third_pinned && got.pending_before_t2 === 1
+            && got.t2.context === 1 && got.t2.old_in_context === 0 && got.t2.dropped === 0
+            && !!got.t3 && got.t3.context === 0 && got.t3.delta < got.t1.delta
+            && !!got.planted_panel && got.planted_panel.context === 0 && got.planted_panel.dropped === got.planted_panel.offered
+            && !!resend && !resend.error && resend.follow_up > got.t3.delta * 5;
+          return { pass: !!ok, evidence: got };
+        } finally {
+          await evaluate(`(async () => {
+            const b = app.workspace.getLeavesOfType("domvec-browser-view")[0].view;
+            for (const cid of [...b.pinned.keys()]) b.unpin(cid);
+            if (b.chat) { b.chat.plantSendAllPins = false; await b.chat.reset(); }
+            return 1;
+          })()`, { timeout: 60000 }).catch(() => 0);
+        }
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {

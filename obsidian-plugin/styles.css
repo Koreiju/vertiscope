@@ -1063,3 +1063,17 @@ button.domvec-run-fence:hover {
 /* A wired link between two fields of one slate (G-281, UR N.4, O.1a). */
 .domvec-slate .domvec-slate-graph-link { stroke: #fff; stroke-width: 1.5; }
 .domvec-slate .domvec-slate-graph-node { cursor: grab; }
+
+/* The browser cell's chat (G-43..G-45): a strip that opens on hover. */
+.domvec-has-chat { position: relative; }
+.domvec-chat { position: absolute; left: 8px; right: 8px; bottom: 26px; z-index: 30;
+  display: flex; flex-direction: column; max-height: 28px; overflow: hidden;
+  background: var(--background-primary); border: 1px solid var(--background-modifier-border);
+  border-radius: 8px; box-shadow: var(--shadow-s); opacity: 0.85; transition: max-height 0.15s ease; }
+.domvec-chat.is-open { max-height: 55%; opacity: 1; }
+.domvec-chat-bar { display: flex; align-items: center; justify-content: space-between;
+  padding: 4px 10px; font-size: var(--font-ui-smaller); color: var(--text-muted); min-height: 26px; }
+.domvec-chat-reset { font-size: var(--font-ui-smaller); padding: 0 6px; height: 20px; }
+.domvec-chat-log { flex: 1 1 auto; overflow: auto; padding: 0 12px; font-size: var(--font-ui-small); }
+.domvec-chat-input { margin: 6px 8px 8px; resize: none; font-size: var(--font-ui-small); }
+.domvec-chat-transcript { margin-top: 12px; border-top: 1px solid var(--background-modifier-border); padding-top: 6px; }
