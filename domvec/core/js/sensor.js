@@ -101,7 +101,7 @@
   // Peripheral reads only -- nothing here touches the fold.
   // `codespans` may also be set at boot (`variants.codespans`): chunks are
   // emitted and cached at the first fold, before a run-time flip could act.
-  var RT_PLANTS = { yclip: false, lightpath: false, codespans: !!V.codespans, xmlnsurl: !!V.xmlnsurl, nojson: !!V.nojson, mergedlines: !!V.mergedlines, idreftext: !!V.idreftext };
+  var RT_PLANTS = { yclip: false, lightpath: false, codespans: !!V.codespans, xmlnsurl: !!V.xmlnsurl, nojson: !!V.nojson, mergedlines: !!V.mergedlines, idreftext: !!V.idreftext, nomedia: !!V.nomedia };
   var USE_SEMANTIC = !!V.semantic; // prefer heading/section boundaries
   var USE_RANK = !!V.rank;         // heaviest subtree first, not document order
   var WIDE = V.budget === 'wide', NARROW = V.budget === 'narrow';
@@ -988,6 +988,9 @@
     var tag = el.tagName;
     if (tag === 'SCRIPT') return jsonPairs(el);
     if (tag === 'HEAD') return null;
+    // Planted (G-99, `V.nomedia`): media elements detect nothing -- every
+    // video, audio, source, track, embed and object reference lost.
+    if (RT_PLANTS.nomedia && (MEDIA_TAGS[tag] || tag === 'TRACK')) return null;
     // <link> is metadata content, and a reader never sees one.
     //
     // Its href is a machine reference -- a stylesheet, a canonical url, a

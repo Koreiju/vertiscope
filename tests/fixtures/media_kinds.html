@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Media kinds</title></head>
+<body>
+<!--
+  G-99: every kind of content on a page is detected. One of each media kind,
+  none of which exists on disk -- the claim is that the PAGE's references
+  reach the store as addressed lines, not that the files load.
+-->
+<h1>Field recordings of the okapi</h1>
+<p>A survey of how the reserve documents the animal, in every medium it keeps.</p>
+<h2>Video with a poster</h2>
+<video src="media/okapi-walk.mp4" poster="media/okapi-walk-poster.jpg" controls width="320"></video>
+<h2>Video with sources and captions</h2>
+<video controls width="320">
+  <source src="media/okapi-feeding.webm" type="video/webm">
+  <source src="media/okapi-feeding.mp4" type="video/mp4">
+  <track kind="captions" src="media/okapi-feeding.en.vtt" srclang="en" label="English">
+</video>
+<h2>Audio</h2>
+<audio controls>
+  <source src="media/okapi-call.ogg" type="audio/ogg">
+  <source src="media/okapi-call.mp3" type="audio/mpeg">
+</audio>
+<h2>An embedded player</h2>
+<iframe src="https://www.youtube-nocookie.com/embed/okapi-dQw4" title="Okapi documentary" width="320" height="180"></iframe>
+<h2>Embedded documents</h2>
+<embed src="media/okapi-range-map.svg" type="image/svg+xml" width="200" height="120">
+<object data="media/okapi-census.pdf" type="application/pdf" width="200" height="120">The 2024 census</object>
+<h2>A responsive picture</h2>
+<picture>
+  <source srcset="media/okapi-portrait.avif" type="image/avif">
+  <img src="media/okapi-portrait.jpg" alt="An okapi in the forest shade">
+</picture>
+<p>Every recording is catalogued with its date and the ranger who made it.</p>
+</body>
+</html>

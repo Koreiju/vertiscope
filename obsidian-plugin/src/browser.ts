@@ -1344,6 +1344,8 @@ export class BrowserView extends ItemView {
     if (this.plant.has("xmlnsurl")) v.push("xmlnsurl: true");
     // G-99's planted arm: every script skipped, its structured data with it.
     if (this.plant.has("nojson")) v.push("nojson: true");
+    // G-99's media arm: media elements detect nothing.
+    if (this.plant.has("nomedia")) v.push("nomedia: true");
     if (this.plant.has("mergedlines")) v.push("mergedlines: true");
     return "{" + v.join(", ") + "}";
   }

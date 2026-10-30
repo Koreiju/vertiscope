@@ -1357,6 +1357,57 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-99-media",
+      asks: "every media kind on a page reaches the store as addressed lines: a video's src and poster, a video's sources and caption track, audio sources, an embedded player, an embed, an object and a picture's source set -- the page's own text intact; planted (nomedia) none of them",
+      async run() {
+        // Addendum IX: "all content that could possibly be detected, whether
+        // it be text; json; images; videos; media". The JSON half is G-99;
+        // this is the media half, surveyed kind by kind on one fixture.
+        const fixtures = await serveFixtures();
+        const KINDS = { video_src: "okapi-walk.mp4", video_poster: "okapi-walk-poster.jpg",
+          source_webm: "okapi-feeding.webm", source_mp4: "okapi-feeding.mp4", track_vtt: "okapi-feeding.en.vtt",
+          audio_ogg: "okapi-call.ogg", audio_mp3: "okapi-call.mp3", iframe: "youtube-nocookie.com/embed/okapi",
+          embed: "okapi-range-map.svg", object: "okapi-census.pdf", picture_source: "okapi-portrait.avif",
+          picture_img: "okapi-portrait.jpg" };
+        const arm = (planted) => evaluate(`(async () => {
+          ${PREP}
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          b.plant.delete("nomedia");
+          if (${planted}) b.plant.add("nomedia");
+          try {
+            const PAGE = ${JSON.stringify(fixtures.origin + "/media_kinds.html?g99m=")} + (${planted} ? "p" : "c") + Date.now();
+            b.go("about:blank"); await sleep(800);
+            if (!(await land(PAGE, 30000))) return { error: "did not land" };
+            let cids = [], same = 0;
+            for (let i = 0; i < 40 && same < 3; i++) {
+              await sleep(1000);
+              const now = await v.sidecar.pageCids(PAGE);
+              same = now.length && now.join() === cids.join() ? same + 1 : 0;
+              cids = now;
+            }
+            const lines = [];
+            for (const c of cids) { const p = await v.chunkPayload(c); for (const l of (p && p.lines) || []) lines.push(String(l.text || "")); }
+            const all = lines.join(String.fromCharCode(10));
+            const kinds = ${JSON.stringify(KINDS)};
+            const found = {};
+            for (const [k, s] of Object.entries(kinds)) found[k] = all.includes(s);
+            return { planted: ${planted}, chunks: cids.length, lines: lines.length, found,
+                     missing: Object.keys(found).filter((k) => !found[k]),
+                     body_text: all.includes("Field recordings of the okapi") && all.includes("catalogued with its date"),
+                     sample: lines.filter((l) => /okapi-|youtube/.test(l)).slice(0, 12) };
+          } finally { b.plant.delete("nomedia"); }
+        })()`, { timeout: 120000 });
+        try {
+          const clean = await arm(false);
+          const planted = await arm(true);
+          const n = (x) => x && x.found ? Object.values(x.found).filter(Boolean).length : 0;
+          return { pass: !!clean && !clean.error && clean.missing.length === 0 && clean.body_text
+                     && !!planted && !planted.error && planted.body_text && n(planted) < n(clean),
+                   evidence: { clean, planted, purged: await tidyFixtures(fixtures.origin) } };
+        } finally { await fixtures.close(); }
+      },
+    },
+    {
       id: "G-102",
       asks: "a billboard does not fake live controls: in the page form of a chunk, a control the trie addresses stays live (it acts on the page), and a control it holds no address for is drawn inert -- dimmed, not-allowed, aria-disabled, with a title saying why; planted (plantInertLooksLive) the dead control looks as pressable as the live one",
       async run() {
