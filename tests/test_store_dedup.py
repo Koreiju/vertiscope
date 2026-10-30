@@ -135,3 +135,34 @@ def test_joining_a_group_makes_the_member_lead_its_content(tmp_path):
     v = _verdict(store)
     assert v[b["Furniture"]][1] == "" and v[a["Furniture"]][1] == b["Furniture"]
     assert store.duplicate_report()["extra_drawn_plain"] == 0
+
+
+def test_s4_a_one_chunk_delta_hashes_one_chunk_whatever_the_page(tmp_path):
+    """`S-4`: deduplication inside the O(delta) budget. A page of N chunks,
+    then a delta that rewrites ONE of them: the delta's dedup hashes 1, at
+    N = 300 and N = 1,500 alike (and the 125-copies case keeps its verdict).
+    Planted `PLANT_DEDUP_WHOLE_PAGE`: it re-hashes the whole page, N."""
+    import time
+    out = {}
+    for n in (300, 1500):
+        store = GraphStore(tmp_path / ("s%d.kuzu" % n))
+        try:
+            texts = ["chunk %d of the page" % i for i in range(n)] + ["Press Down Arrow"] * 125
+            _write(store, A, texts)
+            chunks, addrs = _page(A, texts)
+            one = [c for c in chunks if c.markdown == "chunk 7 of the page"]
+            for planted in (False, True):
+                graphstore.PLANT_DEDUP_WHOLE_PAGE[0] = planted
+                try:
+                    h0 = store.dedup_stats.get("hashed", 0)
+                    t0 = time.perf_counter()
+                    store._assign_content(one)
+                    out[(n, planted)] = (store.dedup_stats["hashed"] - h0, time.perf_counter() - t0)
+                finally:
+                    graphstore.PLANT_DEDUP_WHOLE_PAGE[0] = False
+            leads = [cid for cid, (_u, dup) in _verdict(store).items() if not dup]
+            assert len(leads) == n + 1          # 125 copies of one string: ONE lead
+        finally:
+            store.close()
+    assert out[(300, False)][0] == 1 and out[(1500, False)][0] == 1
+    assert out[(300, True)][0] == 300 + 125 + 1 and out[(1500, True)][0] == 1500 + 125 + 1

@@ -387,6 +387,8 @@ def _same_content(chunks) -> tuple:
 #: Planted (2026-10-29): duplicates resolved within a page only, as before --
 #: the same content on two pages is drawn twice.
 PLANT_PAGE_SCOPED_DEDUP = [False]
+#: Planted (S-4): each write re-hashes every chunk of its page, not its own.
+PLANT_DEDUP_WHOLE_PAGE = [False]
 
 
 def content_key(md: str) -> str:
@@ -949,6 +951,8 @@ class GraphStore:
                 [{"url": url, "cid": c.cid} for c in chunks],
             )
             counts["chunks"] = len(chunk_rows)
+            # The write's size, beside the dedup's work on it (S-4: hashed == written).
+            self.dedup_stats["written"] = self.dedup_stats.get("written", 0) + len(chunk_rows)
         counts["ms_chunks"] = round((time.perf_counter() - _t) * 1000, 1)
         _t = time.perf_counter()
 
@@ -2837,8 +2841,18 @@ class GraphStore:
                 if key:
                     touched.add(key)
             mine = set()
+            # `S-4`: the work is the WRITE's chunks (a delta rewrites only the
+            # chunks that changed), never the page's -- counted, so a check can
+            # see it stay delta-sized. Planted `PLANT_DEDUP_WHOLE_PAGE`: every
+            # chunk of each written page re-hashed, the cost S-4 measured.
+            if PLANT_DEDUP_WHOLE_PAGE[0]:
+                for url in {c.url for c in chunks}:
+                    for _cid, md in self._rows("MATCH (c:Chunk {url: $u}) RETURN c.cid, c.md", {"u": url}):
+                        content_key(md or "")
+                        self.dedup_stats["hashed"] = self.dedup_stats.get("hashed", 0) + 1
             for chunk in chunks:
                 key = content_key(chunk.markdown)
+                self.dedup_stats["hashed"] = self.dedup_stats.get("hashed", 0) + 1
                 old = idx.key_of.get(chunk.cid)
                 if old != key:
                     if old:

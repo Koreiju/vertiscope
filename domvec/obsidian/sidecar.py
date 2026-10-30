@@ -3687,6 +3687,10 @@ class _Handler(BaseHTTPRequestHandler):
         if segments[0] == "duplicates":
             # The store's own verdict: contents drawn more than once (0 is the
             # goal), copies marked, chunks kept drawn because they lead a group.
+            # `?stats=1`: the dedup's own work counters (S-4: hashes per write).
+            if (parse_qs(parts.query).get("stats") or [""])[0] == "1":
+                self._send(200, dict(self.workspace.store.dedup_stats))
+                return
             self._send(200, self.workspace.store.duplicate_report())
             return
 
