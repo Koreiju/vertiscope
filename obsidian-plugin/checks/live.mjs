@@ -7034,7 +7034,9 @@ export function makeChecks(env) {
           const cruise = async (n, back) => {
             reset();
             cam.position.set(n.x + (saved.p.x - n.x) * back, n.y + (saved.p.y - n.y) * back, (n.z || 0) + (saved.p.z - (n.z || 0)) * back);
-            hover(n); await sleep(250 + 1800);           // the dwell, then spin-up
+            // The flight itself, from rest (hover-to-flight is G-273's): spin
+            // up, then one second of cruise.
+            v.flyTo(n); await sleep(750);
             const d0 = dist(n); await sleep(1000); const d1 = dist(n);
             return Math.round((d0 - d1) * 10) / 10;      // world units in one second
           };

@@ -220,7 +220,12 @@ export class UserAgent {
 
   keyUp(e: KeyboardEvent): void {
     const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
-    if (this.lit.has(k)) this.lit.set(k, performance.now() + 180);   // a short afterglow
+    if (!this.lit.has(k)) return;
+    // A short afterglow, cleared by a timer: the frame loop that also fades
+    // stalls in a covered or unfocused window, and the key stayed lit.
+    const until = performance.now() + 180;
+    this.lit.set(k, until);
+    window.setTimeout(() => { if (this.lit.get(k) === until) { this.lit.delete(k); this.draw(); } }, 200);
   }
 
   private axes() {
