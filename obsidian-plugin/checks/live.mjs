@@ -7016,6 +7016,195 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-271",
+      asks: "a hover starts a slow, STATEFUL flight: its speed is the throttle's whatever the distance (two starts 2x apart cruise within 15% of each other), it stops at the hard floor and never nearer, and a new hover BENDS the trajectory in flight -- the speed carries over (over half kept); planted (agent.plantRestart) a new hover starts from rest",
+      async run() {
+        const got = await evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
+          if (!v || !v.graph || !v.agent) return { error: "no graph or agent" };
+          const g = v.graph, cam = g.camera(), ctl = g.controls(), a = v.agent;
+          const saved = { p: cam.position.clone(), t: ctl.target.clone(), up: cam.up.clone(), mode: a.mode, thr: a.throttle };
+          const dist = (n) => Math.hypot(cam.position.x - n.x, cam.position.y - n.y, cam.position.z - (n.z || 0));
+          const ns = g.graphData().nodes.filter((n) => Number.isFinite(n.x) && n.level !== "path");
+          ns.sort((x, y) => dist(y) - dist(x));
+          const n1 = ns[0], n2 = ns[Math.min(ns.length - 1, 5)];
+          const reset = () => { cam.position.copy(saved.p); ctl.target.copy(saved.t); cam.up.copy(saved.up); ctl.update?.(); a.vel = { x: 0, y: 0, z: 0 }; a.target = null; };
+          const hover = (n) => { v.focusNode = null; v.focusPending = null; v.focusOn(n); };
+          const cruise = async (n, back) => {
+            reset();
+            cam.position.set(n.x + (saved.p.x - n.x) * back, n.y + (saved.p.y - n.y) * back, (n.z || 0) + (saved.p.z - (n.z || 0)) * back);
+            hover(n); await sleep(250 + 1800);           // the dwell, then spin-up
+            const d0 = dist(n); await sleep(1000); const d1 = dist(n);
+            return Math.round((d0 - d1) * 10) / 10;      // world units in one second
+          };
+          const out = {};
+          try {
+            a.setMode("ego"); a.setThrottle(0.25); a.paused = false;
+            out.speed_near = await cruise(n1, 1);
+            out.speed_far = await cruise(n1, 2);
+            reset(); a.setThrottle(1); hover(n2);
+            let minD = Infinity;
+            for (let i = 0; i < 80; i++) { await sleep(250); minD = Math.min(minD, dist(n2)); }
+            out.floor = a.floor; out.min_d = Math.round(minD * 10) / 10; out.end_d = Math.round(dist(n2) * 10) / 10;
+            const bend = async (planted) => {
+              reset(); a.setThrottle(0.5); a.plantRestart = planted;
+              hover(n1); await sleep(250 + 2000);
+              const sp = () => Math.round(Math.hypot(a.vel.x, a.vel.y, a.vel.z) * 10) / 10;
+              const before = sp();
+              v.flyTo(n2);                                // the new hover's flight, synchronously
+              const after = sp();
+              return { before, after, kept: Math.round(after / Math.max(1e-9, before) * 100) / 100 };
+            };
+            out.bend = await bend(false);
+            out.bend_planted = await bend(true);
+          } finally {
+            a.plantRestart = false; reset(); v.focusNode = null;
+            a.setThrottle(saved.thr); a.mode = saved.mode; a.draw();
+          }
+          return out;
+        })()`, { timeout: 120000 });
+        if (!got || got.error) return { pass: false, evidence: got };
+        const ratio = got.speed_far / Math.max(1e-9, got.speed_near);
+        return { pass: got.speed_near > 0 && ratio > 0.85 && ratio < 1.15
+                   && got.min_d >= got.floor - 0.5 && Math.abs(got.end_d - got.floor) <= 2
+                   && got.bend.kept > 0.5 && got.bend_planted.kept < 0.25,
+                 evidence: got };
+      },
+    },
+    {
+      id: "G-273",
+      asks: "the user agent's views and keys: in MAP view a hover moves nothing and in EGO view it moves the camera; paused, no motion; Shift +5%, Ctrl -5%; Z, X and M do nothing (deprecated); arrows turn the camera about the focus (distance kept) and Q/R roll it about the view normal (view kept) -- 3-DOF rotation; each key held lit in the agent's state while pressed (its readout awaits the dialect card, G-274); planted (pointer away) the keys do nothing",
+      async run() {
+        const got = await evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
+          if (!v || !v.graph || !v.agent) return { error: "no graph or agent" };
+          const g = v.graph, cam = g.camera(), ctl = g.controls(), a = v.agent;
+          const saved = { p: cam.position.clone(), t: ctl.target.clone(), up: cam.up.clone(), mode: a.mode, thr: a.throttle, over: v.pointerOver };
+          const key = (k) => window.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true }));
+          const moved = () => Math.hypot(cam.position.x - saved.p.x, cam.position.y - saved.p.y, cam.position.z - saved.p.z);
+          const reset = () => { cam.position.copy(saved.p); ctl.target.copy(saved.t); cam.up.copy(saved.up); ctl.update?.(); a.vel = { x: 0, y: 0, z: 0 }; a.target = null; };
+          const n = g.graphData().nodes.filter((x) => Number.isFinite(x.x) && x.level !== "path")
+            .sort((x, y) => Math.hypot(cam.position.x - y.x, cam.position.y - y.y) - Math.hypot(cam.position.x - x.x, cam.position.y - x.y))[0];
+          const out = {};
+          try {
+            v.pointerOver = true;
+            a.mode = "map"; a.draw(); a.setThrottle(0.5); reset();
+            v.focusNode = null; v.focusPending = null; v.focusOn(n); await sleep(1500);
+            out.map_moved = Math.round(moved() * 10) / 10;
+            a.setMode("ego"); out.after_m = a.mode; reset();
+            v.focusNode = null; v.focusPending = null; v.focusOn(n); await sleep(1500);
+            out.ego_moved = Math.round(moved() * 10) / 10;
+            const t0 = a.throttle; key("Shift"); out.shift = Math.round((a.throttle - t0) * 100);
+            const t1 = a.throttle; key("Control"); out.ctrl = Math.round((a.throttle - t1) * 100);
+            a.paused = true; out.paused = a.paused; reset(); a.target = n;
+            await sleep(1000); out.paused_moved = Math.round(moved() * 10) / 10;
+            a.paused = false; a.target = null;
+            const tz = a.throttle; key("z"); key("x"); key("m"); out.zxm_ignored = a.throttle === tz && !a.paused && a.mode === "ego";
+            // Rotation, from rest: arrows turn about the focus, Q/R roll.
+            reset();
+            const rel = () => ({ x: cam.position.x - ctl.target.x, y: cam.position.y - ctl.target.y, z: cam.position.z - ctl.target.z });
+            const ang = (u, w) => { const d = (u.x*w.x + u.y*w.y + u.z*w.z) / (Math.hypot(u.x,u.y,u.z) * Math.hypot(w.x,w.y,w.z)); return Math.acos(Math.max(-1, Math.min(1, d))) * 180 / Math.PI; };
+            const r0 = rel();
+            for (let i = 0; i < 5; i++) key("ArrowLeft");
+            const r1 = rel();
+            out.yaw_deg = Math.round(ang(r0, r1) * 10) / 10;
+            out.yaw_dist_kept = Math.abs(Math.hypot(r0.x, r0.y, r0.z) - Math.hypot(r1.x, r1.y, r1.z)) < 1e-3 * Math.hypot(r0.x, r0.y, r0.z);
+            reset();
+            const up0 = cam.up.clone(); cam.updateMatrixWorld(); const e0 = cam.matrixWorld.elements.slice(8, 11);
+            for (let i = 0; i < 5; i++) key("q");
+            cam.updateMatrixWorld(); const e1 = cam.matrixWorld.elements.slice(8, 11);
+            out.roll_deg = Math.round(ang(up0, cam.up) * 10) / 10;
+            out.roll_view_deg = Math.round(ang({ x: e0[0], y: e0[1], z: e0[2] }, { x: e1[0], y: e1[1], z: e1[2] }) * 10) / 10;
+            // FRAME-respective (item 23): after the roll, a yaw turns about the
+            // camera's CURRENT up -- the offset's component along it is kept --
+            // and A moves along the camera's current left.
+            cam.updateMatrixWorld();
+            const m = cam.matrixWorld.elements, upC = { x: m[4], y: m[5], z: m[6] }, rightC = { x: m[0], y: m[1], z: m[2] };
+            const dot = (u, w) => u.x*w.x + u.y*w.y + u.z*w.z;
+            const ra = rel(); for (let i = 0; i < 5; i++) key("ArrowLeft"); const rb = rel();
+            out.yaw_after_roll_deg = Math.round(ang(ra, rb) * 10) / 10;
+            out.yaw_keeps_camera_up = Math.abs(dot(ra, upC) - dot(rb, upC)) < 1e-3 * Math.hypot(ra.x, ra.y, ra.z);
+            cam.updateMatrixWorld();
+            const m2 = cam.matrixWorld.elements, rightNow = { x: m2[0], y: m2[1], z: m2[2] };
+            const pa = cam.position.clone(); key("a");
+            const mv = { x: cam.position.x - pa.x, y: cam.position.y - pa.y, z: cam.position.z - pa.z };
+            out.strafe_vs_camera_left_deg = Math.round(ang(mv, { x: -rightNow.x, y: -rightNow.y, z: -rightNow.z }) * 10) / 10;
+            // Each key lit while pressed, and named.
+            reset();
+            key("w"); out.lit_held = a.litKeys().includes("w");
+            window.dispatchEvent(new KeyboardEvent("keyup", { key: "w", bubbles: true })); await sleep(500);
+            out.lit_after = a.litKeys().includes("w");
+            v.pointerOver = false; const t2 = a.throttle; key("Control"); out.away_ctrl = Math.round((a.throttle - t2) * 100);
+          } finally {
+            v.pointerOver = saved.over; a.target = null; v.focusNode = null; a.paused = false;
+            a.setThrottle(saved.thr); a.mode = saved.mode; a.draw(); reset(); cam.up.copy(saved.up); a.vel = { x: 0, y: 0, z: 0 };
+          }
+          return out;
+        })()`, { timeout: 60000 });
+        if (!got || got.error) return { pass: false, evidence: got };
+        return { pass: got.map_moved < 0.5 && got.after_m === "ego" && got.ego_moved > 0.5 && got.shift === 5 && got.ctrl === -5
+                   && got.paused === true && got.paused_moved < 0.5 && got.zxm_ignored
+                   && got.yaw_deg > 3 && got.yaw_dist_kept && got.roll_deg > 3 && got.roll_view_deg < 0.5
+                   && got.yaw_after_roll_deg > 3 && got.yaw_keeps_camera_up && got.strafe_vs_camera_left_deg < 2
+                   && got.lit_held && !got.lit_after && got.away_ctrl === 0,
+                 evidence: got };
+      },
+    },
+    {
+      id: "D-52",
+      asks: "hovering a node with no image never makes it disappear: with the pointer on a picture-less node that stands in front of a picture node, the hovered node keeps its default look (not the 0.12 front-dim) -- the pane's own refreshDetail, aimed at it; planted (plantDimByRay, the old dim) it is dimmed",
+      async run() {
+        const got = await evaluate(`(async () => {
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
+          if (!v || !v.graph) return { error: "no graph" };
+          const g = v.graph, cam = g.camera();
+          cam.updateMatrixWorld();
+          const THREE = window.__domvecRaycaster ? null : null;
+          const ns = g.graphData().nodes.filter((n) => Number.isFinite(n.x) && n.level !== "page" && n.level !== "path");
+          const proj = (n) => { const p = cam.position.clone ? null : null; return null; };
+          // NDC and view depth of a node through the camera's own matrices.
+          const e = cam.matrixWorldInverse.elements, pe = cam.projectionMatrix.elements;
+          const ndc = (n) => {
+            const x = n.x, y = n.y, z = n.z || 0;
+            const vx = e[0]*x + e[4]*y + e[8]*z + e[12], vy = e[1]*x + e[5]*y + e[9]*z + e[13], vz = e[2]*x + e[6]*y + e[10]*z + e[14];
+            const cx = pe[0]*vx + pe[4]*vy + pe[8]*vz + pe[12], cy = pe[1]*vx + pe[5]*vy + pe[9]*vz + pe[13], cw = pe[3]*vx + pe[7]*vy + pe[11]*vz + pe[15];
+            return cw > 0 ? [cx / cw, cy / cw, -vz] : null;
+          };
+          const pics = ns.filter((n) => n.image && n.image.src);
+          const plain = ns.filter((n) => !(n.image && n.image.src));
+          if (!pics.length || !plain.length) return { error: "no picture and plain nodes", pics: pics.length, plain: plain.length };
+          // Built, not searched for: the camera on the line from a picture P
+          // through its nearest plain node F, beyond F -- F stands in front of P.
+          const P = pics[0];
+          let F = plain[0], best = Infinity;
+          for (const n of plain) { const d = Math.hypot(n.x - P.x, n.y - P.y, (n.z || 0) - (P.z || 0)); if (d > 1 && d < best) { best = d; F = n; } }
+          const ux = (F.x - P.x) / best, uy = (F.y - P.y) / best, uz = ((F.z || 0) - (P.z || 0)) / best;
+          const savedCam = { p: cam.position.clone(), t: g.controls().target.clone() };
+          cam.position.set(F.x + ux * 60, F.y + uy * 60, (F.z || 0) + uz * 60);
+          g.controls().target.set(P.x, P.y, P.z || 0); cam.lookAt(P.x, P.y, P.z || 0); cam.updateMatrixWorld();
+          const qF = ndc(F);
+          if (!qF) { cam.position.copy(savedCam.p); g.controls().target.copy(savedCam.t); return { error: "F behind the camera" }; }
+          const pair = { P, F, qF };
+          const aim = async (planted) => {
+            v.plantDimByRay = planted;
+            v.pointerNdc = [pair.qF[0], pair.qF[1]];
+            v.detailDirty = true; v.detailAt = 0;
+            v.refreshDetail(g);
+            const look = v.lookOf(pair.F, g.nodeRelSize(), v.drawnMedia);
+            return { dimmed: v.dimFront.has(pair.F), alpha: Math.round((look.alpha ?? 1) * 100) / 100, dim_count: v.dimFront.size };
+          };
+          let clean, planted;
+          try { clean = await aim(false); planted = await aim(true); }
+          finally { v.plantDimByRay = false; v.detailDirty = true; cam.position.copy(savedCam.p); g.controls().target.copy(savedCam.t); g.controls().update?.(); }
+          return { F: String(pair.F.id).slice(0, 12), P: String(pair.P.id).slice(0, 12), clean, planted };
+        })()`, { timeout: 60000 });
+        if (!got || got.error) return { pass: false, evidence: got };
+        return { pass: !got.clean.dimmed && got.clean.alpha > 0.12 && got.planted.dimmed, evidence: got };
+      },
+    },
+    {
       id: "G-270",
       asks: "one content, one drawn chunk, store-wide: the store reports no content drawn twice, and the same text indexed under two pages adds COPIES, not drawn duplicates; the projector holds nothing the store calls a copy; planted (/plant page-scoped-dedup) the second page's text is drawn again",
       async run() {

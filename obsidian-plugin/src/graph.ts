@@ -15,6 +15,7 @@
  * and draws them.
  */
 
+import { UserAgent } from "./useragent";
 import { spreadFactor } from "./spread.ts";
 import { unitOf, lineAddr, inUnit } from "./address.ts";
 import { centredTelescope, relaxCloud, zoomFor, similarityFit, similarityInverse, rotateInverse, type V3 } from "./camera";
@@ -427,6 +428,9 @@ export class GraphView extends ItemView {
     root.addClass("domvec-graph-root");
 
     const bar = root.createDiv({ cls: "domvec-graph-bar" });
+    // The agent's control strip is DEPRECATED (2026-10-29: "deprecate sliders
+    // and the panel you have currently"): its controls are to be cards in the
+    // mortegon dialect (G-274). The keys work without it.
     const status = bar.createSpan({ cls: "domvec-graph-status",
                                     text: "fitting…" });
     const again = bar.createEl("button", { text: "refit" });
@@ -493,8 +497,17 @@ export class GraphView extends ItemView {
     // steps faster the longer it is held, as the k/n fields do (item 109).
     canvas.addEventListener("pointerenter", () => { this.pointerOver = true; });
     canvas.addEventListener("pointerleave", () => { this.pointerOver = false; });
-    this.registerDomEvent(window, "keydown", (e: KeyboardEvent) => this.arrowPan(e));
-    this.registerDomEvent(window, "keyup", (e: KeyboardEvent) => { if (e.key.startsWith("Arrow")) this.panHeldSince = 0; });
+    // Arrows TURN the camera about the focus now, with Q/R rolling it (2026-10-29,
+    // "full 3 DOF rotational motion control"), through the user agent. The
+    // translating pan they did since 2026-10-12 is planted `plantArrowPan`.
+    this.registerDomEvent(window, "keydown", (e: KeyboardEvent) => {
+      if (this.plantArrowPan && this.arrowPan(e)) return;
+      this.agentKey(e);
+    });
+    this.registerDomEvent(window, "keyup", (e: KeyboardEvent) => {
+      if (e.key.startsWith("Arrow")) this.panHeldSince = 0;
+      this.agent.keyUp(e);
+    });
     // The naked search field, middle-bottom of the 3D panel (PLUGIN_GOAL 84).
     this.searchField = new SearchField(canvas, (q, k) => this.searchAsk(q, k),
                                        (hits, d, soft) => this.showSearch(hits, d, soft), () => this.clearSearch());
@@ -2934,7 +2947,7 @@ export class GraphView extends ItemView {
 
   /** Planted by the focus check: hover rings only, the camera stays. */
   plantNoFocus = false;
-  focusStats = { asked: 0, flown: 0, followed: 0, released: 0, last: "", zoomed: 0, kept_zoom: 0, last_d: 0, clamped: 0 };
+  focusStats = { asked: 0, flown: 0, followed: 0, released: 0, last: "", zoomed: 0, kept_zoom: 0, last_d: 0, clamped: 0, agent: 0 };
   /** A flight never ends with its target smaller than this radius on screen (px). */
   minTargetPx = 6;
   /** Planted: the reader's zoom kept whatever the target's size (the speck flights). */
@@ -2995,6 +3008,7 @@ export class GraphView extends ItemView {
       const c: any = g.controls();
       if (c && c.addEventListener) {
         c.addEventListener("start", () => {
+          this.agent.target = null;
           if (!this.focusNode) return;
           this.focusNode = null; this.focusStats.released++;
         });
@@ -3039,6 +3053,16 @@ export class GraphView extends ItemView {
     const len = Math.hypot(dx, dy, dz) || 1;
     dx /= len; dy /= len; dz /= len;
     const to = { x: n.x + dx * D, y: n.y + dy * D, z: (n.z || 0) + dz * D };
+    // The user agent flies it (PLUGIN_GOAL 2026-10-29): slowly, to a hard
+    // floor, in ego view; not at all in map view. Planted
+    // `agent.plantFastFlight`: the 0.4 s tween below.
+    if (this.agent.fly(n)) {
+      this.focusStats.flown++;
+      this.focusStats.agent = (this.focusStats.agent || 0) + 1;
+      this.focusNode = n;
+      this.focusLast = [n.x, n.y, n.z || 0];
+      return;
+    }
     g.cameraPosition(to, { x: n.x, y: n.y, z: n.z || 0 }, 400);
     this.focusStats.flown++;
     this.focusStats.last_d = Math.round(D * 10) / 10;
@@ -5197,6 +5221,31 @@ export class GraphView extends ItemView {
   /** One arrow step, as a share of the camera's distance to its target. */
   panStepShare = 0.006;
   panStats = { steps: 0 };
+  /** The user agent: throttle, map / ego views, the slow flight (useragent.ts). */
+  agent: UserAgent = new UserAgent({
+    camera: () => (this.graph as any)?.camera(),
+    controls: () => (this.graph as any)?.controls(),
+    recentre: () => this.reframe?.(),
+    touched: (what: string) => {
+      (window as any).__domvecReaderAt = Date.now();
+      const by: Record<string, number> = ((window as any).__domvecReaderBy = (window as any).__domvecReaderBy || {});
+      by[what] = (by[what] || 0) + 1;
+    },
+  });
+  private agentAt = 0;
+  /** Planted (2026-10-29): arrows translate the view, as from 2026-10-12. */
+  plantArrowPan = false;
+  agentKey(e: KeyboardEvent): boolean {
+    if (!this.graph || !this.pointerOver) return false;
+    const typing = (el: HTMLElement | null) => !!el && (/^(INPUT|TEXTAREA|SELECT|IFRAME)$/.test(el.tagName) || el.isContentEditable);
+    if (typing(e.target as HTMLElement | null) || typing(document.activeElement as HTMLElement | null)) return false;
+    if (!this.agent.key(e)) return false;
+    e.preventDefault();
+    e.stopPropagation();
+    this.detailDirty = true;
+    return true;
+  }
+
   arrowPan(e: KeyboardEvent): boolean {
     const dir = ({ ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, 1], ArrowDown: [0, -1] } as any)[e.key];
     if (!dir || !this.graph || !this.pointerOver) return false;
@@ -5388,6 +5437,10 @@ export class GraphView extends ItemView {
   /** Nodes between the camera and the presented picture, drawn dark. */
   dimFront = new Set<any>();
   plantNoFrontDim = false;
+  /** Planted (2026-10-29): the old dim -- every picture-less node in the
+   *  hover cylinder nearer than the picture, the aimed-at one included. */
+  plantDimByRay = false;
+  dimStats: { focus_in_front?: number; dimmed?: number } = {};
   /** Planted (item 102): no hover glow. */
   plantNoHoverGlow = false;
   /** Planted (2026-10-11): the slow glow -- an 80 ms throttle and a full re-sync per change. */
@@ -5516,11 +5569,43 @@ export class GraphView extends ItemView {
       for (let i = 1; i < best.length; i++) if (dist[i] < dist[k]) k = i;
       const P = best[k];
       const tP = (P.x - ox) * dx + (P.y - oy) * dy + ((P.z || 0) - oz) * dz;
-      for (const n of [...gBest, ...covers]) {
-        if (pictures.has(n)) continue;
-        const t = (n.x - ox) * dx + (n.y - oy) * dy + ((n.z || 0) - oz) * dz;
-        if (t > 0 && t < tP) this.dimFront.add(n);
+      // **The aimed-at node is never dimmed, and only what COVERS the picture
+      // is** (2026-10-29: "hovering over nodes without images simply
+      // disappear them instead of their default views. So the hover radius
+      // should be connected to the image renderings"). The dim reached every
+      // picture-less node in the hover cylinder nearer than ANY picture behind
+      // it -- so the orb under the pointer, in front of a picture far behind,
+      // vanished. Now: the node nearest the ray is the focus; a picture-less
+      // focus in front of the picture means the reader is aiming at IT, and
+      // nothing dims. Otherwise a node in front dims only within the
+      // picture's own drawn radius about the ray. Planted `plantDimByRay`.
+      // The focus is what the pointer is ON: the front-most node whose drawn
+      // disc covers the ray, as picking resolves it; failing that, the node
+      // nearest the ray.
+      const tOf = (n: any) => (n.x - ox) * dx + (n.y - oy) * dy + ((n.z || 0) - oz) * dz;
+      let F: any = null;
+      for (const n of covers) { const tn = tOf(n); if (tn > 0 && (!F || tn < tOf(F))) F = n; }
+      if (!F) {
+        let f = 0;
+        for (let i = 1; i < gBest.length; i++) if (gDist[i] < gDist[f]) f = i;
+        F = gBest[f];
       }
+      const tF = F ? tOf(F) : Infinity;
+      const aimingInFront = !!F && !pictures.has(F) && tF > 0 && tF < tP;
+      const rP = P.__threeObj && P.__threeObj.__proxy ? P.__threeObj.scale.x : Math.cbrt(Math.max(P.val ?? 1, 1e-9)) * rs;
+      if (this.plantDimByRay || !aimingInFront) {
+        for (const n of [...gBest, ...covers]) {
+          if (pictures.has(n)) continue;
+          if (!this.plantDimByRay && n === F) continue;
+          const vx = n.x - ox, vy = n.y - oy, vz = (n.z || 0) - oz;
+          const t = vx * dx + vy * dy + vz * dz;
+          if (!(t > 0 && t < tP)) continue;
+          if (!this.plantDimByRay && vx * vx + vy * vy + vz * vz - t * t > rP * rP) continue;
+          this.dimFront.add(n);
+        }
+      }
+      this.dimStats.focus_in_front = aimingInFront ? (this.dimStats.focus_in_front || 0) + 1 : (this.dimStats.focus_in_front || 0);
+      this.dimStats.dimmed = this.dimFront.size;
     }
     const picturesChanged = pictures.size !== this.detail.size || [...pictures].some((n) => !this.detail.has(n));
     this.lastRevealed = this.detail;
@@ -5655,6 +5740,13 @@ export class GraphView extends ItemView {
       const g: any = this.graph;
       if (!g || !this.batch) return;
       this.stepGlides();
+      {
+        // Real time, capped at half a second: an unfocused window draws a few
+        // frames a second, and a 0.1 s cap ran the flight 10x slow there.
+        const dt = this.agentAt ? Math.min(0.5, (t - this.agentAt) / 1000) : 0;
+        this.agentAt = t;
+        if (dt > 0) this.agent.tick(dt);
+      }
       freezeStatic();
       if (this.motion.recording) {
         const cam = g.camera(), el = g.renderer().domElement;

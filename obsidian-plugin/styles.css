@@ -988,3 +988,34 @@ button.domvec-run-fence:hover {
 
 /* P-N3: the terminal button beside the run button. */
 .domvec-term-fence { margin-left: 0.3em; font-size: var(--font-ui-smaller); }
+
+/* The user agent's control strip (PLUGIN_GOAL 2026-10-29): map / ego view,
+   throttle, pause -- bottom left of the 3D pane, clear of its bar and the
+   centred search field. */
+.domvec-agent {
+  position: absolute; left: 10px; bottom: 34px; z-index: 5;
+  display: flex; flex-direction: column; align-items: flex-start; gap: 4px;
+  padding: 4px 6px; border-radius: 6px;
+  background: rgba(0, 0, 0, 0.55); border: 1px solid rgba(255, 255, 255, 0.18);
+  font-size: var(--font-ui-smaller); color: #ddd;
+}
+.domvec-agent button { padding: 1px 6px; font-size: inherit; background: transparent; color: #bbb; box-shadow: none; }
+.domvec-agent-mode button.is-on { color: #fff; background: rgba(255, 255, 255, 0.16); }
+.domvec-agent-throttle { display: flex; align-items: center; gap: 4px; }
+.domvec-agent-bar { width: 70px; height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.15); cursor: pointer; }
+.domvec-agent-fill { height: 100%; border-radius: 3px; background: #7fd0ff; }
+.domvec-agent-val { min-width: 3.2em; text-align: right; }
+
+.domvec-agent-row { display: flex; align-items: center; gap: 6px; }
+/* The keys, lit while pressed -- the glow a hovered node gets. */
+.domvec-agent-keys { display: flex; flex-wrap: wrap; gap: 3px; max-width: 260px; }
+.domvec-agent-cap {
+  min-width: 16px; padding: 0 4px; text-align: center; border-radius: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.2); color: #999; font-size: 10px; line-height: 15px;
+  transition: background 0.08s, color 0.08s, box-shadow 0.08s;
+}
+.domvec-agent-cap.is-lit {
+  color: #fff; background: rgba(127, 208, 255, 0.35); border-color: #7fd0ff;
+  box-shadow: 0 0 8px 2px rgba(127, 208, 255, 0.7);
+}
+.domvec-agent-action { font-size: 10px; color: #bbb; }

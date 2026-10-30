@@ -4518,6 +4518,58 @@ mouse.*
 
 > I would suggest as many non blocking micro multiprocesses in the sidecar as you can manage.
 
+> The adaptive motion and zoom is a bad idea. The two should be independent. Also, q and r are camera normal rotation, might be worth an add. I'd also like to see the keypresses alongside the ego throttle panel, similar to our 3D views where hovered nodes glow, but for when keyboard controls are pressed and for what action.
+
+> switching node hovers should diff the same ego motion trajectory
+
+> so, ego motion is stateful
+
+> also, arrow keys for camera pan over the focus, coupled with q r for normal, gives full 3 DOF rotational motion control from the keyboard as computation graph inputs to the "sticked node/panel dialect editor"
+
+> Make sure arrow keys in cockpit and 3rd person view (i.e. all motion controls) are frame-respective to the cockpit's camera normal.
+
+> Ctrl and shift on throttle should also be more symbol/panel pure. Maybe no slider at all to be pure to the interface design from the mortegon docs.
+
+> Currently you have a panel shim, but we must now standardize our 2D computation graph editor around our specific dialect that  you must take time to pore over in order to mount the ideas to the current plugin, along with my own new adds/details.
+
+> deprecate sliders and the panel you have currently please.
+
+> we need to focus on the full scope of the design of our 3D/2D computation graph reservoir. The mortegon docs are substantial on all these factors, but we can now meld with our jupyter kernel design at the mid-grain as well and our extra details on keyboard activations and interactive extended-jupyter interfaces.
+
+> zxm etc are deprecated as well. not needed.
+
+> camera hovers to neighbor nodes keep re-snapping back
+
+*(27) The work now is the FULL design of the 3D/2D computation-graph
+RESERVOIR: mortegon's docs as the substance, melded at the mid-grain with
+the Jupyter kernel design (NOTEBOOK_PANEL_DESIGN) and with the keyboard
+activations and extended-Jupyter interfaces above. (28) Z, X and M (full
+throttle, pause, map/ego key) are deprecated. (29) A defect: hovering from
+one node to a neighbour, the camera keeps snapping back.*
+
+*(24) The throttle and its keys rendered symbol/panel-pure, in the mortegon
+interface design -- no slider; (25) the control strip built on 2026-10-29
+is a SHIM and is deprecated, sliders with it; (26) the 2D computation
+graph editor is standardized on the mortegon DIALECT, which must be studied
+closely (its own docs and code) and mounted onto this plugin together with
+the reader's new additions above.*
+
+*Read as, correcting the first build the same evening: (17) flight speed and
+zoom are INDEPENDENT -- no speed that scales with distance; (18) Q and R
+roll the camera about its view normal; (19) the keys being pressed, and the
+action each takes, are shown beside the throttle panel, lit while pressed
+the way a hovered node glows; (20) a new hover does not restart the flight
+but bends the SAME trajectory toward the new target -- (21) ego motion is
+STATEFUL (it has a velocity that carries over); (22) the arrow keys turn
+the camera about the focus (pitch and yaw), and with Q/R (roll) give full
+three-degree-of-freedom rotation from the keyboard -- inputs, in the end,
+to the stuck node/panel dialect editor (G-274). This overrides item 114's
+arrow-key PAN (2026-10-12), the later words winning. (23) Every motion
+control -- arrows, WASD, Q/R, in the cockpit and in the third-person view
+alike -- acts in the CAMERA's own frame: yaw about its current up, pitch
+about its current right, roll about its view normal, so a roll changes
+what "left" means for every key after it.*
+
 *Read as: (14) beside the throttle, a switch between a GLOBAL MAP view and
 an EGO TRAVERSAL view; throttle + view switch + the craft's controls
 together are the "user agent". (15) Motion in the chunk view lags -- a
