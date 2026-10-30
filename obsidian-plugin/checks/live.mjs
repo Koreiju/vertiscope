@@ -7060,8 +7060,37 @@ export function makeChecks(env) {
             }
             return out;
           };
+          // The Database base object in the kernel: search and read-only cypher.
+          const dbArm = async (planted) => {
+            await fetch(SIDE + "/plant", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "no-base-objects", on: planted }) });
+            const path = folder + "/g279db-" + (planted ? "p" : "c") + stamp + ".md";
+            const code = ["hits = Database.search('radix tree', k=3)",
+                          "pages = Database.cypher('MATCH (p:Page) RETURN count(p)')[0][0]",
+                          "try:", "    Database.cypher('MATCH (c:Chunk) SET c.md = c.md')", "    wrote = 'WROTE'",
+                          "except Exception as e:", "    wrote = 'refused' if 'read-only' in str(e) else str(e)",
+                          "print(len(hits) > 0, pages > 0, wrote)"].join(NL);
+            const f = await app.vault.create(path, "# db" + NL + NL + F + "python" + NL + code + NL + F + NL);
+            const leaf = app.workspace.getLeaf("tab");
+            const out = { planted };
+            try {
+              await leaf.openFile(f, { state: { mode: "source", source: false } });
+              const view = leaf.view;
+              await until(() => !!view.containerEl.querySelector(".domvec-run-fence"), 8000);
+              view.containerEl.querySelector(".domvec-run-fence").click();
+              await until(() => view.editor.getValue().includes("nb-output"), 30000);
+              const text = view.editor.getValue();
+              out.searched_counted_refused = /True True refused/.test(text);
+              out.undefined = /NameError/.test(text);
+            } finally {
+              await fetch(SIDE + "/plant", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "no-base-objects", on: false }) });
+              try { leaf.detach(); } catch (e) {}
+              try { await app.vault.delete(f); } catch (e) {}
+            }
+            return out;
+          };
           try {
-            return { src: srcUrl, clean: await arm(false), planted: await arm(true) };
+            return { src: srcUrl, clean: await arm(false), planted: await arm(true),
+                     db: await dbArm(false), db_planted: await dbArm(true) };
           } finally {
             try { await app.vault.delete(src); } catch (e) {}
             if (srcUrl) { try { await fetch(SIDE + "/purge", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url: srcUrl }) }); } catch (e) {} }
@@ -7075,7 +7104,8 @@ export function makeChecks(env) {
         if (!got || got.error || !got.clean) return { pass: false, evidence: got };
         const c = got.clean, p = got.planted;
         return { pass: !!got.src && c.read_the_note && c.recorded && c.input_urls.includes(got.src)
-                   && p.unbound && !p.read_the_note,
+                   && p.unbound && !p.read_the_note
+                   && got.db.searched_counted_refused && got.db_planted.undefined && !got.db_planted.searched_counted_refused,
                  evidence: got };
       },
     },

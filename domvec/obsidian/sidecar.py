@@ -182,6 +182,8 @@ _WORK_LOCK = _HeldLock()
 
 #: Planted (G-279): a cell's `{ref}` inputs are not bound before it runs.
 PLANT_NO_REF_BINDING = [False]
+#: Planted (G-279): no base objects in a cell's kernel.
+PLANT_NO_BASE_OBJECTS = [False]
 
 #: The encoder (one GPU model), shared by the embed worker and `/project`.
 #: Neither holds the store's lock while encoding, so a projection waits at
@@ -782,6 +784,7 @@ _PLANTABLE = {
     "no-scope-switch": ("domvec.obsidian.projector", "PLANT_NO_SCOPE_SWITCH"),  # G-2, 2026-10-25
     "page-scoped-dedup": ("domvec.graphstore", "PLANT_PAGE_SCOPED_DEDUP"),     # 2026-10-29
     "no-ref-binding": ("domvec.obsidian.sidecar", "PLANT_NO_REF_BINDING"),     # G-279
+    "no-base-objects": ("domvec.obsidian.sidecar", "PLANT_NO_BASE_OBJECTS"),   # G-279
 }
 
 
@@ -2152,6 +2155,29 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(200, {"name": name, "on": now})
             return
 
+        if route == "cypher":
+            # Read-only Cypher over the store (G-279: `Database.cypher` in a
+            # cell). A statement that writes or calls a procedure is refused.
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(length) or b"{}")
+            except Exception as exc:                # noqa: BLE001
+                self._send(400, {"error": "bad body: %s" % exc})
+                return
+            from . import kernel_objects as _ko
+            q = str(body.get("query") or "").strip()
+            if not q or _ko.WRITES.search(q):
+                self._send(400, {"error": "read-only: a query that writes or calls a procedure is refused"})
+                return
+            try:
+                rows = self.workspace.store._rows(q)
+            except Exception as exc:                # noqa: BLE001
+                self._send(200, {"error": "%s: %s" % (type(exc).__name__, str(exc)[:300])})
+                return
+            self._send(200, {"rows": [[v if isinstance(v, (str, int, float, bool, type(None))) else str(v) for v in r]
+                                      for r in rows[:1000]], "n": len(rows)})
+            return
+
         if route == "dedupe":
             # One content, one drawn chunk, store-wide (2026-10-29): every
             # chunk keyed by its markdown, one lead per content, the flipped
@@ -2591,6 +2617,13 @@ class _Handler(BaseHTTPRequestHandler):
         names = [str(n) for n in (body.get("refs") or []) if str(n).strip()]
         bound = {"prelude": "", "bound": [], "inputs": []}
         try:
+            # The base objects (`Database`, read-only) before every cell; the
+            # bootstrap defines them once per kernel. Planted
+            # `PLANT_NO_BASE_OBJECTS`.
+            if not PLANT_NO_BASE_OBJECTS[0]:
+                from . import kernel_objects as _ko
+                port = self.server.server_address[1]
+                self.kernel_pool.run(note, _ko.boot("http://127.0.0.1:%d" % port))
             if names and not PLANT_NO_REF_BINDING[0]:
                 from . import refs as _refs
                 bound = _refs.bind(self.workspace, names)
