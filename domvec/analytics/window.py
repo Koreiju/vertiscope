@@ -60,9 +60,32 @@ def _summarise(costs: List[int], window: int) -> Dict[str, object]:
     }
 
 
+def _rows_from_sidecar(base: str) -> List[tuple]:
+    """Every chunk's window fields through the sidecar's read-only `/cypher`
+    (it holds the writer lock while the app runs), 1,000 rows a page."""
+    import json
+    import urllib.request
+    out: List[tuple] = []
+    skip = 0
+    while True:
+        q = ("MATCH (c:Chunk) RETURN c.cid, c.url, c.md, c.line_count, c.group_of, c.group_n "
+             "ORDER BY c.cid SKIP %d LIMIT 1000" % skip)
+        req = urllib.request.Request(base.rstrip("/") + "/cypher", data=json.dumps({"query": q}).encode(),
+                                     headers={"content-type": "application/json"})
+        with urllib.request.urlopen(req, timeout=300) as r:
+            got = json.load(r)
+        if got.get("error"):
+            raise RuntimeError(got["error"])
+        rows = got.get("rows") or []
+        out += [tuple(row) for row in rows]
+        if len(rows) < 1000:
+            return out
+        skip += 1000
+
+
 def measure_window(workspace_root: str, *, window: int = 256,
                    plant: bool = False,
-                   limit: int = 0) -> Dict[str, object]:
+                   limit: int = 0, sidecar: str = "") -> Dict[str, object]:
     """Score every chunk, and every merge group, against the window.
 
     ``plant`` is the non-vacuity arm: it injects one synthetic record that
@@ -70,15 +93,17 @@ def measure_window(workspace_root: str, *, window: int = 256,
     empty store, a budget function returning 0, a filter that excluded
     everything -- is caught by the planted defect NOT being caught.
     """
-    from ..workspace import Workspace
-
-    ws = Workspace(workspace_root, read_only=True)
-    try:
-        rows = ws.store._rows(
-            "MATCH (c:Chunk) RETURN c.cid, c.url, c.md, c.line_count, "
-            "c.group_of, c.group_n")
-    finally:
-        ws.close()
+    if sidecar:
+        rows = _rows_from_sidecar(sidecar)
+    else:
+        from ..workspace import Workspace
+        ws = Workspace(workspace_root, read_only=True)
+        try:
+            rows = ws.store._rows(
+                "MATCH (c:Chunk) RETURN c.cid, c.url, c.md, c.line_count, "
+                "c.group_of, c.group_n")
+        finally:
+            ws.close()
 
     records = []
     for cid, url, md, line_count, group_of, group_n in rows:
@@ -135,9 +160,24 @@ def measure_window(workspace_root: str, *, window: int = 256,
             group_overs.append({"group_of": lead, "url": members[0]["url"],
                                 "members": len(members), "cost": cost})
 
+    # The user's own bound (`G-86`, `markdown.LENIENCY`): a run may pass the
+    # window to keep what belongs together while it stays nearer the window
+    # than twice it -- under 1.5x. An over UNDER that bound is the rule
+    # working, not the window failing; scoring it against bare 256 counted
+    # the permitted overshoot as a defect. Both are reported.
+    from ..markdown import LENIENCY
+    bound = int(window * LENIENCY)
     report: Dict[str, object] = {
         "workspace": str(workspace_root),
         "window": window,
+        "lenient_bound": bound,
+        "past_bound": {
+            "divisible": sum(1 for o in overs if o["divisible"] and o["cost"] > bound),
+            "indivisible": sum(1 for o in overs if not o["divisible"] and o["cost"] > bound),
+            "groups": sum(1 for g in group_overs if g["cost"] > bound),
+        },
+        "worst_divisible_past_bound": sorted([o for o in overs if o["divisible"] and o["cost"] > bound],
+                                             key=lambda r: -r["cost"])[:20],
         "planted": bool(plant),
         "chunks": {
             "divisible": _summarise(divisible, window),

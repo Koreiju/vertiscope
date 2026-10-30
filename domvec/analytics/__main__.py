@@ -111,6 +111,8 @@ def main(argv=None) -> int:
                         metavar="N",
                         help="measure each page N times and report the "
                              "instrument's own spread instead of a score")
+    parser.add_argument("--window-sidecar", default="",
+                        help="with --window-check, read the store through this running sidecar's /cypher")
     parser.add_argument("--window-check", action="store_true",
                         help="S-11's verification pass: does the token window "
                              "still hold AFTER the scan, for chunks and for "
@@ -130,7 +132,7 @@ def main(argv=None) -> int:
         # written, and opening a browser to ask it would add a variable.
         from .window import (measure_window, render_window_table,
                              write_window_artifact)
-        report = measure_window(args.workspace, window=args.window,
+        report = measure_window(args.workspace, window=args.window, sidecar=args.window_sidecar,
                                 plant=args.plant, limit=args.limit)
         print(render_window_table(report), flush=True)
         print(f"  written: "
