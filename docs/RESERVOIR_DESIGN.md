@@ -265,19 +265,27 @@ forms; nothing else unfolds.
 7. **Rollout** over `{chunk samples}`; flight plans on the same play/pause.
 8. **Halo transport** along cone rays.
 
-### 8b. Where the build stands (2026-10-30)
+### 8b. Where the build stands (2026-10-30, end of day)
 
-| step | state | evidence |
+Every step below is built and seen working in the running plugin by a live check with a planted
+arm (`obsidian-plugin/checks/live.mjs`, verdicts in `build_analytics/live_confirmations.md`).
+
+| step | built | live check |
 |---|---|---|
-| 0 defects | ego motion selective (G-285), chunk view real time (G-286), garbage 54 -> 13 MB a frame (G-290), url nodes 5x (G-269), only trusted input is the reader (G-289) | live checks, both arms |
-| 1 grammar | `domvec/slate.py` (G-277) and the TS `parseSlate` (cockpit.ts) | tests; G-280 |
-| 2 slate notes | the slate CLASS only (G-278 Partly); `{ref}` resolution and the title collapse are not built | G-280 screenshot |
-| 3 cells as nodes | `{ref}` binding, runs recorded, `Database` and `search(query, db, duckduckgo, k)` in every kernel (G-279, G-288) | live |
-| 4 cockpit | the `ego` slate bound both ways to the agent and the search; toggles, slider, rank-1 `{results}` (G-280 Partly) | live |
-| 5 graph form | not built (question 1 below) | -- |
-| 6 perimeter / bisector | the input -> cell signal network drawn and pulsing live (G-292); cell notes placed by UMAP (G-291); perimeter and bisector not built (G-282 Partly) | live |
-| 7 rollout / plans | flight plans through `{results}` on play/pause (G-283 Partly); the `{chunk samples}` rollout not built | live |
-| 8 halo transport | not built (G-284) | -- |
+| 0 defects | ego motion selective (G-285); chunk view real time (G-286); garbage 0.72 MB a frame, was 99.6 (G-290); hover raycast only on change (G-293); relax frames p99 52 ms (G-170); url nodes 5x (G-269); only trusted input is the reader (G-289) | all Confirm |
+| 1 grammar | `domvec/slate.py`, `parseSlate` / `rank1Of` (TS), `refs.rank1` (Py) | G-277, G-278 |
+| 2 slate notes | slate class; `{ref}` internalize / fold with fold state kept; title collapse to the circle | G-278 |
+| 3 cells as nodes | `{ref}` binding, runs recorded, `Database`, `search(query, db, duckduckgo, k)` | G-279, G-288 |
+| 4 cockpit | the `ego` slate bound both ways to the agent and the search; toggles, slider, `{results}`, `{keys}` | G-280 |
+| 5 graph form | double-click flips a slate to circles and undirected lines, node-count parity | G-281 |
+| 6 perimeter / bisector | readouts on the shell along their UMAP bearing; one bisector per graph, click opens it in 2D, right-click folds what it dominates; the signal pulsing input -> bisector -> readout | G-282, G-292 |
+| 7 rollout / plans | ▶▶ runs a cell once per sample of its first `{ref}`; flight plans through `{results}` or any `{ref}` | G-283, G-283-rollout |
+| 8 halo transport | a stuck slate's literal field transports its retrieved nodes onto the camera's cone, sliding with the camera | G-284 |
+| ego reservoir in UMAP | slate and run-cell notes indexed and placed by the global fit | G-291 |
+
+Not built, named in the rows: deleting a halo result to bring in the next (O.14); the
+three-metric similarity in the halo; left-drag wiring in graph form (UR N.4); the cockpit's
+title collapse and `{keys}` as samples other nodes reference.
 
 ## 9. Yours to decide
 
