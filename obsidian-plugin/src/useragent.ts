@@ -25,6 +25,14 @@
  *
  * A key acts only while the pointer is over the graph and nothing is typed
  * into -- the rule `arrowPan` already followed.
+ *
+ * And SELECTIVELY (2026-10-30, items 39, 46): "ego motion is always happening
+ * rather than selectively"; "ego motion should respect zoom outs when flying
+ * to new nodes as well". A flight stops at the reader's own zoom distance
+ * (`standoff`, never nearer than the floor) and ENDS there: the target is
+ * released once the craft is at rest and aimed, and nothing moves the camera
+ * again until the next hover or key. A reader's own drag is a hand on the
+ * stick: target and velocity both dropped (`release`).
  */
 
 export type AgentMode = "ego" | "map";
@@ -36,6 +44,9 @@ export interface AgentHost {
   recentre(): void;
   /** The reader acted: idle turns stop. */
   touched(what: string): void;
+  /** World units: the nearest a camera may be to `n` and still see all of
+   *  it (graph.ts: its drawn radius over the half field of view). */
+  fit?(n: any): number;
 }
 
 const KEY = "domvec.useragent";
@@ -79,13 +90,25 @@ export class UserAgent {
   /** Radians per key step for arrows and Q/R. */
   rotStep = 0.035;
   target: any = null;
+  /** World units: where THIS flight stops -- the reader's zoom distance when
+   *  it began, floored. A bend keeps it; a wheel re-reads it. */
+  standoff = 24;
+  /** The last node flown to, kept after the flight ends: the zoom floor's
+   *  subject (graph.ts `applyZoomFloor`). */
+  focus: any = null;
+  private rezoom = false;
   /** The craft's velocity, world units a second: the state a new hover bends. */
   vel = v3();
-  stats = { flights: 0, frames: 0, at_floor: 0, keys: 0, mode_switches: 0, last_d: 0, speed: 0, bends: 0, rolls: 0, orbits: 0 };
+  stats = { flights: 0, frames: 0, at_floor: 0, keys: 0, mode_switches: 0, last_d: 0, speed: 0, bends: 0, rolls: 0, orbits: 0,
+           arrivals: 0, releases: 0, idle_ticks: 0, standoff: 0 };
   /** Planted: the old 0.4 s tween to wherever `zoomFor` said, no floor. */
   plantFastFlight = false;
   /** Planted: a new hover restarts the flight from rest (no carried velocity). */
   plantRestart = false;
+  /** Planted (item 46): every flight closes to the floor, the reader's zoom-out lost. */
+  plantIgnoreZoom = false;
+  /** Planted (item 39): the target is held for good -- the aim pulls every frame. */
+  plantHoldTarget = false;
   private hud: HTMLElement | null = null;
   private lit = new Map<string, number>();
   private lastAction = "";
@@ -107,9 +130,20 @@ export class UserAgent {
   fly(n: any): boolean {
     if (this.plantFastFlight) return false;
     if (this.mode === "map") { this.target = null; return true; }   // a hover moves nothing
-    if (this.target && this.target !== n) this.stats.bends++;
+    const bend = !!this.target && this.target !== n;
+    if (bend) this.stats.bends++;
     if (this.plantRestart) this.vel = v3();
+    // A NEW flight stops where the reader is zoomed to; a bend keeps the
+    // flight's own standoff (mid-bend the look point is between two nodes).
+    // Never nearer than `stopFloor(n)`.
+    if (!bend) {
+      const cam = this.host.camera(), ctl = this.host.controls();
+      const d = cam && ctl && ctl.target ? Math.hypot(cam.position.x - ctl.target.x, cam.position.y - ctl.target.y, cam.position.z - ctl.target.z) : this.floor;
+      this.standoff = this.plantIgnoreZoom ? this.floor : Math.max(this.stopFloor(n), Number.isFinite(d) ? d : 0);
+      this.stats.standoff = Math.round(this.standoff * 10) / 10;
+    }
     this.target = n;
+    this.focus = n;
     this.stats.flights++;
     return true;
   }
@@ -120,7 +154,15 @@ export class UserAgent {
     if (!cam || !ctl || !ctl.target) return;
     const p = cam.position, t = ctl.target;
     const n = this.mode === "ego" ? this.target : null;
+    // Nothing selected and at rest: the camera is the reader's alone.
+    if (!n && len(this.vel) < 1e-4) { this.stats.idle_ticks++; this.fade(); return; }
+    if (this.rezoom) {
+      this.rezoom = false;
+      const dz = Math.hypot(p.x - t.x, p.y - t.y, p.z - t.z);
+      if (Number.isFinite(dz)) { this.standoff = Math.max(this.stopFloor(n), dz); this.stats.standoff = Math.round(this.standoff * 10) / 10; }
+    }
     let want = v3();
+    let arrived = false;
     if (n && Number.isFinite(n.x) && !this.paused && this.throttle > 0) {
       const nx = n.x, ny = n.y, nz = n.z || 0;
       // Aim: the look point turns onto the node at the craft's turn rate.
@@ -128,23 +170,34 @@ export class UserAgent {
       t.x += (nx - t.x) * ka; t.y += (ny - t.y) * ka; t.z += (nz - t.z) * ka;
       const to = v3(nx - p.x, ny - p.y, nz - p.z), d = len(to);
       this.stats.last_d = Math.round(d * 10) / 10;
-      const left = d - this.floor;
-      if (left > 1e-3) {
+      // Signed: zoomed in nearer than the standoff, the craft backs out to it.
+      const left = d - this.standoff;
+      if (Math.abs(left) > 0.25) {
         // The speed the throttle asks for, capped so the craft can still stop
-        // at the floor: v^2 = 2 a s.
-        const speed = Math.min(this.throttle * this.vmax, Math.sqrt(2 * this.accel * left));
+        // at the standoff: v^2 = 2 a s.
+        const speed = Math.min(this.throttle * this.vmax, Math.sqrt(2 * this.accel * Math.abs(left))) * Math.sign(left);
         want = v3(to.x / d * speed, to.y / d * speed, to.z / d * speed);
       } else {
         this.stats.at_floor++;
+        const off = Math.hypot(nx - t.x, ny - t.y, nz - t.z);
+        arrived = off < Math.max(0.05, d * 0.01) && len(this.vel) < 0.5;
       }
     }
     // The heading turns toward `want` at most `turn` rad/s (the trajectory
     // BENDS); the speed changes at most `accel`.
-    const sv = len(this.vel), sw = len(want);
+    const sv = len(this.vel);
+    let sw = len(want);
     let dir = sv > 1e-6 ? v3(this.vel.x / sv, this.vel.y / sv, this.vel.z / sv) : null;
     if (sw > 1e-6) {
       const wd = v3(want.x / sw, want.y / sw, want.z / sw);
-      if (!dir) dir = wd;
+      // Wanted BEHIND the heading (past the standoff, or zoomed in nearer
+      // than it): brake to rest first, then set off the other way. Turning
+      // round at the bounded rate kept the speed up through the half-circle,
+      // and the craft orbited the node instead of stopping (live G-285,
+      // 2026-10-30: 0 arrivals in six flights).
+      if (dir && dir.x * wd.x + dir.y * wd.y + dir.z * wd.z < 0) {
+        if (sv <= this.accel * dt) dir = wd; else sw = 0;
+      } else if (!dir) dir = wd;
       else {
         const cos = Math.max(-1, Math.min(1, dir.x * wd.x + dir.y * wd.y + dir.z * wd.z));
         const ang = Math.acos(cos), maxA = this.turn * dt;
@@ -162,13 +215,19 @@ export class UserAgent {
     this.stats.speed = Math.round(speed * 10) / 10;
     if (speed > 1e-4) {
       let step = v3(this.vel.x * dt, this.vel.y * dt, this.vel.z * dt);
-      // The floor is HARD: no step ends nearer the target than it.
+      // The floor is HARD: no step ends nearer the target than it. And a
+      // step that would cross the standoff lands ON it, at rest.
       if (n && Number.isFinite(n.x)) {
-        const q = v3(p.x + step.x - n.x, p.y + step.y - n.y, p.z + step.z - (n.z || 0));
+        const nz = n.z || 0;
+        const d0 = Math.hypot(p.x - n.x, p.y - n.y, p.z - nz);
+        const q = v3(p.x + step.x - n.x, p.y + step.y - n.y, p.z + step.z - nz);
         const dq = len(q);
-        if (dq < this.floor) {
-          const k = this.floor / Math.max(dq, 1e-9);
-          step = v3(n.x + q.x * k - p.x, n.y + q.y * k - p.y, (n.z || 0) + q.z * k - p.z);
+        const stop = this.plantIgnoreZoom ? this.floor : this.standoff;
+        const hard = Math.min(this.floor, stop);
+        const crossed = (d0 >= stop && dq < stop) || (d0 <= stop && dq > stop);
+        if (dq < hard || crossed) {
+          const k = (dq < hard ? hard : stop) / Math.max(dq, 1e-9);
+          step = v3(n.x + q.x * k - p.x, n.y + q.y * k - p.y, nz + q.z * k - p.z);
           this.vel = v3();
         }
       }
@@ -176,8 +235,29 @@ export class UserAgent {
       this.stats.frames++;
       ctl.update?.();
     }
+    // At the standoff, at rest, aimed: the flight is over.
+    if (arrived && !this.plantHoldTarget) { this.target = null; this.vel = v3(); this.stats.arrivals++; }
     this.fade();
   }
+
+  /** The nearest a flight to `n` stops: the hard floor, or nearer than that
+   *  never -- but no nearer than `n` fits the view either (item 38: "zoomed
+   *  nodes all-the way are out of view"; a page node of radius 14 needs 33). */
+  stopFloor(n: any): number {
+    const f = this.host.fit ? this.host.fit(n) : 0;
+    return Math.max(this.floor, Number.isFinite(f) ? f : 0);
+  }
+
+  /** The reader's own camera gesture: a hand on the stick. */
+  release(): void {
+    if (!this.target && len(this.vel) < 1e-4) return;
+    this.target = null;
+    this.vel = v3();
+    this.stats.releases++;
+  }
+
+  /** The wheel turned: the flight in progress stops at the new distance. */
+  zoomed(): void { if (this.target) this.rezoom = true; }
 
   setMode(mode: AgentMode): void {
     if (mode === this.mode) return;

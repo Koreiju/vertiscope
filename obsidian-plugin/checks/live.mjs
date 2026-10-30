@@ -7139,10 +7139,15 @@ export function makeChecks(env) {
             a.setMode("ego"); a.setThrottle(0.25); a.paused = false;
             out.speed_near = await cruise(n1, 1);
             out.speed_far = await cruise(n1, 2);
-            reset(); a.setThrottle(1); hover(n2);
+            // Zoomed in nearer than the floor (look point 8 units ahead): the
+            // flight's standoff is then the floor itself (G-285 is the zoom).
+            reset(); a.setThrottle(1);
+            { const b = { x: ctl.target.x - cam.position.x, y: ctl.target.y - cam.position.y, z: ctl.target.z - cam.position.z }; const bl = Math.hypot(b.x, b.y, b.z) || 1;
+              ctl.target.set(cam.position.x + b.x / bl * 8, cam.position.y + b.y / bl * 8, cam.position.z + b.z / bl * 8); }
+            hover(n2);
             let minD = Infinity;
             for (let i = 0; i < 80; i++) { await sleep(250); minD = Math.min(minD, dist(n2)); }
-            out.floor = a.floor; out.min_d = Math.round(minD * 10) / 10; out.end_d = Math.round(dist(n2) * 10) / 10;
+            out.floor = Math.round(a.stopFloor(n2) * 10) / 10; out.hard_floor = a.floor; out.min_d = Math.round(minD * 10) / 10; out.end_d = Math.round(dist(n2) * 10) / 10;
             const bend = async (planted) => {
               reset(); a.setThrottle(0.5); a.plantRestart = planted;
               hover(n1); await sleep(250 + 2000);
@@ -7166,6 +7171,119 @@ export function makeChecks(env) {
                    && got.min_d >= got.floor - 0.5 && Math.abs(got.end_d - got.floor) <= 2
                    && got.bend.kept > 0.5 && got.bend_planted.kept < 0.25,
                  evidence: got };
+      },
+    },
+    {
+      id: "G-285",
+      asks: "ego motion is SELECTIVE and in step with the hover (2026-10-30, items 38-39, 46-48): (a) a flight stops at the reader's own zoom distance, not the floor -- planted (agent.plantIgnoreZoom) it closes to the floor; (b) the flight ENDS: arrived, the target is released and a look point moved off the node stays moved -- planted (agent.plantHoldTarget) the aim pulls it back; (c) a drag on the canvas stops the craft dead -- planted (plantHoldFlight) it flies on; (d) a hovered browser element, a fresh object on every poll, still gets its flight within the dwell -- planted (plantIdentityDwell) none; (e) the node flown to last is flown to again after its flight ended; (f) the wheel all the way in keeps the node in view -- planted (plantNoZoomFloor) the camera goes inside it",
+      async run() {
+        const got = await evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
+          if (!v || !v.graph || !v.agent) return { error: "no graph or agent" };
+          const g = v.graph, cam = g.camera(), ctl = g.controls(), a = v.agent;
+          const saved = { p: cam.position.clone(), t: ctl.target.clone(), up: cam.up.clone(), mode: a.mode, thr: a.throttle };
+          const dist = (n) => Math.hypot(cam.position.x - n.x, cam.position.y - n.y, cam.position.z - (n.z || 0));
+          const reset = () => { cam.position.copy(saved.p); ctl.target.copy(saved.t); cam.up.copy(saved.up); ctl.update?.(); a.vel = { x: 0, y: 0, z: 0 }; a.target = null; v.focusNode = null; v.focusPending = null; };
+          const ns = g.graphData().nodes.filter((n) => Number.isFinite(n.x) && n.level !== "path");
+          if (ns.length < 3) return { error: "too few nodes" };
+          // Nodes about 250 units from the camera, so a flight has room.
+          ns.sort((x, y) => Math.abs(dist(x) - 250) - Math.abs(dist(y) - 250));
+          const n1 = ns[0], n2 = ns[1];
+          // The look point ZOOM units ahead, on the line to n: the reader zoomed to ZOOM.
+          const zoomAt = (n, zoom) => {
+            const b = { x: n.x - cam.position.x, y: n.y - cam.position.y, z: (n.z || 0) - cam.position.z }; const bl = Math.hypot(b.x, b.y, b.z) || 1;
+            ctl.target.set(cam.position.x + b.x / bl * zoom, cam.position.y + b.y / bl * zoom, cam.position.z + b.z / bl * zoom);
+          };
+          const arrive = async (ms) => { for (let i = 0; i < ms / 100; i++) { await sleep(100); if (!a.target) return true; } return false; };
+          const out = { n1: String(n1.id).slice(0, 60), d1: Math.round(dist(n1)) };
+          try {
+            a.setMode("ego"); a.setThrottle(1); a.paused = false;
+            // (a) the standoff is the reader's zoom.
+            const standoff = async (planted) => {
+              reset(); a.plantIgnoreZoom = planted; zoomAt(n1, 90);
+              v.flyTo(n1); const done = await arrive(15000);
+              return { end_d: Math.round(dist(n1) * 10) / 10, arrived: done, standoff: Math.round(a.standoff * 10) / 10, stop_floor: Math.round(a.stopFloor(n1) * 10) / 10 };
+            };
+            out.zoom = await standoff(false);
+            out.zoom_planted = await standoff(true);
+            a.plantIgnoreZoom = false;
+            // (b) arrived, released: a moved look point stays moved.
+            const hold = async (planted) => {
+              reset(); a.plantHoldTarget = planted; zoomAt(n1, 60);
+              v.flyTo(n1);
+              if (planted) await sleep(6000); else await arrive(15000);
+              const t0 = ctl.target.clone(); ctl.target.set(t0.x + 6, t0.y, t0.z);
+              await sleep(1200);
+              return { target_held: !!a.target, off_after: Math.round(Math.hypot(ctl.target.x - n1.x, ctl.target.y - n1.y, ctl.target.z - (n1.z || 0)) * 10) / 10 };
+            };
+            out.hold = await hold(false);
+            out.hold_planted = await hold(true);
+            a.plantHoldTarget = false;
+            // (c) a drag on the canvas: a hand on the stick.
+            const drag = async (planted) => {
+              reset(); v.plantHoldFlight = planted; zoomAt(n2, 20);
+              v.flyTo(n2); await sleep(900);
+              const sp0 = Math.hypot(a.vel.x, a.vel.y, a.vel.z);
+              v.canvasEl.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true, button: 0 }));
+              const p0 = cam.position.clone(); await sleep(600);
+              return { speed_before: Math.round(sp0 * 10) / 10, moved_after: Math.round(Math.hypot(cam.position.x - p0.x, cam.position.y - p0.y, cam.position.z - p0.z) * 10) / 10 };
+            };
+            out.drag = await drag(false);
+            out.drag_planted = await drag(true);
+            v.plantHoldFlight = false;
+            // (d) fresh objects, one id, polled every 30 ms: the dwell still ends in a flight.
+            const poll = async (planted) => {
+              reset(); v.plantIdentityDwell = planted; zoomAt(n2, 20);
+              // Counted WHILE the polls go on, as a pointer resting on a
+              // browser element keeps asking: a dwell that completes only
+              // once the asking stops is the defect.
+              const f0 = v.focusStats.flown;
+              for (let i = 0; i < 34; i++) { v.focusOn({ id: n2.id + "|/html/body/x", level: "chunk", virtual: true, x: n2.x, y: n2.y, z: n2.z || 0 }); await sleep(30); }
+              const flights = v.focusStats.flown - f0;
+              v.focusOn(null);
+              return { flights };
+            };
+            out.poll = await poll(false);
+            out.poll_planted = await poll(true);
+            v.plantIdentityDwell = false;
+            // (e) flown again after its flight ended.
+            reset(); zoomAt(n1, 40);
+            v.focusOn(n1); await sleep(300); await arrive(15000);
+            const f1 = v.focusStats.flown; ctl.target.set(ctl.target.x + 30, ctl.target.y, ctl.target.z);
+            v.focusOn(n1); await sleep(400);
+            out.again_flights = v.focusStats.flown - f1;
+            // (f) the wheel all the way in.
+            const wheel = async (planted) => {
+              reset(); v.plantNoZoomFloor = planted; zoomAt(n1, 40);
+              v.flyTo(n1); await arrive(15000); await sleep(100);
+              const tx = ctl.target;
+              cam.position.set(tx.x + (cam.position.x - tx.x) * 0.001, tx.y + (cam.position.y - tx.y) * 0.001, tx.z + (cam.position.z - tx.z) * 0.001);
+              ctl.update(); cam.updateMatrixWorld();
+              const r = v.proxyRadius(n1), d = dist(n1);
+              const q = cam.position.clone().set(n1.x, n1.y, n1.z || 0).project(cam);
+              return { d: Math.round(d * 100) / 100, r: Math.round(r * 100) / 100, outside: d > r, min_distance: Math.round(ctl.minDistance * 100) / 100,
+                       in_view: Math.abs(q.x) <= 1 && Math.abs(q.y) <= 1 && q.z < 1 };
+            };
+            out.wheel = await wheel(false);
+            out.wheel_planted = await wheel(true);
+          } finally {
+            a.plantIgnoreZoom = false; a.plantHoldTarget = false; v.plantHoldFlight = false; v.plantIdentityDwell = false; v.plantNoZoomFloor = false;
+            reset(); a.setThrottle(saved.thr); a.mode = saved.mode;
+          }
+          return out;
+        })()`, { timeout: 180000 });
+        if (!got || got.error) return { pass: false, evidence: got };
+        // Planted, the flight closes to the floor -- where the wheel's own
+        // floor (the node's fit) holds it, if that is further.
+        const zoomOk = got.zoom.arrived && Math.abs(got.zoom.end_d - Math.max(90, got.zoom.stop_floor)) <= 3
+          && got.zoom_planted.end_d < got.zoom.end_d - 20;
+        const holdOk = !got.hold.target_held && got.hold.off_after > 4 && got.hold_planted.off_after < 2;
+        const dragOk = got.drag.speed_before > 1 && got.drag.moved_after < 0.5 && got.drag_planted.moved_after > 2;
+        const pollOk = got.poll.flights >= 1 && got.poll_planted.flights === 0;
+        const wheelOk = got.wheel.outside && got.wheel.in_view && !got.wheel_planted.outside;
+        return { pass: zoomOk && holdOk && dragOk && pollOk && got.again_flights >= 1 && wheelOk,
+                 evidence: { ...got, verdicts: { zoomOk, holdOk, dragOk, pollOk, again: got.again_flights >= 1, wheelOk } } };
       },
     },
     {
@@ -7745,7 +7863,7 @@ export function makeChecks(env) {
     },
     {
       id: "G-269",
-      asks: "url nodes are drawn two to three times their chunks' size in the view as it is, and the pick proxy with them: as the GPU is given them, page nodes 2.5x what they were, and where chunks are drawn, at least twice the median chunk; planted (plantSmallPages) the old sizes",
+      asks: "url nodes are drawn MUCH larger than their chunks in the view as it is (2026-10-30, item 41), and the pick proxy with them: as the GPU is given them, page nodes pageScale (5x) what they were, and where chunks are drawn, at least four times the median chunk; planted (plantSmallPages) the old sizes",
       async run() {
         const got = await evaluate(`(async () => {
           const v = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
@@ -7776,14 +7894,14 @@ export function makeChecks(env) {
           const pn = v.graph.graphData().nodes.find((n) => n.level === "page" && n.__threeObj && n.__threeObj.__proxy);
           const lk = pn ? v.lookOf(pn, v.graph.nodeRelSize(), v.drawnMedia) : null;
           return { level: v.level || "pages", pages: now.pages.length, chunks: now.chunks.length,
-                   page_vs_old_p50: med(ratios), page_vs_old_min: ratios.length ? Math.min(...ratios) : null,
+                   scale: v.pageScale, page_vs_old_p50: med(ratios), page_vs_old_min: ratios.length ? Math.min(...ratios) : null,
                    page_vs_chunk: pageMed && chunkMed ? Math.round(pageMed / chunkMed * 100) / 100 : null,
-                   proxy_half: pn ? Math.round(pn.__threeObj.scale.x * 100) / 100 : null, drawn_half: lk ? Math.round(lk.half * 100) / 100 : null };
+                   proxy_half: pn ? Math.round(pn.__threeObj.scale.x * 100) / 100 : null, drawn_half: lk ? Math.round(lk.half * v.zoomScale * 100) / 100 : null, zoom_scale: v.zoomScale };
         })()`, { timeout: 60000 });
         if (!got || got.error) return { pass: false, evidence: got };
         return {
-          pass: got.pages > 0 && Math.abs(got.page_vs_old_p50 - 2.5) < 0.05
-             && (got.chunks < 20 || got.page_vs_chunk >= 2),
+          pass: got.pages > 0 && got.scale >= 4 && Math.abs(got.page_vs_old_p50 - got.scale) < 0.05
+             && (got.chunks < 20 || got.page_vs_chunk >= 4),
           evidence: got,
         };
       },

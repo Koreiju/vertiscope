@@ -4540,6 +4540,72 @@ mouse.*
 
 > camera hovers to neighbor nodes keep re-snapping back
 
+> search input panel should be a part of the controls, and the camera should fly at the hovered results or default to the top-most ranked index in view of the scroll. Note the "search" function should be one of the first computation graph artifacts that is essentially the interface overlap on the design of the function-object references and syntax in markdown node panels in recursive chunks within-panel that interfaces with the minimal most python code representation for calling a "search" function either in the db or also in duckduckgo or just duckduckgo, represented as toggleable boolean nodes and panel-fields when hovered, respectively. Continuous values get sliders too I guess. But we make a distinction between the modified mortegon syntax on markdown and their code links, while also respecting the signal flow and order of markdown panels and other computation graph rollout node cells, which governs the layout of the aggregate extended jupyter panels in the panel-dialect, and regular activation reservoir computation graph, with gestures on nodes/fields being very specific and local to the substance of the interface being interacted with, such as only rank-1 expansions on clicked ancestor nodes in either representation of the dialect, panel or computation graph.
+
+
+> 2D/3D representations are shared, just differing on where they live in either interface.
+
+> zoomed nodes all-the way are out of view.
+
+> a few things broken:
+>
+> ego motion is always happening rather than selectively
+> a lot of other rendering, streaming, continuous usage, and general feature degradation in rendering and layouts being erratic is currently observed
+> also, we need to make the url nodes in the page view still much larger than their chunks, since they're hard to spot and interact with when scanning/unfolded
+> these need to be dealt with jointly and swiftly *while* we attend to our mortegon dialect kernel ego vessel reservoir with the specialized syntax and extensions to jupyter as 2D "sticked" panels and 3D nodes depending on selection and view of ego artifacts. UMAP happens on the ego reservoir for all computation graph nodes as artifacts of various kinds. we need to prove the signal flow (all of this is in the docs) rendering works live, and that live rendering is in real-time, since we've seen some memory degradation/latency lag significantly block smooth functionality in the full chunk view
+> search the verbatim, transcript, and docs for more info
+> full builds, comprehensive tests everywhere, running all at once in batch builds and tests, then using and verifying yourself comprehensively with the MCP.
+> The ego computation graph and controls are our main priority, and they are still missing most of their features. We need to keep up with debugging *and* new builds with good balances and alignment of these independent priority strands on diffs and tests with designs. Perhaps our own design docs would be good to track as well if needed to distill the mortegon docs and code and integrate it directly with our plugin. We need to prioritize seeing immediate results and updates with these new features in our plugin along with debugs and fixes to the various items from my own prompts and feedback in our transcript.
+
+> ego motion should respect zoom outs when flying to new nodes as well
+
+> aims don't update as well and ego motion is desynched from hovered panels
+
+> as in, hovered browser UI panels
+
+*Read as (2026-10-30): (37) a node's 2D (panel) and 3D (graph) forms are
+ONE shared representation -- they differ only in which interface they
+live in; (38) a defect: a node zoomed into all the way leaves the view;
+(39) a defect: ego motion runs ALL the time -- it must move the camera
+only when selected (a hover/fly target, a key held, a velocity still
+decaying), and otherwise leave the camera to the reader; (40) a defect
+class: rendering, streaming, continuous use and layout degrade and go
+erratic over a session; (41) URL (page) nodes in the page view drawn
+MUCH larger than their chunks, so they can be found and acted on while
+scanning or unfolded; (42) these fixes run JOINTLY with the build of the
+ego vessel: the mortegon-dialect kernel reservoir, its syntax and the
+Jupyter extensions, shown as 2D stuck panels or 3D nodes by selection
+and view; (43) UMAP runs over the EGO RESERVOIR: every computation-graph
+node, of every artifact kind, is placed by it; (44) the signal-flow
+rendering is proven LIVE and REAL-TIME -- memory growth and latency in
+the full chunk view are the defects that block it; (45) batch builds and
+tests, then MCP verification by use; our own design docs track the
+distillation of the mortegon docs and code into the plugin; immediate,
+visible results in the plugin come first.*
+
+*(46) A flight to a new node stops at the reader's OWN zoom distance --
+zoomed out, it stays out -- never nearer than the floor; (47) a defect:
+the aim does not follow a new hover; (48) a defect: ego motion is out of
+step with the panel hovered in the BROWSER cell's UI -- the camera must go
+where the hovered browser panel is, when it is hovered.*
+
+*(30) The search input belongs to the CONTROLS (the cockpit, not a field
+of its own); (31) the camera flies to the hovered result, and with none
+hovered, to the top-most ranked result in view of the results' scroll;
+(32) `search` is one of the FIRST computation-graph artifacts -- the place
+where the function-object reference syntax of markdown node panels (the
+mortegon dialect, recursive chunks within a panel) meets the minimal
+Python call, `search(query, db, duckduckgo)`: the database, DuckDuckGo,
+or both; (33) its booleans are toggleable NODES in graph form and
+toggleable FIELDS when hovered in panel form; continuous values get
+sliders (in the dialect -- not the deprecated strip); (34) the modified
+mortegon syntax on markdown and its CODE links are kept distinct; (35)
+the signal flow and order of markdown panels and rollout cells GOVERN the
+layout -- of the aggregate extended-Jupyter panels in the panel dialect,
+and of the reservoir graph; (36) gestures are specific and LOCAL to what
+they touch: a click on an ancestor expands only its rank-1 links, in
+panel and graph form alike.*
+
 *(27) The work now is the FULL design of the 3D/2D computation-graph
 RESERVOIR: mortegon's docs as the substance, melded at the mid-grain with
 the Jupyter kernel design (NOTEBOOK_PANEL_DESIGN) and with the keyboard

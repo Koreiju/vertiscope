@@ -491,6 +491,11 @@ export class GraphView extends ItemView {
     // The reader moving the camera, for holding stream deltas (G-227).
     const moved = () => { this.camMovedAt = performance.now(); };
     canvas.addEventListener("wheel", moved, { passive: true, capture: true });
+    // The ego flight is selective (2026-10-30, items 39, 46): a drag on the
+    // canvas is a hand on the stick -- the flight and its velocity dropped --
+    // and the wheel re-reads the distance a flight in progress stops at.
+    canvas.addEventListener("pointerdown", () => { if (!this.plantHoldFlight) this.agent.release(); }, { passive: true, capture: true });
+    canvas.addEventListener("wheel", () => this.agent.zoomed(), { passive: true, capture: true });
     canvas.addEventListener("pointermove", (e) => { if (e.buttons) moved(); }, { passive: true, capture: true });
     // Arrow keys pan, precisely, while the pointer is over the 3D view and no
     // text field has the keyboard (2026-10-12, PLUGIN_GOAL 114). A held key
@@ -2983,7 +2988,16 @@ export class GraphView extends ItemView {
     // The SAME target asked again (every pushed and every polled hover asks)
     // leaves its dwell alone: resetting it on each ask meant it never ran --
     // measured 23 asks, 0 flights (2026-10-06).
-    if (this.focusNode === target || this.focusPending === target) return;
+    // By ID, not by object: a hovered browser ELEMENT is a fresh virtual
+    // target on every poll (`base|element`), so an identity test restarted
+    // the dwell on each poll and the flight never came -- 1,428 asks, 644
+    // flights (2026-10-30, item 48: "ego motion is desynched from hovered
+    // browser UI panels"). And the node flown to last is flown to AGAIN once
+    // its flight is over (item 47, "aims don't update"): only a flight still
+    // under way, or a dwell already waiting, swallows a repeat.
+    const same = (a: any) => !!a && (a === target || (!this.plantIdentityDwell && a.id === target.id));
+    if (same(this.focusPending)) return;
+    if (same(this.focusNode) && (this.agent.target ? same(this.agent.target) : this.focusFrame || this.plantIdentityDwell)) return;
     window.clearTimeout(this.focusTimer);
     this.focusPending = target;
     this.focusStats.asked++;
@@ -3008,7 +3022,9 @@ export class GraphView extends ItemView {
       const c: any = g.controls();
       if (c && c.addEventListener) {
         c.addEventListener("start", () => {
-          this.agent.target = null;
+          // The agent is released by the canvas's own pointerdown (a drag),
+          // not here: TrackballControls also starts on the wheel, and a
+          // zoom-out mid-flight must not end the flight (item 46).
           if (!this.focusNode) return;
           this.focusNode = null; this.focusStats.released++;
         });
@@ -5212,8 +5228,55 @@ export class GraphView extends ItemView {
   /** Spheres drawn this much larger by default (2026-10-12, PLUGIN_GOAL 115:
    *  "the nodes could be a little larger/brighter by default"). */
   nodeScale = 1.25;
-  /** A page (url) node's size over its chunks' (2026-10-24: "twice or three times"). */
-  pageScale = 2.5;
+  /** A page (url) node's size over its chunks' (2026-10-24: "twice or three
+   *  times"; 2026-10-30, item 41: "still much larger than their chunks, since
+   *  they're hard to spot and interact with when scanning/unfolded"). */
+  pageScale = 5;
+  /** Planted (item 39): the agent's flight survives the reader's drag. */
+  plantHoldFlight = false;
+  /** Planted (items 47-48): the hover dwell dedupes by object identity. */
+  plantIdentityDwell = false;
+  /** Planted (item 38): no zoom floor -- the wheel goes through the node. */
+  plantNoZoomFloor = false;
+  zoomFloorStats = { set: 0, last: 0 };
+
+  /**
+   * The wheel's floor (2026-10-30, item 38: "zoomed nodes all-the way are out
+   * of view"). TrackballControls zooms toward its target with no floor at
+   * all: all the way in, the camera sat inside the node it zoomed to, and
+   * the node left the view. The floor is the distance at which the node
+   * flown to last just fills the view's height, while the look point is on
+   * it; elsewhere, one world unit.
+   */
+  /** The nearest the camera may be to `n` and still see all of it: its DRAWN
+   *  radius (a revealed picture is larger than its orb) over the half field
+   *  of view, with a tenth to spare. The wheel's
+   *  floor and the ego flight's nearest stop are both this. */
+  fitDistance(n: any): number {
+    const g: any = this.graph;
+    if (!g || !n) return 0;
+    const half = Math.tan((((g.camera()?.fov) || 50) * Math.PI) / 360);
+    // At FULL size: `zoomScale` halves a node at full view and gives it back
+    // as the camera closes in, so the size it has once near is the one to fit.
+    return (this.lookOf(n, g.nodeRelSize(), this.drawnMedia).half / half) * 1.1;
+  }
+
+  private applyZoomFloor(g: any): void {
+    const ctl: any = g.controls(), cam: any = g.camera();
+    if (!ctl || !ctl.target || !cam) return;
+    if (this.plantNoZoomFloor) { ctl.minDistance = 0; return; }
+    let floor = 1;
+    const f = this.agent.focus;
+    if (f && Number.isFinite(f.x)) {
+      const t = ctl.target, P = cam.position;
+      const d = Math.hypot(P.x - t.x, P.y - t.y, P.z - t.z) || 1;
+      const off = Math.hypot(f.x - t.x, f.y - t.y, (f.z || 0) - t.z);
+      if (off < d * 0.25) {
+        floor = Math.max(floor, this.fitDistance(f) + off);
+      }
+    }
+    if (ctl.minDistance !== floor) { ctl.minDistance = floor; this.zoomFloorStats.set++; this.zoomFloorStats.last = Math.round(floor * 10) / 10; }
+  }
   /** Planted: page nodes at the old sizes -- in chunk view, a chunk's. */
   plantSmallPages = false;
   private pointerOver = false;
@@ -5226,6 +5289,7 @@ export class GraphView extends ItemView {
     camera: () => (this.graph as any)?.camera(),
     controls: () => (this.graph as any)?.controls(),
     recentre: () => this.reframe?.(),
+    fit: (n: any) => this.fitDistance(n),
     touched: (what: string) => {
       (window as any).__domvecReaderAt = Date.now();
       const by: Record<string, number> = ((window as any).__domvecReaderBy = (window as any).__domvecReaderBy || {});
@@ -5746,6 +5810,7 @@ export class GraphView extends ItemView {
         const dt = this.agentAt ? Math.min(0.5, (t - this.agentAt) / 1000) : 0;
         this.agentAt = t;
         if (dt > 0) this.agent.tick(dt);
+        this.applyZoomFloor(g);
       }
       freezeStatic();
       if (this.motion.recording) {
