@@ -5728,6 +5728,10 @@ export class GraphView extends ItemView {
   }
   /** Planted: page nodes at the old sizes -- in chunk view, a chunk's. */
   plantSmallPages = false;
+  /** Planted (G-4/G-21): pages exempt from the spacing pass, as before -- they overlap. */
+  plantPagesOverlap = false;
+  /** Planted (G-4): the page view sized to its room only when the simulation settles. */
+  plantSpacingOnSettleOnly = false;
   private pointerOver = false;
   private panHeldSince = 0;
   /** One arrow step, as a share of the camera's distance to its target. */
@@ -6615,9 +6619,23 @@ export class GraphView extends ItemView {
   plantBigChunks = false;
 
   /** The radius a node is DRAWN at, the pane's own number, for checks. */
+  /**
+   * The radius a node is DRAWN at -- the batch's own `lookOf`, so `nodeScale`
+   * and a page's `pageScale` are in it (2026-10-30). This was `drawnRadius`,
+   * which predates both: a page node drawn at 6.25x the radius reported here
+   * (1.25 x 5), and the collider spacing pages by the smaller one -- G-107
+   * read 800 of 800 nodes off their collider size, and G-21 and G-4, scoring
+   * overlap at this radius, could not see pages overlapping. A picture's
+   * radius is its billboard's half-diagonal.
+   */
   drawnRadiusOf(n: any): number {
-    return this.graph ? drawnRadius(n, this.graph.nodeRelSize(), this.media()) : 0;
+    if (!this.graph) return 0;
+    if (this.plantColliderUndrawn) return drawnRadius(n, this.graph.nodeRelSize(), this.media());
+    const lk = this.lookOf(n, this.graph.nodeRelSize(), this.drawnMedia);
+    return lk.picture ? lk.half * Math.SQRT2 : lk.half;
   }
+  /** Planted (G-107): the collider and `drawnRadiusOf` at the unscaled radius, as before. */
+  plantColliderUndrawn = false;
 
 
   /** Planted by G-94's check: no collision room for projected nodes. */
@@ -7122,9 +7140,17 @@ export class GraphView extends ItemView {
   private relaxAfterSpacing = false;
   /** Planted: the relax moves stored places too, as before. */
   plantRelaxAll = false;
+  /** Planted (G-4): stored places never relaxed again, overlapping or not, as before. */
+  plantRelaxNewOnly = false;
   drawnStats = { skipped: 0, posted: 0, saved: 0, free: 0, fixed: 0 };
   relaxIterations = 40;
-  relaxMaxShift = 4;
+  /** In drawn radii. 12, not 4 (2026-10-30): at 4 every freed overlapping node
+   *  hit the leash and chunk view stayed 91.2% clear; at 12, 94.4%, with the
+   *  drawn place 0.1 units from its fit at the median and 2.6 at p99, in a
+   *  cloud ~700 across. 24 bought nothing more. */
+  relaxMaxShift = 12;
+  /** Planted (G-4): the relax spaces pictures by half their edge, as before. */
+  plantRelaxHalfEdge = false;
   chunkRelaxStats = { runs: 0, iterations: 0, ms: 0, nodes: 0, overlaps_before: -1, overlaps_after: -1, max_shift_radii: 0, moved: 0 };
   private relaxSeq = 0;
   /** The relax's spacing, in drawn radii: a visible gap, not the collider's 2
@@ -7150,10 +7176,10 @@ export class GraphView extends ItemView {
     // spaced for orbs 14x too big are not this size's places (2026-10-12).
     const rs0 = g.nodeRelSize(), media0 = this.drawnMedia;
     const sameSize = (n: any) => Number.isFinite(n.drawnHalf)
-      && Math.abs(n.drawnHalf - this.lookOf(n, rs0, media0).half) <= 0.1 * Math.max(n.drawnHalf, 1e-6);
+      && Math.abs(n.drawnHalf - (this.plantRelaxHalfEdge ? this.lookOf(n, rs0, media0).half : this.drawnRadiusOf(n))) <= 0.1 * Math.max(n.drawnHalf, 1e-6);
     const placed = (n: any) => !this.plantNoDrawn && ((!!n.drawnAt && sameSize(n)) || n.level === "page");
     const stored = nodes.filter(placed).length;
-    if (stored === N) {
+    if (stored === N && this.plantRelaxNewOnly) {
       this.chunkRelaxStats = { ...this.chunkRelaxStats, runs: this.chunkRelaxStats.runs, from_store: N, relaxed: 0 } as any;
       this.drawnStats.skipped++;
       return;
@@ -7166,10 +7192,10 @@ export class GraphView extends ItemView {
     // none stored, every node is free, as before.
     const fixed = new Uint8Array(N);
     if (stored > 0 && !this.plantRelaxAll) nodes.forEach((n, i) => { if (placed(n)) fixed[i] = 1; });
-    const free: number[] = [];
-    for (let i = 0; i < N; i++) if (!fixed[i]) free.push(i);
     nodes.forEach((n, i) => {
-      H[i] = Math.max(1e-6, this.lookOf(n, rs, media).half);
+      // The DRAWN radius (`drawnRadiusOf`), as the collider and the census
+      // read it: a picture is its half-diagonal, not half its edge.
+      H[i] = Math.max(1e-6, this.plantRelaxHalfEdge ? this.lookOf(n, rs, media).half : this.drawnRadiusOf(n));
       F[3 * i] = n.fitX; F[3 * i + 1] = n.fitY; F[3 * i + 2] = n.fitZ ?? 0;
       // A stored place starts where it was left; only the new nodes start at their fit.
       const d = !this.plantNoDrawn && n.drawnAt;
@@ -7180,6 +7206,40 @@ export class GraphView extends ItemView {
     const sorted = Array.from(H).sort((x, y) => x - y);
     const cell = Math.max(1e-3, 2 * S * sorted[Math.floor(N * 0.9)]);
     const hash = (cx: number, cy: number, cz: number) => ((cx * 73856093) ^ (cy * 19349663) ^ (cz * 83492791)) | 0;
+    // A stored place that OVERLAPS a neighbour as drawn now is not settled:
+    // it is freed and relaxed with the new nodes (2026-10-30). Only new nodes
+    // were relaxed, so places a relax had left unresolved -- or that a
+    // promoted lead now sits beside -- overlapped for good: 4,624 of 52,760
+    // chunk-view nodes, every one at a stored place. A clear stored place
+    // stays exactly where the reader last saw it. Planted `plantRelaxNewOnly`.
+    let clashed = 0;
+    if (!this.plantRelaxNewOnly && stored > 0) {
+      const grid0 = new Map<number, number[]>();
+      for (let i = 0; i < N; i++) {
+        const k = hash(Math.floor(P[3 * i] / cell), Math.floor(P[3 * i + 1] / cell), Math.floor(P[3 * i + 2] / cell));
+        const l = grid0.get(k); if (l) l.push(i); else grid0.set(k, [i]);
+      }
+      for (let i = 0; i < N; i++) {
+        if (!fixed[i] || nodes[i].level === "page") continue;
+        const cx = Math.floor(P[3 * i] / cell), cy = Math.floor(P[3 * i + 1] / cell), cz = Math.floor(P[3 * i + 2] / cell);
+        let hit = false;
+        for (let ox = -1; ox <= 1 && !hit; ox++) for (let oy = -1; oy <= 1 && !hit; oy++) for (let oz = -1; oz <= 1 && !hit; oz++) {
+          for (const j of grid0.get(hash(cx + ox, cy + oy, cz + oz)) || []) {
+            if (j === i) continue;
+            if (Math.hypot(P[3 * i] - P[3 * j], P[3 * i + 1] - P[3 * j + 1], P[3 * i + 2] - P[3 * j + 2]) < H[i] + H[j]) { hit = true; break; }
+          }
+        }
+        if (hit) { fixed[i] = 0; clashed++; }
+      }
+    }
+    const free: number[] = [];
+    for (let i = 0; i < N; i++) if (!fixed[i]) free.push(i);
+    if (!free.length) {
+      this.chunkRelaxStats = { ...this.chunkRelaxStats, runs: this.chunkRelaxStats.runs, from_store: N, relaxed: 0 } as any;
+      this.drawnStats.skipped++;
+      return;
+    }
+    (this.drawnStats as any).clashed = clashed;
     const build = () => {
       const grid = new Map<number, number[]>();
       for (let i = 0; i < N; i++) {
@@ -7612,16 +7672,35 @@ export class GraphView extends ItemView {
     // ignored it left crowded nodes a quarter wider than their room -- they
     // overlapped (G-94). Measured scaled, a node is larger where there is
     // room and shrinks to fit where there is not.
+    // ...and AS DRAWN means the batch's own size (`drawnRadiusOf`), page
+    // scale and pictures in it (2026-10-30): with `nodeScale` alone a page
+    // drawn 5x larger was spaced as if it were not.
     const scale = this.plantUnscaledSpacing ? 1 : this.nodeScale;
-    const drawnOf = nodes.map((a) => drawnRadius(a, relSize, media) * scale);
+    const drawnOf = nodes.map((a) => this.plantUnscaledSpacing || this.plantPagesOverlap
+      ? drawnRadius(a, relSize, media) * scale : this.drawnRadiusOf(a));
     const allowedOf = this.spacingAllowed(nodes, drawnOf, this.plantSlowSpacing);
+    // A PAGE is fitted to the room between PAGES. It was exempt from this
+    // pass, because measured against everything its own chunks -- which hang
+    // right around it -- shrank it to their spacing and undid `pageScale`;
+    // exempt, 1,187 of 1,248 drawn pages overlapped a neighbour (G-4, G-21,
+    // 2026-10-30, once the radius was the drawn one). Measured against the
+    // other pages only, a page stays large beside its chunks and clear of
+    // the next page. Planted `plantPagesOverlap`: exempt, as before.
+    const pageAllowed = new Map<number, number>();
+    if (!this.plantSmallPages && !this.plantPagesOverlap) {
+      const idx: number[] = [];
+      nodes.forEach((a, i) => { if (a.level === "page" && !a.force) idx.push(i); });
+      if (idx.length > 1) {
+        const got = this.spacingAllowed(idx.map((i) => nodes[i]), idx.map((i) => drawnOf[i]), this.plantSlowSpacing);
+        idx.forEach((i, k) => pageAllowed.set(i, got[k]));
+      }
+    }
     for (let i = 0; i < nodes.length; i++) {
-      const allowed = allowedOf[i];
-      if (Number.isNaN(allowed)) continue;
       const a = nodes[i];
-      // A page node keeps its size (`pageScale`): its own chunks hang right
-      // around it, and shrinking it to their spacing undid the enlargement.
-      if (a.level === "page" && !this.plantSmallPages) continue;
+      const isPage = a.level === "page" && !this.plantSmallPages;
+      if (isPage && this.plantPagesOverlap) continue;
+      const allowed = isPage ? (pageAllowed.get(i) ?? NaN) : allowedOf[i];
+      if (Number.isNaN(allowed)) continue;
       // `val` is radius cubed, so a radius scale of k is k^3 on val.
       if (a.valFull === undefined) a.valFull = a.val;
       a.val = Math.max((a.val ?? 1) * Math.pow(allowed / drawnOf[i], 3), 1e-4);
@@ -8508,7 +8587,9 @@ export class GraphView extends ItemView {
       // distance (G-94, 2026-09-27).
       .radius((n: any) => {
         if (n.force || this.plantNoCollide) return 0;
-        const r = drawnRadius(n, relSize, media) * COLLIDER_SAFETY + COLLIDER_MARGIN;
+        // AS DRAWN (`drawnRadiusOf`): the size the batch draws, page scale and
+        // node scale in it -- the unscaled radius let page nodes overlap.
+        const r = this.drawnRadiusOf(n) * COLLIDER_SAFETY + COLLIDER_MARGIN;
         // A non-finite or absurd radius makes collision's first pass push by
         // Infinity and its second pass's octree hang (D-38): refused, recorded.
         if (Number.isFinite(r) && r >= 0 && r < 1e4) return r;
@@ -8997,6 +9078,12 @@ export class GraphView extends ItemView {
     // A refit comes back where the reader was looking (G-194), registered by
     // the url nodes; a first draw, or no usable registration, frames anew.
     window.setTimeout(() => {
+      // Sized to their room BEFORE the first frame is fitted, in the page
+      // view: its places are known at once (stored, or the fit), and waiting
+      // for the simulation to settle drew ~7 s of full-size pages on top of
+      // one another after every rebuild -- 662 to 774 of 789 touching, then
+      // 22 (2026-10-30). Planted `plantSpacingOnSettleOnly`: as before.
+      if (this.level !== "chunk" && !this.plantSpacingOnSettleOnly) this.fitRadiiToSpacing();
       const at = this.registeredPose();
       if (at) { placed = at; return; }
       place(); window.setTimeout(tighten, 120);

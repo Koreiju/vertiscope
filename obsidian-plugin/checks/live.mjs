@@ -4599,13 +4599,22 @@ export function makeChecks(env) {
               const synced = v.batchSync();
               const d = g.graphData();
               const finite = d.nodes.filter((n) => Number.isFinite(n.x) && Number.isFinite(n.y)).length;
-              const drawn = synced ? synced.opaque + synced.translucent : null;
+              // Every instance class the batch draws: the glass orbs (the
+              // default look since 2026-10-11) are a third, and counting only
+              // opaque + translucent read 543 of 792 drawn (2026-10-30).
+              const drawn = synced ? synced.opaque + synced.translucent + (synced.glass || 0) : null;
               const streaming = d.nodes.filter((n) => n.force).length;
               // Demand 4: what is drawn is what collides -- the application's
               // own drawnRadius against the size the renderer drew.
               let sized = 0, off = 0;
+              // The COLLIDER's own radius, read off the force the simulation
+              // runs (safety and margin taken back out) -- not drawnRadiusOf,
+              // which since 2026-10-30 IS the drawn size and would compare a
+              // function with itself.
+              const coll = g.d3Force("collide"), C = v.collider;
+              const reserved = (n) => coll && coll.radius ? (coll.radius()(n) - C.margin) / C.safety : v.drawnRadiusOf(n);
               for (const n of d.nodes.filter((n) => !n.force && Number.isFinite(n.x)).slice(0, 800)) {
-                const a = v.drawnAs(n), r = v.drawnRadiusOf(n);
+                const a = v.drawnAs(n), r = reserved(n);
                 const drawnR = a.kind === "picture" ? a.half * Math.SQRT2 : a.half;
                 sized++;
                 if (Math.abs(drawnR - r) > 1e-6 * Math.max(1, r)) off++;
@@ -4972,6 +4981,15 @@ export function makeChecks(env) {
       asks: "nodes never overlap, with billboards sized as panels not spheres",
       async run() {
         const got = await inPane(`
+          // The SETTLED picture: a freshly built view is sized to its room a
+          // moment after it is drawn, and read at once (as this check runs
+          // first after a reload) it scored 414 pairs that were gone 2 s later.
+          // Waits until the overlap count stops falling, at most 15 s.
+          {
+            const quick = () => { const ns = v.graph.graphData().nodes.filter((n) => Number.isFinite(n.x) && !n.force).slice(0, 1200); let o = 0; for (let i = 0; i < ns.length; i++) for (let j = i + 1; j < ns.length; j++) { const a = ns[i], b = ns[j]; if (Math.hypot(a.x-b.x, a.y-b.y, a.z-b.z) < v.drawnRadiusOf(a) + v.drawnRadiusOf(b)) o++; } return o; };
+            let last = quick();
+            for (let i = 0; i < 15; i++) { await sleep(1000); const now = quick(); if (now >= last && i >= 2) break; last = now; }
+          }
           const d = v.graph.graphData();
           const rel = v.graph.nodeRelSize();
           // The pane's own arithmetic, not a paraphrase of it. Written out by
@@ -5919,16 +5937,28 @@ export function makeChecks(env) {
             await sleep(9000);
           };
           const toPages = async () => { if (v.level === "chunk") toggle(); await sleep(6000); };
+          // The SETTLED picture: a rebuilt view glides its nodes to their
+          // places for ~8 s, and overlaps come and go while they travel
+          // (2026-10-30: 229 -> 712 -> 0 touching at 1.5, 6, 10 s). How long
+          // settling took is reported with the verdict.
+          const settled = async () => {
+            const t0 = performance.now();
+            let c = census();
+            for (let i = 0; i < 20 && !(c.share >= 0.95); i++) { await sleep(1000); c = census(); }
+            c.settle_s = Math.round((performance.now() - t0) / 100) / 10;
+            return c;
+          };
           const out = {};
           try {
             await toPages();
-            out.pages = census();
+            out.pages = await settled();
             await toChunk();
-            out.chunk = census();
+            out.chunk = await settled();
             await toPages();
+            out.pages_rebuilt = await settled();
             v.plantNoChunkRelax = true; v.plantNoDrawn = true;
             await toChunk();
-            out.planted = census();
+            out.planted = await settled();
           } finally {
             v.plantNoChunkRelax = false; v.plantNoDrawn = false;
             await toPages();
@@ -5950,7 +5980,7 @@ export function makeChecks(env) {
         got.fit_coincident_different_text = differentText;
         const ok = (c) => c && c.nodes > 0 && c.share >= 0.95;
         return {
-          pass: ok(got.pages) && ok(got.chunk) && differentText === 0
+          pass: ok(got.pages) && ok(got.chunk) && ok(got.pages_rebuilt) && differentText === 0
              && !!got.planted && got.planted.share < got.chunk.share - 0.05,
           evidence: got,
         };
