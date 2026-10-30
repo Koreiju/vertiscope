@@ -634,7 +634,11 @@ export class Sidecar {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ pane, command, shell }),
       });
-      return (await res.json()) as ShellReply;
+      // A refusal or a server error is an answer, not an absent sidecar: the
+      // pane said "no sidecar" for a 400 it could not parse.
+      const text = await res.text();
+      try { return JSON.parse(text) as ShellReply; }
+      catch { return { error: `sidecar answered ${res.status}: ${text.slice(0, 160)}` } as ShellReply; }
     } catch {
       return null;
     }

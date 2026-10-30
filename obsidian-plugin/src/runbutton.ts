@@ -43,6 +43,22 @@ export interface RunHost {
   /** Async, and the return is not awaited by the caller: a click must not
    *  block the editor while a cell runs. */
   onRunFence(req: RunRequest): void | Promise<void>;
+  /** `P-N3`: the same cell to a command terminal in its OWN pane (§4a). The
+   *  kernel runs in place; "both at once" is pressing both -- two panes. */
+  onTerminalFence?(req: RunRequest): void | Promise<void>;
+}
+
+/** The terminal button beside the run button (`P-N3`). Planted
+ *  `__domvecPlantNoTermFence`: not drawn. */
+function termButton(doc: Document, onClick: () => void): HTMLButtonElement | null {
+  if ((window as any).__domvecPlantNoTermFence) return null;
+  const btn = doc.createElement("button");
+  btn.className = "domvec-term-fence";
+  btn.type = "button";
+  btn.setAttribute("aria-label", "Open this block in a terminal pane");
+  btn.textContent = "⌨ terminal";
+  btn.addEventListener("click", (ev) => { ev.preventDefault(); ev.stopPropagation(); onClick(); });
+  return btn;
 }
 
 /** The shared button, so the two paths cannot drift in label or class. */
@@ -89,7 +105,7 @@ export function readingViewRunButtons(host: RunHost) {
       if (!isRunnable(lang)) return;
 
       pre.classList.add("domvec-has-run");
-      pre.appendChild(runButton(el.ownerDocument, () => host.onRunFence({
+      const req = (): RunRequest => ({
         lang,
         code: cellSource(code.textContent || ""),
         // Reading view knows the section, not the line. `getSectionInfo` gives
@@ -97,7 +113,10 @@ export function readingViewRunButtons(host: RunHost) {
         // which would make every unknown cell collide on the first one.
         line: ctx.getSectionInfo(pre)?.lineStart ?? -1,
         path: ctx.sourcePath || "",
-      })));
+      });
+      pre.appendChild(runButton(el.ownerDocument, () => host.onRunFence(req())));
+      const term = host.onTerminalFence ? termButton(el.ownerDocument, () => host.onTerminalFence!(req())) : null;
+      if (term) pre.appendChild(term);
     });
   };
 }
@@ -129,12 +148,16 @@ class RunWidget extends WidgetType {
   toDOM(view: EditorView): HTMLElement {
     const wrap = view.dom.ownerDocument.createElement("span");
     wrap.className = "domvec-run-fence-wrap";
-    wrap.appendChild(runButton(view.dom.ownerDocument, () => this.host.onRunFence({
+    const req = (): RunRequest => ({
       lang: this.fence.lang,
       code: cellSource(this.fence.body),
       line: this.fence.openLine,
       path: this.path(),
-    })));
+    });
+    wrap.appendChild(runButton(view.dom.ownerDocument, () => this.host.onRunFence(req())));
+    const term = this.host.onTerminalFence
+      ? termButton(view.dom.ownerDocument, () => this.host.onTerminalFence!(req())) : null;
+    if (term) wrap.appendChild(term);
     return wrap;
   }
 

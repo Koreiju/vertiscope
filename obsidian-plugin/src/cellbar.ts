@@ -23,7 +23,7 @@ import { MarkdownView } from "obsidian";
 
 export interface CellBarHost {
   addCodeCell(view: MarkdownView): Promise<void>;
-  openTerminal(): void | Promise<void>;
+  openTerminal(): unknown;
   openBrowser(): void | Promise<void>;
 }
 

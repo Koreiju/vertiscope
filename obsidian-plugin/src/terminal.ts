@@ -40,6 +40,9 @@ export class TerminalView extends ItemView {
   private input!: HTMLInputElement;
   private picker!: HTMLSelectElement;
   private busy = false;
+  /** Set once the machine's shells are listed; a cell sent before that went
+   *  out with no shell and failed (`P-N3`). */
+  private discovered = false;
   /** Commands typed here, newest last, for up-arrow recall. */
   private history: string[] = [];
   private cursor = 0;
@@ -68,6 +71,7 @@ export class TerminalView extends ItemView {
     this.input.addEventListener("keydown", (e) => this.onKey(e));
 
     await this.discover();
+    this.discovered = true;
     // The caveat goes where it CANNOT scroll away, not into the scrollback.
     //
     // It started as a three-line banner in the log, and in a narrow bottom
@@ -183,6 +187,35 @@ export class TerminalView extends ItemView {
     if (reply.shell) this.write(`(${reply.shell})\n`);
     if (reply.output) this.write(reply.output + "\n");
   }
+
+  /**
+   * A note's code cell, sent here (`P-N3`). A shell cell runs line by line in
+   * this pane's session, in the shell its language names when the machine
+   * has one; any other language is the kernel's, run in place by the cell's
+   * own button, and this pane says so rather than guessing a command for it.
+   */
+  async runCell(lang: string, code: string): Promise<number> {
+    const want = ({ powershell: /pwsh|powershell/i, pwsh: /pwsh|powershell/i, ps1: /pwsh|powershell/i,
+                    bash: /bash/i, sh: /bash|sh/i, shell: /bash|sh|pwsh|powershell/i, zsh: /zsh|bash/i } as Record<string, RegExp>)[lang.toLowerCase()];
+    if (!want) {
+      this.write(`\n— a ${lang} cell: its kernel runs in place (▶ run); this pane is a shell —\n`);
+      return 0;
+    }
+    for (let i = 0; i < 100 && !this.discovered; i++) await new Promise((r) => setTimeout(r, 100));
+    const option = Array.from(this.picker.options).find((o) => want.test(o.text) || want.test(o.value));
+    if (option && option.value !== this.shell) { this.picker.value = option.value; this.shell = option.value; }
+    let ran = 0;
+    for (const line of code.split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("#"))) {
+      this.history.push(line);
+      await this.run(line);
+      ran++;
+    }
+    this.cursor = this.history.length;
+    return ran;
+  }
+
+  /** What this pane has printed, for checks. */
+  logText(): string { return this.log?.textContent || ""; }
 
   private async restart() {
     await this.sidecar.restartShell(this.pane);

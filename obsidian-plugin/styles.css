@@ -985,3 +985,6 @@ button.domvec-run-fence:hover {
   margin-left: auto;
   margin-right: auto;
 }
+
+/* P-N3: the terminal button beside the run button. */
+.domvec-term-fence { margin-left: 0.3em; font-size: var(--font-ui-smaller); }

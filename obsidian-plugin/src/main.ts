@@ -757,10 +757,22 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     this.app.workspace.revealLeaf(leaf);
   }
 
-  async openTerminal() {
+  async openTerminal(): Promise<TerminalView | null> {
     const leaf = this.app.workspace.getLeaf("split", "horizontal");
     await leaf.setViewState({ type: TERMINAL_VIEW, active: true });
     this.app.workspace.revealLeaf(leaf);
+    return leaf.view instanceof TerminalView ? leaf.view : null;
+  }
+
+  /** `P-N3`: a code cell to a command terminal in a NEW pane beside the note
+   *  (§4a). The kernel still runs it in place with ▶ run; both at once is two
+   *  panes, which needs no layout of its own. */
+  terminalStats = { opened: 0, ran: 0 };
+  async onTerminalFence(req: RunRequest): Promise<void> {
+    const term = await this.openTerminal();
+    if (!term) return;
+    this.terminalStats.opened++;
+    this.terminalStats.ran += await term.runCell(req.lang, req.code);
   }
 
   private async openGraph() {
