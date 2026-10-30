@@ -1259,4 +1259,14 @@
 <p>Paragraph 59.17: radix node path search delete <b>path</b> node radix search pointer branch leaf cache prefix label memory insert <em>key</em> trie pointer key label key search string <a href="#s59">branch</a> edge search radix node search compress delete value.</p>
 <p>Paragraph 59.18: delete branch cache key cache <b>search</b> label key delete string node node cache label value prefix prefix <em>value</em> string value value radix branch compress radix <a href="#s59">search</a> memory cache key cache insert branch value string.</p>
 <p>Paragraph 59.19: label prefix radix delete prefix <b>node</b> prefix cache key suffix suffix label delete node value suffix insert <em>edge</em> leaf path compress prefix edge label prefix <a href="#s59">trie</a> edge edge edge key string prefix insert node.</p>
-</main></body></html>
+</main><script>
+// `?salt=<word>` (G-80): every text block gets a unique word, so a run's
+// chunks are NEW to the embedder's cache and its queue really holds them.
+(function () {
+  var s = new URLSearchParams(location.search).get("salt");
+  if (!s) return;
+  var els = document.querySelectorAll("p, h2, li");
+  for (var i = 0; i < els.length; i++) els[i].insertAdjacentText("beforeend", " " + s + "x" + i);
+})();
+</script>
+</body></html>

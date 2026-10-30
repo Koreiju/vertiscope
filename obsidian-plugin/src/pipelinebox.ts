@@ -756,6 +756,21 @@ export class PipelineBox {
     this.pushedHandleMs.push(performance.now() - t0);
     if (this.pushedHandleMs.length > 200) this.pushedHandleMs.shift();
     if (changed) this.onHoverChunk(cid, url, stored || undefined);
+    // Hover-first (`G-80`) on the PUSHED path too. It was only on the poll,
+    // which returns as soon as the sensor pushes -- so in practice no hover
+    // ever moved its chunk up the encoder's or the projector's queue
+    // (2026-10-30). Once per stored chunk; traced as its own kind, "hover".
+    // Planted `plantNoPushedFocus`: as before.
+    if (changed && stored && !this.plantNoPushedFocus && !this.focused.has(stored)) {
+      this.focused.add(stored);
+      if (this.focused.size > 500) this.focused.clear();
+      this.focusCalls++;
+      void this.sidecar.focus([stored]).catch(() => null);
+      const prof = profiler();
+      const trace = prof.begin("hover", url);
+      prof.fact(trace, "cid", stored);
+      prof.watch(trace, [stored], performance.now());
+    }
     if (xs.length) {
       let drawn = !!sameUnit || this.plantTwoStep;
       const fallback = drawn ? 0 : window.setTimeout(() => {
@@ -783,6 +798,10 @@ export class PipelineBox {
       });
     }
   }
+  /** Planted (G-80): a pushed hover does not move its chunk up the queues, as before. */
+  plantNoPushedFocus = false;
+  /** Hover-first calls made (`/focus`), for the harness. */
+  focusCalls = 0;
   /** Planted: the graph is told only when the hovered CHUNK changes (one panel for every tile). */
   plantChunkOnlyNotify = false;
   /** Planted: a stored ancestor at any depth covers a hover (the 16-step walk). */

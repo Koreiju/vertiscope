@@ -6471,6 +6471,186 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-80",
+      asks: "hover-first: the hovered chunk jumps the encoder's and projector's queues and reaches the 3D view before the page's other chunks -- the LAST chunk of a fresh 200-chunk page, hovered as the page lands, is drawn among the first; planted plantNoPushedFocus (the pushed hover never focused, as before) it is drawn among the last",
+      async run() {
+        // The verbatim (2026-09-22): "whichever element that is hovered is
+        // recursively chunked first ... projected through our 3D graph as
+        // fast as possible". The hover is fed to `pushedHover` with the
+        // stored chunk's own address -- what the sensor pushes -- the moment
+        // the page's chunk map knows its chunks; every chunk's first frame
+        // in the graph is timed.
+        const fixtures = await serveFixtures();
+        const arm = (planted, tag) => evaluate(`(async () => {
+          ${PREP}
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          const box = b.pipebox;
+          box.plantNoPushedFocus = ${planted};
+          try {
+            // Salted: the page's words are new to the embedder's cache, so its
+            // queue really holds them when the hover arrives (unsalted, every
+            // chunk was a cache hit and the whole page drained in one batch
+            // before any hover could matter -- a test that could not fail).
+            const salt = ${JSON.stringify(tag)} + Date.now().toString(36);
+            const url = ${JSON.stringify(fixtures.origin)} + "/nav_heavy.html?g80=" + salt + "&salt=" + salt;
+            b.go(url);
+            let stored = [];
+            const t0 = performance.now();
+            while (performance.now() - t0 < 30000) {
+              await sleep(15);
+              // Every chunk the capture stored, with its addresses (the map's
+              // byCid; its "stored" set is the projector-held subset).
+              if (box.map && box.map.url === url && box.map.byCid && box.map.byCid.size >= 50) { stored = [...box.map.byCid.keys()]; break; }
+            }
+            if (!stored.length) return { error: "the page's chunk map never filled", url };
+            const drawnAtStart = new Set(v.graph.graphData().nodes.filter((n) => !n.force).map((n) => n.id));
+            const waiting = stored.filter((c) => !drawnAtStart.has(c));
+            const target = waiting[waiting.length - 1];
+            const xs = box.map.xpaths(target);
+            if (!target || !xs.length) return { error: "no undrawn chunk with an address", waiting: waiting.length };
+            const focus0 = box.focusCalls;
+            // Placement read at the SIDECAR -- the projector's own log, polled
+            // -- not the pane's frames: the pane draws the browsed page's
+            // chunks in one wave whatever order they were placed in.
+            const base = app.plugins.plugins["domvec-bridge"].settings.sidecar.replace(/[/]+$/, "");
+            const d0 = await (await fetch(base + "/projector/delta?since=0&epoch=-1")).json();
+            let since = d0.seq, epoch = d0.epoch;
+            const want = new Set(waiting);
+            const th = performance.now();
+            box.pushedHover("9999 10,10,40,20 " + xs[0], url);
+            const seen = new Map();
+            while (performance.now() - th < 40000 && seen.size < waiting.length) {
+              await sleep(25);
+              const d = await (await fetch(base + "/projector/delta?since=" + since + "&epoch=" + epoch)).json();
+              if (d.reload) { epoch = d.epoch; since = d.seq; continue; }
+              const now = performance.now() - th;
+              for (const c of Object.keys(d.chunks || {})) if (want.has(c) && !seen.has(c)) seen.set(c, now);
+              since = d.seq;
+            }
+            const order = [...seen.entries()].sort((a, c) => a[1] - c[1]).map(([id]) => id);
+            const rank = order.indexOf(target);
+            const times = [...seen.values()].sort((a, c) => a - c);
+            const first = times.length ? times[0] : null;
+            return { planted: ${planted}, url, stored: stored.length, waiting: waiting.length, drawn: seen.size,
+                     page_first_ms: first === null ? null : Math.round(first),
+                     // The page arrives in waves (the embedder's batches); in
+                     // the FIRST one is what hover-first can promise. A rank
+                     // inside a wave is only the order of a tie.
+                     target_in_first_wave: seen.has(target) && first !== null && seen.get(target) <= first + 60,
+                     focus_calls: box.focusCalls - focus0,
+                     target_ms: seen.has(target) ? Math.round(seen.get(target)) : null,
+                     target_rank: rank, rank_share: rank >= 0 ? Math.round(rank / Math.max(1, order.length - 1) * 100) / 100 : null,
+                     page_p50_ms: times.length ? Math.round(times[Math.floor(times.length / 2)]) : null,
+                     page_last_ms: times.length ? Math.round(times[times.length - 1]) : null };
+          } finally { box.plantNoPushedFocus = false; }
+        })()`, { timeout: 90000 });
+        try {
+          // The planted arm FIRST, then purged: the same content stored twice
+          // makes the second page's chunks copies of the first's (store-wide
+          // dedup), and a copy is never drawn -- the first run's planted arm
+          // drew 0 of 220.
+          const planted = await arm(true, "p");
+          const purged_between = await tidyFixtures(fixtures.origin);
+          const clean = await arm(false, "c");
+          const waves = (x) => !!x && !x.error && x.drawn >= 50 && x.page_last_ms - x.page_first_ms > 150;
+          // Placed before half the page (hover-first), against near the end.
+          const ok = !!clean && !clean.error && !!planted && !planted.error
+            && clean.focus_calls >= 1 && planted.focus_calls === 0
+            && clean.drawn >= 50 && planted.drawn >= 50
+            && clean.rank_share !== null && clean.rank_share < 0.5
+            && planted.rank_share !== null && planted.rank_share > 0.8;
+          clean.purged_between = purged_between;
+          return { pass: ok, evidence: { clean, planted, purged: await tidyFixtures(fixtures.origin) } };
+        } finally { await fixtures.close(); }
+      },
+    },
+    {
+      id: "G-84",
+      asks: "left-click on a folded page node opens its WHOLE tree -- every chunk the store can place for it -- drawn as a tree: each chunk exactly one parent, every chunk reaching the page node; right-click folds it whole; planted plantUnfoldOnClick (one patricia step per click, as the row recorded) draws less than the tree",
+      async run() {
+        // Addendum VII: "expands its FULL patricia TREE"; "intermediate path
+        // nodes, if they go from one root to one leaf, as a single link";
+        // one parent per node. The handlers are the pane's own, fired as the
+        // graph fires them.
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          const g = v.graph;
+          const poll = async (cond, ms) => { const t = performance.now(); while (performance.now() - t < ms) { if (cond()) return true; await sleep(250); } return cond(); };
+          const left = (node) => { const h = g.onNodeClick(); if (typeof h === "function") h(node); };
+          const right = (node) => { const h = g.onNodeRightClick(); if (typeof h === "function") h(node); };
+          const end = (x) => (typeof x === "object" && x ? x.id : x);
+          // A STABLE page: a search results page re-captured between the arms
+          // (30 stored chunks, then 41) is a moving denominator.
+          const pages = g.graphData().nodes.filter((n) => n.level === "page" && !n.force && /^https:[/][/]en[.]wikipedia[.]org[/]wiki[/]/.test(n.url || "")
+            && n.members >= 30 && n.members <= 300).sort((x, y) => (x.members - y.members) || String(x.url).localeCompare(String(y.url)));
+          let page = null, cids = [];
+          let asked = 0, failed = 0;
+          let rawMulti = 0;
+          for (const p of pages.slice(0, 25)) {
+            asked++;
+            const c = await v.sidecar.pageCids(p.url).catch(() => { failed++; return []; });
+            if (c.length < 30) continue;
+            // A page that NESTS: some chunk with two or more containers in the
+            // store's own edges -- the case the one-parent rule is for. On a
+            // page without one, the raw edges are already a tree and the
+            // planted arm had nothing to show (Knowledge_modeling: 0 and 0).
+            const o = await v.sidecar.place(c).catch(() => null);
+            // A chunk inside another chunk: drawn as a web it hangs from that
+            // chunk AND from the page (the DuckDuckGo arm's 8 multi-parents).
+            const ids0 = new Set(c);
+            const inner = new Set();
+            for (const e of (o && o.edges) || []) { const sId = end(e.source), t = end(e.target); if (ids0.has(sId) && ids0.has(t)) inner.add(t); }
+            const multi = inner.size;
+            if (multi >= 2) { page = p; cids = c; rawMulti = multi; break; }
+          }
+          if (!page) return { error: "no stored page with >= 30 chunks drawn as a page node", candidates: pages.length, asked, failed };
+          const url = page.url, pid = "page:" + url;
+          const chunks = () => g.graphData().nodes.filter((n) => n.url === url && n.level !== "page" && !n.force);
+          v.plantUnfoldOnClick = ${planted};
+          try {
+            // Folded first, by the right-click.
+            if (chunks().length) { right(g.graphData().nodes.find((n) => n.id === pid) || page); await poll(() => chunks().length === 0, 5000); }
+            const foldedBefore = chunks().length;
+            // The LEFT click opens it.
+            left(g.graphData().nodes.find((n) => n.id === pid) || page);
+            await poll(() => chunks().length >= Math.min(cids.length, 8), 30000);
+            await sleep(2500);
+            const oracle = await v.sidecar.place(cids);
+            // THIS page's own placeable chunks: a copy is placed as its lead,
+            // which may live on another page (store-wide dedup) -- not this tree.
+            const placeable = new Set(((oracle && oracle.nodes) || []).filter((n) => n.level !== "page" && n.cid && n.url === url).map((n) => n.cid));
+            const drawn = chunks();
+            const ids = new Set(drawn.map((n) => n.id));
+            const parents = new Map(drawn.map((n) => [n.id, []]));
+            for (const l of g.graphData().links) {
+              const s = end(l.source), t = end(l.target);
+              if (!ids.has(t) || l.force) continue;
+              if (s === pid || ids.has(s)) parents.get(t).push(s);
+            }
+            const counts = [...parents.values()].map((p) => p.length);
+            const reaches = (id) => { const seen = new Set(); let cur = id; while (cur && cur !== pid && !seen.has(cur)) { seen.add(cur); cur = (parents.get(cur) || [])[0]; } return cur === pid; };
+            const out = { url: url.slice(-60), raw_multi_parent: rawMulti, stored_cids: cids.length, placeable: placeable.size, folded_before: foldedBefore,
+              drawn: drawn.length, drawn_placeable: drawn.filter((n) => placeable.has(n.id)).length,
+              one_parent: counts.filter((c) => c === 1).length, many_parents: counts.filter((c) => c > 1).length,
+              no_parent: counts.filter((c) => c === 0).length, reach_page: drawn.filter((n) => reaches(n.id)).length };
+            right(g.graphData().nodes.find((n) => n.id === pid) || page);
+            await poll(() => chunks().length === 0, 5000);
+            out.after_right_click = chunks().length;
+            return out;
+          } finally { v.plantUnfoldOnClick = false; }
+        })()`, { timeout: 120000 });
+        const clean = await arm(false);
+        const planted = await arm(true);
+        const ok = !!clean && !clean.error && clean.folded_before === 0 && clean.placeable > 0
+          && clean.drawn_placeable === clean.placeable
+          && clean.many_parents === 0 && clean.no_parent === 0 && clean.reach_page === clean.drawn
+          && clean.after_right_click === 0
+          && !!planted && !planted.error && planted.drawn_placeable < planted.placeable;
+        return { pass: ok, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {
@@ -10432,18 +10612,23 @@ export function makeChecks(env) {
       },
     },
     {
-      id: "G-80",
-      asks: "hover-first: the hovered chunk jumps the encoder and projector queues, and is traced to the screen",
+      id: "G-80-hover",
+      asks: "hover-first, through a real pointer: a hover on a stored page calls /focus and is traced to the screen as its own kind",
       async run() {
         const before = await ask("/profile");
         const n0 = (before.focus || []).length;
         const got = await evaluate(`(async () => {
-          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          ${PREP}
           const d = window.__domvec;
-          await d.act("open", "browser");
-          await d.act("navigate", "https://en.wikipedia.org/wiki/Trie");
+          // A FRESH document: a page loaded before the plugin's last reload
+          // carries a sensor whose pushes the new load does not accept (its
+          // nonce), and its hovers never arrive.
+          await land("about:blank", 8000);
+          if (!(await land("https://en.wikipedia.org/wiki/Trie", 30000))) return { error: "did not land" };
           await sleep(3000);
-          const view = app.workspace.getLeavesOfType("domvec-browser-view")[0].view;
+          const view = b;
+          // A chunk already focused is not focused again: start clean.
+          if (view.pipebox && view.pipebox.focused) view.pipebox.focused.clear();
           const at = await view.webview.executeJavaScript(\`(function(){
             var ps = document.querySelectorAll('#mw-content-text p');
             for (var i = 0; i < ps.length; i++) {
@@ -10454,20 +10639,25 @@ export function makeChecks(env) {
             return null; })()\`);
           if (!at) return { error: "no paragraph on screen" };
           let hover = null;
+          const f0 = view.pipebox ? view.pipebox.focusCalls : 0;
           for (let i = 0; i < 12 && !hover; i++) {
-            view.webview.sendInputEvent({ type: "mouseMove", x: at.x, y: at.y });
+            // Across the page, as G-38 moves: the first moves after a page
+            // lands are not always pushed (seen: 2 of 3 points silent).
+            view.webview.sendInputEvent({ type: "mouseMove", x: at.x + (i * 97) % 500, y: at.y + (i % 4) * 45 });
             await sleep(250);
-            hover = view.pipebox && view.pipebox.hover;
+            hover = view.lastHovered;
           }
           await sleep(1500);
-          const traces = d.profile.traces(50).filter((t) => t.kind === "hover");
-          return { cid: hover && hover.cid, hover_traces: traces.length,
+          const traces = d.profile.traces(500).filter((t) => t.kind === "hover" && t.url === "https://en.wikipedia.org/wiki/Trie");
+          return { cid: hover && hover.cid, stored: hover && hover.stored, pane_focus_calls: view.pipebox.focusCalls - f0, hover_traces: traces.length,
                    last: traces.slice(-1)[0] || null };
         })()`, { timeout: 90000 });
         const after = await ask("/profile");
         const focus = (after.focus || []).slice(n0);
         return {
-          pass: !!got.cid && focus.length > 0 && got.hover_traces > 0,
+          // The pane's own count of /focus calls: the sidecar's profile list is
+          // a capped buffer, and once full a count by length reads 0.
+          pass: !!got.cid && got.pane_focus_calls > 0 && got.hover_traces > 0,
           evidence: { ...got, focus_calls: focus.length, focus: focus.slice(-3) },
         };
       },

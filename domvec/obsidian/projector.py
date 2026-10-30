@@ -89,6 +89,12 @@ BATCH = 256
 ADAPTIVE_WINDOW = [True]
 PLANT_FIXED_BATCH = [False]
 PLANT_WINDOW_ALWAYS = [False]
+#: Planted (G-80): a hovered chunk found without its vector is DROPPED from
+#: the queue like any other, as before -- and lost to a race (below).
+PLANT_DROP_HOT_WAITING = [False]
+#: How long a hovered chunk waiting for its vector is retried, and how often.
+HOT_RETRY_S = 6.0
+HOT_RETRY_EVERY_S = 0.15
 #: Drains averaging fewer chunks than this are a trickle; a queue holding this
 #: many is a burst.
 TRICKLE = 8
@@ -301,6 +307,11 @@ class ChunkProjector:
         self.window_stats: Dict = {"drains": 0, "placed": 0, "waited_ms": 0.0, "windows": 0}
         #: Chunks taken by each recent drain: what the arrivals look like.
         self.recent_sizes: Deque[int] = deque(maxlen=8)
+        #: Hovered chunks (`prioritize`) -> until when a drain that finds one
+        #: without its vector keeps it, retried, instead of dropping it.
+        self.hot: Dict[str, float] = {}
+        self.hot_retry: Dict[str, float] = {}
+        self.hot_stats = {"kept": 0, "retried": 0, "expired": 0}
         self.wanted = threading.Event()
         self.fitted_chunks = 0
         self.fitted_points = 0
@@ -491,6 +502,12 @@ class ChunkProjector:
             self.queue = {**{c: self.queue.get(c) or now for c in wanted}, **rest}
             # A hover is waiting on these: no batching window.
             self.urgent = True
+            mono = time.monotonic()
+            until = mono + HOT_RETRY_S
+            if len(self.hot) > 256:
+                self.hot = {c: t for c, t in self.hot.items() if t > mono}
+            for c in wanted:
+                self.hot[c] = until
         self.wanted.set()
         return len(wanted)
 
@@ -531,6 +548,7 @@ class ChunkProjector:
                 "fixed": bool(PLANT_FIXED_BATCH[0]), "drains": ws["drains"], "placed": ws["placed"],
                 "adaptive": bool(ADAPTIVE_WINDOW[0]), "trickling": self.trickling(),
                 "recent_sizes": list(self.recent_sizes),
+                "hot": dict(self.hot_stats),
                 # A re-cluster's re-queue (sidecar `_project_regrouped`): what
                 # it queued against the page's whole chunk set.
                 "regroups": ws.get("regroups", 0), "regroup_queued": ws.get("regroup_queued", 0),
@@ -582,6 +600,17 @@ class ChunkProjector:
                 gone.append((cid, chunk.url if chunk is not None else None))
             elif not vector or not any(vector):
                 waiting.append(cid)
+                # A HOVERED chunk is kept and retried (G-80, 2026-10-30). The
+                # drain a hover asks for at once can read the chunk a moment
+                # before the embedder's vector is committed -- the embedder
+                # had already handed it over, so nothing queued it again, and
+                # the hovered chunk reached the graph LAST (8.6 s, against
+                # 1.1 s with no hover-first at all). Planted
+                # `PLANT_DROP_HOT_WAITING`: dropped like any other.
+                until = self.hot.get(cid)
+                if until and time.monotonic() < until and not PLANT_DROP_HOT_WAITING[0]:
+                    self.hot_retry[cid] = time.monotonic() + HOT_RETRY_EVERY_S
+                    self.hot_stats["kept"] += 1
             else:
                 keep.append((cid, chunk.url, np.asarray(vector, dtype=np.float32)))
         ms_transform = 0.0
@@ -688,7 +717,9 @@ class ChunkProjector:
                     pass
             checked = 0.0
             while not self._stop.is_set():
-                self.wanted.wait(timeout=1.0)
+                # A hovered chunk awaiting a retry wakes the loop when it is due.
+                nxt = min(self.hot_retry.values()) - time.monotonic() if self.hot_retry else 1.0
+                self.wanted.wait(timeout=max(0.02, min(1.0, nxt)))
                 self.wanted.clear()
                 # The batching window (G-13): a small queue waits, from its
                 # OLDEST item, as long as a drain has been costing -- unless a
@@ -704,6 +735,18 @@ class ChunkProjector:
                         self.window_stats["windows"] += 1
                         self.window_stats["waited_ms"] = round(self.window_stats["waited_ms"] + rest * 1000, 1)
                 self.urgent = False
+                # Hovered chunks a drain found waiting for their vector, due.
+                if self.hot_retry:
+                    now_m = time.monotonic()
+                    due = [c for c, t in list(self.hot_retry.items()) if t <= now_m]
+                    for c in due:
+                        self.hot_retry.pop(c, None)
+                        if self.hot.get(c, 0) > now_m:
+                            self.enqueue([c])
+                            self.hot_stats["retried"] += 1
+                        else:
+                            self.hot_stats["expired"] += 1
+
                 # The drain only READS -- chunk rows and vectors, on the store's
                 # own read connection -- and with the semantic centroid it
                 # touches no shared in-memory index a capture mutates. So it
