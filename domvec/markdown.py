@@ -2724,7 +2724,9 @@ def _tabulate(lines: List[MarkdownLine],
 #: label each drawn as a line of their own, as before.
 PLANT_STRUCTURAL_NOISE = False
 
-_PUNCT_ONLY = re.compile(r"^[\s*-]*([|.,:;?!·•–—/()\[\]]+)\s*$")
+_PUNCT_ONLY = re.compile(r"^[\s*-]*([|.,:;?!·•–—/()\x22“”‘’،؛؟\[\]]+)\s*$")
+#: Planted (D-4): punctuation in a table cell kept whatever line precedes it.
+PLANT_CELL_PUNCT_KEPT = False
 _LINK_LABEL = re.compile(r"^\[([^\]]*)\]\(")
 _IMAGE_ALT = re.compile(r"^!\[([^\]]*)\]\(")
 # HEADER cells only: a `td` whose one line sits on the element is DATA ("Yes"
@@ -2772,17 +2774,25 @@ def _fold_structural(lines: List[MarkdownLine]) -> List[MarkdownLine]:
         text = " ".join(line.text.split())
         prev = out[-1] if out else None
         m = _PUNCT_ONLY.match(text)
-        # Never inside a table cell: a cell's "?" or "–" is a VALUE ("unknown",
+        # Never a table cell's VALUE: a cell's "?" or "–" is one ("unknown",
         # "none") -- folding them turned a feature table's "Yes" + "?" into
-        # "Yes?" on the first run.
-        in_cell = line.address is not None and _CELL.match(line.address.xpath) is not None
+        # "Yes?" on the first run. But a separator BETWEEN two items of one
+        # cell is structure: a navbox's "·" between its links, an infobox's
+        # "Wikidata" + ":" + its id, an en dash between album and artist
+        # (`domvec.analytics.repeats`, 2026-10-30: 103 "·" on one ar.wikipedia
+        # page, 78 '"', 35 "–", 27 ":" on en.wikipedia, all in cells). So in a
+        # cell it folds only onto a line of the SAME cell. Planted
+        # `PLANT_CELL_PUNCT_KEPT`: any cell line kept, as before.
+        cm = _CELL.match(line.address.xpath) if line.address is not None else None
+        pm = _CELL.match(prev.address.xpath) if (cm and prev is not None and prev.address is not None) else None
+        in_cell = cm is not None and (PLANT_CELL_PUNCT_KEPT or pm is None or pm.group(0).rstrip("/") != cm.group(0).rstrip("/"))
         # Words only: a picture drawn as `![]` is made of punctuation characters
         # and is not punctuation (it was glued onto apnews' "( More )").
         media = line.address is not None and (line.address.tag.split(".")[0] in ("image", "media")
                                               or text.startswith(("![", "[")))
         if m and not in_cell and not media and prev is not None and not prev.text.lstrip().startswith("|"):
             p = m.group(1)
-            sep = "" if p[0] in ".,:;?!)]" else " "
+            sep = "" if p[0] in ".,:;?!)]،؛؟" else " "
             out[-1] = _absorb(replace(prev, text=prev.text.rstrip() + sep + p), line)
             continue
         mi = _IMAGE_ALT.match(text)

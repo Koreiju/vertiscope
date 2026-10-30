@@ -53,3 +53,37 @@ def test_an_empty_picture_is_not_punctuation():
     out = _fold_structural([L("/div/button", "( More )", "button", "text()[0]"),
                             L("/div/video", "![]", "media.video", "text()[0]")])
     assert [l.text for l in out] == ["( More )", "![]"]
+
+
+def test_a_separator_between_two_items_of_one_cell_folds():
+    # A navbox: links and their "·" separators in ONE td (ar.wikipedia, 103 of
+    # them on one page); an infobox's "Wikidata" + ":" + its id; an opening
+    # quote before a song link. Same cell -> separator -> folded.
+    cell = "/table/tbody/tr[2]/td[2]"
+    out = _fold_structural([L(cell + "/ul/li[1]/a", "[Max Planck](https://x/Planck)", "link", "href"),
+                            L(cell + "/ul/li[1]/text()[1]", "·"),
+                            L(cell + "/ul/li[2]/a", "[Einstein](https://x/Einstein)", "link", "href"),
+                            L(cell + "/ul/li[2]/text()[1]", "- \""),
+                            L(cell + "/ul/li[3]/a", "[Give Us the Ballot](https://x/B)", "link", "href")])
+    assert [l.text for l in out] == ["[Max Planck](https://x/Planck) ·", "[Einstein](https://x/Einstein) \"",
+                                     "[Give Us the Ballot](https://x/B)"]
+    assert out[0].inline[0].xpath.endswith("li[1]/text()[1]")
+
+
+def test_a_cells_own_punctuation_value_is_kept_and_the_planted_rule_keeps_separators():
+    import domvec.markdown as M
+    # "–" as a whole cell (the line before is ANOTHER cell): a value, kept.
+    lines = [L("/table/tbody/tr[2]/td[1]/text()[1]", "Firefox"), L("/table/tbody/tr[2]/td[2]/text()[1]", "–")]
+    assert [l.text for l in _fold_structural(lines)] == ["Firefox", "–"]
+    sep = [L("/table/tbody/tr[2]/td[2]/a", "[A](https://x/a)", "link", "href"), L("/table/tbody/tr[2]/td[2]/text()[1]", "·")]
+    M.PLANT_CELL_PUNCT_KEPT = True
+    try:
+        assert len(_fold_structural(sep)) == 2
+    finally:
+        M.PLANT_CELL_PUNCT_KEPT = False
+    assert len(_fold_structural(sep)) == 1
+
+
+def test_an_arabic_comma_cut_off_its_text_rejoins_it():
+    out = _fold_structural([L("/p/a", "[ماكس بلانك](https://x/P)", "link", "href"), L("/p/text()[2]", "- ،")])
+    assert [l.text for l in out] == ["[ماكس بلانك](https://x/P)،"]
