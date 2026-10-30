@@ -632,6 +632,15 @@ export class SceneBatch {
   private drawnLinks: any[] = [];
   positionStats = { runs: 0, refused: 0, nodes: 0, last_ms: 0 };
 
+  /** The drawn instances as typed arrays, per mesh (opaque, clear, glass):
+   *  position, drawn half-size, and the node in each slot -- for a scan that
+   *  reads no node object until it has to (`GraphView.refreshDetail`). */
+  scanSource(): { off: Float32Array; size: Float32Array; count: number; slots: any[] }[] {
+    return [this.opaque, this.clear, this.glass].map((m, k) => ({
+      off: m.offset.array as Float32Array, size: m.size.array as Float32Array,
+      count: Math.min(m.geo.instanceCount, this.slots[k].length), slots: this.slots[k] }));
+  }
+
   /**
    * A POSITION change only -- the forces ticked -- written into the slots and
    * edge vertices the last full sync laid out, with no look computed

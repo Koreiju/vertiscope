@@ -5252,6 +5252,8 @@ export class GraphView extends ItemView {
   /** A presented picture's largest radius on screen, px. */
   presentMaxPx = 64;
   presentMinPx = 12;
+  /** Planted (item 44): the hover ranking walks every node object, as before. */
+  plantDetailFromNodes = false;
   /** Planted: a revealed picture at the one size (the invisible hover image). */
   plantTinyReveal = false;
   /** Spheres drawn this much larger by default (2026-10-12, PLUGIN_GOAL 115:
@@ -5617,23 +5619,34 @@ export class GraphView extends ItemView {
     // ray -- in world units, the normal's own length -- is outside it, however
     // few are inside. The K nearest took whatever was nearest, anywhere.
     const R = this.revealRadius(g), R2 = R * R;
-    for (const n of g.graphData().nodes) {
-      if (!Number.isFinite(n.x)) continue;
-      const vx = n.x - ox, vy = n.y - oy, vz = (n.z || 0) - oz;
+    // **Over the batch's typed arrays, not the node objects** (2026-10-30,
+    // item 44). Read off 60k megamorphic node objects every frame of the idle
+    // turn, each coordinate came back a boxed double: 34.7 MB allocated in 12
+    // idle frames (a heap sampling profile), ~3 MB a frame -- the garbage the
+    // collector then paused for. The batch already holds every DRAWN node's
+    // position and drawn half-size in slot order; a node object is touched
+    // only once it is inside the cylinder or covers the ray. Planted
+    // `plantDetailFromNodes`: the per-node walk, as before.
+    const zs = this.zoomScale;
+    const scan = this.batch && !this.plantDetailFromNodes && !this.plantStaleProxies ? this.batch.scanSource() : null;
+    const visit = (n: any, x: number, y: number, z: number, hrIn: number): void => {
+      const vx = x - ox, vy = y - oy, vz = z - oz;
       const t = vx * dx + vy * dy + vz * dz;
-      if (t <= 0) continue;                         // behind the camera
+      if (t <= 0) return;                           // behind the camera
       // The normal to the ray, per unit of depth along it: nearness to the
       // mouse ON SCREEN. The raw normal let nodes far down the ray -- specks --
       // take every slot from the ones under the cursor.
       const n2 = vx * vx + vy * vy + vz * vz - t * t;
-      const d2 = n2 / (t * t);
       // The node's DRAWN radius (its proxy's): sized by `val` this was up to
       // 19 world units for a page node drawn at chunk size, so the ray
       // "covered" nodes far from the pointer near the camera (2026-10-12).
-      const hr = this.plantStaleProxies ? Math.cbrt(Math.max(n.val ?? 1, 1e-9)) * rs * 1.75 * 1.4142
+      const hr = hrIn >= 0 ? hrIn : this.plantStaleProxies ? Math.cbrt(Math.max(n.val ?? 1, 1e-9)) * rs * 1.75 * 1.4142
         : (n.__threeObj && n.__threeObj.__proxy ? n.__threeObj.scale.x : Math.cbrt(Math.max(n.val ?? 1, 1e-9)) * rs);
       if (n2 < hr * hr) covers.add(n);
-      if (!this.plantUnboundedReveal && n2 > R2) continue;
+      if (!this.plantUnboundedReveal && n2 > R2) return;
+      rank(n, n2, n2 / (t * t));
+    };
+    const rank = (n: any, n2: number, d2: number): void => {
       if (gBest.length < K) {
         gBest.push(n); gDist.push(d2); gN.push(n2);
         if (gBest.length === K) { gWorst = 0; for (let i = 1; i < K; i++) if (gDist[i] > gDist[gWorst]) gWorst = i; }
@@ -5641,7 +5654,7 @@ export class GraphView extends ItemView {
         gBest[gWorst] = n; gDist[gWorst] = d2; gN[gWorst] = n2;
         gWorst = 0; for (let i = 1; i < K; i++) if (gDist[i] > gDist[gWorst]) gWorst = i;
       }
-      if (!n.image?.src || n.level === "page" || n.level === "path") continue;
+      if (!n.image?.src || n.level === "page" || n.level === "path") return;
       candidates++;
       if (best.length < K) {
         best.push(n); dist.push(d2);
@@ -5649,6 +5662,28 @@ export class GraphView extends ItemView {
       } else if (d2 < dist[worst]) {
         best[worst] = n; dist[worst] = d2;
         worst = 0; for (let i = 1; i < K; i++) if (dist[i] > dist[worst]) worst = i;
+      }
+    };
+    if (scan) {
+      for (const m of scan) {
+        const off = m.off, size = m.size, slots = m.slots;
+        for (let i = 0; i < m.count; i++) {
+          const o = i * 3;
+          const vx = off[o] - ox, vy = off[o + 1] - oy, vz = off[o + 2] - oz;
+          const t = vx * dx + vy * dy + vz * dz;
+          if (t <= 0) continue;
+          const n2 = vx * vx + vy * vy + vz * vz - t * t;
+          const hr = size[i] * zs;
+          // Only what is near the ray reaches a node object.
+          if (n2 >= hr * hr && (!this.plantUnboundedReveal && n2 > R2)) continue;
+          const n = slots[i];
+          if (n) visit(n, off[o], off[o + 1], off[o + 2], hr);
+        }
+      }
+    } else {
+      for (const n of g.graphData().nodes) {
+        if (!Number.isFinite(n.x)) continue;
+        visit(n, n.x, n.y, n.z || 0, -1);
       }
     }
     const pictures = new Set(best);
@@ -5910,7 +5945,10 @@ export class GraphView extends ItemView {
           const ns = g.graphData().nodes;
           const dtf = this.netAt ? Math.min(500, now - this.netAt) : 16;
           this.netAt = now;
-          const take = Math.min(ns.length, Math.ceil(ns.length * dtf / net));
+          // A whole pass every `rollMs` (6 s), not every 2: the net is for a
+          // change nothing marked, and a pass a 2 s was a full sync's garbage
+          // every 2 s (2026-10-30 heap profile).
+          const take = Math.min(ns.length, Math.ceil(ns.length * dtf / (this.plantNetFullSync ? net : this.rollMs)));
           if (this.netCursor >= ns.length) this.netCursor = 0;
           const slice = ns.slice(this.netCursor, this.netCursor + take);
           this.netCursor += take;
@@ -6978,6 +7016,8 @@ export class GraphView extends ItemView {
   /** Planted (item 44): the large graph's safety net a full sync every 2 s, as before. */
   plantNetFullSync = false;
   private netCursor = 0;
+  /** How long one rolling pass of the safety net takes on a large graph, ms. */
+  rollMs = 6000;
   private netAt = 0;
   private batchSyncedAt = 0;
   /** Planted (2026-10-11): the batch rewritten every frame, changed or not. */

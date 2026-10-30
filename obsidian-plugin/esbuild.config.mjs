@@ -116,6 +116,22 @@ const ctx = await esbuild.context({
   treeShaking: true,
   outfile: "main.js",
   plugins: [{
+    // three-forcegraph walks EVERY link on every frame to move link particles
+    // (`updatePhotons`), whether or not any link has one. This pane draws its
+    // links itself and gives them none (`linkDirectionalParticles` 0), and the
+    // walk was 26.9 MB of garbage in 12 idle frames at 50k links (a heap
+    // sampling profile, 2026-10-30, item 44). Skipped while the accessor is
+    // 0; planted `globalThis.__domvecPlantPhotons`: walked, as upstream.
+    name: "skip-idle-photons",
+    setup(build) {
+      build.onLoad({ filter: /three-forcegraph[\\/]dist[\\/]three-forcegraph\.mjs$/ }, async (args) => {
+        const src = await readFile(args.path, "utf8");
+        const head = "function updatePhotons() {";
+        if (!src.includes(head)) throw new Error("skip-idle-photons: updatePhotons not found in " + args.path);
+        return { contents: src.replace(head, head + " if (!state.linkDirectionalParticles && !globalThis.__domvecPlantPhotons) return;"), loader: "js" };
+      });
+    },
+  }, {
     name: "deploy-to-vault",
     setup(build) {
       // `onEnd` rather than after `rebuild()`, so WATCH mode deploys on every

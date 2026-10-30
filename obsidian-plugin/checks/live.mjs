@@ -7535,6 +7535,63 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-290",
+      asks: "the full chunk view does not churn memory while the reader is away (item 44: 'memory degradation/latency lag'): over 12 s in chunk view with the hover ranking driven ten times a second (as a turning camera drives it), a heap sampling profile that keeps collected objects counts the MB allocated per rendered frame -- under a third of the old paths' (planted: plantDetailFromNodes + __domvecPlantPhotons + plantNetFullSync -- the hover ranking over node objects, the particle walk over every link, the 2 s net); the hover ranking and the particle walk each drop out of the top allocators",
+      async run() {
+        const got = await evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
+          if (!v || !v.graph) return { error: "no graph" };
+          const wasChunk = v.level === "chunk";
+          const toggle = () => [...v.contentEl.querySelectorAll("button")].find((x) => x.textContent === (v.level === "chunk" ? "chunks" : "pages"))?.click();
+          if (!wasChunk) { toggle(); for (let i = 0; i < 120; i++) { await sleep(500); if (v.level === "chunk" && v.graph && v.graph.graphData().nodes.length > 5000) break; } await sleep(8000); }
+          const wc = require("@electron/remote").getCurrentWebContents(), d = wc.debugger;
+          let attached = false;
+          if (!d.isAttached()) { d.attach("1.3"); attached = true; }
+          const set = (on) => { v.plantDetailFromNodes = on; globalThis.__domvecPlantPhotons = on; v.plantNetFullSync = on; };
+          // The idle turn moves the camera, so the hover ranking runs each frame.
+          const arm = async (planted) => {
+            set(planted);
+            const f0 = v.frameGaps.length;
+            await d.sendCommand("HeapProfiler.startSampling", { samplingInterval: 16384, includeObjectsCollectedByMajorGC: true, includeObjectsCollectedByMinorGC: true });
+            // The hover ranking driven ten times a second, as a moving camera
+            // or pointer drives it (the idle turn pauses while checks run).
+            const drive = setInterval(() => { v.detailDirty = true; v.detailAt = 0; v.refreshDetail(v.graph); }, 100);
+            try { await sleep(12000); } finally { clearInterval(drive); }
+            const { profile } = await d.sendCommand("HeapProfiler.stopSampling");
+            set(false);
+            const frames = Math.max(1, v.frameGaps.length - f0);
+            const by = new Map();
+            const walk = (n, stack) => {
+              const name = n.callFrame.functionName || "(anon)";
+              const st = stack.concat(name);
+              if (n.selfSize) for (const fn of new Set(st)) by.set(fn, (by.get(fn) || 0) + n.selfSize);
+              for (const c of n.children || []) walk(c, st);
+            };
+            walk(profile.head, []);
+            const total = by.get("(root)") || 0;
+            const mb = (x) => Math.round(x / 1e5) / 10;
+            return { frames, total_mb: mb(total), mb_per_frame: Math.round(total / frames / 1e4) / 100,
+                     refreshDetail_mb: mb(by.get("refreshDetail") || 0), updatePhotons_mb: mb(by.get("updatePhotons") || 0), patch_mb: mb(by.get("patch") || 0) };
+          };
+          try {
+            await d.sendCommand("HeapProfiler.enable");
+            return { nodes: v.graph.graphData().nodes.length, clean: await arm(false), planted: await arm(true) };
+          } finally {
+            set(false);
+            try { await d.sendCommand("HeapProfiler.disable"); } catch (e) {}
+            if (attached) d.detach();
+            if (!wasChunk) toggle();
+          }
+        })()`, { timeout: 120000 });
+        if (!got || got.error) return { pass: false, evidence: got };
+        const c = got.clean, p = got.planted;
+        return { pass: got.nodes > 5000 && c.mb_per_frame < p.mb_per_frame / 3
+                   && c.refreshDetail_mb < p.refreshDetail_mb / 5 && c.updatePhotons_mb < p.updatePhotons_mb / 5,
+                 evidence: got };
+      },
+    },
+    {
       id: "G-273",
       asks: "the user agent's views and keys: in MAP view a hover moves nothing and in EGO view it moves the camera; paused, no motion; Shift +5%, Ctrl -5%; Z, X and M do nothing (deprecated); arrows turn the camera about the focus (distance kept) and Q/R roll it about the view normal (view kept) -- 3-DOF rotation; each key held lit in the agent's state while pressed (its readout awaits the dialect card, G-274); planted (pointer away) the keys do nothing",
       async run() {
