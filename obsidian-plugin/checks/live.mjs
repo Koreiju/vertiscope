@@ -1597,14 +1597,18 @@ export function makeChecks(env) {
             let hung = null, mutated = false;
             const at = await b.webview.executeJavaScript("(function(){var e=document.getElementById('add');if(!e)return null;e.scrollIntoView({block:'center'});var r=e.getBoundingClientRect();return {x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)};})()");
             const count = () => b.webview.executeJavaScript("document.getElementById('items').children.length");
-            let second = null, secondGone = null, afterClick = null, framePeak = 0;
+            let second = null, secondGone = null, afterClick = null, framePeak = 0, hungSeen = null;
             if (at) {
               const was = await count();
               const clickedAt = Date.now();
               // Every frame, not every 150 ms: a force node that the store
               // answers for within a sample is drawn and gone unseen.
               let watching = true;
-              const watch = () => { if (!watching) return; framePeak = Math.max(framePeak, mine()); requestAnimationFrame(watch); };
+              // ...and whether it hangs from the page, in the frame it exists:
+              // read after a 150 ms sample it was already gone (null).
+              const watch = () => { if (!watching) return; const m = mine(); framePeak = Math.max(framePeak, m);
+                if (m > 0) { const h = hungFromPage(); if (h !== null) hungSeen = hungSeen === null ? h : Math.min(hungSeen, h); }
+                requestAnimationFrame(watch); };
               requestAnimationFrame(watch);
               b.webview.focus();
               for (const type of ["mouseDown", "mouseUp"]) b.webview.sendInputEvent({ type, x: at.x, y: at.y, button: "left", clickCount: 1 });
@@ -1614,6 +1618,7 @@ export function makeChecks(env) {
               second = await until(() => mine() > 0, 20000);
               hung = hungFromPage();
               secondGone = await until(() => mine() === 0, 60000);
+              if (hung === null) hung = hungSeen;
               watching = false;
               // What each drain after the click carried, and why it drew what it did.
               afterClick = window.__domvecProfiler.listAll()
@@ -1670,7 +1675,9 @@ export function makeChecks(env) {
                && c.C6_projector_drawn && c.C7_reached_zero
                && got.mode_at_start === "projector"
                && got.c8.appeared.ok && got.c8.collapsed.ok
-               && got.c8.mutated && got.c8.second && got.c8.second.ok
+               // Appeared: in a sample, or in a frame -- placed and collapsed
+               // inside 150 ms it is drawn and gone between samples.
+               && got.c8.mutated && ((got.c8.second && got.c8.second.ok) || got.c8.frame_peak >= 1)
                && got.c8.hung_from_page === 1 && got.c8.second_gone && got.c8.second_gone.ok,
             evidence: { ...c, pending: got.pending, rows: tr.length, trace: tr.slice(0, 40), label: got.label },
           };
