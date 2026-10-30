@@ -7592,6 +7592,63 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-291",
+      asks: "UMAP places the ego reservoir (item 43): a slate note and a note with a python cell that has RUN (a stored readout), created in the vault, are indexed on their own and arrive in the 3D graph as vault:// pages with a UMAP place (finite fit); a plain note and a never-run python block (a design doc's illustration) are not indexed; planted (__domvecPlantNoReservoirIndex) neither computation-graph note arrives",
+      async run() {
+        const got = await evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const plugin = app.plugins.getPlugin("domvec-bridge");
+          const SIDE = String(plugin.settings.sidecar).replace(/[/]+$/, "");
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
+          if (!v || !v.graph) return { error: "no graph" };
+          const NL = String.fromCharCode(10), F = String.fromCharCode(96).repeat(3), TB = String.fromCharCode(9);
+          const folder = "domvec-checks";
+          if (!app.vault.getAbstractFileByPath(folder)) await app.vault.createFolder(folder);
+          const vaultName = app.vault.getName();
+          const urlOf = (path) => "vault://" + vaultName + "/" + path;
+          const nodeOf = (url) => v.graph.graphData().nodes.find((n) => n.url === url && n.level === "page");
+          const arm = async (planted) => {
+            window.__domvecPlantNoReservoirIndex = planted;
+            const stamp = Date.now() + (planted ? "p" : "c");
+            const files = {
+              slate: [folder + "/g291 slate " + stamp + ".md", "---" + NL + "domvec: slate" + NL + "---" + NL + "reservoir probe" + NL + TB + "marker" + TB + stamp + NL],
+              cell: [folder + "/g291 cell " + stamp + ".md", "# cell" + NL + NL + F + "python" + NL + "x = 'reservoir " + stamp + "'" + NL + F + NL + "<!-- nb-output hash=0 count=1 status=ok -->" + NL + F + "text" + NL + "ok" + NL + F + NL + "<!-- /nb-output -->" + NL],
+              plain: [folder + "/g291 plain " + stamp + ".md", "# plain" + NL + NL + "just prose " + stamp + NL],
+              unrun: [folder + "/g291 unrun " + stamp + ".md", "# doc" + NL + NL + F + "python" + NL + "illustration = 1" + NL + F + NL],
+            };
+            const made = [];
+            try {
+              for (const [path, text] of Object.values(files)) made.push(await app.vault.create(path, text));
+              const out = { planted };
+              const t0 = performance.now();
+              const want = Object.fromEntries(Object.entries(files).map(([k, [path]]) => [k, urlOf(path)]));
+              for (let i = 0; i < 40; i++) {
+                await sleep(1000);
+                if (!planted && nodeOf(want.slate) && nodeOf(want.cell)) break;
+              }
+              await sleep(planted ? 0 : 3000);         // the plain note's chance to (wrongly) arrive
+              for (const k of Object.keys(want)) {
+                const n = nodeOf(want[k]);
+                out[k] = n ? { placed: Number.isFinite(n.fitX) && Number.isFinite(n.fitY), at: [Math.round(n.x), Math.round(n.y), Math.round(n.z || 0)] } : null;
+              }
+              out.s = Math.round((performance.now() - t0) / 100) / 10;
+              return out;
+            } finally {
+              window.__domvecPlantNoReservoirIndex = false;
+              for (const f of made) {
+                try { await fetch(SIDE + "/purge", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url: urlOf(f.path) }) }); } catch (e) {}
+                try { await app.vault.delete(f); } catch (e) {}
+              }
+            }
+          };
+          return { clean: await arm(false), planted: await arm(true) };
+        })()`, { timeout: 150000 });
+        if (!got || got.error) return { pass: false, evidence: got };
+        const c = got.clean, p = got.planted;
+        return { pass: !!(c.slate && c.slate.placed && c.cell && c.cell.placed) && !c.plain && !c.unrun && !p.slate && !p.cell, evidence: got };
+      },
+    },
+    {
       id: "G-273",
       asks: "the user agent's views and keys: in MAP view a hover moves nothing and in EGO view it moves the camera; paused, no motion; Shift +5%, Ctrl -5%; Z, X and M do nothing (deprecated); arrows turn the camera about the focus (distance kept) and Q/R roll it about the view normal (view kept) -- 3-DOF rotation; each key held lit in the agent's state while pressed (its readout awaits the dialect card, G-274); planted (pointer away) the keys do nothing",
       async run() {

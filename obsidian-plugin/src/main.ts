@@ -183,8 +183,15 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     this.registerEvent(this.app.vault.on("modify", (f) => {
       if (f instanceof TFile && f.extension === "md" && (this.settings.indexedNotes || []).includes(f.path)) {
         this.indexNoteSoon(f, "edited");
+      } else if (f instanceof TFile && f.extension === "md") {
+        void this.indexIfReservoir(f, "reservoir");
       }
     }));
+    this.registerEvent(this.app.vault.on("create", (f) => {
+      if (f instanceof TFile && f.extension === "md") void this.indexIfReservoir(f, "reservoir");
+    }));
+    this.addCommand({ id: "domvec-reservoir-index", name: "Index every computation-graph note (the ego reservoir)",
+                      callback: () => { void this.indexReservoir(); } });
     this.gesture = {
       sidecar: this.sidecar,
       stats: { opened: 0, pages: 0, infilled: 0, last: null },
@@ -983,6 +990,43 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
   // ever in the store, so no retrieval link could be). Planted
   // `__domvecPlantNoNoteIndex`: nothing is indexed.
   noteStats = { indexed: 0, errors: 0, last: null as any };
+
+  // ---- the ego reservoir placed by UMAP (item 43) --------------------------
+  //
+  // "UMAP happens on the ego reservoir for all computation graph nodes as
+  // artifacts of various kinds" (2026-10-30). A computation-graph artifact is
+  // a note: a slate (`domvec: slate`, the cockpit among them) or a note with
+  // a code cell (a function node, G-279, and its stored readout). Each is
+  // indexed as a `vault://` page whenever it changes, so the global UMAP
+  // places it among the pages and chunks it reads and writes -- the
+  // reservoir is not a separate picture. Planted `__domvecPlantNoReservoirIndex`.
+  reservoirStats = { indexed: 0, skipped: 0 };
+  async isReservoirNote(file: TFile): Promise<boolean> {
+    const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
+    if (fm && String(fm.domvec || "") === "slate") return true;
+    const text = await this.app.vault.cachedRead(file);
+    // The frontmatter from the TEXT too: on `create` the metadata cache has
+    // not parsed it yet, and a new slate read as a plain note.
+    if (/^---\r?\n(?:.*\r?\n)*?domvec:\s*slate\s*\r?\n(?:.*\r?\n)*?---/.test(text)) return true;
+    // A cell note is a function node once it has RUN -- a python cell AND a
+    // stored readout. This vault is the repository: a design doc with an
+    // illustrative ```python block is not a notebook, and indexing it would
+    // grow the corpus every time the doc was edited.
+    return /^\s*(`{3,}|~{3,})\s*(python|py|python3)\b/m.test(text) && /^\s*<!--\s*nb-output\s/m.test(text);
+  }
+  async indexIfReservoir(file: TFile, why: string): Promise<void> {
+    if ((window as any).__domvecPlantNoReservoirIndex) return;
+    if (!(await this.isReservoirNote(file))) { this.reservoirStats.skipped++; return; }
+    this.reservoirStats.indexed++;
+    this.indexNoteSoon(file, why, 4000);
+  }
+  async indexReservoir(): Promise<number> {
+    let n = 0;
+    for (const f of this.app.vault.getMarkdownFiles()) {
+      if (await this.isReservoirNote(f)) { n++; await this.indexNote(f, "reservoir"); }
+    }
+    return n;
+  }
   private noteTimers = new Map<string, number>();
   indexNoteSoon(file: TFile, why: string, delayMs = 2500): void {
     if ((window as any).__domvecPlantNoNoteIndex) return;
