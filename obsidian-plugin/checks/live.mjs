@@ -6039,6 +6039,114 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-14",
+      asks: "graph linkage completeness across trie, web links and markdown links (2026-10-30): every page link the STORE holds between two pages the pane draws is in the layout and drawn, per axis -- web (http), markdown (vault notes), code -- and every directory (trie) edge the layout carries is drawn; planted plantTreeOnlyPages (the one-parent rule over page links) drops web links and is caught",
+      async run() {
+        // Two legs, each answerable on its own: store -> layout (did the
+        // sidecar hand the pane every link it holds?) and layout -> drawn (did
+        // the pane draw what it was handed?). The denominator is links whose
+        // BOTH pages are drawn: a link to a page the corpus does not hold is
+        // not one the picture can draw.
+        const SIDE = SIDECAR.replace(/\/+$/, "");
+        // The markdown axis made non-vacuous: the store may hold no linked
+        // vault note at all (it held 0 the first time this ran), and an axis
+        // with nothing in it cannot fail. A note linking two stored pages,
+        // indexed as the [](...) gesture indexes it; removed afterwards.
+        const note = await evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const plugin = app.plugins.getPlugin("domvec-bridge");
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
+          const NL = String.fromCharCode(10);
+          const A = "https://en.wikipedia.org/wiki/Radix_tree", B = "https://en.wikipedia.org/wiki/Trie";
+          const folder = "domvec-checks";
+          if (!app.vault.getAbstractFileByPath(folder)) await app.vault.createFolder(folder);
+          const path = folder + "/g14-" + Date.now() + ".md";
+          const f = await app.vault.create(path, "# Linkage" + NL + NL + "A [radix tree](" + A + ") compresses a [trie](" + B + ")." + NL);
+          const url = "vault://" + app.vault.getName() + "/" + path;
+          await plugin.indexNote(f, "check");
+          let laid = 0;
+          for (let i = 0; i < 30 && laid < 1; i++) {
+            await sleep(2000);
+            const lay = await (await fetch(plugin.settings.sidecar.replace(/[/]+$/, "") + "/layout?dims=3")).json();
+            laid = (lay.edges || []).filter((e) => e.source === "page:" + url).length;
+          }
+          if (v && v.reload) { await v.reload(); await sleep(2500); }
+          return { path, url, laid };
+        })()`, { timeout: 120000 });
+        try {
+        const rows = (await (await fetch(SIDE + "/cypher", { method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ query: "MATCH (c:Chunk)-[:LinksTo]->(p:Page) RETURN DISTINCT c.url, p.url" }) })).json()).rows || [];
+        const lay = await ask("/layout?dims=3");
+        const got = await inPane(`
+          if (v.level === "chunk") {
+            [...v.contentEl.querySelectorAll("button")].find((x) => x.textContent === "chunks")?.click();
+            await sleep(6000);
+          }
+          for (let i = 0; i < 60 && !(v.graph && v.graph.graphData().nodes.length); i++) await sleep(500);
+          const rows = ${JSON.stringify(rows)};
+          const layEdges = ${JSON.stringify((lay.edges || []).map((e) => [e.source, e.target, e.kind || ""]))};
+          const d = v.graph.graphData();
+          const end = (x) => (typeof x === "object" && x ? x.id : x);
+          const drawnNodes = new Set(d.nodes.map((n) => n.id));
+          const drawn = new Set(d.links.map((l) => end(l.source) + " -> " + end(l.target)));
+          const laid = new Set(layEdges.map((e) => e[0] + " -> " + e[1]));
+          const axis = (s) => s.startsWith("page:vault://") ? "markdown" : s.startsWith("page:code://") ? "code" : "web";
+          const out = { web: { stored: 0, laid: 0, drawn: 0 }, markdown: { stored: 0, laid: 0, drawn: 0 },
+                        code: { stored: 0, laid: 0, drawn: 0 }, dir: { laid: 0, drawn: 0 }, missing: [] };
+          for (const [a, b] of rows) {
+            if (!a || !b || a === b) continue;
+            const s = "page:" + a, t = "page:" + b;
+            if (!drawnNodes.has(s) || !drawnNodes.has(t)) continue;
+            const k = s + " -> " + t, o = out[axis(s)];
+            o.stored++;
+            if (laid.has(k)) o.laid++;
+            if (drawn.has(k)) o.drawn++;
+            else if (out.missing.length < 4) out.missing.push(k.slice(0, 160));
+          }
+          for (const [s, t, kind] of layEdges) {
+            if (kind !== "dir" || !drawnNodes.has(s) || !drawnNodes.has(t)) continue;
+            out.dir.laid++;
+            if (drawn.has(s + " -> " + t)) out.dir.drawn++;
+          }
+          // The planted arm, on the pane's own transform: the edges it was
+          // handed, through treeOnly, with and without the old rule.
+          const kept = (planted) => {
+            const copy = { nodes: d.nodes, links: layEdges.map((e) => ({ source: e[0], target: e[1], kind: e[2] })) };
+            v.plantTreeOnlyPages = planted;
+            try { v.treeOnly(copy); } finally { v.plantTreeOnlyPages = false; }
+            return copy.links.filter((l) => !l.kind && axis(String(l.source)) === "web").length;
+          };
+          out.transform = { handed_web: layEdges.filter((e) => !e[2] && axis(e[0]) === "web").length,
+                            kept_clean: kept(false), kept_planted: kept(true) };
+          return out;
+        `);
+        if (got.error) return { pass: false, evidence: got };
+        got.note = { laid_edges: note.laid };
+        const whole = (o) => o.laid === o.stored && o.drawn === o.stored;
+        return {
+          pass: got.web.stored > 0 && got.markdown.stored > 0 && whole(got.web) && whole(got.markdown) && whole(got.code)
+             && got.dir.laid > 0 && got.dir.drawn === got.dir.laid
+             && got.transform.kept_clean === got.transform.handed_web
+             && got.transform.kept_planted < got.transform.kept_clean,
+          evidence: got,
+        };
+        } finally {
+          await evaluate(`(async () => {
+            const plugin = app.plugins.getPlugin("domvec-bridge");
+            const f = app.vault.getAbstractFileByPath(${JSON.stringify(note.path)});
+            try { if (f) await app.vault.delete(f); } catch (e) {}
+            try { await fetch(plugin.settings.sidecar.replace(/[/]+$/, "") + "/purge", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url: ${JSON.stringify(note.url)} }) }); } catch (e) {}
+            plugin.settings.indexedNotes = (plugin.settings.indexedNotes || []).filter((p) => p !== ${JSON.stringify(note.path)});
+            await plugin.saveSettings();
+            await new Promise((r) => setTimeout(r, 1500));
+            const fo = app.vault.getAbstractFileByPath("domvec-checks");
+            try { if (fo && (!fo.children || !fo.children.length)) await app.vault.delete(fo, true); } catch (e) {}
+            return 1;
+          })()`, { timeout: 60000 }).catch(() => 0);
+        }
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {
