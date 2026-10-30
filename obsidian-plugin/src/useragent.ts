@@ -105,6 +105,34 @@ export class UserAgent {
   plantFastFlight = false;
   /** Planted: a new hover restarts the flight from rest (no carried velocity). */
   plantRestart = false;
+  /**
+   * A FLIGHT PLAN (items 8-9, 2026-10-29: "we can also draw flight plans for
+   * various searches and anchored nodes ... We will have a throttle to set the
+   * speed, the pause, and be able to plan efficiently that way"; G-283). An
+   * ordered list of nodes; played, the craft flies to each in turn at the
+   * throttle, each leg ending on arrival as any flight does (G-285). The
+   * pause holds it; a hand on the stick (`release`) stops the play.
+   */
+  plan: any[] = [];
+  planAt = -1;
+  playing = false;
+  planStats = { legs: 0, plays: 0, finished: 0, stopped: 0 };
+  /** Planted (G-283): the play flies the first leg and stops there. */
+  plantNoAdvance = false;
+  setPlan(nodes: any[]): void { this.plan = nodes.filter((n) => n && Number.isFinite(n.x)); this.planAt = -1; }
+  play(on: boolean): void {
+    if (on === this.playing) return;
+    this.playing = on && this.plan.length > 0;
+    if (this.playing) { this.planStats.plays++; this.planAt = -1; this.target = null; }
+  }
+  private advance(): void {
+    if (this.planAt >= 0 && this.plantNoAdvance) { this.playing = false; return; }
+    const next = this.planAt + 1;
+    if (next >= this.plan.length) { this.playing = false; this.planStats.finished++; return; }
+    this.planAt = next;
+    this.planStats.legs++;
+    this.fly(this.plan[next]);
+  }
   /** Planted (item 46): every flight closes to the floor, the reader's zoom-out lost. */
   plantIgnoreZoom = false;
   /** Planted (item 39): the target is held for good -- the aim pulls every frame. */
@@ -156,7 +184,7 @@ export class UserAgent {
     const p = cam.position, t = ctl.target;
     const n = this.mode === "ego" ? this.target : null;
     // Nothing selected and at rest: the camera is the reader's alone.
-    if (!n && len(this.vel) < 1e-4) { this.stats.idle_ticks++; this.fade(); return; }
+    if (!n && len(this.vel) < 1e-4 && !(this.playing && !this.paused)) { this.stats.idle_ticks++; this.fade(); return; }
     if (this.rezoom) {
       this.rezoom = false;
       const dz = Math.hypot(p.x - t.x, p.y - t.y, p.z - t.z);
@@ -238,6 +266,8 @@ export class UserAgent {
     }
     // At the standoff, at rest, aimed: the flight is over.
     if (arrived && !this.plantHoldTarget) { this.target = null; this.vel = v3(); this.stats.arrivals++; }
+    // A plan in play takes its next leg once the last has ended.
+    if (this.playing && !this.target && !this.paused && this.mode === "ego") this.advance();
     this.fade();
   }
 
@@ -251,6 +281,7 @@ export class UserAgent {
 
   /** The reader's own camera gesture: a hand on the stick. */
   release(): void {
+    if (this.playing) { this.playing = false; this.planStats.stopped++; }
     if (!this.target && len(this.vel) < 1e-4) return;
     this.target = null;
     this.vel = v3();

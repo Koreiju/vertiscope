@@ -7718,6 +7718,72 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-283",
+      asks: "a flight plan (items 8-9): in the cockpit, plan {results} and play true fly the craft through the search's results one leg at a time at the throttle, each leg ending on arrival -- at least two legs taken, the craft's look point on its last leg's node, and play written back false when the plan ends; a drag on the canvas stops the play and writes play false back into the slate; planted (agent.plantNoAdvance) the play stops after its first leg",
+      async run() {
+        const got = await evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const p = app.plugins.getPlugin("domvec-bridge"), c = p.cockpit;
+          const g = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
+          if (!c || !g || !g.searchField) return { error: "no cockpit or graph" };
+          const v = await c.open(); await sleep(1200);
+          const ed = v.editor, saved = ed.getValue(), a = g.agent, thr0 = a.throttle;
+          const cam = g.graph.camera(), ctl = g.graph.controls();
+          const savedCam = { p: cam.position.clone(), t: ctl.target.clone() };
+          const line = (k) => ed.getValue().split(String.fromCharCode(10)).findIndex((l) => l.trim().split(String.fromCharCode(9))[0] === k);
+          const valOf = (k) => { const l = ed.getLine(line(k)); return l.slice(l.lastIndexOf(String.fromCharCode(9)) + 1); };
+          const setVal = (k, val) => { const i = line(k), l = ed.getLine(i), at = l.lastIndexOf(String.fromCharCode(9)) + 1; ed.replaceRange(val, { line: i, ch: at }, { line: i, ch: l.length }); };
+          const arm = async (planted) => {
+            a.plantNoAdvance = planted;
+            cam.position.copy(savedCam.p); ctl.target.copy(savedCam.t); ctl.update?.(); a.release();
+            const s0 = { ...a.planStats };
+            // The search changed from ANOTHER surface first (the 3D field):
+            // the slate must still ask for its own query.
+            setVal("query", "radix tree"); await sleep(800);
+            g.searchField.input.value = ""; await g.searchField.run(); await sleep(600);
+            setVal("throttle", "100"); setVal("query", "radix tree");
+            // The tiered search takes 1-3 s cold: wait for its results, not a fixed time.
+            for (let i = 0; i < 40 && (g.searchState?.targets || []).filter(Boolean).length < 3; i++) await sleep(250);
+            const targets = (g.searchState?.targets || []).filter(Boolean);
+            setVal("play", "true"); await sleep(400);
+            const out = { planted, targets: targets.length, playing_at_start: a.playing };
+            for (let i = 0; i < 80 && a.playing; i++) await sleep(500);
+            out.legs = a.planStats.legs - s0.legs;
+            out.plan_at = a.planAt;
+            // Where the craft ended: on the last leg's node (its look point).
+            const last = a.plan[a.planAt];
+            out.on_last_leg = last ? Math.round(Math.hypot(ctl.target.x - last.x, ctl.target.y - last.y, ctl.target.z - (last.z || 0)) * 10) / 10 : null;
+            await sleep(700);                              // the slate's sync writes play back
+            out.text_play_finished = valOf("play");
+            if (!planted) {
+              // A hand on the stick mid-plan: a fresh play, stopped by a drag.
+              setVal("play", "true"); await sleep(700);
+              out.replayed = a.playing;
+              g.canvasEl.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true, button: 0 }));
+              await sleep(800);
+              out.playing_after_drag = a.playing; out.text_play_after_drag = valOf("play");
+            }
+            a.play(false); setVal("play", "false"); await sleep(400);
+            return out;
+          };
+          try {
+            return { clean: await arm(false), planted: await arm(true) };
+          } finally {
+            a.plantNoAdvance = false; a.play(false); a.release();
+            ed.setValue(saved); await sleep(500);
+            a.setThrottle(thr0); g.searchField.input.value = ""; await g.searchField.run();
+            cam.position.copy(savedCam.p); ctl.target.copy(savedCam.t); ctl.update?.();
+          }
+        })()`, { timeout: 120000 });
+        if (!got || got.error) return { pass: false, evidence: got };
+        const c = got.clean, p = got.planted;
+        return { pass: c.targets >= 3 && c.playing_at_start && c.legs >= 2 && c.on_last_leg !== null && c.on_last_leg < 2
+                   && c.text_play_finished === "false" && c.replayed && !c.playing_after_drag && c.text_play_after_drag === "false"
+                   && p.legs === 1,
+                 evidence: got };
+      },
+    },
+    {
       id: "G-273",
       asks: "the user agent's views and keys: in MAP view a hover moves nothing and in EGO view it moves the camera; paused, no motion; Shift +5%, Ctrl -5%; Z, X and M do nothing (deprecated); arrows turn the camera about the focus (distance kept) and Q/R roll it about the view normal (view kept) -- 3-DOF rotation; each key held lit in the agent's state while pressed (its readout awaits the dialect card, G-274); planted (pointer away) the keys do nothing",
       async run() {

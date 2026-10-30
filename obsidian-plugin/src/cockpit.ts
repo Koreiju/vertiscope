@@ -39,6 +39,8 @@ export const COCKPIT_TEXT = [
   T + "throttle" + T + "25",
   T + "keys" + T + "{keys}",
   T + "last" + T + "",
+  T + "plan" + T + "{results}",
+  T + "play" + T + "false",
   T + "search",
   T + T + "query" + T + "",
   T + T + "db" + T + "true",
@@ -98,13 +100,18 @@ export interface CockpitHost {
 
 export class Cockpit {
   stats = { applied: 0, wrote: 0, toggles: 0, slides: 0, row_hovers: 0, submits: 0, folds: 0, scroll_flown: 0, opened: 0 };
+  /** Planted (G-283): the query compared with this slate's own memo, as before. */
+  plantMemoQuery = false;
   /** Planted (G-280): the slate is text only -- nothing bound either way. */
   plantUnbound = false;
   /** The results internalized (true) or braced (false); kept across reloads. */
   resultsOpen = false;
   private writing = false;
+  private playSeen = false;
+  private seenSlateQuery = "";
+  private seenEngineQuery = "";
   private lastQuery = "";
-  private lastSeen = { mode: "", throttle: -1, action: "", hitsKey: "" };
+  private lastSeen = { mode: "", throttle: -1, action: "", hitsKey: "", playing: false, query: "" };
   private slider: HTMLElement | null = null;
   private hoveredRow = -1;
   private frontRow = -1;
@@ -125,6 +132,11 @@ export class Cockpit {
     if (!f) {
       if (!this.app.vault.getAbstractFileByPath("domvec")) await this.app.vault.createFolder("domvec").catch(() => undefined);
       f = await this.app.vault.create(COCKPIT_PATH, COCKPIT_TEXT);
+    }
+    // A cockpit written before a field existed gains it (the plan, G-283).
+    const text = await this.app.vault.read(f);
+    if (!/^\tplan\t/m.test(text)) {
+      await this.app.vault.modify(f, text.replace(/^(\tlast\t.*)$/m, "$1\n\tplan\t{results}\n\tplay\tfalse"));
     }
     let leaf = this.leaf();
     if (!leaf) {
@@ -176,6 +188,15 @@ export class Cockpit {
     const a = g.agent;
     const view = this.field(fs, "view")?.value.trim();
     if ((view === "ego" || view === "map") && view !== a.mode) a.setMode(view);
+    // The flight plan (G-283): `play` true flies the craft through `plan`'s
+    // nodes -- `{results}`, the search's ranked targets -- at the throttle.
+    const play = (this.field(fs, "play")?.value || "").trim() === "true";
+    if (play && !a.playing && !this.playSeen) {
+      const plan = (this.field(fs, "plan")?.value || "").trim();
+      if (plan === "{results}" && g.searchState) a.setPlan(g.searchState.targets.filter(Boolean));
+      a.play(true);
+    } else if (!play && a.playing) a.play(false);
+    this.playSeen = play;
     const thr = Number(this.field(fs, "throttle")?.value);
     if (Number.isFinite(thr) && Math.abs(thr / 100 - a.throttle) > 0.004) a.setThrottle(thr / 100);
     const f = g.searchField;
@@ -186,8 +207,15 @@ export class Cockpit {
     const db = (this.field(fs, "search", "db")?.value || "").trim() !== "false";
     // The store's ranking is `db`. Off, the field shows nothing of the store.
     const want = db ? q : "";
-    if (want !== this.lastQuery) {
+    // Against the ENGINE's query, not a memo of what this slate last sent:
+    // another surface (the 3D field, a check) changing the search left the
+    // slate believing its query still ran, and an edit back to it asked
+    // nothing (2026-10-30, found by G-283). Planted `plantMemoQuery`.
+    const current = this.plantMemoQuery ? this.lastQuery : f.query;
+    this.seenSlateQuery = q;
+    if (want !== current) {
       this.lastQuery = want;
+      this.seenEngineQuery = want;
       f.input.value = want;
       void f.run();
     }
@@ -224,13 +252,28 @@ export class Cockpit {
     const a = g.agent;
     const thr = Math.round(a.throttle * 100);
     if (a.mode === this.lastSeen.mode && thr === this.lastSeen.throttle && a.lastAction === this.lastSeen.action
-        && this.hitsKey(g) === this.lastSeen.hitsKey) return;
+        && this.hitsKey(g) === this.lastSeen.hitsKey && a.playing === this.lastSeen.playing
+        && (g.searchField?.query ?? "") === this.lastSeen.query) return;
     let fs = parseSlate(v.editor.getValue());
     const put = (path: string[], value: string) => { const fl = this.field(fs, ...path); if (fl) { this.setValue(fl, value); fs = parseSlate(v.editor.getValue()); } };
     put(["view"], a.mode);
     put(["throttle"], String(thr));
     put(["last"], a.lastAction || "");
-    this.lastSeen = { mode: a.mode, throttle: thr, action: a.lastAction, hitsKey: this.hitsKey(g) };
+    // One record (item 37): whichever side changed LAST wins. A slate edit
+    // not yet applied (Obsidian's editor-change can arrive after this tick)
+    // is applied; only a query changed in the ENGINE (the 3D field) is
+    // written back. Comparing the two alone overwrote the reader's edit.
+    const f = g.searchField;
+    const db = (this.field(fs, "search", "db")?.value || "").trim() !== "false";
+    const sq = (this.field(fs, "search", "query")?.value || "").trim();
+    if (f && db && !this.plantMemoQuery) {
+      if (sq !== this.seenSlateQuery) { this.seenSlateQuery = sq; this.apply(fs); }
+      else if (f.query !== sq && f.query !== this.seenEngineQuery) { put(["search", "query"], f.query); this.seenSlateQuery = f.query; }
+      this.seenEngineQuery = f.query;
+    }
+    // A plan that finished, or a hand on the stick, sets `play` back to false.
+    if (!a.playing && this.playSeen) { put(["play"], "false"); this.playSeen = false; }
+    this.lastSeen = { mode: a.mode, throttle: thr, action: a.lastAction, hitsKey: this.hitsKey(g), playing: a.playing, query: g.searchField?.query ?? "" };
     this.writeResults();
   }
 
