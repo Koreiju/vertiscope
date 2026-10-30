@@ -2534,6 +2534,12 @@ export class GraphView extends ItemView {
    * previous highlight is always cleared first, so the state is "at most one
    * node is hovered" rather than a trail of them.
    */
+  /** A hovered copy's lead, as the sidecar's `place` aliased it (G-38). */
+  private hoverAliases = new Map<string, string>();
+  private hoverPlaced = new Set<string>();
+  private hoverPlacedFor = "";
+  /** Planted (G-38): a hovered copy looked up by its own id, as before. */
+  plantHoverIgnoresAlias = false;
   highlightChunk(cid: string, url = "", stored = ""): void {
     if (!this.graph) return;
     // The hovered url spreads; off every chunk, it goes back (G-230).
@@ -2545,11 +2551,26 @@ export class GraphView extends ItemView {
     // the camera and its panel go to THAT chunk (2026-10-06: "the camera
     // doesn't 'fly' for hovering over different chunks ... this also opens
     // the panels on the 3D side, but closes them when the hovering stops").
-    if (cid && stored && !data.nodes.some((n: any) => n.id === stored) && !this.readerCollapsed(url)) {
+    // Each id placed once per hover: a lead `absorb` does not draw (its page
+    // folded) would otherwise be asked for again on every re-ring.
+    if (cid !== this.hoverPlacedFor) { this.hoverPlacedFor = cid; this.hoverPlaced.clear(); }
+    if (cid && stored && !data.nodes.some((n: any) => n.id === stored) && !this.readerCollapsed(url)
+        && !this.hoverPlaced.has(stored)) {
+      this.hoverPlaced.add(stored);
       void this.sidecar.place([stored]).then((got: any) => {
         if (seq !== this.hoverSeq || !got || !got.nodes || !got.nodes.length) return;
         this.absorb(got.nodes, got.edges);
-        this.highlightChunk(cid, url, stored);
+        // A COPY is drawn as its lead (store-wide dedup: one content, one
+        // drawn chunk), so the reply aliases it -- and looked up by its own
+        // id it was never found and the ring fell back to the page node
+        // (2026-10-30, G-38: 10 of 11 hovers on Trie rang the page). Ring the
+        // lead. Planted `plantHoverIgnoresAlias`: the copy's own id, as before.
+        const lead = !this.plantHoverIgnoresAlias && got.aliases && got.aliases[stored];
+        if (lead && lead !== stored) {
+          if (this.hoverAliases.size > 4000) this.hoverAliases.clear();
+          this.hoverAliases.set(stored, lead);
+        }
+        this.highlightChunk(cid, url, lead || stored);
       }).catch(() => undefined);
     }
     // The chunk's own node if it is drawn; otherwise the PAGE node standing
@@ -2559,6 +2580,10 @@ export class GraphView extends ItemView {
     // is the one case they least need the correspondence drawn.
     let target = cid ? data.nodes.find((n: any) => n.id === cid) : null;
     if (!target && stored) target = data.nodes.find((n: any) => n.id === stored) || null;
+    if (!target && stored && this.hoverAliases.has(stored)) {
+      const lead = this.hoverAliases.get(stored);
+      target = data.nodes.find((n: any) => n.id === lead) || null;
+    }
     // A streamed chunk already folded into a stored one: that one.
     if (!target && cid) {
       const into = this.collapsedTo.get(cid) || this.forceSpecs.get(cid)?.cid;

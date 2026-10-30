@@ -45,6 +45,9 @@ export interface VerifyState {
   resumed?: number;
   /** What the run read -- "fresh run_…, 12/12 pages seeded" or "working". */
   label: string;
+  /** Pages the run's checks stored under a cache-busting timestamp and the
+   *  sweep purged afterwards (-1: the sweep could not ask the store). */
+  swept?: number;
   /** A fresh-store run's seeding, one row per page it browsed. */
   seed?: { url: string; held: boolean; chunks: number | null; s: number; left?: string }[];
   /**
@@ -195,6 +198,7 @@ export class Verifier {
     try {
       await this.runChecks(chosen, wakeProjector);
     } finally {
+      this.state.swept = await this.sweepCopies(this.state.startedAt);
       this.state.running = false;
       this.state.current = "";
       this.state.finishedAt = Date.now();
@@ -223,6 +227,49 @@ export class Verifier {
       return false;
     } finally {
       this.state.paused = "";
+    }
+  }
+
+  /**
+   * Purge the pages this run's checks stored under a cache-busting timestamp
+   * (2026-10-30). A check that wants a page captured afresh browses it as
+   * `Trie?g245=1792318743`; the store keeps it as a page of its own, and
+   * store-wide dedup (one content, one drawn chunk) then made such a copy the
+   * LEAD of the real page's chunks -- hovering a chunk on Trie rang a check's
+   * copy, not Trie. 451 such pages, 39,309 chunks, had accumulated. Only a
+   * query value that is an epoch timestamp (seconds or ms) at or after the
+   * run's start is swept: the reader's own pages carry no such thing.
+   * Planted (`plantNoSweep`): left in the store, as before.
+   */
+  plantNoSweep = false;
+  private async sweepCopies(since: number): Promise<number> {
+    if (this.plantNoSweep) return 0;
+    const base = this.sidecarUrl().trim().replace(/\/+$/, "");
+    try {
+      const res = await fetch(base + "/cypher", { method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ query: "MATCH (p:Page) WHERE p.url CONTAINS '?' RETURN p.url" }) });
+      const rows: string[][] = (await res.json()).rows || [];
+      const stamped = (u: string) => {
+        let q: URLSearchParams;
+        try { q = new URL(u).searchParams; } catch { return false; }
+        for (const v of q.values()) {
+          const m = /^[a-z]?(1[6-9]\d{8})(\d{3})?$/.exec(v);
+          if (!m) continue;
+          const ms = m[2] ? Number(m[1] + m[2]) : Number(m[1]) * 1000;
+          if (ms >= since - 60000) return true;
+        }
+        return false;
+      };
+      let n = 0;
+      for (const [u] of rows) {
+        if (!u || !stamped(u)) continue;
+        const r = await fetch(base + "/purge", { method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ url: u }) });
+        if (r.ok) n++;
+      }
+      return n;
+    } catch {
+      return -1;
     }
   }
 

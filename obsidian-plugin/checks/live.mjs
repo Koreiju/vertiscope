@@ -6147,6 +6147,85 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-38",
+      asks: "hovering a chunk in the browser highlights it minimally -- an outline in the cell with no text, no banner added to the cell -- and rings THAT chunk's node in the 3D projector (not its page's); planted plantPageUnit (the hover resolved to the page) rings the page node and is caught",
+      async run() {
+        // Was blocked (2026-09) on reading the pointer without writing into
+        // the page; the sensor's passive, capturing pointermove listener now
+        // pushes the hovered address and nothing is written into the
+        // document. Real pointer moves (`sendInputEvent`), as G-195.
+        const PAGE = "https://en.wikipedia.org/wiki/Trie";
+        const arm = (planted) => evaluate(`(async () => {
+          ${PREP}
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          const box = b.pipebox;
+          if (!box) return { error: "no pipeline box" };
+          try {
+            if (!(await land(${JSON.stringify(PAGE)}, 30000))) return { error: "did not land" };
+            await sleep(4000);
+            box.plantPageUnit = ${planted};
+            const wv = b.webview, r = wv.getBoundingClientRect(), wrap = wv.parentElement;
+            const outlineEl = wrap.querySelector(".domvec-chunk-outline");
+            const text = () => (wrap.innerText || "").replace(/\\s+/g, " ").trim().length;
+            const out = [];
+            for (let i = 0; i < 16; i++) {
+              const x = Math.round(60 + (i * 97) % Math.max(100, r.width - 120));
+              const y = Math.round(90 + (i * 131) % Math.max(100, r.height - 160));
+              const prev = b.lastHovered ? b.lastHovered.cid : "";
+              const before = text();
+              wv.sendInputEvent({ type: "mouseMove", x, y });
+              const t0 = performance.now();
+              while (performance.now() - t0 < 1500 && !(b.lastHovered && b.lastHovered.cid && b.lastHovered.cid !== prev)) await sleep(10);
+              if (!(b.lastHovered && b.lastHovered.cid && b.lastHovered.cid !== prev)) { await sleep(300); continue; }
+              await sleep(400);
+              const h = b.lastHovered;
+              const ringed = v.graph.graphData().nodes.filter((n) => n.hovered);
+              const ring = ringed[0] || null;
+              out.push({
+                outline: !!outlineEl && outlineEl.offsetWidth > 0 && outlineEl.offsetHeight > 0,
+                outline_text: outlineEl ? (outlineEl.textContent || "").trim().length : -1,
+                cell_text_added: Math.max(0, text() - before),
+                rings: ringed.length,
+                // The chunk, or the lead that draws it when it is a copy.
+                ring_is_chunk: !!ring && ring.level !== "page" && (ring.id === h.stored || ring.id === h.cid
+                  || (v.hoverAliases && ring.id === v.hoverAliases.get(h.stored))),
+                via_alias: !!(v.hoverAliases && v.hoverAliases.has(h.stored)),
+                // A copy whose lead sits in a FOLDED page has no node to ring
+                // (the page view draws chunks of open pages only): it rings
+                // the hovered page, and is not in the chunk-ring denominator.
+                lead_folded: !!(v.hoverAliases && v.hoverAliases.has(h.stored))
+                  && !v.graph.graphData().nodes.some((n) => n.id === v.hoverAliases.get(h.stored)),
+                ring_is_page_of_hover: !!ring && ring.level === "page" && ring.url === h.url,
+                ring_level: ring ? (ring.level || "chunk") : null,
+              });
+              await sleep(300);
+            }
+            const n = out.length;
+            const share = (f) => n ? Math.round(out.filter(f).length / n * 100) / 100 : 0;
+            return { planted: ${planted}, hovers: n,
+                     outlined_without_text: share((o) => o.outline && o.outline_text === 0),
+                     banner_moves: out.filter((o) => o.cell_text_added > 0).length,
+                     max_text_added: Math.max(0, ...out.map((o) => o.cell_text_added)),
+                     one_ring: share((o) => o.rings === 1),
+                     ring_is_chunk: (() => { const d = out.filter((o) => !o.lead_folded); return d.length ? Math.round(d.filter((o) => o.ring_is_chunk).length / d.length * 100) / 100 : 0; })(),
+                     lead_folded: out.filter((o) => o.lead_folded).length,
+                     lead_folded_ring_page: out.filter((o) => o.lead_folded && o.ring_is_page_of_hover).length,
+                     via_alias: out.filter((o) => o.via_alias).length,
+                     sample: out.slice(0, 4) };
+          } finally {
+            box.plantPageUnit = false;
+          }
+        })()`, { timeout: 120000 });
+        const clean = await arm(false);
+        const planted = await arm(true);
+        const ok = (x) => !!x && !x.error && x.hovers >= 6 && x.outlined_without_text >= 0.8
+          && x.banner_moves === 0 && x.one_ring >= 0.8 && x.ring_is_chunk >= 0.9
+          && x.lead_folded_ring_page === x.lead_folded;
+        return { pass: ok(clean) && !!planted && !planted.error && planted.ring_is_chunk < 0.2,
+                 evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {
