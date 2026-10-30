@@ -2988,6 +2988,14 @@ class GraphStore:
                         "inputs": [{"name": a, "cid": b, "url": u} for a, b, u in ins]})
         return out
 
+    def signal_edges(self, limit: int = 2000) -> List[Dict]:
+        """Every run's input -> cell note edge, newest first (G-292)."""
+        rows = self._rows(
+            "MATCH (r:Run)-[e:RunInput]->(c:Chunk) RETURN r.rid, r.note, r.at, r.ok, e.name, c.cid, c.url "
+            "ORDER BY r.at DESC LIMIT $k", {"k": int(limit)})
+        return [{"rid": r, "note": n, "at": t, "ok": ok, "as": a, "cid": c, "url": u}
+                for r, n, t, ok, a, c, u in rows]
+
     def inverse_map(self, cid: str, limit: int = 20) -> List[Dict]:
         """Every recorded run that consumed this chunk, and what it produced."""
         rows = self._rows(

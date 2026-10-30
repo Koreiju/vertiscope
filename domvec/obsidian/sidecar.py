@@ -3650,6 +3650,14 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(200, {"note": note, "runs": self.workspace.store.runs_of(note)})
             return
 
+        if segments[0] == "signal":
+            # The reservoir's signal flow (G-292; RESERVOIR_DESIGN §5, DM
+            # §6.6.4): every recorded run's inputs -> its cell note, most
+            # recent first, for the 3D view to draw as lines.
+            k = int((parse_qs(parts.query).get("k") or ["2000"])[0])
+            self._send(200, {"edges": self.workspace.store.signal_edges(k)})
+            return
+
         if segments[0] == "inverse_map":
             # Every recorded run that consumed a chunk, and what it produced.
             cid = (parse_qs(parts.query).get("cid") or [""])[0]

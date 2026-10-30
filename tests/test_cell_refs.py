@@ -63,3 +63,20 @@ def test_a_run_is_recorded_both_ways(tmp_path):
     # Planted: a run with no inputs is invisible to the inverse map.
     store.record_run("notes/m.md", 1, "print(1)", [], True, "1")
     assert all(r["note"] != "notes/m.md" for r in store.inverse_map(chunks[0].cid))
+
+
+def test_signal_edges_name_every_runs_inputs_newest_first(tmp_path):
+    """G-292: the signal flow the 3D view draws is every run's input -> note edge."""
+    from domvec.graphstore import GraphStore
+    store = GraphStore(str(tmp_path / "s"))
+    try:
+        store._execute("CREATE (:Chunk {cid: 'c1', url: 'https://a/', md: 'a'})")
+        store._execute("CREATE (:Chunk {cid: 'c2', url: 'https://b/', md: 'b'})")
+        store.record_run("n1.md", 1, "x", [("a", "c1")], True, "1")
+        store.record_run("n2.md", 3, "y", [("a", "c1"), ("b", "c2")], True, "2")
+        got = store.signal_edges()
+        assert {(e["note"], e["cid"]) for e in got} == {("n1.md", "c1"), ("n2.md", "c1"), ("n2.md", "c2")}
+        assert got[0]["note"] == "n2.md"            # newest first
+        assert store.signal_edges(1) and len(store.signal_edges(1)) == 1
+    finally:
+        store.close()

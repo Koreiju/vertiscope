@@ -7649,6 +7649,75 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-292",
+      asks: "the signal flow renders live (item 44): a cell whose fence names a vault note by {ref} is run with the real Run button; its run's input -> cell edge is drawn in 3D as a line from the source note's node to the cell note's node (placed by UMAP, G-291), PULSING when it first draws (alpha above its rest) and back at rest after the pulse; the store answers /signal with the edge; planted (plantNoSignal) no signal line is drawn",
+      async run() {
+        const got = await evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const until = async (ok, ms) => { for (let t = 0; t < ms && !ok(); t += 250) await sleep(250); return ok(); };
+          const plugin = app.plugins.getPlugin("domvec-bridge");
+          const SIDE = String(plugin.settings.sidecar).replace(/[/]+$/, "");
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
+          if (!v || !v.graph) return { error: "no graph" };
+          const NL = String.fromCharCode(10), F = String.fromCharCode(96).repeat(3);
+          const folder = "domvec-checks";
+          if (!app.vault.getAbstractFileByPath(folder)) await app.vault.createFolder(folder);
+          const vaultName = app.vault.getName(), urlOf = (path) => "vault://" + vaultName + "/" + path;
+          const stamp = Date.now();
+          const srcName = "g292 source " + stamp;
+          const src = await app.vault.create(folder + "/" + srcName + ".md", "# Source" + NL + NL + "Signal source, marker " + stamp + "." + NL);
+          await plugin.indexNote(src, "check");
+          const varName = srcName.replace(/[^A-Za-z0-9_]+/g, "_").replace(/^_+|_+$/g, "").toLowerCase();
+          const cellPath = folder + "/g292 cell " + stamp + ".md";
+          const cell = await app.vault.create(cellPath, "# cell" + NL + NL + F + "python {" + srcName + "}" + NL + "print(len(" + varName + "))" + NL + F + NL);
+          const leaf = app.workspace.getLeaf("tab");
+          const out = {};
+          const edgeTo = () => {
+            const ns = v.graph.graphData().nodes;
+            const t = ns.find((n) => n.id === "page:" + urlOf(cellPath));
+            const s = ns.find((n) => n.id === "page:" + urlOf(src.path));
+            if (!t || !s) return null;
+            return v.drawableSignalEdges(ns).find((e) => e.target === t && e.source === s) || null;
+          };
+          try {
+            await leaf.openFile(cell, { state: { mode: "source", source: false } });
+            const view = leaf.view;
+            await until(() => !!view.containerEl.querySelector(".domvec-run-fence"), 8000);
+            view.containerEl.querySelector(".domvec-run-fence").click();
+            await until(() => view.editor.getValue().includes("nb-output"), 30000);
+            const sig = await (await fetch(SIDE + "/signal?k=50")).json();
+            out.store_edge = (sig.edges || []).some((e) => e.note === cellPath);
+            // The cell note reaches 3D after its readout is stored and it is re-indexed.
+            const t0 = performance.now();
+            let first = null;
+            for (let i = 0; i < 160 && !first; i++) { await sleep(250); first = edgeTo(); }
+            out.drawn_after_s = first ? Math.round((performance.now() - t0) / 100) / 10 : null;
+            out.alpha_first = first ? Math.round(first.alpha * 100) / 100 : null;
+            await sleep(v.signalPulseMs + 600);
+            const later = edgeTo();
+            out.alpha_rest = later ? Math.round(later.alpha * 100) / 100 : null;
+            out.line_colour = first ? first.color : null;
+            v.plantNoSignal = true;
+            out.planted_drawn = v.drawableSignalEdges(v.graph.graphData().nodes).length;
+            v.plantNoSignal = false;
+            out.stats = { ...v.signalStats };
+          } finally {
+            v.plantNoSignal = false;
+            try { leaf.detach(); } catch (e) {}
+            for (const f of [cell, src]) {
+              try { await fetch(SIDE + "/purge", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url: urlOf(f.path) }) }); } catch (e) {}
+              try { await app.vault.delete(f); } catch (e) {}
+            }
+          }
+          return out;
+        })()`, { timeout: 120000 });
+        if (!got || got.error) return { pass: false, evidence: got };
+        return { pass: got.store_edge && got.drawn_after_s !== null && got.alpha_first > 0.6 && got.alpha_rest !== null
+                   && got.alpha_rest < 0.5 && got.planted_drawn === 0,
+                 evidence: got };
+      },
+    },
+    {
       id: "G-273",
       asks: "the user agent's views and keys: in MAP view a hover moves nothing and in EGO view it moves the camera; paused, no motion; Shift +5%, Ctrl -5%; Z, X and M do nothing (deprecated); arrows turn the camera about the focus (distance kept) and Q/R roll it about the view normal (view kept) -- 3-DOF rotation; each key held lit in the agent's state while pressed (its readout awaits the dialect card, G-274); planted (pointer away) the keys do nothing",
       async run() {

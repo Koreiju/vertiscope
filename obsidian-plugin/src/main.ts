@@ -666,6 +666,15 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
 
     const stored = await this.storeOutput(note, req, reply);
     if (stored) notes.push(stored);
+    // The run's signal flow drawn in 3D as it fires (G-292): its recorded
+    // inputs -> this cell's note, pulsing.
+    if (reply.run) {
+      void this.sidecar.runsOf(note).then((got) => {
+        const r = got && got.runs && got.runs.find((x: any) => x.rid === reply.run);
+        const g = this.app.workspace.getLeavesOfType(GRAPH_VIEW)[0]?.view as any;
+        if (r && g && typeof g.signalRun === "function") g.signalRun(note, r.inputs || []);
+      });
+    }
     // What the cell asked of the app (G-288): `search(..., duckduckgo=True)`
     // asks the BROWSER CELL's web search, the same path as the 3D search
     // button's -- the kernel never fetches the web itself.

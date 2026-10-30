@@ -4135,6 +4135,76 @@ export class GraphView extends ItemView {
     say(`triples: ${Object.keys(entities).length} entities, ${triples.length} triples`);
     return { entities: Object.keys(entities).length, triples: triples.length };
   }
+  /**
+   * **The signal flow, drawn** (G-292; PLUGIN_GOAL item 44: "we need to prove
+   * the signal flow ... rendering works live, and that live rendering is in
+   * real-time"; RESERVOIR_DESIGN §5, DM §6.6.4; UR O.16: undirected lines).
+   * Every recorded run is a forward call, its inputs -> its cell note: drawn
+   * as a line from each input's node (the chunk, else its page) to the cell
+   * note's node, which UMAP placed (G-291). A run that just fired PULSES its
+   * lines for `signalPulseMs` -- bright, fading -- so a run is seen as it
+   * happens. Loaded from `/signal`; a run in this session is added at once.
+   * Planted `plantNoSignal`.
+   */
+  signalEdges: { note: string; cid: string; url: string; at: number }[] = [];
+  private signalFired = new Map<string, number>();
+  /** Notes whose fired run has been DRAWN: the pulse starts when it can be seen. */
+  private signalSeen = new Set<string>();
+  signalPulseMs = 2000;
+  signalStats = { loaded: 0, drawn: 0, pulsing: 0, fired: 0 };
+  plantNoSignal = false;
+  static SIGNAL_COLOUR = "#ffd27a";
+  async loadSignal(): Promise<number> {
+    const got = await this.sidecar.signal();
+    if (!got || !Array.isArray(got.edges)) return 0;
+    this.signalEdges = got.edges.map((e: any) => ({ note: String(e.note), cid: String(e.cid), url: String(e.url || ""), at: Number(e.at) || 0 }));
+    this.signalStats.loaded = this.signalEdges.length;
+    this.batchDirty = true;
+    return this.signalEdges.length;
+  }
+  /** A cell just ran (main.ts): its input edges added and set pulsing. */
+  signalRun(note: string, inputs: { cid: string; url: string }[]): void {
+    const at = Date.now() / 1000;
+    for (const i of inputs) if (i && i.cid) this.signalEdges.unshift({ note, cid: String(i.cid), url: String(i.url || ""), at });
+    this.signalFired.set(note, performance.now());
+    this.signalSeen.delete(note);
+    this.signalStats.fired++;
+    this.batchDirty = true;
+  }
+  private drawableSignalEdges(nodes: any[]): any[] {
+    if (this.plantNoSignal || !this.signalEdges.length) { this.signalStats.drawn = 0; return []; }
+    const byId = new Map<string, any>();
+    for (const n of nodes) byId.set(String(n.id), n);
+    const vault = this.app.vault.getName();
+    const now = performance.now();
+    const out: any[] = [];
+    const seen = new Set<string>();
+    let pulsing = 0;
+    for (const e of this.signalEdges) {
+      const key = e.note + "|" + e.cid;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const t = byId.get("page:vault://" + vault + "/" + e.note);
+      const src = byId.get(e.cid) || (e.url ? byId.get("page:" + e.url) : null);
+      if (!src || !t || src === t) continue;
+      // A cell's note reaches 3D only once its readout is stored and the note
+      // re-indexed (G-291, ~8 s): the pulse starts when its lines first draw.
+      if (this.signalFired.has(e.note) && !this.signalSeen.has(e.note)) { this.signalSeen.add(e.note); this.signalFired.set(e.note, now); }
+      const fired = this.signalFired.get(e.note);
+      const age = fired === undefined ? Infinity : now - fired;
+      const pulse = age < this.signalPulseMs ? 1 - age / this.signalPulseMs : 0;
+      if (pulse > 0) pulsing++;
+      out.push({ source: src, target: t, color: GraphView.SIGNAL_COLOUR, alpha: 0.45 + 0.55 * pulse, signal: true });
+    }
+    this.signalStats.drawn = out.length;
+    this.signalStats.pulsing = pulsing;
+    // While a pulse runs, its lines are re-coloured each frame; and while a
+    // fired run's lines are not drawn yet, keep looking for them.
+    // Bounded: a note that never reaches 3D must not full-sync every frame.
+    if (pulsing || [...this.signalFired.entries()].some(([k, t]) => !this.signalSeen.has(k) && now - t < 60000)) this.batchDirty = true;
+    return out;
+  }
+
   private drawableKgEdges(nodes: any[]): any[] {
     if (this.plantNoKg || !this.kgEdges.size) { this.kgStats.triples_drawn = 0; return []; }
     const byId = new Map<string, any>();
@@ -5979,7 +6049,7 @@ export class GraphView extends ItemView {
       const d = g.graphData();
       const rs = g.nodeRelSize();
       if (this.searchState) { this.resolveSearch(); this.updateSearchLights(); }
-      this.batch.sync(d.nodes, d.links.concat(this.drawableCodeEdges(d.nodes), this.drawableKgEdges(d.nodes)), (n) => this.lookOf(n, rs, media), this.searchLineAlpha());
+      this.batch.sync(d.nodes, d.links.concat(this.drawableCodeEdges(d.nodes), this.drawableKgEdges(d.nodes), this.drawableSignalEdges(d.nodes)), (n) => this.lookOf(n, rs, media), this.searchLineAlpha());
       if (!this.plantStaleProxies) this.fitProxies(d.nodes, rs, media);
     };
     this.batchRaf = requestAnimationFrame(tick);
@@ -6055,7 +6125,7 @@ export class GraphView extends ItemView {
     const g: any = this.graph;
     if (!g || !this.batch || this.plantPerNode) return null;
     const d = g.graphData(), rs = g.nodeRelSize();
-    this.batch.sync(d.nodes, d.links.concat(this.drawableCodeEdges(d.nodes), this.drawableKgEdges(d.nodes)), (n) => this.lookOf(n, rs, this.drawnMedia));
+    this.batch.sync(d.nodes, d.links.concat(this.drawableCodeEdges(d.nodes), this.drawableKgEdges(d.nodes), this.drawableSignalEdges(d.nodes)), (n) => this.lookOf(n, rs, this.drawnMedia));
     return { ...this.batch.lastStats };
   }
 
@@ -8212,6 +8282,7 @@ export class GraphView extends ItemView {
     // `plantFullSyncOnTick`: a full sync per tick, as before.
     graph.onEngineTick(() => { if (this.plantFullSyncOnTick) this.batchDirty = true; else this.posDirty = true; this.govern(); });
     this.startBatch(graph, media);
+    void this.loadSignal();
     // The profiler's listener reads the scene through this, so "visible"
     // is decided by what is drawn and not by what `absorb` returned.
     profiler().graphSource = () => this.graph;

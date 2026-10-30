@@ -446,6 +446,16 @@ export class Sidecar {
    * doubled since that fit and the pane should ask for a real layout.
    */
   /** A code file's CALLS / INHERITS edges, mapped to the nodes that draw them (G-241). */
+  /** A note's recorded runs, newest first, each with its inputs (G-279). */
+  async runsOf(note: string): Promise<{ runs: any[] } | null> {
+    return this.get("/runs?note=" + encodeURIComponent(note));
+  }
+
+  /** Every recorded run's input -> cell note edge, newest first (G-292). */
+  async signal(k = 2000): Promise<{ edges: any[] } | null> {
+    return this.get("/signal?k=" + k);
+  }
+
   async cpgEdges(url: string): Promise<any | null> {
     return this.get("/cpg_edges?url=" + encodeURIComponent(url));
   }
