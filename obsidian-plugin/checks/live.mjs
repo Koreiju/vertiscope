@@ -7333,6 +7333,56 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-287",
+      asks: "with no result hovered, the camera goes to the top-most ranked result in view of the scroll (2026-10-29, item 31): scrolling the bar so result 3 stands at the front asks a flight to result 3's node; with a strip item hovered the scroll asks none (the hover wins); planted (plantNoScrollFlight) the scroll asks none",
+      async run() {
+        const got = await evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
+          if (!v || !v.graph || !v.searchField) return { error: "no graph or search field" };
+          const f = v.searchField, g = v.graph, cam = g.camera(), ctl = g.controls();
+          const saved = { p: cam.position.clone(), t: ctl.target.clone(), q: f.input.value };
+          const asked = [];
+          const orig = v.focusOn.bind(v);
+          v.focusOn = (n) => { if (n) asked.push(String(n.id)); return orig(n); };
+          const scrollTo = async (rank) => {
+            const win = f.window.length, span = f.scroller.scrollWidth - f.scroller.clientWidth;
+            // The soft index runs 1..k over the bar; put rank at the front.
+            f.scroller.scrollLeft = Math.round(span * (rank - 1) / Math.max(1, win - 1));
+            f.scroller.dispatchEvent(new Event("scroll"));
+            await sleep(250);
+          };
+          const out = {};
+          try {
+            f.input.value = "python"; await f.run(); await sleep(1500);
+            const st = v.searchState;
+            out.results = st ? st.targets.filter(Boolean).length : 0;
+            if (!st || out.results < 4) return { error: "too few results", out };
+            const want = String(st.targets[2]?.id);
+            asked.length = 0; await scrollTo(3);
+            out.front = f.strip.querySelector(".is-front")?.textContent?.slice(0, 40);
+            out.clean_asked = asked.slice(); out.clean_hit = asked.includes(want);
+            await scrollTo(1); asked.length = 0;
+            v.searchField.onHoverHit(f.hits[0]);
+            await scrollTo(3);
+            out.hovered_asked = asked.filter((id) => id === want).length;
+            v.searchField.onHoverHit(null);
+            await scrollTo(1); asked.length = 0;
+            v.plantNoScrollFlight = true;
+            await scrollTo(3);
+            out.planted_asked = asked.filter((id) => id === want).length;
+          } finally {
+            v.plantNoScrollFlight = false; v.focusOn = orig; v.focusOn(null);
+            f.input.value = saved.q; await f.run();
+            v.agent.release(); cam.position.copy(saved.p); ctl.target.copy(saved.t); ctl.update?.();
+          }
+          return out;
+        })()`, { timeout: 60000 });
+        if (!got || got.error) return { pass: false, evidence: got };
+        return { pass: got.clean_hit && got.hovered_asked === 0 && got.planted_asked === 0, evidence: got };
+      },
+    },
+    {
       id: "G-273",
       asks: "the user agent's views and keys: in MAP view a hover moves nothing and in EGO view it moves the camera; paused, no motion; Shift +5%, Ctrl -5%; Z, X and M do nothing (deprecated); arrows turn the camera about the focus (distance kept) and Q/R roll it about the view normal (view kept) -- 3-DOF rotation; each key held lit in the agent's state while pressed (its readout awaits the dialect card, G-274); planted (pointer away) the keys do nothing",
       async run() {

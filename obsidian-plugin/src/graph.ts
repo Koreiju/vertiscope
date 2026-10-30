@@ -534,6 +534,7 @@ export class GraphView extends ItemView {
       try { const u = new URL(h.url); return (u.hostname + u.pathname).slice(0, 60); } catch { return h.url.slice(0, 60); }
     };
     this.searchField.onHoverHit = (h) => {
+      this.stripHovered = h;
       if (!h) { this.focusOn(null); this.hoverPanel(null); this.unspread(); return; }
       this.searchStats.strip_hovers++;
       this.spreadUrl(h.url);
@@ -4969,7 +4970,13 @@ export class GraphView extends ItemView {
   /** Planted (item 96): the first version -- undrawn results PLACED in the scene. */
   plantPlaceResults = false;
   searchStats = { strip_hovers: 0, asked: 0, shown: 0, lights: 0, last_ms: 0, resolved_chunk: 0, resolved_page: 0, unresolved: 0,
-                  placed: 0, web_merged: 0, flown_top: 0, web_asked: 0, reranks: 0, rerank_changed: 0 };
+                  placed: 0, web_merged: 0, flown_top: 0, web_asked: 0, reranks: 0, rerank_changed: 0, scroll_flown: 0 };
+  /** The strip item the pointer is on, if any (item 31: a hover wins over the scroll). */
+  private stripHovered: FieldHit | null = null;
+  /** The front result the scroll last flew to, for this query. */
+  private frontFlown = -1;
+  /** Planted (item 31): the scroll flies nowhere -- only a hover or a new query does. */
+  plantNoScrollFlight = false;
 
   /** Told the plugin, which tells the browser cell: search the web too (item 85). */
   onWebSearch: (query: string) => void = () => {};
@@ -5093,12 +5100,34 @@ export class GraphView extends ItemView {
     const top = this.searchState.targets[0];
     if (top && q && q !== this.flownFor && !this.plantNoTopFlight) {
       this.flownFor = q;
+      this.frontFlown = 0;
       this.focusOn(top);
       if (top.level !== "page" && top.level !== "path") this.hoverPanel(top);
       this.searchStats.flown_top++;
+    } else {
+      this.flyToScrollFront(soft);
     }
   }
   private flownFor = "";
+  /**
+   * With no result hovered, the camera goes to the top-most ranked result in
+   * view of the scroll (2026-10-29, item 31: "the camera should fly at the
+   * hovered results or default to the top-most ranked index in view of the
+   * scroll"): the strip's FRONT item, where the soft index stands. Only when
+   * the front moves -- the flight is selective (item 39) -- and by the hover's
+   * own path (`focusOn`: dwell, id, ego flight).
+   */
+  private flyToScrollFront(soft: number): void {
+    const st = this.searchState;
+    if (!st || !st.query || this.stripHovered || this.plantNoScrollFlight) return;
+    const front = Math.max(0, Math.round(soft) - 1);
+    if (front === this.frontFlown) return;
+    const n = st.targets[front];
+    if (!n) return;
+    this.frontFlown = front;
+    this.searchStats.scroll_flown++;
+    this.focusOn(n);
+  }
   /** Planted (item 94): a query flies nowhere and opens no panel. */
   plantNoTopFlight = false;
 
