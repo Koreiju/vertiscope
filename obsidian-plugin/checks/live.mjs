@@ -7534,6 +7534,103 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "P-N7",
+      asks: "ONE interface centralizes retrieval and code research: in one notebook, search() run in a cell returns the database's hits; a package chunk from the 3D view becomes a running prototype cell; the same chunk panel is pulled into THIS note's chat and goes with its next prompt (its cid in the turn) while another notebook's chat never sees it; planted (plantDropPins) the pulled chunk is not sent",
+      async run() {
+        // Addendum I: "centralize retrieval and code research into one
+        // interface where our chat contexts are localized to a panel, we can
+        // pull existing chunk panels into a new chat ... and run code
+        // experiments in the jupyter kernel terminals".
+        const got = await evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const until = async (ok, ms) => { for (let t = 0; t < ms && !(await ok()); t += 250) await sleep(250); return !!(await ok()); };
+          const plugin = app.plugins.getPlugin("domvec-bridge");
+          const SIDE = String(plugin.settings.sidecar).replace(/[/]+$/, "");
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
+          if (!v || !v.graph) return { error: "no graph" };
+          const NL = String.fromCharCode(10), F = String.fromCharCode(96).repeat(3);
+          const URL = "code://pypi/json/__init__.py";
+          const folder = "domvec-checks";
+          if (!app.vault.getAbstractFileByPath(folder)) await app.vault.createFolder(folder);
+          const stamp = Date.now();
+          const nb = await app.vault.create(folder + "/pn7 research " + stamp + ".md", "# research" + NL + NL + F + "python" + NL
+            + "hits = search('radix tree', db=True, k=3)" + NL + "print('hits', len(hits), hits[0]['url'] if hits else '')" + NL + F + NL);
+          const other = await app.vault.create(folder + "/pn7 other " + stamp + ".md", "# other" + NL + NL + F + "python" + NL + "print(2)" + NL + F + NL);
+          const turnsOf = async (path) => ((await (await fetch(SIDE + "/chat?session=" + encodeURIComponent("note:" + path))).json()).turns || []);
+          const leafO = app.workspace.getLeaf("tab");
+          const leaf = app.workspace.getLeaf("tab");
+          let cid = null, unfolded = null;
+          const out = {};
+          try {
+            await leafO.openFile(other, { state: { mode: "source", source: false } });
+            await leaf.openFile(nb, { state: { mode: "source", source: false } });
+            app.workspace.setActiveLeaf(leaf, { focus: true });
+            await sleep(700);
+            out.notebook = plugin.lastNotebook === nb.path;
+            const runs = () => leaf.view.containerEl.querySelectorAll(".domvec-run-fence");
+            const outs = () => (leaf.view.editor.getValue().match(/nb-output/g) || []).length;
+            // 1. Retrieval, in a cell.
+            await until(() => runs().length >= 1, 8000);
+            let n = outs(); runs()[0].click(); await until(() => outs() > n, 30000);
+            const t1 = leaf.view.editor.getValue();
+            const hitLine = (t1.match(/hits (\\d+) (\\S*)/) || []);
+            out.retrieval = { hits: Number(hitLine[1] || 0), first: hitLine[2] || "" };
+            // 2. Code research: a package chunk from the 3D view as a cell.
+            for (const c of await v.sidecar.pageCids(URL)) { const p = await plugin.sidecar.prototype(c); if (p && p.name === "detect_encoding") { cid = c; break; } }
+            if (!cid) return { error: "no detect_encoding chunk" };
+            let node = v.graph.graphData().nodes.find((x) => x.id === cid);
+            const page = v.graph.graphData().nodes.find((x) => x.id === "page:" + URL);
+            if (!node && page) { await v.unfoldNode(page); unfolded = page; await until(() => !!v.graph.graphData().nodes.find((x) => x.id === cid), 8000); node = v.graph.graphData().nodes.find((x) => x.id === cid); }
+            if (!node) return { error: "chunk not placeable" };
+            for (const bb of v.billboardState()) v.closeBillboard(bb.id);
+            await v.openBillboard(node);
+            const ctl = (cls) => document.querySelector('.domvec-bb[data-cid="' + cid + '"] .' + cls);
+            await until(() => !!ctl("domvec-bb-chat"), 8000);
+            const made0 = plugin.prototypeStats.made;
+            ctl("domvec-bb-cell").click();
+            await until(() => plugin.prototypeStats.made > made0, 8000);
+            await until(() => runs().length >= 2, 8000);
+            n = outs(); runs()[1].click(); await until(() => outs() > n, 30000);
+            const t2 = leaf.view.editor.getValue();
+            out.prototype = { in_note: t2.includes("def detect_encoding(b):"), ran_ok: (t2.match(/status=ok/g) || []).length >= 2 };
+            // 3. The same chunk panel pulled into THIS note's chat.
+            const chat = plugin.nbChats.forView(leaf.view);
+            await chat.reset();
+            ctl("domvec-bb-chat").click();
+            await until(() => chat.pins.some((p) => p.cid === cid), 5000);
+            out.pinned = chat.pins.map((p) => p.cid);
+            await chat.send("Reply with the single word ok.");
+            const turns = await turnsOf(nb.path);
+            const last = turns[turns.length - 1] || {};
+            out.chat = { sent: (last.context || []).map((c) => c.cid), pins_after: chat.pins.length };
+            out.other_chat_saw_it = (await turnsOf(other.path)).some((t) => (t.context || []).some((c) => c.cid === cid));
+            // Planted: the pulled chunk is dropped.
+            chat.plantDropPins = true;
+            try {
+              await chat.reset();
+              ctl("domvec-bb-chat").click();
+              await until(() => chat.pins.length > 0, 5000);
+              await chat.send("Reply with the single word ok.");
+              const tp = await turnsOf(nb.path);
+              out.planted = { sent: ((tp[tp.length - 1] || {}).context || []).map((c) => c.cid) };
+            } finally { chat.plantDropPins = false; chat.pins = []; }
+            return out;
+          } finally {
+            if (cid) v.closeBillboard(cid);
+            if (unfolded) await v.unfoldNode(unfolded);
+            leaf.detach(); leafO.detach();
+            for (const f of [nb, other]) { try { await app.vault.delete(f); } catch (e) { /* gone */ } }
+          }
+        })()`, { timeout: 300000 });
+        return {
+          pass: !got.error && got.notebook && got.retrieval.hits >= 1 && got.prototype.in_note && got.prototype.ran_ok
+                && got.pinned.length === 1 && got.chat.sent.includes(got.pinned[0]) && got.chat.pins_after === 0
+                && got.other_chat_saw_it === false && !got.planted.sent.includes(got.pinned[0]),
+          evidence: got,
+        };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {

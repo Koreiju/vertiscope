@@ -1147,6 +1147,8 @@ export class GraphView extends ItemView {
   browsingUrl: (() => string) | null = null;
   /** Set by the plugin: a code chunk sent to a notebook as a prototype cell (G-105). */
   onPrototype: ((cid: string) => Promise<any>) | null = null;
+  /** Set by the plugin: a chunk pulled into the notebook's chat (P-N7). */
+  onPullToChat: ((cid: string) => Promise<any>) | null = null;
   /** Set by the plugin: a code node's module opened in its artifact panel (P-C1). */
   onOpenCode: ((url: string) => Promise<any>) | null = null;
 
@@ -3272,6 +3274,13 @@ export class GraphView extends ItemView {
       cell.setAttr("aria-label", "this code as a notebook cell");
       cell.onpointerdown = (e: PointerEvent) => e.stopPropagation();
       cell.onclick = (e: MouseEvent) => { e.stopPropagation(); void this.onPrototype?.(String(node.id)); };
+    }
+    // Any chunk pulled into the notebook's chat (P-N7).
+    if (node.level !== "page" && !String(node.id || "").startsWith("page:")) {
+      const pull = head.createSpan({ cls: "domvec-bb-cell domvec-bb-chat", text: "chat" });
+      pull.setAttr("aria-label", "pull this chunk into the notebook's chat");
+      pull.onpointerdown = (e: PointerEvent) => e.stopPropagation();
+      pull.onclick = (e: MouseEvent) => { e.stopPropagation(); void this.onPullToChat?.(String(node.id)); };
     }
     // Any code node opens its module as a standalone artifact (P-C1).
     if (String(node.url || "").startsWith("code://")) {

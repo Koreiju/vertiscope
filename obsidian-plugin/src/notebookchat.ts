@@ -177,6 +177,22 @@ export class NotebookChat {
     return rewind(cells, end, { nCtx: N_CTX, safety: SAFETY, limit });
   }
 
+  /**
+   * Chunk panels pulled into this note's chat from anywhere -- the 3D view's
+   * billboards (P-N7: "we can pull existing chunk panels into a new chat").
+   * They go with the next prompt, ahead of the marks or the rewind, and the
+   * sidecar keeps each to at most once per conversation.
+   */
+  pins: { cid: string; url: string; markdown: string; head: string }[] = [];
+  /** Planted (P-N7): pulled chunks are dropped, not sent. */
+  plantDropPins = false;
+  pin(item: { cid: string; url: string; markdown: string; head: string }): number {
+    if (!this.pins.some((p) => p.cid === item.cid)) this.pins.push(item);
+    this.el.show();
+    this.refresh();
+    return this.pins.length;
+  }
+
   /** How many addresses the reader marked in this note (P-N10). */
   marked(): number { return this.view.file && this.marks ? this.marks.count(this.view.file.path) : 0; }
 
@@ -194,7 +210,8 @@ export class NotebookChat {
   refresh(): void {
     const r = this.pendingRewind(null), m = this.marked();
     this.label.setText(`chat${this.turns.length ? ` · ${this.turns.length}` : ""}`
-      + (m ? ` · context: ${m} marked` : r ? ` · rewinds ${r.cells.length} cell${r.cells.length === 1 ? "" : "s"}` : ""));
+      + (m ? ` · context: ${m} marked` : r ? ` · rewinds ${r.cells.length} cell${r.cells.length === 1 ? "" : "s"}` : "")
+      + (this.pins.length ? ` · ${this.pins.length} pulled in` : ""));
     this.clearMarks.toggle(m > 0);
     this.log.empty();
     void MarkdownRenderer.render(this.app, this.markdown() || "*Ask about this cell and the ones above it.*",
@@ -227,6 +244,8 @@ export class NotebookChat {
       given = r.cells.length;
       this.lastSource = "rewind";
     }
+    const pulled = this.plantDropPins ? [] : this.pins.slice();
+    context = [...pulled, ...context];
     this.busy = true; this.lastError = ""; this.open(true); this.refresh();
     try {
       const got = await this.sidecar.chat(this.session, prompt || raw, context);
@@ -235,6 +254,7 @@ export class NotebookChat {
         return null;
       }
       const t = got.turn;
+      this.pins = this.pins.filter((p) => !pulled.includes(p));
       const turn: NotebookTurn = { prompt: prompt || raw, cells: given, source: this.lastSource, sent: t.context.length,
         dropped: t.resent_dropped.length, chars: t.delta_chars, reply: t.reply, ms: t.ms };
       this.turns.push(turn);

@@ -462,6 +462,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
         // pin and its markdown too (`G-78`): one selection, three surfaces.
         view.onPrototype = (cid: string) => this.prototypeToCell(cid);
         view.onOpenCode = (url: string) => this.openCode(url);
+        view.onPullToChat = (cid: string) => this.pullToChat(cid);
         view.browsingUrl = () => {
           const l = this.app.workspace.getLeavesOfType(BROWSER_VIEW)[0];
           const b: any = l?.view;
@@ -971,6 +972,24 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     const leaf = this.app.workspace.getLeaf("split", "vertical");
     await leaf.setViewState({ type: BROWSER_VIEW, active: true });
     this.app.workspace.revealLeaf(leaf);
+  }
+
+  /**
+   * A chunk panel pulled into the chat of the notebook the reader was last in
+   * (P-N7): pinned there, sent with its next prompt at most once.
+   */
+  pullStats = { pulled: 0, last: null as any };
+  async pullToChat(cid: string): Promise<{ path: string; pins: number } | { error: string }> {
+    const leaf = this.app.workspace.getLeavesOfType("markdown").find((l) => (l.view as MarkdownView).file?.path === this.lastNotebook);
+    const chat = leaf ? this.nbChats?.forView(leaf.view as MarkdownView) : null;
+    if (!chat) { new Notice("domvec: open a notebook to pull a chunk into its chat"); return { error: "no notebook open" }; }
+    const p: any = await this.sidecar.chunk(cid);
+    if (!p) return { error: "no such chunk" };
+    const pins = chat.pin({ cid, url: p.url || "", markdown: (p.lines || []).map((l: any) => l.text || "").join("\n"),
+                            head: "pulled in from the 3D view" });
+    this.pullStats.pulled++;
+    this.pullStats.last = { cid, path: this.lastNotebook, pins };
+    return { path: this.lastNotebook, pins };
   }
 
   /** A code module in its artifact panel, one pane per module. */
