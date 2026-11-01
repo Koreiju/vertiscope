@@ -136,6 +136,10 @@ def _locked(fn):
     return run
 
 
+#: Planted (P-N6): the digest gate off -- an unchanged chunk is embedded again,
+#: so a one-cell edit re-embeds the whole note.
+PLANT_REEMBED_ALL = [False]
+
 #: Planted: the matrix unlocked, as before (the shapes race).
 _PLANT_NO_LOCK = [False]
 
@@ -731,7 +735,7 @@ class VectorQueue:
         markdown = tokens_mod.for_model(
             markdown, drop_code=str(url or "").startswith("code://"))
         d = self.digest(markdown)
-        if self.digests.get(cid) == d and cid not in self.pending:
+        if self.digests.get(cid) == d and cid not in self.pending and not PLANT_REEMBED_ALL[0]:
             self.skipped += 1
             return False
         # Last write wins, and re-pushing moves nothing in the order: the
@@ -740,6 +744,22 @@ class VectorQueue:
         self.pending[cid] = markdown
         self.queued += 1
         return True
+
+    def seed(self, rows: Iterable[Tuple[str, str, str]]) -> int:
+        """Teach the gate what the STORE already holds a vector for:
+        (cid, markdown, url) of stored, embedded chunks. The digest cache is
+        memory only and a cid is keyed on position, not content, so after a
+        restart nothing said a re-rendered chunk was unchanged and the first
+        edit of a note re-embedded all of it (P-N6). Only cids the gate does
+        not know; returns how many it learned."""
+        n = 0
+        for cid, md, url in rows:
+            if cid in self.digests or cid in self.pending:
+                continue
+            self.digests[cid] = self.digest(tokens_mod.for_model(
+                md or "", drop_code=str(url or "").startswith("code://")))
+            n += 1
+        return n
 
     def extend(self, chunks: Iterable) -> int:
         """Offer many chunks. Returns how many were queued."""

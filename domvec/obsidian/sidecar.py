@@ -797,6 +797,8 @@ _PLANTABLE = {
     "project-whole-page": ("domvec.obsidian.sidecar", "PLANT_PROJECT_WHOLE_PAGE"),  # G-13
     "chat-resend": ("domvec.chat", "PLANT_RESEND"),                               # G-43
     "prototype-no-code": ("domvec.obsidian.sidecar", "PLANT_PROTOTYPE_NO_CODE"),  # G-105
+    "reembed-all": ("domvec.vectors", "PLANT_REEMBED_ALL"),                    # P-N6
+    "no-seed": ("domvec.workspace", "PLANT_NO_SEED"),                          # P-N6
 }
 
 
@@ -2283,6 +2285,20 @@ class _Handler(BaseHTTPRequestHandler):
                 threading.Thread(target=_maybe_compact, args=(self.workspace, store_mb), daemon=True).start()
             return
 
+        if route == "vectors":
+            # What a restart loses, for one page (P-N6's check): the embed
+            # gate's digests for its chunks. The store keeps every vector.
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                url = str(json.loads(self.rfile.read(length) or b"{}").get("forget_url") or "")
+                cids = [r[0] for r in self.workspace.store._rows(
+                    "MATCH (c:Chunk {url: $u}) RETURN c.cid", {"u": url})] if url else []
+                for c in cids:
+                    self.workspace.vectors.digests.pop(c, None)
+                self._send(200, {"forgot": len(cids)})
+            except Exception as exc:                # noqa: BLE001
+                self._send(500, {"error": "%s: %s" % (type(exc).__name__, exc)})
+            return
         if route == "note":
             # A vault NOTE into the store as a page (`G-7`, `Workspace.index_note`):
             # the note a reader wrote retrieval links into, so its links are
@@ -3706,6 +3722,14 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(200, {"query": query, "pages": [{"url": u, "score": round(sc, 5), "n": counts.get(u)} for u, sc in pages],
                              "matching": matching,
                              "ms": round((time.perf_counter() - t0) * 1000, 1)})
+            return
+
+        if segments[0] == "vectors":
+            # The embed queue's cumulative counters (P-N6): `skipped` is a
+            # chunk offered again with the text it was embedded from -- the
+            # diff a re-index of an edited note should mostly be.
+            v = getattr(self.workspace, "vectors", None) if self.workspace is not None else None
+            self._send(200, v.report() if v is not None else {"error": "no vector queue"})
             return
 
         if segments[0] == "prototype":

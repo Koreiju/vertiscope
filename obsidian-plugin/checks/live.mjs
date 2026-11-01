@@ -6809,6 +6809,97 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "P-N6",
+      asks: "a notebook is continuously diff-updated to the store: saving an edit to one cell re-indexes the note by itself and queues for a new vector ONLY the chunks whose text changed -- the rest are skipped by the embed gate -- and the same holds after a restart (the gate re-learned from the store's own embedded markdown); planted (no-seed) a restart re-embeds the whole note, planted (reembed-all) every edit does",
+      async run() {
+        // P-N5/P-N6: "our jupyter notebooks are dynamically recursively
+        // chunked similarly to our webpages and continuously diff-updated to
+        // the db (including re-vectorization and chunk assignment)".
+        const got = await evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const until = async (ok, ms) => { for (let t = 0; t < ms && !(await ok()); t += 250) await sleep(250); return !!(await ok()); };
+          const plugin = app.plugins.getPlugin("domvec-bridge");
+          const SIDE = String(plugin.settings.sidecar).replace(/[/]+$/, "");
+          const H = { "content-type": "application/json", "X-Domvec-Client": "obsidian-plugin" };
+          const post = async (route, body) => (await fetch(SIDE + route, { method: "POST", headers: H, body: JSON.stringify(body) })).json();
+          const vec = async () => (await fetch(SIDE + "/vectors")).json();
+          const mdOf = async (url) => {
+            const r = await post("/cypher", { query: "MATCH (c:Chunk {url: " + JSON.stringify(url) + "}) RETURN c.cid, c.md" });
+            return Object.fromEntries((r.rows || []).map((x) => [x[0], x[1] || ""]));
+          };
+          const NL = String.fromCharCode(10), F = String.fromCharCode(96).repeat(3);
+          const folder = "domvec-checks";
+          if (!app.vault.getAbstractFileByPath(folder)) await app.vault.createFolder(folder);
+          const stamp = Date.now();
+          const path = folder + "/pn6 notebook " + stamp + ".md";
+          const url = "vault://" + app.vault.getName() + "/" + path;
+          // Five cells, each a heading, a paragraph of its own words and code:
+          // big enough that each is its own chunk at the 256 window.
+          const cell = (k) => "## Cell " + k + NL + NL + Array.from({ length: 70 }, (_, i) => "c" + k + "w" + i + "x" + stamp).join(" ") + "." + NL + NL
+            + F + "python" + NL + "print(" + k + ")" + NL + F + NL;
+          const file = await app.vault.create(path, "# pn6" + NL + NL + [1, 2, 3, 4, 5].map(cell).join(NL));
+          const leaf = app.workspace.getLeaf("tab");
+          const settle = async () => {
+            let last = "", same = 0;
+            await until(async () => {
+              const v = await vec(); const k = [v.pending, v.queued, v.embedded, v.reused].join();
+              same = v.pending === 0 && k === last ? same + 1 : 0; last = k; return same >= 3;
+            }, 90000);
+          };
+          // One edit, saved; the note re-indexes ON ITS OWN (vault modify), and
+          // the queue's counters say what was offered and what was skipped.
+          const edit = async (from, to) => {
+            const md0 = await mdOf(url), v0 = await vec(), n0 = plugin.noteStats.indexed;
+            await app.vault.process(file, (t) => t.replace(from, to));
+            const indexed = await until(() => plugin.noteStats.indexed > n0, 20000);
+            await settle();
+            const md1 = await mdOf(url), v1 = await vec();
+            const changed = Object.keys(md1).filter((c) => md0[c] !== md1[c]).length;
+            return { indexed, chunks: Object.keys(md1).length, changed,
+                     queued: v1.queued - v0.queued, skipped: v1.skipped - v0.skipped,
+                     embedded: v1.embedded - v0.embedded, reused: v1.reused - v0.reused };
+          };
+          const out = {};
+          try {
+            await leaf.openFile(file, { state: { mode: "source", source: false } });
+            // Run cell 1 with the real Run control: the note becomes a notebook
+            // that has run (a stored readout), which is what is indexed on save.
+            // Scrolled to the first cell, as a reader would: a long paragraph is
+            // one wrapped line and CodeMirror draws only what is in view.
+            const ed = leaf.view.editor, at = ed.getValue().split(NL).indexOf(F + "python");
+            ed.setCursor({ line: at, ch: 0 }); ed.scrollIntoView({ from: { line: at, ch: 0 }, to: { line: at + 2, ch: 0 } }, true);
+            if (!(await until(() => !!leaf.view.containerEl.querySelector(".domvec-run-fence"), 8000))) return { error: "no Run control in view" };
+            const n0 = plugin.noteStats.indexed;
+            leaf.view.containerEl.querySelector(".domvec-run-fence").click();
+            await until(() => leaf.view.editor.getValue().includes("nb-output"), 30000);
+            out.first_index = await until(() => plugin.noteStats.indexed > n0, 20000);
+            await settle();
+            out.chunks = Object.keys(await mdOf(url)).length;
+            out.clean = await edit("print(3)", "print(33)");
+            await post("/vectors", { forget_url: url });
+            out.restart = await edit("print(4)", "print(44)");
+            await post("/plant", { name: "no-seed", on: true });
+            try { await post("/vectors", { forget_url: url }); out.planted_no_seed = await edit("print(5)", "print(55)"); }
+            finally { await post("/plant", { name: "no-seed", on: false }); }
+            await post("/plant", { name: "reembed-all", on: true });
+            try { out.planted_reembed_all = await edit("print(2)", "print(22)"); }
+            finally { await post("/plant", { name: "reembed-all", on: false }); }
+            return out;
+          } finally {
+            leaf.detach();
+            try { await app.vault.delete(file); } catch (e) { /* gone */ }
+          }
+        })()`, { timeout: 420000 });
+        const diffOnly = (a) => !!a && a.indexed && a.changed >= 1 && a.queued === a.changed && a.skipped >= a.chunks - a.changed;
+        const whole = (a) => !!a && a.indexed && a.queued >= a.chunks - 1;
+        return {
+          pass: !got.error && got.first_index && got.chunks >= 5 && diffOnly(got.clean) && diffOnly(got.restart)
+                && whole(got.planted_no_seed) && whole(got.planted_reembed_all),
+          evidence: got,
+        };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {

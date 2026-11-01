@@ -58,6 +58,9 @@ _PLANT_CODE_FROM_LINE = bool(os.environ.get("DOMVEC_PLANT_CODE_FROM_LINE"))
 _PLANT_NO_FILES = bool(os.environ.get("DOMVEC_PLANT_NO_FILES"))
 #: Planted (186k): a Hugging Face `/blob/` viewer link is taken as the file.
 _PLANT_HF_BLOB = bool(os.environ.get("DOMVEC_PLANT_HF_BLOB"))
+#: Planted (P-N6): the embed gate is not seeded from the store, so after a
+#: restart an unchanged chunk of an edited note is embedded again.
+PLANT_NO_SEED = [False]
 
 ProgressFn = Callable[[str, str], None]
 
@@ -485,6 +488,15 @@ class Workspace:
         # chunks whose markdown digest has not moved, so a page that re-emits
         # a settled chunk costs nothing. Vectors are computed in batches by
         # `flush_vectors`, which the query surface calls before it answers.
+        # A cid the gate has never seen may still be stored WITH its vector
+        # (the gate is memory, the store is not): seed it from the store's own
+        # markdown so an unchanged chunk is skipped across a restart too.
+        # Only when some cid is unknown -- one read, not one per drain (P-N6).
+        unknown = [c.cid for c in chunks if c.cid not in self.vectors.digests]
+        if unknown and not PLANT_NO_SEED[0]:
+            self.vectors.seed(store._rows(
+                "MATCH (c:Chunk) WHERE c.cid IN $ids AND c.embedding IS NOT NULL "
+                "RETURN c.cid, c.md, c.url", {"ids": unknown}))
         self.vectors.forget(superseded)
         self.vectors.extend(chunks)
         vectors: Dict[str, Sequence[float]] = {}
