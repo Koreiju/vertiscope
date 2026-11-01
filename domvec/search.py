@@ -57,6 +57,8 @@ class Hit:
     lexical: float
     semantic: float
     markdown: str = ""
+    #: The fourth factor: the chunk's content share (PLUGIN_GOAL 59).
+    content: float = 1.0
 
     def preview(self, lines: int = 3) -> str:
         return "\n".join(self.markdown.split("\n")[:lines])
@@ -65,6 +67,49 @@ class Hit:
 #: Planted: duplicates keyed on the stored markdown (empty for chunks the
 #: store lost, so they all collapse into one).
 _PLANT_MD_DIGEST = [False]
+
+#: Planted (PLUGIN_GOAL 59): no content factor -- boilerplate ranks as content.
+PLANT_NO_CONTENT_FACTOR = [False]
+#: The least a chunk of pure boilerplate keeps of its score: weighed down, never
+#: vetoed -- a page that holds the query ONLY in its controls is still found.
+CONTENT_FLOOR = 0.1
+
+import re as _re
+_CONTROL = _re.compile(r"^\(\s.*\s\)$|^\[[ xX]\]\s|^\[[^\]]*\]$")
+_LINK_ONLY = _re.compile(r"^(?:[-*+]\s+|\d+\.\s+)?\[.*\]\([^)]*\)$")
+_MEDIA = _re.compile(r"^(?:[-*+]\s+)?!\[[^\]]*\]\([^)]*\)$")
+_HEADING = _re.compile(r"^#{1,6}\s")
+_SENTENCE = _re.compile(r"[.!?;:,]\s*$")
+
+
+def content_share(md: str) -> float:
+    """How much of a chunk is what the page SAYS (PLUGIN_GOAL 59, 2026-11-01:
+    "exclude boilerplate things, where the original search query at the input
+    fields or buttons are often the top results").
+
+    Read from the renderer's own line forms, not from words: a control
+    (`( button X )`, a field `[ ] x`, a bracketed label), a line that is ONE
+    link (navigation, language lists, breadcrumbs, citation crumbs), and a
+    bare label of three words or fewer with no sentence punctuation are
+    boilerplate; a heading or an image counts neither way. The share is prose
+    characters over prose and boilerplate characters; a chunk with neither is
+    1.0 -- nothing is not boilerplate. Measured on the live store, 2026-11-01:
+    Wikipedia's language list and namespace bar 0.00, DuckDuckGo's search box
+    holding the query 0.07, its related searches 0.09; an article paragraph
+    1.00, a docstring 0.85.
+    """
+    prose = boiler = 0
+    for raw in (md or "").split("\n"):
+        line = raw.strip()
+        if not line or _MEDIA.match(line) or _HEADING.match(line):
+            continue
+        if _CONTROL.match(line) or _LINK_ONLY.match(line):
+            boiler += len(line)
+        elif len(line.lstrip("-*+ ").split()) <= 3 and not _SENTENCE.search(line):
+            boiler += len(line)
+        else:
+            prose += len(line)
+    return 1.0 if prose + boiler == 0 else prose / (prose + boiler)
 
 
 @dataclass
@@ -127,6 +172,9 @@ class ThreeFormIndex:
         self._ranks: Optional[np.ndarray] = None
         self._meta: Dict[int, Tuple[str, str, str]] = {}
         self._live: Optional[np.ndarray] = None
+        #: Each row's content share (`content_share`), from the markdown the
+        #: build and each delta read anyway.
+        self._content: Optional[np.ndarray] = None
 
     # -- build -------------------------------------------------------------
     def build(self) -> "ThreeFormIndex":
@@ -149,11 +197,13 @@ class ThreeFormIndex:
         # 50-117 reads a query, seconds to minutes on a 65k-chunk store,
         # 2026-10-17).
         self._digests = {}
+        self._content = np.ones(n, dtype=np.float32)
         for chunk in self.store.chunks():
             row = row_of.get(chunk.cid)
             if row is not None:
                 self._meta[row] = (chunk.cid, chunk.url, chunk.xpath)
                 self._digests[row] = self._row_digest(row, getattr(chunk, "md", "") or "")
+                self._content[row] = content_share(getattr(chunk, "md", "") or "")
 
         # Rows that describe nothing. A retired row (see FreqMatrix.remove)
         # keeps its slot so the other rows are not renumbered, and it scores
@@ -194,6 +244,9 @@ class ThreeFormIndex:
             grow = n - (0 if self._live is None else len(self._live))
             self._live = np.concatenate([self._live if self._live is not None else np.zeros(0, dtype=np.float32),
                                          np.zeros(grow, dtype=np.float32)])
+        if self._content is None or n > len(self._content):
+            have = self._content if self._content is not None else np.zeros(0, dtype=np.float32)
+            self._content = np.concatenate([have, np.ones(n - len(have), dtype=np.float32)])
         cid_row = getattr(self, "_cid_row", None)
         if cid_row is None:
             cid_row = self._cid_row = {m[0]: r for r, m in self._meta.items() if m}
@@ -217,6 +270,7 @@ class ThreeFormIndex:
                 continue
             self._meta[row] = (chunk.cid, chunk.url, chunk.xpath)
             self._digests[row] = self._row_digest(row, getattr(chunk, "md", "") or "")
+            self._content[row] = content_share(getattr(chunk, "md", "") or "")
             self._live[row] = 1.0
             if self._ranks[row] <= 0:
                 self._ranks[row] = fill
@@ -352,6 +406,15 @@ class ThreeFormIndex:
             if available:
                 score = score * np.power(semantic + floor, ws)
         score = np.asarray(score, dtype=np.float64)
+        # What the page SAYS before what it offers to click (PLUGIN_GOAL 59): a
+        # fourth factor, the chunk's content share (squared), floored so
+        # boilerplate is weighed down -- up to tenfold -- and never vetoed.
+        if self._content is not None and not PLANT_NO_CONTENT_FACTOR[0]:
+            share = _fit(self._content, rows).astype(np.float64)
+            # Squared: a search form around the query (share 0.25) kept a third
+            # of its score linearly and still ranked first for "okapi"; squared
+            # it keeps 16%, while content (0.8 and up) keeps 68% or more.
+            score = score * (CONTENT_FLOOR + (1.0 - CONTENT_FLOOR) * share * share)
         # Retired rows describe nothing and must never be returned, whatever
         # the floor makes their factors look like.
         score = score * _fit(self._live if self._live is not None
@@ -437,6 +500,7 @@ class ThreeFormIndex:
                 score=float(score[row]), rank=float(ranks[row]),
                 lexical=float(lexical[row]), semantic=float(semantic[row]),
                 markdown=markdown if include_markdown else "",
+                content=float(self._content[row]) if self._content is not None and row < len(self._content) else 1.0,
             ))
         _lap("select")
         return hits
