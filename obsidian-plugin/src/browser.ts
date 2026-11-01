@@ -534,7 +534,7 @@ export class BrowserView extends ItemView {
       this.address.value = view.getURL();
       try {
         const u = view.getURL();
-        if (/^https?:/.test(u)) (this.app as any).saveLocalStorage?.("domvec-browser-last", u);
+        if (/^https?:/.test(u) && !this.hosted) (this.app as any).saveLocalStorage?.("domvec-browser-last", u);
       } catch { /* not attached */ }
       this.say(view.getTitle() || view.getURL());
       // A PDF is read as a document, not folded as a viewer (G-248).
@@ -676,7 +676,10 @@ export class BrowserView extends ItemView {
     // Back where the reader was (2026-09-27: after a window reload the cell
     // came back on about:blank, and "nothing showing in the obsidian
     // browser" was the report). The last page is remembered per vault.
+    // A cell hosted in a notebook names its own page (its fence): it neither
+    // restores the standalone's last page nor records its own as that.
     try {
+      if (this.hosted) throw new Error("hosted");
       const last = String((this.app as any).loadLocalStorage?.("domvec-browser-last") || "");
       if (last && /^https?:/.test(last) && !/[?&](d3[5-7]|g9[34]|d36)=/.test(last)) {
         window.setTimeout(() => this.go(last), 300);
@@ -1470,6 +1473,12 @@ export class BrowserView extends ItemView {
   /** What the address bar sent where (G-202). */
   addressStats = { searched: 0, went: 0 };
   /** Navigate. Bare hosts get https, because a reader types `arxiv.org`. */
+  /** Hosted in a notebook (G-36's second host, `nbbrowser.ts`): its leaf is
+   *  not in the workspace's tree. The standalone pane's leaf always is. */
+  get hosted(): boolean {
+    return !this.app.workspace.getLeavesOfType(BROWSER_VIEW).includes(this.leaf);
+  }
+
   go(where: string): void {
     if (!this.webview || !where.trim()) return;
     const url = /^[a-z]+:/i.test(where) ? where : `https://${where}`;

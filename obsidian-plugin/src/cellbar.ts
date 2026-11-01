@@ -12,7 +12,8 @@
  *                     its run button and kernel are `runbutton.ts`'s
  *   [+ terminal]      a command terminal in a SEPARATE pane (§4a: a shell is a
  *                     stream, not a leaf, and gets no address)
- *   [+ browser cell]  the browser cell, beside the note
+ *   [+ browser cell]  a browser cell IN the note: a ```browser fence, rendered
+ *                     as the same component the standalone pane is (G-36)
  *
  * Placed by the plugin into the view's own scroller -- after CodeMirror's
  * content in live preview, before the footer in reading view -- and put back
@@ -25,6 +26,7 @@ export interface CellBarHost {
   addCodeCell(view: MarkdownView): Promise<void>;
   openTerminal(): unknown;
   openBrowser(): void | Promise<void>;
+  addBrowserCell(view: MarkdownView): Promise<void>;
 }
 
 const CLS = "domvec-cellbar";
@@ -45,7 +47,7 @@ function build(doc: Document, view: MarkdownView, host: CellBarHost): HTMLElemen
   };
   add("+ code", "append a code cell to this note", () => host.addCodeCell(view));
   add("+ terminal", "open a command terminal in its own pane", () => host.openTerminal());
-  add("+ browser cell", "open the browser cell beside this note", () => host.openBrowser());
+  add("+ browser cell", "append a browser cell to this note", () => host.addBrowserCell(view));
   return bar;
 }
 

@@ -35,6 +35,7 @@ import {
 import { installHarness } from "./harness";
 import { TERMINAL_VIEW, TerminalView } from "./terminal";
 import { CODE_VIEW, CodeView } from "./codeview";
+import { BROWSER_FENCE, browserFence, notebookBrowsers } from "./nbbrowser";
 import {
   RunHost, RunRequest, livePreviewRunButtons, readingViewRunButtons,
 } from "./runbutton";
@@ -237,6 +238,13 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     } catch (e) {
       console.warn("domvec: a stale `domvec` fence processor is still registered; keeping it", e);
     }
+    // The browser cell inside a notebook (G-36's second host, `nbbrowser.ts`).
+    try {
+      this.registerMarkdownCodeBlockProcessor(BROWSER_FENCE, browserFence(this.app));
+    } catch (e) {
+      console.warn("domvec: a stale `browser` fence processor is still registered; keeping it", e);
+    }
+    (window as any).__domvecNotebookBrowsers = notebookBrowsers;
 
     this.registerEditorSuggest(
       new RetrievalSuggest(this.app, this.sidecar, () => this.settings,
@@ -937,6 +945,21 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
   }
 
   /** Put a browser cell in a pane, reusing one if it is already open. */
+  /** `+ browser cell`: a browser cell IN the note (G-36), on the page the
+   *  standalone cell shows, or a search page when there is none. */
+  async addBrowserCell(view: MarkdownView): Promise<void> {
+    const file = view.file;
+    if (!file) return;
+    let url = "https://duckduckgo.com/";
+    try {
+      const b: any = this.app.workspace.getLeavesOfType(BROWSER_VIEW)[0]?.view;
+      const u = b?.webview?.getURL?.();
+      if (u && /^https?:/.test(u)) url = u;
+    } catch { /* the standalone cell is not attached */ }
+    const NL = "\n", F = "```";
+    await this.app.vault.process(file, (t) => t.replace(/\s*$/, "") + NL + NL + F + BROWSER_FENCE + NL + url + NL + F + NL);
+  }
+
   async openBrowser(): Promise<void> {
     const existing = this.app.workspace.getLeavesOfType(BROWSER_VIEW);
     if (existing.length) {

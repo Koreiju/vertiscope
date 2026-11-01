@@ -488,10 +488,13 @@ button.domvec-run-fence:hover {
   padding: 4px 6px;
   border-bottom: 1px solid var(--background-modifier-border);
   flex: 0 0 auto;
+  /* A notebook's browser cell is narrow (G-36): the controls wrap to a
+     second row rather than squeezing the address to nothing or clipping. */
+  flex-wrap: wrap;
 }
 .domvec-browser-url {
-  flex: 1 1 auto;
-  min-width: 0;
+  flex: 1 1 140px;
+  min-width: 140px;
   font-size: 12px;
 }
 .domvec-browser-page,
@@ -1125,3 +1128,10 @@ button.domvec-run-fence:hover {
   font-size: var(--font-ui-smaller); background: var(--background-secondary); white-space: pre-wrap; }
 .domvec-code-input { border: 0; border-top: 1px solid var(--background-modifier-border); border-radius: 0;
   font-family: var(--font-monospace); font-size: var(--font-ui-small); padding: 4px 10px; }
+
+/* G-36: the browser cell inside a notebook -- the same view as the standalone
+   pane, in a frame the reader drags to resize; its width is the note's. */
+.domvec-nb-browser { height: 440px; min-height: 160px; resize: vertical; overflow: hidden; position: relative;
+  border: 1px solid var(--background-modifier-border); border-radius: 6px; margin: 6px 0; }
+.domvec-nb-browser > .workspace-leaf { position: absolute; inset: 0; display: flex; flex-direction: column; }
+.domvec-nb-browser > .workspace-leaf > .workspace-leaf-content { flex: 1 1 auto; min-height: 0; }

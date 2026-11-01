@@ -7399,6 +7399,88 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-36-notebook",
+      asks: "the browser cell is ONE component with two hosts: a ```browser fence in a notebook renders the same domvec-browser-view the standalone pane is (outside the workspace's tree), loads its page, and its sensor puts that page in the store; dragging the cell's frame resizes the page's viewport, and so does narrowing the notebook's pane; closing the note detaches it; planted (__domvecPlantNoNotebookBrowser) the fence stays plain text",
+      async run() {
+        // Addendum IV: "the webbrowser notebook cells should be actual electron
+        // browser cells, resizable within the notebook, as well as allowing it
+        // to resize along with the rest of the notebook within its panel
+        // window" -- "the completeness of functionalities are the same".
+        const fixtures = await serveFixtures();
+        try {
+          const got = await evaluate(`(async () => {
+            const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+            const until = async (ok, ms) => { for (let t = 0; t < ms && !(await ok()); t += 250) await sleep(250); return !!(await ok()); };
+            const plugin = app.plugins.getPlugin("domvec-bridge");
+            const NL = String.fromCharCode(10), F = String.fromCharCode(96).repeat(3);
+            const folder = "domvec-checks";
+            if (!app.vault.getAbstractFileByPath(folder)) await app.vault.createFolder(folder);
+            const PAGE = ${JSON.stringify(fixtures.origin + "/media_kinds.html?g36nb=")} + Date.now();
+            const path = folder + "/g36 notebook " + Date.now() + ".md";
+            const file = await app.vault.create(path, "# g36" + NL + NL + "A notebook with a browser cell." + NL + NL + F + "browser" + NL + PAGE + NL + F + NL + NL + F + "python" + NL + "print(1)" + NL + F + NL);
+            // The note's fence renders twice (reading view, and the live-preview
+            // editor kept behind it); only the SEEN one holds a browser.
+            const cellsOf = () => [...window.__domvecNotebookBrowsers].filter((c) => c.sourcePath === path);
+            const cellOf = () => cellsOf().find((c) => c.containerEl.offsetWidth > 0 && c.view);
+            const standalone0 = app.workspace.getLeavesOfType("domvec-browser-view").length;
+            const leaf = app.workspace.getLeaf("tab");
+            const out = {};
+            try {
+              await leaf.openFile(file, { state: { mode: "preview" } });
+              app.workspace.setActiveLeaf(leaf, { focus: true });
+              out.rendered = await until(() => !!cellOf() && !!cellOf().view && !!cellOf().view.webview, 10000);
+              const cell = cellOf();
+              if (!cell) return { error: "no browser cell in the note", cells: cellsOf().length };
+              out.renders = { cells: cellsOf().length, live_browsers: cellsOf().filter((c) => !!c.leaf).length };
+              const v = cell.view, wv = v.webview;
+              out.same_component = { type: v.getViewType(), in_note: leaf.view.containerEl.contains(cell.containerEl),
+                                     in_workspace_tree: app.workspace.getLeavesOfType("domvec-browser-view").length - standalone0,
+                                     toolbar: [...v.contentEl.querySelectorAll("button")].map((b) => (b.textContent || "").trim()).filter(Boolean).slice(0, 8) };
+              out.loaded = await until(() => { try { return wv.getURL() === PAGE && !wv.isLoading(); } catch (e) { return false; } }, 30000);
+              out.url_now = (() => { try { return { url: cell.view.webview.getURL(), same_webview: cell.view.webview === wv, loading: cell.view.webview.isLoading(), mounts: cell.mounts, unmounts: cell.unmounts }; } catch (e) { return String(e.message); } })();
+              // The sensor in the notebook's cell, writing the store.
+              let cids = [];
+              for (let i = 0; i < 40 && !cids.length; i++) { await sleep(1000); cids = await plugin.sidecar.pageCids(PAGE); }
+              out.stored_chunks = cids.length;
+              const size = async () => { try { return await wv.executeJavaScript("[innerWidth, innerHeight]"); } catch (e) { return null; } };
+              const frame = cell.containerEl;
+              frame.style.height = "300px"; await sleep(900); const small = await size();
+              frame.style.height = "620px"; await sleep(900); const tall = await size();
+              const pane = leaf.view.containerEl;
+              const w0 = pane.style.width;
+              pane.style.width = "55%"; await sleep(900); const narrow = await size();
+              pane.style.width = w0; await sleep(900); const wide = await size();
+              out.resize = { small, tall, narrow, wide };
+              leaf.detach();
+              await sleep(600);
+              out.detached = cellsOf().length === 0;
+              window.__domvecPlantNoNotebookBrowser = true;
+              const leaf2 = app.workspace.getLeaf("tab");
+              try {
+                await leaf2.openFile(file, { state: { mode: "preview" } });
+                await sleep(1500);
+                out.planted = { cell: cellsOf().length > 0, webviews: leaf2.view.containerEl.querySelectorAll("webview").length,
+                                plain_url: (leaf2.view.containerEl.textContent || "").includes(PAGE) };
+              } finally { window.__domvecPlantNoNotebookBrowser = false; leaf2.detach(); }
+              return out;
+            } finally {
+              try { leaf.detach(); } catch (e) { /* gone */ }
+              try { await app.vault.delete(file); } catch (e) { /* gone */ }
+            }
+          })()`, { timeout: 180000 });
+          const r = got.resize || {};
+          const ok = (a) => Array.isArray(a) && a[0] > 50 && a[1] > 50;
+          return {
+            pass: !got.error && got.rendered && got.renders.live_browsers === 1 && got.same_component.type === "domvec-browser-view" && got.same_component.in_note
+                  && got.same_component.in_workspace_tree === 0 && got.loaded && got.stored_chunks > 0
+                  && ok(r.small) && ok(r.tall) && r.tall[1] > r.small[1] + 200 && ok(r.narrow) && ok(r.wide) && r.wide[0] > r.narrow[0] + 50
+                  && got.detached && !!got.planted && !got.planted.cell && got.planted.webviews === 0 && got.planted.plain_url,
+            evidence: { ...got, purged: await tidyFixtures(fixtures.origin) },
+          };
+        } finally { await fixtures.close(); }
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {
@@ -10240,10 +10322,11 @@ export function makeChecks(env) {
                 [...rbar.querySelectorAll("button")].find((b) => b.textContent === "+ terminal").click();
                 await until(() => app.workspace.getLeavesOfType("domvec-terminal-view").length > terms0, 5000);
                 out.terminal_opened = app.workspace.getLeavesOfType("domvec-terminal-view").length > terms0;
+                // '+ browser cell' appends a browser cell IN the note (G-36).
                 [...rbar.querySelectorAll("button")].find((b) => b.textContent === "+ browser cell").click();
-                await sleep(800);
-                const br = app.workspace.getLeavesOfType("domvec-browser-view");
-                out.browser_shown = br.some((l) => l.view.containerEl.offsetWidth > 0);
+                await until(() => [...window.__domvecNotebookBrowsers].some((c) => c.sourcePath === f.path && c.view && c.view.webview), 8000);
+                out.browser_shown = [...window.__domvecNotebookBrowsers].some((c) => c.sourcePath === f.path && c.view && c.view.webview
+                  && c.containerEl.offsetWidth > 0);
               }
             } finally {
               window.__domvecPlantNoCellBar = false;
