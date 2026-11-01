@@ -7481,6 +7481,59 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "P-N4",
+      asks: "a facade over the vault exposes a note's kernel to the file structure: run with the real Run control, a cell starts in its note's own folder, reads the file beside its note by name, and writes a note through Vault that Obsidian's vault then holds; planted (no-vault) a cell has no Vault and does not start beside its note",
+      async run() {
+        // Addendum I: "make the most of our vault interface that obsidian
+        // already has that can be directly provided a facade for to expose
+        // local jupyter terminals to the filestructure and space".
+        const plant = (name, on) => fetch(SIDECAR + "/plant", { method: "POST",
+          headers: { "content-type": "application/json", "X-Domvec-Client": "obsidian-plugin" }, body: JSON.stringify({ name, on }) });
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const until = async (ok, ms) => { for (let t = 0; t < ms && !(await ok()); t += 250) await sleep(250); return !!(await ok()); };
+          const NL = String.fromCharCode(10), F = String.fromCharCode(96).repeat(3);
+          const folder = "domvec-checks/pn4 lab " + Date.now() + (${planted} ? "p" : "c");
+          await app.vault.createFolder(folder);
+          await app.vault.create(folder + "/data.csv", "species,count" + NL + "okapi,2" + NL);
+          const code = ["import os", "print('cwd', os.path.basename(os.getcwd()))", "print('beside', open('data.csv').read().splitlines()[0])",
+                        "print('wrote', Vault.write('made by a cell.md', '# Made by a cell'))"].join(NL);
+          const file = await app.vault.create(folder + "/notebook.md", "# lab" + NL + NL + F + "python" + NL + code + NL + F + NL);
+          const leaf = app.workspace.getLeaf("tab");
+          try {
+            await leaf.openFile(file, { state: { mode: "source", source: false } });
+            await until(() => !!leaf.view.containerEl.querySelector(".domvec-run-fence"), 8000);
+            leaf.view.containerEl.querySelector(".domvec-run-fence").click();
+            await until(() => leaf.view.editor.getValue().includes("nb-output"), 30000);
+            await sleep(400);
+            const text = leaf.view.editor.getValue();
+            const outBlock = text.slice(text.indexOf("nb-output"));
+            const made = folder + "/made by a cell.md";
+            const seen = await until(() => !!app.vault.getAbstractFileByPath(made), 6000);
+            return { planted: ${planted}, folder,
+                     cwd_is_note_folder: outBlock.includes("cwd " + folder.split("/").pop()),
+                     read_beside: outBlock.includes("beside species,count"),
+                     wrote: outBlock.includes("wrote " + made), vault_holds_it: seen,
+                     error: (outBlock.match(/(NameError|FileNotFoundError|PermissionError)[^\\n]*/) || [""])[0],
+                     output: outBlock.slice(0, 300) };
+          } finally {
+            leaf.detach();
+            const f = app.vault.getAbstractFileByPath(folder);
+            if (f) await app.vault.delete(f, true);
+          }
+        })()`, { timeout: 120000 });
+        const clean = await arm(false);
+        await plant("no-vault", true);
+        let planted;
+        try { planted = await arm(true); } finally { await plant("no-vault", false); }
+        return {
+          pass: !clean.error && clean.cwd_is_note_folder && clean.read_beside && clean.wrote && clean.vault_holds_it
+                && !planted.cwd_is_note_folder && !planted.vault_holds_it && !!planted.error,
+          evidence: { clean, planted },
+        };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {

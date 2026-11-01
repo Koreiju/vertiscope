@@ -102,3 +102,69 @@ def parse_asks(reply) -> list:
 def boot(base: str) -> str:
     """The bootstrap for a kernel talking to the sidecar at `base`."""
     return BOOT % {"base": base}
+
+
+#: The vault facade (P-N4): "a facade for [the vault interface] to expose local
+#: jupyter terminals to the filestructure and space". Defined once per kernel;
+#: each run sets `Vault.here` to the running note's folder and moves the
+#: kernel's working directory there, so a cell's `open("data.csv")` reads the
+#: file beside its note. Reads anywhere in the vault; writes only inside it and
+#: never into `.obsidian` or `.git` -- Obsidian's own file watcher then shows
+#: what a cell wrote, as it shows any file.
+VAULT_BOOT = r'''
+if "Vault" not in globals():
+    import os as _os, fnmatch as _fn
+    from pathlib import Path as _P
+
+    class _Vault:
+        """Vault: the notes' file structure. here, ls(path), read(path), write(path, text), glob(pattern)."""
+
+        _GUARDED = (".obsidian", ".git")
+
+        def __init__(self, root):
+            self.root = _P(root).resolve()
+            self.here = self.root
+
+        def _at(self, path, writing=False):
+            p = (self.here / str(path)).resolve() if not str(path).startswith("/") else (self.root / str(path).lstrip("/")).resolve()
+            if p != self.root and self.root not in p.parents:
+                raise PermissionError("outside the vault: %%s" %% path)
+            rel = p.relative_to(self.root).parts
+            if writing and rel and rel[0] in self._GUARDED:
+                raise PermissionError("the vault's own settings are not written from a cell: %%s" %% path)
+            return p
+
+        def ls(self, path="."):
+            p = self._at(path)
+            return sorted((c.name + ("/" if c.is_dir() else "")) for c in p.iterdir() if c.name not in self._GUARDED)
+
+        def read(self, path):
+            return self._at(path).read_text(encoding="utf-8")
+
+        def write(self, path, text):
+            p = self._at(path, writing=True)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(str(text), encoding="utf-8")
+            return p.relative_to(self.root).as_posix()
+
+        def glob(self, pattern):
+            return sorted(c.relative_to(self.root).as_posix() for c in self.root.rglob("*")
+                          if c.is_file() and _fn.fnmatch(c.relative_to(self.root).as_posix(), pattern)
+                          and c.relative_to(self.root).parts[0] not in self._GUARDED)
+
+        def __repr__(self):
+            return "Vault(here=%%r)" %% self.here.relative_to(self.root).as_posix()
+
+    Vault = _Vault(%(root)r)
+Vault.here = Vault._at("/" + %(folder)r) if %(folder)r else Vault.root
+_os.chdir(Vault.here)
+'''
+
+
+def vault_boot(root: str, note: str) -> str:
+    """The vault facade for a kernel running `note` (vault-relative) under `root`."""
+    folder = note.rsplit("/", 1)[0] if "/" in note else ""
+    return VAULT_BOOT % {"root": root, "folder": folder}
+
+#: Run after each cell: back to the vault root, out of the note's folder.
+VAULT_DONE = "_os.chdir(Vault.root)"

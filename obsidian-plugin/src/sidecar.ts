@@ -771,6 +771,9 @@ export class Sidecar {
    * `detail` the reader needs -- turning either into `null` would make "not
    * enabled" indistinguishable from "no sidecar".
    */
+  /** The vault's folder on disk, for the kernel's vault facade (P-N4). */
+  vaultRoot = "";
+
   async runCell(note: string, code: string,
                 lang = "python", refs: string[] = [], line = -1, sample?: number): Promise<KernelReply | null> {
     const base = this.base().trim().replace(/\/+$/, "");
@@ -779,7 +782,8 @@ export class Sidecar {
       const res = await fetch(`${base}/kernel`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ note, code, lang, refs, line, ...(sample === undefined ? {} : { sample }) }),
+        body: JSON.stringify({ note, code, lang, refs, line, ...(sample === undefined ? {} : { sample }),
+                               ...(this.vaultRoot ? { vault_root: this.vaultRoot } : {}) }),
       });
       return (await res.json()) as KernelReply;
     } catch {

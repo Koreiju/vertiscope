@@ -184,6 +184,8 @@ _WORK_LOCK = _HeldLock()
 PLANT_NO_REF_BINDING = [False]
 #: Planted (G-279): no base objects in a cell's kernel.
 PLANT_NO_BASE_OBJECTS = [False]
+#: Planted (P-N4): no vault facade -- a cell sees neither `Vault` nor its note's folder.
+PLANT_NO_VAULT = [False]
 #: Planted (G-288): a cell's asks of the app are dropped.
 PLANT_NO_ASKS = [False]
 #: Planted (G-13, 2026-10-30): a re-cluster re-queues EVERY chunk of the page
@@ -804,6 +806,7 @@ _PLANTABLE = {
     "prototype-no-code": ("domvec.obsidian.sidecar", "PLANT_PROTOTYPE_NO_CODE"),  # G-105
     "reembed-all": ("domvec.vectors", "PLANT_REEMBED_ALL"),                    # P-N6
     "no-seed": ("domvec.workspace", "PLANT_NO_SEED"),                          # P-N6
+    "no-vault": ("domvec.obsidian.sidecar", "PLANT_NO_VAULT"),                 # P-N4
     "source-not-written": ("domvec.obsidian.sidecar", "PLANT_SOURCE_NOT_WRITTEN"),     # P-C1
     "source-not-projected": ("domvec.obsidian.sidecar", "PLANT_SOURCE_NOT_PROJECTED"),  # P-C5
 }
@@ -2826,6 +2829,14 @@ class _Handler(BaseHTTPRequestHandler):
                 from . import kernel_objects as _ko
                 port = self.server.server_address[1]
                 self.kernel_pool.run(note, _ko.boot("http://127.0.0.1:%d" % port))
+            # The vault facade (P-N4): `Vault`, and the note's folder as the
+            # working directory. Only for a note's kernel, and only under a
+            # vault root the plugin names that exists. Planted `PLANT_NO_VAULT`.
+            root = str(body.get("vault_root") or "")
+            in_vault = bool(root and not note.startswith("code:") and Path(root).is_dir() and not PLANT_NO_VAULT[0])
+            if in_vault:
+                from . import kernel_objects as _ko
+                self.kernel_pool.run(note, _ko.vault_boot(root, note))
             if names and not PLANT_NO_REF_BINDING[0]:
                 from . import refs as _refs
                 sample = body.get("sample")
@@ -2834,6 +2845,11 @@ class _Handler(BaseHTTPRequestHandler):
                 if bound["prelude"]:
                     self.kernel_pool.run(note, bound["prelude"])
             reply = self.kernel_pool.run(note, code)
+            if in_vault:
+                # The note's folder only for the cell: a process's working
+                # directory cannot be removed on Windows, so a kernel parked
+                # there would block deleting or renaming the folder (EBUSY).
+                self.kernel_pool.run(note, _ko.VAULT_DONE)
             # What the cell's calls asked of the APP (a web search through the
             # browser cell, `search(..., duckduckgo=True)`): drained from the
             # kernel and handed back, for the plugin to carry out.

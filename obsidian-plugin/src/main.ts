@@ -165,6 +165,8 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
       sw.paint();
     }
     this.sidecar = new Sidecar(() => this.settings.sidecar);
+    // The kernel's vault facade (P-N4) is rooted at the vault's own folder.
+    this.sidecar.vaultRoot = String((this.app.vault.adapter as any).basePath || "");
     // Once a minute while the reader has been idle five minutes: the sidecar
     // may compact its store now, the only moment nobody waits on it (2026-10-18:
     // 1.6 -> 8.8 GB uncompacted, captures 3-10 s -> 15-26 s). Never while the
