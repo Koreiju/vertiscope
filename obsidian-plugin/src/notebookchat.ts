@@ -29,6 +29,8 @@ import { cellAt, cellsOf, parseRewind, rewind, type Cell } from "./rewind";
 /** The model's window (`domvec/chat.py`: n_ctx 8192) and the share one rewind may take. */
 export const N_CTX = 8192;
 export const SAFETY = 0.35;
+/** The band below the scroll window the collapsed chat rests in (P-M5). */
+export const DOCK_PX = 40;
 
 export interface NotebookTurn { prompt: string; cells: number; source: string; sent: number; dropped: number; chars: number; reply: string; ms: number }
 
@@ -53,6 +55,10 @@ export class NotebookChat {
   plantNoBudget = false;
   /** Planted (P-N10): the reader's marks are ignored, the rewind sent instead. */
   plantIgnoreMarks = false;
+  /** Planted (P-M5): no band -- the strip clamps over the note's last lines. */
+  plantNoDock = false;
+  /** Placed in the band below the scroll window, not at a cell's foot. */
+  docked = false;
   /** What the last turn was given: "marks" or "rewind". */
   lastSource = "";
   private scrollEl: HTMLElement | null = null;
@@ -110,9 +116,10 @@ export class NotebookChat {
     const ed = this.view.editor;
     if (!ed) return;
     const cells = cellsOf(this.text());
-    if (!cells.length && !this.marked()) { this.landed = null; this.el.hide(); return; }
+    if (!cells.length && !this.marked()) { this.landed = null; this.el.hide(); this.dock(false); return; }
     this.el.show();
-    if (!cells.length) { this.refresh(); return; }
+    this.dock(true);
+    if (!cells.length) { this.landed = null; this.refresh(); return; }
     // "last-most viewable cell within current selection": the selection's END.
     const line = Math.max(ed.getCursor("from").line, ed.getCursor("to").line);
     const index = cellAt(cells, line);
@@ -124,22 +131,37 @@ export class NotebookChat {
     this.refresh();
   }
 
-  /** At the foot of the selected cell, kept inside the view as it scrolls. */
+  /** Shown: the scroll window gives up a band at its foot (P-M5). */
+  private dock(on: boolean): void {
+    this.view.contentEl.toggleClass("domvec-chat-dock", on && !this.plantNoDock);
+  }
+
+  /**
+   * At the foot of the selected cell while that foot is in view (L-2);
+   * otherwise -- the cell scrolled away, the reading view, a marked note with
+   * no cells -- in the band BELOW the scroll window's boundary (P-M5: "the
+   * hovering chat is always below the boundary of the scrollable markdown
+   * window"), so it never lies over text. Open, it grows upward over the
+   * view, which is what hovering it asks for.
+   */
   place(): void {
-    const cm = this.cm();
-    if (!cm || !this.landed) return;
-    const cells = cellsOf(this.text());
-    const c = cells[Math.min(this.landed.index, cells.length - 1)];
-    if (!c) return;
     const host = this.view.contentEl.getBoundingClientRect();
-    let y = host.bottom - 40;
-    try {
-      const pos = cm.state.doc.line(Math.min(c.to + 1, cm.state.doc.lines)).to;
-      const at = cm.coordsAtPos(pos);
-      if (at) y = at.bottom + 4;
-    } catch { /* the line is not laid out: the clamp below places it */ }
-    const h = this.el.offsetHeight || 30;
-    const top = Math.max(8, Math.min(y - host.top, host.height - h - 8));
+    const h = this.el.offsetHeight || 28;
+    const band = this.view.contentEl.hasClass("domvec-chat-dock") ? DOCK_PX : 0;
+    const docked = host.height - h - (this.isOpen ? 6 : Math.max(6, (band - h) / 2));
+    let top = docked;
+    const cm = this.cm();
+    const cells = this.landed ? cellsOf(this.text()) : [];
+    const c = this.landed ? cells[Math.min(this.landed.index, cells.length - 1)] : null;
+    if (cm && c && this.view.getMode() === "source") {
+      try {
+        const pos = cm.state.doc.line(Math.min(c.to + 1, cm.state.doc.lines)).to;
+        const at = cm.coordsAtPos(pos);
+        // The foot only while the strip would sit inside the scroll window.
+        if (at && at.bottom + 4 - host.top + h <= host.height - band) top = Math.max(8, at.bottom + 4 - host.top);
+      } catch { /* the line is not laid out: docked */ }
+    }
+    this.docked = top === docked;
     this.el.style.top = `${Math.round(top)}px`;
   }
 
@@ -231,6 +253,7 @@ export class NotebookChat {
 
   destroy(): void {
     this.scrollEl?.removeEventListener("scroll", this.onScroll);
+    this.dock(false);
     this.el.remove();
   }
 }

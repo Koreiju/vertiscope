@@ -1087,6 +1087,10 @@ button.domvec-run-fence:hover {
   border-radius: 8px; box-shadow: var(--shadow-s); opacity: 0.85; transition: max-height 0.15s ease; }
 .domvec-nbchat.is-open { max-height: 50%; opacity: 1; }
 .view-content:has(> .domvec-nbchat) { position: relative; }
+/* P-M5: while the chat is shown the scroll window ends DOCK_PX (40px) above
+   the pane's foot; the collapsed strip rests in that band, below the boundary. */
+.view-content.domvec-chat-dock > .markdown-source-view,
+.view-content.domvec-chat-dock > .markdown-reading-view { height: calc(100% - 40px) !important; }
 
 /* G-105: a code chunk's billboard sends it to a notebook as a cell. */
 .domvec-bb-cell { cursor: pointer; font-size: var(--font-ui-smaller); padding: 0 6px; margin-left: 4px;

@@ -7063,6 +7063,79 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "P-M5",
+      asks: "the hovering chat sits below the boundary of the scrollable markdown window: while the selected cell's foot is in view it is at that foot (L-2); scrolled away, and in a marked note's reading view, the collapsed strip rests in a band BELOW the scroller's bottom edge and the note's last line scrolls clear of it; planted (plantNoDock) the strip lies over the scroll window",
+      async run() {
+        // PLUGIN_GOAL: "the hovering chat is always below the boundary of the
+        // scrollable markdown window".
+        const got = await evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const plugin = app.plugins.getPlugin("domvec-bridge");
+          const NL = String.fromCharCode(10), F = String.fromCharCode(96).repeat(3);
+          const folder = "domvec-checks";
+          if (!app.vault.getAbstractFileByPath(folder)) await app.vault.createFolder(folder);
+          const stamp = Date.now();
+          const cell = (k) => "## Cell " + k + NL + NL + "Prose line. ".repeat(30) + NL + NL + F + "python" + NL + "print(" + k + ")" + NL + F + NL;
+          const nb = await app.vault.create(folder + "/pm5 notebook " + stamp + ".md", "# pm5" + NL + NL + [1, 2, 3, 4, 5, 6, 7, 8].map(cell).join(NL) + NL + "LAST LINE OF THE NOTE" + NL);
+          const sec = (n) => "## " + n + NL + NL + (n + " words. ").repeat(60) + NL;
+          const plain = await app.vault.create(folder + "/pm5 note " + stamp + ".md", "# pm5 plain" + NL + NL + ["Alpha", "Beta", "Gamma", "Delta", "Epsilon"].map(sec).join(NL));
+          const box = (e) => { const b = e.getBoundingClientRect(); return { top: Math.round(b.top), bottom: Math.round(b.bottom) }; };
+          const leaf = app.workspace.getLeaf("tab");
+          const out = {};
+          try {
+            await leaf.openFile(nb, { state: { mode: "source", source: false } });
+            app.workspace.setActiveLeaf(leaf, { focus: true });
+            await sleep(800);
+            leaf.view.editor.setCursor({ line: 6, ch: 0 });
+            await sleep(500);
+            const chat = plugin.nbChats.forView(leaf.view);
+            if (!chat) return { error: "no chat on the notebook" };
+            chat.land(true); await sleep(400);
+            const sc = leaf.view.contentEl.querySelector(".cm-scroller");
+            out.at_foot = { scroller: box(sc), chat: box(chat.el), docked: chat.docked };
+            sc.scrollTop = 1e7; await sleep(600); chat.place();
+            const last = Array.from(sc.querySelectorAll(".cm-line")).find((l) => (l.textContent || "").includes("LAST LINE"));
+            out.scrolled = { scroller: box(sc), chat: box(chat.el), docked: chat.docked, last: last ? box(last) : null };
+            chat.plantNoDock = true;
+            try {
+              chat.land(true); await sleep(300); sc.scrollTop = 1e7; await sleep(400); chat.place();
+              out.planted = { scroller: box(sc), chat: box(chat.el) };
+            } finally { chat.plantNoDock = false; chat.land(true); }
+            // A native note, marked in reading view: no cells, the chat docked.
+            await leaf.openFile(plain, { state: { mode: "preview" } });
+            await sleep(1200);
+            const secs = (leaf.view.previewMode.renderer.sections || []).filter((s) => s && s.el);
+            const s = secs.find((x) => (x.el.textContent || "").includes("Gamma words") && x.el.querySelector("p"));
+            const node = s.el.querySelector("p").firstChild;
+            const r = document.createRange(); r.setStart(node, 0); r.setEnd(node, 20);
+            const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+            s.el.querySelector("p").dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+            for (let i = 0; i < 40 && !(plugin.marks.byNote[plain.path] || []).length; i++) await sleep(200);
+            await sleep(500);
+            const c2 = plugin.nbChats.forView(leaf.view);
+            const rv = leaf.view.contentEl.querySelector(".markdown-reading-view");
+            if (c2) c2.place();
+            out.reading = { marked: (plugin.marks.byNote[plain.path] || []).length, scroller: rv ? box(rv) : null,
+                            chat: c2 ? box(c2.el) : null, docked: c2 ? c2.docked : null };
+            return out;
+          } finally {
+            await plugin.marks.clear(plain.path);
+            leaf.detach();
+            for (const f of [nb, plain]) { try { await app.vault.delete(f); } catch (e) { /* gone */ } }
+          }
+        })()`, { timeout: 120000 });
+        const below = (x) => !!x && !!x.chat && !!x.scroller && x.chat.top >= x.scroller.bottom - 1;
+        return {
+          pass: !got.error
+                && !got.at_foot.docked && got.at_foot.chat.bottom <= got.at_foot.scroller.bottom
+                && got.scrolled.docked && below(got.scrolled) && !!got.scrolled.last && got.scrolled.last.bottom <= got.scrolled.chat.top
+                && got.reading.marked >= 1 && got.reading.docked && below(got.reading)
+                && got.planted.chat.top < got.planted.scroller.bottom - 1,
+          evidence: got,
+        };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {
