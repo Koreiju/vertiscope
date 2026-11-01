@@ -56,7 +56,7 @@ import { ChunkPayload, DEFAULTS, DomvecSettings, EnactResult, KernelReply }
   from "./types";
 import { VaultLinks } from "./vaultlinks";
 import { PANEL_VIEW, PanelView } from "./panelview";
-import { Cockpit } from "./cockpit";
+import { COCKPIT_PATH, Cockpit } from "./cockpit";
 import { slateFolds } from "./slatefold";
 import { NotebookChats } from "./notebookchat";
 import { NoteMarks } from "./marks";
@@ -1260,7 +1260,12 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     if ((window as any).__domvecPlantNoReservoirIndex) return;
     if (!(await this.isReservoirNote(file))) { this.reservoirStats.skipped++; return; }
     this.reservoirStats.indexed++;
-    this.indexNoteSoon(file, why, 4000);
+    // The cockpit's fields are LIVE state -- throttle, last key, results rows
+    // -- written several times a second while the craft flies. Indexed on
+    // every write, it re-indexed 19 times in a minute (9.4 s each under the
+    // sidecar's work lock) and a search waited 23 s behind it (2026-11-01).
+    // Still indexed whenever it changes (G-291): after 30 s of quiet.
+    this.indexNoteSoon(file, why, file.path === COCKPIT_PATH ? 30000 : 4000);
   }
   async indexReservoir(): Promise<number> {
     let n = 0;

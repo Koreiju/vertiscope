@@ -7764,6 +7764,245 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-280-plane",
+      asks: "the cockpit is stuck ON the 2D plane over the 3D graph (PLUGIN_GOAL 50, 52-53): a cockpit open in the sidebar docks onto the graph's plane and the sidebar copy closes; the card holds the same slate note, bound both ways (throttle typed in the card sets the agent's, the agent's written back into the card); its title folds it to the ego node and opens it; the plane passes the 3D view every pointer event off the card; planted (plantSidebar) the cockpit stays a sidebar note",
+      async run() {
+        // 2026-11-01: "The current ego control panel is detached from the 2D
+        // computation graph plane overtop of the 3D graph editor."
+        const got = await evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const until = async (ok, ms) => { for (let t = 0; t < ms && !(await ok()); t += 200) await sleep(200); return !!(await ok()); };
+          const plugin = app.plugins.getPlugin("domvec-bridge");
+          const c = plugin.cockpit;
+          const g = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
+          if (!g || !g.canvasEl) return { error: "no graph" };
+          const sidebar = () => app.workspace.getLeavesOfType("markdown").filter((l) => l.view.file && l.view.file.path === "domvec/ego.md");
+          const a = g.agent, thr0 = a.throttle;
+          const out = {};
+          try {
+            // A restored layout: the cockpit open in the sidebar.
+            c.undock();
+            const f = app.vault.getAbstractFileByPath("domvec/ego.md");
+            const side = app.workspace.getRightLeaf(false);
+            await side.openFile(f, { state: { mode: "source", source: false } });
+            out.sidebar_before = sidebar().length;
+            await until(() => !!c.card && c.card.isConnected && sidebar().length === 0, 8000);
+            out.docked = { on_plane: !!c.card && g.canvasEl.contains(c.card), sidebar_after: sidebar().length,
+                           bound_view: c.view() === (c.planeLeaf && c.planeLeaf.view), slate: c.planeLeaf.containerEl.classList.contains("domvec-slate") };
+            const ed = c.view().editor;
+            const line = (k) => { for (let i = 0; i < ed.lineCount(); i++) if (ed.getLine(i).trim().split(String.fromCharCode(9))[0] === k) return i; return -1; };
+            const setVal = (k, v) => { const i = line(k), l = ed.getLine(i), at = l.lastIndexOf(String.fromCharCode(9)) + 1; ed.replaceRange(v, { line: i, ch: at }, { line: i, ch: l.length }); };
+            const valOf = (k) => { const l = ed.getLine(line(k)); return l.slice(l.lastIndexOf(String.fromCharCode(9)) + 1); };
+            // In ONE tick: typed in the card (applied synchronously), then the
+            // agent back to the value sync last saw -- no sync between them.
+            const roundTrip = async () => {
+              a.setThrottle(0.55); await sleep(600);
+              setVal("throttle", "30");
+              const typed = a.throttle;
+              a.setThrottle(0.55);
+              await until(() => valOf("throttle") === "55", 3000);
+              return { card_to_agent: typed, agent_to_card: valOf("throttle") };
+            };
+            Object.assign(out, await roundTrip());
+            c.plantStaleSeen = true;
+            try { out.planted_stale_seen = await roundTrip(); } finally { c.plantStaleSeen = false; a.setThrottle(0.56); await sleep(600); a.setThrottle(0.55); await sleep(600); }
+            // Items 54-55: ONE "ego" -- open, the header node is the slate's
+            // own title line, drawn as a node; references drawn as nodes in
+            // Obsidian's link colour.
+            const linkColor = getComputedStyle(document.body).getPropertyValue("--link-color").trim();
+            const title = c.card.querySelectorAll(".domvec-var-title");
+            const vars = Array.from(c.card.querySelectorAll(".domvec-var:not(.domvec-var-title)")).map((e) => e.textContent);
+            out.open_nodes = { heads: c.card.querySelectorAll(".domvec-plane-card-head").length, title_nodes: title.length,
+                               title: title[0] ? title[0].textContent : null, vars, link_coloured: !!title[0] && getComputedStyle(title[0]).color !== getComputedStyle(c.planeLeaf.containerEl.querySelector(".cm-line")).color,
+                               link_color: linkColor,
+                               // Item 60: field names are variables; filled values are not.
+                               keys: Array.from(c.card.querySelectorAll(".domvec-var-key")).map((e) => e.textContent),
+                               value_nodes: Array.from(c.card.querySelectorAll(".domvec-var:not(.domvec-var-title)")).map((e) => e.textContent).filter((t) => /^(55|30|false|true|8|ego)$/.test(t)) };
+            // Minimized by the slate's own gesture (a right-click on its title):
+            // the card is that header node alone.
+            const cm = c.view().editor.cm;
+            const tpos = cm.state.doc.toString().indexOf(String.fromCharCode(10) + "ego") + 2;
+            const at = cm.coordsAtPos(tpos);
+            const rc = (el, x, y) => el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 2 }));
+            rc(document.elementFromPoint((at.left + at.right) / 2, (at.top + at.bottom) / 2) || c.view().contentEl, (at.left + at.right) / 2, (at.top + at.bottom) / 2);
+            await until(() => c.card.classList.contains("is-collapsed"), 3000);
+            const circ = c.card.querySelector(".domvec-slate-circle");
+            const cr0 = c.card.getBoundingClientRect();
+            out.folded = { collapsed: c.card.classList.contains("is-collapsed"), node: circ ? circ.textContent.trim() : null,
+                           title_lines: c.card.querySelectorAll(".domvec-var-title").length, size: [Math.round(cr0.width), Math.round(cr0.height)] };
+            if (circ) rc(circ, 1, 1);
+            await until(() => !c.card.classList.contains("is-collapsed"), 3000);
+            out.opened = !c.card.classList.contains("is-collapsed") && c.card.querySelectorAll(".domvec-var-title").length === 1;
+            // Item 57: dragged by its header node, contained in the plane.
+            {
+              const plane = g.canvasEl.querySelector(".domvec-plane"), st0 = { left: c.card.style.left, top: c.card.style.top, right: c.card.style.right };
+              const saved = window.localStorage.getItem("domvec-plane-card:ego");
+              const text0 = c.view().editor.getValue();
+              const drag = (dx, dy) => {
+                const t = c.card.querySelector(".domvec-var-title"), r = t.getBoundingClientRect();
+                const x = r.left + r.width / 2, y = r.top + r.height / 2;
+                t.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0, clientX: x, clientY: y }));
+                window.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, cancelable: true, clientX: x + dx / 2, clientY: y + dy / 2 }));
+                window.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, cancelable: true, clientX: x + dx, clientY: y + dy }));
+                window.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, button: 0, clientX: x + dx, clientY: y + dy }));
+              };
+              const inside = () => { const p = plane.getBoundingClientRect(), k = c.card.getBoundingClientRect();
+                return k.left >= p.left - 1 && k.top >= p.top - 1 && k.right <= p.right + 1 && k.bottom <= p.bottom + 1; };
+              const r0 = c.card.getBoundingClientRect();
+              drag(-200, 120); await sleep(200);
+              const r1 = c.card.getBoundingClientRect();
+              const moved = Math.abs(r1.left - r0.left - -200) < 3 && Math.abs(r1.top - r0.top - 120) < 3, in1 = inside();
+              drag(-5000, 5000); await sleep(200);
+              out.dragged = { moved, inside: in1, clamped_inside: inside(), text_unchanged: c.view().editor.getValue() === text0,
+                              drags: c.placeStats.drags };
+              c.card.style.left = st0.left; c.card.style.top = st0.top; c.card.style.right = st0.right;
+              if (saved === null) window.localStorage.removeItem("domvec-plane-card:ego"); else window.localStorage.setItem("domvec-plane-card:ego", saved);
+            }
+            // Planted: plain text, no nodes (redrawn by an edit).
+            window.__domvecPlantNoVarNodes = true;
+            try { setVal("throttle", "56"); await sleep(400); out.planted_nodes = c.card.querySelectorAll(".domvec-var").length; }
+            finally { window.__domvecPlantNoVarNodes = false; setVal("throttle", "55"); await sleep(300); }
+            // Off the card, the 3D view takes the pointer.
+            const r = g.canvasEl.getBoundingClientRect(), cr = c.card.getBoundingClientRect();
+            const x = r.left + 30, y = r.top + r.height / 2;
+            const hit = document.elementFromPoint(x, y);
+            out.passes_through = !!hit && hit.tagName === "CANVAS" && !(x >= cr.left && x <= cr.right && y >= cr.top && y <= cr.bottom);
+            // Planted: the cockpit stays a sidebar note.
+            c.undock(); c.plantSidebar = true;
+            try {
+              await c.open(); await sleep(2500);
+              out.planted = { card: !!c.card && c.card.isConnected, sidebar: sidebar().length };
+            } finally {
+              c.plantSidebar = false;
+            }
+            await until(() => !!c.card && c.card.isConnected && sidebar().length === 0, 8000);
+            out.redocked = !!c.card && c.card.isConnected && sidebar().length === 0;
+            // What a reload does -- the card and its leaf gone, no sidebar copy
+            // -- and the cockpit comes back on the plane by itself.
+            c.undock();
+            out.after_reload = await until(() => !!c.card && c.card.isConnected, 6000);
+            // Left-snapped like Obsidian's own editor ("the "ego" panel uses a
+            // center view instead of left-snap"): the title node near the card's edge.
+            await until(() => !!c.card && !!c.card.querySelector(".domvec-var-title"), 5000);
+            const tn = c.card.querySelector(".domvec-var-title");
+            out.left_snap = tn ? Math.round(tn.getBoundingClientRect().left - c.card.getBoundingClientRect().left) : null;
+            return out;
+          } finally { a.setThrottle(thr0); }
+        })()`, { timeout: 90000 });
+        return {
+          pass: !got.error && got.sidebar_before === 1 && got.docked.on_plane && got.docked.sidebar_after === 0 && got.docked.bound_view
+                && got.docked.slate && Math.abs(got.card_to_agent - 0.30) < 0.005 && got.agent_to_card === "55"
+                && got.open_nodes.heads === 0 && got.open_nodes.title_nodes === 1 && got.open_nodes.title === "ego"
+                && got.open_nodes.vars.includes("{keys}") && got.open_nodes.link_coloured
+                && ["view", "throttle", "search", "query", "k", "results"].every((k) => got.open_nodes.keys.includes(k))
+                && got.open_nodes.value_nodes.length === 0
+                && got.folded.collapsed && got.folded.node === "ego" && got.folded.title_lines === 0 && got.folded.size[0] < 120
+                && got.opened && got.planted_nodes === 0
+                && !!got.dragged && got.dragged.moved && got.dragged.inside && got.dragged.clamped_inside && got.dragged.text_unchanged
+                && got.after_reload && got.left_snap !== null && got.left_snap < 40
+                && !!got.planted_stale_seen && got.planted_stale_seen.agent_to_card === "30"
+                && got.passes_through && !got.planted.card && got.planted.sidebar === 1 && got.redocked,
+          evidence: got,
+        };
+      },
+    },
+    {
+      id: "P-N1",
+      asks: "a notebook's cells run in a REAL Jupyter kernel, retrieval-enhanced: run with the real Run control, a cell sees IPython's ZMQInteractiveShell, a %magic works, state carries to the next cell, and the database's search() and the Vault answer from inside it; planted (subprocess-kernel) the plain subprocess -- no get_ipython",
+      async run() {
+        // PLUGIN_GOAL item 49 (2026-11-01: "Yes, install them"); Addendum I:
+        // "fully-fledged jupyter notebooks ... run code experiments in the
+        // jupyter kernel terminals".
+        const plant = (name, on) => fetch(SIDECAR + "/plant", { method: "POST",
+          headers: { "content-type": "application/json", "X-Domvec-Client": "obsidian-plugin" }, body: JSON.stringify({ name, on }) });
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const until = async (ok, ms) => { for (let t = 0; t < ms && !(await ok()); t += 250) await sleep(250); return !!(await ok()); };
+          const NL = String.fromCharCode(10), F = String.fromCharCode(96).repeat(3);
+          const folder = "domvec-checks";
+          if (!app.vault.getAbstractFileByPath(folder)) await app.vault.createFolder(folder);
+          const cell1 = ["shell = type(get_ipython()).__name__", "print('shell', shell)", "%time y = sum(range(1000))"].join(NL);
+          const cell2 = ["print('state', y)", "hits = search('radix tree', db=True, k=2)", "print('hits', len(hits))", "print('vault', Vault.here.name)"].join(NL);
+          const file = await app.vault.create(folder + "/pn1 jupyter " + Date.now() + (${planted} ? "p" : "c") + ".md",
+            "# jupyter" + NL + NL + F + "python" + NL + cell1 + NL + F + NL + NL + F + "python" + NL + cell2 + NL + F + NL);
+          const leaf = app.workspace.getLeaf("tab");
+          try {
+            await leaf.openFile(file, { state: { mode: "source", source: false } });
+            app.workspace.setActiveLeaf(leaf, { focus: true });
+            await until(() => leaf.view.containerEl.querySelectorAll(".domvec-run-fence").length >= 2, 8000);
+            const outs = () => (leaf.view.editor.getValue().match(/<!-- nb-output/g) || []).length;
+            for (let i = 0; i < 2; i++) {
+              const n = outs();
+              leaf.view.containerEl.querySelectorAll(".domvec-run-fence")[i].click();
+              await until(() => outs() > n, 60000);
+              await sleep(400);
+            }
+            const t = leaf.view.editor.getValue();
+            const blocks = t.split("<!-- nb-output").slice(1).map((b) => b.split("<!-- /nb-output")[0]);
+            const all = blocks.join(NL);
+            return { planted: ${planted}, blocks: blocks.length,
+                     ipython: all.includes("shell ZMQInteractiveShell"), magic: /Wall time|CPU times/.test(all),
+                     state: all.includes("state 499500"), hits: Number((all.match(/hits (\\d+)/) || [])[1] || 0),
+                     vault: all.includes("vault domvec-checks"), name_error: all.includes("NameError"),
+                     errored: /(NameError|SyntaxError)/.test(all),
+                     sample: all.slice(0, 400) };
+          } finally {
+            leaf.detach();
+            try { await app.vault.delete(file); } catch (e) { /* gone */ }
+          }
+        })()`, { timeout: 180000 });
+        const clean = await arm(false);
+        await plant("subprocess-kernel", true);
+        let planted;
+        try { planted = await arm(true); } finally { await plant("subprocess-kernel", false); }
+        return {
+          pass: clean.blocks === 2 && clean.ipython && clean.magic && clean.state && clean.hits >= 1 && clean.vault && !clean.name_error
+                && !planted.ipython && planted.errored,
+          evidence: { clean, planted },
+        };
+      },
+    },
+    {
+      id: "G-294",
+      asks: "retrieval ranks what pages SAY above their boilerplate (PLUGIN_GOAL 59): for four queries the top five hits hold no chunk that is mostly controls, fields or bare links (content share < 0.3) and every query fills its page of eight; planted (no-content-factor) language lists, nav bars, search boxes and citation crumbs take the top; planted (no-refill) a filtered page comes back short or empty",
+      async run() {
+        // 2026-11-01: "debugging retrieval results to exclude boilerplate
+        // things, where the original search query at the input fields or
+        // buttons are often the top results and filter out actual
+        // content-based results".
+        const got = await evaluate(`(async () => {
+          const plugin = app.plugins.getPlugin("domvec-bridge");
+          const SIDE = String(plugin.settings.sidecar).replace(/[/]+$/, "");
+          const H = { "content-type": "application/json", "X-Domvec-Client": "obsidian-plugin" };
+          const plant = (name, on) => fetch(SIDE + "/plant", { method: "POST", headers: H, body: JSON.stringify({ name, on }) });
+          const Q = ["okapi", "radix tree", "books", "patricia trie"];
+          const run = async () => {
+            const out = {};
+            for (const q of Q) {
+              const d = await (await fetch(SIDE + "/search?k=8&q=" + encodeURIComponent(q))).json();
+              const hs = d.hits || [];
+              out[q] = { hits: hs.length, boiler_top5: hs.slice(0, 5).filter((h) => (h.content ?? 1) < 0.3).length,
+                         top: hs.slice(0, 2).map((h) => (h.content ?? 1).toFixed(2) + " " + String(h.preview || "").replace(/\\s+/g, " ").slice(0, 40)) };
+            }
+            return out;
+          };
+          const out = { clean: await run() };
+          await plant("no-content-factor", true);
+          try { out.planted_no_factor = await run(); } finally { await plant("no-content-factor", false); }
+          await plant("no-refill", true);
+          try { out.planted_no_refill = await run(); } finally { await plant("no-refill", false); }
+          return out;
+        })()`, { timeout: 300000 });
+        const sum = (arm, f) => Object.values(arm || {}).reduce((a, x) => a + f(x), 0);
+        return {
+          pass: !got.error && sum(got.clean, (x) => x.boiler_top5) === 0 && sum(got.clean, (x) => x.hits) === 32
+                && sum(got.planted_no_factor, (x) => x.boiler_top5) >= 4
+                && sum(got.planted_no_refill, (x) => x.hits) < 32,
+          evidence: got,
+        };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {
@@ -9392,7 +9631,10 @@ export function makeChecks(env) {
             window.dispatchEvent(new KeyboardEvent("keydown", { key: "Shift", bubbles: true }));
             await sleep(700);
             out.text_throttle = valOf("throttle"); out.text_last = valOf("last");
-            setVal("query", "radix tree"); await sleep(2500);
+            setVal("query", "radix tree");
+            // Its results, not a fixed time: the search answers when it answers.
+            for (let i = 0; i < 60 && !planted && !((g.searchField.window || []).length); i++) await sleep(250);
+            await sleep(300);
             out.query = g.searchField.query; out.k = g.searchField.k;
             c.resultsOpen = false; c.toggleResults(); await sleep(700);
             out.rows = c.resultRows().length;

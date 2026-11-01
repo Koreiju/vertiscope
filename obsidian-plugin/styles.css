@@ -1044,7 +1044,10 @@ button.domvec-run-fence:hover {
 .domvec-slate .cm-sizer { max-width: none !important; }
 .domvec-slate .cm-scroller { overflow-x: auto; font-size: 14px; }
 .domvec-slate .cm-sizer, .domvec-slate .cm-contentContainer { margin-left: 0 !important; margin-right: 0 !important; }
-.domvec-slate .cm-content { padding-left: 12px !important; }
+/* Left-snapped as Obsidian's own editor is (2026-11-01: "the "ego" panel uses
+   a center view instead of left-snap"): no padding of ours, and no chunk
+   gutter -- a slate is a record of fields, not prose cut into chunks. */
+.domvec-slate .cm-gutters { display: none; }
 
 /* A revealed {ref}'s rank-1 lines (G-278): read-only, a step dimmer than the
    slate's own text; the collapsed slate as its circular node. */
@@ -1135,3 +1138,37 @@ button.domvec-run-fence:hover {
   border: 1px solid var(--background-modifier-border); border-radius: 6px; margin: 6px 0; }
 .domvec-nb-browser > .workspace-leaf { position: absolute; inset: 0; display: flex; flex-direction: column; }
 .domvec-nb-browser > .workspace-leaf > .workspace-leaf-content { flex: 1 1 auto; min-height: 0; }
+
+/* Items 50, 52-53: the 2D computation-graph plane over the 3D view, and the
+   cockpit stuck on it (cockpit.ts dock). The plane passes every pointer event
+   to the 3D view except on what is stuck to it. */
+.domvec-plane { position: absolute; inset: 0; pointer-events: none; z-index: 25; }
+.domvec-plane > * { pointer-events: auto; }
+.domvec-plane-card { position: absolute; top: 10px; right: 10px; width: min(300px, 45%);
+  background: #000; border: 1px solid #c0c0c0; border-radius: 6px; box-shadow: 0 2px 12px rgba(0, 0, 0, 0.6);
+  display: flex; flex-direction: column; overflow: hidden; }
+.domvec-plane-card > .workspace-leaf { position: relative; height: min(360px, 55vh); }
+.domvec-plane-card > .workspace-leaf > .workspace-leaf-content { height: 100%; }
+/* A slate has no chrome (G-278): the hosted note's view header goes. */
+.domvec-plane-card .view-header { display: none; }
+.domvec-plane-card .markdown-source-view.mod-cm6 .cm-scroller { padding-top: 6px; }
+
+/* Items 54-55: variables are NODES in the panel, in Obsidian's own purple
+   linked-markdown style -- the slate's name on its title line (the header
+   node of an open panel) and every {ref}. */
+.domvec-slate .domvec-var { color: var(--link-color); background: color-mix(in srgb, var(--link-color) 16%, transparent);
+  border-radius: 4px; padding: 0 3px; }
+.domvec-slate .domvec-var-title { border: 1px solid var(--link-color); border-radius: 12px; padding: 1px 10px; }
+/* Minimized, the card is its header node alone, compact. */
+.domvec-plane-card.is-collapsed { width: auto; background: transparent; border: 0; box-shadow: none; }
+/* Minimized: the header node alone, sized to it (an auto height left the
+   circle no room and the card measured 0 x 0). */
+.domvec-plane-card.is-collapsed > .workspace-leaf { display: block; height: 62px; width: 62px; }
+.domvec-plane-card.is-collapsed .cm-scroller { overflow: hidden; padding: 0; }
+.domvec-plane-card.is-collapsed .view-content { border: 0; background: transparent; }
+.domvec-plane-card.is-collapsed .domvec-slate-circle { padding: 0; }
+.domvec-plane-card.is-collapsed .domvec-slate-circle-dot { width: 46px; height: 46px; font-size: 12px; }
+/* Item 57: the header node is the panel's handle on the plane. */
+.domvec-plane-card .domvec-var-title, .domvec-plane-card .domvec-slate-circle-dot { cursor: grab; }
+/* The narrow card on the plane: Obsidian's own margin variable, smaller. */
+.domvec-plane-card { --file-margins: 6px 10px; }

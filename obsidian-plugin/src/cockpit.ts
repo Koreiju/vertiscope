@@ -28,10 +28,13 @@
  */
 import { App, MarkdownView, TFile } from "obsidian";
 import { FoldState, SlateLine, foldsOf, parseSlate, setFolds, titleLine } from "./slatefold";
+import { makeDraggable, type PlaceStats } from "./planecard";
 export { parseSlate } from "./slatefold";
 export type { SlateLine } from "./slatefold";
 
 export const COCKPIT_PATH = "domvec/ego.md";
+/** Remembered: the cockpit lives on the plane (items 52-53). */
+const DOCKED_KEY = "domvec-cockpit-on-plane";
 const FOLD_KEY = "domvec.cockpit.results";
 
 const T = "\t";
@@ -134,6 +137,9 @@ export class Cockpit {
     if (!/^\tplan\t/m.test(text)) {
       await this.app.vault.modify(f, text.replace(/^(\tlast\t.*)$/m, "$1\n\tplan\t{results}\n\tplay\tfalse"));
     }
+    // On the 2D plane over the 3D view when a graph is open (items 50, 52-53).
+    const onPlane = await this.dock();
+    if (onPlane) { this.stats.opened++; return onPlane; }
     let leaf = this.leaf();
     if (!leaf) {
       leaf = this.app.workspace.getRightLeaf(false) || this.app.workspace.getLeaf("split");
@@ -145,7 +151,74 @@ export class Cockpit {
     return leaf.view instanceof MarkdownView ? leaf.view : null;
   }
 
+  /**
+   * The cockpit STUCK on the 2D plane over the 3D graph (PLUGIN_GOAL 52-53,
+   * 2026-11-01: "The current ego control panel is detached from the 2D
+   * computation graph plane overtop of the 3D graph editor"). The same note in
+   * the same native editor -- every slate gesture, the sync both ways -- held
+   * in a leaf outside the workspace's tree (as the notebook's browser cell
+   * is), in a card on the plane; its title folds it to the ego node's circle
+   * and back. A sidebar copy is closed: one cockpit. Planted `plantSidebar`:
+   * the cockpit stays a sidebar note.
+   */
+  planeLeaf: any = null;
+  card: HTMLElement | null = null;
+  plantSidebar = false;
+  dockStats = { docked: 0, undocked_sidebar: 0 };
+  async dock(): Promise<MarkdownView | null> {
+    if (this.plantSidebar) return null;
+    const g = this.host.graph();
+    const plane: HTMLElement | null = g && typeof g.plane === "function" ? g.plane() : null;
+    const f = this.file();
+    if (!plane || !f) return null;
+    if (this.planeLeaf && this.card && plane.contains(this.card) && this.planeLeaf.view?.file?.path === COCKPIT_PATH) {
+      this.card.removeClass("is-collapsed");
+      return this.planeLeaf.view instanceof MarkdownView ? this.planeLeaf.view : null;
+    }
+    this.undock();
+    const Leaf = (this.app.workspace as any).activeLeaf?.constructor ?? (this.app.workspace.getMostRecentLeaf() as any)?.constructor;
+    if (!Leaf) return null;
+    // No head of its own (item 54: "the duplicative "ego" part should
+    // actually be fused"): open, the header node is the slate's own title
+    // line; minimized -- the slate's own collapse, a right-click on that
+    // title -- the card is that node alone (`syncCard`).
+    const card = plane.createDiv({ cls: "domvec-plane-card domvec-cockpit-card" });
+    const leaf = new Leaf(this.app);
+    card.appendChild(leaf.containerEl);
+    await leaf.openFile(f, { state: { mode: "source", source: false } });
+    this.planeLeaf = leaf;
+    this.card = card;
+    // Draggable by its header node, contained in the plane (item 57).
+    this.undrag = makeDraggable(card, plane, "domvec-plane-card:ego", this.placeStats);
+    // One cockpit: the sidebar's copy goes.
+    for (const l of this.app.workspace.getLeavesOfType("markdown")) {
+      if ((l.view as any)?.file?.path === COCKPIT_PATH) { l.detach(); this.dockStats.undocked_sidebar++; }
+    }
+    this.dockStats.docked++;
+    try { window.localStorage.setItem(DOCKED_KEY, "1"); } catch { /* a convenience */ }
+    this.decorate();
+    return leaf.view instanceof MarkdownView ? leaf.view : null;
+  }
+
+  /** The card minimized exactly when its slate is collapsed to the header node. */
+  syncCard(): void {
+    if (!this.card || !this.planeLeaf) return;
+    this.card.toggleClass("is-collapsed", !!this.planeLeaf.containerEl.querySelector(".domvec-slate-circle"));
+  }
+
+  /** Off the plane (its graph closed, or the plugin unloading). */
+  placeStats: PlaceStats = { drags: 0, clamped: 0 };
+  private undrag: (() => void) | null = null;
+  undock(): void {
+    this.undrag?.(); this.undrag = null;
+    try { this.planeLeaf?.detach(); } catch { /* gone */ }
+    this.card?.remove();
+    this.planeLeaf = null;
+    this.card = null;
+  }
+
   leaf(): any {
+    if (this.planeLeaf && this.card?.isConnected && this.planeLeaf.view?.file?.path === COCKPIT_PATH) return this.planeLeaf;
     return this.app.workspace.getLeavesOfType("markdown").find((l: any) => l.view?.file?.path === COCKPIT_PATH) || null;
   }
 
@@ -157,7 +230,9 @@ export class Cockpit {
   /** The slate class on every leaf whose note asks for it, the slate gestures
    *  on each (G-278), and the cockpit's own on the cockpit. */
   decorate(): void {
-    for (const l of this.app.workspace.getLeavesOfType("markdown")) {
+    const leaves: any[] = this.app.workspace.getLeavesOfType("markdown");
+    if (this.planeLeaf && this.card?.isConnected) leaves.push(this.planeLeaf);
+    for (const l of leaves) {
       const v: any = l.view;
       const on = isSlate(this.app, v?.file || null);
       (l as any).containerEl?.toggleClass?.("domvec-slate", on);
@@ -290,7 +365,19 @@ export class Cockpit {
     const v = this.view();
     if (!v) return;
     this.apply(parseSlate(v.editor.getValue()));
+    // The text and the agent agree now: that is what sync has SEEN. Without
+    // this, an edit (throttle 30) followed by the agent returning to the value
+    // sync last saw (55) read as "nothing changed", and the card kept saying
+    // 30 while the craft flew at 55 (found live, 2026-11-01). Planted
+    // `plantStaleSeen`.
+    const g = this.host.graph();
+    if (g && !this.plantStaleSeen) {
+      const a = g.agent;
+      this.lastSeen = { ...this.lastSeen, mode: a.mode, throttle: Math.round(a.throttle * 100), action: a.lastAction, playing: a.playing };
+    }
   }
+  /** Planted: an applied edit leaves sync's memory of the agent as it was. */
+  plantStaleSeen = false;
 
   private field(fs: SlateLine[], ...path: string[]): SlateLine | undefined {
     const want = path.join("/");
@@ -402,8 +489,25 @@ export class Cockpit {
   }
 
   /** Once a frame or so: the agent's state and the results, into the text. */
+  private dockCheckAt = 0;
   sync(): void {
+    // A cockpit open in the sidebar (a restored layout), or one whose card a
+    // rebuilt graph dropped, goes (back) onto the plane -- checked every 2 s.
+    const now = Date.now();
+    if (!this.plantSidebar && now - this.dockCheckAt > 2000) {
+      this.dockCheckAt = now;
+      const inSidebar = this.app.workspace.getLeavesOfType("markdown").some((l: any) => l.view?.file?.path === COCKPIT_PATH);
+      // Lost to a rebuilt graph, or to a reload of the plugin or the app: the
+      // cockpit LIVES on the plane, and that is remembered (a reload once
+      // left no cockpit anywhere, its sidebar copy having been closed).
+      let remembered = false;
+      try { remembered = window.localStorage.getItem(DOCKED_KEY) === "1"; } catch { /* a convenience */ }
+      const lost = (!!this.planeLeaf || remembered) && !this.card?.isConnected;
+      const g = this.host.graph();
+      if ((inSidebar || lost) && g && typeof g.plane === "function" && g.plane()) void this.dock();
+    }
     this.decorate();
+    this.syncCard();
     this.haloTick();
     const v = this.view(), g = this.host.graph();
     if (!v || !g || this.plantUnbound) return;
@@ -610,5 +714,5 @@ export class Cockpit {
     s.style.top = `${Math.round(e.clientY - 34)}px`;
   }
 
-  unload(): void { this.slider?.remove(); this.slider = null; }
+  unload(): void { this.slider?.remove(); this.slider = null; this.undock(); }
 }

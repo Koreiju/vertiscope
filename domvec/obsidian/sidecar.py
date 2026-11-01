@@ -186,6 +186,8 @@ PLANT_NO_REF_BINDING = [False]
 PLANT_NO_BASE_OBJECTS = [False]
 #: Planted (P-N4): no vault facade -- a cell sees neither `Vault` nor its note's folder.
 PLANT_NO_VAULT = [False]
+#: Planted (item 59): a filtered search page is truncated, not refilled.
+PLANT_NO_REFILL = [False]
 #: Planted (G-288): a cell's asks of the app are dropped.
 PLANT_NO_ASKS = [False]
 #: Planted (G-13, 2026-10-30): a re-cluster re-queues EVERY chunk of the page
@@ -807,6 +809,9 @@ _PLANTABLE = {
     "reembed-all": ("domvec.vectors", "PLANT_REEMBED_ALL"),                    # P-N6
     "no-seed": ("domvec.workspace", "PLANT_NO_SEED"),                          # P-N6
     "no-vault": ("domvec.obsidian.sidecar", "PLANT_NO_VAULT"),                 # P-N4
+    "no-content-factor": ("domvec.search", "PLANT_NO_CONTENT_FACTOR"),         # item 59
+    "no-refill": ("domvec.obsidian.sidecar", "PLANT_NO_REFILL"),               # item 59
+    "subprocess-kernel": ("domvec.obsidian.kernel", "PLANT_SUBPROCESS_KERNEL"),  # P-N1
     "source-not-written": ("domvec.obsidian.sidecar", "PLANT_SOURCE_NOT_WRITTEN"),     # P-C1
     "source-not-projected": ("domvec.obsidian.sidecar", "PLANT_SOURCE_NOT_PROJECTED"),  # P-C5
 }
@@ -1574,71 +1579,82 @@ def search_payload(workspace, query: str, k: int = 8, *,
     # `n` for "showing {k}/{n} results" (PLUGIN_GOAL 86): the chunks the
     # ranking gives a positive score at all -- before duplicate content and
     # merge groups collapse, so it bounds what scrolling can reach from above.
-    from ..search import SearchDiagnostics
-    diag = SearchDiagnostics()
-    try:
-        hits = workspace.search(query, k=want, scope_url=url or "", diagnostics=diag)
-    except TypeError:                       # an index without diagnostics
-        hits = workspace.search(query, k=want, scope_url=url or "")
-    import time as _time
-    _t_shape = _time.perf_counter()
-    out = []
-    spent = 0
-    seen_groups = set()
-    # One read for every hit (it was one query per hit, after the ranking had
-    # already read them all once: 9-10 s cold, 2026-10-17).
-    many = getattr(workspace.store, "chunks_many", None)
-    # The ranking already read these to collapse duplicates: reused, not read
-    # again (shape was 1.2-2.2 s of every search on 65k chunks, 2026-10-17).
-    got = dict(getattr(diag, "read_chunks", None) or {})
-    need = [c for c in (getattr(h, "cid", None) or getattr(h, "chunk", "") for h in hits) if c and c not in got]
-    if need and many:
-        got.update(many(need))
-    elif need:
-        got = None
-    for hit in hits:
-        cid = getattr(hit, "cid", None) or getattr(hit, "chunk", "")
-        stored = (got.get(cid) if got is not None else workspace.store.chunk(cid)) if cid else None
-        if stored is None:
-            continue
-        if url and stored.url != url:
-            continue
-        if stored.redundant:
-            # `G-24` settled this one: it draws what another chunk draws.
-            continue
-        if coarse:
-            if stored.group_of and stored.group_of != stored.cid:
-                # A member speaks through its lead, which ranks on its own.
+    # Refilled, not truncated: the coarse and redundant filters below drop
+    # members and copies, and a page of k asked for exactly k came back
+    # EMPTY once content ranked first ("okapi": 220 matches, 0 hits,
+    # 2026-11-01). Asked again four times as deep while the page is short
+    # and the ranking had more. Planted `PLANT_NO_REFILL`.
+    while True:
+        from ..search import SearchDiagnostics
+        diag = SearchDiagnostics()
+        try:
+            hits = workspace.search(query, k=want, scope_url=url or "", diagnostics=diag)
+        except TypeError:                       # an index without diagnostics
+            hits = workspace.search(query, k=want, scope_url=url or "")
+        import time as _time
+        _t_shape = _time.perf_counter()
+        out = []
+        spent = 0
+        seen_groups = set()
+        # One read for every hit (it was one query per hit, after the ranking had
+        # already read them all once: 9-10 s cold, 2026-10-17).
+        many = getattr(workspace.store, "chunks_many", None)
+        # The ranking already read these to collapse duplicates: reused, not read
+        # again (shape was 1.2-2.2 s of every search on 65k chunks, 2026-10-17).
+        got = dict(getattr(diag, "read_chunks", None) or {})
+        need = [c for c in (getattr(h, "cid", None) or getattr(h, "chunk", "") for h in hits) if c and c not in got]
+        if need and many:
+            got.update(many(need))
+        elif need:
+            got = None
+        for hit in hits:
+            cid = getattr(hit, "cid", None) or getattr(hit, "chunk", "")
+            stored = (got.get(cid) if got is not None else workspace.store.chunk(cid)) if cid else None
+            if stored is None:
                 continue
-            if stored.group_of in seen_groups:
+            if url and stored.url != url:
                 continue
-            if stored.group_of:
-                seen_groups.add(stored.group_of)
-        out.append({
-            "cid": stored.cid,
-            "url": stored.url,
-            "xpath": stored.xpath,
-            "score": float(getattr(hit, "score", 0.0) or 0.0),
-            # The three factors, not just their product. The product is a
-            # multiplication of three small numbers and lands around 1e-5,
-            # which reads as zero at any sane precision and tells a reader
-            # nothing about WHY a result ranked -- whether the words matched,
-            # the meaning did, or the page is simply well linked.
-            "lexical": float(getattr(hit, "lexical", 0.0) or 0.0),
-            "semantic": float(getattr(hit, "semantic", 0.0) or 0.0),
-            "pagerank": float(getattr(hit, "rank", 0.0) or 0.0),
-            "members": stored.group_n,
-            "tokens": tokens.budget(stored.md or ""),
-            # The first lines, LINK-FREE. The stored markdown is 52.5%
-            # machine addressing by token (M.7), and a preview of it
-            # reads as the same long path twice inside one `[](...)`,
-            # filling the row and pushing the words that would say what
-            # the result IS off the end. `for_model` is the string the
-            # encoder ranked on, so a preview of it previews what
-            # actually matched.
-            "preview": "\n".join(
-                tokens.for_model(stored.md or "").splitlines()[:6]),
-        })
+            if stored.redundant:
+                # `G-24` settled this one: it draws what another chunk draws.
+                continue
+            if coarse:
+                if stored.group_of and stored.group_of != stored.cid:
+                    # A member speaks through its lead, which ranks on its own.
+                    continue
+                if stored.group_of in seen_groups:
+                    continue
+                if stored.group_of:
+                    seen_groups.add(stored.group_of)
+            out.append({
+                "cid": stored.cid,
+                "url": stored.url,
+                "xpath": stored.xpath,
+                "score": float(getattr(hit, "score", 0.0) or 0.0),
+                # The three factors, not just their product. The product is a
+                # multiplication of three small numbers and lands around 1e-5,
+                # which reads as zero at any sane precision and tells a reader
+                # nothing about WHY a result ranked -- whether the words matched,
+                # the meaning did, or the page is simply well linked.
+                "lexical": float(getattr(hit, "lexical", 0.0) or 0.0),
+                "semantic": float(getattr(hit, "semantic", 0.0) or 0.0),
+                "content": float(getattr(hit, "content", 1.0)),
+                "pagerank": float(getattr(hit, "rank", 0.0) or 0.0),
+                "members": stored.group_n,
+                "tokens": tokens.budget(stored.md or ""),
+                # The first lines, LINK-FREE. The stored markdown is 52.5%
+                # machine addressing by token (M.7), and a preview of it
+                # reads as the same long path twice inside one `[](...)`,
+                # filling the row and pushing the words that would say what
+                # the result IS off the end. `for_model` is the string the
+                # encoder ranked on, so a preview of it previews what
+                # actually matched.
+                "preview": "\n".join(
+                    tokens.for_model(stored.md or "").splitlines()[:6]),
+            })
+
+        if len(out) >= offset + k or len(hits) < want or want >= 4096 or PLANT_NO_REFILL[0]:
+            break
+        want = min(4096, want * 4)
 
     out = out[offset:offset + k]
     if budget:

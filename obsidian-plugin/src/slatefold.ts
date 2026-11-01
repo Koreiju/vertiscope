@@ -215,21 +215,47 @@ export function foldDecorations(doc: Text, st: FoldState): DecorationSet {
     b.add(from, to, Decoration.replace({ widget: new CircleWidget(doc.line(t).text.trim()), block: true }));
     return b.finish();
   }
+  // Variables are NODES in the panel (PLUGIN_GOAL 54-55, 2026-11-01: "variable
+  // entities like "ego" are shown as nodes within the panel", in Obsidian's
+  // purple linked-markdown style): the slate's own name on its title line --
+  // the header node, shown here when the panel is open -- and every `{ref}`.
+  // Planted `__domvecPlantNoVarNodes`: plain text.
+  const nodes = !(window as any).__domvecPlantNoVarNodes;
   for (let i = t; i <= doc.lines; i++) {
     const line = doc.line(i);
     const re = /\{([^}]+)\}/g;
     let m: RegExpExecArray | null;
-    const marks: [number, number][] = [];
+    const ranges: [number, number, Decoration][] = [];
     let reveal: { name: string; lines: string[] } | null = null;
-    while ((m = re.exec(line.text))) {
-      const name = m[1];
-      if (!(name in st.reveals)) continue;
-      // Braces dropped on the revealed token (revealed-internal).
-      marks.push([line.from + m.index, line.from + m.index + 1]);
-      marks.push([line.from + m.index + m[0].length - 1, line.from + m.index + m[0].length]);
-      if (!reveal) reveal = { name, lines: st.reveals[name] };
+    if (i === t && nodes) {
+      const lead = line.text.length - line.text.trimStart().length, name = line.text.trim();
+      if (name) ranges.push([line.from + lead, line.from + lead + name.length, Decoration.mark({ class: "domvec-var domvec-var-title" })]);
+    } else if (nodes) {
+      // Every field NAME is a variable too (item 60: "most/all variables
+      // contained within the panel are actual variables ... Unhighlighted
+      // parts ... only be the filled values"): the key, up to its tab.
+      const lead = line.text.length - line.text.trimStart().length;
+      const rest = line.text.slice(lead), tab = rest.indexOf("\t");
+      const key = (tab < 0 ? rest : rest.slice(0, tab)).trimEnd();
+      // A positional child (`- x`, `1. x`) is a value in a list, not a name.
+      if (key && !/^([-*+]|\d+\.)\s/.test(key) && !key.startsWith("{")) {
+        ranges.push([line.from + lead, line.from + lead + key.length, Decoration.mark({ class: "domvec-var domvec-var-key" })]);
+      }
     }
-    for (const [a, z] of marks) b.add(a, z, Decoration.replace({}));
+    while ((m = re.exec(line.text))) {
+      const name = m[1], a = line.from + m.index, z = a + m[0].length;
+      if (name in st.reveals) {
+        // Braces dropped on the revealed token (revealed-internal); the name a node.
+        ranges.push([a, a + 1, Decoration.replace({})]);
+        if (nodes) ranges.push([a + 1, z - 1, Decoration.mark({ class: "domvec-var is-revealed" })]);
+        ranges.push([z - 1, z, Decoration.replace({})]);
+        if (!reveal) reveal = { name, lines: st.reveals[name] };
+      } else if (nodes) {
+        ranges.push([a, z, Decoration.mark({ class: "domvec-var" })]);
+      }
+    }
+    ranges.sort((x, y) => x[0] - y[0]);
+    for (const [a, z, d] of ranges) b.add(a, z, d);
     if (reveal) {
       const indent = (/^\t*/.exec(line.text) || [""])[0].length;
       b.add(line.to, line.to, Decoration.widget({ widget: new RevealWidget(reveal.name, reveal.lines, indent), block: true, side: 1 }));
@@ -239,7 +265,9 @@ export function foldDecorations(doc: Text, st: FoldState): DecorationSet {
 }
 
 export const foldField = StateField.define<{ st: FoldState; deco: DecorationSet }>({
-  create: (s: EditorState) => ({ st: EMPTY, deco: Decoration.none }),
+  // Drawn from the first frame: the variable nodes (items 54-55) need no fold
+  // state, and a note opened afresh showed none until a fold or an edit.
+  create: (s: EditorState) => ({ st: EMPTY, deco: foldDecorations(s.doc, EMPTY) }),
   update(v, tr) {
     let st = v.st;
     for (const e of tr.effects) if (e.is(setFolds)) st = e.value;

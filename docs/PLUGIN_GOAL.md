@@ -4674,6 +4674,60 @@ node, stuck in the 2D graph form; with (50), that form lives on the plane in
 the 3D view, so the collapsed cockpit is reachable there without a second copy.
 This reading is mine, marked as such.*
 
+*Later the same day, with a screenshot (the `ego` slate open in Obsidian's
+right sidebar; the 3D graph and the browser cell to its left):*
+
+> The current ego control panel is detached from the 2D computation graph plane overtop of the 3D graph editor.
+
+*Read as: (53) a defect against (50) and (52) -- the cockpit is a separate
+sidebar note; it belongs ON the 2D plane that lies over the 3D graph, stuck
+there as the ego node, its fields acted on in place.*
+
+*Then, with a screenshot of the cockpit card on the plane (a circled "ego"
+head above the note's own "ego" title line, Obsidian's view header between):*
+
+> The duplicative "ego" part should actually be fused, and this goes for all "variables" with links in the remainder of the computation graph. So, variable entities like "ego" are shown as nodes within the panel. Perhaps rectangular borders *or* (even more congruent to extending obsidian's purple highlight for linked markdown, including our in-panel retrieval mechanism where [search query is entered here and](ranked results are shown as a scrollable overlay inplace where the parentheses are), which extends to computation graph i.e. python structures/variable references). Also, the duplicative aspect should be that the panel-view can be minimized and show its top-most 'header' node compactly, as is the one duplicate, with 'open' panels showing the header nodes regularly in their markdown.
+
+*Read as: (54) one "ego", not two -- an OPEN panel shows its header node in
+its own markdown (the slate's title line, drawn as a node), and the card's
+separate head exists only when the panel is MINIMIZED, as that header node
+alone, compact; (55) every variable entity with a link in the computation
+graph -- a slate's name, a `{ref}`, a Python structure or variable reference
+-- is drawn as a NODE inside the panel, in Obsidian's own purple
+linked-markdown style (preferred over rectangular borders), the same style as
+the in-panel retrieval gesture `[query](ranked results)`, so references read
+alike across notes, slates and code.*
+
+*And next:*
+
+> Also, the markdown panel should still technically be the default "obsidian" panel but with the necessary extensions.... this would fix a lot of markdown things upfront for us and lets us build off of features obsidian's markdown panels already support. But the panels should still be draggable and contained within the 2D computation graph plane.
+
+> The markdown isn't obsidian-native and I can tell because the "ego" panel uses a center view instead of left-snap.
+
+> When you have time, also quickly have a look at debugging retrieval results to exclude boilerplate things, where the original search query at the input fields or buttons are often the top results and filter out actual content-based results.
+
+*With a screenshot of the cockpit (the title "ego" and the `{keys}` /
+`{results}` references highlighted, the field names plain):*
+
+> I think most/all variables contained within the panel are actual variables that are supposed to be highlighted. Unhighlighted parts here would likely be only be the filled values the variables take if they're inputted by the user or similar.
+
+*Read as: (60) every field NAME in a slate is a variable and is drawn as a
+node -- `view`, `throttle`, `search`, `query`, `k` alike, with the title and
+every `{ref}`; only the filled VALUES (`ego`, `55`, `false`, a typed query)
+stay plain text.*
+
+*Read as: (58) a slate on the plane is laid out as Obsidian's own editor
+lays a note out -- left-snapped, with nothing of ours pushing it inward;
+(59) a defect in retrieval: chunks that only ECHO the query -- a search box
+holding it, a button labelled with it, a results page's own query line --
+rank at the top and push content out; boilerplate of that kind is excluded
+(or ranked below content) so the results are what pages SAY.*
+
+*Read as: (56) a panel on the plane IS Obsidian's own markdown view, extended
+(the slate class, folds, variable nodes) -- never a re-implementation; (57)
+panels on the plane are DRAGGABLE and CONTAINED: moved by their header node,
+never leaving the plane's bounds.*
+
 ---
 
 ## Standing instructions carried in the verbatim

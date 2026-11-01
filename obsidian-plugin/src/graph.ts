@@ -1147,6 +1147,20 @@ export class GraphView extends ItemView {
   browsingUrl: (() => string) | null = null;
   /** Set by the plugin: a code chunk sent to a notebook as a prototype cell (G-105). */
   onPrototype: ((cid: string) => Promise<any>) | null = null;
+  /**
+   * The 2D computation-graph PLANE over the 3D view (PLUGIN_GOAL 50, 52-53:
+   * "A plane inside the 3D view"; the cockpit "detached from the 2D
+   * computation graph plane overtop of the 3D graph editor" was the defect).
+   * A layer over the canvas that lets the 3D view take every pointer event
+   * except on what is stuck to it -- the cockpit first.
+   */
+  plane(): HTMLElement | null {
+    if (!this.canvasEl) return null;
+    let p = this.canvasEl.querySelector(":scope > .domvec-plane") as HTMLElement | null;
+    if (!p) p = this.canvasEl.createDiv({ cls: "domvec-plane" });
+    return p;
+  }
+
   /** Set by the plugin: a chunk pulled into the notebook's chat (P-N7). */
   onPullToChat: ((cid: string) => Promise<any>) | null = null;
   /** Set by the plugin: a code node's module opened in its artifact panel (P-C1). */
