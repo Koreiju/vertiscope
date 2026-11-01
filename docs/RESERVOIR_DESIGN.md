@@ -292,6 +292,10 @@ title collapse and `{keys}` as samples other nodes reference.
 *Item 37 narrows questions 1 and 5: the 2D and 3D forms are one record in two places, so the
 answer to "where" is a placement, not a second model.*
 
+**Answered 2026-11-01 (PLUGIN_GOAL items 50, 52):** question 1 -- *"A plane inside the 3D
+view"*; question 5 -- the cockpit is the ego 2D node stuck in the 2D graph form (the reader's
+2026-10-29 words), so on that plane. Questions 2-4 remain open.
+
 1. **Where graph form lives.** An Obsidian view beside the 3D graph (as mortegon put it, GW §6),
    Obsidian's own Canvas (cards and edges native, but its file format owns the layout), or
    inside the 3D view as a plane.

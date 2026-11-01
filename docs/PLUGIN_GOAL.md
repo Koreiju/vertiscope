@@ -4643,6 +4643,37 @@ latency defect in the view as it stands. (16) The sidecar's work split into
 as many small, non-blocking PROCESSES as can be managed, rather than
 threads sharing one interpreter and its locks.*
 
+**2026-11-01** *(bringing the app back up; then rulings on the open design questions)*
+
+> Please bring the app back up, and summarize for me what progress has been made thus far on the computation graph/jupyter kernel dialectic thing. A lot of stuff has been recently prompted on this, and I saw some discontinuity in the features of the app with what I was originally requesting.
+
+*Four questions were then put, each with options; the reader's answers, verbatim:*
+
+- *"May I pip-install jupyter_client, ipykernel and pyzmq so notebook cells run in real Jupyter kernels (P-N1/P-N2), instead of the current plain Python subprocess?"* --
+  > Yes, install them (Recommended)
+- *"Where should the 2D computation-graph editor (the mortegon-dialect graph form of slates and cells) live? (RESERVOIR_DESIGN §9.1)"* --
+  > A plane inside the 3D view
+- *"Should code be dropped from the embedding the same way for every code artifact? Today only code:// modules embed just their comments and docstrings; a web page's code block and a vault note's python cell are embedded whole."* --
+  > One rule: docs only, everywhere
+- *"Where does the cockpit (the ego slate: view, throttle, keys, plan) sit? (RESERVOIR_DESIGN §9.5)"* --
+  > review prompts in our transcript for details
+
+*Read as (2026-11-01): (49) notebook cells run in real Jupyter kernels -- the
+protocol, through `jupyter_client` and `ipykernel`, installed with the
+reader's leave; (50) the 2D computation-graph editor is a PLANE inside the 3D
+view -- the graph form of a slate or cell drawn on a surface in the projector,
+not a second pane (this answers RESERVOIR_DESIGN §9.1 and GW §6's "host");
+(51) G-52's rule is the rule for EVERY code artifact: a web page's code block
+and a vault note's code cell embed their prose only, as a `code://` module
+does -- the earlier choice recorded in `tokens.for_model` is overruled;
+(52) the cockpit, read from the reader's 2026-10-29 words: "these controls will
+be stickable components of the computation graph in the UI panel that can be
+readily accessed always in their 2D graph form, even if collapsed within the
+'ego' 2D node which corresponds to the cockpit" -- the cockpit IS the ego 2D
+node, stuck in the 2D graph form; with (50), that form lives on the plane in
+the 3D view, so the collapsed cockpit is reachable there without a second copy.
+This reading is mine, marked as such.*
+
 ---
 
 ## Standing instructions carried in the verbatim
