@@ -8003,6 +8003,93 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-296",
+      asks: "the panel <-> graph dialect keeps ONE fold state (mortegon DOMAIN_MODEL 7.3.4): a right-click on a field with children braces it {name} and hides its subtree in the panel; the graph form then draws exactly the fields the panel shows (node-count parity) with that node braced; a click on the braced graph node unfolds it in both forms; a child's own fold survives its parent's fold and unfold; a double-click on a graph node opens its containment panel with the cursor on that field; the note's text never changes; planted (__domvecPlantNoFoldParity) the graph draws every field",
+      async run() {
+        // 2026-11-01: "let's work on the computation graph part and the dialect
+        // of how we go between the two. There are very specific points to be
+        // made on this part within the mortegon docs."
+        const got = await evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const plugin = app.plugins.getPlugin("domvec-bridge");
+          const c = plugin.cockpit;
+          const NL = String.fromCharCode(10), T = String.fromCharCode(9);
+          const folder = "domvec-checks";
+          if (!app.vault.getAbstractFileByPath(folder)) await app.vault.createFolder(folder);
+          const text = ["---", "domvec: slate", "---", "probe", T + "alpha" + T + "1", T + "group", T + T + "inner" + T + "2", T + T + "deeper",
+                        T + T + T + "leaf" + T + "3", T + "tail" + T + "4", ""].join(NL);
+          const file = await app.vault.create(folder + "/g296 probe " + Date.now() + ".md", text);
+          const leaf = app.workspace.getLeaf("tab");
+          const out = {};
+          try {
+            await leaf.openFile(file, { state: { mode: "source", source: false } });
+            app.workspace.setActiveLeaf(leaf, { focus: true });
+            await sleep(1200); c.decorate(); await sleep(300);
+            const v = leaf.view, cm = v.editor.cm, el = v.contentEl;
+            const lineText = (n) => cm.state.doc.line(n).text;
+            const lineOf = (k) => { for (let i = 1; i <= cm.state.doc.lines; i++) if (lineText(i).trim().split(T)[0] === k) return i; return -1; };
+            const shownLines = () => Array.from(el.querySelectorAll(".cm-line")).map((e) => (e.textContent || "").trim()).filter(Boolean);
+            const rightClickKey = async (k) => {
+              const pos = cm.state.doc.line(lineOf(k)).from + lineText(lineOf(k)).indexOf(k) + 1;
+              const at = cm.coordsAtPos(pos);
+              const x = (at.left + at.right) / 2, y = (at.top + at.bottom) / 2;
+              (document.elementFromPoint(x, y) || el).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 2 }));
+              await sleep(400);
+            };
+            const graph = () => el.querySelector(".domvec-slate-graph");
+            const gnodes = () => Array.from(graph() ? graph().querySelectorAll("circle") : []).map((n) => n.getAttribute("data-path"));
+            const glabel = (path) => { const t = graph() && Array.from(graph().querySelectorAll("text")).find((x) => x.getAttribute("data-path") === path); return t ? t.textContent : null; };
+            const gfire = async (path, type) => {
+              const n = Array.from(graph().querySelectorAll("circle")).find((x) => x.getAttribute("data-path") === path);
+              n.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, button: type === "contextmenu" ? 2 : 0, detail: 1 }));
+              await sleep(400);
+            };
+            // 1. Panel: fold "group".
+            await rightClickKey("group");
+            out.panel_fold = { shown: shownLines(), braces: el.querySelectorAll(".domvec-fold-brace").length,
+                               hidden_inner: !shownLines().some((l) => l.startsWith("inner")) };
+            // 2. Graph form: parity with the panel.
+            c.flipForm(v); await sleep(500);
+            out.graph_folded = { nodes: gnodes(), label: glabel("probe/group") };
+            // 3. Planted: the graph ignores the folds.
+            window.__domvecPlantNoFoldParity = true;
+            try { c.flipForm(v); await sleep(300); c.flipForm(v); await sleep(500); out.planted_nodes = gnodes().length; }
+            finally { window.__domvecPlantNoFoldParity = false; c.flipForm(v); await sleep(300); c.flipForm(v); await sleep(500); }
+            // 4. A click on the braced node unfolds it -- in both forms.
+            await gfire("probe/group", "click");
+            out.graph_unfolded = gnodes();
+            // 5. Per-subtree: fold "deeper" (graph right-click), fold and unfold "group".
+            await gfire("probe/group/deeper", "contextmenu");
+            const afterDeeper = gnodes();
+            await gfire("probe/group", "contextmenu");
+            await gfire("probe/group", "click");
+            out.subtree_kept = { after_deeper: afterDeeper, after_parent_round_trip: gnodes(), deeper_label: glabel("probe/group/deeper") };
+            // 6. Double-click a graph node: its containment panel, cursor on it.
+            await gfire("probe/group/inner", "dblclick");
+            const head = cm.state.selection.main.head;
+            out.node_to_panel = { graph_gone: !graph(), cursor_line: cm.state.doc.lineAt(head).text.trim(), shown: shownLines() };
+            out.text_unchanged = (await app.vault.read(file)) === text && v.editor.getValue() === text;
+            return out;
+          } finally {
+            leaf.detach();
+            try { await app.vault.delete(file); } catch (e) { /* gone */ }
+          }
+        })()`, { timeout: 90000 });
+        const g = got;
+        return {
+          pass: !g.error && g.panel_fold.hidden_inner && g.panel_fold.braces === 2
+                && g.graph_folded.nodes.length === 4 && g.graph_folded.label === "{group}"
+                && g.planted_nodes === 7
+                && g.graph_unfolded.length === 7
+                && g.subtree_kept.after_deeper.length === 6 && g.subtree_kept.after_parent_round_trip.length === 6
+                && g.subtree_kept.deeper_label === "{deeper}"
+                && g.node_to_panel.graph_gone && g.node_to_panel.cursor_line.startsWith("inner")
+                && g.text_unchanged,
+          evidence: got,
+        };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {

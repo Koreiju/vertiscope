@@ -61,7 +61,33 @@ export function parseSlate(text: string): SlateLine[] {
 
 export interface Reveal { name: string; lines: string[] }
 /** One note's fold state: the `{ref}`s revealed (by name) and whether the slate is collapsed. */
-export interface FoldState { reveals: Record<string, string[]>; collapsed: boolean; graph?: boolean }
+export interface FoldState {
+  reveals: Record<string, string[]>; collapsed: boolean; graph?: boolean;
+  /** Fields whose rank-1 children are folded away, by path (`ego/search`).
+   *  ONE state for both forms (mortegon DOMAIN_MODEL 7.3.4: graph form "has
+   *  no independent fold state; it stays in node-count parity with the
+   *  panel"), and per-subtree: folding a parent keeps its children's entries. */
+  folds?: string[];
+}
+
+/** The fields a fold state leaves visible, and each folded field's last child
+ *  (the dialect's one rule: a folded field shows `{name}`, its subtree hidden). */
+export function visibleFields(fs: SlateLine[], folds: string[] = []): { shown: SlateLine[]; folded: Map<number, number> } {
+  const want = new Set(folds);
+  const shown: SlateLine[] = [];
+  const folded = new Map<number, number>();
+  for (let i = 0; i < fs.length; i++) {
+    const f = fs[i];
+    shown.push(f);
+    let end = i;
+    while (end + 1 < fs.length && fs[end + 1].depth > f.depth) end++;
+    if (end > i && want.has(f.path.join("/"))) {
+      folded.set(i, end);
+      i = end;
+    }
+  }
+  return { shown, folded };
+}
 
 export const setFolds = StateEffect.define<FoldState>();
 
@@ -96,6 +122,18 @@ class RevealWidget extends WidgetType {
   ignoreEvent(): boolean { return false; }
 }
 
+/** A fold marker's brace, drawn round a folded field's name (not in the text). */
+class BraceWidget extends WidgetType {
+  constructor(readonly ch: string) { super(); }
+  eq(o: BraceWidget): boolean { return o.ch === this.ch; }
+  toDOM(): HTMLElement {
+    const el = document.createElement("span");
+    el.className = "domvec-fold-brace";
+    el.textContent = this.ch;
+    return el;
+  }
+}
+
 class CircleWidget extends WidgetType {
   constructor(readonly title: string) { super(); }
   eq(o: CircleWidget): boolean { return o.title === this.title; }
@@ -108,89 +146,138 @@ class CircleWidget extends WidgetType {
   ignoreEvent(): boolean { return false; }
 }
 
-/** The slate as a graph: one circle per field, undirected lines parent ->
- *  child, rows in the text's order (the signal flow), columns by depth. */
+/** The slate as a graph: one circle per VISIBLE field, undirected lines parent
+ *  -> child, rows in the text's order (the signal flow), columns by depth.
+ *
+ *  The other side of ONE record (mortegon DOMAIN_MODEL 7.3.4): it has no fold
+ *  state of its own -- it draws exactly the fields the panel form shows
+ *  (node-count parity), a folded field braced `{name}` (the fold marker in
+ *  both forms), and a revealed `{ref}`'s rank-1 lines as child nodes joined by
+ *  undirected lines. Its gestures are the panel's, said once for both and
+ *  handed to the cockpit as a `domvec-slate-graph` event: right-click folds /
+ *  unfolds a node with children or reveals / folds a `{ref}`; a click on a
+ *  braced node instantiates its rank-1 walk; a double-click opens the node's
+ *  containment panel (panel form, the cursor on that field). Planted
+ *  `__domvecPlantNoFoldParity`: every field drawn, the folds ignored. */
 class GraphWidget extends WidgetType {
-  constructor(readonly text: string) { super(); }
-  eq(o: GraphWidget): boolean { return o.text === this.text; }
+  constructor(readonly text: string, readonly st: FoldState) { super(); }
+  private key(): string { return this.text + "\u0000" + JSON.stringify([this.st.folds || [], Object.keys(this.st.reveals).sort()]); }
+  eq(o: GraphWidget): boolean { return o.key() === this.key(); }
   toDOM(view?: EditorView): HTMLElement {
-    const fs = parseSlate(this.text);
+    const all = parseSlate(this.text);
+    const parity = !(window as any).__domvecPlantNoFoldParity;
+    const { shown: fs, folded } = parity ? visibleFields(all, this.st.folds) : { shown: all, folded: new Map<number, number>() };
+    const foldedKeys = new Set([...folded.keys()].map((i) => all[i].path.join("/")));
+    // The nodes, in order: each visible field, then a revealed ref's lines.
+    type GNode = { key: string; label: string; depth: number; path: string; line: number; cls: string; parent: number; ref?: string };
+    const nodes: GNode[] = [];
+    const lastAt: number[] = [];
+    for (const f of fs) {
+      const path = f.path.join("/");
+      const isFolded = foldedKeys.has(path);
+      const ref = (/^\{([^}]+)\}$/.exec(f.value.trim()) || [])[1];
+      lastAt.length = f.depth;
+      const parent = f.depth > 0 ? (lastAt[f.depth - 1] ?? -1) : -1;
+      nodes.push({ key: f.key, depth: f.depth, path, line: f.line, parent, ref,
+                   label: (isFolded ? "{" + f.key + "}" : f.key) + (f.value ? "  " + f.value : ""),
+                   cls: "domvec-slate-graph-node" + (ref && !(ref in this.st.reveals) ? " is-ref" : "") + (isFolded ? " is-folded" : "") });
+      const me = nodes.length - 1;
+      lastAt[f.depth] = me;
+      for (const m of f.value.matchAll(/\{([^}]+)\}/g)) {
+        const lines = this.st.reveals[m[1]];
+        if (!lines) continue;
+        for (const l of lines.length ? lines : ["(nothing at rank 1)"]) {
+          nodes.push({ key: "", label: l.replace(/\t/g, "   ").trim(), depth: f.depth + 1, path: path + "/{" + m[1] + "}", line: f.line,
+                       parent: me, cls: "domvec-slate-graph-node is-revealed" });
+        }
+      }
+    }
     const NS = "http://www.w3.org/2000/svg";
     const el = document.createElement("div");
     el.className = "domvec-slate-graph";
     const row = 26, col = 22, r = 7, pad = 12;
     const svg = document.createElementNS(NS, "svg");
     svg.setAttribute("width", "100%");
-    svg.setAttribute("height", String(pad * 2 + Math.max(1, fs.length) * row));
-    const at = fs.map((f, i) => ({ x: pad + r + f.depth * col, y: pad + r + i * row }));
-    // Lines first, under the circles: each field to its parent (the nearest
-    // earlier field one level shallower).
-    fs.forEach((f, i) => {
-      if (f.depth === 0) return;
-      for (let j = i - 1; j >= 0; j--) if (fs[j].depth === f.depth - 1) {
-        const ln = document.createElementNS(NS, "line");
-        ln.setAttribute("x1", String(at[j].x)); ln.setAttribute("y1", String(at[j].y));
-        ln.setAttribute("x2", String(at[i].x)); ln.setAttribute("y2", String(at[i].y));
-        ln.setAttribute("class", "domvec-slate-graph-edge");
-        svg.appendChild(ln);
-        break;
-      }
-    });
-    // A field whose value names another field of this slate by `{ref}` is
-    // WIRED to it: a solid line to a node already on screen (UR O.1a's
-    // resolved-external state).
+    svg.setAttribute("height", String(pad * 2 + Math.max(1, nodes.length) * row));
+    const at = nodes.map((n, i) => ({ x: pad + r + n.depth * col, y: pad + r + i * row }));
+    const line = (a: number, b: number, cls: string) => {
+      const ln = document.createElementNS(NS, "line");
+      ln.setAttribute("x1", String(at[a].x)); ln.setAttribute("y1", String(at[a].y));
+      ln.setAttribute("x2", String(at[b].x)); ln.setAttribute("y2", String(at[b].y));
+      ln.setAttribute("class", cls);
+      svg.appendChild(ln);
+    };
+    nodes.forEach((n, i) => { if (n.parent >= 0) line(n.parent, i, "domvec-slate-graph-edge"); });
+    // A field naming another VISIBLE field of this slate by `{ref}` is wired to
+    // it: a solid line (UR O.1a's resolved-external state).
     const byKey = new Map<string, number>();
-    fs.forEach((f, i) => { if (!byKey.has(f.key)) byKey.set(f.key, i); });
-    fs.forEach((f, i) => {
-      const re = /\{([^}]+)\}/g;
-      let m: RegExpExecArray | null;
-      while ((m = re.exec(f.value))) {
+    nodes.forEach((n, i) => { if (n.key && !byKey.has(n.key)) byKey.set(n.key, i); });
+    fs.forEach((f) => {
+      const i = nodes.findIndex((n) => n.path === f.path.join("/"));
+      for (const m of f.value.matchAll(/\{([^}]+)\}/g)) {
         const j = byKey.get(m[1]);
-        if (j === undefined || j === i) continue;
-        const ln = document.createElementNS(NS, "line");
-        ln.setAttribute("x1", String(at[i].x)); ln.setAttribute("y1", String(at[i].y));
-        ln.setAttribute("x2", String(at[j].x)); ln.setAttribute("y2", String(at[j].y));
-        ln.setAttribute("class", "domvec-slate-graph-link");
-        svg.appendChild(ln);
+        if (j !== undefined && j !== i) line(i, j, "domvec-slate-graph-link");
       }
     });
-    fs.forEach((f, i) => {
+    nodes.forEach((n, i) => {
       const c = document.createElementNS(NS, "circle");
-      c.setAttribute("cx", String(at[i].x)); c.setAttribute("cy", String(at[i].y)); c.setAttribute("r", String(r));
-      // A field whose value is a `{ref}` is drawn hollow: its node is elsewhere.
-      c.setAttribute("class", "domvec-slate-graph-node" + (/^\{[^}]+\}$/.test(f.value.trim()) ? " is-ref" : ""));
-      c.setAttribute("data-key", f.key);
+      c.setAttribute("cx", String(at[i].x)); c.setAttribute("cy", String(at[i].y)); c.setAttribute("r", String(n.key ? r : r - 2));
+      c.setAttribute("class", n.cls);
+      c.setAttribute("data-key", n.key);
+      c.setAttribute("data-path", n.path);
+      if (n.ref) c.setAttribute("data-ref", n.ref);
       svg.appendChild(c);
       const t = document.createElementNS(NS, "text");
       t.setAttribute("x", String(at[i].x + r + 6)); t.setAttribute("y", String(at[i].y + 4));
-      t.setAttribute("class", "domvec-slate-graph-label");
-      t.textContent = f.value ? f.key + "  " + f.value : f.key;
+      t.setAttribute("class", "domvec-slate-graph-label" + (n.cls.includes("is-folded") ? " is-folded" : ""));
+      t.setAttribute("data-path", n.path);
+      t.textContent = n.label;
       svg.appendChild(t);
     });
     el.appendChild(svg);
+    const nodeOf = (e: Event) => {
+      const p = (e.target as Element)?.getAttribute?.("data-path");
+      return p == null ? null : nodes.find((n) => n.path === p) || null;
+    };
+    const tell = (kind: string, n: GNode) => el.dispatchEvent(new CustomEvent("domvec-slate-graph", {
+      bubbles: true, detail: { kind, path: n.path, ref: n.ref || "", line: n.line, folded: n.cls.includes("is-folded") } }));
+    svg.addEventListener("contextmenu", (e) => {
+      const n = nodeOf(e);
+      if (!n || !n.key) return;
+      e.preventDefault(); e.stopPropagation();
+      tell("right", n);
+    });
+    svg.addEventListener("click", (e) => {
+      const n = nodeOf(e);
+      if (!n || !n.cls.includes("is-folded") || e.detail > 1) return;
+      e.preventDefault(); e.stopPropagation();
+      tell("unfold", n);
+    });
+    svg.addEventListener("dblclick", (e) => {
+      const n = nodeOf(e);
+      if (!n || !n.key) return;
+      e.preventDefault(); e.stopPropagation();
+      tell("panel", n);
+    });
     // Left-drag from one node onto another WIRES them (UR N.4): the dragged
     // field gains `{target}` -- written into the slate's text, the record, so
     // the panel form shows the same link. Planted `__domvecPlantNoWire`.
-    let from = -1;
+    let from: GNode | null = null;
     svg.addEventListener("mousedown", (e) => {
-      const k = (e.target as Element)?.getAttribute?.("data-key");
-      if (e.button !== 0 || k == null) return;
-      from = fs.findIndex((f) => f.key === k);
-      e.preventDefault(); e.stopPropagation();
+      const n = nodeOf(e);
+      if (e.button !== 0 || !n || !n.key) return;
+      from = n;
     });
     svg.addEventListener("mouseup", (e) => {
-      const k = (e.target as Element)?.getAttribute?.("data-key");
-      const src = from;
-      from = -1;
-      if (src < 0 || k == null || !view || (window as any).__domvecPlantNoWire) return;
-      const dst = fs.findIndex((f) => f.key === k);
-      if (dst < 0 || dst === src) return;
+      const src = from, dst = nodeOf(e);
+      from = null;
+      if (!src || !dst || !dst.key || src === dst || !view || (window as any).__domvecPlantNoWire) return;
       e.preventDefault(); e.stopPropagation();
-      const ref = "{" + fs[dst].key + "}";
-      if (fs[src].value.includes(ref)) return;
-      const line = view.state.doc.line(fs[src].line + 1);
-      const insert = fs[src].value ? " " + ref : "\t" + ref;
-      view.dispatch({ changes: { from: line.to, to: line.to, insert } });
+      const ref = "{" + dst.key + "}";
+      const f = all.find((x) => x.path.join("/") === src.path);
+      if (!f || f.value.includes(ref)) return;
+      const ln = view.state.doc.line(f.line + 1);
+      view.dispatch({ changes: { from: ln.to, to: ln.to, insert: f.value ? " " + ref : "\t" + ref } });
       ((window as any).__domvecWireStats = (window as any).__domvecWireStats || { wired: 0 }).wired++;
     });
     return el;
@@ -206,7 +293,7 @@ export function foldDecorations(doc: Text, st: FoldState): DecorationSet {
   if (st.graph && !st.collapsed) {
     // Graph form: the slate's fields as nodes and lines, the same record.
     const from = doc.line(t).from, to = doc.line(doc.lines).to;
-    b.add(from, to, Decoration.replace({ widget: new GraphWidget(doc.toString()), block: true }));
+    b.add(from, to, Decoration.replace({ widget: new GraphWidget(doc.toString(), st), block: true }));
     return b.finish();
   }
   if (st.collapsed) {
@@ -221,7 +308,16 @@ export function foldDecorations(doc: Text, st: FoldState): DecorationSet {
   // the header node, shown here when the panel is open -- and every `{ref}`.
   // Planted `__domvecPlantNoVarNodes`: plain text.
   const nodes = !(window as any).__domvecPlantNoVarNodes;
+  // Folded fields: braces round the name (the fold marker, mortegon O.2), the
+  // subtree's lines replaced. Doc line of each folded field -> its last child.
+  const fsAll = parseSlate(doc.toString());
+  const foldAt = new Map<number, number>();
+  for (const [i, end] of visibleFields(fsAll, st.folds).folded) {
+    if (fsAll[i].line + 1 !== t) foldAt.set(fsAll[i].line + 1, fsAll[end].line + 1);
+  }
+  let skipTo = 0;
   for (let i = t; i <= doc.lines; i++) {
+    if (i <= skipTo) continue;
     const line = doc.line(i);
     const re = /\{([^}]+)\}/g;
     let m: RegExpExecArray | null;
@@ -230,7 +326,7 @@ export function foldDecorations(doc: Text, st: FoldState): DecorationSet {
     if (i === t && nodes) {
       const lead = line.text.length - line.text.trimStart().length, name = line.text.trim();
       if (name) ranges.push([line.from + lead, line.from + lead + name.length, Decoration.mark({ class: "domvec-var domvec-var-title" })]);
-    } else if (nodes) {
+    } else if (i !== t) {
       // Every field NAME is a variable too (item 60: "most/all variables
       // contained within the panel are actual variables ... Unhighlighted
       // parts ... only be the filled values"): the key, up to its tab.
@@ -239,7 +335,15 @@ export function foldDecorations(doc: Text, st: FoldState): DecorationSet {
       const key = (tab < 0 ? rest : rest.slice(0, tab)).trimEnd();
       // A positional child (`- x`, `1. x`) is a value in a list, not a name.
       if (key && !/^([-*+]|\d+\.)\s/.test(key) && !key.startsWith("{")) {
-        ranges.push([line.from + lead, line.from + lead + key.length, Decoration.mark({ class: "domvec-var domvec-var-key" })]);
+        const folded = foldAt.get(i);
+        if (nodes) ranges.push([line.from + lead, line.from + lead + key.length,
+          Decoration.mark({ class: "domvec-var domvec-var-key" + (folded ? " is-folded" : "") })]);
+        if (folded) {
+          ranges.push([line.from + lead, line.from + lead, Decoration.widget({ widget: new BraceWidget("{"), side: -1 })]);
+          ranges.push([line.from + lead + key.length, line.from + lead + key.length, Decoration.widget({ widget: new BraceWidget("}"), side: 1 })]);
+          ranges.push([line.to, doc.line(folded).to, Decoration.replace({})]);
+          skipTo = folded;
+        }
       }
     }
     while ((m = re.exec(line.text))) {
@@ -254,7 +358,7 @@ export function foldDecorations(doc: Text, st: FoldState): DecorationSet {
         ranges.push([a, z, Decoration.mark({ class: "domvec-var" })]);
       }
     }
-    ranges.sort((x, y) => x[0] - y[0]);
+    ranges.sort((x, y) => x[0] - y[0] || (x[2] as any).startSide - (y[2] as any).startSide);
     for (const [a, z, d] of ranges) b.add(a, z, d);
     if (reveal) {
       const indent = (/^\t*/.exec(line.text) || [""])[0].length;

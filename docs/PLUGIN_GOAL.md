@@ -4716,6 +4716,32 @@ node -- `view`, `throttle`, `search`, `query`, `k` alike, with the title and
 every `{ref}`; only the filled VALUES (`ego`, `55`, `false`, a typed query)
 stay plain text.*
 
+*And next:*
+
+> After this, let's work on the computation graph part and the dialect of how we go between the two. There are very specific points to be made on this part within the mortegon docs.
+
+*With a screenshot of the cockpit, every field name now highlighted:*
+
+> What also needs to happen is for you to treat our specialized code-node markdown integrations more like as a standard python module with specialized markdown features, so things like triple-repeating "results" would likely throw a syntax error and stuff. This specific set of designs is meant to give a smoother integration between markdown and python per regular jupyter, while keeping jupyter support, but with this as the missing-link between the two standard types of jupyter kernels. This goes along with the additional cells to a standard markdown notebook that have been spec'd previously.
+
+> Let's stick to all tasks though and not pause when just one is done
+
+*Read as: (62) a slate IS a Python module written as a markdown tree: its
+fields are names in nested namespaces, a `{ref}` is a name resolved by
+Python's scoping, a literal value is a Python literal -- and its own
+grammar's errors are raised as Python would raise them: the same name bound
+twice in one namespace, a name defined as itself (`results {results}`), a
+reference to nothing (the triple "results" of the cockpit is such an error);
+(63) this dialect is the MISSING LINK between Jupyter's two standard cell
+kinds, markdown and code: a third cell kind in the markdown notebook (with the
+cells already specified), compiled into the note's real Jupyter kernel as a
+module, Jupyter support kept; (64) work through ALL the open tasks without
+pausing when one is done.*
+
+*Read as: (61) next, the COMPUTATION GRAPH form and the dialect of going
+between the two forms (panel and graph) -- built to the specific points the
+mortegon docs make on it, read there rather than reconstructed.*
+
 *Read as: (58) a slate on the plane is laid out as Obsidian's own editor
 lays a note out -- left-snapped, with nothing of ours pushing it inward;
 (59) a defect in retrieval: chunks that only ECHO the query -- a search box

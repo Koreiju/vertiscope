@@ -243,7 +243,8 @@ export class Cockpit {
   }
 
   // ---- the slate gestures, on every slate note (G-278) ----------------------
-  foldStats = { reveals: 0, folds: 0, collapses: 0, opens: 0, restored: 0, unresolved: 0, flips: 0 };
+  foldStats = { reveals: 0, folds: 0, collapses: 0, opens: 0, restored: 0, unresolved: 0, flips: 0,
+                field_folds: 0, field_unfolds: 0, node_to_panel: 0 };
   /** Planted (G-281): a double-click on a slate flips nothing. */
   plantNoGraphForm = false;
   /** Double left-click: the slate flips between panel and graph form (G-281). */
@@ -252,11 +253,78 @@ export class Cockpit {
     const cm = v?.editor?.cm, path = v?.file?.path;
     if (!cm || !path) return false;
     const cur = foldsOf(cm);
-    const st: FoldState = { collapsed: false, reveals: { ...cur.reveals }, graph: !cur.graph };
+    // The SAME record, the other form: reveals and folds carried whole.
+    const st: FoldState = { ...this.copyFolds(cur), collapsed: false, graph: !cur.graph };
     cm.dispatch({ effects: setFolds.of(st) });
     this.saveFolds(path, st);
     this.foldStats.flips++;
     return true;
+  }
+
+  /** A fold state copied whole -- every gesture starts from all of it (a
+   *  right-click once rebuilt it from two fields and dropped the graph flag). */
+  private copyFolds(cur: FoldState): FoldState {
+    return { collapsed: cur.collapsed, graph: cur.graph, reveals: { ...cur.reveals }, folds: [...(cur.folds || [])] };
+  }
+
+  /** Fold or unfold a field's rank-1 children (mortegon 7.3.4, M.6): its name
+   *  braced and its subtree hidden in BOTH forms; per-subtree state kept. */
+  toggleFieldFold(v: any, fieldPath: string, open?: boolean): boolean {
+    const cm = v?.editor?.cm, path = v?.file?.path;
+    if (!cm || !path || this.plantNoFolds) return false;
+    const st = this.copyFolds(foldsOf(cm));
+    const folds = new Set(st.folds);
+    const fold = open === undefined ? !folds.has(fieldPath) : !open;
+    if (fold) folds.add(fieldPath); else folds.delete(fieldPath);
+    st.folds = [...folds];
+    cm.dispatch({ effects: setFolds.of(st) });
+    this.saveFolds(path, st);
+    if (fold) this.foldStats.field_folds++; else this.foldStats.field_unfolds++;
+    return true;
+  }
+
+  /** The field on a doc line (1-based), and whether it has children. */
+  private fieldAtLine(cm: any, lineNo: number): { path: string; hasKids: boolean } | null {
+    const fs = parseSlate(cm.state.doc.toString());
+    const i = fs.findIndex((f) => f.line + 1 === lineNo);
+    if (i < 0) return null;
+    return { path: fs[i].path.join("/"), hasKids: i + 1 < fs.length && fs[i + 1].depth > fs[i].depth };
+  }
+
+  /** The graph form's gestures, said once for both forms (`GraphWidget`). */
+  private async graphGesture(v: any, d: { kind: string; path: string; ref: string; line: number; folded: boolean }): Promise<void> {
+    const cm = v?.editor?.cm;
+    if (!cm) return;
+    const f = this.fieldAtLine(cm, d.line + 1);
+    if (d.kind === "right") {
+      if (f && (f.hasKids || d.folded)) { this.toggleFieldFold(v, d.path); return; }
+      if (d.ref) await this.toggleReveal(v, d.ref);
+    } else if (d.kind === "unfold") {
+      this.toggleFieldFold(v, d.path, true);
+    } else if (d.kind === "panel") {
+      // A graph node opens its containment panel: panel form, the cursor on it.
+      if (this.flipForm(v)) {
+        const ln = cm.state.doc.line(Math.min(d.line + 1, cm.state.doc.lines));
+        cm.dispatch({ selection: { anchor: ln.from }, scrollIntoView: true });
+        this.foldStats.node_to_panel++;
+      }
+    }
+  }
+
+  /** Reveal / fold a `{ref}`'s rank-1 lines (the right-click on a reference). */
+  async toggleReveal(v: any, name: string): Promise<string> {
+    const cm = v?.editor?.cm, path = v?.file?.path;
+    if (!cm || !path || this.plantNoFolds) return "none";
+    const st = this.copyFolds(foldsOf(cm));
+    if (name in st.reveals) { delete st.reveals[name]; this.foldStats.folds++; }
+    else {
+      const lines = await this.rank1(path, name);
+      if (!lines) return "unresolved";
+      st.reveals[name] = lines; this.foldStats.reveals++;
+    }
+    cm.dispatch({ effects: setFolds.of(st) });
+    this.saveFolds(path, st);
+    return "ok";
   }
   /** Planted (G-280): `{keys}` resolves only inside the cockpit. */
   plantKeysCockpitOnly = false;
@@ -280,9 +348,9 @@ export class Cockpit {
     const cm = v?.editor?.cm, path = v?.file?.path;
     if (!cm || !path) return;
     const st = this.loadFolds(path);
-    if (!(Object.keys(st.reveals).length || st.collapsed || st.graph)) return;
+    if (!(Object.keys(st.reveals).length || st.collapsed || st.graph || (st.folds || []).length)) return;
     const cur = foldsOf(cm);
-    if (Object.keys(cur.reveals).length || cur.collapsed || cur.graph) return;
+    if (Object.keys(cur.reveals).length || cur.collapsed || cur.graph || (cur.folds || []).length) return;
     cm.dispatch({ effects: setFolds.of(st) });
     this.foldStats.restored++;
   }
@@ -309,7 +377,7 @@ export class Cockpit {
     const cm = v?.editor?.cm, path = v?.file?.path;
     if (!cm || !path) return "none";
     const cur = foldsOf(cm);
-    const st: FoldState = { collapsed: cur.collapsed, reveals: { ...cur.reveals } };
+    const st: FoldState = this.copyFolds(cur);
     if (target?.closest?.(".domvec-slate-circle")) {
       st.collapsed = false; this.foldStats.opens++;
     } else {
@@ -328,6 +396,11 @@ export class Cockpit {
         }
       } else if (!hit && ln.number === titleLine(cm.state.doc)) {
         st.collapsed = true; this.foldStats.collapses++;
+      } else if (!hit) {
+        // A field with rank-1 children: its fold toggles (braced, subtree hidden).
+        const f = this.fieldAtLine(cm, ln.number);
+        if (!f || !f.hasKids) return "none";
+        return this.toggleFieldFold(v, f.path) ? "ok" : "none";
       } else return "none";
     }
     cm.dispatch({ effects: setFolds.of(st) });
@@ -347,14 +420,21 @@ export class Cockpit {
       const ln = pos != null ? cm.state.doc.lineAt(pos) : null;
       const onRef = ln ? /\{[^}]+\}/.test(ln.text) : false;
       const onTitle = ln ? ln.number === titleLine(cm.state.doc) : false;
-      if (!(t?.closest?.(".domvec-slate-circle") || onRef || onTitle)) return;
+      const onFoldable = ln ? !!this.fieldAtLine(cm, ln.number)?.hasKids : false;
+      if (t?.closest?.(".domvec-slate-graph")) return;    // the graph says its own (below)
+      if (!(t?.closest?.(".domvec-slate-circle") || onRef || onTitle || onFoldable)) return;
       e.preventDefault(); e.stopPropagation();
       void this.slateGesture(v, e.clientX, e.clientY, t);
     }, true);
+    // The graph form's gestures (`GraphWidget`): the same fold state.
+    el.addEventListener("domvec-slate-graph", (e: Event) => { void this.graphGesture(v, (e as CustomEvent).detail); });
     el.addEventListener("dblclick", (e: MouseEvent) => {
       if (e.button !== 0) return;
       const t = e.target as HTMLElement | null;
       if (!t?.closest?.(".cm-content, .domvec-slate-graph")) return;
+      // On a graph NODE the graph says it itself: that node's containment
+      // panel, the cursor on it (7.3.4) -- not a bare flip.
+      if (t.closest(".domvec-slate-graph") && (t as Element).getAttribute?.("data-path") != null) return;
       if (this.flipForm(v)) { e.preventDefault(); e.stopPropagation(); }
     }, true);
   }
