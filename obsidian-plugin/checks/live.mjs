@@ -7352,6 +7352,53 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "P-M3",
+      asks: "code, kernel and terminal options are built ON TOP OF the native form: one note, opened as Obsidian's own 'markdown' view (no domvec view type for it), carries all of them in place -- a kernel run and a terminal on its code fence, the add-cell strip at its foot -- in live preview and in reading view; planted (__domvecPlantNoTermFence) the terminal option is gone from the native view",
+      async run() {
+        // PLUGIN_GOAL: "we build on this native form to include code, kernel,
+        // and terminal options". P-N3 and P-M4 run each option; this asks
+        // where they live.
+        const got = await evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const NL = String.fromCharCode(10), F = String.fromCharCode(96).repeat(3);
+          const folder = "domvec-checks";
+          if (!app.vault.getAbstractFileByPath(folder)) await app.vault.createFolder(folder);
+          const file = await app.vault.create(folder + "/pm3 note " + Date.now() + ".md", "# pm3" + NL + NL + "Prose." + NL + NL + F + "python" + NL + "print(3)" + NL + F + NL);
+          const ours = () => { const n = []; app.workspace.iterateAllLeaves((l) => { const t = l.view.getViewType(); if (t.startsWith("domvec-") && l.view.file === file) n.push(t); }); return n; };
+          const look = async (leaf, mode) => {
+            await leaf.setViewState({ type: "markdown", state: { file: file.path, mode, source: false } });
+            await sleep(1200);
+            const el = leaf.view.containerEl;
+            return { type: leaf.view.getViewType(), mode: leaf.view.getMode(),
+                     run: !!el.querySelector(".domvec-run-fence"), terminal: !!el.querySelector(".domvec-term-fence"),
+                     cells: !!el.querySelector(".domvec-cellbar"), cell_buttons: el.querySelectorAll(".domvec-cellbar-add").length };
+          };
+          const leaf = app.workspace.getLeaf("tab");
+          const out = {};
+          try {
+            out.live = await look(leaf, "source");
+            out.reading = await look(leaf, "preview");
+            out.domvec_views_for_note = ours();
+            window.__domvecPlantNoTermFence = true;
+            try {
+              await leaf.setViewState({ type: "markdown", state: { file: "", mode: "source" } });
+              out.planted = await look(leaf, "source");
+            } finally { window.__domvecPlantNoTermFence = false; }
+            return out;
+          } finally {
+            leaf.detach();
+            try { await app.vault.delete(file); } catch (e) { /* gone */ }
+          }
+        })()`, { timeout: 60000 });
+        const all = (x) => !!x && x.type === "markdown" && x.run && x.terminal && x.cells && x.cell_buttons >= 2;
+        return {
+          pass: !got.error && all(got.live) && got.live.mode === "source" && all(got.reading) && got.reading.mode === "preview"
+                && got.domvec_views_for_note.length === 0 && got.planted.type === "markdown" && got.planted.run && !got.planted.terminal,
+          evidence: got,
+        };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {
