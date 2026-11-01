@@ -6715,6 +6715,100 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-105",
+      asks: "a package chunk goes into a notebook cell as a code prototype: the 'cell' control on a code chunk's billboard appends its function -- heading linked to its code:// address, docstring, python fence holding the def -- to the notebook the reader was last in, and that cell runs in the note's kernel in its home module's namespace (a later cell calls it); planted (prototype-no-code) nothing is appended",
+      async run() {
+        // Addendum IX: "bringing these chunks into code prototypes in jupyter
+        // python cells on a notebook". json's detect_encoding uses `codecs`,
+        // imported at module level, so a bare copy of the def would fail when
+        // called: the call cell is what proves the prototype RUNS.
+        const plant = (name, on) => fetch(SIDECAR + "/plant", { method: "POST",
+          headers: { "content-type": "application/json", "X-Domvec-Client": "obsidian-plugin" }, body: JSON.stringify({ name, on }) });
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const until = async (ok, ms) => { for (let t = 0; t < ms && !(await ok()); t += 250) await sleep(250); return !!(await ok()); };
+          const plugin = app.plugins.getPlugin("domvec-bridge");
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
+          if (!v || !v.graph) return { error: "no graph" };
+          const NL = String.fromCharCode(10), F = String.fromCharCode(96).repeat(3);
+          const URL = "code://pypi/json/__init__.py";
+          const folder = "domvec-checks";
+          if (!app.vault.getAbstractFileByPath(folder)) await app.vault.createFolder(folder);
+          const path = folder + "/g105 notebook " + Date.now() + (${planted} ? "p" : "c") + ".md";
+          const file = await app.vault.create(path, "# g105" + NL + NL + F + "python" + NL + "x = 1" + NL + F + NL);
+          const leaf = app.workspace.getLeaf("tab");
+          let cid = null, unfolded = null;
+          try {
+            await leaf.openFile(file, { state: { mode: "source", source: false } });
+            app.workspace.setActiveLeaf(leaf, { focus: true });
+            await sleep(600);
+            const notebook = plugin.lastNotebook === path;
+            for (const c of await v.sidecar.pageCids(URL)) {
+              const p = await plugin.sidecar.prototype(c);
+              if (p && p.name === "detect_encoding") { cid = c; break; }
+            }
+            if (!cid) return { error: "no detect_encoding chunk under " + URL };
+            let n = v.graph.graphData().nodes.find((x) => x.id === cid);
+            // In page view a chunk is reached the reader's way: its page unfolded.
+            const page = v.graph.graphData().nodes.find((x) => x.id === "page:" + URL);
+            if (!n && page) { await v.unfoldNode(page); unfolded = page; await until(() => !!v.graph.graphData().nodes.find((x) => x.id === cid), 8000); n = v.graph.graphData().nodes.find((x) => x.id === cid); }
+            if (!n) { const g = await v.sidecar.place([cid]); if (g && g.nodes) v.absorb(g.nodes, g.edges); n = v.graph.graphData().nodes.find((x) => x.id === cid); }
+            if (!n) return { error: "chunk not placeable", cid };
+            for (const bb of v.billboardState()) v.closeBillboard(bb.id);
+            await v.openBillboard(n);
+            const sel = '.domvec-bb[data-cid="' + cid + '"] .domvec-bb-cell';
+            await until(() => !!document.querySelector(sel), 8000);
+            const btn = document.querySelector(sel);
+            if (!btn) return { error: "no cell control on the billboard", cid };
+            const made0 = plugin.prototypeStats.made;
+            btn.click();
+            await until(() => plugin.prototypeStats.made > made0, 8000);
+            await sleep(400);
+            const text = await app.vault.read(file);
+            const out = { planted: ${planted}, cid, notebook, made: plugin.prototypeStats.made - made0,
+                          heading: text.includes("### detect_encoding"), link: text.includes("(" + URL + ")"),
+                          def: text.includes("def detect_encoding(b):"), home: text.includes("import_module("),
+                          fences: text.split(F + "python").length - 1 };
+            if (!out.def) return out;
+            // The call cell, then run every cell with the real Run controls.
+            await app.vault.process(file, (t) => t.replace(/\\s*$/, "") + NL + NL + F + "python" + NL
+              + "print(detect_encoding(codecs.BOM_UTF8 + b'hi'))" + NL + F + NL);
+            await until(() => leaf.view.containerEl.querySelectorAll(".domvec-run-fence").length >= 3, 8000);
+            const outs = () => (leaf.view.editor.getValue().match(/nb-output/g) || []).length;
+            for (let i = 0; i < 3; i++) {
+              const before = outs();
+              const run = leaf.view.containerEl.querySelectorAll(".domvec-run-fence")[i];
+              if (!run) break;
+              run.click();
+              await until(() => outs() > before, 30000);
+              await sleep(300);
+            }
+            const after = leaf.view.editor.getValue();
+            const tail = after.slice(after.lastIndexOf("detect_encoding(codecs"));
+            out.ran = tail.includes("utf-8-sig");
+            out.errors = (after.match(/(NameError|Traceback)[^\\n]*/g) || []).slice(0, 3);
+            out.tail = tail.slice(0, 240);
+            return out;
+          } finally {
+            if (cid) v.closeBillboard(cid);
+            if (unfolded) await v.unfoldNode(unfolded);
+            leaf.detach();
+            try { await app.vault.delete(file); } catch (e) { /* already gone */ }
+          }
+        })()`, { timeout: 180000 });
+        const clean = await arm(false);
+        await plant("prototype-no-code", true);
+        let planted;
+        try { planted = await arm(true); } finally { await plant("prototype-no-code", false); }
+        return {
+          pass: !!clean && !clean.error && clean.notebook && clean.made === 1 && clean.heading && clean.link
+                && clean.def && clean.home && clean.ran
+                && !!planted && !planted.error && planted.made === 0 && !planted.def,
+          evidence: { clean, planted },
+        };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {

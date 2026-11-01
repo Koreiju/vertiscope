@@ -189,6 +189,8 @@ PLANT_NO_ASKS = [False]
 #: Planted (G-13, 2026-10-30): a re-cluster re-queues EVERY chunk of the page
 #: for re-projection, as before, instead of the ones whose group changed.
 PLANT_PROJECT_WHOLE_PAGE = [False]
+#: Planted (G-105): a prototype comes back without its code -- the name alone.
+PLANT_PROTOTYPE_NO_CODE = [False]
 
 #: The encoder (one GPU model), shared by the embed worker and `/project`.
 #: Neither holds the store's lock while encoding, so a projection waits at
@@ -794,6 +796,7 @@ _PLANTABLE = {
     "no-asks": ("domvec.obsidian.sidecar", "PLANT_NO_ASKS"),                   # G-288
     "project-whole-page": ("domvec.obsidian.sidecar", "PLANT_PROJECT_WHOLE_PAGE"),  # G-13
     "chat-resend": ("domvec.chat", "PLANT_RESEND"),                               # G-43
+    "prototype-no-code": ("domvec.obsidian.sidecar", "PLANT_PROTOTYPE_NO_CODE"),  # G-105
 }
 
 
@@ -3703,6 +3706,49 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(200, {"query": query, "pages": [{"url": u, "score": round(sc, 5), "n": counts.get(u)} for u, sc in pages],
                              "matching": matching,
                              "ms": round((time.perf_counter() - t0) * 1000, 1)})
+            return
+
+        if segments[0] == "prototype":
+            # A code chunk as a notebook cell's prototype (`G-105`): the
+            # function or class it belongs to -- its address with the
+            # trailing name/docstring/code step taken off -- and that scope's
+            # name, docstring and CODE, read from the trie's addresses (the
+            # code is kept out of the embedding, never out of the map).
+            q = parse_qs(parts.query)
+            cid = (q.get("cid") or [""])[0]
+            try:
+                rows = self.workspace.store._rows(
+                    "MATCH (c:Chunk {cid: $c}) RETURN c.url, c.xpath", {"c": cid})
+                if not rows or not str(rows[0][0]).startswith("code://"):
+                    self._send(404, {"error": "not a stored code chunk", "cid": cid})
+                    return
+                url, xpath = rows[0][0], rows[0][1] or ""
+                scope = re.sub(r"/(name|docstring|code)(\[\d+\])?$", "", xpath)
+                # The chunk spells `function[1]` bare, the address keeps the
+                # `[1]`: compared with the ordinal dropped on both sides.
+                from ..markdown import _one_is_bare
+                want = {_one_is_bare(scope) + "/" + k: k for k in ("name", "docstring", "code")}
+                vals = {}
+                for x, v in self.workspace.store._rows(
+                        "MATCH (a:Address) WHERE a.url = $u RETURN a.xpath, a.value", {"u": url}):
+                    k = want.get(_one_is_bare(x or ""))
+                    if k:
+                        vals[k] = v or ""
+                if PLANT_PROTOTYPE_NO_CODE[0]:
+                    vals.pop("code", None)
+                # Its home module, importable: the trie keeps a module's
+                # imports as links, not as text, so a prototype runs in its
+                # module's namespace rather than a copy of its import lines.
+                # `code://repo/` is this package; `code://pypi/` an installed one.
+                rest = url[len("code://"):].split("/", 1)
+                rel = re.sub(r"(/__init__)?\.py$", "", rest[1] if len(rest) > 1 else "")
+                module = ((("domvec/" if rest[0] == "repo" else "") + rel).replace("/", ".")
+                          if rest[0] in ("repo", "pypi") and rel else "")
+                self._send(200, {"cid": cid, "url": url, "scope": scope, "name": vals.get("name", ""),
+                                 "docstring": vals.get("docstring", ""), "code": vals.get("code", ""),
+                                 "module": module})
+            except Exception as exc:                # noqa: BLE001
+                self._send(500, {"error": "%s: %s" % (type(exc).__name__, str(exc)[:200])})
             return
 
         if segments[0] == "chat":

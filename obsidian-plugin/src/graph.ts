@@ -1145,6 +1145,8 @@ export class GraphView extends ItemView {
 
   /** Set by the plugin: the url the browser cell is showing. */
   browsingUrl: (() => string) | null = null;
+  /** Set by the plugin: a code chunk sent to a notebook as a prototype cell (G-105). */
+  onPrototype: ((cid: string) => Promise<any>) | null = null;
 
   /** Force nodes still waiting on a transform -- for the harness. */
   pendingState() {
@@ -3262,6 +3264,13 @@ export class GraphView extends ItemView {
       const en: any = this.billboards.get(node.id);
       if (en) this.setMinimized(en, !en.minimized);
     };
+    // A package chunk goes to a notebook as a prototype cell (G-105).
+    if (String(node.url || "").startsWith("code://") && node.level !== "page") {
+      const cell = head.createSpan({ cls: "domvec-bb-cell", text: "cell" });
+      cell.setAttr("aria-label", "this code as a notebook cell");
+      cell.onpointerdown = (e: PointerEvent) => e.stopPropagation();
+      cell.onclick = (e: MouseEvent) => { e.stopPropagation(); void this.onPrototype?.(String(node.id)); };
+    }
     const close = head.createSpan({ cls: "domvec-bb-close" });
     close.setText("\u00d7");
     close.onpointerdown = (e: PointerEvent) => e.stopPropagation();

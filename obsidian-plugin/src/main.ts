@@ -260,7 +260,20 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
       window.clearTimeout(nbTimer);
       nbTimer = window.setTimeout(() => this.nbChats?.onCursor(), 120);
     }));
-    this.registerEvent(this.app.workspace.on("active-leaf-change", () => this.nbChats?.onCursor()));
+    // The notebook the reader is in: where a prototype cell goes (G-105). Read
+    // from the FILE: a note opened into the active tab fires `file-open` and
+    // no leaf change, before its editor holds the text. (The first version
+    // tested the editor with a `\b` a heredoc had turned into a backspace
+    // byte, so no note ever counted.)
+    const noteNotebook = async (file: TFile | null | undefined) => {
+      if (!file || file.extension !== "md") return;
+      if (/^\s*(`{3,}|~{3,})\s*(python|py)\b/m.test(await this.app.vault.cachedRead(file))) this.lastNotebook = file.path;
+    };
+    this.registerEvent(this.app.workspace.on("active-leaf-change", () => {
+      this.nbChats?.onCursor();
+      void noteNotebook(this.app.workspace.getActiveViewOfType(MarkdownView)?.file);
+    }));
+    this.registerEvent(this.app.workspace.on("file-open", (f) => void noteNotebook(f)));
     // A chunk note's two halves, one at a time (`D-3`): `chunkhalves.ts`.
     this.registerEditorExtension(chunkHalves());
     // The slate's fold state, as decorations (G-278): `slatefold.ts`.
@@ -402,6 +415,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
         };
         // Closing a billboard the browser pinned lets the browser drop the
         // pin and its markdown too (`G-78`): one selection, three surfaces.
+        view.onPrototype = (cid: string) => this.prototypeToCell(cid);
         view.browsingUrl = () => {
           const l = this.app.workspace.getLeavesOfType(BROWSER_VIEW)[0];
           const b: any = l?.view;
@@ -996,6 +1010,46 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
       if (view?.file && ensureCellBar(view, this, on)) placed++;
     }
     this.cellBarStats.placed = placed;
+  }
+
+  /** The notebook the reader was last in: a note holding a python cell. */
+  lastNotebook = "";
+  prototypeStats = { made: 0, last: null as any };
+
+  /**
+   * A package chunk as a code prototype in a notebook cell (`G-105`, Addendum
+   * IX: "bringing these chunks into code prototypes in jupyter python cells on
+   * a notebook"). The chunk's function or class comes from the trie
+   * (`/prototype`) and is appended to the notebook the reader was last in --
+   * or `Prototypes.md` -- as a python cell headed by a link back to its
+   * address, where the cell's own run button runs it in the kernel.
+   */
+  async prototypeToCell(cid: string): Promise<{ path: string; name: string; code_lines: number } | { error: string }> {
+    const p = await this.sidecar.prototype(cid);
+    if (!p || p.error) return { error: (p && p.error) || "the sidecar did not answer" };
+    if (!p.code) return { error: "no code under " + p.scope };
+    const NL = "\n", F = "```";
+    const doc = (p.docstring || "").split(NL)[0].trim();
+    // Its module's names first (the trie holds the imports as links, not
+    // text): the prototype is an editable copy that runs as it did at home.
+    const home = p.module
+      ? "import importlib as _il; globals().update({k: v for k, v in vars(_il.import_module(" + JSON.stringify(p.module)
+        + ")).items() if not k.startswith(\"__\")})  # " + p.module + "'s names" + NL
+      : "";
+    const block = NL + NL + "### " + (p.name || p.scope) + " -- [" + p.url.replace(/^code:\/\//, "") + " " + p.scope + "](" + p.url + ")" + NL
+      + (doc ? NL + "> " + doc + NL : "") + NL + F + "python" + NL + home + p.code.replace(/\s+$/, "") + NL + F + NL;
+    let path = this.lastNotebook;
+    let file: any = path ? this.app.vault.getAbstractFileByPath(path) : null;
+    if (!file) {
+      path = "Prototypes.md";
+      file = this.app.vault.getAbstractFileByPath(path) || await this.app.vault.create(path, "# Prototypes" + NL);
+    }
+    await this.app.vault.process(file, (t) => t.replace(/\s*$/, "") + block);
+    const out = { path, name: p.name, code_lines: p.code.split(NL).length };
+    this.prototypeStats.made++;
+    this.prototypeStats.last = out;
+    new Notice("prototype " + (p.name || p.scope) + " -> " + path);
+    return out;
   }
 
   /** `+ code`: a python fence at the end of the note, the cursor inside it.

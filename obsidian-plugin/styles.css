@@ -1087,3 +1087,8 @@ button.domvec-run-fence:hover {
   border-radius: 8px; box-shadow: var(--shadow-s); opacity: 0.85; transition: max-height 0.15s ease; }
 .domvec-nbchat.is-open { max-height: 50%; opacity: 1; }
 .view-content:has(> .domvec-nbchat) { position: relative; }
+
+/* G-105: a code chunk's billboard sends it to a notebook as a cell. */
+.domvec-bb-cell { cursor: pointer; font-size: var(--font-ui-smaller); padding: 0 6px; margin-left: 4px;
+  border: 1px solid var(--background-modifier-border); border-radius: 4px; color: var(--text-muted); }
+.domvec-bb-cell:hover { color: var(--text-normal); }

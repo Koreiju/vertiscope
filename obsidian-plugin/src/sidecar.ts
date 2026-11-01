@@ -474,6 +474,19 @@ export class Sidecar {
     }
   }
 
+  /** A code chunk's prototype (`G-105`): its function or class, read from
+   *  the trie -- name, docstring and code. */
+  async prototype(cid: string): Promise<{ url: string; scope: string; name: string; docstring: string; code: string; module?: string; error?: string } | null> {
+    const base = this.base().trim().replace(/\/+$/, "");
+    if (!base) return null;
+    try {
+      const res = await fetch(`${base}/prototype?cid=${encodeURIComponent(cid)}`);
+      return await res.json();
+    } catch {
+      return null;
+    }
+  }
+
   /** A `{ref}` resolved through the store, with its rank-1 lines (G-278). */
   async ref(name: string): Promise<{ resolved: boolean; kind?: string; url?: string; lines: string[] } | null> {
     return this.get("/ref?name=" + encodeURIComponent(name));
