@@ -197,6 +197,122 @@ class _Kernel:
             done.set()
 
 
+#: Planted (P-N1): the plain subprocess kernel even where Jupyter is installed.
+PLANT_SUBPROCESS_KERNEL = [False]
+
+_ANSI = __import__("re").compile(r"\x1b\[[0-9;]*m")
+
+
+def jupyter_available() -> bool:
+    try:
+        import jupyter_client  # noqa: F401
+        import ipykernel  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+class _JupyterKernel:
+    """One REAL Jupyter kernel (P-N1; PLUGIN_GOAL item 49, 2026-11-01: "Yes,
+    install them"), driven over the Jupyter messaging protocol by
+    `jupyter_client` -- the same kernel a Jupyter notebook runs, so `%magics`,
+    rich `repr`s and any installed kernelspec work. The same face as `_Kernel`
+    (`run`, `alive`, `close`, `kill`), the same reply: stdout, stderr, the
+    trailing expression's `text/plain` value, the traceback, the execution
+    count. Loopback TCP, as `jupyter_client` uses on Windows."""
+
+    def __init__(self, note: str, kernel_name: str = "python3") -> None:
+        from jupyter_client import KernelManager
+        self.note = note
+        self.lock = threading.Lock()
+        self.started = time.time()
+        self.last_used = self.started
+        self.executions = 0
+        self.kernel_name = kernel_name
+        try:
+            self.km = KernelManager(kernel_name=kernel_name)
+            self.km.start_kernel()
+            self.kc = self.km.client()
+            self.kc.start_channels()
+            self.kc.wait_for_ready(timeout=60)
+        except Exception as exc:                # noqa: BLE001
+            raise KernelError(f"could not start the {kernel_name} Jupyter kernel: {exc}") from exc
+
+    @property
+    def alive(self) -> bool:
+        try:
+            return bool(self.km.is_alive())
+        except Exception:                       # noqa: BLE001
+            return False
+
+    def _stop_client(self) -> None:
+        try:
+            self.kc.stop_channels()
+        except Exception:                       # noqa: BLE001
+            pass
+
+    def kill(self) -> None:
+        self._stop_client()
+        try:
+            self.km.shutdown_kernel(now=True)
+        except Exception:                       # noqa: BLE001
+            pass
+
+    def close(self) -> None:
+        self._stop_client()
+        try:
+            self.km.shutdown_kernel(now=False)
+        except Exception:                       # noqa: BLE001
+            self.kill()
+
+    def run(self, code: str, timeout: float) -> dict:
+        if not self.alive:
+            raise KernelError("kernel exited")
+        import queue
+        deadline = time.time() + timeout
+        msg_id = self.kc.execute(code, store_history=True, allow_stdin=False)
+        out, err, value, error = [], [], None, None
+        try:
+            while True:
+                left = deadline - time.time()
+                if left <= 0:
+                    raise queue.Empty
+                m = self.kc.get_iopub_msg(timeout=left)
+                if m.get("parent_header", {}).get("msg_id") != msg_id:
+                    continue
+                kind, c = m["msg_type"], m["content"]
+                if kind == "stream":
+                    (err if c.get("name") == "stderr" else out).append(c.get("text", ""))
+                elif kind in ("execute_result", "display_data"):
+                    text = (c.get("data") or {}).get("text/plain")
+                    if kind == "execute_result":
+                        value = text
+                    elif text:
+                        out.append(text + "\n")
+                elif kind == "error":
+                    error = _ANSI.sub("", "\n".join(c.get("traceback") or [])) or f"{c.get('ename')}: {c.get('evalue')}"
+                elif kind == "status" and c.get("execution_state") == "idle":
+                    break
+            # The shell reply to THIS request: the startup's kernel_info reply
+            # is on the same channel, so replies are matched by id.
+            count = None
+            while time.time() < deadline:
+                r = self.kc.get_shell_msg(timeout=max(0.1, deadline - time.time()))
+                if r.get("parent_header", {}).get("msg_id") == msg_id:
+                    count = r["content"].get("execution_count")
+                    break
+        except queue.Empty:
+            try:
+                self.km.interrupt_kernel()
+            except Exception:                   # noqa: BLE001
+                pass
+            raise TimeoutError(f"cell exceeded {timeout:g}s")
+        self.executions += 1
+        self.last_used = time.time()
+        return {"ok": error is None, "stdout": "".join(out), "stderr": "".join(err),
+                "value": value, "error": error, "count": count or self.executions, "jupyter": self.kernel_name}
+
+
 class KernelPool:
     """Per-note kernels, capped and reaped.
 
@@ -264,7 +380,17 @@ class KernelPool:
                 kernel = None
             if kernel is None:
                 evicted = self._evict_if_needed()
-                kernel = _Kernel(note)
+                # A real Jupyter kernel where Jupyter is installed (P-N1); the
+                # subprocess when it is not, or when a Jupyter kernel cannot
+                # start -- said in the reply, never silently.
+                kernel = None
+                if jupyter_available() and not PLANT_SUBPROCESS_KERNEL[0]:
+                    try:
+                        kernel = _JupyterKernel(note)
+                    except KernelError:
+                        kernel = None
+                if kernel is None:
+                    kernel = _Kernel(note)
                 self._kernels[note] = kernel
                 fresh = True
 
