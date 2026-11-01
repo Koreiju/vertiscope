@@ -1103,3 +1103,25 @@ button.domvec-run-fence:hover {
   box-shadow: inset 3px 0 0 var(--interactive-accent);
   border-radius: 3px;
 }
+
+/* P-C1/P-C2: the code artifact panel -- source and trie side by side, the
+   module's run surface always directly below them (codeview.ts). */
+.domvec-code { display: flex; flex-direction: column; padding: 0 !important; }
+.domvec-code-head { display: flex; gap: 8px; align-items: center; padding: 6px 10px;
+  border-bottom: 1px solid var(--background-modifier-border); font-size: var(--font-ui-small); }
+.domvec-code-url { color: var(--text-muted); font-family: var(--font-monospace); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.domvec-code-badge { color: var(--text-faint); }
+.domvec-code-sides { display: flex; flex: 1 1 auto; min-height: 0; }
+.domvec-code-source { flex: 1 1 55%; min-width: 0; overflow: auto; font-family: var(--font-monospace); font-size: var(--font-ui-small);
+  border-right: 1px solid var(--background-modifier-border); }
+.domvec-code-source .cm-editor { height: 100%; }
+.domvec-code-trie { flex: 1 1 45%; min-width: 0; overflow: auto; padding: 4px 10px; font-size: var(--font-ui-small); }
+.domvec-code-chunk { border-left: 2px solid transparent; padding: 2px 6px; margin: 4px 0; }
+.domvec-code-chunk.is-changed { border-left-color: var(--interactive-accent);
+  background: color-mix(in srgb, var(--interactive-accent) 10%, transparent); }
+.domvec-code-xpath { color: var(--text-faint); font-family: var(--font-monospace); font-size: var(--font-ui-smaller); }
+.domvec-code-run { flex: 0 0 auto; display: flex; flex-direction: column; border-top: 1px solid var(--background-modifier-border); }
+.domvec-code-out { margin: 0; padding: 6px 10px; max-height: 180px; min-height: 60px; overflow: auto;
+  font-size: var(--font-ui-smaller); background: var(--background-secondary); white-space: pre-wrap; }
+.domvec-code-input { border: 0; border-top: 1px solid var(--background-modifier-border); border-radius: 0;
+  font-family: var(--font-monospace); font-size: var(--font-ui-small); padding: 4px 10px; }

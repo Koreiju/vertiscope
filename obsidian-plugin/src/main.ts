@@ -34,6 +34,7 @@ import {
 
 import { installHarness } from "./harness";
 import { TERMINAL_VIEW, TerminalView } from "./terminal";
+import { CODE_VIEW, CodeView } from "./codeview";
 import {
   RunHost, RunRequest, livePreviewRunButtons, readingViewRunButtons,
 } from "./runbutton";
@@ -225,7 +226,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     // a code-block processor cannot be cleared from here, so a stale one is
     // left handling fences rather than aborting this load.
     const reg: any = (this.app as any).viewRegistry;
-    for (const t of [GRAPH_VIEW, BROWSER_VIEW, PANEL_VIEW, TERMINAL_VIEW]) {
+    for (const t of [GRAPH_VIEW, BROWSER_VIEW, PANEL_VIEW, TERMINAL_VIEW, CODE_VIEW]) {
       try { if (reg?.viewByType?.[t]) reg.unregisterView(t); } catch { /* not ours to fail on */ }
     }
     try {
@@ -450,6 +451,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
         // Closing a billboard the browser pinned lets the browser drop the
         // pin and its markdown too (`G-78`): one selection, three surfaces.
         view.onPrototype = (cid: string) => this.prototypeToCell(cid);
+        view.onOpenCode = (url: string) => this.openCode(url);
         view.browsingUrl = () => {
           const l = this.app.workspace.getLeavesOfType(BROWSER_VIEW)[0];
           const b: any = l?.view;
@@ -478,6 +480,14 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
       TERMINAL_VIEW,
       (leaf: WorkspaceLeaf) => new TerminalView(leaf, this.sidecar),
     );
+    // The code artifact panel (P-C1/P-C2/P-C5): a module's source and its
+    // chunks side by side, its own kernel's run surface below.
+    this.registerView(CODE_VIEW, (leaf: WorkspaceLeaf) => new CodeView(leaf, this.sidecar));
+    this.addCommand({
+      id: "domvec-open-code",
+      name: "Open the code artifact of the hovered code node",
+      callback: () => { const u = (window as any).__domvecLastCodeUrl; if (u) void this.openCode(u); },
+    });
     this.addCommand({
       id: "domvec-open-terminal",
       name: "Open a command terminal",
@@ -936,6 +946,19 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     const leaf = this.app.workspace.getLeaf("split", "vertical");
     await leaf.setViewState({ type: BROWSER_VIEW, active: true });
     this.app.workspace.revealLeaf(leaf);
+  }
+
+  /** A code module in its artifact panel, one pane per module. */
+  async openCode(url: string): Promise<CodeView | null> {
+    for (const leaf of this.app.workspace.getLeavesOfType(CODE_VIEW)) {
+      if (leaf.view instanceof CodeView && leaf.view.url === url) { this.app.workspace.revealLeaf(leaf); return leaf.view; }
+    }
+    const leaf = this.app.workspace.getLeaf("tab");
+    await leaf.setViewState({ type: CODE_VIEW, active: true, state: { url } });
+    this.app.workspace.revealLeaf(leaf);
+    const v = leaf.view;
+    if (v instanceof CodeView && v.url !== url) await v.openUrl(url);
+    return v instanceof CodeView ? v : null;
   }
 
   async openTerminal(): Promise<TerminalView | null> {

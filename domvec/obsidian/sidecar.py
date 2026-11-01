@@ -191,6 +191,11 @@ PLANT_NO_ASKS = [False]
 PLANT_PROJECT_WHOLE_PAGE = [False]
 #: Planted (G-105): a prototype comes back without its code -- the name alone.
 PLANT_PROTOTYPE_NO_CODE = [False]
+#: Planted (P-C1): a saved artifact is re-indexed but its file is not written.
+PLANT_SOURCE_NOT_WRITTEN = [False]
+#: Planted (P-C5): a saved artifact is stored but reaches the 3D view by
+#: neither path -- not queued for projection, dropped from the encoder.
+PLANT_SOURCE_NOT_PROJECTED = [False]
 
 #: The encoder (one GPU model), shared by the embed worker and `/project`.
 #: Neither holds the store's lock while encoding, so a projection waits at
@@ -799,6 +804,8 @@ _PLANTABLE = {
     "prototype-no-code": ("domvec.obsidian.sidecar", "PLANT_PROTOTYPE_NO_CODE"),  # G-105
     "reembed-all": ("domvec.vectors", "PLANT_REEMBED_ALL"),                    # P-N6
     "no-seed": ("domvec.workspace", "PLANT_NO_SEED"),                          # P-N6
+    "source-not-written": ("domvec.obsidian.sidecar", "PLANT_SOURCE_NOT_WRITTEN"),     # P-C1
+    "source-not-projected": ("domvec.obsidian.sidecar", "PLANT_SOURCE_NOT_PROJECTED"),  # P-C5
 }
 
 
@@ -1046,6 +1053,37 @@ def _project(cids) -> None:
             got.enqueue(list(cids))
     except Exception:                               # noqa: BLE001
         pass
+
+
+def _source_file(url: str):
+    """(path, module, editable) for a ``code://`` python module (P-C1), or
+    None. ``code://repo/`` is this package and is editable; ``code://pypi/``
+    an installed one, found where Python imports it from, read-only."""
+    from ..source import source_path_of
+    got = source_path_of(url)
+    if not got or not got[1].endswith(".py"):
+        return None
+    root, rel = got
+    mod = re.sub(r"(/__init__)?\.py$", "", rel).replace("/", ".")
+    if root == "repo":
+        base = Path(__file__).resolve().parents[1]
+        path = (base / rel).resolve()
+        if base not in path.parents:
+            return None
+        return path, "domvec." + mod, True
+    if root == "pypi":
+        import importlib.util
+        top = rel.split("/", 1)[0]
+        try:
+            spec = importlib.util.find_spec(top)
+        except (ImportError, ValueError):
+            spec = None
+        if spec is None or not spec.origin:
+            return None
+        base = Path(spec.origin).resolve().parent
+        path = (base.parent / rel).resolve() if spec.submodule_search_locations else (base / rel).resolve()
+        return (path, mod, False) if path.exists() else None
+    return None
 
 
 def _project_page(workspace, url: str) -> None:
@@ -2283,6 +2321,54 @@ class _Handler(BaseHTTPRequestHandler):
                              "supervised": os.environ.get("DOMVEC_SUPERVISED") == "1"})
             if due:
                 threading.Thread(target=_maybe_compact, args=(self.workspace, store_mb), daemon=True).start()
+            return
+
+        if route == "source":
+            # A saved code artifact (P-C1/P-C5): the file written, then
+            # re-indexed into the trie as the module page it is, and queued for
+            # the projector -- the embed gate keeps it a delta (P-N6). This
+            # repository's modules only; an installed package is read-only.
+            if not self.capture_allowed or self.workspace is None:
+                self._send(403, {"error": "writing is off (start with --capture)"})
+                return
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(length) or b"{}")
+                url, text = str(body.get("url") or ""), body.get("text")
+            except Exception as exc:                # noqa: BLE001
+                self._send(400, {"error": "bad body: %s" % exc})
+                return
+            got = _source_file(url)
+            if got is None or not got[2] or not isinstance(text, str):
+                self._send(400, {"error": "only this repository's modules (code://repo/...) are saved", "url": url})
+                return
+            path = got[0]
+            if not path.exists() and not body.get("create"):
+                self._send(404, {"error": "no such module", "url": url})
+                return
+            try:
+                t0 = time.time()
+                v0 = dict(self.workspace.vectors.report())
+                with _foreground(), _WORK_LOCK:
+                    if not PLANT_SOURCE_NOT_WRITTEN[0]:
+                        path.write_text(text, encoding="utf-8")
+                    rel = url[len("code://repo/"):]
+                    res = self.workspace.index_source(path.read_text(encoding="utf-8"), rel, root="repo")
+                v1 = self.workspace.vectors.report()
+                if PLANT_SOURCE_NOT_PROJECTED[0]:
+                    # Neither path to the 3D view: not queued for projection,
+                    # and dropped from the encoder (whose batches project too).
+                    self.workspace.vectors.forget(r[0] for r in self.workspace.store._rows(
+                        "MATCH (c:Chunk {url: $u}) RETURN c.cid", {"u": url}))
+                else:
+                    _project_page(self.workspace, url)
+                _LAST_WRITE[0] = time.time()
+                out = {"url": url, "chunks": res.chunks, "queued": v1["queued"] - v0["queued"],
+                       "skipped": v1["skipped"] - v0["skipped"], "ms": round((time.time() - t0) * 1000)}
+                _profile("source", out)
+                self._send(200, out)
+            except Exception as exc:                # noqa: BLE001
+                self._send(500, {"error": "%s: %s" % (type(exc).__name__, exc)})
             return
 
         if route == "vectors":
@@ -3730,6 +3816,20 @@ class _Handler(BaseHTTPRequestHandler):
             # diff a re-index of an edited note should mostly be.
             v = getattr(self.workspace, "vectors", None) if self.workspace is not None else None
             self._send(200, v.report() if v is not None else {"error": "no vector queue"})
+            return
+
+        if segments[0] == "source":
+            # A code module's text (P-C1): the standalone artifact panel's
+            # editable side. The trie holds the module as addresses; the FILE
+            # is what a reader edits, and a save re-indexes it (POST /source).
+            url = (parse_qs(parts.query).get("url") or [""])[0]
+            got = _source_file(url)
+            if got is None or not got[0].exists():
+                self._send(404, {"error": "not a code:// python module this sidecar can read", "url": url})
+                return
+            path, module, editable = got
+            self._send(200, {"url": url, "module": module, "editable": editable,
+                             "text": path.read_text(encoding="utf-8", errors="replace")})
             return
 
         if segments[0] == "prototype":

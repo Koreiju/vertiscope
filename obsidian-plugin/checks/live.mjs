@@ -7136,6 +7136,222 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "P-C1",
+      asks: "a code module opens standalone in the code artifact panel -- its file on the source side, its chunks on the trie side -- editable for this repository: an edit through the editor, saved, is on disk; an installed package's module opens read-only with no save; planted (source-not-written) a save leaves the file as it was",
+      async run() {
+        // Addendum I: "Full code artifacts should be viewable and editable as
+        // standalone as well. A terminal only below the artifact panel should
+        // always accompany the artifact" -- "we can view live delta updates to
+        // modules as well in both sides of their panels and their UMAP 3D
+        // graph view". One scratch module of this repository, made, opened in
+        // the code artifact panel, edited through its editor, then removed.
+        const got = await evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const until = async (ok, ms) => { for (let t = 0; t < ms && !(await ok()); t += 200) await sleep(200); return !!(await ok()); };
+          const plugin = app.plugins.getPlugin("domvec-bridge");
+          const SIDE = String(plugin.settings.sidecar).replace(/[/]+$/, "");
+          const H = { "content-type": "application/json", "X-Domvec-Client": "obsidian-plugin" };
+          const plant = (name, on) => fetch(SIDE + "/plant", { method: "POST", headers: H, body: JSON.stringify({ name, on }) });
+          const stamp = Date.now();
+          const rel = "_pc_check_" + stamp + ".py", url = "code://repo/" + rel, vpath = "domvec/" + rel;
+          const NL = String.fromCharCode(10), Q = String.fromCharCode(34).repeat(3);
+          const src = [Q + "Probe module for the code artifact check." + Q, "", "", "def alpha(x):", "    " + Q + "Alpha doubles x." + NL + NL + "    " + "Alpha explains its doubling at length. ".repeat(24) + Q,
+                       "    return 2 * x", "", "", "def beta(y):", "    " + Q + "Beta adds one." + NL + NL + "    " + "Beta explains its increment at length. ".repeat(24) + Q, "    return y + 1", ""].join(NL);
+          await app.vault.adapter.write(vpath, src);
+          await plugin.sidecar.saveSource(url, src);
+          const view = await plugin.openCode(url);
+          if (!view) return { error: "no code view" };
+          await until(() => !!view.editor && view.text() === src, 8000);
+          const edit = (from, to) => { const t = view.text(), i = t.indexOf(from); view.editor.dispatch({ changes: { from: i, to: i + from.length, insert: to } }); };
+          const button = (v, label) => Array.from(v.contentEl.querySelectorAll(".domvec-code-head button")).find((b) => b.textContent === label);
+          const save = async () => { const n = view.stats.saves; button(view, "save").click(); await until(() => view.stats.saves > n && !view.dirty, 20000); await sleep(300); };
+          const out = {};
+          try {
+
+            out.open = { editable: view.editable, text_matches: view.text() === src,
+                         trie_chunks: view.contentEl.querySelectorAll(".domvec-code-chunk").length,
+                         trie_has_docstring: (view.contentEl.querySelector(".domvec-code-trie").textContent || "").includes("Alpha doubles") };
+            edit("Beta adds one.", "Beta adds one, edited " + stamp + ".");
+            out.dirty = view.dirty;
+            await save();
+            out.saved = { on_disk: (await app.vault.adapter.read(vpath)).includes("edited " + stamp), reply: view.stats.last };
+            const ro = await plugin.openCode("code://pypi/json/__init__.py");
+            await until(() => !!ro && !!ro.editor && ro.text().length > 0, 8000);
+            out.pypi = { editable: ro.editable, read_only: ro.editor.state.readOnly, save_button: !!button(ro, "save"),
+                         has_text: ro.text().includes("def dumps") };
+            await plant("source-not-written", true);
+            try {
+              edit("edited " + stamp, "edited twice " + stamp);
+              await save();
+              out.planted = { on_disk: (await app.vault.adapter.read(vpath)).includes("twice " + stamp) };
+            } finally { await plant("source-not-written", false); }
+            return out;
+
+          } finally {
+            for (const l of app.workspace.getLeavesOfType("domvec-code-view")) l.detach();
+            try { await app.vault.adapter.remove(vpath); } catch (e) { /* gone */ }
+            await plugin.sidecar.purge(url);
+          }
+        })()`, { timeout: 120000 });
+        return { pass: !got.error && got.open.editable && got.open.text_matches && got.open.trie_chunks >= 2 && got.open.trie_has_docstring
+                && got.dirty && got.saved.on_disk && got.pypi.editable === false && got.pypi.read_only && !got.pypi.save_button
+                && got.pypi.has_text && got.planted.on_disk === false, evidence: got };
+      },
+    },
+    {
+      id: "P-C2",
+      asks: "a kernel run-and-output surface is always directly below the artifact, across its full width: run executes the module in a kernel of its own, and an expression typed below is evaluated in that namespace (alpha(21) -> 42); planted (plantOtherKernel) the expression meets another kernel -- NameError",
+      async run() {
+        // Addendum I: "Full code artifacts should be viewable and editable as
+        // standalone as well. A terminal only below the artifact panel should
+        // always accompany the artifact" -- "we can view live delta updates to
+        // modules as well in both sides of their panels and their UMAP 3D
+        // graph view". One scratch module of this repository, made, opened in
+        // the code artifact panel, edited through its editor, then removed.
+        const got = await evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const until = async (ok, ms) => { for (let t = 0; t < ms && !(await ok()); t += 200) await sleep(200); return !!(await ok()); };
+          const plugin = app.plugins.getPlugin("domvec-bridge");
+          const SIDE = String(plugin.settings.sidecar).replace(/[/]+$/, "");
+          const H = { "content-type": "application/json", "X-Domvec-Client": "obsidian-plugin" };
+          const plant = (name, on) => fetch(SIDE + "/plant", { method: "POST", headers: H, body: JSON.stringify({ name, on }) });
+          const stamp = Date.now();
+          const rel = "_pc_check_" + stamp + ".py", url = "code://repo/" + rel, vpath = "domvec/" + rel;
+          const NL = String.fromCharCode(10), Q = String.fromCharCode(34).repeat(3);
+          const src = [Q + "Probe module for the code artifact check." + Q, "", "", "def alpha(x):", "    " + Q + "Alpha doubles x." + NL + NL + "    " + "Alpha explains its doubling at length. ".repeat(24) + Q,
+                       "    return 2 * x", "", "", "def beta(y):", "    " + Q + "Beta adds one." + NL + NL + "    " + "Beta explains its increment at length. ".repeat(24) + Q, "    return y + 1", ""].join(NL);
+          await app.vault.adapter.write(vpath, src);
+          await plugin.sidecar.saveSource(url, src);
+          const view = await plugin.openCode(url);
+          if (!view) return { error: "no code view" };
+          await until(() => !!view.editor && view.text() === src, 8000);
+          const edit = (from, to) => { const t = view.text(), i = t.indexOf(from); view.editor.dispatch({ changes: { from: i, to: i + from.length, insert: to } }); };
+          const button = (v, label) => Array.from(v.contentEl.querySelectorAll(".domvec-code-head button")).find((b) => b.textContent === label);
+          const save = async () => { const n = view.stats.saves; button(view, "save").click(); await until(() => view.stats.saves > n && !view.dirty, 20000); await sleep(300); };
+          const out = {};
+          try {
+
+            const box = (sel) => { const b = view.contentEl.querySelector(sel).getBoundingClientRect(); return { top: Math.round(b.top), bottom: Math.round(b.bottom), left: Math.round(b.left), right: Math.round(b.right) }; };
+            out.layout = { sides: box(".domvec-code-sides"), run: box(".domvec-code-run") };
+            const ask = async (expr) => {
+              const n = view.stats.runs, inp = view.contentEl.querySelector(".domvec-code-input");
+              inp.value = expr; inp.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+              await until(() => view.stats.runs > n, 5000);
+              await until(() => (view.contentEl.querySelector(".domvec-code-out").textContent || "").includes(">>> " + expr + NL), 20000);
+              await sleep(800);
+              const t = view.contentEl.querySelector(".domvec-code-out").textContent || "";
+              return t.slice(t.lastIndexOf(">>> " + expr));
+            };
+            const n0 = view.stats.runs;
+            button(view, "run").click();
+            await until(() => view.stats.runs > n0, 5000);
+            await sleep(2500);
+            out.run_module = (view.contentEl.querySelector(".domvec-code-out").textContent || "").slice(0, 200);
+            out.alpha = await ask("alpha(21)");
+            view.plantOtherKernel = true;
+            try { out.planted = await ask("beta(1)"); } finally { view.plantOtherKernel = false; }
+            return out;
+
+          } finally {
+            for (const l of app.workspace.getLeavesOfType("domvec-code-view")) l.detach();
+            try { await app.vault.adapter.remove(vpath); } catch (e) { /* gone */ }
+            await plugin.sidecar.purge(url);
+          }
+        })()`, { timeout: 120000 });
+        return { pass: !got.error && got.layout.run.top >= got.layout.sides.bottom - 1 && got.layout.run.top - got.layout.sides.bottom <= 3
+                && got.layout.run.left <= got.layout.sides.left + 1 && got.layout.run.right >= got.layout.sides.right - 1
+                && /\b42\b/.test(got.alpha) && !/Error/.test(got.alpha) && /NameError/.test(got.planted), evidence: got };
+      },
+    },
+    {
+      id: "P-C5",
+      asks: "a saved edit to a module is a live delta in both halves and the 3D view: the trie side re-reads the store and marks exactly the chunk that changed (not its neighbour), and that chunk reaches the projector's delta stream; planted (plantNoTrieRefresh) the trie side keeps the old text, planted (source-not-projected) the chunk never reaches the stream",
+      async run() {
+        // Addendum I: "Full code artifacts should be viewable and editable as
+        // standalone as well. A terminal only below the artifact panel should
+        // always accompany the artifact" -- "we can view live delta updates to
+        // modules as well in both sides of their panels and their UMAP 3D
+        // graph view". One scratch module of this repository, made, opened in
+        // the code artifact panel, edited through its editor, then removed.
+        const got = await evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const until = async (ok, ms) => { for (let t = 0; t < ms && !(await ok()); t += 200) await sleep(200); return !!(await ok()); };
+          const plugin = app.plugins.getPlugin("domvec-bridge");
+          const SIDE = String(plugin.settings.sidecar).replace(/[/]+$/, "");
+          const H = { "content-type": "application/json", "X-Domvec-Client": "obsidian-plugin" };
+          const plant = (name, on) => fetch(SIDE + "/plant", { method: "POST", headers: H, body: JSON.stringify({ name, on }) });
+          const stamp = Date.now();
+          const rel = "_pc_check_" + stamp + ".py", url = "code://repo/" + rel, vpath = "domvec/" + rel;
+          const NL = String.fromCharCode(10), Q = String.fromCharCode(34).repeat(3);
+          const src = [Q + "Probe module for the code artifact check." + Q, "", "", "def alpha(x):", "    " + Q + "Alpha doubles x." + NL + NL + "    " + "Alpha explains its doubling at length. ".repeat(24) + Q,
+                       "    return 2 * x", "", "", "def beta(y):", "    " + Q + "Beta adds one." + NL + NL + "    " + "Beta explains its increment at length. ".repeat(24) + Q, "    return y + 1", ""].join(NL);
+          await app.vault.adapter.write(vpath, src);
+          await plugin.sidecar.saveSource(url, src);
+          const view = await plugin.openCode(url);
+          if (!view) return { error: "no code view" };
+          await until(() => !!view.editor && view.text() === src, 8000);
+          const edit = (from, to) => { const t = view.text(), i = t.indexOf(from); view.editor.dispatch({ changes: { from: i, to: i + from.length, insert: to } }); };
+          const button = (v, label) => Array.from(v.contentEl.querySelectorAll(".domvec-code-head button")).find((b) => b.textContent === label);
+          const save = async () => { const n = view.stats.saves; button(view, "save").click(); await until(() => view.stats.saves > n && !view.dirty, 20000); await sleep(300); };
+          const out = {};
+          try {
+
+            const delta0 = await (await fetch(SIDE + "/projector/delta?since=0&epoch=-1")).json();
+            let since = delta0.seq, epoch = delta0.epoch;
+            const watch = async (cids, ms) => {
+              const want = new Set(cids), seen = new Set(), t0 = performance.now();
+              while (performance.now() - t0 < ms && seen.size < want.size) {
+                await sleep(250);
+                const d = await (await fetch(SIDE + "/projector/delta?since=" + since + "&epoch=" + epoch)).json();
+                if (d.reload) { epoch = d.epoch; since = d.seq; continue; }
+                for (const c of Object.keys(d.chunks || {})) if (want.has(c)) seen.add(c);
+                since = d.seq;
+              }
+              return { seen: seen.size, ms: Math.round(performance.now() - t0) };
+            };
+            const trieText = () => view.contentEl.querySelector(".domvec-code-trie").textContent || "";
+            const marked = () => Array.from(view.contentEl.querySelectorAll(".domvec-code-chunk.is-changed")).map((e) => e.textContent || "");
+            // Settle the first index's own projection before measuring.
+            await sleep(4000);
+            const d1 = await (await fetch(SIDE + "/projector/delta?since=" + since + "&epoch=" + epoch)).json();
+            if (!d1.reload) since = d1.seq; else { epoch = d1.epoch; since = d1.seq; }
+            edit("Alpha doubles x.", "Alpha doubles x, revised " + stamp + ".");
+            await save();
+            const changed = [...view.changed];
+            out.clean = { reply: view.stats.last, changed: changed.length,
+                          marked_has_revision: marked().some((t) => t.includes("revised " + stamp)),
+                          beta_marked: marked().some((t) => t.includes("Beta adds one")),
+                          delta: await watch(changed, 40000) };
+            view.plantNoTrieRefresh = true;
+            try {
+              edit("revised " + stamp, "revised again " + stamp);
+              await save();
+              out.planted_no_refresh = { trie_has_new: trieText().includes("again " + stamp) };
+            } finally { view.plantNoTrieRefresh = false; }
+            await view.readTrie();
+            await sleep(3000);
+            const d2 = await (await fetch(SIDE + "/projector/delta?since=" + since + "&epoch=" + epoch)).json();
+            if (!d2.reload) since = d2.seq; else { epoch = d2.epoch; since = d2.seq; }
+            await plant("source-not-projected", true);
+            try {
+              edit("revised again " + stamp, "revised thrice " + stamp);
+              await save();
+              out.planted_not_projected = { changed: view.changed.size, delta: await watch([...view.changed], 20000) };
+            } finally { await plant("source-not-projected", false); }
+            return out;
+
+          } finally {
+            for (const l of app.workspace.getLeavesOfType("domvec-code-view")) l.detach();
+            try { await app.vault.adapter.remove(vpath); } catch (e) { /* gone */ }
+            await plugin.sidecar.purge(url);
+          }
+        })()`, { timeout: 240000 });
+        return { pass: !got.error && got.clean.changed >= 1 && got.clean.marked_has_revision && !got.clean.beta_marked
+                && got.clean.delta.seen >= 1 && got.planted_no_refresh.trie_has_new === false
+                && got.planted_not_projected.changed >= 1 && got.planted_not_projected.delta.seen === 0, evidence: got };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {

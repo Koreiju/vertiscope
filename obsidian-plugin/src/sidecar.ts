@@ -474,6 +474,23 @@ export class Sidecar {
     }
   }
 
+  /** A code module's text, and whether it may be saved (`P-C1`). */
+  async source(url: string): Promise<{ url: string; module: string; editable: boolean; text: string; error?: string } | null> {
+    return this.get("/source?url=" + encodeURIComponent(url));
+  }
+
+  /** A code artifact saved: written, re-indexed, queued for the 3D view (`P-C1`, `P-C5`). */
+  async saveSource(url: string, text: string, create = false): Promise<{ url: string; chunks: number; queued: number; skipped: number; ms: number; error?: string } | null> {
+    const base = this.base().trim().replace(/\/+$/, "");
+    if (!base) return null;
+    try {
+      const res = await fetch(`${base}/source`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url, text, create }) });
+      return await res.json();
+    } catch {
+      return null;
+    }
+  }
+
   /** A code chunk's prototype (`G-105`): its function or class, read from
    *  the trie -- name, docstring and code. */
   async prototype(cid: string): Promise<{ url: string; scope: string; name: string; docstring: string; code: string; module?: string; error?: string } | null> {

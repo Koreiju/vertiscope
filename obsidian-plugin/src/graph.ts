@@ -1147,6 +1147,8 @@ export class GraphView extends ItemView {
   browsingUrl: (() => string) | null = null;
   /** Set by the plugin: a code chunk sent to a notebook as a prototype cell (G-105). */
   onPrototype: ((cid: string) => Promise<any>) | null = null;
+  /** Set by the plugin: a code node's module opened in its artifact panel (P-C1). */
+  onOpenCode: ((url: string) => Promise<any>) | null = null;
 
   /** Force nodes still waiting on a transform -- for the harness. */
   pendingState() {
@@ -3270,6 +3272,14 @@ export class GraphView extends ItemView {
       cell.setAttr("aria-label", "this code as a notebook cell");
       cell.onpointerdown = (e: PointerEvent) => e.stopPropagation();
       cell.onclick = (e: MouseEvent) => { e.stopPropagation(); void this.onPrototype?.(String(node.id)); };
+    }
+    // Any code node opens its module as a standalone artifact (P-C1).
+    if (String(node.url || "").startsWith("code://")) {
+      (window as any).__domvecLastCodeUrl = String(node.url);
+      const code = head.createSpan({ cls: "domvec-bb-cell domvec-bb-code", text: "code" });
+      code.setAttr("aria-label", "open this module as a code artifact");
+      code.onpointerdown = (e: PointerEvent) => e.stopPropagation();
+      code.onclick = (e: MouseEvent) => { e.stopPropagation(); void this.onOpenCode?.(String(node.url)); };
     }
     const close = head.createSpan({ cls: "domvec-bb-close" });
     close.setText("\u00d7");
