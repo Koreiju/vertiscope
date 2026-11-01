@@ -182,6 +182,8 @@ export interface DomvecSettings {
   /** Vault notes the reader wrote retrieval links into, kept in the store as
    *  pages and re-indexed when edited (G-7). */
   indexedNotes?: string[];
+  /** P-N9/P-N10: per note, the trie addresses the reader marked as the model's context. */
+  marks?: Record<string, { xpath: string; part: number }[]>;
   /** How the reader's sidecar was launched, as its `/health` last said
    *  (python, argv, cwd, workspace): what a fresh supervisor is started with. */
   sidecarLaunch?: { python: string; argv: string[]; cwd: string; workspace: string; supervised: boolean };

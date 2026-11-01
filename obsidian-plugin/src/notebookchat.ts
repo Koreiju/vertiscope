@@ -23,19 +23,21 @@
  */
 import { Component, MarkdownRenderer, MarkdownView, type App, type TFile } from "obsidian";
 import type { Sidecar } from "./sidecar";
+import type { NoteMarks } from "./marks";
 import { cellAt, cellsOf, parseRewind, rewind, type Cell } from "./rewind";
 
 /** The model's window (`domvec/chat.py`: n_ctx 8192) and the share one rewind may take. */
 export const N_CTX = 8192;
 export const SAFETY = 0.35;
 
-export interface NotebookTurn { prompt: string; cells: number; sent: number; dropped: number; chars: number; reply: string; ms: number }
+export interface NotebookTurn { prompt: string; cells: number; source: string; sent: number; dropped: number; chars: number; reply: string; ms: number }
 
 export class NotebookChat {
   readonly el: HTMLElement;
   private log: HTMLElement;
   private input: HTMLTextAreaElement;
   private label: HTMLElement;
+  private clearMarks: HTMLElement;
   /** The cell the rewind ends at, fixed when the cursor landed on it. */
   landed: { index: number; from: number; hash: string } | null = null;
   /** Rewinds applied: one per landing on a new cell, none per scroll. */
@@ -49,13 +51,20 @@ export class NotebookChat {
   plantRewindOnScroll = false;
   /** Planted (L-9): no budget -- the whole note above the cell. */
   plantNoBudget = false;
+  /** Planted (P-N10): the reader's marks are ignored, the rewind sent instead. */
+  plantIgnoreMarks = false;
+  /** What the last turn was given: "marks" or "rewind". */
+  lastSource = "";
   private scrollEl: HTMLElement | null = null;
   private onScroll = () => this.place();
 
-  constructor(private app: App, private owner: Component, private view: MarkdownView, private sidecar: Sidecar) {
+  constructor(private app: App, private owner: Component, private view: MarkdownView, private sidecar: Sidecar,
+              private marks: NoteMarks | null = null) {
     this.el = view.contentEl.createDiv({ cls: "domvec-nbchat" });
     const bar = this.el.createDiv({ cls: "domvec-chat-bar" });
     this.label = bar.createSpan({ cls: "domvec-chat-label" });
+    this.clearMarks = bar.createEl("button", { text: "clear marks", cls: "domvec-chat-reset" });
+    this.clearMarks.onclick = () => { if (this.view.file) void this.marks?.clear(this.view.file.path); };
     const reset = bar.createEl("button", { text: "new chat", cls: "domvec-chat-reset" });
     reset.onclick = () => void this.reset();
     this.log = this.el.createDiv({ cls: "domvec-chat-log markdown-rendered" });
@@ -101,8 +110,9 @@ export class NotebookChat {
     const ed = this.view.editor;
     if (!ed) return;
     const cells = cellsOf(this.text());
-    if (!cells.length) { this.landed = null; this.el.hide(); return; }
+    if (!cells.length && !this.marked()) { this.landed = null; this.el.hide(); return; }
     this.el.show();
+    if (!cells.length) { this.refresh(); return; }
     // "last-most viewable cell within current selection": the selection's END.
     const line = Math.max(ed.getCursor("from").line, ed.getCursor("to").line);
     const index = cellAt(cells, line);
@@ -145,10 +155,13 @@ export class NotebookChat {
     return rewind(cells, end, { nCtx: N_CTX, safety: SAFETY, limit });
   }
 
+  /** How many addresses the reader marked in this note (P-N10). */
+  marked(): number { return this.view.file && this.marks ? this.marks.count(this.view.file.path) : 0; }
+
   markdown(): string {
     const out: string[] = [];
     for (const t of this.turns) {
-      out.push(`> **You** -- rewound ${t.cells} cell${t.cells === 1 ? "" : "s"}, ${t.sent} new to the chat\n> ${t.prompt.replace(/\n/g, "\n> ")}`);
+      out.push(`> **You** -- ${t.source === "marks" ? `${t.cells} marked chunk${t.cells === 1 ? "" : "s"}` : `rewound ${t.cells} cell${t.cells === 1 ? "" : "s"}`}, ${t.sent} new to the chat\n> ${t.prompt.replace(/\n/g, "\n> ")}`);
       out.push(t.reply || "*(no reply)*");
     }
     if (this.busy) out.push("*thinking...*");
@@ -157,9 +170,10 @@ export class NotebookChat {
   }
 
   refresh(): void {
-    const r = this.pendingRewind(null);
+    const r = this.pendingRewind(null), m = this.marked();
     this.label.setText(`chat${this.turns.length ? ` · ${this.turns.length}` : ""}`
-      + (r ? ` · rewinds ${r.cells.length} cell${r.cells.length === 1 ? "" : "s"}` : ""));
+      + (m ? ` · context: ${m} marked` : r ? ` · rewinds ${r.cells.length} cell${r.cells.length === 1 ? "" : "s"}` : ""));
+    this.clearMarks.toggle(m > 0);
     this.log.empty();
     void MarkdownRenderer.render(this.app, this.markdown() || "*Ask about this cell and the ones above it.*",
       this.log, this.view.file?.path || "", this.owner).then(() => { this.log.scrollTop = this.log.scrollHeight; this.place(); });
@@ -169,12 +183,28 @@ export class NotebookChat {
     if (this.busy) return null;
     if (!this.landed) this.land();
     const { limit, prompt } = parseRewind(raw);
-    const r = this.pendingRewind(limit);
-    if (!r) { this.lastError = "no cell selected"; this.refresh(); return null; }
-    this.lastRewind = { cells: r.cells.length, chars: r.chars, budget: r.budget, cut: r.cut, limit };
     const path = this.view.file?.path || "";
-    const context = r.cells.map((c: Cell) => ({ cid: "cell:" + c.hash, url: `vault://${path}#L${c.from + 1}`,
-      markdown: c.text, head: `${c.kind} cell, line ${c.from + 1}` }));
+    let context: { cid: string; url: string; markdown: string; head: string }[];
+    let given: number;
+    // The reader's marks, when there are any, ARE the context (P-N10): their
+    // addresses resolved against the note's current text, in note order.
+    const marked = this.view.file && this.marks && this.marked() && !this.plantIgnoreMarks
+      ? (await this.marks.resolve(this.view.file)).sort((a, b) => a.from - b.from) : [];
+    if (marked.length) {
+      context = marked.map((m) => ({ cid: m.cid, url: m.url + "#" + m.xpath, markdown: m.markdown,
+        head: `marked, lines ${m.from + 1}-${m.to + 1}` }));
+      given = marked.length;
+      this.lastSource = "marks";
+      if (this.marks) this.marks.stats.sent += marked.length;
+    } else {
+      const r = this.pendingRewind(limit);
+      if (!r) { this.lastError = "no cell selected"; this.refresh(); return null; }
+      this.lastRewind = { cells: r.cells.length, chars: r.chars, budget: r.budget, cut: r.cut, limit };
+      context = r.cells.map((c: Cell) => ({ cid: "cell:" + c.hash, url: `vault://${path}#L${c.from + 1}`,
+        markdown: c.text, head: `${c.kind} cell, line ${c.from + 1}` }));
+      given = r.cells.length;
+      this.lastSource = "rewind";
+    }
     this.busy = true; this.lastError = ""; this.open(true); this.refresh();
     try {
       const got = await this.sidecar.chat(this.session, prompt || raw, context);
@@ -183,7 +213,7 @@ export class NotebookChat {
         return null;
       }
       const t = got.turn;
-      const turn: NotebookTurn = { prompt: prompt || raw, cells: r.cells.length, sent: t.context.length,
+      const turn: NotebookTurn = { prompt: prompt || raw, cells: given, source: this.lastSource, sent: t.context.length,
         dropped: t.resent_dropped.length, chars: t.delta_chars, reply: t.reply, ms: t.ms };
       this.turns.push(turn);
       return turn;
@@ -208,17 +238,25 @@ export class NotebookChat {
 /** One chat per open note view that holds a code cell (a notebook). */
 export class NotebookChats {
   readonly byView = new Map<MarkdownView, NotebookChat>();
+  /** The reader's marks (P-N10), set by the plugin. */
+  marks: NoteMarks | null = null;
   constructor(private app: App, private owner: Component, private sidecar: Sidecar) {}
 
   /** The chat of the active note, made when it is a notebook. */
   forActive(): NotebookChat | null {
     const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-    if (!view || !view.file) return null;
+    return view ? this.forView(view) : null;
+  }
+
+  /** A view's chat: a notebook's, or any note's the reader has marked. */
+  forView(view: MarkdownView): NotebookChat | null {
+    if (!view.file) return null;
     let chat = this.byView.get(view);
-    const isNotebook = /^\s*(`{3,}|~{3,})/m.test(view.editor?.getValue() ?? "");
+    const isNotebook = /^\s*(`{3,}|~{3,})/m.test(view.editor?.getValue() ?? "")
+      || !!(this.marks && this.marks.count(view.file.path));
     if (!isNotebook) { if (chat) { chat.destroy(); this.byView.delete(view); } return null; }
     if (!chat || !chat.el.isConnected) {
-      chat = new NotebookChat(this.app, this.owner, view, this.sidecar);
+      chat = new NotebookChat(this.app, this.owner, view, this.sidecar, this.marks);
       this.byView.set(view, chat);
     }
     return chat;

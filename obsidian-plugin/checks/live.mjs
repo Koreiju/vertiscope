@@ -6900,6 +6900,169 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "P-N9",
+      asks: "a selection over the RENDERED markdown (reading view) marks the chunks it covers as trie addresses and draws them highlighted -- only those blocks; the mark follows its address when a section is added above it; selecting it again unmarks it; planted (plantNoMarks) a selection marks nothing",
+      async run() {
+        // Addendum II: "exposing the chunk scanning and selection highlighting
+        // for markdown rendering in the alternative panel by the user to
+        // annotate the context fed to our small language model".
+        const got = await evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const until = async (ok, ms) => { for (let t = 0; t < ms && !(await ok()); t += 200) await sleep(200); return !!(await ok()); };
+          const plugin = app.plugins.getPlugin("domvec-bridge");
+          const marks = plugin.marks;
+          const NL = String.fromCharCode(10);
+          const folder = "domvec-checks";
+          if (!app.vault.getAbstractFileByPath(folder)) await app.vault.createFolder(folder);
+          const stamp = Date.now();
+          const path = folder + "/pn9 note " + stamp + ".md";
+          const sec = (name) => "## " + name + NL + NL + Array.from({ length: 45 }, (_, i) => name.toLowerCase() + "w" + i).join(" ") + " " + name + "MARK." + NL;
+          const file = await app.vault.create(path, "# pn9" + NL + NL + ["Alpha", "Beta", "Gamma", "Delta"].map(sec).join(NL));
+          const leaf = app.workspace.getLeaf("tab");
+          const view = () => leaf.view;
+          const sections = () => (view().previewMode && view().previewMode.renderer.sections || []).filter((s) => s && s.el);
+          const markedTexts = () => sections().filter((s) => s.el.classList.contains("domvec-marked")).map((s) => s.el.textContent || "");
+          const which = () => { const t = markedTexts().join(" "); return ["Alpha", "Beta", "Gamma", "Delta", "Zeta"].filter((n) => t.includes(n + "MARK")); };
+          // Select a few words inside the block holding NAME, then release the
+          // mouse: the plugin's own mouseup handler takes it from there.
+          const select = async (name) => {
+            const s = sections().find((x) => (x.el.textContent || "").includes(name + "MARK") && x.el.querySelector("p"));
+            if (!s) return false;
+            const p = s.el.querySelector("p"), node = p.firstChild;
+            const r = document.createRange(); r.setStart(node, 3); r.setEnd(node, 40);
+            const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+            p.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+            return true;
+          };
+          const out = {};
+          try {
+            await leaf.openFile(file, { state: { mode: "preview" } });
+            app.workspace.setActiveLeaf(leaf, { focus: true });
+            await until(() => sections().some((s) => (s.el.textContent || "").includes("DeltaMARK")), 8000);
+            const m0 = marks.stats.marked;
+            out.selected = await select("Gamma");
+            await until(() => marks.stats.marked > m0 && which().length > 0, 8000);
+            out.marked = { addresses: marks.byNote[path] || [], blocks: which() };
+            // A section added ABOVE: line numbers move, the address does not.
+            await app.vault.process(file, (t) => t.replace("## Alpha", sec("Zeta").trimEnd() + NL + NL + "## Alpha"));
+            await until(() => sections().some((s) => (s.el.textContent || "").includes("ZetaMARK")), 8000);
+            await until(() => which().includes("Gamma"), 6000);
+            out.after_insert = { blocks: which() };
+            const u0 = marks.stats.unmarked;
+            await select("Gamma");
+            await until(() => marks.stats.unmarked > u0, 8000);
+            await sleep(300);
+            out.unmarked = { addresses: (marks.byNote[path] || []).length, blocks: which() };
+            // Planted: the ordinal address alone -- a section added above
+            // carries the mark onto its neighbour.
+            marks.plantAddressOnly = true;
+            try {
+              const m1 = marks.stats.marked;
+              await select("Delta");
+              await until(() => marks.stats.marked > m1 && which().includes("Delta"), 8000);
+              await app.vault.process(file, (t) => t.replace("## Zeta", sec("Eta").trimEnd() + NL + NL + "## Zeta"));
+              await until(() => sections().some((s) => (s.el.textContent || "").includes("EtaMARK")), 8000);
+              await until(() => !which().includes("Delta"), 6000);
+              out.planted_address_only = { blocks: which() };
+            } finally { marks.plantAddressOnly = false; await marks.clear(path); }
+            marks.plantNoMarks = true;
+            try {
+              await select("Beta");
+              await sleep(1500);
+              out.planted = { addresses: (marks.byNote[path] || []).length, blocks: which() };
+            } finally { marks.plantNoMarks = false; }
+            return out;
+          } finally {
+            await marks.clear(path);
+            leaf.detach();
+            try { await app.vault.delete(file); } catch (e) { /* gone */ }
+          }
+        })()`, { timeout: 120000 });
+        const only = (blocks, name) => !!blocks && blocks.includes(name) && !blocks.some((b) => b === "Alpha" || b === "Delta" || b === "Zeta");
+        return {
+          pass: !got.error && got.selected && got.marked.addresses.length >= 1 && only(got.marked.blocks, "Gamma")
+                && only(got.after_insert.blocks, "Gamma")
+                && got.unmarked.addresses === 0 && got.unmarked.blocks.length === 0
+                && !!got.planted_address_only && !got.planted_address_only.blocks.includes("Delta")
+                && got.planted.addresses === 0 && got.planted.blocks.length === 0,
+          evidence: got,
+        };
+      },
+    },
+    {
+      id: "P-N10",
+      asks: "what the reader marked IS the model's context: with a chunk marked in a notebook, the chat's turn is given exactly that chunk -- its store cid, its current text -- and not the rewind; planted (plantIgnoreMarks) the rewind's cells are sent instead",
+      async run() {
+        const got = await evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const until = async (ok, ms) => { for (let t = 0; t < ms && !(await ok()); t += 200) await sleep(200); return !!(await ok()); };
+          const plugin = app.plugins.getPlugin("domvec-bridge");
+          const SIDE = String(plugin.settings.sidecar).replace(/[/]+$/, "");
+          const marks = plugin.marks;
+          const NL = String.fromCharCode(10), F = String.fromCharCode(96).repeat(3);
+          const folder = "domvec-checks";
+          if (!app.vault.getAbstractFileByPath(folder)) await app.vault.createFolder(folder);
+          const stamp = Date.now();
+          const path = folder + "/pn10 notebook " + stamp + ".md";
+          const url = "vault://" + app.vault.getName() + "/" + path;
+          const sec = (name) => "## " + name + NL + NL + Array.from({ length: 45 }, (_, i) => name.toLowerCase() + "w" + i).join(" ") + " " + name + "MARK." + NL;
+          const file = await app.vault.create(path, "# pn10" + NL + NL + ["Alpha", "Beta", "Gamma"].map(sec).join(NL) + NL + F + "python" + NL + "print(1)" + NL + F + NL);
+          const leaf = app.workspace.getLeaf("tab");
+          const sections = () => (leaf.view.previewMode && leaf.view.previewMode.renderer.sections || []).filter((s) => s && s.el);
+          const chatTurns = async () => ((await (await fetch(SIDE + "/chat?session=" + encodeURIComponent("note:" + path))).json()).turns || []);
+          const out = {};
+          try {
+            await leaf.openFile(file, { state: { mode: "preview" } });
+            app.workspace.setActiveLeaf(leaf, { focus: true });
+            await until(() => sections().some((s) => (s.el.textContent || "").includes("GammaMARK")), 8000);
+            // The note in the store, so the marked address can be checked
+            // against the store's own chunk for it.
+            await plugin.indexNote(file, "check");
+            const s = sections().find((x) => (x.el.textContent || "").includes("GammaMARK") && x.el.querySelector("p"));
+            const node = s.el.querySelector("p").firstChild;
+            const r = document.createRange(); r.setStart(node, 3); r.setEnd(node, 40);
+            const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+            s.el.querySelector("p").dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+            await until(() => (marks.byNote[path] || []).length > 0, 8000);
+            const resolved = await marks.resolve(file);
+            const q = await (await fetch(SIDE + "/cypher", { method: "POST", headers: { "content-type": "application/json" },
+              body: JSON.stringify({ query: "MATCH (c:Chunk {url: " + JSON.stringify(url) + "}) RETURN c.cid, c.md" }) })).json();
+            const stored = Object.fromEntries((q.rows || []).map((x) => [x[0], x[1] || ""]));
+            out.marked = resolved.map((m) => ({ cid: m.cid, in_store: m.cid in stored, store_has_gamma: (stored[m.cid] || "").includes("GammaMARK"), lines: [m.from, m.to] }));
+            const chat = plugin.nbChats.forView(leaf.view);
+            if (!chat) return { error: "no chat on the marked note" };
+            await chat.reset();
+            const t0 = await chat.send("Reply with the single word ok.");
+            const turns = await chatTurns();
+            const last = turns[turns.length - 1] || {};
+            out.clean = { source: chat.lastSource, sent: (last.context || []).map((c) => c.cid), heads: (last.context || []).map((c) => c.head),
+                          reply: String((t0 && t0.reply) || "").slice(0, 60) };
+            chat.plantIgnoreMarks = true;
+            try {
+              await chat.reset();
+              chat.land(true);
+              const t1 = await chat.send("Reply with the single word ok.");
+              const turns1 = await chatTurns();
+              const l1 = turns1[turns1.length - 1] || {};
+              out.planted = { source: chat.lastSource, sent: (l1.context || []).map((c) => c.cid), heads: (l1.context || []).map((c) => c.head) };
+            } finally { chat.plantIgnoreMarks = false; }
+            return out;
+          } finally {
+            await marks.clear(path);
+            leaf.detach();
+            try { await app.vault.delete(file); } catch (e) { /* gone */ }
+          }
+        })()`, { timeout: 300000 });
+        const want = (got.marked || []).map((m) => m.cid).sort().join();
+        return {
+          pass: !got.error && got.marked.length >= 1 && got.marked.every((m) => m.in_store) && got.marked.some((m) => m.store_has_gamma)
+                && got.clean.source === "marks" && got.clean.sent.slice().sort().join() === want
+                && got.planted.source === "rewind" && got.planted.sent.length >= 1 && !got.planted.sent.some((c) => want.split(",").includes(c)),
+          evidence: got,
+        };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {

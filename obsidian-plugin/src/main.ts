@@ -57,6 +57,7 @@ import { PANEL_VIEW, PanelView } from "./panelview";
 import { Cockpit } from "./cockpit";
 import { slateFolds } from "./slatefold";
 import { NotebookChats } from "./notebookchat";
+import { NoteMarks } from "./marks";
 import { EditorView as CmView } from "@codemirror/view";
 
 export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost {
@@ -254,6 +255,39 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     // cursor landing on a new cell is a new rewind, a scroll is not.
     this.nbChats = new NotebookChats(this.app, this, this.sidecar);
     (window as any).__domvecNbChats = this.nbChats;
+    // The reader marks what the model is given (P-N9/P-N10, `marks.ts`): a
+    // selection in reading view becomes trie addresses, drawn highlighted,
+    // and the note's chat sends those in place of the rewind.
+    this.marks = new NoteMarks(this.app, this.sidecar,
+      async () => { this.settings.marks = this.marks.byNote; await this.saveSettings(); },
+      (path) => { const f = this.app.vault.getAbstractFileByPath(path); const c = f instanceof TFile ? this.nbChats?.forFile(f) : null; c?.refresh(); });
+    this.marks.byNote = { ...(this.settings.marks || {}) };
+    this.nbChats.marks = this.marks;
+    (window as any).__domvecMarks = this.marks;
+    this.registerDomEvent(document, "mouseup", () => {
+      const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+      const sel = window.getSelection();
+      if (!view || view.getMode() !== "preview" || !sel || sel.isCollapsed) return;
+      const host = (view as any).previewMode?.containerEl as HTMLElement | undefined;
+      if (!host || !sel.anchorNode || !host.contains(sel.anchorNode)) return;
+      void this.marks.markSelection(view).then((m) => { if (m.length) this.nbChats?.forView(view)?.land(); });
+    });
+    this.registerMarkdownPostProcessor((el, ctx) => {
+      if (!this.marks.count(ctx.sourcePath)) return;
+      this.marks.paintBlock(el, ctx.sourcePath, ctx.getSectionInfo(el));
+    });
+    // A marked note's spans re-resolved when it opens or changes, so the
+    // highlight follows its addresses rather than its old line numbers.
+    const remark = async (f: TFile | null | undefined) => {
+      if (!f || !this.marks.count(f.path)) return;
+      await this.marks.resolve(f);
+      for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
+        const v = leaf.view as MarkdownView;
+        if (v.file?.path === f.path) this.marks.paint(v);
+      }
+    };
+    this.registerEvent(this.app.workspace.on("file-open", (f) => void remark(f)));
+    this.registerEvent(this.app.vault.on("modify", (f) => { if (f instanceof TFile) void remark(f); }));
     let nbTimer = 0;
     this.registerEditorExtension(CmView.updateListener.of((u) => {
       if (!u.selectionSet && !u.docChanged) return;
@@ -854,6 +888,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
 
   /** The notebook chats, one per open notebook view (L-2). */
   nbChats: NotebookChats | null = null;
+  marks!: NoteMarks;
 
   onunload() {
     this.nbChats?.destroy();

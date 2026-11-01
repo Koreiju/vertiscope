@@ -1092,3 +1092,10 @@ button.domvec-run-fence:hover {
 .domvec-bb-cell { cursor: pointer; font-size: var(--font-ui-smaller); padding: 0 6px; margin-left: 4px;
   border: 1px solid var(--background-modifier-border); border-radius: 4px; color: var(--text-muted); }
 .domvec-bb-cell:hover { color: var(--text-normal); }
+
+/* P-N9: a block the reader marked as the model's context (marks.ts). */
+.markdown-preview-section > div.domvec-marked {
+  background: color-mix(in srgb, var(--interactive-accent) 14%, transparent);
+  box-shadow: inset 3px 0 0 var(--interactive-accent);
+  border-radius: 3px;
+}
