@@ -7631,6 +7631,60 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-275",
+      asks: "a flight plan is DRAWN in 3D -- a path through its targets in order, the leg being flown brighter -- and planned per mode with the throttle: in the map view the plan is drawn and holds (the camera does not move), in the ego view it flies leg by leg and the drawn leg follows, a throttle of 0 holds it where it is; planted (plantNoPlanDraw) the plan is flown but not drawn",
+      async run() {
+        // PLUGIN_GOAL items 8-9: "we can also draw flight plans for various
+        // searches and anchored nodes within different modes. We will have a
+        // throttle to set the speed, the pause, and be able to plan
+        // efficiently that way." G-283 flies plans; this draws them.
+        const got = await inPane(`
+          for (let i = 0; i < 60 && !(v.graph && v.graph.graphData().nodes.length); i++) await sleep(500);
+          app.workspace.revealLeaf(app.workspace.getLeavesOfType(TYPE)[0]);
+          const a = v.agent, cam = () => v.graph.camera().position;
+          const at = () => { const p = cam(); return [p.x, p.y, p.z]; };
+          const moved = (p0) => { const p = cam(); return Math.round(Math.hypot(p.x - p0[0], p.y - p0[1], p.z - p0[2]) * 10) / 10; };
+          const mode0 = a.mode, thr0 = a.throttle;
+          const nodes = v.graph.graphData().nodes.filter((n) => n.url && Number.isFinite(n.x)).slice(0, 4);
+          if (nodes.length < 4) return { error: "fewer than 4 placed nodes" };
+          const out = {};
+          try {
+            // The switch to map recentres the camera itself: measured after.
+            a.setMode("map"); a.setThrottle(1); await sleep(2500);
+            a.setPlan(nodes); a.play(true);
+            let p0 = at(); await sleep(2500);
+            out.map = { points: v.planDrawn.points, visible: !!v.planGroup && v.planGroup.visible, plan_at: a.planAt, moved: moved(p0) };
+            a.play(false); a.setMode("ego"); a.play(true);
+            p0 = at();
+            for (let i = 0; i < 80 && a.planAt < 1; i++) await sleep(250);
+            await sleep(400);
+            out.ego = { plan_at: a.planAt, drawn_leg: v.planDrawn.current, leg_visible: v.planGroup.children[1].visible, moved: moved(p0),
+                        legs: a.planStats.legs };
+            // Throttle 0: the craft brakes from its carried velocity (motion is
+            // stateful, item 21), then holds -- measured once at rest.
+            a.setThrottle(0);
+            for (let i = 0; i < 40 && a.stats.speed > 0.05; i++) await sleep(100);
+            const held = a.planAt; p0 = at(); await sleep(2500);
+            out.throttle_zero = { plan_at_before: held, plan_at_after: a.planAt, moved: moved(p0) };
+            v.plantNoPlanDraw = true;
+            await sleep(400);
+            out.planted = { points: v.planDrawn.points, visible: !!v.planGroup && v.planGroup.visible, still_planned: a.plan.length };
+            return out;
+          } finally {
+            v.plantNoPlanDraw = false;
+            a.play(false); a.setPlan([]); a.setThrottle(thr0); a.setMode(mode0);
+          }
+        `);
+        return {
+          pass: !got.error && got.map.points === 4 && got.map.visible && got.map.plan_at === -1 && got.map.moved < 0.5
+                && got.ego.plan_at >= 1 && got.ego.drawn_leg === got.ego.plan_at && got.ego.leg_visible && got.ego.moved > 1
+                && got.throttle_zero.plan_at_after === got.throttle_zero.plan_at_before && got.throttle_zero.moved < 1
+                && got.planted.points === 0 && !got.planted.visible && got.planted.still_planned === 4,
+          evidence: got,
+        };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {
@@ -9550,7 +9604,11 @@ export function makeChecks(env) {
             // The search changed from ANOTHER surface first (the 3D field):
             // the slate must still ask for its own query.
             setVal("query", "radix tree"); await sleep(800);
-            g.searchField.input.value = ""; await g.searchField.run(); await sleep(600);
+            g.searchField.input.value = ""; await g.searchField.run();
+            // The engine changed LAST, so the slate's sync writes its query
+            // back; only then is setting "radix tree" an edit (a fixed 600 ms
+            // raced the sync, and the planted arm's search never ran).
+            for (let i = 0; i < 40 && valOf("query") !== ""; i++) await sleep(150);
             setVal("throttle", "100"); setVal("query", "radix tree");
             // The tiered search takes 1-3 s cold: wait for its results, not a fixed time.
             for (let i = 0; i < 40 && (g.searchState?.targets || []).filter(Boolean).length < 3; i++) await sleep(250);
@@ -9563,6 +9621,8 @@ export function makeChecks(env) {
             // Where the craft ended: on the last leg's node (its look point).
             const last = a.plan[a.planAt];
             out.on_last_leg = last ? Math.round(Math.hypot(ctl.target.x - last.x, ctl.target.y - last.y, ctl.target.z - (last.z || 0)) * 10) / 10 : null;
+            // The agent's own arrival rule: aimed within 1% of the distance (UserAgent.tick).
+            out.arrival_tolerance = last ? Math.round(Math.max(0.05, Math.hypot(cam.position.x - last.x, cam.position.y - last.y, cam.position.z - (last.z || 0)) * 0.01) * 10) / 10 + 0.1 : null;
             await sleep(700);                              // the slate's sync writes play back
             out.text_play_finished = valOf("play");
             if (!planted) {
@@ -9594,7 +9654,7 @@ export function makeChecks(env) {
         })()`, { timeout: 120000 });
         if (!got || got.error) return { pass: false, evidence: got };
         const c = got.clean, p = got.planted;
-        return { pass: c.targets >= 3 && c.playing_at_start && c.legs >= 2 && c.on_last_leg !== null && c.on_last_leg < 2
+        return { pass: c.targets >= 3 && c.playing_at_start && c.legs >= 2 && c.on_last_leg !== null && c.on_last_leg <= Math.max(2, c.arrival_tolerance)
                    && c.text_play_finished === "false" && c.replayed && !c.playing_after_drag && c.text_play_after_drag === "false"
                    && c.anchored_resolved >= 1 && c.anchored_legs >= 1
                    && p.legs === 1,

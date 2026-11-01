@@ -4351,6 +4351,51 @@ export class GraphView extends ItemView {
     t.x = t.fx = x; t.y = t.fy = y; t.z = t.fz = z;
     t.__perim = true;
   }
+  /**
+   * The flight plan DRAWN (G-275: "we can also draw flight plans for various
+   * searches and anchored nodes within different modes"): a path through the
+   * plan's targets in order, the leg being flown brighter. Drawn in both
+   * modes; in the map view the plan holds and only the ego view flies it
+   * (`UserAgent.tick`). Rebuilt only when the plan, its leg or its nodes'
+   * places change -- a still plan costs a frame nothing.
+   */
+  private planGroup: any = null;
+  private planKey = "";
+  planDrawn = { points: 0, current: -1, mode: "", rebuilt: 0 };
+  /** Planted (G-275): the plan is flown but never drawn. */
+  plantNoPlanDraw = false;
+  private drawPlan(g: any): void {
+    const a = this.agent;
+    const nodes = (a.plan || []).filter((n: any) => n && Number.isFinite(n.x));
+    const show = nodes.length >= 2 && !this.plantNoPlanDraw;
+    if (!show) {
+      if (this.planGroup) this.planGroup.visible = false;
+      this.planDrawn.points = 0; this.planDrawn.current = -1; this.planDrawn.mode = a.mode;
+      return;
+    }
+    if (!this.planGroup) {
+      this.planGroup = new THREE.Group();
+      const path = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0x8fd3ff, transparent: true, opacity: 0.6 }));
+      const leg = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0xffffff }));
+      this.planGroup.add(path, leg);
+      g.scene().add(this.planGroup);
+    }
+    this.planGroup.visible = true;
+    const key = a.planAt + "|" + nodes.map((n: any) => `${Math.round(n.x)},${Math.round(n.y)},${Math.round(n.z || 0)}`).join(";");
+    if (key !== this.planKey) {
+      this.planKey = key;
+      const pts = nodes.map((n: any) => new THREE.Vector3(n.x, n.y, n.z || 0));
+      const [path, leg] = this.planGroup.children;
+      path.geometry.dispose(); path.geometry = new THREE.BufferGeometry().setFromPoints(pts);
+      const i = a.planAt;
+      const legPts = i > 0 && i < pts.length ? [pts[i - 1], pts[i]] : [];
+      leg.geometry.dispose(); leg.geometry = new THREE.BufferGeometry().setFromPoints(legPts);
+      leg.visible = legPts.length === 2;
+      this.planDrawn.rebuilt++;
+    }
+    this.planDrawn.points = nodes.length; this.planDrawn.current = a.planAt; this.planDrawn.mode = a.mode;
+  }
+
   private bisectorMesh(note: string): any {
     const g: any = this.graph;
     if (!g) return null;
@@ -6355,6 +6400,7 @@ export class GraphView extends ItemView {
         const dt = this.agentAt ? Math.min(0.5, (t - this.agentAt) / 1000) : 0;
         this.agentAt = t;
         if (dt > 0) this.agent.tick(dt);
+        this.drawPlan(g);
         this.applyZoomFloor(g);
         // The halo rides the camera's cone (G-284).
         if (this.halo) this.placeHalo();
