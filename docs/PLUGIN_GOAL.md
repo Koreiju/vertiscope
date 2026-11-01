@@ -4738,6 +4738,19 @@ cells already specified), compiled into the note's real Jupyter kernel as a
 module, Jupyter support kept; (64) work through ALL the open tasks without
 pausing when one is done.*
 
+*Correcting (63), the next message:*
+
+> No; the marldown panels are extended to the python syntax while still being markdown panels. This is sort of the "mysterious third middle" that generalizes markdown/python cells, but does not restrict using either one or the other. These two types are intimately interlaced with each other by our designs, but we keep this in jupyter terms still as a "markdown" cell since python cells are syntax-strict and specialized. So we're just extending, really, the markdown cell features to include these computation graph components.
+
+*Read as (replacing 63): (63') NOT a third cell kind -- the MARKDOWN cell
+itself is extended: its tree structures (the slate grammar, `{ref}`s) read
+with Python's syntax and scoping, as computation-graph components, while it
+stays a markdown cell in Jupyter's terms; the "mysterious third middle" that
+generalizes markdown and python without restricting either; python cells stay
+syntax-strict and specialized, and the two interlace -- names the markdown
+defines reach the code cells, and the code cells' names are referenceable from
+the markdown.*
+
 *Read as: (61) next, the COMPUTATION GRAPH form and the dialect of going
 between the two forms (panel and graph) -- built to the specific points the
 mortegon docs make on it, read there rather than reconstructed.*
@@ -4753,6 +4766,25 @@ rank at the top and push content out; boilerplate of that kind is excluded
 (the slate class, folds, variable nodes) -- never a re-implementation; (57)
 panels on the plane are DRAGGABLE and CONTAINED: moved by their header node,
 never leaving the plane's bounds.*
+
+*And next (2026-11-01, later):*
+
+> The jupyter kernels/cells are supposed to also be the draggable 2D computation graph plane type panels. You might see how graph/panel/kernel/nodes might integrate as one thing here.
+
+> All tests should be on the 2D computation graph plane for panel experiments, never their own view. This encourages the exercise of editor tools accompanying the graph editor (i.e. create/delete etc)
+
+> Let's stick to all tasks though and not pause when just one is done
+
+*Read as: (65) a notebook's cells -- the kernel's markdown and code cells --
+are panels on the 2D plane too, of the same type as the cockpit: Obsidian's
+own editor, draggable by a header node, contained in the plane, minimized to
+that node; one thing seen four ways -- a graph NODE, its PANEL, its KERNEL
+cell, its tree -- so opening a node opens its panel, a panel's run is its
+kernel's, and a panel minimized is its node again; (66) every live check of a
+panel opens that panel ON the plane, never in its own workspace view, and
+reaches it through the plane's own editor tools -- create a panel, delete a
+panel -- so the checks exercise those tools as a reader would; (64, again)
+all the open tasks, without pausing after one.*
 
 ---
 

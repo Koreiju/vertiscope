@@ -474,6 +474,18 @@ export class Sidecar {
     }
   }
 
+  /** A slate's -- or a markdown note's trees' -- Python errors (PLUGIN_GOAL 62). */
+  async slateCheck(text: string, known: string[] = []): Promise<{ diagnostics: { line: number; from: number; to: number; kind: string; message: string }[]; trees: boolean } | null> {
+    const base = this.base().trim().replace(/\/+$/, "");
+    if (!base) return null;
+    try {
+      const res = await fetch(`${base}/slate_check`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, known }) });
+      return await res.json();
+    } catch {
+      return null;
+    }
+  }
+
   /** A code module's text, and whether it may be saved (`P-C1`). */
   async source(url: string): Promise<{ url: string; module: string; editable: boolean; text: string; error?: string } | null> {
     return this.get("/source?url=" + encodeURIComponent(url));
@@ -775,7 +787,7 @@ export class Sidecar {
   vaultRoot = "";
 
   async runCell(note: string, code: string,
-                lang = "python", refs: string[] = [], line = -1, sample?: number): Promise<KernelReply | null> {
+                lang = "python", refs: string[] = [], line = -1, sample?: number, markdown = ""): Promise<KernelReply | null> {
     const base = this.base().trim().replace(/\/+$/, "");
     if (!base) return null;
     try {
@@ -783,7 +795,8 @@ export class Sidecar {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ note, code, lang, refs, line, ...(sample === undefined ? {} : { sample }),
-                               ...(this.vaultRoot ? { vault_root: this.vaultRoot } : {}) }),
+                               ...(this.vaultRoot ? { vault_root: this.vaultRoot } : {}),
+                               ...(markdown ? { markdown } : {}) }),
       });
       return (await res.json()) as KernelReply;
     } catch {

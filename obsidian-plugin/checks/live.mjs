@@ -8090,6 +8090,99 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-297",
+      asks: "a markdown cell's trees are a Python module (PLUGIN_GOAL 62, 63'): in a slate note the editor draws Python's errors where they are -- a name bound twice, a name defined as itself, a reference to nothing -- and none once fixed; in a plain markdown notebook a tree among the prose is compiled into the note's real kernel, so a code cell reads its names (params.rate) and the tree reads a code cell's (steps {n}); the cockpit, migrated, draws no error; planted (no-slate-check) nothing drawn, (no-trees) the code cell meets NameError",
+      async run() {
+        // 2026-11-01: "treat our specialized code-node markdown integrations
+        // more like as a standard python module with specialized markdown
+        // features" -- "we're just extending, really, the markdown cell
+        // features to include these computation graph components."
+        const plant = (name, on) => fetch(SIDECAR + "/plant", { method: "POST",
+          headers: { "content-type": "application/json", "X-Domvec-Client": "obsidian-plugin" }, body: JSON.stringify({ name, on }) });
+        const lint = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const until = async (ok, ms) => { for (let t = 0; t < ms && !(await ok()); t += 200) await sleep(200); return !!(await ok()); };
+          const NL = String.fromCharCode(10), T = String.fromCharCode(9);
+          const folder = "domvec-checks";
+          if (!app.vault.getAbstractFileByPath(folder)) await app.vault.createFolder(folder);
+          const bad = ["---", "domvec: slate", "---", "probe", T + "a" + T + "1", T + "a" + T + "2", T + "x" + T + "{x}", T + "y" + T + "{nope}", T + "z" + T + "{a}", ""].join(NL);
+          const good = ["---", "domvec: slate", "---", "probe", T + "a" + T + "1", T + "x" + T + "{a}", T + "y" + T + "{Database}", ""].join(NL);
+          const file = await app.vault.create(folder + "/g297 lint " + Date.now() + (${planted} ? "p" : "c") + ".md", bad);
+          const leaf = app.workspace.getLeaf("tab");
+          const errs = () => Array.from(leaf.view.contentEl.querySelectorAll(".domvec-slate-error")).map((e) => ({ text: e.textContent, title: e.getAttribute("title") }));
+          try {
+            await leaf.openFile(file, { state: { mode: "source", source: false } });
+            app.workspace.setActiveLeaf(leaf, { focus: true });
+            const a0 = window.__domvecSlateLint.asked;
+            await until(() => window.__domvecSlateLint.asked > a0 && (${planted} || errs().length >= 3), 8000);
+            await sleep(400);
+            const before = errs();
+            if (${planted}) return { planted: true, errors: before };
+            leaf.view.editor.setValue(good);
+            await until(() => errs().length === 0, 6000);
+            await sleep(700);
+            return { planted: false, errors: before, after_fix: errs() };
+          } finally {
+            leaf.detach();
+            try { await app.vault.delete(file); } catch (e) { /* gone */ }
+          }
+        })()`, { timeout: 60000 });
+        const kernel = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const until = async (ok, ms) => { for (let t = 0; t < ms && !(await ok()); t += 250) await sleep(250); return !!(await ok()); };
+          const NL = String.fromCharCode(10), T = String.fromCharCode(9), F = String.fromCharCode(96).repeat(3);
+          const folder = "domvec-checks";
+          const text = ["# Run", "", "Some prose about the run.", "", "params", T + "rate" + T + "0.5", T + "steps" + T + "{n}", "",
+                        F + "python", "n = 3", F, "", F + "python", "print('out', params.rate * 2, params.steps)", F, ""].join(NL);
+          const file = await app.vault.create(folder + "/g297 notebook " + Date.now() + (${planted} ? "p" : "c") + ".md", text);
+          const leaf = app.workspace.getLeaf("tab");
+          try {
+            await leaf.openFile(file, { state: { mode: "source", source: false } });
+            app.workspace.setActiveLeaf(leaf, { focus: true });
+            await until(() => leaf.view.containerEl.querySelectorAll(".domvec-run-fence").length >= 2, 8000);
+            const outs = () => (leaf.view.editor.getValue().match(/<!-- nb-output/g) || []).length;
+            for (let i = 0; i < 2; i++) {
+              const n = outs();
+              leaf.view.containerEl.querySelectorAll(".domvec-run-fence")[i].click();
+              await until(() => outs() > n, 60000);
+              await sleep(400);
+            }
+            const t = leaf.view.editor.getValue();
+            const last = t.slice(t.lastIndexOf("<!-- nb-output")).split("<!-- /nb-output")[0];
+            return { planted: ${planted}, printed: /out 1\\.0 3/.test(last), name_error: last.includes("NameError"), last: last.slice(-160) };
+          } finally {
+            leaf.detach();
+            try { await app.vault.delete(file); } catch (e) { /* gone */ }
+          }
+        })()`, { timeout: 120000 });
+        const cockpit = () => evaluate(`(async () => {
+          const plugin = app.plugins.getPlugin("domvec-bridge");
+          const f = app.vault.getAbstractFileByPath("domvec/ego.md");
+          await plugin.cockpit.migrateModule(f);
+          const text = await app.vault.read(f);
+          const got = await plugin.sidecar.slateCheck(text);
+          return { plan: (text.match(/\\tplan\\t.*/) || [""])[0], results: (text.match(/\\t\\tresults.*/) || [""])[0],
+                   diagnostics: got ? got.diagnostics : null };
+        })()`, { timeout: 30000 });
+        const out = { lint: await lint(false) };
+        await plant("no-slate-check", true);
+        try { out.lint_planted = await lint(true); } finally { await plant("no-slate-check", false); }
+        out.kernel = await kernel(false);
+        await plant("no-trees", true);
+        try { out.kernel_planted = await kernel(true); } finally { await plant("no-trees", false); }
+        out.cockpit = await cockpit();
+        const titles = (out.lint.errors || []).map((e) => e.title || "");
+        return {
+          pass: titles.some((t) => t.startsWith("SyntaxError") && t.includes("bound twice"))
+                && titles.some((t) => t.includes("defined as itself")) && titles.some((t) => t.includes("'nope' is not defined"))
+                && out.lint.after_fix.length === 0 && out.lint_planted.errors.length === 0
+                && out.kernel.printed && !out.kernel.name_error && out.kernel_planted.name_error && !out.kernel_planted.printed
+                && !!out.cockpit.diagnostics && out.cockpit.diagnostics.length === 0 && out.cockpit.plan.includes("{search.results}"),
+          evidence: out,
+        };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {

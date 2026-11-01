@@ -45,14 +45,14 @@ export const COCKPIT_TEXT = [
   T + "throttle" + T + "25",
   T + "keys" + T + "{keys}",
   T + "last" + T + "",
-  T + "plan" + T + "{results}",
+  T + "plan" + T + "{search.results}",
   T + "play" + T + "false",
   T + "search",
   T + T + "query" + T + "",
   T + T + "db" + T + "true",
   T + T + "duckduckgo" + T + "false",
   T + T + "k" + T + "8",
-  T + T + "results" + T + "{results}",
+  T + T + "results",
   "",
 ].join("\n");
 
@@ -135,7 +135,7 @@ export class Cockpit {
     // A cockpit written before a field existed gains it (the plan, G-283).
     const text = await this.app.vault.read(f);
     if (!/^\tplan\t/m.test(text)) {
-      await this.app.vault.modify(f, text.replace(/^(\tlast\t.*)$/m, "$1\n\tplan\t{results}\n\tplay\tfalse"));
+      await this.app.vault.modify(f, text.replace(/^(\tlast\t.*)$/m, "$1\n\tplan\t{search.results}\n\tplay\tfalse"));
     }
     // On the 2D plane over the 3D view when a graph is open (items 50, 52-53).
     const onPlane = await this.dock();
@@ -171,6 +171,7 @@ export class Cockpit {
     const plane: HTMLElement | null = g && typeof g.plane === "function" ? g.plane() : null;
     const f = this.file();
     if (!plane || !f) return null;
+    await this.migrateModule(f);
     if (this.planeLeaf && this.card && plane.contains(this.card) && this.planeLeaf.view?.file?.path === COCKPIT_PATH) {
       this.card.removeClass("is-collapsed");
       return this.planeLeaf.view instanceof MarkdownView ? this.planeLeaf.view : null;
@@ -204,6 +205,21 @@ export class Cockpit {
   syncCard(): void {
     if (!this.card || !this.planeLeaf) return;
     this.card.toggleClass("is-collapsed", !!this.planeLeaf.containerEl.querySelector(".domvec-slate-circle"));
+  }
+
+  /** The cockpit's `search/results` field. */
+  isResultsField(fl: SlateLine): boolean { return fl.key === "results" && fl.path.includes("search"); }
+
+  /** The cockpit's slate as the Python module it is (PLUGIN_GOAL 62): its
+   *  first form bound `results {results}` (a name defined as itself) and
+   *  `plan {results}` (nothing at module scope by that name). Rewritten once
+   *  to the dotted reference and a plain field; the rows go beneath it. */
+  async migrateModule(f: TFile): Promise<boolean> {
+    const text = await this.app.vault.read(f);
+    const next = text.replace(/^(\tplan\t)\{results\}\s*$/m, "$1{search.results}").replace(/^(\t\tresults)\t\{results\}\s*$/m, "$1");
+    if (next === text) return false;
+    await this.app.vault.modify(f, next);
+    return true;
   }
 
   /** Off the plane (its graph closed, or the plugin unloading). */
@@ -420,7 +436,8 @@ export class Cockpit {
       const ln = pos != null ? cm.state.doc.lineAt(pos) : null;
       const onRef = ln ? /\{[^}]+\}/.test(ln.text) : false;
       const onTitle = ln ? ln.number === titleLine(cm.state.doc) : false;
-      const onFoldable = ln ? !!this.fieldAtLine(cm, ln.number)?.hasKids : false;
+      const atLine = ln ? this.fieldAtLine(cm, ln.number) : null;
+      const onFoldable = !!atLine?.hasKids && !(v?.file?.path === COCKPIT_PATH && /\/search\/results$/.test(atLine.path));
       if (t?.closest?.(".domvec-slate-graph")) return;    // the graph says its own (below)
       if (!(t?.closest?.(".domvec-slate-circle") || onRef || onTitle || onFoldable)) return;
       e.preventDefault(); e.stopPropagation();
@@ -476,7 +493,7 @@ export class Cockpit {
     const play = (this.field(fs, "play")?.value || "").trim() === "true";
     if (play && !a.playing && !this.playSeen) {
       const plan = (this.field(fs, "plan")?.value || "").trim();
-      if (plan === "{results}" && g.searchState) { a.setPlan(g.searchState.targets.filter(Boolean)); a.play(true); }
+      if ((plan === "{search.results}" || plan === "{results}") && g.searchState) { a.setPlan(g.searchState.targets.filter(Boolean)); a.play(true); }
       else {
         // Any other `{ref}`: its target through the store -- the plan flies
         // through its chunks' nodes, or its page's node when they are not
@@ -748,11 +765,13 @@ export class Cockpit {
       const at = this.fieldAt(e.clientX, e.clientY);
       if (!at) return;
       if (e.button === 0 && at.onValue && this.toggle(at.fl)) { e.preventDefault(); return; }
-      if (e.button === 2 && at.onRef === "results") { e.preventDefault(); e.stopPropagation(); this.toggleResults(); }
+      // The results FIELD (item 62: `results {results}` defined itself): its
+      // rows are its children, opened and folded by a right-click on it.
+      if (e.button === 2 && (at.onRef === "results" || this.isResultsField(at.fl))) { e.preventDefault(); e.stopPropagation(); this.toggleResults(); }
     }, true);
     el.addEventListener("contextmenu", (e: MouseEvent) => {
       const at = this.fieldAt(e.clientX, e.clientY);
-      if (at && at.onRef) { e.preventDefault(); e.stopPropagation(); }
+      if (at && (at.onRef || this.isResultsField(at.fl))) { e.preventDefault(); e.stopPropagation(); }
     }, true);
     el.addEventListener("mousemove", (e: MouseEvent) => {
       const at = this.fieldAt(e.clientX, e.clientY);

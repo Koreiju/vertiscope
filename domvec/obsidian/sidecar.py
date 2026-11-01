@@ -186,6 +186,12 @@ PLANT_NO_REF_BINDING = [False]
 PLANT_NO_BASE_OBJECTS = [False]
 #: Planted (P-N4): no vault facade -- a cell sees neither `Vault` nor its note's folder.
 PLANT_NO_VAULT = [False]
+#: Planted (PLUGIN_GOAL 62): a note's markdown trees are not compiled into its kernel.
+PLANT_NO_TREES = [False]
+#: Planted (PLUGIN_GOAL 62): the slate check finds nothing.
+PLANT_NO_SLATE_CHECK = [False]
+#: Names that exist outside any note: the kernel's base objects, the cockpit's key stream.
+_SLATE_KNOWN = ("Database", "WebBrowser", "Agent", "search", "Vault", "keys")
 #: Planted (item 59): a filtered search page is truncated, not refilled.
 PLANT_NO_REFILL = [False]
 #: Planted (G-288): a cell's asks of the app are dropped.
@@ -809,6 +815,8 @@ _PLANTABLE = {
     "reembed-all": ("domvec.vectors", "PLANT_REEMBED_ALL"),                    # P-N6
     "no-seed": ("domvec.workspace", "PLANT_NO_SEED"),                          # P-N6
     "no-vault": ("domvec.obsidian.sidecar", "PLANT_NO_VAULT"),                 # P-N4
+    "no-trees": ("domvec.obsidian.sidecar", "PLANT_NO_TREES"),                 # item 62
+    "no-slate-check": ("domvec.obsidian.sidecar", "PLANT_NO_SLATE_CHECK"),     # item 62
     "no-content-factor": ("domvec.search", "PLANT_NO_CONTENT_FACTOR"),         # item 59
     "no-refill": ("domvec.obsidian.sidecar", "PLANT_NO_REFILL"),               # item 59
     "subprocess-kernel": ("domvec.obsidian.kernel", "PLANT_SUBPROCESS_KERNEL"),  # P-N1
@@ -2342,6 +2350,25 @@ class _Handler(BaseHTTPRequestHandler):
                 threading.Thread(target=_maybe_compact, args=(self.workspace, store_mb), daemon=True).start()
             return
 
+        if route == "slate_check":
+            # A slate's -- or a markdown note's trees' -- Python errors
+            # (PLUGIN_GOAL 62, 63'): duplicates, self-definitions, cycles,
+            # references to nothing, line by line for the editor to draw. A
+            # pure function of the text; the kernel's base objects and the
+            # cockpit's key stream are names that exist.
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(length) or b"{}")
+                text = str(body.get("text") or "")
+                known = [str(k) for k in (body.get("known") or [])] + list(_SLATE_KNOWN)
+                from .. import slate_module as _sm
+                trees = _sm.trees_of(text)
+                diags = [] if PLANT_NO_SLATE_CHECK[0] else _sm.check(trees, known=known)
+                self._send(200, {"trees": bool(trees.strip()), "diagnostics": [d.to_json() for d in diags]})
+            except Exception as exc:                # noqa: BLE001
+                self._send(500, {"error": "%s: %s" % (type(exc).__name__, exc)})
+            return
+
         if route == "source":
             # A saved code artifact (P-C1/P-C5): the file written, then
             # re-indexed into the trie as the module page it is, and queued for
@@ -2860,7 +2887,21 @@ class _Handler(BaseHTTPRequestHandler):
                                    sample=int(sample) if isinstance(sample, (int, float)) else None)
                 if bound["prelude"]:
                     self.kernel_pool.run(note, bound["prelude"])
-            reply = self.kernel_pool.run(note, code)
+            # The note's markdown TREES first (PLUGIN_GOAL 62, 63': the extended
+            # markdown cell): compiled into this kernel as the module they are,
+            # so the code cell sees the names the markdown binds -- and a tree
+            # that fails, fails the cell as importing a broken module would.
+            # Planted `PLANT_NO_TREES`.
+            md = body.get("markdown")
+            trees_reply = None
+            if isinstance(md, str) and md.strip() and not PLANT_NO_TREES[0]:
+                from .. import slate_module as _sm
+                trees = _sm.trees_of(md)
+                if trees.strip():
+                    tr = self.kernel_pool.run(note, _sm.compile_module(trees))
+                    if isinstance(tr, dict) and tr.get("error"):
+                        trees_reply = dict(tr, error="in the note's markdown trees:\n" + str(tr["error"]))
+            reply = trees_reply if trees_reply is not None else self.kernel_pool.run(note, code)
             if in_vault:
                 # The note's folder only for the cell: a process's working
                 # directory cannot be removed on Windows, so a kernel parked

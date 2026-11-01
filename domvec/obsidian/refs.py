@@ -50,10 +50,18 @@ def resolve(workspace, name: str) -> Optional[Dict]:
             text, cids = _page_text(store, url)
             return {"kind": "page", "url": url, "cids": cids, "value": text}
     # The halo's answer: retrieval's top hit.
-    try:
-        hits = workspace.search(name, k=1)
-    except Exception:                               # noqa: BLE001
-        hits = []
+    # A search racing a live write can raise (the index mid-swap); that is
+    # not "nothing is called that" -- asked again once it settles (G-283's
+    # anchored plan read a transient failure as an unresolved name).
+    hits = []
+    for attempt in range(3):
+        try:
+            hits = workspace.search(name, k=1)
+            break
+        except Exception as e:                      # noqa: BLE001
+            import sys, time
+            print(f"[refs] search {name!r} failed ({type(e).__name__}: {e}); retry {attempt + 1}", file=sys.stderr)
+            time.sleep(0.25 * (attempt + 1))
     for h in hits or []:
         cid = getattr(h, "cid", None) or getattr(h, "chunk", "")
         c = store.chunk(cid) if cid else None

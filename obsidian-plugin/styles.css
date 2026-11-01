@@ -1172,3 +1172,6 @@ button.domvec-run-fence:hover {
 .domvec-plane-card .domvec-var-title, .domvec-plane-card .domvec-slate-circle-dot { cursor: grab; }
 /* The narrow card on the plane: Obsidian's own margin variable, smaller. */
 .domvec-plane-card { --file-margins: 6px 10px; }
+
+/* Item 62: a tree's Python error, drawn where it is (slatelint.ts). */
+.domvec-slate-error { text-decoration: underline wavy var(--text-error); text-decoration-skip-ink: none; text-underline-offset: 3px; }

@@ -60,6 +60,7 @@ import { COCKPIT_PATH, Cockpit } from "./cockpit";
 import { slateFolds } from "./slatefold";
 import { NotebookChats } from "./notebookchat";
 import { NoteMarks } from "./marks";
+import { slateLint, slateLintStats } from "./slatelint";
 import { EditorView as CmView } from "@codemirror/view";
 
 export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost {
@@ -262,6 +263,9 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     // a click infills the link between the parentheses.
     this.registerEditorExtension(linkGesture(this.gesture));
     this.registerEditorExtension(chunkGutter());
+    // A note's trees checked as the Python module they are (PLUGIN_GOAL 62).
+    this.registerEditorExtension(slateLint(() => this.sidecar));
+    (window as any).__domvecSlateLint = slateLintStats;
     // The notebook chat (L-2..L-9): a panel at the selected cell's foot; the
     // cursor landing on a new cell is a new rewind, a scroll is not.
     this.nbChats = new NotebookChats(this.app, this, this.sidecar);
@@ -774,7 +778,12 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     try {
       // The cell's `{ref}` inputs (G-279). Planted `__domvecPlantNoRefs`: none sent.
       const refs = (window as any).__domvecPlantNoRefs ? [] : (req.refs || []);
-      reply = await this.sidecar.runCell(note, req.code, req.lang, refs, req.line, req.sample);
+      // The note's own text: its markdown TREES are compiled into the kernel
+      // first (PLUGIN_GOAL 62, 63': the extended markdown cell), so a code
+      // cell sees the names the markdown binds.
+      const nf = this.app.vault.getAbstractFileByPath(note);
+      const markdown = nf instanceof TFile ? await this.app.vault.cachedRead(nf) : "";
+      reply = await this.sidecar.runCell(note, req.code, req.lang, refs, req.line, req.sample, markdown);
     } finally {
       running.hide();
     }
