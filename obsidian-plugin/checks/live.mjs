@@ -7685,6 +7685,85 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-234",
+      asks: "one class of code artifact, one interface: a vault note's code cell opens (its fence's ⧉ open) in the SAME code artifact panel a code:// module does -- its source editable, its chunks with their addresses on the trie side -- an edit saved there lands back in its fence (the other cell untouched), and the panel's run surface is the notebook's own kernel (run x = 41 in the panel, then print(x + 2) in the note prints 43); planted (plantOtherKernel) the note's next cell meets NameError",
+      async run() {
+        // PLUGIN_GOAL 163 (read 2026-10-18): web code blocks, code:// modules
+        // and vault code cells "SHOWN the same way: the code artifact panel".
+        // This is the vault-cell half; the web-code-block half and the
+        // vectorisation half are recorded as open.
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const until = async (ok, ms) => { for (let t = 0; t < ms && !(await ok()); t += 250) await sleep(250); return !!(await ok()); };
+          const plugin = app.plugins.getPlugin("domvec-bridge");
+          const NL = String.fromCharCode(10), F = String.fromCharCode(96).repeat(3);
+          const folder = "domvec-checks";
+          if (!app.vault.getAbstractFileByPath(folder)) await app.vault.createFolder(folder);
+          const path = folder + "/g234 notebook " + Date.now() + (${planted} ? "p" : "c") + ".md";
+          const file = await app.vault.create(path, "# nb" + NL + NL + "## Setup" + NL + NL + "The first cell sets x." + NL + NL + F + "python" + NL + "x = 40" + NL + F + NL + NL
+            + "## Next" + NL + NL + F + "python" + NL + "print(x + 2)" + NL + F + NL);
+          const leaf = app.workspace.getLeaf("tab");
+          const out = { planted: ${planted} };
+          try {
+            await leaf.openFile(file, { state: { mode: "source", source: false } });
+            app.workspace.setActiveLeaf(leaf, { focus: true });
+            await until(() => leaf.view.containerEl.querySelectorAll(".domvec-open-fence").length >= 2, 8000);
+            leaf.view.containerEl.querySelectorAll(".domvec-open-fence")[0].click();
+            await until(() => app.workspace.getLeavesOfType("domvec-code-view").some((l) => l.view.cell && l.view.cell.path === path && l.view.editor), 8000);
+            const cv = app.workspace.getLeavesOfType("domvec-code-view").map((l) => l.view).find((v) => v.cell && v.cell.path === path);
+            if (!cv) return { error: "the cell did not open in the code artifact panel" };
+            await until(() => cv.contentEl.querySelectorAll(".domvec-code-chunk").length > 0, 8000);
+            out.opened = { type: cv.getViewType(), url: cv.url, editable: cv.editable, source: cv.text(),
+                           trie: Array.from(cv.contentEl.querySelectorAll(".domvec-code-xpath")).map((e) => e.textContent) };
+            // Edited in the panel, saved back into the fence.
+            const t = cv.text(), i = t.indexOf("40");
+            cv.editor.dispatch({ changes: { from: i, to: i + 2, insert: "41" } });
+            const n0 = cv.stats.saves;
+            Array.from(cv.contentEl.querySelectorAll(".domvec-code-head button")).find((b) => b.textContent === "save").click();
+            await until(() => cv.stats.saves > n0 && !cv.dirty, 8000);
+            await sleep(500);
+            const note = await app.vault.read(file);
+            out.saved = { in_fence: note.includes(F + "python" + NL + "x = 41" + NL + F), other_cell: note.includes(F + "python" + NL + "print(x + 2)" + NL + F) };
+            // Run in the panel, then the note's next cell: one kernel.
+            cv.plantOtherKernel = ${planted};
+            try {
+              const r0 = cv.stats.runs;
+              Array.from(cv.contentEl.querySelectorAll(".domvec-code-head button")).find((b) => b.textContent === "run").click();
+              await until(() => cv.stats.runs > r0, 5000);
+              await sleep(2500);
+            } finally { cv.plantOtherKernel = false; }
+            app.workspace.setActiveLeaf(leaf, { focus: true });
+            await sleep(500);
+            const runs = leaf.view.containerEl.querySelectorAll(".domvec-run-fence");
+            const outs = () => (leaf.view.editor.getValue().match(/nb-output/g) || []).length;
+            const before = outs();
+            runs[runs.length - 1].click();
+            await until(() => outs() > before, 30000);
+            await sleep(400);
+            const after = leaf.view.editor.getValue();
+            // The LAST output block: its opening marker (the closing one reads "/nb-output").
+            const block = after.slice(after.lastIndexOf("<!-- nb-output")).split("<!-- /nb-output")[0];
+            // The printed text only: the marker line carries a hex hash.
+            const printed = block.slice(block.indexOf("-->") + 3).split(NL).map((l) => l.trim());
+            out.note_cell = { printed_43: printed.includes("43"), name_error: block.includes("NameError"), block: block.slice(0, 200) };
+            return out;
+          } finally {
+            for (const l of app.workspace.getLeavesOfType("domvec-code-view")) if (l.view.cell && l.view.cell.path === path) l.detach();
+            leaf.detach();
+            try { await app.vault.delete(file); } catch (e) { /* gone */ }
+          }
+        })()`, { timeout: 120000 });
+        const clean = await arm(false), planted = await arm(true);
+        return {
+          pass: !clean.error && clean.opened.type === "domvec-code-view" && clean.opened.editable && clean.opened.source === "x = 40"
+                && clean.opened.trie.length >= 1 && clean.saved.in_fence && clean.saved.other_cell
+                && clean.note_cell.printed_43 && !clean.note_cell.name_error
+                && !planted.error && planted.note_cell.name_error && !planted.note_cell.printed_43,
+          evidence: { clean, planted },
+        };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {

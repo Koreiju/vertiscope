@@ -52,6 +52,20 @@ export interface RunHost {
   onTerminalFence?(req: RunRequest): void | Promise<void>;
   /** G-283: play / pause the cell over the samples of its first `{ref}`. */
   onRolloutFence?(req: RunRequest): void | Promise<void>;
+  /** G-234: the cell in the code artifact panel, as a module opens there. */
+  onOpenFence?(req: RunRequest): void | Promise<void>;
+}
+
+/** `⧉ open` beside run (G-234). */
+function openButton(doc: Document, onClick: () => void): HTMLButtonElement {
+  const btn = doc.createElement("button");
+  btn.className = "domvec-open-fence";
+  btn.type = "button";
+  btn.setAttribute("aria-label", "Open this cell in the code artifact panel");
+  btn.textContent = "⧉ open";
+  btn.addEventListener("mousedown", (e) => e.preventDefault());
+  btn.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); onClick(); });
+  return btn;
 }
 
 /** The rollout's play beside run (G-283), on a cell with a `{ref}` to iterate. */
@@ -142,6 +156,7 @@ export function readingViewRunButtons(host: RunHost) {
       pre.appendChild(runButton(el.ownerDocument, () => host.onRunFence(req())));
       const term = host.onTerminalFence ? termButton(el.ownerDocument, () => host.onTerminalFence!(req())) : null;
       if (term) pre.appendChild(term);
+      if (host.onOpenFence) pre.appendChild(openButton(el.ownerDocument, () => host.onOpenFence!(req())));
     });
   };
 }
@@ -184,6 +199,7 @@ class RunWidget extends WidgetType {
     const term = this.host.onTerminalFence
       ? termButton(view.dom.ownerDocument, () => this.host.onTerminalFence!(req())) : null;
     if (term) wrap.appendChild(term);
+    if (this.host.onOpenFence) wrap.appendChild(openButton(view.dom.ownerDocument, () => this.host.onOpenFence!(req())));
     if (this.host.onRolloutFence && (this.fence.refs || []).length) {
       wrap.appendChild(playButton(view.dom.ownerDocument, () => this.host.onRolloutFence!(req())));
     }

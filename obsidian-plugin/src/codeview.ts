@@ -22,7 +22,7 @@
  * The 3D half of P-C5 is the projector's: a save queues the module's page,
  * and the graph's delta stream redraws what moved.
  */
-import { ItemView, MarkdownRenderer, type WorkspaceLeaf } from "obsidian";
+import { ItemView, MarkdownRenderer, TFile, type WorkspaceLeaf } from "obsidian";
 import { EditorState } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import type { Sidecar } from "./sidecar";
@@ -88,7 +88,9 @@ export class CodeView extends ItemView {
   /** Open a module: its file on the source side, its chunks on the trie side. */
   async openUrl(url: string): Promise<boolean> {
     if (!this.sourceEl) await this.onOpen();
-    const got = await this.sidecar.source(url);
+    // One class of code artifact (G-234): a vault note's code cell opens here
+    // as a module does -- `cell:<note path>#<fence line>`.
+    const got = url.startsWith("cell:") ? await this.readCell(url) : await this.sidecar.source(url);
     this.url = url;
     if (!got || got.error) { this.head.setText((got && got.error) || "the sidecar did not answer"); return false; }
     this.module = got.module || "";
@@ -132,12 +134,52 @@ export class CodeView extends ItemView {
     };
   }
 
+  /** A vault code cell (G-234): the note it lives in, and its fence's open line. */
+  cell: { path: string; line: number } | null = null;
+
+  /** The python fences of a note: open line, close line, body. */
+  private static fences(text: string): { open: number; close: number; body: string }[] {
+    const lines = text.split("\n"), out: { open: number; close: number; body: string }[] = [];
+    for (let i = 0; i < lines.length; i++) {
+      const m = /^\s*(`{3,}|~{3,})\s*(python|py|python3)\b/.exec(lines[i]);
+      if (!m) continue;
+      let j = i + 1;
+      while (j < lines.length && !lines[j].trim().startsWith(m[1])) j++;
+      out.push({ open: i, close: j, body: lines.slice(i + 1, j).join("\n") });
+      i = j;
+    }
+    return out;
+  }
+
+  private async readCell(url: string): Promise<{ module: string; editable: boolean; text: string; error?: string }> {
+    const m = /^cell:(.+)#(\d+)$/.exec(url);
+    const file = m ? this.app.vault.getAbstractFileByPath(m[1]) : null;
+    if (!m || !(file instanceof TFile)) return { module: "", editable: false, text: "", error: "no such note: " + url };
+    const fs = CodeView.fences(await this.app.vault.read(file));
+    const f = fs.find((x) => x.open === Number(m[2])) || fs.find((x) => x.open >= Number(m[2]));
+    if (!f) return { module: "", editable: false, text: "", error: "no python cell at line " + m[2] };
+    this.cell = { path: m[1], line: f.open };
+    return { module: "", editable: true, text: f.body };
+  }
+
+  /** The trie side of a cell: the chunks the store's chunker cuts around it,
+   *  with their addresses (`/chunk_preview`, the chunker `index_note` uses). */
+  private async cellChunks(): Promise<SideChunk[]> {
+    const file = this.cell ? this.app.vault.getAbstractFileByPath(this.cell.path) : null;
+    if (!(file instanceof TFile) || !this.cell) return [];
+    const text = await this.app.vault.read(file), lines = text.split("\n");
+    const f = CodeView.fences(text).find((x) => x.open === this.cell!.line);
+    if (!f) return [];
+    const pv = await this.sidecar.chunkPreview(text, file.path, this.app.vault.getName());
+    return ((pv && pv.chunks) || []).filter((c) => c.start_line <= f.close && c.end_line >= f.open)
+      .map((c) => ({ cid: c.xpath + "#" + c.part, xpath: c.xpath, md: lines.slice(c.start_line, c.end_line + 1).join("\n") }));
+  }
+
   /** The trie side: every chunk the store holds for the module, in order. */
   async readTrie(): Promise<SideChunk[]> {
     const before = new Map(this.chunks.map((c) => [c.cid, c.md]));
-    const cids = await this.sidecar.pageCids(this.url);
-    const next: SideChunk[] = [];
-    for (const cid of cids) {
+    const next: SideChunk[] = this.cell ? await this.cellChunks() : [];
+    for (const cid of this.cell ? [] : await this.sidecar.pageCids(this.url)) {
       const p: any = await this.sidecar.chunk(cid);
       if (p) next.push({ cid, xpath: p.xpath || "", md: (p.lines || []).map((l: any) => l.text || "").join("\n") });
     }
@@ -160,7 +202,7 @@ export class CodeView extends ItemView {
   async save(): Promise<any> {
     if (!this.editable || !this.editor) return null;
     const text = this.text();
-    const got = await this.sidecar.saveSource(this.url, text);
+    const got = this.cell ? await this.saveCell(text) : await this.sidecar.saveSource(this.url, text);
     this.stats.saves++;
     this.stats.last = got;
     if (got && !got.error) {
@@ -171,12 +213,33 @@ export class CodeView extends ItemView {
     return got;
   }
 
+  /** A cell saved back into its fence in the note -- found by its open
+   *  line, or, if the note moved under it, by the body it was opened with. */
+  private async saveCell(text: string): Promise<any> {
+    const file = this.cell ? this.app.vault.getAbstractFileByPath(this.cell.path) : null;
+    if (!(file instanceof TFile) || !this.cell) return { error: "the note is gone" };
+    let wrote: any = { error: "the cell is gone from the note" };
+    await this.app.vault.process(file, (t) => {
+      const fs = CodeView.fences(t);
+      const f = fs.find((x) => x.open === this.cell!.line && x.body === this.savedText) || fs.find((x) => x.body === this.savedText);
+      if (!f) return t;
+      const lines = t.split("\n");
+      lines.splice(f.open + 1, f.close - f.open - 1, ...text.split("\n"));
+      this.cell!.line = f.open;
+      wrote = { path: this.cell!.path, line: f.open };
+      return lines.join("\n");
+    });
+    return wrote;
+  }
+
   /** Run in the module's own kernel; output appended below. */
   async run(code: string, whole = false): Promise<any> {
     const pkg = this.module.includes(".") ? this.module.slice(0, this.module.lastIndexOf(".")) : "";
     const pre = whole && pkg ? `__package__ = ${JSON.stringify(pkg)}\n` : "";
     this.stats.runs++;
-    const r: any = await this.sidecar.runCell(this.plantOtherKernel ? "code:elsewhere" : "code:" + this.url, pre + code);
+    // A cell runs in its NOTEBOOK's kernel, the namespace its run button uses.
+    const key = this.plantOtherKernel ? "code:elsewhere" : this.cell ? this.cell.path : "code:" + this.url;
+    const r: any = await this.sidecar.runCell(key, (this.cell ? "" : pre) + code);
     const lines: string[] = [`>>> ${whole ? `run ${this.getDisplayText()}` : code}`];
     if (!r) lines.push("(the sidecar did not answer)");
     else {

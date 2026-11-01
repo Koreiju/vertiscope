@@ -1016,6 +1016,12 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
    *  (§4a). The kernel still runs it in place with ▶ run; both at once is two
    *  panes, which needs no layout of its own. */
   terminalStats = { opened: 0, ran: 0 };
+  /** G-234: a vault code cell in the code artifact panel -- editable, saved
+   *  back into its fence, run in its notebook's own kernel. */
+  async onOpenFence(req: RunRequest): Promise<void> {
+    if (req.path && req.line >= 0) await this.openCode("cell:" + req.path + "#" + req.line);
+  }
+
   async onTerminalFence(req: RunRequest): Promise<void> {
     const term = await this.openTerminal();
     if (!term) return;
