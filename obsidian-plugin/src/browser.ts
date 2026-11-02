@@ -789,8 +789,16 @@ export class BrowserView extends ItemView {
     menu.showAtPosition({ x: Number(p.x) || 0, y: Number(p.y) || 0 });
   }
 
-  /** A new browser cell in its own tab, on `url`. */
+  /** A new browser cell on `url`: another browser panel on the plane (PLUGIN_GOAL
+   *  87-89, many browsers), not a workspace tab -- a tab landed in the graph's
+   *  own group and hid the plane behind it, every panel on it measuring 0px. */
   private async openInNewTab(url: string): Promise<void> {
+    const plugin: any = (this.app as any).plugins?.getPlugin?.("domvec-bridge");
+    if (plugin?.openBrowserInstance && plugin.desk?.host?.plane?.()) {
+      const bp = await plugin.openBrowserInstance();
+      bp.go(url);
+      return;
+    }
     const leaf = this.app.workspace.getLeaf("tab");
     await leaf.setViewState({ type: "domvec-browser-view", active: true });
     const v: any = leaf.view;

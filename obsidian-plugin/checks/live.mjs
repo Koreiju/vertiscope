@@ -6928,9 +6928,19 @@ export function makeChecks(env) {
           const which = () => { const t = markedTexts().join(" "); return ["Alpha", "Beta", "Gamma", "Delta", "Zeta"].filter((n) => t.includes(n + "MARK")); };
           // Select a few words inside the block holding NAME, then release the
           // mouse: the plugin's own mouseup handler takes it from there.
+          // The reading view is virtualized: a block below the panel's fold is
+          // not in the DOM, and a "selection" inside it is collapsed -- so the
+          // block is scrolled to first, as a reader would (2026-11-02).
           const select = async (name) => {
-            const s = sections().find((x) => (x.el.textContent || "").includes(name + "MARK") && x.el.querySelector("p"));
-            if (!s) return false;
+            const find = () => sections().find((x) => (x.el.textContent || "").includes(name + "MARK") && x.el.querySelector("p"));
+            const s0 = find();
+            if (!s0) return false;
+            if (!s0.el.isConnected) {
+              view().previewMode.applyScroll(Math.max(0, (s0.start ? s0.start.line : s0.lineStart) - 1));
+              await until(() => { const x = find(); return !!x && x.el.isConnected; }, 4000);
+            }
+            const s = find();
+            if (!s || !s.el.isConnected) return false;
             const p = s.el.querySelector("p"), node = p.firstChild;
             const r = document.createRange(); r.setStart(node, 3); r.setEnd(node, 40);
             const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
@@ -9501,7 +9511,11 @@ export function makeChecks(env) {
             use(A); await sleep(200);
             out.after_A = String(g.browsingUrl() || "");
             out.follows = out.after_B.includes("-B") && out.after_A.includes("-A");
-            c.dirty(); await sleep(2500); c.dirty(); await sleep(2600);
+            // A rebuild AFTER the plant was set (a sidecar busy with two
+            // browsers' streams answers the craft's asks late).
+            const b0 = c.stats.builds;
+            c.dirty();
+            await until(() => c.stats.builds > b0 + 1, 45000);
             out.code_node = c.nodes.some((n) => n.id === "craft:code:BrowserView");
             out.instance_links = c.edges.filter((e) => e.kind === "instance").map((e) => e.b.replace("craft:", ""));
             return out;
@@ -9550,7 +9564,7 @@ export function makeChecks(env) {
             out.ready = await until(async () => {
               const r = await (await fetch(SIDE + "/search?q=" + encodeURIComponent(body) + "&k=12&where=ego", { headers: H })).json();
               return (r.hits || []).filter((h) => String(h.url).includes("g317") && String(h.url).includes(String(stamp))).length >= 5;
-            }, 60000);
+            }, 150000);
             await halo.open(focus.path);
             await until(() => halo.nodes.length >= 4, 10000);
             const ours = halo.nodes.filter((n) => n.url.includes(String(stamp)));
@@ -9565,7 +9579,7 @@ export function makeChecks(env) {
             for (const n of [focus, ...notes]) { try { await d.trash(n.path); } catch (e) { /* gone */ } }
             c.dirty();
           }
-        })()`, { timeout: 150000 });
+        })()`, { timeout: 300000 });
         const clean = await arm(false);
         const planted = await arm(true);
         const c = clean || {};

@@ -139,7 +139,7 @@ export class Craft {
   /** Knowledge key -> place, from the ego's own projection (item 76). */
   private places: Record<string, number[]> = {};
   private builtAt = -1e9;
-  private building = false;
+  building = false;
   private key = "";
 
   constructor(private host: CraftHost) {}

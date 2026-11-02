@@ -1709,19 +1709,33 @@ def _build_codegraph(workspace) -> None:
         root = Path(__file__).resolve().parents[1]
         g = CodeGraph(root, Path(getattr(workspace, "path", ".")) / "codegraph.json").build()
         CODEGRAPH["graph"] = g
-        idx = getattr(workspace, "index", None)
-        if idx is not None:
-            # url -> its module's percentile, for every code:// page the store holds.
-            ranks = {}
-            for url in workspace.store.page_urls():
-                if url.startswith("code://repo/"):
-                    m = g.module_of_url(url)
-                    if m in g.rank:
-                        ranks[url] = g.rank[m]
-            idx.code_rank = ranks
+        # url -> its module's percentile, for every code:// page the store
+        # holds -- computed whether or not an index exists yet: a fresh
+        # sidecar builds its index lazily, and the ranks gated on it were never
+        # computed at all (G-318: 0 pages ranked). `_ensure_code_rank` hands
+        # them to whichever index is current.
+        ranks = {}
+        for url in workspace.store.page_urls():
+            if url.startswith("code://repo/"):
+                m = g.module_of_url(url)
+                if m in g.rank:
+                    ranks[url] = g.rank[m]
+        CODEGRAPH["ranks"] = ranks
+        _ensure_code_rank(workspace)
     except Exception as exc:                        # noqa: BLE001 -- retrieval goes on without it
         CODEGRAPH["error"] = "%s: %s" % (type(exc).__name__, exc)
     CODEGRAPH["ms"] = round((_t.perf_counter() - t0) * 1000)
+
+
+def _ensure_code_rank(workspace) -> int:
+    """The code graph's ranks on whichever index is CURRENT: the sidecar
+    replaces its index as the store grows, and the ranks were set on the one
+    that existed when the graph was built (G-318 read 0 pages ranked)."""
+    ranks = CODEGRAPH.get("ranks")
+    idx = getattr(workspace, "index", None)
+    if ranks and idx is not None and getattr(idx, "code_rank", None) is not ranks:
+        idx.code_rank = ranks
+    return len(getattr(idx, "code_rank", None) or {})
 
 
 def _ego_hits(workspace, query: str, want: int) -> list:
@@ -1781,6 +1795,7 @@ def search_payload(workspace, query: str, k: int = 8, *,
     list that can be handed to a model.
     """
     want = max(1, offset + k)
+    _ensure_code_rank(workspace)
     # Scoped means ranked WITHIN the page, and the index does that itself now
     # (`scope_url`). It used to be a post-filter over a widened global top-k,
     # bounded so that scoping a large page did not rank the corpus end to
@@ -4281,7 +4296,7 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             name = (parse_qs(parts.query).get("name") or [""])[0]
             out = {"ready": True, "ms": CODEGRAPH["ms"], "stats": g.stats,
-                   "code_rank_pages": len(getattr(self.workspace.index, "code_rank", None) or {})}
+                   "code_rank_pages": _ensure_code_rank(self.workspace)}
             if name:
                 out.update({"name": name, "kind": g.kind.get(name, ""), "rank": g.percentile(name),
                             "neighbours": [{"name": n, "edge": k} for n, k in g.neighbours(name)[:40]]})

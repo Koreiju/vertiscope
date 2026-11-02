@@ -175,22 +175,29 @@ class CodeGraph:
             key = str(path.relative_to(self.root))
             mtime = path.stat().st_mtime
             hit = cached.get(key)
-            if hit and hit.get("mtime") == mtime:
+            # A cached entry names the parser that read it, so `cst`/`ast` count
+            # every file, not only this build's re-reads (G-318 read 1 of 138
+            # as libcst's when 137 came from the cache). One without it is read
+            # again rather than guessed.
+            if hit and hit.get("mtime") == mtime and hit.get("parser") in ("cst", "ast"):
                 files[key] = hit
+                self.stats[hit["parser"]] += 1
                 continue
             self.stats["reread"] += 1
             src = path.read_text(encoding="utf-8", errors="replace")
             try:
                 defs, imports = _read_cst(src)
-                self.stats["cst"] += 1
+                parser = "cst"
             except Exception:                           # noqa: BLE001 -- the AST then
                 try:
                     defs, imports = _read_ast(src)
-                    self.stats["ast"] += 1
+                    parser = "ast"
                 except SyntaxError:
                     self.stats["failed"] += 1
                     continue
-            files[key] = {"mtime": mtime, "module": _module_name(self.root, path), "defs": defs, "imports": imports}
+            self.stats[parser] += 1
+            files[key] = {"mtime": mtime, "module": _module_name(self.root, path), "defs": defs, "imports": imports,
+                          "parser": parser}
         self.stats["files"] = len(files)
         if self.cache:
             try:

@@ -304,9 +304,9 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     });
     // A marked note's spans re-resolved when it opens or changes, so the
     // highlight follows its addresses rather than its old line numbers.
-    const remark = async (f: TFile | null | undefined) => {
+    const remark = async (f: TFile | null | undefined, fromFile = false) => {
       if (!f || !this.marks.count(f.path)) return;
-      await this.marks.resolve(f);
+      await this.marks.resolve(f, fromFile);
       const paintAll = () => {
         for (const leaf of this.markdownLeaves()) {
           const v = leaf.view as MarkdownView;
@@ -321,7 +321,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
       window.setTimeout(paintAll, 1200);
     };
     this.registerEvent(this.app.workspace.on("file-open", (f) => void remark(f)));
-    this.registerEvent(this.app.vault.on("modify", (f) => { if (f instanceof TFile) void remark(f); }));
+    this.registerEvent(this.app.vault.on("modify", (f) => { if (f instanceof TFile) void remark(f, true); }));
     let nbTimer = 0;
     this.registerEditorExtension(CmView.updateListener.of((u) => {
       if (!u.selectionSet && !u.docChanged) return;

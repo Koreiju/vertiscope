@@ -57,7 +57,8 @@ export class NoteMarks {
    *  plane -- else the file's: the file lags the editor by its autosave, and a
    *  section added a moment before put rendered lines and file lines out of
    *  step (P-N9 on the plane picked another chunk). */
-  private async textOf(file: TFile): Promise<string> {
+  private async textOf(file: TFile, fromFile = false): Promise<string> {
+    if (fromFile) return this.app.vault.read(file);
     const plane: any[] = (window as any).__domvecPlane?.leaves?.() || [];
     for (const leaf of [...this.app.workspace.getLeavesOfType("markdown"), ...plane]) {
       const v: any = leaf.view;
@@ -66,11 +67,15 @@ export class NoteMarks {
     return this.app.vault.cachedRead(file);
   }
 
-  /** Resolve a note's marks against its current text: lines, markdown, cid. */
-  async resolve(file: TFile): Promise<Resolved[]> {
+  /** Resolve a note's marks against its current text: lines, markdown, cid.
+   *  `fromFile` when the FILE just changed (`modify`): a write from outside the
+   *  editor lands in the file before the view reloads it, and resolving
+   *  against the view's old text put a mark on the lines its chunk HAD -- a
+   *  section inserted above moved the highlight onto the block above (P-N9). */
+  async resolve(file: TFile, fromFile = false): Promise<Resolved[]> {
     const marks = this.byNote[file.path] || [];
     if (!marks.length) { this.spans.delete(file.path); return []; }
-    const text = await this.textOf(file);
+    const text = await this.textOf(file, fromFile);
     const pv = await this.sidecar.chunkPreview(text, file.path, this.app.vault.getName());
     const lines = text.split("\n"), url = this.urlOf(file.path);
     const chunks = (pv && pv.chunks) || [];
