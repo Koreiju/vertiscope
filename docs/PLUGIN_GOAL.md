@@ -5089,6 +5089,39 @@ capped scale could clear them:*
 collision -- the scale is the only collision answer, uncapped; a pair the fit
 put on one point is reported, not moved.*
 
+*And, on the wave-0 review (`docs/PROMPT_COVERAGE.md`): asked how to handle four
+confirmed features later reported broken, which no-row asks get a row, and
+whether to accept the reviewers' eleven supersessions:*
+
+> (contradicted) Reopen as defects
+
+> (no row) I recommend manually reading through and contextualizing each agent's findings.
+
+> (superseded) see previous answer; be superstitious about their verdicts
+
+*Read as: (122) the four contradicted features are reopened as Defects, each
+verified live first; (123) no reviewer verdict is taken on trust -- each
+finding is read in its context by the integrator before it changes a row or
+starts a build ("superstitious": suspicious).*
+
+> Perhaps favor contradictions by recency.
+
+*Read as: (124) where two messages conflict, the MORE RECENT one stands --
+recency by the message's date (this file is not in date order), and a fix
+committed after a report is more recent than the report.*
+
+> make sure you are basing the analysis off my own verbatim prompts as well
+
+*Read as: (125) the reader's own verbatim messages are the evidence of record
+for whether something still holds: a later message reporting it broken
+outranks a commit or a Confirm before it, and the review reads those messages,
+not only the PRD and the history.*
+
+> let's hold off on any more agents and just do it ourselves/
+
+*Read as: (126) no further agents; the review's findings are verified and
+the builds done directly, in this session.*
+
 ---
 
 ## Standing instructions carried in the verbatim
