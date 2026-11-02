@@ -288,6 +288,8 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     // probe note through these, never through a workspace tab.
     (window as any).__domvecPlane = this.desk;
     this.registerInterval(window.setInterval(() => this.desk.ensureTools(), 1000));
+    // G-326: each panel sized to the fields it shows, folded to its node at its root.
+    this.registerInterval(window.setInterval(() => this.desk.fitAll(), 400));
     this.registerDomEvent(document, "mouseup", () => {
       const sel = window.getSelection();
       // The view the selection is IN -- a tab or a panel on the plane.

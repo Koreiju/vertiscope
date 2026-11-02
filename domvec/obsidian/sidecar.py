@@ -1097,7 +1097,8 @@ def _source_file(url: str):
         return path, "domvec." + mod, True
     if root == "pypi":
         import importlib.util
-        top = rel.split("/", 1)[0]
+        # A single-file module is its own top (`typing.py`), as `blackbox.module_url` writes it.
+        top = re.sub(r"\.py$", "", rel.split("/", 1)[0])
         try:
             spec = importlib.util.find_spec(top)
         except (ImportError, ValueError):

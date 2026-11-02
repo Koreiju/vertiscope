@@ -119,7 +119,9 @@ export class Craft {
   edges: CraftEdge[] = [];
   stats = { builds: 0, notes: 0, cells: 0, trees: 0, web: 0, edges: 0, io: 0, refs: 0, visible: false, opened: 0, closed: 0,
             projection: "", placed_by_ego: 0, io_to_ego: 0, lit: 0, readouts: 0, reattached: 0,
-            anchor: null as V3 | null, radius: 0 };
+            anchor: null as V3 | null, radius: 0, map_scale: 0, map_left_overlapping: 0 };
+  /** Planted (G-324): every craft node on a sphere by bearing, the map's distances dropped. */
+  plantSphereEgo = false;
   /** Planted (item 67): the craft's nodes unlinked -- no edges inside it. */
   plantNoLinks = false;
   /** Per note: the distinct inputs its readout has been fed (item 96). */
@@ -305,18 +307,45 @@ export class Craft {
     };
     for (const n of this.nodes) if (n.kind === "code") n.local = { x: 0, y: -R * 0.5, z: 0 };
     const webs = this.nodes.filter((n) => n.kind === "web");
+    const notes = this.nodes.filter((n) => n.kind === "note");
+    // THE MAP, SCALED (item 107, G-324): a node the ego's UMAP placed sits at
+    // that place -- centred, times ONE factor chosen so that no two notes'
+    // cell orbits overlap (bar the closest 2%) -- not projected onto a sphere,
+    // which kept the bearing and threw the map's distances away. A node the
+    // map has not placed waits on a sphere just outside it. Planted
+    // `plantSphereEgo`: every node on the sphere, as before.
+    const keyOf = (n: CraftNode) => n.kind === "web" ? n.id.slice("craft:web:".length) : "vault://" + vault + "/" + n.path;
+    const mapped = [...notes, ...webs].filter((n) => { const p = this.places[keyOf(n)]; return p && p.length === 3 && p.every(Number.isFinite); });
+    const mapAt = new Map<CraftNode, V3>();
+    if (!this.plantSphereEgo && mapped.length >= 2) {
+      const P = mapped.map((n) => this.places[keyOf(n)]);
+      const c = [0, 1, 2].map((a) => P.reduce((s, p) => s + p[a], 0) / P.length);
+      const nn = P.map((p, i) => Math.min(...P.map((q, j) => j === i ? Infinity : Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]))));
+      const need = 2 * R * 0.32 * 1.15;
+      const sorted = nn.filter((d) => d > 1e-9).sort((a, b) => a - b);
+      const near = sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor(0.02 * sorted.length))] : 1;
+      const s = need / Math.max(near, 1e-6);
+      this.stats.map_scale = Math.round(s * 1000) / 1000;
+      this.stats.map_left_overlapping = nn.filter((d) => d * s < need - 1e-9).length;
+      mapped.forEach((n, i) => mapAt.set(n, { x: (P[i][0] - c[0]) * s, y: (P[i][1] - c[1]) * s, z: (P[i][2] - c[2]) * s }));
+    }
+    const outer = Math.max(R, ...[...mapAt.values()].map((v) => Math.hypot(v.x, v.y, v.z) + R * 0.4));
     webs.forEach((n, i) => {
+      const at = mapAt.get(n);
+      if (at) { n.local = at; return; }
       const cid = n.id.slice("craft:web:".length);
       const d = placeOf(cid, i, Math.max(2, webs.length), cid);
-      n.local = { x: d.x * R * 0.8, y: d.y * R * 0.8, z: d.z * R * 0.8 };
+      const r = mapAt.size ? outer : R * 0.8;
+      n.local = { x: d.x * r, y: d.y * r, z: d.z * r };
     });
-    const notes = this.nodes.filter((n) => n.kind === "note");
     notes.forEach((n, i) => {
-      const d = placeOf("vault://" + vault + "/" + n.path, i, notes.length, "page:vault://" + vault + "/" + n.path);
-      n.local = { x: d.x * R, y: d.y * R, z: d.z * R };
+      const at = mapAt.get(n);
+      const d = at ? norm(at) : placeOf("vault://" + vault + "/" + n.path, i, notes.length, "page:vault://" + vault + "/" + n.path);
+      const r = mapAt.size ? outer : R;
+      n.local = at || { x: d.x * r, y: d.y * r, z: d.z * r };
       // A readout outward of its note, past its cells.
       const ro = this.nodes.find((k) => k.kind === "readout" && k.path === n.path);
-      if (ro) ro.local = { x: d.x * R * 1.45, y: d.y * R * 1.45, z: d.z * R * 1.45 };
+      if (ro) ro.local = { x: n.local.x + d.x * R * 0.45, y: n.local.y + d.y * R * 0.45, z: n.local.z + d.z * R * 0.45 };
       const kids = this.nodes.filter((k) => k.path === n.path && (k.kind === "cell" || k.kind === "tree"));
       kids.forEach((k, j) => {
         const o = fib(j, Math.max(2, kids.length));

@@ -1649,7 +1649,16 @@ export function makeChecks(env) {
             const at = await b.webview.executeJavaScript("(function(){var e=document.getElementById('add');if(!e)return null;e.scrollIntoView({block:'center'});var r=e.getBoundingClientRect();return {x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)};})()");
             const count = () => b.webview.executeJavaScript("document.getElementById('items').children.length");
             let second = null, secondGone = null, afterClick = null, framePeak = 0, hungSeen = null;
+            // The projector around the click: a hung second node waits on its
+            // chunk's placement, and a refit in flight skips deltas until it
+            // completes -- a fresh store crosses the 2x refit threshold early
+            // (2026-11-02, run 40: second node never folded in 60 s).
+            const projAt = () => ({ epoch: v.projEpoch, seq: v.projSeq, fitting: !!(v.projStatus && v.projStatus.fitting),
+                                    reloads: v.streamApplied ? v.streamApplied.reloads : null,
+                                    deltas: v.streamApplied ? v.streamApplied.deltas : null });
+            let projBefore = null, projAfter = null, staleSpecs = null;
             if (at) {
+              projBefore = projAt();
               const was = await count();
               const clickedAt = Date.now();
               // Every frame, not every 150 ms: a force node that the store
@@ -1669,6 +1678,9 @@ export function makeChecks(env) {
               second = await until(() => mine() > 0, 20000);
               hung = hungFromPage();
               secondGone = await until(() => mine() === 0, 60000);
+              projAfter = projAt();
+              staleSpecs = [...v.forceSpecs.values()].filter((s) => s.url === b.webview.getURL())
+                .map((s) => ({ cid: s.cid || null, stale: !!s.stale }));
               if (hung === null) hung = hungSeen;
               watching = false;
               // What each drain after the click carried, and why it drew what it did.
@@ -1684,7 +1696,8 @@ export function makeChecks(env) {
             const ui = window.__domvec.ui();
             return { phases: st.phases || null, label: st.label, mode_at_start,
                      c8: { appeared, collapsed, mutated, second, hung_from_page: hung, second_gone: secondGone,
-                           frame_peak: framePeak, after_click: afterClick },
+                           frame_peak: framePeak, after_click: afterClick,
+                           projector: { before: projBefore, after: projAfter }, specs_left: staleSpecs },
                      force: (ui.graph || {}).force || null,
                      pending: v.pendingState ? v.pendingState() : null };
           })()`, { timeout: 300000 });

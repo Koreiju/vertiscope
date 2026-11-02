@@ -1691,7 +1691,9 @@ export class GraphView extends ItemView {
         if (n.force || n.level === "page" || (url && n.url !== url) || !Number.isFinite(n.fitX)) continue;
         drawnCids.add(n.id);
         const c = drawnRadius(n, relSize, media) * COLLIDER_SAFETY + COLLIDER_MARGIN;
-        off.push(Math.hypot(n.x - n.fitX, n.y - n.fitY, (n.z || 0) - (n.fitZ || 0)) / Math.max(c, 1e-6));
+        // Where the fit put it, AS DRAWN: under the scaled map that is S x fit (G-324).
+        const t = this.scaledMode ? this.mapTarget(n) : [n.fitX, n.fitY, n.fitZ || 0];
+        off.push(Math.hypot(n.x - t[0], n.y - t[1], (n.z || 0) - t[2]) / Math.max(c, 1e-6));
       }
       // A force node still drawn beside the stored node it became.
       for (const n of nodes) {
@@ -4090,6 +4092,115 @@ export class GraphView extends ItemView {
 
   /** Planted: projector moves glide to the raw fit, never re-telescoped (the drift after every update). */
   plantRawMoves = false;
+
+  /**
+   * **The map, scaled -- never pushed** (PLUGIN_GOAL 107, G-324: "too much
+   * intermediate force directed motion ... umap-collision-scaled only with
+   * force directed live scan diffs not yet mapped"). Every MAPPED node is
+   * drawn at `mapScale` x its fit and goes there directly -- a new node
+   * appears there, a moved fit glides there -- and overlaps are answered by
+   * ONE factor that spreads the whole map apart, never by forces shoving
+   * nodes about. Only force nodes (live-scan diffs the fit has not placed)
+   * keep forces. Planted `plantForceMapped`: home/contain/collide as before.
+   */
+  plantForceMapped = false;
+  mapScale = 1;
+  scaledStats = { runs: 0, scale: 1, mapped: 0, overlapping_at_1: 0, left_overlapping: 0, jumped: 0, glided: 0 };
+  /** The largest the map is spread; a coincident pair is not worth a map 100x wide. */
+  static MAP_SCALE_MAX = 6;
+  private mapScaleN = 0;
+  get scaledMode(): boolean { return !this.plantForceMapped; }
+  /** Where a mapped node is drawn: its fit, scaled about the map's origin. */
+  mapTarget(n: any): number[] {
+    const s = this.mapScale;
+    return [n.fitX * s, n.fitY * s, (n.fitZ ?? 0) * s];
+  }
+  /** One factor for the whole map: the smallest that leaves at most 2% of the
+   *  mapped nodes overlapping, as drawn. Pairs apart at scale 1 only get
+   *  further apart, so only the pairs touching at 1 are asked. */
+  private computeMapScale(nodes: any[]): number {
+    const m = nodes.filter((n) => !n.force && Number.isFinite(n.fitX) && Number.isFinite(n.fitY));
+    const N = m.length;
+    this.mapScaleN = N;
+    if (N < 2) return this.mapScale;
+    const R = m.map((n) => Math.max(1e-6, this.drawnRadiusOf(n)) * COLLIDER_SAFETY + COLLIDER_MARGIN);
+    const sorted = R.slice().sort((a, b) => a - b);
+    const cell = Math.max(1e-3, 2 * sorted[Math.floor(0.99 * (N - 1))]);
+    const key = (x: number, y: number, z: number) => x + "," + y + "," + z;
+    const grid = new Map<string, number[]>();
+    const P = m.map((n) => [n.fitX, n.fitY, n.fitZ ?? 0]);
+    P.forEach((p, i) => {
+      const k = key(Math.floor(p[0] / cell), Math.floor(p[1] / cell), Math.floor(p[2] / cell));
+      const l = grid.get(k); if (l) l.push(i); else grid.set(k, [i]);
+    });
+    const worst = new Float64Array(N);
+    let pairs = 0;
+    const MAX = GraphView.MAP_SCALE_MAX;
+    P.forEach((p, i) => {
+      const cx = Math.floor(p[0] / cell), cy = Math.floor(p[1] / cell), cz = Math.floor(p[2] / cell);
+      for (let ox = -1; ox <= 1; ox++) for (let oy = -1; oy <= 1; oy++) for (let oz = -1; oz <= 1; oz++) {
+        for (const j of grid.get(key(cx + ox, cy + oy, cz + oz)) || []) {
+          if (j <= i) continue;
+          const need = R[i] + R[j];
+          const d = Math.hypot(p[0] - P[j][0], p[1] - P[j][1], p[2] - P[j][2]);
+          if (d >= need) continue;
+          pairs++;
+          const ratio = need / Math.max(d, need / MAX);
+          if (ratio > worst[i]) worst[i] = ratio;
+          if (ratio > worst[j]) worst[j] = ratio;
+        }
+      }
+    });
+    const need = Array.from(worst).filter((r) => r > 1).sort((a, b) => b - a);
+    const allowed = Math.floor(0.02 * N);
+    const s = need.length > allowed ? Math.min(MAX, Math.max(1, need[allowed])) : 1;
+    this.scaledStats.runs++;
+    this.scaledStats.mapped = N;
+    this.scaledStats.overlapping_at_1 = need.length;
+    this.scaledStats.left_overlapping = need.filter((r) => r > s + 1e-9).length;
+    this.scaledStats.scale = Math.round(s * 1000) / 1000;
+    return s;
+  }
+  /** Re-derive the scale when the map has grown by a sixth; adopt it only when it moved by a tenth. */
+  private rescaleMap(force = false): void {
+    if (!this.graph || !this.scaledMode) return;
+    const nodes = this.graph.graphData().nodes as any[];
+    const mapped = nodes.reduce((a: number, n: any) => a + (!n.force && Number.isFinite(n.fitX) ? 1 : 0), 0);
+    if (!force && this.mapScaleN && mapped < this.mapScaleN * 1.17) return;
+    const s = this.computeMapScale(nodes);
+    if (force || Math.abs(s - this.mapScale) > 0.1 * this.mapScale) this.mapScale = s;
+  }
+  private mapNewcomers(nodes: any[]): void {
+    for (const n of nodes) {
+      if (n.__mapped || n.force || n.__glide || n.__spreadHome || !Number.isFinite(n.fitX) || !Number.isFinite(n.fitY)) continue;
+      const t = this.mapTarget(n);
+      n.x = n.fx = t[0]; n.y = n.fy = t[1]; n.z = n.fz = t[2];
+      n.vx = 0; n.vy = 0; n.vz = 0;
+      n.__mapped = true; n.__calm = false;
+      this.scaledStats.jumped++;
+    }
+  }
+  /** Every mapped node held at its scaled place: a newcomer appears there, a
+   *  node whose place moved glides there. No force touches a mapped node. */
+  private enforceMap(nodes: any[]): void {
+    for (const n of nodes) {
+      if (n.force || n.__glide || n.__spreadHome || !Number.isFinite(n.fitX) || !Number.isFinite(n.fitY)) continue;
+      const t = this.mapTarget(n);
+      if (!n.__mapped || !Number.isFinite(n.x)) {
+        n.x = n.fx = t[0]; n.y = n.fy = t[1]; n.z = n.fz = t[2];
+        n.vx = 0; n.vy = 0; n.vz = 0;
+        n.__mapped = true; n.__calm = false;
+        this.scaledStats.jumped++;
+        continue;
+      }
+      if (Math.abs((n.fx ?? n.x) - t[0]) + Math.abs((n.fy ?? n.y) - t[1]) + Math.abs((n.fz ?? n.z ?? 0) - t[2]) > 1e-3) {
+        this.glide(n, t);
+        this.scaledStats.glided++;
+      } else if (n.fx == null) {
+        n.fx = t[0]; n.fy = t[1]; n.fz = t[2];
+      }
+    }
+  }
   /** Planted: the fit's raw radii (a dense core), and no relaxation (overlaps, chunks inside the url node). */
   plantNoUniform = false;
   plantNoRelax = false;
@@ -5043,6 +5154,10 @@ export class GraphView extends ItemView {
 
   private glide(n: any, to: number[], ms = 450): void {
     if (!to.every(Number.isFinite)) return;
+    // A glide to the raw fit is a glide to the SCALED place (G-324): every
+    // caller that says "to its fit" means "to where the map draws it".
+    if (this.scaledMode && !n.force && !n.__spreadHome && Number.isFinite(n.fitX)
+        && Math.abs(to[0] - n.fitX) + Math.abs(to[1] - n.fitY) + Math.abs(to[2] - (n.fitZ ?? 0)) < 1e-6) to = this.mapTarget(n);
     if (this.plantTeleport || !Number.isFinite(n.x)) {
       n.x = to[0]; n.y = to[1]; n.z = to[2];
       if (n.__calm) { n.fx = n.x; n.fy = n.y; n.fz = n.z; n.__calmFit = [n.fitX, n.fitY, n.fitZ]; }
@@ -5076,9 +5191,10 @@ export class GraphView extends ItemView {
         // at a stale place -- a new page's chunks sat 53-80 units off their
         // centred targets 35 s after landing (2026-10-18, G-245). Not under
         // the hover spread, whose glides are to its own homes.
+        const want = this.scaledMode && !n.force ? this.mapTarget(n) : [n.fitX, n.fitY, n.fitZ || 0];
         if (!this.plantTeleByForce && !n.__spreadHome && [n.fitX, n.fitY].every(Number.isFinite)
-            && Math.hypot(n.x - n.fitX, n.y - n.fitY, (n.z || 0) - (n.fitZ || 0)) > 2) {
-          this.glide(n, [n.fitX, n.fitY, n.fitZ || 0]);
+            && Math.hypot(n.x - want[0], n.y - want[1], (n.z || 0) - want[2]) > 2) {
+          this.glide(n, want);
           this.glideStats.retargeted = (this.glideStats.retargeted || 0) + 1;
         }
       }
@@ -6575,6 +6691,9 @@ export class GraphView extends ItemView {
       const g: any = this.graph;
       if (!g || !this.batch) return;
       this.stepGlides();
+      // A mapped newcomer appears AT its scaled place, every frame and in both
+      // views -- a cool simulation does not tick, and the chunk view runs none.
+      if (this.scaledMode) this.mapNewcomers(g.graphData().nodes as any[]);
       {
         // Real time, capped at half a second: an unfocused window draws a few
         // frames a second, and a 0.1 s cap ran the flight 10x slow there.
@@ -7445,7 +7564,7 @@ export class GraphView extends ItemView {
   relaxBudgetMs = 8;
   private relaxChunkView(): void {
     const g: any = this.graph;
-    if (!g || this.level !== "chunk" || this.plantNoChunkRelax) return;
+    if (!g || this.level !== "chunk" || this.plantNoChunkRelax || this.scaledMode) return;
     const seq = ++this.relaxSeq;
     const nodes = (g.graphData().nodes as any[]).filter((n) => Number.isFinite(n.fitX) && Number.isFinite(n.fitY));
     const N = nodes.length;
@@ -8899,6 +9018,15 @@ export class GraphView extends ItemView {
     // after a placement, a move by the fit, a resize or a collapse.
     let gatedNodes: any[] = [];
     const gated: any = (alpha: number) => {
+      // The scaled map (G-324): mapped nodes held at S x fit, no collision --
+      // the scale is the collision answer. Force nodes are left to their tree.
+      if (this.scaledMode) {
+        this.rescaleMap();
+        this.enforceMap(gatedNodes);
+        this.sanitize(gatedNodes);
+        this.octreeSkips.flushed += flushTiny(gatedNodes);
+        return;
+      }
       // What the stream is not changing holds still (calm, above).
       this.calm(gatedNodes);
       // EVERY tick, gate open or not: a non-finite position must never reach
@@ -8950,6 +9078,14 @@ export class GraphView extends ItemView {
     };
     this.collideUntil = performance.now() + 3000;
     graph.d3Force("collide", gated);
+    // The scaled map (G-324): one factor for this layout, and no force that
+    // moves a mapped node -- home, contain and the global charge and centre
+    // go; the hold and the diff tree's spring stay for the force nodes.
+    if (this.scaledMode) {
+      this.mapScale = this.computeMapScale(graph.graphData().nodes as any[]);
+      for (const name of ["home", "contain", "charge", "center"]) graph.d3Force(name, null);
+      for (const n of graph.graphData().nodes as any[]) n.__mapped = false;
+    }
     // **Chunk view is UMAP alone** (2026-10-11: "i dont think the chunk view
     // needs force-directed, might also slow things down and we can rely on
     // UMAP only for this view"). Every force goes but the link force, held at
@@ -8967,6 +9103,8 @@ export class GraphView extends ItemView {
         if (!Number.isFinite(n.fitX)) continue;
         // The stored drawn place first (PLUGIN_GOAL 108): the switch shows
         // where the reader last saw the chunk, not the fit before relaxing.
+        // Scaled map (G-324): at S x fit, and no relax pass after.
+        if (this.scaledMode) { const t = this.mapTarget(n); n.x = n.fx = t[0]; n.y = n.fy = t[1]; n.z = n.fz = t[2]; n.__mapped = true; continue; }
         const d = !this.plantNoDrawn && n.drawnAt;
         if (d) { n.x = n.fx = d[0]; n.y = n.fy = d[1]; n.z = n.fz = d[2]; }
         else { n.x = n.fx = n.fitX; n.y = n.fy = n.fitY; n.z = n.fz = n.fitZ ?? 0; }
@@ -8977,7 +9115,7 @@ export class GraphView extends ItemView {
       // relax at 400 ms ran on the load's unspaced `val` (every chunk 1) and
       // stored places spaced for orbs 14x too big (2026-10-12). The engine's
       // stop runs the spacing; a fallback covers an engine that never stops.
-      this.relaxAfterSpacing = true;
+      this.relaxAfterSpacing = !this.scaledMode;
       window.setTimeout(() => { if (this.relaxAfterSpacing) { this.relaxAfterSpacing = false; this.relaxChunkView(); } }, 3000);
     } else {
       this.umapOnly = false;

@@ -15,6 +15,8 @@ The address is Python's own tree, as `domvec/source.py` addresses a source
 file (the module path, then the qualified name).
 """
 import ast
+import re
+from pathlib import Path
 from typing import Dict, List, Optional
 
 #: Planted (item 80): the box opens flat -- every definition at once, no ranks.
@@ -70,6 +72,127 @@ def _sig(fn) -> str:
         return fn.name + "(...)"
 
 
+#: Planted (item 112): a module's imports are not boxes -- the unnesting stops
+#: at the module's own definitions, as before.
+PLANT_NO_IMPORTS = [False]
+
+_REPO = Path(__file__).resolve().parents[1]
+
+
+def _module_of(url: str) -> str:
+    """The dotted module a `code://` url addresses ('' when it is not one)."""
+    if url.startswith("code://repo/"):
+        rel = url[len("code://repo/"):]
+        return "domvec." + re.sub(r"(/__init__)?\.py$", "", rel).replace("/", ".")
+    if url.startswith("code://pypi/"):
+        rel = url[len("code://pypi/"):]
+        return re.sub(r"(/__init__)?\.py$", "", rel).replace("/", ".")
+    return ""
+
+
+def _is_package(url: str) -> bool:
+    return url.endswith("/__init__.py")
+
+
+def module_url(name: str) -> Optional[str]:
+    """Where a dotted module's SOURCE is, as a box address -- found the way
+    Python would find it, without importing it (an import runs the package):
+    the top-level spec, then the package's own directories down. `None` for a
+    compiled base module, which has no source to unnest."""
+    if not name:
+        return None
+    parts = name.split(".")
+    if parts[0] == "domvec":
+        rel = Path(*parts[1:]) if len(parts) > 1 else Path()
+        for cand in (_REPO / rel / "__init__.py", _REPO / (str(rel) + ".py")):
+            if cand.is_file():
+                return "code://repo/" + cand.relative_to(_REPO).as_posix()
+        return None
+    import importlib.util
+    try:
+        spec = importlib.util.find_spec(parts[0])
+    except (ImportError, ValueError):
+        return None
+    if spec is None or not spec.origin or not spec.origin.endswith(".py"):
+        return None
+    origin = Path(spec.origin)
+    if spec.submodule_search_locations:
+        pkg = origin.parent
+        root = pkg.parent
+        here = pkg
+        for p in parts[1:]:
+            if (here / p / "__init__.py").is_file():
+                here = here / p
+            elif (here / (p + ".py")).is_file():
+                return "code://pypi/" + (here / (p + ".py")).relative_to(root).as_posix()
+            else:
+                return None
+        return "code://pypi/" + (here / "__init__.py").relative_to(root).as_posix()
+    return "code://pypi/" + origin.name if len(parts) == 1 else None
+
+
+def _resolve_from(base_url: str, level: int, module: str) -> str:
+    """`from .x import y` in the module at `base_url`: the absolute name."""
+    if not level:
+        return module or ""
+    me = _module_of(base_url).split(".")
+    pkg = me if _is_package(base_url) else me[:-1]
+    up = pkg[:len(pkg) - (level - 1)] if level > 1 else pkg
+    return ".".join([*up, module] if module else up)
+
+
+def _import_rows(tree: ast.Module, base_url: str) -> List[str]:
+    """One row per import: the imported name, and the box it unnests to --
+    a module's, or a definition's inside it -- or `(compiled)` for a base
+    module with no source (the bottom of the unnesting)."""
+    tab = "\t"
+    rows: List[str] = []
+    seen = set()
+    for st in tree.body:
+        if isinstance(st, ast.Import):
+            for a in st.names:
+                if a.name in seen:
+                    continue
+                seen.add(a.name)
+                u = module_url(a.name)
+                rows.append("import %s%s%s" % (a.name, tab, "{" + u + "}" if u else "(compiled)"))
+        elif isinstance(st, ast.ImportFrom):
+            mod = _resolve_from(base_url, st.level or 0, st.module or "")
+            for a in st.names:
+                if a.name == "*":
+                    continue
+                key = mod + ":" + a.name
+                if key in seen:
+                    continue
+                seen.add(key)
+                sub = module_url(mod + "." + a.name) if mod else None
+                if sub:
+                    rows.append("from %s import %s%s{%s}" % (mod, a.name, tab, sub))
+                    continue
+                u = module_url(mod)
+                rows.append("from %s import %s%s%s" % (mod, a.name, tab, "{" + u + "#" + a.name + "}" if u else "(compiled)"))
+    return rows
+
+
+def unfold_source(base: str, source: str) -> Optional[Dict]:
+    """A few lines that are no module on disk -- a notebook cell (item 112's
+    "mini-artifacts from a few lines"): its imports as boxes, its definitions
+    as typed rows."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return None
+    lines: List[str] = []
+    if not PLANT_NO_IMPORTS[0]:
+        lines.extend(_import_rows(tree, base))
+    for d in _defs(tree.body):
+        if isinstance(d, ast.ClassDef):
+            lines.append("class %s%s%s" % (d.name, chr(9), ", ".join("super: " + (_un(b) or "?") for b in d.bases)))
+        else:
+            lines.append("def %s%s%s -> %s" % (d.name, chr(9), _sig(d), _un(d.returns) or "?"))
+    return {"kind": "cell", "qual": "", "lines": lines}
+
+
 def unfold(url: str, source: str) -> Optional[Dict]:
     """The box at `url` (a `code://` module, `#qualname` for a definition in
     it): `{kind, qual, lines}` -- its rank-1 contents, each a `{ref}` line."""
@@ -84,6 +207,11 @@ def unfold(url: str, source: str) -> Optional[Dict]:
     kind = "module" if node is tree else ("class" if isinstance(node, ast.ClassDef) else "function")
     tab = "\t"
     lines: List[str] = []
+    # A MODULE's imports are boxes too (item 112): each unnests into the
+    # library module it names, whose imports unnest the same way, down to the
+    # compiled base modules that have no source.
+    if node is tree and not PLANT_NO_IMPORTS[0]:
+        lines.extend(_import_rows(tree, base))
     if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
         lines.append("signature" + tab + _sig(node))
         # The TYPED panel form (mortegon DM 9.6.1, M.3; PLUGIN_GOAL 100): one

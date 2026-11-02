@@ -46,7 +46,9 @@ export interface PlaneHost {
   egoNotes?(): string[];
 }
 
-export interface PlanePanel { path: string; card: HTMLElement; leaf: any; head: HTMLElement | null; undrag: () => void; cleanup?: () => void }
+export interface PlanePanel { path: string; card: HTMLElement; leaf: any; head: HTMLElement | null; undrag: () => void; cleanup?: () => void;
+  /** G-326: the reader sized it by hand -- the fold no longer sizes it. */
+  manual?: boolean; fitH?: number; foldedToNode?: boolean }
 
 /** Where new notes made by the tools go. */
 export const PLANE_FOLDER = "domvec/graph";
@@ -207,7 +209,9 @@ export class PlaneDesk {
       card.appendChild(leaf.containerEl);
       await (leaf.__openFile || leaf.openFile).call(leaf, file, opts.state || { state: { mode: "source", source: false } });
       const fpath = file.path;
-      const undrag = makeDraggable(card, plane, "domvec-plane-card:" + file.path, this.place, () => this.host.headerClick?.(fpath));
+      // Alt+click on the node is the containment gesture (G-327), not the halo.
+      const undrag = makeDraggable(card, plane, "domvec-plane-card:" + file.path, this.place,
+        () => { if (performance.now() - this.altAt < 800) return; this.host.headerClick?.(fpath); });
       clampToPlane(card, plane);
       p = { path: file.path, card, leaf, head, undrag };
       // The panel is the note's as soon as the note shows; anything mounted
@@ -369,11 +373,152 @@ export class PlaneDesk {
     return pool.map((f) => f.path);
   }
 
+  /**
+   * **Panel and node are one fold parameter** (PLUGIN_GOAL 110, G-326): a
+   * panel is as tall as the fields it SHOWS -- folding a heading or a slate
+   * field shrinks it, unfolding grows it, up to the plane (beyond that it
+   * scrolls: the rest is occluded) -- and folded back to its root field, one
+   * line showing, it IS its node. A reader's own resize takes the size over.
+   * Planted `plantFixedSize`: the card's fixed CSS size whatever is folded.
+   */
+  plantFixedSize = false;
+  foldStats = { fits: 0, to_node: 0, from_node: 0, manual: 0 };
+  /** What a panel shows: its visible lines and folds, its content's natural height. */
+  foldOf(path: string): { lines: number; folds: number; content: number; height: number; node: boolean; manual: boolean } | null {
+    const p = this.panelOf(path);
+    if (!p) return null;
+    const el = p.leaf.containerEl as HTMLElement;
+    const v: any = p.leaf.view;
+    const preview = typeof v?.getMode === "function" && v.getMode() === "preview";
+    let lines = 0, folds = 0, content = 0;
+    if (preview) {
+      const sizer = el.querySelector(".markdown-reading-view .markdown-preview-sizer") as HTMLElement | null;
+      content = sizer ? sizer.scrollHeight : 0;
+      lines = sizer ? sizer.querySelectorAll(":scope > div:not(.mod-header):not(.mod-footer)").length : 0;
+      folds = el.querySelectorAll(".markdown-reading-view .is-collapsed").length;
+    } else {
+      const cm = el.querySelector(".cm-content") as HTMLElement | null;
+      if (cm) {
+        const ls = Array.from(cm.querySelectorAll(":scope > .cm-line")) as HTMLElement[];
+        lines = ls.filter((l) => (l.textContent || "").trim().length > 0).length;
+        folds = cm.querySelectorAll(".cm-foldPlaceholder").length;
+      }
+      const sizer = el.querySelector(".cm-sizer") as HTMLElement | null;
+      content = sizer ? sizer.scrollHeight : (cm ? cm.scrollHeight : 0);
+    }
+    return { lines, folds, content, height: p.card.offsetHeight, node: p.card.hasClass("is-collapsed"), manual: !!p.manual };
+  }
+  /** Size one panel to what it shows; fold it into its node when only its root shows. */
+  fit(path: string): void {
+    const p = this.panelOf(path);
+    const plane = this.host.plane();
+    if (!p || !plane || this.plantFixedSize || p.manual || !p.card.hasClass("domvec-panel-card") || p.card.hasClass("domvec-browser-card")) return;
+    const f = this.foldOf(path);
+    if (!f) return;
+    // Folded back to the root: one line, something folded -- the panel is its node.
+    if (!f.node && f.folds > 0 && f.lines <= 1) {
+      p.card.addClass("is-collapsed"); p.foldedToNode = true; this.foldStats.to_node++;
+      clampToPlane(p.card, plane);
+      return;
+    }
+    if (f.node) return;
+    const head = (p.head?.offsetHeight || 0) + 18;
+    const max = Math.max(160, plane.clientHeight * 0.85);
+    const h = Math.round(Math.min(max, Math.max(120, head + f.content + 12)));
+    if (Math.abs(h - (p.fitH ?? -1)) <= 2 && Math.abs(p.card.offsetHeight - h) <= 2) return;
+    p.fitH = h;
+    p.card.style.height = h + "px";
+    this.foldStats.fits++;
+    clampToPlane(p.card, plane);
+  }
+  fitAll(): void { for (const p of this.panels) this.fit(p.path); if (this.groups.size) this.followGroups(); }
+
+  /**
+   * **The containment gesture** (PLUGIN_GOAL 111, G-327): Alt+click on a
+   * panel's node gathers the COLLAPSED panel nodes linked to it -- a link
+   * either way between the notes -- under it, in a container drawn round
+   * them; they follow it while contained, and the same gesture puts them
+   * back where they were. Planted `plantContainNoLinks`: every collapsed node
+   * is gathered, linked or not.
+   */
+  plantContainNoLinks = false;
+  groups = new Map<string, { members: string[]; was: Map<string, { left: string; top: string }>; el: HTMLElement }>();
+  containStats = { gathered: 0, released: 0, last: null as any };
+  private altAt = 0;
+  /** The notes linked to this one, either way (the metadata cache's resolved links). */
+  linkedTo(path: string): Set<string> {
+    const out = new Set<string>();
+    const rl: Record<string, Record<string, number>> = (this.app.metadataCache as any).resolvedLinks || {};
+    for (const t of Object.keys(rl[path] || {})) out.add(t);
+    for (const [src, targets] of Object.entries(rl)) if (targets && targets[path]) out.add(src);
+    out.delete(path);
+    return out;
+  }
+  contain(path: string): string[] {
+    const p = this.panelOf(path);
+    const plane = this.host.plane();
+    if (!p || !plane) return [];
+    const had = this.groups.get(path);
+    if (had) {
+      for (const m of had.members) {
+        const q = this.panelOf(m), w = had.was.get(m);
+        if (q && w) { q.card.style.left = w.left; q.card.style.top = w.top; q.card.removeClass("is-contained"); }
+      }
+      had.el.remove();
+      this.groups.delete(path);
+      this.containStats.released++;
+      this.containStats.last = { path, released: had.members };
+      return [];
+    }
+    const linked = this.linkedTo(path);
+    const inOther = new Set([...this.groups.values()].flatMap((g) => g.members));
+    const members = this.panels.filter((q) => q.path !== path && q.card.hasClass("is-collapsed") && !inOther.has(q.path)
+      && !this.groups.has(q.path) && (this.plantContainNoLinks || linked.has(q.path))).map((q) => q.path);
+    const was = new Map<string, { left: string; top: string }>();
+    for (const m of members) { const q = this.panelOf(m)!; was.set(m, { left: q.card.style.left, top: q.card.style.top }); q.card.addClass("is-contained"); }
+    const el = plane.createDiv({ cls: "domvec-plane-group" });
+    el.createSpan({ cls: "domvec-plane-group-label", text: path.split("/").pop()!.replace(/\.md$/, "") + " contains " + members.length });
+    this.groups.set(path, { members, was, el });
+    this.containStats.gathered++;
+    this.containStats.last = { path, members, linked: linked.size };
+    this.followGroups();
+    return members;
+  }
+  /** Each group's members laid out under its node, and its container drawn round them. */
+  followGroups(): void {
+    const plane = this.host.plane();
+    if (!plane) return;
+    const pr = plane.getBoundingClientRect();
+    for (const [path, g] of this.groups) {
+      const p = this.panelOf(path);
+      if (!p) { g.el.remove(); this.groups.delete(path); continue; }
+      const cr = p.card.getBoundingClientRect();
+      const x0 = cr.left - pr.left, y0 = cr.bottom - pr.top + 14;
+      let right = cr.right - pr.left, bottom = cr.bottom - pr.top;
+      g.members.forEach((m, i) => {
+        const q = this.panelOf(m);
+        if (!q) return;
+        const x = x0 + (i % 4) * 76, y = y0 + Math.floor(i / 4) * 70;
+        q.card.style.left = x + "px"; q.card.style.top = y + "px"; q.card.style.right = "auto";
+        right = Math.max(right, x + q.card.offsetWidth); bottom = Math.max(bottom, y + q.card.offsetHeight);
+      });
+      const pad = 10;
+      g.el.style.left = (x0 - pad) + "px"; g.el.style.top = (cr.top - pr.top - pad) + "px";
+      g.el.style.width = (right - x0 + 2 * pad) + "px"; g.el.style.height = (bottom - (cr.top - pr.top) + 2 * pad) + "px";
+    }
+  }
+
   /** Minimized: the card is its header node alone (items 54-55). */
   toggleMinimized(path: string): boolean {
     const p = this.panelOf(path);
     if (!p) return false;
     const now = !p.card.hasClass("is-collapsed");
+    // Restored from a node it was FOLDED into: unfolded, or the fold would
+    // fold it straight back (G-326).
+    if (!now && p.foldedToNode) {
+      try { (p.leaf.view as any)?.editor?.exec?.("unfoldAll"); } catch { /* nothing folded */ }
+      p.foldedToNode = false; this.foldStats.from_node++;
+    }
     p.card.toggleClass("is-collapsed", now);
     if (now) this.stats.minimized++; else this.stats.restored++;
     const plane = this.host.plane();
@@ -403,6 +548,27 @@ export class PlaneDesk {
       if (p.head) { e.preventDefault(); e.stopPropagation(); this.toggleMinimized(p.path); }
     };
     p.card.addEventListener("contextmenu", onRight, true);
+    // Alt+click on the node: contain its linked collapsed nodes (G-327).
+    p.card.addEventListener("click", (e: MouseEvent) => {
+      if (!e.altKey) return;
+      const t = e.target as HTMLElement;
+      if (!t?.closest?.(".domvec-plane-head-node, .domvec-var-title, .domvec-slate-circle-dot")) return;
+      e.preventDefault(); e.stopPropagation();
+      this.altAt = performance.now();
+      this.contain(p.path);
+    }, true);
+    p.card.addEventListener("pointerdown", (e: PointerEvent) => { if (e.altKey) this.altAt = performance.now(); }, true);
+    // The resize corner pressed and the size changed: the READER sized it (G-326).
+    p.card.addEventListener("pointerdown", (e: PointerEvent) => {
+      const r = p.card.getBoundingClientRect();
+      if (e.clientX < r.right - 18 || e.clientY < r.bottom - 18) return;
+      const h0 = p.card.offsetHeight, w0 = p.card.offsetWidth;
+      const up = () => {
+        window.removeEventListener("pointerup", up, true);
+        if (Math.abs(p.card.offsetHeight - h0) > 3 || Math.abs(p.card.offsetWidth - w0) > 3) { p.manual = true; this.foldStats.manual++; }
+      };
+      window.addEventListener("pointerup", up, true);
+    }, true);
     // A slate: the card is minimized exactly when its slate is collapsed.
     if (!p.head) {
       const sync = () => p.card.toggleClass("is-collapsed", !!p.leaf.containerEl.querySelector(".domvec-slate-circle"));

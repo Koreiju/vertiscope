@@ -5012,6 +5012,53 @@ not a separate bar above the field -- the hovered NUMBER itself extends
 outward into a horizontal, scrollable slider, in place, over the value's
 detected range.*
 
+*And next (2026-11-02), mid-run, while the streaming checks were being run down:*
+
+> again, there is still too much intermediate force directed motion and i think umap-collision-scaled only with force directed live scan diffs not yet mapped are the best bet for both ego and the 3D world layout to keep it simple. let's also get moving on the full ego build as best we can without getting too pedantic on the specifics outside of this clear focus, which also includes all computation graph and jupyter cell features as they are variously described. Please also ensure they're all organizedly tracked in their feature details for each panel's layout, including computation graph reservoir, the panel/node integrated layout on folds and panel resizes back to the parent field panel (i.e. if collapsed to the root node in the panel and the panel is made to adapt its size to the current expanded/collapsed panels viewable/occluded then the root field becomes a node, and that's just the way the layout is parameterized. Another thing that needs to be built (all of this must be built immediately without delay and tested at the very end of a complete build) is the way our layouts are presented can be adapted to whether or not a gesture is made on a node that would then apply a containment operator on the linked fields of other collapsed-panel nodes in their overall visual organization/grouping on computation graphs (again, with our unnestable recursive black box assumption that can trace us all the way from our base modules and mini-artifacts from a few lines to a module with imports of a handful of libraries through our concrete python syntax graph through their full library dependencies all the way back to their base modules and definitions, and be able to then also select parts in the evolving panel/graph layouts where this unnesting can happen that supports both unnesting black boxes in the full computation graph representation and the nested panel fields, all while remaining type-strict in our panel representations and interactions with the per-node-type (i.e. the jupyter-patricia ontology) retrieval polar-radial-force-directed 2D navigation fields with traces back to the root node). The iterative-recursive signal flow glow animations are important to capture. Most visual frames can be captured immediately and should be. Then, the actual functionality is build from there, with simple mocks to prove the gestures in tests. Integrating the ego graph and its 3D map as a non-holonomic cockpit-like entity with first person and 3rd person view that stays true to our keyboard control interface that respects boundaries when inputting text to the markdowns. Each and every detail must be built so that we are at the point where we get as many UI-level real results as we can as we progress into the backend that fully replaces our mocks.
+
+*Read as:*
+
+- *(107) A DEFECT, repeated ("again"): too much intermediate force-directed
+  motion. One layout rule for BOTH the ego and the 3D world: every mapped
+  node sits at its UMAP place, collisions resolved by SCALING the map (not
+  by forces pushing nodes about); force-directed motion is kept ONLY for
+  live-scan diffs not yet mapped. Keep it simple.*
+- *(108) Build the full ego now -- every computation-graph and Jupyter-cell
+  feature as described across the verbatim -- without stalling on specifics
+  outside this focus.*
+- *(109) Track every panel's layout features in an organised place: the
+  computation-graph reservoir, the panel/node integrated layout.*
+- *(110) Panel and node are ONE layout, parameterised by folding: a panel
+  sizes itself to the fields currently expanded and visible (not occluded);
+  folded back to its root field, the panel IS a node. Resizing and folding
+  move continuously along that one parameter.*
+- *(111) A CONTAINMENT gesture on a node: the linked fields of other
+  collapsed-panel nodes are grouped under it in the computation graph's
+  visual organisation; the layout adapts to whether that gesture was made.*
+- *(112) Recursive, unnestable black boxes all the way down: a few-line
+  mini-artifact -> a module importing a handful of libraries -> its concrete
+  syntax graph -> those libraries' own dependencies -> their base modules and
+  definitions; the reader selects WHERE to unnest, both in the computation
+  graph and in nested panel fields.*
+- *(113) Type-strict: panel representations and interactions are per node
+  type (the Jupyter-patricia ontology); the polar-radial, force-directed 2D
+  retrieval field (the halo, items 90-92) is type-strict, with its trace back
+  to the root node.*
+- *(114) Iterative-recursive signal-flow GLOW animations -- a signal moving
+  through the computation graph, cell to readout to the cells downstream --
+  are important to capture.*
+- *(115) Method: capture the visual frames immediately; then build the
+  functionality from them, with simple mocks proving the gestures in tests;
+  the backend replaces the mocks as it lands. As many UI-level real results
+  as possible as it goes.*
+- *(116) The ego graph and its 3D map are one NON-HOLONOMIC, cockpit-like
+  vehicle -- it moves along its heading and turns, it does not slide
+  sideways -- with a first-person and a third-person view, driven by the
+  keyboard interface, which never takes a key typed into a markdown or any
+  text field.*
+- *(117) Build all of it immediately; test at the very end of a complete
+  build (a standing instruction for this batch).*
+
 ---
 
 ## Standing instructions carried in the verbatim
