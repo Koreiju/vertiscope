@@ -41,7 +41,7 @@ export class NoteMarks {
   byNote: Record<string, Mark[]> = {};
   /** The last spans resolved per note, for painting synchronously. */
   private spans = new Map<string, Resolved[]>();
-  stats = { marked: 0, unmarked: 0, sent: 0, last: null as any };
+  stats = { marked: 0, unmarked: 0, sent: 0, realigned: 0, last: null as any };
   /** Planted (P-N9): a selection marks nothing. */
   plantNoMarks = false;
   /** Planted (P-N9): a mark is its ordinal address alone, no content hash. */
@@ -94,10 +94,31 @@ export class NoteMarks {
   /** The rendered blocks of a reading view: Obsidian's sections, with the
    *  source lines each draws (`start`/`end` are positions, `.line` 0-based). */
   private sections(view: MarkdownView): { el: HTMLElement; lineStart: number; lineEnd: number }[] {
-    return ((view as any).previewMode?.renderer?.sections || [])
+    const raw = ((view as any).previewMode?.renderer?.sections || [])
       .filter((s: any) => s && s.el)
       .map((s: any) => ({ el: s.el, lineStart: s.start?.line ?? s.lineStart, lineEnd: s.end?.line ?? s.lineEnd }))
       .filter((s: any) => Number.isFinite(s.lineStart) && Number.isFinite(s.lineEnd));
+    // The renderer's line numbers can lag an edit (a section inserted above
+    // shifted them, and a selection marked the block above -- P-N9 on the
+    // plane): each section's first rendered words must be on its first line;
+    // where they are not, the section is moved to the nearest line that holds
+    // them, its span kept.
+    const data = typeof (view as any).getViewData === "function" ? String((view as any).getViewData()) : "";
+    if (!data) return raw;
+    const lines = data.split("\n");
+    const norm = (t: string) => t.replace(/[#>*_`\[\]()-]/g, " ").replace(/\s+/g, " ").trim().toLowerCase();
+    return raw.map((s: any) => {
+      const words = norm((s.el.textContent || "").split("\n").find((l: string) => l.trim()) || "").slice(0, 32);
+      if (!words || norm(lines[s.lineStart] || "").includes(words)) return s;
+      let best = -1;
+      for (let d = 1; d < lines.length && best < 0; d++) {
+        for (const i of [s.lineStart - d, s.lineStart + d]) if (i >= 0 && i < lines.length && norm(lines[i]).includes(words)) { best = i; break; }
+      }
+      if (best < 0) return s;
+      const shift = best - s.lineStart;
+      this.stats.realigned = (this.stats.realigned || 0) + 1;
+      return { el: s.el, lineStart: s.lineStart + shift, lineEnd: s.lineEnd + shift };
+    });
   }
 
   /** A selection in the reading view, marked (or unmarked) as addresses. */

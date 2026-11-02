@@ -307,10 +307,18 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     const remark = async (f: TFile | null | undefined) => {
       if (!f || !this.marks.count(f.path)) return;
       await this.marks.resolve(f);
-      for (const leaf of this.markdownLeaves()) {
-        const v = leaf.view as MarkdownView;
-        if (v.file?.path === f.path) this.marks.paint(v);
-      }
+      const paintAll = () => {
+        for (const leaf of this.markdownLeaves()) {
+          const v = leaf.view as MarkdownView;
+          if (v.file?.path === f.path) this.marks.paint(v);
+        }
+      };
+      paintAll();
+      // Again once the reading view has re-rendered: its sections' line
+      // numbers update after the edit lands, and a paint between the two put
+      // the mark on the block above (P-N9, a section inserted above it).
+      window.setTimeout(paintAll, 400);
+      window.setTimeout(paintAll, 1200);
     };
     this.registerEvent(this.app.workspace.on("file-open", (f) => void remark(f)));
     this.registerEvent(this.app.vault.on("modify", (f) => { if (f instanceof TFile) void remark(f); }));
@@ -343,9 +351,12 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     // The cockpit (G-280): the `ego` slate's fields bound both ways to the
     // user agent and the search -- the text read on every edit, the agent's
     // own changes written back a few times a second.
-    this.registerEvent(this.app.workspace.on("editor-change", (_e: any, info: any) => { this.cockpit.onEdit(info?.file || null); this.browserPanel.onEdit(info?.file || null); }));
-    this.registerInterval(window.setInterval(() => { this.cockpit.sync(); this.browserPanel.sync(); }, 250));
+    this.registerEvent(this.app.workspace.on("editor-change", (_e: any, info: any) => { this.cockpit.onEdit(info?.file || null); for (const b of this.browserPanels) b.onEdit(info?.file || null); }));
+    this.registerInterval(window.setInterval(() => { this.cockpit.sync(); for (const b of this.browserPanels) b.sync(); }, 250));
     (window as any).__domvecBrowserPanel = this.browserPanel;
+    this.browserPanels = [this.browserPanel];
+    (window as any).__domvecBrowsers = this;
+    (window as any).__domvecActiveBrowser = () => this.activeBrowser();
     (window as any).__domvecHalo = this.halo;
     this.addCommand({ id: "domvec-cockpit", name: "Open the cockpit (ego slate)", callback: () => { void this.cockpit.open(); } });
     // The structural-cell strip at the bottom of every note (`P-M4`); put
@@ -467,7 +478,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
         // browser cell (PLUGIN_GOAL 85), when the setting allows it.
         view.onWebSearch = (query: string) => {
           if (!this.settings.webSearch) return;
-          const l = this.app.workspace.getLeavesOfType(BROWSER_VIEW)[0];
+          const l = { view: this.activeBrowser() } as any;
           const browser = l?.view as BrowserView | undefined;
           if (browser && typeof browser.searchWeb === "function") void browser.searchWeb(query);
         };
@@ -485,7 +496,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
         view.onOpenCode = (url: string) => this.openCode(url);
         view.onPullToChat = (cid: string) => this.pullToChat(cid);
         view.browsingUrl = () => {
-          const l = this.app.workspace.getLeavesOfType(BROWSER_VIEW)[0];
+          const l = { view: this.activeBrowser() } as any;
           const b: any = l?.view;
           try { return (typeof b?.shownUrl === "function" ? b.shownUrl() : b?.webview?.getURL()) || ""; } catch { return ""; }
         };
@@ -552,8 +563,12 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
         // (`G-38`). Brokered like everything else across the two panes.
         browser.onRightChunk = (cid: string, url: string, stored: string) =>
           this.eachGraph((view) => view.rightPanel(cid, url, stored));
+        // Used = pressed in, or hovered in its page (item 87): the 3D graph
+        // follows whichever browser the reader is using.
+        browser.containerEl.addEventListener("pointerdown", () => this.touchBrowser(browser), true);
+        browser.containerEl.addEventListener("focusin", () => this.touchBrowser(browser), true);
         browser.onHover = (cid: string, url: string, stored?: string) =>
-          this.eachGraph((view) => {
+          (this.touchBrowser(browser), this.eachGraph((view) => {
             if (stored) { view.highlightChunk(cid, url, stored); return; }
             // A stored ANCESTOR covers the hovered chunk only roughly -- the
             // tile not yet stored resolved to archive.org's whole search-page
@@ -563,7 +578,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
             const cover = browser.storedCoverFor(cid, url);
             const grey = !cover.exact && !browser.plant.has("ancestor-over-grey") && view.hasNode(cid);
             view.highlightChunk(cid, url, grey ? "" : cover.cid);
-          });
+          }));
         // Right-click pins a chunk: its billboard opens in the graph and
         // stays while the browser's markdown side holds it (`G-78`).
         // A capture rewrote chunks: their open billboards redraw. The
@@ -747,7 +762,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     changed: () => { const g: any = this.app.workspace.getLeavesOfType(GRAPH_VIEW)[0]?.view; g?.craft?.dirty(); this.cockpit.decorate(); },
     // A panel on the plane gets at once what a tab gets from the workspace's
     // layout events, which a leaf outside the tree never fires.
-    openBrowser: () => { void this.browserPanel.open(); },
+    openBrowser: () => { void this.openBrowserInstance(); },
     headerClick: (path) => { void this.halo.toggle(path); },
     haloQuery: (path, q) => { void this.halo.open(path, q); },
     egoNotes: () => {
@@ -775,6 +790,43 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     app: this.app, desk: this.desk, sidecar: () => this.sidecar,
     plane: () => { const g: any = this.app.workspace.getLeavesOfType(GRAPH_VIEW)[0]?.view; return g && typeof g.plane === "function" ? g.plane() : null; },
   });
+
+  /** Every browser instance on the plane (item 87), the first the default. */
+  browserPanels: BrowserPanel[] = [];
+  /** `+ browser`: the default browser if it is not on the plane, else a NEW
+   *  instance -- its own cockpit note, its own session. */
+  async openBrowserInstance(): Promise<BrowserPanel> {
+    if (!this.desk.panelOf(this.browserPanel.path)) { await this.browserPanel.open(); return this.browserPanel; }
+    let n = 2;
+    while (this.browserPanels.some((b) => b.path === `domvec/browser ${n}.md`) && this.desk.panelOf(`domvec/browser ${n}.md`)) n++;
+    const path = `domvec/browser ${n}.md`;
+    let bp = this.browserPanels.find((b) => b.path === path);
+    if (!bp) { bp = new BrowserPanel(this.app, { browserViewType: BROWSER_VIEW, desk: this.desk }, path); this.browserPanels.push(bp); }
+    await bp.open();
+    return bp;
+  }
+
+  /** The browser the reader is USING (item 87): the one last pressed in or
+   *  hovered, of every open browser view -- the standalone pane, the plane's
+   *  browsers, a notebook's browser fence. Every 3D feature follows it.
+   *  Planted `plantFirstBrowser`: the workspace's first browser, always. */
+  plantFirstBrowser = false;
+  private browserUsedAt = new Map<any, number>();
+  browserStats = { touched: 0, active: "" };
+  touchBrowser(v: any): void {
+    this.browserUsedAt.set(v, performance.now());
+    this.browserStats.touched++;
+  }
+  activeBrowser(): any {
+    const first = this.app.workspace.getLeavesOfType(BROWSER_VIEW)[0]?.view || null;
+    if (this.plantFirstBrowser) return first;
+    let best: any = null, at = -1;
+    for (const [v, t] of this.browserUsedAt) {
+      if (!v?.containerEl?.isConnected) { this.browserUsedAt.delete(v); continue; }
+      if (t > at) { at = t; best = v; }
+    }
+    return best || first;
+  }
 
   /** The browser cell as a panel on the plane, with its cockpit (item 71). */
   browserPanel: BrowserPanel = new BrowserPanel(this.app, { browserViewType: BROWSER_VIEW, desk: this.desk });
@@ -812,7 +864,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     graph: () => this.app.workspace.getLeavesOfType(GRAPH_VIEW)[0]?.view as any,
     ref: (name: string) => this.sidecar.ref(name),
     webSearch: (q: string) => {
-      const browser = this.app.workspace.getLeavesOfType(BROWSER_VIEW)[0]?.view as BrowserView | undefined;
+      const browser = this.activeBrowser() as BrowserView | undefined;
       if (!browser || typeof browser.searchWeb !== "function") return false;
       void browser.searchWeb(q);
       return true;
@@ -927,7 +979,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
       if (a && typeof a.web === "string" && a.web.trim()) {
         this.askStats.web++;
         this.askStats.last = a.web;
-        const l = this.app.workspace.getLeavesOfType(BROWSER_VIEW)[0];
+        const l = { view: this.activeBrowser() } as any;
         const browser = l?.view as BrowserView | undefined;
         if (browser && typeof browser.searchWeb === "function") { void browser.searchWeb(a.web); notes.push(`web: "${a.web}" asked of the browser cell`); }
         else notes.push(`web: no browser cell open for "${a.web}"`);
@@ -1066,7 +1118,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     if (!file) return;
     let url = "https://duckduckgo.com/";
     try {
-      const b: any = this.app.workspace.getLeavesOfType(BROWSER_VIEW)[0]?.view;
+      const b: any = this.activeBrowser();
       const u = b?.webview?.getURL?.();
       if (u && /^https?:/.test(u)) url = u;
     } catch { /* the standalone cell is not attached */ }
@@ -1463,7 +1515,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
       // From the context's own frontmatter first: a note opened as it is
       // created renders its fence before the metadata cache has read it.
       { notePath: ((ctx.frontmatter?.domvec === "chunk" && !(window as any).__domvecPlantNoHalves)
-                   || this.isChunkNote(ctx.sourcePath)) ? ctx.sourcePath : undefined });
+                   || this.isChunkNote(ctx.sourcePath)) ? ctx.sourcePath : undefined, sourcePath: ctx.sourcePath });
     // addChild ties the surface to the element's life: when the user edits
     // the note and this section is replaced, onunload runs. Without it an
     // aborted fetch resolves into a detached element.

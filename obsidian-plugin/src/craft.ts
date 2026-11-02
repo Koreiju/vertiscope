@@ -42,14 +42,14 @@ import { PLANE_FOLDER } from "./planepanels";
 
 const PY = /^(python|py|python3)$/;
 
-export type CraftKind = "ego" | "note" | "cell" | "tree" | "web";
+export type CraftKind = "ego" | "note" | "cell" | "tree" | "web" | "readout" | "code";
 export interface CraftNode {
   id: string; kind: CraftKind; path: string; line: number; label: string;
   /** Where in the craft's own frame. */
   local: { x: number; y: number; z: number };
   mesh?: any;
 }
-export interface CraftEdge { a: string; b: string; kind: "root" | "contains" | "order" | "ref" }
+export interface CraftEdge { a: string; b: string; kind: "root" | "contains" | "order" | "ref" | "forward" | "instance" }
 export interface V3 { x: number; y: number; z: number }
 
 export interface CraftHost {
@@ -118,15 +118,21 @@ export class Craft {
   nodes: CraftNode[] = [];
   edges: CraftEdge[] = [];
   stats = { builds: 0, notes: 0, cells: 0, trees: 0, web: 0, edges: 0, io: 0, refs: 0, visible: false, opened: 0, closed: 0,
-            projection: "", placed_by_ego: 0, io_to_ego: 0, lit: 0,
+            projection: "", placed_by_ego: 0, io_to_ego: 0, lit: 0, readouts: 0, reattached: 0,
             anchor: null as V3 | null, radius: 0 };
   /** Planted (item 67): the craft's nodes unlinked -- no edges inside it. */
   plantNoLinks = false;
+  /** Per note: the distinct inputs its readout has been fed (item 96). */
+  readoutInputs: Record<string, number> = {};
+  /** Planted (item 89): instances drawn with no link to their code. */
+  plantNoInstances = false;
+  /** Planted (item 96): runs leave no readout in the craft. */
+  plantNoReadouts = false;
   /** Planted (item 68): the craft drawn in the ego view too (around the camera). */
   plantAlwaysDrawn = false;
   private group: any = null;
   private lines: any = null;
-  private ioLines: any = null;
+  ioLines: any = null;
   private rings: any = null;
   private labels: any[] = [];
   private stale = true;
@@ -205,9 +211,34 @@ export class Craft {
           for (const r of x.refs || []) pending.push({ from: cid, ref: r });
           steps.push({ id: cid, line: x.openLine });
         });
+        // The ego's MEMORY (item 96): a note whose cell has run holds a READOUT
+        // -- its own node, linked forward from the cell that produced it; the
+        // run's recorded inputs are its inverse lookups (lines into the world).
+        if (ran && !this.plantNoReadouts) {
+          const lines = text.split("\n");
+          let producer = "";
+          for (const x of fences) {
+            const after = lines.slice(x.closeLine + 1, x.closeLine + 4).join("\n");
+            if (/<!--\s*nb-output\s/.test(after)) producer = `${id}#cell:${x.openLine}`;
+          }
+          const rid = "craft:readout:" + f.path;
+          nodes.push({ id: rid, kind: "readout", path: f.path, line: -1, label: "readout", local: { x: 0, y: 0, z: 0 } });
+          edges.push({ a: producer || id, b: rid, kind: "forward" });
+        }
         // One kernel per note, run in the note's order (trees and cells).
         steps.sort((a, b) => a.line - b.line);
         for (let i = 1; i < steps.length; i++) edges.push({ a: steps[i - 1].id, b: steps[i].id, kind: "order" });
+      }
+      // CODE and its INSTANCES (item 89): the browser's definition one node,
+      // each browser instance (its cockpit note) linked to it -- undirected,
+      // forward (code -> instance) and inverse (instance -> its code) alike.
+      const browsers = nodes.filter((n) => n.kind === "note" && /^domvec\/browser( \d+)?\.md$/.test(n.path));
+      if (browsers.length && !this.plantNoInstances) {
+        const code: CraftNode = { id: "craft:code:BrowserView", kind: "code", path: "obsidian-plugin/src/browser.ts", line: -1,
+                                  label: "BrowserView (code)", local: { x: 0, y: 0, z: 0 } };
+        nodes.push(code);
+        edges.push({ a: ego.id, b: code.id, kind: "root" });
+        for (const b of browsers) edges.push({ a: code.id, b: b.id, kind: "instance" });
       }
       // Web chunks tagged into the ego (item 74b): each a `web` node of the
       // craft, its I/O line to its world node.
@@ -272,6 +303,7 @@ export class Craft {
       }
       return fib(i, n);
     };
+    for (const n of this.nodes) if (n.kind === "code") n.local = { x: 0, y: -R * 0.5, z: 0 };
     const webs = this.nodes.filter((n) => n.kind === "web");
     webs.forEach((n, i) => {
       const cid = n.id.slice("craft:web:".length);
@@ -282,6 +314,9 @@ export class Craft {
     notes.forEach((n, i) => {
       const d = placeOf("vault://" + vault + "/" + n.path, i, notes.length, "page:vault://" + vault + "/" + n.path);
       n.local = { x: d.x * R, y: d.y * R, z: d.z * R };
+      // A readout outward of its note, past its cells.
+      const ro = this.nodes.find((k) => k.kind === "readout" && k.path === n.path);
+      if (ro) ro.local = { x: d.x * R * 1.45, y: d.y * R * 1.45, z: d.z * R * 1.45 };
       const kids = this.nodes.filter((k) => k.path === n.path && (k.kind === "cell" || k.kind === "tree"));
       kids.forEach((k, j) => {
         const o = fib(j, Math.max(2, kids.length));
@@ -334,6 +369,8 @@ export class Craft {
       tree: new THREE.OctahedronGeometry(R * 0.032),
       cell: new THREE.BoxGeometry(R * 0.045, R * 0.045, R * 0.045),
       web: new THREE.TetrahedronGeometry(R * 0.04),
+      readout: new THREE.IcosahedronGeometry(R * 0.04),
+      code: new THREE.BoxGeometry(R * 0.07, R * 0.07, R * 0.07),
     };
     const mat: Record<CraftKind, any> = {
       ego: new THREE.MeshBasicMaterial({ color: 0xffffff }),
@@ -341,6 +378,8 @@ export class Craft {
       tree: new THREE.MeshBasicMaterial({ color: CRAFT_COLOUR }),
       cell: new THREE.MeshBasicMaterial({ color: CELL_COLOUR }),
       web: new THREE.MeshBasicMaterial({ color: IO_COLOUR }),
+      readout: new THREE.MeshBasicMaterial({ color: 0x8fd3ff }),
+      code: new THREE.MeshBasicMaterial({ color: 0x9ae6b4 }),
     };
     for (const n of this.nodes) {
       const m = new THREE.Mesh(geo[n.kind], mat[n.kind]);
@@ -349,7 +388,7 @@ export class Craft {
       // A computation still in flight stays lit through a rebuild.
       if (n.kind === "note" && this.lit.has(n.path)) { m.userData.base = m.material; m.material = LIT_MAT; m.scale.setScalar(1.8); }
       this.group.add(m);
-      if (n.kind === "ego" || n.kind === "note" || n.kind === "web") this.labels.push(this.label(n, R));
+      if (n.kind !== "cell" && n.kind !== "tree") this.labels.push(this.label(n, R));
     }
     this.lines = new THREE.LineSegments(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: CRAFT_COLOUR, transparent: true, opacity: 0.75 }));
     this.ioLines = new THREE.LineSegments(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: IO_COLOUR, transparent: true, opacity: 0.4 }));
@@ -379,6 +418,11 @@ export class Craft {
     // vault change, and the craft reads every artifact's text.
     if (this.stale && !this.building && performance.now() - this.builtAt > 2000) { this.builtAt = performance.now(); void this.build(); }
     if (!this.group) return;
+    // The graph view rebuilds its whole scene on a redraw (a refit, a level
+    // toggle): the craft rejoins the CURRENT scene -- left in the old one it
+    // was drawn nowhere and no ray could reach it (found 2026-11-02, G-320).
+    const scene = this.host.scene();
+    if (scene && this.group.parent !== scene) { scene.add(this.group); this.stats.reattached = (this.stats.reattached || 0) + 1; }
     const show = this.plantAlwaysDrawn || this.host.mode() !== "ego";
     this.group.visible = show;
     this.stats.visible = show;
@@ -416,7 +460,7 @@ export class Craft {
       const k = s.note + "|" + s.cid;
       if (seen.has(k)) continue;
       seen.add(k);
-      const n = byId.get("craft:" + s.note);
+      const n = byId.get("craft:readout:" + s.note) || byId.get("craft:" + s.note);
       if (!n) continue;
       const p = pos(n);
       // The note's toggle (item 79): `maps: ego` ends its I/O on the ego's own
@@ -431,6 +475,11 @@ export class Craft {
       io.push(w.x, w.y, w.z || 0, p.x, p.y, p.z);
     }
     this.stats.io_to_ego = toEgo;
+    // Each readout's memory: how many distinct inputs its runs have read.
+    const fed = new Map<string, Set<string>>();
+    for (const q of sig) { if (!fed.has(q.note)) fed.set(q.note, new Set()); fed.get(q.note)!.add(q.cid); }
+    this.readoutInputs = Object.fromEntries([...fed].map(([k, v]) => [k, v.size]));
+    this.stats.readouts = this.nodes.filter((x) => x.kind === "readout").length;
     // A tagged chunk's line to its place in the world.
     for (const n of this.nodes) {
       if (n.kind !== "web") continue;
@@ -473,7 +522,7 @@ export class Craft {
 
   /** A click on a craft node: its panel on the plane, or closed back into it. */
   click(n: CraftNode): "opened" | "closed" {
-    if (n.kind === "web") return "opened";      // a tagged chunk: its world node holds its panel
+    if (n.kind === "web" || n.kind === "code") return "opened";   // their panels are elsewhere
     if (n.kind !== "ego" && this.host.isOpen(n.path) && (n.kind === "note")) {
       this.host.closePanel(n.path);
       this.stats.closed++;

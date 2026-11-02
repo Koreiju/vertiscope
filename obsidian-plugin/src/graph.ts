@@ -529,6 +529,17 @@ export class GraphView extends ItemView {
       if (hit) this.toggleBisector(hit);
     }, { passive: true, capture: true });
     canvas.addEventListener("wheel", () => this.agent.zoomed(), { passive: true, capture: true });
+    // Zoom passes INTO the ego (PLUGIN_GOAL 97: "zoom to pass into the
+    // microscope of the ego"): in the map view, wheel-in over a craft node
+    // steps the camera toward IT (the node becomes the focus), and close
+    // enough the zoom passes through -- its panel opens on the plane.
+    canvas.addEventListener("wheel", (e: WheelEvent) => {
+      if (this.plantNoMicroscope || e.deltaY >= 0 || this.agent.mode !== "map" || !this.craft) return;
+      const n = this.craft.nodeAt(e.clientX, e.clientY);
+      if (!n || !n.mesh) return;
+      e.preventDefault(); e.stopPropagation();
+      this.microscopeStep(n);
+    }, { passive: false, capture: true });
     canvas.addEventListener("pointermove", (e) => { if (e.buttons) moved(); }, { passive: true, capture: true });
     // Arrow keys pan, precisely, while the pointer is over the 3D view and no
     // text field has the keyboard (2026-10-12, PLUGIN_GOAL 114). A held key
@@ -3145,7 +3156,7 @@ export class GraphView extends ItemView {
     // fly-throughs"; "some kind of debounce on ... re-setting the zoom action
     // for 'new navigations'"). A navigation is the browser cell's page; two
     // within 1.5 s zoom once.
-    const bv: any = this.app.workspace.getLeavesOfType("domvec-browser-view")[0]?.view;
+    const bv: any = ((window as any).__domvecActiveBrowser?.() ?? this.app.workspace.getLeavesOfType("domvec-browser-view")[0]?.view);
     const nav = String((bv && bv.session) || n.url || "");
     const ctl: any = g.controls();
     const tgt = ctl && ctl.target ? ctl.target : null;
@@ -3395,7 +3406,7 @@ export class GraphView extends ItemView {
       // The fast page form carried no addresses (its controls inert): now
       // that the store answered, re-read it addressed and redraw (G-111).
       if (entry.form === "page" && this.billboards.has(node.id)) {
-        const b: any = this.app.workspace.getLeavesOfType("domvec-browser-view")[0]?.view;
+        const b: any = ((window as any).__domvecActiveBrowser?.() ?? this.app.workspace.getLeavesOfType("domvec-browser-view")[0]?.view);
         if (b && typeof b.snapshotAddressed === "function" && await b.snapshotAddressed(node.id, payload.lines || [])) {
           if (this.billboards.has(node.id) && entry.form === "page") await this.renderForm(entry, "page", false);
         }
@@ -3467,7 +3478,7 @@ export class GraphView extends ItemView {
   private async pageFormFor(entry: any, live = true): Promise<"live" | "saved" | null> {
     const id = entry.node.id;
     const ask = this.snapshotFor || ((cid: string, url: string, again?: boolean) => {
-      const b: any = this.app.workspace.getLeavesOfType("domvec-browser-view")[0]?.view;
+      const b: any = ((window as any).__domvecActiveBrowser?.() ?? this.app.workspace.getLeavesOfType("domvec-browser-view")[0]?.view);
       return b && typeof b.snapshotChunk === "function" ? b.snapshotChunk(cid, url, again) : Promise.resolve(false);
     });
     let fresh = false;
@@ -3480,7 +3491,7 @@ export class GraphView extends ItemView {
   }
 
   private lastSnapOk(id: string): boolean {
-    const b: any = this.app.workspace.getLeavesOfType("domvec-browser-view")[0]?.view;
+    const b: any = ((window as any).__domvecActiveBrowser?.() ?? this.app.workspace.getLeavesOfType("domvec-browser-view")[0]?.view);
     const last = b && b.lastSnapshot;
     return !!last && last.cid === id && !!last.ok;
   }
@@ -3726,7 +3737,7 @@ export class GraphView extends ItemView {
     const id = entry.node.id;
     if (form === "page") {
       const ask = this.snapshotFor || ((cid: string, url: string, again?: boolean) => {
-        const b: any = this.app.workspace.getLeavesOfType("domvec-browser-view")[0]?.view;
+        const b: any = ((window as any).__domvecActiveBrowser?.() ?? this.app.workspace.getLeavesOfType("domvec-browser-view")[0]?.view);
         return b && typeof b.snapshotChunk === "function" ? b.snapshotChunk(cid, url, again) : Promise.resolve(false);
       });
       try { await ask(id, entry.node.url || "", fresh); } catch { /* not open in the cell */ }
@@ -4409,6 +4420,7 @@ export class GraphView extends ItemView {
       this.planGroup.add(path, leg);
       g.scene().add(this.planGroup);
     }
+    if (this.planGroup.parent !== g.scene()) g.scene().add(this.planGroup);
     this.planGroup.visible = true;
     const key = a.planAt + "|" + nodes.map((n: any) => `${Math.round(n.x)},${Math.round(n.y)},${Math.round(n.z || 0)}`).join(";");
     if (key !== this.planKey) {
@@ -4429,6 +4441,8 @@ export class GraphView extends ItemView {
     const g: any = this.graph;
     if (!g) return null;
     if (!this.bisectorGroup) { this.bisectorGroup = new THREE.Group(); g.scene().add(this.bisectorGroup); }
+    // A redraw builds a new scene: the bisectors rejoin it (as the craft does).
+    if (this.bisectorGroup.parent !== g.scene()) g.scene().add(this.bisectorGroup);
     let b = this.bisectors.get(note);
     if (!b) {
       const mesh = new THREE.Mesh(new THREE.SphereGeometry(2.4, 16, 12), new THREE.MeshBasicMaterial({ color: GraphView.SIGNAL_COLOUR }));
@@ -5967,6 +5981,29 @@ export class GraphView extends ItemView {
     }
     this.craft.frame();
   }
+  /** Planted (item 97): the wheel over a craft node zooms as anywhere else. */
+  plantNoMicroscope = false;
+  microscopeStats = { steps: 0, entered: 0, last: "", d: 0 };
+  /** One wheel step into a craft node: the camera 30% nearer, aimed at it;
+   *  inside a fifth of the craft's radius, its panel opens on the plane. */
+  microscopeStep(n: any): boolean {
+    const g: any = this.graph;
+    if (!g || !this.craft) return false;
+    const cam = g.camera(), ctl = g.controls(), q = n.mesh.position;
+    const p = cam.position;
+    p.set(q.x + (p.x - q.x) * 0.7, q.y + (p.y - q.y) * 0.7, q.z + (p.z - q.z) * 0.7);
+    ctl.target.set(q.x, q.y, q.z);
+    ctl.update?.();
+    const d = Math.hypot(p.x - q.x, p.y - q.y, p.z - q.z);
+    this.microscopeStats.steps++; this.microscopeStats.d = Math.round(d);
+    if (d < (this.craft.stats.radius || 10) * 0.2) {
+      this.craft.click(n);
+      this.microscopeStats.entered++; this.microscopeStats.last = n.id;
+      return true;
+    }
+    return false;
+  }
+
   /** A world node by id, for the craft's I/O lines; the map rebuilt at most once a second. */
   private craftIds: Map<string, any> | null = null;
   private craftIdsAt = 0;
@@ -7165,7 +7202,7 @@ export class GraphView extends ItemView {
   /** Put a billboard where its node is, in screen coordinates. */
   /** Is the browser cell showing a page's offline form (`G-59`, `G-62`)? */
   private offlineNow(): boolean {
-    const b: any = this.app.workspace.getLeavesOfType("domvec-browser-view")[0]?.view;
+    const b: any = ((window as any).__domvecActiveBrowser?.() ?? this.app.workspace.getLeavesOfType("domvec-browser-view")[0]?.view);
     return !!(b && b.offlineFor) && !this.plantOfflineBillboard;
   }
   /** Planted (`G-59`): offline, the panel stays a projector billboard. */

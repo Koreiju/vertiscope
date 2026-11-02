@@ -823,6 +823,7 @@ _PLANTABLE = {
     "no-maps": ("domvec.obsidian.sidecar", "PLANT_NO_MAPS"),                  # item 79
     "flat-box": ("domvec.obsidian.blackbox", "PLANT_FLAT"),                   # item 80
     "untyped-box": ("domvec.obsidian.blackbox", "PLANT_UNTYPED"),             # item 100
+    "no-codegraph": ("domvec.search", "PLANT_NO_CODEGRAPH"),                  # item 93
     "no-instant": ("domvec.obsidian.sidecar", "PLANT_NO_INSTANT"),            # item 100
     "world-projection": ("domvec.obsidian.sidecar", "PLANT_WORLD_PROJECTION"),  # item 76
     "no-refill": ("domvec.obsidian.sidecar", "PLANT_NO_REFILL"),               # item 59
@@ -1693,6 +1694,34 @@ def pairwise(workspace, keys) -> Dict:
     X = np.stack([vecs[k] for k in have])
     S = np.clip((X @ X.T + 1.0) / 2.0, 0.0, 1.0)
     return {"keys": have, "sim": [[round(float(x), 4) for x in row] for row in S]}
+
+
+#: The code graph web (PLUGIN_GOAL 93-95): built off the request path at start,
+#: its module PageRank handed to the index as a retrieval term for code chunks.
+CODEGRAPH = {"graph": None, "ms": 0, "error": ""}
+
+
+def _build_codegraph(workspace) -> None:
+    import time as _t
+    t0 = _t.perf_counter()
+    try:
+        from ..codegraph import CodeGraph
+        root = Path(__file__).resolve().parents[1]
+        g = CodeGraph(root, Path(getattr(workspace, "path", ".")) / "codegraph.json").build()
+        CODEGRAPH["graph"] = g
+        idx = getattr(workspace, "index", None)
+        if idx is not None:
+            # url -> its module's percentile, for every code:// page the store holds.
+            ranks = {}
+            for url in workspace.store.page_urls():
+                if url.startswith("code://repo/"):
+                    m = g.module_of_url(url)
+                    if m in g.rank:
+                        ranks[url] = g.rank[m]
+            idx.code_rank = ranks
+    except Exception as exc:                        # noqa: BLE001 -- retrieval goes on without it
+        CODEGRAPH["error"] = "%s: %s" % (type(exc).__name__, exc)
+    CODEGRAPH["ms"] = round((_t.perf_counter() - t0) * 1000)
 
 
 def _ego_hits(workspace, query: str, want: int) -> list:
@@ -4243,6 +4272,22 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(200, {"note": note, "runs": self.workspace.store.runs_of(note)})
             return
 
+        if segments[0] == "codegraph":
+            # The code graph (item 93): its size, and a name's place in it --
+            # kind, PageRank percentile, neighbours.
+            g = CODEGRAPH["graph"]
+            if g is None:
+                self._send(200, {"ready": False, "error": CODEGRAPH["error"]})
+                return
+            name = (parse_qs(parts.query).get("name") or [""])[0]
+            out = {"ready": True, "ms": CODEGRAPH["ms"], "stats": g.stats,
+                   "code_rank_pages": len(getattr(self.workspace.index, "code_rank", None) or {})}
+            if name:
+                out.update({"name": name, "kind": g.kind.get(name, ""), "rank": g.percentile(name),
+                            "neighbours": [{"name": n, "edge": k} for n, k in g.neighbours(name)[:40]]})
+            self._send(200, out)
+            return
+
         if segments[0] == "ego" and len(segments) > 1 and segments[1] == "projection":
             # The ego's own projection (item 76): knowledge keys -> places.
             try:
@@ -5134,6 +5179,9 @@ def serve(workspace, port: int = 8787, *, block: bool = True,
                          name="domvec-poison-watch", daemon=True).start()
         threading.Thread(target=_warm_containment, args=(workspace, stop),
                          name="domvec-warm-containment", daemon=True).start()
+    if workspace is not None:
+        threading.Thread(target=_build_codegraph, args=(workspace,),
+                         name="domvec-codegraph", daemon=True).start()
 
     # **The chunk projector.** One fit over every drawable chunk, made off
     # the request path; then a worker that drains the stream the embedder and

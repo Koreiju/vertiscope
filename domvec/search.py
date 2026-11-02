@@ -87,6 +87,8 @@ ADDITIVE_WEIGHTS = {"lexical": 0.30, "semantic": 0.35, "pagerank": 0.10, "conten
 #: The default fuse. Planted (`PLANT_PRODUCT_FUSE`): the triple product, as before.
 DEFAULT_FUSE = ["additive"]
 PLANT_PRODUCT_FUSE = [False]
+#: Planted (PLUGIN_GOAL 93): the code graph's PageRank not used.
+PLANT_NO_CODEGRAPH = [False]
 
 
 def _unit(v: np.ndarray) -> np.ndarray:
@@ -429,8 +431,15 @@ class ThreeFormIndex:
             share = (_fit(self._content, rows).astype(np.float64)
                      if self._content is not None and not PLANT_NO_CONTENT_FACTOR[0]
                      else np.ones(rows, dtype=np.float64))
+            # A code chunk's centrality in the CODE GRAPH (PLUGIN_GOAL 93:
+            # "pagerank on a global library ast") where it says more than the
+            # link graph does: the larger of the two percentiles.
+            pr_term = _percentile(ranks)
+            code_vec = self._code_rank_rows(rows)
+            if code_vec is not None:
+                pr_term = np.maximum(pr_term, code_vec)
             score = (w["lexical"] * _unit(lexical)
-                     + w["pagerank"] * _percentile(ranks)
+                     + w["pagerank"] * pr_term
                      + w["content"] * np.clip(share, 0.0, 1.0) ** 2)
             if available:
                 score = score + w["semantic"] * _unit(semantic)
@@ -675,6 +684,25 @@ class ThreeFormIndex:
                     mapping[i] = got
         self._emb_rows = (key, mapping)
         return mapping
+
+    #: url -> the code graph's PageRank percentile of its module (set by the
+    #: sidecar once `domvec.codegraph` is built), or None.
+    code_rank: Optional[Dict[str, float]] = None
+
+    def _code_rank_rows(self, rows: int) -> Optional[np.ndarray]:
+        """Per row: its page's code-graph percentile (0 for a non-code page)."""
+        if not self.code_rank or PLANT_NO_CODEGRAPH[0]:
+            return None
+        key = (rows, len(self._meta), id(self.code_rank))
+        got = getattr(self, "_code_vec", None)
+        if got is not None and got[0] == key:
+            return got[1]
+        vec = np.zeros(rows, dtype=np.float64)
+        for row, meta in self._meta.items():
+            if meta and 0 <= int(row) < rows:
+                vec[int(row)] = self.code_rank.get(meta[1], 0.0)
+        self._code_vec = (key, vec)
+        return vec
 
     def _rows_of_url(self, url: str, rows: int) -> np.ndarray:
         """A url's frequency rows, from an index built once per content

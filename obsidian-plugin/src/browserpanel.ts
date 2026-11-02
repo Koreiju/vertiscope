@@ -53,31 +53,36 @@ export class BrowserPanel {
   private scopeTry = 0;
   private hooked = new WeakSet<HTMLElement>();
 
-  constructor(private app: App, private host: BrowserPanelHost) {}
+  /** `path`: this instance's cockpit note -- one per browser instance
+   *  (PLUGIN_GOAL 87: "several instances of browsers (each with several tabs)
+   *  could be running their own sessions at a time"). */
+  constructor(private app: App, private host: BrowserPanelHost, readonly path: string = BROWSER_COCKPIT_PATH) {}
 
   /** The slate's view on the plane, if open. */
-  slateView(): MarkdownView | null { return this.host.desk.viewOf(BROWSER_COCKPIT_PATH); }
+  slateView(): MarkdownView | null { return this.host.desk.viewOf(this.path); }
   /** The browser's view inside the card, if mounted. */
   view(): any { return this.browserLeaf?.view || null; }
 
   /** The browser on the plane: its cockpit note (made on first use) and the
    *  browser beneath it, in one card. */
   async open(url = ""): Promise<any> {
-    let f = this.app.vault.getAbstractFileByPath(BROWSER_COCKPIT_PATH);
+    let f = this.app.vault.getAbstractFileByPath(this.path);
     if (!(f instanceof TFile)) {
       if (!this.app.vault.getAbstractFileByPath("domvec")) await this.app.vault.createFolder("domvec").catch(() => undefined);
-      f = await this.app.vault.create(BROWSER_COCKPIT_PATH, BROWSER_TEXT);
+      // Its slate titled for its note: `browser`, `browser 2`, ...
+      const title = this.path.slice(this.path.lastIndexOf("/") + 1).replace(/\.md$/, "");
+      f = await this.app.vault.create(this.path, BROWSER_TEXT.replace("\nbrowser\n", "\n" + title + "\n"));
     }
     // Asked to open, it opens: the slate's REMEMBERED fold state said
     // "collapsed" (a right-click on its title, kept per note) and came back
     // after the note's text loaded -- the browser shown as its node alone.
     try {
-      const k = "domvec.slate.folds:" + BROWSER_COCKPIT_PATH;
+      const k = "domvec.slate.folds:" + this.path;
       const st = JSON.parse(window.localStorage.getItem(k) || "null");
       if (st && st.collapsed) { st.collapsed = false; window.localStorage.setItem(k, JSON.stringify(st)); }
     } catch { /* a convenience */ }
     const desk = this.host.desk;
-    const existing = desk.panelOf(BROWSER_COCKPIT_PATH);
+    const existing = desk.panelOf(this.path);
     await desk.open(f as TFile, {
       mount: async (card: HTMLElement) => {
         card.addClass("domvec-browser-card");
@@ -172,7 +177,7 @@ export class BrowserPanel {
 
   /** The text read: an edit in the cockpit drives the browser. */
   onEdit(file: TFile | null): void {
-    if (!file || file.path !== BROWSER_COCKPIT_PATH || this.plantUnbound) return;
+    if (!file || file.path !== this.path || this.plantUnbound) return;
     const v = this.view();
     if (!v) return;
     const fs = this.fields();
@@ -257,8 +262,8 @@ export class BrowserPanel {
     this.chunkComp.load();
     this.chunkEl.empty();
     const NL = "\n";
-    await MarkdownRenderer.render(this.app, "```domvec" + NL + "cid: " + cid + NL + "```", this.chunkEl, BROWSER_COCKPIT_PATH, this.chunkComp);
+    await MarkdownRenderer.render(this.app, "```domvec" + NL + "cid: " + cid + NL + "```", this.chunkEl, this.path, this.chunkComp);
   }
 
-  close(): void { this.host.desk.closePath(BROWSER_COCKPIT_PATH); }
+  close(): void { this.host.desk.closePath(this.path); }
 }

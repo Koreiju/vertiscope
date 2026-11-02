@@ -8668,7 +8668,7 @@ export function makeChecks(env) {
             g.plantEgoInWorld = false; g.batchDirty = true;
             c.dirty();
           }
-        })()`, { timeout: 60000 });
+        })()`, { timeout: 150000 });
         const clean = await arm(null);
         const world = await arm("world");
         const drawn = await arm("drawn");
@@ -9345,6 +9345,269 @@ export function makeChecks(env) {
                 && !!tree && tree.layout === "tree" && tree.columns <= 4
                 && !!noedit && !noedit.editor && !noedit.written,
           evidence: { clean, tree, noedit, slider },
+        };
+      },
+    },
+    {
+      id: "G-320",
+      asks: "zoom passes into the microscope of the ego (PLUGIN_GOAL 97): in the map view, wheel-in with the pointer over a craft node steps the camera toward that node -- each step nearer, the node the focus -- and close enough the zoom passes through: the node's panel opens on the plane; planted (plantNoMicroscope) the wheel zooms as anywhere else and no panel opens",
+      async run() {
+        // 2026-11-01: "with 3d being a unique umap to its non holonomic origin
+        // and similar more compact scaling that enables zoom to pass into the
+        // microscope of the ego".
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const until = async (ok, ms) => { for (let t = 0; t < ms && !(await ok()); t += 250) await sleep(250); return !!(await ok()); };
+          const d = window.__domvecPlane, c = window.__domvecCraft;
+          const g = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
+          if (!d || !c || !g) return { error: "no craft" };
+          const path = "domvec/graph/g320 micro " + Date.now() + ".md";
+          const mode0 = g.agent.mode;
+          g.plantNoMicroscope = ${planted};
+          const out = { planted: ${planted} };
+          try {
+            await d.create("notebook", { path, text: "# micro" + String.fromCharCode(10) + String.fromCharCode(10) + "A note seen through the ego's microscope." + String.fromCharCode(10) });
+            d.closePath(path);
+            c.dirty();
+            await until(() => c.nodes.some((n) => n.id === "craft:" + path && n.mesh), 10000);
+            g.agent.setMode("map"); await sleep(1400);
+            const cam = g.graph.camera(), el = g.graph.renderer().domElement;
+            const node = () => c.nodes.find((n) => n.id === "craft:" + path);
+            const screen = () => { const r = el.getBoundingClientRect(), v = node().mesh.position.clone().project(cam); return { x: r.left + (v.x + 1) / 2 * r.width, y: r.top + (1 - v.y) / 2 * r.height }; };
+            const d0 = cam.position.distanceTo(node().mesh.position);
+            let steps = 0;
+            for (; steps < 30 && !d.panelOf(path); steps++) {
+              const at = screen();
+              el.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: -120, clientX: at.x, clientY: at.y }));
+              await sleep(120);
+            }
+            await sleep(600);
+            out.steps = steps;
+            out.nearer = Math.round(cam.position.distanceTo(node().mesh.position)) < Math.round(d0);
+            out.opened = !!d.panelOf(path);
+            out.stats = { ...g.microscopeStats };
+            return out;
+          } finally {
+            g.plantNoMicroscope = false;
+            g.agent.setMode(mode0);
+            try { await d.trash(path); } catch (e) { /* gone */ }
+            c.dirty();
+          }
+        })()`, { timeout: 90000 });
+        const clean = await arm(false);
+        const planted = await arm(true);
+        const c = clean || {};
+        return {
+          pass: c.opened && c.nearer && c.steps < 30 && !!planted && !planted.opened,
+          evidence: { clean, planted },
+        };
+      },
+    },
+    {
+      id: "G-319",
+      asks: "the ego's memory, live (PLUGIN_GOAL 96): a cell that runs leaves a READOUT in the craft -- its own node, linked forward from the cell that produced it -- and the run's recorded input (a chunk of the world) is wired to the readout (the inverse lookup), the readout counting the inputs it has been fed; planted (plantNoReadouts) a run leaves no readout",
+      async run() {
+        // 2026-11-01: "our computation graph showing actively evolving egoic
+        // memory structures being mapped from recursive calls on hard-typed
+        // computation graph iterative-recursive unrolls ... mapped
+        // bidirectionally with undirected lookup/indexing links".
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const until = async (ok, ms) => { for (let t = 0; t < ms && !(await ok()); t += 300) await sleep(300); return !!(await ok()); };
+          const d = window.__domvecPlane, c = window.__domvecCraft;
+          const g = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
+          if (!d || !c || !g) return { error: "no craft" };
+          const NL = String.fromCharCode(10), F = String.fromCharCode(96).repeat(3);
+          const path = "domvec/graph/g319 memory " + Date.now() + ".md";
+          c.plantNoReadouts = ${planted};
+          const mode0 = g.agent.mode;
+          const out = { planted: ${planted} };
+          try {
+            await d.create("notebook", { path, text: F + "python {Radix tree}" + NL + "print(len(radix_tree))" + NL + F + NL });
+            const v = d.viewOf(path);
+            await until(() => v.containerEl.querySelector(".domvec-run-fence"), 6000);
+            v.containerEl.querySelector(".domvec-run-fence").click();
+            await until(() => v.editor.getValue().includes("<!-- nb-output"), 30000);
+            g.agent.setMode("map");
+            c.dirty();
+            const rid = "craft:readout:" + path;
+            await until(() => ${planted} ? c.stats.builds > 0 && c.nodes.some((n) => n.path === path) : c.nodes.some((n) => n.id === rid), 15000);
+            await sleep(2500); c.dirty(); await sleep(2600);
+            const ro = c.nodes.find((n) => n.id === rid);
+            out.readout = !!ro;
+            out.forward = c.edges.filter((e) => e.kind === "forward" && e.b === rid).map((e) => e.a);
+            out.forward_from_cell = out.forward.some((a) => a.startsWith("craft:" + path + "#cell:"));
+            await until(() => (c.readoutInputs[path] || 0) >= 1, 15000);
+            out.fed = c.readoutInputs[path] || 0;
+            // The inverse lookup drawn: an I/O segment ending on the readout.
+            if (ro && ro.mesh) {
+              const pos = c.ioLines ? c.ioLines.geometry.getAttribute("position") : null;
+              const q = ro.mesh.position;
+              let ends = 0;
+              if (pos) for (let i = 0; i < pos.count; i++) if (Math.hypot(pos.getX(i) - q.x, pos.getY(i) - q.y, pos.getZ(i) - q.z) < 0.01) ends++;
+              out.io_ends_on_readout = ends;
+            }
+            return out;
+          } finally {
+            c.plantNoReadouts = false;
+            g.agent.setMode(mode0);
+            try { await d.trash(path); } catch (e) { /* gone */ }
+            c.dirty();
+          }
+        })()`, { timeout: 120000 });
+        const clean = await arm(false);
+        const planted = await arm(true);
+        const c = clean || {};
+        return {
+          pass: c.readout && c.forward_from_cell && c.fed >= 1 && c.io_ends_on_readout >= 1 && !!planted && !planted.readout,
+          evidence: { clean, planted },
+        };
+      },
+    },
+    {
+      id: "G-313",
+      asks: "many browsers, the 3D graph following the one in use (PLUGIN_GOAL 87-89): the plane's + browser tool opens the default browser and then a NEW instance (its own cockpit note, its own session), both stuck on the plane; whichever the reader presses in, the graph's browsing page is THAT browser's (A's page after using A, B's after using B); the craft draws the browser's code as one node with an instance link to each browser's cockpit; planted (plantFirstBrowser) the graph keeps to the first browser whichever is used, (plantNoInstances) no code-instance links",
+      async run() {
+        // 2026-11-01: "several instances of browsers (each with several tabs)
+        // could be running their own sessions at a time, and depending on
+        // whcih one is being interacted with, all the 3D graph features follow".
+        const fixtures = await serveFixtures();
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const until = async (ok, ms) => { for (let t = 0; t < ms && !(await ok()); t += 250) await sleep(250); return !!(await ok()); };
+          const pl = window.__domvecBrowsers, d = window.__domvecPlane, c = window.__domvecCraft;
+          const g = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view, plane = g && g.plane();
+          if (!pl || !d || !plane) return { error: "no browsers" };
+          const base = ${JSON.stringify(fixtures.origin + "/media_kinds.html?g313=")} + (${JSON.stringify(planted || "c")}) + Date.now();
+          pl.plantFirstBrowser = ${JSON.stringify(planted)} === "first";
+          c.plantNoInstances = ${JSON.stringify(planted)} === "noinst";
+          const out = { planted: ${JSON.stringify(planted)} };
+          const opened = [];
+          try {
+            for (const b of pl.browserPanels) b.close();
+            const tool = plane.querySelector('.domvec-plane-tool[data-kind="browser"]');
+            tool.click(); await until(() => !!pl.browserPanels[0].view(), 20000); await sleep(800);
+            tool.click(); await until(() => pl.browserPanels.length > 1 && !!pl.browserPanels[pl.browserPanels.length - 1].view(), 20000); await sleep(800);
+            const A = pl.browserPanels[0], B = pl.browserPanels[pl.browserPanels.length - 1];
+            opened.push(A, B);
+            out.instances = [A.path, B.path];
+            out.both_on_plane = !!d.panelOf(A.path) && !!d.panelOf(B.path) && A.view() !== B.view();
+            await A.go(base + "-A"); await B.go(base + "-B");
+            await until(() => String(A.view().webview?.getURL?.() || "").includes("-A") && String(B.view().webview?.getURL?.() || "").includes("-B"), 15000);
+            // A press INSIDE the browser view (where a reader's lands).
+            const use = (bp) => bp.view().contentEl.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true }));
+            use(B); await sleep(200);
+            out.after_B = String(g.browsingUrl() || "");
+            use(A); await sleep(200);
+            out.after_A = String(g.browsingUrl() || "");
+            out.follows = out.after_B.includes("-B") && out.after_A.includes("-A");
+            c.dirty(); await sleep(2500); c.dirty(); await sleep(2600);
+            out.code_node = c.nodes.some((n) => n.id === "craft:code:BrowserView");
+            out.instance_links = c.edges.filter((e) => e.kind === "instance").map((e) => e.b.replace("craft:", ""));
+            return out;
+          } finally {
+            pl.plantFirstBrowser = false; c.plantNoInstances = false;
+            for (const b of opened) b.close();
+            c.dirty();
+          }
+        })()`, { timeout: 120000 });
+        let clean, first, noinst;
+        try { clean = await arm(null); first = await arm("first"); noinst = await arm("noinst"); } finally { await fixtures.close(); }
+        const c = clean || {};
+        return {
+          pass: c.both_on_plane && c.follows && c.code_node && (c.instance_links || []).length >= 2
+                && (c.instance_links || []).includes(c.instances[0]) && (c.instance_links || []).includes(c.instances[1])
+                && !!first && !first.follows && !!noinst && (noinst.instance_links || []).length === 0,
+          evidence: { clean, first, noinst },
+        };
+      },
+    },
+    {
+      id: "G-317",
+      asks: "type-aware similarity (PLUGIN_GOAL 92): in a notebook's halo, results of its own kind (notebooks) sit nearer than results of another kind (markdown notes) of like text -- the kind an additive term of the halo's similarity; planted (plantNoTypeTerm) kind plays no part and the gap closes",
+      async run() {
+        // 2026-11-01: "radially normalised similarity distance of k-many
+        // similar node/panels of the similar most datatype and layer of
+        // abstraction (think pagerank for datatypes and type inheritance ...)".
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const until = async (ok, ms) => { for (let t = 0; t < ms && !(await ok()); t += 400) await sleep(400); return !!(await ok()); };
+          const plugin = app.plugins.getPlugin("domvec-bridge");
+          const SIDE = String(plugin.settings.sidecar).replace(/[/]+$/, "");
+          const H = { "content-type": "application/json", "X-Domvec-Client": "obsidian-plugin" };
+          const d = window.__domvecPlane, halo = window.__domvecHalo, c = window.__domvecCraft;
+          const NL = String.fromCharCode(10), F = String.fromCharCode(96).repeat(3), stamp = Date.now();
+          const body = "Lighthouse keepers log the foghorn hours on stormy coasts, night after night.";
+          const mk = (i, nb) => ({ path: "domvec/graph/g317 " + (nb ? "nb" : "md") + i + " " + stamp + ".md",
+                                   text: "# g317" + NL + NL + body + " Entry " + i + "." + NL + (nb ? NL + F + "python" + NL + "x = " + i + NL + F + NL : "") });
+          const focus = mk(0, true), notes = [mk(1, true), mk(2, true), mk(3, false), mk(4, false)];
+          halo.plantNoTypeTerm = ${planted};
+          const out = { planted: ${planted} };
+          try {
+            await d.create("notebook", focus);
+            for (const n of notes) { await d.create("notebook", n); d.closePath(n.path); }
+            c.dirty();
+            out.ready = await until(async () => {
+              const r = await (await fetch(SIDE + "/search?q=" + encodeURIComponent(body) + "&k=12&where=ego", { headers: H })).json();
+              return (r.hits || []).filter((h) => String(h.url).includes("g317") && String(h.url).includes(String(stamp))).length >= 5;
+            }, 60000);
+            await halo.open(focus.path);
+            await until(() => halo.nodes.length >= 4, 10000);
+            const ours = halo.nodes.filter((n) => n.url.includes(String(stamp)));
+            const same = ours.filter((n) => n.kind === "notebook"), other = ours.filter((n) => n.kind === "markdown");
+            const mean = (xs) => xs.length ? xs.reduce((a, n) => a + n.r, 0) / xs.length : null;
+            out.kinds = ours.map((n) => n.kind);
+            out.r_same = mean(same); out.r_other = mean(other);
+            out.gap = out.r_same !== null && out.r_other !== null ? Math.round(out.r_other - out.r_same) : null;
+            return out;
+          } finally {
+            halo.plantNoTypeTerm = false; halo.close();
+            for (const n of [focus, ...notes]) { try { await d.trash(n.path); } catch (e) { /* gone */ } }
+            c.dirty();
+          }
+        })()`, { timeout: 150000 });
+        const clean = await arm(false);
+        const planted = await arm(true);
+        const c = clean || {};
+        return {
+          pass: c.ready && c.gap !== null && c.gap > 0 && !!planted && planted.gap !== null && c.gap > planted.gap + 10,
+          evidence: { clean, planted },
+        };
+      },
+    },
+    {
+      id: "G-318",
+      asks: "the code graph web (PLUGIN_GOAL 93-95): built from libcst's concrete syntax trees over the repository -- every module, class, function and method a node; contains, calls, imports, inherits its edges -- with a PageRank over it; a definition's kind, rank and neighbours answered; and the PageRank a retrieval term: code chunks score higher with it than without (planted no-codegraph)",
+      async run() {
+        // 2026-11-01: "pagerank on a global library ast ... we might extend the
+        // ast to include perhaps cst's (https://pypi.org/project/libcst/)".
+        const got = await evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const plugin = app.plugins.getPlugin("domvec-bridge");
+          const SIDE = String(plugin.settings.sidecar).replace(/[/]+$/, "");
+          const H = { "content-type": "application/json", "X-Domvec-Client": "obsidian-plugin" };
+          const plant = (name, on) => fetch(SIDE + "/plant", { method: "POST", headers: H, body: JSON.stringify({ name, on }) });
+          let cg = null;
+          for (let i = 0; i < 60; i++) { cg = await (await fetch(SIDE + "/codegraph?name=" + encodeURIComponent("domvec.search.ThreeFormIndex.search"), { headers: H })).json(); if (cg.ready) break; await sleep(1000); }
+          const scores = async () => {
+            const r = await (await fetch(SIDE + "/search?q=" + encodeURIComponent("patricia trie chunk builder") + "&k=20", { headers: H })).json();
+            const m = {}; for (const h of r.hits || []) if (String(h.url).startsWith("code://")) m[h.cid] = h.score; return m;
+          };
+          const clean = await scores();
+          await plant("no-codegraph", true);
+          let planted;
+          try { planted = await scores(); } finally { await plant("no-codegraph", false); }
+          const both = Object.keys(clean).filter((k) => k in planted);
+          return { cg: cg && { ready: cg.ready, stats: cg.stats, kind: cg.kind, rank: cg.rank, neighbours: (cg.neighbours || []).length,
+                               edges: [...new Set((cg.neighbours || []).map((n) => n.edge))], code_rank_pages: cg.code_rank_pages },
+                   code_hits: both.length, higher: both.filter((k) => clean[k] > planted[k] + 1e-9).length,
+                   lower: both.filter((k) => clean[k] < planted[k] - 1e-9).length };
+        })()`, { timeout: 120000 });
+        const c = (got && got.cg) || {};
+        return {
+          pass: c.ready && c.stats && c.stats.nodes > 1000 && c.stats.cst >= c.stats.files * 0.9 && c.kind === "method" && c.rank > 0
+                && c.neighbours >= 1 && c.code_rank_pages > 0 && got.code_hits >= 1 && got.higher >= 1 && got.lower === 0,
+          evidence: got,
         };
       },
     },

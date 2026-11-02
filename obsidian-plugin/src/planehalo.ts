@@ -30,7 +30,7 @@ import { App, TFile } from "obsidian";
 import type { PlaneDesk } from "./planepanels";
 import type { Sidecar } from "./sidecar";
 
-interface HNode { key: string; url: string; cid: string; label: string; preview: string; s: number; r: number; theta: number; x: number; y: number }
+interface HNode { key: string; url: string; cid: string; label: string; preview: string; kind: string; s: number; r: number; theta: number; x: number; y: number }
 
 export interface HaloHost { app: App; desk: PlaneDesk; sidecar: () => Sidecar | null; plane: () => HTMLElement | null }
 
@@ -86,6 +86,7 @@ export class PlaneHalo {
     if (this.focus !== path) return false;
     const hits = ((got && got.hits) || []).filter((h: any) => h.url !== url).slice(0, cap);
     this.focusKey = url; this.history = [];
+    this.focusKind = this.kindOf(url);
     await this.place(hits);
     if (this.focus !== path) return false;
     this.cursor = { ...this.centre };
@@ -104,13 +105,22 @@ export class PlaneHalo {
     const r0 = this.stats.r0, R = this.stats.R;
     this.stats.results = hits.length;
     const top = Math.max(1e-9, ...hits.map((h: any) => Number(h.score) || 0));
+    const vault = "vault://" + this.host.app.vault.getName() + "/";
     this.nodes = hits.map((h: any) => {
       const s = Math.max(0, Number(h.score) || 0) / top;
       const isNote = String(h.url || "").startsWith("vault://");
       const label = isNote ? String(h.url).split("/").pop()!.replace(/\.md$/, "") : String(h.preview || h.cid).split("\n")[0].slice(0, 24);
-      return { key: isNote ? String(h.url) : String(h.cid), url: String(h.url || ""), cid: String(h.cid || ""), label,
-               preview: String(h.preview || ""), s, r: r0 + (1 - s) * R, theta: 0, x: 0, y: 0 };
+      const url = String(h.url || "");
+      // TYPE-AWARE similarity (PLUGIN_GOAL 92: "of the similar most datatype
+      // and layer of abstraction"): the result's kind against the focus's,
+      // as one more additive term (0.2 of it, re-normalized).
+      const kind = this.kindOf(url);
+      const t = this.plantNoTypeTerm ? 0 : this.typeMatch(this.focusKind, kind);
+      const s2 = this.plantNoTypeTerm ? s : 0.8 * s + 0.2 * t;
+      return { key: isNote ? url : String(h.cid), url, cid: String(h.cid || ""), label, kind,
+               preview: String(h.preview || ""), s: s2, r: r0 + (1 - s2) * R, theta: 0, x: 0, y: 0 };
     });
+    void vault;
     // Lateral similarity, from the store.
     const pw: any = this.nodes.length > 1 ? await sc.egoPost("ego/pairwise" as any, { keys: this.nodes.map((n) => n.key) }) : null;
     const at = new Map<string, number>(((pw && pw.keys) || []).map((k: string, i: number) => [k, i]));
@@ -215,6 +225,7 @@ export class PlaneHalo {
     if (!sc || !plane || !h) return false;
     this.history.push({ key: this.focusKey || this.focus, x: this.centre.x, y: this.centre.y });
     this.focusKey = h.key;
+    this.focusKind = h.kind || this.kindOf(h.url);
     this.centre = { x: h.x, y: h.y };
     const seen = new Set(this.history.map((q) => q.key).concat([h.key, "vault://" + this.host.app.vault.getName() + "/" + this.focus]));
     const got: any = await sc.search((h.preview || h.label).slice(0, 240), { k: this.stats.cap + seen.size, where: "ego" });
@@ -228,6 +239,29 @@ export class PlaneHalo {
   }
   /** The key of the current focus (the opened panel's note, or a re-keyed node). */
   focusKey = "";
+  /** The focus's kind (item 92): what like-kinds sit nearer to. */
+  focusKind = "";
+  /** Planted (item 92): kind plays no part. */
+  plantNoTypeTerm = false;
+  /** An artifact's kind and layer: a slate, a notebook (a note with a python
+   *  cell), a markdown note, code, or a web chunk. */
+  kindOf(url: string): string {
+    const vault = "vault://" + this.host.app.vault.getName() + "/";
+    if (url.startsWith("code://")) return "code";
+    if (!url.startsWith(vault)) return "web";
+    const f = this.host.app.vault.getAbstractFileByPath(url.slice(vault.length));
+    if (!(f instanceof TFile)) return "markdown";
+    const cache = this.host.app.metadataCache.getFileCache(f);
+    if (String(cache?.frontmatter?.domvec || "") === "slate") return "slate";
+    return (cache?.sections || []).some((x) => x.type === "code") ? "notebook" : "markdown";
+  }
+  /** 1 for the same kind, 0.5 for the same family (a note of another kind), 0 otherwise. */
+  typeMatch(a: string, b: string): number {
+    if (!a || !b) return 0;
+    if (a === b) return 1;
+    const notes = ["slate", "notebook", "markdown"];
+    return notes.includes(a) && notes.includes(b) ? 0.5 : 0;
+  }
 
   /** Dijkstra from the focus (-1) over the halo: focus -> each result at
    *  1 - s, result -> its two most similar at 1 - sim. */

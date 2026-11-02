@@ -128,6 +128,9 @@ export interface SurfaceHost {
   /** A chunk NOTE's half, kept per note across redraws (`D-3`): true when
    *  the card is on show and the note's own body hidden. */
   noteHalf?: { get(path: string): boolean | undefined; set(path: string, card: boolean): void };
+  /** Is the note at `path` a chunk note? Asked when the fence draws: at
+   *  render the metadata of a note just created may not be parsed yet (D-3). */
+  isChunkNote?(path: string): boolean;
 }
 
 export class ChunkSurface extends MarkdownRenderChild {
@@ -145,10 +148,11 @@ export class ChunkSurface extends MarkdownRenderChild {
     /** Force a form. The graph's billboard is the chunk's SHADOW-DOM form
      *  (`G-77`), whatever the note default is; the markdown form lives on
      *  the browser's markdown side. */
-    opts: { interactive?: boolean; notePath?: string } = {},
+    opts: { interactive?: boolean; notePath?: string; sourcePath?: string } = {},
   ) {
     super(containerEl);
     this.notePath = opts.notePath;
+    this.sourcePath = opts.sourcePath || "";
     this.interactive = opts.interactive
       ?? (this.notePath ? host.noteHalf?.get(this.notePath) : undefined)
       ?? host.settings.interactiveByDefault;
@@ -157,6 +161,14 @@ export class ChunkSurface extends MarkdownRenderChild {
   /** Set on a chunk note's own fence: its markdown half is the NOTE (the
    *  native, editable editor), not a render in here (`D-3`). */
   private notePath?: string;
+  private sourcePath = "";
+  /** The note path, decided again whenever it is still unknown: a fence that
+   *  rendered before its note's metadata was read drew the read-only copy and
+   *  never noticed it sat in a chunk note (D-3, intermittent on the plane). */
+  private chunkNote(): string | undefined {
+    if (!this.notePath && this.sourcePath && this.host.isChunkNote?.(this.sourcePath)) this.notePath = this.sourcePath;
+    return this.notePath;
+  }
 
   async onload() {
     this.payload = await this.host.fetchChunk(this.cid);
@@ -164,7 +176,7 @@ export class ChunkSurface extends MarkdownRenderChild {
   }
 
   /** The chunk note this fence belongs to, when it is one (`D-3`). */
-  get note(): string | undefined { return this.notePath; }
+  get note(): string | undefined { return this.chunkNote(); }
 
   /** Follow the note's half when it was set elsewhere -- the plugin, or the
    *  same note's fence in another leaf. */
@@ -216,7 +228,7 @@ export class ChunkSurface extends MarkdownRenderChild {
       return;
     }
     if (this.interactive) this.drawInteractive(body);
-    else if (this.notePath) {
+    else if (this.chunkNote()) {
       // The markdown half of a chunk note is the note itself, in Obsidian's
       // own editor, under this bar -- not a second, read-only copy here.
       root.addClass("domvec-folded");
