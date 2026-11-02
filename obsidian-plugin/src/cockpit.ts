@@ -51,6 +51,7 @@ export const COCKPIT_TEXT = [
   T + T + "query" + T + "",
   T + T + "db" + T + "true",
   T + T + "duckduckgo" + T + "false",
+  T + T + "where" + T + "all",
   T + T + "k" + T + "8",
   T + T + "results",
   "",
@@ -216,7 +217,9 @@ export class Cockpit {
    *  to the dotted reference and a plain field; the rows go beneath it. */
   async migrateModule(f: TFile): Promise<boolean> {
     const text = await this.app.vault.read(f);
-    const next = text.replace(/^(\tplan\t)\{results\}\s*$/m, "$1{search.results}").replace(/^(\t\tresults)\t\{results\}\s*$/m, "$1");
+    let next = text.replace(/^(\tplan\t)\{results\}\s*$/m, "$1{search.results}").replace(/^(\t\tresults)\t\{results\}\s*$/m, "$1");
+    // The search's `where` (item 78), written once into a cockpit made before it.
+    if (!/^\t\twhere\t/m.test(next)) next = next.replace(/^(\t\tduckduckgo\t.*)$/m, "$1\n\t\twhere\tall");
     if (next === text) return false;
     await this.app.vault.modify(f, next);
     return true;
@@ -248,6 +251,8 @@ export class Cockpit {
   decorate(): void {
     const leaves: any[] = this.app.workspace.getLeavesOfType("markdown");
     if (this.planeLeaf && this.card?.isConnected) leaves.push(this.planeLeaf);
+    // The plane's other panels (PLUGIN_GOAL 65): a slate there is a slate.
+    for (const l of (window as any).__domvecPlane?.leaves?.() || []) if (!leaves.includes(l)) leaves.push(l);
     for (const l of leaves) {
       const v: any = l.view;
       const on = isSlate(this.app, v?.file || null);
@@ -431,6 +436,14 @@ export class Cockpit {
       const t = e.target as HTMLElement | null;
       const cm = v?.editor?.cm;
       if (!cm) return;
+      // A `{ref}` INSIDE a revealed box: the next rank of the black box opened,
+      // or folded again (PLUGIN_GOAL 80) -- the same reveal state, by name.
+      const inner = t?.closest?.(".domvec-slate-reveal-ref") as HTMLElement | null;
+      if (inner && inner.dataset.ref) {
+        e.preventDefault(); e.stopPropagation();
+        void this.toggleReveal(v, inner.dataset.ref);
+        return;
+      }
       // Only what is the slate's: a `{ref}`, the title, the circle.
       const pos = cm.posAtCoords({ x: e.clientX, y: e.clientY });
       const ln = pos != null ? cm.state.doc.lineAt(pos) : null;
@@ -516,6 +529,9 @@ export class Cockpit {
     if (Number.isFinite(thr) && Math.abs(thr / 100 - a.throttle) > 0.004) a.setThrottle(thr / 100);
     const f = g.searchField;
     if (!f) return;
+    // Ego or web (item 78): the search's `where`, a three-state field.
+    const where = (this.field(fs, "search", "where")?.value || "").trim();
+    if (typeof g.setSearchWhere === "function" && g.setSearchWhere(where) && f.input.value.trim()) void f.run();
     const k = Number(this.field(fs, "search", "k")?.value);
     if (Number.isFinite(k) && k >= 1 && k !== f.k) f.setK(k);
     const q = (this.field(fs, "search", "query")?.value || "").trim();
@@ -571,7 +587,8 @@ export class Cockpit {
   private haloTick(): void {
     const g = this.host.graph();
     if (!g || typeof g.haloFor !== "function") return;
-    const v: any = this.app.workspace.getActiveViewOfType(MarkdownView);
+    const pl: any = (this.app as any).plugins?.getPlugin?.("domvec-bridge");
+    const v: any = pl?.activeView ? pl.activeView() : this.app.workspace.getActiveViewOfType(MarkdownView);
     let q = "";
     if (v && v.file && v.file.path !== COCKPIT_PATH && isSlate(this.app, v.file)) {
       const cur = v.editor.getCursor();

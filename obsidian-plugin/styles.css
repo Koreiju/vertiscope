@@ -1175,3 +1175,53 @@ button.domvec-run-fence:hover {
 
 /* Item 62: a tree's Python error, drawn where it is (slatelint.ts). */
 .domvec-slate-error { text-decoration: underline wavy var(--text-error); text-decoration-skip-ink: none; text-underline-offset: 3px; }
+
+/* Items 65-66: every note a panel on the plane -- Obsidian's own view of it,
+   its header node the note's name in the link colour (the inline title's
+   place: the name drawn once), the plane's create tools in a strip. */
+.domvec-panel-card { width: min(380px, 48%); }
+.domvec-panel-card > .workspace-leaf { height: min(420px, 60vh); }
+.domvec-panel-card .inline-title { display: none; }
+.domvec-plane-head { padding: 6px 8px 2px; background: var(--background-primary); }
+.domvec-plane-head-node { display: inline-block; color: var(--link-color); cursor: grab;
+  background: color-mix(in srgb, var(--link-color) 16%, transparent);
+  border: 1px solid var(--link-color); border-radius: 12px; padding: 1px 10px; font-size: 13px; user-select: none; }
+.domvec-panel-card.is-collapsed { width: auto; }
+.domvec-panel-card.has-head.is-collapsed > .workspace-leaf { display: none; }
+.domvec-panel-card.is-collapsed .domvec-plane-head { background: transparent; padding: 0; }
+.domvec-panel-card.is-collapsed .domvec-plane-head-node { border-radius: 50%; min-width: 46px; height: 46px;
+  display: inline-flex; align-items: center; justify-content: center; padding: 0 6px; }
+.domvec-plane-tools { position: absolute; left: 8px; top: 8px; display: flex; gap: 4px; }
+.domvec-plane-tool { font-size: 11px; padding: 2px 8px; height: auto; opacity: 0.75; }
+.domvec-plane-tool:hover { opacity: 1; }
+/* Left-snapped like the cockpit (item 58): Obsidian's readable line width
+   centres the sizer; on the plane a panel's text starts at its edge. */
+.domvec-plane-card .markdown-source-view.mod-cm6.is-readable-line-width .cm-sizer { margin-inline: 0; max-width: none; }
+.domvec-plane-card .markdown-source-view.mod-cm6 .cm-contentContainer.cm-contentContainer > .cm-content { margin-inline: 0; }
+/* Item 71: the browser on the plane -- its cockpit slate above, the browser
+   itself beneath, one card. */
+.domvec-browser-card { width: min(760px, 72%); }
+.domvec-browser-card > .workspace-leaf:not(.domvec-browser-panel-leaf) { height: 190px; }
+.domvec-browser-card > .domvec-browser-panel-leaf { position: relative; height: min(440px, 58vh); border-top: 1px solid #444; }
+.domvec-browser-card > .domvec-browser-panel-leaf > .workspace-leaf-content { height: 100%; }
+.domvec-browser-card.is-collapsed > .domvec-browser-panel-leaf { display: none; }
+/* Items 81-84: the halo that slides, on the plane. */
+.domvec-halo2d { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+.domvec-halo2d .ray { stroke: var(--link-color); stroke-opacity: 0.25; stroke-width: 1; }
+.domvec-halo2d .trace { fill: none; stroke: #ffd27a; stroke-width: 2; stroke-opacity: 0.9; }
+.domvec-halo2d .node { fill: color-mix(in srgb, var(--link-color) 35%, #000); stroke: var(--link-color); stroke-width: 1.5; }
+.domvec-halo2d .node.lit { fill: var(--link-color); stroke: #fff; stroke-width: 2; }
+.domvec-halo2d .label { fill: #ddd; font-size: 11px; }
+.domvec-halo2d .cursor { fill: #ffd27a; }
+/* Item 79: a node's I/O toggle beside its header node. */
+.domvec-plane-maps { margin-left: 6px; font-size: 10px; padding: 0 6px; border-radius: 8px; border: 1px solid #666; color: #aaa; cursor: pointer; user-select: none; }
+.domvec-plane-maps.is-ego { border-color: var(--link-color); color: var(--link-color); }
+.domvec-panel-card.is-collapsed .domvec-plane-maps { display: none; }
+/* Panels on the plane RESIZE as well as move (the reader sizes a panel to
+   what it shows): the card takes the size, the note's leaf fills it. */
+.domvec-panel-card { height: min(460px, 62vh); resize: both; min-width: 180px; min-height: 120px; }
+.domvec-panel-card > .workspace-leaf { height: auto; flex: 1 1 auto; min-height: 0; }
+.domvec-panel-card.is-collapsed { height: auto !important; width: auto !important; resize: none; min-width: 0; min-height: 0; }
+.domvec-browser-card { height: min(700px, 82vh); }
+.domvec-browser-card > .workspace-leaf:not(.domvec-browser-panel-leaf) { flex: 0 0 190px; height: 190px; }
+.domvec-browser-card > .domvec-browser-panel-leaf { flex: 1 1 auto; height: auto; }

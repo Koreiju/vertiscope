@@ -124,14 +124,18 @@ gives the cell its place:
   The 2D panel and the 3D node are two PLACEMENTS of that record, not two models kept in sync:
   editing either writes the record, and the other redraws from it. Selection and view decide
   which placement is shown (item 42): stuck, it is a 2D panel; in flight, a 3D node.
-- **UMAP over the ego reservoir** (item 43: "UMAP happens on the ego reservoir for all
-  computation graph nodes as artifacts of various kinds"). Every computation-graph node -- a
-  cell, a slate, a readout, the cockpit, a search and its results -- is an ARTIFACT with an
-  embedding (its rendered text through the same encoder the chunks use), placed by the same
-  global ParametricUMAP `transform` as pages and chunks (G-270's global scope). The reservoir is
-  therefore not a separate picture: its nodes sit among the web and vault chunks they read and
-  write, and a readout lands beside what it resembles. New nodes are a delta on the stream
-  (online `transform`, no refit).
+- **UMAP over the ego reservoir -- CORRECTED twice, 2026-11-01.** As first written here (item
+  43, 2026-10-30) every computation-graph node was placed by the GLOBAL fit among the web and
+  vault chunks: "the reservoir is therefore not a separate picture". The reader's correction
+  (PLUGIN_GOAL 67): *"the full ego computation graph as one unit, its own graph separate from the
+  red of the UMAPped components, all interconnected in 3D"* -- so the reservoir IS a separate
+  picture: the craft (5a). And the binding rule that followed (item 76): *"forego all UMAPping on
+  things in the world-map at input-output most parts of the computation graph/reservoir in place
+  of "knowledge keys" of variously collected artifacts at the ego-umap level and which is
+  integrated with UMAP on the local ego-linked code artifacts"* -- the ego has its OWN projection
+  (10.4), and the world fit no longer places the reservoir's inputs and outputs. G-291 (ego
+  artifacts indexed as vault pages and placed by the global fit) is superseded in its placement;
+  its indexing stays (the artifacts are still retrievable).
 
 - **Readouts at the perimeter** (UR P.3–P.7, R.4; DM §6.6.1, §7.8.3): a node with no succeeding
   `{ref}` is terminal; its settled rendering is indexed as a chunk and placed on the projector's
@@ -147,6 +151,98 @@ gives the cell its place:
 - **The halo transports** (UR O.18, V.4): retrieved nodes ride constant-similarity rays from the
   stuck slate as apex, sliding along them as the camera moves. The search lights (G-209) are
   this halo's lit half today; the transport is not built.
+
+## 5a. The craft -- the ego computation graph as one unit (items 67-69, 75)
+
+*Built 2026-11-01: `obsidian-plugin/src/craft.ts`; live check G-299.*
+
+The reader's words, the two that define it: *"something like kerbal space program, where we can
+see from both first person view within a "cockpit" as well as a 3rd person view, but for a
+"craft" that is where our 3D computation graphs from our legacy mothership mortegon
+specs/docs/code comes in"* (2026-10-29) and *"the full ego computation graph as one unit, its
+own graph separate from the red of the UMAPped components, all interconnected in 3D ... this
+being where our "cockpit" view really comes in"* (2026-11-01).
+
+**What it holds.** Every computation-graph artifact in the vault, one record each (section 5's
+"one representation, two places"):
+
+| node | is | fused with |
+|---|---|---|
+| `ego` | the cockpit note, the craft's root | the cockpit's title node (item 54) -- one `ego` |
+| note | a slate, or a notebook whose python cell has RUN (G-291's rule), or a note the plane's tools made or the plane shows | a slate IS its one tree |
+| tree | a markdown tree in a notebook (the extended markdown cell, G-297) | -- |
+| cell | a python cell (one kernel per note) | -- |
+
+The vault is this repository, so a README's fenced example is not a kernel cell: first built
+without the rule, the craft took in 106 notes, 498 "cells", most of them `node_modules`
+READMEs. With it, 34 notes -- 32 of them probe notes earlier checks had failed to delete (an
+editor's pending save rewrote them after the delete; the plane's delete tool now saves, closes,
+then trashes).
+
+**How it is linked -- "all interconnected".** `root` (every note hangs from `ego`, item 10's
+"collapsed within the "ego" 2D node which corresponds to the cockpit"), `contains` (a note's
+trees and cells), `order` (the note's one kernel runs its trees and cells in document order --
+the signal flow of item 35), `ref` (a `{name}` in a tree or on a fence line naming another
+artifact). Measured: every node reachable from `ego` (7 of 7; planted `plantNoLinks`, 1 of 7).
+
+**Its I/O are links into the world, not nodes dissolved into it** (item 69; mortegon P.8: "a
+node-edge network rendering independent of the UMAP embedding project, simply links between
+nodes in the projector, to the computation graph itself"). A run's recorded input -- a chunk of
+the world -- is a line to the cell's note in the craft. Measured: 1 I/O line for a cell reading
+`{Radix tree}`.
+
+**Where it is -- its own frame.** None of its nodes is a node of the fit's graph (0 of the
+world's nodes are craft nodes): it is its own scene group. Its centre is where the agent last
+FLEW in the ego view (the craft is the camera there); until it has flown, beside the world,
+outside the fit's shell. A note's bearing from `ego` is, for now, its bearing in the world fit
+-- superseded by the ego's own projection (10.4) when built.
+
+**Third person and first person** (items 4, 68, 75). The map view (third person) frames the
+world AND the craft side by side: the camera aims between them from across the line joining
+them (looking along it, the craft sat on top of the world). Measured: craft at screen x 0.71,
+world at -0.70. The ego view (first person) does not draw the craft -- the reader is in the
+cockpit, and the panels on the 2D plane are the craft's inside (planted `plantAlwaysDrawn`:
+drawn around the camera).
+
+**Gestures on a craft node** (item 65): a click opens its panel on the plane (a cell or tree at
+its line); a click on a node whose panel is open closes the panel back into the node; a node
+whose panel is stuck on the plane is ringed.
+
+*Not yet:* the ego's own UMAP and knowledge keys (10.4) placing the craft's nodes; the halo
+(10.7) on craft nodes; zooming through the cockpit from third person into first.
+
+## 5b. Panels on the plane -- every artifact, with the editor's tools (items 65-66)
+
+*Built 2026-11-01: `obsidian-plugin/src/planepanels.ts`; live check G-298.*
+
+*"The jupyter kernels/cells are supposed to also be the draggable 2D computation graph plane
+type panels. You might see how graph/panel/kernel/nodes might integrate as one thing here."*
+One record seen four ways: a NODE of the craft, its PANEL on the plane, its KERNEL when a cell
+runs, its TREES as a Python module. A panel is Obsidian's own markdown view (item 56) in a leaf
+outside the workspace tree, in a card on the plane; its header node is the note's name in the
+link colour, in the inline title's place (the name drawn once, item 54); a slate's header is
+its own title line.
+
+**The editor's tools** (item 66: *"All tests should be on the 2D computation graph plane for
+panel experiments, never their own view. This encourages the exercise of editor tools
+accompanying the graph editor (i.e. create/delete etc)"*):
+
+| tool | gesture |
+|---|---|
+| create | `+ notebook`, `+ slate` on the plane's strip: a note in `domvec/graph/`, opened on the plane |
+| move | drag the header node; clamped to the plane |
+| minimize / restore | right-click the header node (a slate: its own title collapse) |
+| delete | double right-click the header node (mortegon N.13): saved, closed, the note to the vault's `.trash` |
+| close into the node | click the craft node of an open panel |
+| open from the node | click a craft node (or a bisector) |
+
+Every live check of a panel now opens its probe through the desk (`__domvecPlane.leaf()`) and
+deletes it through the delete tool (`__domvecPlane.trash`) -- 31 opens and 32 deletes converted.
+
+Found on the way, both real: a cell's run took its note from the workspace's ACTIVE file (a
+panel on the plane is never active, so the kernel ran and the output went nowhere); and a run
+sent the note's text from the FILE, so a tree typed a moment before the run was not compiled
+(NameError). Both now read the editor's own.
 
 ## 6. The user agent and the cockpit (items 1–29)
 
@@ -308,3 +404,243 @@ view"*; question 5 -- the cockpit is the ego 2D node stuck in the 2D graph form 
    notes, or drop it everywhere for keystrokes?
 5. **The cockpit's place.** Stuck in the 2D editor (as item 10 reads), or also pinned in a
    corner of the 3D view in its collapsed circle?
+
+*Added 2026-11-01 with section 10:*
+
+6. **The scope ladder's gesture** (10.2). A `scope` field stepped by wheel-in / wheel-out over
+   the header (zoom-through, item 7) -- or another gesture you had in mind for chunk -> page ->
+   live browser?
+7. **"Knowledge keys"** (10.4). Read here as each artifact's trie address (its key) plus its
+   place in the ego's own projection. Is that what you meant -- or a keyed index of another kind
+   (named keys, the cockpit's `{keys}`, an ontology)?
+8. **The sliding rule** (10.10). "Fast in a short distance is the same as slow in a long
+   distance" is read as pointer acceleration (gain grows with speed), and "moving it back ...
+   has the same effect" as reversibility. Those two pull against each other when the speeds
+   differ -- which wins?
+9. **The halo's toggle** (10.10). A click on a node / header opens the halo, so a craft node's
+   click (today: open / close its panel) moves to a double-click. Agreed, or another gesture?
+
+## 10. The browser as a panel, the ego's own map, the halo that slides (items 71-86, 2026-11-01)
+
+*Design before code for PLUGIN_GOAL items 71-86, the reader's message of 2026-11-01 (verbatim
+there). Each subsection states the reader's words, what exists, the design, and what is my
+reading rather than theirs. PRD rows G-300 to G-312.*
+
+### 10.1 The browser cell as a panel on the plane (item 71)
+
+*"our full web browser panel feature + all functionalities should be translated to its
+draggable panel/computation graph analogue; includes "cockpit" for browser tools/actions on the
+panel, as well as the actual web browser rendering the interactive HTML".*
+
+What exists: the browser cell (`browser.ts`, a workspace view: address, back, forward, reload,
+scan, live, save offline, offline, boxes, the chat strip, the "in graph" badge); the browser
+hosted inside a notebook fence (`nbbrowser.ts`, a leaf outside the workspace tree -- the same
+mechanism the plane's panels use); the reconstructed page (`panelview.ts`); chunk billboards.
+
+Design: the browser is a panel on the plane like any other (5b), its view the existing
+`BrowserView` in a plane leaf. Its tools become a **browser cockpit**: a slate whose fields ARE
+the tools, bound both ways as the ego cockpit's are (G-280):
+
+```
+browser
+	url	https://...
+	back	{}
+	forward	{}
+	scan	false
+	live	true
+	offline	false
+	boxes	false
+	scope	page
+```
+
+A boolean is a toggle node (item 33); `back` / `forward` are actions (a click fires); `url` is
+the field typed into. The browser's own toolbar stays for now (the reader can compare) and
+goes when the slate covers every action (UR S.4, chrome).
+
+### 10.2 One scope ladder: chunk -> page -> live browser (item 72)
+
+*"the actual web browser rendering the interactive HTML, which was originally designed with the
+intent of seamlessly flowing between chunk-level rendering/interactions and the full webpage and
+*then* the actual browser itself, similar to the various gestures on various nodes to render the
+panels at the selected scope of the computation graph nodes (i.e. adaptive/selective
+abstractions)".*
+
+Three scopes of one web artifact, each a rendering of the same trie address (`url : xpath`):
+
+| scope | what draws | exists as |
+|---|---|---|
+| chunk | the chunk's markdown + its interactive wireframe; acts in place | billboard, chunk note (D-3) |
+| page | the reconstructed page, every chunk of the url | the offline panel (`panelview.ts`) |
+| live | the real browser at the url, scrolled to the xpath | the browser cell |
+
+Design (my reading): the ladder is ONE panel whose `scope` field steps chunk -> page -> live and
+back; the same gestures that change a computation-graph node's scope step it -- right-click on
+the header (the base node) collapses toward the node (mortegon: right-click on the base node
+collapses to self), and **zoom-through** (item 7: at the floor, wheel-in opens the node's panel)
+steps outward: wheel-in over a chunk panel's header goes to page, again to live; wheel-out steps
+back. Moving up keeps the address: the page opens scrolled to the chunk, the browser at the
+chunk's xpath (the hovered-chunk highlight marks it). *Question 9.6.*
+
+### 10.3 Every panel a notebook cell; the computation graph a rendered notebook (item 73)
+
+*"this obviously makes each panel an extension of a jupyter notebook (as cells each) and so the
+computation graph is the analogue to a fully rendered jupyter notebook as the highest-level
+primal aggregate of panel-facing artifacts (code, web, markdown with retrieval and
+code/computation graph links that render like queries as functional-object dialects, and verify
+this rigorous statement in the mortegon docs)".*
+
+**Verified against the mortegon docs (2026-11-01), part by part:**
+
+| part of the statement | in mortegon? | where |
+|---|---|---|
+| a node and a panel are one artifact | **yes** | UR N.2 ("technically both computation and panel-based as a singular field primitive"); DM §7 line 374 ("the same record at different sizes") |
+| the two forms commute | **yes** | UR R.1, O.1 (node-count parity) |
+| code modules become computation-graph structure | **yes** | UR M.2 (modules -> recursive computation-graph nodes of singular values with memory references), M.3 (the panel is the base form of a Python API module) |
+| links render like queries, functional-object dialect | **yes** | UR M.3 (curly-brace calls to external computation nodes; right-click compiles the next level of syntax tree), M.9 ("function calls ... have an automatic rendering property ... similar to memory reference lookup") |
+| web artifacts as panels in the same graph | **yes** | UR N.2 (the duckduckgo url node referencing the `scan` function node), DM line 92 (urls aggregated over a panel), DM line 1624 (`{urls_panel}` into `WebBrowser.scan`) |
+| **Jupyter / notebook** | **no** | the words "jupyter" and "notebook" occur nowhere in mortegon's docs |
+
+So the structure is mortegon's; the NOTEBOOK framing is the reader's own, from 2026-10-29
+(*"The full panel set of artifacts becomes, in fact, the various arranged cells and extensions
+of our jupyter kernel cells with native obsidian markdown representations"*) and NB / P-N here.
+The statement holds as a composition of the two: each panel is a cell (markdown, code, web --
+extended), and the computation graph is the whole notebook rendered: the craft (5a) is its 3D
+form, the plane its 2D form.
+
+### 10.4 The ego's own projection: knowledge keys and ego-UMAP (items 74a, 76) -- BINDING
+
+*"We will now make the binding rule to forego all UMAPping on things in the world-map at
+input-output most parts of the computation graph/reservoir in place of "knowledge keys" of
+variously collected artifacts at the ego-umap level and which is integrated with UMAP on the
+local ego-linked code artifacts."*
+
+The rule, as binding: the reservoir's inputs and outputs are NOT placed by the world fit.
+Affected today: G-291 (ego artifacts placed by the global fit), G-282 (readouts moved to the
+world's perimeter, the bisector between world centroids). Both are superseded in placement;
+their links stay as I/O lines (5a).
+
+**The ego set**: the craft's artifacts (5a) + web chunks tagged into the ego (10.5) + the
+reader's own markdown / prompt panels (10.6) + the code artifacts linked to them (a cell's
+imports resolved to `code://` symbols through the code property graph, `/cpg_edges`).
+
+**The ego's projection**: its own fit over the ego set's embeddings (the same encoder, docs-only
+for code per the 2026-11-01 ruling), separate from the world's; the craft's node places come
+from it (replacing the world bearing used now). Small sets: UMAP needs ~15 points; below that
+the places come from PCA of the same embeddings, and the fit is taken once the set passes 15.
+
+**Knowledge keys -- my reading, not the reader's words** (*Question 9.7*): the term occurs
+nowhere in either repository's docs. Read as: each collected artifact is placed and found by its
+KEY -- its trie address (`url : xpath` for a web chunk, `vault://` path : line for a note's
+tree or cell, `code://` module : qualname for code) -- and its position in the ego projection;
+the key, not a world coordinate, is what links it to the world.
+
+### 10.5 The tag: a web chunk joins the ego (item 74b)
+
+*"including selected web chunk nodes with a simple tag button on the top of each of the
+billboard panel renderings".* A `+ ego` tag on each billboard's top edge: pressed, the chunk
+joins the ego set (stored in the store, keyed by cid -- survives a reload); it appears in the
+craft as a `web` node linked to `ego`, with an I/O line to its world node; pressed again, it
+leaves.
+
+### 10.6 The reader's own panels live in the ego (items 74c, 77)
+
+User-written prompts and markdown panels -- notes made on the plane, the notebook chat's prompts
+-- are ego artifacts; they may link OUT to the world through markdown retrieval links (the
+`[query](results)` overlay); a Jupyter kernel's cells likewise. Code brought in from the web (a
+web code block opened as a cell, G-234) and code a local model writes in a notebook chat (L-2)
+are ego artifacts: *"the ego houses user-generated artfiacts within the space of their
+preferences and thoughts"*.
+
+### 10.7 Retrieval gains a field: ego or web (item 78)
+
+`search(query, db=True, duckduckgo=False, k=8, where="web")` -- `where` is `web` (the world's
+store, today's behaviour) or `ego` (the ego set alone). In the cockpit's `search` slate, a field
+`where` toggled between the two; in the sidecar, `/search?where=ego` restricts candidates to the
+ego set's urls and cids.
+
+### 10.8 I/O linked to the ego or the web, by a toggle (item 79)
+
+Mortegon's signal flow and forward-inverse lookup (UR R.6, DM §7.7 -- built here as G-279's
+recorded runs and the inverse map) decide WHAT a run read and wrote; the new toggle decides
+WHERE those links point: each computation-graph node carries `maps ego|web`; at `ego` its input
+and output links end on ego nodes (tagged chunks, notes), at `web` on the world's nodes. A
+toggle node in graph form, a field in panel form (item 33).
+
+### 10.9 Black-box containment, unfoldable recursively (item 80)
+
+A `{ref}` to a code module is a black box: its panel shows the module's signature line; a
+right-click unfolds its rank-1 contents (classes, functions -- mortegon M.3: "when these tokens
+are right clicked ... they compile the next level of recursive syntax tree"), each again a
+black box, recursively; folded, it collapses back. Built on `code://` addressing (Python's own
+tree as the xpath) and the slate fold state (G-296).
+
+### 10.10 The halo that slides -- 2D only, ego only (items 81-84)
+
+*"when we click on a computation graph artifact (either node or panel form), we see a
+polar-coordinate force-directed layout on similarity-based proximity diffs local to the node.
+So, radial coordinates are similarity to the node ... and angular coordinates in 2D are the
+lateral retrieved result similarities to each other."*
+
+Against mortegon: DM §8.2.1 already makes the halo polar (`r = r_focal + r_inner + (1 -
+normalized_score) * r_extent`); what is new is the ANGLE (theirs is free; here it is set by the
+results' similarity to one another), the force-direction on local similarity diffs, the chunking
+by renderability, and the sliding navigation.
+
+**Layout.** Focus f, candidates = ego retrieval for f, cut to the top K that can be RENDERED at
+the current size (K from the plane's area over a node's footprint -- "only the top-most
+renderable retrieval results ever call this layout"). Radius `r_i = r0 + (1 - s_i) * R`, `s_i`
+the ADDITIVE score (10.11) of i against f -- links count through the PageRank term. Angle: the
+results' pairwise similarity matrix ordered around the circle (spectral seriation), then a few
+force steps: angular attraction proportional to pairwise similarity, repulsion between
+neighbours closer than a node's width -- so similar results sit side by side.
+
+**Sliding** (my reading of the motion rule -- *Question 9.8*): with the pointer outside the
+focus's panel or node, its motion is a velocity over the layout -- a cursor point that moves by
+the pointer's xy delta (reversible: the same delta back returns to the same place), scaled so
+that a fast short stroke and a slow long one travel alike (the gain grows with speed, as pointer
+acceleration does). The node nearest the cursor point is the navigated one, lit; a line traces
+the shortest path back to the focus over the halo's similarity graph.
+
+**Sticking** (item 83): selecting the navigated node sticks it onto the plane as a panel -- linked
+or not -- and slidable there like any panel.
+
+**Toggling** (item 84; *Question 9.9*): proposed -- a click on a node or a panel's header node
+without moving opens its halo (the reader's "when we click"); Escape or a click on the focus
+closes it. Today that click opens/closes a craft node's panel, so one of the two moves.
+
+### 10.11 Retrieval terms are additive (item 85)
+
+*"Retrieval terms should be additive (i think, and normalized between 0 and 1 for their
+components) rather than multiplicative."* Today `domvec/search.py` multiplies: `lexical *
+semantic * pagerank`, and G-294 multiplied in the content factor. Mortegon's rank is also a
+product (DM §8.1, the "triple product"). New:
+
+`score = w_lex * lex~ + w_sem * sem~ + w_pr * pr~ + w_con * content`
+
+each `~` term normalized to 0..1 over the candidate set (lexical / max lexical; cosine mapped
+`(c + 1) / 2`; PageRank as its percentile), weights summing to 1 (default .35 / .40 / .10 /
+.15). Measured against the old product on the G-294 queries before switching, and G-294's
+boilerplate check re-run on it.
+
+### 10.12 Build order (procedural, each live-checked with a planted arm)
+
+*Where it stands, 2026-11-01 (late) -- verdicts in `build_analytics/live_confirmations.md`:*
+
+| piece | built | live check |
+|---|---|---|
+| additive retrieval (10.11) | `search.py` `fuse="additive"`, content squared at 0.25 | G-310 Confirm; G-294 green on it |
+| `where` ego / web (10.7) | sidecar `search_payload(where=)`, kernel `search(where=)`, cockpit `search/where` | G-306 Confirm |
+| the `+ ego` tag (10.5) | billboard control, `/ego/tag`, `ego.json`, craft `web` nodes | G-306 (via the function the control calls) |
+| the ego's projection (10.4) | `/ego/projection` (PCA under 15, UMAP from 15), craft places by knowledge key; craft notes drawn at size 0 in the world | G-303 written, running |
+| the browser panel (10.1) | `browserpanel.ts`: one card, cockpit slate + `BrowserView`; url both ways, live / boxes toggles, back / forward / scan actions, `scope` kept | G-300 written; all but `scope page` seen |
+| the halo that slides (10.10) | `planehalo.ts`; `/ego/pairwise` | G-309 written, running |
+| I/O ego or web (10.8) | `maps` frontmatter chip on the header; `refs.resolve(allow=)`; craft I/O lines to ego nodes | G-307 written, running |
+| reader's panels in the ego (10.6) | plane notes are ego artifacts, indexed, in the craft, cell or not | via G-299, G-309 |
+| scope ladder's chunk rung (10.2), black-box unfold (10.9) | not built | -- |
+
+1. Additive retrieval (10.11) -- touches every search; first, so every later piece ranks on it.
+2. The `where` field (10.7) and the `+ ego` tag (10.5) -- the ego set becomes queryable.
+3. The ego projection (10.4) placing the craft's nodes; world placement of I/O retired.
+4. The browser panel and its cockpit slate (10.1); the scope ladder (10.2).
+5. The halo that slides (10.10).
+6. The I/O toggle (10.8); black-box unfolding (10.9).

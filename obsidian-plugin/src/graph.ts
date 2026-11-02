@@ -16,6 +16,7 @@
  */
 
 import { UserAgent } from "./useragent";
+import { Craft } from "./craft";
 import { setFolds as setFoldsEffect } from "./slatefold";
 import { spreadFactor } from "./spread.ts";
 import { unitOf, lineAddr, inUnit } from "./address.ts";
@@ -521,6 +522,9 @@ export class GraphView extends ItemView {
     // A click (no drag) on a bisector opens / closes its graph in 2D (G-282).
     canvas.addEventListener("pointerup", (e: PointerEvent) => {
       if (!this.downAt || Math.hypot(e.clientX - this.downAt[0], e.clientY - this.downAt[1]) > 4) return;
+      // A craft node: its panel on the plane, or closed back into it (item 65).
+      const cn = this.craft?.nodeAt(e.clientX, e.clientY);
+      if (cn) { this.craft!.click(cn); return; }
       const hit = this.bisectorAt(e.clientX, e.clientY);
       if (hit) this.toggleBisector(hit);
     }, { passive: true, capture: true });
@@ -2227,6 +2231,7 @@ export class GraphView extends ItemView {
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;
     this.stopBatch();
+    this.craft?.unload(); this.craft = null;
     // Every timer this view started that the plugin did not register: left
     // running, a closed view's code kept firing after a plugin RELOAD -- the
     // old build's profiler replaced the new one's, and the two thrashed
@@ -3295,6 +3300,16 @@ export class GraphView extends ItemView {
       pull.setAttr("aria-label", "pull this chunk into the notebook's chat");
       pull.onpointerdown = (e: PointerEvent) => e.stopPropagation();
       pull.onclick = (e: MouseEvent) => { e.stopPropagation(); void this.onPullToChat?.(String(node.id)); };
+    }
+    // The ego tag (item 74b): this chunk into the ego set, or out of it.
+    if (node.level !== "page" && !String(node.id || "").startsWith("page:")) {
+      const cid = String(node.id);
+      const tag = head.createSpan({ cls: "domvec-bb-cell domvec-bb-ego" });
+      const paint = () => { const on = this.egoTags.has(cid); tag.setText(on ? "ego ✓" : "+ ego"); tag.toggleClass("is-on", on); };
+      paint();
+      tag.setAttr("aria-label", "tag this chunk into the ego");
+      tag.onpointerdown = (e: PointerEvent) => e.stopPropagation();
+      tag.onclick = (e: MouseEvent) => { e.stopPropagation(); void this.tagEgo(cid, !this.egoTags.has(cid)).then(paint); };
     }
     // Any code node opens its module as a standalone artifact (P-C1).
     if (String(node.url || "").startsWith("code://")) {
@@ -4438,11 +4453,14 @@ export class GraphView extends ItemView {
   }
   /** A click on a bisector: its graph opened in 2D, or closed if open. */
   toggleBisector(note: string): "opened" | "closed" | "none" {
+    // On the 2D plane, as every panel is (PLUGIN_GOAL 65), never a split.
+    const desk: any = (window as any).__domvecPlane;
+    if (desk?.panelOf(note)) { desk.closePath(note); this.perimeterStats.closed++; return "closed"; }
     const leaves = this.app.workspace.getLeavesOfType("markdown").filter((l: any) => l.view?.file?.path === note);
     if (leaves.length) { for (const l of leaves) l.detach(); this.perimeterStats.closed++; return "closed"; }
     const f = this.app.vault.getAbstractFileByPath(note);
     if (!f) return "none";
-    const leaf = this.app.workspace.getLeaf("split");
+    const leaf = desk && this.plane() ? desk.leaf() : this.app.workspace.getLeaf("split");
     void (leaf as any).openFile(f, { state: { mode: "source", source: false } }).then(() => {
       window.setTimeout(() => {
         const cp: any = (this.app as any).plugins?.getPlugin?.("domvec-bridge")?.cockpit;
@@ -5279,6 +5297,13 @@ export class GraphView extends ItemView {
    * READS the node; writes nothing the layout uses.
    */
   private lookOf(n: any, relSize: number, media: boolean): NodeLook {
+    // The binding rule (PLUGIN_GOAL 76): the computation graph's own notes are
+    // placed by the EGO, in the craft -- not drawn again in the world's fit.
+    // Planted `plantEgoInWorld`: drawn in both, as before the rule.
+    if (!this.plantEgoInWorld && this.egoUrls.size && n.url && this.egoUrls.has(String(n.url))) {
+      this.egoHidden++;
+      return { half: 0, translucent: true, alpha: 0, color: "#000000" };
+    }
     const base = this.baseLook(n, relSize, media);
     const st = this.searchState;
     if (!st || this.plantNoGlass) {
@@ -5558,12 +5583,30 @@ export class GraphView extends ItemView {
     this.posDirty = true;
   }
 
+  /**
+   * Ego or web (PLUGIN_GOAL 78): what the 3D search retrieves -- "ego" the
+   * computation graph's artifacts and the chunks tagged into it, "web" the
+   * world without the ego's notes, "" everything. Set from the cockpit's
+   * `search/where` field. A scoped search asks one ranked list: the tiered
+   * path (pages first) ranks pages, which know nothing of the ego set.
+   */
+  searchWhere = "";
+  private tiersSaved: any = null;
+  setSearchWhere(where: string): boolean {
+    const w = where === "ego" || where === "web" ? where : "";
+    if (w === this.searchWhere) return false;
+    if (!this.tiersSaved && this.searchField?.tiers) this.tiersSaved = this.searchField.tiers;
+    this.searchWhere = w;
+    if (this.searchField) this.searchField.tiers = w ? null : this.tiersSaved;
+    return true;
+  }
+
   private async searchAsk(query: string, total: number): Promise<FieldAnswer | null> {
     const t0 = performance.now();
     this.searchStats.asked++;
     if (this.plantWebOnType) { this.searchStats.web_asked++; this.onWebSearch(query); }
     this.followStore(query);
-    const got: any = await this.sidecar.search(query, { k: total });
+    const got: any = await this.sidecar.search(query, { k: total, where: this.searchWhere });
     if (!got) return null;
     const hits: FieldHit[] = (got.hits || []).map((h: any) => ({ cid: String(h.cid), url: String(h.url || "") }));
     if (this.plantPlaceResults) await this.placeResultsPlanted(hits);
@@ -5850,6 +5893,90 @@ export class GraphView extends ItemView {
   panStepShare = 0.006;
   panStats = { steps: 0 };
   /** The user agent: throttle, map / ego views, the slow flight (useragent.ts). */
+  /**
+   * The CRAFT (PLUGIN_GOAL 67-69; `craft.ts`): the ego computation graph as
+   * one unit, its own group in the scene -- never nodes of the fit's graph.
+   */
+  craft: Craft | null = null;
+  /** The craft's notes' urls (`vault://...`): not drawn in the world (item 76). */
+  egoUrls = new Set<string>();
+  egoHidden = 0;
+  plantEgoInWorld = false;
+  /** The chunks tagged into the ego (item 74b), as the store last said. */
+  egoTags = new Set<string>();
+  private egoPosted = "";
+  /** The `+ ego` tag on a billboard: the chunk joins the ego set, or leaves it. */
+  async tagEgo(cid: string, on: boolean): Promise<boolean> {
+    const got = await this.sidecar.egoPost("ego/tag", { cid, on });
+    if (!got || !Array.isArray(got.cids)) return false;
+    this.egoTags = new Set(got.cids);
+    this.craft?.dirty();
+    return this.egoTags.has(cid) === on;
+  }
+  private craftFrame(): void {
+    const g: any = this.graph;
+    if (!g) return;
+    if (!this.craft) {
+      this.craft = new Craft({
+        app: this.app,
+        scene: () => (this.graph as any)?.scene(),
+        camera: () => (this.graph as any)?.camera(),
+        canvas: () => (this.graph as any)?.renderer()?.domElement || null,
+        mode: () => this.agent.mode,
+        anchor: () => this.agent.craftAt,
+        world: () => this.shellOf((this.graph as any)?.graphData?.().nodes || []),
+        worldNode: (id: string) => this.craftLookup(id),
+        signalEdges: () => this.signalEdges,
+        isOpen: (path: string) => {
+          const desk: any = (window as any).__domvecPlane;
+          if (desk?.panelOf(path)) return true;
+          const cp: any = (this.app as any).plugins?.getPlugin?.("domvec-bridge")?.cockpit;
+          return path === "domvec/ego.md" && !!cp?.card?.isConnected && !cp.card.hasClass("is-collapsed");
+        },
+        openPanel: (path: string, line: number) => {
+          const desk: any = (window as any).__domvecPlane;
+          const f = this.app.vault.getAbstractFileByPath(path);
+          if (path === "domvec/ego.md") { const cp: any = (this.app as any).plugins?.getPlugin?.("domvec-bridge")?.cockpit; void cp?.open(); return; }
+          if (desk && f) void desk.open(f, { line });
+        },
+        closePanel: (path: string) => { (window as any).__domvecPlane?.closePath(path); },
+        postEgo: (urls: string[]) => {
+          const next = new Set(urls);
+          if (next.size !== this.egoUrls.size || urls.some((u) => !this.egoUrls.has(u))) { this.egoUrls = next; this.batchDirty = true; }
+          const key = urls.slice().sort().join("|");
+          if (key === this.egoPosted) return;
+          this.egoPosted = key;
+          void this.sidecar.egoPost("ego", { urls });
+        },
+        egoProjection: async () => this.sidecar.egoProjection(),
+        egoTags: async () => {
+          const got = await this.sidecar.ego();
+          this.egoTags = new Set((got && got.cids) || []);
+          return [...this.egoTags];
+        },
+      });
+      (window as any).__domvecCraft = this.craft;
+      this.registerEvent(this.app.vault.on("modify", () => this.craft?.dirty()));
+      this.registerEvent(this.app.vault.on("create", () => this.craft?.dirty()));
+      this.registerEvent(this.app.vault.on("delete", () => this.craft?.dirty()));
+      this.registerEvent(this.app.vault.on("rename", () => this.craft?.dirty()));
+      this.registerEvent(this.app.metadataCache.on("changed", () => this.craft?.dirty()));
+    }
+    this.craft.frame();
+  }
+  /** A world node by id, for the craft's I/O lines; the map rebuilt at most once a second. */
+  private craftIds: Map<string, any> | null = null;
+  private craftIdsAt = 0;
+  private craftLookup(id: string): any {
+    const now = performance.now();
+    if (!this.craftIds || now - this.craftIdsAt > 1000) {
+      this.craftIds = new Map();
+      for (const n of ((this.graph as any)?.graphData?.().nodes || [])) this.craftIds.set(String(n.id), n);
+      this.craftIdsAt = now;
+    }
+    return this.craftIds.get(id) || null;
+  }
+
   agent: UserAgent = new UserAgent({
     camera: () => (this.graph as any)?.camera(),
     controls: () => (this.graph as any)?.controls(),
@@ -6415,6 +6542,8 @@ export class GraphView extends ItemView {
         this.agentAt = t;
         if (dt > 0) this.agent.tick(dt);
         this.drawPlan(g);
+        // The craft: the ego computation graph as one unit (items 67-69).
+        this.craftFrame();
         this.applyZoomFloor(g);
         // The halo rides the camera's cone (G-284).
         if (this.halo) this.placeHalo();
@@ -9248,9 +9377,27 @@ export class GraphView extends ItemView {
 
     this.reframe = () => {
       placed = null;              // an explicit reframe is always wanted
-      const c = centre();
+      let c = centre();
       this.fullViewDist = frameDistance(c);
-      graph.cameraPosition({ x: c.x, y: c.y, z: c.z + this.fullViewDist }, c, 400);
+      // Third person (PLUGIN_GOAL 68): the map view frames the world AND the
+      // craft beside it, side by side -- the camera aims between them from
+      // across the line joining them (looking along it, the craft sat on top of
+      // the world), backed off by the gap, so the craft is in the shot.
+      const k = this.agent.mode === "map" && this.craft ? this.craft.where() : null;
+      let eye = { x: c.x, y: c.y, z: c.z + this.fullViewDist };
+      if (k && Number.isFinite(k.x)) {
+        const gap = Math.hypot(k.x - c.x, k.y - c.y, k.z - c.z) || 1;
+        const u = { x: (k.x - c.x) / gap, y: (k.y - c.y) / gap, z: (k.z - c.z) / gap };
+        // Across the axis, as level as it can be: u x up, or x when u is vertical.
+        let w = { x: -u.z, y: 0, z: u.x };
+        let wl = Math.hypot(w.x, w.z);
+        if (wl < 0.2) { w = { x: 0, y: 0, z: 1 }; wl = 1; }
+        w = { x: w.x / wl, y: 0, z: w.z / wl };
+        c = { x: (c.x + k.x) / 2, y: (c.y + k.y) / 2, z: (c.z + k.z) / 2 } as any;
+        this.fullViewDist += gap * 0.6;
+        eye = { x: c.x + w.x * this.fullViewDist, y: c.y, z: c.z + w.z * this.fullViewDist };
+      }
+      graph.cameraPosition(eye, c, 400);
       // After the flight, not during it: the camera is animating for 400ms
       // and a measurement taken mid-flight frames the halfway point.
       window.setTimeout(() => {
@@ -9258,7 +9405,8 @@ export class GraphView extends ItemView {
         const d: any = graph.graphData();
         this.fitChunkSizes(d);
         graph.d3ReheatSimulation?.();
-        tighten();
+        // Tightened onto the world alone only when no craft is in the shot.
+        if (!k) tighten();
       }, 450);
     };
     this.keepBillboards(canvas);

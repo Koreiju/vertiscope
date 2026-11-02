@@ -33,8 +33,13 @@ def _page_text(store, url: str):
     return "\n\n".join(c.md or "" for c in chunks)[:MAX_CHARS], [c.cid for c in chunks[:50]]
 
 
-def resolve(workspace, name: str) -> Optional[Dict]:
-    """The node `name` refers to, with its text: `{kind, url, cids, value}`."""
+def resolve(workspace, name: str, allow=None) -> Optional[Dict]:
+    """The node `name` refers to, with its text: `{kind, url, cids, value}`.
+
+    `allow(url, cid)` (PLUGIN_GOAL 79): which artifacts a ref may resolve to --
+    the ego's alone, or the web's -- as the cell's note toggles it. None:
+    any, as before."""
+    ok = allow or (lambda url, cid: True)
     want = (name or "").strip().lower()
     if not want:
         return None
@@ -42,11 +47,11 @@ def resolve(workspace, name: str) -> Optional[Dict]:
     titles = store.page_titles()
     # A vault note by its title (the file's name), then any page by its title.
     for url in titles:
-        if url.startswith("vault://") and url.rsplit("/", 1)[-1].rsplit(".", 1)[0].lower() == want:
+        if url.startswith("vault://") and url.rsplit("/", 1)[-1].rsplit(".", 1)[0].lower() == want and ok(url, ""):
             text, cids = _page_text(store, url)
             return {"kind": "note", "url": url, "cids": cids, "value": text}
     for url, title in titles.items():
-        if (title or "").strip().lower() == want:
+        if (title or "").strip().lower() == want and ok(url, ""):
             text, cids = _page_text(store, url)
             return {"kind": "page", "url": url, "cids": cids, "value": text}
     # The halo's answer: retrieval's top hit.
@@ -56,7 +61,7 @@ def resolve(workspace, name: str) -> Optional[Dict]:
     hits = []
     for attempt in range(3):
         try:
-            hits = workspace.search(name, k=1)
+            hits = workspace.search(name, k=1 if allow is None else 32)
             break
         except Exception as e:                      # noqa: BLE001
             import sys, time
@@ -65,7 +70,7 @@ def resolve(workspace, name: str) -> Optional[Dict]:
     for h in hits or []:
         cid = getattr(h, "cid", None) or getattr(h, "chunk", "")
         c = store.chunk(cid) if cid else None
-        if c is not None:
+        if c is not None and ok(c.url, cid):
             return {"kind": "retrieved", "url": c.url, "cids": [cid], "value": (c.md or "")[:MAX_CHARS]}
     return None
 
@@ -102,7 +107,7 @@ def rank1(text: str, limit: int = 12) -> List[str]:
     return out
 
 
-def bind(workspace, names: List[str], sample: Optional[int] = None) -> Dict:
+def bind(workspace, names: List[str], sample: Optional[int] = None, allow=None) -> Dict:
     """The prelude that binds each named ref in a kernel, and what was bound.
 
     `sample` (G-283, the rollout; RESERVOIR_DESIGN §4: "a cell whose `{ref}`
@@ -113,7 +118,7 @@ def bind(workspace, names: List[str], sample: Optional[int] = None) -> Dict:
     """
     lines, bound, inputs = [], [], []
     for k, name in enumerate(dict.fromkeys(n for n in names if n and n.strip())):
-        got = resolve(workspace, name)
+        got = resolve(workspace, name, allow)
         var = var_name(name)
         if got is None:
             bound.append({"name": name, "var": var, "kind": "unresolved"})

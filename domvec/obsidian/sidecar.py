@@ -818,6 +818,11 @@ _PLANTABLE = {
     "no-trees": ("domvec.obsidian.sidecar", "PLANT_NO_TREES"),                 # item 62
     "no-slate-check": ("domvec.obsidian.sidecar", "PLANT_NO_SLATE_CHECK"),     # item 62
     "no-content-factor": ("domvec.search", "PLANT_NO_CONTENT_FACTOR"),         # item 59
+    "product-fuse": ("domvec.search", "PLANT_PRODUCT_FUSE"),                   # item 85
+    "no-where": ("domvec.obsidian.sidecar", "PLANT_NO_WHERE"),                # item 78
+    "no-maps": ("domvec.obsidian.sidecar", "PLANT_NO_MAPS"),                  # item 79
+    "flat-box": ("domvec.obsidian.blackbox", "PLANT_FLAT"),                   # item 80
+    "world-projection": ("domvec.obsidian.sidecar", "PLANT_WORLD_PROJECTION"),  # item 76
     "no-refill": ("domvec.obsidian.sidecar", "PLANT_NO_REFILL"),               # item 59
     "subprocess-kernel": ("domvec.obsidian.kernel", "PLANT_SUBPROCESS_KERNEL"),  # P-N1
     "source-not-written": ("domvec.obsidian.sidecar", "PLANT_SOURCE_NOT_WRITTEN"),     # P-C1
@@ -1549,9 +1554,150 @@ def chunk_payload(workspace, cid: str) -> Optional[Dict]:
     }
 
 
+#: The EGO SET (PLUGIN_GOAL 74, 78; RESERVOIR_DESIGN 10.4-10.7): the
+#: computation graph's artifacts as the plugin's craft holds them (`urls`,
+#: posted on each rebuild) and the web chunks the reader TAGGED into the ego
+#: (`cids`, persisted in the workspace as `ego.json`).
+EGO = {"urls": set(), "cids": set(), "loaded": ""}
+#: Planted (item 78): `where` ignored -- ego and web retrieve alike.
+PLANT_NO_WHERE = [False]
+#: Planted (item 79): a note's `maps` toggle ignored -- its refs resolve anywhere.
+PLANT_NO_MAPS = [False]
+
+
+def _ego_file(workspace):
+    return Path(getattr(workspace, "path", ".")) / "ego.json"
+
+
+def ego_load(workspace) -> None:
+    f = _ego_file(workspace)
+    if EGO["loaded"] == str(f):
+        return
+    EGO["loaded"] = str(f)
+    try:
+        EGO["cids"] = set(json.loads(f.read_text(encoding="utf-8")).get("cids") or [])
+    except Exception:                               # noqa: BLE001 -- none yet
+        EGO["cids"] = set()
+
+
+def ego_save(workspace) -> None:
+    try:
+        _ego_file(workspace).write_text(json.dumps({"cids": sorted(EGO["cids"])}), encoding="utf-8")
+    except Exception:                               # noqa: BLE001
+        pass
+
+
+#: Planted (item 76): the ego projected by the WORLD's fit, as before -- the
+#: craft's places taken from the world bearings, no projection of its own.
+PLANT_WORLD_PROJECTION = [False]
+
+
+def ego_projection(workspace) -> Dict:
+    """The ego's OWN projection (PLUGIN_GOAL 76, binding; RESERVOIR_DESIGN
+    10.4): each ego artifact's KNOWLEDGE KEY -- its trie address, a note's
+    `vault://` url or a tagged chunk's cid -- placed by its embedding alone,
+    projected among the ego set only, never by the world's fit. A note's
+    embedding is the mean of its chunks'. UMAP once the set holds 15 or more
+    (it needs neighbours); below that, PCA of the same vectors. Places are
+    centred and scaled into the unit ball."""
+    import numpy as np
+    ego_load(workspace)
+    if PLANT_WORLD_PROJECTION[0]:
+        return {"method": "world", "n": 0, "places": {}, "missing": []}
+    idx = getattr(workspace, "index", None)
+    emb = getattr(idx, "embeddings", None)
+    if idx is None or emb is None or emb.matrix is None:
+        return {"method": "none", "n": 0, "places": {}, "missing": sorted(EGO["urls"]) + sorted(EGO["cids"])}
+    keys, vecs, missing = [], [], []
+    rows = len(idx.freq.rows)
+    def vec_of_cid(cid):
+        r = emb.row_of(cid)
+        return None if r is None else np.asarray(emb.matrix[r], dtype=np.float64)
+    for url in sorted(EGO["urls"]):
+        got = [vec_of_cid(idx.freq.rows[int(r)]) for r in idx._rows_of_url(url, rows)]
+        got = [v for v in got if v is not None and np.any(v)]
+        if got:
+            keys.append(url); vecs.append(np.mean(got, axis=0))
+        else:
+            missing.append(url)
+    for cid in sorted(EGO["cids"]):
+        v = vec_of_cid(cid)
+        if v is not None and np.any(v):
+            keys.append(cid); vecs.append(v)
+        else:
+            missing.append(cid)
+    n = len(keys)
+    if n == 0:
+        return {"method": "none", "n": 0, "places": {}, "missing": missing}
+    X = np.stack(vecs)
+    X = X / np.maximum(np.linalg.norm(X, axis=1, keepdims=True), 1e-9)
+    if n >= 15:
+        import umap as _umap
+        Y = _umap.UMAP(n_components=3, metric="cosine", n_neighbors=min(15, n - 1), random_state=0).fit_transform(X)
+        method = "umap"
+    elif n >= 2:
+        Xc = X - X.mean(axis=0)
+        _, _, vt = np.linalg.svd(Xc, full_matrices=False)
+        Y = Xc @ vt[:3].T
+        if Y.shape[1] < 3:
+            Y = np.pad(Y, ((0, 0), (0, 3 - Y.shape[1])))
+        method = "pca"
+    else:
+        Y = np.zeros((1, 3)); method = "single"
+    Y = Y - Y.mean(axis=0)
+    scale = float(np.max(np.linalg.norm(Y, axis=1))) or 1.0
+    Y = Y / scale
+    return {"method": method, "n": n, "missing": missing,
+            "places": {k: [round(float(a), 4) for a in y] for k, y in zip(keys, Y)}}
+
+
+def key_vectors(workspace, keys) -> Dict:
+    """An embedding per knowledge key: a cid's own vector, a url's mean over
+    its chunks (as `ego_projection` takes them). Keys with none are left out."""
+    import numpy as np
+    idx = getattr(workspace, "index", None)
+    emb = getattr(idx, "embeddings", None)
+    if idx is None or emb is None or emb.matrix is None:
+        return {}
+    rows = len(idx.freq.rows)
+    out = {}
+    for key in keys:
+        key = str(key)
+        if "://" in key:
+            vs = []
+            for r in idx._rows_of_url(key, rows):
+                er = emb.row_of(idx.freq.rows[int(r)])
+                if er is not None:
+                    vs.append(np.asarray(emb.matrix[er], dtype=np.float64))
+            if vs:
+                out[key] = np.mean(vs, axis=0)
+        else:
+            er = emb.row_of(key)
+            if er is not None:
+                out[key] = np.asarray(emb.matrix[er], dtype=np.float64)
+    return {k: v / max(float(np.linalg.norm(v)), 1e-9) for k, v in out.items() if np.any(v)}
+
+
+def pairwise(workspace, keys) -> Dict:
+    """The halo's lateral geometry (PLUGIN_GOAL 81): cosine similarity between
+    every two of the retrieved results, mapped to 0..1."""
+    import numpy as np
+    vecs = key_vectors(workspace, keys)
+    have = [str(k) for k in keys if str(k) in vecs]
+    if not have:
+        return {"keys": [], "sim": []}
+    X = np.stack([vecs[k] for k in have])
+    S = np.clip((X @ X.T + 1.0) / 2.0, 0.0, 1.0)
+    return {"keys": have, "sim": [[round(float(x), 4) for x in row] for row in S]}
+
+
+def _in_ego(stored) -> bool:
+    return stored.cid in EGO["cids"] or stored.url in EGO["urls"]
+
+
 def search_payload(workspace, query: str, k: int = 8, *,
                    offset: int = 0, url: str = "",
-                   coarse: bool = True, budget: int = 0) -> Dict:
+                   coarse: bool = True, budget: int = 0, where: str = "") -> Dict:
     """Ranked chunks for the overlay (`G-63`, `G-64`, `G-69`, `G-70`).
 
     Ranking is the store's own three-form retrieval; this adds nothing to it
@@ -1622,6 +1768,15 @@ def search_payload(workspace, query: str, k: int = 8, *,
                 continue
             if url and stored.url != url:
                 continue
+            # Ego or web (item 78): `ego` keeps only the ego set; `web` keeps
+            # the world -- everything but the computation graph's own notes
+            # (a tagged web chunk is in both). Unset: everything, as before.
+            if where and not PLANT_NO_WHERE[0]:
+                ego_load(workspace)
+                if where == "ego" and not _in_ego(stored):
+                    continue
+                if where == "web" and stored.url in EGO["urls"]:
+                    continue
             if stored.redundant:
                 # `G-24` settled this one: it draws what another chunk draws.
                 continue
@@ -1674,7 +1829,9 @@ def search_payload(workspace, query: str, k: int = 8, *,
             spent += row["tokens"]
         out = kept
     return {"query": query, "hits": out, "offset": offset,
-            "scope": url or "", "coarse": bool(coarse),
+            "scope": url or "", "coarse": bool(coarse), "where": where or "",
+            #: Which fuse ranked them (PLUGIN_GOAL 85: "additive" by default).
+            "fuse": getattr(diag, "fuse", ""),
             "tokens": spent if budget else sum(r["tokens"] for r in out),
             #: True while the ranking still had more to give at this depth,
             #: so a scrolling overlay knows whether to keep asking.
@@ -2350,6 +2507,41 @@ class _Handler(BaseHTTPRequestHandler):
                 threading.Thread(target=_maybe_compact, args=(self.workspace, store_mb), daemon=True).start()
             return
 
+        if route == "ego/pairwise":
+            # The halo's lateral similarities (item 81): {keys} -> a matrix.
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(length) or b"{}")
+                self._send(200, pairwise(self.workspace, list(body.get("keys") or [])[:64]))
+            except Exception as exc:                # noqa: BLE001
+                self._send(500, {"error": "%s: %s" % (type(exc).__name__, exc)})
+            return
+
+        if route in ("ego", "ego/tag"):
+            # The ego set (items 74, 78): POST /ego {urls} -- the craft's notes,
+            # from the plugin on each rebuild; POST /ego/tag {cid, on} -- a web
+            # chunk tagged into the ego from its billboard (persisted).
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(length) or b"{}")
+                ego_load(self.workspace)
+                if route == "ego":
+                    EGO["urls"] = set(str(u) for u in (body.get("urls") or []))
+                else:
+                    cid = str(body.get("cid") or "")
+                    if not cid:
+                        self._send(400, {"error": "missing cid"})
+                        return
+                    if body.get("on", True):
+                        EGO["cids"].add(cid)
+                    else:
+                        EGO["cids"].discard(cid)
+                    ego_save(self.workspace)
+                self._send(200, {"urls": len(EGO["urls"]), "cids": sorted(EGO["cids"])})
+            except Exception as exc:                # noqa: BLE001
+                self._send(500, {"error": "%s: %s" % (type(exc).__name__, exc)})
+            return
+
         if route == "slate_check":
             # A slate's -- or a markdown note's trees' -- Python errors
             # (PLUGIN_GOAL 62, 63'): duplicates, self-definitions, cycles,
@@ -2883,8 +3075,18 @@ class _Handler(BaseHTTPRequestHandler):
             if names and not PLANT_NO_REF_BINDING[0]:
                 from . import refs as _refs
                 sample = body.get("sample")
+                # The note's toggle (PLUGIN_GOAL 79): its inputs from the EGO
+                # alone, or from the WEB (the world, without the ego's notes).
+                maps = str(body.get("maps") or "")
+                allow = None
+                if maps in ("ego", "web") and not PLANT_NO_MAPS[0]:
+                    ego_load(self.workspace)
+                    if maps == "ego":
+                        allow = lambda url, cid: (cid in EGO["cids"]) or (url in EGO["urls"])
+                    else:
+                        allow = lambda url, cid: url not in EGO["urls"]
                 bound = _refs.bind(self.workspace, names,
-                                   sample=int(sample) if isinstance(sample, (int, float)) else None)
+                                   sample=int(sample) if isinstance(sample, (int, float)) else None, allow=allow)
                 if bound["prelude"]:
                     self.kernel_pool.run(note, bound["prelude"])
             # The note's markdown TREES first (PLUGIN_GOAL 62, 63': the extended
@@ -3996,11 +4198,42 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(200, {"note": note, "runs": self.workspace.store.runs_of(note)})
             return
 
+        if segments[0] == "ego" and len(segments) > 1 and segments[1] == "projection":
+            # The ego's own projection (item 76): knowledge keys -> places.
+            try:
+                self._send(200, ego_projection(self.workspace))
+            except Exception as exc:            # noqa: BLE001
+                self._send(500, {"error": "%s: %s" % (type(exc).__name__, exc)})
+            return
+
+        if segments[0] == "ego":
+            # The ego set (items 74, 78): its notes and its tagged chunks.
+            ego_load(self.workspace)
+            self._send(200, {"urls": sorted(EGO["urls"]), "cids": sorted(EGO["cids"])})
+            return
+
         if segments[0] == "ref":
             # A `{ref}` resolved through the store, with the rank-1 lines that
             # internalizing it reveals (G-278; RESERVOIR_DESIGN §3.1-3.3).
             from . import refs as _refs
             name = (parse_qs(parts.query).get("name") or [""])[0]
+            # A code artifact is a BLACK BOX (PLUGIN_GOAL 80): its rank-1
+            # definitions, each a ref that unfolds the same way.
+            if name.strip().startswith("code://"):
+                from . import blackbox as _bb
+                src = _source_file(name.strip().split("#", 1)[0])
+                got = None
+                if src is not None:
+                    try:
+                        got = _bb.unfold(name.strip(), Path(src[0]).read_text(encoding="utf-8"))
+                    except OSError:
+                        got = None
+                if got is None:
+                    self._send(200, {"name": name, "resolved": False, "lines": []})
+                else:
+                    self._send(200, {"name": name, "resolved": True, "kind": "code-" + got["kind"],
+                                     "url": name.strip(), "cids": [], "lines": got["lines"]})
+                return
             got = _refs.resolve(self.workspace, name)
             if got is None:
                 self._send(200, {"name": name, "resolved": False, "lines": []})
@@ -4745,6 +4978,7 @@ class _Handler(BaseHTTPRequestHandler):
             offset = max(0, min(offset, 2000))
             scope = (params.get("url") or [""])[0]
             coarse = (params.get("coarse") or ["1"])[0] != "0"
+            where = (params.get("where") or [""])[0]
             try:
                 budget = int((params.get("budget") or ["0"])[0])
             except ValueError:
@@ -4757,7 +4991,7 @@ class _Handler(BaseHTTPRequestHandler):
                 with _foreground():
                     got = search_payload(
                         self.workspace, query, k, offset=offset,
-                        url=scope, coarse=coarse, budget=budget)
+                        url=scope, coarse=coarse, budget=budget, where=where)
                 self._send(200, got)
             return
 

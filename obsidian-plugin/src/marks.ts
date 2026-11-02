@@ -53,11 +53,24 @@ export class NoteMarks {
   urlOf(path: string): string { return "vault://" + this.app.vault.getName() + "/" + path; }
   count(path: string): number { return (this.byNote[path] || []).length; }
 
+  /** A note's text as an open view of it holds it -- a tab or a panel on the
+   *  plane -- else the file's: the file lags the editor by its autosave, and a
+   *  section added a moment before put rendered lines and file lines out of
+   *  step (P-N9 on the plane picked another chunk). */
+  private async textOf(file: TFile): Promise<string> {
+    const plane: any[] = (window as any).__domvecPlane?.leaves?.() || [];
+    for (const leaf of [...this.app.workspace.getLeavesOfType("markdown"), ...plane]) {
+      const v: any = leaf.view;
+      if (v?.file?.path === file.path && typeof v.getViewData === "function") return String(v.getViewData());
+    }
+    return this.app.vault.cachedRead(file);
+  }
+
   /** Resolve a note's marks against its current text: lines, markdown, cid. */
   async resolve(file: TFile): Promise<Resolved[]> {
     const marks = this.byNote[file.path] || [];
     if (!marks.length) { this.spans.delete(file.path); return []; }
-    const text = await this.app.vault.cachedRead(file);
+    const text = await this.textOf(file);
     const pv = await this.sidecar.chunkPreview(text, file.path, this.app.vault.getName());
     const lines = text.split("\n"), url = this.urlOf(file.path);
     const chunks = (pv && pv.chunks) || [];
@@ -96,7 +109,7 @@ export class NoteMarks {
     const hit = this.sections(view).filter((s) => range.intersectsNode(s.el));
     if (!hit.length) return [];
     const a = Math.min(...hit.map((s) => s.lineStart)), b = Math.max(...hit.map((s) => s.lineEnd));
-    const text = await this.app.vault.cachedRead(file);
+    const text = await this.textOf(file);
     const pv = await this.sidecar.chunkPreview(text, file.path, this.app.vault.getName());
     const lines = text.split("\n");
     const picked: Mark[] = [];
@@ -140,7 +153,8 @@ export class NoteMarks {
   async clear(path: string): Promise<void> {
     delete this.byNote[path];
     this.spans.delete(path);
-    for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
+    const plane: any[] = (window as any).__domvecPlane?.leaves?.() || [];
+    for (const leaf of [...this.app.workspace.getLeavesOfType("markdown"), ...plane]) {
       const v = leaf.view as MarkdownView;
       if (v.file?.path === path) this.paint(v);
     }

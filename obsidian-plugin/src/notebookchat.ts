@@ -283,11 +283,13 @@ export class NotebookChats {
   readonly byView = new Map<MarkdownView, NotebookChat>();
   /** The reader's marks (P-N10), set by the plugin. */
   marks: NoteMarks | null = null;
+  /** The note view the reader is in (set by the plugin: a plane panel counts). */
+  active: (() => MarkdownView | null) | null = null;
   constructor(private app: App, private owner: Component, private sidecar: Sidecar) {}
 
   /** The chat of the active note, made when it is a notebook. */
   forActive(): NotebookChat | null {
-    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    const view = this.active ? this.active() : this.app.workspace.getActiveViewOfType(MarkdownView);
     return view ? this.forView(view) : null;
   }
 

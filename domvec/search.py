@@ -74,6 +74,37 @@ PLANT_NO_CONTENT_FACTOR = [False]
 #: vetoed -- a page that holds the query ONLY in its controls is still found.
 CONTENT_FLOOR = 0.1
 
+#: Retrieval terms are ADDITIVE (PLUGIN_GOAL 85, 2026-11-01: "Retrieval terms
+#: should be additive (i think, and normalized between 0 and 1 for their
+#: components) rather than multiplicative"): each term normalized to 0..1 over
+#: the query's candidates, then summed with these weights (they sum to one).
+#: Whether a chunk MATCHES at all is still the lexical gate (lexical > 0), as
+#: under the product -- the k/n counts keep their meaning; the terms rank.
+#: Content is its share SQUARED, as G-294 found it must be: at 0.15 linear a
+#: results page echoing "okapi" (share 0.78) outranked the article (0.92) --
+#: 0.661 to 0.652, measured 2026-11-01 -- and squared at 0.25 it does not.
+ADDITIVE_WEIGHTS = {"lexical": 0.30, "semantic": 0.35, "pagerank": 0.10, "content": 0.25}
+#: The default fuse. Planted (`PLANT_PRODUCT_FUSE`): the triple product, as before.
+DEFAULT_FUSE = ["additive"]
+PLANT_PRODUCT_FUSE = [False]
+
+
+def _unit(v: np.ndarray) -> np.ndarray:
+    """A term on 0..1: divided by its largest positive value (0 stays 0)."""
+    v = np.clip(np.asarray(v, dtype=np.float64), 0.0, None)
+    top = float(v.max()) if v.size else 0.0
+    return v / top if top > 0 else np.zeros_like(v)
+
+
+def _percentile(v: np.ndarray) -> np.ndarray:
+    """A term on 0..1 by rank: PageRank's raw values span orders of magnitude
+    (it sums to one over the corpus), so its POSITION is what is comparable."""
+    v = np.asarray(v, dtype=np.float64)
+    if v.size < 2:
+        return np.ones_like(v)
+    order = np.argsort(np.argsort(v, kind="stable"), kind="stable")
+    return order / float(v.size - 1)
+
 import re as _re
 _CONTROL = _re.compile(r"^\(\s.*\s\)$|^\[[ xX]\]\s|^\[[^\]]*\]$")
 _LINK_ONLY = _re.compile(r"^(?:[-*+]\s+|\d+\.\s+)?\[.*\]\([^)]*\)$")
@@ -126,6 +157,8 @@ class SearchDiagnostics:
     zeroed_by_semantic: int = 0
     zeroed_by_rank: int = 0
     survivors: int = 0
+    #: Which fuse ranked (PLUGIN_GOAL 85: "additive" by default).
+    fuse: str = ""
     collapsed: int = 0
     semantic_available: bool = False
     #: The code pre-filter (R-6): partitions total and kept, rows masked.
@@ -316,7 +349,7 @@ class ThreeFormIndex:
         diagnostics: Optional[SearchDiagnostics] = None,
         include_markdown: bool = True,
         collapse: bool = True,
-        fuse: str = "product",
+        fuse: str = "",
         scope_url: str = "",
         count_only: bool = False,
     ) -> List[Hit]:
@@ -380,13 +413,32 @@ class ThreeFormIndex:
         diag.zeroed_by_rank = int(np.sum(ranks <= 0))
 
         wr, wl, ws = weights
+        if not fuse:
+            fuse = "product" if PLANT_PRODUCT_FUSE[0] else DEFAULT_FUSE[0]
+        diag.fuse = fuse
         # `fuse` is the retrieval side's first axis. The product is the
         # design's rule and keeps every factor's veto — a zero anywhere is a
         # zero overall, which is correct when all three factors are
         # trustworthy and catastrophic when one is merely missing. `sum` and
         # `rrf` are the two standard alternatives, so the choice can be
         # measured rather than defended.
-        if fuse == "sum":
+        if fuse == "additive":
+            # Each term on 0..1, summed (PLUGIN_GOAL 85); the lexical gate
+            # decides what matches, the terms decide the order.
+            w = ADDITIVE_WEIGHTS
+            share = (_fit(self._content, rows).astype(np.float64)
+                     if self._content is not None and not PLANT_NO_CONTENT_FACTOR[0]
+                     else np.ones(rows, dtype=np.float64))
+            score = (w["lexical"] * _unit(lexical)
+                     + w["pagerank"] * _percentile(ranks)
+                     + w["content"] * np.clip(share, 0.0, 1.0) ** 2)
+            if available:
+                score = score + w["semantic"] * _unit(semantic)
+            # The lexical gate, softened only when a floor is asked for (as
+            # the product's veto is: `floor` > 0 lets every row through).
+            if floor <= 0:
+                score = np.where(np.asarray(lexical) > 0, score, 0.0)
+        elif fuse == "sum":
             # No vetoes: a factor that is merely missing costs its share
             # instead of the whole hit.
             score = wr * (ranks + floor) + wl * (lexical + floor)
@@ -409,7 +461,7 @@ class ThreeFormIndex:
         # What the page SAYS before what it offers to click (PLUGIN_GOAL 59): a
         # fourth factor, the chunk's content share (squared), floored so
         # boilerplate is weighed down -- up to tenfold -- and never vetoed.
-        if self._content is not None and not PLANT_NO_CONTENT_FACTOR[0]:
+        if fuse != "additive" and self._content is not None and not PLANT_NO_CONTENT_FACTOR[0]:
             share = _fit(self._content, rows).astype(np.float64)
             # Squared: a search form around the query (share 0.25) kept a third
             # of its score linearly and still ranked first for "okapi"; squared

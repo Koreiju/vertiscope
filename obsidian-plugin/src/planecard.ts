@@ -11,7 +11,7 @@
  * remembered per card.
  */
 
-const HANDLE = ".domvec-var-title, .domvec-slate-circle, .domvec-slate-circle-dot";
+const HANDLE = ".domvec-var-title, .domvec-slate-circle, .domvec-slate-circle-dot, .domvec-plane-head-node";
 
 export interface PlaceStats { drags: number; clamped: number }
 
@@ -25,7 +25,8 @@ export function clampToPlane(card: HTMLElement, plane: HTMLElement): boolean {
   return true;
 }
 
-export function makeDraggable(card: HTMLElement, plane: HTMLElement, key: string, stats: PlaceStats): () => void {
+export function makeDraggable(card: HTMLElement, plane: HTMLElement, key: string, stats: PlaceStats,
+                              onClick?: () => void): () => void {
   try {
     const saved = JSON.parse(window.localStorage.getItem(key) || "null");
     if (saved && Number.isFinite(saved.x) && Number.isFinite(saved.y)) {
@@ -49,11 +50,15 @@ export function makeDraggable(card: HTMLElement, plane: HTMLElement, key: string
     card.style.top = `${start.top + e.clientY - start.y}px`;
     if (clampToPlane(card, plane)) stats.clamped++;
   };
-  const up = () => {
+  const up = (e?: MouseEvent) => {
     window.removeEventListener("mousemove", move, true);
     window.removeEventListener("mouseup", up, true);
     if (!start) return;
+    // Pressed and released in place: a CLICK on the header node, not a drag
+    // (PLUGIN_GOAL 81: the halo opens on it).
+    const still = !e || Math.hypot(e.clientX - start.x, e.clientY - start.y) < 3;
     start = null;
+    if (still && onClick) { onClick(); return; }
     stats.drags++;
     try { window.localStorage.setItem(key, JSON.stringify({ x: parseFloat(card.style.left) || 0, y: parseFloat(card.style.top) || 0 })); }
     catch { /* a convenience only */ }

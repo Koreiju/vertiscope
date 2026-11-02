@@ -106,17 +106,44 @@ export function titleLine(doc: Text): number {
 }
 
 class RevealWidget extends WidgetType {
-  constructor(readonly name: string, readonly lines: string[], readonly indent: number) { super(); }
-  eq(o: RevealWidget): boolean { return o.name === this.name && o.lines.join("\n") === this.lines.join("\n") && o.indent === this.indent; }
+  /** `all`: every reveal of the slate -- a `{ref}` in a revealed row is a node,
+   *  and opened (right-click) its own rows nest beneath it: black-box
+   *  containment, one rank at a time (PLUGIN_GOAL 80; mortegon M.3). */
+  constructor(readonly name: string, readonly lines: string[], readonly indent: number,
+              readonly all: Record<string, string[]> = {}) { super(); }
+  private sig(): string {
+    const seen = new Set<string>();
+    const walk = (n: string): string => {
+      if (seen.has(n)) return "";
+      seen.add(n);
+      const ls = n === this.name ? this.lines : this.all[n] || [];
+      return n + "[" + ls.map((l) => { const m = /\{([^}]+)\}/.exec(l); return l + (m && m[1] in this.all ? walk(m[1]) : ""); }).join("|") + "]";
+    };
+    return walk(this.name);
+  }
+  eq(o: RevealWidget): boolean { return o.indent === this.indent && o.sig() === this.sig(); }
   toDOM(): HTMLElement {
     const el = document.createElement("div");
     el.className = "domvec-slate-reveal";
     el.setAttribute("data-ref", this.name);
-    for (const l of this.lines.length ? this.lines : ["(nothing at rank 1)"]) {
-      const row = el.createDiv({ cls: "domvec-slate-reveal-line" });
-      row.style.paddingLeft = `${(this.indent + 1) * 3}ch`;
-      row.setText(l.replace(/\t/g, "   "));
-    }
+    const seen = new Set<string>([this.name]);
+    const rows = (lines: string[], depth: number) => {
+      for (const l of lines.length ? lines : ["(nothing at rank 1)"]) {
+        const row = el.createDiv({ cls: "domvec-slate-reveal-line" });
+        row.style.paddingLeft = `${(this.indent + depth) * 3}ch`;
+        const text = l.replace(/\t/g, "   ");
+        const m = /\{([^}]+)\}/.exec(text);
+        if (!m) { row.setText(text); continue; }
+        row.appendText(text.slice(0, m.index));
+        const open = m[1] in this.all;
+        const node = row.createSpan({ cls: "domvec-var domvec-slate-reveal-ref" + (open ? " is-revealed" : ""),
+                                      text: open ? (m[1].split("#").pop() || m[1]) : m[0] });
+        node.setAttribute("data-ref", m[1]);
+        row.appendText(text.slice(m.index + m[0].length));
+        if (open && !seen.has(m[1])) { seen.add(m[1]); rows(this.all[m[1]], depth + 1); }
+      }
+    };
+    rows(this.lines, 1);
     return el;
   }
   ignoreEvent(): boolean { return false; }
@@ -362,7 +389,7 @@ export function foldDecorations(doc: Text, st: FoldState): DecorationSet {
     for (const [a, z, d] of ranges) b.add(a, z, d);
     if (reveal) {
       const indent = (/^\t*/.exec(line.text) || [""])[0].length;
-      b.add(line.to, line.to, Decoration.widget({ widget: new RevealWidget(reveal.name, reveal.lines, indent), block: true, side: 1 }));
+      b.add(line.to, line.to, Decoration.widget({ widget: new RevealWidget(reveal.name, reveal.lines, indent, st.reveals), block: true, side: 1 }));
     }
   }
   return b.finish();

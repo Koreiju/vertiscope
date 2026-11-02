@@ -39,8 +39,10 @@ if "Database" not in globals():
         def __init__(self, base):
             self._base = base
 
-        def search(self, query, k=5):
+        def search(self, query, k=5, where=""):
             url = self._base + "/search?q=" + _up.quote(str(query)) + "&k=" + str(int(k))
+            if where:
+                url += "&where=" + _up.quote(str(where))
             with _ur.urlopen(url, timeout=120) as r:
                 got = _json.load(r)
             return [{"cid": h.get("cid"), "url": h.get("url"), "text": h.get("preview") or ""}
@@ -66,12 +68,14 @@ if "Database" not in globals():
 if "search" not in globals():
     _domvec_asks = []
 
-    def search(query, db=True, duckduckgo=False, k=8):
-        """search(query, db=True, duckduckgo=False, k=8): the database's ranking, the web's (through
-        the browser cell), or both. The web's results arrive in the store as the cell captures them."""
+    def search(query, db=True, duckduckgo=False, k=8, where=""):
+        """search(query, db=True, duckduckgo=False, k=8, where=""): the database's ranking, the web's
+        (through the browser cell), or both. `where` is "ego" (the computation graph's own artifacts
+        and the chunks tagged into the ego), "web" (the world without them), or "" (everything).
+        The web's results arrive in the store as the cell captures them."""
         out = []
         if db:
-            out += [dict(h, source="db") for h in Database.search(query, k)]
+            out += [dict(h, source="db") for h in Database.search(query, k, where)]
         if duckduckgo:
             _domvec_asks.append({"web": str(query)})
             out.append({"cid": None, "source": "duckduckgo", "pending": True,

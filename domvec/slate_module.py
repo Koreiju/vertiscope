@@ -246,6 +246,11 @@ def check(text: str, known: Iterable[str] = ()) -> List[Diagnostic]:
                 continue
             if name.split(".")[0] in outer:
                 continue
+            # A trie ADDRESS (`code://...`, `vault://...`, `https://...`) names
+            # something outside the module by where it is, as a cell's input
+            # does -- resolved through the store, never a NameError here.
+            if "://" in name:
+                continue
             own = name.split(".")[0] == n.key
             out.append(Diagnostic(n.line, a, a + len(m.group(0)), "NameError",
                                   ("name '%s' is defined as itself -- nothing outside %s is called that"

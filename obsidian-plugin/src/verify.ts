@@ -120,9 +120,17 @@ export class Verifier {
       // The window's own eval, awaited, and handed back BY VALUE -- the
       // same shape CDP's `returnByValue` gives the terminal runner, so a
       // check cannot pass here on a live object it would not get there.
-      evaluate: async (code: string) => {
-        const value = await (0, eval)(code);
-        return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
+      // Its `timeout` HONOURED, as CDP's is for the terminal runner: an
+      // in-app check once waited forever on a request that never answered,
+      // and the whole run stood behind it (G-307, G-309; 2026-11-01).
+      evaluate: async (code: string, opts?: { timeout?: number }) => {
+        const ms = Math.max(1000, Number(opts && opts.timeout) || 600000);
+        let timer = 0;
+        const timedOut = new Promise((_, reject) => { timer = window.setTimeout(() => reject(new Error(`evaluate timed out after ${ms} ms`)), ms); });
+        try {
+          const value = await Promise.race([(0, eval)(code), timedOut]);
+          return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
+        } finally { window.clearTimeout(timer); }
       },
       // The fixture pages the checks browse to, served from the vault's own
       // `tests/fixtures` -- the vault is the repository -- on a loopback

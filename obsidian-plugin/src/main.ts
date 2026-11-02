@@ -30,6 +30,7 @@ import {
   WorkspaceLeaf,
   PluginSettingTab,
   Setting,
+  editorInfoField,
 } from "obsidian";
 
 import { installHarness } from "./harness";
@@ -57,6 +58,9 @@ import { ChunkPayload, DEFAULTS, DomvecSettings, EnactResult, KernelReply }
 import { VaultLinks } from "./vaultlinks";
 import { PANEL_VIEW, PanelView } from "./panelview";
 import { COCKPIT_PATH, Cockpit } from "./cockpit";
+import { PLANE_FOLDER, PlaneDesk } from "./planepanels";
+import { BrowserPanel } from "./browserpanel";
+import { PlaneHalo } from "./planehalo";
 import { slateFolds } from "./slatefold";
 import { NotebookChats } from "./notebookchat";
 import { NoteMarks } from "./marks";
@@ -269,6 +273,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     // The notebook chat (L-2..L-9): a panel at the selected cell's foot; the
     // cursor landing on a new cell is a new rewind, a scroll is not.
     this.nbChats = new NotebookChats(this.app, this, this.sidecar);
+    this.nbChats.active = () => this.activeView();
     (window as any).__domvecNbChats = this.nbChats;
     // The reader marks what the model is given (P-N9/P-N10, `marks.ts`): a
     // selection in reading view becomes trie addresses, drawn highlighted,
@@ -279,9 +284,15 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     this.marks.byNote = { ...(this.settings.marks || {}) };
     this.nbChats.marks = this.marks;
     (window as any).__domvecMarks = this.marks;
+    // The plane's panels and its tools (items 65-66): the checks reach a
+    // probe note through these, never through a workspace tab.
+    (window as any).__domvecPlane = this.desk;
+    this.registerInterval(window.setInterval(() => this.desk.ensureTools(), 1000));
     this.registerDomEvent(document, "mouseup", () => {
-      const view = this.app.workspace.getActiveViewOfType(MarkdownView);
       const sel = window.getSelection();
+      // The view the selection is IN -- a tab or a panel on the plane.
+      const view = (sel && sel.anchorNode ? this.markdownLeaves().map((l) => l.view as MarkdownView)
+        .find((v) => v?.containerEl?.contains(sel.anchorNode as Node)) : null) || this.activeView();
       if (!view || view.getMode() !== "preview" || !sel || sel.isCollapsed) return;
       const host = (view as any).previewMode?.containerEl as HTMLElement | undefined;
       if (!host || !sel.anchorNode || !host.contains(sel.anchorNode)) return;
@@ -296,7 +307,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     const remark = async (f: TFile | null | undefined) => {
       if (!f || !this.marks.count(f.path)) return;
       await this.marks.resolve(f);
-      for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
+      for (const leaf of this.markdownLeaves()) {
         const v = leaf.view as MarkdownView;
         if (v.file?.path === f.path) this.marks.paint(v);
       }
@@ -314,13 +325,11 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     // no leaf change, before its editor holds the text. (The first version
     // tested the editor with a `\b` a heredoc had turned into a backspace
     // byte, so no note ever counted.)
-    const noteNotebook = async (file: TFile | null | undefined) => {
-      if (!file || file.extension !== "md") return;
-      if (/^\s*(`{3,}|~{3,})\s*(python|py)\b/m.test(await this.app.vault.cachedRead(file))) this.lastNotebook = file.path;
-    };
+    const noteNotebook = (file: TFile | null | undefined) => this.noteNotebook(file);
     this.registerEvent(this.app.workspace.on("active-leaf-change", () => {
       this.nbChats?.onCursor();
-      void noteNotebook(this.app.workspace.getActiveViewOfType(MarkdownView)?.file);
+      this.wsActiveAt = performance.now();
+      void noteNotebook(this.activeView()?.file);
     }));
     this.registerEvent(this.app.workspace.on("file-open", (f) => void noteNotebook(f)));
     // A chunk note's two halves, one at a time (`D-3`): `chunkhalves.ts`.
@@ -334,12 +343,14 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     // The cockpit (G-280): the `ego` slate's fields bound both ways to the
     // user agent and the search -- the text read on every edit, the agent's
     // own changes written back a few times a second.
-    this.registerEvent(this.app.workspace.on("editor-change", (_e: any, info: any) => this.cockpit.onEdit(info?.file || null)));
-    this.registerInterval(window.setInterval(() => this.cockpit.sync(), 250));
+    this.registerEvent(this.app.workspace.on("editor-change", (_e: any, info: any) => { this.cockpit.onEdit(info?.file || null); this.browserPanel.onEdit(info?.file || null); }));
+    this.registerInterval(window.setInterval(() => { this.cockpit.sync(); this.browserPanel.sync(); }, 250));
+    (window as any).__domvecBrowserPanel = this.browserPanel;
+    (window as any).__domvecHalo = this.halo;
     this.addCommand({ id: "domvec-cockpit", name: "Open the cockpit (ego slate)", callback: () => { void this.cockpit.open(); } });
     // The structural-cell strip at the bottom of every note (`P-M4`); put
     // back whenever Obsidian rebuilds a renderer under it.
-    this.registerInterval(window.setInterval(() => this.applyCellBars(), 1500));
+    this.registerInterval(window.setInterval(() => this.applyCellBars(), 500));
     this.registerEvent(this.app.workspace.on("active-leaf-change",
                                              () => this.refreshChunkMarks()));
     this.registerEvent(this.app.workspace.on("editor-change",
@@ -371,7 +382,13 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
 
     this.registerMarkdownPostProcessor(readingViewRunButtons(this));
     this.registerEditorExtension(
-      livePreviewRunButtons(this, () => this.app.workspace.getActiveFile()?.path ?? ""),
+      // The note is the EDITOR's own, never the workspace's active file: a
+      // panel on the plane is never the active leaf (PLUGIN_GOAL 65), and its
+      // run read the active note -- the kernel ran, the output went nowhere.
+      livePreviewRunButtons(this, (view) => {
+        try { const f = view.state.field(editorInfoField)?.file; if (f) return f.path; } catch { /* not an Obsidian editor */ }
+        return this.app.workspace.getActiveFile()?.path ?? "";
+      }),
     );
 
     this.addCommand({
@@ -683,7 +700,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
 
   /** Re-ask the sidecar where this note's chunks fall, and redraw the gutter. */
   private async refreshChunkMarks() {
-    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    const view = this.activeView();
     // @ts-ignore -- `editor.cm` is the CM6 EditorView; Obsidian does not type it.
     const cm = view?.editor?.cm as { state: unknown; dispatch: Function } | undefined;
     if (!view || !cm) return;
@@ -695,7 +712,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     // keystrokes by nature, and the next debounce corrects them. What would
     // NOT be right is dispatching into a different note, so the path is
     // re-checked.
-    const still = this.app.workspace.getActiveViewOfType(MarkdownView);
+    const still = this.activeView();
     if (still?.file?.path !== view.file?.path) return;
     cm.dispatch({ effects: setChunkSpans.of(preview.chunks as ChunkSpan[]) });
   }
@@ -717,6 +734,61 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
    * all — an output block scrolled off screen is indistinguishable from a button
    * that did nothing.
    */
+  /**
+   * Panels on the 2D plane (PLUGIN_GOAL 65-66): every note a panel there --
+   * Obsidian's own view of it, draggable, minimized to its node -- with the
+   * plane's create / delete tools. The craft in 3D rings each one.
+   */
+  desk: PlaneDesk = new PlaneDesk(this.app, {
+    plane: () => {
+      const g: any = this.app.workspace.getLeavesOfType(GRAPH_VIEW)[0]?.view;
+      return g && typeof g.plane === "function" ? g.plane() : null;
+    },
+    changed: () => { const g: any = this.app.workspace.getLeavesOfType(GRAPH_VIEW)[0]?.view; g?.craft?.dirty(); this.cockpit.decorate(); },
+    // A panel on the plane gets at once what a tab gets from the workspace's
+    // layout events, which a leaf outside the tree never fires.
+    openBrowser: () => { void this.browserPanel.open(); },
+    headerClick: (path) => { void this.halo.toggle(path); },
+    opened: (f) => { void this.noteNotebook(f); window.setTimeout(() => { this.applyCellBars(); this.applyHalves(); this.cockpit.decorate(); }, 0); },
+  });
+
+  /** The halo that slides, on the plane (items 81-84). */
+  halo: PlaneHalo = new PlaneHalo({
+    app: this.app, desk: this.desk, sidecar: () => this.sidecar,
+    plane: () => { const g: any = this.app.workspace.getLeavesOfType(GRAPH_VIEW)[0]?.view; return g && typeof g.plane === "function" ? g.plane() : null; },
+  });
+
+  /** The browser cell as a panel on the plane, with its cockpit (item 71). */
+  browserPanel: BrowserPanel = new BrowserPanel(this.app, { browserViewType: BROWSER_VIEW, desk: this.desk });
+
+  /** Every markdown leaf showing a note: the workspace's, the plane's panels
+   *  and the docked cockpit -- one list, so a run's output, the cell strip and
+   *  the marks reach a note wherever it is open. */
+  markdownLeaves(): any[] {
+    const out: any[] = this.app.workspace.getLeavesOfType("markdown");
+    for (const l of this.desk.leaves()) if (!out.includes(l)) out.push(l);
+    const c = this.cockpit?.planeLeaf;
+    if (c && this.cockpit.card?.isConnected && !out.includes(c)) out.push(c);
+    return out;
+  }
+
+  /** The note view the reader is in: the plane panel they last touched when
+   *  that was after the workspace's last leaf change, else the active tab. */
+  private wsActiveAt = 0;
+  activeView(): MarkdownView | null {
+    const pv = this.desk.focusedView();
+    if (pv && this.desk.focusedAt >= this.wsActiveAt) return pv;
+    return this.app.workspace.getActiveViewOfType(MarkdownView) || pv;
+  }
+
+  /** The notebook the reader is in: where a prototype cell goes (G-105). Read
+   *  from the FILE: a note opened into the active tab fires `file-open` and
+   *  no leaf change, before its editor holds the text. */
+  async noteNotebook(file: TFile | null | undefined): Promise<void> {
+    if (!file || file.extension !== "md") return;
+    if (/^\s*(`{3,}|~{3,})\s*(python|py)\b/m.test(await this.app.vault.cachedRead(file))) this.lastNotebook = file.path;
+  }
+
   /** The `ego` slate, bound to the agent and the search (G-280). */
   cockpit: Cockpit = new Cockpit(this.app, {
     graph: () => this.app.workspace.getLeavesOfType(GRAPH_VIEW)[0]?.view as any,
@@ -782,8 +854,15 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
       // first (PLUGIN_GOAL 62, 63': the extended markdown cell), so a code
       // cell sees the names the markdown binds.
       const nf = this.app.vault.getAbstractFileByPath(note);
-      const markdown = nf instanceof TFile ? await this.app.vault.cachedRead(nf) : "";
-      reply = await this.sidecar.runCell(note, req.code, req.lang, refs, req.line, req.sample, markdown);
+      // The EDITOR's text when the note is open (on the plane or in a tab):
+      // the file lags the editor by its autosave, and a tree typed a moment
+      // before the run was not yet there -- the cell met NameError (G-298).
+      const openView = this.markdownLeaves().map((l) => l.view as MarkdownView).find((v) => v?.file?.path === note);
+      const markdown = openView?.editor ? openView.editor.getValue()
+        : nf instanceof TFile ? await this.app.vault.cachedRead(nf) : "";
+      // The note's I/O toggle (item 79): its inputs from the ego or the web.
+      const maps = nf instanceof TFile ? String(this.app.metadataCache.getFileCache(nf)?.frontmatter?.maps || "") : "";
+      reply = await this.sidecar.runCell(note, req.code, req.lang, refs, req.line, req.sample, markdown, maps);
     } finally {
       running.hide();
     }
@@ -889,7 +968,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
       // changed span only, so the cursor and undo history survive), and the
       // editor's own save persists it. Planted `__domvecPlantFileOutput`.
       const open = (window as any).__domvecPlantFileOutput ? undefined
-        : this.app.workspace.getLeavesOfType("markdown").map((l) => l.view as MarkdownView)
+        : this.markdownLeaves().map((l) => l.view as MarkdownView)
             .find((v) => v?.file?.path === note && v.getMode() === "source");
       if (open) {
         const ed = open.editor;
@@ -923,6 +1002,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
   onunload() {
     this.nbChats?.destroy();
     this.cockpit?.unload();
+    this.desk?.unload();
     this.surfaces.clear();
     // The view's own `onClose` releases the WebGL context; detaching leaves
     // is Obsidian's job and doing it here is explicitly discouraged, because
@@ -989,7 +1069,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
    */
   pullStats = { pulled: 0, last: null as any };
   async pullToChat(cid: string): Promise<{ path: string; pins: number } | { error: string }> {
-    const leaf = this.app.workspace.getLeavesOfType("markdown").find((l) => (l.view as MarkdownView).file?.path === this.lastNotebook);
+    const leaf = this.markdownLeaves().find((l) => (l.view as MarkdownView).file?.path === this.lastNotebook);
     const chat = leaf ? this.nbChats?.forView(leaf.view as MarkdownView) : null;
     if (!chat) { new Notice("domvec: open a notebook to pull a chunk into its chat"); return { error: "no notebook open" }; }
     const p: any = await this.sidecar.chunk(cid);
@@ -1097,7 +1177,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
 
   applyHalves(): void {
     let leaves = 0;
-    for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
+    for (const leaf of this.markdownLeaves()) {
       const view = leaf.view as MarkdownView;
       const path = view?.file?.path;
       if (!path) continue;
@@ -1122,7 +1202,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
   applyCellBars(): void {
     const on = !(window as any).__domvecPlantNoCellBar;
     let placed = 0;
-    for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
+    for (const leaf of this.markdownLeaves()) {
       const view = leaf.view as MarkdownView;
       if (view?.file && ensureCellBar(view, this, on)) placed++;
     }
@@ -1255,6 +1335,9 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
   async isReservoirNote(file: TFile): Promise<boolean> {
     const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
     if (fm && String(fm.domvec || "") === "slate") return true;
+    // The reader's own panels are ego artifacts (PLUGIN_GOAL 74c, 77): a note
+    // the plane's tools made, or one open on the plane -- markdown alone too.
+    if (file.path.startsWith(PLANE_FOLDER + "/") || this.desk.panelOf(file.path)) return true;
     const text = await this.app.vault.cachedRead(file);
     // The frontmatter from the TEXT too: on `create` the metadata cache has
     // not parsed it yet, and a new slate read as a plain note.

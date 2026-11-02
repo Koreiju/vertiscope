@@ -211,7 +211,7 @@ class RunWidget extends WidgetType {
 }
 
 function buildDecorations(view: EditorView, host: RunHost,
-                          path: () => string): DecorationSet {
+                          path: (view: EditorView) => string): DecorationSet {
   const builder = new RangeSetBuilder<Decoration>();
   const doc = view.state.doc;
   // The whole document, not only the viewport. A fence's OPENING line can be
@@ -225,7 +225,7 @@ function buildDecorations(view: EditorView, host: RunHost,
     // sit before the ``` and push the fence marker sideways.
     const line = doc.line(fence.openLine + 1);   // CM lines are 1-based
     builder.add(line.to, line.to, Decoration.widget({
-      widget: new RunWidget(fence, host, path),
+      widget: new RunWidget(fence, host, () => path(view)),
       side: 1,
     }));
   }
@@ -240,7 +240,7 @@ function buildDecorations(view: EditorView, host: RunHost,
  * reaching for one.
  */
 export function livePreviewRunButtons(host: RunHost,
-                                      path: () => string): Extension {
+                                      path: (view: EditorView) => string): Extension {
   return ViewPlugin.fromClass(
     class {
       decorations: DecorationSet;

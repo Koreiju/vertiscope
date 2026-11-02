@@ -187,6 +187,10 @@ export class UserAgent {
     const n = this.mode === "ego" ? this.target : null;
     // Nothing selected and at rest: the camera is the reader's alone.
     if (!n && len(this.vel) < 1e-4 && !(this.playing && !this.paused)) { this.stats.idle_ticks++; this.fade(); return; }
+    // The craft is where the agent FLIES (item 68): its place follows the
+    // camera only while the ego view is under way -- a mode switch alone
+    // never moves it (each toggle once carried it outward with the camera).
+    if (this.mode === "ego") this.craftAt = { x: p.x, y: p.y, z: p.z };
     if (this.rezoom) {
       this.rezoom = false;
       const dz = Math.hypot(p.x - t.x, p.y - t.y, p.z - t.z);
@@ -293,11 +297,17 @@ export class UserAgent {
   /** The wheel turned: the flight in progress stops at the new distance. */
   zoomed(): void { if (this.target) this.rezoom = true; }
 
+  /** Where the craft is (PLUGIN_GOAL 68): the agent's place on its last
+   *  flight in the ego view; null until it has flown. */
+  craftAt: { x: number; y: number; z: number } | null = null;
+
   setMode(mode: AgentMode): void {
     if (mode === this.mode) return;
     this.mode = mode;
     this.stats.mode_switches++;
     this.target = null;
+    // Third person (item 68): the craft is left where the agent was flying,
+    // and the map view sees it there.
     if (mode === "map") { this.vel = v3(); this.host.recentre(); }
     this.save();
     this.draw();

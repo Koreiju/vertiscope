@@ -373,7 +373,7 @@ export class Sidecar {
 
   async search(query: string, options: {
     k?: number; offset?: number; url?: string;
-    coarse?: boolean; budget?: number;
+    coarse?: boolean; budget?: number; where?: string;
   } = {}): Promise<SearchResults | null> {
     if (!query.trim()) return null;
     const q = new URLSearchParams({ q: query });
@@ -382,6 +382,7 @@ export class Sidecar {
     if (options.url) q.set("url", options.url);
     if (options.coarse === false) q.set("coarse", "0");
     if (options.budget) q.set("budget", String(options.budget));
+    if (options.where) q.set("where", options.where);
     return this.get<SearchResults>(`/search?${q.toString()}`);
   }
 
@@ -475,6 +476,19 @@ export class Sidecar {
   }
 
   /** A slate's -- or a markdown note's trees' -- Python errors (PLUGIN_GOAL 62). */
+  /** The ego set (PLUGIN_GOAL 74, 78): the craft's notes and the tagged chunks. */
+  async ego(): Promise<{ urls: string[]; cids: string[] } | null> { return this.get("/ego"); }
+  /** The ego's own projection (item 76): knowledge key -> place. */
+  async egoProjection(): Promise<{ method: string; n: number; places: Record<string, number[]>; missing: string[] } | null> { return this.get("/ego/projection"); }
+  async egoPost(route: "ego" | "ego/tag", body: any): Promise<any | null> {
+    const base = this.base().trim().replace(/\/+$/, "");
+    if (!base) return null;
+    try {
+      const res = await fetch(`${base}/${route}`, { method: "POST", headers: { "Content-Type": "application/json", "X-Domvec-Client": "obsidian-plugin" }, body: JSON.stringify(body) });
+      return await res.json();
+    } catch { return null; }
+  }
+
   async slateCheck(text: string, known: string[] = []): Promise<{ diagnostics: { line: number; from: number; to: number; kind: string; message: string }[]; trees: boolean } | null> {
     const base = this.base().trim().replace(/\/+$/, "");
     if (!base) return null;
@@ -787,7 +801,7 @@ export class Sidecar {
   vaultRoot = "";
 
   async runCell(note: string, code: string,
-                lang = "python", refs: string[] = [], line = -1, sample?: number, markdown = ""): Promise<KernelReply | null> {
+                lang = "python", refs: string[] = [], line = -1, sample?: number, markdown = "", maps = ""): Promise<KernelReply | null> {
     const base = this.base().trim().replace(/\/+$/, "");
     if (!base) return null;
     try {
@@ -796,7 +810,7 @@ export class Sidecar {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ note, code, lang, refs, line, ...(sample === undefined ? {} : { sample }),
                                ...(this.vaultRoot ? { vault_root: this.vaultRoot } : {}),
-                               ...(markdown ? { markdown } : {}) }),
+                               ...(markdown ? { markdown } : {}), ...(maps ? { maps } : {}) }),
       });
       return (await res.json()) as KernelReply;
     } catch {

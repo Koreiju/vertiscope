@@ -4786,6 +4786,116 @@ reaches it through the plane's own editor tools -- create a panel, delete a
 panel -- so the checks exercise those tools as a reader would; (64, again)
 all the open tasks, without pausing after one.*
 
+*And, while that was being built:*
+
+> Also, part of the docs on outputs/inputs miss the gap where we have the full ego computation graph as one unit, its own graph separate from the red of the UMAPped components, all interconnected in 3D. refer to our transcripts on this being where our "cockpit" view really comes in. There's a lot of details everywhere with this new set of computation graph/jupyter cells (and context/high-level design vision) that you seem to brush over.
+
+*Read as: (67) the EGO COMPUTATION GRAPH is ONE UNIT in 3D -- its own graph,
+drawn apart from the UMAP-coloured world of pages and chunks ("the red"), its
+nodes (slates, notebooks, their cells and kernels, the cockpit) all linked to
+one another in 3D; RESERVOIR_DESIGN section 5 said the opposite ("the
+reservoir is therefore not a separate picture: its nodes sit among the web
+and vault chunks") and is corrected by this; (68) that unit is the CRAFT of
+the 2026-10-29 words -- "something like kerbal space program, where we can
+see from both first person view within a "cockpit" as well as a 3rd person
+view, but for a "craft" that is where our 3D computation graphs from our
+legacy mothership mortegon specs/docs/code comes in" -- so the third-person
+view sees the craft, the ego computation graph, as a whole among the world,
+and the cockpit is the first-person view from inside it; (69) the craft's
+inputs and outputs are its links into the world: what its cells read (the
+chunks a run took as input) and what they write (their readouts) are edges
+from the craft to the world, never the craft's nodes dissolved into it; (70)
+a standing correction on method: the details of these words -- the
+computation graph, the Jupyter cells, the context and the high-level vision
+-- are read in full from the transcript and the verbatim before building, not
+summarised past.*
+
+*And next (2026-11-01, while items 65-69 were being built):*
+
+> our full web browser panel feature + all functionalities should be translated to its draggable panel/computation graph analogue; includes "cockpit" for browser tools/actions on the panel, as well as the actual web browser rendering the interactive HTML, which was originally designed with the intent of seamlessly flowing between chunk-level rendering/interactions and the full webpage and *then* the actual browser itself, similar to the various gestures on various nodes to render the panels at the selected scope of the computation graph nodes (i.e. adaptive/selective abstractions). this obviously makes each panel an extension of a jupyter notebook (as cells each) and so the computation graph is the analogue to a fully rendered jupyter notebook as the highest-level primal aggregate of panel-facing artifacts (code, web, markdown with retrieval and code/computation graph links that render like queries as functional-object dialects, and verify this rigorous statement in the mortegon docs). let's build for breadth and integration/switching between 3D graph (with umap on the various ego-set of reservoir artifacts, including selected web chunk nodes with a simple tag button on the top of each of the billboard panel renderings, along with user-defined/written prompts/markdown panels that are contained within the ego of the computation graph itself which can also link to the world-UMAP per markdown retrieval links on largely user-written markdowns and jupyter kernels and what have you), including all gestures/functionalities that define rules for the interactions and flow over the integrations between the computation graph and 3D graph viewer via the ego. Ensure we get the first-person and third person cockpit views, as well as the actual ego computation graph as well. We will now make the binding rule to forego all UMAPping on things in the world-map at input-output most parts of the computation graph/reservoir in place of "knowledge keys" of variously collected artifacts at the ego-umap level and which is integrated with UMAP on the local ego-linked code artifacts. Code from the web can be brought in, and code generated from user chats with local language models per interactive jupyter kernels (per I think our specs somewhere), and so the ego houses user-generated artfiacts within the space of their preferences and thoughts. Retrieval options to our db and cockpit graph get an extra field, then, with the specification of retrieving ego-artifacts vs the web maps. Per the mortegon docs, live signal flow updates and forward-inverse general function-object memory lookup dialectics within the panel/computation graph dialectic are somewhat touched on in the mortegon docs as well, can be intuited with the thinking provided thus far, means the artifacts governing the computation graphs inputs and outputs are linked either to the ego or the web umap based on a panel/node toggle (including adaptive black-box recursively unfoldable containment on references, good for unnesting complex and high-level code modules). Please add this to the set of remaining tasks currently being worked on.
+> Also, unlike and somewhat like the mortegon docs, our new updated version of retrieval halos take on a completely different navigational geometry. Here and now, when we click on a computation graph artifact (either node or panel form), we see a polar-coordinate force-directed layout on similarity-based proximity diffs local to the node. So, radial coordinates are similarity to the node (whether or not hard-linked, which the pagerank component should automatically account for) and angular coordinates in 2D are the lateral retrieved result similarities to each other. Efficient render-based chunking is done such that only the top-most renderable retrieval results ever call this layout algorithm. The special thing is when the mouse then hovers outside of the panel/node along some set of radial lies from the similar nodes, the motion of the mouse then informs the directional velocity vector that traverses on this chunked 2D layout space, meaning that moving the mouse fast in a short distance is the same as moving it slow in a long distance, and moving it with its xy delta means that moving it back from where it was going has the same effect when "sliding" over this adaptive layout surface, with a clear shortest-path navigational trace back to the original focused node that is selected. When any other navigated node is selected, it is "stuck" and slidable as well to the 2D computation graph, whether or not it has hard links. This only happens for 2D, and includes only ego-based nodes for retrieval. Depending on our gesture space, different interactions on the computation graph node/panels might be better to toggle this extensive feature on/off. Retrieval terms should be additive (i think, and normalized between 0 and 1 for their components) rather than multiplicative.
+> All prompts and details should be added to requirements docs and perhaps various designs on software etc.
+
+*Read as, in order (numbered on from 70):*
+
+*(71) THE BROWSER AS A PANEL. The whole web-browser cell -- every function it
+has -- gets its draggable plane-panel / computation-graph analogue: a browser
+"cockpit" (its tools and actions -- address, back, forward, reload, scan,
+live, save offline, boxes) as fields of a panel, and the browser's own
+interactive rendering of the page, on the plane.*
+
+*(72) THE SCOPE LADDER. The browser was always meant to flow without a seam
+from a CHUNK rendered and acted on, to the FULL WEBPAGE (the reconstructed
+page), and THEN to the actual browser -- the same ladder as the gestures that
+render a node's panel at a chosen scope (adaptive / selective abstraction):
+one gesture vocabulary steps a panel along chunk -> page -> live browser and
+back.*
+
+*(73) EVERY PANEL IS A NOTEBOOK CELL, extended -- code, web, markdown (with
+retrieval, and code / computation-graph links that render like queries, as
+functional-object dialects) -- and the computation graph is the analogue of a
+FULLY RENDERED Jupyter notebook: the highest-level primal aggregate of the
+panel-facing artifacts. To be VERIFIED against the mortegon docs: a claim the
+reader asked to have checked, not assumed.*
+
+*(74) BREADTH AND SWITCHING between the 3D graph and the computation graph,
+through the ego: (a) UMAP over the EGO SET of reservoir artifacts; (b) a web
+chunk joins the ego by a simple TAG button on top of each billboard panel;
+(c) user-written prompts and markdown panels live INSIDE the ego of the
+computation graph, and may link out to the world UMAP through markdown
+retrieval links, as the Jupyter kernels may; (d) every gesture and function
+ruling the flow between the computation graph and the 3D viewer goes through
+the ego.*
+
+*(75) BOTH COCKPIT VIEWS, first person and third person, and the ego
+computation graph itself (the craft, 67-68) -- all three working.*
+
+*(76) A BINDING RULE: no more UMAP of the WORLD map for the input-output side
+of the computation graph / reservoir (most of it). In its place, KNOWLEDGE
+KEYS of the variously collected artifacts at the EGO-UMAP level, integrated
+with UMAP over the local ego-linked CODE artifacts. This replaces item 43's
+reading (the reservoir placed by the global fit) and G-291's means.*
+
+*(77) THE EGO HOUSES THE READER'S OWN ARTIFACTS: code brought in from the
+web; code generated in chats with local language models through the
+interactive Jupyter kernels (the notebook chat, L-2 / P-N); the ego is the
+space of the reader's preferences and thoughts.*
+
+*(78) RETRIEVAL GAINS A FIELD, in the db's search and in the cockpit's
+search: retrieve EGO artifacts or the WEB maps.*
+
+*(79) SIGNAL FLOW AND FORWARD-INVERSE LOOKUP, per the mortegon docs: live
+signal-flow updates and the forward-inverse function-object memory lookup of
+the panel / computation-graph dialectic; a computation graph's input and
+output artifacts are linked EITHER to the ego OR to the web UMAP, by a TOGGLE
+on the panel / node.*
+
+*(80) ADAPTIVE BLACK-BOX CONTAINMENT on references: a `{ref}` is a black box,
+unfoldable recursively -- for unnesting complex, high-level code modules.*
+
+*(81) THE NEW RETRIEVAL HALO -- 2D only, ego only. Clicking a
+computation-graph artifact (node or panel form) lays its retrieval out in
+POLAR coordinates, force-directed on similarity diffs local to it: radius =
+similarity to the focused node (hard-linked or not; PageRank accounts for the
+links), angle = the retrieved results' similarity to one another. Only the
+top renderable results (render-based chunking) ever enter this layout.*
+
+*(82) SLIDING NAVIGATION on that layout: with the pointer outside the panel or
+node, along the radial lines, the mouse's motion is a velocity over the
+chunked 2D layout -- displacement counts, not speed (fast and short = slow and
+long), and moving back undoes moving forward (the xy delta is reversible) --
+with a clear shortest-path TRACE back to the focused node. (83) Selecting a
+navigated node STICKS it, slidable onto the 2D computation graph, hard-linked
+or not. (84) Which gesture toggles this on or off is chosen within the gesture
+space.*
+
+*(85) RETRIEVAL TERMS ARE ADDITIVE: each component normalized to 0..1 and
+summed (weighted), not multiplied -- G-294's content factor and the hybrid
+score are products today.*
+
+*(86) Every prompt and detail goes into the requirement documents and the
+software designs.*
+
 ---
 
 ## Standing instructions carried in the verbatim

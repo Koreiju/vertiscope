@@ -3464,7 +3464,7 @@ export function makeChecks(env) {
           const path = "domvec-checks/R-gesture-" + Date.now() + ".md";
           if (!app.vault.getAbstractFileByPath("domvec-checks")) await app.vault.createFolder("domvec-checks");
           const file = await app.vault.create(path, "first line of the note\\n[patricia trie]()\\nthe line below the gesture\\nand one more");
-          const leaf = app.workspace.getLeaf("tab");
+          const leaf = window.__domvecPlane.leaf();
           g.plantOverlay = ${planted};
           try {
             await leaf.openFile(file, { state: { mode: "source" } });
@@ -6228,7 +6228,7 @@ export function makeChecks(env) {
           await evaluate(`(async () => {
             const plugin = app.plugins.getPlugin("domvec-bridge");
             const f = app.vault.getAbstractFileByPath(${JSON.stringify(note.path)});
-            try { if (f) await app.vault.delete(f); } catch (e) {}
+            try { if (f) await window.__domvecPlane.trash(f); } catch (e) {}
             try { await fetch(plugin.settings.sidecar.replace(/[/]+$/, "") + "/purge", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url: ${JSON.stringify(note.url)} }) }); } catch (e) {}
             plugin.settings.indexedNotes = (plugin.settings.indexedNotes || []).filter((p) => p !== ${JSON.stringify(note.path)});
             await plugin.saveSettings();
@@ -6451,7 +6451,7 @@ export function makeChecks(env) {
           lines.push(F + "python", "print('end')", F);
           const f = await app.vault.create(path, lines.join(NL));
           const url = "vault://" + app.vault.getName() + "/" + path;
-          const leaf = app.workspace.getLeaf("tab");
+          const leaf = window.__domvecPlane.leaf();
           await leaf.openFile(f);
           app.workspace.setActiveLeaf(leaf, { focus: true });
           await sleep(1500);
@@ -6468,7 +6468,10 @@ export function makeChecks(env) {
             out.landed_index = chat.landed && chat.landed.index;
             ed.setCursor({ line: 9, ch: 3 }); await sleep(400);
             out.same_cell_no_rewind = chat.rewinds === r0;
-            // At the cell's foot.
+            // At the cell's foot -- scrolled into view first: a panel on the
+            // plane is shorter than a tab, and the chat rightly docks while
+            // the foot is out of the scroll window.
+            ed.scrollIntoView({ from: { line: 12, ch: 0 }, to: { line: 12, ch: 0 } }, true); await sleep(300);
             const cm = ed.cm, host = view.contentEl.getBoundingClientRect();
             const foot = cm.coordsAtPos(cm.state.doc.line(12).to);
             chat.place();
@@ -6514,7 +6517,7 @@ export function makeChecks(env) {
           } finally {
             try { const c = chats.forActive(); if (c) await c.reset(); } catch (e) {}
             try { leaf.detach(); } catch (e) {}
-            try { await app.vault.delete(f); } catch (e) {}
+            try { await window.__domvecPlane.trash(f); } catch (e) {}
             try { await fetch(plugin.settings.sidecar.replace(/[/]+$/, "") + "/purge", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url }) }); } catch (e) {}
             plugin.settings.indexedNotes = (plugin.settings.indexedNotes || []).filter((p) => p !== path);
             await plugin.saveSettings();
@@ -6736,7 +6739,7 @@ export function makeChecks(env) {
           if (!app.vault.getAbstractFileByPath(folder)) await app.vault.createFolder(folder);
           const path = folder + "/g105 notebook " + Date.now() + (${planted} ? "p" : "c") + ".md";
           const file = await app.vault.create(path, "# g105" + NL + NL + F + "python" + NL + "x = 1" + NL + F + NL);
-          const leaf = app.workspace.getLeaf("tab");
+          const leaf = window.__domvecPlane.leaf();
           let cid = null, unfolded = null;
           try {
             await leaf.openFile(file, { state: { mode: "source", source: false } });
@@ -6793,7 +6796,7 @@ export function makeChecks(env) {
             if (cid) v.closeBillboard(cid);
             if (unfolded) await v.unfoldNode(unfolded);
             leaf.detach();
-            try { await app.vault.delete(file); } catch (e) { /* already gone */ }
+            try { await window.__domvecPlane.trash(file); } catch (e) { /* already gone */ }
           }
         })()`, { timeout: 180000 });
         const clean = await arm(false);
@@ -6838,7 +6841,7 @@ export function makeChecks(env) {
           const cell = (k) => "## Cell " + k + NL + NL + Array.from({ length: 70 }, (_, i) => "c" + k + "w" + i + "x" + stamp).join(" ") + "." + NL + NL
             + F + "python" + NL + "print(" + k + ")" + NL + F + NL;
           const file = await app.vault.create(path, "# pn6" + NL + NL + [1, 2, 3, 4, 5].map(cell).join(NL));
-          const leaf = app.workspace.getLeaf("tab");
+          const leaf = window.__domvecPlane.leaf();
           const settle = async () => {
             let last = "", same = 0;
             await until(async () => {
@@ -6887,7 +6890,7 @@ export function makeChecks(env) {
             return out;
           } finally {
             leaf.detach();
-            try { await app.vault.delete(file); } catch (e) { /* gone */ }
+            try { await window.__domvecPlane.trash(file); } catch (e) { /* gone */ }
           }
         })()`, { timeout: 420000 });
         const diffOnly = (a) => !!a && a.indexed && a.changed >= 1 && a.queued === a.changed && a.skipped >= a.chunks - a.changed;
@@ -6918,7 +6921,7 @@ export function makeChecks(env) {
           const path = folder + "/pn9 note " + stamp + ".md";
           const sec = (name) => "## " + name + NL + NL + Array.from({ length: 45 }, (_, i) => name.toLowerCase() + "w" + i).join(" ") + " " + name + "MARK." + NL;
           const file = await app.vault.create(path, "# pn9" + NL + NL + ["Alpha", "Beta", "Gamma", "Delta"].map(sec).join(NL));
-          const leaf = app.workspace.getLeaf("tab");
+          const leaf = window.__domvecPlane.leaf();
           const view = () => leaf.view;
           const sections = () => (view().previewMode && view().previewMode.renderer.sections || []).filter((s) => s && s.el);
           const markedTexts = () => sections().filter((s) => s.el.classList.contains("domvec-marked")).map((s) => s.el.textContent || "");
@@ -6975,7 +6978,7 @@ export function makeChecks(env) {
           } finally {
             await marks.clear(path);
             leaf.detach();
-            try { await app.vault.delete(file); } catch (e) { /* gone */ }
+            try { await window.__domvecPlane.trash(file); } catch (e) { /* gone */ }
           }
         })()`, { timeout: 120000 });
         const only = (blocks, name) => !!blocks && blocks.includes(name) && !blocks.some((b) => b === "Alpha" || b === "Delta" || b === "Zeta");
@@ -7007,7 +7010,7 @@ export function makeChecks(env) {
           const url = "vault://" + app.vault.getName() + "/" + path;
           const sec = (name) => "## " + name + NL + NL + Array.from({ length: 45 }, (_, i) => name.toLowerCase() + "w" + i).join(" ") + " " + name + "MARK." + NL;
           const file = await app.vault.create(path, "# pn10" + NL + NL + ["Alpha", "Beta", "Gamma"].map(sec).join(NL) + NL + F + "python" + NL + "print(1)" + NL + F + NL);
-          const leaf = app.workspace.getLeaf("tab");
+          const leaf = window.__domvecPlane.leaf();
           const sections = () => (leaf.view.previewMode && leaf.view.previewMode.renderer.sections || []).filter((s) => s && s.el);
           const chatTurns = async () => ((await (await fetch(SIDE + "/chat?session=" + encodeURIComponent("note:" + path))).json()).turns || []);
           const out = {};
@@ -7050,7 +7053,7 @@ export function makeChecks(env) {
           } finally {
             await marks.clear(path);
             leaf.detach();
-            try { await app.vault.delete(file); } catch (e) { /* gone */ }
+            try { await window.__domvecPlane.trash(file); } catch (e) { /* gone */ }
           }
         })()`, { timeout: 300000 });
         const want = (got.marked || []).map((m) => m.cid).sort().join();
@@ -7080,7 +7083,7 @@ export function makeChecks(env) {
           const sec = (n) => "## " + n + NL + NL + (n + " words. ").repeat(60) + NL;
           const plain = await app.vault.create(folder + "/pm5 note " + stamp + ".md", "# pm5 plain" + NL + NL + ["Alpha", "Beta", "Gamma", "Delta", "Epsilon"].map(sec).join(NL));
           const box = (e) => { const b = e.getBoundingClientRect(); return { top: Math.round(b.top), bottom: Math.round(b.bottom) }; };
-          const leaf = app.workspace.getLeaf("tab");
+          const leaf = window.__domvecPlane.leaf();
           const out = {};
           try {
             await leaf.openFile(nb, { state: { mode: "source", source: false } });
@@ -7092,6 +7095,12 @@ export function makeChecks(env) {
             if (!chat) return { error: "no chat on the notebook" };
             chat.land(true); await sleep(400);
             const sc = leaf.view.contentEl.querySelector(".cm-scroller");
+            // The cell's foot in view first: a panel on the plane is shorter
+            // than a tab, and the chat rightly docks while the foot is not --
+            // so the panel is sized as a reader would size it (it resizes).
+            const card = leaf.containerEl.closest(".domvec-plane-card");
+            if (card) { card.style.height = "720px"; await sleep(300); }
+            sc.scrollTop = 0; await sleep(200); chat.place();
             out.at_foot = { scroller: box(sc), chat: box(chat.el), docked: chat.docked };
             sc.scrollTop = 1e7; await sleep(600); chat.place();
             const last = Array.from(sc.querySelectorAll(".cm-line")).find((l) => (l.textContent || "").includes("LAST LINE"));
@@ -7121,7 +7130,7 @@ export function makeChecks(env) {
           } finally {
             await plugin.marks.clear(plain.path);
             leaf.detach();
-            for (const f of [nb, plain]) { try { await app.vault.delete(f); } catch (e) { /* gone */ } }
+            for (const f of [nb, plain]) { try { await window.__domvecPlane.trash(f); } catch (e) { /* gone */ } }
           }
         })()`, { timeout: 120000 });
         const below = (x) => !!x && !!x.chat && !!x.scroller && x.chat.top >= x.scroller.bottom - 1;
@@ -7373,7 +7382,7 @@ export function makeChecks(env) {
                      run: !!el.querySelector(".domvec-run-fence"), terminal: !!el.querySelector(".domvec-term-fence"),
                      cells: !!el.querySelector(".domvec-cellbar"), cell_buttons: el.querySelectorAll(".domvec-cellbar-add").length };
           };
-          const leaf = app.workspace.getLeaf("tab");
+          const leaf = window.__domvecPlane.leaf();
           const out = {};
           try {
             out.live = await look(leaf, "source");
@@ -7387,7 +7396,7 @@ export function makeChecks(env) {
             return out;
           } finally {
             leaf.detach();
-            try { await app.vault.delete(file); } catch (e) { /* gone */ }
+            try { await window.__domvecPlane.trash(file); } catch (e) { /* gone */ }
           }
         })()`, { timeout: 60000 });
         const all = (x) => !!x && x.type === "markdown" && x.run && x.terminal && x.cells && x.cell_buttons >= 2;
@@ -7423,7 +7432,7 @@ export function makeChecks(env) {
             const cellsOf = () => [...window.__domvecNotebookBrowsers].filter((c) => c.sourcePath === path);
             const cellOf = () => cellsOf().find((c) => c.containerEl.offsetWidth > 0 && c.view);
             const standalone0 = app.workspace.getLeavesOfType("domvec-browser-view").length;
-            const leaf = app.workspace.getLeaf("tab");
+            const leaf = window.__domvecPlane.leaf();
             const out = {};
             try {
               await leaf.openFile(file, { state: { mode: "preview" } });
@@ -7455,7 +7464,7 @@ export function makeChecks(env) {
               await sleep(600);
               out.detached = cellsOf().length === 0;
               window.__domvecPlantNoNotebookBrowser = true;
-              const leaf2 = app.workspace.getLeaf("tab");
+              const leaf2 = window.__domvecPlane.leaf();
               try {
                 await leaf2.openFile(file, { state: { mode: "preview" } });
                 await sleep(1500);
@@ -7465,7 +7474,7 @@ export function makeChecks(env) {
               return out;
             } finally {
               try { leaf.detach(); } catch (e) { /* gone */ }
-              try { await app.vault.delete(file); } catch (e) { /* gone */ }
+              try { await window.__domvecPlane.trash(file); } catch (e) { /* gone */ }
             }
           })()`, { timeout: 180000 });
           const r = got.resize || {};
@@ -7499,7 +7508,7 @@ export function makeChecks(env) {
           const code = ["import os", "print('cwd', os.path.basename(os.getcwd()))", "print('beside', open('data.csv').read().splitlines()[0])",
                         "print('wrote', Vault.write('made by a cell.md', '# Made by a cell'))"].join(NL);
           const file = await app.vault.create(folder + "/notebook.md", "# lab" + NL + NL + F + "python" + NL + code + NL + F + NL);
-          const leaf = app.workspace.getLeaf("tab");
+          const leaf = window.__domvecPlane.leaf();
           try {
             await leaf.openFile(file, { state: { mode: "source", source: false } });
             await until(() => !!leaf.view.containerEl.querySelector(".domvec-run-fence"), 8000);
@@ -7557,8 +7566,8 @@ export function makeChecks(env) {
             + "hits = search('radix tree', db=True, k=3)" + NL + "print('hits', len(hits), hits[0]['url'] if hits else '')" + NL + F + NL);
           const other = await app.vault.create(folder + "/pn7 other " + stamp + ".md", "# other" + NL + NL + F + "python" + NL + "print(2)" + NL + F + NL);
           const turnsOf = async (path) => ((await (await fetch(SIDE + "/chat?session=" + encodeURIComponent("note:" + path))).json()).turns || []);
-          const leafO = app.workspace.getLeaf("tab");
-          const leaf = app.workspace.getLeaf("tab");
+          const leafO = window.__domvecPlane.leaf();
+          const leaf = window.__domvecPlane.leaf();
           let cid = null, unfolded = null;
           const out = {};
           try {
@@ -7619,7 +7628,7 @@ export function makeChecks(env) {
             if (cid) v.closeBillboard(cid);
             if (unfolded) await v.unfoldNode(unfolded);
             leaf.detach(); leafO.detach();
-            for (const f of [nb, other]) { try { await app.vault.delete(f); } catch (e) { /* gone */ } }
+            for (const f of [nb, other]) { try { await window.__domvecPlane.trash(f); } catch (e) { /* gone */ } }
           }
         })()`, { timeout: 300000 });
         return {
@@ -7702,7 +7711,7 @@ export function makeChecks(env) {
           const path = folder + "/g234 notebook " + Date.now() + (${planted} ? "p" : "c") + ".md";
           const file = await app.vault.create(path, "# nb" + NL + NL + "## Setup" + NL + NL + "The first cell sets x." + NL + NL + F + "python" + NL + "x = 40" + NL + F + NL + NL
             + "## Next" + NL + NL + F + "python" + NL + "print(x + 2)" + NL + F + NL);
-          const leaf = app.workspace.getLeaf("tab");
+          const leaf = window.__domvecPlane.leaf();
           const out = { planted: ${planted} };
           try {
             await leaf.openFile(file, { state: { mode: "source", source: false } });
@@ -7750,7 +7759,7 @@ export function makeChecks(env) {
           } finally {
             for (const l of app.workspace.getLeavesOfType("domvec-code-view")) if (l.view.cell && l.view.cell.path === path) l.detach();
             leaf.detach();
-            try { await app.vault.delete(file); } catch (e) { /* gone */ }
+            try { await window.__domvecPlane.trash(file); } catch (e) { /* gone */ }
           }
         })()`, { timeout: 120000 });
         const clean = await arm(false), planted = await arm(true);
@@ -7925,7 +7934,7 @@ export function makeChecks(env) {
           const cell2 = ["print('state', y)", "hits = search('radix tree', db=True, k=2)", "print('hits', len(hits))", "print('vault', Vault.here.name)"].join(NL);
           const file = await app.vault.create(folder + "/pn1 jupyter " + Date.now() + (${planted} ? "p" : "c") + ".md",
             "# jupyter" + NL + NL + F + "python" + NL + cell1 + NL + F + NL + NL + F + "python" + NL + cell2 + NL + F + NL);
-          const leaf = app.workspace.getLeaf("tab");
+          const leaf = window.__domvecPlane.leaf();
           try {
             await leaf.openFile(file, { state: { mode: "source", source: false } });
             app.workspace.setActiveLeaf(leaf, { focus: true });
@@ -7948,7 +7957,7 @@ export function makeChecks(env) {
                      sample: all.slice(0, 400) };
           } finally {
             leaf.detach();
-            try { await app.vault.delete(file); } catch (e) { /* gone */ }
+            try { await window.__domvecPlane.trash(file); } catch (e) { /* gone */ }
           }
         })()`, { timeout: 180000 });
         const clean = await arm(false);
@@ -8019,7 +8028,7 @@ export function makeChecks(env) {
           const text = ["---", "domvec: slate", "---", "probe", T + "alpha" + T + "1", T + "group", T + T + "inner" + T + "2", T + T + "deeper",
                         T + T + T + "leaf" + T + "3", T + "tail" + T + "4", ""].join(NL);
           const file = await app.vault.create(folder + "/g296 probe " + Date.now() + ".md", text);
-          const leaf = app.workspace.getLeaf("tab");
+          const leaf = window.__domvecPlane.leaf();
           const out = {};
           try {
             await leaf.openFile(file, { state: { mode: "source", source: false } });
@@ -8072,7 +8081,7 @@ export function makeChecks(env) {
             return out;
           } finally {
             leaf.detach();
-            try { await app.vault.delete(file); } catch (e) { /* gone */ }
+            try { await window.__domvecPlane.trash(file); } catch (e) { /* gone */ }
           }
         })()`, { timeout: 90000 });
         const g = got;
@@ -8108,7 +8117,7 @@ export function makeChecks(env) {
           const bad = ["---", "domvec: slate", "---", "probe", T + "a" + T + "1", T + "a" + T + "2", T + "x" + T + "{x}", T + "y" + T + "{nope}", T + "z" + T + "{a}", ""].join(NL);
           const good = ["---", "domvec: slate", "---", "probe", T + "a" + T + "1", T + "x" + T + "{a}", T + "y" + T + "{Database}", ""].join(NL);
           const file = await app.vault.create(folder + "/g297 lint " + Date.now() + (${planted} ? "p" : "c") + ".md", bad);
-          const leaf = app.workspace.getLeaf("tab");
+          const leaf = window.__domvecPlane.leaf();
           const errs = () => Array.from(leaf.view.contentEl.querySelectorAll(".domvec-slate-error")).map((e) => ({ text: e.textContent, title: e.getAttribute("title") }));
           try {
             await leaf.openFile(file, { state: { mode: "source", source: false } });
@@ -8124,7 +8133,7 @@ export function makeChecks(env) {
             return { planted: false, errors: before, after_fix: errs() };
           } finally {
             leaf.detach();
-            try { await app.vault.delete(file); } catch (e) { /* gone */ }
+            try { await window.__domvecPlane.trash(file); } catch (e) { /* gone */ }
           }
         })()`, { timeout: 60000 });
         const kernel = (planted) => evaluate(`(async () => {
@@ -8135,7 +8144,7 @@ export function makeChecks(env) {
           const text = ["# Run", "", "Some prose about the run.", "", "params", T + "rate" + T + "0.5", T + "steps" + T + "{n}", "",
                         F + "python", "n = 3", F, "", F + "python", "print('out', params.rate * 2, params.steps)", F, ""].join(NL);
           const file = await app.vault.create(folder + "/g297 notebook " + Date.now() + (${planted} ? "p" : "c") + ".md", text);
-          const leaf = app.workspace.getLeaf("tab");
+          const leaf = window.__domvecPlane.leaf();
           try {
             await leaf.openFile(file, { state: { mode: "source", source: false } });
             app.workspace.setActiveLeaf(leaf, { focus: true });
@@ -8152,7 +8161,7 @@ export function makeChecks(env) {
             return { planted: ${planted}, printed: /out 1\\.0 3/.test(last), name_error: last.includes("NameError"), last: last.slice(-160) };
           } finally {
             leaf.detach();
-            try { await app.vault.delete(file); } catch (e) { /* gone */ }
+            try { await window.__domvecPlane.trash(file); } catch (e) { /* gone */ }
           }
         })()`, { timeout: 120000 });
         const cockpit = () => evaluate(`(async () => {
@@ -8179,6 +8188,760 @@ export function makeChecks(env) {
                 && out.kernel.printed && !out.kernel.name_error && out.kernel_planted.name_error && !out.kernel_planted.printed
                 && !!out.cockpit.diagnostics && out.cockpit.diagnostics.length === 0 && out.cockpit.plan.includes("{search.results}"),
           evidence: out,
+        };
+      },
+    },
+    {
+      id: "G-298",
+      asks: "a notebook is a panel on the 2D plane, through the plane's own tools (PLUGIN_GOAL 65-66): the + notebook tool makes a note and opens it ON the plane -- Obsidian's own view, its header node the note's name; a markdown tree and a python cell typed into it run in its kernel from its own run control, the output written into that panel; the craft gains its note, cell and tree nodes; dragged by its header node it moves and stays inside the plane; a right-click on the header minimizes it to the node and a second restores it; a click on its craft node closes the panel into the node and another reopens it; a double right-click deletes it -- the panel gone, the note in the vault's trash; planted (plantOwnView) the tool opens the note in a workspace tab",
+      async run() {
+        // 2026-11-01: "The jupyter kernels/cells are supposed to also be the
+        // draggable 2D computation graph plane type panels" -- "All tests
+        // should be on the 2D computation graph plane for panel experiments,
+        // never their own view. This encourages the exercise of editor tools
+        // accompanying the graph editor (i.e. create/delete etc)".
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const until = async (ok, ms) => { for (let t = 0; t < ms && !(await ok()); t += 200) await sleep(200); return !!(await ok()); };
+          const NL = String.fromCharCode(10), T = String.fromCharCode(9), F = String.fromCharCode(96).repeat(3);
+          const d = window.__domvecPlane;
+          const g = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
+          const plane = g && g.plane();
+          if (!d || !plane) return { error: "no plane" };
+          const graphFiles = () => new Set(app.vault.getMarkdownFiles().filter((f) => f.path.startsWith("domvec/graph/")).map((f) => f.path));
+          const before = graphFiles();
+          d.plantOwnView = ${planted};
+          const out = { planted: ${planted} };
+          let path = "";
+          try {
+            await until(() => !!plane.querySelector(".domvec-plane-tool"), 4000);
+            const tool = plane.querySelector('.domvec-plane-tool[data-kind="notebook"]');
+            out.tool = !!tool;
+            tool.click();
+            await until(() => [...graphFiles()].some((p) => !before.has(p)), 6000);
+            path = [...graphFiles()].find((p) => !before.has(p)) || "";
+            await sleep(600);
+            const p = d.panelOf(path);
+            out.on_plane = !!p && plane.contains(p.card);
+            out.in_tab = app.workspace.getLeavesOfType("markdown").some((l) => l.view?.file?.path === path);
+            if (${planted} || !p) return out;
+            const head = p.card.querySelector(".domvec-plane-head-node");
+            out.head = head ? head.textContent : null;
+            out.native_view = p.leaf.view?.getViewType?.() === "markdown";
+            // Type a tree and a cell, run the cell from its own control.
+            const v = p.leaf.view;
+            v.editor.setValue(["params", T + "rate" + T + "0.5", "", F + "python", "print('g298', params.rate * 4)", F, ""].join(NL));
+            await until(() => v.containerEl.querySelectorAll(".domvec-run-fence").length >= 1, 6000);
+            v.containerEl.querySelector(".domvec-run-fence").click();
+            await until(() => v.editor.getValue().includes("<!-- nb-output"), 30000);
+            await sleep(300);
+            const text = v.editor.getValue();
+            out.printed = /g298 2\\.0/.test(text.slice(text.indexOf("<!-- nb-output")));
+            // The craft: its note, cell and tree.
+            const c = window.__domvecCraft;
+            c.dirty();
+            await until(() => c.nodes.some((n) => n.id === "craft:" + path) && c.nodes.some((n) => n.path === path && n.kind === "cell") && c.nodes.some((n) => n.path === path && n.kind === "tree"), 9000);
+            out.craft = c.nodes.filter((n) => n.path === path).map((n) => n.kind).sort();
+            // Drag by the header node; then far past the plane's edge.
+            const drag = (dx, dy) => {
+              const h = p.card.querySelector(".domvec-plane-head-node"), r = h.getBoundingClientRect();
+              const x = r.left + r.width / 2, y = r.top + r.height / 2;
+              h.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0, clientX: x, clientY: y }));
+              window.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, cancelable: true, clientX: x + dx, clientY: y + dy }));
+              window.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, clientX: x + dx, clientY: y + dy }));
+            };
+            // From a place with room to move (a remembered place may sit in a corner).
+            p.card.style.left = "40px"; p.card.style.top = "60px"; await sleep(50);
+            const at0 = p.card.getBoundingClientRect();
+            drag(60, 40); await sleep(150);
+            const at1 = p.card.getBoundingClientRect();
+            out.moved = [Math.round(at1.left - at0.left), Math.round(at1.top - at0.top)];
+            drag(5000, 5000); await sleep(150);
+            const pr = plane.getBoundingClientRect(), at2 = p.card.getBoundingClientRect();
+            out.contained = at2.right <= pr.right + 1 && at2.bottom <= pr.bottom + 1 && at2.left >= pr.left - 1 && at2.top >= pr.top - 1;
+            // Minimize to the node, and back.
+            const right = () => p.card.querySelector(".domvec-plane-head-node").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, button: 2 }));
+            right(); await sleep(200);
+            const mini = p.card.getBoundingClientRect();
+            out.minimized = p.card.classList.contains("is-collapsed") ? [Math.round(mini.width), Math.round(mini.height)] : null;
+            await sleep(600);
+            right(); await sleep(200);
+            out.restored = !p.card.classList.contains("is-collapsed") && p.card.getBoundingClientRect().height > 150;
+            await sleep(600);
+            // The craft node closes the panel into itself and reopens it.
+            const node = c.nodes.find((n) => n.id === "craft:" + path);
+            c.click(node); await sleep(300);
+            out.closed_by_node = !d.panelOf(path) && !!app.vault.getAbstractFileByPath(path);
+            c.click(node); await until(() => !!d.panelOf(path), 4000);
+            out.reopened = !!d.panelOf(path);
+            // Delete: a double right-click on the header node.
+            const p2 = d.panelOf(path), h2 = p2.card.querySelector(".domvec-plane-head-node");
+            h2.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, button: 2 }));
+            await sleep(120);
+            h2.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, button: 2 }));
+            await until(() => !app.vault.getAbstractFileByPath(path), 5000);
+            out.deleted = !app.vault.getAbstractFileByPath(path) && !d.panelOf(path);
+            out.in_trash = await app.vault.adapter.exists(".trash/" + path.slice(path.lastIndexOf("/") + 1));
+            out.stats = { ...d.stats };
+            return out;
+          } finally {
+            d.plantOwnView = false;
+            for (const l of app.workspace.getLeavesOfType("markdown")) if (l.view?.file?.path === path) l.detach();
+            const f = path && app.vault.getAbstractFileByPath(path);
+            if (f) { try { await d.trash(f); } catch (e) { /* gone */ } }
+          }
+        })()`, { timeout: 90000 });
+        const clean = await arm(false);
+        const planted = await arm(true);
+        const c = clean || {};
+        return {
+          pass: !!c.on_plane && !c.in_tab && c.native_view && !!c.head && c.printed
+                && (c.craft || []).includes("note") && (c.craft || []).includes("cell") && (c.craft || []).includes("tree")
+                && c.moved && c.moved[0] === 60 && c.moved[1] === 40 && c.contained
+                && !!c.minimized && c.minimized[0] < 140 && c.minimized[1] < 80 && c.restored
+                && c.closed_by_node && c.reopened && c.deleted && c.in_trash
+                && !!planted && !planted.on_plane && planted.in_tab,
+          evidence: { clean, planted },
+        };
+      },
+    },
+    {
+      id: "G-299",
+      asks: "the ego computation graph is ONE unit in 3D, its own graph apart from the fit's world (PLUGIN_GOAL 67-69): the craft holds exactly the vault's computation-graph artifacts -- the cockpit as ego, each slate, each notebook whose cell has run, each note on the plane -- with their cells and markdown trees, every node linked to ego (containment, the kernel's order, a {ref} from one note's tree to another's); none of its nodes is a node of the fit's graph; a run's recorded input, a chunk of the world, is wired to its cell's note (I/O); the map view (third person) frames the craft beside the world, both on screen; the ego view (first person) does not draw it; planted (plantNoLinks) the craft falls apart, (plantAlwaysDrawn) it is drawn around the camera in the ego view",
+      async run() {
+        // 2026-11-01: "the full ego computation graph as one unit, its own
+        // graph separate from the red of the UMAPped components, all
+        // interconnected in 3D ... this being where our "cockpit" view
+        // really comes in".
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const until = async (ok, ms) => { for (let t = 0; t < ms && !(await ok()); t += 250) await sleep(250); return !!(await ok()); };
+          const NL = String.fromCharCode(10), T = String.fromCharCode(9), F = String.fromCharCode(96).repeat(3);
+          const d = window.__domvecPlane, c = window.__domvecCraft;
+          const g = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
+          if (!d || !c || !g) return { error: "no plane or craft" };
+          const planted = ${JSON.stringify(planted)};
+          const mode0 = g.agent.mode;
+          const stamp = Date.now();
+          const pa = "domvec/graph/g299 a " + stamp + ".md", pb = "domvec/graph/g299 b " + stamp + ".md";
+          const out = { planted };
+          try {
+            c.plantNoLinks = planted === "links"; c.plantAlwaysDrawn = planted === "drawn";
+            // Two notes through the create tool: A binds a tree; B reads A's
+            // tree by {ref} and runs a cell whose input is a chunk of the world.
+            // A name no other note binds: a ref resolves by name, and a second
+            // module binding "params" took the edge.
+            const tname = "params_" + stamp;
+            await d.create("notebook", { path: pa, text: [tname, T + "rate" + T + "0.5", "", F + "python", "print(" + tname + ".rate)", F, ""].join(NL) });
+            await d.create("notebook", { path: pb, text: ["uses", T + "p" + T + "{" + tname + "}", "", F + "python {Radix tree}", "print('g299 io')", F, ""].join(NL) });
+            const vb = d.viewOf(pb);
+            await until(() => vb.containerEl.querySelectorAll(".domvec-run-fence").length >= 1, 6000);
+            vb.containerEl.querySelector(".domvec-run-fence").click();
+            await until(() => vb.editor.getValue().includes("<!-- nb-output"), 30000);
+            c.dirty();
+            await until(() => c.nodes.some((n) => n.path === pb) && c.nodes.some((n) => n.path === pa), 9000);
+            await sleep(2500); c.dirty(); await sleep(2600);
+            const s = c.summary();
+            out.summary = { nodes: s.nodes, reached_from_ego: s.reached_from_ego, kinds: s.kinds, edge_kinds: s.edge_kinds };
+            out.ref_ab = c.edges.some((e) => e.kind === "ref" && ((e.a.includes(pb) && e.b.includes(pa)) || (e.a.includes(pa) && e.b.includes(pb))));
+            // Membership read independently from the vault.
+            const want = new Set(["domvec/ego.md"]);
+            for (const f of app.vault.getMarkdownFiles()) {
+              if (f.path.includes("node_modules/") || f.path.startsWith(".")) continue;
+              const fm = app.metadataCache.getFileCache(f)?.frontmatter;
+              if (fm && String(fm.domvec) === "chunk") continue;
+              if (fm && String(fm.domvec) === "slate") { want.add(f.path); continue; }
+              const t = await app.vault.cachedRead(f);
+              const py = new RegExp("^\\\\s*(" + F + "|~~~)\\\\s*(python|py|python3)\\\\b", "m").test(t);
+              // The reader's own panels (item 74c): on the plane or made by its tools, cell or not.
+              if (f.path.startsWith("domvec/graph/") || d.panelOf(f.path) || (py && /^\\s*<!--\\s*nb-output\\s/m.test(t))) want.add(f.path);
+            }
+            const have = new Set(c.nodes.filter((n) => n.kind === "note" || n.kind === "ego").map((n) => n.path));
+            out.membership = { want: want.size, have: have.size, missing: [...want].filter((p) => !have.has(p)).slice(0, 5), extra: [...have].filter((p) => !want.has(p)).slice(0, 5) };
+            // Apart from the fit's world.
+            const world = g.graph.graphData().nodes;
+            out.in_world = world.filter((n) => String(n.id).startsWith("craft:")).length;
+            // Third person: both on screen, apart.
+            g.agent.setMode("ego"); await sleep(400);
+            g.agent.setMode("map"); await sleep(1300);
+            // I/O: the run's chunk wired to B -- counted where the craft is
+            // drawn (the map view; in the ego view it is not drawn at all).
+            await until(() => c.stats.io >= 1, 15000);
+            out.io = c.stats.io;
+            const cam = g.graph.camera();
+            const ndc = (p) => { const v = new (c.nodes[0].mesh.position.constructor)(p.x, p.y, p.z).project(cam); return [Math.round(v.x * 100) / 100, Math.round(v.y * 100) / 100, v.z]; };
+            const sh = g.shellOf(world);
+            const e = c.where();
+            out.third = { drawn: c.stats.visible, craft: ndc(e), world: ndc({ x: sh.cx, y: sh.cy, z: sh.cz }) };
+            // First person.
+            g.agent.setMode("ego"); await sleep(400);
+            out.drawn_in_ego = c.stats.visible;
+            return out;
+          } finally {
+            c.plantNoLinks = false; c.plantAlwaysDrawn = false; c.dirty();
+            g.agent.setMode(mode0);
+            for (const p of [pa, pb]) { try { await d.trash(p); } catch (e) { /* gone */ } }
+          }
+        })()`, { timeout: 120000 });
+        const clean = await arm(null);
+        const links = await arm("links");
+        const drawn = await arm("drawn");
+        const c = clean || {};
+        const onScreen = (v) => !!v && Math.abs(v[0]) <= 1 && Math.abs(v[1]) <= 1 && v[2] < 1;
+        const third = c.third || {};
+        return {
+          pass: !!c.summary && c.summary.reached_from_ego === c.summary.nodes && c.summary.nodes > 3
+                && !!c.membership && c.membership.missing.length === 0 && c.membership.extra.length === 0
+                && c.ref_ab && c.in_world === 0 && c.io >= 1
+                && third.drawn && onScreen(third.craft) && onScreen(third.world)
+                && Math.hypot(third.craft[0] - third.world[0], third.craft[1] - third.world[1]) > 0.2
+                && c.drawn_in_ego === false
+                && !!links && !!links.summary && links.summary.reached_from_ego < links.summary.nodes
+                && !!drawn && drawn.drawn_in_ego === true,
+          evidence: { clean, links, drawn },
+        };
+      },
+    },
+    {
+      id: "G-300",
+      asks: "the browser cell as a panel on the plane with its own cockpit (PLUGIN_GOAL 71-72): the plane's + browser tool opens ONE card holding the browser cockpit -- a slate titled browser, its header node -- and the browser itself beneath it; a url typed into the slate's url field takes the browser there, and the browser's own navigation is written back into the field; a click on live's value toggles the browser's streaming; scope page shows the page rebuilt from the store and scope live the live page again (the scope ladder's upper rungs); a right-click on the header collapses the card to its node; planted (plantUnbound) the slate drives nothing",
+      async run() {
+        // 2026-11-01: "our full web browser panel feature + all functionalities
+        // should be translated to its draggable panel/computation graph
+        // analogue; includes "cockpit" for browser tools/actions on the panel".
+        const fixtures = await serveFixtures();
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const until = async (ok, ms) => { for (let t = 0; t < ms && !(await ok()); t += 200) await sleep(200); return !!(await ok()); };
+          const bp = window.__domvecBrowserPanel, d = window.__domvecPlane;
+          const g = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
+          const plane = g && g.plane();
+          if (!bp || !d || !plane) return { error: "no browser panel or plane" };
+          const PAGE = ${JSON.stringify(fixtures.origin + "/media_kinds.html?g300=")} + (${planted} ? "p" : "c") + Date.now();
+          bp.plantUnbound = ${planted};
+          const out = { planted: ${planted} };
+          try {
+            await until(() => !!plane.querySelector('.domvec-plane-tool[data-kind="browser"]'), 4000);
+            plane.querySelector('.domvec-plane-tool[data-kind="browser"]').click();
+            await until(() => !!bp.view() && !!bp.slateView(), 8000);
+            const p = d.panelOf("domvec/browser.md");
+            out.one_card = !!p && plane.contains(p.card) && p.card.contains(bp.browserLeaf.containerEl);
+            out.browser_type = bp.view()?.getViewType?.();
+            out.head = p?.card.querySelector(".domvec-var-title")?.textContent || null;
+            const sv = bp.slateView(), ed = sv.editor;
+            const lineOf = (k) => { const n = ed.lineCount(); for (let i = 0; i < n; i++) if (ed.getLine(i).trim().split(String.fromCharCode(9))[0] === k) return i; return -1; };
+            const setVal = (k, val) => { const i = lineOf(k), l = ed.getLine(i), at = l.lastIndexOf(String.fromCharCode(9)) + 1; ed.replaceRange(val, { line: i, ch: at }, { line: i, ch: l.length }); };
+            const valOf = (k) => { const l = ed.getLine(lineOf(k)); return l.slice(l.lastIndexOf(String.fromCharCode(9)) + 1); };
+            // url typed -> the browser goes there.
+            setVal("url", PAGE);
+            await until(() => String(bp.view().webview?.getURL?.() || "").includes("g300="), 15000);
+            out.went = String(bp.view().webview?.getURL?.() || "").includes(PAGE.split("?")[1]);
+            if (${planted}) return out;
+            // The browser's own navigation written back.
+            const PAGE2 = PAGE + "&back=1";
+            bp.view().go(PAGE2);
+            await until(() => valOf("url").includes("back=1"), 10000);
+            out.written_back = valOf("url").includes("back=1");
+            // live toggled by a click on its value.
+            const live0 = !!bp.view().live;
+            const cm = ed.cm, li = lineOf("live"), ln = cm.state.doc.line(li + 1);
+            const at = cm.coordsAtPos(ln.to - 1);
+            sv.contentEl.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0, clientX: (at.left + at.right) / 2, clientY: (at.top + at.bottom) / 2 }));
+            await until(() => !!bp.view().live !== live0, 3000);
+            out.live_toggled = [live0, !!bp.view().live, valOf("live")];
+            sv.contentEl.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0, clientX: (at.left + at.right) / 2, clientY: (at.top + at.bottom) / 2 }));
+            await until(() => !!bp.view().live === live0, 3000);
+            // scope: page (rebuilt from the store), then live again -- once the
+            // store holds the page (it was visited a moment ago).
+            const shownNow = String(bp.view().webview?.getURL?.() || "");
+            await until(async () => { const i = await bp.view().sidecar.offlineInfo(shownNow); return !!(i && i.opens); }, 30000);
+            setVal("scope", "page");
+            await until(() => !!bp.view().offlineFor, 15000);
+            out.scope_page = !!bp.view().offlineFor;
+            setVal("scope", "live");
+            await until(() => !bp.view().offlineFor, 10000);
+            out.scope_live = !bp.view().offlineFor;
+            // Collapse to its header node.
+            const title = p.card.querySelector(".domvec-var-title");
+            title.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, button: 2 }));
+            await until(() => p.card.classList.contains("is-collapsed"), 3000);
+            out.collapsed = p.card.classList.contains("is-collapsed") && bp.browserLeaf.containerEl.offsetHeight === 0;
+            title && p.card.querySelector(".domvec-slate-circle-dot")?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, button: 2 }));
+            await sleep(500);
+            out.stats = { ...bp.stats };
+            return out;
+          } finally {
+            bp.plantUnbound = false;
+            await sleep(600);
+            bp.close();
+          }
+        })()`, { timeout: 90000 });
+        let clean, planted;
+        try { clean = await arm(false); planted = await arm(true); } finally { await fixtures.close(); }
+        const c = clean || {};
+        return {
+          pass: c.one_card && c.browser_type === "domvec-browser-view" && c.head === "browser" && c.went && c.written_back
+                && !!c.live_toggled && c.live_toggled[0] !== c.live_toggled[1] && c.scope_page && c.scope_live && c.collapsed
+                && !!planted && planted.one_card && !planted.went,
+          evidence: { clean, planted },
+        };
+      },
+    },
+    {
+      id: "G-306",
+      asks: "retrieval chooses ego or web, and a web chunk joins the ego by its tag (PLUGIN_GOAL 74b, 78): the billboard's + ego tag puts a chunk into the ego set (the store keeps it) and the craft draws it as a web node with a line to its world node; the db's search with where=ego returns only ego artifacts -- that chunk among them -- and where=web never the computation graph's own notes; the cockpit's search/where field set to ego scopes the 3D search the same way; untagged, it leaves; planted (no-where) where is ignored",
+      async run() {
+        // 2026-11-01: "selected web chunk nodes with a simple tag button on the
+        // top of each of the billboard panel renderings" -- "Retrieval options
+        // to our db and cockpit graph get an extra field, then, with the
+        // specification of retrieving ego-artifacts vs the web maps."
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const until = async (ok, ms) => { for (let t = 0; t < ms && !(await ok()); t += 250) await sleep(250); return !!(await ok()); };
+          const plugin = app.plugins.getPlugin("domvec-bridge");
+          const SIDE = String(plugin.settings.sidecar).replace(/[/]+$/, "");
+          const H = { "content-type": "application/json", "X-Domvec-Client": "obsidian-plugin" };
+          const plant = (name, on) => fetch(SIDE + "/plant", { method: "POST", headers: H, body: JSON.stringify({ name, on }) });
+          const search = async (q, where) => (await (await fetch(SIDE + "/search?q=" + encodeURIComponent(q) + "&k=8" + (where ? "&where=" + where : ""), { headers: H })).json());
+          const ego = async () => (await (await fetch(SIDE + "/ego", { headers: H })).json());
+          const g = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view, c = window.__domvecCraft;
+          if (!g || !c) return { error: "no graph or craft" };
+          const out = { planted: ${planted} };
+          if (${planted}) await plant("no-where", true);
+          // A world chunk: the top hit for a query the web answers.
+          const top = (await search("radix tree", "")).hits[0];
+          const cid = top.cid;
+          try {
+            // The tag, as the billboard's control calls it.
+            out.tagged = await g.tagEgo(cid, true);
+            const e1 = await ego();
+            out.stored = e1.cids.includes(cid);
+            c.dirty();
+            await until(() => c.nodes.some((n) => n.id === "craft:web:" + cid), 8000);
+            out.craft_web_node = c.nodes.some((n) => n.id === "craft:web:" + cid);
+            await until(() => c.stats.io >= 1, 4000);
+            out.io = c.stats.io;
+            // The db: ego only / web without the ego's notes.
+            const e2 = await ego();
+            const inEgo = (h) => e2.cids.includes(h.cid) || e2.urls.includes(h.url);
+            const eg = await search("radix tree", "ego");
+            out.ego_hits = eg.hits.length;
+            out.ego_all_in_ego = eg.hits.every(inEgo);
+            out.ego_has_tag = eg.hits.some((h) => h.cid === cid);
+            const web = await search("throttle", "web");
+            out.web_has_ego_note = web.hits.some((h) => e2.urls.includes(h.url));
+            const all = await search("throttle", "");
+            out.all_has_ego_note = all.hits.some((h) => e2.urls.includes(h.url));
+            // The cockpit's where field scopes the 3D search.
+            const cv = plugin.cockpit.view();
+            if (cv) {
+              const ed = cv.editor, n = ed.lineCount();
+              let li = -1; for (let i = 0; i < n; i++) if (ed.getLine(i).trim().split(String.fromCharCode(9))[0] === "where") li = i;
+              out.cockpit_where_field = li >= 0;
+              if (li >= 0) {
+                const l = ed.getLine(li), at = l.lastIndexOf(String.fromCharCode(9)) + 1;
+                ed.replaceRange("ego", { line: li, ch: at }, { line: li, ch: l.length });
+                await until(() => g.searchWhere === "ego", 4000);
+                out.field_scoped = g.searchWhere;
+                const l2 = ed.getLine(li), at2 = l2.lastIndexOf(String.fromCharCode(9)) + 1;
+                ed.replaceRange("all", { line: li, ch: at2 }, { line: li, ch: l2.length });
+                await until(() => g.searchWhere === "", 4000);
+                out.field_back = g.searchWhere === "";
+              }
+            }
+            return out;
+          } finally {
+            await g.tagEgo(cid, false);
+            out.untagged = !(await ego()).cids.includes(cid);
+            if (${planted}) await plant("no-where", false);
+            c.dirty();
+          }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false);
+        const planted = await arm(true);
+        const c = clean || {};
+        return {
+          pass: c.tagged && c.stored && c.craft_web_node && c.io >= 1 && c.ego_hits >= 1 && c.ego_all_in_ego && c.ego_has_tag
+                && !c.web_has_ego_note && c.all_has_ego_note && c.cockpit_where_field && c.field_scoped === "ego" && c.field_back && c.untagged
+                && !!planted && planted.ego_all_in_ego === false,
+          evidence: { clean, planted },
+        };
+      },
+    },
+    {
+      id: "G-310",
+      asks: "retrieval terms are ADDITIVE (PLUGIN_GOAL 85): the search reports fuse additive; every score lies in 0..1 (a weighted sum of terms each normalized to 0..1, content squared); on four queries the top hit is content (share 0.9 or more), not a page echoing the query; planted (product-fuse) the triple product again -- scores collapse to the product's scale (below 0.01)",
+      async run() {
+        const got = await evaluate(`(async () => {
+          const plugin = app.plugins.getPlugin("domvec-bridge");
+          const SIDE = String(plugin.settings.sidecar).replace(/[/]+$/, "");
+          const H = { "content-type": "application/json", "X-Domvec-Client": "obsidian-plugin" };
+          const plant = (name, on) => fetch(SIDE + "/plant", { method: "POST", headers: H, body: JSON.stringify({ name, on }) });
+          const Q = ["okapi", "radix tree", "books", "patricia trie"];
+          const run = async () => {
+            const out = {};
+            for (const q of Q) {
+              const d = await (await fetch(SIDE + "/search?q=" + encodeURIComponent(q) + "&k=5", { headers: H })).json();
+              out[q] = { fuse: d.fuse, scores: d.hits.map((h) => Math.round(h.score * 1e4) / 1e4), top_content: d.hits[0] ? d.hits[0].content : null, top: d.hits[0] ? d.hits[0].url : null };
+            }
+            return out;
+          };
+          const clean = await run();
+          await plant("product-fuse", true);
+          let planted;
+          try { planted = await run(); } finally { await plant("product-fuse", false); }
+          return { clean, planted };
+        })()`, { timeout: 120000 });
+        const c = (got && got.clean) || {}, p = (got && got.planted) || {};
+        const qs = Object.keys(c);
+        return {
+          pass: qs.length === 4 && qs.every((q) => c[q].fuse === "additive" && c[q].scores.every((s) => s > 0 && s <= 1) && c[q].top_content >= 0.9)
+                && qs.every((q) => p[q] && p[q].fuse === "product" && p[q].scores.every((s) => s < 0.01)),
+          evidence: got,
+        };
+      },
+    },
+    {
+      id: "G-303",
+      asks: "BINDING (PLUGIN_GOAL 76): the ego has its own projection -- the store projects the ego set alone (the craft's notes and the tagged chunks, each by its knowledge key: a vault url or a cid) by PCA under 15 artifacts and UMAP from 15, never by the world's fit; the craft places its notes along those places (each note's direction from ego is its projected place); and the computation graph's own notes are not drawn again in the world's fit (drawn at size 0 there); planted (world-projection) the craft takes the world's bearings again, (plantEgoInWorld) the notes are drawn in the world too",
+      async run() {
+        // 2026-11-01: "We will now make the binding rule to forego all UMAPping
+        // on things in the world-map at input-output most parts of the
+        // computation graph/reservoir in place of "knowledge keys" of
+        // variously collected artifacts at the ego-umap level".
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const until = async (ok, ms) => { for (let t = 0; t < ms && !(await ok()); t += 250) await sleep(250); return !!(await ok()); };
+          const plugin = app.plugins.getPlugin("domvec-bridge");
+          const SIDE = String(plugin.settings.sidecar).replace(/[/]+$/, "");
+          const H = { "content-type": "application/json", "X-Domvec-Client": "obsidian-plugin" };
+          const plant = (name, on) => fetch(SIDE + "/plant", { method: "POST", headers: H, body: JSON.stringify({ name, on }) });
+          const g = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view, c = window.__domvecCraft;
+          if (!g || !c) return { error: "no graph or craft" };
+          const planted = ${JSON.stringify(planted)};
+          const out = { planted };
+          if (planted === "world") await plant("world-projection", true);
+          if (planted === "drawn") g.plantEgoInWorld = true;
+          const d = window.__domvecPlane, stamp = Date.now(), NL = String.fromCharCode(10);
+          const own = ["tries and radix trees compress shared prefixes", "sourdough bread ferments with wild yeast", "umap projects high dimensional vectors to three"]
+            .map((t, i) => ({ path: "domvec/graph/g303 " + i + " " + stamp + ".md", text: "# g303" + NL + NL + t + "." + NL }));
+          try {
+            for (const o of own) await d.create("notebook", { path: o.path, text: o.text });
+            c.dirty();
+            // Their vectors in the store, before the ego can place them.
+            await until(async () => {
+              const p = await (await fetch(SIDE + "/ego/projection", { headers: H })).json();
+              return own.every((o) => p.places && p.places["vault://" + app.vault.getName() + "/" + o.path]) || p.method === "world";
+            }, 60000);
+            const b0 = c.stats.builds;
+            c.dirty();
+            await until(() => c.stats.builds > b0, 9000);
+            await sleep(400);
+            const proj = await (await fetch(SIDE + "/ego/projection", { headers: H })).json();
+            out.method = proj.method; out.n = proj.n; out.missing = (proj.missing || []).length;
+            out.craft_projection = c.stats.projection; out.placed_by_ego = c.stats.placed_by_ego;
+            // Each placed note points from ego the way its projected place does.
+            const vault = app.vault.getName();
+            let agree = 0, compared = 0;
+            for (const n of c.nodes.filter((x) => x.kind === "note")) {
+              const p = proj.places && proj.places["vault://" + vault + "/" + n.path];
+              if (!p) continue;
+              const a = Math.hypot(n.local.x, n.local.y, n.local.z) || 1, b = Math.hypot(p[0], p[1], p[2]) || 1;
+              const cos = (n.local.x * p[0] + n.local.y * p[1] + n.local.z * p[2]) / (a * b);
+              compared++; if (cos > 0.99) agree++;
+            }
+            out.directions = { compared, agree };
+            // Not drawn in the world: each craft note's world nodes look size 0.
+            const urls = new Set(c.nodes.filter((x) => x.kind === "note" || x.kind === "ego").map((x) => "vault://" + vault + "/" + x.path));
+            const world = g.graph.graphData().nodes.filter((n) => n.url && urls.has(String(n.url)));
+            g.batchDirty = true; await sleep(300);
+            out.world_nodes_of_craft = world.length;
+            out.world_drawn = world.filter((n) => g.lookOf(n, 1, false).half > 0).length;
+            const other = g.graph.graphData().nodes.find((n) => n.url && !urls.has(String(n.url)) && !n.force);
+            out.other_drawn = other ? g.lookOf(other, 1, false).half > 0 : null;
+            return out;
+          } finally {
+            for (const o of own) { try { await d.trash(o.path); } catch (e) { /* gone */ } }
+            if (planted === "world") await plant("world-projection", false);
+            g.plantEgoInWorld = false; g.batchDirty = true;
+            c.dirty();
+          }
+        })()`, { timeout: 60000 });
+        const clean = await arm(null);
+        const world = await arm("world");
+        const drawn = await arm("drawn");
+        const c = clean || {};
+        return {
+          pass: ["pca", "umap", "single"].includes(c.method) && c.craft_projection === c.method && c.placed_by_ego >= 3
+                && c.directions && c.directions.compared >= 3 && c.directions.agree === c.directions.compared
+                && c.world_nodes_of_craft >= 1 && c.world_drawn === 0 && c.other_drawn === true
+                && !!world && world.craft_projection === "world" && world.placed_by_ego === 0
+                && !!drawn && drawn.world_drawn >= 1,
+          evidence: { clean, world, drawn },
+        };
+      },
+    },
+    {
+      id: "G-309",
+      asks: "the halo that slides, 2D only and ego only (PLUGIN_GOAL 81-84): a click on a plane panel's header node opens its halo -- the ego's retrieval for that note, cut to what fits the ring, laid out in polar coordinates: radius larger as similarity to the focus falls, angle by the results' similarity to one another (angular neighbours more alike than any two); the pointer moving outside the panel slides a cursor over the layout -- the result nearest it lit, a shortest path traced back to the focus; moving back the same way retraces; a fast short stroke travels at least 60% of a slow stroke three times longer; a click sticks the lit note on the plane; Escape closes it; planted (plantRankAngles) the angles are the retrieval's rank order",
+      async run() {
+        // 2026-11-01: "when we click on a computation graph artifact ... we see
+        // a polar-coordinate force-directed layout on similarity-based
+        // proximity diffs local to the node" -- "moving the mouse fast in a
+        // short distance is the same as moving it slow in a long distance".
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const until = async (ok, ms) => { for (let t = 0; t < ms && !(await ok()); t += 400) await sleep(400); return !!(await ok()); };
+          const plugin = app.plugins.getPlugin("domvec-bridge");
+          const SIDE = String(plugin.settings.sidecar).replace(/[/]+$/, "");
+          const H = { "content-type": "application/json", "X-Domvec-Client": "obsidian-plugin" };
+          const d = window.__domvecPlane, halo = window.__domvecHalo, c = window.__domvecCraft;
+          const g = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view, plane = g && g.plane();
+          if (!d || !halo || !plane) return { error: "no plane or halo" };
+          const stamp = Date.now(), NL = String.fromCharCode(10);
+          const texts = {
+            a: "The patricia trie compresses shared key prefixes; a radix tree stores keys by their common prefixes.",
+            b: "Radix trees and tries index string keys by prefix, merging single-child chains into one edge.",
+            c: "Bread rises because yeast ferments the flour's sugars; bake the loaf once the dough has doubled.",
+            d: "Sourdough bread uses a wild yeast starter; long fermentation gives the crumb its sour taste.",
+          };
+          const paths = Object.keys(texts).map((k) => "domvec/graph/g309 " + k + " " + stamp + ".md");
+          halo.plantRankAngles = ${planted};
+          const out = { planted: ${planted} };
+          try {
+            for (let i = 0; i < 4; i++) await d.create("notebook", { path: paths[i], text: "# g309" + NL + NL + Object.values(texts)[i] + NL });
+            // The ego set must hold them, embedded, before the ego can retrieve them.
+            c.dirty();
+            const ready = await until(async () => {
+              const r = await (await fetch(SIDE + "/search?q=" + encodeURIComponent(texts.a) + "&k=8&where=ego", { headers: H })).json();
+              return (r.hits || []).filter((h) => String(h.url).includes("g309") && String(h.url).includes(String(stamp))).length >= 3;
+            }, 60000);
+            out.ego_ready = ready;
+            // Open the halo: a click on A's header node.
+            const pa = d.panelOf(paths[0]);
+            const head = pa.card.querySelector(".domvec-plane-head-node"), hr = head.getBoundingClientRect();
+            const cx = hr.left + hr.width / 2, cy = hr.top + hr.height / 2;
+            head.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0, clientX: cx, clientY: cy }));
+            window.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, button: 0, clientX: cx, clientY: cy }));
+            await until(() => halo.focus === paths[0] && halo.nodes.length > 0, 10000);
+            out.opened = halo.focus === paths[0];
+            out.results = halo.nodes.length; out.cap = halo.stats.cap;
+            const e = await (await fetch(SIDE + "/ego", { headers: H })).json();
+            out.all_ego = halo.nodes.every((n) => e.urls.includes(n.url) || e.cids.includes(n.cid));
+            const byS = halo.nodes.slice().sort((x, y) => y.s - x.s);
+            out.radius_monotone = byS.every((n, i) => i === 0 || n.r >= byS[i - 1].r - 1e-6);
+            out.neighbour_sim = halo.stats.neighbour_sim; out.random_sim = halo.stats.random_sim;
+            const rankOrder = halo.nodes.map((_, i) => i);
+            const angleOrder = halo.nodes.map((n, i) => ({ i, t: ((n.theta % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI) })).sort((x, y) => x.t - y.t).map((x) => x.i);
+            const rot = angleOrder.indexOf(0);
+            out.rank_angles = rot >= 0 && rankOrder.every((v, k) => angleOrder[(rot + k) % angleOrder.length] === v);
+            // Slide: strokes outside the card.
+            const cr = pa.card.getBoundingClientRect();
+            let px = cr.right + 40, py = cr.top + 40;
+            const stroke = async (dx, dy, steps, wait) => {
+              const c0 = { ...halo.cursor };
+              window.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, clientX: px, clientY: py })); await sleep(300);
+              window.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, clientX: px, clientY: py })); await sleep(wait);
+              for (let k = 0; k < steps; k++) { px += dx; py += dy; window.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, clientX: px, clientY: py })); await sleep(wait); }
+              return Math.hypot(halo.cursor.x - c0.x, halo.cursor.y - c0.y);
+            };
+            // Towards the first result.
+            const t0 = halo.nodes[0], dir = Math.atan2(t0.y - halo.cursor.y, t0.x - halo.cursor.x);
+            const c0 = { ...halo.cursor };
+            await stroke(Math.cos(dir) * 6, Math.sin(dir) * 6, 6, 40);
+            const fwd = { ...halo.cursor };
+            await stroke(-Math.cos(dir) * 6, -Math.sin(dir) * 6, 6, 40);
+            out.retraced_px = Math.round(Math.hypot(halo.cursor.x - c0.x, halo.cursor.y - c0.y) * 10) / 10;
+            out.forward_px = Math.round(Math.hypot(fwd.x - c0.x, fwd.y - c0.y) * 10) / 10;
+            const fast = await stroke(3, 0, 5, 4);
+            await stroke(-3, 0, 5, 4);
+            const slow = await stroke(9, 0, 5, 90);
+            await stroke(-9, 0, 5, 90);
+            out.fast_short = Math.round(fast); out.slow_long = Math.round(slow);
+            // Navigate onto the first result and stick it.
+            for (let k = 0; k < 40 && halo.navigated < 0; k++) {
+              const n0 = halo.nodes[0], a = Math.atan2(n0.y - halo.cursor.y, n0.x - halo.cursor.x);
+              await stroke(Math.cos(a) * 5, Math.sin(a) * 5, 2, 20);
+            }
+            out.navigated = halo.navigated;
+            out.trace = halo.trace.slice();
+            out.trace_ends_on_it = halo.trace.length > 0 && halo.trace[halo.trace.length - 1] === halo.navigated;
+            const lit = halo.navigated >= 0 ? halo.nodes[halo.navigated] : null;
+            window.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true, button: 0, clientX: px, clientY: py }));
+            await sleep(1200);
+            const vault = "vault://" + app.vault.getName() + "/";
+            out.stuck = !!lit && lit.url.startsWith(vault) && !!d.panelOf(lit.url.slice(vault.length));
+            window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+            await sleep(200);
+            out.closed = halo.focus === "" && !plane.querySelector(".domvec-halo2d");
+            return out;
+          } finally {
+            halo.plantRankAngles = false;
+            halo.close();
+            for (const p of paths) { try { await d.trash(p); } catch (e) { /* gone */ } }
+            c.dirty();
+          }
+        })()`, { timeout: 150000 });
+        const clean = await arm(false);
+        const planted = await arm(true);
+        const c = clean || {};
+        return {
+          pass: c.ego_ready && c.opened && c.results >= 2 && c.all_ego && c.radius_monotone && c.neighbour_sim >= c.random_sim
+                && c.forward_px > 5 && c.retraced_px <= 1.5 && c.fast_short >= 0.6 * c.slow_long
+                && c.navigated >= 0 && c.trace_ends_on_it && c.stuck && c.closed
+                && !!planted && planted.rank_angles === true,
+          evidence: { clean, planted },
+        };
+      },
+    },
+    {
+      id: "G-307",
+      asks: "a node's inputs and outputs are linked to the ego OR the web by a toggle on the node (PLUGIN_GOAL 79): the panel's header carries the note's maps chip; clicked, the note's maps frontmatter flips; with maps ego, a cell's {ref} resolves within the ego set -- the recorded run's input is the ego note that answers it -- and the craft ends that I/O line on the ego's own node; with maps web the same ref resolves in the world; planted (no-maps) the toggle is ignored",
+      async run() {
+        // 2026-11-01: "the artifacts governing the computation graphs inputs and
+        // outputs are linked either to the ego or the web umap based on a
+        // panel/node toggle".
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const until = async (ok, ms) => { for (let t = 0; t < ms && !(await ok()); t += 400) await sleep(400); return !!(await ok()); };
+          const plugin = app.plugins.getPlugin("domvec-bridge");
+          const SIDE = String(plugin.settings.sidecar).replace(/[/]+$/, "");
+          const H = { "content-type": "application/json", "X-Domvec-Client": "obsidian-plugin" };
+          const plant = (name, on) => fetch(SIDE + "/plant", { method: "POST", headers: H, body: JSON.stringify({ name, on }) });
+          const d = window.__domvecPlane, c = window.__domvecCraft;
+          const g = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
+          if (!d || !c || !g) return { error: "no plane or craft" };
+          const NL = String.fromCharCode(10), F = String.fromCharCode(96).repeat(3), stamp = Date.now();
+          const vault = "vault://" + app.vault.getName() + "/";
+          const pa = "domvec/graph/g307 a " + stamp + ".md", pb = "domvec/graph/g307 b " + stamp + ".md";
+          const out = { planted: ${planted} };
+          if (${planted}) await plant("no-maps", true);
+          const mode0 = g.agent.mode;
+          try {
+            await d.create("notebook", { path: pa, text: "# ego notes" + NL + NL + "The patricia trie, kept in the ego: a radix tree of my own notes on prefix compression." + NL });
+            await d.create("notebook", { path: pb, text: F + "python {patricia trie}" + NL + "print(len(patricia_trie))" + NL + F + NL });
+            c.dirty();
+            out.a_in_ego = await until(async () => {
+              const r = await (await fetch(SIDE + "/search?q=" + encodeURIComponent("patricia trie") + "&k=8&where=ego", { headers: H })).json();
+              return (r.hits || []).some((h) => h.url === vault + pa);
+            }, 60000);
+            const fb = app.vault.getAbstractFileByPath(pb);
+            const chip = d.panelOf(pb).card.querySelector(".domvec-plane-maps");
+            out.chip = chip ? chip.textContent : null;
+            const run = async () => {
+              const v = d.viewOf(pb), n0 = (v.editor.getValue().match(/<!-- nb-output/g) || []).length;
+              await until(() => v.containerEl.querySelector(".domvec-run-fence"), 5000);
+              v.containerEl.querySelector(".domvec-run-fence").click();
+              await until(() => (v.editor.getValue().match(/<!-- nb-output/g) || []).length > n0 || v.editor.getValue().includes("count="), 30000);
+              await sleep(800);
+              const runs = (await (await fetch(SIDE + "/runs?note=" + encodeURIComponent(pb), { headers: H })).json()).runs || [];
+              return runs.length ? (runs[0].inputs || []).map((i) => i.url || i.cid) : [];
+            };
+            // ego: the chip clicked.
+            chip.click(); await until(() => app.metadataCache.getFileCache(fb)?.frontmatter?.maps === "ego", 5000);
+            out.fm_after_click = app.metadataCache.getFileCache(fb)?.frontmatter?.maps || null;
+            out.ego_inputs = await run();
+            out.ego_input_is_a = out.ego_inputs.includes(vault + pa);
+            if (!${planted}) {
+              g.agent.setMode("map"); c.dirty();
+              await until(() => c.stats.io_to_ego >= 1, 15000);
+              out.io_to_ego = c.stats.io_to_ego;
+              g.agent.setMode(mode0);
+            }
+            // web: clicked back.
+            d.panelOf(pb).card.querySelector(".domvec-plane-maps").click();
+            await until(() => app.metadataCache.getFileCache(fb)?.frontmatter?.maps === "web", 5000);
+            out.web_inputs = await run();
+            out.web_input_is_a = out.web_inputs.includes(vault + pa);
+            return out;
+          } finally {
+            if (${planted}) await plant("no-maps", false);
+            g.agent.setMode(mode0);
+            for (const p of [pa, pb]) { try { await d.trash(p); } catch (e) { /* gone */ } }
+            c.dirty();
+          }
+        })()`, { timeout: 150000 });
+        const clean = await arm(false);
+        const planted = await arm(true);
+        const c = clean || {};
+        return {
+          pass: c.a_in_ego && c.chip === "web" && c.fm_after_click === "ego" && c.ego_input_is_a && c.io_to_ego >= 1
+                && c.web_inputs.length >= 1 && !c.web_input_is_a
+                && !!planted && planted.a_in_ego && !planted.ego_input_is_a,
+          evidence: { clean, planted },
+        };
+      },
+    },
+    {
+      id: "G-308",
+      asks: "black-box containment, unfoldable recursively (PLUGIN_GOAL 80; mortegon M.3): in a slate on the plane, a right-click on a {ref} to a code module opens its rank 1 only -- its top-level classes and functions, each a {ref} node; a right-click on one of those opens ITS rank 1 beneath it (a class's methods), and on a method its signature; a right-click on an open one folds it again; the note's text never changes; planted (flat-box) the box opens flat -- every definition at once",
+      async run() {
+        // 2026-11-01: "adaptive black-box recursively unfoldable containment on
+        // references, good for unnesting complex and high-level code modules".
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const until = async (ok, ms) => { for (let t = 0; t < ms && !(await ok()); t += 200) await sleep(200); return !!(await ok()); };
+          const plugin = app.plugins.getPlugin("domvec-bridge");
+          const SIDE = String(plugin.settings.sidecar).replace(/[/]+$/, "");
+          const H = { "content-type": "application/json", "X-Domvec-Client": "obsidian-plugin" };
+          const plant = (name, on) => fetch(SIDE + "/plant", { method: "POST", headers: H, body: JSON.stringify({ name, on }) });
+          const d = window.__domvecPlane, cp = plugin.cockpit;
+          const NL = String.fromCharCode(10), T = String.fromCharCode(9);
+          const MOD = "code://repo/search.py";
+          const path = "domvec/graph/g308 box " + Date.now() + ".md";
+          const text = ["---", "domvec: slate", "---", "box", T + "module" + T + "{" + MOD + "}", ""].join(NL);
+          const out = { planted: ${planted} };
+          if (${planted}) await plant("flat-box", true);
+          try {
+            await d.create("slate", { path, text });
+            const v = d.viewOf(path);
+            await sleep(900); cp.decorate(); await sleep(300);
+            const cm = v.editor.cm;
+            const rows = () => [...v.contentEl.querySelectorAll(".domvec-slate-reveal-line")].map((r) => r.textContent);
+            const refNode = (ref) => [...v.contentEl.querySelectorAll(".domvec-slate-reveal-ref")].find((s) => s.dataset.ref === ref);
+            const right = (el) => el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, button: 2, clientX: el.getBoundingClientRect().left + 3, clientY: el.getBoundingClientRect().top + 3 }));
+            // The module's {ref} on its line: right-click it.
+            const ln = cm.state.doc.line(5), at = ln.text.indexOf("{"), c = cm.coordsAtPos(ln.from + at + 2);
+            await cp.slateGesture(v, (c.left + c.right) / 2, (c.top + c.bottom) / 2, document.elementFromPoint((c.left + c.right) / 2, (c.top + c.bottom) / 2));
+            await until(() => rows().length > 0, 8000);
+            out.rank1 = rows();
+            if (${planted}) return out;
+            out.rank1_all_refs = out.rank1.every((r) => /^(class|def) /.test(r.trim()));
+            // One rank down: a class.
+            const cls = out.rank1.map((r) => r.trim()).find((r) => r.startsWith("class "));
+            const clsName = cls ? cls.split(" ")[1] : "";
+            const n1 = refNode(MOD + "#" + clsName);
+            out.class_node = !!n1;
+            if (n1) right(n1);
+            await until(() => rows().length > out.rank1.length, 8000);
+            out.rank2 = rows().slice();
+            out.nested_under_class = out.rank2.some((r) => /def /.test(r) && r.length > 0) && out.rank2.length > out.rank1.length;
+            // A method: its signature.
+            const meth = [...v.contentEl.querySelectorAll(".domvec-slate-reveal-ref")].find((s) => (s.dataset.ref || "").startsWith(MOD + "#" + clsName + "."));
+            out.method = meth ? meth.dataset.ref : null;
+            if (meth) right(meth);
+            await until(() => rows().some((r) => r.includes("signature")), 8000);
+            out.signature = rows().find((r) => r.includes("signature")) || null;
+            // Fold the class again: its rows go.
+            const n1b = refNode(MOD + "#" + clsName);
+            if (n1b) right(n1b);
+            await until(() => rows().length === out.rank1.length, 8000);
+            out.folded_back = rows().length === out.rank1.length;
+            out.text_unchanged = v.editor.getValue() === text;
+            return out;
+          } finally {
+            if (${planted}) await plant("flat-box", false);
+            try { await d.trash(path); } catch (e) { /* gone */ }
+          }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false);
+        const planted = await arm(true);
+        const c = clean || {};
+        return {
+          pass: (c.rank1 || []).length >= 3 && c.rank1_all_refs && c.class_node && c.nested_under_class && !!c.method && !!c.signature
+                && c.folded_back && c.text_unchanged
+                && !!planted && (planted.rank1 || []).length > (c.rank1 || []).length,
+          evidence: { clean, planted },
         };
       },
     },
@@ -9340,7 +10103,7 @@ export function makeChecks(env) {
             window.__domvecPlantNoRefs = planted;
             const path = folder + "/g279-" + (planted ? "p" : "c") + stamp + ".md";
             const f = await app.vault.create(path, "# cell" + NL + NL + F + "python {" + srcName + "}" + NL + "print(len(" + v + ") > 0, '" + stamp + "' in " + v + ")" + NL + F + NL);
-            const leaf = app.workspace.getLeaf("tab");
+            const leaf = window.__domvecPlane.leaf();
             const out = { planted };
             try {
               await leaf.openFile(f, { state: { mode: "source", source: false } });
@@ -9359,7 +10122,7 @@ export function makeChecks(env) {
             } finally {
               window.__domvecPlantNoRefs = false;
               try { leaf.detach(); } catch (e) {}
-              try { await app.vault.delete(f); } catch (e) {}
+              try { await window.__domvecPlane.trash(f); } catch (e) {}
             }
             return out;
           };
@@ -9373,7 +10136,7 @@ export function makeChecks(env) {
                           "except Exception as e:", "    wrote = 'refused' if 'read-only' in str(e) else str(e)",
                           "print(len(hits) > 0, pages > 0, wrote)"].join(NL);
             const f = await app.vault.create(path, "# db" + NL + NL + F + "python" + NL + code + NL + F + NL);
-            const leaf = app.workspace.getLeaf("tab");
+            const leaf = window.__domvecPlane.leaf();
             const out = { planted };
             try {
               await leaf.openFile(f, { state: { mode: "source", source: false } });
@@ -9387,7 +10150,7 @@ export function makeChecks(env) {
             } finally {
               await fetch(SIDE + "/plant", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "no-base-objects", on: false }) });
               try { leaf.detach(); } catch (e) {}
-              try { await app.vault.delete(f); } catch (e) {}
+              try { await window.__domvecPlane.trash(f); } catch (e) {}
             }
             return out;
           };
@@ -9395,7 +10158,7 @@ export function makeChecks(env) {
             return { src: srcUrl, clean: await arm(false), planted: await arm(true),
                      db: await dbArm(false), db_planted: await dbArm(true) };
           } finally {
-            try { await app.vault.delete(src); } catch (e) {}
+            try { await window.__domvecPlane.trash(src); } catch (e) {}
             if (srcUrl) { try { await fetch(SIDE + "/purge", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url: srcUrl }) }); } catch (e) {} }
             plugin.settings.indexedNotes = (plugin.settings.indexedNotes || []).filter((p) => !p.includes("g279"));
             await plugin.saveSettings();
@@ -9723,7 +10486,7 @@ export function makeChecks(env) {
             const code = ["r = search('radix tree', db=True, duckduckgo=True, k=3)",
                           "print(sum(1 for h in r if h['source'] == 'db'), sum(1 for h in r if h.get('pending')))"].join(NL);
             const f = await app.vault.create(path, "# search" + NL + NL + F + "python" + NL + code + NL + F + NL);
-            const leaf = app.workspace.getLeaf("tab");
+            const leaf = window.__domvecPlane.leaf();
             const out = { planted };
             const web0 = plugin.askStats.web;
             try {
@@ -9744,7 +10507,7 @@ export function makeChecks(env) {
               browser.searchWeb = realSearch;
               await plant(false);
               try { leaf.detach(); } catch (e) {}
-              try { await app.vault.delete(f); } catch (e) {}
+              try { await window.__domvecPlane.trash(f); } catch (e) {}
             }
             return out;
           };
@@ -9840,7 +10603,7 @@ export function makeChecks(env) {
             out.cockpit_reopened = !cv.contentEl.querySelector(".domvec-slate-circle");
             const NL2 = String.fromCharCode(10), TB2 = String.fromCharCode(9);
             const f = await app.vault.create("domvec-checks/g280 keys " + Date.now() + ".md", "---" + NL2 + "domvec: slate" + NL2 + "---" + NL2 + "listener" + NL2 + TB2 + "input" + TB2 + "{keys}" + NL2);
-            const leaf = app.workspace.getLeaf("tab");
+            const leaf = window.__domvecPlane.leaf();
             try {
               g.pointerOver = true; window.dispatchEvent(new KeyboardEvent("keydown", { key: "Shift", bubbles: true })); g.pointerOver = over0;
               await leaf.openFile(f, { state: { mode: "source", source: false } }); await sleep(800); c.decorate(); await sleep(200);
@@ -9856,7 +10619,7 @@ export function makeChecks(env) {
               c.plantKeysCockpitOnly = false;
               try { leaf.detach(); } catch (e) {}
               try { window.localStorage.removeItem("domvec.slate.folds:" + f.path); } catch (e) {}
-              try { await app.vault.delete(f); } catch (e) {}
+              try { await window.__domvecPlane.trash(f); } catch (e) {}
             }
             return out;
           };
@@ -9983,7 +10746,7 @@ export function makeChecks(env) {
               window.__domvecPlantNoReservoirIndex = false;
               for (const f of made) {
                 try { await fetch(SIDE + "/purge", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url: urlOf(f.path) }) }); } catch (e) {}
-                try { await app.vault.delete(f); } catch (e) {}
+                try { await window.__domvecPlane.trash(f); } catch (e) {}
               }
             }
           };
@@ -9996,7 +10759,7 @@ export function makeChecks(env) {
             for (let i = 0; i < 40 && !nodeOf(urlOf(path)); i++) await sleep(1000);
             const before = await inStore(urlOf(path));
             window.__domvecPlantKeepDeleted = planted;
-            try { await app.vault.modify(f, "---" + NL + "domvec: slate" + NL + "---" + NL + "deleted probe" + NL + TB + "x" + TB + "2" + NL); await app.vault.delete(f); }
+            try { await app.vault.modify(f, "---" + NL + "domvec: slate" + NL + "---" + NL + "deleted probe" + NL + TB + "x" + TB + "2" + NL); await window.__domvecPlane.trash(f); }
             finally { window.__domvecPlantKeepDeleted = false; }
             await sleep(7000);                       // past the 4 s index debounce
             const after = await inStore(urlOf(path));
@@ -10033,7 +10796,7 @@ export function makeChecks(env) {
           const varName = srcName.replace(/[^A-Za-z0-9_]+/g, "_").replace(/^_+|_+$/g, "").toLowerCase();
           const cellPath = folder + "/g292 cell " + stamp + ".md";
           const cell = await app.vault.create(cellPath, "# cell" + NL + NL + F + "python {" + srcName + "}" + NL + "print(len(" + varName + "))" + NL + F + NL);
-          const leaf = app.workspace.getLeaf("tab");
+          const leaf = window.__domvecPlane.leaf();
           const out = {};
           const edgeTo = () => {
             const ns = v.graph.graphData().nodes;
@@ -10071,7 +10834,7 @@ export function makeChecks(env) {
             try { leaf.detach(); } catch (e) {}
             for (const f of [cell, src]) {
               try { await fetch(SIDE + "/purge", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url: urlOf(f.path) }) }); } catch (e) {}
-              try { await app.vault.delete(f); } catch (e) {}
+              try { await window.__domvecPlane.trash(f); } catch (e) {}
             }
           }
           return out;
@@ -10093,6 +10856,9 @@ export function makeChecks(env) {
           if (!c || !g || !g.searchField) return { error: "no cockpit or graph" };
           const v = await c.open(); await sleep(1200);
           const ed = v.editor, saved = ed.getValue(), a = g.agent, thr0 = a.throttle;
+          // A plan flies in the ego view only (the map view holds it): a mode
+          // left in map by a reader -- or an earlier check -- flew 0 legs.
+          const mode0 = a.mode; a.setMode("ego");
           const cam = g.graph.camera(), ctl = g.graph.controls();
           const savedCam = { p: cam.position.clone(), t: ctl.target.clone() };
           const line = (k) => ed.getValue().split(String.fromCharCode(10)).findIndex((l) => l.trim().split(String.fromCharCode(9))[0] === k);
@@ -10147,7 +10913,7 @@ export function makeChecks(env) {
           try {
             return { clean: await arm(false), planted: await arm(true) };
           } finally {
-            a.plantNoAdvance = false; a.play(false); a.release();
+            a.plantNoAdvance = false; a.play(false); a.release(); a.setMode(mode0);
             ed.setValue(saved); await sleep(500);
             a.setThrottle(thr0); g.searchField.input.value = ""; await g.searchField.run();
             cam.position.copy(savedCam.p); ctl.target.copy(savedCam.t); ctl.update?.();
@@ -10182,7 +10948,7 @@ export function makeChecks(env) {
           const slateText = "---" + NL + "domvec: slate" + NL + "---" + NL + "probe" + NL + TB + "input" + TB + "{" + tName + "}" + NL + TB + "note" + TB + "plain" + NL;
           const slate = await app.vault.create(folder + "/g278 slate " + stamp + ".md", slateText);
           const open = async () => {
-            const leaf = app.workspace.getLeaf("tab");
+            const leaf = window.__domvecPlane.leaf();
             await leaf.openFile(slate, { state: { mode: "source", source: false } });
             await sleep(800); c.decorate(); await sleep(300);
             return leaf;
@@ -10236,7 +11002,7 @@ export function makeChecks(env) {
             try { window.localStorage.removeItem("domvec.slate.folds:" + slate.path); } catch (e) {}
             for (const f of [slate, target]) {
               try { await fetch(SIDE + "/purge", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url: urlOf(f.path) }) }); } catch (e) {}
-              try { await app.vault.delete(f); } catch (e) {}
+              try { await window.__domvecPlane.trash(f); } catch (e) {}
             }
           }
           return out;
@@ -10263,7 +11029,7 @@ export function makeChecks(env) {
           const text = "---" + NL + "domvec: slate" + NL + "---" + NL + "probe" + NL + TB + "query" + TB + "radix" + NL + TB + "source" + TB + "{somewhere}" + NL + TB + "search" + NL + TB + TB + "db" + TB + "true" + NL + TB + TB + "k" + TB + "8" + NL;
           const fields = 6, roots = 1;
           const f = await app.vault.create(folder + "/g281 slate " + stamp + ".md", text);
-          const open = async () => { const leaf = app.workspace.getLeaf("tab"); await leaf.openFile(f, { state: { mode: "source", source: false } }); await sleep(800); c.decorate(); await sleep(300); return leaf; };
+          const open = async () => { const leaf = window.__domvecPlane.leaf(); await leaf.openFile(f, { state: { mode: "source", source: false } }); await sleep(800); c.decorate(); await sleep(300); return leaf; };
           const dbl = (v) => {
             const t = v.contentEl.querySelector(".domvec-slate-graph") || v.contentEl.querySelector(".cm-content");
             t.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, cancelable: true, button: 0 }));
@@ -10315,7 +11081,7 @@ export function makeChecks(env) {
             c.plantNoGraphForm = false;
             try { leaf && leaf.detach(); } catch (e) {}
             try { window.localStorage.removeItem("domvec.slate.folds:" + f.path); } catch (e) {}
-            try { await app.vault.delete(f); } catch (e) {}
+            try { await window.__domvecPlane.trash(f); } catch (e) {}
           }
           return out;
         })()`, { timeout: 60000 });
@@ -10355,7 +11121,7 @@ export function makeChecks(env) {
             const cellPath = folder + "/g282 cell " + stamp + ".md";
             const cell = await app.vault.create(cellPath, "# cell" + NL + NL + F + "python {" + srcName + "}" + NL + "print(len(" + varName + "))" + NL + F + NL);
             made.push(cell);
-            const leaf = app.workspace.getLeaf("tab");
+            const leaf = window.__domvecPlane.leaf();
             await leaf.openFile(cell, { state: { mode: "source", source: false } });
             await until(() => !!leaf.view.containerEl.querySelector(".domvec-run-fence"), 8000);
             leaf.view.containerEl.querySelector(".domvec-run-fence").click();
@@ -10403,11 +11169,15 @@ export function makeChecks(env) {
               const click = () => { const [x, y] = pointOf(); for (const type of ["pointerdown", "pointerup"]) v.canvasEl.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 0 })); };
               clean.picked = v.bisectorAt(...pointOf());
               click(); await sleep(1500);
-              const leaf = app.workspace.getLeavesOfType("markdown").find((l) => l.view?.file?.path === cr.cellPath);
+              // On the 2D plane (PLUGIN_GOAL 65), as every panel opens now.
+              const onPlane = () => (window.__domvecPlane?.leaves() || []).find((l) => l.view?.file?.path === cr.cellPath)
+                || app.workspace.getLeavesOfType("markdown").find((l) => l.view?.file?.path === cr.cellPath);
+              const leaf = onPlane();
               clean.opened = !!leaf;
+              clean.on_plane = !!window.__domvecPlane?.panelOf(cr.cellPath);
               clean.graph_form = !!leaf && !!leaf.view.contentEl.querySelector(".domvec-slate-graph");
               click(); await sleep(600);
-              clean.closed = !app.workspace.getLeavesOfType("markdown").some((l) => l.view?.file?.path === cr.cellPath);
+              clean.closed = !onPlane();
               // Rank-dominance: a right-click on the bisector folds its lines; another unfolds.
               const lines = () => v.drawableSignalEdges(v.graph.graphData().nodes).filter((e) => e.source === b.at || e.target === b.at).length;
               const rclick = (planted) => { v.plantNoDominance = planted; const [x, y] = pointOf(); v.canvasEl.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 2 })); v.plantNoDominance = false; };
@@ -10421,7 +11191,7 @@ export function makeChecks(env) {
             v.plantNoPerimeter = false; v.plantNoBisector = false;
             for (const f of made) {
               try { await fetch(SIDE + "/purge", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url: urlOf(f.path) }) }); } catch (e) {}
-              try { await app.vault.delete(f); } catch (e) {}
+              try { await window.__domvecPlane.trash(f); } catch (e) {}
             }
           }
           return out;
@@ -10464,7 +11234,7 @@ export function makeChecks(env) {
             const path = folder + "/g283 roll " + tag + " " + stamp + ".md";
             const f = await app.vault.create(path, "# roll" + NL + NL + F + "python {" + srcName + "}" + NL + "print(len(" + varName + "))" + NL + F + NL);
             made.push(f);
-            const leaf = app.workspace.getLeaf("tab");
+            const leaf = window.__domvecPlane.leaf();
             await leaf.openFile(f, { state: { mode: "source", source: false } });
             await until(() => !!leaf.view.containerEl.querySelector(".domvec-play-fence"), 8000);
             return { f, leaf, path };
@@ -10503,7 +11273,7 @@ export function makeChecks(env) {
             window.__domvecPlantNoRollout = false;
             for (const f of made) {
               try { await fetch(SIDE + "/purge", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url: urlOf(f.path) }) }); } catch (e) {}
-              try { await app.vault.delete(f); } catch (e) {}
+              try { await window.__domvecPlane.trash(f); } catch (e) {}
             }
           }
           return out;
@@ -10533,7 +11303,7 @@ export function makeChecks(env) {
           const folder = "domvec-checks";
           if (!app.vault.getAbstractFileByPath(folder)) await app.vault.createFolder(folder);
           const f = await app.vault.create(folder + "/g284 halo " + Date.now() + ".md", "---" + NL + "domvec: slate" + NL + "---" + NL + "halo probe" + NL + TB + "topic" + TB + "radix tree compression" + NL + TB + "source" + TB + "{somewhere}" + NL);
-          const leaf = app.workspace.getLeaf("tab");
+          const leaf = window.__domvecPlane.leaf();
           await leaf.openFile(f, { state: { mode: "source", source: false } });
           app.workspace.setActiveLeaf(leaf, { focus: true });
           await sleep(600);
@@ -10625,7 +11395,7 @@ export function makeChecks(env) {
             try { leaf.detach(); } catch (e) {}
             // The note was indexed as a reservoir node (G-291): out of the store too.
             try { await fetch(SIDE + "/purge", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url: "vault://" + app.vault.getName() + "/" + f.path }) }); } catch (e) {}
-            try { await app.vault.delete(f); } catch (e) {}
+            try { await window.__domvecPlane.trash(f); } catch (e) {}
           }
           return out;
         })()`, { timeout: 90000 });
@@ -10913,7 +11683,7 @@ export function makeChecks(env) {
             const path = folder + "/pn3-" + (planted ? "p" : "c") + Date.now() + ".md";
             const text = ["# cells", "", F + "powershell", "Write-Output " + mark, F, "", F + "python", "print(" + "6*7" + ")", F, ""].join(NL);
             const f = await app.vault.create(path, text);
-            const leaf = app.workspace.getLeaf("tab");
+            const leaf = window.__domvecPlane.leaf();
             const t0 = terms().length;
             const out = { planted };
             try {
@@ -10943,7 +11713,7 @@ export function makeChecks(env) {
               window.__domvecPlantNoTermFence = false;
               for (const t of terms().slice(t0)) { try { t.detach(); } catch (e) {} }
               try { leaf.detach(); } catch (e) {}
-              try { await app.vault.delete(f); } catch (e) {}
+              try { await window.__domvecPlane.trash(f); } catch (e) {}
             }
             return out;
           };
@@ -10982,7 +11752,7 @@ export function makeChecks(env) {
             window.__domvecPlantFileOutput = planted;
             const path = folder + "/pm4-" + (planted ? "p" : "c") + Date.now() + ".md";
             const f = await app.vault.create(path, "# A note" + NL + NL + "Some prose." + NL);
-            const leaf = app.workspace.getLeaf("tab");
+            const leaf = window.__domvecPlane.leaf();
             const out = { planted };
             const terms0 = app.workspace.getLeavesOfType("domvec-terminal-view").length;
             try {
@@ -11045,7 +11815,7 @@ export function makeChecks(env) {
               const terms = app.workspace.getLeavesOfType("domvec-terminal-view");
               for (const t of terms.slice(terms0)) { try { t.detach(); } catch (e) {} }
               try { leaf.detach(); } catch (e) {}
-              try { await app.vault.delete(f); } catch (e) {}
+              try { await window.__domvecPlane.trash(f); } catch (e) {}
             }
             return out;
           };
@@ -11094,7 +11864,7 @@ export function makeChecks(env) {
             const path = folder + "/d3-" + (planted ? "p" : "c") + Date.now() + ".md";
             const text = ["---", "domvec: chunk", "cid: " + hit.cid, "---", "", FENCE + "domvec", "cid: " + hit.cid, FENCE, "", md, ""].join(NL);
             const f = await app.vault.create(path, text);
-            const leaf = app.workspace.getLeaf("tab");
+            const leaf = window.__domvecPlane.leaf();
             const out = { planted };
             try {
               await leaf.openFile(f, { state: { mode: "source", source: false } });
@@ -11135,7 +11905,7 @@ export function makeChecks(env) {
               window.__domvecPlantNoHalves = false;
               plugin.noteHalves.delete(path);
               try { leaf.detach(); } catch (e) {}
-              try { await app.vault.delete(f); } catch (e) {}
+              try { await window.__domvecPlane.trash(f); } catch (e) {}
             }
             return out;
           };
@@ -11198,7 +11968,7 @@ export function makeChecks(env) {
               }
             } finally {
               window.__domvecPlantNoNoteIndex = false;
-              try { await app.vault.delete(f); } catch (e) {}
+              try { await window.__domvecPlane.trash(f); } catch (e) {}
               try { await fetch(plugin.settings.sidecar.replace(/[/]+$/, "") + "/purge", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url }) }); } catch (e) {}
               plugin.settings.indexedNotes = (plugin.settings.indexedNotes || []).filter((p) => p !== path);
               await plugin.saveSettings();
