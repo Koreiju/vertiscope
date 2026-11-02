@@ -40,6 +40,10 @@ export interface PlaneHost {
   openBrowser?(): void;
   /** A click (no drag) on a panel's header node: its halo (item 81). */
   headerClick?(path: string): void;
+  /** The soft-link field's query: the halo laid out for it (item 90). */
+  haloQuery?(path: string, query: string): void;
+  /** The ego's notes (the craft's), for the sooner / later fans (item 90). */
+  egoNotes?(): string[];
 }
 
 export interface PlanePanel { path: string; card: HTMLElement; leaf: any; head: HTMLElement | null; undrag: () => void; cleanup?: () => void }
@@ -177,6 +181,19 @@ export class PlaneDesk {
           chip.setText(m === "ego" ? "ego" : "web"); chip.toggleClass("is-ego", m === "ego");
         };
         paint();
+        // The cell's tools (item 90): the ego's cells before / after it,
+        // fanned out; similar -- the halo; a soft-link field.
+        const tool = (text: string, cls: string, act: () => void) => {
+          const b = head!.createSpan({ cls: "domvec-plane-cell-tool " + cls, text });
+          b.onmousedown = (e) => e.stopPropagation();
+          b.onclick = (e) => { e.preventDefault(); e.stopPropagation(); act(); };
+        };
+        tool("‹ sooner", "is-sooner", () => { void this.fan(file.path, -1); });
+        tool("later ›", "is-later", () => { void this.fan(file.path, 1); });
+        tool("similar", "is-similar", () => this.host.headerClick?.(file.path));
+        const field = head.createEl("input", { cls: "domvec-plane-softlink", attr: { placeholder: "soft links…" } });
+        field.onmousedown = (e) => e.stopPropagation();
+        field.onkeydown = (e) => { if (e.key === "Enter" && field.value.trim()) { e.preventDefault(); this.host.haloQuery?.(file.path, field.value); } };
         chip.onmousedown = (e) => e.stopPropagation();
         chip.onclick = async (e) => {
           e.preventDefault(); e.stopPropagation();
@@ -193,10 +210,12 @@ export class PlaneDesk {
       const undrag = makeDraggable(card, plane, "domvec-plane-card:" + file.path, this.place, () => this.host.headerClick?.(fpath));
       clampToPlane(card, plane);
       p = { path: file.path, card, leaf, head, undrag };
-      // More in the same card beneath the note (the browser under its cockpit).
-      if (opts.mount) { const undo = await opts.mount(card); if (undo) p.cleanup = undo; clampToPlane(card, plane); }
+      // The panel is the note's as soon as the note shows; anything mounted
+      // beneath it (the browser under its cockpit) arrives after -- a browser
+      // booting for seconds once hid the panel itself (G-300).
       this.panels.push(p);
       this.hook(p);
+      if (opts.mount) { const pp = p; const undo = await opts.mount(card); if (undo) pp.cleanup = undo; clampToPlane(card, plane); }
       const path = file.path;
       card.addEventListener("pointerdown", () => this.focus(path), true);
       card.addEventListener("focusin", () => this.focus(path), true);
@@ -209,6 +228,13 @@ export class PlaneDesk {
       this.host.changed?.();
     } else {
       p.card.removeClass("is-collapsed");
+      // Opened before by a path that mounted nothing beneath it (a remembered
+      // panel restored at load): mounted now -- the browser's slate had come
+      // back alone, with no browser under it (G-300).
+      if (opts.mount && !p.cleanup) { const pp = p; const undo = await opts.mount(p.card); if (undo) pp.cleanup = undo; }
+      // Asked for again: decorated again (a panel restored at load, before the
+      // slate decorations were hooked, drew its title as plain text -- G-300).
+      this.host.changed?.();
     }
     this.focus(file.path);
     if (opts.line !== undefined && opts.line >= 0) {
@@ -293,6 +319,54 @@ export class PlaneDesk {
   /** The delete tool by file (the checks' cleanup goes through it, item 66). */
   async trash(file: TFile | string): Promise<boolean> {
     return this.remove(typeof file === "string" ? file : file.path);
+  }
+
+  /** The sooner / later fans open now: note -> { dir, the notes it opened }. */
+  fans = new Map<string, { dir: number; paths: string[] }>();
+  fanStats = { opened: 0, closed: 0, last: [] as string[] };
+  /** Planted (item 90): a fan ignores creation order -- sooner and later alike. */
+  plantFanUnordered = false;
+  /** The ego's cells made before (`dir` -1) or after (+1) this one, by their
+   *  creation time, opened as minimized nodes on an arc beside its card; the
+   *  same tool again folds the fan away (item 90). */
+  async fan(path: string, dir: -1 | 1, n = 5): Promise<string[]> {
+    const key = path + "|" + dir;
+    const open = this.fans.get(key);
+    if (open) {
+      for (const q of open.paths) this.closePath(q);
+      this.fans.delete(key); this.fanStats.closed++;
+      return [];
+    }
+    const me = this.app.vault.getAbstractFileByPath(path);
+    const plane = this.host.plane(), p = this.panelOf(path);
+    if (!(me instanceof TFile) || !plane || !p) return [];
+    const t0 = me.stat.ctime;
+    // Cells only: the cockpit and the browsers' cockpits are instruments,
+    // not cells (a browser's slate fanned open would lose its browser).
+    const pool = (this.host.egoNotes?.() || []).filter((q) => q !== path && q !== COCKPIT_PATH && !q.startsWith("domvec/browser"))
+      .map((q) => this.app.vault.getAbstractFileByPath(q)).filter((f): f is TFile => f instanceof TFile)
+      .filter((f) => this.plantFanUnordered || (dir < 0 ? f.stat.ctime < t0 : f.stat.ctime > t0))
+      .sort((a, b) => Math.abs(a.stat.ctime - t0) - Math.abs(b.stat.ctime - t0)).slice(0, n);
+    const cr = p.card.getBoundingClientRect(), pr = plane.getBoundingClientRect();
+    const cx = (dir < 0 ? cr.left : cr.right) - pr.left, cy = cr.top - pr.top + 24;
+    const opened: string[] = [];
+    for (let i = 0; i < pool.length; i++) {
+      const f = pool[i];
+      const was = !!this.panelOf(f.path);
+      await this.open(f);
+      const q = this.panelOf(f.path);
+      if (!q) continue;
+      if (!q.card.hasClass("is-collapsed")) this.toggleMinimized(f.path);
+      const a = (-0.6 + (1.2 * i) / Math.max(1, pool.length - 1)) * (pool.length > 1 ? 1 : 0);
+      const r = 120 + 30 * i;
+      q.card.style.left = `${Math.max(0, cx + dir * r * Math.cos(a) - (dir < 0 ? 70 : 0))}px`;
+      q.card.style.top = `${Math.max(0, cy + r * Math.sin(a))}px`;
+      clampToPlane(q.card, plane);
+      if (!was) opened.push(f.path);
+    }
+    this.fans.set(key, { dir, paths: opened });
+    this.fanStats.opened++; this.fanStats.last = pool.map((f) => f.path);
+    return pool.map((f) => f.path);
   }
 
   /** Minimized: the card is its header node alone (items 54-55). */

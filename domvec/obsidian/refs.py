@@ -33,7 +33,24 @@ def _page_text(store, url: str):
     return "\n\n".join(c.md or "" for c in chunks)[:MAX_CHARS], [c.cid for c in chunks[:50]]
 
 
-def resolve(workspace, name: str, allow=None) -> Optional[Dict]:
+def titled(workspace, name: str) -> bool:
+    """Is there an artifact CALLED `name` in the store -- a vault note by its
+    file name, a page by its title (or the title's head, "Radix tree" for
+    "Radix tree - Wikipedia")? What a slate's `{ref}` may name besides its own
+    module (G-297: a reference to NOTHING is the error, not one to the store)."""
+    want = (name or "").strip().lower()
+    if not want:
+        return False
+    for url, title in workspace.store.page_titles().items():
+        if url.startswith("vault://") and url.rsplit("/", 1)[-1].rsplit(".", 1)[0].lower() == want:
+            return True
+        t = (title or "").strip().lower()
+        if t == want or t.startswith(want + " -") or t.startswith(want + " |") or t.startswith(want + " —"):
+            return True
+    return False
+
+
+def resolve(workspace, name: str, allow=None, search=None) -> Optional[Dict]:
     """The node `name` refers to, with its text: `{kind, url, cids, value}`.
 
     `allow(url, cid)` (PLUGIN_GOAL 79): which artifacts a ref may resolve to --
@@ -61,7 +78,8 @@ def resolve(workspace, name: str, allow=None) -> Optional[Dict]:
     hits = []
     for attempt in range(3):
         try:
-            hits = workspace.search(name, k=1 if allow is None else 32)
+            # `search`: the ranking to ask -- the ego's own, under `maps: ego`.
+            hits = search(name) if search is not None else workspace.search(name, k=1 if allow is None else 32)
             break
         except Exception as e:                      # noqa: BLE001
             import sys, time
@@ -107,7 +125,7 @@ def rank1(text: str, limit: int = 12) -> List[str]:
     return out
 
 
-def bind(workspace, names: List[str], sample: Optional[int] = None, allow=None) -> Dict:
+def bind(workspace, names: List[str], sample: Optional[int] = None, allow=None, search=None) -> Dict:
     """The prelude that binds each named ref in a kernel, and what was bound.
 
     `sample` (G-283, the rollout; RESERVOIR_DESIGN §4: "a cell whose `{ref}`
@@ -118,7 +136,7 @@ def bind(workspace, names: List[str], sample: Optional[int] = None, allow=None) 
     """
     lines, bound, inputs = [], [], []
     for k, name in enumerate(dict.fromkeys(n for n in names if n and n.strip())):
-        got = resolve(workspace, name, allow)
+        got = resolve(workspace, name, allow, search)
         var = var_name(name)
         if got is None:
             bound.append({"name": name, "var": var, "kind": "unresolved"})

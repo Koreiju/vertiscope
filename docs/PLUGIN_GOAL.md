@@ -4896,6 +4896,122 @@ score are products today.*
 *(86) Every prompt and detail goes into the requirement documents and the
 software designs.*
 
+*And next (2026-11-01, late, while items 71-86 were being built and checked;
+the middle paragraphs arrived as pasted text inside the message, continuing
+the reader's own sentences):*
+
+> The differentiation between browser code-side interface panels and the linked other panels of the actual web browser itself means that several instances of browsers (each with several tabs) could be running their own sessions at a time, and depending on whcih one is being interacted with, all the 3D graph features follow. In terms of interacting with browsers, their feedback to the 3D graph motions/fly-to features, and the panel-view, it will be assumed that selected/opened browser panels "stick" to the computation graph plane like any other.
+
+> The above, I think, somewhat aligns with the interpretation for the functional-object undirected memory link with forward-inverse lookups and code-compiled/memory-based referenced computation graphs where the code and the instances of class definitions are clearly discernable as independent entities that are inherently linked to each other in the computation graph.
+
+> a note should be made, too, that depending on how one jupyter cell level of computational/panel and "add panel" links, there could also be an input field that retrieves directly on soft links with other cells in the ego graph beside the 'new cell' and 'delete cell' and perhaps also 'later cell' to add a fan-out 2d view of other cells created after that cell, along with the "sooner cell", with 'similar cell' being the toggle for our 2d retrieval
+
+> polar coordinate force directed where mouse velocity vectors inform the polar coordinate focal node navigation, where nodes being navigated to (closest in 2d) are then the retrieval keys for the dynamic force directed polar coordinate and radially normalised similarity distance of k-many similar node/panels of the similar most datatype and layer of abstraction (think pagerank for datatypes and type inheritance across the full package and codespace of the node/panel in focus) layout mechanism (unpack the layers of abstraction of this sentence to get the accurate picture of what i mean and why it naturally extends from the navigational layout over jupyter cells to code level types, functions, and code structures. perhaps here is where some additional retrieval structures like pagerank on a global library ast and so on may be the right extension of graph representations to our retrieval schemes situated within their syntaxes and structures of abstraction that are both named string subtypes and adjacency based graph structures. we might extend the ast to include perhaps cst's (https://pypi.org/project/libcst/) too/instead to this end, and maintain a complete code graph web within our web view as well, which includes umap-networks on said semantic measures on our triple retrieval mechanism with both frequency and encoder based vectorization and our compact/concrete efficient code grapg representations which translates csts and our patricia trie to graph based ontologies cleanly within our node/panel dialect of our computation grapgh, with our computation graph showing actively evolving egoic memory structures being mapped from recursive calls on hard-typed computation graph iterative-recursive unrolls over the general space of the reservoir's computation graph mapped bidirectionally with undirected lookup/indexing links on our functional-object dialect of recursive graph layouts on computationally and semantically interlinked node/panels in both our 2d and 3d ego graph views, with 3d being a unique umap to its non holonomic origin and similar more compact scaling that enables zoom to pass into the microscope of the ego, and 2d being the precise graph editor that users interact with to build new reservoir readouts on the computation graph of recursive-iterative data flows. note these computations must be clearly visible lights from the active triples being computed on predicate-subject-predicate, at both 2d and 3d views. ensure you study our own assumptions on type inferences and typed data panels for our interactive and instant feedback stuff for high-frequency computation graph rollouts (ie seeing immediate search results if i were to unnest black box panels to obtain the computation graph for that component).
+
+*Read as, in order (numbered on from 86):*
+
+*(87) MANY BROWSERS. The browser's CODE-SIDE interface panel (its cockpit
+slate, item 71) is distinct from the panels of the actual web browser it is
+linked to; so SEVERAL browser instances, each with several tabs, may run
+their own sessions at once -- and whichever one the reader is interacting
+with, ALL the 3D graph's features follow it (hover, fly-to, panels, the
+search). (88) Selected / opened browser panels STICK to the computation-graph
+plane like any other panel.*
+
+*(89) This matches the functional-object reading: an undirected memory link
+with forward-inverse lookups between code and instance -- a class's
+DEFINITION (code) and its INSTANCES (a browser session is an instance of the
+browser's code) are discernibly independent entities, inherently linked in
+the computation graph.*
+
+*(90) CELL-LEVEL TOOLS beside "new cell" and "delete cell": an INPUT FIELD
+that retrieves directly over SOFT LINKS to other cells in the ego graph;
+"LATER CELL" -- a fan-out 2D view of the cells created AFTER this one;
+"SOONER CELL" -- those created before; and "SIMILAR CELL" -- the toggle for
+the 2D retrieval (the sliding halo, items 81-84).*
+
+*(91) THE HALO'S NAVIGATION, restated: polar, force-directed; the mouse's
+velocity vectors steer the navigation about the focal node; the node
+navigated to (nearest in 2D) becomes the NEW retrieval key -- the layout
+re-forms around it: radially normalised similarity distance to k-many
+similar node/panels OF THE MOST SIMILAR DATATYPE AND LAYER OF ABSTRACTION.
+(92) Type-aware similarity: "think pagerank for datatypes and type
+inheritance across the full package and codespace" of the focused
+node/panel -- a PageRank over types and their inheritance, so a cell is
+near cells of its kind, a function near functions, a class near its
+relatives -- the navigational layout over cells extending naturally down to
+code-level types, functions and structures.*
+
+*(93) CODE GRAPH RETRIEVAL STRUCTURES: PageRank over a GLOBAL LIBRARY AST
+(and the like) as the extension of the retrieval graph -- retrieval situated
+in the syntaxes and abstraction structures that are both NAMED STRING
+SUBTYPES and ADJACENCY GRAPHS. (94) Concrete syntax trees: extend (or
+replace) the AST with CSTs (libcst, https://pypi.org/project/libcst/).*
+
+*(95) A COMPLETE CODE GRAPH WEB inside the web view: UMAP networks over the
+triple retrieval's semantic measures (frequency and encoder vectors) and the
+compact concrete code-graph representations; CSTs and the patricia trie
+translated cleanly into graph ontologies within the node/panel dialect.*
+
+*(96) THE EGO'S MEMORY, LIVE: the computation graph shows actively evolving
+egoic memory structures, mapped from recursive calls in hard-typed
+computation-graph iterative-recursive unrolls over the reservoir, mapped
+BIDIRECTIONALLY with undirected lookup / indexing links in the
+functional-object dialect -- in both the 2D and 3D ego views.*
+
+*(97) 3D = the ego's own UMAP, unique to its non-holonomic origin, compactly
+scaled so that ZOOM PASSES INTO THE MICROSCOPE of the ego. (98) 2D = the
+precise graph editor in which the reader builds new reservoir readouts on
+the computation graph of recursive-iterative data flows.*
+
+*(99) VISIBLE COMPUTATION: the active triples being computed
+(predicate-subject-predicate, as written) are clearly visible LIGHTS in both
+the 2D and the 3D views.*
+
+*(100) TYPES AND INSTANT FEEDBACK: study the project's own assumptions on
+TYPE INFERENCE and TYPED DATA PANELS (mortegon E.6 "functions infer input
+and output types as they emerge", M.9 pydantic templates) for interactive,
+instant feedback in high-frequency rollouts -- e.g. unnesting a black-box
+panel (item 80) shows that component's computation graph AND immediate
+search results for it.*
+
+*And, while those were being designed:*
+
+> make sure you track all verbatims too
+
+*Read as: (101) a standing instruction -- every message of the reader's is
+transcribed here verbatim, as it arrives and before it is built from,
+including the short ones and the corrections; a requirement row cites the
+item it decomposes.*
+
+*And, answering RESERVOIR_DESIGN question 9.10 (libcst, item 94):*
+
+> approval to install granted
+
+*Read as: (102) libcst is to be installed and the code graph built on
+concrete syntax trees as well (G-318).*
+
+*And next (2026-11-02), with two screenshots -- the cockpit slate in its graph
+form (the nodes in one indented column, each line from its parent, `view ego`,
+`throttle 55`, `keys {keys}` ... `search`, `query`, `db true`, `duckduckgo
+false`, `where all`, `k 8`), and the throttle's slider drawn as a separate
+bar above the field:*
+
+> also, what's going on here? the graph layout is supposed to be general force-directed form. also, none of the fields are editable. also, since we have key:value duals with visual links in place of triples, out computation graph form can likely appreciate keeping these structured knowledge-fields in graph form as they are.
+
+> The number is supposed to extend outwards with a horizontal-scrollable-slider in-place of the hovered continuous float within its detected ranges.
+
+*Read as: (103) a DEFECT in the graph form (G-281): it is laid out as an
+indented tree, one column -- it is to be a general FORCE-DIRECTED layout;
+(104) a DEFECT: in graph form no field is editable -- each node's value is
+edited in place (mortegon 7.3.4: single left-click edits); (105) the graph
+form KEEPS the structured key:value fields as they are -- each node a
+`key value` dual, the links standing in for the triples -- rather than
+splitting key and value apart; (106) a DEFECT in the slider (item 33): it is
+not a separate bar above the field -- the hovered NUMBER itself extends
+outward into a horizontal, scrollable slider, in place, over the value's
+detected range.*
+
 ---
 
 ## Standing instructions carried in the verbatim

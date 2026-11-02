@@ -80,6 +80,7 @@ export interface CraftHost {
 const CRAFT_COLOUR = 0xa882ff;       // Obsidian's link purple: the variables' colour on the panels (item 55)
 const CELL_COLOUR = 0xe8e8e8;
 const IO_COLOUR = 0xffd27a;          // the signal's colour (G-292)
+const LIT_MAT = new THREE.MeshBasicMaterial({ color: IO_COLOUR });
 
 /** A unit direction for the k-th of n, spread evenly on the sphere. */
 function fib(k: number, n: number): V3 {
@@ -117,7 +118,7 @@ export class Craft {
   nodes: CraftNode[] = [];
   edges: CraftEdge[] = [];
   stats = { builds: 0, notes: 0, cells: 0, trees: 0, web: 0, edges: 0, io: 0, refs: 0, visible: false, opened: 0, closed: 0,
-            projection: "", placed_by_ego: 0, io_to_ego: 0,
+            projection: "", placed_by_ego: 0, io_to_ego: 0, lit: 0,
             anchor: null as V3 | null, radius: 0 };
   /** Planted (item 67): the craft's nodes unlinked -- no edges inside it. */
   plantNoLinks = false;
@@ -291,6 +292,20 @@ export class Craft {
     this.stats.placed_by_ego = byEgo;
   }
 
+  /** Computation in flight (item 99): a note's node and its I/O lines lit. */
+  lit = new Set<string>();
+  setLit(path: string, on: boolean): void {
+    if (on) this.lit.add(path); else this.lit.delete(path);
+    const n = this.nodes.find((x) => x.id === "craft:" + path);
+    if (n?.mesh) {
+      if (on && !n.mesh.userData.base) n.mesh.userData.base = n.mesh.material;
+      n.mesh.material = on ? LIT_MAT : (n.mesh.userData.base || n.mesh.material);
+      n.mesh.scale.setScalar(on ? 1.8 : 1);
+    }
+    if (this.ioLines) this.ioLines.material.opacity = this.lit.size ? 0.95 : 0.4;
+    this.stats.lit = this.lit.size;
+  }
+
   /** A note's I/O toggle (item 79): its `maps` frontmatter, "web" by default. */
   mapsOf(path: string): string {
     const f = this.host.app.vault.getAbstractFileByPath(path);
@@ -331,6 +346,8 @@ export class Craft {
       const m = new THREE.Mesh(geo[n.kind], mat[n.kind]);
       (m as any).__craft = n.id;
       n.mesh = m;
+      // A computation still in flight stays lit through a rebuild.
+      if (n.kind === "note" && this.lit.has(n.path)) { m.userData.base = m.material; m.material = LIT_MAT; m.scale.setScalar(1.8); }
       this.group.add(m);
       if (n.kind === "ego" || n.kind === "note" || n.kind === "web") this.labels.push(this.label(n, R));
     }
@@ -365,7 +382,8 @@ export class Craft {
     const show = this.plantAlwaysDrawn || this.host.mode() !== "ego";
     this.group.visible = show;
     this.stats.visible = show;
-    if (!show) return;
+    // Placed and counted drawn or not: hidden in the ego view, its I/O still
+    // counts (a count taken only when drawn read 0 in the ego view, G-306).
     const at = this.where();
     this.stats.anchor = { x: Math.round(at.x), y: Math.round(at.y), z: Math.round(at.z) };
     const open = this.nodes.filter((n) => (n.kind === "note" || n.kind === "ego") && this.host.isOpen(n.path)).map((n) => n.id);

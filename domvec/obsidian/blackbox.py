@@ -37,6 +37,32 @@ def _find(tree: ast.Module, qual: str) -> Optional[ast.AST]:
     return node
 
 
+#: Planted (item 100): the box opens untyped -- no `name: Type` rows.
+PLANT_UNTYPED = [False]
+
+
+def _un(node) -> str:
+    try:
+        return ast.unparse(node) if node is not None else ""
+    except Exception:                               # noqa: BLE001
+        return ""
+
+
+def _params(fn):
+    """(name, annotation, default) per parameter, in order."""
+    a = fn.args
+    pos = list(a.posonlyargs) + list(a.args)
+    defaults = [None] * (len(pos) - len(a.defaults)) + list(a.defaults)
+    out = [(p.arg, _un(p.annotation), _un(d) if d is not None else "") for p, d in zip(pos, defaults)]
+    if a.vararg:
+        out.append(("*" + a.vararg.arg, _un(a.vararg.annotation), ""))
+    for p, d in zip(a.kwonlyargs, a.kw_defaults):
+        out.append((p.arg, _un(p.annotation), _un(d) if d is not None else ""))
+    if a.kwarg:
+        out.append(("**" + a.kwarg.arg, _un(a.kwarg.annotation), ""))
+    return out
+
+
 def _sig(fn) -> str:
     try:
         return fn.name + "(" + ast.unparse(fn.args) + ")"
@@ -60,9 +86,26 @@ def unfold(url: str, source: str) -> Optional[Dict]:
     lines: List[str] = []
     if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
         lines.append("signature" + tab + _sig(node))
+        # The TYPED panel form (mortegon DM 9.6.1, M.3; PLUGIN_GOAL 100): one
+        # row per input, `name: Type = default`, and the output's type --
+        # annotations top-down; an unannotated slot says so (`?`), to be
+        # inferred bottom-up from what flows through it (mortegon E.6, O.15).
+        if not PLANT_UNTYPED[0]:
+            for name, ann, default in _params(node):
+                if name in ("self", "cls"):
+                    continue
+                lines.append("%s: %s%s" % (name, ann or "?", (" = " + default) if default else ""))
+            lines.append("return: " + (_un(node.returns) or "?"))
         doc = ast.get_docstring(node) or ""
         if doc:
             lines.append("doc" + tab + doc.strip().splitlines()[0][:120])
+    elif isinstance(node, ast.ClassDef) and not PLANT_UNTYPED[0]:
+        for b in node.bases:
+            lines.append("super: " + (_un(b) or "?"))
+        for st in node.body:
+            if isinstance(st, ast.AnnAssign) and isinstance(st.target, ast.Name):
+                lines.append("%s: %s%s" % (st.target.id, _un(st.annotation) or "?",
+                                           (" = " + (_un(st.value) or "")[:40]) if st.value is not None else ""))
     if PLANT_FLAT[0]:
         kids = [n for n in ast.walk(node) if isinstance(n, _DEF) and n is not node]
     else:

@@ -30,7 +30,7 @@ import { App, TFile } from "obsidian";
 import type { PlaneDesk } from "./planepanels";
 import type { Sidecar } from "./sidecar";
 
-interface HNode { key: string; url: string; cid: string; label: string; s: number; r: number; theta: number; x: number; y: number }
+interface HNode { key: string; url: string; cid: string; label: string; preview: string; s: number; r: number; theta: number; x: number; y: number }
 
 export interface HaloHost { app: App; desk: PlaneDesk; sidecar: () => Sidecar | null; plane: () => HTMLElement | null }
 
@@ -44,7 +44,7 @@ export class PlaneHalo {
   navigated = -1;
   trace: number[] = [];
   stats = { opened: 0, closed: 0, results: 0, laid: 0, slides: 0, travelled: 0, navigated: 0, stuck: 0, last_stuck: "",
-            r0: 0, R: 0, cap: 0, neighbour_sim: 0, random_sim: 0 };
+            r0: 0, R: 0, cap: 0, neighbour_sim: 0, random_sim: 0, rekeyed: 0 };
   /** Planted (item 81): angles in the retrieval's rank order, the lateral similarity ignored. */
   plantRankAngles = false;
   private svg: SVGSVGElement | null = null;
@@ -62,7 +62,8 @@ export class PlaneHalo {
     return this.open(path);
   }
 
-  async open(path: string): Promise<boolean> {
+  /** `query`: the soft-link field's text (item 90) in place of the note's own words. */
+  async open(path: string, query = ""): Promise<boolean> {
     this.close();
     const sc = this.host.sidecar(), plane = this.host.plane(), p = this.host.desk.panelOf(path);
     const f = this.host.app.vault.getAbstractFileByPath(path);
@@ -79,19 +80,36 @@ export class PlaneHalo {
     const cap = Math.max(3, Math.min(16, Math.floor((2 * Math.PI * (r0 + R * 0.6)) / slot)));
     this.stats.r0 = r0; this.stats.R = Math.round(R); this.stats.cap = cap;
     // The ego's retrieval for the note's own words.
-    const text = (await this.host.app.vault.cachedRead(f)).replace(/^---[\s\S]*?\n---\n?/, "").replace(/[`{}#>*_]/g, " ").trim().slice(0, 240);
+    const text = query.trim() ? query.trim() : (await this.host.app.vault.cachedRead(f)).replace(/^---[\s\S]*?\n---\n?/, "").replace(/[`{}#>*_]/g, " ").trim().slice(0, 240);
     const url = "vault://" + this.host.app.vault.getName() + "/" + path;
     const got: any = await sc.search(text || f.basename, { k: cap + 1, where: "ego" });
     if (this.focus !== path) return false;
     const hits = ((got && got.hits) || []).filter((h: any) => h.url !== url).slice(0, cap);
+    this.focusKey = url; this.history = [];
+    await this.place(hits);
+    if (this.focus !== path) return false;
+    this.cursor = { ...this.centre };
+    this.navigated = -1; this.trace = [];
+    this.draw(plane);
+    window.addEventListener("pointermove", this.onMove, true);
+    window.addEventListener("pointerdown", this.onDown, true);
+    window.addEventListener("keydown", this.onKey, true);
+    return true;
+  }
+
+  /** Results laid out round the current centre: radius by similarity, angle
+   *  by the results' own similarity to one another. */
+  private async place(hits: any[]): Promise<void> {
+    const sc = this.host.sidecar()!;
+    const r0 = this.stats.r0, R = this.stats.R;
     this.stats.results = hits.length;
     const top = Math.max(1e-9, ...hits.map((h: any) => Number(h.score) || 0));
     this.nodes = hits.map((h: any) => {
       const s = Math.max(0, Number(h.score) || 0) / top;
       const isNote = String(h.url || "").startsWith("vault://");
       const label = isNote ? String(h.url).split("/").pop()!.replace(/\.md$/, "") : String(h.preview || h.cid).split("\n")[0].slice(0, 24);
-      return { key: isNote ? String(h.url) : String(h.cid), url: String(h.url || ""), cid: String(h.cid || ""), label, s,
-               r: r0 + (1 - s) * R, theta: 0, x: 0, y: 0 };
+      return { key: isNote ? String(h.url) : String(h.cid), url: String(h.url || ""), cid: String(h.cid || ""), label,
+               preview: String(h.preview || ""), s, r: r0 + (1 - s) * R, theta: 0, x: 0, y: 0 };
     });
     // Lateral similarity, from the store.
     const pw: any = this.nodes.length > 1 ? await sc.egoPost("ego/pairwise" as any, { keys: this.nodes.map((n) => n.key) }) : null;
@@ -101,13 +119,6 @@ export class PlaneHalo {
       return i !== undefined && j !== undefined ? Number(pw.sim[i][j]) : 0;
     }));
     this.layout();
-    this.cursor = { ...this.centre };
-    this.navigated = -1; this.trace = [];
-    this.draw(plane);
-    window.addEventListener("pointermove", this.onMove, true);
-    window.addEventListener("pointerdown", this.onDown, true);
-    window.addEventListener("keydown", this.onKey, true);
-    return true;
   }
 
   /** Angles: chained by similarity, spread, then relaxed. */
@@ -163,7 +174,9 @@ export class PlaneHalo {
     const cr = p.card.getBoundingClientRect();
     if (e.clientX >= cr.left && e.clientX <= cr.right && e.clientY >= cr.top && e.clientY <= cr.bottom) return;
     const v = Math.hypot(dx, dy) / dt;                   // px per ms
-    const gain = Math.max(0.5, Math.min(3, 0.5 + v / 0.8));
+    // Speed scales the step: a fast short stroke travels as far as a slow
+    // long one (item 82), within bounds.
+    const gain = Math.max(0.3, Math.min(4, v / 0.15));
     const lim = this.stats.r0 + this.stats.R + 30;
     let x = this.cursor.x + dx * gain * 0.6, y = this.cursor.y + dy * gain * 0.6;
     const ox = x - this.centre.x, oy = y - this.centre.y, d = Math.hypot(ox, oy);
@@ -175,14 +188,46 @@ export class PlaneHalo {
     this.draw(plane);
   }
 
-  /** The navigated result: nearest the cursor, within reach; its path traced. */
+  /** The navigated result: nearest the cursor, within reach; its path traced.
+   *  Rested on (0.6 s), it becomes the new retrieval key (item 91). */
   navigate(): void {
     let best = -1, bd = 46;
     this.nodes.forEach((h, i) => { const d = Math.hypot(h.x - this.cursor.x, h.y - this.cursor.y); if (d < bd) { bd = d; best = i; } });
-    if (best !== this.navigated && best >= 0) this.stats.navigated++;
+    if (best !== this.navigated) {
+      if (best >= 0) this.stats.navigated++;
+      window.clearTimeout(this.dwell);
+      if (best >= 0 && !this.plantNoRekey) { const at = best; this.dwell = window.setTimeout(() => { if (this.navigated === at) void this.rekey(at); }, 600); }
+    }
     this.navigated = best;
     this.trace = best >= 0 ? this.shortestPath(best) : [];
   }
+
+  /** Foci passed through, oldest first: the trace back runs through them. */
+  history: { key: string; x: number; y: number }[] = [];
+  /** Planted (item 91): the layout never re-forms round the navigated node. */
+  plantNoRekey = false;
+  private dwell = 0;
+  /** The navigated node as the new FOCUS (item 91): its own ego retrieval laid
+   *  out round it -- same datatype ranks nearer through the additive score --
+   *  the foci already passed through left out, the trace extended. */
+  async rekey(i: number): Promise<boolean> {
+    const sc = this.host.sidecar(), plane = this.host.plane(), h = this.nodes[i];
+    if (!sc || !plane || !h) return false;
+    this.history.push({ key: this.focusKey || this.focus, x: this.centre.x, y: this.centre.y });
+    this.focusKey = h.key;
+    this.centre = { x: h.x, y: h.y };
+    const seen = new Set(this.history.map((q) => q.key).concat([h.key, "vault://" + this.host.app.vault.getName() + "/" + this.focus]));
+    const got: any = await sc.search((h.preview || h.label).slice(0, 240), { k: this.stats.cap + seen.size, where: "ego" });
+    const hits = ((got && got.hits) || []).filter((x: any) => !seen.has(String(x.url).startsWith("vault://") ? String(x.url) : String(x.cid))).slice(0, this.stats.cap);
+    await this.place(hits);
+    this.cursor = { ...this.centre };
+    this.navigated = -1; this.trace = [];
+    this.stats.rekeyed++;
+    this.draw(plane);
+    return true;
+  }
+  /** The key of the current focus (the opened panel's note, or a re-keyed node). */
+  focusKey = "";
 
   /** Dijkstra from the focus (-1) over the halo: focus -> each result at
    *  1 - s, result -> its two most similar at 1 - sim. */
@@ -243,10 +288,10 @@ export class PlaneHalo {
       return e;
     };
     for (const h of this.nodes) el("line", { x1: this.centre.x, y1: this.centre.y, x2: h.x, y2: h.y, class: "ray" });
-    if (this.trace.length) {
-      const pts = [this.centre, ...this.trace.map((i) => this.nodes[i])].map((q) => `${q.x},${q.y}`).join(" ");
-      el("polyline", { points: pts, class: "trace" });
-    }
+    // The trace back: through every focus passed, then to the navigated one.
+    const back = [...this.history.map((q) => ({ x: q.x, y: q.y })), this.centre, ...this.trace.map((i) => this.nodes[i])];
+    if (back.length > 1) el("polyline", { points: back.map((q) => `${q.x},${q.y}`).join(" "), class: "trace" });
+    for (const q of this.history) el("circle", { cx: q.x, cy: q.y, r: 5, class: "node past" });
     this.nodes.forEach((h, i) => {
       el("circle", { cx: h.x, cy: h.y, r: 8, class: i === this.navigated ? "node lit" : "node" });
       el("text", { x: h.x + 11, y: h.y + 4, class: "label" }, h.label);
@@ -262,6 +307,7 @@ export class PlaneHalo {
     window.removeEventListener("pointerdown", this.onDown, true);
     window.removeEventListener("keydown", this.onKey, true);
     this.svg?.remove(); this.svg = null;
-    this.nodes = []; this.navigated = -1; this.trace = [];
+    window.clearTimeout(this.dwell);
+    this.nodes = []; this.navigated = -1; this.trace = []; this.history = []; this.focusKey = "";
   }
 }

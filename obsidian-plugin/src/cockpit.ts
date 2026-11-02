@@ -809,25 +809,62 @@ export class Cockpit {
   }
 
   /** The dialect's one slider: over a number's value while hovered, gone when left. */
-  private showSlider(fl: SlateLine, e: MouseEvent): void {
+  /** The detected range of a continuous field (item 106): the named ones as
+   *  they are; a fraction 0..1; else up to the value's next power of ten
+   *  (symmetric about zero for a negative one). */
+  static rangeOf(key: string, value: number): { lo: number; hi: number; step: number } {
+    const named: Record<string, [number, number]> = { throttle: [0, 100], k: [1, 50] };
+    if (named[key]) return { lo: named[key][0], hi: named[key][1], step: 1 };
+    const isInt = Number.isInteger(value);
+    if (!isInt && value >= 0 && value <= 1) return { lo: 0, hi: 1, step: 0.01 };
+    const m = Math.pow(10, Math.max(1, Math.ceil(Math.log10(Math.abs(value) + 1e-9))));
+    return { lo: value < 0 ? -m : 0, hi: m, step: isInt ? 1 : m / 100 };
+  }
+  sliderStats = { shown: 0, slid: 0, wheel: 0, last: null as any };
+  /** The hovered NUMBER extends outward into a horizontal slider, in place
+   *  (PLUGIN_GOAL 106: "the number is supposed to extend outwards with a
+   *  horizontal-scrollable-slider in-place of the hovered continuous float
+   *  within its detected ranges") -- not a bar above it: the strip starts
+   *  where the number is drawn, at its line's height, the live number at its
+   *  left; the wheel scrolls it a step at a time. */
+  private showSlider(fl: SlateLine, _e: MouseEvent): void {
     const v: any = this.view();
-    if (!v) return;
-    const range: Record<string, [number, number]> = { throttle: [0, 100], k: [1, 50] };
-    const [lo, hi] = range[fl.key] || [0, Math.max(10, Number(fl.value) * 2)];
-    if (!this.slider) {
-      this.slider = document.body.createDiv({ cls: "domvec-slate-slider" });
-      this.slider.addEventListener("mouseleave", () => { this.slider?.remove(); this.slider = null; });
-    }
-    const s = this.slider;
-    s.empty();
+    const cm = v?.editor?.cm;
+    if (!v || !cm) return;
+    const ln = cm.state.doc.line(fl.line + 1);
+    const a = cm.coordsAtPos(ln.from + fl.valueFrom);
+    if (!a) return;
+    const { lo, hi, step } = Cockpit.rangeOf(fl.key, Number(fl.value));
+    if (this.slider && this.slider.dataset.line === String(fl.line)) return;
+    this.slider?.remove();
+    const s = document.body.createDiv({ cls: "domvec-slate-slider" });
+    this.slider = s;
+    s.dataset.line = String(fl.line);
+    s.addEventListener("mouseleave", () => { s.remove(); if (this.slider === s) this.slider = null; });
+    const num = s.createSpan({ cls: "domvec-slate-slider-num", text: fl.value.trim() });
     const input = s.createEl("input", { type: "range" });
-    input.min = String(lo); input.max = String(hi); input.step = "1"; input.value = String(Number(fl.value));
-    input.oninput = () => {
+    input.min = String(lo); input.max = String(hi); input.step = String(step); input.value = String(Number(fl.value));
+    const write = (x: number) => {
+      const val = Math.max(lo, Math.min(hi, Math.round(x / step) * step));
+      const shown = step < 1 ? String(Math.round(val * 1000) / 1000) : String(Math.round(val));
+      num.setText(shown);
+      input.value = String(val);
       const fresh = parseSlate(v.editor.getValue()).find((f) => f.line === fl.line);
-      if (fresh) this.slide(fresh, Number(input.value));
+      if (fresh) this.slide(fresh, Number(shown));
+      this.sliderStats.slid++;
     };
-    s.style.left = `${Math.round(e.clientX - 60)}px`;
-    s.style.top = `${Math.round(e.clientY - 34)}px`;
+    input.oninput = () => write(Number(input.value));
+    s.addEventListener("wheel", (we: WheelEvent) => {
+      we.preventDefault(); we.stopPropagation();
+      const d = Math.abs(we.deltaX) > Math.abs(we.deltaY) ? we.deltaX : -we.deltaY;
+      this.sliderStats.wheel++;
+      write(Number(input.value) + (d > 0 ? step : -step));
+    }, { passive: false });
+    s.style.left = Math.round(a.left) + "px";
+    s.style.top = Math.round(a.top) + "px";
+    s.style.height = Math.max(18, Math.round(a.bottom - a.top)) + "px";
+    this.sliderStats.shown++;
+    this.sliderStats.last = { key: fl.key, lo, hi, step, left: Math.round(a.left), top: Math.round(a.top) };
   }
 
   unload(): void { this.slider?.remove(); this.slider = null; this.undock(); }

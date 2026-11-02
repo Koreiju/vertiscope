@@ -8423,7 +8423,7 @@ export function makeChecks(env) {
           try {
             await until(() => !!plane.querySelector('.domvec-plane-tool[data-kind="browser"]'), 4000);
             plane.querySelector('.domvec-plane-tool[data-kind="browser"]').click();
-            await until(() => !!bp.view() && !!bp.slateView(), 8000);
+            await until(() => !!bp.view() && !!bp.slateView(), 20000);
             const p = d.panelOf("domvec/browser.md");
             out.one_card = !!p && plane.contains(p.card) && p.card.contains(bp.browserLeaf.containerEl);
             out.browser_type = bp.view()?.getViewType?.();
@@ -8462,11 +8462,13 @@ export function makeChecks(env) {
             await until(() => !bp.view().offlineFor, 10000);
             out.scope_live = !bp.view().offlineFor;
             // Collapse to its header node.
-            const title = p.card.querySelector(".domvec-var-title");
-            title.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, button: 2 }));
+            // A right-click WHERE the title is: the slate finds its line by position.
+            const title = p.card.querySelector(".domvec-var-title"), tr = title.getBoundingClientRect();
+            title.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, button: 2, clientX: tr.left + tr.width / 2, clientY: tr.top + tr.height / 2 }));
             await until(() => p.card.classList.contains("is-collapsed"), 3000);
             out.collapsed = p.card.classList.contains("is-collapsed") && bp.browserLeaf.containerEl.offsetHeight === 0;
-            title && p.card.querySelector(".domvec-slate-circle-dot")?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, button: 2 }));
+            const dot = p.card.querySelector(".domvec-slate-circle-dot");
+            if (dot) { const q = dot.getBoundingClientRect(); dot.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, button: 2, clientX: q.left + q.width / 2, clientY: q.top + q.height / 2 })); }
             await sleep(500);
             out.stats = { ...bp.stats };
             return out;
@@ -8707,6 +8709,8 @@ export function makeChecks(env) {
           };
           const paths = Object.keys(texts).map((k) => "domvec/graph/g309 " + k + " " + stamp + ".md");
           halo.plantRankAngles = ${planted};
+          // Re-keying is G-316's: here the layout under test must hold still.
+          halo.plantNoRekey = true;
           const out = { planted: ${planted} };
           try {
             for (let i = 0; i < 4; i++) await d.create("notebook", { path: paths[i], text: "# g309" + NL + NL + Object.values(texts)[i] + NL });
@@ -8753,8 +8757,8 @@ export function makeChecks(env) {
             await stroke(-Math.cos(dir) * 6, -Math.sin(dir) * 6, 6, 40);
             out.retraced_px = Math.round(Math.hypot(halo.cursor.x - c0.x, halo.cursor.y - c0.y) * 10) / 10;
             out.forward_px = Math.round(Math.hypot(fwd.x - c0.x, fwd.y - c0.y) * 10) / 10;
-            const fast = await stroke(3, 0, 5, 4);
-            await stroke(-3, 0, 5, 4);
+            const fast = await stroke(3, 0, 5, 0);
+            await stroke(-3, 0, 5, 0);
             const slow = await stroke(9, 0, 5, 90);
             await stroke(-9, 0, 5, 90);
             out.fast_short = Math.round(fast); out.slow_long = Math.round(slow);
@@ -8776,7 +8780,7 @@ export function makeChecks(env) {
             out.closed = halo.focus === "" && !plane.querySelector(".domvec-halo2d");
             return out;
           } finally {
-            halo.plantRankAngles = false;
+            halo.plantRankAngles = false; halo.plantNoRekey = false;
             halo.close();
             for (const p of paths) { try { await d.trash(p); } catch (e) { /* gone */ } }
             c.dirty();
@@ -8819,20 +8823,25 @@ export function makeChecks(env) {
           const mode0 = g.agent.mode;
           try {
             await d.create("notebook", { path: pa, text: "# ego notes" + NL + NL + "The patricia trie, kept in the ego: a radix tree of my own notes on prefix compression." + NL });
-            await d.create("notebook", { path: pb, text: F + "python {patricia trie}" + NL + "print(len(patricia_trie))" + NL + F + NL });
+            // A ref the WORLD answers better (Wikipedia's Radix tree) and the
+            // ego answers with A alone: the toggle is then what decides.
+            await d.create("notebook", { path: pb, text: F + "python {radix tree}" + NL + "print(len(radix_tree))" + NL + F + NL });
             c.dirty();
             out.a_in_ego = await until(async () => {
-              const r = await (await fetch(SIDE + "/search?q=" + encodeURIComponent("patricia trie") + "&k=8&where=ego", { headers: H })).json();
+              const r = await (await fetch(SIDE + "/search?q=" + encodeURIComponent("radix tree") + "&k=8&where=ego", { headers: H })).json();
               return (r.hits || []).some((h) => h.url === vault + pa);
             }, 60000);
             const fb = app.vault.getAbstractFileByPath(pb);
             const chip = d.panelOf(pb).card.querySelector(".domvec-plane-maps");
             out.chip = chip ? chip.textContent : null;
+            // A run's own record: wait for the output's run count to CHANGE
+            // (waiting for any output read the previous run's inputs).
+            const countOf = (t) => { const m = /<!-- nb-output[^>]*count=(\\d+)/.exec(t); return m ? Number(m[1]) : -1; };
             const run = async () => {
-              const v = d.viewOf(pb), n0 = (v.editor.getValue().match(/<!-- nb-output/g) || []).length;
+              const v = d.viewOf(pb), c0 = countOf(v.editor.getValue());
               await until(() => v.containerEl.querySelector(".domvec-run-fence"), 5000);
               v.containerEl.querySelector(".domvec-run-fence").click();
-              await until(() => (v.editor.getValue().match(/<!-- nb-output/g) || []).length > n0 || v.editor.getValue().includes("count="), 30000);
+              await until(() => countOf(v.editor.getValue()) !== c0, 30000);
               await sleep(800);
               const runs = (await (await fetch(SIDE + "/runs?note=" + encodeURIComponent(pb), { headers: H })).json()).runs || [];
               return runs.length ? (runs[0].inputs || []).map((i) => i.url || i.cid) : [];
@@ -8906,7 +8915,8 @@ export function makeChecks(env) {
             await until(() => rows().length > 0, 8000);
             out.rank1 = rows();
             if (${planted}) return out;
-            out.rank1_all_refs = out.rank1.every((r) => /^(class|def) /.test(r.trim()));
+            // Definitions, besides the search's instant "found" rows (item 100).
+            out.rank1_all_refs = out.rank1.filter((r) => !/^found/.test(r.trim())).every((r) => /^(class|def) /.test(r.trim()));
             // One rank down: a class.
             const cls = out.rank1.map((r) => r.trim()).find((r) => r.startsWith("class "));
             const clsName = cls ? cls.split(" ")[1] : "";
@@ -8942,6 +8952,399 @@ export function makeChecks(env) {
                 && c.folded_back && c.text_unchanged
                 && !!planted && (planted.rank1 || []).length > (c.rank1 || []).length,
           evidence: { clean, planted },
+        };
+      },
+    },
+    {
+      id: "G-301",
+      asks: "one scope ladder, chunk -> page -> live browser (PLUGIN_GOAL 72): in the browser panel on the plane, the wheel over its header node steps the slate's scope -- in: live -> page (the page rebuilt from the store) -> chunk (one chunk, drawn as a chunk note's fence draws it, in the browser's place); out: back to page and to the live browser; the address kept throughout; planted (plantUnbound) the scope is written but nothing follows",
+      async run() {
+        // 2026-11-01: "originally designed with the intent of seamlessly
+        // flowing between chunk-level rendering/interactions and the full
+        // webpage and *then* the actual browser itself".
+        const fixtures = await serveFixtures();
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const until = async (ok, ms) => { for (let t = 0; t < ms && !(await ok()); t += 250) await sleep(250); return !!(await ok()); };
+          const bp = window.__domvecBrowserPanel, d = window.__domvecPlane;
+          const g = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view, plane = g && g.plane();
+          if (!bp || !d || !plane) return { error: "no browser panel or plane" };
+          const PAGE = ${JSON.stringify(fixtures.origin + "/media_kinds.html?g301=")} + (${planted} ? "p" : "c") + Date.now();
+          const out = { planted: ${planted} };
+          try {
+            await bp.open(PAGE);
+            const v = bp.view();
+            await until(() => String(v.webview?.getURL?.() || "").includes("g301="), 15000);
+            const shown = String(v.webview.getURL());
+            await until(async () => { const i = await v.sidecar.offlineInfo(shown); return !!(i && i.opens); }, 40000);
+            bp.plantUnbound = ${planted};
+            const p = d.panelOf("domvec/browser.md");
+            await until(() => !!p.card.querySelector(".domvec-var-title"), 10000);
+            const head = p.card.querySelector(".domvec-var-title");
+            const wheel = (dy) => head.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: dy }));
+            const scopeVal = () => { const l = bp.slateView().editor.getValue().split(String.fromCharCode(10)).find((x) => x.trim().startsWith("scope")); return l ? l.trim().split(/\\s+/)[1] : ""; };
+            const look = () => ({ scope: scopeVal(), offline: !!v.offlineFor, chunk_shown: !!p.card.querySelector(".domvec-browser-chunk .block-language-domvec, .domvec-browser-chunk .domvec-surface") && p.card.querySelector(".domvec-browser-chunk").style.display !== "none",
+                                  browser_shown: bp.browserLeaf.containerEl.style.display !== "none" });
+            out.start = look();
+            wheel(-100); await until(() => !!v.offlineFor || ${planted}, 15000); await sleep(600);
+            out.in1 = look();
+            wheel(-100); await until(() => look().chunk_shown || ${planted}, 10000); await sleep(800);
+            out.in2 = look();
+            wheel(100); await sleep(1200);
+            out.out1 = look();
+            wheel(100); await until(() => !v.offlineFor, 15000); await sleep(800);
+            out.out2 = look();
+            out.address_kept = String(v.offlineFor || v.webview.getURL()).includes("g301=");
+            return out;
+          } finally {
+            bp.plantUnbound = false;
+            await sleep(500);
+            bp.close();
+          }
+        })()`, { timeout: 120000 });
+        let clean, planted;
+        try { clean = await arm(false); planted = await arm(true); } finally { await fixtures.close(); }
+        const c = clean || {};
+        return {
+          pass: !!c.start && c.start.scope === "live" && c.in1 && c.in1.scope === "page" && c.in1.offline
+                && c.in2 && c.in2.scope === "chunk" && c.in2.chunk_shown && !c.in2.browser_shown
+                && c.out1 && c.out1.scope === "page" && !c.out1.chunk_shown && c.out1.browser_shown
+                && c.out2 && c.out2.scope === "live" && !c.out2.offline && c.address_kept
+                && !!planted && planted.in2 && planted.in2.scope === "chunk" && !planted.in2.chunk_shown,
+          evidence: { clean, planted },
+        };
+      },
+    },
+    {
+      id: "G-322",
+      asks: "typed panels and instant feedback (PLUGIN_GOAL 100; mortegon E.6, O.15, DM 9.6.1): unnesting a black box for a function in a slate on the plane shows its TYPED rows -- each input as name: Type, the output as return: Type -- and, at once, the search's top results for that symbol (found rows); planted (untyped-box) no type rows, (no-instant) no found rows",
+      async run() {
+        // 2026-11-01: "ensure you study our own assumptions on type inferences
+        // and typed data panels for our interactive and instant feedback ...
+        // (ie seeing immediate search results if i were to unnest black box
+        // panels to obtain the computation graph for that component)".
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const until = async (ok, ms) => { for (let t = 0; t < ms && !(await ok()); t += 200) await sleep(200); return !!(await ok()); };
+          const plugin = app.plugins.getPlugin("domvec-bridge");
+          const SIDE = String(plugin.settings.sidecar).replace(/[/]+$/, "");
+          const H = { "content-type": "application/json", "X-Domvec-Client": "obsidian-plugin" };
+          const plant = (name, on) => fetch(SIDE + "/plant", { method: "POST", headers: H, body: JSON.stringify({ name, on }) });
+          const d = window.__domvecPlane, cp = plugin.cockpit;
+          const NL = String.fromCharCode(10), T = String.fromCharCode(9);
+          const REF = "code://repo/search.py#content_share";
+          const path = "domvec/graph/g322 typed " + Date.now() + ".md";
+          const text = ["---", "domvec: slate", "---", "typed", T + "fn" + T + "{" + REF + "}", ""].join(NL);
+          const planted = ${JSON.stringify(planted)};
+          const out = { planted };
+          if (planted) await plant(planted, true);
+          try {
+            await d.create("slate", { path, text });
+            const v = d.viewOf(path);
+            await sleep(900); cp.decorate(); await sleep(300);
+            const cm = v.editor.cm, ln = cm.state.doc.line(5), at = ln.text.indexOf("{"), c = cm.coordsAtPos(ln.from + at + 2);
+            const x = (c.left + c.right) / 2, y = (c.top + c.bottom) / 2;
+            await cp.slateGesture(v, x, y, document.elementFromPoint(x, y));
+            const rows = () => [...v.contentEl.querySelectorAll(".domvec-slate-reveal-line")].map((r) => r.textContent.trim());
+            await until(() => rows().length > 0, 10000);
+            out.rows = rows();
+            out.typed = out.rows.filter((r) => /^[A-Za-z_*][\\w*]*: /.test(r) && !r.startsWith("found"));
+            out.has_return = out.rows.some((r) => /^return: /.test(r));
+            out.found = out.rows.filter((r) => r.startsWith("found"));
+            return out;
+          } finally {
+            if (planted) await plant(planted, false);
+            try { await d.trash(path); } catch (e) { /* gone */ }
+          }
+        })()`, { timeout: 60000 });
+        const clean = await arm(null);
+        const untyped = await arm("untyped-box");
+        const noInstant = await arm("no-instant");
+        const c = clean || {};
+        return {
+          pass: (c.typed || []).length >= 2 && c.has_return && (c.found || []).length >= 1
+                && !!untyped && (untyped.typed || []).length === 0 && !untyped.has_return
+                && !!noInstant && (noInstant.found || []).length === 0 && (noInstant.typed || []).length >= 2,
+          evidence: { clean, untyped, noInstant },
+        };
+      },
+    },
+    {
+      id: "G-316",
+      asks: "the halo re-keys on the navigated node (PLUGIN_GOAL 91): with a panel's halo open, the slide resting on a result for 0.6 s makes it the FOCUS -- the layout re-forms round it from its own ego retrieval, the focus passed through is left out of it and kept in the trace (drawn back through it to the first focus); planted (plantNoRekey) the layout stays where it was",
+      async run() {
+        // 2026-11-01: "nodes being navigated to (closest in 2d) are then the
+        // retrieval keys for the dynamic force directed polar coordinate and
+        // radially normalised similarity distance of k-many similar node/panels".
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const until = async (ok, ms) => { for (let t = 0; t < ms && !(await ok()); t += 400) await sleep(400); return !!(await ok()); };
+          const plugin = app.plugins.getPlugin("domvec-bridge");
+          const SIDE = String(plugin.settings.sidecar).replace(/[/]+$/, "");
+          const H = { "content-type": "application/json", "X-Domvec-Client": "obsidian-plugin" };
+          const d = window.__domvecPlane, halo = window.__domvecHalo, c = window.__domvecCraft;
+          const g = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view, plane = g && g.plane();
+          if (!d || !halo || !plane) return { error: "no plane or halo" };
+          const stamp = Date.now(), NL = String.fromCharCode(10);
+          const texts = ["Tries index keys by prefix; a radix tree merges single-child chains.",
+                         "A patricia trie compresses shared prefixes of binary keys.",
+                         "Suffix trees index every suffix of a string for substring search.",
+                         "Sourdough bread ferments with a wild yeast starter."];
+          const paths = texts.map((_, i) => "domvec/graph/g316 " + i + " " + stamp + ".md");
+          halo.plantNoRekey = ${planted};
+          const out = { planted: ${planted} };
+          const rekeyed0 = halo.stats.rekeyed;
+          try {
+            for (let i = 0; i < 4; i++) await d.create("notebook", { path: paths[i], text: "# g316" + NL + NL + texts[i] + NL });
+            c.dirty();
+            out.ego_ready = await until(async () => {
+              const r = await (await fetch(SIDE + "/search?q=" + encodeURIComponent(texts[0]) + "&k=8&where=ego", { headers: H })).json();
+              return (r.hits || []).filter((h) => String(h.url).includes("g316") && String(h.url).includes(String(stamp))).length >= 3;
+            }, 60000);
+            const pa = d.panelOf(paths[0]);
+            const head = pa.card.querySelector(".domvec-plane-head-node"), hr = head.getBoundingClientRect();
+            const cx = hr.left + hr.width / 2, cy = hr.top + hr.height / 2;
+            head.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0, clientX: cx, clientY: cy }));
+            window.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, button: 0, clientX: cx, clientY: cy }));
+            await until(() => halo.focus === paths[0] && halo.nodes.length > 0, 10000);
+            const before = { centre: { ...halo.centre }, keys: halo.nodes.map((n) => n.key), focusKey: halo.focusKey };
+            out.before_results = before.keys.length;
+            // Slide onto the first result and rest there.
+            const cr = pa.card.getBoundingClientRect();
+            let px = cr.right + 40, py = cr.top + 40;
+            const move = async (dx, dy, wait) => { px += dx; py += dy; window.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, clientX: px, clientY: py })); await sleep(wait); };
+            await move(0, 0, 300); await move(0, 0, 20);
+            for (let k = 0; k < 60 && halo.navigated < 0; k++) {
+              const n0 = halo.nodes[0], a = Math.atan2(n0.y - halo.cursor.y, n0.x - halo.cursor.x);
+              await move(Math.cos(a) * 5, Math.sin(a) * 5, 20);
+            }
+            const target = halo.navigated >= 0 ? halo.nodes[halo.navigated].key : null;
+            out.navigated_to = target;
+            await sleep(1500);                                  // the rest: 0.6 s, and the new retrieval
+            out.rekeyed = halo.stats.rekeyed - rekeyed0;
+            out.focus_now = halo.focusKey;
+            out.focus_moved = !!target && halo.focusKey === target;
+            out.history = halo.history.map((q) => q.key);
+            out.passed_left_out = !halo.nodes.some((n) => n.key === before.focusKey || n.key === target);
+            out.centre_moved = Math.hypot(halo.centre.x - before.centre.x, halo.centre.y - before.centre.y) > 5;
+            out.trace_drawn = !!plane.querySelector(".domvec-halo2d polyline.trace") && !!plane.querySelector(".domvec-halo2d circle.past");
+            out.after_results = halo.nodes.length;
+            return out;
+          } finally {
+            halo.plantNoRekey = false;
+            halo.close();
+            for (const p of paths) { try { await d.trash(p); } catch (e) { /* gone */ } }
+            c.dirty();
+          }
+        })()`, { timeout: 150000 });
+        const clean = await arm(false);
+        const planted = await arm(true);
+        const c = clean || {};
+        return {
+          pass: c.ego_ready && !!c.navigated_to && c.rekeyed >= 1 && c.focus_moved && c.history.length >= 1 && c.passed_left_out
+                && c.centre_moved && c.trace_drawn
+                && !!planted && planted.rekeyed === 0 && !planted.focus_moved,
+          evidence: { clean, planted },
+        };
+      },
+    },
+    {
+      id: "G-321",
+      asks: "active computation is a visible light (PLUGIN_GOAL 99): while a cell runs in a notebook on the plane, its panel's header node glows (the signal colour) and its node in the 3D craft is lit and enlarged -- the same moment; both go out when the run returns; planted (plantNoLights) nothing lights",
+      async run() {
+        // 2026-11-01: "these computations must be clearly visible lights from
+        // the active triples being computed ... at both 2d and 3d views".
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const until = async (ok, ms) => { for (let t = 0; t < ms && !(await ok()); t += 150) await sleep(150); return !!(await ok()); };
+          const plugin = app.plugins.getPlugin("domvec-bridge");
+          const d = window.__domvecPlane, c = window.__domvecCraft;
+          const NL = String.fromCharCode(10), F = String.fromCharCode(96).repeat(3);
+          const path = "domvec/graph/g321 lit " + Date.now() + ".md";
+          plugin.plantNoLights = ${planted};
+          const out = { planted: ${planted} };
+          try {
+            await d.create("notebook", { path, text: F + "python" + NL + "import time" + NL + "time.sleep(3)" + NL + "print('done')" + NL + F + NL });
+            c.dirty();
+            await until(() => c.nodes.some((n) => n.id === "craft:" + path), 9000);
+            const v = d.viewOf(path), card = d.panelOf(path).card;
+            await until(() => v.containerEl.querySelector(".domvec-run-fence"), 5000);
+            v.containerEl.querySelector(".domvec-run-fence").click();
+            await until(() => card.classList.contains("is-computing") || ${planted}, 4000);
+            await sleep(400);
+            const head = card.querySelector(".domvec-plane-head-node");
+            const node = c.nodes.find((n) => n.id === "craft:" + path);
+            out.during = { panel_lit: card.classList.contains("is-computing"), head_bg: head ? getComputedStyle(head).backgroundColor : null,
+                           craft_lit: c.lit.has(path), craft_scale: node && node.mesh ? Math.round(node.mesh.scale.x * 10) / 10 : null };
+            await until(() => v.editor.getValue().includes("<!-- nb-output"), 30000);
+            await sleep(500);
+            out.after = { panel_lit: card.classList.contains("is-computing"), craft_lit: c.lit.has(path),
+                          craft_scale: node && node.mesh ? Math.round(node.mesh.scale.x * 10) / 10 : null };
+            return out;
+          } finally {
+            plugin.plantNoLights = false;
+            try { await d.trash(path); } catch (e) { /* gone */ }
+            c.dirty();
+          }
+        })()`, { timeout: 90000 });
+        const clean = await arm(false);
+        const planted = await arm(true);
+        const c = clean || {};
+        return {
+          pass: !!c.during && c.during.panel_lit && c.during.craft_lit && c.during.craft_scale > 1.5 && /255, 210, 122/.test(String(c.during.head_bg))
+                && !!c.after && !c.after.panel_lit && !c.after.craft_lit
+                && !!planted && planted.during && !planted.during.panel_lit && !planted.during.craft_lit,
+          evidence: { clean, planted },
+        };
+      },
+    },
+    {
+      id: "G-315",
+      asks: "the cell's tools on its panel header (PLUGIN_GOAL 90): 'later' fans out the ego's cells made AFTER it -- opened as minimized nodes to the right of its card, nearest first -- and again folds them away; 'sooner' fans those made BEFORE it to the left; 'similar' opens its halo; Enter in the soft-link field lays the halo out for the field's query; planted (plantFanUnordered) a fan takes cells regardless of when they were made",
+      async run() {
+        // 2026-11-01: "an input field that retrieves directly on soft links
+        // with other cells in the ego graph beside the 'new cell' and 'delete
+        // cell' and perhaps also 'later cell' to add a fan-out 2d view of other
+        // cells created after that cell, along with the "sooner cell", with
+        // 'similar cell' being the toggle for our 2d retrieval".
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const until = async (ok, ms) => { for (let t = 0; t < ms && !(await ok()); t += 300) await sleep(300); return !!(await ok()); };
+          const d = window.__domvecPlane, halo = window.__domvecHalo, c = window.__domvecCraft;
+          const g = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view, plane = g && g.plane();
+          if (!d || !halo || !plane) return { error: "no plane" };
+          const stamp = Date.now(), NL = String.fromCharCode(10);
+          const paths = [0, 1, 2, 3, 4].map((i) => "domvec/graph/g315 " + i + " " + stamp + ".md");
+          d.plantFanUnordered = ${planted};
+          const out = { planted: ${planted} };
+          try {
+            for (let i = 0; i < 5; i++) { await d.create("notebook", { path: paths[i], text: "# cell " + i + NL + NL + "Cell number " + i + " of the g315 sequence." + NL }); await sleep(1100); }
+            for (const p of paths) if (p !== paths[2]) d.closePath(p);
+            c.dirty();
+            await until(() => paths.every((p) => c.nodes.some((n) => n.id === "craft:" + p)), 12000);
+            const mid = d.panelOf(paths[2]), mr = mid.card.getBoundingClientRect();
+            const click = (cls) => mid.card.querySelector(".domvec-plane-cell-tool." + cls).click();
+            const opened = () => paths.filter((p) => p !== paths[2] && d.panelOf(p));
+            click("is-later"); await until(() => opened().length > 0, 8000); await sleep(400);
+            out.later = opened().map((p) => paths.indexOf(p)).sort();
+            out.later_right = opened().every((p) => d.panelOf(p).card.getBoundingClientRect().left >= mr.right - 80);
+            out.later_minimized = opened().every((p) => d.panelOf(p).card.classList.contains("is-collapsed"));
+            click("is-later"); await sleep(600);
+            out.later_folded = opened().length === 0;
+            click("is-sooner"); await until(() => opened().length > 0, 8000); await sleep(400);
+            out.sooner = opened().map((p) => paths.indexOf(p)).sort();
+            out.sooner_left = opened().every((p) => d.panelOf(p).card.getBoundingClientRect().left < mr.left);
+            click("is-sooner"); await sleep(600);
+            if (${planted}) return out;
+            click("is-similar"); await until(() => halo.focus === paths[2], 8000);
+            out.similar_opens_halo = halo.focus === paths[2];
+            halo.close();
+            const field = mid.card.querySelector(".domvec-plane-softlink");
+            field.value = "Cell number 4 of the g315 sequence";
+            field.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+            await until(() => halo.focus === paths[2] && halo.nodes.length > 0, 20000);
+            out.field_halo = halo.focus === paths[2];
+            out.field_results = halo.nodes.map((n) => n.label);
+            halo.close();
+            return out;
+          } finally {
+            d.plantFanUnordered = false;
+            halo.close();
+            for (const p of paths) { try { await d.trash(p); } catch (e) { /* gone */ } }
+            c.dirty();
+          }
+        })()`, { timeout: 120000 });
+        const clean = await arm(false);
+        const planted = await arm(true);
+        const c = clean || {};
+        const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+        return {
+          pass: same(c.later, [3, 4]) && c.later_right && c.later_minimized && c.later_folded
+                && same(c.sooner, [0, 1]) && c.sooner_left && c.similar_opens_halo && c.field_halo && (c.field_results || []).length >= 1
+                && !!planted && (!same(planted.later, [3, 4]) || !same(planted.sooner, [0, 1])),
+          evidence: { clean, planted },
+        };
+      },
+    },
+    {
+      id: "G-323",
+      asks: "the graph form and the slider as the reader asked (PLUGIN_GOAL 103-106): a slate on the plane flipped to graph form is laid out FORCE-DIRECTED (not one indented column: its nodes spread over many columns) with each node its key:value dual; a single click on a value edits it in place and writes the slate's text; hovering a number extends it into a slider IN PLACE -- starting where the number is drawn, on its line -- over its detected range, the wheel stepping the value; planted (__domvecPlantTreeLayout) the indented column, (__domvecPlantNoGraphEdit) no edit",
+      async run() {
+        // 2026-11-02: "the graph layout is supposed to be general force-directed
+        // form. also, none of the fields are editable" -- "The number is
+        // supposed to extend outwards with a horizontal-scrollable-slider
+        // in-place of the hovered continuous float within its detected ranges."
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const until = async (ok, ms) => { for (let t = 0; t < ms && !(await ok()); t += 200) await sleep(200); return !!(await ok()); };
+          const plugin = app.plugins.getPlugin("domvec-bridge");
+          const d = window.__domvecPlane, cp = plugin.cockpit;
+          const NL = String.fromCharCode(10), T = String.fromCharCode(9);
+          const path = "domvec/graph/g323 graph " + Date.now() + ".md";
+          const text = ["---", "domvec: slate", "---", "probe", T + "rate" + T + "0.5", T + "steps" + T + "12", T + "group", T + T + "inner" + T + "2", T + T + "deep" + T + "x", T + "tail" + T + "4", ""].join(NL);
+          const planted = ${JSON.stringify(planted)};
+          if (planted === "tree") window.__domvecPlantTreeLayout = true;
+          if (planted === "noedit") window.__domvecPlantNoGraphEdit = true;
+          const out = { planted };
+          try {
+            await d.create("slate", { path, text });
+            const v = d.viewOf(path);
+            await sleep(900); cp.decorate(); await sleep(300);
+            cp.flipForm(v); await until(() => !!v.contentEl.querySelector(".domvec-slate-graph"), 4000);
+            const g = v.contentEl.querySelector(".domvec-slate-graph");
+            out.layout = g.__layout ? g.__layout.kind : null;
+            const xs = g.__layout ? g.__layout.at.map((p) => p.x) : [];
+            out.nodes = xs.length;
+            out.columns = new Set(xs.map((x) => Math.round(x / 10))).size;
+            out.duals = g.querySelectorAll("tspan[data-part=value]").length;
+            // Edit a value in place.
+            const tv = [...g.querySelectorAll("tspan[data-part=value]")].find((t) => t.getAttribute("data-path") === "probe/steps");
+            tv.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, detail: 1 }));
+            await sleep(500);
+            const inp = v.contentEl.querySelector(".domvec-graph-edit");
+            out.editor = !!inp;
+            if (inp) { inp.value = "13"; inp.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); }
+            await sleep(500);
+            out.written = v.editor.getValue().includes(T + "steps" + T + "13");
+            return out;
+          } finally {
+            delete window.__domvecPlantTreeLayout; delete window.__domvecPlantNoGraphEdit;
+            try { await d.trash(path); } catch (e) { /* gone */ }
+          }
+        })()`, { timeout: 60000 });
+        // The slider, in the cockpit (its numbers' home).
+        const slider = await evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const cp = app.plugins.getPlugin("domvec-bridge").cockpit, v = cp.view();
+          if (!v) return { error: "no cockpit" };
+          if (v.contentEl.querySelector(".domvec-slate-graph")) { cp.flipForm(v); await sleep(800); }
+          const cm = v.editor.cm;
+          let ln = null; for (let i = 1; i <= cm.state.doc.lines; i++) if (/^\\tthrottle\\t/.test(cm.state.doc.line(i).text)) ln = cm.state.doc.line(i);
+          const vs = ln.from + ln.text.lastIndexOf(String.fromCharCode(9)) + 1;
+          const at = cm.coordsAtPos(vs + 1), a0 = cm.coordsAtPos(vs);
+          const before = ln.text.split(String.fromCharCode(9)).pop();
+          v.contentEl.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, clientX: (at.left + at.right) / 2, clientY: (at.top + at.bottom) / 2 }));
+          await sleep(300);
+          const s = document.querySelector(".domvec-slate-slider");
+          if (!s) return { slider: false };
+          const r = s.getBoundingClientRect(), input = s.querySelector("input");
+          const out = { slider: true, dx: Math.round(r.left - a0.left), dy: Math.round(r.top - a0.top), range: [input.min, input.max] };
+          s.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: -100 })); await sleep(400);
+          out.stepped = (v.editor.getValue().match(/\\tthrottle\\t(\\S+)/) || [])[1];
+          s.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: 100 })); await sleep(400);
+          out.back = (v.editor.getValue().match(/\\tthrottle\\t(\\S+)/) || [])[1];
+          out.before = before;
+          s.dispatchEvent(new MouseEvent("mouseleave"));
+          return out;
+        })()`, { timeout: 30000 });
+        const clean = await arm(null), tree = await arm("tree"), noedit = await arm("noedit");
+        const c = clean || {}, sl = slider || {};
+        return {
+          pass: c.layout === "force" && c.columns >= Math.ceil(c.nodes * 0.7) && c.duals >= 4 && c.editor && c.written
+                && sl.slider && Math.abs(sl.dx) <= 2 && Math.abs(sl.dy) <= 2 && Number(sl.stepped) === Number(sl.before) + 1 && sl.back === sl.before
+                && !!tree && tree.layout === "tree" && tree.columns <= 4
+                && !!noedit && !noedit.editor && !noedit.written,
+          evidence: { clean, tree, noedit, slider },
         };
       },
     },
@@ -10865,6 +11268,10 @@ export function makeChecks(env) {
           const valOf = (k) => { const l = ed.getLine(line(k)); return l.slice(l.lastIndexOf(String.fromCharCode(9)) + 1); };
           const setVal = (k, val) => { const i = line(k), l = ed.getLine(i), at = l.lastIndexOf(String.fromCharCode(9)) + 1; ed.replaceRange(val, { line: i, ch: at }, { line: i, ch: l.length }); };
           const arm = async (planted) => {
+            // The ego view by the cockpit's OWN field: the cockpit applies its
+            // text on every edit, and a "view map" left there by an earlier
+            // check held the plan after its first leg.
+            setVal("view", "ego"); await sleep(400);
             a.plantNoAdvance = planted;
             cam.position.copy(savedCam.p); ctl.target.copy(savedCam.t); ctl.update?.(); a.release();
             const s0 = { ...a.planStats };
@@ -10905,7 +11312,7 @@ export function makeChecks(env) {
               setVal("plan", "{Radix tree}"); setVal("play", "true");
               for (let i = 0; i < 40 && (a.playing || a.planStats.legs === l0); i++) await sleep(500);
               out.anchored_resolved = c.planStats.resolved; out.anchored_legs = a.planStats.legs - l0;
-              a.play(false); setVal("play", "false"); setVal("plan", "{results}"); await sleep(400);
+              a.play(false); setVal("play", "false"); setVal("plan", "{search.results}"); await sleep(400);
             }
             a.play(false); setVal("play", "false"); await sleep(400);
             return out;

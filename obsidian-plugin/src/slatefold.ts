@@ -186,6 +186,88 @@ class CircleWidget extends WidgetType {
  *  braced node instantiates its rank-1 walk; a double-click opens the node's
  *  containment panel (panel form, the cursor on that field). Planted
  *  `__domvecPlantNoFoldParity`: every field drawn, the folds ignored. */
+/** Positions for the graph form: a force-directed layout (item 103). Seeded
+ *  on a spiral by order, then relaxed: springs along parent links, pairwise
+ *  repulsion scaled by label width, a weak pull to the centre. Planted
+ *  `__domvecPlantTreeLayout`: the indented column it replaced. */
+export function forceLayout(ns: { parent: number; w: number }[], kind: "force" | "tree" = "force"): { x: number; y: number }[] {
+  const n = ns.length;
+  if (kind === "tree") {
+    const depth = ns.map(() => 0);
+    ns.forEach((q, i) => { depth[i] = q.parent >= 0 ? depth[q.parent] + 1 : 0; });
+    return ns.map((_, i) => ({ x: 20 + depth[i] * 22, y: 20 + i * 26 }));
+  }
+  const p = ns.map((_, i) => { const a = i * 2.39996, rr = 30 * Math.sqrt(i + 1); return { x: rr * Math.cos(a), y: rr * Math.sin(a) }; });
+  const edges: [number, number][] = [];
+  ns.forEach((q, i) => { if (q.parent >= 0) edges.push([q.parent, i]); });
+  for (let it = 0; it < 320; it++) {
+    const f = p.map(() => ({ x: 0, y: 0 }));
+    for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
+      let dx = p[i].x - p[j].x, dy = p[i].y - p[j].y;
+      let d = Math.hypot(dx, dy);
+      if (d < 0.01) { dx = 0.01 * (i - j); dy = 0.01; d = Math.hypot(dx, dy); }
+      // Labels run to the right: repelled more sideways, by their widths.
+      const want = 34 + 0.5 * (ns[i].w + ns[j].w) * Math.abs(dx) / d;
+      if (d < want * 1.15) {
+        const k = 0.9 * (want * 1.15 - d) / d;
+        f[i].x += dx * k; f[i].y += dy * k; f[j].x -= dx * k; f[j].y -= dy * k;
+      }
+    }
+    for (const [a, b] of edges) {
+      const dx = p[b].x - p[a].x, dy = p[b].y - p[a].y, d = Math.hypot(dx, dy) || 1;
+      const rest = 40 + 0.2 * ns[a].w, k = 0.1 * (d - rest) / d;
+      f[a].x += dx * k; f[a].y += dy * k; f[b].x -= dx * k; f[b].y -= dy * k;
+    }
+    const cool = 1 - it / 340;
+    for (let i = 0; i < n; i++) {
+      f[i].x -= 0.01 * p[i].x; f[i].y -= 0.01 * p[i].y;
+      p[i].x += Math.max(-12, Math.min(12, f[i].x)) * cool;
+      p[i].y += Math.max(-12, Math.min(12, f[i].y)) * cool;
+    }
+  }
+  return p;
+}
+
+/** A graph node's key or value edited in place (item 104): an input over the
+ *  text; Enter (or leaving it) writes the slate's TEXT -- the record -- and
+ *  Escape leaves it as it was. */
+function editInPlace(host: HTMLElement, target: SVGGraphicsElement, view: EditorView, all: SlateLine[], path: string, part: "key" | "value"): void {
+  const f = all.find((x) => x.path.join("/") === path);
+  if (!f) return;
+  host.querySelector(".domvec-graph-edit")?.remove();
+  const hr = host.getBoundingClientRect(), tr = target.getBoundingClientRect();
+  const input = document.createElement("input");
+  input.className = "domvec-graph-edit";
+  input.value = part === "key" ? f.key : f.value;
+  input.style.left = (tr.left - hr.left - 2) + "px";
+  input.style.top = (tr.top - hr.top - 3) + "px";
+  input.style.width = Math.max(60, tr.width + 40) + "px";
+  host.appendChild(input);
+  input.focus(); input.select();
+  const stats = ((window as any).__domvecGraphEditStats = (window as any).__domvecGraphEditStats || { opened: 0, written: 0 });
+  stats.opened++;
+  const done = (write: boolean) => {
+    if (!input.isConnected) return;
+    const next = input.value;
+    input.remove();
+    if (!write) return;
+    const ln = view.state.doc.line(f.line + 1);
+    const indent = (/^\s*/.exec(ln.text) || [""])[0];
+    const from = part === "key" ? ln.from + indent.length : ln.from + f.valueFrom;
+    const to = part === "key" ? from + f.key.length : ln.from + f.valueFrom + f.value.length;
+    if (next === (part === "key" ? f.key : f.value)) return;
+    view.dispatch({ changes: { from, to, insert: next } });
+    stats.written++;
+  };
+  input.addEventListener("keydown", (e) => {
+    e.stopPropagation();
+    if (e.key === "Enter") { e.preventDefault(); done(true); }
+    else if (e.key === "Escape") { e.preventDefault(); done(false); }
+  });
+  input.addEventListener("blur", () => done(true));
+  input.addEventListener("mousedown", (e) => e.stopPropagation());
+}
+
 class GraphWidget extends WidgetType {
   constructor(readonly text: string, readonly st: FoldState) { super(); }
   private key(): string { return this.text + "\u0000" + JSON.stringify([this.st.folds || [], Object.keys(this.st.reveals).sort()]); }
@@ -222,11 +304,28 @@ class GraphWidget extends WidgetType {
     const NS = "http://www.w3.org/2000/svg";
     const el = document.createElement("div");
     el.className = "domvec-slate-graph";
-    const row = 26, col = 22, r = 7, pad = 12;
+    const r = 7, pad = 14;
     const svg = document.createElementNS(NS, "svg");
     svg.setAttribute("width", "100%");
-    svg.setAttribute("height", String(pad * 2 + Math.max(1, nodes.length) * row));
-    const at = nodes.map((n, i) => ({ x: pad + r + n.depth * col, y: pad + r + i * row }));
+    // A GENERAL force-directed layout (PLUGIN_GOAL 103: "the graph layout is
+    // supposed to be general force-directed form"; an indented column was a
+    // tree printed sideways). Springs along the links, every pair repelled
+    // by its labels' widths, a weak pull to the centre -- deterministic,
+    // seeded by order, so a redraw lands where it was.
+    const plantTree = !!(window as any).__domvecPlantTreeLayout;
+    const at = forceLayout(nodes.map((n) => ({ parent: n.parent, w: 7 * (n.label.length + 2) })), plantTree ? "tree" : "force");
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    nodes.forEach((n, i) => {
+      minX = Math.min(minX, at[i].x - r); maxX = Math.max(maxX, at[i].x + r + 10 + 7 * n.label.length);
+      minY = Math.min(minY, at[i].y - r - 6); maxY = Math.max(maxY, at[i].y + r + 6);
+    });
+    if (!nodes.length) { minX = 0; minY = 0; maxX = 40; maxY = 40; }
+    svg.setAttribute("viewBox", [minX - pad, minY - pad, maxX - minX + 2 * pad, maxY - minY + 2 * pad].join(" "));
+    // At 1:1 -- text the size the slate's own text is; a graph wider than its
+    // panel scrolls rather than shrinking its labels to nothing.
+    svg.setAttribute("width", String(Math.round(maxX - minX + 2 * pad)));
+    svg.setAttribute("height", String(Math.round(maxY - minY + 2 * pad)));
+    (el as any).__layout = { kind: plantTree ? "tree" : "force", at: at.map((q) => ({ x: Math.round(q.x), y: Math.round(q.y) })) };
     const line = (a: number, b: number, cls: string) => {
       const ln = document.createElementNS(NS, "line");
       ln.setAttribute("x1", String(at[a].x)); ln.setAttribute("y1", String(at[a].y));
@@ -258,7 +357,22 @@ class GraphWidget extends WidgetType {
       t.setAttribute("x", String(at[i].x + r + 6)); t.setAttribute("y", String(at[i].y + 4));
       t.setAttribute("class", "domvec-slate-graph-label" + (n.cls.includes("is-folded") ? " is-folded" : ""));
       t.setAttribute("data-path", n.path);
-      t.textContent = n.label;
+      // The key:value DUAL kept as one structured field (item 105), its two
+      // parts each editable in place (item 104).
+      const f = n.key ? fs.find((x) => x.path.join("/") === n.path) : undefined;
+      if (f && !n.cls.includes("is-folded")) {
+        const k = document.createElementNS(NS, "tspan");
+        k.setAttribute("class", "domvec-graph-key"); k.setAttribute("data-path", n.path); k.setAttribute("data-part", "key");
+        k.textContent = f.key;
+        t.appendChild(k);
+        if (f.value) {
+          const v = document.createElementNS(NS, "tspan");
+          v.setAttribute("class", "domvec-graph-value"); v.setAttribute("data-path", n.path); v.setAttribute("data-part", "value");
+          v.setAttribute("dx", "6");
+          v.textContent = f.value;
+          t.appendChild(v);
+        }
+      } else t.textContent = n.label;
       svg.appendChild(t);
     });
     el.appendChild(svg);
@@ -274,13 +388,22 @@ class GraphWidget extends WidgetType {
       e.preventDefault(); e.stopPropagation();
       tell("right", n);
     });
+    // A single left-click EDITS (mortegon 7.3.4; item 104): the key or the
+    // value under it, in place -- after a beat, so a double-click still flips.
+    let editTimer = 0;
     svg.addEventListener("click", (e) => {
       const n = nodeOf(e);
-      if (!n || !n.cls.includes("is-folded") || e.detail > 1) return;
+      if (!n || e.detail > 1) return;
+      if (n.cls.includes("is-folded")) { e.preventDefault(); e.stopPropagation(); tell("unfold", n); return; }
+      const part = (e.target as Element)?.getAttribute?.("data-part");
+      if (!part || !view || (window as any).__domvecPlantNoGraphEdit) return;
       e.preventDefault(); e.stopPropagation();
-      tell("unfold", n);
+      const target = e.target as SVGGraphicsElement;
+      window.clearTimeout(editTimer);
+      editTimer = window.setTimeout(() => editInPlace(el, target, view, all, n.path, part as "key" | "value"), 260);
     });
     svg.addEventListener("dblclick", (e) => {
+      window.clearTimeout(editTimer);
       const n = nodeOf(e);
       if (!n || !n.key) return;
       e.preventDefault(); e.stopPropagation();

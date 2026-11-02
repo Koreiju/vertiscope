@@ -1225,3 +1225,29 @@ button.domvec-run-fence:hover {
 .domvec-browser-card { height: min(700px, 82vh); }
 .domvec-browser-card > .workspace-leaf:not(.domvec-browser-panel-leaf) { flex: 0 0 190px; height: 190px; }
 .domvec-browser-card > .domvec-browser-panel-leaf { flex: 1 1 auto; height: auto; }
+/* Item 72: the ladder's chunk rung, in the browser's place. */
+.domvec-browser-card > .domvec-browser-chunk { flex: 1 1 auto; overflow: auto; padding: 6px 10px; border-top: 1px solid #444; background: var(--background-primary); }
+.domvec-browser-card.is-collapsed > .domvec-browser-chunk { display: none !important; }
+/* Item 99: a computation in flight is a light -- the panel's header node glows. */
+.domvec-panel-card.is-computing .domvec-plane-head-node,
+.domvec-panel-card.is-computing .domvec-var-title { color: #000; background: #ffd27a; border-color: #ffd27a;
+  box-shadow: 0 0 10px 2px rgba(255, 210, 122, 0.8); }
+/* Item 90: the cell's tools on its header -- sooner, later, similar, a soft-link field. */
+.domvec-plane-cell-tool { margin-left: 6px; font-size: 10px; color: #999; cursor: pointer; user-select: none; }
+.domvec-plane-cell-tool:hover { color: var(--link-color); }
+.domvec-plane-softlink { margin-left: 6px; width: 90px; font-size: 10px; height: 18px; padding: 0 4px; }
+.domvec-panel-card.is-collapsed .domvec-plane-cell-tool, .domvec-panel-card.is-collapsed .domvec-plane-softlink { display: none; }
+/* Items 104-105: a graph-form field is a key:value dual, each part edited in place. */
+.domvec-slate-graph { position: relative; }
+.domvec-slate-graph .domvec-graph-key { fill: var(--link-color); cursor: text; }
+.domvec-slate-graph .domvec-graph-value { fill: #fff; cursor: text; }
+.domvec-graph-edit { position: absolute; z-index: 5; height: 22px; font-size: 13px; padding: 0 4px; background: #000; color: #fff; border: 1px solid var(--link-color); }
+/* Item 106: the hovered number extends into its slider, in place -- the strip
+   starts where the number is drawn, the live number at its left. */
+.domvec-slate-slider { position: fixed; z-index: 1000; display: flex; align-items: center; gap: 6px; padding: 0 6px 0 0;
+  background: #000; border: 0; border-radius: 0; box-shadow: none; }
+.domvec-slate-slider .domvec-slate-slider-num { color: #fff; font-family: inherit; min-width: 2ch; }
+.domvec-slate-slider input { width: 160px; accent-color: var(--link-color); margin: 0; }
+/* The graph form at 1:1; a wide graph scrolls inside its panel. */
+.domvec-slate-graph { overflow-x: auto; }
+.domvec-slate-graph-label { font-size: 13px; }

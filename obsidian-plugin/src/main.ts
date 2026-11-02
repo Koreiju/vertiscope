@@ -749,8 +749,26 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     // layout events, which a leaf outside the tree never fires.
     openBrowser: () => { void this.browserPanel.open(); },
     headerClick: (path) => { void this.halo.toggle(path); },
+    haloQuery: (path, q) => { void this.halo.open(path, q); },
+    egoNotes: () => {
+      const g: any = this.app.workspace.getLeavesOfType(GRAPH_VIEW)[0]?.view;
+      return (g?.craft?.nodes || []).filter((n: any) => n.kind === "note").map((n: any) => n.path);
+    },
     opened: (f) => { void this.noteNotebook(f); window.setTimeout(() => { this.applyCellBars(); this.applyHalves(); this.cockpit.decorate(); }, 0); },
   });
+
+  /** Planted (item 99): computation draws no light. */
+  plantNoLights = false;
+  lightStats = { lit: 0, unlit: 0, now: [] as string[] };
+  private lit = new Set<string>();
+  light(note: string, on: boolean): void {
+    if (this.plantNoLights) return;
+    if (on) { this.lit.add(note); this.lightStats.lit++; } else { this.lit.delete(note); this.lightStats.unlit++; }
+    this.lightStats.now = [...this.lit];
+    this.desk.panelOf(note)?.card.toggleClass("is-computing", on);
+    const g: any = this.app.workspace.getLeavesOfType(GRAPH_VIEW)[0]?.view;
+    g?.craft?.setLit?.(note, on);
+  }
 
   /** The halo that slides, on the plane (items 81-84). */
   halo: PlaneHalo = new PlaneHalo({
@@ -847,6 +865,9 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
 
     const running = new Notice(`domvec: running ${req.lang}…`, 0);
     let reply;
+    // The computation, LIT while it runs (PLUGIN_GOAL 99): the panel's header
+    // node on the plane, the craft's node in 3D -- the same moment.
+    this.light(note, true);
     try {
       // The cell's `{ref}` inputs (G-279). Planted `__domvecPlantNoRefs`: none sent.
       const refs = (window as any).__domvecPlantNoRefs ? [] : (req.refs || []);
@@ -865,6 +886,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
       reply = await this.sidecar.runCell(note, req.code, req.lang, refs, req.line, req.sample, markdown, maps);
     } finally {
       running.hide();
+      this.light(note, false);
     }
 
     if (!reply) {

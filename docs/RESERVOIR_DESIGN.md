@@ -419,6 +419,9 @@ view"*; question 5 -- the cockpit is the ego 2D node stuck in the 2D graph form 
    differ -- which wins?
 9. **The halo's toggle** (10.10). A click on a node / header opens the halo, so a craft node's
    click (today: open / close its panel) moves to a double-click. Agreed, or another gesture?
+10. **libcst** (11.4, item 94). Concrete syntax trees keep comments and formatting the AST drops;
+    it is a download (`pip install libcst`). Install it?
+    **Answered 2026-11-01 (PLUGIN_GOAL 102): "approval to install granted"** -- installed.
 
 ## 10. The browser as a panel, the ego's own map, the halo that slides (items 71-86, 2026-11-01)
 
@@ -644,3 +647,88 @@ boilerplate check re-run on it.
 4. The browser panel and its cockpit slate (10.1); the scope ladder (10.2).
 5. The halo that slides (10.10).
 6. The I/O toggle (10.8); black-box unfolding (10.9).
+
+## 11. Many browsers, typed navigation, the code graph web, visible computation (items 87-100, 2026-11-01)
+
+*Design before code for PLUGIN_GOAL items 87-100 (verbatim there). PRD rows G-313 to G-322.*
+
+### 11.1 Many browsers; the 3D graph follows the one in use (items 87-89)
+
+Today one browser cell: 15 places in the plugin take `getLeavesOfType(BROWSER_VIEW)[0]` (graph 6,
+main 5, verify 3, anomalies 1). Design: every `BrowserView` -- the standalone pane, each plane
+browser panel, each notebook browser fence -- registers itself; the plugin keeps the one the
+reader last INTERACTED with (pointer or key in it) as the active browser, and every one of those
+15 places asks for it instead of the first. Hover-to-3D, fly-to, the in-graph badge, the web
+search and the offline page follow whichever browser is in use. `+ browser` on the plane opens a
+NEW instance each time (`domvec/browser 2.md`, ... -- one cockpit slate per instance), each its
+own session (its webview partition, its tabs).
+
+Item 89, read with mortegon M.2-M.5 and DM 9.6.1: the browser's cockpit slate and the code that
+backs it are the class DEFINITION; each running browser is an INSTANCE -- separate nodes in the
+craft, joined by an undirected `instance_of` line (the functional-object memory link: forward,
+code -> instance; inverse, instance -> its code).
+
+### 11.2 Cell-level tools: sooner, later, similar, and a soft-link field (item 90)
+
+Beside `+ notebook` / delete, on each panel's header: **sooner** -- a fan of the ego's cells made
+BEFORE this one (by creation time), opened as minimized nodes on an arc to its left; **later** --
+those made after, to its right; **similar** -- the toggle for the 2D retrieval (the halo, 10.10);
+and an **input field** that retrieves over soft links among the ego's cells (`where=ego`,
+the field's text as the query), its results laid out by the same halo.
+
+### 11.3 The halo re-keys on the navigated node; type-aware similarity (items 91-92)
+
+*"nodes being navigated to (closest in 2d) are then the retrieval keys for the dynamic force
+directed polar coordinate ... layout"*: when the slide rests on a result (a dwell of ~0.6 s), that
+result becomes the FOCUS -- its own retrieval laid out around it, the trace extended back through
+the previous focus. Similarity gains a TYPE term (item 92): each artifact's kind and layer of
+abstraction -- note / cell / tree / chunk; for code, module / class / function / method -- with a
+PageRank over the type graph (inheritance, containment, calls) giving each type's weight, so a
+cell's halo holds cells, a method's holds methods of related classes. Added to the additive score
+as one more 0..1 term (10.11).
+
+### 11.4 The code graph web (items 93-95)
+
+A GLOBAL LIBRARY graph built from Python's own syntax tree across the repository and the
+installed packages the kernels import: nodes are named definitions (module, class, function),
+edges are containment, inheritance, calls and imports -- "both named string subtypes and
+adjacency based graph structures". PageRank over it is a retrieval term for code chunks
+(item 93). Concrete syntax trees (libcst, item 94) keep comments and formatting, which the AST
+drops: **a download, asked before installing** (question 9.10). The web view of it (item 95):
+the code graph's nodes as an ego-UMAP network (frequency and encoder vectors, the triple
+retrieval) beside the patricia trie's, translated into the node/panel dialect -- a module's
+panel is its black box (G-308), its graph form the code graph's neighbourhood.
+
+### 11.5 The ego's memory, live; 3D the microscope, 2D the editor (items 96-98)
+
+The craft (5a) draws the ego's memory as it evolves: each run's recursive / iterative unroll
+(rollout samples, G-283-rollout) adds its readout node and its undirected lookup links (forward:
+input -> readout; inverse: readout -> inputs, G-279's recorded runs). 3D: the ego's own UMAP
+(G-303), compact, and the wheel ZOOMS INTO it -- at the floor over a craft node, a further
+wheel-in opens its panel on the plane (item 7's zoom-through, "the microscope of the ego").
+2D: the plane is the precise editor where readouts are built.
+
+### 11.6 Visible computation: active triples are lights (item 99)
+
+A computation in flight is a triple -- subject (input), predicate (the cell / function), object
+(readout). While a cell runs: its panel's header node glows on the plane; in 3D its craft node
+and its I/O lines pulse in the signal colour (G-292's pulse, carried to the craft). Both views,
+the same moment.
+
+### 11.7 Typed panels and instant feedback (item 100)
+
+From mortegon E.6, O.15, DM 9.6.1: a definition's panel is TYPED -- `name: Type = value` rows;
+functions show their inputs' and output's types (inferred jointly: annotations top-down,
+observed values bottom-up); a class shows `super: Base`. Unnesting a black box (G-308) shows its
+typed rows AND, at once, the search's top results for that symbol -- the high-frequency rollout's
+instant feedback.
+
+### 11.8 Build order
+
+1. Typed black-box rows + instant search on unfold (11.7) -- extends G-308.
+2. The halo re-keys on the navigated node (11.3, first half).
+3. Visible computation lights (11.6).
+4. Cell tools sooner / later / similar / field (11.2).
+5. Many browsers, active browser followed (11.1).
+6. Type-aware similarity term; the code graph and its PageRank (11.3 second half, 11.4).
+7. Zoom-through into the craft (11.5).

@@ -26,11 +26,13 @@
  * The browser's own toolbar stays until the slate covers every action (UR
  * S.4: chrome goes, but not before its replacement is seen to work).
  */
-import { App, MarkdownView, TFile } from "obsidian";
-import { parseSlate, type SlateLine } from "./slatefold";
+import { App, Component, MarkdownRenderer, MarkdownView, TFile } from "obsidian";
+import { foldsOf, parseSlate, setFolds, type SlateLine } from "./slatefold";
 import type { PlaneDesk } from "./planepanels";
 
 export const BROWSER_COCKPIT_PATH = "domvec/browser.md";
+/** The scope ladder, narrowest first (item 72; RESERVOIR_DESIGN 10.2). */
+export const LADDER = ["chunk", "page", "live"] as const;
 const T = "\t";
 const BROWSER_TEXT = ["---", "domvec: slate", "---", "browser",
   T + "url" + T, T + "back" + T + "go", T + "forward" + T + "go", T + "scan" + T + "go",
@@ -40,6 +42,10 @@ export interface BrowserPanelHost { browserViewType: string; desk: PlaneDesk }
 
 export class BrowserPanel {
   browserLeaf: any = null;
+  /** The chunk rung: the chunk rendered as a chunk note's fence renders it. */
+  private chunkEl: HTMLElement | null = null;
+  private chunkComp: Component | null = null;
+  chunkShown = "";
   stats = { opened: 0, went: 0, back: 0, forward: 0, scans: 0, toggles: 0, written: 0, scope: "" as string };
   /** Planted (item 71): the cockpit's fields bind nothing. */
   plantUnbound = false;
@@ -73,12 +79,32 @@ export class BrowserPanel {
         card.appendChild(leaf.containerEl);
         await leaf.setViewState({ type: this.host.browserViewType, active: false });
         this.browserLeaf = leaf;
-        return () => { try { leaf.detach(); } catch { /* gone */ } if (this.browserLeaf === leaf) this.browserLeaf = null; };
+        const chunkEl = card.createDiv({ cls: "domvec-browser-chunk" });
+        chunkEl.style.display = "none";
+        this.chunkEl = chunkEl;
+        // The ladder's gesture (item 72): the wheel over the header node steps
+        // the scope -- in, toward the chunk; out, toward the live page.
+        const onWheel = (e: WheelEvent) => {
+          if (!(e.target as HTMLElement)?.closest?.(".domvec-var-title")) return;
+          e.preventDefault(); e.stopPropagation();
+          this.step(e.deltaY < 0 ? -1 : 1);
+        };
+        card.addEventListener("wheel", onWheel, { capture: true, passive: false });
+        return () => {
+          card.removeEventListener("wheel", onWheel, true);
+          this.chunkComp?.unload(); this.chunkComp = null; this.chunkEl = null; this.chunkShown = "";
+          try { leaf.detach(); } catch { /* gone */ }
+          if (this.browserLeaf === leaf) this.browserLeaf = null;
+        };
       },
     });
     if (!existing) this.stats.opened++;
     const sv = this.slateView();
     if (sv) this.hook(sv);
+    // Asked to open, it opens: a slate left collapsed to its node (its fold
+    // state is remembered) is unfolded -- the browser was asked for.
+    const cm: any = (sv?.editor as any)?.cm;
+    if (cm) { const st = foldsOf(cm); if (st.collapsed) cm.dispatch({ effects: setFolds.of({ ...st, collapsed: false }) }); }
     if (url) await this.go(url);
     return this.view();
   }
@@ -130,7 +156,7 @@ export class BrowserPanel {
       else if (fl.key === "forward") { const w = v.webview; if (w?.canGoForward?.()) { w.goForward(); this.stats.forward++; } }
       else if (fl.key === "scan") { void v.scan?.(); this.stats.scans++; }
       else if (val === "true" || val === "false") { this.write(fl, val === "true" ? "false" : "true"); this.stats.toggles++; }
-      else if (fl.key === "scope") { this.write(fl, val === "live" ? "page" : "live"); this.stats.toggles++; }
+      else if (fl.key === "scope") { this.write(fl, LADDER[(Math.max(0, LADDER.indexOf(val as any)) + 1) % LADDER.length]); this.stats.toggles++; }
       else acted = false;
       if (acted) { e.preventDefault(); e.stopPropagation(); }
     }, true);
@@ -170,6 +196,13 @@ export class BrowserPanel {
     // the page (a page just visited may not be stored yet), `live` otherwise.
     const scope = (this.field(fs, "scope")?.value || "").trim();
     const now = performance.now();
+    // The chunk rung in the browser's place; any other rung, the browser.
+    const chunk = scope === "chunk";
+    if (this.chunkEl && this.browserLeaf) {
+      this.chunkEl.style.display = chunk ? "" : "none";
+      this.browserLeaf.containerEl.style.display = chunk ? "none" : "";
+      if (chunk) void this.showChunk(v);
+    }
     if (scope === "page" && !v.offlineFor && now - this.scopeTry > 3000) {
       this.scopeTry = now;
       const u = String(v.shownUrl?.() || v.webview?.getURL?.() || "");
@@ -180,6 +213,41 @@ export class BrowserPanel {
       this.seenUrl = shown;
       this.write(urlF, shown);
     }
+  }
+
+  /** One rung along the ladder: written into the slate's `scope` field, which
+   *  `sync` then keeps (the field is the state; the gesture only edits it). */
+  ladderSteps = 0;
+  step(dir: -1 | 1): string {
+    const fs = this.fields(), fl = this.field(fs, "scope");
+    if (!fl) return "";
+    const at = Math.max(0, LADDER.indexOf((fl.value.trim() || "live") as any));
+    const next = LADDER[Math.max(0, Math.min(LADDER.length - 1, at + dir))];
+    this.write(fl, next);
+    this.ladderSteps++;
+    return next;
+  }
+
+  /** The chunk rung shown: the chunk the reader last hovered in the browser,
+   *  else the page's first -- through the `domvec` fence, so it is the same
+   *  interactive surface a chunk note draws. */
+  private async showChunk(v: any): Promise<void> {
+    if (!this.chunkEl) return;
+    const h = v.lastHovered;
+    let cid = h ? String(h.stored || h.cid || "") : "";
+    if (!cid) {
+      const url = String(v.shownUrl?.() || "");
+      const cids = url ? await v.sidecar?.pageCids?.(url) : [];
+      cid = (cids && cids[0]) || "";
+    }
+    if (!cid || cid === this.chunkShown) return;
+    this.chunkShown = cid;
+    this.chunkComp?.unload();
+    this.chunkComp = new Component();
+    this.chunkComp.load();
+    this.chunkEl.empty();
+    const NL = "\n";
+    await MarkdownRenderer.render(this.app, "```domvec" + NL + "cid: " + cid + NL + "```", this.chunkEl, BROWSER_COCKPIT_PATH, this.chunkComp);
   }
 
   close(): void { this.host.desk.closePath(BROWSER_COCKPIT_PATH); }

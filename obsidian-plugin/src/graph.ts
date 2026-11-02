@@ -5904,6 +5904,7 @@ export class GraphView extends ItemView {
   plantEgoInWorld = false;
   /** The chunks tagged into the ego (item 74b), as the store last said. */
   egoTags = new Set<string>();
+  egoTagUrls: Record<string, string> = {};
   private egoPosted = "";
   /** The `+ ego` tag on a billboard: the chunk joins the ego set, or leaves it. */
   async tagEgo(cid: string, on: boolean): Promise<boolean> {
@@ -5925,7 +5926,8 @@ export class GraphView extends ItemView {
         mode: () => this.agent.mode,
         anchor: () => this.agent.craftAt,
         world: () => this.shellOf((this.graph as any)?.graphData?.().nodes || []),
-        worldNode: (id: string) => this.craftLookup(id),
+        // A chunk's node, else its page's (drawn whether or not it is open).
+        worldNode: (id: string) => this.craftLookup(id) || (this.egoTagUrls[id] ? this.craftLookup("page:" + this.egoTagUrls[id]) : null),
         signalEdges: () => this.signalEdges,
         isOpen: (path: string) => {
           const desk: any = (window as any).__domvecPlane;
@@ -5950,8 +5952,9 @@ export class GraphView extends ItemView {
         },
         egoProjection: async () => this.sidecar.egoProjection(),
         egoTags: async () => {
-          const got = await this.sidecar.ego();
+          const got: any = await this.sidecar.ego();
           this.egoTags = new Set((got && got.cids) || []);
+          this.egoTagUrls = (got && got.cid_urls) || {};
           return [...this.egoTags];
         },
       });

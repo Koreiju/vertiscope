@@ -822,6 +822,8 @@ _PLANTABLE = {
     "no-where": ("domvec.obsidian.sidecar", "PLANT_NO_WHERE"),                # item 78
     "no-maps": ("domvec.obsidian.sidecar", "PLANT_NO_MAPS"),                  # item 79
     "flat-box": ("domvec.obsidian.blackbox", "PLANT_FLAT"),                   # item 80
+    "untyped-box": ("domvec.obsidian.blackbox", "PLANT_UNTYPED"),             # item 100
+    "no-instant": ("domvec.obsidian.sidecar", "PLANT_NO_INSTANT"),            # item 100
     "world-projection": ("domvec.obsidian.sidecar", "PLANT_WORLD_PROJECTION"),  # item 76
     "no-refill": ("domvec.obsidian.sidecar", "PLANT_NO_REFILL"),               # item 59
     "subprocess-kernel": ("domvec.obsidian.kernel", "PLANT_SUBPROCESS_KERNEL"),  # P-N1
@@ -1563,6 +1565,8 @@ EGO = {"urls": set(), "cids": set(), "loaded": ""}
 PLANT_NO_WHERE = [False]
 #: Planted (item 79): a note's `maps` toggle ignored -- its refs resolve anywhere.
 PLANT_NO_MAPS = [False]
+#: Planted (item 100): unnesting a box shows no search results.
+PLANT_NO_INSTANT = [False]
 
 
 def _ego_file(workspace):
@@ -1691,6 +1695,30 @@ def pairwise(workspace, keys) -> Dict:
     return {"keys": have, "sim": [[round(float(x), 4) for x in row] for row in S]}
 
 
+def _ego_hits(workspace, query: str, want: int) -> list:
+    """The ego's ranking: each ego page ranked WITHIN itself (the index's
+    `scope_url`), a tagged chunk through its own page, merged by score --
+    only ego artifacts, never the corpus ranked end to end."""
+    ego_load(workspace)
+    urls = set(EGO["urls"])
+    for cid in EGO["cids"]:
+        c = workspace.store.chunk(cid)
+        if c is not None:
+            urls.add(c.url)
+    hits = []
+    for u in urls:
+        try:
+            got = workspace.search(query, k=max(8, want), scope_url=u)
+        except Exception:                           # noqa: BLE001 -- one page's failure is not the ego's
+            continue
+        for h in got or []:
+            cid = getattr(h, "cid", None) or getattr(h, "chunk", "")
+            if u in EGO["urls"] or cid in EGO["cids"]:
+                hits.append(h)
+    hits.sort(key=lambda h: -float(getattr(h, "score", 0.0) or 0.0))
+    return hits[:want]
+
+
 def _in_ego(stored) -> bool:
     return stored.cid in EGO["cids"] or stored.url in EGO["urls"]
 
@@ -1741,10 +1769,17 @@ def search_payload(workspace, query: str, k: int = 8, *,
     while True:
         from ..search import SearchDiagnostics
         diag = SearchDiagnostics()
-        try:
-            hits = workspace.search(query, k=want, scope_url=url or "", diagnostics=diag)
-        except TypeError:                       # an index without diagnostics
-            hits = workspace.search(query, k=want, scope_url=url or "")
+        if where == "ego" and not url and not PLANT_NO_WHERE[0]:
+            # The EGO ranked over its own pages only (item 78): a scoped
+            # ranking per ego page, merged by score -- a filter over the whole
+            # corpus's ranking refilled to k=4096 on every call, a few ego
+            # chunks among 60k, and an ego search took seconds (G-309).
+            hits = _ego_hits(workspace, query, want)
+        else:
+            try:
+                hits = workspace.search(query, k=want, scope_url=url or "", diagnostics=diag)
+            except TypeError:                   # an index without diagnostics
+                hits = workspace.search(query, k=want, scope_url=url or "")
         import time as _time
         _t_shape = _time.perf_counter()
         out = []
@@ -2555,6 +2590,13 @@ class _Handler(BaseHTTPRequestHandler):
                 known = [str(k) for k in (body.get("known") or [])] + list(_SLATE_KNOWN)
                 from .. import slate_module as _sm
                 trees = _sm.trees_of(text)
+                # Names the STORE has an artifact by (a note, a page title): a
+                # `{ref}` to one resolves through the store -- not a NameError.
+                from . import refs as _refs
+                for m in _sm.REF.finditer(trees):
+                    nm = m.group(1).strip()
+                    if nm and nm not in known and _refs.titled(self.workspace, nm):
+                        known.append(nm)
                 diags = [] if PLANT_NO_SLATE_CHECK[0] else _sm.check(trees, known=known)
                 self._send(200, {"trees": bool(trees.strip()), "diagnostics": [d.to_json() for d in diags]})
             except Exception as exc:                # noqa: BLE001
@@ -3079,14 +3121,17 @@ class _Handler(BaseHTTPRequestHandler):
                 # alone, or from the WEB (the world, without the ego's notes).
                 maps = str(body.get("maps") or "")
                 allow = None
+                ego_search = None
                 if maps in ("ego", "web") and not PLANT_NO_MAPS[0]:
                     ego_load(self.workspace)
                     if maps == "ego":
                         allow = lambda url, cid: (cid in EGO["cids"]) or (url in EGO["urls"])
+                        ego_search = lambda q: _ego_hits(self.workspace, q, 8)
                     else:
                         allow = lambda url, cid: url not in EGO["urls"]
                 bound = _refs.bind(self.workspace, names,
-                                   sample=int(sample) if isinstance(sample, (int, float)) else None, allow=allow)
+                                   sample=int(sample) if isinstance(sample, (int, float)) else None, allow=allow,
+                                   search=ego_search)
                 if bound["prelude"]:
                     self.kernel_pool.run(note, bound["prelude"])
             # The note's markdown TREES first (PLUGIN_GOAL 62, 63': the extended
@@ -4209,7 +4254,14 @@ class _Handler(BaseHTTPRequestHandler):
         if segments[0] == "ego":
             # The ego set (items 74, 78): its notes and its tagged chunks.
             ego_load(self.workspace)
-            self._send(200, {"urls": sorted(EGO["urls"]), "cids": sorted(EGO["cids"])})
+            # Each tagged chunk's page too: its own node is drawn only when its
+            # page is open, and a line to it falls back to the page's node.
+            cid_urls = {}
+            for cid in EGO["cids"]:
+                c = self.workspace.store.chunk(cid)
+                if c is not None:
+                    cid_urls[cid] = c.url
+            self._send(200, {"urls": sorted(EGO["urls"]), "cids": sorted(EGO["cids"]), "cid_urls": cid_urls})
             return
 
         if segments[0] == "ref":
@@ -4230,9 +4282,24 @@ class _Handler(BaseHTTPRequestHandler):
                         got = None
                 if got is None:
                     self._send(200, {"name": name, "resolved": False, "lines": []})
-                else:
-                    self._send(200, {"name": name, "resolved": True, "kind": "code-" + got["kind"],
-                                     "url": name.strip(), "cids": [], "lines": got["lines"]})
+                    return
+                # Instant feedback (PLUGIN_GOAL 100): unnesting a box shows at
+                # once what the search finds for that symbol -- its top three.
+                lines = list(got["lines"])
+                if not PLANT_NO_INSTANT[0]:
+                    base_, _, qual_ = name.strip().partition("#")
+                    term = (qual_.split(".")[-1] if qual_ else base_.rsplit("/", 1)[-1].rsplit(".", 1)[0]).replace("_", " ")
+                    try:
+                        found = self.workspace.search(term, k=3) if term.strip() else []
+                    except Exception:                    # noqa: BLE001
+                        found = []
+                    for h in found or []:
+                        c = self.workspace.store.chunk(getattr(h, "cid", None) or getattr(h, "chunk", ""))
+                        if c is not None:
+                            first = next((l.strip() for l in (c.md or "").splitlines() if l.strip()), "")
+                            lines.append("found" + chr(9) + first[:90])
+                self._send(200, {"name": name, "resolved": True, "kind": "code-" + got["kind"],
+                                 "url": name.strip(), "cids": [], "lines": lines})
                 return
             got = _refs.resolve(self.workspace, name)
             if got is None:
