@@ -68,6 +68,14 @@ export class BrowserPanel {
       if (!this.app.vault.getAbstractFileByPath("domvec")) await this.app.vault.createFolder("domvec").catch(() => undefined);
       f = await this.app.vault.create(BROWSER_COCKPIT_PATH, BROWSER_TEXT);
     }
+    // Asked to open, it opens: the slate's REMEMBERED fold state said
+    // "collapsed" (a right-click on its title, kept per note) and came back
+    // after the note's text loaded -- the browser shown as its node alone.
+    try {
+      const k = "domvec.slate.folds:" + BROWSER_COCKPIT_PATH;
+      const st = JSON.parse(window.localStorage.getItem(k) || "null");
+      if (st && st.collapsed) { st.collapsed = false; window.localStorage.setItem(k, JSON.stringify(st)); }
+    } catch { /* a convenience */ }
     const desk = this.host.desk;
     const existing = desk.panelOf(BROWSER_COCKPIT_PATH);
     await desk.open(f as TFile, {
@@ -236,7 +244,9 @@ export class BrowserPanel {
     const h = v.lastHovered;
     let cid = h ? String(h.stored || h.cid || "") : "";
     if (!cid) {
-      const url = String(v.shownUrl?.() || "");
+      // The page's own address -- on the page rung the view shows the page
+      // REBUILT, whose own url is not the page's (`offlineFor` is).
+      const url = String(v.offlineFor || v.shownUrl?.() || "");
       const cids = url ? await v.sidecar?.pageCids?.(url) : [];
       cid = (cids && cids[0]) || "";
     }

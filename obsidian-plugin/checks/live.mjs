@@ -10982,7 +10982,12 @@ export function makeChecks(env) {
             for (let i = 0; i < 60 && !planted && !((g.searchField.window || []).length); i++) await sleep(250);
             await sleep(300);
             out.query = g.searchField.query; out.k = g.searchField.k;
-            c.resultsOpen = false; c.toggleResults(); await sleep(700);
+            c.resultsOpen = false; c.toggleResults();
+            // The rows are written by the cockpit's sync once the search
+            // answers: waited for, not a fixed 700 ms (a sidecar busy storing
+            // pages a browser check had just streamed answered later).
+            for (let i = 0; i < 40 && !planted && !c.resultRows().length; i++) await sleep(250);
+            await sleep(300);
             out.rows = c.resultRows().length;
             const f0 = g.focusStats.asked; c.hoverRow(2); await sleep(300); c.hoverRow(0);
             out.row_flight = g.focusStats.asked - f0;
@@ -11285,7 +11290,9 @@ export function makeChecks(env) {
             for (let i = 0; i < 40 && valOf("query") !== ""; i++) await sleep(150);
             setVal("throttle", "100"); setVal("query", "radix tree");
             // The tiered search takes 1-3 s cold: wait for its results, not a fixed time.
-            for (let i = 0; i < 40 && (g.searchState?.targets || []).filter(Boolean).length < 3; i++) await sleep(250);
+            // Up to 30 s: a sidecar busy storing what earlier checks streamed
+            // answered the search after the 10 s this once allowed.
+            for (let i = 0; i < 120 && (g.searchState?.targets || []).filter(Boolean).length < 3; i++) await sleep(250);
             const targets = (g.searchState?.targets || []).filter(Boolean);
             setVal("play", "true"); await sleep(400);
             const out = { planted, targets: targets.length, playing_at_start: a.playing };
