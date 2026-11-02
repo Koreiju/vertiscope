@@ -5059,6 +5059,36 @@ detected range.*
 - *(117) Build all of it immediately; test at the very end of a complete
   build (a standing instruction for this batch).*
 
+*And, asked how agents should split the work (`docs/AGENT_PLAN.md`) -- whether
+to review the prompts first, whether item 107 supersedes G-21 ("nodes never
+overlap", the scale then leaving up to 2% overlapping), and how many agents:*
+
+> You may wish to spawn claude sonnet agents to get the bulk done sooner and more focusedly, including the remainder of the open items. Before you do so, let's plan how we'll break down each agent from a full review of my own prompts with our docs and what is implemented per the docs without any later prompts relating to them, and what is still open issues from my prompts that, if were made later than the requirements or more generally, are still open ones that need strict builds and tests? You can be partially liberal with agents; our plan is to use sonnet at low temperature.
+
+> (sequencing) Review, then build
+
+> (item 107) there are no overlaps because umap scaling is for collisions strictly. even if the two closest nodes are just touching at a point.
+
+> (parallelism) 10, but haiku agents, with strict and focused instructions.
+
+*Read as: (118) the open work is split across agents, PLANNED from a full
+review of every prompt against the docs and the code -- what is built, what
+a later prompt changed, and what is still open -- before any agent builds;
+(119) item 107 is STRICT: the map's one scale is the smallest at which NO
+two mapped nodes overlap -- the closest pair just touching -- not "at most 2%
+overlapping"; G-21 ("nodes never overlap") stands and is met by the scale;
+(120) up to ten agents at once, Haiku, each with strict and focused
+instructions.*
+
+*And, interrupting a draft that parted near-coincident nodes in the fit so a
+capped scale could clear them:*
+
+> No nudging nodes
+
+*Read as: (121) no node is ever moved off its fit position to clear a
+collision -- the scale is the only collision answer, uncapped; a pair the fit
+put on one point is reported, not moved.*
+
 ---
 
 ## Standing instructions carried in the verbatim

@@ -4105,19 +4105,23 @@ export class GraphView extends ItemView {
    */
   plantForceMapped = false;
   mapScale = 1;
-  scaledStats = { runs: 0, scale: 1, mapped: 0, overlapping_at_1: 0, left_overlapping: 0, jumped: 0, glided: 0 };
-  /** The largest the map is spread; a coincident pair is not worth a map 100x wide. */
-  static MAP_SCALE_MAX = 6;
+  scaledStats = { runs: 0, scale: 1, mapped: 0, overlapping_at_1: 0, left_overlapping: 0, coincident: 0, jumped: 0, glided: 0 };
   private mapScaleN = 0;
   get scaledMode(): boolean { return !this.plantForceMapped; }
-  /** Where a mapped node is drawn: its fit, scaled about the map's origin. */
+  /** Where a mapped node is drawn: its fit, scaled about the map's origin --
+   *  and nothing else: no node is nudged (PLUGIN_GOAL 121). */
   mapTarget(n: any): number[] {
     const s = this.mapScale;
     return [n.fitX * s, n.fitY * s, (n.fitZ ?? 0) * s];
   }
-  /** One factor for the whole map: the smallest that leaves at most 2% of the
-   *  mapped nodes overlapping, as drawn. Pairs apart at scale 1 only get
-   *  further apart, so only the pairs touching at 1 are asked. */
+  /** One factor for the whole map, STRICT (PLUGIN_GOAL 119: "there are no
+   *  overlaps because umap scaling is for collisions strictly. even if the
+   *  two closest nodes are just touching at a point"): the smallest at which
+   *  no two mapped nodes overlap, as drawn -- the closest pair just touching.
+   *  Pairs apart at scale 1 only get further apart, so only the pairs
+   *  touching at 1 are asked. No cap, and no node moved off its fit ("No
+   *  nudging nodes", item 121): two nodes the fit put on ONE point cannot be
+   *  parted by any scale, and are counted `coincident`, never moved. */
   private computeMapScale(nodes: any[]): number {
     const m = nodes.filter((n) => !n.force && Number.isFinite(n.fitX) && Number.isFinite(n.fitY));
     const N = m.length;
@@ -4133,9 +4137,10 @@ export class GraphView extends ItemView {
       const k = key(Math.floor(p[0] / cell), Math.floor(p[1] / cell), Math.floor(p[2] / cell));
       const l = grid.get(k); if (l) l.push(i); else grid.set(k, [i]);
     });
-    const worst = new Float64Array(N);
-    let pairs = 0;
-    const MAX = GraphView.MAP_SCALE_MAX;
+    // The closest pair decides: the scale is the LARGEST need/distance over
+    // every pair overlapping at 1, so at it every pair is clear and that pair
+    // just touches. A pair on one point (distance 0) no scale parts: counted.
+    let s = 1, overlapping = 0, coincident = 0;
     P.forEach((p, i) => {
       const cx = Math.floor(p[0] / cell), cy = Math.floor(p[1] / cell), cz = Math.floor(p[2] / cell);
       for (let ox = -1; ox <= 1; ox++) for (let oy = -1; oy <= 1; oy++) for (let oz = -1; oz <= 1; oz++) {
@@ -4144,31 +4149,30 @@ export class GraphView extends ItemView {
           const need = R[i] + R[j];
           const d = Math.hypot(p[0] - P[j][0], p[1] - P[j][1], p[2] - P[j][2]);
           if (d >= need) continue;
-          pairs++;
-          const ratio = need / Math.max(d, need / MAX);
-          if (ratio > worst[i]) worst[i] = ratio;
-          if (ratio > worst[j]) worst[j] = ratio;
+          overlapping++;
+          if (d <= 0) { coincident++; continue; }
+          if (need / d > s) s = need / d;
         }
       }
     });
-    const need = Array.from(worst).filter((r) => r > 1).sort((a, b) => b - a);
-    const allowed = Math.floor(0.02 * N);
-    const s = need.length > allowed ? Math.min(MAX, Math.max(1, need[allowed])) : 1;
     this.scaledStats.runs++;
     this.scaledStats.mapped = N;
-    this.scaledStats.overlapping_at_1 = need.length;
-    this.scaledStats.left_overlapping = need.filter((r) => r > s + 1e-9).length;
-    this.scaledStats.scale = Math.round(s * 1000) / 1000;
+    this.scaledStats.overlapping_at_1 = overlapping;
+    this.scaledStats.coincident = coincident;
+    this.scaledStats.left_overlapping = coincident;
+    this.scaledStats.scale = Math.round(s * 1e6) / 1e6;
     return s;
   }
-  /** Re-derive the scale when the map has grown by a sixth; adopt it only when it moved by a tenth. */
+  /** Re-derive the scale when the map has grown by a sixth (or `force`).
+   *  STRICT: any larger scale is adopted at once -- a smaller one only past a
+   *  tenth, so the map does not breathe on every newcomer. */
   private rescaleMap(force = false): void {
     if (!this.graph || !this.scaledMode) return;
     const nodes = this.graph.graphData().nodes as any[];
     const mapped = nodes.reduce((a: number, n: any) => a + (!n.force && Number.isFinite(n.fitX) ? 1 : 0), 0);
-    if (!force && this.mapScaleN && mapped < this.mapScaleN * 1.17) return;
+    if (!force && this.mapScaleN && mapped === this.mapScaleN) return;
     const s = this.computeMapScale(nodes);
-    if (force || Math.abs(s - this.mapScale) > 0.1 * this.mapScale) this.mapScale = s;
+    if (force || s > this.mapScale || s < 0.9 * this.mapScale) this.mapScale = s;
   }
   private mapNewcomers(nodes: any[]): void {
     for (const n of nodes) {

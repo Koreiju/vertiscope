@@ -321,11 +321,12 @@ export class Craft {
       const P = mapped.map((n) => this.places[keyOf(n)]);
       const c = [0, 1, 2].map((a) => P.reduce((s, p) => s + p[a], 0) / P.length);
       const nn = P.map((p, i) => Math.min(...P.map((q, j) => j === i ? Infinity : Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]))));
+      // STRICT (item 119): the closest pair of notes just touching; no node
+      // nudged (item 121) -- two on one point are counted, never moved.
       const need = 2 * R * 0.32 * 1.15;
-      const sorted = nn.filter((d) => d > 1e-9).sort((a, b) => a - b);
-      const near = sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor(0.02 * sorted.length))] : 1;
-      const s = need / Math.max(near, 1e-6);
-      this.stats.map_scale = Math.round(s * 1000) / 1000;
+      const apart = nn.filter((d) => d > 0);
+      const s = apart.length ? need / Math.min(...apart) : 1;
+      this.stats.map_scale = Math.round(s * 1e6) / 1e6;
       this.stats.map_left_overlapping = nn.filter((d) => d * s < need - 1e-9).length;
       mapped.forEach((n, i) => mapAt.set(n, { x: (P[i][0] - c[0]) * s, y: (P[i][1] - c[1]) * s, z: (P[i][2] - c[2]) * s }));
     }
