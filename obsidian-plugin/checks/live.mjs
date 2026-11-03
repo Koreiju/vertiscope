@@ -9569,6 +9569,9 @@ export function makeChecks(env) {
                                    text: "# g317" + NL + NL + body + " Entry " + i + "." + NL + (nb ? NL + F + "python" + NL + "x = " + i + NL + F + NL : "") });
           const focus = mk(0, true), notes = [mk(1, true), mk(2, true), mk(3, false), mk(4, false)];
           halo.plantNoTypeTerm = ${planted};
+          // The ADDITIVE term is measured in the mixed field: the default is
+          // type-strict now (item 113, G-330), where markdown never shows.
+          halo.plantLooseType = true;
           const out = { planted: ${planted} };
           try {
             await d.create("notebook", focus);
@@ -9588,7 +9591,7 @@ export function makeChecks(env) {
             out.gap = out.r_same !== null && out.r_other !== null ? Math.round(out.r_other - out.r_same) : null;
             return out;
           } finally {
-            halo.plantNoTypeTerm = false; halo.close();
+            halo.plantNoTypeTerm = false; halo.plantLooseType = false; halo.close();
             for (const n of [focus, ...notes]) { try { await d.trash(n.path); } catch (e) { /* gone */ } }
             c.dirty();
           }
@@ -9636,6 +9639,373 @@ export function makeChecks(env) {
                 && c.neighbours >= 1 && c.code_rank_pages > 0 && got.code_hits >= 1 && got.higher >= 1 && got.lower === 0,
           evidence: got,
         };
+      },
+    },
+    {
+      id: "G-324",
+      asks: "the calm layout (PLUGIN_GOAL 107, 119, 121): every MAPPED node in the 3D world drawn at the map's one scale times its fit -- no two overlapping as drawn (the closest pair just touching), none nudged, and holding still with no force moving it; the ego craft's notes at their ego-UMAP places scaled the same way, none overlapping; planted (plantForceMapped, plantSphereEgo) the forces and the sphere, as before",
+      async run() {
+        // 2026-11-02: "there is still too much intermediate force directed
+        // motion ... umap-collision-scaled only"; "there are no overlaps because
+        // umap scaling is for collisions strictly"; "No nudging nodes".
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          const c = v.craft;
+          v.plantForceMapped = ${planted};
+          if (c) c.plantSphereEgo = ${planted};
+          try {
+            await v.reload();
+            await sleep(6000);
+            const before = v.overlapCensus();
+            const mapped = v.graph.graphData().nodes.filter((n) => !n.force && Number.isFinite(n.fitX)).slice(0, 400);
+            const p0 = mapped.map((n) => [n.x, n.y, n.z || 0]);
+            await sleep(3000);
+            const moved = mapped.map((n, i) => Math.hypot(n.x - p0[i][0], n.y - p0[i][1], (n.z || 0) - p0[i][2]));
+            const after = v.overlapCensus();
+            const offTarget = v.scaledMode ? mapped.filter((n) => { const t = v.mapTarget(n); return Math.hypot(n.x - t[0], n.y - t[1], (n.z || 0) - t[2]) > 1e-3 && !n.__glide; }).length : null;
+            if (c) { c.dirty(); await sleep(2500); }
+            return { planted: ${planted}, census: after, census_first: before, moved_max: Math.round(Math.max(0, ...moved) * 1000) / 1000,
+                     sampled: mapped.length, off_target: offTarget, scaled: v.scaledStats,
+                     craft: c ? { map_scale: c.stats.map_scale, left_overlapping: c.stats.map_left_overlapping, notes: c.stats.notes } : null };
+          } finally {
+            v.plantForceMapped = false; if (c) c.plantSphereEgo = false;
+            await v.reload();
+          }
+        })()`, { timeout: 120000 });
+        const clean = await arm(false);
+        const planted = await arm(true);
+        const strict = (x) => !!x && x.census.mapped > 10 && x.census.overlapping_pairs - x.census.coincident === 0
+          && x.moved_max < 0.5 && (!x.craft || x.craft.notes < 2 || x.craft.left_overlapping === 0);
+        return { pass: strict(clean) && clean.off_target === 0 && !strict(planted), evidence: { clean, planted } };
+      },
+    },
+    {
+      id: "G-326",
+      asks: "panel and node are one fold parameter (PLUGIN_GOAL 110): a panel on the plane is as tall as the fields it shows -- folding one section shrinks it, folding all to its root makes it its node, restoring the node unfolds it to its full height again; planted (plantFixedSize) the card keeps its size whatever is folded and never becomes the node",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const d = window.__domvecPlane, NL = String.fromCharCode(10);
+          const body = (name) => "## " + name + NL + NL + Array.from({ length: 6 }, (_, i) => name + " line " + i + " of the fold check.").join(NL + NL) + NL;
+          const path = "domvec/graph/g326 " + (${planted} ? "p" : "c") + " " + Date.now() + ".md";
+          d.plantFixedSize = ${planted};
+          const out = { planted: ${planted} };
+          try {
+            await d.create("notebook", { path, text: "# g326 root" + NL + NL + body("Alpha") + NL + body("Beta") + NL + body("Gamma") });
+            const p = d.panelOf(path), v = p.leaf.view;
+            if (v.getMode && v.getMode() === "preview") await v.setState({ ...v.getState(), mode: "source", source: false }, { history: false });
+            await sleep(1500);
+            out.full = d.foldOf(path).height;
+            const lines = v.editor.getValue().split(NL);
+            v.editor.setCursor({ line: lines.findIndex((l) => l.startsWith("## Alpha")), ch: 0 });
+            v.editor.exec("toggleFold");
+            await sleep(1200);
+            out.one_folded = d.foldOf(path).height;
+            v.editor.exec("foldAll");
+            await sleep(1500);
+            const f = d.foldOf(path);
+            out.all_folded = { node: f.node, lines: f.lines, folds: f.folds, height: f.height };
+            if (f.node) d.toggleMinimized(path);
+            await sleep(1500);
+            const g = d.foldOf(path);
+            out.restored = { node: g.node, height: g.height, folds: g.folds };
+            out.stats = d.foldStats;
+            return out;
+          } finally {
+            d.plantFixedSize = false;
+            try { await d.trash(path); } catch (e) { /* gone */ }
+          }
+        })()`, { timeout: 90000 });
+        const clean = await arm(false);
+        const planted = await arm(true);
+        const ok = (x) => !!x && x.one_folded < x.full - 20 && x.all_folded.node && !x.restored.node && x.restored.height > x.one_folded + 20;
+        return { pass: ok(clean) && !ok(planted), evidence: { clean, planted } };
+      },
+    },
+    {
+      id: "G-327",
+      asks: "the containment gesture (PLUGIN_GOAL 111): Alt+click on a panel's node on the plane gathers the collapsed-panel nodes LINKED to it (either way) under it, in a drawn container, leaving an unlinked collapsed node where it was; the same gesture puts them back where they were; planted (plantContainNoLinks) the unlinked node is gathered too",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const until = async (ok, ms) => { for (let t = 0; t < ms && !(await ok()); t += 200) await sleep(200); return !!(await ok()); };
+          const d = window.__domvecPlane, NL = String.fromCharCode(10), st = Date.now();
+          const name = (k) => "g327 " + k + " " + st;
+          const pth = (k) => "domvec/graph/" + name(k) + ".md";
+          d.plantContainNoLinks = ${planted};
+          const out = { planted: ${planted} };
+          try {
+            await d.create("notebook", { path: pth("hub"), text: "# hub" + NL + NL + "[[" + name("a") + "]] and [[" + name("b") + "]]" + NL });
+            await d.create("notebook", { path: pth("a"), text: "# a" + NL });
+            await d.create("notebook", { path: pth("b"), text: "# b links back to [[" + name("hub") + "]]" + NL });
+            await d.create("notebook", { path: pth("lone"), text: "# lone, linked to nothing" + NL });
+            for (const k of ["a", "b", "lone"]) d.toggleMinimized(pth(k));
+            await until(() => d.linkedTo(pth("hub")).size >= 2, 8000);
+            const lone0 = { left: d.panelOf(pth("lone")).card.style.left, top: d.panelOf(pth("lone")).card.style.top };
+            const head = d.panelOf(pth("hub")).card.querySelector(".domvec-plane-head-node");
+            head.dispatchEvent(new MouseEvent("click", { bubbles: true, altKey: true }));
+            await sleep(600);
+            const g = d.groups.get(pth("hub"));
+            out.members = g ? g.members.map((m) => m.split("/").pop().split(" ")[1]) : null;
+            out.container = !!(g && g.el && g.el.isConnected && g.el.offsetWidth > 0);
+            const hubR = d.panelOf(pth("hub")).card.getBoundingClientRect();
+            out.under = g ? g.members.every((m) => d.panelOf(m).card.getBoundingClientRect().top >= hubR.bottom) : false;
+            out.lone_kept = d.panelOf(pth("lone")).card.style.left === lone0.left && d.panelOf(pth("lone")).card.style.top === lone0.top;
+            head.dispatchEvent(new MouseEvent("click", { bubbles: true, altKey: true }));
+            await sleep(400);
+            out.released = !d.groups.has(pth("hub"));
+            return out;
+          } finally {
+            d.plantContainNoLinks = false;
+            if (d.groups.has(pth("hub"))) d.contain(pth("hub"));
+            for (const k of ["hub", "a", "b", "lone"]) { try { await d.trash(pth(k)); } catch (e) { /* gone */ } }
+          }
+        })()`, { timeout: 90000 });
+        const clean = await arm(false);
+        const planted = await arm(true);
+        const ok = (x) => !!x && !!x.members && x.members.length === 2 && x.members.includes("a") && x.members.includes("b")
+          && x.container && x.under && x.lone_kept && x.released;
+        return { pass: ok(clean) && !ok(planted) && !!planted.members && planted.members.includes("lone"), evidence: { clean, planted } };
+      },
+    },
+    {
+      id: "G-329",
+      asks: "unnest where the reader selects (PLUGIN_GOAL 112): a cell's unnest makes a black-box panel on the plane linked to its note -- its imports as boxes that unnest again, through the store's /ref, into the library module's own imports (json -> json.decoder), a compiled base module a leaf, its definitions typed; the selection does the same for a dotted name; planted (plantUnnestFlat) the rows are text with nothing to unnest",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const plugin = app.plugins.getPlugin("domvec-bridge");
+          const SIDE = String(plugin.settings.sidecar).replace(/[/]+$/, "");
+          const H = { "X-Domvec-Client": "obsidian-plugin" };
+          const d = window.__domvecPlane, NL = String.fromCharCode(10), F = String.fromCharCode(96).repeat(3);
+          const path = "domvec/graph/g329 " + (${planted} ? "p" : "c") + " " + Date.now() + ".md";
+          const code = "import json" + NL + "import sys" + NL + "from typing import Optional" + NL + NL + "def f(x: int) -> str:" + NL + "    return str(x)";
+          plugin.plantUnnestFlat = ${planted};
+          const made = [];
+          const out = { planted: ${planted} };
+          try {
+            await d.create("notebook", { path, text: "# g329" + NL + NL + F + "python" + NL + code + NL + F + NL });
+            await plugin.onUnnestFence({ lang: "python", code, line: 2, path });
+            const u = plugin.unnestStats.last.path; made.push(u);
+            const text = await app.vault.read(app.vault.getAbstractFileByPath(u));
+            out.rows = text.split(NL).filter((l) => /^(import|from|def|class) /.test(l));
+            out.boxes = out.rows.filter((r) => r.includes("{code://")).length;
+            out.leaf = out.rows.some((r) => r.startsWith("import sys") && r.includes("(compiled)"));
+            out.on_plane = !!d.panelOf(u);
+            out.links_back = text.includes("[[" + path.split("/").pop().replace(/\\.md$/, "") + "]]");
+            const box = (out.rows.find((r) => r.startsWith("import json")) || "").match(/\\{(code:[^}]+)\\}/);
+            if (box) {
+              const r = await (await fetch(SIDE + "/ref?name=" + encodeURIComponent(box[1]), { headers: H })).json();
+              out.next_level = (r.lines || []).filter((l) => /^from json\\./.test(l)).slice(0, 3);
+            } else out.next_level = [];
+            const sel = await plugin.unnest("json.decoder", path, "selection");
+            made.push(sel);
+            const st = await app.vault.read(app.vault.getAbstractFileByPath(sel));
+            out.selection_box = /import json\\.decoder\\t\\{code:\\/\\/pypi\\/json\\/decoder\\.py\\}/.test(st);
+            return out;
+          } finally {
+            plugin.plantUnnestFlat = false;
+            for (const p of [path, ...made]) { try { await d.trash(p); } catch (e) { /* gone */ } }
+          }
+        })()`, { timeout: 90000 });
+        const clean = await arm(false);
+        const planted = await arm(true);
+        const ok = (x) => !!x && x.boxes >= 2 && x.leaf && x.on_plane && x.links_back && x.next_level.length >= 1 && x.selection_box
+          && x.rows.some((r) => r.startsWith("def f") && r.includes("-> str"));
+        return { pass: ok(clean) && !ok(planted) && planted.boxes === 0, evidence: { clean, planted } };
+      },
+    },
+    {
+      id: "G-330",
+      asks: "the halo is type-strict (PLUGIN_GOAL 113): a notebook's polar retrieval field holds only notebooks -- markdown notes of the same words are left out -- and re-keying keeps the trace back to the root focus; planted (plantLooseType) the markdown notes join the field",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const until = async (ok, ms) => { for (let t = 0; t < ms && !(await ok()); t += 400) await sleep(400); return !!(await ok()); };
+          const plugin = app.plugins.getPlugin("domvec-bridge");
+          const SIDE = String(plugin.settings.sidecar).replace(/[/]+$/, "");
+          const H = { "content-type": "application/json", "X-Domvec-Client": "obsidian-plugin" };
+          const d = window.__domvecPlane, halo = window.__domvecHalo, c = window.__domvecCraft;
+          const NL = String.fromCharCode(10), F = String.fromCharCode(96).repeat(3), stamp = Date.now();
+          const body = "Glassblowers anneal the vessel slowly so the cooling strain never cracks it.";
+          const mk = (i, nb) => ({ path: "domvec/graph/g330 " + (nb ? "nb" : "md") + i + " " + stamp + ".md",
+                                   text: "# g330" + NL + NL + body + " Entry " + i + "." + NL + (nb ? NL + F + "python" + NL + "y = " + i + NL + F + NL : "") });
+          const focus = mk(0, true), notes = [mk(1, true), mk(2, true), mk(3, false), mk(4, false)];
+          halo.plantLooseType = ${planted};
+          const out = { planted: ${planted} };
+          try {
+            await d.create("notebook", focus);
+            for (const n of notes) { await d.create("notebook", n); d.closePath(n.path); }
+            c.dirty();
+            out.ready = await until(async () => {
+              const r = await (await fetch(SIDE + "/search?q=" + encodeURIComponent(body) + "&k=12&where=ego", { headers: H })).json();
+              return (r.hits || []).filter((h) => String(h.url).includes(String(stamp))).length >= 5;
+            }, 150000);
+            await halo.open(focus.path);
+            await until(() => halo.nodes.length >= 2, 10000);
+            const ours = halo.nodes.filter((n) => n.url.includes(String(stamp)));
+            out.kinds = ours.map((n) => n.kind);
+            out.focus_kind = halo.focusKind;
+            const i = halo.nodes.findIndex((n) => n.url.includes(String(stamp)));
+            if (i >= 0) { await halo.rekey(i); out.after_rekey_kinds = halo.nodes.filter((n) => n.url.includes(String(stamp))).map((n) => n.kind); out.history = halo.history.length; }
+            out.type_stats = halo.typeStats;
+            return out;
+          } finally {
+            halo.plantLooseType = false; halo.close();
+            for (const n of [focus, ...notes]) { try { await d.trash(n.path); } catch (e) { /* gone */ } }
+            c.dirty();
+          }
+        })()`, { timeout: 300000 });
+        const clean = await arm(false);
+        const planted = await arm(true);
+        const strict = (x) => !!x && x.ready && x.kinds.length >= 1 && x.kinds.every((k) => k === "notebook")
+          && (!x.after_rekey_kinds || x.after_rekey_kinds.every((k) => k === "notebook")) && (x.history || 0) >= 1;
+        return { pass: strict(clean) && !!planted && planted.kinds.includes("markdown"), evidence: { clean, planted } };
+      },
+    },
+    {
+      id: "G-331",
+      asks: "signal-flow glow, iterative-recursive (PLUGIN_GOAL 114): a finished run sends a glowing pulse from its note down the craft's edges -- to its cells, then on from each cell to its readout -- hop by hop (more hops than the note's own edges), pulses visibly in flight, and a panel the pulse reaches flashes on the plane; planted (plantNoPulse) no pulse",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const until = async (ok, ms) => { for (let t = 0; t < ms && !(await ok()); t += 300) await sleep(300); return !!(await ok()); };
+          const plugin = app.plugins.getPlugin("domvec-bridge");
+          const d = window.__domvecPlane, c = window.__domvecCraft, NL = String.fromCharCode(10), F = String.fromCharCode(96).repeat(3);
+          const path = "domvec/graph/g331 " + (${planted} ? "p" : "c") + " " + Date.now() + ".md";
+          c.plantNoPulse = ${planted};
+          const out = { planted: ${planted} };
+          try {
+            await d.create("notebook", { path, text: "# g331" + NL + NL + F + "python" + NL + "z = 41 + 1" + NL + "print(z)" + NL + F + NL });
+            // A real run: the cell executes in the note's kernel; its end lights off and pulses.
+            const v = d.panelOf(path).leaf.view;
+            const code = "z = 41 + 1" + NL + "print(z)";
+            await plugin.onRunFence({ lang: "python", code, line: 2, path });
+            c.dirty();
+            await until(() => c.nodes.some((n) => n.id === "craft:" + path) && c.downstream("craft:" + path).length > 0, 20000);
+            out.direct = c.downstream("craft:" + path).length;
+            const s0 = c.pulseStats.started, h0 = c.pulseStats.hops;
+            let flashed = false;
+            const card = d.panelOf(path).card;
+            const mo = new MutationObserver(() => { if (card.classList.contains("is-pulsed")) flashed = true; });
+            mo.observe(card, { attributes: true, attributeFilter: ["class"] });
+            plugin.light(path, true);
+            plugin.light(path, false);
+            await sleep(150);
+            out.in_flight = c.pulses ? c.pulses.length : null;
+            await sleep(3500);
+            mo.disconnect();
+            out.started = c.pulseStats.started - s0;
+            out.hops = c.pulseStats.hops - h0;
+            out.panel_flashed = flashed;
+            return out;
+          } finally {
+            c.plantNoPulse = false;
+            try { await d.trash(path); } catch (e) { /* gone */ }
+          }
+        })()`, { timeout: 90000 });
+        const clean = await arm(false);
+        const planted = await arm(true);
+        const ok = (x) => !!x && x.started >= 1 && x.hops > x.direct && x.in_flight >= 1 && x.panel_flashed;
+        return { pass: ok(clean) && !!planted && planted.hops === 0, evidence: { clean, planted } };
+      },
+    },
+    {
+      id: "G-333",
+      asks: "the ego is a non-holonomic vehicle (PLUGIN_GOAL 116): D turns the heading without moving the camera, W moves it along the heading with nothing sideways; V to third person puts the camera behind the vehicle looking at it, the craft drawn there in the ego view, W in third person moves the vehicle and the camera follows; V back puts the camera in the cockpit; planted (plantStrafe) D slides the camera sideways",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          const a = v.agent, cam = v.graph.camera(), ctl = v.graph.controls();
+          const save = { p: cam.position.clone(), t: ctl.target.clone(), u: cam.up.clone(), mode: a.mode, view: a.view };
+          const k = (key) => a.key(new KeyboardEvent("keydown", { key }));
+          const P = () => cam.position.clone(), T = () => ctl.target.clone();
+          const dir = () => T().sub(P()).normalize();
+          a.plantStrafe = ${planted};
+          const out = { planted: ${planted} };
+          try {
+            a.setMode("ego"); a.setView("first");
+            const p0 = P(), d0 = dir();
+            cam.updateMatrixWorld(); const right = new cam.position.constructor().setFromMatrixColumn(cam.matrixWorld, 0);
+            k("d");
+            out.turn_moved = Math.round(P().distanceTo(p0) * 1000) / 1000;
+            out.turn_angle = Math.round(Math.acos(Math.max(-1, Math.min(1, dir().dot(d0)))) * 1000) / 1000;
+            const p1 = P(), h1 = dir();
+            k("w");
+            const step = P().sub(p1);
+            out.forward = Math.round(step.dot(h1) * 1000) / 1000;
+            out.sideways = Math.round(Math.abs(step.clone().sub(h1.clone().multiplyScalar(step.dot(h1))).length()) * 1000) / 1000;
+            k("v");
+            const veh = a.vehicle ? { x: a.vehicle.p.x, y: a.vehicle.p.y, z: a.vehicle.p.z } : null;
+            out.third = a.view === "third";
+            out.cam_behind = veh ? Math.round(P().distanceTo(new cam.position.constructor(veh.x, veh.y, veh.z)) * 10) / 10 : null;
+            out.looks_at_vehicle = veh ? T().distanceTo(new cam.position.constructor(veh.x, veh.y, veh.z)) < 1e-3 : false;
+            await new Promise((r) => setTimeout(r, 300));
+            out.craft_drawn = !!(v.craft && v.craft.group && v.craft.group.visible);
+            const v0 = { ...a.vehicle.p }, c0 = P();
+            k("w");
+            out.vehicle_moved = Math.round(Math.hypot(a.vehicle.p.x - v0.x, a.vehicle.p.y - v0.y, a.vehicle.p.z - v0.z) * 1000) / 1000;
+            out.camera_followed = Math.round(P().distanceTo(c0) * 1000) / 1000;
+            k("v");
+            out.back_first = a.view === "first" && P().distanceTo(new cam.position.constructor(a.vehicle.p.x, a.vehicle.p.y, a.vehicle.p.z)) < 1e-3;
+            out.stats = a.vehicleStats;
+            return out;
+          } finally {
+            a.plantStrafe = false;
+            a.setView("first");
+            cam.position.copy(save.p); ctl.target.copy(save.t); cam.up.copy(save.u); cam.lookAt(ctl.target); ctl.update && ctl.update();
+            a.setMode(save.mode);
+          }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false);
+        const planted = await arm(true);
+        const ok = (x) => !!x && x.turn_moved < 1e-3 && x.turn_angle > 0.01 && x.forward > 0 && x.sideways < 1e-3
+          && x.third && x.cam_behind > 1 && x.looks_at_vehicle && x.craft_drawn && x.vehicle_moved > 0 && x.camera_followed > 0 && x.back_first;
+        return { pass: ok(clean) && !!planted && planted.turn_moved > 1e-3 && !ok(planted), evidence: { clean, planted } };
+      },
+    },
+    {
+      id: "G-334",
+      asks: "keys typed into text never drive (PLUGIN_GOAL 116): with the pointer over the 3D view, a W pressed while a plane panel's markdown editor or an input field has the focus is the text's -- the camera does not move and the refusal is counted -- and the same W with nothing focused drives; planted (plantKeysThroughText) the editor's W drives the camera",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          const d = window.__domvecPlane, cam = v.graph.camera(), ctl = v.graph.controls();
+          const save = { p: cam.position.clone(), t: ctl.target.clone() };
+          const NL = String.fromCharCode(10);
+          const path = "domvec/graph/g334 " + (${planted} ? "p" : "c") + " " + Date.now() + ".md";
+          v.plantKeysThroughText = ${planted};
+          const over = v.pointerOver;
+          const out = { planted: ${planted} };
+          const press = () => { const p0 = cam.position.clone(); const took = v.agentKey(new KeyboardEvent("keydown", { key: "w", cancelable: true })); return { took, moved: Math.round(cam.position.distanceTo(p0) * 1000) / 1000 }; };
+          try {
+            await d.create("notebook", { path, text: "# g334" + NL + NL + "typing here" + NL });
+            v.pointerOver = true;
+            const ed = d.panelOf(path).leaf.view.editor;
+            ed.focus(); await sleep(200);
+            const r0 = v.keyStats.refused_typing;
+            out.in_editor = press();
+            out.editor_focused = !!document.activeElement && document.activeElement.isContentEditable;
+            const input = d.panelOf(path).card.querySelector("input.domvec-plane-softlink") || document.body.appendChild(document.createElement("input"));
+            input.focus(); await sleep(100);
+            out.in_input = press();
+            input.blur(); document.activeElement && document.activeElement.blur && document.activeElement.blur(); await sleep(100);
+            out.nothing_focused = press();
+            out.refused = v.keyStats.refused_typing - r0;
+            return out;
+          } finally {
+            v.plantKeysThroughText = false; v.pointerOver = over;
+            cam.position.copy(save.p); ctl.target.copy(save.t); cam.lookAt(ctl.target); ctl.update && ctl.update();
+            try { await d.trash(path); } catch (e) { /* gone */ }
+          }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false);
+        const planted = await arm(true);
+        const ok = (x) => !!x && x.editor_focused && !x.in_editor.took && x.in_editor.moved === 0 && !x.in_input.took && x.in_input.moved === 0
+          && x.nothing_focused.took && x.nothing_focused.moved > 0 && x.refused >= 2;
+        return { pass: ok(clean) && !!planted && planted.in_editor.took && planted.in_editor.moved > 0, evidence: { clean, planted } };
       },
     },
     {

@@ -4163,6 +4163,33 @@ export class GraphView extends ItemView {
     this.scaledStats.scale = Math.round(s * 1e6) / 1e6;
     return s;
   }
+  /** The census G-324's check reads: mapped nodes overlapping where they are
+   *  DRAWN now, by the same radius rule the scale is chosen with. */
+  overlapCensus(): { mapped: number; overlapping_pairs: number; coincident: number; worst: number; scale: number } {
+    const nodes = ((this.graph as any)?.graphData?.().nodes || []) as any[];
+    const m = nodes.filter((n) => !n.force && Number.isFinite(n.fitX) && Number.isFinite(n.x));
+    const R = m.map((n) => Math.max(1e-6, this.drawnRadiusOf(n)) * COLLIDER_SAFETY + COLLIDER_MARGIN);
+    const N = m.length;
+    if (N < 2) return { mapped: N, overlapping_pairs: 0, coincident: 0, worst: 0, scale: this.mapScale };
+    const cell = Math.max(1e-3, 2 * R.slice().sort((a, b) => a - b)[Math.floor(0.99 * (N - 1))]);
+    const grid = new Map<string, number[]>();
+    const key = (x: number, y: number, z: number) => x + "," + y + "," + z;
+    m.forEach((n, i) => { const k = key(Math.floor(n.x / cell), Math.floor(n.y / cell), Math.floor((n.z || 0) / cell)); const l = grid.get(k); if (l) l.push(i); else grid.set(k, [i]); });
+    let pairs = 0, coincident = 0, worst = 0;
+    m.forEach((n, i) => {
+      const cx = Math.floor(n.x / cell), cy = Math.floor(n.y / cell), cz = Math.floor((n.z || 0) / cell);
+      for (let ox = -1; ox <= 1; ox++) for (let oy = -1; oy <= 1; oy++) for (let oz = -1; oz <= 1; oz++) {
+        for (const j of grid.get(key(cx + ox, cy + oy, cz + oz)) || []) {
+          if (j <= i) continue;
+          const d = Math.hypot(n.x - m[j].x, n.y - m[j].y, (n.z || 0) - (m[j].z || 0));
+          const need = R[i] + R[j];
+          // A pair just touching is clear (item 119); a hair inside it is float noise.
+          if (d < need * (1 - 1e-6)) { pairs++; if (d <= 0) coincident++; worst = Math.max(worst, (need - d) / need); }
+        }
+      }
+    });
+    return { mapped: N, overlapping_pairs: pairs, coincident, worst: Math.round(worst * 1000) / 1000, scale: this.mapScale };
+  }
   /** Re-derive the scale when the map has grown by a sixth (or `force`).
    *  STRICT: any larger scale is adopted at once -- a smaller one only past a
    *  tenth, so the map does not breathe on every newcomer. */
@@ -6057,7 +6084,8 @@ export class GraphView extends ItemView {
         scene: () => (this.graph as any)?.scene(),
         camera: () => (this.graph as any)?.camera(),
         canvas: () => (this.graph as any)?.renderer()?.domElement || null,
-        mode: () => this.agent.mode,
+        // Third person (G-333): the craft is drawn at the vehicle even in the ego view.
+        mode: () => (this.agent.mode === "ego" && this.agent.view === "third" ? "third" : this.agent.mode),
         anchor: () => this.agent.craftAt,
         world: () => this.shellOf((this.graph as any)?.graphData?.().nodes || []),
         // A chunk's node, else its page's (drawn whether or not it is open).
@@ -6153,10 +6181,18 @@ export class GraphView extends ItemView {
   private agentAt = 0;
   /** Planted (2026-10-29): arrows translate the view, as from 2026-10-12. */
   plantArrowPan = false;
+  /** Planted (G-334): keys typed into text drive the vehicle too. */
+  plantKeysThroughText = false;
+  keyStats = { refused_typing: 0 };
   agentKey(e: KeyboardEvent): boolean {
     if (!this.graph || !this.pointerOver) return false;
     const typing = (el: HTMLElement | null) => !!el && (/^(INPUT|TEXTAREA|SELECT|IFRAME)$/.test(el.tagName) || el.isContentEditable);
-    if (typing(e.target as HTMLElement | null) || typing(document.activeElement as HTMLElement | null)) return false;
+    // G-334: a key typed into a markdown editor, an input or any text field
+    // never drives the vehicle. Planted `plantKeysThroughText`: it does.
+    if (!this.plantKeysThroughText && (typing(e.target as HTMLElement | null) || typing(document.activeElement as HTMLElement | null))) {
+      this.keyStats.refused_typing++;
+      return false;
+    }
     if (!this.agent.key(e)) return false;
     e.preventDefault();
     e.stopPropagation();

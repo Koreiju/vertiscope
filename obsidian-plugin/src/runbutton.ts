@@ -54,6 +54,8 @@ export interface RunHost {
   onRolloutFence?(req: RunRequest): void | Promise<void>;
   /** G-234: the cell in the code artifact panel, as a module opens there. */
   onOpenFence?(req: RunRequest): void | Promise<void>;
+  /** G-329: the cell unnested into a black-box panel on the plane. */
+  onUnnestFence?(req: RunRequest): void | Promise<void>;
 }
 
 /** `⧉ open` beside run (G-234). */
@@ -63,6 +65,18 @@ function openButton(doc: Document, onClick: () => void): HTMLButtonElement {
   btn.type = "button";
   btn.setAttribute("aria-label", "Open this cell in the code artifact panel");
   btn.textContent = "⧉ open";
+  btn.addEventListener("mousedown", (e) => e.preventDefault());
+  btn.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); onClick(); });
+  return btn;
+}
+
+/** `⊞ unnest` beside open (G-329): the cell as a black box, its imports unnesting down to their base modules. */
+function unnestButton(doc: Document, onClick: () => void): HTMLButtonElement {
+  const btn = doc.createElement("button");
+  btn.className = "domvec-open-fence domvec-unnest-fence";
+  btn.type = "button";
+  btn.setAttribute("aria-label", "Unnest this cell: its imports and definitions as black boxes");
+  btn.textContent = "⊞ unnest";
   btn.addEventListener("mousedown", (e) => e.preventDefault());
   btn.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); onClick(); });
   return btn;
@@ -157,6 +171,7 @@ export function readingViewRunButtons(host: RunHost) {
       const term = host.onTerminalFence ? termButton(el.ownerDocument, () => host.onTerminalFence!(req())) : null;
       if (term) pre.appendChild(term);
       if (host.onOpenFence) pre.appendChild(openButton(el.ownerDocument, () => host.onOpenFence!(req())));
+      if (host.onUnnestFence) pre.appendChild(unnestButton(el.ownerDocument, () => host.onUnnestFence!(req())));
     });
   };
 }
@@ -200,6 +215,7 @@ class RunWidget extends WidgetType {
       ? termButton(view.dom.ownerDocument, () => this.host.onTerminalFence!(req())) : null;
     if (term) wrap.appendChild(term);
     if (this.host.onOpenFence) wrap.appendChild(openButton(view.dom.ownerDocument, () => this.host.onOpenFence!(req())));
+    if (this.host.onUnnestFence) wrap.appendChild(unnestButton(view.dom.ownerDocument, () => this.host.onUnnestFence!(req())));
     if (this.host.onRolloutFence && (this.fence.refs || []).length) {
       wrap.appendChild(playButton(view.dom.ownerDocument, () => this.host.onRolloutFence!(req())));
     }

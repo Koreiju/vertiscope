@@ -81,6 +81,8 @@ const CRAFT_COLOUR = 0xa882ff;       // Obsidian's link purple: the variables' c
 const CELL_COLOUR = 0xe8e8e8;
 const IO_COLOUR = 0xffd27a;          // the signal's colour (G-292)
 const LIT_MAT = new THREE.MeshBasicMaterial({ color: IO_COLOUR });
+/** A signal in flight (G-331): bright, drawn over what it passes. */
+const PULSE_MAT = new THREE.MeshBasicMaterial({ color: 0xfff1a8, transparent: true, opacity: 0.95, depthTest: false });
 
 /** A unit direction for the k-th of n, spread evenly on the sphere. */
 function fib(k: number, n: number): V3 {
@@ -357,6 +359,88 @@ export class Craft {
     this.stats.placed_by_ego = byEgo;
   }
 
+  /**
+   * **Signal-flow glow, iterative-recursive** (PLUGIN_GOAL 114, G-331): a
+   * finished run sends a glowing pulse down every edge leaving its note --
+   * the note to its cells, a cell to its readout (`forward`), a definition to
+   * every cell that READS it (`ref`, followed backwards) -- and each node a
+   * pulse reaches flashes and sends its own on, hop by hop, never back to a
+   * node already reached. Where a hop lands on a note, `onPulse` tells the
+   * plane, which lights that panel in the same order. Planted `plantNoPulse`.
+   */
+  plantNoPulse = false;
+  onPulse: ((path: string) => void) | null = null;
+  pulseStats = { started: 0, hops: 0, reached: [] as string[], last_ms: 0 };
+  private pulses: { a: string; b: string; t0: number; ms: number; dot: any; depth: number }[] = [];
+  private pulseSeen = new Set<string>();
+  static PULSE_MS = 420;
+  static PULSE_DEPTH = 6;
+  /** Where a signal goes next from a node: forward along contains, order and
+   *  forward edges; backward along ref (the reader of a definition). */
+  downstream(id: string): string[] {
+    const out: string[] = [];
+    for (const e of this.edges) {
+      if (e.a === id && (e.kind === "contains" || e.kind === "order" || e.kind === "forward")) out.push(e.b);
+      else if (e.b === id && e.kind === "ref") out.push(e.a);
+    }
+    return out;
+  }
+  pulse(path: string): number {
+    if (this.plantNoPulse || !this.group) return 0;
+    const start = "craft:" + path;
+    if (!this.nodes.some((n) => n.id === start)) return 0;
+    this.pulseSeen = new Set([start]);
+    this.pulseStats.started++;
+    this.pulseStats.reached = [path];
+    this.pulseStats.last_ms = performance.now();
+    return this.sendFrom(start, 0);
+  }
+  private sendFrom(id: string, depth: number): number {
+    if (depth >= Craft.PULSE_DEPTH) return 0;
+    let sent = 0;
+    for (const b of this.downstream(id)) {
+      if (this.pulseSeen.has(b)) continue;
+      this.pulseSeen.add(b);
+      const R = this.stats.radius || 10;
+      const dot = new THREE.Mesh(new THREE.SphereGeometry(R * 0.022, 10, 8), PULSE_MAT);
+      this.group.add(dot);
+      this.pulses.push({ a: id, b, t0: performance.now(), ms: Craft.PULSE_MS, dot, depth });
+      sent++;
+    }
+    return sent;
+  }
+  /** Each frame: every pulse in flight moved along its edge; one that arrives
+   *  flashes its target and sends the signal on. */
+  private stepPulses(at: V3): void {
+    if (!this.pulses.length) return;
+    const byId = new Map(this.nodes.map((n) => [n.id, n]));
+    const now = performance.now();
+    const still: typeof this.pulses = [];
+    // The ones in flight this frame; arrivals send theirs into a fresh list.
+    const cur = this.pulses;
+    this.pulses = [];
+    for (const p of cur) {
+      const a = byId.get(p.a), b = byId.get(p.b);
+      const e = Math.min(1, (now - p.t0) / p.ms);
+      if (a && b) {
+        p.dot.position.set(at.x + a.local.x + (b.local.x - a.local.x) * e, at.y + a.local.y + (b.local.y - a.local.y) * e,
+                           at.z + a.local.z + (b.local.z - a.local.z) * e);
+      }
+      if (e < 1) { still.push(p); continue; }
+      p.dot.removeFromParent(); p.dot.geometry.dispose();
+      this.pulseStats.hops++;
+      if (b?.mesh) {
+        const m = b.mesh;
+        if (!m.userData.flashBase) m.userData.flashBase = m.material;
+        m.material = PULSE_MAT;
+        window.setTimeout(() => { if (m.userData.flashBase) { m.material = m.userData.flashBase; delete m.userData.flashBase; } }, 260);
+      }
+      if (b && b.kind === "note" && b.path) { this.pulseStats.reached.push(b.path); try { this.onPulse?.(b.path); } catch { /* the plane is optional */ } }
+      this.sendFrom(p.b, p.depth + 1);
+    }
+    this.pulses = still.concat(this.pulses);
+  }
+
   /** Computation in flight (item 99): a note's node and its I/O lines lit. */
   lit = new Set<string>();
   setLit(path: string, on: boolean): void {
@@ -460,6 +544,8 @@ export class Craft {
     // counts (a count taken only when drawn read 0 in the ego view, G-306).
     const at = this.where();
     this.stats.anchor = { x: Math.round(at.x), y: Math.round(at.y), z: Math.round(at.z) };
+    // Pulses move every frame, before the redraw key can skip it (G-331).
+    this.stepPulses(at);
     const open = this.nodes.filter((n) => (n.kind === "note" || n.kind === "ego") && this.host.isOpen(n.path)).map((n) => n.id);
     const sig = this.host.signalEdges();
     // Redrawn when the anchor, the open panels or the runs change -- and once a

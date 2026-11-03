@@ -53,7 +53,8 @@ const KEY = "domvec.useragent";
 
 /** The keys the agent answers, and what each does, as the strip shows them. */
 const CAPS: [string, string, string][] = [
-  ["w", "W", "forward"], ["a", "A", "strafe left"], ["s", "S", "back"], ["d", "D", "strafe right"],
+  ["w", "W", "forward"], ["a", "A", "turn left"], ["s", "S", "back"], ["d", "D", "turn right"],
+  ["v", "V", "first / third person"],
   ["q", "Q", "roll left"], ["r", "R", "roll right"],
   ["ArrowLeft", "←", "yaw left about the focus"], ["ArrowRight", "→", "yaw right about the focus"],
   ["ArrowUp", "↑", "pitch up about the focus"], ["ArrowDown", "↓", "pitch down about the focus"],
@@ -183,6 +184,9 @@ export class UserAgent {
   tick(dt: number): void {
     const cam = this.host.camera(), ctl = this.host.controls();
     if (!cam || !ctl || !ctl.target) return;
+    // Third person is the keyboard's chase view (G-333): the craft is at the
+    // vehicle, the camera behind it -- a hover's flight does not move it.
+    if (this.view === "third") { if (this.vehicle) this.craftAt = { ...this.vehicle.p }; this.target = null; this.fade(); return; }
     const p = cam.position, t = ctl.target;
     const n = this.mode === "ego" ? this.target : null;
     // Nothing selected and at rest: the camera is the reader's alone.
@@ -329,7 +333,11 @@ export class UserAgent {
     if (bare("Shift")) this.setThrottle(this.throttle + 0.05);
     else if (bare("Control")) this.setThrottle(this.throttle - 0.05);
     else if (e.ctrlKey || e.shiftKey) took = false;          // a shortcut, not ours
-    else if (k === "w" || k === "a" || k === "s" || k === "d") this.move(k);
+    else if (k === "w" || k === "s") this.move(k);
+    // NON-HOLONOMIC (PLUGIN_GOAL 116, G-333): A/D turn the heading; the
+    // vehicle never slides sideways. Planted `plantStrafe`: they strafe.
+    else if (k === "a" || k === "d") { if (this.plantStrafe) this.move(k); else this.turnHeading(k === "a" ? 1 : -1); }
+    else if (k === "v") this.setView(this.view === "first" ? "third" : "first");
     else if (k === "q" || k === "r") this.roll(k === "q" ? -1 : 1);
     else if (k === "ArrowLeft" || k === "ArrowRight") this.orbit(k === "ArrowLeft" ? 1 : -1, 0);
     else if (k === "ArrowUp" || k === "ArrowDown") this.orbit(0, k === "ArrowUp" ? 1 : -1);
@@ -359,13 +367,90 @@ export class UserAgent {
     return { cam, ctl, right: v3(e[0], e[1], e[2]), up: v3(e[4], e[5], e[6]), back: v3(e[8], e[9], e[10]) };
   }
 
-  /** WASD: forward/back along the view, strafe, at the throttle's speed. */
+  /**
+   * **The vehicle** (PLUGIN_GOAL 116, G-333): the ego graph and its 3D map
+   * move as ONE cockpit-like entity with a heading. In FIRST person the
+   * camera is the vehicle; in THIRD person the camera rides behind and above
+   * it, looking at it, and the ego craft is drawn where the vehicle is
+   * (`craftAt`). W/S move along the heading, A/D turn it -- never sideways.
+   */
+  view: "first" | "third" = "first";
+  /** Planted (G-333): A/D strafe sideways, as before the vehicle. */
+  plantStrafe = false;
+  vehicleStats = { turns: 0, views: 0, sideways_max: 0 };
+  /** The vehicle's place and heading (third person keeps them apart from the camera). */
+  vehicle: { p: any; dir: any } | null = null;
+  private chase(): void {
+    const { cam, ctl } = this.axes();
+    if (!ctl || !this.vehicle) return;
+    const D = Math.max(20, this.vmax * 0.6), v = this.vehicle;
+    const up = v3(cam.up.x, cam.up.y, cam.up.z);
+    cam.position.set(v.p.x - v.dir.x * D + up.x * D * 0.35, v.p.y - v.dir.y * D + up.y * D * 0.35, v.p.z - v.dir.z * D + up.z * D * 0.35);
+    ctl.target.set(v.p.x, v.p.y, v.p.z);
+    cam.lookAt(ctl.target);
+    this.craftAt = { x: v.p.x, y: v.p.y, z: v.p.z };
+    ctl.update?.();
+  }
+  setView(view: "first" | "third"): void {
+    if (view === this.view) return;
+    const { cam, ctl, back } = this.axes();
+    if (!ctl || !ctl.target) return;
+    this.vehicleStats.views++;
+    if (view === "third") {
+      // The vehicle is where the camera WAS, heading where it looked.
+      this.vehicle = { p: v3(cam.position.x, cam.position.y, cam.position.z), dir: v3(-back.x, -back.y, -back.z) };
+      this.view = "third";
+      this.chase();
+    } else {
+      // Back into the cockpit: the camera at the vehicle, looking along its heading.
+      const v = this.vehicle;
+      this.view = "first";
+      if (v) {
+        const L = Math.max(1, Math.hypot(ctl.target.x - cam.position.x, ctl.target.y - cam.position.y, ctl.target.z - cam.position.z));
+        cam.position.set(v.p.x, v.p.y, v.p.z);
+        ctl.target.set(v.p.x + v.dir.x * L, v.p.y + v.dir.y * L, v.p.z + v.dir.z * L);
+        cam.lookAt(ctl.target);
+        ctl.update?.();
+      }
+    }
+    this.save();
+    this.draw();
+  }
+  /** A/D: the heading turns about the vehicle's up -- in place, no translation. */
+  private turnHeading(sign: number): void {
+    const { cam, ctl, up } = this.axes();
+    if (!ctl || !ctl.target) return;
+    this.vehicleStats.turns++;
+    this.target = null;
+    if (this.view === "third" && this.vehicle) {
+      this.vehicle.dir = rotate(this.vehicle.dir, up, sign * this.rotStep * 1.5);
+      this.chase();
+      return;
+    }
+    const p = cam.position, t = ctl.target;
+    const rel = rotate(v3(t.x - p.x, t.y - p.y, t.z - p.z), up, sign * this.rotStep * 1.5);
+    t.x = p.x + rel.x; t.y = p.y + rel.y; t.z = p.z + rel.z;
+    cam.lookAt(t);
+    ctl.update?.();
+  }
+
+  /** W/S: forward/back along the heading at the throttle's speed (A/D only when planted to strafe). */
   private move(k: string): void {
     const { ctl, right, back, cam } = this.axes();
     if (!ctl || !ctl.target) return;
     const s = Math.max(0.05, this.throttle) * this.vmax * 0.12;      // one key step
+    if (this.view === "third" && this.vehicle && (k === "w" || k === "s")) {
+      const d = this.vehicle.dir, sg = k === "w" ? 1 : -1;
+      this.vehicle.p = v3(this.vehicle.p.x + d.x * s * sg, this.vehicle.p.y + d.y * s * sg, this.vehicle.p.z + d.z * s * sg);
+      this.target = null;
+      this.chase();
+      return;
+    }
     const v = k === "w" ? v3(-back.x * s, -back.y * s, -back.z * s) : k === "s" ? v3(back.x * s, back.y * s, back.z * s)
       : k === "a" ? v3(-right.x * s, -right.y * s, -right.z * s) : v3(right.x * s, right.y * s, right.z * s);
+    // The sideways part of the step, along the camera's right: 0 for a vehicle.
+    const side = Math.abs(v.x * right.x + v.y * right.y + v.z * right.z);
+    if (side > this.vehicleStats.sideways_max) this.vehicleStats.sideways_max = side;
     const p = cam.position, t = ctl.target;
     p.x += v.x; p.y += v.y; p.z += v.z;
     t.x += v.x; t.y += v.y; t.z += v.z;

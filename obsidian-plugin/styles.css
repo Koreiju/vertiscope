@@ -1251,3 +1251,12 @@ button.domvec-run-fence:hover {
 /* The graph form at 1:1; a wide graph scrolls inside its panel. */
 .domvec-slate-graph { overflow-x: auto; }
 .domvec-slate-graph-label { font-size: 13px; }
+
+/* G-327: a containment group -- the gathered collapsed nodes under the node that holds them. */
+.domvec-plane-group { position: absolute; border: 1px dashed var(--link-color); border-radius: 14px;
+  background: color-mix(in srgb, var(--link-color) 6%, transparent); pointer-events: none; z-index: 0; }
+.domvec-plane-group-label { position: absolute; left: 10px; bottom: 4px; font-size: 10px; color: var(--link-color); opacity: 0.8; }
+.domvec-plane-card.is-contained .domvec-plane-head-node { border-style: dashed; }
+/* G-331: a signal arriving at a panel -- a brief glow, in the order the pulse reaches it. */
+.domvec-panel-card.is-pulsed { box-shadow: 0 0 0 2px #fff1a8, 0 0 18px 6px rgba(255, 241, 168, 0.75); transition: box-shadow 120ms ease-out; }
+.domvec-panel-card.is-pulsed .domvec-plane-head-node { background: #fff1a8; color: #000; }

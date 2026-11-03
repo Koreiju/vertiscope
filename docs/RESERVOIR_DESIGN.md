@@ -732,3 +732,77 @@ instant feedback.
 5. Many browsers, active browser followed (11.1).
 6. Type-aware similarity term; the code graph and its PageRank (11.3 second half, 11.4).
 7. Zoom-through into the craft (11.5).
+
+## 12. The register of panel layouts (items 107-121, 2026-11-02)
+
+Item 109 asks that every panel's layout features be tracked in one place.
+This is that place: each panel type, what decides its layout, and the rows
+that build and check it. A row's status lives in the PRD; this says where
+the layout parameters are and how they compose.
+
+### 12.1 The two maps -- one rule (G-324; items 107, 119, 121)
+
+| map | a node's place | collisions | motion |
+|---|---|---|---|
+| 3D world (`graph.ts`) | `mapScale x fit` (`mapTarget`) | the ONE scale: the largest need/distance over every pair overlapping at 1, so the closest pair just touches; uncapped; nothing nudged; a pair on one point counted (`scaledStats.coincident`) | a newcomer appears at its place (`mapNewcomers`); a moved fit glides there (`glide`, 450 ms); no force acts on a mapped node -- `home`, `contain`, `collide`, `charge`, `center` off |
+| ego craft (`craft.ts`) | the ego UMAP place, centred, times one factor | the factor at which the closest two notes' cell orbits (0.32 R each, 15% clearance) just touch | rebuilt on change, no forces |
+| live-scan diffs (force nodes) | the diff tree's own spring | none (they take no room) | force-directed until the fit maps them |
+
+Plants: `plantForceMapped`, `plantSphereEgo`. Census: `GraphView.overlapCensus()`.
+
+### 12.2 A plane panel (G-326, G-298, G-299; item 110)
+
+One parameter, the fold: `PlaneDesk.foldOf(path)` reads what the panel SHOWS
+(visible lines, folds, the content's natural height) and `fit(path)` sizes
+the card to it every 400 ms -- header + content, 120 px to 85% of the plane,
+the rest scrolling (occluded). Folded to its root (one line showing,
+something folded) the card IS its node (`is-collapsed`, `foldedToNode`);
+restoring that node unfolds it. A drag on the resize corner hands the size
+to the reader (`manual`). Plant: `plantFixedSize`.
+
+### 12.3 Groups of nodes on the plane (G-327; item 111)
+
+Alt+click on a panel's node: `PlaneDesk.contain(path)` gathers the collapsed
+nodes linked to it (`linkedTo`: the metadata cache's resolved links, either
+way) into `.domvec-plane-group`, laid in rows of four under it, following
+it (`followGroups`); again releases them to their places. Plant:
+`plantContainNoLinks`.
+
+### 12.4 Black boxes, all the way down (G-328, G-329; item 112)
+
+`blackbox.unfold` (a `code://` module or definition) and `unfold_source` (a
+cell, a selection): imports are boxes -- `code://repo/` for this package,
+`code://pypi/` for anything installed or in the standard library, found on
+`sys.path` without importing; a compiled base module is `(compiled)`, the
+bottom. The unnest panel (`main.unnest`, `⊞ unnest` on a fence, the command
+"Unnest the selection") is a slate whose `{code://...}` fields unnest by the
+slate's own recursive reveal, linked to its source note. Plants:
+`PLANT_NO_IMPORTS` (`no-imports`), `plantUnnestFlat`.
+
+### 12.5 The halo (G-315, G-316, G-317, G-330; items 90-92, 113)
+
+Polar: radius by similarity, angle by the results' similarity to one
+another; type-STRICT -- only the focus's kind (`kindOf`: slate, notebook,
+markdown, code, web), asked three times over (`strict`); the additive type
+term (0.2) applies inside a loose field; the trace leads back to the root
+focus (`history`). Plants: `plantLooseType`, `plantNoTypeTerm`, `plantNoRekey`.
+
+### 12.6 Signal flow (G-321, G-331; items 99, 114)
+
+A run lights its panel and craft node while it runs (`light`); when it ends,
+`Craft.pulse` sends a pulse down `contains`/`order`/`forward` and back up
+`ref`, hop by hop to depth 6, each arrival flashing its node and sending on;
+a pulse reaching a note flashes its panel (`is-pulsed`). Plant: `plantNoPulse`.
+
+### 12.7 The vehicle (G-333, G-334, G-272, G-273; item 116)
+
+`UserAgent.view` first | third. W/S along the heading, A/D turn it (never
+sideways), V switches; third person chases the vehicle (`chase`: behind
+and above, looking at it) and the craft is drawn at it. Keys typed into an
+editor or field are refused (`agentKey`, `keyStats.refused_typing`). Plants:
+`plantStrafe`, `plantKeysThroughText`.
+
+### 12.8 Open in this register
+
+- Whether item 107's ONE global scale also replaces the per-url bounded
+  telescoping that 2026-10-06's message kept "maybe" (G-115, G-204): asked.

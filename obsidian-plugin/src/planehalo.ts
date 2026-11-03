@@ -82,11 +82,11 @@ export class PlaneHalo {
     // The ego's retrieval for the note's own words.
     const text = query.trim() ? query.trim() : (await this.host.app.vault.cachedRead(f)).replace(/^---[\s\S]*?\n---\n?/, "").replace(/[`{}#>*_]/g, " ").trim().slice(0, 240);
     const url = "vault://" + this.host.app.vault.getName() + "/" + path;
-    const got: any = await sc.search(text || f.basename, { k: cap + 1, where: "ego" });
+    const got: any = await sc.search(text || f.basename, { k: 3 * cap + 1, where: "ego" });
     if (this.focus !== path) return false;
-    const hits = ((got && got.hits) || []).filter((h: any) => h.url !== url).slice(0, cap);
     this.focusKey = url; this.history = [];
     this.focusKind = this.kindOf(url);
+    const hits = this.strict(((got && got.hits) || []).filter((h: any) => h.url !== url)).slice(0, cap);
     await this.place(hits);
     if (this.focus !== path) return false;
     this.cursor = { ...this.centre };
@@ -228,8 +228,8 @@ export class PlaneHalo {
     this.focusKind = h.kind || this.kindOf(h.url);
     this.centre = { x: h.x, y: h.y };
     const seen = new Set(this.history.map((q) => q.key).concat([h.key, "vault://" + this.host.app.vault.getName() + "/" + this.focus]));
-    const got: any = await sc.search((h.preview || h.label).slice(0, 240), { k: this.stats.cap + seen.size, where: "ego" });
-    const hits = ((got && got.hits) || []).filter((x: any) => !seen.has(String(x.url).startsWith("vault://") ? String(x.url) : String(x.cid))).slice(0, this.stats.cap);
+    const got: any = await sc.search((h.preview || h.label).slice(0, 240), { k: 3 * this.stats.cap + seen.size, where: "ego" });
+    const hits = this.strict(((got && got.hits) || []).filter((x: any) => !seen.has(String(x.url).startsWith("vault://") ? String(x.url) : String(x.cid)))).slice(0, this.stats.cap);
     await this.place(hits);
     this.cursor = { ...this.centre };
     this.navigated = -1; this.trace = [];
@@ -243,6 +243,23 @@ export class PlaneHalo {
   focusKind = "";
   /** Planted (item 92): kind plays no part. */
   plantNoTypeTerm = false;
+  /**
+   * TYPE-STRICT (PLUGIN_GOAL 113, G-330: "remaining type-strict in our panel
+   * representations and interactions with the per-node-type ... retrieval
+   * polar-radial-force-directed 2D navigation fields"): the field holds only
+   * results of the focus's own kind -- a notebook's halo is notebooks, a
+   * slate's slates -- asked for three times over so the filter still fills
+   * the ring. Planted `plantLooseType`: every kind, as the additive term had it.
+   */
+  plantLooseType = false;
+  typeStats = { kept: 0, dropped: 0, last: null as any };
+  private strict(hits: any[]): any[] {
+    if (this.plantLooseType || !this.focusKind) return hits;
+    const kept = hits.filter((h: any) => this.kindOf(String(h.url || "")) === this.focusKind);
+    this.typeStats.kept += kept.length; this.typeStats.dropped += hits.length - kept.length;
+    this.typeStats.last = { focus: this.focusKind, kept: kept.length, of: hits.length };
+    return kept;
+  }
   /** An artifact's kind and layer: a slate, a notebook (a note with a python
    *  cell), a markdown note, code, or a web chunk. */
   kindOf(url: string): string {

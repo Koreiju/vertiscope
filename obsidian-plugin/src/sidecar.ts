@@ -480,7 +480,12 @@ export class Sidecar {
   async ego(): Promise<{ urls: string[]; cids: string[] } | null> { return this.get("/ego"); }
   /** The ego's own projection (item 76): knowledge key -> place. */
   async egoProjection(): Promise<{ method: string; n: number; places: Record<string, number[]>; missing: string[] } | null> { return this.get("/ego/projection"); }
-  async egoPost(route: "ego" | "ego/tag", body: any): Promise<any | null> {
+  /** A cell's or a selection's lines as a black box (G-328/G-329): imports as boxes, definitions typed. */
+  async unfoldSource(base: string, source: string): Promise<{ kind: string; lines: string[] } | null> {
+    return this.egoPost("unfold_source", { base, source });
+  }
+
+  async egoPost(route: "ego" | "ego/tag" | "unfold_source", body: any): Promise<any | null> {
     const base = this.base().trim().replace(/\/+$/, "");
     if (!base) return null;
     try {

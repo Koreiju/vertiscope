@@ -405,6 +405,11 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     );
 
     this.addCommand({
+      id: "domvec-unnest-selection",
+      name: "Unnest the selection as a black box (G-329)",
+      callback: () => { void this.unnestSelection(); },
+    });
+    this.addCommand({
       id: "domvec-session-empty",
       name: "Start an empty test workspace",
       callback: () => { void (window as any).__domvec?.session?.empty(); },
@@ -785,6 +790,19 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     this.desk.panelOf(note)?.card.toggleClass("is-computing", on);
     const g: any = this.app.workspace.getLeavesOfType(GRAPH_VIEW)[0]?.view;
     g?.craft?.setLit?.(note, on);
+    // A finished run's signal flows on downstream (G-331): the craft's pulse,
+    // and each panel it reaches on the plane flashing as it arrives.
+    if (!on && g?.craft) {
+      g.craft.onPulse = (p: string) => {
+        const card = this.desk.panelOf(p)?.card;
+        if (!card) return;
+        card.addClass("is-pulsed");
+        window.setTimeout(() => card.removeClass("is-pulsed"), 450);
+      };
+      g.craft.pulse(note);
+      const own = this.desk.panelOf(note)?.card;
+      if (own) { own.addClass("is-pulsed"); window.setTimeout(() => own.removeClass("is-pulsed"), 450); }
+    }
   }
 
   /** The halo that slides, on the plane (items 81-84). */
@@ -1185,6 +1203,48 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
    *  back into its fence, run in its notebook's own kernel. */
   async onOpenFence(req: RunRequest): Promise<void> {
     if (req.path && req.line >= 0) await this.openCode("cell:" + req.path + "#" + req.line);
+  }
+
+  /**
+   * **Unnest where the reader selects** (PLUGIN_GOAL 112, G-329): a cell, or
+   * the selection in any note -- a dotted name alone read as `import name` --
+   * becomes a BLACK-BOX panel on the plane: its imports as `{code://...}`
+   * boxes that unnest, field by field (the slate's own recursive reveal), into
+   * their library modules and those modules' imports, down to the compiled
+   * base modules; its definitions as typed rows. The panel links back to its
+   * source note, so the containment gesture (G-327) can gather it there.
+   * Planted `plantUnnestFlat`: the rows as plain text, nothing to unnest.
+   */
+  plantUnnestFlat = false;
+  unnestStats = { made: 0, last: null as any };
+  async onUnnestFence(req: RunRequest): Promise<void> {
+    if (req.path) await this.unnest(req.code, req.path, "cell " + (req.line + 1));
+  }
+  async unnestSelection(): Promise<string | null> {
+    const v = this.activeView();
+    if (!v?.file) return null;
+    const sel = v.editor?.getSelection?.() || "";
+    if (!sel.trim()) return null;
+    return this.unnest(sel, v.file.path, "selection");
+  }
+  async unnest(source: string, from: string, where: string): Promise<string | null> {
+    const name = source.trim();
+    const src = /^[A-Za-z_][\w.]*$/.test(name) ? "import " + name : source;
+    const got = await this.sidecar.unfoldSource("cell://" + from + "#" + where, src);
+    if (!got || !got.lines) { new Notice("domvec: nothing to unnest (not python?)"); return null; }
+    const NL = "\n";
+    const base = from.split("/").pop()!.replace(/\.md$/, "");
+    const rows = got.lines.map((l) => this.plantUnnestFlat ? l.replace(/[{}]/g, "") : l);
+    const folder = "domvec/graph";
+    if (!this.app.vault.getAbstractFileByPath(folder)) await this.app.vault.createFolder(folder);
+    let path = `${folder}/unnest ${base} ${where}.md`.replace(/[\\:*?"<>|#]/g, " ");
+    for (let n = 2; this.app.vault.getAbstractFileByPath(path); n++) path = `${folder}/unnest ${base} ${where} ${n}.md`.replace(/[\\:*?"<>|#]/g, " ");
+    const text = "---" + NL + "domvec: slate" + NL + "---" + NL + "# unnest " + where + " of [[" + base + "]]" + NL + NL + rows.join(NL) + NL;
+    const file = await this.app.vault.create(path, text);
+    await this.desk.open(file);
+    this.unnestStats.made++;
+    this.unnestStats.last = { path, from, where, rows: rows.length, boxes: rows.filter((r) => /\{code:\/\//.test(r)).length };
+    return path;
   }
 
   async onTerminalFence(req: RunRequest): Promise<void> {

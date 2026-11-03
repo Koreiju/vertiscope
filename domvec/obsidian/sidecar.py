@@ -822,6 +822,7 @@ _PLANTABLE = {
     "no-where": ("domvec.obsidian.sidecar", "PLANT_NO_WHERE"),                # item 78
     "no-maps": ("domvec.obsidian.sidecar", "PLANT_NO_MAPS"),                  # item 79
     "flat-box": ("domvec.obsidian.blackbox", "PLANT_FLAT"),                   # item 80
+    "no-imports": ("domvec.obsidian.blackbox", "PLANT_NO_IMPORTS"),           # item 112
     "untyped-box": ("domvec.obsidian.blackbox", "PLANT_UNTYPED"),             # item 100
     "no-codegraph": ("domvec.search", "PLANT_NO_CODEGRAPH"),                  # item 93
     "no-instant": ("domvec.obsidian.sidecar", "PLANT_NO_INSTANT"),            # item 100
@@ -2585,6 +2586,20 @@ class _Handler(BaseHTTPRequestHandler):
                              "supervised": os.environ.get("DOMVEC_SUPERVISED") == "1"})
             if due:
                 threading.Thread(target=_maybe_compact, args=(self.workspace, store_mb), daemon=True).start()
+            return
+
+        if route == "unfold_source":
+            # A few lines that are no module on disk -- a notebook cell, a
+            # selection (PLUGIN_GOAL 112, G-328/G-329): its imports as boxes
+            # that unnest to their library modules, its definitions typed.
+            from . import blackbox as _bb
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(length) or b"{}")
+                got = _bb.unfold_source(str(body.get("base") or "cell://"), str(body.get("source") or ""))
+                self._send(200, got or {"kind": "cell", "qual": "", "lines": [], "error": "not python"})
+            except Exception as exc:                # noqa: BLE001
+                self._send(500, {"error": "%s: %s" % (type(exc).__name__, exc)})
             return
 
         if route == "ego/pairwise":
