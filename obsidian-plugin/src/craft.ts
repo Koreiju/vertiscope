@@ -124,6 +124,8 @@ export class Craft {
             anchor: null as V3 | null, radius: 0, map_scale: 0, map_left_overlapping: 0 };
   /** Planted (G-324): every craft node on a sphere by bearing, the map's distances dropped. */
   plantSphereEgo = false;
+  /** Planted (G-302): a plane panel that is not a slate or a ran notebook is not the craft's. */
+  plantPlaneNotCells = false;
   /** The ego's scaled map is an OPTION, off -- the sphere is the layout again (PLUGIN_GOAL 127). */
   useScaledMap = false;
   /** Planted (item 67): the craft's nodes unlinked -- no edges inside it. */
@@ -176,7 +178,7 @@ export class Craft {
         // Cheap first cut -- but never past a note on the plane or made by its
         // tools: a markdown panel with no cell is the reader's own artifact
         // (item 74c), and this cut once dropped it before the rule below.
-        const planeNote = f.path.startsWith(PLANE_FOLDER + "/") || this.host.isOpen(f.path);
+        const planeNote = !this.plantPlaneNotCells && (f.path.startsWith(PLANE_FOLDER + "/") || this.host.isOpen(f.path));
         if (!slate && !hasCode && !planeNote) continue;
         // Membership: G-291's rule for a computation-graph artifact -- a slate,
         // or a note whose python cell has RUN (a stored readout) -- and any note

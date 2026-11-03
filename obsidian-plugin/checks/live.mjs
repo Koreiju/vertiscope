@@ -10271,6 +10271,54 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-302",
+      asks: "every panel is a notebook cell; the computation graph is the rendered notebook (PLUGIN_GOAL 73): a notebook, a slate, a markdown panel and a browser panel opened on the plane (the 2D form) are each a node of the craft (the 3D form) -- one set, two renderings -- every note panel on the plane is in the craft, and a panel closed into its node is still that node; planted (craft plantPlaneNotCells) a panel that is not a slate or a ran notebook falls out of the 3D form",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const until = async (ok, ms) => { for (let t = 0; t < ms && !(await ok()); t += 300) await sleep(300); return !!(await ok()); };
+          const plugin = app.plugins.getPlugin("domvec-bridge");
+          const d = window.__domvecPlane, c = window.__domvecCraft, NL = String.fromCharCode(10), F = String.fromCharCode(96).repeat(3), T = String.fromCharCode(9);
+          const st = Date.now() + (${planted} ? "p" : "c");
+          const paths = {
+            notebook: "domvec/graph/g302 notebook " + st + ".md",
+            slate: "domvec/graph/g302 slate " + st + ".md",
+            markdown: "domvec/graph/g302 markdown " + st + ".md",
+          };
+          c.plantPlaneNotCells = ${planted};
+          const out = { planted: ${planted} };
+          try {
+            await d.create("notebook", { path: paths.notebook, text: "# g302" + NL + NL + F + "python" + NL + "v = 1" + NL + F + NL });
+            await d.create("slate", { path: paths.slate, text: "---" + NL + "domvec: slate" + NL + "---" + NL + "g302 card" + NL + T + "k" + T + "v" + NL });
+            await d.create("notebook", { path: paths.markdown, text: "# g302 markdown" + NL + NL + "prose only" + NL });
+            await plugin.browserPanel.open();
+            c.dirty();
+            const inCraft = (p) => c.nodes.some((n) => n.kind === "note" && n.path === p);
+            out.ready = await until(() => Object.values(paths).every(inCraft), ${planted} ? 6000 : 15000);
+            out.kinds = Object.fromEntries(Object.entries(paths).map(([k, p]) => [k, { on_plane: !!d.panelOf(p), in_craft: inCraft(p) }]));
+            out.browser = { on_plane: !!d.panelOf(plugin.browserPanel.path), code_instance: c.edges.some((e) => e.kind === "instance") };
+            const plane = d.panels.map((p) => p.path).filter((p) => app.vault.getAbstractFileByPath(p) && p.startsWith("domvec/graph/"));
+            out.plane_panels = plane.length;
+            out.plane_not_in_craft = plane.filter((p) => !inCraft(p));
+            d.closePath(paths.notebook);
+            c.dirty();
+            await sleep(2500);
+            out.closed_still_node = inCraft(paths.notebook);
+            return out;
+          } finally {
+            c.plantPlaneNotCells = false;
+            for (const p of Object.values(paths)) { try { await d.trash(p); } catch (e) { /* gone */ } }
+            c.dirty();
+          }
+        })()`, { timeout: 90000 });
+        const clean = await arm(false);
+        const planted = await arm(true);
+        const ok = (x) => !!x && x.ready && ["notebook", "slate", "markdown"].every((k) => x.kinds[k] && x.kinds[k].on_plane && x.kinds[k].in_craft)
+          && x.browser.on_plane && x.browser.code_instance && x.plane_not_in_craft.length === 0 && x.closed_still_node;
+        return { pass: ok(clean) && !ok(planted) && !!planted && !planted.kinds.markdown.in_craft, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {
