@@ -124,6 +124,8 @@ export class Craft {
             anchor: null as V3 | null, radius: 0, map_scale: 0, map_left_overlapping: 0 };
   /** Planted (G-324): every craft node on a sphere by bearing, the map's distances dropped. */
   plantSphereEgo = false;
+  /** The ego's scaled map is an OPTION, off -- the sphere is the layout again (PLUGIN_GOAL 127). */
+  useScaledMap = false;
   /** Planted (item 67): the craft's nodes unlinked -- no edges inside it. */
   plantNoLinks = false;
   /** Per note: the distinct inputs its readout has been fed (item 96). */
@@ -319,7 +321,7 @@ export class Craft {
     const keyOf = (n: CraftNode) => n.kind === "web" ? n.id.slice("craft:web:".length) : "vault://" + vault + "/" + n.path;
     const mapped = [...notes, ...webs].filter((n) => { const p = this.places[keyOf(n)]; return p && p.length === 3 && p.every(Number.isFinite); });
     const mapAt = new Map<CraftNode, V3>();
-    if (!this.plantSphereEgo && mapped.length >= 2) {
+    if (this.useScaledMap && !this.plantSphereEgo && mapped.length >= 2) {
       const P = mapped.map((n) => this.places[keyOf(n)]);
       const c = [0, 1, 2].map((a) => P.reduce((s, p) => s + p[a], 0) / P.length);
       const nn = P.map((p, i) => Math.min(...P.map((q, j) => j === i ? Infinity : Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]))));

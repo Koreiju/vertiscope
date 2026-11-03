@@ -4109,7 +4109,11 @@ export class GraphView extends ItemView {
   private mapScaleN = 0;
   private mapScaleSig = "";
   private mapScaleAt = 0;
-  get scaledMode(): boolean { return !this.plantForceMapped; }
+  /** The scaled map is an OPTION, off (PLUGIN_GOAL 127, 2026-11-02: "nodes
+   *  seem out of view with umap-only which is expected. we'll revert to our
+   *  original older layout with more features"). */
+  useScaledMap = false;
+  get scaledMode(): boolean { return this.useScaledMap && !this.plantForceMapped; }
   /** Where a mapped node is drawn: its fit, scaled about the map's origin --
    *  and nothing else: no node is nudged (PLUGIN_GOAL 121). */
   mapTarget(n: any): number[] {
@@ -7886,9 +7890,17 @@ export class GraphView extends ItemView {
   }
 
   private driftAt = 0;
+  /** Planted (G-156 reopened): each frame's step capped at 0.1 s, as before. */
+  plantDriftCap = false;
   private idleDrift(g: any, now: number): void {
     if (!this.batch) return;
-    const dt = this.driftAt ? Math.min(0.1, (now - this.driftAt) / 1000) : 0;
+    // REAL time between frames (G-156, reopened 2026-11-02 by "rotating xyzhsv
+    // stalls out after some time"): an unfocused or covered window draws a few
+    // frames a second, and the 0.1 s cap turned the drift at a tenth of its
+    // rate there -- the flight had the same bug (`agent.tick`). A gap over
+    // 1.5 s is a paused window: skipped, so the turn resumes without a jump.
+    const gap = this.driftAt ? (now - this.driftAt) / 1000 : 0;
+    const dt = this.plantDriftCap ? Math.min(0.1, gap) : (gap <= 1.5 ? gap : 0);
     this.driftAt = now;
     const readerAt = (window as any).__domvecReaderAt || 0;
     const idle = Date.now() - readerAt >= this.idleDriftAfterMs;

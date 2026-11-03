@@ -9652,6 +9652,9 @@ export function makeChecks(env) {
           const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
           const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
           const c = v.craft;
+          // The scaled map is an option now, off by default (PLUGIN_GOAL 127):
+          // switched on for both arms, the plant then takes it away.
+          v.useScaledMap = true; if (c) c.useScaledMap = true;
           v.plantForceMapped = ${planted};
           if (c) c.plantSphereEgo = ${planted};
           try {
@@ -9670,6 +9673,7 @@ export function makeChecks(env) {
                      craft: c ? { map_scale: c.stats.map_scale, left_overlapping: c.stats.map_left_overlapping, notes: c.stats.notes } : null };
           } finally {
             v.plantForceMapped = false; if (c) c.plantSphereEgo = false;
+            v.useScaledMap = false; if (c) c.useScaledMap = false;
             await v.reload();
           }
         })()`, { timeout: 120000 });
@@ -10008,6 +10012,38 @@ export function makeChecks(env) {
         const ok = (x) => !!x && x.editor_focused && !x.in_editor.took && x.in_editor.moved === 0 && !x.in_input.took && x.in_input.moved === 0
           && x.nothing_focused.took && x.nothing_focused.moved > 0 && x.refused >= 2;
         return { pass: ok(clean) && !!planted && planted.in_editor.took && planted.in_editor.moved > 0, evidence: { clean, planted } };
+      },
+    },
+    {
+      id: "G-156-throttled",
+      asks: "the idle xyzhsv drift keeps its rate when the window draws few frames (G-156 reopened by 2026-10-17's \"rotating xyzhsv stalls out after some time\"): at one frame a second -- an unfocused or covered window -- each frame turns the camera by the full second's worth; planted (plantDriftCap) the old 0.1 s cap turns a tenth, the stall",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          const g = v.graph;
+          v.plantDriftCap = ${planted};
+          v.driftInCheck = true;
+          const per = [];
+          try {
+            // The reader idle, as a stall is only ever seen idle.
+            const idle = Date.now() - (window.__domvecReaderAt || 0) >= v.idleDriftAfterMs;
+            for (let i = 0; i < 6; i++) {
+              const t = v.driftAt + 1000;          // one frame a second
+              const a0 = v.driftStats.turned;
+              v.idleDrift(g, t);
+              per.push(v.driftStats.turned - a0);
+            }
+            const each = per.slice(1);
+            const mean = each.reduce((s, x) => s + x, 0) / each.length;
+            return { planted: ${planted}, idle, rate: v.driftOrbitRate, turned_per_frame: Math.round(mean * 1e4) / 1e4,
+                     ratio: Math.round(mean / v.driftOrbitRate * 100) / 100 };
+          } finally {
+            v.plantDriftCap = false; v.driftInCheck = false;
+          }
+        })()`, { timeout: 30000 });
+        const clean = await arm(false);
+        const planted = await arm(true);
+        return { pass: clean.idle && clean.ratio >= 0.95 && planted.ratio <= 0.15, evidence: { clean, planted } };
       },
     },
     {

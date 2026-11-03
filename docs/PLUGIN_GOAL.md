@@ -5122,6 +5122,17 @@ not only the PRD and the history.*
 *Read as: (126) no further agents; the review's findings are verified and
 the builds done directly, in this session.*
 
+*And, having seen the strict scaled map live (6.6x for the world once sizes
+settle, ~95,000x for the ego craft; nodes specks at full view):*
+
+> nodes seem out of view with umap-only which is expected. we'll revert to our original older layout with more features.
+
+*Read as: (127) items 107, 119 and 121 are WITHDRAWN as the default layout:
+the world and the ego craft go back to the earlier layout (the fit as home,
+collision and containment forces, the craft's sphere); the scaled map stays
+in the code as an option, off. G-21 ("nodes never overlap") returns to what
+it was before item 119.*
+
 ---
 
 ## Standing instructions carried in the verbatim
