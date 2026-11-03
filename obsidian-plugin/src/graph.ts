@@ -540,6 +540,16 @@ export class GraphView extends ItemView {
       e.preventDefault(); e.stopPropagation();
       this.microscopeStep(n);
     }, { passive: false, capture: true });
+    // Zoom passes THROUGH the cockpit (G-311, G-274; item 75): in the ego
+    // view's third person the wheel closes the chase on the vehicle, and
+    // close enough it passes into the cockpit -- first person; wheel-out in
+    // the cockpit backs out to third person. Planted `plantNoZoomThrough`.
+    canvas.addEventListener("wheel", (e: WheelEvent) => {
+      if (this.plantNoZoomThrough || this.agent.mode !== "ego") return;
+      const took = this.agent.zoomThrough(e.deltaY);
+      // Immediate: the orbit controls listen on this same canvas and would dolly too.
+      if (took) { e.preventDefault(); e.stopImmediatePropagation(); }
+    }, { passive: false, capture: true });
     canvas.addEventListener("pointermove", (e) => { if (e.buttons) moved(); }, { passive: true, capture: true });
     // Arrow keys pan, precisely, while the pointer is over the 3D view and no
     // text field has the keyboard (2026-10-12, PLUGIN_GOAL 114). A held key
@@ -6197,6 +6207,8 @@ export class GraphView extends ItemView {
   private agentAt = 0;
   /** Planted (2026-10-29): arrows translate the view, as from 2026-10-12. */
   plantArrowPan = false;
+  /** Planted (G-311): the wheel never passes through the cockpit. */
+  plantNoZoomThrough = false;
   /** Planted (G-334): keys typed into text drive the vehicle too. */
   plantKeysThroughText = false;
   keyStats = { refused_typing: 0 };

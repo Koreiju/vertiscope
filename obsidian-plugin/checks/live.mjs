@@ -10053,6 +10053,49 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-311",
+      asks: "zoom passes through the cockpit (PLUGIN_GOAL 75, G-274): in the ego view's third person, wheel-in over the 3D view closes the chase on the vehicle and passes INTO the cockpit -- first person, the camera at the vehicle -- and wheel-out from that cockpit backs out to third person; a wheel-out in a cockpit entered by the keyboard is the ordinary zoom; planted (plantNoZoomThrough) the wheel never changes the view",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          const a = v.agent, cam = v.graph.camera(), ctl = v.graph.controls();
+          const el = v.graph.renderer().domElement, r = el.getBoundingClientRect();
+          const save = { p: cam.position.clone(), t: ctl.target.clone(), u: cam.up.clone(), mode: a.mode };
+          const wheel = (dy) => el.dispatchEvent(new WheelEvent("wheel", { deltaY: dy, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2, bubbles: true, cancelable: true }));
+          v.plantNoZoomThrough = ${planted};
+          const out = { planted: ${planted} };
+          try {
+            a.setMode("ego"); a.setView("first"); a.setView("third");
+            const veh = { ...a.vehicle.p };
+            const d0 = cam.position.distanceTo(new cam.position.constructor(veh.x, veh.y, veh.z));
+            const ds = [];
+            for (let i = 0; i < 14 && a.view === "third"; i++) { wheel(-100); await sleep(30); ds.push(Math.round(cam.position.distanceTo(new cam.position.constructor(veh.x, veh.y, veh.z)) * 10) / 10); }
+            out.d0 = Math.round(d0 * 10) / 10; out.closing = ds.slice(0, 4);
+            out.entered = a.view === "first";
+            out.at_vehicle = Math.round(cam.position.distanceTo(new cam.position.constructor(veh.x, veh.y, veh.z)) * 1000) / 1000;
+            wheel(100); await sleep(50);
+            out.backed_out = a.view === "third";
+            // A cockpit entered by the keyboard: its wheel-out is the ordinary zoom.
+            a.setView("first"); wheel(100); await sleep(50);
+            out.keyboard_cockpit_kept = a.view === "first";
+            out.stats = a.zoomStats;
+            return out;
+          } finally {
+            v.plantNoZoomThrough = false;
+            a.setView("first");
+            cam.position.copy(save.p); ctl.target.copy(save.t); cam.up.copy(save.u); cam.lookAt(ctl.target); ctl.update && ctl.update();
+            a.setMode(save.mode);
+          }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false);
+        const planted = await arm(true);
+        const ok = (x) => !!x && x.entered && x.at_vehicle < 1e-3 && x.closing.length >= 2 && x.closing[1] < x.closing[0]
+          && x.backed_out && x.keyboard_cockpit_kept;
+        return { pass: ok(clean) && !!planted && !planted.entered, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {

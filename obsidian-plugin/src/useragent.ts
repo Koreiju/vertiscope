@@ -380,10 +380,46 @@ export class UserAgent {
   vehicleStats = { turns: 0, views: 0, sideways_max: 0 };
   /** The vehicle's place and heading (third person keeps them apart from the camera). */
   vehicle: { p: any; dir: any } | null = null;
+  /** The chase camera's distance behind the vehicle (third person); the wheel shortens it. */
+  chaseD = 0;
+  private cameThrough = false;
+  zoomStats = { in: 0, out: 0, into_cockpit: 0, out_of_cockpit: 0 };
+  /** The wheel in the ego view: in third person it closes on the vehicle and,
+   *  past `cockpitD`, passes INTO the cockpit; in first person a wheel-out
+   *  backs out to third. Returns true when the wheel was the vehicle's. */
+  zoomThrough(deltaY: number): boolean {
+    const base = Math.max(20, this.vmax * 0.6), cockpitD = base * 0.12;
+    if (this.view === "third") {
+      if (!this.chaseD) this.chaseD = base;
+      this.chaseD = Math.min(base * 3, this.chaseD * (deltaY < 0 ? 0.8 : 1.25));
+      if (deltaY < 0) this.zoomStats.in++; else this.zoomStats.out++;
+      if (this.chaseD < cockpitD) {
+        this.chaseD = 0;
+        this.zoomStats.into_cockpit++;
+        this.setView("first");
+        this.cameThrough = true;
+        return true;
+      }
+      this.chase();
+      return true;
+    }
+    // Only a cockpit ENTERED by the wheel is left by it: otherwise a wheel-out
+    // in first person is the ordinary zoom.
+    if (deltaY > 0 && this.vehicle && this.cameThrough) {
+      this.cameThrough = false;
+      // Out of the cockpit: the chase begins just behind it.
+      this.zoomStats.out_of_cockpit++;
+      this.setView("third");
+      this.chaseD = cockpitD * 1.5;
+      this.chase();
+      return true;
+    }
+    return false;
+  }
   private chase(): void {
     const { cam, ctl } = this.axes();
     if (!ctl || !this.vehicle) return;
-    const D = Math.max(20, this.vmax * 0.6), v = this.vehicle;
+    const D = this.chaseD || Math.max(20, this.vmax * 0.6), v = this.vehicle;
     const up = v3(cam.up.x, cam.up.y, cam.up.z);
     cam.position.set(v.p.x - v.dir.x * D + up.x * D * 0.35, v.p.y - v.dir.y * D + up.y * D * 0.35, v.p.z - v.dir.z * D + up.z * D * 0.35);
     ctl.target.set(v.p.x, v.p.y, v.p.z);
@@ -393,6 +429,8 @@ export class UserAgent {
   }
   setView(view: "first" | "third"): void {
     if (view === this.view) return;
+    this.cameThrough = false;     // the wheel's own entry sets it again, after
+    this.chaseD = 0;              // the chase starts at its own distance; the wheel's exit sets it, after
     const { cam, ctl, back } = this.axes();
     if (!ctl || !ctl.target) return;
     this.vehicleStats.views++;
