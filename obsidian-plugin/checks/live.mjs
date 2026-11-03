@@ -10448,6 +10448,55 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-236-apply",
+      asks: "a graph mutation APPLIED and seen live (G-236, PLUGIN_GOAL 165): an ADD_EDGE CALLS on a probe module of this repository is compiled to source, written, re-ingested -- the file now calls it, still compiles, and the STORE's code property graph holds the new CALLS edge; DELETE_EDGE puts the file back byte-identical; planted (a preview, apply off) nothing is written and the store has no such edge",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const plugin = app.plugins.getPlugin("domvec-bridge");
+          const SIDE = String(plugin.settings.sidecar).replace(/[/]+$/, "");
+          const H = { "content-type": "application/json", "X-Domvec-Client": "obsidian-plugin" };
+          const NL = String.fromCharCode(10), Q = String.fromCharCode(34).repeat(3);
+          const name = "_g236_probe_" + (${planted} ? "p" : "c") + ".py";
+          const vpath = "domvec/" + name, url = "code://repo/" + name;
+          const SRC = Q + "G-236 probe." + Q + NL + NL + NL + "def a():" + NL + "    return 1" + NL + NL + NL + "def b():" + NL + "    return 2" + NL;
+          const mut = (mutations, apply) => fetch(SIDE + "/cpg_mutate", { method: "POST", headers: H, body: JSON.stringify({ url, mutations, apply }) }).then((r) => r.json());
+          const calls = async () => {
+            const g = await (await fetch(SIDE + "/cpg?url=" + encodeURIComponent(url), { headers: H })).json();
+            return (g.edges || []).filter((e) => e.kind === "CALLS" && String(e.src).endsWith("|/module/function") && String(e.dst).endsWith("|/module/function[2]")).length;
+          };
+          const out = { planted: ${planted} };
+          try {
+            await app.vault.adapter.write(vpath, SRC);
+            const add = await mut([{ op: "ADD_EDGE", kind: "CALLS", src: "/module/function", call: "b()" }], !${planted});
+            out.written = !!add.written;
+            out.diff_adds_call = /\\+\\s+b\\(\\)/.test(add.diff || "");
+            const after = await app.vault.adapter.read(vpath);
+            // The CALL as a statement -- "def b():" holds "b()" too (run 67).
+            out.file_calls = /\\n[ \\t]+b\\(\\)[ \\t]*\\r?\\n/.test(after);
+            out.store_calls = await calls();
+            if (!${planted}) {
+              const del = await mut([{ op: "DELETE_EDGE", kind: "CALLS", src: "/module/function", name: "b" }], true);
+              out.removed_written = !!del.written;
+              out.round_trip = (await app.vault.adapter.read(vpath)) === SRC;
+              out.store_calls_after = await calls();
+            }
+            return out;
+          } finally {
+            try { await app.vault.adapter.remove(vpath); } catch (e) { /* gone */ }
+            try { await fetch(SIDE + "/purge", { method: "POST", headers: H, body: JSON.stringify({ url }) }); } catch (e) { /* best effort */ }
+          }
+        })()`, { timeout: 120000 });
+        const clean = await arm(false);
+        const planted = await arm(true);
+        return {
+          pass: !!clean && clean.written && clean.diff_adds_call && clean.file_calls && clean.store_calls >= 1
+            && clean.removed_written && clean.round_trip && clean.store_calls_after === 0
+            && !!planted && !planted.written && !planted.file_calls && planted.store_calls === 0,
+          evidence: { clean, planted },
+        };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {

@@ -1083,6 +1083,15 @@ def _project(cids) -> None:
         pass
 
 
+def _write_source(path: Path, text: str) -> None:
+    """A repository file written with its OWN line endings: Python's text mode
+    turns every \\n into \\r\\n on Windows, so a one-line edit from the app
+    rewrote a whole LF file (G-236, run 67)."""
+    crlf = path.exists() and b"\r\n" in path.read_bytes()
+    data = text.replace("\r\n", "\n")
+    path.write_text(data.replace("\n", "\r\n") if crlf else data, encoding="utf-8", newline="")
+
+
 def _source_file(url: str):
     """(path, module, editable) for a ``code://`` python module (P-C1), or
     None. ``code://repo/`` is this package and is editable; ``code://pypi/``
@@ -2726,7 +2735,7 @@ class _Handler(BaseHTTPRequestHandler):
                 v0 = dict(self.workspace.vectors.report())
                 with _foreground(), _WORK_LOCK:
                     if not PLANT_SOURCE_NOT_WRITTEN[0]:
-                        path.write_text(text, encoding="utf-8")
+                        _write_source(path, text)
                     rel = url[len("code://repo/"):]
                     res = self.workspace.index_source(path.read_text(encoding="utf-8"), rel, root="repo")
                 v1 = self.workspace.vectors.report()
@@ -2907,7 +2916,7 @@ class _Handler(BaseHTTPRequestHandler):
                     self._send(403, {"error": "writing is off (start with --capture)", **res})
                     return
                 with _WORK_LOCK:
-                    path.write_text(out["text"], encoding="utf-8")
+                    _write_source(path, out["text"])        # its own line endings kept
                     self.workspace.index_source(out["text"], rel, root=root)
                     res["cpg"] = getattr(self.workspace, "last_cpg", None)
                 _LAST_WRITE[0] = time.time()
