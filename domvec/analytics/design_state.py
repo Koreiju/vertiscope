@@ -92,7 +92,9 @@ STATUSES = [
 #: holds the live checks -- read as "cites nothing". The count of unevidenced
 #: rows is the one number this file exists to apply pressure with, and it was
 #: overstating itself by the whole live-confirmation surface.
-CITES = re.compile(r"`([^`]+\.(?:py|ts|js|mjs|md|json))`|§([MNO]\.\d+)"
+#: `.png` too: a frame captured from the running app is the evidence for what
+#: a person sees ("Look at it"), and G-332's five frames read as nothing.
+CITES = re.compile(r"`([^`]+\.(?:py|ts|js|mjs|md|json|png))`|§([MNO]\.\d+)"
                    r"|\b(probes/[\w.-]+\.js)\b|\b(tests/test_[\w.-]+\.py)\b")
 
 
