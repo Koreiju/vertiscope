@@ -5122,6 +5122,21 @@ not only the PRD and the history.*
 *Read as: (126) no further agents; the review's findings are verified and
 the builds done directly, in this session.*
 
+*And, asked about G-253 (old versions of feed items a page rewrites in place:
+seen streaming, never stored, grey forever) and G-193 (a per-phase debounce
+measured to add ~240 ms a chunk for nothing):*
+
+> (G-253) object permanence on chunk streaming and latency both; store and also question why the rewrite rather than efficient diff and dedup?
+
+> (G-193) Done by measurement
+
+*Read as: (128) object permanence: a chunk once seen streaming is not lost --
+an old version the page rewrote in place is STORED (with its address's history),
+and latency is held as well; and the rewrite itself is questioned: why the
+pipeline overwrites an address's content when it changes, rather than
+diffing it and deduplicating by content; (129) G-193 is done by measurement --
+the projection is never what a reader waits on, so the debounce stays off.*
+
 *And, having seen the strict scaled map live (6.6x for the world once sizes
 settle, ~95,000x for the ego craft; nodes specks at full view):*
 
