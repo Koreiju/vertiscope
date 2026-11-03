@@ -314,6 +314,38 @@ class CodeGraph:
     def percentile(self, name: str) -> float:
         return self.rank.get(name, 0.0)
 
+    def module_net(self, n: int = 12) -> Dict:
+        """The code graph's most central MODULES and the edges among them (G-318:
+        "its nodes an ego-UMAP network"): the top `n` modules by PageRank, each
+        with its `code://repo/` address, and every contains/calls/imports/inherits
+        edge between two of them, counted -- a definition's edge belongs to its
+        module."""
+        mods = [m for m, k in self.kind.items() if k == "module"]
+        top = sorted(mods, key=lambda m: -self.rank.get(m, 0.0))[:max(0, int(n))]
+        keep = set(top)
+        by_len = sorted(mods, key=len, reverse=True)
+
+        def owner(name: str) -> str:
+            for m in by_len:
+                if name == m or name.startswith(m + "."):
+                    return m
+            return ""
+
+        def url(m: str) -> str:
+            rel = m.split(".")[1:]
+            base = self.root.joinpath(*rel) if rel else self.root
+            if (base / "__init__.py").is_file():
+                return "code://repo/" + "/".join(rel + ["__init__.py"])
+            return "code://repo/" + "/".join(rel[:-1] + [rel[-1] + ".py"]) if rel else ""
+
+        counts: Dict[Tuple[str, str], int] = {}
+        for a, b, _k in self.edges:
+            ma, mb = owner(a), owner(b)
+            if ma in keep and mb in keep and ma != mb:
+                counts[(ma, mb)] = counts.get((ma, mb), 0) + 1
+        return {"nodes": [{"name": m, "url": url(m), "rank": round(self.percentile(m), 4)} for m in top],
+                "edges": [{"a": a, "b": b, "n": c} for (a, b), c in sorted(counts.items(), key=lambda x: -x[1])]}
+
     def module_of_url(self, url: str) -> str:
         """`code://repo/core/chunk_builder.py` -> `domvec.core.chunk_builder`."""
         if not url.startswith("code://repo/"):

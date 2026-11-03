@@ -49,7 +49,7 @@ export interface CraftNode {
   local: { x: number; y: number; z: number };
   mesh?: any;
 }
-export interface CraftEdge { a: string; b: string; kind: "root" | "contains" | "order" | "ref" | "forward" | "instance" }
+export interface CraftEdge { a: string; b: string; kind: "root" | "contains" | "order" | "ref" | "forward" | "instance" | "module" }
 export interface V3 { x: number; y: number; z: number }
 
 export interface CraftHost {
@@ -73,6 +73,8 @@ export interface CraftHost {
   egoTags?(): Promise<string[]>;
   /** The ego's own projection (item 76): knowledge key -> place in the unit ball. */
   egoProjection?(): Promise<{ method: string; places: Record<string, number[]> } | null>;
+  /** The code graph's most central modules and the edges among them (G-318). */
+  codeNet?(): Promise<{ nodes: { name: string; url: string; rank: number }[]; edges: { a: string; b: string; n: number }[] } | null>;
   openPanel(path: string, line: number): void;
   closePanel(path: string): void;
 }
@@ -121,7 +123,9 @@ export class Craft {
   edges: CraftEdge[] = [];
   stats = { builds: 0, notes: 0, cells: 0, trees: 0, web: 0, edges: 0, io: 0, refs: 0, visible: false, opened: 0, closed: 0,
             projection: "", placed_by_ego: 0, io_to_ego: 0, lit: 0, readouts: 0, reattached: 0,
-            anchor: null as V3 | null, radius: 0, map_scale: 0, map_left_overlapping: 0 };
+            anchor: null as V3 | null, radius: 0, map_scale: 0, map_left_overlapping: 0, modules: 0, modules_by_ego: 0 };
+  /** Planted (G-318): the code graph's modules are not the ego's. */
+  plantNoCodeNet = false;
   /** Planted (G-324): every craft node on a sphere by bearing, the map's distances dropped. */
   plantSphereEgo = false;
   /** Planted (G-302): a plane panel that is not a slate or a ran notebook is not the craft's. */
@@ -258,8 +262,29 @@ export class Craft {
         edges.push({ a: ego.id, b: "craft:web:" + cid, kind: "root" });
       }
       this.stats.web = tags.length;
+      // THE CODE GRAPH WEB in the ego (G-318, items 93-95): the code graph's
+      // most central modules, each a code node of the craft, joined by the
+      // calls / imports / inherits between them -- and posted into the ego set,
+      // so the ego's OWN projection places them (item 76). Planted `plantNoCodeNet`.
+      const modUrls: string[] = [];
+      const net = this.plantNoCodeNet || !this.host.codeNet ? null : await this.host.codeNet().catch(() => null);
+      if (net && net.nodes.length) {
+        for (const m of net.nodes) {
+          if (!m.url) continue;
+          const id = "craft:mod:" + m.name;
+          nodes.push({ id, kind: "code", path: m.url, line: -1, label: m.name.split(".").slice(-1)[0] + " (module)", local: { x: 0, y: 0, z: 0 } });
+          edges.push({ a: ego.id, b: id, kind: "root" });
+          modUrls.push(m.url);
+        }
+        const have = new Set(nodes.map((n) => n.id));
+        for (const e of net.edges) {
+          const a = "craft:mod:" + e.a, b = "craft:mod:" + e.b;
+          if (have.has(a) && have.has(b)) edges.push({ a, b, kind: "module" });
+        }
+      }
+      this.stats.modules = modUrls.length;
       const vaultName = app.vault.getName();
-      this.host.postEgo?.(nodes.filter((n) => n.kind === "note" || n.kind === "ego").map((n) => "vault://" + vaultName + "/" + n.path));
+      this.host.postEgo?.(nodes.filter((n) => n.kind === "note" || n.kind === "ego").map((n) => "vault://" + vaultName + "/" + n.path).concat(modUrls));
       let refs = 0;
       for (const p of pending) {
         const head = p.ref.split(".")[0].trim().toLowerCase();
@@ -311,7 +336,18 @@ export class Craft {
       }
       return fib(i, n);
     };
-    for (const n of this.nodes) if (n.kind === "code") n.local = { x: 0, y: -R * 0.5, z: 0 };
+    for (const n of this.nodes) if (n.kind === "code" && !n.id.startsWith("craft:mod:")) n.local = { x: 0, y: -R * 0.5, z: 0 };
+    // The code graph's modules (G-318): by the EGO's projection of their
+    // `code://` address, on a shell just outside the notes.
+    const mods = this.nodes.filter((n) => n.id.startsWith("craft:mod:"));
+    let modsByEgo = 0;
+    mods.forEach((n, i) => {
+      const p = this.places[n.path];
+      if (p && p.length === 3 && Math.hypot(p[0], p[1], p[2]) > 1e-6) modsByEgo++;
+      const d = placeOf(n.path, i, Math.max(2, mods.length), "page:" + n.path);
+      n.local = { x: d.x * R * 1.25, y: d.y * R * 1.25, z: d.z * R * 1.25 };
+    });
+    this.stats.modules_by_ego = modsByEgo;
     const webs = this.nodes.filter((n) => n.kind === "web");
     const notes = this.nodes.filter((n) => n.kind === "note");
     // THE MAP, SCALED (item 107, G-324): a node the ego's UMAP placed sits at

@@ -10362,6 +10362,39 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-318-net",
+      asks: "the code graph web in the ego (PLUGIN_GOAL 93-95: \"its nodes an ego-UMAP network\"): the code graph's most central modules are code nodes of the craft, joined by the calls/imports/inherits between them, placed by the ego's OWN projection of their code:// address -- and still the world's pages, drawn there; planted (plantNoCodeNet) the craft holds no module",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const until = async (ok, ms) => { for (let t = 0; t < ms && !(await ok()); t += 400) await sleep(400); return !!(await ok()); };
+          const c = window.__domvecCraft, v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          c.plantNoCodeNet = ${planted};
+          try {
+            c.dirty();
+            const want = ${planted} ? 0 : 8;
+            await until(() => !c.building && (${planted} ? c.stats.modules === 0 : c.stats.modules >= want), 30000);
+            // A second build, so the projection holds the modules the first one posted.
+            c.dirty(); await sleep(3000); await until(() => !c.building, 20000);
+            const mods = c.nodes.filter((n) => n.id.startsWith("craft:mod:"));
+            const modEdges = c.edges.filter((e) => e.kind === "module").length;
+            const urls = mods.map((n) => n.path);
+            const hiddenInWorld = urls.filter((u) => v.egoUrls && v.egoUrls.has(u)).length;
+            return { planted: ${planted}, modules: mods.length, module_edges: modEdges, by_ego: c.stats.modules_by_ego,
+                     labels: mods.slice(0, 6).map((n) => n.label), hidden_in_world: hiddenInWorld,
+                     distinct_places: new Set(mods.map((n) => [n.local.x, n.local.y, n.local.z].map((x) => Math.round(x)).join(","))).size };
+          } finally {
+            c.plantNoCodeNet = false; c.dirty();
+          }
+        })()`, { timeout: 90000 });
+        const clean = await arm(false);
+        const planted = await arm(true);
+        const ok = (x) => !!x && x.modules >= 8 && x.module_edges >= 5 && x.by_ego >= Math.ceil(x.modules / 2)
+          && x.hidden_in_world === 0 && x.distinct_places === x.modules;
+        return { pass: ok(clean) && !!planted && planted.modules === 0, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {

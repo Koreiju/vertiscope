@@ -4351,6 +4351,10 @@ class _Handler(BaseHTTPRequestHandler):
             if name:
                 out.update({"name": name, "kind": g.kind.get(name, ""), "rank": g.percentile(name),
                             "neighbours": [{"name": n, "edge": k} for n, k in g.neighbours(name)[:40]]})
+            # The module network the ego draws (G-318): `?top=N`.
+            top = (parse_qs(parts.query).get("top") or [""])[0]
+            if top.isdigit():
+                out["net"] = g.module_net(int(top))
             self._send(200, out)
             return
 

@@ -6131,7 +6131,9 @@ export class GraphView extends ItemView {
         },
         closePanel: (path: string) => { (window as any).__domvecPlane?.closePath(path); },
         postEgo: (urls: string[]) => {
-          const next = new Set(urls);
+          // Hidden from the world: the reader's NOTES only. The code graph's
+          // modules (G-318) are the world's pages too, and stay drawn there.
+          const next = new Set(urls.filter((u) => u.startsWith("vault://")));
           if (next.size !== this.egoUrls.size || urls.some((u) => !this.egoUrls.has(u))) { this.egoUrls = next; this.batchDirty = true; }
           const key = urls.slice().sort().join("|");
           if (key === this.egoPosted) return;
@@ -6139,6 +6141,10 @@ export class GraphView extends ItemView {
           void this.sidecar.egoPost("ego", { urls });
         },
         egoProjection: async () => this.sidecar.egoProjection(),
+        codeNet: async () => {
+          const got: any = await (this.sidecar as any).get("/codegraph?top=12");
+          return got && got.ready && got.net ? got.net : null;
+        },
         egoTags: async () => {
           const got: any = await this.sidecar.ego();
           this.egoTags = new Set((got && got.cids) || []);
