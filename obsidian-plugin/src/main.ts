@@ -1235,7 +1235,10 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     if (!got || !got.lines) { new Notice("domvec: nothing to unnest (not python?)"); return null; }
     const NL = "\n";
     const base = from.split("/").pop()!.replace(/\.md$/, "");
-    const rows = got.lines.map((l) => this.plantUnnestFlat ? l.replace(/[{}]/g, "") : l);
+    // Underscores inside a ref are escaped: the slate is markdown, and
+    // `__init__` drew as "init" in bold (G-332's frame). `/ref` unescapes.
+    const rows = got.lines.map((l) => this.plantUnnestFlat ? l.replace(/[{}]/g, "")
+      : l.replace(/\{([^}]+)\}/g, (_m: string, r: string) => "{" + r.replace(/_/g, "\\_") + "}"));
     const folder = "domvec/graph";
     if (!this.app.vault.getAbstractFileByPath(folder)) await this.app.vault.createFolder(folder);
     let path = `${folder}/unnest ${base} ${where}.md`.replace(/[\\:*?"<>|#]/g, " ");

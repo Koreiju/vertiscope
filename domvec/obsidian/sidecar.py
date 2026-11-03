@@ -4345,6 +4345,9 @@ class _Handler(BaseHTTPRequestHandler):
             # internalizing it reveals (G-278; RESERVOIR_DESIGN §3.1-3.3).
             from . import refs as _refs
             name = (parse_qs(parts.query).get("name") or [""])[0]
+            # Markdown escapes in a ref are the note's, not the name's: an unnest
+            # panel writes `\_\_init\_\_` so the slate draws the underscores.
+            name = re.sub(r"\\(.)", r"\1", name)
             # A code artifact is a BLACK BOX (PLUGIN_GOAL 80): its rank-1
             # definitions, each a ref that unfolds the same way.
             if name.strip().startswith("code://"):
