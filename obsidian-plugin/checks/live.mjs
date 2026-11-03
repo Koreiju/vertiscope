@@ -10535,6 +10535,53 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-245",
+      asks: "a url node stands at the centroid of its chunks (PLUGIN_GOAL 174): six pages of different sizes unfolded as a click unfolds them, settled -- each page node's distance to its drawn chunks' centroid, as a fraction of the cloud's rms radius, median at most 0.35 (0 = dead centre, ~1 = at the cloud's edge) -- and how far the drawn chunks sit from their targets; planted (plantOffCentre) the cloud is telescoped off the page point and the node sits toward its edge",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          v.plantOffCentre = ${planted};
+          const opened = [];
+          try {
+            const ns0 = v.graph.graphData().nodes;
+            const drawn = new Set(ns0.filter((n) => n.level !== "page").map((n) => String(n.url || "").split("#")[0]));
+            const pages = ns0.filter((n) => n.level === "page" && !n.force && n.url && !drawn.has(String(n.url).split("#")[0])
+                                    && (n.members || 0) >= 10 && (n.members || 0) <= 600).sort((a, b) => (a.members || 0) - (b.members || 0));
+            const pick = []; for (let i = 0; i < 6 && pages.length; i++) pick.push(pages[Math.floor((i + 0.5) * pages.length / 6)]);
+            for (const p of pick) { if (!p) continue; const r = await v.togglePage(p); if (r && r.action === "expand") opened.push(p.url); }
+            await sleep(14000);
+            const ns = v.graph.graphData().nodes;
+            const rows = [];
+            for (const u of opened) {
+              const key = String(u).split("#")[0];
+              const p = ns.find((n) => n.level === "page" && !n.force && String(n.url).split("#")[0] === key);
+              const cs = ns.filter((n) => n.level !== "page" && n.level !== "path" && Number.isFinite(n.x) && String(n.url || "").split("#")[0] === key);
+              if (!p || cs.length < 3) continue;
+              const c = [0, 0, 0]; for (const n of cs) { c[0] += n.x; c[1] += n.y; c[2] += (n.z || 0); }
+              for (let i = 0; i < 3; i++) c[i] /= cs.length;
+              let rms = 0; for (const n of cs) rms += (n.x - c[0]) ** 2 + (n.y - c[1]) ** 2 + ((n.z || 0) - c[2]) ** 2;
+              rms = Math.sqrt(rms / cs.length);
+              const wander = cs.filter((n) => Number.isFinite(n.fitX)).map((n) => Math.hypot(n.x - n.fitX, n.y - n.fitY, (n.z || 0) - (n.fitZ || 0)));
+              wander.sort((a, b) => a - b);
+              rows.push({ n: cs.length, ratio: +(Math.hypot(p.x - c[0], p.y - c[1], (p.z || 0) - c[2]) / Math.max(1e-6, rms)).toFixed(3),
+                          rms: +rms.toFixed(1), wander_p90: wander.length ? +wander[Math.floor(0.9 * (wander.length - 1))].toFixed(1) : null });
+            }
+            const rs = rows.map((r) => r.ratio).sort((a, b) => a - b);
+            return { planted: ${planted}, pages: rows.length, median_ratio: rs.length ? rs[Math.floor(rs.length / 2)] : null, rows };
+          } finally {
+            const ns = v.graph.graphData().nodes;
+            for (const u of opened) { const p = ns.find((n) => n.level === "page" && n.url === u); if (p) { try { await v.togglePage(p); } catch (e) { /* gone */ } } }
+            v.plantOffCentre = false;
+          }
+        })()`, { timeout: 180000 });
+        const clean = await arm(false);
+        const planted = await arm(true);
+        return { pass: !!clean && clean.pages >= 3 && clean.median_ratio <= 0.35 && !!planted && planted.median_ratio > clean.median_ratio * 1.5,
+                 evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {
