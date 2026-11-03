@@ -4107,6 +4107,8 @@ export class GraphView extends ItemView {
   mapScale = 1;
   scaledStats = { runs: 0, scale: 1, mapped: 0, overlapping_at_1: 0, left_overlapping: 0, coincident: 0, jumped: 0, glided: 0 };
   private mapScaleN = 0;
+  private mapScaleSig = "";
+  private mapScaleAt = 0;
   get scaledMode(): boolean { return !this.plantForceMapped; }
   /** Where a mapped node is drawn: its fit, scaled about the map's origin --
    *  and nothing else: no node is nudged (PLUGIN_GOAL 121). */
@@ -4195,9 +4197,19 @@ export class GraphView extends ItemView {
    *  tenth, so the map does not breathe on every newcomer. */
   private rescaleMap(force = false): void {
     if (!this.graph || !this.scaledMode) return;
+    // Looked at twice a second, not every tick: the size sum is O(nodes).
+    const now = performance.now();
+    if (!force && now - this.mapScaleAt < 500) return;
+    this.mapScaleAt = now;
     const nodes = this.graph.graphData().nodes as any[];
-    const mapped = nodes.reduce((a: number, n: any) => a + (!n.force && Number.isFinite(n.fitX) ? 1 : 0), 0);
-    if (!force && this.mapScaleN && mapped === this.mapScaleN) return;
+    // Re-derived when the mapped set OR any node's drawn size changes: page
+    // and chunk sizes settle after the scale is first chosen, and a scale
+    // kept from the old sizes left 6 pairs overlapping (G-324, run 45).
+    let mapped = 0, reach = 0;
+    for (const n of nodes) if (!n.force && Number.isFinite(n.fitX)) { mapped++; reach += this.drawnRadiusOf(n); }
+    const sig = mapped + "|" + Math.round(reach * 1000);
+    if (!force && this.mapScaleSig === sig) return;
+    this.mapScaleSig = sig;
     const s = this.computeMapScale(nodes);
     if (force || s > this.mapScale || s < 0.9 * this.mapScale) this.mapScale = s;
   }
