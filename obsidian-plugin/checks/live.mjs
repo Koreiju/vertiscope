@@ -9687,7 +9687,9 @@ export function makeChecks(env) {
         const arm = (planted) => evaluate(`(async () => {
           const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
           const d = window.__domvecPlane, NL = String.fromCharCode(10);
-          const body = (name) => "## " + name + NL + NL + Array.from({ length: 6 }, (_, i) => name + " line " + i + " of the fold check.").join(NL + NL) + NL;
+          // Short enough that the whole note fits the plane: a card clamped at
+          // the plane's height cannot shrink by folding one section (run 42).
+          const body = (name) => "## " + name + NL + NL + Array.from({ length: 2 }, (_, i) => name + " line " + i + " of the fold check.").join(NL + NL) + NL;
           const path = "domvec/graph/g326 " + (${planted} ? "p" : "c") + " " + Date.now() + ".md";
           d.plantFixedSize = ${planted};
           const out = { planted: ${planted} };

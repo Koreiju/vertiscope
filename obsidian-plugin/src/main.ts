@@ -799,9 +799,10 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
         card.addClass("is-pulsed");
         window.setTimeout(() => card.removeClass("is-pulsed"), 450);
       };
-      g.craft.pulse(note);
+      // The run's own panel flashes only when a signal actually leaves it.
+      const sent = g.craft.pulse(note);
       const own = this.desk.panelOf(note)?.card;
-      if (own) { own.addClass("is-pulsed"); window.setTimeout(() => own.removeClass("is-pulsed"), 450); }
+      if (sent && own) { own.addClass("is-pulsed"); window.setTimeout(() => own.removeClass("is-pulsed"), 450); }
     }
   }
 

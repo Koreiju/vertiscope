@@ -391,20 +391,29 @@ export class PlaneDesk {
     const v: any = p.leaf.view;
     const preview = typeof v?.getMode === "function" && v.getMode() === "preview";
     let lines = 0, folds = 0, content = 0;
+    // The NATURAL height: from the top of what is drawn to the bottom of its
+    // last block -- never a sizer's scroll height, which CodeMirror holds at
+    // least as tall as its container, so a card sized to it grew without end
+    // (G-326, run 42-43: a six-line note read 728 px, the plane's limit).
+    const bottomOf = (root: HTMLElement | null, kids: HTMLElement[]) => {
+      if (!root || !kids.length) return 0;
+      const top = root.getBoundingClientRect().top;
+      return Math.max(...kids.map((k) => k.getBoundingClientRect().bottom - top));
+    };
     if (preview) {
       const sizer = el.querySelector(".markdown-reading-view .markdown-preview-sizer") as HTMLElement | null;
-      content = sizer ? sizer.scrollHeight : 0;
-      lines = sizer ? sizer.querySelectorAll(":scope > div:not(.mod-header):not(.mod-footer)").length : 0;
+      const kids = sizer ? Array.from(sizer.querySelectorAll(":scope > div:not(.mod-footer)")) as HTMLElement[] : [];
+      content = bottomOf(sizer, kids);
+      lines = kids.filter((k) => !k.classList.contains("mod-header")).length;
       folds = el.querySelectorAll(".markdown-reading-view .is-collapsed").length;
     } else {
       const cm = el.querySelector(".cm-content") as HTMLElement | null;
-      if (cm) {
-        const ls = Array.from(cm.querySelectorAll(":scope > .cm-line")) as HTMLElement[];
-        lines = ls.filter((l) => (l.textContent || "").trim().length > 0).length;
-        folds = cm.querySelectorAll(".cm-foldPlaceholder").length;
-      }
-      const sizer = el.querySelector(".cm-sizer") as HTMLElement | null;
-      content = sizer ? sizer.scrollHeight : (cm ? cm.scrollHeight : 0);
+      const ls = cm ? Array.from(cm.querySelectorAll(":scope > *")) as HTMLElement[] : [];
+      lines = ls.filter((l) => l.classList.contains("cm-line") && (l.textContent || "").trim().length > 0).length;
+      folds = cm ? cm.querySelectorAll(".cm-foldPlaceholder").length : 0;
+      // The inline title and properties sit above the content in the same scroller.
+      const scroller = el.querySelector(".cm-scroller") as HTMLElement | null;
+      content = bottomOf(scroller, ls) + 8;
     }
     return { lines, folds, content, height: p.card.offsetHeight, node: p.card.hasClass("is-collapsed"), manual: !!p.manual };
   }
