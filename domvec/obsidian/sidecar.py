@@ -1704,6 +1704,9 @@ def pairwise(workspace, keys) -> Dict:
 #: its module PageRank handed to the index as a retrieval term for code chunks.
 CODEGRAPH = {"graph": None, "ms": 0, "error": ""}
 
+#: What the browser cell in use shows, as the plugin last told it (G-279).
+BROWSER_STATE: dict = {"url": "", "title": "", "at": 0.0}
+
 
 def _build_codegraph(workspace) -> None:
     import time as _t
@@ -2588,6 +2591,18 @@ class _Handler(BaseHTTPRequestHandler):
                              "supervised": os.environ.get("DOMVEC_SUPERVISED") == "1"})
             if due:
                 threading.Thread(target=_maybe_compact, args=(self.workspace, store_mb), daemon=True).start()
+            return
+
+        if route == "browser_state":
+            # What the browser in use shows (G-279), told by the plugin every 2 s:
+            # a kernel's `WebBrowser.url` reads it back.
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(length) or b"{}")
+                BROWSER_STATE.update({"url": str(body.get("url") or ""), "title": str(body.get("title") or ""), "at": time.time()})
+                self._send(200, {"ok": True})
+            except Exception as exc:                # noqa: BLE001
+                self._send(500, {"error": "%s: %s" % (type(exc).__name__, exc)})
             return
 
         if route == "vault_root":
@@ -4336,6 +4351,11 @@ class _Handler(BaseHTTPRequestHandler):
                 out.update({"name": name, "kind": g.kind.get(name, ""), "rank": g.percentile(name),
                             "neighbours": [{"name": n, "edge": k} for n, k in g.neighbours(name)[:40]]})
             self._send(200, out)
+            return
+
+        if segments[0] == "browser_state":
+            # The browser cell's address, as the plugin last told it (G-279).
+            self._send(200, dict(BROWSER_STATE, age_s=round(time.time() - BROWSER_STATE.get("at", 0), 1) if BROWSER_STATE.get("at") else None))
             return
 
         if segments[0] == "ego" and len(segments) > 1 and segments[1] == "projection":

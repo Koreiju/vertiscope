@@ -10196,6 +10196,81 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-279-browser",
+      asks: "WebBrowser in a cell's kernel (G-279, the mothership's F.2 base objects): a cell reads `WebBrowser.url` -- what the browser in use shows -- and `WebBrowser.chunks()` -- what the store holds of that page -- and `WebBrowser.go(url)` sends the browser there when the cell ends, the kernel never reaching the plugin itself (an ask, as `search(duckduckgo=True)`); planted (plantNoBrowserAsk) the browser stays",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const until = async (ok, ms) => { for (let t = 0; t < ms && !(await ok()); t += 300) await sleep(300); return !!(await ok()); };
+          const plugin = app.plugins.getPlugin("domvec-bridge");
+          const d = window.__domvecPlane, NL = String.fromCharCode(10), F = String.fromCharCode(96).repeat(3);
+          const FROM = "https://en.wikipedia.org/wiki/Trie", TO = "https://en.wikipedia.org/wiki/Radix_tree";
+          const b = plugin.activeBrowser();
+          const shown = () => { try { return b.webview.getURL(); } catch (e) { return ""; } };
+          plugin.plantNoBrowserAsk = ${planted};
+          const path = "domvec/graph/g279b " + (${planted} ? "p" : "c") + " " + Date.now() + ".md";
+          const code = "print('URL', WebBrowser.url)" + NL + "print('CHUNKS', len(WebBrowser.chunks()))" + NL + "WebBrowser.go(" + JSON.stringify(TO) + ")";
+          const out = { planted: ${planted} };
+          try {
+            b.go(FROM);
+            await until(() => shown() === FROM && !b.webview.isLoading(), 30000);
+            await sleep(2600);                      // the 2 s report reaches the sidecar
+            await d.create("notebook", { path, text: "# g279b" + NL + NL + F + "python" + NL + code + NL + F + NL });
+            // The run's REPLY: its output reaches the note a moment after the
+            // run returns, and read from the note it was not there yet (run 57).
+            const reply = await plugin.onRunFence({ lang: "python", code, line: 2, path });
+            const text = String((reply && reply.stdout) || "");
+            const m = text.match(/URL (\\S+)/), n = text.match(/CHUNKS (\\d+)/);
+            out.read_url = m ? m[1] : null;
+            out.chunks = n ? Number(n[1]) : null;
+            out.went = await until(() => shown().split("#")[0] === TO, 20000);
+            out.now = shown();
+            out.asks = plugin.askStats;
+            return out;
+          } finally {
+            plugin.plantNoBrowserAsk = false;
+            try { await d.trash(path); } catch (e) { /* gone */ }
+          }
+        })()`, { timeout: 120000 });
+        const clean = await arm(false);
+        const planted = await arm(true);
+        const ok = (x) => !!x && x.read_url === "https://en.wikipedia.org/wiki/Trie" && x.chunks > 0 && x.went;
+        return { pass: ok(clean) && !!planted && planted.read_url === "https://en.wikipedia.org/wiki/Trie" && !planted.went, evidence: { clean, planted } };
+      },
+    },
+    {
+      id: "G-279-agent",
+      asks: "Agent in a cell's kernel (G-279, the mothership's F.2 base objects): `Agent.ask(prompt)` puts the question to the sidecar's local model and returns its reply into the cell, the model named; planted (no-base-objects) the kernel has no Agent",
+      async run() {
+        const plant = (on) => fetch(`${SIDECAR}/plant`, { method: "POST", headers: { "Content-Type": "application/json", "X-Domvec-Client": "obsidian-plugin" },
+                                                          body: JSON.stringify({ name: "no-base-objects", on }) });
+        const arm = async (planted) => {
+          await plant(planted);
+          try {
+            return await evaluate(`(async () => {
+              const plugin = app.plugins.getPlugin("domvec-bridge");
+              const d = window.__domvecPlane, NL = String.fromCharCode(10), F = String.fromCharCode(96).repeat(3);
+              const path = "domvec/graph/g279a " + (${planted} ? "p" : "c") + " " + Date.now() + ".md";
+              const code = "r = Agent.ask('Reply with the single word: ready')" + NL + "print('AGENT', r.strip()[:60])" + NL + "print('MODEL', Agent.model)";
+              try {
+                await d.create("notebook", { path, text: "# g279a" + NL + NL + F + "python" + NL + code + NL + F + NL });
+                const reply = await plugin.onRunFence({ lang: "python", code, line: 2, path });
+                const out = String((reply && reply.stdout) || ""), err = String((reply && reply.error) || "");
+                const a = out.match(/AGENT (.*)/), m = out.match(/MODEL (.*)/);
+                return { planted: ${planted}, ok: !!(reply && reply.ok), agent: a ? a[1] : null, model: m ? m[1] : null, name_error: /NameError/.test(err) };
+              } finally {
+                try { await d.trash(path); } catch (e) { /* gone */ }
+              }
+            })()`, { timeout: 300000 });
+          } finally { await plant(false); }
+        };
+        const clean = await arm(false);
+        const planted = await arm(true);
+        return { pass: !!clean && clean.ok && /ready/i.test(clean.agent || "") && !!clean.model && !!planted && planted.name_error,
+                 evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {

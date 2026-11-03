@@ -178,6 +178,14 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     const tellVault = () => { if (this.sidecar.vaultRoot) void this.sidecar.egoPost("vault_root", { root: this.sidecar.vaultRoot, name: this.app.vault.getName() }); };
     tellVault();
     this.registerInterval(window.setInterval(tellVault, 30000));
+    // What the browser in use shows, told to the sidecar every 2 s: a kernel's
+    // `WebBrowser.url` reads it (G-279), the kernel never reaching the plugin.
+    this.registerInterval(window.setInterval(() => {
+      const b: any = this.activeBrowser();
+      let url = "";
+      try { url = (typeof b?.shownUrl === "function" ? b.shownUrl() : b?.webview?.getURL()) || ""; } catch { /* no webview yet */ }
+      if (url) void this.sidecar.egoPost("browser_state", { url, title: (() => { try { return b?.webview?.getTitle?.() || ""; } catch { return ""; } })() });
+    }, 2000));
     // Once a minute while the reader has been idle five minutes: the sidecar
     // may compact its store now, the only moment nobody waits on it (2026-10-18:
     // 1.6 -> 8.8 GB uncompacted, captures 3-10 s -> 15-26 s). Never while the
@@ -969,7 +977,9 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
   }
 
   /** A cell's asks of the app, carried out (G-288). */
-  askStats = { web: 0, last: "" };
+  askStats: { web: number; go?: number; last: string } = { web: 0, last: "" };
+  /** Planted (G-279): the kernel's `WebBrowser.go` asks are not carried out. */
+  plantNoBrowserAsk = false;
 
   async onRunFence(req: RunRequest): Promise<any> {
     const note = req.path || this.app.workspace.getActiveFile()?.path || "";
@@ -1047,6 +1057,14 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
         const browser = l?.view as BrowserView | undefined;
         if (browser && typeof browser.searchWeb === "function") { void browser.searchWeb(a.web); notes.push(`web: "${a.web}" asked of the browser cell`); }
         else notes.push(`web: no browser cell open for "${a.web}"`);
+      }
+      // `WebBrowser.go(url)` (G-279): the browser in use sent to the address.
+      if (a && typeof a.go === "string" && a.go.trim()) {
+        this.askStats.go = (this.askStats.go || 0) + 1;
+        this.askStats.last = a.go;
+        const browser = this.activeBrowser() as BrowserView | undefined;
+        if (browser && typeof (browser as any).go === "function" && !this.plantNoBrowserAsk) { (browser as any).go(a.go); notes.push(`go: the browser sent to ${a.go}`); }
+        else notes.push(`go: no browser cell open for ${a.go}`);
       }
     }
 

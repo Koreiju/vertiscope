@@ -87,6 +87,73 @@ if "search" not in globals():
         got = list(_domvec_asks)
         _domvec_asks.clear()
         return _json.dumps(got)
+
+if "WebBrowser" not in globals():
+    class _WebBrowser:
+        """WebBrowser: the browser cell, from a kernel. `url` -- what it shows now; `go(url)` -- asked of
+        the cell, carried out when this cell ends; `chunks(url=None)` -- what the store holds of a page."""
+
+        def __init__(self, base):
+            self._base = base
+
+        @property
+        def url(self):
+            with _ur.urlopen(self._base + "/browser_state", timeout=30) as r:
+                return (_json.load(r) or {}).get("url") or ""
+
+        @property
+        def title(self):
+            with _ur.urlopen(self._base + "/browser_state", timeout=30) as r:
+                return (_json.load(r) or {}).get("title") or ""
+
+        def go(self, url):
+            _domvec_asks.append({"go": str(url)})
+            return {"asked": str(url), "pending": True}
+
+        def chunks(self, url=None):
+            u = url or self.url
+            if not u:
+                return []
+            with _ur.urlopen(self._base + "/page_map?url=" + _up.quote(u, safe=""), timeout=60) as r:
+                return sorted(((_json.load(r) or {}).get("chunks") or {}).keys())
+
+        def __repr__(self):
+            return "WebBrowser(url, title, go, chunks) at " + self._base
+
+    WebBrowser = _WebBrowser(%(base)r)
+
+if "Agent" not in globals():
+    import uuid as _uuid
+
+    class _Agent:
+        """Agent: the local model, from a kernel. `ask(prompt, context=None)` -> its reply, one session
+        per kernel (the model keeps the turns); `context` a list of strings or {markdown, url} dicts."""
+
+        def __init__(self, base):
+            self._base = base
+            self._session = "kernel-" + _uuid.uuid4().hex[:12]
+            self.model = ""
+
+        def ask(self, prompt, context=None):
+            ctx = []
+            for i, c in enumerate(context or []):
+                if isinstance(c, str):
+                    c = {"markdown": c}
+                ctx.append({"cid": str(c.get("cid") or "kernel:%%d" %% i), "url": str(c.get("url") or ""),
+                            "markdown": str(c.get("markdown") or c.get("text") or ""), "head": str(c.get("head") or "from the kernel")})
+            req = _ur.Request(self._base + "/chat", data=_json.dumps({"session": self._session, "prompt": str(prompt),
+                              "context": ctx}).encode(), headers={"content-type": "application/json"})
+            with _ur.urlopen(req, timeout=300) as r:
+                got = _json.load(r)
+            if got.get("error") or not got.get("turn"):
+                raise RuntimeError(got.get("error") or "the model did not answer")
+            self.model = got.get("model") or self.model
+            return got["turn"].get("reply") or ""
+
+        def __repr__(self):
+            return "Agent(ask) -- " + (self.model or "the sidecar's local model") + " at " + self._base
+
+    Agent = _Agent(%(base)r)
 '''
 
 #: Run after each cell: the asks its calls recorded, as the repr of a JSON string.
