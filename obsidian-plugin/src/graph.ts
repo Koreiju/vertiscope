@@ -1377,6 +1377,9 @@ export class GraphView extends ItemView {
     this.collapseCovered();
   }
 
+  /** Planted (G-253): unfolding a page draws its current chunks only. */
+  plantNoVersionUnfold = false;
+
   /** Planted by G-92's check: a saved node waits for its projection (the old order). */
   plantLateCollapse = false;
 
@@ -1962,6 +1965,10 @@ export class GraphView extends ItemView {
     void this.loadCodeEdges(url);                  // G-241: a code page's calls and bases
     void this.loadFiles(url);                      // 186k: the special files it links to
     const cids = await this.sidecar.pageCids(url).catch(() => [] as string[]);
+    // And its earlier contents the store kept (G-253: a version's url is the
+    // page's marked with `#~v`, which no positional read of the page sees).
+    // Placement hands them back under the page's url, so they fold with it.
+    if (!this.plantNoVersionUnfold) cids.push(...await this.sidecar.pageCids(url + "#~v").catch(() => [] as string[]));
     let placed = 0;
     // 400 a request, as the reopen after a refit does: a 1,109-chunk page is
     // three placements, each absorbed as it lands.

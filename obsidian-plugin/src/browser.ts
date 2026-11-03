@@ -905,6 +905,45 @@ export class BrowserView extends ItemView {
   /** Planted: hovers resolve only where `coversFor` does (the dead fly-to). */
   plantNoAncestorHover = false;
 
+  /** Versions a capture stored, and the kept nodes they covered (G-253). */
+  versionStats = { replies: 0, versions: 0, covered: 0 };
+  /** Kept nodes already covered by a version, so one is not covered twice. */
+  private versionCovered = new Set<string>();
+
+  /**
+   * Which kept node each stored version is (G-253). A version names the
+   * position it was the content of; the kept nodes at that position are the
+   * candidates, and the one whose words the version's markdown holds is it --
+   * a position can have held several contents between two captures, and only
+   * the one the store saw was kept. Words, not lines: the view holds the
+   * drain's line texts, the store the projection's markdown.
+   */
+  private versionCovers(url: string, tree: ForceTree, vers: Record<string, string>,
+                        sample: Record<string, string>): Record<string, string> {
+    const words = (t: string) => new Set(String(t || "").toLowerCase().match(/[\p{L}\p{N}]{2,}/gu) || []);
+    const kept = tree.retainedHeld().filter((h) => !this.versionCovered.has(h.id));
+    if (!kept.length) return {};
+    const at = this.coversFor(url, kept);
+    const out: Record<string, string> = {};
+    for (const [vid, of] of Object.entries(vers)) {
+      const md = words(sample[vid] || "");
+      let best = "", score = 0.5;
+      for (const h of kept) {
+        if (at[h.id] !== of || out[h.id] || this.versionCovered.has(h.id)) continue;
+        const w = words(h.text.join(" "));
+        if (!w.size) continue;
+        // Over the smaller set: the sample is a prefix of the version's
+        // markdown, the kept node the whole of its content.
+        let hit = 0; for (const x of w) if (md.has(x)) hit++;
+        const sc = hit / Math.max(1, Math.min(w.size, md.size));
+        if (sc >= score) { score = sc; best = h.id; }
+      }
+      if (best) { out[best] = vid; this.versionCovered.add(best); }
+    }
+    if (this.versionCovered.size > 20000) this.versionCovered.clear();
+    return out;
+  }
+
   private coversFor(url: string, items: { id: string; address: string }[]): Record<string, string> {
     const map = this.pipebox?.map;
     const out: Record<string, string> = {};
@@ -3218,6 +3257,18 @@ export class BrowserView extends ItemView {
           const settledNow = this.settledOf(url, covers)
             .concat(Object.entries(covers).filter(([, c]) => undrawable.has(c)).map(([id]) => id));
           if (Object.keys(covers).length) this.onCovers(url, covers, settledNow);
+          // G-253: the earlier contents this capture STORED as versions cover
+          // the kept nodes holding them, which then fold into their page like
+          // any saved chunk -- before this they stayed grey for good (95 of
+          // 170 on bandcamp), the store having overwritten what they showed.
+          const vers = ((reply as any).versions || {}) as Record<string, string>;
+          if (Object.keys(vers).length) {
+            const vcov = this.versionCovers(url, tree, vers, ((reply as any).version_md || {}) as Record<string, string>);
+            this.versionStats.replies++;
+            this.versionStats.versions += Object.keys(vers).length;
+            this.versionStats.covered += Object.keys(vcov).length;
+            if (Object.keys(vcov).length) this.onCovers(url, vcov, []);
+          }
           // The stored chunks now known for drained ones carry their pictures.
           const picked: Record<string, string> = {};
           for (const [fid, cid] of Object.entries(covers)) {

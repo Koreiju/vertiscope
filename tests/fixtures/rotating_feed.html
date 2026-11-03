@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Rotating feed</title>
+<style>
+  body { font-family: sans-serif; margin: 24px; }
+  .card { border: 1px solid #ccc; padding: 10px; margin: 8px 0; width: 520px; }
+  .card h3 { margin: 0 0 4px; font-size: 16px; }
+</style>
+</head>
+<body>
+<h1>New and notable</h1>
+<p>A feed that rewrites its cards in place, the way a rotating storefront does:
+the same six elements, a new album in one of them every 1.2 seconds, for 30
+seconds -- then it holds still. (G-253's fixture: every earlier album is an
+earlier content of a position the store must keep.)</p>
+<div id="feed"></div>
+<script>
+  // Each album's words are its own, so a kept node can be told from its
+  // neighbours by what it says.
+  const pool = [
+    ["Amber Lattice", "Orrin Vale", "slowcore"], ["Basalt Hymns", "Tamsin Rook", "drone"],
+    ["Cobalt Errands", "Ivo Marsh", "math rock"], ["Dune Cartography", "Wren Okafor", "ambient"],
+    ["Ember Ledger", "Pell Quarry", "post punk"], ["Fathom Transit", "Juno Abara", "dub"],
+    ["Gilded Static", "Kesh Morrow", "shoegaze"], ["Harrow Lantern", "Sabe Ilunga", "folk"],
+    ["Indigo Sluice", "Ravi Tenning", "jazz"], ["Juniper Circuit", "Odette Faure", "techno"],
+    ["Kelp Chorale", "Bram Solano", "choral"], ["Lumen Parish", "Ottilie Nakai", "gospel"],
+    ["Marrow Thicket", "Cyan Delacroix", "black metal"], ["Nimbus Pantry", "Hollis Achebe", "lofi"],
+    ["Ochre Mandate", "Fenna Strand", "noise"], ["Pewter Orchard", "Lio Haverford", "country"],
+    ["Quartz Vespers", "Mabli Ortega", "minimal"], ["Russet Engine", "Tobiah Kwan", "krautrock"],
+    ["Saffron Tollway", "Edda Mbeki", "highlife"], ["Tundra Almanac", "Corin Valdis", "neoclassical"],
+    ["Umber Satchel", "Ysolde Park", "trip hop"], ["Vellum Harbor", "Anouk Diallo", "dream pop"],
+    ["Wicker Meridian", "Basil Okonjo", "afrobeat"], ["Xylem Parade", "Greta Holm", "garage"],
+    ["Yarrow Signal", "Imre Castell", "electro"], ["Zinc Arcadia", "Noor Hallett", "grime"],
+    ["Alder Bellows", "Quill Ferreira", "bluegrass"], ["Briar Tessellate", "Saoirse Lund", "idm"],
+  ];
+  const feed = document.getElementById("feed");
+  // Long enough that each card is its own chunk: a rewrite then replaces a
+  // whole chunk's content, which is what a feed item is.
+  const card = (i) => { const [t, a, g] = pool[i % pool.length];
+    const p = (x) => "<p>" + x + "</p>";
+    return "<h3>" + t + "</h3>" + p("by " + a + " &middot; " + g)
+      + p(t + " is the record " + a + " made after a long winter of " + g + " sessions; every track on " + t + " was cut live, and " + a + " kept the room noise in on purpose.")
+      + p("Critics who heard " + t + " early called it the clearest " + g + " statement of the year. " + a + " says the title came from a notebook kept while touring, and that " + t + " is meant to be heard in one sitting.")
+      + p("Pressed on heavy vinyl, " + t + " ships with a booklet of photographs " + a + " took on the road. A " + g + " record for late evenings: " + t + ", by " + a + ".")
+      + p("Liner note: " + a + " thanks everyone who came to the " + t + " shows, and promises more " + g + " soon."); };
+  const N = 6;
+  for (let i = 0; i < N; i++) {
+    const d = document.createElement("div"); d.className = "card"; d.innerHTML = card(i); feed.appendChild(d);
+  }
+  let next = N, turns = 0;
+  const t = setInterval(() => {
+    if (++turns * 1200 > 30000) { clearInterval(t); return; }
+    feed.children[turns % N].innerHTML = card(next++);
+  }, 1200);
+</script>
+</body>
+</html>

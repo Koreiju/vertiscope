@@ -12,7 +12,7 @@ from domvec.obsidian import kernel_objects as ko
 def _kernel():
     ns: dict = {}
     exec(ko.boot("http://127.0.0.1:1"), ns)
-    ns["Database"].search = lambda q, k=5: [{"cid": "c%d" % i, "url": "u", "text": q} for i in range(k)]
+    ns["Database"].search = lambda q, k=5, where="": [{"cid": "c%d" % i, "url": "u", "text": q} for i in range(k)]
     return ns
 
 

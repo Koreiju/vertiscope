@@ -10582,6 +10582,90 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-253-versions",
+      asks: "an earlier content a page rewrote in place is STORED, not overwritten (PLUGIN_GOAL 128: \"object permanence on chunk streaming and latency both; store\"): a served feed rewrites one of six cards every 1.2 s for 30 s -- the store keeps the contents it captured as versions (keyed by position and content, under the page's marked url), each capture reply names them, the view's kept grey nodes holding them are covered and fold into their page, and unfolded the page draws them at their projected place; the version write's own cost read from the capture profile; planted (sidecar no-versions) the store overwrites, as before, and nothing covers the kept nodes",
+      async run() {
+        const fixtures = await serveFixtures();
+        const plant = (name, on) => fetch(SIDECAR + "/plant", {
+          method: "POST", headers: { "content-type": "application/json", "X-Domvec-Client": "obsidian-plugin" },
+          body: JSON.stringify({ name, on }) });
+        const arm = async (planted) => {
+          await plant("no-versions", planted);
+          try {
+            return await evaluate(`(async () => {
+              ${PREP}
+              const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+              const PAGE = ${JSON.stringify(fixtures.origin + "/rotating_feed.html?g253=")} + (${planted} ? "p" : "c") + Date.now();
+              b.go("about:blank"); await sleep(800);
+              const s0 = { ...b.versionStats };
+              if (!(await land(PAGE, 30000))) return { error: "did not land" };
+              await sleep(32000);                 // the feed rotates for 30 s, then holds still
+              await sleep(15000);                 // the captures behind it finish
+              const tree = b.forceTrees.get(PAGE);
+              const kept = tree ? tree.retainedHeld().map((h) => h.id) : [];
+              // Covered as the replies came (the fold then removes the spec,
+              // so the end state cannot say which cover took it).
+              const byVersion = kept.filter((id) => b.versionCovered.has(id));
+              const life = (id) => v.life.nodes.get(id) || {};
+              const folded = byVersion.filter((id) => !v.forceSpecs.has(id) && (life(id).savedAt || life(id).foldedAt));
+              // Still drawn grey, uncovered: kept contents the store never saw
+              // (rewritten between two captures).
+              const grey = kept.filter((id) => v.forceSpecs.has(id) && !b.versionCovered.has(id));
+              // Covered, still drawn grey: waiting for the version's projected node.
+              const waiting = byVersion.filter((id) => v.forceSpecs.has(id));
+              const stored = await v.sidecar.pageCids(PAGE + "#~v");
+              const current = await v.sidecar.pageCids(PAGE);
+              // Unfolded: the versions drawn at their projected place.
+              let drawn = 0, opened = false;
+              const key = (u) => String(u || "").split("#")[0];
+              const pageNode = () => v.graph.graphData().nodes.find((n) => n.level === "page" && !n.force && key(n.url) === PAGE);
+              for (let i = 0; i < 20 && !pageNode(); i++) await sleep(500);
+              const verDrawn = () => v.graph.graphData().nodes.filter((n) => !n.force && String(n.id).startsWith("v")
+                && key(n.url) === PAGE && Number.isFinite(n.x)).length;
+              const drawnLive = verDrawn();
+              const pn = pageNode();
+              if (pn) {
+                // The page on screen is drawn already, so the first toggle
+                // folds it; the second is the unfold being measured.
+                let r = await v.togglePage(pn);
+                if (r && r.action === "collapse") { await sleep(500); r = await v.togglePage(pageNode() || pn); }
+                opened = !!r && r.action === "expand";
+                for (let i = 0; i < 16; i++) {
+                  await sleep(500);
+                  drawn = verDrawn();
+                  if (drawn >= stored.length && drawn) break;
+                }
+                if (opened) { const p2 = pageNode(); if (p2) await v.togglePage(p2); }
+              }
+              const prof = ((await v.sidecar.profile()) || {}).capture || [];
+              const mine = prof.filter((e) => String(e.url || "") === PAGE);
+              const col = (k) => mine.map((e) => Number(e[k])).filter((x) => Number.isFinite(x)).sort((a, b2) => a - b2);
+              const p = (xs, q) => xs.length ? xs[Math.min(xs.length - 1, Math.floor(q * xs.length))] : null;
+              const vr = col("ms_versions_read"), vw = col("ms_versions_merge"), vc = col("ms_versions_cap"), tot = col("total");
+              const vh = col("ms_versions_held"), vl = col("ms_versions_link");
+              return { planted: ${planted}, kept: kept.length, covered_by_version: byVersion.length, covered_and_folded: folded.length, covered_waiting: waiting.length, versions_drawn_live: drawnLive, grey_uncovered: grey.length,
+                       versions_stored: stored.length, current_chunks: current.length, versions_drawn: drawn,
+                       reply_versions: b.versionStats.versions - s0.versions, reply_covered: b.versionStats.covered - s0.covered,
+                       captures: mine.length, ms_versions_read_p50: p(vr, 0.5), ms_versions_read_max: p(vr, 1),
+                       ms_versions_write_p50: p(vw, 0.5), ms_versions_write_max: p(vw, 1),
+                       ms_versions_cap_p50: p(vc, 0.5), ms_versions_cap_max: p(vc, 1),
+                       ms_versions_held_p50: p(vh, 0.5), ms_versions_link_p50: p(vl, 0.5), ms_versions_link_max: p(vl, 1),
+                       ms_capture_p50: p(tot, 0.5), ms_capture_p90: p(tot, 0.9) };
+            })()`, { timeout: 180000 });
+          } finally { await plant("no-versions", false); }
+        };
+        try {
+          const clean = await arm(false);
+          const planted = await arm(true);
+          const ok = !!clean && !clean.error && clean.versions_stored >= 5 && clean.reply_versions >= clean.versions_stored * 0.8
+            && clean.covered_by_version >= Math.min(clean.versions_stored, clean.kept) * 0.6 && clean.versions_drawn >= 1
+            && !!planted && !planted.error && planted.versions_stored === 0 && planted.covered_by_version === 0;
+          return { pass: ok, evidence: { clean, planted, purged: await tidyFixtures(fixtures.origin),
+                   bar: "clean: >= 5 versions stored, the replies naming them, >= 0.6 of them covering a kept node, and versions drawn when the page unfolds; planted: none stored, none covered" } };
+        } finally { await fixtures.close(); }
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {

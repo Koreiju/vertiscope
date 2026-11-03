@@ -358,6 +358,11 @@ export class ForceTree {
   private retainedByText = new Map<string, string>();
   retainStats = { retained: 0, recycled: 0, revived: 0 };
   retainedCount(): number { return this.retained.size; }
+  /** The kept nodes -- contents the page removed or rewrote -- with their
+   *  line texts, for a stored version to be matched to (G-253). */
+  retainedHeld(): { id: string; address: string; text: string[] }[] {
+    return [...this.retained.values()].map((h) => ({ id: h.id, address: h.address, text: h.text || [] }));
+  }
   private retain(h: Held, delta: ForceNodeDelta): void {
     this.retained.set(h.id, h);
     // The element's NEXT content is a new node: a kept version and a live

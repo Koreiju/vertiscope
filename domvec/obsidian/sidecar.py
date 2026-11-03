@@ -826,6 +826,7 @@ _PLANTABLE = {
     "slate-space-split": ("domvec.slate", "PLANT_SPACE_SPLIT"),               # G-277
     "stored-note": ("domvec.obsidian.refs", "PLANT_STORED_NOTE"),             # G-277
     "uniform-types": ("domvec.codegraph", "PLANT_UNIFORM_TYPES"),             # G-317
+    "no-versions": ("domvec.graphstore", "PLANT_NO_VERSIONS"),                # G-253
     "untyped-box": ("domvec.obsidian.blackbox", "PLANT_UNTYPED"),             # item 100
     "no-codegraph": ("domvec.search", "PLANT_NO_CODEGRAPH"),                  # item 93
     "no-instant": ("domvec.obsidian.sidecar", "PLANT_NO_INSTANT"),            # item 100
@@ -3606,6 +3607,10 @@ class _Handler(BaseHTTPRequestHandler):
             # (the hash of its address span) and same markdown is the same chunk.
             # They stay in `dirty` for the reply: panels and graph still hear.
             write = dirty
+            # What the store holds now, read once for the skip below and
+            # handed to the write: the content an in-place rewrite replaces is
+            # kept as a version from it (G-253), with no second read.
+            held_md: Optional[Dict[str, str]] = None
             if dirty and not _PLANT_REWRITE_SAME[0]:
                 try:
                     if _PLANT_SKIP_BY_MD[0] or not hasattr(self.workspace.store, "chunk_sigs"):
@@ -3617,12 +3622,15 @@ class _Handler(BaseHTTPRequestHandler):
                         # stayed one sibling off on arXiv for every capture.
                         from domvec.graphstore import anchor_sig
                         sigs = self.workspace.store.chunk_sigs([c.cid for c in dirty])
+                        held_md = {cid: got[0] for cid, got in sigs.items()}
                         lines_of = lambda c: sum(1 for ln in c.lines if ln.address is not None)
                         write = [c for c in dirty
                                  if sigs.get(c.cid) != (c.markdown, anchor_sig(c), lines_of(c))]
                     phases["unchanged_skipped"] = len(dirty) - len(write)
                 except Exception:                   # noqa: BLE001
                     write = dirty
+            version_of: Dict[str, str] = {}
+            version_md: Dict[str, str] = {}
             if write or retired:
                 # **The wait is not the work.** `_WORK_LOCK` is shared with
                 # the embed worker (per 64-chunk batch) and aggregation (per
@@ -3641,7 +3649,8 @@ class _Handler(BaseHTTPRequestHandler):
                         return n.value if n is not None else None
                     _written, counts = self.workspace.ingest_chunks(
                         url, write, complete=False, removed=retired,
-                        title=(body.get("title") or ""), raw_values=_held)
+                        title=(body.get("title") or ""), raw_values=_held,
+                        held_md=held_md)
                 # The store's own breakdown, carried up. `store` was 96% of a
                 # capture and one number cannot say which statement it is.
                 if isinstance(counts, dict):
@@ -3652,6 +3661,11 @@ class _Handler(BaseHTTPRequestHandler):
                     # to how much of the page it rewrote.
                     if "mirror_rows_written" in counts:
                         phases["mirror_rows"] = counts["mirror_rows_written"]
+                    # G-253: earlier contents this write kept, version -> position.
+                    version_of = dict(counts.get("version_of") or {})
+                    version_md = dict(counts.get("version_md") or {})
+                    if version_of:
+                        phases["versions"] = len(version_of)
                 # There are chunks without vectors now. The worker embeds
                 # them; this request does not wait for it -- but the page the
                 # reader is ON goes to the front of the queue (2026-10-07: a
@@ -3659,7 +3673,12 @@ class _Handler(BaseHTTPRequestHandler):
                 # behind other pages' backlog, end to end p90 4.5 s, while the
                 # fold itself took 1.7 ms). Newest first: what is on screen now.
                 try:
-                    self.workspace.vectors.prioritize([c.cid for c in dirty])
+                    # G-253: the versions this write kept, to the embedder --
+                    # their vectors written off the capture path, then placed.
+                    if isinstance(counts, dict):
+                        for vid, (md, purl) in (counts.get("version_text") or {}).items():
+                            self.workspace.vectors.push(vid, md, url=purl)
+                    self.workspace.vectors.prioritize([c.cid for c in dirty] + list(version_of))
                 except Exception:                   # noqa: BLE001
                     pass
                 _EMBED_WANTED.set()
@@ -3684,7 +3703,8 @@ class _Handler(BaseHTTPRequestHandler):
             # dropped from its queue and comes back through the embedder.
             # Retired ones too: the projector finds them gone from the store
             # and logs them `gone`, which is how the pane removes their nodes.
-            _project(dirty_cids + retired)
+            # And the versions it kept, placed like any chunk (G-253).
+            _project(dirty_cids + retired + list(version_of))
             _project_dedup(self.workspace)
             if diff is not None:
                 diff = _record_diff(diff)
@@ -3704,6 +3724,11 @@ class _Handler(BaseHTTPRequestHandler):
             "dirty": len(dirty),
             "dirty_cids": dirty_cids,
             "map_delta": map_delta,
+            # G-253: the earlier contents this capture stored, each with the
+            # position it was the content of -- what the view's kept nodes of
+            # those contents are covered by.
+            "versions": version_of,
+            "version_md": version_md,
             # The central diff: every view applies these lists, none infers them.
             "diff": diff,
             "wire_bytes": sense.wire_bytes,
@@ -3730,7 +3755,7 @@ class _Handler(BaseHTTPRequestHandler):
             # the reader scrolled belongs on screen now, and this is the only
             # moment anyone asks.
             wanted = list(dict.fromkeys(
-                list(session.get("pending") or []) + dirty_cids))
+                list(session.get("pending") or []) + dirty_cids + list(version_of)))
             try:
                 placed = place_into(self.workspace, wanted) if wanted else {}
                 reply.update(placed)

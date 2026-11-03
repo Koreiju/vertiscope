@@ -154,6 +154,8 @@ _SCHEMA = [
     "CREATE REL TABLE IF NOT EXISTS Anchors(FROM Chunk TO Address, ord INT64)",
     "CREATE REL TABLE IF NOT EXISTS Contains(FROM Chunk TO Chunk)",
     "CREATE REL TABLE IF NOT EXISTS LinksTo(FROM Chunk TO Page)",
+    # G-253: a version to the chunk now at its position (`version_cid`).
+    "CREATE REL TABLE IF NOT EXISTS VersionOf(FROM Chunk TO Chunk)",
     # `G-12`: a fitted layout, kept so the pane can ask for one
     # instead of paying for it. A TABLE rather than columns on
     # `Chunk`: the payload belongs to a fit, not to a chunk, and two
@@ -214,6 +216,10 @@ _MIGRATIONS = [
     # The hash of the chunk's exact markdown (2026-10-29): its CONTENT
     # identity, store-wide, which `_assign_content` keys one lead on.
     "ALTER TABLE Chunk ADD mdkey STRING",
+    # G-253: a version's position (the cid it was the content of) and when
+    # it was last the content there.
+    "ALTER TABLE Chunk ADD ver_of STRING",
+    "ALTER TABLE Chunk ADD ver_at DOUBLE",
 ]
 
 
@@ -287,6 +293,22 @@ def canonical_url(url: str, base: str = "") -> str:
         return ""
     return urlunsplit((parts.scheme, parts.netloc, parts.path or "/",
                        parts.query, ""))
+
+
+def _paged(rows):
+    """Placement rows with a version's url read as its page's (G-253)."""
+    import dataclasses
+    return [(cid, dataclasses.replace(ch, url=page_of(ch.url))
+             if ch is not None and ch.url.endswith(VERSION_SUFFIX) else ch, vec)
+            for cid, ch, vec in rows]
+
+
+class _VersionText:
+    """What the content index reads off a version row (G-253)."""
+    __slots__ = ("cid", "markdown", "url")
+
+    def __init__(self, cid: str, markdown: str, url: str) -> None:
+        self.cid, self.markdown, self.url = cid, markdown, url
 
 
 @dataclass
@@ -397,6 +419,45 @@ def content_key(md: str) -> str:
     return hashlib.sha1((md or "").encode("utf-8")).hexdigest()[:20]
 
 
+# **An earlier state of a position, kept** (G-253, PLUGIN_GOAL 128: "object
+# permanence on chunk streaming and latency both; store"). A chunk's id is its
+# POSITION, `sha1(url|xpath|part)`, so a page that rewrites an element in place
+# -- bandcamp's rotating feed, archive.org's recycled tiles -- overwrote the
+# stored content while the view kept it: 95 of 170 grey nodes on bandcamp were
+# such earlier contents, never placeable. A VERSION is keyed by position AND
+# content (`docs/UNIQUENESS_AND_VERSIONS.md`): unique wherever either is, so it
+# never competes with the current chunk for an address.
+#
+# Its url is its page's with `VERSION_SUFFIX`: every positional read here asks
+# `{url: $url}` exactly -- reconcile, the page's trie rows, its groups, its
+# count -- and none of them may see a version, which has no anchors and draws
+# no element. The placement reads hand back the page url (`page_of`), so the
+# projector puts a version with its page. No `HasChunk`: a `VersionOf` edge to
+# the chunk now at its position instead.
+VERSION_SUFFIX = "#~v"
+#: Versions kept per position; past it the oldest go. A ticker rewriting every
+#: second would otherwise mint one a capture for as long as the tab is open.
+VERSIONS_PER_POSITION = 32
+#: Planted (G-253): an in-place rewrite overwrites the earlier content, as before.
+PLANT_NO_VERSIONS = [False]
+
+
+def page_of(url: str) -> str:
+    """The page a chunk url belongs to: a version's url without its mark."""
+    return url[:-len(VERSION_SUFFIX)] if url and url.endswith(VERSION_SUFFIX) else url
+
+
+def version_cid(url: str, xpath: str, part: int, key: str) -> str:
+    """A version's id: its position and its content. `v` first, so it sorts
+    after every position's hex id and is told apart without a read."""
+    import hashlib
+    return "v" + hashlib.sha1(f"{url}|{xpath}|{part}|{key}".encode("utf-8")).hexdigest()
+
+
+def is_version(cid: str) -> bool:
+    return bool(cid) and cid[0] == "v"
+
+
 class _ContentIndex:
     """Which chunks hold each content, store-wide, lead first (2026-10-29).
 
@@ -446,8 +507,11 @@ class _ContentIndex:
             return {}
         # A grouped member draws anyway (its group speaks through it), so it
         # leads: the plain chunks become ITS copies rather than a second
-        # drawing beside it. Otherwise the longest-standing member leads.
-        lead = next((c for c in ms if c in self.grouped), ms[0])
+        # drawing beside it. Otherwise the longest-standing member leads --
+        # but a chunk at its position before any VERSION (G-253): content the
+        # page shows again is drawn as the current chunk, its version a copy.
+        lead = next((c for c in ms if c in self.grouped),
+                    next((c for c in ms if not is_version(c)), ms[0]))
         out = {}
         for cid in ms:
             if cid == lead:
@@ -647,6 +711,8 @@ class GraphStore:
         self.dedup_stats = {"keys": 0, "copies": 0, "rewrites": 0, "promoted": 0, "demoted": 0}
         #: The chunks the last `_reconcile` deleted.
         self._last_gone: List[str] = []
+        #: G-253: versions written, and dropped past the per-position cap.
+        self.version_stats = {"written": 0, "capped": 0}
         if not self.read_only and os.environ.get("DOMVEC_SHARED_READS", "") != "1":
             try:
                 self.conn.execute("CALL auto_checkpoint=false")
@@ -707,6 +773,7 @@ class GraphStore:
         root_hash: str = "",
         complete: bool = True,
         removed: Optional[Sequence[str]] = None,
+        held_md: Optional[Dict[str, str]] = None,
     ) -> Dict[str, int]:
         """Write one page: its addresses, its chunks, and the edges between.
 
@@ -909,11 +976,19 @@ class GraphStore:
         # which an all-zero vector already qualified. `embedding()` gains the
         # NULL guard, since `list(None)` raises.
         has_vectors = bool(embeddings)
+        # G-253: what this write is about to overwrite, kept as versions --
+        # read BEFORE the MERGE below replaces it.
+        versions = [] if PLANT_NO_VERSIONS[0] else self._versions_of(chunks, held_md)
+        counts["ms_versions_read"] = round((time.perf_counter() - _t) * 1000, 1)
         if PLANT_PAGE_SCOPED_DEDUP[0]:
             canonical, copies = _same_content(chunks)
             elsewhere = []
         else:
-            canonical, copies, elsewhere = self._assign_content(chunks, self._last_gone)
+            # One content index for both: a version whose content is current
+            # somewhere is that chunk's copy, never a second drawing of it.
+            canonical, copies, elsewhere = self._assign_content(
+                list(chunks) + [_VersionText(v["cid"], v["md"], v["url"]) for v in versions],
+                self._last_gone)
         self._last_gone = []
         chunk_rows = []
         for chunk in chunks:
@@ -932,6 +1007,8 @@ class GraphStore:
                     vector = vector + [0.0] * (EMBED_DIM - len(vector))
                 row["emb"] = vector
             chunk_rows.append(row)
+        if versions:
+            counts.update(self._write_versions(versions, canonical, copies))
         if chunk_rows:
             self._batch(
                 "UNWIND $rows AS r MERGE (c:Chunk {cid: r.cid}) "
@@ -1835,7 +1912,7 @@ class GraphStore:
                 if not vector and chunk is not None:
                     vector = self.embedding(cid)
                 out.append((cid, chunk, vector))
-            return out
+            return _paged(out)
         rows = self._rows(
             "MATCH (c:Chunk) WHERE list_contains($cids, c.cid) RETURN "
             "c.cid, c.url, c.xpath, c.part, c.md, c.chars, c.line_count, "
@@ -1854,7 +1931,7 @@ class GraphStore:
             own = list(r[12]) if r[12] is not None else None
             vector = group if (chunk.group_n > 1 and group) else own
             found[r[0]] = (chunk, vector)
-        return [(cid,) + found.get(cid, (None, None)) for cid in cids]
+        return _paged([(cid,) + found.get(cid, (None, None)) for cid in cids])
 
     def chunks_many(self, cids: Sequence[str]) -> Dict[str, StoredChunk]:
         """Several chunks in one read: a lookup per cid below
@@ -2127,6 +2204,13 @@ class GraphStore:
             "MATCH (p:Page)-[:HasChunk]->(c:Chunk) "
             "RETURN c.url, c.cid, c.dup_of, c.group_of, c.group_n, "
             "c.embedding, c.group_embedding")
+        # And the versions (G-253), placed with their page: without them a
+        # refit took every kept earlier state off the map again.
+        if not PLANT_NO_VERSIONS[0]:
+            rows = list(rows) + [(page_of(r[0]),) + tuple(r[1:]) for r in self._rows(
+                "MATCH (c:Chunk)-[:VersionOf]->(:Chunk) "
+                "RETURN c.url, c.cid, c.dup_of, c.group_of, c.group_n, "
+                "c.embedding, c.group_embedding")]
         for url, cid, dup, group_of, group_n, emb, gemb in rows:
             if not url or dup:
                 continue
@@ -2878,6 +2962,105 @@ class GraphStore:
             self.dedup_stats["keys"] = len(idx.members)
             return canonical, copies, elsewhere
 
+    def _versions_of(self, chunks, held_md=None) -> List[dict]:
+        """The stored content each of these chunks is about to overwrite, as
+        version rows -- only where the content CHANGED and there was some.
+
+        `held_md` is the stored markdown the caller's diff already read (the
+        capture's skip-unchanged check reads every dirty chunk's); given it,
+        this reads nothing. Without it, one key lookup per chunk. The vector
+        is never read here: `_write_versions` copies it inside the store.
+        The position is the chunk's own -- its cid IS `url|xpath|part`.
+        """
+        if not chunks:
+            return []
+        if held_md is None:
+            held_md = {cid: md or "" for cid, md in self._rows(
+                "UNWIND $cids AS x MATCH (c:Chunk {cid: x}) RETURN c.cid, c.md",
+                {"cids": [c.cid for c in chunks]})}
+        out, now = [], time.time()
+        for c in chunks:
+            md = held_md.get(c.cid)
+            if not (md or "").strip() or c.url.endswith(VERSION_SUFFIX):
+                continue
+            key = content_key(md)
+            if key == content_key(c.markdown):
+                continue
+            out.append({"cid": version_cid(c.url, c.xpath, int(c.part or 0), key),
+                        "of": c.cid, "url": c.url + VERSION_SUFFIX, "xp": c.xpath,
+                        "part": int(c.part or 0), "md": md, "mdkey": key,
+                        "chars": len(md), "lines": md.count(chr(10)) + 1, "at": now})
+        return out
+
+    def _write_versions(self, versions, canonical, copies) -> Dict[str, object]:
+        """Write version rows, hang each on its position, keep the newest
+        `VERSIONS_PER_POSITION` there. Same content at the same position again
+        is the same id, so it is refreshed, not minted twice."""
+        _t = time.perf_counter()
+        # Which of these the store already holds at their position (the same
+        # content seen there again): those are refreshed, never linked twice.
+        # Read first because the cap needs it anyway.
+        held: Dict[str, List[Tuple[float, str]]] = {}
+        for of, vid, at in self._rows(
+                "UNWIND $cids AS x MATCH (v:Chunk)-[:VersionOf]->(c:Chunk {cid: x}) "
+                "RETURN x, v.cid, v.ver_at", {"cids": sorted({v["of"] for v in versions})}):
+            held.setdefault(of, []).append((float(at or 0), vid))
+        known = {vid for got in held.values() for _a, vid in got}
+        ms_read = round((time.perf_counter() - _t) * 1000, 1)
+        _t = time.perf_counter()
+        # The node upsert in the shape the chunk write uses (a key MERGE and
+        # SETs, nothing else bound). A first cut fused the position's MATCH,
+        # this MERGE, the vector copy and the edge into one statement: 1,076
+        # ms p50 for two rows live -- the planner scanned rather than keyed.
+        self._batch(
+            "UNWIND $rows AS r MERGE (v:Chunk {cid: r.cid}) "
+            "SET v.url = r.url, v.xpath = r.xp, v.part = r.part, v.md = r.md, "
+            "v.chars = r.chars, v.line_count = r.lines, v.row = -1, "
+            "v.dup_of = r.dup, v.dup_n = r.dupn, v.mdkey = r.mdkey, "
+            "v.ver_of = r.of, v.ver_at = r.at",
+            [dict(v, dup=canonical.get(v["cid"], ""), dupn=copies.get(v["cid"], 1))
+             for v in versions])
+        ms_merge = round((time.perf_counter() - _t) * 1000, 1)
+        _t = time.perf_counter()
+        # A NEW version's edge: two MATCH clauses, both by key; CREATE, not
+        # MERGE, because `known` already answered existence. Its VECTOR is not
+        # written here: copying the position's 768 floats across in this
+        # statement was 1,527 ms p50 live (an embedding SET is this store's
+        # heavy write). The caller queues the version for the embedder, which
+        # writes vectors off the capture path and hands them to the projector.
+        fresh = [{"cid": v["cid"], "of": v["of"]} for v in versions if v["cid"] not in known]
+        if fresh:
+            self._batch(
+                "UNWIND $rows AS r MATCH (c:Chunk {cid: r.of}) MATCH (v:Chunk {cid: r.cid}) "
+                "CREATE (v)-[:VersionOf]->(c)", fresh)
+        ms_link = round((time.perf_counter() - _t) * 1000, 1)
+        _t = time.perf_counter()
+        now = {v["of"]: v for v in versions}
+        for of, v in now.items():
+            if v["cid"] not in known:
+                held.setdefault(of, []).append((v["at"], v["cid"]))
+        drop = [vid for got in held.values()
+                for _at, vid in sorted(got, reverse=True)[VERSIONS_PER_POSITION:]]
+        if drop:
+            self._batch("UNWIND $rows AS r MATCH (c:Chunk {cid: r.cid}) DETACH DELETE c",
+                        [{"cid": c} for c in drop])
+            # Through the next write's `gone`, so a copy of a dropped lead
+            # gets a new one rather than pointing at nothing.
+            self._last_gone.extend(drop)
+        self.version_stats["written"] += len(versions)
+        self.version_stats["capped"] += len(drop)
+        return {"versions_written": len(versions), "versions_capped": len(drop),
+                "ms_versions_held": ms_read, "ms_versions_merge": ms_merge,
+                "ms_versions_link": ms_link,
+                "ms_versions_cap": round((time.perf_counter() - _t) * 1000, 1),
+                "version_of": {v["cid"]: v["of"] for v in versions},
+                # A sample of each, for the view to know which of its kept
+                # nodes it is (the view holds line texts, not this markdown).
+                "version_md": {v["cid"]: v["md"][:1200] for v in versions},
+                # Whole, for the embedder (`Vectors.push`), never sent.
+                "version_text": {v["cid"]: (v["md"], page_of(v["url"])) for v in versions},
+                }
+
     def _write_dups(self, rows) -> None:
         self.dedup_stats["rewrites"] += len(rows)
         self._batch(
@@ -3021,13 +3204,16 @@ class GraphStore:
     def purge_page(self, url: str) -> int:
         """Remove a page, its chunks and its addresses. Returns chunks removed."""
         self._tnode_forget(url)
+        # Its versions too (G-253), filed under the page's marked url.
         cids = [r[0] for r in self._rows(
-            "MATCH (c:Chunk {url: $url}) RETURN c.cid",
-            {"url": url})]
+            "MATCH (c:Chunk) WHERE c.url = $url OR c.url = $vurl RETURN c.cid",
+            {"url": url, "vurl": url + VERSION_SUFFIX})]
         self._execute(
             "MATCH (a:Address {url: $url}) DETACH DELETE a", {"url": url})
         self._execute(
             "MATCH (c:Chunk {url: $url}) DETACH DELETE c", {"url": url})
+        self._execute(
+            "MATCH (c:Chunk {url: $url}) DETACH DELETE c", {"url": url + VERSION_SUFFIX})
         self._execute(
             "MATCH (p:Page {url: $url}) DETACH DELETE p", {"url": url})
         # The page's chunks may have led content other pages copy.

@@ -271,6 +271,9 @@ def g1_every_chunk_belongs_to_a_page(store: Any) -> List[Violation]:
     """G-1: no chunk is orphaned from the page it was scanned from."""
     known = {r[0] for r in store._rows(
         "MATCH (:Page)-[:HasChunk]->(c:Chunk) RETURN c.cid")}
+    # A version (G-253) belongs to its page through the chunk at its position.
+    known |= {r[0] for r in store._rows(
+        "MATCH (c:Chunk)-[:VersionOf]->(:Chunk)<-[:HasChunk]-(:Page) RETURN c.cid")}
     orphans = [r[0] for r in store._rows("MATCH (c:Chunk) RETURN c.cid")
                if r[0] not in known]
     return [f"{len(orphans)} chunk(s) with no page: {orphans[:5]}"] if orphans else []

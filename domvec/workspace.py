@@ -401,6 +401,7 @@ class Workspace:
         removed: Optional[Sequence[str]] = None,
         raw_values=None,
         defer: bool = False,
+        held_md: Optional[Dict[str, str]] = None,
     ) -> Tuple[List[MarkdownChunk], Dict[str, int]]:
         """Write already-rendered chunks. The single write path's body.
 
@@ -541,6 +542,7 @@ class Workspace:
                 embeddings=vectors or None, title=title,
                 root_hash=root_hash, complete=complete,
                 removed=None if complete else removed,
+                held_md=held_md,
             )
         # The mirror is rewritten only by a write that describes the whole
         # page. A delta names some chunks; writing those alone replaced the
