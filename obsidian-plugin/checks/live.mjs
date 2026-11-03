@@ -10497,6 +10497,44 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-228",
+      asks: "node sizes during a search (PLUGIN_GOAL 157: \"why some orbs are huge in front of small results\"): with a query standing, no non-result orb is drawn larger than the results' size -- the big page orbs that stood 1.8-3x a result are capped to it -- read through the app's own lookOf; planted (plantSearchBigLens) the page orbs keep their full size",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          const f = v.searchField;
+          v.plantSearchBigLens = ${planted};
+          try {
+            f.input.value = "tree data structure"; await f.run();
+            await sleep(1200);
+            const st = v.searchState;
+            const rs = v.graph.nodeRelSize(), media = v.drawnMedia;
+            let maxOther = 0, over = 0, others = 0, wouldBe = 0;
+            for (const n of v.graph.graphData().nodes) {
+              const r = st.ranks.get(String(n.id));
+              if (r !== undefined && r < st.shown) continue;
+              const look = v.lookOf(n, rs, media);
+              if (!look || !(look.half > 0)) continue;
+              others++;
+              if (look.half > maxOther) maxOther = look.half;
+              if (look.half > st.minHalf + 1e-6) over++;
+              if (v.baseLook(n, rs, media).half > st.minHalf + 1e-6) wouldBe++;
+            }
+            return { planted: ${planted}, results: st.shown, min_half: Math.round(st.minHalf * 100) / 100, others,
+                     max_other_half: Math.round(maxOther * 100) / 100, over_result_size: over, would_be_over: wouldBe };
+          } finally {
+            v.plantSearchBigLens = false;
+            f.input.value = ""; await f.run();
+          }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false);
+        const planted = await arm(true);
+        return { pass: !!clean && clean.others > 0 && clean.would_be_over > 0 && clean.over_result_size === 0
+                       && !!planted && planted.over_result_size > 0, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {

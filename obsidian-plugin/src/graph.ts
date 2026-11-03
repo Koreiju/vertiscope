@@ -5539,7 +5539,11 @@ export class GraphView extends ItemView {
     // lights reflect off ("These nodes are the only nodes visible while a
     // user searches. All other nodes become *translucent-ish* ... colorless
     // but still applying a glassy lens material effect").
-    return { half: base.half, translucent: true, alpha: 0, color: "#ffffff", glass: true };
+    // And NO LARGER THAN A RESULT (G-228, PLUGIN_GOAL 157: "some orbs are huge
+    // in front of small results"): a page orb sized by its 2,000 members stood
+    // 1.8-3x a result in front of it. Planted `plantSearchBigLens`: full size.
+    const half = this.plantSearchBigLens ? base.half : Math.min(base.half, st.minHalf);
+    return { half, translucent: true, alpha: 0, color: "#ffffff", glass: true };
   }
 
   /** Planted (G-199): a fold forgets the page's streamed chunks, as before. */
@@ -5548,6 +5552,8 @@ export class GraphView extends ItemView {
   plantOpaqueOrbs = false;
   /** Planted (G-209): a search's results drawn opaque, without the glow. */
   plantOpaqueResults = false;
+  /** Planted (G-228): during a search the other orbs keep their full size. */
+  plantSearchBigLens = false;
 
   // ---- PLUGIN_GOAL 84-88, 94-97: the search field, its results, glass and light ----
   //
