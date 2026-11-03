@@ -600,6 +600,7 @@ export class GraphView extends ItemView {
       const st = this.searchState;
       const i = st ? st.hits.findIndex((x) => x.cid === h.cid) : -1;
       const n = i >= 0 ? st!.targets[i] : null;
+      if (this.plantStripNoFlight) return;
       if (!n) { this.highlightChunk(h.cid, h.url, h.cid); return; }
       this.focusOn(n);
       // The panels toggle governs the strip as it governs the browser hover
@@ -6213,6 +6214,8 @@ export class GraphView extends ItemView {
   private agentAt = 0;
   /** Planted (2026-10-29): arrows translate the view, as from 2026-10-12. */
   plantArrowPan = false;
+  /** Planted (G-222): a strip item's hover flies nowhere. */
+  plantStripNoFlight = false;
   /** Planted (G-311): the wheel never passes through the cockpit. */
   plantNoZoomThrough = false;
   /** Planted (G-334): keys typed into text drive the vehicle too. */

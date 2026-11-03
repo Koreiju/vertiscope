@@ -10395,6 +10395,59 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-222-flight",
+      asks: "a flight between DISTINCT nodes from the results strip (G-222, PLUGIN_GOAL 151; owed since 2026-10-18): with a query whose results span pages, hovering one strip item flies the camera to its result's node and hovering another flies on to a DIFFERENT node -- the look point ends on each in turn; planted (plantStripNoFlight) the hovers fly nowhere",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          const f = v.searchField, a = v.agent, cam = v.graph.camera(), ctl = v.graph.controls();
+          const save = { p: cam.position.clone(), t: ctl.target.clone(), mode: a.mode };
+          v.plantStripNoFlight = ${planted};
+          const out = { planted: ${planted} };
+          try {
+            a.setMode("ego");
+            f.input.value = "tree data structure"; await f.run();
+            await sleep(1500);
+            const st = v.searchState;
+            const items = Array.from(f.strip.children);
+            // Two strip items whose results resolve to DIFFERENT nodes.
+            const pairs = [];
+            for (let i = 0; i < Math.min(items.length, st.targets.length); i++) if (st.targets[i]) pairs.push(i);
+            let i0 = pairs[0], i1 = pairs.find((j) => st.targets[j] && st.targets[j] !== st.targets[i0]);
+            out.items = items.length; out.targets = pairs.length;
+            if (i0 === undefined || i1 === undefined) { out.error = "no two distinct targets"; return out; }
+            const at = (n) => Math.round(Math.hypot(ctl.target.x - n.x, ctl.target.y - n.y, (ctl.target.z || 0) - (n.z || 0)) * 10) / 10;
+            // Where the look point ends, against BOTH nodes: the flight stops at
+            // a stand-off and the nodes still settle, so it is judged by which
+            // node it went to, not by landing exactly (run 65: 3.3 and 11.9 of 50).
+            const visit = async (i, other) => {
+              items[i].dispatchEvent(new MouseEvent("mouseenter"));
+              await sleep(3500);
+              const d = { own: at(st.targets[i]), other: at(st.targets[other]) };
+              items[i].dispatchEvent(new MouseEvent("mouseleave"));
+              await sleep(200);
+              return d;
+            };
+            out.first = { label: items[i0].textContent.slice(0, 40), ...(await visit(i0, i1)) };
+            out.second = { label: items[i1].textContent.slice(0, 40), ...(await visit(i1, i0)) };
+            out.distinct_nodes = Math.round(Math.hypot(st.targets[i0].x - st.targets[i1].x, st.targets[i0].y - st.targets[i1].y, (st.targets[i0].z || 0) - (st.targets[i1].z || 0)));
+            return out;
+          } finally {
+            v.plantStripNoFlight = false;
+            f.input.value = ""; await f.run();
+            cam.position.copy(save.p); ctl.target.copy(save.t); cam.lookAt(ctl.target); ctl.update && ctl.update();
+            a.setMode(save.mode);
+          }
+        })()`, { timeout: 90000 });
+        const clean = await arm(false);
+        const planted = await arm(true);
+        const went = (v, sep) => v.own < 0.3 * sep && v.own < v.other;
+        const ok = (x) => !!x && !x.error && x.distinct_nodes > 5 && went(x.first, x.distinct_nodes) && went(x.second, x.distinct_nodes);
+        return { pass: ok(clean) && !!planted && !planted.error && !went(planted.second, planted.distinct_nodes), evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {
