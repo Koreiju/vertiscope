@@ -12927,12 +12927,14 @@ export function makeChecks(env) {
             const dot = (u, w) => u.x*w.x + u.y*w.y + u.z*w.z;
             const ra = rel(); for (let i = 0; i < 5; i++) key("ArrowLeft"); const rb = rel();
             out.yaw_after_roll_deg = Math.round(ang(ra, rb) * 10) / 10;
-            out.yaw_keeps_camera_up = Math.abs(dot(ra, upC) - dot(rb, upC)) < 1e-3 * Math.hypot(ra.x, ra.y, ra.z);
-            cam.updateMatrixWorld();
-            const m2 = cam.matrixWorld.elements, rightNow = { x: m2[0], y: m2[1], z: m2[2] };
-            const pa = cam.position.clone(); key("a");
-            const mv = { x: cam.position.x - pa.x, y: cam.position.y - pa.y, z: cam.position.z - pa.z };
-            out.strafe_vs_camera_left_deg = Math.round(ang(mv, { x: -rightNow.x, y: -rightNow.y, z: -rightNow.z }) * 10) / 10;
+            out.yaw_up_error = Math.abs(dot(ra, upC) - dot(rb, upC)) / Math.max(1e-9, Math.hypot(ra.x, ra.y, ra.z));
+            out.yaw_keeps_camera_up = out.yaw_up_error < 1e-3;
+            // A, since the vehicle (item 116, 2026-11-02 -- later than item 23's
+            // strafe): it TURNS the heading in place, never moves sideways.
+            const pa = cam.position.clone(), ha = { x: ctl.target.x - pa.x, y: ctl.target.y - pa.y, z: ctl.target.z - pa.z };
+            key("a");
+            out.a_moved = Math.round(cam.position.distanceTo(pa) * 1000) / 1000;
+            out.a_turned_deg = Math.round(ang(ha, { x: ctl.target.x - cam.position.x, y: ctl.target.y - cam.position.y, z: ctl.target.z - cam.position.z }) * 10) / 10;
             // Each key lit while pressed, and named.
             reset();
             key("w"); out.lit_held = a.litKeys().includes("w");
@@ -12949,7 +12951,7 @@ export function makeChecks(env) {
         return { pass: got.map_moved < 0.5 && got.after_m === "ego" && got.ego_moved > 0.5 && got.shift === 5 && got.ctrl === -5
                    && got.paused === true && got.paused_moved < 0.5 && got.zxm_ignored
                    && got.yaw_deg > 3 && got.yaw_dist_kept && got.roll_deg > 3 && got.roll_view_deg < 0.5
-                   && got.yaw_after_roll_deg > 3 && got.yaw_keeps_camera_up && got.strafe_vs_camera_left_deg < 2
+                   && got.yaw_after_roll_deg > 3 && got.yaw_keeps_camera_up && got.a_moved < 1e-3 && got.a_turned_deg > 0.5
                    && got.lit_held && !got.lit_after && got.away_ctrl === 0,
                  evidence: got };
       },
