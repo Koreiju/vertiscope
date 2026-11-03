@@ -1488,7 +1488,13 @@ export function makeChecks(env) {
             v.setPanelsOn("flyto");
             if (${planted}) b.plant.add("poll-hover");
             const wv = b.webview, r = wv.getBoundingClientRect(), out = [];
-            const texty = (e) => { const body = e && e.el && e.el.querySelector(".domvec-bb-body"); return !!body && (body.textContent || "").replace(/\\s+/g, " ").trim().length > 20; };
+            // The panel's text, in either form: its markdown, or the page's own
+            // rendering in a snapshot iframe -- a grey unit's panel draws the
+            // page-original form since 2026-10-25 (30906f9), and read by
+            // textContent alone it read empty: G-195 "regressed" with every
+            // panel open and full (2026-11-02).
+            const textOf = (body) => { if (!body) return ""; let t = body.textContent || ""; for (const f of body.querySelectorAll("iframe.domvec-snapshot")) { try { t += " " + ((f.contentDocument && f.contentDocument.body && f.contentDocument.body.textContent) || ""); } catch (e) { /* cross-origin */ } } return t; };
+            const texty = (e) => { const body = e && e.el && e.el.querySelector(".domvec-bb-body"); return !!body && textOf(body).replace(/\\s+/g, " ").trim().length > 20; };
             for (let i = 0; i < 16; i++) {
               const x = Math.round(60 + (i * 97) % Math.max(100, r.width - 120));
               const y = Math.round(90 + (i * 131) % Math.max(100, r.height - 160));
