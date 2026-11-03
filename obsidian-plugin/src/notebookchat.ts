@@ -64,6 +64,9 @@ export class NotebookChat {
   private scrollEl: HTMLElement | null = null;
   private onScroll = () => this.place();
 
+  /** Set by the plugin (G-305): the prompt written into the ego, and its reply after. */
+  record: ((note: string, prompt: string, context: { cid: string; url: string; head: string }[]) => Promise<string | null>) | null = null;
+  recordReply: ((at: string, reply: string, error: string) => Promise<void>) | null = null;
   constructor(private app: App, private owner: Component, private view: MarkdownView, private sidecar: Sidecar,
               private marks: NoteMarks | null = null) {
     this.el = view.contentEl.createDiv({ cls: "domvec-nbchat" });
@@ -247,12 +250,17 @@ export class NotebookChat {
     const pulled = this.plantDropPins ? [] : this.pins.slice();
     context = [...pulled, ...context];
     this.busy = true; this.lastError = ""; this.open(true); this.refresh();
+    // The reader's prompt is an EGO artifact (G-305): recorded as it is sent,
+    // answered or not, with the context it was given.
+    const rec = this.record ? await this.record(path, prompt || raw, context).catch(() => null) : null;
     try {
       const got = await this.sidecar.chat(this.session, prompt || raw, context);
       if (!got || got.error || !got.turn) {
         this.lastError = `the chat did not answer${got && got.error ? `: ${String(got.error).slice(0, 120)}` : ""}`;
+        if (rec && this.recordReply) await this.recordReply(rec, "", this.lastError).catch(() => null);
         return null;
       }
+      if (rec && this.recordReply) await this.recordReply(rec, got.turn.reply || "", "").catch(() => null);
       const t = got.turn;
       this.pins = this.pins.filter((p) => !pulled.includes(p));
       const turn: NotebookTurn = { prompt: prompt || raw, cells: given, source: this.lastSource, sent: t.context.length,
@@ -285,6 +293,9 @@ export class NotebookChats {
   marks: NoteMarks | null = null;
   /** The note view the reader is in (set by the plugin: a plane panel counts). */
   active: (() => MarkdownView | null) | null = null;
+  /** Set by the plugin, handed to every chat (G-305). */
+  record: NotebookChat["record"] = null;
+  recordReply: NotebookChat["recordReply"] = null;
   constructor(private app: App, private owner: Component, private sidecar: Sidecar) {}
 
   /** The chat of the active note, made when it is a notebook. */
@@ -302,6 +313,7 @@ export class NotebookChats {
     if (!isNotebook) { if (chat) { chat.destroy(); this.byView.delete(view); } return null; }
     if (!chat || !chat.el.isConnected) {
       chat = new NotebookChat(this.app, this.owner, view, this.sidecar, this.marks);
+      chat.record = this.record; chat.recordReply = this.recordReply;
       this.byView.set(view, chat);
     }
     return chat;

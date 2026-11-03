@@ -274,6 +274,43 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     // cursor landing on a new cell is a new rewind, a scroll is not.
     this.nbChats = new NotebookChats(this.app, this, this.sidecar);
     this.nbChats.active = () => this.activeView();
+    // The reader's prompts are EGO artifacts (G-305, items 74c, 77): each turn
+    // written, as it is sent, into `domvec/graph/prompts <note>.md` -- a note
+    // the craft counts as the ego's -- linked back to its notebook and OUT to
+    // the world through what it was given: each context chunk a link to its
+    // page. The reply follows when it comes. Planted `plantPromptsUnkept`.
+    this.nbChats.record = async (note, prompt, context) => {
+      if (this.plantPromptsUnkept || !note) return null;
+      const folder = PLANE_FOLDER;
+      if (!this.app.vault.getAbstractFileByPath(folder)) await this.app.vault.createFolder(folder).catch(() => undefined);
+      const base = note.split("/").pop()!.replace(/\.md$/, "");
+      const path = `${folder}/prompts ${base}.md`;
+      const NL = "\n", at = new Date().toISOString().slice(0, 19);
+      const links = context.map((c) => {
+        const u = String(c.url || "").split("#")[0];
+        if (u.startsWith("vault://")) return `[[${u.replace(/^vault:\/\/[^/]+\//, "").replace(/\.md$/, "")}]]`;
+        return u.startsWith("http") ? `[${(c.head || u).slice(0, 60)}](${u})` : "";
+      }).filter(Boolean);
+      const entry = `## ${at}` + NL + NL + `> ${prompt.replace(/\n/g, NL + "> ")}` + NL + NL
+        + `from [[${base}]]` + (links.length ? ` · given ${[...new Set(links)].join(", ")}` : "") + NL + NL + "*(awaiting the reply)*" + NL;
+      const f = this.app.vault.getAbstractFileByPath(path);
+      if (f instanceof TFile) await this.app.vault.process(f, (t) => t.replace(/\s*$/, "") + NL + NL + entry);
+      else await this.app.vault.create(path, `# prompts of [[${base}]]` + NL + NL + entry);
+      this.promptStats.kept++;
+      this.promptStats.last = { path, links: links.length };
+      return path + "#" + at;
+    };
+    this.nbChats.recordReply = async (at, reply, error) => {
+      const [path, stamp] = at.split("#");
+      const f = this.app.vault.getAbstractFileByPath(path);
+      if (!(f instanceof TFile)) return;
+      await this.app.vault.process(f, (t) => {
+        const i = t.lastIndexOf("## " + stamp);
+        if (i < 0) return t;
+        const j = t.indexOf("*(awaiting the reply)*", i);
+        return j < 0 ? t : t.slice(0, j) + (reply ? reply.trim() : `*(no reply: ${error})*`) + t.slice(j + "*(awaiting the reply)*".length);
+      });
+    };
     (window as any).__domvecNbChats = this.nbChats;
     // The reader marks what the model is given (P-N9/P-N10, `marks.ts`): a
     // selection in reading view becomes trie addresses, drawn highlighted,
@@ -1217,6 +1254,9 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
    * Planted `plantUnnestFlat`: the rows as plain text, nothing to unnest.
    */
   plantUnnestFlat = false;
+  /** Planted (G-305): the reader's prompts are not kept as ego artifacts. */
+  plantPromptsUnkept = false;
+  promptStats = { kept: 0, last: null as any };
   unnestStats = { made: 0, last: null as any };
   async onUnnestFence(req: RunRequest): Promise<void> {
     if (req.path) await this.unnest(req.code, req.path, "cell " + (req.line + 1));

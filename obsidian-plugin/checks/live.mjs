@@ -10096,6 +10096,58 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-305",
+      asks: "the reader's own artifacts live in the ego (PLUGIN_GOAL 74c, 77): a prompt sent from a notebook's chat is written, as it is sent, into a prompts note linked back to its notebook and out to what it was given -- and that note, like a plain markdown panel on the plane, is an ego artifact: a node of the craft and a member of the sidecar's ego set; planted (plantPromptsUnkept) the prompt leaves nothing",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const until = async (ok, ms) => { for (let t = 0; t < ms && !(await ok()); t += 300) await sleep(300); return !!(await ok()); };
+          const plugin = app.plugins.getPlugin("domvec-bridge");
+          const SIDE = String(plugin.settings.sidecar).replace(/[/]+$/, "");
+          const H = { "X-Domvec-Client": "obsidian-plugin" };
+          const d = window.__domvecPlane, c = window.__domvecCraft, chats = window.__domvecNbChats;
+          const NL = String.fromCharCode(10), F = String.fromCharCode(96).repeat(3), st = Date.now();
+          const nb = "domvec/graph/g305 nb " + (${planted} ? "p" : "c") + " " + st + ".md";
+          const md = "domvec/graph/g305 md " + (${planted} ? "p" : "c") + " " + st + ".md";
+          const prompts = "domvec/graph/prompts " + nb.split("/").pop().replace(/\\.md$/, "") + ".md";
+          const vault = "vault://" + app.vault.getName() + "/";
+          plugin.plantPromptsUnkept = ${planted};
+          const out = { planted: ${planted} };
+          try {
+            await d.create("notebook", { path: nb, text: "# g305" + NL + NL + F + "python" + NL + "answer = 42" + NL + F + NL });
+            await d.create("notebook", { path: md, text: "# a markdown panel the reader wrote" + NL + NL + "No cell here, only prose." + NL });
+            const view = d.panelOf(nb).leaf.view;
+            const lines = view.editor.getValue().split(NL);
+            view.editor.setCursor({ line: lines.indexOf("answer = 42"), ch: 0 });
+            const chat = chats.forView(view);
+            await chat.send("what does this cell compute? g305 " + st);
+            const f = app.vault.getAbstractFileByPath(prompts);
+            out.prompts_note = !!f;
+            const text = f ? await app.vault.read(f) : "";
+            out.has_prompt = text.includes("g305 " + st);
+            out.links_back = text.includes("[[" + nb.split("/").pop().replace(/\\.md$/, "") + "]]");
+            out.reply_filled = f ? !text.includes("*(awaiting the reply)*") : false;
+            c.dirty();
+            out.craft_has_prompts = await until(() => c.nodes.some((n) => n.kind === "note" && n.path === prompts), 12000);
+            out.craft_has_md = c.nodes.some((n) => n.kind === "note" && n.path === md);
+            const ego = await (await fetch(SIDE + "/ego", { headers: H })).json();
+            out.ego_has_prompts = (ego.urls || []).includes(vault + prompts);
+            out.ego_has_md = (ego.urls || []).includes(vault + md);
+            out.stats = plugin.promptStats;
+            return out;
+          } finally {
+            plugin.plantPromptsUnkept = false;
+            for (const p of [nb, md, prompts]) { try { await d.trash(p); } catch (e) { const g = app.vault.getAbstractFileByPath(p); if (g) await app.vault.trash(g, true); } }
+            c.dirty();
+          }
+        })()`, { timeout: 120000 });
+        const clean = await arm(false);
+        const planted = await arm(true);
+        const ok = (x) => !!x && x.prompts_note && x.has_prompt && x.links_back && x.craft_has_prompts && x.ego_has_prompts && x.craft_has_md && x.ego_has_md;
+        return { pass: ok(clean) && !!planted && !planted.prompts_note, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {
