@@ -485,7 +485,7 @@ export class Sidecar {
     return this.egoPost("unfold_source", { base, source });
   }
 
-  async egoPost(route: "ego" | "ego/tag" | "unfold_source", body: any): Promise<any | null> {
+  async egoPost(route: "ego" | "ego/tag" | "unfold_source" | "vault_root", body: any): Promise<any | null> {
     const base = this.base().trim().replace(/\/+$/, "");
     if (!base) return null;
     try {

@@ -10148,6 +10148,54 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-277",
+      asks: "the slate grammar is the app's (G-277, mothership N.7-N.9): internalizing a `{ref}` to a slate reveals its rank-1 fields as the grammar reads them -- names that hold spaces kept whole (`duckduckgo url`, `scan for duckduckgo url`), the value after the tab -- through the sidecar's /ref (`refs.rank1` -> `slate.parse_slate`); planted (slate-space-split) a space-leaning parse breaks the names",
+      async run() {
+        // Two plants, either of which breaks the grammar's reading: the parse
+        // itself (names split at a space), and the note read from the store's
+        // flattened chunks instead of its own text (run 54: one line).
+        const plant = async (on) => { for (const name of ["slate-space-split", "stored-note"]) await fetch(`${SIDECAR}/plant`, { method: "POST", headers: { "Content-Type": "application/json", "X-Domvec-Client": "obsidian-plugin" },
+                                                          body: JSON.stringify({ name, on }) }); };
+        const arm = async (planted) => {
+          await plant(planted);
+          try {
+            return await evaluate(`(async () => {
+              const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+              const plugin = app.plugins.getPlugin("domvec-bridge");
+              const SIDE = String(plugin.settings.sidecar).replace(/[/]+$/, "");
+              const H = { "X-Domvec-Client": "obsidian-plugin" };
+              const NL = String.fromCharCode(10), TAB = String.fromCharCode(9), st = Date.now();
+              const title = "g277 card " + (${planted} ? "p" : "c") + st;
+              const path = "domvec/graph/" + title + ".md";
+              const d = window.__domvecPlane;
+              await d.create("slate", { path, text: "---" + NL + "domvec: slate" + NL + "---" + NL + title + NL
+                + TAB + "duckduckgo url" + TAB + "https://www.duckduckgo.com/" + NL + TAB + "scan for duckduckgo url" + TAB + "true" + NL });
+              // In the store first, as G-278's target is: a note made a moment ago
+              // is found by its title only once indexed (run 53 resolved it by
+              // retrieval to another page's "User card").
+              await plugin.indexNote(app.vault.getAbstractFileByPath(path), "check");
+              try {
+                let r = null;
+                for (let i = 0; i < 60; i++) {
+                  r = await (await fetch(SIDE + "/ref?name=" + encodeURIComponent(title), { headers: H })).json();
+                  if (r && r.resolved && (r.lines || []).length) break;
+                  await sleep(1500);
+                }
+                return { planted: ${planted}, resolved: !!(r && r.resolved), kind: r && r.kind, lines: (r && r.lines) || [] };
+              } finally {
+                try { await d.trash(path); } catch (e) { /* gone */ }
+              }
+            })()`, { timeout: 120000 });
+          } finally { await plant(false); }
+        };
+        const clean = await arm(false);
+        const planted = await arm(true);
+        const TAB = String.fromCharCode(9);
+        const whole = (x) => !!x && x.lines.includes("duckduckgo url" + TAB + "https://www.duckduckgo.com/") && x.lines.includes("scan for duckduckgo url" + TAB + "true");
+        return { pass: !!clean && clean.resolved && whole(clean) && !!planted && planted.resolved && !whole(planted), evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {

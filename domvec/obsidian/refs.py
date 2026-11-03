@@ -27,6 +27,33 @@ def var_name(name: str) -> str:
     return "_" + v if v[0].isdigit() else v
 
 
+#: The reader's vault: [folder, name], told by the plugin (`POST /vault_root`).
+VAULT = ["", ""]
+#: Planted (G-277): a vault note's text from the store's chunks, as before.
+PLANT_STORED_NOTE = [False]
+
+
+def _note_text(url: str):
+    """A vault note's OWN text, when the vault is reachable: the store's chunks
+    flatten a slate's tabs and lines, so a `{ref}` to one revealed one line."""
+    root, name = VAULT
+    if PLANT_STORED_NOTE[0] or not root or not url.startswith("vault://"):
+        return None
+    rest = url[len("vault://"):]
+    vname, _, rel = rest.partition("/")
+    if name and vname != name:
+        return None
+    from pathlib import Path
+    base = Path(root).resolve()
+    p = (base / rel).resolve()
+    if base not in p.parents or not p.is_file():
+        return None
+    try:
+        return p.read_text(encoding="utf-8")[:MAX_CHARS]
+    except OSError:
+        return None
+
+
 def _page_text(store, url: str):
     chunks = [c for c in store.chunks(url) if not c.redundant]
     chunks.sort(key=lambda c: (c.xpath, c.part))
@@ -66,7 +93,8 @@ def resolve(workspace, name: str, allow=None, search=None) -> Optional[Dict]:
     for url in titles:
         if url.startswith("vault://") and url.rsplit("/", 1)[-1].rsplit(".", 1)[0].lower() == want and ok(url, ""):
             text, cids = _page_text(store, url)
-            return {"kind": "note", "url": url, "cids": cids, "value": text}
+            own = _note_text(url)
+            return {"kind": "note", "url": url, "cids": cids, "value": own if own is not None else text}
     for url, title in titles.items():
         if (title or "").strip().lower() == want and ok(url, ""):
             text, cids = _page_text(store, url)

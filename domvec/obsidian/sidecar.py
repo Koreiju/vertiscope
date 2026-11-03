@@ -823,6 +823,8 @@ _PLANTABLE = {
     "no-maps": ("domvec.obsidian.sidecar", "PLANT_NO_MAPS"),                  # item 79
     "flat-box": ("domvec.obsidian.blackbox", "PLANT_FLAT"),                   # item 80
     "no-imports": ("domvec.obsidian.blackbox", "PLANT_NO_IMPORTS"),           # item 112
+    "slate-space-split": ("domvec.slate", "PLANT_SPACE_SPLIT"),               # G-277
+    "stored-note": ("domvec.obsidian.refs", "PLANT_STORED_NOTE"),             # G-277
     "untyped-box": ("domvec.obsidian.blackbox", "PLANT_UNTYPED"),             # item 100
     "no-codegraph": ("domvec.search", "PLANT_NO_CODEGRAPH"),                  # item 93
     "no-instant": ("domvec.obsidian.sidecar", "PLANT_NO_INSTANT"),            # item 100
@@ -2586,6 +2588,23 @@ class _Handler(BaseHTTPRequestHandler):
                              "supervised": os.environ.get("DOMVEC_SUPERVISED") == "1"})
             if due:
                 threading.Thread(target=_maybe_compact, args=(self.workspace, store_mb), daemon=True).start()
+            return
+
+        if route == "vault_root":
+            # Where the reader's vault is (G-277): a `{ref}` to a vault note is
+            # read from the NOTE's own text -- the store's chunks flatten a
+            # slate's tabs and lines, and the grammar saw one line. Kept only
+            # when it is a folder on this machine.
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(length) or b"{}")
+                root = str(body.get("root") or "")
+                from . import refs as _refs
+                _refs.VAULT[0] = root if root and Path(root).is_dir() else ""
+                _refs.VAULT[1] = str(body.get("name") or "")
+                self._send(200, {"ok": bool(_refs.VAULT[0])})
+            except Exception as exc:                # noqa: BLE001
+                self._send(500, {"error": "%s: %s" % (type(exc).__name__, exc)})
             return
 
         if route == "unfold_source":

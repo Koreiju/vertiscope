@@ -91,6 +91,10 @@ def _depth(line: str, unit: int) -> int:
     return tabs + spaces // max(1, unit)
 
 
+#: Planted (G-277): a parse that splits a field's name at its first space.
+PLANT_SPACE_SPLIT = [False]
+
+
 def parse_slate(text: str, typed: bool = False) -> List[Field]:
     """The fields a slate's text holds. Blank lines carry nothing."""
     lines = [l for l in text.split("\n") if l.strip()]
@@ -109,7 +113,11 @@ def parse_slate(text: str, typed: bool = False) -> List[Field]:
             t = _TYPED.match(body)
             if t:
                 f.key, f.type, f.value = t.group(1), t.group(2), t.group(3)
-        if f.type is None and "\t" in body:
+        if f.type is None and PLANT_SPACE_SPLIT[0] and " " in body.replace("\t", " "):
+            # Planted (G-277): the first word is the name, as a space-leaning
+            # parse reads a slate -- names with spaces break.
+            f.key, f.value = body.replace("\t", " ").split(" ", 1)
+        elif f.type is None and "\t" in body:
             f.key, f.value = body.split("\t", 1)
         while stack and stack[-1][0] >= d:
             stack.pop()
