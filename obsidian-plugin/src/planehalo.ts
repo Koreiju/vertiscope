@@ -70,6 +70,13 @@ export class PlaneHalo {
     if (!sc || !plane || !p || !(f instanceof TFile)) return false;
     this.focus = path;
     this.stats.opened++;
+    // The type graph's ranks (G-317), once: what each code kind weighs.
+    if (!this.typeRank) {
+      try {
+        const got: any = await (sc as any).get("/typegraph");
+        if (got && got.ready && got.ranks) this.typeRank = got.ranks;
+      } catch { /* the term then weighs every kind 1 */ }
+    }
     // The focus's place: its header node's centre, in plane coordinates.
     const pr = plane.getBoundingClientRect();
     const head = (p.card.querySelector(".domvec-plane-head-node, .domvec-var-title") as HTMLElement | null) || p.card;
@@ -115,7 +122,9 @@ export class PlaneHalo {
       // and layer of abstraction"): the result's kind against the focus's,
       // as one more additive term (0.2 of it, re-normalized).
       const kind = this.kindOf(url);
-      const t = this.plantNoTypeTerm ? 0 : this.typeMatch(this.focusKind, kind);
+      // Weighted by the type graph's PageRank (G-317): a kind central to the
+      // code's structure counts for more than a peripheral one.
+      const t = this.plantNoTypeTerm ? 0 : this.typeMatch(this.focusKind, kind) * this.rankOf(kind);
       const s2 = this.plantNoTypeTerm ? s : 0.8 * s + 0.2 * t;
       return { key: isNote ? url : String(h.cid), url, cid: String(h.cid || ""), label, kind,
                preview: String(h.preview || ""), s: s2, r: r0 + (1 - s2) * R, theta: 0, x: 0, y: 0 };
@@ -262,9 +271,27 @@ export class PlaneHalo {
   }
   /** An artifact's kind and layer: a slate, a notebook (a note with a python
    *  cell), a markdown note, code, or a web chunk. */
+  /** The type graph's PageRank by kind (G-317), from `/typegraph`. */
+  typeRank: Record<string, number> | null = null;
+  /** Planted (G-317): every kind weighs 1 -- the type graph's ranks ignored. */
+  plantUniformTypeRank = false;
+  /** What a kind weighs in the type term: its rank in the type graph (code kinds), else 1. */
+  rankOf(kind: string): number {
+    if (this.plantUniformTypeRank || !this.typeRank) return 1;
+    const r = this.typeRank[kind];
+    return typeof r === "number" && r > 0 ? r : 1;
+  }
   kindOf(url: string): string {
     const vault = "vault://" + this.host.app.vault.getName() + "/";
-    if (url.startsWith("code://")) return "code";
+    if (url.startsWith("code://")) {
+      // The layer of abstraction (item 92): a module, a class, a function, a method.
+      const q = url.includes("#") ? url.slice(url.indexOf("#") + 1) : "";
+      if (!q) return "module";
+      const parts = q.split(".");
+      const last = parts[parts.length - 1];
+      if (parts.length >= 2 && /^[a-z_]/.test(last)) return "method";
+      return /^[A-Z]/.test(last) ? "class" : "function";
+    }
     if (!url.startsWith(vault)) return "web";
     const f = this.host.app.vault.getAbstractFileByPath(url.slice(vault.length));
     if (!(f instanceof TFile)) return "markdown";
@@ -276,8 +303,8 @@ export class PlaneHalo {
   typeMatch(a: string, b: string): number {
     if (!a || !b) return 0;
     if (a === b) return 1;
-    const notes = ["slate", "notebook", "markdown"];
-    return notes.includes(a) && notes.includes(b) ? 0.5 : 0;
+    const notes = ["slate", "notebook", "markdown"], code = ["module", "class", "function", "method"];
+    return (notes.includes(a) && notes.includes(b)) || (code.includes(a) && code.includes(b)) ? 0.5 : 0;
   }
 
   /** Dijkstra from the focus (-1) over the halo: focus -> each result at

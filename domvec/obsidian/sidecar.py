@@ -825,6 +825,7 @@ _PLANTABLE = {
     "no-imports": ("domvec.obsidian.blackbox", "PLANT_NO_IMPORTS"),           # item 112
     "slate-space-split": ("domvec.slate", "PLANT_SPACE_SPLIT"),               # G-277
     "stored-note": ("domvec.obsidian.refs", "PLANT_STORED_NOTE"),             # G-277
+    "uniform-types": ("domvec.codegraph", "PLANT_UNIFORM_TYPES"),             # G-317
     "untyped-box": ("domvec.obsidian.blackbox", "PLANT_UNTYPED"),             # item 100
     "no-codegraph": ("domvec.search", "PLANT_NO_CODEGRAPH"),                  # item 93
     "no-instant": ("domvec.obsidian.sidecar", "PLANT_NO_INSTANT"),            # item 100
@@ -4351,6 +4352,13 @@ class _Handler(BaseHTTPRequestHandler):
                 out.update({"name": name, "kind": g.kind.get(name, ""), "rank": g.percentile(name),
                             "neighbours": [{"name": n, "edge": k} for n, k in g.neighbours(name)[:40]]})
             self._send(200, out)
+            return
+
+        if segments[0] == "typegraph":
+            # The PageRank over the TYPE graph (G-317): the code graph's kinds,
+            # weighted by the edges between their members. Empty until built.
+            g = CODEGRAPH.get("graph")
+            self._send(200, {"ready": g is not None, "ranks": g.type_ranks() if g is not None else {}})
             return
 
         if segments[0] == "browser_state":

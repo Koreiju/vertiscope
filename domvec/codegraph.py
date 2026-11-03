@@ -37,6 +37,9 @@ import numpy as np
 #: says nothing about WHICH definition it reaches, and linking it to the one
 #: repo method that happens to share the name ranked `items`, `set`, `values`
 #: first (measured 2026-11-02). Such attribute calls link nothing.
+#: Planted (G-317): every type the same weight -- the type graph's PageRank dropped.
+PLANT_UNIFORM_TYPES = [False]
+
 BUILTIN_ATTRS = set()
 for _t in (dict, list, str, set, bytes, object, tuple, int, float, frozenset):
     BUILTIN_ATTRS.update(n for n in dir(_t) if not n.startswith("__"))
@@ -275,6 +278,38 @@ class CodeGraph:
         order = np.argsort(np.argsort(r))
         pct = order / max(1, n - 1)
         self.rank = {names[i]: float(pct[i]) for i in range(n)}
+
+    def type_ranks(self, iters: int = 60, damping: float = 0.85) -> Dict[str, float]:
+        """A PageRank over the TYPE graph (PLUGIN_GOAL 92, G-317: "pagerank for
+        datatypes and type inheritance"): the definitions grouped by kind --
+        module, class, function, method -- an edge between two kinds weighted by
+        how many contains / calls / imports / inherits edges join their members.
+        Normalised to the top kind = 1. Planted `PLANT_UNIFORM_TYPES`: all 1."""
+        kinds = sorted(set(self.kind.values()))
+        if not kinds:
+            return {}
+        if PLANT_UNIFORM_TYPES[0]:
+            return {k: 1.0 for k in kinds}
+        w: Dict[Tuple[str, str], float] = {}
+        for a, b, _ in self.edges:
+            ka, kb = self.kind.get(a), self.kind.get(b)
+            if ka and kb:
+                w[(ka, kb)] = w.get((ka, kb), 0.0) + 1.0
+        out_sum = {k: 0.0 for k in kinds}
+        for (ka, _kb), x in w.items():
+            out_sum[ka] += x
+        n = len(kinds)
+        r = {k: 1.0 / n for k in kinds}
+        for _ in range(iters):
+            nxt = {k: (1.0 - damping) / n for k in kinds}
+            dangling = sum(r[k] for k in kinds if out_sum[k] == 0)
+            for (ka, kb), x in w.items():
+                nxt[kb] += damping * r[ka] * x / out_sum[ka]
+            for k in kinds:
+                nxt[k] += damping * dangling / n
+            r = nxt
+        top = max(r.values()) or 1.0
+        return {k: round(v / top, 4) for k, v in r.items()}
 
     def percentile(self, name: str) -> float:
         return self.rank.get(name, 0.0)

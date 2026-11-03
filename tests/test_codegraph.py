@@ -69,3 +69,21 @@ def test_the_cache_rereads_only_what_changed(tmp_path):
     CodeGraph(root, cache).build()
     g2 = CodeGraph(root, cache).build()
     assert g2.stats["reread"] == 0
+
+
+def test_type_ranks_are_a_pagerank_over_kinds_and_the_plant_flattens_them(tmp_path):
+    """G-317: the type graph's PageRank -- kinds weighted by the edges between
+    their members; planted uniform, every kind 1."""
+    from domvec import codegraph as cg
+    (tmp_path / "m.py").write_text(
+        "class A:\n    def f(self):\n        return g()\n\ndef g():\n    return 1\n\ndef h():\n    return g()\n",
+        encoding="utf-8")
+    g = cg.CodeGraph(tmp_path, None).build()
+    r = g.type_ranks()
+    assert set(r) == {"module", "class", "method", "function"}
+    assert max(r.values()) == 1.0 and len(set(r.values())) > 1
+    cg.PLANT_UNIFORM_TYPES[0] = True
+    try:
+        assert set(g.type_ranks().values()) == {1.0}
+    finally:
+        cg.PLANT_UNIFORM_TYPES[0] = False

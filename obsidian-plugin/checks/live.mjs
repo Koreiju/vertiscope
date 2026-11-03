@@ -10319,6 +10319,49 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-317-rank",
+      asks: "the type term weighted by a PageRank over the type graph (PLUGIN_GOAL 92: \"pagerank for datatypes and type inheritance\"): /typegraph ranks the code graph's kinds (module, class, function, method) by the contains/calls/imports/inherits edges between their members, not uniformly; in a method's halo, code results of EQUAL raw score sit nearer the more central their kind -- the function before the class before the module; planted (plantUniformTypeRank) the three tie",
+      async run() {
+        const got = await evaluate(`(async () => {
+          const plugin = app.plugins.getPlugin("domvec-bridge");
+          const SIDE = String(plugin.settings.sidecar).replace(/[/]+$/, "");
+          const halo = window.__domvecHalo;
+          let tg = null;
+          for (let i = 0; i < 60; i++) { tg = await (await fetch(SIDE + "/typegraph", { headers: { "X-Domvec-Client": "obsidian-plugin" } })).json(); if (tg.ready) break; await new Promise((r) => setTimeout(r, 1000)); }
+          // Fixed inputs (item 115: "simple mocks to prove the gestures"): three
+          // code results of one raw score, laid out by the halo's own place().
+          const hits = [
+            { url: "code://repo/x.py#Box", cid: "k-class", score: 1, preview: "class Box" },
+            { url: "code://repo/x.py#run", cid: "k-function", score: 1, preview: "def run" },
+            { url: "code://repo/x.py", cid: "k-module", score: 1, preview: "module x" },
+          ];
+          const radii = async (uniform) => {
+            halo.typeRank = tg && tg.ranks ? tg.ranks : null;
+            halo.plantUniformTypeRank = uniform;
+            halo.focusKind = "method";
+            halo.stats.r0 = 54; halo.stats.R = 200;
+            await halo.place(hits);
+            const by = {}; for (const n of halo.nodes) by[n.kind] = Math.round(n.r * 100) / 100;
+            return by;
+          };
+          try {
+            const clean = await radii(false);
+            const planted = await radii(true);
+            return { ready: !!tg.ready, ranks: tg.ranks, clean, planted, kinds: halo.nodes.map((n) => n.kind) };
+          } finally {
+            halo.plantUniformTypeRank = false; halo.nodes = []; halo.focusKind = "";
+          }
+        })()`, { timeout: 90000 });
+        const r = got.ranks || {}, c = got.clean || {}, p = got.planted || {};
+        const nonUniform = new Set(Object.values(r)).size > 1;
+        return {
+          pass: got.ready && nonUniform && c.function < c.class && c.class < c.module
+            && Math.abs(p.function - p.class) < 1e-6 && Math.abs(p.class - p.module) < 1e-6,
+          evidence: got,
+        };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {
