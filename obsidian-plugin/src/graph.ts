@@ -485,11 +485,16 @@ export class GraphView extends ItemView {
         this.batchDirty = true;
       };
     }
-    const geometry = bar.createEl("button", { text: "euclidean" });
-    geometry.onclick = () => {
-      this.space = this.space ? "" : "S3";
-      geometry.setText(this.space ? "S³" : "euclidean");
-      void load();
+    // The SIDECAR trigger, where "euclidean" was (2026-11-04, PLUGIN_GOAL 130:
+    // "replace the euclidean button with a sidecar trigger to load and verify
+    // the sidecar is setup"). Its dot is the sidecar's state; a click checks it
+    // and starts one when none answers. The S3 toggle stays a command.
+    const side = bar.createEl("button", { text: "sidecar ○" });
+    side.addClass("domvec-sidecar-trigger");
+    this.sidecarButton = side;
+    side.onclick = async () => {
+      side.setText("sidecar …");
+      try { side.setText(await this.onSidecarTrigger()); } catch (e) { side.setText("sidecar ✕"); }
     };
 
     const canvas = root.createDiv({ cls: "domvec-graph-canvas" });
@@ -1169,6 +1174,11 @@ export class GraphView extends ItemView {
                                           born?: number }>();
   private settleTimer = 0;
 
+  /** Set by the plugin: check the sidecar, start it if none answers; the button's new text. */
+  onSidecarTrigger: () => Promise<string> = async () => "sidecar ?";
+  sidecarButton: HTMLElement | null = null;
+  /** The S3 toggle, kept as a command now the button is the sidecar's. */
+  toggleSpace(): void { this.space = this.space ? "" : "S3"; }
   /** Set by the plugin: the url the browser cell is showing. */
   browsingUrl: (() => string) | null = null;
   /** Set by the plugin: a code chunk sent to a notebook as a prototype cell (G-105). */

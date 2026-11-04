@@ -5137,6 +5137,18 @@ pipeline overwrites an address's content when it changes, rather than
 diffing it and deduplicating by content; (129) G-193 is done by measurement --
 the projection is never what a reader waits on, so the debounce stays off.*
 
+*2026-11-04:*
+
+> please replace the "euclidean button" with a "sidecar" trigger to load and verify the sidecar is setup, perhaps similar to how you have on your MCP
+> The "browser" and "ego" panels should technically be one-to-one the same with the markdown cells in all jupyter notebooks.
+
+*Read as: (130) the graph bar's "euclidean" toggle becomes a SIDECAR trigger:
+it shows whether the sidecar answers, and a click verifies it the way the
+MCP's health check does (store counts, powers) and starts it when none
+answers; (131) the browser and ego panels on the plane are the same thing as
+a notebook's markdown cells -- one-to-one, one representation, not a second
+kind of panel beside the notebook's.*
+
 *And, having seen the strict scaled map live (6.6x for the world once sizes
 settle, ~95,000x for the ego craft; nodes specks at full view):*
 

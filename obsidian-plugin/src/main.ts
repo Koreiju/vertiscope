@@ -540,6 +540,8 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
           const browser = l?.view as BrowserView | undefined;
           if (browser && typeof browser.searchWeb === "function") void browser.searchWeb(query);
         };
+        view.onSidecarTrigger = () => this.sidecarTrigger();
+        void this.sidecarTrigger(true).then((t) => view.sidecarButton?.setText(t));
         view.onReveal = (url: string, xpath: string) => {
           for (const l of this.app.workspace.getLeavesOfType(BROWSER_VIEW)) {
             const browser = l.view as BrowserView;
@@ -1514,6 +1516,52 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     } finally {
       this.respawning = false;
     }
+  }
+
+  /**
+   * The graph's sidecar button (PLUGIN_GOAL 130): verify the sidecar the way
+   * the MCP's `live_health` does -- is it answering, what does the store hold,
+   * which powers are on -- and, when none answers and a launch is on record,
+   * start one (supervised) and wait for it. `quiet` only reads the state.
+   */
+  sidecarStats = { checked: 0, started: 0, last: null as any };
+  async sidecarTrigger(quiet = false): Promise<string> {
+    this.sidecarStats.checked++;
+    const say = (h: any) => {
+      const powers = ["capture", "kernel", "enact"].filter((k) => h[k]).join(" ");
+      return `pages ${h.pages} · chunks ${h.chunks_total} · no vector ${h.chunks_without_vector} · ${powers}`;
+    };
+    let h: any = await this.sidecar.health().catch(() => null);
+    if (h && h.ok) {
+      this.sidecarStats.last = { ok: true, at: Date.now() };
+      if (!quiet) new Notice("domvec sidecar ✓ " + say(h), 6000);
+      return "sidecar ●";
+    }
+    if (quiet) return "sidecar ○";
+    const L = this.settings.sidecarLaunch;
+    if (!L || !L.python || !Array.isArray(L.argv)) {
+      new Notice("domvec sidecar ✕ not answering, and no launch on record -- start it once from the MCP or a terminal", 8000);
+      return "sidecar ✕";
+    }
+    const req = (window as any).require;
+    const fs = req("fs"), path = req("path"), cp = req("child_process");
+    const argv = L.argv.slice();
+    const at = argv.indexOf("serve");
+    if (at >= 0) argv[at] = "supervise"; else argv.unshift("supervise");
+    const log = fs.openSync(path.join(L.workspace, "sidecar.log"), "a");
+    const child = cp.spawn(L.python, ["-X", "faulthandler", "-m", "domvec.obsidian", ...argv],
+      { cwd: L.cwd || undefined, detached: true, windowsHide: true, stdio: ["ignore", log, log],
+        env: { ...(window as any).process.env, PYTHONIOENCODING: "utf-8" } });
+    child.unref();
+    this.sidecarStats.started++;
+    new Notice("domvec sidecar: starting (pid " + child.pid + ") ...", 4000);
+    for (let i = 0; i < 90; i++) {
+      await new Promise((r) => setTimeout(r, 1000));
+      h = await this.sidecar.health().catch(() => null);
+      if (h && h.ok) { new Notice("domvec sidecar ✓ started -- " + say(h), 8000); this.sidecarStats.last = { ok: true, started: true, at: Date.now() }; return "sidecar ●"; }
+    }
+    new Notice("domvec sidecar ✕ started but not answering after 90 s -- see sidecar.log", 10000);
+    return "sidecar ✕";
   }
 
   // ---- retrieval links drawn (G-7) -----------------------------------------
