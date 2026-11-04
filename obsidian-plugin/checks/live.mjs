@@ -10810,6 +10810,31 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-256",
+      asks: "the field the reader is typing in keeps the keyboard while the cell acts (2026-10-11: \"i type a number and am instantly kicked out\"): a real input focused, the cell acts on its own (`selfAct`) and its webview takes focus -- who holds the keyboard 1 s later; and a webview the READER clicks keeps it; planted (plantKeepFocus) the cell keeps the focus it took",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          ${PREP}
+          b.plantKeepFocus = ${planted};
+          const inp = document.createElement("input"); inp.placeholder = "G-256"; document.body.appendChild(inp);
+          try {
+            inp.focus(); inp.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+            await sleep(200);
+            b.selfAct(); b.webview.focus();
+            await sleep(1200);
+            const kept = document.activeElement === inp;
+            // The reader's own click on the page: no cell action, so it stays.
+            await sleep(1600);
+            b.webview.focus(); await sleep(900);
+            const readerClickHonoured = document.activeElement === b.webview;
+            return { planted: ${planted}, field_kept_keyboard: kept, reader_click_kept_in_page: readerClickHonoured, stats: b.focusStats };
+          } finally { b.plantKeepFocus = false; inp.remove(); }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        return { pass: clean.field_kept_keyboard && clean.reader_click_kept_in_page && !planted.field_kept_keyboard, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {
