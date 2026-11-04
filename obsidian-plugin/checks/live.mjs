@@ -10835,6 +10835,33 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-258",
+      asks: "a second node clicked drives the browser as the first did (2026-10-12: \"clicking on a node after clicking on another node gives no response in the browser\"): two chunk nodes clicked in turn -- each hands the browser its page AND the element its first line draws, and the two differ; planted (plantRevealPathOnly) the node's own path only, which chunk nodes lack",
+      async run() {
+        const arm = (planted) => inPane(`
+          v.plantRevealPathOnly = ${planted};
+          const seen = []; const orig = v.onReveal;
+          v.onReveal = (url, xpath) => { seen.push({ url: String(url).slice(-40), xpath }); };
+          try {
+            let opened = null;
+            const chunks = () => v.graph.graphData().nodes.filter((n) => !n.force && n.level !== "page" && n.level !== "path" && !n.path && n.url && !String(n.url).startsWith("code://"));
+            if (chunks().length < 2) {
+              const pg = v.graph.graphData().nodes.find((n) => n.level === "page" && !n.force && (n.members || 0) >= 5 && (n.members || 0) <= 200 && /^https:/.test(String(n.url)));
+              if (pg) { const r = await v.togglePage(pg); if (r && r.action === "expand") opened = pg; }
+              for (let i = 0; i < 20 && chunks().length < 2; i++) await sleep(500);
+            }
+            const ns = v.graph.graphData().nodes.filter((n) => !n.force && n.level !== "page" && n.level !== "path" && !n.path && n.url && !String(n.url).startsWith("code://")).slice(0, 2);
+            for (const n of ns) await v.revealChunk(n);
+            if (opened) await v.togglePage(opened), opened = null;
+            return { planted: ${planted}, clicked: ns.length, seen, with_xpath: seen.filter((s) => s.xpath).length,
+                     distinct: new Set(seen.map((s) => s.xpath)).size };
+          } finally { v.onReveal = orig; v.plantRevealPathOnly = false; if (typeof opened !== "undefined" && opened) await v.togglePage(opened); }
+        `);
+        const clean = await arm(false), planted = await arm(true);
+        return { pass: clean.clicked === 2 && clean.with_xpath === 2 && clean.distinct === 2 && planted.with_xpath === 0, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {
