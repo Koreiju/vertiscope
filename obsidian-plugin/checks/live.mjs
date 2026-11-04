@@ -10756,6 +10756,60 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-208",
+      asks: "a hovered node presents its picture in chunk view at a readable size (12-64 px of radius on screen): the pointer put on six picture nodes in turn, the presented one measured on screen; planted (plantTinyReveal) the picture at the one orb size. G-213 (nodes in front drawn dark) is reported, not scored: these scenes put nothing in front",
+      async run() {
+        const JS = `(async (planted) => {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  
+  const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+  if (v.level !== "chunk") { const b = [...v.containerEl.querySelectorAll("button")].find((x) => (x.textContent || "").trim() === "pages"); if (b) b.click(); }
+  for (let i = 0; i < 80; i++) { await sleep(500); if (v.level === "chunk" && v.graph && v.graph.graphData().nodes.length > 5000) break; }
+  await sleep(2500);
+  v.plantTinyReveal = planted; v.plantNoFrontDim = planted; v.plantNoDrift = true;
+  const g = v.graph, W = v.canvasEl.clientWidth, H = v.canvasEl.clientHeight;
+  const cam = g.camera(), e = cam.matrixWorld.elements, right = [e[0], e[1], e[2]];
+  const out = [];
+  try {
+    const cand = g.graphData().nodes.filter((n) => n.image && n.image.src && n.level !== "page" && n.level !== "path" && Number.isFinite(n.x));
+    for (const n of cand) {
+      if (out.length >= 6) break;
+      const s = g.graph2ScreenCoords(n.x, n.y, n.z || 0);
+      if (!(s.x > 80 && s.y > 100 && s.x < W - 80 && s.y < H - 100)) continue;
+      v.pointerNdc = [s.x / W * 2 - 1, -(s.y / H * 2 - 1)]; v.detailDirty = true; v.detailAt = 0;
+      v.refreshDetail(g); v.batchSync();
+      let loaded = false;
+      for (let i = 0; i < 16 && !loaded; i++) { await sleep(500); v.batchSync(); loaded = !!n.__bpic; }
+      const l = v.lookOf(n, g.nodeRelSize(), v.drawnMedia);
+      const half = l.half * (n.__bpic ? 1 : v.zoomScale);
+      // Radius on screen from the node's depth NOW: a right vector taken once
+      // went stale when chunk view rebuilt the camera, and projected 929 px.
+      const cm = g.camera(), P = cm.position, me = cm.matrixWorld.elements;
+      const depth = -((n.x - P.x) * me[8] + (n.y - P.y) * me[9] + ((n.z || 0) - P.z) * me[10]);
+      const pxPer = H * cm.projectionMatrix.elements[5] / (2 * depth);
+      const front = [...v.dimFront].length;
+      const frontDark = [...v.dimFront].filter((m) => { const lm = v.lookOf(m, g.nodeRelSize(), v.drawnMedia); return lm.alpha <= 0.2; }).length;
+      // In front and NOT dark: nodes in the cylinder nearer than the picture, as the pass sees them.
+      out.push({ revealed: v.detail.has(n), picture: !!l.picture, loaded, front, front_dark: frontDark,
+                 radius_px: Math.round(half * pxPer * 10) / 10,
+                 at: [Math.round(s.x), Math.round(s.y)] });
+    }
+    const c = v.canvasEl.getBoundingClientRect();
+    return JSON.stringify({ planted, out, canvas: [c.left, c.top], inner: innerWidth });
+  } finally { v.plantTinyReveal = false; v.plantNoFrontDim = false; v.plantNoDrift = false; }
+})`;
+        const arm = async (planted) => JSON.parse(await evaluate("(" + JS + ")(" + planted + ")", { timeout: 180000 }));
+        const clean = await arm(false), planted = await arm(true);
+        const px = (r) => r.out.filter((x) => x.loaded).map((x) => x.radius_px);
+        const dark = (r) => r.out.reduce((a, x) => a + x.front_dark, 0), front = (r) => r.out.reduce((a, x) => a + x.front, 0);
+        const cp = px(clean), pp = px(planted);
+        const ok = cp.length >= 3 && cp.every((x) => x >= 11.5 && x <= 64.5) && dark(clean) === front(clean)
+          && (pp.length === 0 || Math.max(...pp) < 11.5);
+        return { pass: ok, evidence: { clean_px: cp, planted_px: pp, clean_front: front(clean), clean_front_dark: dark(clean),
+                 planted_front_dark: dark(planted), clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {

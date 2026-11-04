@@ -6001,7 +6001,7 @@ export class GraphView extends ItemView {
       // the size its room allows: floored to a readable size it overlapped
       // its neighbours (405 of 415 overlapping pairs held a picture,
       // 2026-10-30). Planted `plantFloorAllRevealed`: every reveal floored.
-      const acted = n.hovered || this.billboards.has(n.id) || this.plantFloorAllRevealed;
+      const acted = n.hovered || n === this.presented || this.billboards.has(n.id) || this.plantFloorAllRevealed;
       if (shown && acted && !this.plantTinyReveal && this.graph && this.canvasEl) {
         const cam: any = this.graph.camera(), P = cam.position, e = cam.matrixWorld.elements;
         const depth = -((n.x - P.x) * e[8] + (n.y - P.y) * e[9] + ((n.z || 0) - P.z) * e[10]);
@@ -6031,6 +6031,8 @@ export class GraphView extends ItemView {
   }
   /** Planted (G-21): every revealed picture floored to a readable size, as before. */
   plantFloorAllRevealed = false;
+  /** The picture nearest the pointer's ray, presented at a readable size. */
+  presented: any = null;
   /** A presented picture's largest radius on screen, px. */
   presentMaxPx = 64;
   presentMinPx = 12;
@@ -6609,6 +6611,10 @@ export class GraphView extends ItemView {
     // is dimmed, its glow with it. Planted: `plantNoFrontDim`.
     const wasDim = this.dimFront;
     this.dimFront = new Set<any>();
+    // The picture being PRESENTED -- the one nearest the ray -- is what the
+    // reader points at; it alone is floored to a readable size (G-208), the
+    // rest of the reveal keeps its room (G-21).
+    { let k = -1; for (let i = 0; i < best.length; i++) if (k < 0 || dist[i] < dist[k]) k = i; this.presented = k >= 0 ? best[k] : null; }
     if (best.length && !this.plantNoFrontDim) {
       let k = 0;
       for (let i = 1; i < best.length; i++) if (dist[i] < dist[k]) k = i;
