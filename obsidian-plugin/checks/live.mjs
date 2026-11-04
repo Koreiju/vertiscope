@@ -10730,6 +10730,32 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-257",
+      asks: "a drag on empty space moves nothing -- every pick proxy is its node's DRAWN size, never larger (2026-10-12: \"clicking and dragging empty space somehow drags a nearby ... node\"): node sizes changed (nodeScale halved), then every proxy's scale against `proxyRadius`; planted (plantStaleProxies) proxies keep their old size",
+      async run() {
+        const arm = (planted) => inPane(`
+          v.plantStaleProxies = ${planted};
+          const was = v.nodeScale;
+          try {
+            v.nodeScale = was * 0.5;
+            v.graph.nodeVal(v.graph.nodeVal());
+            await sleep(2500);
+            let n = 0, stale = 0, worst = 1;
+            for (const x of v.graph.graphData().nodes) {
+              const o = x.__threeObj; if (!o || !o.__proxy) continue;
+              const want = v.proxyRadius(x); if (!(want > 0)) continue;
+              n++; const r = o.scale.x / want; worst = Math.max(worst, r);
+              if (r > 1.05) stale++;
+            }
+            return { planted: ${planted}, proxies: n, larger_than_drawn: stale, worst_ratio: +worst.toFixed(2) };
+          } finally { v.nodeScale = was; v.plantStaleProxies = false; v.graph.nodeVal(v.graph.nodeVal()); await sleep(1500); }
+        `);
+        const clean = await arm(false), planted = await arm(true);
+        return { pass: !clean.error && clean.proxies > 50 && clean.larger_than_drawn === 0 && planted.larger_than_drawn > 0,
+                 evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {
