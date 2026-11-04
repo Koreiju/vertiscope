@@ -5996,7 +5996,13 @@ export class GraphView extends ItemView {
       // `presentMinPx` and `presentMaxPx` of radius. A chunk's own panel
       // scale follows its `val`, and small chunks presented at 2 px; right by
       // the camera one filled the pane (1,204 px) (2026-10-17).
-      if (shown && !this.plantTinyReveal && this.graph && this.canvasEl) {
+      // ...only for a picture the READER acts on -- hovered, or its panel
+      // open (G-21). One revealed because it lies near the pointer's ray keeps
+      // the size its room allows: floored to a readable size it overlapped
+      // its neighbours (405 of 415 overlapping pairs held a picture,
+      // 2026-10-30). Planted `plantFloorAllRevealed`: every reveal floored.
+      const acted = n.hovered || this.billboards.has(n.id) || this.plantFloorAllRevealed;
+      if (shown && acted && !this.plantTinyReveal && this.graph && this.canvasEl) {
         const cam: any = this.graph.camera(), P = cam.position, e = cam.matrixWorld.elements;
         const depth = -((n.x - P.x) * e[8] + (n.y - P.y) * e[9] + ((n.z || 0) - P.z) * e[10]);
         const yy = cam.projectionMatrix.elements[5], H = this.canvasEl.clientHeight;
@@ -6023,6 +6029,8 @@ export class GraphView extends ItemView {
     return { half: Math.cbrt(Math.max(sized.val ?? 1, 1e-9)) * relSize * this.nodeScale * ps, translucent: false, alpha: 1,
              color: n.hovered ? "#ffffff" : (n.color || "#9aa0a6") };
   }
+  /** Planted (G-21): every revealed picture floored to a readable size, as before. */
+  plantFloorAllRevealed = false;
   /** A presented picture's largest radius on screen, px. */
   presentMaxPx = 64;
   presentMinPx = 12;
