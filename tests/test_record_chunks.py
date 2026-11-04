@@ -194,3 +194,89 @@ def test_the_guarantee_ends_where_the_page_fits_the_window():
     swallowed = [c for c in _chunks(2048) if _results_in(c)]
     assert len(swallowed) == 1, \
         "a window larger than the page unexpectedly split it"
+
+
+
+
+#: annas-archive's result card (`G-246`), its element tree as served
+#: (2026-11-03, read from the live page; the text is synthetic, the blurbs
+#: being the publishers'): a cover link holding an image and a hidden
+#: fallback, then a body of four blocks -- path, title, author and publisher
+#: links; a description with a "Read more" link and a script; the metadata
+#: line with a Save link and a downloads count; a hidden score. Live, at the
+#: 256 window, 19 of 36 cards were cut (the metadata line, the description
+#: their own chunks) and the first shared a chunk with the page's header.
+def _card(i, words=110):
+    desc = " ".join("word%d" % ((i * 7 + j) % 97) for j in range(words))
+    return (
+        "<div class='flex pt-3 pb-3 border-b'>"
+        "<a href='/md5/%032d' class='custom-a block'><div id='cover%d' class='w-20 relative'>"
+        "<img src='https://covers.test/%d.jpg' alt=''>"
+        "<div class='absolute hidden js-fallback'><div data-content='Title %d'></div><div data-content='Author %d'></div></div>"
+        "</div></a>"
+        "<div class='max-w-full flex flex-col'>"
+        "<div><div class='font-mono'>zlib/no-category/Author %d/Card %d title_%d.pdf</div>"
+        "<a href='/md5/%032d' class='js-vim-focus'>Card %d: a title about small language models</a>"
+        "<a href='/search?q=Author %d'><span class='icon'></span> Author %d</a>"
+        "<a href='/search?q=Publisher'><span class='icon'></span> Publisher %d, 2026</a></div>"
+        "<div><div class='line-clamp-[5]'></div>"
+        "<div class='relative'><div class='line-clamp-[2]'>Card %d description: %s</div> "
+        "<a href='#' class='read-more'>Read more...</a> <script>window.addReadMoreButton(1);</script></div></div>"
+        "<div class='meta'>English [en] - PDF - %d.4MB - 2026 - Book (unknown) - zlib - "
+        "<a href='#' class='custom-a'><span class='icon'></span>Save<script>(function(){})();</script></a>"
+        "<span class='text-xs'><span> - <span title='Downloads'><span class='icon'></span>Downloads %d</span></span></span></div>"
+        "<div class='hidden'>base score: 1100%d.0, final score: 16735%d.2</div>"
+        "</div></div>" % (i, i, i, i, i, i, i, i, i, i, i, i, i, i, desc, i, i, i, i))
+
+
+def _render(html, window):
+    result = run_pipeline(html, URL, render=False)
+    return render_trie(AddressTrie.from_tagged(result.tagged, URL), context_window=window)
+
+
+ANNAS = ("<html><body><main><form><div>"
+         "<div><p>Search settings and filters for the results below.</p>"
+         "<p>Showing results 1-8 for small language models, sorted by relevance.</p></div>"
+         "<div class='js-aarecord-list-outer'>%s</div></div></form></main></body></html>"
+         % "".join(_card(i) for i in range(8)))
+
+
+def _card_of(text):
+    return set(re.findall(r"(?:Card |Author |Downloads |Publisher )(\d+)", text))
+
+
+def _card_budget():
+    one = _render("<html><body><div>%s</div></body></html>" % _card(0), 100000)
+    return max(tokens.budget(c.markdown) for c in one)
+
+
+def _split_and_header(window):
+    got = _render(ANNAS, window)
+    holders = {}
+    for c in got:
+        for k in _card_of(c.markdown):
+            holders.setdefault(k, set()).add(c.cid)
+    split = sorted(k for k, cs in holders.items() if len(cs) > 1)
+    header = [c for c in got if "Showing results" in c.markdown and _card_of(c.markdown)]
+    mixed = [c for c in got if len(_card_of(c.markdown)) > 1]
+    return holders, split, header, mixed
+
+
+@pytest.mark.parametrize("planted", [False, True])
+def test_a_card_over_the_window_is_one_chunk_within_the_lenient_bound(planted, monkeypatch):
+    monkeypatch.setattr(md, "PLANT_RECORD_SPLIT_AT_WINDOW", planted)
+    # The window one card overflows by a fifth -- inside the 1.5x bound.
+    window = int(_card_budget() / 1.2)
+    holders, split, header, mixed = _split_and_header(window)
+    assert len(holders) == 8 and not mixed
+    if planted:
+        assert split or header, "planted: the cards are cut at the window, or one joins the header"
+    else:
+        assert split == [] and header == []
+
+
+def test_a_card_past_the_lenient_bound_still_splits_but_only_inside_itself():
+    window = int(_card_budget() / 2.2)
+    holders, split, header, mixed = _split_and_header(window)
+    assert split                                  # past the bound it does split
+    assert not mixed and not header               # but never across cards, nor into the header

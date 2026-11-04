@@ -3168,6 +3168,11 @@ PLANT_TRAILING_HEADINGS = False
 #: Planted (`G-86`): a heading before a record set is flushed on its own.
 PLANT_HEADING_APART_FROM_RECORD = False
 
+#: Planted (`G-246`): a record over the window is split at the window, and a
+#: buffered lead joins its first piece -- annas-archive's result cards, 19 of
+#: 36 cut across, one sharing a chunk with the page header.
+PLANT_RECORD_SPLIT_AT_WINDOW = False
+
 #: Planted (`G-86`): a content boundary after a lone heading flushes it alone.
 PLANT_LONE_HEADING_FLUSH = False
 
@@ -3433,6 +3438,17 @@ def _record_children(sized: Sequence[Tuple[TrieNode, object, int]],
     if typical < RECORD_MIN_SIZE:
         return set()
     return {id(e[0]) for e in composite}
+
+
+def _mark_record(chunk: MarkdownChunk) -> None:
+    """Note that `chunk` is (part of) one record (`G-246`). An attribute on the
+    descent's own object: memo hits hand back the same object, so the mark
+    survives them, and nothing outside the descent reads it."""
+    chunk._record = True                     # type: ignore[attr-defined]
+
+
+def _is_record_chunk(chunk: MarkdownChunk) -> bool:
+    return bool(getattr(chunk, "_record", False))
 
 
 def _certainly_overflows(child_chars: Sequence[int], window: int) -> bool:
@@ -3739,10 +3755,52 @@ def _descend(
         buffered_chars += chars
 
     for kind, piece, piece_chars, piece_hash, is_record in pieces:
+        if kind == "split" and is_record and not PLANT_RECORD_SPLIT_AT_WINDOW:
+            # A RECORD over the window (`G-246`, PLUGIN_GOAL 175: "broken
+            # chunks spotted on anna's archive"). A result card is the unit
+            # whatever its size, so within the lenient bound -- the same 1.5x
+            # every other run is allowed -- it is one chunk, not cut at the
+            # window into a title chunk and a metadata-line chunk. Past the
+            # bound it does split, but only inside itself, and it takes a
+            # buffered lead only when that lead is headings: annas-archive's
+            # first card shared a chunk with seven lines of page header.
+            whole, whole_chars = _render_sized(piece, url, url_depth, memo)  # type: ignore[arg-type]
+            heads_only = bool(buffer) and all(_only_heading(b) for b in buffer)
+            if whole.lines and whole_chars < LENIENCY * window:
+                if heads_only and buffered_chars + len(buffer) + whole_chars < LENIENCY * window:
+                    take(whole, whole_chars)
+                else:
+                    flush(final=True)
+                    take(whole, whole_chars)
+                flush(final=True)
+                _mark_record(out[-1])
+                last_run.clear()
+                continue
+            sub = _descend(piece, url, url_depth, window, memo)  # type: ignore[arg-type]
+            for c in sub:
+                _mark_record(c)
+            if heads_only and sub and buffered_chars + len(buffer) + tokens.budget(sub[0].markdown) < LENIENCY * window:
+                buffer.append(sub[0])
+                sizes.append(tokens.budget(sub[0].markdown))
+                flush(final=True)
+                sub = sub[1:]
+            flush(final=True)
+            out.extend(sub)
+            last_run.clear()
+            continue
         if kind == "split":
             sub = _descend(piece, url, url_depth, window, memo)  # type: ignore[arg-type]
             # A buffered heading and lead go WITH the first chunk of what they
-            # head, when the two fit the lenient bound together (`G-86`).
+            # head, when the two fit the lenient bound together (`G-86`) --
+            # but a RECORD takes headings only (`G-246`): the lead of a result
+            # list is the page's, and annas-archive's first card shared a
+            # chunk with seven lines of header through this join.
+            if (sub and _is_record_chunk(sub[0]) and not PLANT_RECORD_SPLIT_AT_WINDOW
+                    and not all(_only_heading(b) for b in buffer)):
+                flush(final=True)
+                out.extend(sub)
+                last_run.clear()
+                continue
             if buffer and sub:
                 first_cost = tokens.budget(sub[0].markdown)
                 if buffered_chars + len(buffer) + first_cost < LENIENCY * window:
@@ -3773,11 +3831,13 @@ def _descend(
                     and buffered_chars + len(buffer) + piece_chars < LENIENCY * window):
                 take(piece, piece_chars)  # type: ignore[arg-type]
                 flush(final=True)
+                _mark_record(out[-1])
                 last_run.clear()
                 continue
             flush(final=True)
             take(piece, piece_chars)  # type: ignore[arg-type]
             flush(final=True)
+            _mark_record(out[-1])
             last_run.clear()
             continue
         # A BARE heading -- a sibling that is nothing but the heading, as in a

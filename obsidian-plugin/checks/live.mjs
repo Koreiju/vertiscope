@@ -10666,6 +10666,70 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-246",
+      asks: "annas-archive result cards chunk along their own boundaries (PLUGIN_GOAL 175: \"broken chunks spotted on anna's archive\"): a live search, each result card found by its own boundary (the largest container holding one result's links) and the stored chunks' lines mapped onto the cards -- no card's lines in more than one chunk and no chunk holding two cards or a card beside the page's header; planted (sidecar record-split-at-window) a card over the window is cut at it and a lead joins the first card, as before",
+      async run() {
+        const plant = (name, on) => fetch(SIDECAR + "/plant", {
+          method: "POST", headers: { "content-type": "application/json", "X-Domvec-Client": "obsidian-plugin" },
+          body: JSON.stringify({ name, on }) });
+        const arm = async (planted) => {
+          await plant("record-split-at-window", planted);
+          try {
+            return await evaluate(`(async () => {
+              ${PREP}
+              const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+              // The SAME results in both arms (the run before compared two
+              // queries' cards), told apart by a parameter the site ignores,
+              // so neither arm reads the other's stored chunks.
+              b.go("about:blank"); await sleep(800);
+              b.go("https://annas-archive.gl/search?q=small+language+models+distillation&domvec_arm=" + (${planted} ? "p" : "c") + Date.now());
+              let n = 0;
+              for (let i = 0; i < 90 && n < 10; i++) { await sleep(1000);
+                try { n = await b.webview.executeJavaScript("document.querySelectorAll('div.js-aarecord-list-outer a[href*=\\"/md5/\\"]').length"); } catch (e) { n = 0; } }
+              if (n < 10) return { error: "no results (guard or network)", n };
+              const U = b.webview.getURL();
+              const cards = await b.webview.executeJavaScript(\`(() => { const xp = (el) => { const s=[]; for (let e=el; e && e.nodeType===1 && e!==document.documentElement; e=e.parentElement) { let i=1; for (let p=e.previousElementSibling;p;p=p.previousElementSibling) if (p.tagName===e.tagName) i++; s.unshift(e.tagName.toLowerCase()+'['+i+']'); } return '/html/'+s.join('/'); }; const hrefs = (el) => new Set([...el.querySelectorAll('a[href*="/md5/"]')].map(a=>a.getAttribute('href'))); const seen=new Set(), out=[]; for (const a of document.querySelectorAll('div.js-aarecord-list-outer a[href*="/md5/"]')) { const h=a.getAttribute('href'); if (seen.has(h)) continue; seen.add(h); let c=a; while (c.parentElement && hrefs(c.parentElement).size===1) c=c.parentElement; if (c.innerText.split(String.fromCharCode(10)).filter(x=>x.trim()).length>=3) out.push(xp(c)); } return out; })()\`);
+              const norm = (x) => String(x || "").split("[1]").join("");
+              const cardN = cards.map(norm);
+              let cids = [], same = 0;
+              for (let i = 0; i < 40 && same < 3; i++) { await sleep(1500); const now = await v.sidecar.pageCids(U); same = now.length && now.join() === cids.join() ? same + 1 : 0; cids = now; }
+              const holders = new Map(cardN.map((c) => [c, new Set()]));
+              const tok = new Map(); let win = 0;
+              let mixed = 0, withPage = 0;
+              for (const cid of cids) {
+                const p = await v.chunkPayload(cid); if (!p) continue;
+                tok.set(cid, Number(p.tokens) || 0); win = Number(p.window) || win;
+                const inCards = new Set(); let outside = 0;
+                for (const l of p.lines || []) { const x = norm(String(l.key || "").split("|")[1] || ""); const c = cardN.find((k) => x === k || x.startsWith(k + "/"));
+                  if (c) { holders.get(c).add(cid); inCards.add(c); } else outside++; }
+                if (inCards.size > 1) mixed++;
+                if (inCards.size && outside) withPage++;
+              }
+              // A card's size is what its chunks hold; within the lenient
+              // bound (1.5x the window) a card is never split, past it it may
+              // split -- inside itself only.
+              const size = (s) => [...s].reduce((a, c) => a + (tok.get(c) || 0), 0);
+              const splitSets = [...holders.values()].filter((s) => s.size > 1);
+              const split = splitSets.length;
+              const within = splitSets.filter((s) => size(s) < 1.5 * win).length;
+              const sizes = [...holders.values()].filter((s) => s.size).map(size).sort((a, c) => a - c);
+              return { planted: ${planted}, url: U, cards: cards.length, chunks: cids.length,
+                       cards_seen: [...holders.values()].filter((s) => s.size).length,
+                       window: win, card_tokens_p50: sizes[sizes.length >> 1], card_tokens_p90: sizes[Math.floor(0.9 * sizes.length)],
+                       split_cards: split, split_within_bound: within, split_past_bound: split - within,
+                       chunks_mixing_cards: mixed, chunks_card_and_page: withPage };
+            })()`, { timeout: 240000 });
+          } finally { await plant("record-split-at-window", false); }
+        };
+        const clean = await arm(false);
+        const planted = await arm(true);
+        const ok = !!clean && !clean.error && clean.cards >= 10 && clean.cards_seen >= clean.cards * 0.9
+          && clean.split_within_bound === 0 && clean.chunks_mixing_cards === 0 && clean.chunks_card_and_page === 0
+          && !!planted && !planted.error && (planted.split_within_bound > 0 || planted.chunks_card_and_page > 0);
+        return { pass: ok, evidence: { clean, planted, bar: "clean: >= 90% of the cards stored, no card within 1.5x the window split, no chunk mixing cards or a card with page content (a card past the bound splits inside itself, counted); planted: cards within the bound split, or a card beside page content" } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {
