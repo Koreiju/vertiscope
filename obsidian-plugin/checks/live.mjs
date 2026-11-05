@@ -11458,6 +11458,56 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-213",
+      asks: "nodes in front of a presented picture are drawn dark, orb and glow (PLUGIN_GOAL 140): a scene staged by the CAMERA only -- placed on the line from a picture node P through another node Q, so Q stands between them -- and the pointer put on P: Q is dimmed (alpha <= 0.2) while P is presented; planted (plantNoFrontDim) nothing in front dims",
+      async run() {
+        const arm = (planted) => inPane(`
+          v.plantNoFrontDim = ${planted};
+          const g = v.graph, cam = g.camera(), keep = { ...g.cameraPosition() };
+          try {
+            if (v.level !== "chunk") { const b = [...v.containerEl.querySelectorAll("button")].find((x) => (x.textContent || "").trim() === "pages"); if (b) b.click(); }
+            for (let i = 0; i < 60; i++) { await sleep(500); if (v.level === "chunk" && g.graphData().nodes.length > 2000) break; }
+            let ns = [], pics = [];
+            for (let i = 0; i < 40; i++) {
+              ns = g.graphData().nodes.filter((n) => Number.isFinite(n.x));
+              pics = ns.filter((n) => n.image && n.image.src && n.level !== "page" && n.level !== "path").slice(0, 40);
+              if (pics.length >= 3) break; await sleep(500);
+            }
+            let P = null, Q = null;
+            for (const p of pics) {
+              const near = ns.filter((q) => q !== p && !(q.image && q.image.src) && Math.hypot(q.x - p.x, q.y - p.y, (q.z||0) - (p.z||0)) > 4)
+                .sort((a, b) => Math.hypot(a.x - p.x, a.y - p.y, (a.z||0) - (p.z||0)) - Math.hypot(b.x - p.x, b.y - p.y, (b.z||0) - (p.z||0)));
+              if (near[0]) { P = p; Q = near[0]; break; }
+            }
+            if (!P) return { error: "no picture with a neighbour" };
+            const d = [Q.x - P.x, Q.y - P.y, (Q.z||0) - (P.z||0)], L = Math.hypot(...d);
+            const back = L + Math.max(80, 4 * L);
+            const at = { x: P.x + d[0] / L * back, y: P.y + d[1] / L * back, z: (P.z||0) + d[2] / L * back };
+            g.cameraPosition(at, { x: P.x, y: P.y, z: P.z || 0 }, 0);
+            await sleep(600);
+            // The camera a little OFF the P-Q line, so Q overlaps P's picture
+            // without lying on the pointer's ray: P is what is aimed at.
+            const W = v.canvasEl.clientWidth, H = v.canvasEl.clientHeight;
+            const sp = g.graph2ScreenCoords(P.x, P.y, P.z || 0), sq = g.graph2ScreenCoords(Q.x, Q.y, Q.z || 0);
+            const rP = v.lookOf(P, g.nodeRelSize(), v.drawnMedia).half;
+            const e2 = cam.matrixWorld.elements, depth = Math.hypot(at.x - P.x, at.y - P.y, at.z - (P.z || 0));
+            const px = rP * H * cam.projectionMatrix.elements[5] / (2 * depth);
+            let ux = sp.x - sq.x, uy = sp.y - sq.y; const ul = Math.hypot(ux, uy) || 1; ux /= ul; uy /= ul; if (ul < 0.5) { ux = 1; uy = 0; }
+            const off = Math.max(3, Math.min(px * 0.7, 40));
+            const s = { x: sp.x + ux * off, y: sp.y + uy * off };
+            v.pointerNdc = [s.x / W * 2 - 1, -(s.y / H * 2 - 1)]; v.detailDirty = true; v.detailAt = 0;
+            v.refreshDetail(g); v.batchSync();
+            await sleep(300);
+            const lookQ = v.lookOf(Q, g.nodeRelSize(), v.drawnMedia);
+            return { planted: ${planted}, presented: v.presented === P, q_in_front: v.dimFront.has(Q), q_alpha: lookQ.alpha, dimmed: v.dimFront.size };
+          } finally { v.plantNoFrontDim = false; g.cameraPosition(keep, undefined, 0); }
+        `);
+        await arm(true);                      // warm-up: chunk view in, pictures landed; discarded
+        const clean = await arm(false), planted = await arm(true);
+        return { pass: !clean.error && clean.q_in_front && clean.q_alpha <= 0.2 && !planted.error && !planted.q_in_front, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {
