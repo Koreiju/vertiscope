@@ -11414,6 +11414,50 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "PG-134-hover-copy",
+      asks: "copy-paste from the cell under the mouse (PLUGIN_GOAL 134): mouse over one cell, Ctrl+C with nothing selected; mouse over another, Ctrl+V outside an editor -- the second cell's note now holds the first's text; planted (__domvecPlantNoHoverCopy) it does not",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          window.__domvecPlantNoHoverCopy = ${planted};
+          await window.__domvec.act("open", "graph"); await sleep(1500);
+          const desk = window.__domvecPlane, NL = String.fromCharCode(10), tag = (${planted} ? "p" : "c") + Date.now();
+          const X = "domvec-checks/pg134 copy x " + tag + ".md", Y = "domvec-checks/pg134 copy y " + tag + ".md";
+          const card = (p) => [...document.querySelectorAll(".domvec-panel-card")].find((c) => c.dataset.path === p);
+          const marker = "hover-copied text " + tag;
+          try {
+            await desk.create("notebook", { path: X, text: marker + NL });
+            await desk.create("notebook", { path: Y, text: "target" + NL });
+            let x = null, y = null;
+            for (let i = 0; i < 20 && !(x && y); i++) { await sleep(300); x = card(X); y = card(Y); }
+            if (!x || !y) return { error: "no cards" };
+            x.style.right = "auto"; x.style.left = "30px"; x.style.top = "200px";
+            y.style.right = "auto"; y.style.left = "420px"; y.style.top = "200px";
+            await sleep(300);
+            const at = (c) => { const r = (c.querySelector(".domvec-plane-head-node") || c).getBoundingClientRect(); return { clientX: r.left + 4, clientY: r.top + r.height / 2 }; };
+            if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+            window.getSelection().removeAllRanges();
+            window.dispatchEvent(new MouseEvent("mousemove", { ...at(x), bubbles: true }));
+            window.dispatchEvent(new KeyboardEvent("keydown", { key: "c", ctrlKey: true, bubbles: true, cancelable: true }));
+            await sleep(800);
+            if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+            window.dispatchEvent(new MouseEvent("mousemove", { ...at(y), bubbles: true }));
+            window.dispatchEvent(new KeyboardEvent("keydown", { key: "v", ctrlKey: true, bubbles: true, cancelable: true }));
+            await sleep(1200);
+            const f = app.vault.getAbstractFileByPath(Y);
+            const text = f ? await app.vault.read(f) : "";
+            const P = app.plugins.plugins["domvec-bridge"];
+            return { planted: ${planted}, pasted_into_y: text.includes(marker), stats: P.hoverCopyStats };
+          } finally {
+            window.__domvecPlantNoHoverCopy = false;
+            for (const p of [X, Y]) { const f = app.vault.getAbstractFileByPath(p); if (f) await app.vault.trash(f, true); }
+          }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        return { pass: !clean.error && clean.pasted_into_y && !planted.error && !planted.pasted_into_y, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {

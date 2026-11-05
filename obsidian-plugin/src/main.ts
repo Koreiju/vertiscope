@@ -123,6 +123,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
   private surfaces = new Set<ChunkSurface>();
 
   async onload() {
+    this.hookHoverCopy();
     // This load's generation (G-175): a view born in an earlier load whose
     // loop is still running reads a newer number and stops itself.
     (window as any).__domvecLoadGen = ((window as any).__domvecLoadGen || 0) + 1;
@@ -1530,6 +1531,60 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
    * every chunk right-clicked in the browser appended to it once, under its
    * page. Planted `__domvecPlantNoClipboard`: right-clicks add nothing.
    */
+  /**
+   * Copy and paste from the cell under the MOUSE (PLUGIN_GOAL 134: "copy-paste
+   * comes from the perspective view of the cell hovered by the mouse"): with
+   * nothing selected, Ctrl+C copies the hovered cell's markdown -- a plane
+   * panel's note or a chunk panel's lines -- and Ctrl+V, outside an editor,
+   * appends the clipboard to the hovered cell's note. Planted
+   * `__domvecPlantNoHoverCopy`: the keys do what they did.
+   */
+  hoverCopyStats = { copied: 0, pasted: 0, last: "" };
+  private mouseAt = { x: -1, y: -1 };
+  private hookHoverCopy(): void {
+    this.registerDomEvent(window, "mousemove", (e: MouseEvent) => { this.mouseAt = { x: e.clientX, y: e.clientY }; }, true);
+    this.registerDomEvent(window, "keydown", (e: KeyboardEvent) => { void this.hoverCopy(e); }, true);
+  }
+  async hoverCopy(e: KeyboardEvent): Promise<string> {
+    if ((window as any).__domvecPlantNoHoverCopy || !(e.ctrlKey || e.metaKey)) return "";
+    const k = e.key.toLowerCase();
+    if (k !== "c" && k !== "v") return "";
+    const sel = window.getSelection();
+    if (k === "c" && sel && String(sel).length) return "";
+    const under = document.elementFromPoint(this.mouseAt.x, this.mouseAt.y) as HTMLElement | null;
+    if (!under) return "";
+    const card = under.closest(".domvec-panel-card") as HTMLElement | null;
+    const bb = card ? null : under.closest(".domvec-billboard, .domvec-bb") as HTMLElement | null;
+    const path = card?.dataset.path || "";
+    if (k === "c") {
+      let text = "";
+      if (path) { const f: any = this.app.vault.getAbstractFileByPath(path); if (f) text = await this.app.vault.read(f); }
+      else if (bb) {
+        const gv: any = this.app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
+        const id = gv ? [...gv.billboards.entries()].find(([, en]: any) => en.el === bb || en.el.contains(bb))?.[0] : "";
+        const pay: any = id ? await gv.chunkPayload(String(id)).catch(() => null) : null;
+        text = ((pay && pay.lines) || []).map((l: any) => String(l.text || "")).join(String.fromCharCode(10));
+      }
+      if (!text) return "";
+      e.preventDefault(); e.stopPropagation();
+      await navigator.clipboard.writeText(text);
+      this.hoverCopyStats.copied++; this.hoverCopyStats.last = path || "chunk";
+      return "copied";
+    }
+    // Paste: only outside an editor -- inside one, the editor pastes as usual.
+    const active = document.activeElement as HTMLElement | null;
+    if (!path || (active && (active.isContentEditable || active.tagName === "INPUT" || active.tagName === "TEXTAREA"))) return "";
+    const f: any = this.app.vault.getAbstractFileByPath(path);
+    if (!f) return "";
+    e.preventDefault(); e.stopPropagation();
+    const clip = await navigator.clipboard.readText();
+    if (!clip) return "";
+    const NL = String.fromCharCode(10);
+    await this.app.vault.process(f, (t: string) => t.replace(/\s*$/, "") + NL + NL + clip + NL);
+    this.hoverCopyStats.pasted++; this.hoverCopyStats.last = path;
+    return "pasted";
+  }
+
   clipStats = { added: 0, repeats: 0 };
   async clipboardAdd(cid: string, url: string): Promise<boolean> {
     if ((window as any).__domvecPlantNoClipboard || !cid) return false;
