@@ -7389,6 +7389,13 @@ export class GraphView extends ItemView {
     }
     if (!node || !this.pinWanted.has(cid)) return false;
     await this.openBillboard(node, true);
+    // STUCK on the 2D plane (PLUGIN_GOAL 133: "the panel should (instead of
+    // showing in the clipboard) then emerge as its 2D editor equivalent, the
+    // exact same thing as the billboards ... but just as stuck panels"): the
+    // same two-view billboard, held where it opened instead of following its
+    // node; its head drags it. Planted `plantPinFollows`: it follows, as before.
+    const stuck: any = this.billboards.get(drawnAs);
+    if (stuck && !this.plantPinFollows) { stuck.pinned = true; stuck.el.addClass("is-stuck"); stuck.el.removeClass("is-preview"); this.stuckPins++; }
     if (drawnAs !== cid) {
       this.pinAlias.set(cid, drawnAs);
       const entry: any = this.billboards.get(drawnAs);
@@ -7396,6 +7403,9 @@ export class GraphView extends ItemView {
     }
     return true;
   }
+  /** Planted (133): a pin's billboard follows its node, as before. */
+  plantPinFollows = false;
+  stuckPins = 0;
   /** A pinned chunk -> the chunk whose billboard shows it (duplicates, group members). */
   private pinAlias = new Map<string, string>();
 

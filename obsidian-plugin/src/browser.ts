@@ -2160,8 +2160,10 @@ export class BrowserView extends ItemView {
     this.pinned.delete(cid);                     // re-pinning moves it to the top
     this.pinned = new Map([[cid, read], ...this.pinned]);
     this.pipebox?.setPins(this.pinList());
-    await this.renderSide();
-    this.layoutSide();
+    // Not the side card -- "the clipboard" -- any more (PLUGIN_GOAL 133): the
+    // pin emerges as a stuck panel on the plane (the graph's `pinChunk`).
+    // Planted `side-card`: rendered beside the page, as before.
+    if (this.plant.has("side-card")) { await this.renderSide(); this.layoutSide(); }
     void this.keepInView(read.matched);
     // The projector rings the same chunk (`G-38`) and opens its billboard.
     this.onHover(cid, read.url);

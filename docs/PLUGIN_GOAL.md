@@ -5179,6 +5179,34 @@ cells with VS Code's capabilities; (f) minimize and exit on notebook panels
 (and others); (g) "soft links" removed, subsumed by "similar"; (h) Ctrl+= /
 Ctrl+- resize a notebook panel.*
 
+*2026-11-04, later still:*
+
+> Also, boxes work on all general panel-facing node/panel dialects and node glow on hovers too where applicable. Right-clicks work on all in general too, including the browser. 
+>
+> We add a basic mistral 2 DPO chat model cell as one of the primary jupyter level notebook cells that can be individual or aggregate, include drag to snap on magnetic naked edges without any additional visual elements. Any cells magnetized to its context-truncated (on recursive links) cell around its four edges chat model are included as the only context engineering needed. The prompt and responses are different magnetized and unmagentizable cells that can be picked and placed. the output dynamics follow with the model's context. Streamed outputs are per-token and in real time. Right-click-placed panels over the browser respect the layer and level of the gesture. The block-magnet element also respects hard links in the computation graph form as well as the panel form, even for laterals. The remainder of the panel/graph folds on the querying field in the panel when the "similar" search is triggered to give full mobility over the specified polar coordinate navigational surface that renders dynamically for most similar nodes rendering only when in view. the original node that was used to select the navigational retrieval aspect on the 2D results sets that as the origin location while the nodes slide over their deltas per the mouse's proximity from the invisible fixed origin (with our traces to the origin node queried still visible as lines) and the motion velocity vector is the magnitude of the mouse from the origin. 
+>
+> The clipboard is a basic markdown panel per all the other "same" panel constraints and dynamically aggregates on right-clicks. it is essentially a feature working overtop active markdown cells. So copy-paste comes from the perspective view of the cell hovered by the mouse. The chunk panel right-clicked by the mouse anywhere "sticks" to the mouse and "carries" until right-clicked. If right-clicked over a markdown, it goes in the cell. If over empty space in the 2D plane, then its own panel/node view linked to any other node/panel views.
+
+*Read as (134): (a) the chunk boxes, node glow on hover and right-click work
+on every panel/node form, the browser included; (b) a Mistral DPO chat-model
+CELL among the notebook's primary cells, alone or aggregated; (c) cells SNAP
+to each other on magnetic bare edges, with no added visual element; the cells
+magnetized around a chat cell's four edges (truncated to its context, following
+recursive links) ARE its context -- the only context engineering; (d) prompt
+and response are separate cells, magnetizable or not, picked and placed;
+output streams per token in real time; (e) a right-click-placed panel over the
+browser keeps the layer and level of the gesture; (f) the magnet respects hard
+links in graph form and panel form, laterals included; (g) "similar" folds the
+rest of the panel/graph onto the query field and opens a POLAR navigational
+surface: the querying node is the fixed invisible origin, similar nodes render
+only in view, they slide by their deltas with the mouse's distance from the
+origin (traces to the origin kept as lines), velocity = that distance; (h) the
+CLIPBOARD is a plain markdown panel under the same one-panel rule, aggregating
+on right-clicks -- copy and paste from the cell under the mouse; a right-clicked
+chunk panel sticks to the mouse and is carried until the next right-click:
+over a markdown cell it goes into the cell, over empty plane it becomes its own
+panel/node, linked to the others.*
+
 *And, having seen the strict scaled map live (6.6x for the world once sizes
 settle, ~95,000x for the ego craft; nodes specks at full view):*
 
