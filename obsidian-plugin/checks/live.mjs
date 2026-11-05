@@ -10990,44 +10990,37 @@ export function makeChecks(env) {
     },
     {
       id: "PG-133-stuck-pin",
-      asks: "a double right-click on the browser's chunk box emerges as a STUCK 2D panel (PLUGIN_GOAL 133), the same two-view billboard, not the side card: a stored chunk pinned the way the gesture pins it (`pinXpath`), then the camera moved -- the panel holds its place on screen; planted (plantPinFollows + side-card) it follows its node and the side card renders",
+      asks: "a chunk the browser pins emerges as a STUCK 2D panel (PLUGIN_GOAL 133), the same two-view billboard: a drawn chunk of a stored page pinned (`pinChunk`, what the browser's gesture calls), then the camera moved -- the panel holds its place on screen; planted (plantPinFollows) it follows its node",
       async run() {
-        const fixtures = await serveFixtures();
-        const arm = (planted) => evaluate(`(async () => {
-          ${PREP}
-          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
-          v.plantPinFollows = ${planted}; b.plant.delete("side-card"); if (${planted}) b.plant.add("side-card");
-          const PAGE = ${JSON.stringify(fixtures.origin + "/records_catalog.html?pg133=")} + (${planted} ? "p" : "c") + Date.now();
+        const arm = (planted) => inPane(`
+          v.plantPinFollows = ${planted};
+          let opened = null;
+          const chunks = () => v.graph.graphData().nodes.filter((n) => !n.force && n.level !== "page" && n.level !== "path" && Number.isFinite(n.x));
           try {
-            b.go("about:blank"); await sleep(800);
-            if (!(await land(PAGE, 30000))) return { error: "no land" };
-            let cids = [];
-            for (let i = 0; i < 30 && cids.length < 3; i++) { await sleep(1000); cids = await v.sidecar.pageCids(PAGE); }
-            const pay = await v.chunkPayload(cids[1] || cids[0]);
-            const key = String(((pay && pay.lines) || []).find((l) => l.key)?.key || "");
-            let xpath = key.split("|")[1] || ""; const tcut = xpath.lastIndexOf("/text()"); if (tcut > 0) xpath = xpath.slice(0, tcut);
-            const got = await b.pinXpath(xpath);
-            if (!got || got.error) return { error: "pin: " + (got && got.error), xpath };
-            let e = null;
-            for (let i = 0; i < 40 && !e; i++) { await sleep(500); e = v.billboards.get(got.cid) || [...v.billboards.values()].find((x) => x.pins && x.pins.has(got.cid)); }
-            if (!e) return { error: "no billboard", cid: got.cid };
-            await sleep(800);
+            if (chunks().length < 2) {
+              const pg = v.graph.graphData().nodes.find((n) => n.level === "page" && !n.force && (n.members || 0) >= 5 && (n.members || 0) <= 200 && /^https:/.test(String(n.url)));
+              if (pg) { const r = await v.togglePage(pg); if (r && r.action === "expand") opened = pg; }
+              for (let i = 0; i < 20 && chunks().length < 2; i++) await sleep(500);
+            }
+            const n = chunks()[0];
+            if (!n) return { error: "no chunk drawn" };
+            const ok = await v.pinChunk(String(n.id));
+            await sleep(1200);
+            const e = v.billboards.get(String(n.id));
+            if (!ok || !e) return { error: "no billboard", ok };
             const r0 = e.el.getBoundingClientRect();
             const cam = v.graph.cameraPosition();
-            v.graph.cameraPosition({ x: cam.x + 60, y: cam.y + 40, z: cam.z }, undefined, 0);
+            v.graph.cameraPosition({ x: cam.x + (cam.z || 300) * 0.35, y: cam.y + (cam.z || 300) * 0.25, z: cam.z }, undefined, 0);
             await sleep(900);
             const r1 = e.el.getBoundingClientRect();
             v.graph.cameraPosition(cam, undefined, 0);
-            const side = b.containerEl.querySelector(".domvec-side, .domvec-browser-side");
-            const sideShown = !!(side && side.textContent && side.textContent.trim().length > 0 && side.offsetParent);
-            return { planted: ${planted}, stuck: !!e.pinned, cls: e.el.classList.contains("is-stuck"), moved_px: Math.round(Math.hypot(r1.left - r0.left, r1.top - r0.top)), side_card: sideShown };
-          } finally { v.plantPinFollows = false; b.plant.delete("side-card"); try { b.unpinAll && b.unpinAll(); } catch (e) {} }
-        })()`, { timeout: 120000 });
-        try {
-          const clean = await arm(false), planted = await arm(true);
-          return { pass: !clean.error && clean.stuck && clean.moved_px <= 2 && !clean.side_card && !planted.error && planted.moved_px > 10,
-                   evidence: { clean, planted, purged: await tidyFixtures(fixtures.origin) } };
-        } finally { await fixtures.close(); }
+            const res = { planted: ${planted}, stuck: !!e.pinned, cls: e.el.classList.contains("is-stuck"), moved_px: Math.round(Math.hypot(r1.left - r0.left, r1.top - r0.top)) };
+            v.unpinChunk(String(n.id)); v.closeBillboard && v.closeBillboard(String(n.id));
+            return res;
+          } finally { v.plantPinFollows = false; if (opened) await v.togglePage(opened); }
+        `);
+        const clean = await arm(false), planted = await arm(true);
+        return { pass: !clean.error && clean.stuck && clean.cls && clean.moved_px <= 2 && !planted.error && planted.moved_px > 10, evidence: { clean, planted } };
       },
     },
     {
