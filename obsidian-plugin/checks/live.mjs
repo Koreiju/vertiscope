@@ -11211,6 +11211,48 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "PG-134-drop-plane",
+      asks: "a carried chunk panel right-clicked over EMPTY plane stays there as its own stuck panel (PLUGIN_GOAL 134): a pinned chunk's billboard carried 200 px and dropped where no cell is -- it ends at the drop point, still open, and holds there when the camera moves; planted (plantNoCarry) it is not carried",
+      async run() {
+        const arm = (planted) => inPane(`
+          v.plantNoCarry = ${planted};
+          let opened = null, pinned = "";
+          const chunks = () => v.graph.graphData().nodes.filter((n) => !n.force && n.level !== "page" && n.level !== "path" && Number.isFinite(n.x));
+          try {
+            if (chunks().length < 2) {
+              const pg = v.graph.graphData().nodes.find((n) => n.level === "page" && !n.force && (n.members || 0) >= 5 && (n.members || 0) <= 200 && /^https:/.test(String(n.url)));
+              if (pg) { const r = await v.togglePage(pg); if (r && r.action === "expand") opened = pg; }
+              for (let i = 0; i < 20 && chunks().length < 2; i++) await sleep(500);
+            }
+            const n = chunks()[0]; if (!n) return { error: "no chunk" };
+            pinned = String(n.id); await v.pinChunk(pinned); await sleep(1200);
+            const e = v.billboards.get(pinned); if (!e) return { error: "no billboard" };
+            const head = e.el.querySelector(".domvec-bb-head") || e.el;
+            const hr = head.getBoundingClientRect(), r0 = e.el.getBoundingClientRect();
+            const s0 = { ...v.carryStats };
+            head.dispatchEvent(new MouseEvent("contextmenu", { clientX: hr.left + 8, clientY: hr.top + 6, bubbles: true, cancelable: true, button: 2 }));
+            await sleep(100);
+            const tx = hr.left + 8 + 200, ty = hr.top + 6 + 120;
+            window.dispatchEvent(new MouseEvent("mousemove", { clientX: tx, clientY: ty, bubbles: true }));
+            await sleep(100);
+            const canvas = v.canvasEl;
+            canvas.dispatchEvent(new MouseEvent("contextmenu", { clientX: tx, clientY: ty, bubbles: true, cancelable: true, button: 2 }));
+            await sleep(800);
+            const r1 = e.el.getBoundingClientRect();
+            const cam = v.graph.cameraPosition();
+            v.graph.cameraPosition({ x: cam.x + (cam.z || 300) * 0.35, y: cam.y, z: cam.z }, undefined, 0); await sleep(800);
+            const r2 = e.el.getBoundingClientRect(); v.graph.cameraPosition(cam, undefined, 0);
+            return { planted: ${planted}, carried: v.carryStats.carried - s0.carried, onto_plane: v.carryStats.onto_plane - s0.onto_plane,
+                     moved_by_carry: Math.round(Math.hypot(r1.left - r0.left, r1.top - r0.top)), still_open: e.el.isConnected,
+                     held_after_camera: Math.round(Math.hypot(r2.left - r1.left, r2.top - r1.top)) };
+          } finally { v.plantNoCarry = false; if (pinned) { v.unpinChunk(pinned); v.closeBillboard && v.closeBillboard(pinned); } if (opened) await v.togglePage(opened); }
+        `);
+        const clean = await arm(false), planted = await arm(true);
+        return { pass: !clean.error && clean.carried === 1 && clean.onto_plane === 1 && clean.moved_by_carry > 150 && clean.still_open && clean.held_after_camera <= 2
+                       && !planted.error && planted.carried === 0 && planted.moved_by_carry < 20, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {
