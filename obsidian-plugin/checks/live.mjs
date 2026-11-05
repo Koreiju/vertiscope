@@ -10917,6 +10917,38 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-221",
+      asks: "going back to a scanned page resumes from what was kept (PLUGIN_GOAL 150): a served page landed, stored, left, and landed again -- on the return its stored chunks are settled at once, not drawn again as new streaming (grey) nodes; planted (no-settle) the whole page streams again",
+      async run() {
+        const fixtures = await serveFixtures();
+        const arm = (planted) => evaluate(`(async () => {
+          ${PREP}
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          b.plant.delete("no-settle");
+          const PAGE = ${JSON.stringify(fixtures.origin + "/structured_data.html?g221=")} + (${planted} ? "p" : "c") + Date.now();
+          const grey = () => [...v.forceSpecs.values()].filter((s) => s.parent && !s.branch && String(s.url).split("#")[0] === PAGE && !s.cid).length;
+          const drawnNew = () => [...v.forceSpecs.values()].filter((s) => s.parent && !s.branch && String(s.url).split("#")[0] === PAGE).length;
+          try {
+            b.go("about:blank"); await sleep(800);
+            if (!(await land(PAGE, 30000))) return { error: "no land" };
+            let cids = [], same = 0;
+            for (let i = 0; i < 40 && same < 3; i++) { await sleep(1000); const now = await v.sidecar.pageCids(PAGE); same = now.length && now.join() === cids.join() ? same + 1 : 0; cids = now; }
+            b.go("about:blank"); await sleep(4000);
+            if (${planted}) b.plant.add("no-settle");
+            if (!(await land(PAGE, 30000))) return { error: "no return" };
+            let peak = 0;
+            for (let i = 0; i < 12; i++) { await sleep(500); peak = Math.max(peak, drawnNew()); }
+            return { planted: ${planted}, stored: cids.length, streamed_again_peak: peak, grey_after_6s: grey() };
+          } finally { b.plant.delete("no-settle"); }
+        })()`, { timeout: 150000 });
+        try {
+          const clean = await arm(false), planted = await arm(true);
+          return { pass: !clean.error && clean.stored > 3 && clean.streamed_again_peak <= Math.ceil(clean.stored * 0.2) && planted.streamed_again_peak > clean.streamed_again_peak,
+                   evidence: { clean, planted, purged: await tidyFixtures(fixtures.origin) } };
+        } finally { await fixtures.close(); }
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {
