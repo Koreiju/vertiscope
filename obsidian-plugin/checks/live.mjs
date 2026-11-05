@@ -11024,6 +11024,50 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "PG-134-magnet",
+      asks: "cells snap on magnetic bare edges with no added visual element (PLUGIN_GOAL 134): two notebook panels on the plane, the second dropped 9 px short of the first's right edge -- it ends flush against it and records the first as its left neighbour; planted (__domvecPlantNoMagnet) it stays where dropped",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          window.__domvecPlantNoMagnet = ${planted};
+          await window.__domvec.act("open", "graph"); await sleep(1500);
+          const desk = window.__domvecPlane;
+          const tag = (${planted} ? "p" : "c") + Date.now();
+          const A = "domvec-checks/pg134a " + tag + ".md", B = "domvec-checks/pg134b " + tag + ".md";
+          const BT = String.fromCharCode(96).repeat(3), NL = String.fromCharCode(10);
+          const card = (p) => [...document.querySelectorAll(".domvec-panel-card")].find((c) => c.dataset.path === p);
+          try {
+            await desk.create("notebook", { path: A, text: ["a", "", BT + "python", "a = 1", BT, ""].join(NL) });
+            await desk.create("notebook", { path: B, text: ["b", "", BT + "python", "b = 2", BT, ""].join(NL) });
+            let a = null, b = null;
+            for (let i = 0; i < 20 && !(a && b); i++) { await sleep(300); a = card(A); b = card(B); }
+            if (!a || !b) return { error: "no cards" };
+            const plane = a.parentElement, P = plane.getBoundingClientRect();
+            a.style.right = "auto"; a.style.left = "40px"; a.style.top = "220px";
+            await sleep(200);
+            const ra = a.getBoundingClientRect();
+            const head = b.querySelector(".domvec-plane-head-node") || b;
+            const hr = head.getBoundingClientRect(), br = b.getBoundingClientRect();
+            const grabX = hr.left + 5, grabY = hr.top + hr.height / 2;
+            const wantLeft = ra.right + 9, wantTop = ra.top + 20;
+            const ev = (type, x, y) => (type === "mousedown" ? head : window).dispatchEvent(new MouseEvent(type, { clientX: x, clientY: y, button: 0, bubbles: true, cancelable: true }));
+            ev("mousedown", grabX, grabY);
+            ev("mousemove", grabX + (wantLeft - br.left), grabY + (wantTop - br.top));
+            ev("mouseup", grabX + (wantLeft - br.left), grabY + (wantTop - br.top));
+            await sleep(300);
+            const rb = b.getBoundingClientRect();
+            return { planted: ${planted}, gap_px: Math.round(rb.left - ra.right), magnet_left: (b.dataset.magnetLeft || "") === A };
+          } finally {
+            window.__domvecPlantNoMagnet = false;
+            for (const p of [A, B]) { const f = app.vault.getAbstractFileByPath(p); if (f) await app.vault.trash(f, true); }
+          }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        return { pass: !clean.error && Math.abs(clean.gap_px) <= 1 && clean.magnet_left && !planted.error && planted.gap_px >= 7 && !planted.magnet_left,
+                 evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {

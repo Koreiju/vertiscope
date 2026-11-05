@@ -25,6 +25,42 @@ export function clampToPlane(card: HTMLElement, plane: HTMLElement): boolean {
   return true;
 }
 
+/** How near, in px, a dropped card's edge must come to another's to snap. */
+export const SNAP_PX = 14;
+
+/**
+ * MAGNETIC bare edges (PLUGIN_GOAL 134: "drag to snap on magnetic naked edges
+ * without any additional visual elements"): a card dropped with an edge within
+ * `SNAP_PX` of another card's opposite edge, the two overlapping along it,
+ * moves flush against it and remembers whom it is attached to on that side
+ * (`data-magnet-left/right/top/bottom` = the neighbour's path) -- the cells a
+ * chat cell's context is read from. Nothing is drawn. Planted
+ * `__domvecPlantNoMagnet`: dropped where released, as before.
+ */
+export function snapToNeighbour(card: HTMLElement, plane: HTMLElement, stats: any): string {
+  for (const side of ["left", "right", "top", "bottom"]) delete card.dataset["magnet" + side[0].toUpperCase() + side.slice(1)];
+  if ((window as any).__domvecPlantNoMagnet) return "";
+  const p = plane.getBoundingClientRect(), r = card.getBoundingClientRect();
+  let best: { d: number; dx: number; dy: number; side: string; other: HTMLElement } | null = null;
+  for (const o of Array.from(plane.querySelectorAll(".domvec-plane-card")) as HTMLElement[]) {
+    if (o === card || !o.isConnected || o.offsetParent === null) continue;
+    const q = o.getBoundingClientRect();
+    const vOverlap = Math.min(r.bottom, q.bottom) - Math.max(r.top, q.top) > 0;
+    const hOverlap = Math.min(r.right, q.right) - Math.max(r.left, q.left) > 0;
+    const cands: [number, number, number, string][] = [];
+    if (vOverlap) { cands.push([Math.abs(r.left - q.right), q.right - r.left, 0, "left"]); cands.push([Math.abs(r.right - q.left), q.left - r.right, 0, "right"]); }
+    if (hOverlap) { cands.push([Math.abs(r.top - q.bottom), 0, q.bottom - r.top, "top"]); cands.push([Math.abs(r.bottom - q.top), 0, q.top - r.bottom, "bottom"]); }
+    for (const [d, dx, dy, side] of cands) if (d <= SNAP_PX && (!best || d < best.d)) best = { d, dx, dy, side, other: o };
+  }
+  if (!best) return "";
+  card.style.right = "auto";
+  card.style.left = `${(parseFloat(card.style.left) || (r.left - p.left)) + best.dx}px`;
+  card.style.top = `${(parseFloat(card.style.top) || (r.top - p.top)) + best.dy}px`;
+  card.dataset["magnet" + best.side[0].toUpperCase() + best.side.slice(1)] = best.other.dataset.path || "";
+  stats.snapped = (stats.snapped || 0) + 1;
+  return best.side;
+}
+
 export function makeDraggable(card: HTMLElement, plane: HTMLElement, key: string, stats: PlaceStats,
                               onClick?: () => void): () => void {
   try {
@@ -60,6 +96,7 @@ export function makeDraggable(card: HTMLElement, plane: HTMLElement, key: string
     start = null;
     if (still && onClick) { onClick(); return; }
     stats.drags++;
+    snapToNeighbour(card, plane, stats);
     try { window.localStorage.setItem(key, JSON.stringify({ x: parseFloat(card.style.left) || 0, y: parseFloat(card.style.top) || 0 })); }
     catch { /* a convenience only */ }
   };
