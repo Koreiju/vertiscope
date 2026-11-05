@@ -10862,6 +10862,27 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "PG-130",
+      asks: "the graph bar's sidecar trigger (PLUGIN_GOAL 130): where \"euclidean\" was, a button whose dot is the sidecar's state; a click verifies it (store counts, powers) -- answering, it reads sidecar ●; planted (health failing, no launch on record, so nothing is started) it reads sidecar ✕",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          await window.__domvec.act("open", "graph"); await sleep(1500);
+          const P = app.plugins.plugins["domvec-bridge"];
+          const b = document.querySelector("button.domvec-sidecar-trigger");
+          const euclid = [...document.querySelectorAll("button")].some((x) => x.textContent === "euclidean");
+          if (!b) return { error: "no sidecar button", euclid };
+          const h0 = P.sidecar.health, L0 = P.settings.sidecarLaunch, n0 = P.sidecarStats.checked;
+          if (${planted}) { P.sidecar.health = () => Promise.reject(new Error("planted")); P.settings.sidecarLaunch = null; }
+          try { b.click(); for (let i = 0; i < 20 && /…/.test(b.textContent); i++) await sleep(250); await sleep(300);
+                return { planted: ${planted}, text: b.textContent, euclid, checked: P.sidecarStats.checked - n0 }; }
+          finally { P.sidecar.health = h0; P.settings.sidecarLaunch = L0; }
+        })()`, { timeout: 30000 });
+        const clean = await arm(false), planted = await arm(true);
+        return { pass: clean.text === "sidecar ●" && !clean.euclid && clean.checked === 1 && planted.text === "sidecar ✕", evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {
