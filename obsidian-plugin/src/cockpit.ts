@@ -82,6 +82,13 @@ export function rank1Of(text: string, limit = 12): string[] {
   return out;
 }
 
+/** A notebook: a note with code cells that is not itself a slate. */
+export function isNotebook(app: App, file: TFile | null): boolean {
+  if (!file || file.extension !== "md") return false;
+  const c = app.metadataCache.getFileCache(file);
+  return !!c?.sections?.some((x: any) => x.type === "code");
+}
+
 export function isSlate(app: App, file: TFile | null): boolean {
   if (!file) return false;
   const fm = app.metadataCache.getFileCache(file)?.frontmatter;
@@ -257,7 +264,13 @@ export class Cockpit {
       const v: any = l.view;
       const on = isSlate(this.app, v?.file || null);
       (l as any).containerEl?.toggleClass?.("domvec-slate", on);
-      if (on && v.contentEl && !this.slateHooked.has(v.contentEl)) this.hookSlate(v);
+      // A NOTEBOOK's markdown is a slate (PLUGIN_GOAL 131-132: "the slate is
+      // the markdown part of the notebook"): its lines outside the code fences
+      // take the slate's form and gestures; the fences stay cells. Planted
+      // `__domvecPlantNotebookPlain`: notebooks' markdown plain, as before.
+      const nb = !on && isNotebook(this.app, v?.file || null) && !(window as any).__domvecPlantNotebookPlain;
+      (l as any).containerEl?.toggleClass?.("domvec-nb-slate", nb);
+      if ((on || nb) && v.contentEl && !this.slateHooked.has(v.contentEl)) this.hookSlate(v);
       if (on) this.restoreFolds(v);
       if (v?.file?.path === COCKPIT_PATH && v.contentEl && !this.hooked.has(v.contentEl)) this.hook(v);
     }

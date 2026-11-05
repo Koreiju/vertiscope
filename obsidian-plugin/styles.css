@@ -1260,3 +1260,8 @@ button.domvec-run-fence:hover {
 /* G-331: a signal arriving at a panel -- a brief glow, in the order the pulse reaches it. */
 .domvec-panel-card.is-pulsed { box-shadow: 0 0 0 2px #fff1a8, 0 0 18px 6px rgba(255, 241, 168, 0.75); transition: box-shadow 120ms ease-out; }
 .domvec-panel-card.is-pulsed .domvec-plane-head-node { background: #fff1a8; color: #000; }
+
+/* PLUGIN_GOAL 131-132: a notebook's markdown is a slate -- its lines outside the
+   code fences in the slate's type and tab fields; the fences stay code cells. */
+.domvec-nb-slate .cm-line:not(.HyperMD-codeblock) {
+  font-family: Georgia, "Times New Roman", serif; tab-size: 3; -moz-tab-size: 3; white-space: pre; }
