@@ -5149,6 +5149,12 @@ answers; (131) the browser and ego panels on the plane are the same thing as
 a notebook's markdown cells -- one-to-one, one representation, not a second
 kind of panel beside the notebook's.*
 
+> so the "slate" is the markdown part of the notebook
+
+*Read as: (132) answering 131's question -- the SLATE is the notebook's
+markdown cell. So the browser and ego panels are slates: one kind, the
+notebook's markdown, rather than panel types of their own.*
+
 *And, having seen the strict scaled map live (6.6x for the world once sizes
 settle, ~95,000x for the ego craft; nodes specks at full view):*
 
