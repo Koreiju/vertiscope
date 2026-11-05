@@ -10883,6 +10883,40 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "PG-132",
+      asks: "a notebook's markdown is a slate (PLUGIN_GOAL 131-132: \"the slate is the markdown part of the notebook\"): a notebook opened on the plane -- its markdown lines in the slate's form (serif, tab fields) and the slate's gestures hooked, its code cell still a code cell; planted (__domvecPlantNotebookPlain) the markdown plain",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          window.__domvecPlantNotebookPlain = ${planted};
+          await window.__domvec.act("open", "graph"); await sleep(1500);
+          const desk = window.__domvecPlane;
+          const path = "domvec-checks/pg132 " + (${planted} ? "p" : "c") + Date.now() + ".md";
+          const NL = String.fromCharCode(10), TB = String.fromCharCode(9), BT = String.fromCharCode(96).repeat(3);
+          const text = ["notes", TB + "query" + TB + "small language models", TB + "k" + TB + "8", "", BT + "python", "x = 41", BT, ""].join(NL);
+          try {
+            await desk.create("notebook", { path, text });
+            let card = null;
+            for (let i = 0; i < 20 && !card; i++) { await sleep(300); card = [...document.querySelectorAll(".domvec-panel-card")].find((c) => c.dataset.path === path); }
+            await sleep(1500);
+            const leafEl = card && card.querySelector(".workspace-leaf, .view-content") ? card : null;
+            const lines = card ? [...card.querySelectorAll(".cm-line")] : [];
+            const md = lines.find((l) => /query/.test(l.textContent || ""));
+            const code = lines.find((l) => /x = 41/.test(l.textContent || ""));
+            const font = (el) => el ? getComputedStyle(el).fontFamily : "";
+            return { planted: ${planted}, card: !!card, nb_slate: !!(card && card.querySelector(".domvec-nb-slate, .domvec-nb-slate *")) || !!(card && card.closest(".domvec-nb-slate")) || !!(card && [...card.querySelectorAll("*")].some((e) => e.classList.contains("domvec-nb-slate"))),
+                     md_font: font(md).slice(0, 30), code_font: font(code).slice(0, 30) };
+          } finally {
+            window.__domvecPlantNotebookPlain = false;
+            const f = app.vault.getAbstractFileByPath(path); if (f) { try { desk.close && desk.close(path); } catch (e) {} await app.vault.trash(f, true); }
+          }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        const serif = (f) => /Georgia/.test(f);
+        return { pass: clean.card && serif(clean.md_font) && !serif(clean.code_font) && !serif(planted.md_font), evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {
