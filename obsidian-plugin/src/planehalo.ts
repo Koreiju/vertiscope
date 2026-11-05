@@ -50,7 +50,38 @@ export class PlaneHalo {
   private svg: SVGSVGElement | null = null;
   private centre = { x: 0, y: 0 };
   private lastMove = { x: 0, y: 0, t: 0 };
-  private onMove = (e: PointerEvent) => this.slide(e);
+  private onMove = (e: PointerEvent) => { this.mouse = { x: e.clientX, y: e.clientY }; if (this.plantDeltaSlide) this.slide(e); };
+  /** PLUGIN_GOAL 134(g): "the nodes slide over their deltas per the mouse's
+   *  proximity from the invisible fixed origin ... and the motion velocity
+   *  vector is the magnitude of the mouse from the origin" -- a joystick, not
+   *  a drag. Planted `plantDeltaSlide`: the pointer's own deltas, as before. */
+  plantDeltaSlide = false;
+  /** Planted (134g): the other panels stay open while "similar" runs. */
+  plantNoFold = false;
+  private mouse = { x: -1, y: -1 };
+  private raf = 0;
+  private lastTick = 0;
+  private folded: string[] = [];
+  drift = { ticks: 0, travelled: 0, culled: 0 };
+  private tick = (t: number) => {
+    if (!this.focus) return;
+    this.raf = window.requestAnimationFrame(this.tick);
+    const plane = this.host.plane(), p = this.host.desk.panelOf(this.focus);
+    const dt = this.lastTick ? Math.min(64, t - this.lastTick) : 16; this.lastTick = t;
+    if (!plane || !p || this.mouse.x < 0 || this.plantDeltaSlide) return;
+    const pr = plane.getBoundingClientRect(), cr = p.card.getBoundingClientRect();
+    if (this.mouse.x >= cr.left && this.mouse.x <= cr.right && this.mouse.y >= cr.top && this.mouse.y <= cr.bottom) return;
+    const ox = this.mouse.x - pr.left - this.centre.x, oy = this.mouse.y - pr.top - this.centre.y;
+    const k = 0.0025 * dt;                       // velocity = offset from the origin
+    const lim = this.stats.r0 + this.stats.R + 30;
+    let x = this.cursor.x + ox * k, y = this.cursor.y + oy * k;
+    const dx = x - this.centre.x, dy = y - this.centre.y, d = Math.hypot(dx, dy);
+    if (d > lim) { x = this.centre.x + (dx / d) * lim; y = this.centre.y + (dy / d) * lim; }
+    const step = Math.hypot(x - this.cursor.x, y - this.cursor.y);
+    if (step < 0.05) return;
+    this.cursor = { x, y }; this.drift.ticks++; this.drift.travelled += step; this.stats.slides++;
+    this.navigate(); this.draw(plane);
+  };
   private onDown = (e: PointerEvent) => this.stick(e);
   private onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && this.focus) this.close(); };
 
@@ -102,6 +133,13 @@ export class PlaneHalo {
     window.addEventListener("pointermove", this.onMove, true);
     window.addEventListener("pointerdown", this.onDown, true);
     window.addEventListener("keydown", this.onKey, true);
+    // The rest of the plane folds onto the query (134g), back on close.
+    this.folded = [];
+    if (!this.plantNoFold) for (const q of this.host.desk.panels) {
+      if (q.path === path || q.card.hasClass("is-collapsed")) continue;
+      this.host.desk.toggleMinimized(q.path); this.folded.push(q.path);
+    }
+    this.lastTick = 0; this.raf = window.requestAnimationFrame(this.tick);
     return true;
   }
 
@@ -370,7 +408,10 @@ export class PlaneHalo {
     const back = [...this.history.map((q) => ({ x: q.x, y: q.y })), this.centre, ...this.trace.map((i) => this.nodes[i])];
     if (back.length > 1) el("polyline", { points: back.map((q) => `${q.x},${q.y}`).join(" "), class: "trace" });
     for (const q of this.history) el("circle", { cx: q.x, cy: q.y, r: 5, class: "node past" });
+    // Only what is IN VIEW is drawn (134g).
+    const W = plane.clientWidth, H = plane.clientHeight;
     this.nodes.forEach((h, i) => {
+      if (h.x < -20 || h.y < -20 || h.x > W + 20 || h.y > H + 20) { this.drift.culled++; return; }
       el("circle", { cx: h.x, cy: h.y, r: 8, class: i === this.navigated ? "node lit" : "node" });
       el("text", { x: h.x + 11, y: h.y + 4, class: "label" }, h.label);
     });
@@ -381,6 +422,9 @@ export class PlaneHalo {
     if (!this.focus) return;
     this.focus = "";
     this.stats.closed++;
+    window.cancelAnimationFrame(this.raf); this.raf = 0;
+    for (const q of this.folded) { const pp = this.host.desk.panelOf(q); if (pp && pp.card.hasClass("is-collapsed")) this.host.desk.toggleMinimized(q); }
+    this.folded = [];
     window.removeEventListener("pointermove", this.onMove, true);
     window.removeEventListener("pointerdown", this.onDown, true);
     window.removeEventListener("keydown", this.onKey, true);

@@ -11290,6 +11290,47 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "PG-134-polar",
+      asks: "\"similar\" opens a polar navigation surface (PLUGIN_GOAL 134g): the rest of the plane folds onto the querying panel, the query node is a fixed invisible origin, and the surface moves with a velocity set by the mouse's offset from it -- a STILL mouse held off the origin keeps it moving; closing unfolds the rest; planted (plantDeltaSlide + plantNoFold) a still mouse moves nothing and nothing folds",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          await window.__domvec.act("open", "graph"); await sleep(1500);
+          const P = app.plugins.plugins["domvec-bridge"], desk = window.__domvecPlane, halo = P.halo;
+          halo.plantDeltaSlide = ${planted}; halo.plantNoFold = ${planted};
+          const NL = String.fromCharCode(10), tag = (${planted} ? "p" : "c") + Date.now();
+          const A = "domvec-checks/pg134g a " + tag + ".md", B = "domvec-checks/pg134g b " + tag + ".md";
+          const card = (p) => [...document.querySelectorAll(".domvec-panel-card")].find((c) => c.dataset.path === p);
+          try {
+            await desk.create("notebook", { path: A, text: "small language models and tries" + NL });
+            await desk.create("notebook", { path: B, text: "another cell" + NL });
+            let a = null, b = null;
+            for (let i = 0; i < 20 && !(a && b); i++) { await sleep(300); a = card(A); b = card(B); }
+            if (!a || !b) return { error: "no cards" };
+            const ok = await halo.open(A);
+            if (!ok) return { error: "halo did not open" };
+            await sleep(300);
+            const foldedB = b.classList.contains("is-collapsed");
+            const ar = a.getBoundingClientRect();
+            const s0 = halo.drift.travelled, c0 = { ...halo.cursor };
+            window.dispatchEvent(new PointerEvent("pointermove", { clientX: ar.right + 120, clientY: ar.bottom + 60, bubbles: true }));
+            await sleep(1200);
+            const travelled = Math.round(halo.drift.travelled - s0), moved = Math.round(Math.hypot(halo.cursor.x - c0.x, halo.cursor.y - c0.y));
+            const results = halo.nodes.length;
+            halo.close(); await sleep(300);
+            const restoredB = !b.classList.contains("is-collapsed");
+            return { planted: ${planted}, results, folded_other: foldedB, still_mouse_travel: travelled, cursor_moved: moved, restored_on_close: restoredB };
+          } finally {
+            halo.plantDeltaSlide = false; halo.plantNoFold = false; halo.close();
+            for (const p of [A, B]) { const f = app.vault.getAbstractFileByPath(p); if (f) await app.vault.trash(f, true); }
+          }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        return { pass: !clean.error && clean.folded_other && clean.cursor_moved > 5 && clean.restored_on_close
+                       && !planted.error && !planted.folded_other && planted.cursor_moved === 0, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {
