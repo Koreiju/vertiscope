@@ -11482,24 +11482,33 @@ export function makeChecks(env) {
             if (!P) return { error: "no picture with a neighbour" };
             const d = [Q.x - P.x, Q.y - P.y, (Q.z||0) - (P.z||0)], L = Math.hypot(...d);
             const back = L + Math.max(80, 4 * L);
-            const at = { x: P.x + d[0] / L * back, y: P.y + d[1] / L * back, z: (P.z||0) + d[2] / L * back };
-            g.cameraPosition(at, { x: P.x, y: P.y, z: P.z || 0 }, 0);
-            await sleep(600);
-            // The camera a little OFF the P-Q line, so Q overlaps P's picture
-            // without lying on the pointer's ray: P is what is aimed at.
+            // A side direction, perpendicular to P->Q.
+            let side = [-d[1], d[0], 0]; if (Math.hypot(...side) < 1e-6) side = [0, -d[2], d[1]];
+            const sl = Math.hypot(...side); side = side.map((x) => x / sl);
             const W = v.canvasEl.clientWidth, H = v.canvasEl.clientHeight;
-            const sp = g.graph2ScreenCoords(P.x, P.y, P.z || 0), sq = g.graph2ScreenCoords(Q.x, Q.y, Q.z || 0);
-            const rP = v.lookOf(P, g.nodeRelSize(), v.drawnMedia).half;
-            const e2 = cam.matrixWorld.elements, depth = Math.hypot(at.x - P.x, at.y - P.y, at.z - (P.z || 0));
-            const px = rP * H * cam.projectionMatrix.elements[5] / (2 * depth);
-            let ux = sp.x - sq.x, uy = sp.y - sq.y; const ul = Math.hypot(ux, uy) || 1; ux /= ul; uy /= ul; if (ul < 0.5) { ux = 1; uy = 0; }
-            const off = Math.max(3, Math.min(px * 0.7, 40));
-            const s = { x: sp.x + ux * off, y: sp.y + uy * off };
+            const pxOf = (n, depth) => v.drawnRadiusOf(n) * H * cam.projectionMatrix.elements[5] / (2 * depth);
+            let scene = null;
+            // Slide the camera sideways until Q's disc overlaps P's picture
+            // (presented at >= 12 px) but sits off P's centre, where the pointer goes.
+            for (let k = 0; k <= 60 && !scene; k++) {
+              const sh = k * L * 0.02;
+              const at = { x: P.x + d[0] / L * back + side[0] * sh, y: P.y + d[1] / L * back + side[1] * sh, z: (P.z||0) + d[2] / L * back + side[2] * sh };
+              g.cameraPosition(at, { x: P.x, y: P.y, z: P.z || 0 }, 0);
+              await sleep(80);                  // a frame: the camera's matrices are the drawn ones
+              const sp = g.graph2ScreenCoords(P.x, P.y, P.z || 0), sq = g.graph2ScreenCoords(Q.x, Q.y, Q.z || 0);
+              const dq = Math.hypot(at.x - Q.x, at.y - Q.y, at.z - (Q.z||0));
+              const rq = pxOf(Q, dq), sep = Math.hypot(sp.x - sq.x, sp.y - sq.y);
+              if (sp.x < 0 || sp.y < 0 || sp.x > W || sp.y > H) continue;
+              if (sep > rq * 1.15 + 2 && sep < 12 + rq - 1) scene = { sp, sq, sep: Math.round(sep), rq: Math.round(rq * 10) / 10, shift: k };
+            }
+            if (!scene) return { error: "no partial-overlap scene", planted: ${planted} };
+            await sleep(600);
+            const s = scene.sp;
             v.pointerNdc = [s.x / W * 2 - 1, -(s.y / H * 2 - 1)]; v.detailDirty = true; v.detailAt = 0;
             v.refreshDetail(g); v.batchSync();
             await sleep(300);
             const lookQ = v.lookOf(Q, g.nodeRelSize(), v.drawnMedia);
-            return { planted: ${planted}, presented: v.presented === P, q_in_front: v.dimFront.has(Q), q_alpha: lookQ.alpha, dimmed: v.dimFront.size };
+            return { planted: ${planted}, presented: v.presented === P, q_in_front: v.dimFront.has(Q), q_alpha: lookQ.alpha, dimmed: v.dimFront.size, scene };
           } finally { v.plantNoFrontDim = false; g.cameraPosition(keep, undefined, 0); }
         `);
         await arm(true);                      // warm-up: chunk view in, pictures landed; discarded
