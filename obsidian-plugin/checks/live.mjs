@@ -11253,6 +11253,43 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "PG-133-one-markdown",
+      asks: "one markdown panel, the same code everywhere (PLUGIN_GOAL 133): a stuck chunk panel's markdown half is a real Obsidian editor over the chunk's note -- the notebook cell's own editor, with its extensions -- not a separate static render; planted (plantStaticMarkdown) the static render, no editor",
+      async run() {
+        const arm = (planted) => inPane(`
+          v.plantStaticMarkdown = ${planted};
+          let opened = null, pinned = "";
+          const chunks = () => v.graph.graphData().nodes.filter((n) => !n.force && n.level !== "page" && n.level !== "path" && Number.isFinite(n.x));
+          try {
+            if (chunks().length < 2) {
+              const pg = v.graph.graphData().nodes.find((n) => n.level === "page" && !n.force && (n.members || 0) >= 5 && (n.members || 0) <= 200 && /^https:/.test(String(n.url)));
+              if (pg) { const r = await v.togglePage(pg); if (r && r.action === "expand") opened = pg; }
+              for (let i = 0; i < 20 && chunks().length < 2; i++) await sleep(500);
+            }
+            const n = chunks()[1] || chunks()[0]; if (!n) return { error: "no chunk" };
+            pinned = String(n.id); await v.pinChunk(pinned); await sleep(800);
+            const e = v.billboards.get(pinned); if (!e) return { error: "no billboard" };
+            await v.renderForm(e, "markdown"); await sleep(1500);
+            const editor = e.el.querySelector(".domvec-bb-cell .cm-editor");
+            const staticMd = e.el.querySelector(".domvec-bb-md");
+            const text = editor ? (editor.querySelector(".cm-content") || {}).textContent || "" : (staticMd ? staticMd.textContent : "");
+            const want = String(v.chunkMarkdown(e.payload || (await v.chunkPayload(pinned))) || "").trim();
+            const f = e.cellPath ? app.vault.getAbstractFileByPath(e.cellPath) : null;
+            const note = f ? (await app.vault.read(f)).trim() : "";
+            const shown = editor ? (editor.querySelectorAll(".cm-line").length) : 0;
+            return { planted: ${planted}, editor: !!editor, static_render: !!staticMd, note: e.cellPath || "", has_text: !!want && note === want, editor_lines: shown };
+          } finally {
+            v.plantStaticMarkdown = false;
+            if (pinned) { v.unpinChunk(pinned); v.closeBillboard && v.closeBillboard(pinned); }
+            if (opened) await v.togglePage(opened);
+          }
+        `);
+        const clean = await arm(false), planted = await arm(true);
+        return { pass: !clean.error && clean.editor && /^domvec\/chunks\//.test(clean.note) && clean.has_text && !planted.error && !planted.editor && planted.static_render,
+                 evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {

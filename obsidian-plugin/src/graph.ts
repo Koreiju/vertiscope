@@ -3797,6 +3797,17 @@ export class GraphView extends ItemView {
       // 2026-10-19: "form none" from the graph).
       if (fallback && entry.form === "page" && !this.plantPanelRace) return true;
       body.empty();
+      // A STUCK panel's markdown half is the notebook's own markdown cell --
+      // the same Obsidian editor, with every feature the notes have (the
+      // retrieval links, slate folds, code refs, run buttons), because those
+      // are editor extensions and a static render has none of them
+      // (PLUGIN_GOAL 133: "the panel is the exact same code over all three").
+      // A hovered preview stays the light render. Planted
+      // `plantStaticMarkdown`: every panel the static render, as before.
+      if (entry.el.hasClass("is-stuck") && !this.plantStaticMarkdown) {
+        const cellMd = this.chunkMarkdown(entry.payload);
+        if (await this.mountCell(entry, body, cellMd)) return true;
+      }
       const host = body.createDiv({ cls: "domvec-bb-md markdown-rendered" });
       const md = this.chunkMarkdown(entry.payload);
       if (!md.trim()) host.setText("(no lines stored for this chunk)");
@@ -7336,6 +7347,7 @@ export class GraphView extends ItemView {
     const entry: any = this.billboards.get(id);
     if (!entry) return;
     if (entry.surface) this.removeChild(entry.surface);
+    if (entry.cellLeaf) { try { entry.cellLeaf.detach(); } catch { /* gone */ } entry.cellLeaf = null; }
     entry.el.remove();
     this.billboards.delete(id);
     this.stopBillboardLoop();
@@ -7404,12 +7416,39 @@ export class GraphView extends ItemView {
     // same two-view billboard, held where it opened instead of following its
     // node; its head drags it. Planted `plantPinFollows`: it follows, as before.
     const stuck: any = this.billboards.get(drawnAs);
-    if (stuck && !this.plantPinFollows) { stuck.pinned = true; stuck.el.addClass("is-stuck"); stuck.el.removeClass("is-preview"); this.stuckPins++; }
+    if (stuck && !this.plantPinFollows) {
+      stuck.pinned = true; stuck.el.addClass("is-stuck"); stuck.el.removeClass("is-preview"); this.stuckPins++;
+      if (stuck.form !== "page") await this.renderForm(stuck, "markdown").catch(() => false);
+    }
     if (drawnAs !== cid) {
       this.pinAlias.set(cid, drawnAs);
       const entry: any = this.billboards.get(drawnAs);
       if (entry) (entry.pins = entry.pins || new Set()).add(cid);
     }
+    return true;
+  }
+  /** Planted (133): stuck panels' markdown the static render, as before. */
+  plantStaticMarkdown = false;
+  cellStats = { mounted: 0, written: 0 };
+  /** The chunk's markdown as a NOTE, opened in a real editor leaf inside the
+   *  panel -- one markdown panel for billboards, code panels and notebook
+   *  cells. Kept at `domvec/chunks/<cid>.md`; an edit there is the reader's. */
+  async mountCell(entry: any, body: HTMLElement, md: string): Promise<boolean> {
+    const cid = String(entry.node.id).replace(/[^\w.-]+/g, "_");
+    const folder = "domvec/chunks", path = `${folder}/${cid}.md`;
+    const vault = this.app.vault;
+    if (!vault.getAbstractFileByPath(folder)) await vault.createFolder(folder).catch(() => undefined);
+    let f: any = vault.getAbstractFileByPath(path);
+    if (!f) { f = await vault.create(path, md || ""); this.cellStats.written++; }
+    const Leaf: any = (this.app.workspace as any).activeLeaf?.constructor ?? (this.app.workspace.getMostRecentLeaf() as any)?.constructor;
+    if (!Leaf) return false;
+    if (entry.cellLeaf) { try { entry.cellLeaf.detach(); } catch { /* gone */ } }
+    const leaf = new Leaf(this.app);
+    const box = body.createDiv({ cls: "domvec-bb-cell" });
+    box.appendChild(leaf.containerEl);
+    await leaf.openFile(f, { state: { mode: "source", source: false } } as any);
+    entry.cellLeaf = leaf; entry.cellPath = path;
+    this.cellStats.mounted++;
     return true;
   }
   /** Planted (134): a right-click on a panel's head does not carry it. */
