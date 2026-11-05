@@ -8097,16 +8097,17 @@ export class GraphView extends ItemView {
       if (!this.plantAllPairsSpacing) {
         nodes.forEach((a, i) => { const [x, y, z] = at(a); const k = keyOf(x, y, z); const l = grid.get(k); if (l) l.push(i); else grid.set(k, [i]); });
       }
+      const placed = (a: any) => Number.isFinite((a.x ?? 0) + (a.y ?? 0) + (a.z ?? 0));
       for (let i = 0; i < n; i++) {
         const drawn = drawnOf[i];
-        if (drawn <= 0) continue;
+        if (drawn <= 0 || !placed(nodes[i])) continue;
         const reach = drawn / 0.45;
         const [ax, ay, az] = at(nodes[i]);
         let nearest = Infinity;
         const rings = Math.ceil(reach / cell);
         if (this.plantAllPairsSpacing || Math.pow(2 * rings + 1, 3) > n) {
           for (let j = 0; j < n; j++) {
-            if (i === j) continue;
+            if (i === j || !placed(nodes[j])) continue;
             const [bx, by, bz] = at(nodes[j]);
             const d = Math.hypot(ax - bx, ay - by, az - bz);
             if (d > 1e-6 && d < nearest) nearest = d;
@@ -8124,7 +8125,7 @@ export class GraphView extends ItemView {
         }
         if (!Number.isFinite(nearest)) continue;
         const allowed = Math.max(nearest * 0.45, drawn * floorShare);
-        if (drawn > allowed) out[i] = allowed;
+        if (drawn > allowed * (1 + 1e-9)) out[i] = allowed;
       }
       return out;
     }
@@ -8132,10 +8133,16 @@ export class GraphView extends ItemView {
     const cxs = new Int32Array(n), cys = new Int32Array(n), czs = new Int32Array(n);
     const key = (x: number, y: number, z: number) => (Math.imul(x, 73856093) ^ Math.imul(y, 19349663) ^ Math.imul(z, 83492791));
     const grid = new Map<number, number[]>();
+    const unplaced = new Uint8Array(n);
     for (let i = 0; i < n; i++) {
       const a = nodes[i];
       xs[i] = a.x ?? 0; ys[i] = a.y ?? 0; zs[i] = a.z ?? 0;
       cxs[i] = Math.floor(xs[i] / cell); cys[i] = Math.floor(ys[i] / cell); czs[i] = Math.floor(zs[i] / cell);
+      // An UNPLACED node (NaN position) has no room and takes none (G-254):
+      // an Int32Array turns NaN into 0, which filed it in the origin's cell
+      // as a neighbour of whatever really sits there -- 7 of 844 verdicts
+      // differed from the old path, which kept it in a "NaN" cell of its own.
+      if (!Number.isFinite(xs[i] + ys[i] + zs[i])) { unplaced[i] = 1; continue; }
       if (this.plantAllPairsSpacing) continue;
       const k = key(cxs[i], cys[i], czs[i]);
       const l = grid.get(k); if (l) l.push(i); else grid.set(k, [i]);
@@ -8143,14 +8150,14 @@ export class GraphView extends ItemView {
     const EPS2 = 1e-12;
     for (let i = 0; i < n; i++) {
       const drawn = drawnOf[i];
-      if (drawn <= 0) continue;
+      if (drawn <= 0 || unplaced[i]) continue;
       const reach = drawn / 0.45;
       const ax = xs[i], ay = ys[i], az = zs[i];
       let near2 = Infinity;
       const rings = Math.ceil(reach / cell);
       if (this.plantAllPairsSpacing || Math.pow(2 * rings + 1, 3) > n) {
         for (let j = 0; j < n; j++) {
-          if (i === j) continue;
+          if (i === j || unplaced[j]) continue;
           const dx = ax - xs[j], dy = ay - ys[j], dz = az - zs[j];
           const d2 = dx * dx + dy * dy + dz * dz;
           if (d2 > EPS2 && d2 < near2) near2 = d2;
@@ -8171,7 +8178,11 @@ export class GraphView extends ItemView {
       }
       if (!Number.isFinite(near2)) continue;
       const allowed = Math.max(Math.sqrt(near2) * 0.45, drawn * floorShare);
-      if (drawn > allowed) out[i] = allowed;
+      // MATERIALLY over its room (G-254): a node the last pass already fitted
+      // sits at drawn == allowed to the last bits, where hypot and sqrt round
+      // differently -- 7-49 verdicts flipped between the two paths, and a
+      // fitted node was re-shrunk by a rounding error on every settle.
+      if (drawn > allowed * (1 + 1e-9)) out[i] = allowed;
     }
     return out;
   }
