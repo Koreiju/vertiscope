@@ -5155,6 +5155,30 @@ kind of panel beside the notebook's.*
 markdown cell. So the browser and ego panels are slates: one kind, the
 notebook's markdown, rather than panel types of their own.*
 
+*2026-11-04, later:*
+
+> I should be able to move the computational graph editor nodes/panels *across* panes like the 3D world viewer and the browser. When I right click the overlaid chunk box, the panel should (instead of showing in the clipboard) then emerge as its 2D editor equivalent, the exact same thing as the billboards (two-view; web rendered and markdown) but just as "stuck" panels in the 2D plane with the same set of panel designs. The markdown-half of a special dual-view artifact should be the exact same thing as our current node/code markdown panels (with all the extra features ontop of code element references and the markdown-side syntax for python code graphs, and also with the [query](result scrollable list) style of links and retrievals as one merged thing), which should be the exact same thing as the markdown cells in the notebook level aggregate of each of the types of panels. That means the panel is the *exact same code* over all three. Not three different markdowns. But each should incorporate all markdown-wise rendering per obsidian default as well as the special syntax and retrieval-link features in the default obsidian markdown style panels *exactly*. 
+>
+> Instead of buttons for creating only three different notebook-level cells (where notebook needs to be "markdown" to respect the levels), we will have a retrieval bar for the different typed nodes from our code-side artifacts since we're looking for the full space of variety of access to all nodes our computation graph computes, deeper than just inputs and outputs and of course extensive to the full concrete syntax graph that we compute to get dependencies and variable references from regular python code artifacts. This means we go for "code cell" "markdown cell" and "browser cell" within a retrieval space that includes the generalities as well. All this needs to be built. Code cells need to have the full set of vscode capabilities. markdown with the aggregate of special features from each of the three unique contributors as a single thing. Also, minimize and exit panels on the jupyter parts, and perhaps other panels, do not yet exist. 
+>
+> Soft links are subsumed by "similar" button on the jupyternotebook panel currently. 
+>
+> The notebooks also must be able to be resized with "Ctrl + and Ctrl -"
+
+*Read as (133): (a) plane panels move ACROSS panes -- the 3D viewer, the
+browser; (b) a right-click on the browser's chunk box opens the chunk as a
+STUCK 2D panel (not the clipboard), the same two-view design as the
+billboards (web-rendered and markdown); (c) ONE markdown panel, the same code,
+for a billboard's markdown half, a code/node panel and a notebook's markdown
+cell -- Obsidian's own markdown rendering plus every special feature (code
+element refs, the python code-graph syntax, `[query](results)` retrieval
+links); (d) the plane's `+ notebook / + slate / + browser` buttons become a
+RETRIEVAL BAR over every typed node the computation graph computes (the full
+concrete syntax graph), offering code, markdown and browser cells; (e) code
+cells with VS Code's capabilities; (f) minimize and exit on notebook panels
+(and others); (g) "soft links" removed, subsumed by "similar"; (h) Ctrl+= /
+Ctrl+- resize a notebook panel.*
+
 *And, having seen the strict scaled map live (6.6x for the world once sizes
 settle, ~95,000x for the ego craft; nodes specks at full view):*
 

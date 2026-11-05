@@ -809,6 +809,9 @@ export class BrowserView extends ItemView {
   /** Told by the plugin: a drain's delta, decoded here, for the force tree
    *  (`G-89`) -- before the capture's round trip. */
   onDrain: (delta: ForceNodeDelta) => void = () => {};
+  /** Pages whose chunk map is loading: their drains wait for it (G-221). */
+  private mapReady = new Map<string, Promise<void>>();
+  mapHeld = 0;
   /** One chunk tree per page, fed by that page's drains. */
   private forceTrees = new Map<string, ForceTree>();
 
@@ -2231,6 +2234,9 @@ export class BrowserView extends ItemView {
       // patch it, and every hover resolved to nothing). Only while the map is
       // still empty: a capture that patched it meanwhile is newer than a
       // reload would be. Planted: one attempt, as before.
+      // The map's arrival, for the drains that must not beat it (G-221).
+      let mapDone: () => void = () => {};
+      this.mapReady.set(url, new Promise<void>((r) => { mapDone = r; }));
       const loadMap = async (): Promise<boolean> => {
         for (const wait of this.plant.has("map-once") ? [0] : [0, 1500, 4000, 10000, 25000]) {
           if (wait) await new Promise((r) => window.setTimeout(r, wait));
@@ -2242,7 +2248,7 @@ export class BrowserView extends ItemView {
         }
         return false;
       };
-      void loadMap().then(() => {
+      void loadMap().finally(() => { mapDone(); this.mapReady.delete(url); }).then(() => {
         if (map.url !== url || this.session !== url) return;
         this.scheduleFormSaver();
         if (map.nodes.length) this.onChunks(map.nodes, [], "");
@@ -2750,7 +2756,24 @@ export class BrowserView extends ItemView {
         // large the boxes waited for it -- 545 ms p50 to paint, against
         // 5-9 ms when the graph was small. rAF, then a task: the paint
         // happens between them.
-        window.requestAnimationFrame(() => window.setTimeout(() => this.onDrain(delta), 0));
+        // A STORED page's drain waits for its chunk map (G-221): landing
+        // again, the first drain beat the map and was checked against nothing
+        // -- 11 of 30 stored chunks drawn again as new on every return. Held
+        // at most 4 s; then checked again against the map that came in.
+        // Planted `drain-before-map`: sent at once, as before.
+        const ready = this.mapReady.get(url);
+        if (ready && !this.plant.has("drain-before-map")) {
+          this.mapHeld++;
+          void Promise.race([ready, new Promise((r) => window.setTimeout(r, 4000))]).then(() => {
+            const ids = new Set(delta.added.map((a) => a.id));
+            const again = this.coversFor(url, tree!.held().filter((h) => ids.has(h.id)));
+            delta.covers = { ...(delta.covers || {}), ...again };
+            delta.settled = [...new Set([...(delta.settled || []), ...this.settledOf(url, delta.covers)])];
+            window.requestAnimationFrame(() => window.setTimeout(() => this.onDrain(delta), 0));
+          });
+        } else {
+          window.requestAnimationFrame(() => window.setTimeout(() => this.onDrain(delta), 0));
+        }
       }
     }
     if (!payload || !(payload.chunks || []).length) {
