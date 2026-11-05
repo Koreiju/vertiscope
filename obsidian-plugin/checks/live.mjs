@@ -10949,6 +10949,46 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "PG-133-panel-tools",
+      asks: "notebook panels (PLUGIN_GOAL 133): no soft-link field (subsumed by similar); a minimize and an exit tool on the header; Ctrl+= and Ctrl+- resize the panel; planted (plantSoftLinkField + plantNoPanelZoom) the field is back and the keys do nothing",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          await window.__domvec.act("open", "graph"); await sleep(1500);
+          const desk = window.__domvecPlane;
+          desk.plantSoftLinkField = ${planted}; desk.plantNoPanelZoom = ${planted};
+          const path = "domvec-checks/pg133 " + (${planted} ? "p" : "c") + Date.now() + ".md";
+          const BT = String.fromCharCode(96).repeat(3), NL = String.fromCharCode(10);
+          try {
+            await desk.create("notebook", { path, text: ["notes", "", BT + "python", "x = 1", BT, ""].join(NL) });
+            let card = null;
+            for (let i = 0; i < 20 && !card; i++) { await sleep(300); card = [...document.querySelectorAll(".domvec-panel-card")].find((c) => c.dataset.path === path); }
+            if (!card) return { error: "no card" };
+            await sleep(800);
+            const soft = !!card.querySelector(".domvec-plane-softlink");
+            const min = card.querySelector(".is-minimize"), exit = card.querySelector(".is-exit");
+            const target = card.querySelector(".cm-content") || card;
+            const key = (k) => target.dispatchEvent(new KeyboardEvent("keydown", { key: k, ctrlKey: true, bubbles: true, cancelable: true }));
+            key("="); const z1 = Number(card.dataset.zoom || "1");
+            key("-"); const z2 = Number(card.dataset.zoom || "1");
+            if (min) min.click(); await sleep(300);
+            const collapsed = card.classList.contains("is-collapsed");
+            if (min) min.click(); await sleep(200);
+            if (exit) exit.click(); await sleep(500);
+            const closed = !card.isConnected;
+            return { planted: ${planted}, soft_field: soft, minimize: !!min, exit: !!exit, zoom_up: z1, zoom_back: z2, collapsed, closed };
+          } finally {
+            desk.plantSoftLinkField = false; desk.plantNoPanelZoom = false;
+            const f = app.vault.getAbstractFileByPath(path); if (f) await app.vault.trash(f, true);
+          }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        return { pass: !clean.error && !clean.soft_field && clean.minimize && clean.exit && clean.zoom_up > 1.05 && Math.abs(clean.zoom_back - 1) < 0.02
+                       && clean.collapsed && clean.closed && planted.soft_field && planted.zoom_up === 1,
+                 evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {

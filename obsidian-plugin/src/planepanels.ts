@@ -60,10 +60,14 @@ const SLATE_TEXT = (name: string) => `---\ndomvec: slate\n---\n${name}\n\tvalue\
 
 export class PlaneDesk {
   panels: PlanePanel[] = [];
-  stats = { created: 0, opened: 0, closed: 0, deleted: 0, minimized: 0, restored: 0, own_view: 0 };
+  stats: Record<string, number> = { created: 0, opened: 0, closed: 0, deleted: 0, minimized: 0, restored: 0, own_view: 0, zoomed: 0 };
   place: PlaceStats = { drags: 0, clamped: 0 };
   /** Planted (item 66): panels open in a workspace tab, off the plane. */
   plantOwnView = false;
+  /** Planted (133): the soft-link field back on panel headers. */
+  plantSoftLinkField = false;
+  /** Planted (133): Ctrl+= / Ctrl+- leave the panel alone. */
+  plantNoPanelZoom = false;
   private toolsEl: HTMLElement | null = null;
   /** The panel the reader last touched, and when: a plane panel is never
    *  the workspace's active leaf, so "the note the reader is in" asks here. */
@@ -193,9 +197,16 @@ export class PlaneDesk {
         tool("‹ sooner", "is-sooner", () => { void this.fan(file.path, -1); });
         tool("later ›", "is-later", () => { void this.fan(file.path, 1); });
         tool("similar", "is-similar", () => this.host.headerClick?.(file.path));
-        const field = head.createEl("input", { cls: "domvec-plane-softlink", attr: { placeholder: "soft links…" } });
-        field.onmousedown = (e) => e.stopPropagation();
-        field.onkeydown = (e) => { if (e.key === "Enter" && field.value.trim()) { e.preventDefault(); this.host.haloQuery?.(file.path, field.value); } };
+        // PLUGIN_GOAL 133: "soft links" is subsumed by "similar" (the field
+        // is gone; planted `plantSoftLinkField` puts it back); minimize and
+        // exit, which notebook panels did not have.
+        if (this.plantSoftLinkField) {
+          const field = head.createEl("input", { cls: "domvec-plane-softlink", attr: { placeholder: "soft links…" } });
+          field.onmousedown = (e) => e.stopPropagation();
+          field.onkeydown = (e) => { if (e.key === "Enter" && field.value.trim()) { e.preventDefault(); this.host.haloQuery?.(file.path, field.value); } };
+        }
+        tool("–", "is-minimize", () => { this.toggleMinimized(file.path); });
+        tool("×", "is-exit", () => { const q = this.panelOf(file.path); if (q) q.leaf.detach(); });
         chip.onmousedown = (e) => e.stopPropagation();
         chip.onclick = async (e) => {
           e.preventDefault(); e.stopPropagation();
@@ -221,6 +232,19 @@ export class PlaneDesk {
       this.hook(p);
       if (opts.mount) { const pp = p; const undo = await opts.mount(card); if (undo) pp.cleanup = undo; clampToPlane(card, plane); }
       const path = file.path;
+      // Ctrl+= / Ctrl+- (and Ctrl+0) resize THIS panel (PLUGIN_GOAL 133),
+      // captured before Obsidian's own zoom of the whole app.
+      card.addEventListener("keydown", (e: KeyboardEvent) => {
+        if (!(e.ctrlKey || e.metaKey) || this.plantNoPanelZoom) return;
+        const k = e.key;
+        if (k !== "=" && k !== "+" && k !== "-" && k !== "0") return;
+        e.preventDefault(); e.stopPropagation();
+        const now = Number(card.dataset.zoom || "1");
+        const next = k === "0" ? 1 : Math.min(3, Math.max(0.4, Math.round((now * (k === "-" ? 1 / 1.1 : 1.1)) * 100) / 100));
+        card.dataset.zoom = String(next);
+        (card.style as any).zoom = String(next);
+        this.stats.zoomed = (this.stats.zoomed || 0) + 1;
+      }, true);
       card.addEventListener("pointerdown", () => this.focus(path), true);
       card.addEventListener("focusin", () => this.focus(path), true);
       // `detach` closes the panel: the card goes with its leaf.
