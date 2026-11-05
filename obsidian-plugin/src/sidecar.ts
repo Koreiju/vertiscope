@@ -21,6 +21,12 @@ export class Sidecar {
 
   /** The chat cell's reply, token by token (PLUGIN_GOAL 134): `onToken` sees
    *  each piece as the model makes it; resolves to the whole reply. */
+  /** Code nodes by name, for the plane's retrieval bar (PLUGIN_GOAL 133). */
+  async codeNodes(q: string): Promise<any[]> {
+    const got: any = await this.get("/code_nodes?q=" + encodeURIComponent(q) + "&k=12");
+    return (got && Array.isArray(got.nodes)) ? got.nodes : [];
+  }
+
   async chatStream(prompt: string, context: string[], onToken: (t: string) => void): Promise<string> {
     const base = this.base().trim().replace(/\/+$/, "");
     const r = await fetch(base + "/chat_stream", { method: "POST",

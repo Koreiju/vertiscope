@@ -36,6 +36,8 @@ export interface PlaneHost {
   changed?(): void;
   /** A note just shown in a panel (the plugin's notebook bookkeeping). */
   opened?(file: TFile): void;
+  /** The retrieval bar's code nodes by name (PLUGIN_GOAL 133). */
+  codeNodes?(q: string): Promise<any[]>;
   /** The `+ browser` tool: the browser cell as a panel (item 71). */
   openBrowser?(): void;
   /** A click (no drag) on a panel's header node: its halo (item 81). */
@@ -119,6 +121,7 @@ export class PlaneDesk {
     if (!plane) return null;
     if (this.toolsEl && plane.contains(this.toolsEl)) return this.toolsEl;
     const el = plane.createDiv({ cls: "domvec-plane-tools" });
+    if (!this.plantToolButtons) { this.buildRetrievalBar(el); this.toolsEl = el; void this.restore(); return el; }
     for (const kind of ["notebook", "slate"] as const) {
       const b = el.createEl("button", { text: "+ " + kind, cls: "domvec-plane-tool" });
       b.dataset.kind = kind;
@@ -132,6 +135,57 @@ export class PlaneDesk {
     this.toolsEl = el;
     void this.restore();
     return el;
+  }
+
+  /** Planted (133): the three create buttons, as before the retrieval bar. */
+  plantToolButtons = false;
+  retrieveStats = { queries: 0, node_hits: 0, picked: 0, last_kind: "" };
+  /**
+   * The RETRIEVAL BAR (PLUGIN_GOAL 133: "Instead of buttons for creating only
+   * three different notebook-level cells ... a retrieval bar for the different
+   * typed nodes from our code-side artifacts ... code cell, markdown cell and
+   * browser cell within a retrieval space that includes the generalities"):
+   * one field; its results are the three general cells, then every typed node
+   * of the code property graph whose name matches, each with its kind. A node
+   * picked opens as a cell holding its reference.
+   */
+  private buildRetrievalBar(el: HTMLElement): void {
+    const input = el.createEl("input", { cls: "domvec-plane-retrieve", attr: { placeholder: "cell or node…" } });
+    const list = el.createDiv({ cls: "domvec-plane-retrieve-list" });
+    input.onmousedown = (e) => e.stopPropagation();
+    type Hit = { label: string; kind: string; act: () => void };
+    const general: Hit[] = [
+      { label: "code cell", kind: "cell", act: () => { void this.create("notebook"); } },
+      { label: "markdown cell", kind: "cell", act: () => { void this.create("slate"); } },
+      { label: "browser cell", kind: "cell", act: () => { this.host.openBrowser?.(); } },
+    ];
+    let seq = 0;
+    const show = (hits: Hit[]) => {
+      list.empty();
+      for (const h of hits) {
+        const row = list.createDiv({ cls: "domvec-plane-retrieve-hit" });
+        row.createSpan({ cls: "domvec-plane-retrieve-kind", text: h.kind });
+        row.createSpan({ text: " " + h.label });
+        row.onmousedown = (e) => { e.preventDefault(); e.stopPropagation(); this.retrieveStats.picked++; this.retrieveStats.last_kind = h.kind; list.empty(); input.value = ""; h.act(); };
+      }
+    };
+    const run = async () => {
+      const q = input.value.trim().toLowerCase(), my = ++seq;
+      this.retrieveStats.queries++;
+      const hits = general.filter((g) => !q || g.label.includes(q));
+      let nodes: any[] = [];
+      if (q.length >= 2 && this.host.codeNodes) nodes = await this.host.codeNodes(q).catch(() => []);
+      if (my !== seq) return;
+      this.retrieveStats.node_hits = nodes.length;
+      const BT = String.fromCharCode(96).repeat(3), NL = String.fromCharCode(10);
+      for (const n of nodes) hits.push({ label: `${n.qname || n.name}`, kind: String(n.kind || "node"), act: () => {
+        void this.create("notebook", { text: [`${n.kind} [${n.qname || n.name}](${n.url}${n.line ? "#L" + n.line : ""})`, "", BT + "python", `# ${n.qname || n.name}`, BT, ""].join(NL) });
+      } });
+      show(hits);
+    };
+    input.oninput = () => { void run(); };
+    input.onfocus = () => { void run(); };
+    input.onblur = () => window.setTimeout(() => list.empty(), 150);
   }
 
   /** The `+ notebook` / `+ slate` tool: a new note, opened on the plane. With

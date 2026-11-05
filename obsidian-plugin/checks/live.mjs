@@ -11178,6 +11178,39 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "PG-133-retrieval-bar",
+      asks: "the plane's create buttons become a RETRIEVAL BAR (PLUGIN_GOAL 133): one field whose results are the general code / markdown / browser cells and every typed node of the code property graph matching the query, each with its kind; a node picked opens as a cell referencing it; planted (plantToolButtons) the three buttons, no bar",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          await window.__domvec.act("open", "graph"); await sleep(1500);
+          const D = window.__domvecPlane; D.plantToolButtons = ${planted};
+          for (const t of document.querySelectorAll(".domvec-plane-tools")) t.remove();
+          D.toolsEl = null; D.ensureTools(); await sleep(500);
+          const input = document.querySelector(".domvec-plane-retrieve");
+          const buttons = document.querySelectorAll(".domvec-plane-tool").length;
+          if (!input) { D.plantToolButtons = false; for (const t of document.querySelectorAll(".domvec-plane-tools")) t.remove(); D.toolsEl = null; D.ensureTools(); return { planted: ${planted}, bar: false, buttons }; }
+          input.focus(); input.value = "cell"; input.dispatchEvent(new Event("input")); await sleep(400);
+          const general = [...document.querySelectorAll(".domvec-plane-retrieve-hit")].map((h) => h.textContent.trim());
+          input.value = "trie"; input.dispatchEvent(new Event("input"));
+          let hits = [];
+          for (let i = 0; i < 20; i++) { await sleep(300); hits = [...document.querySelectorAll(".domvec-plane-retrieve-hit")]; if (hits.length) break; }
+          const kinds = [...new Set(hits.map((h) => (h.querySelector(".domvec-plane-retrieve-kind") || {}).textContent))];
+          const before = new Set(app.vault.getMarkdownFiles().map((f) => f.path));
+          const nodeHit = hits.find((h) => (h.querySelector(".domvec-plane-retrieve-kind") || {}).textContent !== "cell");
+          let opened = "";
+          if (nodeHit) { nodeHit.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true })); await sleep(1500);
+            const made = app.vault.getMarkdownFiles().find((f) => !before.has(f.path));
+            if (made) { opened = (await app.vault.read(made)).split(String.fromCharCode(10))[0]; await app.vault.trash(made, true); } }
+          D.plantToolButtons = false; for (const t of document.querySelectorAll(".domvec-plane-tools")) t.remove(); D.toolsEl = null; D.ensureTools();
+          return { planted: ${planted}, bar: true, buttons, general, node_hits: hits.length, kinds, opened: opened.slice(0, 80) };
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        return { pass: clean.bar && clean.buttons === 0 && clean.general.filter((g) => g.startsWith("cell ")).length === 3 && clean.node_hits >= 1 && clean.kinds.length >= 1 && /\]\(code:\/\//.test(clean.opened)
+                       && !planted.bar && planted.buttons >= 2, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {

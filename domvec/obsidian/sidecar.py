@@ -4424,6 +4424,23 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(200, {"note": note, "runs": self.workspace.store.runs_of(note)})
             return
 
+        if segments[0] == "code_nodes":
+            # The plane's RETRIEVAL BAR (PLUGIN_GOAL 133): every typed node the
+            # code property graph holds -- module, class, function, statement --
+            # matched by name, with its kind and address.
+            try:
+                q = str((parse_qs(parts.query).get("q") or [""])[0]).strip().lower()
+                k = max(1, min(50, int((parse_qs(parts.query).get("k") or ["12"])[0])))
+                rows = self.workspace.store._rows(
+                    "MATCH (n:CodeNode) WHERE lower(n.name) CONTAINS $q "
+                    "RETURN n.key, n.url, n.xpath, n.kind, n.name, n.qname, n.line LIMIT $k",
+                    {"q": q, "k": k}) if q else []
+                self._send(200, {"nodes": [{"key": r[0], "url": r[1], "xpath": r[2], "kind": r[3], "name": r[4],
+                                            "qname": r[5], "line": r[6]} for r in rows]})
+            except Exception as exc:                # noqa: BLE001
+                self._send(500, {"error": "%s: %s" % (type(exc).__name__, exc)})
+            return
+
         if segments[0] == "codegraph":
             # The code graph (item 93): its size, and a name's place in it --
             # kind, PageRank percentile, neighbours.
