@@ -19,6 +19,20 @@ import { CaptureResult, ChunkPayload, ChunkPreview, EnactPlan, EnactResult, Heal
 export class Sidecar {
   constructor(private base: () => string) {}
 
+  /** The chat cell's reply, token by token (PLUGIN_GOAL 134): `onToken` sees
+   *  each piece as the model makes it; resolves to the whole reply. */
+  async chatStream(prompt: string, context: string[], onToken: (t: string) => void): Promise<string> {
+    const base = this.base().trim().replace(/\/+$/, "");
+    const r = await fetch(base + "/chat_stream", { method: "POST",
+      headers: { "Content-Type": "application/json", "X-Domvec-Client": "obsidian-plugin" },
+      body: JSON.stringify({ prompt, context }) });
+    if (!r.ok || !r.body) throw new Error("chat_stream " + r.status);
+    const rd = r.body.getReader(), dec = new TextDecoder();
+    let all = "";
+    for (;;) { const { done, value } = await rd.read(); if (done) break; const t = dec.decode(value, { stream: true }); if (t) { all += t; onToken(t); } }
+    return all;
+  }
+
   private url(path: string): string | null {
     const base = this.base().trim().replace(/\/+$/, "");
     return base ? `${base}${path}` : null;

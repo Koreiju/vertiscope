@@ -11068,6 +11068,59 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "PG-134-chat",
+      asks: "a chat-model cell on the plane (PLUGIN_GOAL 134): its text the prompt, the cells magnetized around its edges the ONLY context, the reply a separate response cell snapped beneath it and streamed per token -- a context cell (\"the secret word is tangerine\") snapped to the chat cell's left edge, the chat asked: the reply names it, in many tokens with the first well before the last; planted (__domvecPlantNoMagnet) nothing snaps, so no context and no tangerine",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          window.__domvecPlantNoMagnet = ${planted};
+          await window.__domvec.act("open", "graph"); await sleep(1500);
+          const desk = window.__domvecPlane;
+          const NL = String.fromCharCode(10), tag = (${planted} ? "p" : "c") + Date.now();
+          const A = "domvec-checks/pg134 ctx " + tag + ".md", C = "domvec-checks/pg134 chat " + tag + ".md";
+          const card = (p) => [...document.querySelectorAll(".domvec-panel-card")].find((c) => c.dataset.path === p);
+          const made = [A, C];
+          try {
+            await desk.create("notebook", { path: A, text: "The secret word for this conversation is tangerine." + NL });
+            await desk.create("notebook", { path: C, text: ["---", "domvec: chat", "---", "What is the secret word? Answer with the word only.", ""].join(NL) });
+            let a = null, c = null;
+            for (let i = 0; i < 20 && !(a && c); i++) { await sleep(300); a = card(A); c = card(C); }
+            if (!a || !c) return { error: "no cards" };
+            a.style.right = "auto"; a.style.left = "30px"; a.style.top = "200px"; await sleep(200);
+            const ra = a.getBoundingClientRect();
+            const head = c.querySelector(".domvec-plane-head-node") || c;
+            const hr = head.getBoundingClientRect(), cr = c.getBoundingClientRect();
+            const gx = hr.left + 5, gy = hr.top + hr.height / 2, dx = (ra.right + 8) - cr.left, dy = (ra.top + 10) - cr.top;
+            head.dispatchEvent(new MouseEvent("mousedown", { clientX: gx, clientY: gy, button: 0, bubbles: true, cancelable: true }));
+            window.dispatchEvent(new MouseEvent("mousemove", { clientX: gx + dx, clientY: gy + dy, bubbles: true }));
+            window.dispatchEvent(new MouseEvent("mouseup", { clientX: gx + dx, clientY: gy + dy, bubbles: true }));
+            await sleep(400);
+            // Asked through its own header tool, as a reader asks.
+            for (let i = 0; i < 15 && !(c.querySelector(".is-ask") && c.querySelector(".is-ask").style.display !== "none"); i++) await sleep(300);
+            const s0 = { ...desk.chatStats };
+            const ask = c.querySelector(".is-ask");
+            if (!ask || ask.style.display === "none") return { error: "no ask tool" };
+            const t0 = performance.now();
+            const reply = await desk.askChat(C);
+            const ms = Math.round(performance.now() - t0);
+            const rp = [...app.vault.getMarkdownFiles()].map((f) => f.path).filter((p) => p.startsWith(C.replace(/\.md$/, "") + " reply"));
+            made.push(...rp);
+            const rcard = rp[0] ? card(rp[0]) : null;
+            return { planted: ${planted}, context_cells: desk.chatStats.context_cells, tokens: desk.chatStats.tokens - s0.tokens,
+                     first_token_ms: desk.chatStats.first_token_ms, total_ms: ms, says_tangerine: /tangerine/i.test(reply || ""),
+                     reply: String(reply || "").slice(0, 80), response_cell: !!rcard, response_below: !!(rcard && rcard.dataset.magnetTop === C) };
+          } finally {
+            window.__domvecPlantNoMagnet = false;
+            for (const p of made) { const f = app.vault.getAbstractFileByPath(p); if (f) await app.vault.trash(f, true); }
+          }
+        })()`, { timeout: 240000 });
+        const clean = await arm(false), planted = await arm(true);
+        return { pass: !clean.error && clean.context_cells >= 1 && clean.says_tangerine && clean.tokens >= 2 && clean.response_cell && clean.response_below
+                       && clean.first_token_ms < clean.total_ms && !planted.error && planted.context_cells === 0 && !planted.says_tangerine,
+                 evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {

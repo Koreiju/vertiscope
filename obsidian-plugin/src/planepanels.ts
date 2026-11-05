@@ -40,6 +40,8 @@ export interface PlaneHost {
   openBrowser?(): void;
   /** A click (no drag) on a panel's header node: its halo (item 81). */
   headerClick?(path: string): void;
+  /** The chat cell's model, streamed (PLUGIN_GOAL 134). */
+  chatStream?(prompt: string, context: string[], onToken: (t: string) => void): Promise<string>;
   /** The soft-link field's query: the halo laid out for it (item 90). */
   haloQuery?(path: string, query: string): void;
   /** The ego's notes (the craft's), for the sooner / later fans (item 90). */
@@ -56,6 +58,7 @@ const OPEN_KEY = "domvec-plane-panels";
 
 // No heading: the header node IS the note's name (item 54, drawn once).
 const NOTEBOOK_TEXT = (_name: string) => "```python\n\n```\n";
+const RESPONSE_HEAD = ["---", "domvec: response", "---", ""].join(String.fromCharCode(10));
 const SLATE_TEXT = (name: string) => `---\ndomvec: slate\n---\n${name}\n\tvalue\t\n`;
 
 export class PlaneDesk {
@@ -205,6 +208,16 @@ export class PlaneDesk {
           field.onmousedown = (e) => e.stopPropagation();
           field.onkeydown = (e) => { if (e.key === "Enter" && field.value.trim()) { e.preventDefault(); this.host.haloQuery?.(file.path, field.value); } };
         }
+        // A CHAT cell's ask (PLUGIN_GOAL 134). Decided again when the note's
+        // metadata lands: a note just created has none yet.
+        tool("ask ▸", "is-ask", () => { void this.askChat(file.path); });
+        const askEl = head.querySelector(".is-ask") as HTMLElement;
+        const isChat = () => String(this.app.metadataCache.getFileCache(file)?.frontmatter?.domvec || "") === "chat";
+        const paintAsk = () => { askEl.style.display = isChat() ? "" : "none"; };
+        paintAsk();
+        const ref = this.app.metadataCache.on("changed", (f: TFile) => { if (f.path === file.path) paintAsk(); });
+        window.setTimeout(paintAsk, 600);
+        card.addEventListener("domvec-closed", () => this.app.metadataCache.offref(ref));
         tool("–", "is-minimize", () => { this.toggleMinimized(file.path); });
         tool("×", "is-exit", () => { const q = this.panelOf(file.path); if (q) q.leaf.detach(); });
         chip.onmousedown = (e) => e.stopPropagation();
@@ -542,6 +555,63 @@ export class PlaneDesk {
   }
 
   /** Minimized: the card is its header node alone (items 54-55). */
+  chatStats = { asks: 0, tokens: 0, context_cells: 0, last_ms: 0, first_token_ms: 0 };
+  /** The cells magnetized around `path`, recursively -- its context (PLUGIN_GOAL 134). */
+  magnetized(path: string): string[] {
+    const seen = new Set<string>([path]), order: string[] = [];
+    const sides = ["magnetLeft", "magnetRight", "magnetTop", "magnetBottom"];
+    const cards = () => this.panels.map((p) => p.card);
+    const queue = [path];
+    while (queue.length) {
+      const at = queue.shift()!;
+      const mine = this.panelOf(at)?.card;
+      const next = new Set<string>();
+      if (mine) for (const k of sides) { const v = (mine.dataset as any)[k]; if (v) next.add(v); }
+      for (const c of cards()) for (const k of sides) if ((c.dataset as any)[k] === at && c.dataset.path) next.add(c.dataset.path);
+      for (const n of next) if (!seen.has(n)) { seen.add(n); order.push(n); queue.push(n); }
+    }
+    return order;
+  }
+  /** A chat cell asked (PLUGIN_GOAL 134): its text the prompt, the cells
+   *  magnetized around it (recursively, truncated) the ONLY context; the reply
+   *  a separate response cell snapped beneath it, written token by token. */
+  async askChat(path: string): Promise<string> {
+    const f = this.app.vault.getAbstractFileByPath(path) as TFile | null;
+    const p = this.panelOf(path);
+    if (!f || !p || !this.host.chatStream) return "";
+    const strip = (t: string) => t.replace(/^---[\s\S]*?---\s*/, "").trim();
+    const prompt = strip(await this.app.vault.read(f));
+    const ctx: string[] = [];
+    let budget = 6000;
+    for (const q of this.magnetized(path)) {
+      const g = this.app.vault.getAbstractFileByPath(q) as TFile | null;
+      if (!g || budget <= 0) continue;
+      const t = strip(await this.app.vault.read(g)).slice(0, budget);
+      if (t) { ctx.push(t); budget -= t.length; }
+    }
+    this.chatStats.asks++; this.chatStats.context_cells = ctx.length;
+    const dir = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
+    let rp = "";
+    for (let i = 1; ; i++) { rp = `${dir ? dir + "/" : ""}${f.basename} reply ${i}.md`; if (!this.app.vault.getAbstractFileByPath(rp)) break; }
+    await this.create("notebook", { path: rp, text: RESPONSE_HEAD });
+    const rc = this.panelOf(rp)?.card, pc = p.card;
+    if (rc) {
+      rc.style.right = "auto"; rc.style.left = pc.style.left || `${pc.offsetLeft}px`;
+      rc.style.top = `${pc.offsetTop + pc.offsetHeight}px`;
+      rc.dataset.magnetTop = path;
+    }
+    const rf = this.app.vault.getAbstractFileByPath(rp) as TFile;
+    const editor: any = (this.panelOf(rp)?.leaf?.view as any)?.editor;
+    const t0 = performance.now(); let first = 0, n = 0;
+    const reply = await this.host.chatStream(prompt, ctx, (tok) => {
+      n++; if (!first) first = performance.now() - t0;
+      if (editor) { const end = editor.offsetToPos(editor.getValue().length); editor.replaceRange(tok, end); }
+    });
+    if (!editor) await this.app.vault.modify(rf, RESPONSE_HEAD + reply);
+    this.chatStats.tokens += n; this.chatStats.last_ms = Math.round(performance.now() - t0); this.chatStats.first_token_ms = Math.round(first);
+    return reply;
+  }
+
   toggleMinimized(path: string): boolean {
     const p = this.panelOf(path);
     if (!p) return false;

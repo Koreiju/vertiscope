@@ -2977,6 +2977,57 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(200, got)
             return
 
+        if route == "chat_stream":
+            # The plane's CHAT CELL (PLUGIN_GOAL 134): one prompt, its context
+            # the cells magnetized around it (sent by the plugin, already
+            # truncated), the reply written token by token as the model makes
+            # it -- plain text, flushed per token, the connection closed at
+            # the end. Its own model session: the browser cell's is closed
+            # first and reopens on its next turn. Loopback only.
+            if self.client_address[0] not in ("127.0.0.1", "::1"):
+                self._send(403, {"error": "loopback only"})
+                return
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(length) or b"{}") or {}
+            except Exception as exc:                # noqa: BLE001
+                self._send(400, {"error": "bad body: %s" % exc})
+                return
+            prompt = str(body.get("prompt") or "").strip()
+            if not prompt:
+                self._send(400, {"error": "no prompt"})
+                return
+            context = [str(c) for c in (body.get("context") or []) if str(c).strip()]
+            from .. import chat as _chat
+            with _chat._GLOBAL:
+                if _chat._BACKEND[0] is None:
+                    _chat._BACKEND[0] = _chat.HermesBackend()
+                be = _chat._BACKEND[0]
+                be.close()
+                _chat._ACTIVE[0] = ""
+            NL = chr(10)
+            text = ("Context, the cells beside this one:" + NL + NL + (NL + NL + "---" + NL + NL).join(context) + NL + NL if context else "") + prompt
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Connection", "close")
+            self.end_headers()
+            t0 = time.time(); n = 0
+            try:
+                m = be._load()
+                with m.chat_session(_chat.SYSTEM, _chat.TEMPLATE):
+                    for tok in m.generate(text, max_tokens=int(body.get("max_tokens") or 400), temp=0.3, streaming=True):
+                        self.wfile.write(str(tok).encode("utf-8")); self.wfile.flush(); n += 1
+            except Exception as exc:                # noqa: BLE001
+                try:
+                    self.wfile.write((chr(10) + "[error: %s]" % exc).encode("utf-8"))
+                except Exception:                   # noqa: BLE001
+                    pass
+            _profile("chat_stream", {"tokens": n, "context": len(context), "ms": round((time.time() - t0) * 1000)})
+            self.close_connection = True
+            return
+
         if route == "chat":
             # The browser cell's chat (`G-43`..`G-45`, `domvec/chat.py`): a turn
             # is the reader's prompt plus the chunks pinned since the last
