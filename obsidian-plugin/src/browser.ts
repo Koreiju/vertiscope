@@ -2240,6 +2240,9 @@ export class BrowserView extends ItemView {
       let mapDone: () => void = () => {};
       this.mapReady.set(url, new Promise<void>((r) => { mapDone = r; }));
       const loadMap = async (): Promise<boolean> => {
+        // A test condition (G-221's check): the map arrives late, so the
+        // first drain does beat it, in both arms. Never set outside a check.
+        if (this.plant.has("slow-map")) await new Promise((r) => window.setTimeout(r, 2500));
         for (const wait of this.plant.has("map-once") ? [0] : [0, 1500, 4000, 10000, 25000]) {
           if (wait) await new Promise((r) => window.setTimeout(r, wait));
           if (map.url !== url && wait) return false;

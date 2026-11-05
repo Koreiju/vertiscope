@@ -10934,12 +10934,13 @@ export function makeChecks(env) {
             let cids = [], same = 0;
             for (let i = 0; i < 40 && same < 3; i++) { await sleep(1000); const now = await v.sidecar.pageCids(PAGE); same = now.length && now.join() === cids.join() ? same + 1 : 0; cids = now; }
             b.go("about:blank"); await sleep(4000);
+            b.plant.add("slow-map");
             if (${planted}) b.plant.add("drain-before-map");
             if (!(await land(PAGE, 30000))) return { error: "no return" };
             let peak = 0;
             for (let i = 0; i < 12; i++) { await sleep(500); peak = Math.max(peak, drawnNew()); }
             return { planted: ${planted}, stored: cids.length, streamed_again_peak: peak, grey_after_6s: grey() };
-          } finally { b.plant.delete("drain-before-map"); }
+          } finally { b.plant.delete("drain-before-map"); b.plant.delete("slow-map"); }
         })()`, { timeout: 150000 });
         try {
           const clean = await arm(false), planted = await arm(true);
