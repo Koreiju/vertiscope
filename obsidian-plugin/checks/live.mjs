@@ -10925,7 +10925,7 @@ export function makeChecks(env) {
           ${PREP}
           const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
           b.plant.delete("no-settle");
-          const PAGE = ${JSON.stringify(fixtures.origin + "/structured_data.html?g221=")} + (${planted} ? "p" : "c") + Date.now();
+          const PAGE = ${JSON.stringify(fixtures.origin + "/records_catalog.html?g221=")} + (${planted} ? "p" : "c") + Date.now();
           const grey = () => [...v.forceSpecs.values()].filter((s) => s.parent && !s.branch && String(s.url).split("#")[0] === PAGE && !s.cid).length;
           const drawnNew = () => [...v.forceSpecs.values()].filter((s) => s.parent && !s.branch && String(s.url).split("#")[0] === PAGE).length;
           try {
