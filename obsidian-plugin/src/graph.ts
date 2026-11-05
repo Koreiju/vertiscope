@@ -1995,6 +1995,10 @@ export class GraphView extends ItemView {
     // trie has one (2026-10-11, "all the recursive chunks linked to their
     // root URL node"). Planted: the per-slice passes only.
     if (placed && !this.plantSliceContainment) await this.drawContainment();
+    // Its chunks' payloads fetched ahead (G-224): the click that follows an
+    // unfold opened its panel cold -- the prefetch ran only for the page
+    // being BROWSED.
+    if (placed) this.prefetchPayloads(url);
     // The page's streamed chunks come back with its stored ones (G-199).
     if (!this.plantFoldForgets) { const before = this.graph.graphData().nodes.length; this.redrawForce(); placed += Math.max(0, this.graph.graphData().nodes.length - before); }
     return out("expand", placed);

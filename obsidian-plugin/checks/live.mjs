@@ -11518,6 +11518,42 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-224",
+      asks: "click-to-panel latency brought down (PLUGIN_GOAL 153): a page unfolded as a click unfolds it, six of its chunks opened through the click's own call, each timed until the chunk's OWN first line is in the panel -- with the payload prefetch, against planted (plantShortPayloadCache: no prefetch, cache emptied) the same six cold",
+      async run() {
+        const arm = (planted) => inPane(`
+          v.plantShortPayloadCache = ${planted};
+          let opened = null; const times = [];
+          const chunks = () => v.graph.graphData().nodes.filter((n) => !n.force && n.level !== "page" && n.level !== "path" && Number.isFinite(n.x));
+          try {
+            if (${planted}) v.payloadCache.clear();
+            const pg = v.graph.graphData().nodes.filter((n) => n.level === "page" && !n.force && (n.members || 0) >= 8 && (n.members || 0) <= 200 && /^https:/.test(String(n.url)))[0];
+            if (!pg) return { error: "no page" };
+            const r = await v.togglePage(pg); if (r && r.action === "expand") opened = pg;
+            await sleep(3000);
+            const mine = chunks().filter((n) => String(n.url).split("#")[0] === String(pg.url).split("#")[0]).slice(0, 6);
+            for (const n of mine) {
+              const t0 = performance.now();
+              const pay = await v.chunkPayload(String(n.id));
+              const words = ((pay && pay.lines) || []).map((l) => String(l.text || "").replace(/\]\([^)]*\)/g, " ")).join(" ").match(/[A-Za-z]{5,}/g) || [];
+              const first = words[0] || "";
+              const tOpen = performance.now();
+              await v.openBillboard(n);
+              const e = v.billboards.get(String(n.id));
+              let ms = null;
+              for (let i = 0; i < 100 && e; i++) { if (first && (e.el.textContent || "").includes(first)) { ms = performance.now() - t0; break; } await sleep(10); }
+              times.push(ms === null ? null : Math.round(ms));
+              v.closeBillboard(String(n.id));
+            }
+            const ok = times.filter((x) => x !== null).sort((a, b) => a - b);
+            return { planted: ${planted}, page: String(pg.url).slice(-40), n: ok.length, p50: ok[ok.length >> 1], p90: ok[Math.floor(0.9 * (ok.length - 1))], times };
+          } finally { v.plantShortPayloadCache = false; if (opened) await v.togglePage(opened); }
+        `);
+        const clean = await arm(false), planted = await arm(true);
+        return { pass: !clean.error && clean.n >= 4 && !planted.error && planted.n >= 4 && clean.p90 < planted.p90, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {
