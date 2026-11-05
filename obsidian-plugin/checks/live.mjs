@@ -11299,11 +11299,16 @@ export function makeChecks(env) {
           const P = app.plugins.plugins["domvec-bridge"], desk = window.__domvecPlane, halo = P.halo;
           halo.plantDeltaSlide = ${planted}; halo.plantNoFold = ${planted};
           const NL = String.fromCharCode(10), tag = (${planted} ? "p" : "c") + Date.now();
-          const A = "domvec-checks/pg134g a " + tag + ".md", B = "domvec-checks/pg134g b " + tag + ".md";
+          const texts = ["Radix tries compress chains of single-child nodes in a prefix tree.", "A patricia trie is a radix tree with binary branching over bit strings.",
+                         "Suffix trees index every suffix of a string for substring search.", "Prefix trees store keys by shared prefixes; radix variants merge edges."];
+          const ps = texts.map((_, i) => "domvec-checks/pg134g " + i + " " + tag + ".md");
+          const A = ps[0], B = ps[1];
           const card = (p) => [...document.querySelectorAll(".domvec-panel-card")].find((c) => c.dataset.path === p);
           try {
-            await desk.create("notebook", { path: A, text: "small language models and tries" + NL });
-            await desk.create("notebook", { path: B, text: "another cell" + NL });
+            for (let i = 0; i < 4; i++) await desk.create("notebook", { path: ps[i], text: texts[i] + NL });
+            await sleep(800);
+            for (const p of ps) { const f = app.vault.getAbstractFileByPath(p); if (f) await P.indexNote(f, "check").catch(() => null); }
+            await sleep(3000);
             let a = null, b = null;
             for (let i = 0; i < 20 && !(a && b); i++) { await sleep(300); a = card(A); b = card(B); }
             if (!a || !b) return { error: "no cards" };
@@ -11311,22 +11316,28 @@ export function makeChecks(env) {
             if (!ok) return { error: "halo did not open" };
             await sleep(300);
             const foldedB = b.classList.contains("is-collapsed");
-            const ar = a.getBoundingClientRect();
+            const plane = a.parentElement.getBoundingClientRect();
+            const target = halo.nodes[0];
             const s0 = halo.drift.travelled, c0 = { ...halo.cursor };
-            window.dispatchEvent(new PointerEvent("pointermove", { clientX: ar.right + 120, clientY: ar.bottom + 60, bubbles: true }));
-            await sleep(1200);
+            let reached = false;
+            if (target) {
+              const dx = target.x - halo.cursor.x, dy = target.y - halo.cursor.y, d = Math.hypot(dx, dy) || 1;
+              window.dispatchEvent(new PointerEvent("pointermove", { clientX: plane.left + halo.cursor.x + dx / d * 160, clientY: plane.top + halo.cursor.y + dy / d * 160, bubbles: true }));
+              for (let i = 0; i < 30 && !reached; i++) { await sleep(100); reached = halo.navigated >= 0; }
+              window.dispatchEvent(new PointerEvent("pointermove", { clientX: plane.left + halo.cursor.x, clientY: plane.top + halo.cursor.y, bubbles: true }));
+            }
             const travelled = Math.round(halo.drift.travelled - s0), moved = Math.round(Math.hypot(halo.cursor.x - c0.x, halo.cursor.y - c0.y));
             const results = halo.nodes.length;
             halo.close(); await sleep(300);
             const restoredB = !b.classList.contains("is-collapsed");
-            return { planted: ${planted}, results, folded_other: foldedB, still_mouse_travel: travelled, cursor_moved: moved, restored_on_close: restoredB };
+            return { planted: ${planted}, results, folded_other: foldedB, still_mouse_travel: travelled, cursor_moved: moved, reached_result: reached, restored_on_close: restoredB };
           } finally {
             halo.plantDeltaSlide = false; halo.plantNoFold = false; halo.close();
-            for (const p of [A, B]) { const f = app.vault.getAbstractFileByPath(p); if (f) await app.vault.trash(f, true); }
+            for (const p of ps) { const f = app.vault.getAbstractFileByPath(p); if (f) await app.vault.trash(f, true); }
           }
         })()`, { timeout: 60000 });
         const clean = await arm(false), planted = await arm(true);
-        return { pass: !clean.error && clean.folded_other && clean.cursor_moved > 5 && clean.restored_on_close
+        return { pass: !clean.error && clean.results >= 1 && clean.reached_result && clean.folded_other && clean.cursor_moved > 5 && clean.restored_on_close
                        && !planted.error && !planted.folded_other && planted.cursor_moved === 0, evidence: { clean, planted } };
       },
     },
