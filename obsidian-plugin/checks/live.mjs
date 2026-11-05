@@ -11342,6 +11342,50 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "PG-133-cross-pane",
+      asks: "panels move ACROSS panes (PLUGIN_GOAL 133: \"move the computational graph editor nodes/panels across panes like the 3D world viewer and the browser\"): a notebook panel dragged by its header onto the browser pane lands on it, at the drop point; dragged back onto the 3D view it returns to the plane; planted (__domvecPlantNoCrossPane) it never leaves the plane",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          ${PREP}
+          window.__domvecPlantNoCrossPane = ${planted};
+          const desk = window.__domvecPlane;
+          const path = "domvec-checks/pg133 pane " + (${planted} ? "p" : "c") + Date.now() + ".md";
+          const NL = String.fromCharCode(10);
+          try {
+            await desk.create("notebook", { path, text: "a cell that travels" + NL });
+            let card = null;
+            for (let i = 0; i < 20 && !card; i++) { await sleep(300); card = [...document.querySelectorAll(".domvec-panel-card")].find((c) => c.dataset.path === path); }
+            if (!card) return { error: "no card" };
+            const plane = card.parentElement;
+            const bleaf = app.workspace.getLeavesOfType("domvec-browser-view")[0].view.containerEl;
+            const glead = app.workspace.getLeavesOfType("domvec-graph-view")[0].view.containerEl;
+            const drag = async (tx, ty) => {
+              const head = card.querySelector(".domvec-plane-head-node") || card;
+              const hr = head.getBoundingClientRect(), gx = hr.left + 6, gy = hr.top + hr.height / 2;
+              head.dispatchEvent(new MouseEvent("mousedown", { clientX: gx, clientY: gy, button: 0, bubbles: true, cancelable: true }));
+              window.dispatchEvent(new MouseEvent("mousemove", { clientX: tx, clientY: ty, bubbles: true }));
+              window.dispatchEvent(new MouseEvent("mouseup", { clientX: tx, clientY: ty, bubbles: true }));
+              await sleep(400);
+            };
+            const br = bleaf.getBoundingClientRect();
+            await drag(br.left + br.width * 0.5, br.top + br.height * 0.55);
+            const onBrowser = bleaf.contains(card);
+            const cr = card.getBoundingClientRect();
+            const atDrop = Math.abs(cr.left - (br.left + br.width * 0.5 - 6)) < 40;
+            const gr = glead.getBoundingClientRect();
+            await drag(gr.left + gr.width * 0.5, gr.top + gr.height * 0.6);
+            const back = plane.contains(card);
+            return { planted: ${planted}, on_browser: onBrowser, at_drop: atDrop, back_on_plane: back };
+          } finally {
+            window.__domvecPlantNoCrossPane = false;
+            const f = app.vault.getAbstractFileByPath(path); if (f) await app.vault.trash(f, true);
+          }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        return { pass: !clean.error && clean.on_browser && clean.at_drop && clean.back_on_plane && !planted.error && !planted.on_browser, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {

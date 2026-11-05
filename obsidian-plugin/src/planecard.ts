@@ -61,8 +61,39 @@ export function snapToNeighbour(card: HTMLElement, plane: HTMLElement, stats: an
   return best.side;
 }
 
-export function makeDraggable(card: HTMLElement, plane: HTMLElement, key: string, stats: PlaceStats,
+/** The pane under (x, y) a card may live on: the 3D view's plane itself, or
+ *  another workspace leaf's content (the browser cell, a note). Planted
+ *  `__domvecPlantNoCrossPane`: none, the card stays on its plane. */
+export function paneUnder(card: HTMLElement, x: number, y: number, home: HTMLElement): HTMLElement | null {
+  if ((window as any).__domvecPlantNoCrossPane) return null;
+  const was = card.style.pointerEvents; card.style.pointerEvents = "none";
+  const under = document.elementFromPoint(x, y) as HTMLElement | null;
+  card.style.pointerEvents = was;
+  if (!under) return null;
+  if (home.contains(under) || under === home) return home;
+  const leaf = under.closest(".workspace-leaf-content") as HTMLElement | null;
+  return leaf && !leaf.contains(home) ? leaf : null;
+}
+
+/** Re-parent `card` onto `to`, keeping it where it was dropped on screen. */
+export function moveToPane(card: HTMLElement, from: HTMLElement, to: HTMLElement, x: number, y: number): void {
+  const r = card.getBoundingClientRect();
+  if (getComputedStyle(to).position === "static") to.style.position = "relative";
+  to.appendChild(card);
+  const t = to.getBoundingClientRect();
+  card.style.position = "absolute"; card.style.right = "auto"; card.style.zIndex = "30";
+  // At the DROP point (the header grabbed near its left end), not where the
+  // drag left it clamped to the pane it came from.
+  card.style.left = `${Math.round(Math.max(0, x - t.left - 6))}px`; card.style.top = `${Math.round(Math.max(0, y - t.top - Math.min(12, r.height / 2)))}px`;
+  card.dataset.pane = to === from ? "" : (to.closest(".workspace-leaf")?.querySelector(".view-header-title")?.textContent || "pane");
+}
+
+export function makeDraggable(card: HTMLElement, home: HTMLElement, key: string, stats: PlaceStats,
                               onClick?: () => void): () => void {
+  // The pane the card is on NOW: the 3D view's plane, or another pane it was
+  // carried to (PLUGIN_GOAL 133: "move the computational graph editor
+  // nodes/panels *across* panes like the 3D world viewer and the browser").
+  let plane = home;
   try {
     const saved = JSON.parse(window.localStorage.getItem(key) || "null");
     if (saved && Number.isFinite(saved.x) && Number.isFinite(saved.y)) {
@@ -96,6 +127,7 @@ export function makeDraggable(card: HTMLElement, plane: HTMLElement, key: string
     start = null;
     if (still && onClick) { onClick(); return; }
     stats.drags++;
+    if (e) { const to = paneUnder(card, e.clientX, e.clientY, home); if (to && to !== plane) { moveToPane(card, plane, to, e.clientX, e.clientY); plane = to; (stats as any).crossed = ((stats as any).crossed || 0) + 1; } }
     snapToNeighbour(card, plane, stats);
     try { window.localStorage.setItem(key, JSON.stringify({ x: parseFloat(card.style.left) || 0, y: parseFloat(card.style.top) || 0 })); }
     catch { /* a convenience only */ }
