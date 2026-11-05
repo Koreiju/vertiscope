@@ -11121,6 +11121,63 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "PG-134-carry",
+      asks: "a right-clicked chunk panel sticks to the mouse and is carried until the next right-click (PLUGIN_GOAL 134): a pinned chunk's billboard right-clicked, carried over a notebook panel and right-clicked again -- the chunk's markdown is now in that cell's note; planted (plantNoCarry) nothing is carried and the note is unchanged",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          await window.__domvec.act("open", "graph"); await sleep(1500);
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          v.plantNoCarry = ${planted};
+          const desk = window.__domvecPlane;
+          const NL = String.fromCharCode(10), path = "domvec-checks/pg134 carry " + (${planted} ? "p" : "c") + Date.now() + ".md";
+          let opened = null, pinned = "";
+          const chunks = () => v.graph.graphData().nodes.filter((n) => !n.force && n.level !== "page" && n.level !== "path" && Number.isFinite(n.x));
+          try {
+            await desk.create("notebook", { path, text: "cell" + NL });
+            let card = null;
+            for (let i = 0; i < 20 && !card; i++) { await sleep(300); card = [...document.querySelectorAll(".domvec-panel-card")].find((c) => c.dataset.path === path); }
+            if (!card) return { error: "no cell" };
+            card.style.right = "auto"; card.style.left = "40px"; card.style.top = "260px";
+            if (chunks().length < 2) {
+              const pg = v.graph.graphData().nodes.find((n) => n.level === "page" && !n.force && (n.members || 0) >= 5 && (n.members || 0) <= 200 && /^https:/.test(String(n.url)));
+              if (pg) { const r = await v.togglePage(pg); if (r && r.action === "expand") opened = pg; }
+              for (let i = 0; i < 20 && chunks().length < 2; i++) await sleep(500);
+            }
+            const n = chunks()[0]; if (!n) return { error: "no chunk" };
+            pinned = String(n.id);
+            await v.pinChunk(pinned); await sleep(1200);
+            const e = v.billboards.get(pinned); if (!e) return { error: "no billboard" };
+            const pay = await v.chunkPayload(pinned);
+            const first = String(((pay && pay.lines) || []).map((l) => l.text).find((t) => String(t || "").trim().length > 6) || "").trim().slice(0, 30);
+            const head = e.el.querySelector(".domvec-bb-head") || e.el;
+            const hr = head.getBoundingClientRect();
+            const s0 = { ...v.carryStats };
+            head.dispatchEvent(new MouseEvent("contextmenu", { clientX: hr.left + 8, clientY: hr.top + 6, bubbles: true, cancelable: true, button: 2 }));
+            await sleep(100);
+            const cr = card.getBoundingClientRect(), tx = cr.left + cr.width / 2, ty = cr.top + Math.min(cr.height / 2, 60);
+            window.dispatchEvent(new MouseEvent("mousemove", { clientX: tx, clientY: ty, bubbles: true }));
+            await sleep(100);
+            const target = document.elementFromPoint(tx, ty) || card;
+            target.dispatchEvent(new MouseEvent("contextmenu", { clientX: tx, clientY: ty, bubbles: true, cancelable: true, button: 2 }));
+            await sleep(1500);
+            const f = app.vault.getAbstractFileByPath(path);
+            const text = f ? await app.vault.read(f) : "";
+            return { planted: ${planted}, carried: v.carryStats.carried - s0.carried, into_cell: v.carryStats.into_cell - s0.into_cell,
+                     chunk_in_note: !!first && text.includes(first), first, note_chars: text.length };
+          } finally {
+            v.plantNoCarry = false;
+            if (pinned) { v.unpinChunk(pinned); v.closeBillboard && v.closeBillboard(pinned); }
+            if (opened) await v.togglePage(opened);
+            const f = app.vault.getAbstractFileByPath(path); if (f) await app.vault.trash(f, true);
+          }
+        })()`, { timeout: 90000 });
+        const clean = await arm(false), planted = await arm(true);
+        return { pass: !clean.error && clean.carried === 1 && clean.into_cell === 1 && clean.chunk_in_note && !planted.error && planted.carried === 0 && !planted.chunk_in_note,
+                 evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {

@@ -3391,6 +3391,15 @@ export class GraphView extends ItemView {
     if (this.offlineNow()) void this.dockPanel(entry);
     this.startBillboardLoop();
 
+    // RIGHT-CLICK CARRIES it (PLUGIN_GOAL 134: "The chunk panel right-clicked
+    // by the mouse anywhere sticks to the mouse and carries until
+    // right-clicked. If right-clicked over a markdown, it goes in the cell. If
+    // over empty space in the 2D plane, then its own panel").
+    head.addEventListener("contextmenu", (e: MouseEvent) => {
+      if (this.plantNoCarry || this.carrying) return;
+      e.preventDefault(); e.stopPropagation();
+      this.startCarry(entry, e.clientX, e.clientY);
+    });
     // Dragging pins it. Pointer events rather than mouse, so a drag that
     // leaves the pane still ends.
     head.onpointerdown = (down: PointerEvent) => {
@@ -7402,6 +7411,54 @@ export class GraphView extends ItemView {
       if (entry) (entry.pins = entry.pins || new Set()).add(cid);
     }
     return true;
+  }
+  /** Planted (134): a right-click on a panel's head does not carry it. */
+  plantNoCarry = false;
+  carrying: any = null;
+  carryStats = { carried: 0, into_cell: 0, onto_plane: 0, last_cell: "" };
+  /** Carry `entry` with the mouse until the next right-click, then drop it. */
+  startCarry(entry: any, x: number, y: number): void {
+    const el: HTMLElement = entry.el;
+    const layer = (this.billboardLayer as HTMLElement).getBoundingClientRect();
+    const box = el.getBoundingClientRect();
+    const dx = x - box.left, dy = y - box.top;
+    entry.pinned = true; el.addClass("is-stuck"); el.addClass("is-carried"); el.removeClass("is-preview");
+    this.carrying = entry; this.carryStats.carried++;
+    const move = (m: MouseEvent) => { el.style.left = `${m.clientX - layer.left - dx}px`; el.style.top = `${m.clientY - layer.top - dy}px`; };
+    const drop = (d: MouseEvent) => {
+      d.preventDefault(); d.stopPropagation();
+      window.removeEventListener("mousemove", move, true);
+      window.removeEventListener("contextmenu", drop, true);
+      el.removeClass("is-carried");
+      this.carrying = null;
+      void this.dropCarried(entry, d.clientX, d.clientY);
+    };
+    window.addEventListener("mousemove", move, true);
+    window.setTimeout(() => window.addEventListener("contextmenu", drop, true), 0);
+  }
+  /** Over a markdown cell: the chunk's markdown goes INTO it. Elsewhere: it
+   *  stays where it was dropped, its own stuck panel. */
+  async dropCarried(entry: any, x: number, y: number): Promise<string> {
+    const el: HTMLElement = entry.el;
+    const was = el.style.pointerEvents; el.style.pointerEvents = "none";
+    const under = document.elementFromPoint(x, y) as HTMLElement | null;
+    el.style.pointerEvents = was;
+    const cell = under?.closest?.(".domvec-panel-card") as HTMLElement | null;
+    const path = cell?.dataset.path || "";
+    const f = path ? this.app.vault.getAbstractFileByPath(path) : null;
+    if (f) {
+      const pay: any = await this.chunkPayload(String(entry.node.id)).catch(() => null);
+      const md = ((pay && pay.lines) || []).map((l: any) => String(l.text || "")).join(String.fromCharCode(10));
+      if (md.trim()) {
+        const NL = String.fromCharCode(10);
+        await this.app.vault.process(f as any, (t: string) => t.replace(/\s*$/, "") + NL + NL + md + NL);
+        this.carryStats.into_cell++; this.carryStats.last_cell = path;
+        this.closeBillboard(String(entry.node.id));
+        return "cell";
+      }
+    }
+    this.carryStats.onto_plane++;
+    return "plane";
   }
   /** Planted (133): a pin's billboard follows its node, as before. */
   plantPinFollows = false;
