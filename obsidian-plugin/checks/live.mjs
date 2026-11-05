@@ -11554,6 +11554,38 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-215",
+      asks: "the panels toggle governs the browser hover (PLUGIN_GOAL 143): over a drawn chunk, a browser hover and then a browser right-click, in each mode -- right-click mode: the hover opens no panel, the right-click opens it; fly-to mode: the hover opens it, the right-click does nothing. Either mode alone would read the same if the toggle governed nothing",
+      async run() {
+        const arm = (mode) => evaluate(`(async () => {
+          ${PREP}
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          const was = v.panelsOn; v.setPanelsOn(${JSON.stringify(mode)});
+          let opened = null;
+          const chunks = () => v.graph.graphData().nodes.filter((n) => !n.force && n.level !== "page" && n.level !== "path" && Number.isFinite(n.x));
+          try {
+            if (chunks().length < 2) {
+              const pg = v.graph.graphData().nodes.find((n) => n.level === "page" && !n.force && (n.members || 0) >= 5 && (n.members || 0) <= 200 && /^https:/.test(String(n.url)));
+              if (pg) { const r = await v.togglePage(pg); if (r && r.action === "expand") opened = pg; }
+              for (let i = 0; i < 20 && chunks().length < 2; i++) await sleep(500);
+            }
+            const n = chunks()[0]; if (!n) return { error: "no chunk" };
+            const id = String(n.id);
+            for (const k of [...v.billboards.keys()]) v.closeBillboard(k);
+            b.onHover(id, String(n.url), id); await sleep(1500);
+            const afterHover = v.billboards.has(id);
+            for (const k of [...v.billboards.keys()]) v.closeBillboard(k);
+            b.onRightChunk(id, String(n.url), id); await sleep(1500);
+            const afterRight = v.billboards.has(id);
+            for (const k of [...v.billboards.keys()]) v.closeBillboard(k);
+            return { mode: ${JSON.stringify(mode)}, hover_opened: afterHover, right_opened: afterRight };
+          } finally { v.setPanelsOn(was); if (opened) await v.togglePage(opened); }
+        })()`, { timeout: 60000 });
+        const right = await arm("rightclick"), fly = await arm("flyto");
+        return { pass: !right.error && !right.hover_opened && right.right_opened && !fly.error && fly.hover_opened && !fly.right_opened, evidence: { right, fly } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {
