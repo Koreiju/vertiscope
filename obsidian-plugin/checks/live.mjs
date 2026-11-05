@@ -11586,6 +11586,47 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-217",
+      asks: "hover-to-panel latency for a STORED chunk brought down (PLUGIN_GOAL 145; was 84-888 ms, the sidecar fetch): in fly-to mode six chunks of an unfolded page hovered through the browser's own hover, each timed until the chunk's own words are in its panel -- payloads prefetched on unfold, against planted (plantShortPayloadCache: cold)",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          ${PREP}
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          const was = v.panelsOn; v.setPanelsOn("flyto");
+          v.plantShortPayloadCache = ${planted};
+          let opened = null; const times = [];
+          const chunks = () => v.graph.graphData().nodes.filter((n) => !n.force && n.level !== "page" && n.level !== "path" && Number.isFinite(n.x));
+          try {
+            if (${planted}) v.payloadCache.clear();
+            const pg = v.graph.graphData().nodes.filter((n) => n.level === "page" && !n.force && (n.members || 0) >= 8 && (n.members || 0) <= 200 && /^https:/.test(String(n.url)))[0];
+            if (!pg) return { error: "no page" };
+            const r = await v.togglePage(pg); if (r && r.action === "expand") opened = pg;
+            await sleep(3000);
+            const mine = chunks().filter((n) => String(n.url).split("#")[0] === String(pg.url).split("#")[0]).slice(0, 6);
+            for (const n of mine) {
+              for (const k of [...v.billboards.keys()]) v.closeBillboard(k);
+              const pay = ${planted} ? null : await v.chunkPayload(String(n.id));
+              const t0 = performance.now();
+              b.onHover(String(n.id), String(n.url), String(n.id));
+              let ms = null;
+              for (let i = 0; i < 300; i++) {
+                const e = v.billboards.get(String(n.id));
+                const want = (((e && e.payload) || pay || {}).lines || []).map((l) => String(l.text || "").replace(/\]\([^)]*\)/g, " ")).join(" ").match(/[A-Za-z]{5,}/g) || [];
+                if (e && want[0] && (e.el.textContent || "").includes(want[0])) { ms = performance.now() - t0; break; }
+                await sleep(5);
+              }
+              times.push(ms === null ? null : Math.round(ms));
+            }
+            for (const k of [...v.billboards.keys()]) v.closeBillboard(k);
+            const ok = times.filter((x) => x !== null).sort((a, b2) => a - b2);
+            return { planted: ${planted}, n: ok.length, p50: ok[ok.length >> 1], p90: ok[Math.floor(0.9 * (ok.length - 1))], max: ok[ok.length - 1], times };
+          } finally { v.plantShortPayloadCache = false; v.setPanelsOn(was); if (opened) await v.togglePage(opened); }
+        })()`, { timeout: 90000 });
+        const clean = await arm(false), planted = await arm(true);
+        return { pass: !clean.error && clean.n >= 4 && !planted.error && planted.n >= 4 && clean.p90 < planted.p90, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {
