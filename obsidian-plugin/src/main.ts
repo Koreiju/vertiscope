@@ -621,8 +621,11 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
         (url, cids) => this.eachGraph((view) => void view.showHits(url, cids)));
         // Hovering a chunk in the browser rings its node in the projector
         // (`G-38`). Brokered like everything else across the two panes.
-        browser.onRightChunk = (cid: string, url: string, stored: string) =>
+        browser.onRightChunk = (cid: string, url: string, stored: string) => {
           this.eachGraph((view) => view.rightPanel(cid, url, stored));
+          // And the CLIPBOARD aggregates it (PLUGIN_GOAL 134h).
+          if (stored) void this.clipboardAdd(stored, url);
+        };
         // Used = pressed in, or hovered in its page (item 87): the 3D graph
         // follows whichever browser the reader is using.
         browser.containerEl.addEventListener("pointerdown", () => this.touchBrowser(browser), true);
@@ -1518,6 +1521,32 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     } finally {
       this.respawning = false;
     }
+  }
+
+  /**
+   * The CLIPBOARD (PLUGIN_GOAL 134: "The clipboard is a basic markdown panel per
+   * all the other 'same' panel constraints and dynamically aggregates on
+   * right-clicks"): a plain note, `domvec/clipboard.md`, open on the plane --
+   * every chunk right-clicked in the browser appended to it once, under its
+   * page. Planted `__domvecPlantNoClipboard`: right-clicks add nothing.
+   */
+  clipStats = { added: 0, repeats: 0 };
+  async clipboardAdd(cid: string, url: string): Promise<boolean> {
+    if ((window as any).__domvecPlantNoClipboard || !cid) return false;
+    const path = "domvec/clipboard.md";
+    const NL = String.fromCharCode(10);
+    let f: any = this.app.vault.getAbstractFileByPath(path);
+    if (!f) f = await this.app.vault.create(path, "clipboard" + NL);
+    const text = await this.app.vault.read(f);
+    if (text.includes("<!-- cid:" + cid + " -->")) { this.clipStats.repeats++; return false; }
+    const gv: any = this.app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
+    const pay: any = gv ? await gv.chunkPayload(cid).catch(() => null) : null;
+    const md = ((pay && pay.lines) || []).map((l: any) => String(l.text || "")).join(NL).trim();
+    if (!md) return false;
+    await this.app.vault.process(f, (t: string) => t.replace(/\s*$/, "") + NL + NL + "<!-- cid:" + cid + " -->" + NL + "*" + url + "*" + NL + md + NL);
+    this.clipStats.added++;
+    if (!this.desk.panelOf(path)) await this.desk.open(f).catch(() => null);
+    return true;
   }
 
   /**

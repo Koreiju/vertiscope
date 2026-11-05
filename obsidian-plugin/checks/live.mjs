@@ -11386,6 +11386,34 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "PG-134-clipboard",
+      asks: "the clipboard is a plain markdown panel that aggregates on right-clicks (PLUGIN_GOAL 134): two stored chunks right-clicked in the browser and the first again -- the clipboard note gains two blocks (the repeat ignored) and is open on the plane; planted (__domvecPlantNoClipboard) it gains nothing",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          ${PREP}
+          window.__domvecPlantNoClipboard = ${planted};
+          const P = app.plugins.plugins["domvec-bridge"], v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          const path = "domvec/clipboard.md";
+          const old = app.vault.getAbstractFileByPath(path); if (old) await app.vault.trash(old, true);
+          try {
+            const pg = v.graph.graphData().nodes.find((n) => n.level === "page" && !n.force && (n.members || 0) >= 5 && /^https:/.test(String(n.url)));
+            if (!pg) return { error: "no page" };
+            const cids = (await v.sidecar.pageCids(pg.url)).slice(0, 2);
+            if (cids.length < 2) return { error: "few chunks" };
+            const s0 = { ...P.clipStats };
+            for (const c of [cids[0], cids[1], cids[0]]) { b.onRightChunk(c, pg.url, c); await sleep(1200); }
+            const f = app.vault.getAbstractFileByPath(path);
+            const text = f ? await app.vault.read(f) : "";
+            const blocks = (text.match(/<!-- cid:/g) || []).length;
+            const open = !!window.__domvecPlane.panelOf(path);
+            return { planted: ${planted}, blocks, added: P.clipStats.added - s0.added, repeats: P.clipStats.repeats - s0.repeats, open };
+          } finally { window.__domvecPlantNoClipboard = false; }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        return { pass: !clean.error && clean.blocks === 2 && clean.repeats === 1 && clean.open && !planted.error && planted.blocks === 0, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {
