@@ -11857,6 +11857,44 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "PG-134-reply-placeable",
+      asks: "prompt and response are separate cells that can be picked and placed (PLUGIN_GOAL 134): a reply snapped beneath its prompt is in the prompt's magnet context; dragged 240 px away it is unsnapped and leaves it; planted (__domvecPlantNoMagnet off-switch kept, drag skipped) it stays in context",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          await window.__domvec.act("open", "graph"); await sleep(1200);
+          const desk = window.__domvecPlane;
+          const tag = (${planted} ? "p" : "c") + Date.now(), NL = String.fromCharCode(10);
+          const A = "domvec-checks/pgrp-q " + tag + ".md", R = "domvec-checks/pgrp-r " + tag + ".md";
+          const card = (p) => [...document.querySelectorAll(".domvec-panel-card")].find((c) => c.dataset.path === p);
+          try {
+            await desk.create("notebook", { path: A, text: "prompt" + NL });
+            await desk.create("notebook", { path: R, text: "reply" + NL });
+            let a = null, r = null;
+            for (let i = 0; i < 20 && !(a && r); i++) { await sleep(300); a = card(A); r = card(R); }
+            if (!a || !r) return { error: "no cards" };
+            a.style.right = "auto"; a.style.left = "40px"; a.style.top = "200px";
+            r.style.right = "auto"; r.style.left = "40px"; r.style.top = (200 + a.offsetHeight) + "px";
+            r.dataset.magnetTop = A;
+            const before = desk.magnetized(A).includes(R);
+            if (!${planted}) {
+              const head = r.querySelector(".domvec-plane-head-node") || r;
+              const h = head.getBoundingClientRect(), x = h.left + 5, y = h.top + h.height / 2;
+              const ev = (t, X, Y) => (t === "mousedown" ? head : window).dispatchEvent(new MouseEvent(t, { clientX: X, clientY: Y, button: 0, bubbles: true, cancelable: true }));
+              ev("mousedown", x, y); ev("mousemove", x + 240, y + 60); ev("mouseup", x + 240, y + 60);
+              await sleep(300);
+            }
+            return { planted: ${planted}, in_context_before: before, in_context_after: desk.magnetized(A).includes(R), magnet_top: r.dataset.magnetTop || "" };
+          } finally {
+            for (const p of [A, R]) { const f = app.vault.getAbstractFileByPath(p); if (f) await app.vault.trash(f, true); }
+          }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        return { pass: !clean.error && clean.in_context_before && !clean.in_context_after && !clean.magnet_top
+          && !planted.error && planted.in_context_after, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {
