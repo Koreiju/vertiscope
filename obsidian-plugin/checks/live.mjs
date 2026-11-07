@@ -11748,6 +11748,39 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "PG-133-notebook-chat",
+      asks: "one markdown panel for the notebook chat too (PLUGIN_GOAL 133): a notebook's chat conversation is a note in a real Obsidian editor; planted (plantStaticChat) a static render, no editor",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const P = app.plugins.plugins["domvec-bridge"];
+          const NL = String.fromCharCode(10), F = "~~~";
+          const path = "domvec-checks/nbchat-check.md";
+          if (!app.vault.getAbstractFileByPath("domvec-checks")) await app.vault.createFolder("domvec-checks").catch(() => 0);
+          let f = app.vault.getAbstractFileByPath(path);
+          const body = "# nb" + NL + F + "python" + NL + "1+1" + NL + F + NL;
+          if (!f) f = await app.vault.create(path, body);
+          const leaf = app.workspace.getLeaf("tab");
+          await leaf.openFile(f); await sleep(800);
+          const chat = P.nbChats.forView(leaf.view);
+          if (!chat) { leaf.detach(); return { error: "no notebook chat" }; }
+          chat.plantStaticChat = ${planted};
+          chat.turns = [{ source: "rewind", cells: 1, sent: 1, prompt: "check prompt", reply: "**nb check reply** one panel" }];
+          chat.refresh(); await sleep(2500);
+          const log = chat.log;
+          const editor = !!log.querySelector(".cm-editor");
+          const text = log.innerText.includes("nb check reply");
+          const nf = app.vault.getAbstractFileByPath(chat.notePath);
+          const note = nf ? (await app.vault.read(nf)).includes("nb check reply") : false;
+          chat.turns = []; chat.destroy(); leaf.detach();
+          if (nf) await app.vault.delete(nf).catch(() => 0);
+          return { planted: ${planted}, editor, text_shown: text, note_written: note };
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        return { pass: !clean.error && clean.editor && clean.note_written && !planted.error && !planted.editor && planted.text_shown, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {

@@ -36,7 +36,7 @@ export interface NotebookTurn { prompt: string; cells: number; source: string; s
 
 export class NotebookChat {
   readonly el: HTMLElement;
-  private log: HTMLElement;
+  log!: HTMLElement;
   private input: HTMLTextAreaElement;
   private label: HTMLElement;
   private clearMarks: HTMLElement;
@@ -216,9 +216,40 @@ export class NotebookChat {
       + (m ? ` · context: ${m} marked` : r ? ` · rewinds ${r.cells.length} cell${r.cells.length === 1 ? "" : "s"}` : "")
       + (this.pins.length ? ` · ${this.pins.length} pulled in` : ""));
     this.clearMarks.toggle(m > 0);
+    const md = this.markdown() || "*Ask about this cell and the ones above it.*";
+    const gen = ++this.renderGen;
+    // ONE markdown panel (PLUGIN_GOAL 133): the conversation is a note in the
+    // notebook's own editor. Planted `plantStaticChat`: a static render.
+    if (!this.plantStaticChat) { void this.mountNote(md, gen).then(() => this.place()); return; }
+    this.dropLeaf();
     this.log.empty();
-    void MarkdownRenderer.render(this.app, this.markdown() || "*Ask about this cell and the ones above it.*",
-      this.log, this.view.file?.path || "", this.owner).then(() => { this.log.scrollTop = this.log.scrollHeight; this.place(); });
+    void MarkdownRenderer.render(this.app, md, this.log, this.view.file?.path || "", this.owner)
+      .then(() => { this.log.scrollTop = this.log.scrollHeight; this.place(); });
+  }
+
+  plantStaticChat = false;
+  private renderGen = 0;
+  chatLeaf: any = null;
+  get notePath(): string {
+    return "domvec/chunks/chat " + (this.view.file?.path || "untitled").replace(/[^\w.-]+/g, "_").slice(-100) + ".md";
+  }
+  dropLeaf(): void { try { this.chatLeaf?.detach(); } catch { /* gone */ } this.chatLeaf = null; }
+
+  private async mountNote(md: string, gen: number): Promise<void> {
+    const vault = this.app.vault, folder = "domvec/chunks", path = this.notePath;
+    if (!vault.getAbstractFileByPath(folder)) await vault.createFolder(folder).catch(() => undefined);
+    let f: any = vault.getAbstractFileByPath(path);
+    if (f) { if ((await vault.read(f)) !== md) await vault.modify(f, md); } else f = await vault.create(path, md);
+    if (gen !== this.renderGen) return;
+    if (this.chatLeaf && this.log.contains(this.chatLeaf.containerEl)) return;
+    const ws: any = this.app.workspace;
+    const Leaf: any = ws.activeLeaf?.constructor ?? ws.getMostRecentLeaf()?.constructor;
+    if (!Leaf) return;
+    this.log.empty();
+    const leaf = new Leaf(this.app);
+    this.log.appendChild(leaf.containerEl);
+    this.chatLeaf = leaf;
+    await leaf.openFile(f, { state: { mode: "source", source: false } } as any);
   }
 
   async send(raw: string): Promise<NotebookTurn | null> {
@@ -280,6 +311,7 @@ export class NotebookChat {
   }
 
   destroy(): void {
+    this.dropLeaf();
     this.scrollEl?.removeEventListener("scroll", this.onScroll);
     this.dock(false);
     this.el.remove();
