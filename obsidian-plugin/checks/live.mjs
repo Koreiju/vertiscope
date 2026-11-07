@@ -12413,6 +12413,28 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "PG-137-prose-plain",
+      asks: "PLUGIN_GOAL 137 (9): in a slate (a browser cell's control note), plain text at the margin is markdown, not a variable -- fields (indented, or name<TAB>value) are marked, a heading and two sentences are not; planted (__domvecPlantProseAsFields) the sentences are marked",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          window.__domvecPlantProseAsFields = ${planted};
+          const T = String.fromCharCode(9), NL = String.fromCharCode(10);
+          const path = "domvec-checks/prose plain " + (${planted} ? "p" : "c") + ".md";
+          const old = app.vault.getAbstractFileByPath(path); if (old) await app.vault.trash(old, true);
+          const f = await app.vault.create(path, ["---", "domvec: slate", "---", "browser", T + "url" + T + "https://example.org", T + "live" + T + "true", "", "## Hello", "I am writing a regular text.", "", "Another plain sentence here.", ""].join(NL));
+          const leaf = app.workspace.getLeaf("tab");
+          try {
+            await leaf.openFile(f, { state: { mode: "source", source: false } }); await sleep(1500);
+            const keys = [...leaf.view.containerEl.querySelectorAll(".domvec-var-key")].map((e) => e.textContent.trim());
+            return { planted: ${planted}, keys, prose_marked: keys.filter((k) => /regular|plain|Hello/.test(k)).length, fields_marked: keys.filter((k) => k === "url" || k === "live").length };
+          } finally { window.__domvecPlantProseAsFields = false; leaf.detach(); await app.vault.trash(f, true); }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        return { pass: !clean.error && clean.fields_marked === 2 && clean.prose_marked === 0 && !planted.error && planted.prose_marked >= 2, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {

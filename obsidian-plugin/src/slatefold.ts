@@ -484,7 +484,13 @@ export function foldDecorations(doc: Text, st: FoldState): DecorationSet {
       const rest = line.text.slice(lead), tab = rest.indexOf("\t");
       const key = (tab < 0 ? rest : rest.slice(0, tab)).trimEnd();
       // A positional child (`- x`, `1. x`) is a value in a list, not a name.
-      if (key && !/^([-*+]|\d+\.)\s/.test(key) && !key.startsWith("{")) {
+      // PLAIN TEXT is not a field (2026-11-07: "all the regular text is
+      // highlighted as variables with no reference for doing so"): a field is
+      // indented under the title or carries the tab between its name and its
+      // value. A sentence at the margin, a heading, is markdown. Planted
+      // `__domvecPlantProseAsFields`: every line's start, as before.
+      const field = lead > 0 || tab >= 0 || (window as any).__domvecPlantProseAsFields;
+      if (field && key && !/^([-*+]|\d+\.)\s/.test(key) && !key.startsWith("{") && !key.startsWith("#")) {
         const folded = foldAt.get(i);
         if (nodes) ranges.push([line.from + lead, line.from + lead + key.length,
           Decoration.mark({ class: "domvec-var domvec-var-key" + (folded ? " is-folded" : "") })]);
