@@ -827,6 +827,7 @@ _PLANTABLE = {
     "stored-note": ("domvec.obsidian.refs", "PLANT_STORED_NOTE"),             # G-277
     "uniform-types": ("domvec.codegraph", "PLANT_UNIFORM_TYPES"),             # G-317
     "no-versions": ("domvec.graphstore", "PLANT_NO_VERSIONS"),                # G-253
+    "retire-in-session": ("domvec.obsidian.sidecar", "_PLANT_RETIRE_IN_SESSION"),  # Q.002 / G-120
     "record-split-at-window": ("domvec.markdown", "PLANT_RECORD_SPLIT_AT_WINDOW"),  # G-246
     "untyped-box": ("domvec.obsidian.blackbox", "PLANT_UNTYPED"),             # item 100
     "no-codegraph": ("domvec.search", "PLANT_NO_CODEGRAPH"),                  # item 93

@@ -12160,6 +12160,7 @@ export function makeChecks(env) {
               await sleep(4000);
               const wc = window.require("@electron/remote").webContents.fromId(b.webview.getWebContentsId());
               const r = await b.webview.executeJavaScript("(function(){var r=document.querySelector('#t1 h3').getBoundingClientRect();return [r.left+20, r.top+r.height/2];})()");
+              { const z = b.webview.getZoomFactor ? b.webview.getZoomFactor() : 1; r[0] *= z; r[1] *= z; }
               for (let k = 0; k < 4; k++) { wc.sendInputEvent({ type: "mouseMove", x: Math.round(r[0]) + k, y: Math.round(r[1]) }); await sleep(150); }
               const opened = await b.webview.executeJavaScript("!!document.getElementById('pane')");
               let links = [];
@@ -12243,6 +12244,48 @@ export function makeChecks(env) {
         const clean = await arm(false), planted = await arm(true);
         return { pass: !clean.error && !clean.err && clean.css_width >= 1270 && clean.image_tiles >= 5
                        && !planted.error && planted.css_width < 1270 && planted.image_tiles === 0, evidence: { clean, planted } };
+      },
+    },
+    {
+      id: "Q-002",
+      asks: "a hover pane's content is KEPT after the pane closes (2026-11-07: \"Q.002: Yes\"): on the hover-popup fixture the VHS Vault pane's chunks, recorded when it opened, are still in the store after another tile's hover replaces the pane -- and after the page is visited again; planted (retire-in-session) they are deleted when the pane closes",
+      async run() {
+        const fixtures = await serveFixtures();
+        const plant = (name, on) => fetch(SIDECAR + "/plant", { method: "POST",
+          headers: { "content-type": "application/json", "X-Domvec-Client": "obsidian-plugin" }, body: JSON.stringify({ name, on }) });
+        try {
+          const arm = async (planted) => {
+            await plant("retire-in-session", planted);
+            try {
+              return await evaluate(`(async () => {
+                ${PREP}
+                const PAGE = ${JSON.stringify(fixtures.origin + "/hover_popup.html")} + "?q=" + ${planted ? 1 : 0} + Date.now();
+                b.setLive(true); b.popupOf.clear();
+                const wc = window.require("@electron/remote").webContents.fromId(b.webview.getWebContentsId());
+                b.go(PAGE);
+                for (let i = 0; i < 60; i++) { await sleep(250); if (b.pipebox && b.pipebox.map && b.pipebox.map.cids().length >= 2) break; }
+                await sleep(4000);
+                const at = async (sel) => JSON.parse(await b.webview.executeJavaScript("(function(){var r=document.querySelector(" + JSON.stringify(sel) + ").getBoundingClientRect();return JSON.stringify([r.left+20, r.top+r.height/2]);})()"));
+                const z = b.webview.getZoomFactor ? b.webview.getZoomFactor() : 1;
+                const hover = async (sel, n) => { const p = await at(sel); for (let i = 0; i < n; i++) { wc.sendInputEvent({ type: "mouseMove", x: Math.round(p[0] * z) + (i % 3), y: Math.round(p[1] * z) }); await sleep(400); } };
+                await hover("#t1 h3", 20);
+                const vhs = [...b.popupOf.keys()];
+                if (!vhs.length) return { planted: ${planted}, error: "no pane chunks recorded" };
+                await hover("#t2 h3", 12);
+                const closed = await b.webview.executeJavaScript("document.getElementById('pane') ? document.getElementById('pane').textContent.slice(0, 30) : ''");
+                await sleep(9000);
+                const held = async () => { let n = 0; for (const c of vhs) { const p = await b.sidecar.chunk(c).catch(() => null); if (p && p.lines && p.lines.length) n++; } return n; };
+                const after_close = await held();
+                b.go("about:blank"); await sleep(1500); b.go(PAGE); await sleep(12000);
+                const after_revisit = await held();
+                return { planted: ${planted}, pane_chunks: vhs.length, pane_now: closed, after_close, after_revisit };
+              })()`, { timeout: 150000 });
+            } finally { await plant("retire-in-session", false); }
+          };
+          const clean = await arm(false), planted = await arm(true);
+          return { pass: !clean.error && clean.pane_chunks >= 1 && /Radio/.test(clean.pane_now) && clean.after_close === clean.pane_chunks && clean.after_revisit === clean.pane_chunks
+                         && !planted.error && planted.after_close < planted.pane_chunks, evidence: { clean, planted } };
+        } finally { await fixtures.close(); }
       },
     },
     {
