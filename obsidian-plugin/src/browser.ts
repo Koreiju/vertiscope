@@ -1758,6 +1758,7 @@ export class BrowserView extends ItemView {
     };
     await sleep(900);
     let have = await count();
+    let emptyOnce = false;
     for (;;) {
       if (seq !== this.webSeq) return null;
       if (this.plantFixedRounds && this.webSearchStats.rounds >= this.plantFixedRounds) {
@@ -1789,15 +1790,28 @@ export class BrowserView extends ItemView {
       }
       await sleep(250);
       this.selfAct();
-      wc.sendInputEvent({ type: "mouseMove", x: at[0], y: at[1] });
-      wc.sendInputEvent({ type: "mouseDown", x: at[0], y: at[1], button: "left", clickCount: 1 });
-      wc.sendInputEvent({ type: "mouseUp", x: at[0], y: at[1], button: "left", clickCount: 1 });
+      // The page's CSS px times the cell's zoom (desktop width scales the page,
+      // 2026-11-07): unscaled, the press landed beside "More results" and the
+      // scan stopped after one round. Planted `unscaled-press`.
+      const zf = this.plant.has("unscaled-press") ? 1 : ((this.webview as any).getZoomFactor?.() || 1);
+      const px = Math.round(at[0] * zf), py = Math.round(at[1] * zf);
+      wc.sendInputEvent({ type: "mouseMove", x: px, y: py });
+      wc.sendInputEvent({ type: "mouseDown", x: px, y: py, button: "left", clickCount: 1 });
+      wc.sendInputEvent({ type: "mouseUp", x: px, y: py, button: "left", clickCount: 1 });
       this.webSearchStats.clicked++;
       const after = await grew(have);
       if (after < 0) return null;
       this.webSearchStats.deltas.push(after - have);
       this.webSearchStats.results = after;
-      if (after <= have) { this.webSearchStats.stopped = "no delta"; break; }
+      // One empty press is not the end: a press that landed while the page
+      // was still settling after the scroll ended the scan at round 2
+      // (2026-11-07: "the 'more results' button is no longer clicked").
+      // Two in a row are. Planted `one-empty-round`: one ends it, as before.
+      if (after <= have) {
+        if (!this.plant.has("one-empty-round") && !emptyOnce) { emptyOnce = true; await sleep(800); continue; }
+        this.webSearchStats.stopped = "no delta"; break;
+      }
+      emptyOnce = false;
       have = after;
     }
     await sleep(800);
