@@ -53,6 +53,8 @@ export const COCKPIT_TEXT = [
   T + T + "duckduckgo" + T + "false",
   T + T + "where" + T + "all",
   T + T + "k" + T + "8",
+  T + T + "n" + T + "50",
+  T + T + "matching" + T + "",
   T + T + "results",
   "",
 ].join("\n");
@@ -118,7 +120,7 @@ export class Cockpit {
   private seenSlateQuery = "";
   private seenEngineQuery = "";
   private lastQuery = "";
-  private lastSeen = { mode: "", throttle: -1, action: "", hitsKey: "", playing: false, query: "" };
+  private lastSeen = { mode: "", throttle: -1, action: "", hitsKey: "", playing: false, query: "", searchKey: "" };
   private slider: HTMLElement | null = null;
   private hoveredRow = -1;
   private frontRow = -1;
@@ -551,7 +553,9 @@ export class Cockpit {
     const where = (this.field(fs, "search", "where")?.value || "").trim();
     if (typeof g.setSearchWhere === "function" && g.setSearchWhere(where) && f.input.value.trim()) void f.run();
     const k = Number(this.field(fs, "search", "k")?.value);
-    if (Number.isFinite(k) && k >= 1 && k !== f.k) f.setK(k);
+    // Linked (137 (23)): the note's k moves the bar only when the NOTE changed
+    // it -- not when the bar changed and the note has yet to hear.
+    if (Number.isFinite(k) && k >= 1 && k !== f.k && (this.plantSearchUnlinked || k !== this.seenEngine.k && f.k === this.seenEngine.k)) f.setK(k);
     const q = (this.field(fs, "search", "query")?.value || "").trim();
     const db = (this.field(fs, "search", "db")?.value || "").trim() !== "false";
     // The store's ranking is `db`. Off, the field shows nothing of the store.
@@ -648,7 +652,8 @@ export class Cockpit {
     const thr = Math.round(a.throttle * 100);
     if (a.mode === this.lastSeen.mode && thr === this.lastSeen.throttle && a.lastAction === this.lastSeen.action
         && this.hitsKey(g) === this.lastSeen.hitsKey && a.playing === this.lastSeen.playing
-        && (g.searchField?.query ?? "") === this.lastSeen.query) return;
+        && (g.searchField?.query ?? "") === this.lastSeen.query
+        && this.searchKey(g) === this.lastSeen.searchKey) return;
     let fs = parseSlate(v.editor.getValue());
     const put = (path: string[], value: string) => { const fl = this.field(fs, ...path); if (fl) { this.setValue(fl, value); fs = parseSlate(v.editor.getValue()); } };
     put(["view"], a.mode);
@@ -668,8 +673,43 @@ export class Cockpit {
     }
     // A plan that finished, or a hand on the stick, sets `play` back to false.
     if (!a.playing && this.playSeen) { put(["play"], "false"); this.playSeen = false; }
-    this.lastSeen = { mode: a.mode, throttle: thr, action: a.lastAction, hitsKey: this.hitsKey(g), playing: a.playing, query: g.searchField?.query ?? "" };
+    // ONE set of retrieval controls (2026-11-07: "the retrieval results
+    // controller on the ego vs the search bar are somewhat disconnected"):
+    // k and n are the search bar's, both ways; matching is read from it.
+    // Planted `plantSearchUnlinked`: k from the slate only, as before.
+    if (f && !this.plantSearchUnlinked) {
+      this.ensureSearchFields(v);
+      fs = parseSlate(v.editor.getValue());
+      const sk = Number(this.field(fs, "search", "k")?.value), sn = Number(this.field(fs, "search", "n")?.value);
+      if (f.k !== this.seenEngine.k && f.k !== sk) put(["search", "k"], String(f.k));
+      else if (Number.isFinite(sk) && sk >= 1 && sk !== f.k && sk !== this.seenEngine.k) f.setK(sk);
+      if (f.total !== this.seenEngine.n && f.total !== sn) put(["search", "n"], String(f.total));
+      else if (Number.isFinite(sn) && sn >= 1 && sn !== f.total && sn !== this.seenEngine.n) f.setTotal(sn);
+      put(["search", "matching"], f.matching ? String(f.matching) : "");
+      this.seenEngine = { k: f.k, n: f.total };
+      this.linkStats.synced++;
+    }
+    this.lastSeen = { mode: a.mode, throttle: thr, action: a.lastAction, hitsKey: this.hitsKey(g), playing: a.playing, query: g.searchField?.query ?? "", searchKey: this.searchKey(g) };
     this.writeResults();
+  }
+
+  plantSearchUnlinked = false;
+  linkStats = { synced: 0, added_fields: 0 };
+  private seenEngine = { k: 0, n: 0 };
+  private searchKey(g: any): string { const f = g?.searchField; return f ? `${f.k}/${f.total}/${f.matching}` : ""; }
+  /** A cockpit written before `n` and `matching` existed gets them, under `k`. */
+  private ensureSearchFields(v: any): void {
+    const fs = parseSlate(v.editor.getValue());
+    const k = this.field(fs, "search", "k");
+    if (!k) return;
+    const add: string[] = [];
+    if (!this.field(fs, "search", "n")) add.push(T.repeat(k.depth) + "n" + T + "50");
+    if (!this.field(fs, "search", "matching")) add.push(T.repeat(k.depth) + "matching" + T);
+    if (!add.length) return;
+    const NL = String.fromCharCode(10);
+    const lines = v.editor.getValue().split(NL);
+    v.editor.replaceRange(NL + add.join(NL), { line: k.line, ch: lines[k.line].length });
+    this.linkStats.added_fields += add.length;
   }
 
   private hitsKey(g: any): string {
@@ -812,7 +852,9 @@ export class Cockpit {
       const at = this.fieldAt(e.clientX, e.clientY);
       const row = at ? this.resultRows().find((r) => r.fl.line === at.fl.line) : undefined;
       this.hoverRow(row ? row.rank : 0);
-      if (at && at.onValue && /^-?\d+(\.\d+)?$/.test(at.fl.value.trim())) this.showSlider(at.fl, e);
+      // No slider on the search's own counts (2026-11-07: "We should remove
+      // the slider"): k and n are the search bar's numbers.
+      if (at && at.onValue && /^-?\d+(\.\d+)?$/.test(at.fl.value.trim()) && !(/^(k|n|matching)$/.test(at.fl.key) && !this.plantSearchUnlinked)) this.showSlider(at.fl, e);
       else if (this.slider) { this.slider.remove(); this.slider = null; }
     });
     el.addEventListener("mouseleave", () => { this.hoverRow(0); });

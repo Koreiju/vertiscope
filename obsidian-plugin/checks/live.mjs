@@ -12510,6 +12510,39 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "PG-137-search-linked",
+      asks: "PLUGIN_GOAL 137 (23): the ego's search controls and the 3D search bar are one set -- k and n set in the bar appear in the ego note, matching is written from the bar, and k typed in the note moves the bar; no slider on them; planted (plantSearchUnlinked) the note's n stays as it was",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const p = app.plugins.getPlugin("domvec-bridge"), c = p.cockpit;
+          const g = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
+          if (!c || !g || !g.searchField) return { error: "no cockpit or graph" };
+          c.plantSearchUnlinked = ${planted};
+          const v = await c.open(); await sleep(1200);
+          const ed = v.editor, saved = ed.getValue(), f = g.searchField, k0 = f.k, n0 = f.total, q0 = f.input.value;
+          const T = String.fromCharCode(9), NL = String.fromCharCode(10);
+          const read = (key) => { const l = ed.getValue().split(NL).find((x) => new RegExp("^" + T + T + key + T).test(x)); return l ? l.split(T).pop() : null; };
+          try {
+            f.input.value = "radix tree"; await f.run();
+            f.setTotal(77); f.setK(13);
+            for (let i = 0; i < 16; i++) { await sleep(500); if (read("n") === "77") break; }
+            const fromBar = { k: read("k"), n: read("n"), matching: read("matching") };
+            // the note drives the bar
+            const lines = ed.getValue().split(NL), li = lines.findIndex((x) => new RegExp("^" + T + T + "k" + T).test(x));
+            if (li >= 0) ed.replaceRange(T + T + "k" + T + "9", { line: li, ch: 0 }, { line: li, ch: lines[li].length });
+            for (let i = 0; i < 12; i++) { await sleep(500); if (f.k === 9) break; }
+            return { planted: ${planted}, fromBar, bar_k_after_note: f.k, stats: { ...c.linkStats } };
+          } finally {
+            c.plantSearchUnlinked = false; ed.setValue(saved); f.input.value = q0; f.setTotal(n0); f.setK(k0); await f.run();
+          }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        return { pass: !clean.error && clean.fromBar.k === "13" && clean.fromBar.n === "77" && !!clean.fromBar.matching && clean.bar_k_after_note === 9
+                       && !planted.error && planted.fromBar.n !== "77", evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {
