@@ -3373,7 +3373,14 @@ export class GraphView extends ItemView {
     // back (2026-09-26; it used to let go of all three).
     close.onclick = (e: MouseEvent) => {
       e.stopPropagation();
+      // A STUCK pin panel is the pin's card now (PLUGIN_GOAL 133 replaced the
+      // side card with it), so its x lets go of the pin as the card's x did:
+      // outline, panel, all of it. Planted `plantStuckXKeepsPin`: the panel
+      // closes and the pin stays, outline and all.
+      const ent: any = this.billboards.get(String(node.id));
+      const pins: string[] = ent && ent.pinned ? [...(ent.pins || []), String(node.id)] : [];
       this.closeBillboard(node.id);
+      if (pins.length && !this.plantStuckXKeepsPin) for (const c of new Set(pins)) { this.pinWanted.delete(c); this.onBillboardClosed(c); }
     };
     const body = el.createDiv({ cls: "domvec-bb-body" });
     body.setText("\u2026");
@@ -7503,6 +7510,7 @@ export class GraphView extends ItemView {
     this.carryStats.onto_plane++;
     return "plane";
   }
+  plantStuckXKeepsPin = false;
   /** Planted (133): a pin's billboard follows its node, as before. */
   plantPinFollows = false;
   stuckPins = 0;

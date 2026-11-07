@@ -11995,6 +11995,48 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-78",
+      asks: "a pin (as PLUGIN_GOAL 133 has it: the side card replaced by a STUCK 2D panel): right-click pins a chunk -- its outline on the page and its panel stuck on the plane; the panel's x lets go of the pin, outline and all; planted (plantStuckXKeepsPin) the panel closes and the pin and outline stay",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const d = window.__domvec;
+          await d.act("open", "browser"); await d.act("unpin", "all");
+          await d.act("navigate", "https://en.wikipedia.org/wiki/Radix_tree");
+          await sleep(4500);
+          const b = app.workspace.getLeavesOfType("domvec-browser-view")[0].view;
+          const g = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          g.plantStuckXKeepsPin = ${planted};
+          await b.webview.executeJavaScript("window.scrollTo({top:0,behavior:'instant'}); true"); await sleep(300);
+          let target = null;
+          for (let t = 0; t < 10 && !target; t++) { if (t) await sleep(1000); target = await b.webview.executeJavaScript(\`(function(){ var ps=document.querySelectorAll('#mw-content-text p'); for (var i=0;i<ps.length;i++){var r=ps[i].getBoundingClientRect(); if(r.height>20&&r.top>60&&r.bottom<innerHeight-40){var parts=[],n=ps[i];while(n&&n.nodeType===1){var t=n.tagName.toLowerCase(),k=1,s=n.previousElementSibling;while(s){if(s.tagName===n.tagName)k++;s=s.previousElementSibling;}parts.unshift(k>1?t+'['+k+']':t);n=n.parentElement;}return '/'+parts.join('/');}} return null; })()\`).catch(() => null); }
+          if (!target) return { error: "no paragraph" };
+          await d.act("pin", target);
+          let pin = null, entry = null;
+          for (let i = 0; i < 50 && !entry; i++) {
+            await sleep(500);
+            pin = [...b.pinned.keys()][0] || null;
+            const id = pin && ((g.pinAlias && g.pinAlias.get(pin)) || pin);
+            entry = id ? g.billboards.get(id) : null;
+          }
+          const ui = d.ui();
+          const before = { pins: b.pinned.size, outlines: ((ui.pipebox || {}).pins || []).length, stuck: !!entry && !!entry.pinned && entry.el.classList.contains("is-stuck"), in_doc: !!entry && document.contains(entry.el) };
+          const x = entry && entry.el.querySelector(".domvec-bb-close");
+          if (x) x.click();
+          await sleep(800);
+          const u2 = d.ui();
+          const after = { pins: b.pinned.size, outlines: ((u2.pipebox || {}).pins || []).length, panel: !!entry && document.contains(entry.el) };
+          g.plantStuckXKeepsPin = false; await d.act("unpin", "all");
+          return { planted: ${planted}, pin, before, after };
+        })()`, { timeout: 90000 });
+        const clean = await arm(false), planted = await arm(true);
+        return { pass: !clean.error && clean.before.pins === 1 && clean.before.outlines >= 1 && clean.before.stuck && clean.before.in_doc
+            && clean.after.pins === 0 && clean.after.outlines === 0 && !clean.after.panel
+            && !planted.error && planted.before.stuck && !planted.after.panel && planted.after.pins === 1 && planted.after.outlines >= 1,
+          evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {
@@ -15523,7 +15565,7 @@ export function makeChecks(env) {
       },
     },
     {
-      id: "G-78",
+      id: "G-78-sidecard",
       asks: "a pin: outline on its box, markdown card beside the page, billboard in the graph; the billboard's x and minimize act on it alone, the card brings it back",
       async run() {
         const got = await evaluate(`(async () => {
