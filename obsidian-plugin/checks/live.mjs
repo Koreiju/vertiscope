@@ -6390,6 +6390,17 @@ export function makeChecks(env) {
             out.reply_below_pins = !!tr && cards.length > 0 && !!(cards[cards.length - 1].compareDocumentPosition(tr) & Node.DOCUMENT_POSITION_FOLLOWING)
               && (tr.innerText || "").includes(t1.reply.slice(0, 30).trim());
             out.reply_rendered_as_markdown = !!tr && !!tr.querySelector("blockquote, p, strong");
+            // The one-note slate (PLUGIN_GOAL 133): the chat is the note's
+            // last section, after every pin, drawn by the live editor.
+            const slate = side.querySelector(".domvec-slate-cell .cm-editor");
+            if (slate && b.slatePath) {
+              const nf = app.vault.getAbstractFileByPath(b.slatePath);
+              const txt = nf ? await app.vault.read(nf) : "";
+              const lastPin = txt.lastIndexOf("<!-- cid:"), chatAt = txt.indexOf("## chat");
+              out.slate_one_note = true;
+              out.reply_below_pins = lastPin >= 0 && chatAt > lastPin && txt.includes(t1.reply.slice(0, 30).trim());
+              out.reply_rendered_as_markdown = !!slate.querySelector(".HyperMD-quote, .cm-strong, .HyperMD-header");
+            }
             // One more pin: the next turn carries THAT one only.
             const firstSent = new Set(chat.sent);
             let third = false;
@@ -11778,6 +11789,36 @@ export function makeChecks(env) {
         })()`, { timeout: 60000 });
         const clean = await arm(false), planted = await arm(true);
         return { pass: !clean.error && clean.editor && clean.note_written && !planted.error && !planted.editor && planted.text_shown, evidence: { clean, planted } };
+      },
+    },
+    {
+      id: "PG-131-slate-one-panel",
+      asks: "the slate is the markdown part of the notebook (PLUGIN_GOAL 131/132/133): the browser's pinned chunks are sections of ONE note in a real Obsidian editor, each with a handle; planted (plantStaticSide) a static card per pin, no editor",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const leaf = app.workspace.getLeavesOfType("domvec-browser-view")[0];
+          if (!leaf) return { error: "no browser view" };
+          const b = leaf.view;
+          const keep = new Map(b.pinned);
+          b.plantStaticSide = ${planted};
+          b.pinned.clear();
+          for (const i of [1, 2, 3]) b.pinned.set("pgslate" + i, { cid: "pgslate" + i, url: "https://example.org/p" + i, head: "/html/body/div[" + i + "]", markdown: "slate check chunk " + i });
+          await b.renderSide(); await sleep(2000);
+          const w = b.markdownWrap;
+          const editors = w.querySelectorAll(".domvec-slate-cell .cm-editor").length;
+          const handles = w.querySelectorAll(".domvec-pin-handle").length;
+          const cards = w.querySelectorAll(".domvec-pin-card").length;
+          const text = w.innerText.includes("slate check chunk 3");
+          const f = app.vault.getAbstractFileByPath(b.slatePath);
+          const sections = f ? ((await app.vault.read(f)).match(/<!-- cid:pgslate/g) || []).length : 0;
+          b.pinned.clear(); for (const [k, v] of keep) b.pinned.set(k, v);
+          b.plantStaticSide = false; await b.renderSide();
+          return { planted: ${planted}, editors, handles, cards, text_shown: text, note_sections: sections };
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        return { pass: !clean.error && clean.editors === 1 && clean.handles === 3 && clean.note_sections === 3 && clean.text_shown
+          && !planted.error && planted.editors === 0 && planted.cards === 3, evidence: { clean, planted } };
       },
     },
     {

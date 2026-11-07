@@ -1272,3 +1272,7 @@ button.domvec-run-fence:hover {
 .domvec-plane-retrieve-hit { padding: 2px 6px; cursor: pointer; color: #ddd; font-size: 12px; white-space: nowrap; }
 .domvec-plane-retrieve-hit:hover { background: #222; }
 .domvec-plane-retrieve-kind { color: #9b8cff; }
+.domvec-pin-handles { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px; }
+.domvec-pin-handle { font-size: var(--font-ui-smaller); padding: 1px 6px; border-radius: 4px; background: var(--background-modifier-hover); cursor: pointer; }
+.domvec-pin-handle .domvec-pin-close { margin-left: 4px; opacity: .6; }
+.domvec-slate-cell .workspace-leaf-content { height: auto; }

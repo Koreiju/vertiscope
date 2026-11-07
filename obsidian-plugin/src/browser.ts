@@ -689,6 +689,7 @@ export class BrowserView extends ItemView {
 
   async onClose(): Promise<void> {
     try { this.chat?.destroy(); } catch { /* gone */ }
+    try { this.slateLeaf?.detach(); } catch { /* gone */ } this.slateLeaf = null;
     // The capture pump stops with the view. It kept sending its queue -- and
     // retrying refusals for up to 15 minutes -- after a plugin reload, beside
     // the new view's pump: two sensors' drains for one url interleaved on the
@@ -1404,6 +1405,10 @@ export class BrowserView extends ItemView {
     return "{" + v.join(", ") + "}";
   }
 
+  plantStaticSide = false;
+  slateLeaf: any = null;
+  get slatePath(): string { return "domvec/chunks/slate " + ((this.leaf as any).id || "cell") + ".md"; }
+
   /** The markdown side: one card per pinned chunk, natively rendered. */
   private async renderSide(): Promise<void> {
     this.markdownWrap.empty();
@@ -1415,6 +1420,42 @@ export class BrowserView extends ItemView {
       await this.chat?.renderInto(this.markdownWrap);
       return;
     }
+    // ONE markdown panel (PLUGIN_GOAL 131/132: the slate IS the notebook's
+    // markdown part): every pin a section of one note, the chat below it, in
+    // a real Obsidian editor -- each pin keeps a handle row (open, unpin).
+    // Planted `plantStaticSide`: a static card per pin, as before.
+    if (!this.plantStaticSide) {
+      const NL = String.fromCharCode(10);
+      const bar = this.markdownWrap.createDiv({ cls: "domvec-pin-handles" });
+      const parts: string[] = [];
+      for (const pin of this.pinned.values()) {
+        let host = "";
+        try { host = new URL(pin.url).host; } catch { /* not a url */ }
+        const h = bar.createSpan({ cls: "domvec-pin-handle", attr: { "data-cid": pin.cid, title: pin.head } });
+        h.createSpan({ text: host || pin.head }).onclick = () => this.onPin(pin.cid);
+        const x = h.createSpan({ cls: "domvec-pin-close", text: "×" });
+        x.setAttr("aria-label", "unpin"); x.onclick = () => this.unpin(pin.cid);
+        parts.push(`<!-- cid:${pin.cid} -->` + NL + `[${host || pin.head}](${pin.url})` + NL + NL + pin.markdown);
+      }
+      const chat = this.chat && (this.chat.turns.length || this.chat.pending().length) ? this.chat.markdown() : "";
+      if (chat) parts.push("## chat" + NL + NL + chat);
+      const body = parts.join(NL + NL + "---" + NL + NL);
+      const vault = this.app.vault, folder = "domvec/chunks", path = this.slatePath;
+      if (!vault.getAbstractFileByPath(folder)) await vault.createFolder(folder).catch(() => undefined);
+      let f: any = vault.getAbstractFileByPath(path);
+      if (f) { if ((await vault.read(f)) !== body) await vault.modify(f, body); } else f = await vault.create(path, body);
+      const ws: any = this.app.workspace;
+      const Leaf: any = ws.activeLeaf?.constructor ?? ws.getMostRecentLeaf()?.constructor;
+      if (Leaf) {
+        if (!this.slateLeaf) {
+          this.slateLeaf = new Leaf(this.app);
+          await this.slateLeaf.openFile(f, { state: { mode: "source", source: false } } as any);
+        }
+        this.markdownWrap.createDiv({ cls: "domvec-slate-cell" }).appendChild(this.slateLeaf.containerEl);
+        return;
+      }
+    }
+    if (this.slateLeaf) { try { this.slateLeaf.detach(); } catch { /* gone */ } this.slateLeaf = null; }
     for (const pin of this.pinned.values()) {
       const card = this.markdownWrap.createDiv({ cls: "domvec-pin-card" });
       card.dataset.cid = pin.cid;
