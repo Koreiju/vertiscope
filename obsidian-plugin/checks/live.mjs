@@ -11651,6 +11651,28 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-210",
+      asks: "tiered retrieval (PLUGIN_GOAL 137): url nodes ranked first, then each page's chunks re-ranked into the readout page by page -- a query typed into the 3D search field: the readout repaints as pages land, its first ranked answer well before the last; planted (plantSingleTier) one answer, painted once",
+      async run() {
+        const arm = (planted) => inPane(`
+          const sf = v.searchField; sf.plantSingleTier = ${planted};
+          let paints = 0; const orig = sf.paint.bind(sf); sf.paint = (...a) => { paints++; return orig(...a); };
+          try {
+            sf.input.value = ""; await sf.run(); paints = 0;
+            sf.input.value = ${planted} ? "patricia radix trie" : "patricia radix tries";
+            const t0 = performance.now(); await sf.run(); const ms = Math.round(performance.now() - t0);
+            await sleep(500);
+            const res = { planted: ${planted}, paints, total_ms: ms, tier: { ...sf.tierStats }, hits: sf.hits.length };
+            sf.input.value = ""; await sf.run();
+            return res;
+          } finally { sf.paint = orig; sf.plantSingleTier = false; }
+        `);
+        const clean = await arm(false), planted = await arm(true);
+        return { pass: !clean.error && clean.hits > 0 && clean.paints >= 3 && clean.tier.pages_done >= 2 && clean.tier.first_ms < clean.total_ms
+                       && !planted.error && planted.paints <= 2, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {
