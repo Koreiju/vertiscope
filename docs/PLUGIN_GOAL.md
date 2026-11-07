@@ -5218,6 +5218,37 @@ collision and containment forces, the craft's sphere); the scaled map stays
 in the code as an option, off. G-21 ("nodes never overlap") returns to what
 it was before item 119.*
 
+*2026-11-07, answering the open rulings (with two screenshots: the Cyberpunk
+Wiki home page as our chunk panel drew it -- a white box of five plain titles --
+beside the page itself -- five image tiles with their captions):*
+
+> D-2/T-1: I'm having second thoughts about how our inline markdown retrieval mechanism works. I don't think we should need heuristics on which level the retrieval acts on because that should be already managed by a properly engineered pagerank component in the regular retrieval mechanism. Im pretty sure we can simplify that component of our extended markdown panel gestures to just a regular triple-retrieval mechanism with a properly engineered pagerank aspect
+>
+> D-36: Note from my previous transcripts that we had the intention of fusing the way panel/cells are represented based on their sources, like if we are getting the chunks from the browser then we have the dual-view panel of markdown and the actual browser itself. Perhaps others might just be markdown from SLM model outputs in chats, perhaps others are more code-sided with things like our ego and our browser cells with controls. However, universal everywhere is the exact same markdown interface with the full suite of features and extensions that work in any/all instances where markdown is interoperable with the rendered page chunk views or the browser itself. Page chunk views would essentially then be special kinds of browsers that are only really rendering/focused on the chunk view, but with full interactivity still connected back to the shadow DOM. There are likely other alignment issues with browser cells (i.e. the browser panel features we open from your MCP toolspace versus the browser panels that are in the 2D plane with accompanying markdown panels as well. Note that the markdown and browser panels in the 2D plan appear as one unit, but should still be able to be pulled apart and show solid links between the two through our function-object undirected relation dialect that universalizes the interface of our 2D computation graph aspect of the dialectic representation in panel/cell form on the 2D plane with the analogous undirected graph representation, where a single gesture allows the user to flip between the two representations depending on where they are localized with ease. So, there is a necessity to universalize the features of each instance of our panel-style cell representations and interactions (i.e. extended markdown, magnetic factors of fused computational graphs between markdown controls and the browser/other cells themselves. Note also that when I say "cell", it's just another type of specialized interactive node int the panel/graph dialect, which can then include the VSCode editors on code artifacts. Also, SLM model outputs of code artifacts should automatically render and register within the chat context as their own pickable/pullabale magnetic nodes with solid links. Solid computational links can be turned "on" and "off" with a gesture (perhaps a right click on a clearly clickable solid undirected link) that is either semi translucent or solid to show the presence of the memory link that is active in code compilation between the panels/nodes in general (the browser and markdown are literally just an example but the main drive is for this to be something that can generalize to the full scale of undirected links between nodes that connote function-object memory structures of the computation graph as the reservoir computer.
+>
+> G-21, G-93, G-94: The question is illegible of the cause and there is no context presented by you on this
+>
+> Q.002: Yes
+>
+> Inputs: Missing. Omit and we can do our best to carry on until they surface again, likely so.
+
+*Read as (135): (a) D-2/T-1 -- no level heuristics in the inline `[]()`
+retrieval: it becomes the regular triple retrieval with a properly engineered
+PageRank term, which decides the level; (b) D-36 -- a panel's views follow its
+SOURCE (browser chunks: markdown + a chunk-focused browser view, fully
+interactive back to the shadow DOM; chat output: markdown; code: the VS Code
+editor), and the extended markdown interface is the same everywhere; a
+markdown+browser pair is one unit that can be PULLED APART into two nodes
+joined by a solid undirected link; one gesture flips a region between panel
+form and graph form; (c) a chat's code output becomes its own pickable,
+magnetic node with solid links in the chat context; (d) a solid link toggles
+on/off by right-click on the link, drawn solid when active and translucent when
+not -- the memory link of the computation graph; (e) the panel's page view
+must draw the page's own pictures and layout (the screenshot: tiles lost to a
+white box of titles); (f) Q.002 -- a hover pane's content is KEPT after it
+closes; (g) G-21/G-93/G-94 to be re-asked with their cause shown; (h) the
+G-145 image hovers and the 11-03 screenshots are omitted until they surface.*
+
 ---
 
 ## Standing instructions carried in the verbatim
