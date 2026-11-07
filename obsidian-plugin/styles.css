@@ -1300,3 +1300,5 @@ button.domvec-run-fence:hover {
 .domvec-browser-card { position: relative; }
 .domvec-browser-card-exit { position: absolute; top: 4px; right: 8px; z-index: 5; cursor: pointer; font-size: 16px; line-height: 1; padding: 2px 6px; border-radius: 4px; color: var(--text-muted); background: var(--background-secondary); }
 .domvec-browser-card-exit:hover { color: var(--text-normal); background: var(--background-modifier-hover); }
+/* The billboard layer over every pane (PLUGIN_GOAL 137 (2)). */
+.domvec-bb-layer.is-overlay { position: fixed; inset: auto; overflow: visible; z-index: var(--layer-popover, 30); }

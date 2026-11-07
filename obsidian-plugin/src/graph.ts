@@ -3304,7 +3304,28 @@ export class GraphView extends ItemView {
     }
     if (!this.billboardLayer) {
       const host = this.canvasEl || this.contentEl;
-      this.billboardLayer = host.createDiv({ cls: "domvec-bb-layer" });
+      // OVER every pane (2026-11-07: "chunk panels are supposed to be layered
+      // *overtop* and not underneath the browser"): the layer lives on the
+      // document body, fixed over the 3D view's own rectangle and free to
+      // overflow it, so a panel near the edge is drawn over the browser
+      // beside it instead of cut by the pane. Its origin is the canvas's,
+      // so every panel position is unchanged. Planted `plantLayerInPane`.
+      if (this.plantLayerInPane) this.billboardLayer = host.createDiv({ cls: "domvec-bb-layer" });
+      else {
+        const layer = document.body.createDiv({ cls: "domvec-bb-layer is-overlay" });
+        this.billboardLayer = layer;
+        const sync = () => {
+          if (!host.isConnected) { layer.style.display = "none"; return; }
+          const r = host.getBoundingClientRect();
+          const hidden = r.width === 0 || r.height === 0;
+          layer.style.display = hidden ? "none" : "";
+          Object.assign(layer.style, { left: r.left + "px", top: r.top + "px", width: r.width + "px", height: r.height + "px" });
+        };
+        sync();
+        const ro = new ResizeObserver(sync); ro.observe(host);
+        const tick = window.setInterval(sync, 250);
+        this.register(() => { ro.disconnect(); window.clearInterval(tick); layer.remove(); });
+      }
     }
     const el = this.billboardLayer.createDiv({ cls: "domvec-bb" });
     // A HOVER preview passes the pointer through to the graph: an open
@@ -7571,6 +7592,7 @@ export class GraphView extends ItemView {
   popupLinks = new Map<string, string>();
   plantPopupWaitsForPlace = false;
   plantRerankEveryAbsorb = false;
+  plantLayerInPane = false;
   private rerankTimer = 0;
   rerankStats = { asked: 0, fired: 0, skipped: 0 };
   private arrivalsSinceRerank = 0;

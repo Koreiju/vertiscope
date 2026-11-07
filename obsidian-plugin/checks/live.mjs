@@ -4837,7 +4837,7 @@ export function makeChecks(env) {
             // read until 2026-10-07 was retired with the form switch
             // (2026-10-06: "rather than having this switching between markdown
             // and 'shadow DOM'"), and read 0 elements from a panel showing 40.
-            const bb = v.containerEl.querySelector('.domvec-bb[data-cid="' + node.id + '"]');
+            const bb = (v.billboardLayer || v.containerEl).querySelector('.domvec-bb[data-cid="' + node.id + '"]');
             const frame = bb && bb.querySelector("iframe.domvec-snapshot");
             const fdoc = frame && frame.contentDocument;
             const root = fdoc ? fdoc.body : (bb && bb.querySelector(".domvec-bb-body"));
@@ -5850,7 +5850,7 @@ export function makeChecks(env) {
           // a billboard -- and openBillboard TOGGLES, so running second this
           // check was closing one instead of opening one and reporting that
           // none appeared. Establish the state rather than inherit it.
-          const stale = Array.from(v.contentEl.querySelectorAll(".domvec-bb"));
+          const stale = Array.from((v.billboardLayer || v.contentEl).querySelectorAll(".domvec-bb"));
           for (const el of stale) {
             const x = el.querySelector(".domvec-bb-close");
             if (x) x.click();
@@ -5890,16 +5890,16 @@ export function makeChecks(env) {
           // The panel fetches its lines; give it a moment.
           for (let i = 0; i < 40; i++) {
             await sleep(250);
-            const b = v.contentEl.querySelector(".domvec-bb-body");
+            const b = (v.billboardLayer || v.contentEl).querySelector(".domvec-bb-body");
             if (b && b.childElementCount) break;
           }
-          const all = v.contentEl.querySelectorAll(".domvec-bb");
+          const all = (v.billboardLayer || v.contentEl).querySelectorAll(".domvec-bb");
           const el = all[all.length - 1];
           if (!el) return { error: "no billboard appeared",
                             open_count: all.length,
                             tracked: v.billboards ? v.billboards.size : null,
                             clicked: String(chunk.id).slice(0, 24) };
-          const layer = v.contentEl.querySelector(".domvec-bb-layer");
+          const layer = (v.billboardLayer || v.contentEl.querySelector(".domvec-bb-layer"));
           const body = el.querySelector(".domvec-bb-body");
           const lines = body ? body.childElementCount : 0;
 
@@ -5951,7 +5951,7 @@ export function makeChecks(env) {
           // And it closes.
           el.querySelector(".domvec-bb-close").click();
           await sleep(300);
-          const gone = !v.contentEl.querySelector(".domvec-bb");
+          const gone = !(v.billboardLayer || v.contentEl).querySelector(".domvec-bb");
 
           return {
             node: String(chunk.id).slice(0, 24),
@@ -12375,6 +12375,32 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "PG-137-panels-over",
+      asks: "PLUGIN_GOAL 137 (2): a chunk panel near the 3D view's edge is drawn OVER the browser pane beside it, not cut by the pane -- the panel's box extends past the canvas edge and the element on top at that point is the panel; planted (plantLayerInPane) the pane clips it",
+      async run() {
+        const arm = (planted) => inPane(`
+          v.plantLayerInPane = ${planted};
+          if (v.billboardLayer) { for (const id of [...v.billboards.keys()]) v.closeBillboard(id); v.billboardLayer.remove(); v.billboardLayer = null; }
+          const n = v.graph.graphData().nodes.find((x) => !x.force && Number.isFinite(x.x));
+          if (!n) return { error: "no node" };
+          await v.openBillboard(n, false, false); await sleep(1500);
+          const e = v.billboards.get(n.id);
+          if (!e) return { error: "no billboard" };
+          const cr = (v.canvasEl || v.contentEl).getBoundingClientRect();
+          e.el.style.left = (cr.width - 60) + "px"; e.el.style.top = "40px"; e.pinned = true;
+          await sleep(300);
+          const br = e.el.getBoundingClientRect();
+          const px = Math.min(br.right - 5, cr.right + 40), py = br.top + 20;
+          const top = document.elementFromPoint(px, py);
+          const res = { planted: ${planted}, past_edge: br.right > cr.right + 10, probe_x: Math.round(px), canvas_right: Math.round(cr.right), on_top: !!top && e.el.contains(top) };
+          v.closeBillboard(n.id); v.billboardLayer && v.billboardLayer.remove(); v.billboardLayer = null; v.plantLayerInPane = false;
+          return res;
+        `);
+        const clean = await arm(false), planted = await arm(true);
+        return { pass: !clean.error && clean.past_edge && clean.on_top && !planted.error && !planted.on_top, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {
@@ -16082,7 +16108,7 @@ export function makeChecks(env) {
           await v.openBillboard(again);
           await sleep(2500);
           const bb = v.billboardState().find((b) => b.id === again.id) || null;
-          const host = [...v.containerEl.querySelectorAll(".domvec-bb")]
+          const host = [...(v.billboardLayer || v.containerEl).querySelectorAll(".domvec-bb")]
             .map((e) => e.querySelector(".domvec-html-host")).find(Boolean);
           const inside = host && host.shadowRoot
             ? host.shadowRoot.querySelectorAll("*").length : (bb ? bb.elements : 0);

@@ -1079,6 +1079,7 @@ class GraphStore:
             for h in fresh:
                 edge_rows.append({"cid": h[0], "aid": row["aid"], "ord": h[1]})
 
+        _tb = time.perf_counter()
         if fused_rows:
             self._batch(
                 "UNWIND $rows AS r MERGE (a:Address {aid: r.aid}) "
@@ -1089,6 +1090,7 @@ class GraphStore:
                 "CREATE (c)-[:Anchors {ord: r.ord}]->(a)",
                 fused_rows,
             )
+        counts["ms_anchors_fused"] = round((time.perf_counter() - _tb) * 1000, 1); counts["n_anchors_fused"] = len(fused_rows); _tb = time.perf_counter()
         if plain_rows:
             self._batch(
                 "UNWIND $rows AS r MERGE (a:Address {aid: r.aid}) "
@@ -1098,8 +1100,10 @@ class GraphStore:
                 plain_rows,
             )
 
+        counts["ms_anchors_plain"] = round((time.perf_counter() - _tb) * 1000, 1); counts["n_anchors_plain"] = len(plain_rows); _tb = time.perf_counter()
         if edge_rows:
             self._create_anchors(edge_rows)
+        counts["ms_anchors_edge"] = round((time.perf_counter() - _tb) * 1000, 1); counts["n_anchors_edge"] = len(edge_rows); _tb = time.perf_counter()
 
         # Whatever is left in `anchor_of` is an anchor whose address this
         # write did not carry. Rare, and it still has to be created.
@@ -1125,6 +1129,7 @@ class GraphStore:
             # and this comment is the tie.
             self._create_anchors(anchor_rows)
             counts["anchors"] = len(anchor_rows)
+        counts["ms_anchors_rest"] = round((time.perf_counter() - _tb) * 1000, 1); counts["n_anchors_rest"] = len(anchor_rows)
         counts["anchors"] = (counts.get("anchors", 0)
                              + len(fused_rows) + len(edge_rows))
         counts["ms_anchors"] = round((time.perf_counter() - _t) * 1000, 1)
