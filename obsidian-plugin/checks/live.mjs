@@ -15386,6 +15386,14 @@ export function makeChecks(env) {
           if (!target) return { error: "no paragraph on screen to pin" };
           const pinned = (await d.act("pin", target)).result || {};
           await sleep(1500);
+          // The billboard waits for the chunk's vector (embedding is off the
+          // capture path): wait for it, and report how long.
+          const t0 = Date.now(); let pin_billboard_ms = null;
+          for (let k = 0; k < 50; k++) {
+            const u = d.ui(), p0 = (u.pinned && u.pinned.pins || [])[0];
+            if (p0 && (u.billboards || []).some((b) => b.id === p0.cid || b.id === ((app.workspace.getLeavesOfType("domvec-graph-view")[0].view.pinAlias || new Map()).get(p0.cid)))) { pin_billboard_ms = 1500 + Date.now() - t0; break; }
+            await sleep(500);
+          }
           const ui = d.ui();
           const pin = (ui.pinned && ui.pinned.pins || [])[0] || null;
           // The chunk's own element box, as the page lays it out right now.
@@ -15399,7 +15407,8 @@ export function makeChecks(env) {
           const wb = view.webview.getBoundingClientRect();
           const outline = ((ui.pipebox || {}).pins || [])[0] || null;
           const bbs = ui.billboards || [];
-          const bb = pin ? bbs.find((b) => b.id === pin.cid) : null;
+          const alias0 = pin ? ((app.workspace.getLeavesOfType("domvec-graph-view")[0].view.pinAlias || new Map()).get(pin.cid) || pin.cid) : null;
+          const bb = pin ? bbs.find((b) => b.id === pin.cid || b.id === alias0) : null;
           const card = (ui.pinned && ui.pinned.side_cards || []).find((c) => pin && c.cid === pin.cid);
           // It must survive a REDRAW -- a refit, a new epoch, a store
           // switch all redraw the graph -- still on screen, with its x.
@@ -15410,7 +15419,7 @@ export function makeChecks(env) {
           if (pin) {
             const g0 = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
             if (typeof g0.reload === "function") { await g0.reload(); await sleep(1500); }
-            const e0 = g0.billboards && g0.billboards.get(pin.cid);
+            const e0 = g0.billboards && g0.billboards.get((g0.pinAlias && g0.pinAlias.get(pin.cid)) || pin.cid);
             survived = { entry: !!e0, in_document: !!e0 && document.contains(e0.el),
                          has_close: !!e0 && !!e0.el.querySelector(".domvec-bb-close") };
           }
@@ -15419,12 +15428,12 @@ export function makeChecks(env) {
           if (pin) {
             const g = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
             // THIS pin's billboard, not the first one with an x.
-            const own = g.billboards && g.billboards.get(pin.cid);
+            const own = g.billboards && g.billboards.get((g.pinAlias && g.pinAlias.get(pin.cid)) || pin.cid);
             const x = own && own.el.querySelector(".domvec-bb-close");
             closed_via = x ? "own billboard's x" : "no x on its billboard";
             const snap = () => {
               const u = d.ui();
-              const own2 = g.billboards && g.billboards.get(pin.cid);
+              const own2 = g.billboards && g.billboards.get((g.pinAlias && g.pinAlias.get(pin.cid)) || pin.cid);
               return { pins: (u.pinned && u.pinned.pins || []).length,
                        card: !!view.markdownWrap.querySelector('.domvec-pin-card[data-cid="' + pin.cid + '"]'),
                        billboard: !!own2 && document.contains(own2.el),
@@ -15442,7 +15451,7 @@ export function makeChecks(env) {
             await sleep(1500);
             after.card_click = snap();
             // Minimize collapses it to its title bar; the card expands it again.
-            const own3 = g.billboards && g.billboards.get(pin.cid);
+            const own3 = g.billboards && g.billboards.get((g.pinAlias && g.pinAlias.get(pin.cid)) || pin.cid);
             const mn = own3 && own3.el.querySelector(".domvec-bb-min");
             if (mn) mn.click();
             await sleep(300);
