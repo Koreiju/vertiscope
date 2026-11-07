@@ -11627,6 +11627,30 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "PG-orphan-cards",
+      asks: "one ego card, however often the plugin reloads (2026-11-07, the reader's screenshot of stacked ego panels): a stray ego card left on the plane as a reload left it, then the cockpit docked -- exactly one ego card remains; planted (__domvecPlantKeepOrphans) the stray stays beside it",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          window.__domvecPlantKeepOrphans = ${planted};
+          await window.__domvec.act("open", "graph"); await sleep(1500);
+          const P = app.plugins.plugins["domvec-bridge"], ck = P.cockpit;
+          const plane = app.workspace.getLeavesOfType("domvec-graph-view")[0].view.plane();
+          try {
+            ck.undock();
+            const stray = plane.createDiv({ cls: "domvec-plane-card domvec-cockpit-card" }); stray.setText("ego (left by a reload)");
+            await ck.dock(); await sleep(500);
+            return { planted: ${planted}, ego_cards: plane.querySelectorAll(".domvec-cockpit-card").length, stray_left: stray.isConnected };
+          } finally {
+            window.__domvecPlantKeepOrphans = false;
+            for (const c of Array.from(plane.querySelectorAll(".domvec-cockpit-card"))) if (c !== ck.card) c.remove();
+          }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        return { pass: !clean.error && clean.ego_cards === 1 && !clean.stray_left && planted.ego_cards === 2 && planted.stray_left, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {
