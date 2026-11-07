@@ -11218,7 +11218,7 @@ export function makeChecks(env) {
           return { planted: ${planted}, bar: true, buttons, general, node_hits: hits.length, kinds, opened: opened.slice(0, 80) };
         })()`, { timeout: 60000 });
         const clean = await arm(false), planted = await arm(true);
-        return { pass: clean.bar && clean.buttons === 0 && clean.general.filter((g) => g.startsWith("cell ")).length === 3 && clean.node_hits >= 1 && clean.kinds.length >= 1 && /\]\(code:\/\//.test(clean.opened)
+        return { pass: clean.bar && clean.buttons === 0 && clean.general.filter((g) => g.startsWith("cell ")).length >= 3 && clean.node_hits >= 1 && clean.kinds.length >= 1 && /\]\(code:\/\//.test(clean.opened)
                        && !planted.bar && planted.buttons >= 2, evidence: { clean, planted } };
       },
     },
@@ -11892,6 +11892,41 @@ export function makeChecks(env) {
         const clean = await arm(false), planted = await arm(true);
         return { pass: !clean.error && clean.in_context_before && !clean.in_context_after && !clean.magnet_top
           && !planted.error && planted.in_context_after, evidence: { clean, planted } };
+      },
+    },
+    {
+      id: "PG-134-chat-entry",
+      asks: "a chat cell is one of the primary cells (PLUGIN_GOAL 134): the retrieval bar offers 'chat cell'; picked, it opens a notebook panel whose note is domvec: chat and whose head shows ask; planted (plantNoChatEntry) no such entry",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          await window.__domvec.act("open", "graph"); await sleep(1200);
+          const D = window.__domvecPlane; D.plantNoChatEntry = ${planted};
+          for (const t of document.querySelectorAll(".domvec-plane-tools")) t.remove();
+          D.toolsEl = null; D.ensureTools(); await sleep(400);
+          const input = document.querySelector(".domvec-plane-retrieve");
+          if (!input) return { error: "no bar" };
+          input.focus(); input.value = "chat"; input.dispatchEvent(new Event("input")); await sleep(400);
+          const hit = [...document.querySelectorAll(".domvec-plane-retrieve-hit")].find((h) => /chat cell/.test(h.textContent));
+          let fm = "", ask = false, made = null;
+          if (hit) {
+            const before = new Set(app.vault.getMarkdownFiles().map((f) => f.path));
+            hit.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+            for (let i = 0; i < 20 && !made; i++) { await sleep(300); made = app.vault.getMarkdownFiles().find((f) => !before.has(f.path)); }
+            await sleep(1200);
+            if (made) {
+              fm = String(app.metadataCache.getFileCache(made)?.frontmatter?.domvec || "");
+              const card = [...document.querySelectorAll(".domvec-panel-card")].find((c) => c.dataset.path === made.path);
+              const a = card && card.querySelector(".is-ask"); ask = !!a && a.style.display !== "none";
+              const p = D.panelOf(made.path); if (p) p.leaf.detach();
+              await app.vault.trash(made, true);
+            }
+          }
+          D.plantNoChatEntry = false; for (const t of document.querySelectorAll(".domvec-plane-tools")) t.remove(); D.toolsEl = null; D.ensureTools();
+          return { planted: ${planted}, entry: !!hit, frontmatter: fm, ask_shown: ask };
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        return { pass: !clean.error && clean.entry && clean.frontmatter === "chat" && clean.ask_shown && !planted.error && !planted.entry, evidence: { clean, planted } };
       },
     },
     {

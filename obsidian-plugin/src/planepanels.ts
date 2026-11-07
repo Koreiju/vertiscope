@@ -147,6 +147,7 @@ export class PlaneDesk {
 
   /** Planted (133): the three create buttons, as before the retrieval bar. */
   plantToolButtons = false;
+  plantNoChatEntry = false;
   retrieveStats = { queries: 0, node_hits: 0, picked: 0, last_kind: "" };
   /**
    * The RETRIEVAL BAR (PLUGIN_GOAL 133: "Instead of buttons for creating only
@@ -166,6 +167,12 @@ export class PlaneDesk {
       { label: "code cell", kind: "cell", act: () => { void this.create("notebook"); } },
       { label: "markdown cell", kind: "cell", act: () => { void this.create("slate"); } },
       { label: "browser cell", kind: "cell", act: () => { this.host.openBrowser?.(); } },
+      // A CHAT cell (PLUGIN_GOAL 134: "a basic mistral 2 DPO chat model cell as
+      // one of the primary jupyter level notebook cells"): its note carries
+      // `domvec: chat`, so its head shows `ask`. Planted `plantNoChatEntry`.
+      ...(this.plantNoChatEntry ? [] : [{ label: "chat cell", kind: "cell", act: () => {
+        void this.create("notebook", { text: ["---", "domvec: chat", "---", "", "Ask here; snap cells to my edges for context.", ""].join(String.fromCharCode(10)) });
+      } }]),
     ];
     let seq = 0;
     const show = (hits: Hit[]) => {
