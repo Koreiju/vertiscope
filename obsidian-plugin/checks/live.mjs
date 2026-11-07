@@ -11673,6 +11673,28 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-212",
+      asks: "the 3D graph follows the most recent re-ranked set, tier by tier (PLUGIN_GOAL 139): a query typed into the 3D search field -- the view is handed each tier's re-ranked set as pages land (several follows, each the newest set), not one set at the end; planted (plantSingleTier) one follow",
+      async run() {
+        const arm = (planted) => inPane(`
+          const sf = v.searchField; sf.plantSingleTier = ${planted};
+          const follows = []; const orig = v.showSearch.bind(v);
+          v.showSearch = (hits, d, soft) => { follows.push({ at: Math.round(performance.now()), n: (hits || []).length, top: String(((hits || [])[0] || {}).cid || "") }); return orig(hits, d, soft); };
+          try {
+            sf.input.value = ""; await sf.run(); follows.length = 0;
+            sf.input.value = ${planted} ? "suffix tree index" : "suffix tree indexes";
+            await sf.run(); await sleep(500);
+            const tops = new Set(follows.map((f) => f.top));
+            const res = { planted: ${planted}, follows: follows.length, distinct_tops: tops.size, last_n: follows.length ? follows[follows.length - 1].n : 0 };
+            sf.input.value = ""; await sf.run();
+            return res;
+          } finally { v.showSearch = orig; sf.plantSingleTier = false; }
+        `);
+        const clean = await arm(false), planted = await arm(true);
+        return { pass: !clean.error && clean.follows >= 3 && clean.last_n > 0 && !planted.error && planted.follows <= 2, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {
