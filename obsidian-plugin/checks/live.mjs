@@ -16173,7 +16173,10 @@ export function makeChecks(env) {
             "l=Math.min(l,q.left);t=Math.min(t,q.top);r=Math.max(r,q.right);b=Math.max(b,q.bottom);}" +
             "return any?[l,t,r,b]:null;})";
           const wb = wv.getBoundingClientRect();
+          // The page is laid out at desktop width and scaled into the cell: page px * Z = cell px.
+          const Z = wv.getZoomFactor ? wv.getZoomFactor() : 1;
           async function hoverAt(x, y) {
+            const X = Math.round(x * Z), Y = Math.round(y * Z);   // cell px for the pointer; x, y stay page px
             // Move, let Chromium apply it, then wait out two of the overlay's
             // 80 ms polls, so the reading is of THIS position, not the last.
             // Chromium does not re-hit-test a move to where the pointer
@@ -16183,9 +16186,9 @@ export function makeChecks(env) {
             const AGREE = "(function(x,y){var e=document.elementFromPoint(x,y);" +
               "var hs=document.querySelectorAll(':hover');return !!e&&hs.length>0&&hs[hs.length-1]===e;})";
             for (let k = 0; k < 8; k++) {
-              wv.sendInputEvent({ type: "mouseMove", x: x + 6 + k, y: y + 4 });
+              wv.sendInputEvent({ type: "mouseMove", x: X + 6 + k, y: Y + 4 });
               await sleep(25);
-              wv.sendInputEvent({ type: "mouseMove", x, y });
+              wv.sendInputEvent({ type: "mouseMove", x: X, y: Y });
               await sleep(35);
               if (await wv.executeJavaScript(AGREE + "(" + x + "," + y + ")")) break;
             }
@@ -16209,7 +16212,8 @@ export function makeChecks(env) {
                 oracle = await fetch(base + "/page_map?url=" + encodeURIComponent(wv.getURL())).then((r) => r.json());
               }
               const xs = (oracle.chunks || {})[h.cid] || [];
-              const box = await wv.executeJavaScript(UNION + "(" + JSON.stringify(xs.slice(0, 400)) + ")");
+              const box0 = await wv.executeJavaScript(UNION + "(" + JSON.stringify(xs.slice(0, 400)) + ")");
+              const box = box0 ? box0.map((v) => v * Z) : box0;
               if (box) {
                 const want = [wb.left + Math.max(0, box[0]), wb.top + Math.max(0, box[1]),
                               wb.left + Math.min(wb.width, box[2]), wb.top + Math.min(wb.height, box[3])];
