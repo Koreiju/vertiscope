@@ -433,6 +433,13 @@ export class GraphView extends ItemView {
   getIcon() { return "git-fork"; }
 
   async onOpen() {
+    // The craft (the ego set "similar" and ego search rank over) is made
+    // whether or not this view is drawing: a 3D view in a background tab
+    // ticks rarely, and after a reload no ego list reached the sidecar
+    // (2026-11-07). Planted `__domvecPlantCraftOnFrame`: made by the frame only.
+    this.registerInterval(window.setInterval(() => {
+      if (!this.craft && this.graph && !(window as any).__domvecPlantCraftOnFrame) { try { this.craftFrame(); (this.craft as any)?.dirty?.(); } catch { /* not ready */ } }
+    }, 2000));
     const root = this.containerEl.children[1] as HTMLElement;
     root.empty();
     root.addClass("domvec-graph-root");

@@ -415,7 +415,10 @@ export class PlaneHalo {
       el("circle", { cx: h.x, cy: h.y, r: 8, class: i === this.navigated ? "node lit" : "node" });
       el("text", { x: h.x + 11, y: h.y + 4, class: "label" }, h.label);
     });
-    el("circle", { cx: this.cursor.x, cy: this.cursor.y, r: 3, class: "cursor" });
+    // No dot under the pointer (2026-11-07: "this annoying yellow dot that
+    // appears randomly and follows the mouse around"). Planted
+    // `__domvecPlantHaloCursor`: drawn, as before.
+    if ((window as any).__domvecPlantHaloCursor) el("circle", { cx: this.cursor.x, cy: this.cursor.y, r: 3, class: "cursor" });
   }
 
   close(): void {

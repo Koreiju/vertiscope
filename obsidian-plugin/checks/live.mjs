@@ -11328,13 +11328,13 @@ export function makeChecks(env) {
     },
     {
       id: "PG-134-polar",
-      asks: "\"similar\" opens a polar navigation surface (PLUGIN_GOAL 134g): the rest of the plane folds onto the querying panel, the query node is a fixed invisible origin, and the surface moves with a velocity set by the mouse's offset from it -- a STILL mouse held off the origin keeps it moving; closing unfolds the rest; planted (plantDeltaSlide + plantNoFold) a still mouse moves nothing and nothing folds",
+      asks: "(and PLUGIN_GOAL 137 (12): no yellow dot follows the pointer) \"similar\" opens a polar navigation surface (PLUGIN_GOAL 134g): the rest of the plane folds onto the querying panel, the query node is a fixed invisible origin, and the surface moves with a velocity set by the mouse's offset from it -- a STILL mouse held off the origin keeps it moving; closing unfolds the rest; planted (plantDeltaSlide + plantNoFold) a still mouse moves nothing and nothing folds",
       async run() {
         const arm = (planted) => evaluate(`(async () => {
           const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
           await window.__domvec.act("open", "graph"); await sleep(1500);
           const P = app.plugins.plugins["domvec-bridge"], desk = window.__domvecPlane, halo = P.halo;
-          halo.plantDeltaSlide = ${planted}; halo.plantNoFold = ${planted};
+          halo.plantDeltaSlide = ${planted}; halo.plantNoFold = ${planted}; window.__domvecPlantHaloCursor = ${planted};
           const NL = String.fromCharCode(10), tag = (${planted} ? "p" : "c") + Date.now();
           const texts = ["Radix tries compress chains of single-child nodes in a prefix tree.", "A patricia trie is a radix tree with binary branching over bit strings.",
                          "Suffix trees index every suffix of a string for substring search.", "Prefix trees store keys by shared prefixes; radix variants merge edges."];
@@ -11345,11 +11345,22 @@ export function makeChecks(env) {
             for (let i = 0; i < 4; i++) await desk.create("notebook", { path: ps[i], text: texts[i] + NL });
             await sleep(800);
             for (const p of ps) { const f = app.vault.getAbstractFileByPath(p); if (f) await P.indexNote(f, "check").catch(() => null); }
-            await sleep(3000);
+            // Searchable before the surface asks: the vectors land asynchronously.
+            for (let w = 0; w < 40; w++) {
+              const got = await P.sidecar.search(texts[1], { k: 20, where: "ego" }).catch(() => null);
+              if (((got && got.hits) || []).filter((h) => ps.some((p) => String(h.url).endsWith(p))).length >= 2) break;
+              await sleep(750);
+            }
             let a = null, b = null;
             for (let i = 0; i < 20 && !(a && b); i++) { await sleep(300); a = card(A); b = card(B); }
             if (!a || !b) return { error: "no cards" };
+            const egoNow = await P.sidecar.ego().catch(() => null);
+            const diag = { in_ego: ((egoNow && egoNow.urls) || []).filter((u) => ps.some((p) => u.endsWith(p))).length, craft: !!window.__domvecCraft };
+            const sr = await P.sidecar.search(texts[0], { k: 20, where: "ego" }).catch(() => null);
+            diag.ego_hits = ((sr && sr.hits) || []).filter((h) => ps.some((p) => String(h.url).endsWith(p))).length;
+            diag.ego_all = ((sr && sr.hits) || []).length;
             const ok = await halo.open(A);
+            diag.halo_stats = { ...halo.stats };
             if (!ok) return { error: "halo did not open" };
             await sleep(300);
             const foldedB = b.classList.contains("is-collapsed");
@@ -11365,17 +11376,18 @@ export function makeChecks(env) {
             }
             const travelled = Math.round(halo.drift.travelled - s0), moved = Math.round(Math.hypot(halo.cursor.x - c0.x, halo.cursor.y - c0.y));
             const results = halo.nodes.length;
+            const cursor_dots = halo.svg ? halo.svg.querySelectorAll("circle.cursor").length : -1;
             halo.close(); await sleep(300);
             const restoredB = !b.classList.contains("is-collapsed");
-            return { planted: ${planted}, results, folded_other: foldedB, still_mouse_travel: travelled, cursor_moved: moved, reached_result: reached, restored_on_close: restoredB };
+            return { planted: ${planted}, diag, cursor_dots, results, folded_other: foldedB, still_mouse_travel: travelled, cursor_moved: moved, reached_result: reached, restored_on_close: restoredB };
           } finally {
-            halo.plantDeltaSlide = false; halo.plantNoFold = false; halo.close();
+            halo.plantDeltaSlide = false; halo.plantNoFold = false; window.__domvecPlantHaloCursor = false; halo.close();
             for (const p of ps) { const f = app.vault.getAbstractFileByPath(p); if (f) await app.vault.trash(f, true); }
           }
-        })()`, { timeout: 60000 });
+        })()`, { timeout: 150000 });
         const clean = await arm(false), planted = await arm(true);
-        return { pass: !clean.error && clean.results >= 1 && clean.reached_result && clean.folded_other && clean.cursor_moved > 5 && clean.restored_on_close
-                       && !planted.error && !planted.folded_other && planted.cursor_moved === 0, evidence: { clean, planted } };
+        return { pass: !clean.error && clean.results >= 1 && clean.reached_result && clean.folded_other && clean.cursor_moved > 5 && clean.restored_on_close && clean.cursor_dots === 0
+                       && !planted.error && !planted.folded_other && planted.cursor_moved === 0 && planted.cursor_dots >= 1, evidence: { clean, planted } };
       },
     },
     {

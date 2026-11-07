@@ -157,7 +157,20 @@ export class Craft {
   constructor(private host: CraftHost) {}
 
   /** The vault changed (or a panel opened): rebuild on the next frame. */
-  dirty(): void { this.stale = true; this.key = ""; }
+  dirty(): void {
+    this.stale = true; this.key = "";
+    // Rebuilt whether or not the craft is on screen: the ego set (what
+    // "similar" and the ego search rank over) came only from the draw loop, so
+    // a note made on the plane joined it only once the craft was looked at
+    // (2026-11-07, the polar surface finding nothing). Planted
+    // `__domvecPlantCraftOnFrame`: rebuilt by the frame only, as before.
+    if ((window as any).__domvecPlantCraftOnFrame) return;
+    window.clearTimeout(this.dirtyTimer);
+    this.dirtyTimer = window.setTimeout(() => {
+      if (this.stale && !this.building) { this.builtAt = performance.now(); void this.build(); }
+    }, 1200);
+  }
+  private dirtyTimer = 0;
 
   /** The craft's artifacts read from the vault. */
   async build(): Promise<void> {
