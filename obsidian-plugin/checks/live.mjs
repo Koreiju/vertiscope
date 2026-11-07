@@ -12062,6 +12062,38 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "PG-133-hover-panel",
+      asks: "one markdown panel for hover previews too (PLUGIN_GOAL 133): a hovered (unstuck) billboard's markdown form is the same Obsidian editor as a stuck one, its light render painted within 400 ms and swapped for the editor once mounted; planted (plantHoverStatic) the static render, no editor",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const g = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          g.plantHoverStatic = ${planted};
+          try {
+            const n = g.graph.graphData().nodes.find((x) => !x.force && x.level !== "page" && x.level !== "path" && Number.isFinite(x.x) && !g.billboards.has(x.id));
+            if (!n) return { error: "no drawn chunk" };
+            await g.openBillboard(n, false, true);
+            const e = g.billboards.get(n.id);
+            if (!e) return { error: "no billboard" };
+            const t0 = performance.now();
+            await g.renderForm(e, "markdown");
+            const ms = Math.round(performance.now() - t0);
+            const firstPaint = !!e.el.querySelector(".domvec-bb-md, .cm-editor");
+            let ed = null;
+            for (let k = 0; k < 20 && !ed; k++) { await sleep(250); ed = e.el.querySelector(".domvec-bb-cell:not([style*='none']) .cm-editor"); }
+            await sleep(300);
+            const out = { planted: ${planted}, first_paint: firstPaint, stuck: e.el.classList.contains("is-stuck"), editor: !!ed, editor_px: ed ? Math.round(ed.getBoundingClientRect().height) : 0,
+                          static: !!e.el.querySelector(".domvec-bb-md"), ms, hover_ms: g.cellStats.hover_ms };
+            g.closeBillboard(n.id);
+            return out;
+          } finally { g.plantHoverStatic = false; }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        return { pass: !clean.error && !clean.stuck && clean.editor && clean.editor_px > 20 && clean.ms <= 400 && clean.first_paint && !clean.static
+          && !planted.error && !planted.editor && planted.static, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {

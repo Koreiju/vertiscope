@@ -3815,6 +3815,10 @@ export class GraphView extends ItemView {
       // (PLUGIN_GOAL 133: "the panel is the exact same code over all three").
       // A hovered preview stays the light render. Planted
       // `plantStaticMarkdown`: every panel the static render, as before.
+      // A HOVER preview is the same editor too (PLUGIN_GOAL 133: one panel
+      // for billboards, code panels and cells) -- its open cost measured in
+      // `cellStats.hover_ms`. Planted `plantHoverStatic`: the light render.
+      const hoverCell = !entry.el.hasClass("is-stuck") && !this.plantHoverStatic && !this.plantStaticMarkdown;
       if (entry.el.hasClass("is-stuck") && !this.plantStaticMarkdown) {
         const cellMd = this.chunkMarkdown(entry.payload);
         if (await this.mountCell(entry, body, cellMd)) return true;
@@ -3823,6 +3827,19 @@ export class GraphView extends ItemView {
       const md = this.chunkMarkdown(entry.payload);
       if (!md.trim()) host.setText("(no lines stored for this chunk)");
       else await MarkdownRenderer.render(this.app, md, host, "", this);
+      // A hover shows this light render AT ONCE, and becomes the editor when
+      // the editor has mounted behind it (an editor leaf opens in ~2 s cold:
+      // measured 2,070 ms, against 1 ms for this render).
+      if (hoverCell && md.trim()) {
+        const t0 = performance.now();
+        void this.mountCell(entry, body, md, true).then((ok) => {
+          if (!ok || !body.isConnected) return;
+          host.remove();
+          const box = body.querySelector(".domvec-bb-cell") as HTMLElement | null;
+          if (box) box.style.display = "";
+          this.cellStats.hover++; this.cellStats.hover_ms = Math.round(performance.now() - t0);
+        });
+      }
       // A link goes to the browser cell, never the vault's own router.
       host.querySelectorAll("a").forEach((a: HTMLAnchorElement) => {
         a.onclick = (e: MouseEvent) => {
@@ -7457,11 +7474,12 @@ export class GraphView extends ItemView {
   }
   /** Planted (133): stuck panels' markdown the static render, as before. */
   plantStaticMarkdown = false;
-  cellStats = { mounted: 0, written: 0 };
+  cellStats = { mounted: 0, written: 0, hover: 0, hover_ms: 0 };
+  plantHoverStatic = false;
   /** The chunk's markdown as a NOTE, opened in a real editor leaf inside the
    *  panel -- one markdown panel for billboards, code panels and notebook
    *  cells. Kept at `domvec/chunks/<cid>.md`; an edit there is the reader's. */
-  async mountCell(entry: any, body: HTMLElement, md: string): Promise<boolean> {
+  async mountCell(entry: any, body: HTMLElement, md: string, hidden = false): Promise<boolean> {
     const cid = String(entry.node.id).replace(/[^\w.-]+/g, "_");
     const folder = "domvec/chunks", path = `${folder}/${cid}.md`;
     const vault = this.app.vault;
@@ -7473,6 +7491,7 @@ export class GraphView extends ItemView {
     if (entry.cellLeaf) { try { entry.cellLeaf.detach(); } catch { /* gone */ } }
     const leaf = new Leaf(this.app);
     const box = body.createDiv({ cls: "domvec-bb-cell" });
+    if (hidden) box.style.display = "none";
     box.appendChild(leaf.containerEl);
     await leaf.openFile(f, { state: { mode: "source", source: false } } as any);
     entry.cellLeaf = leaf; entry.cellPath = path;
