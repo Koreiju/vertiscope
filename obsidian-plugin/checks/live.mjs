@@ -12187,6 +12187,34 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-231",
+      asks: "retrieval works as the reader uses it (2026-10-18): a query asking n=200 draws its results from many pages, not the two that hold thousands of matches -- at least 6 distinct pages among the hits, and strip items named by page, not all one host's root; planted (plantUncappedShare) a page counted for all it holds",
+      async run() {
+        const arm = (planted) => inPane(`
+          const sf = v.searchField; sf.plantUncappedShare = ${planted};
+          const keepTotal = sf.total; sf.total = 200;
+          try {
+            sf.input.value = ""; await sf.run();
+            sf.input.value = ${planted} ? "data structure tree search" : "data structure tree searching";
+            await sf.run(); await sleep(800);
+            const pageOf = (h) => String(h.url || "").split("#")[0];
+            const pages = new Set(sf.hits.map(pageOf));
+            const counts = {}; for (const h of sf.hits) { const k = pageOf(h); counts[k] = (counts[k] || 0) + 1; }
+            const top2 = Object.values(counts).sort((a, b) => b - a).slice(0, 2).reduce((a, b) => a + b, 0);
+            const labels = [...sf.strip.querySelectorAll(".domvec-search3d-item, [class*=strip] > *")].slice(0, 30).map((e) => (e.textContent || "").trim()).filter(Boolean);
+            const res = { planted: ${planted}, hits: sf.hits.length, pages: pages.size, top2_share: +(top2 / Math.max(1, sf.hits.length)).toFixed(2),
+                          tier_pages: sf.tierStats.pages, distinct_labels: new Set(labels).size, labels: labels.slice(0, 6) };
+            sf.input.value = ""; await sf.run();
+            return res;
+          } finally { sf.plantUncappedShare = false; sf.total = keepTotal; }
+        `);
+        const clean = await arm(false), planted = await arm(true);
+        return { pass: !clean.error && clean.hits >= 50 && clean.pages >= 6 && clean.distinct_labels >= 5
+                       && !planted.error && (planted.tier_pages < clean.tier_pages || planted.top2_share > clean.top2_share),
+                 evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {
