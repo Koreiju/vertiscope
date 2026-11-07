@@ -123,6 +123,9 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
   private surfaces = new Set<ChunkSurface>();
 
   async onload() {
+    // The plugin-scope require, for the harness to ask which CodeMirror
+    // modules Obsidian hands a plugin (codecell.ts uses the same ones).
+    (window as any).__domvecRequire = (m: string) => require(m);
     this.hookHoverCopy();
     // This load's generation (G-175): a view born in an earlier load whose
     // loop is still running reads a newer number and stops itself.

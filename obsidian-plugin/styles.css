@@ -1276,3 +1276,20 @@ button.domvec-run-fence:hover {
 .domvec-pin-handle { font-size: var(--font-ui-smaller); padding: 1px 6px; border-radius: 4px; background: var(--background-modifier-hover); cursor: pointer; }
 .domvec-pin-handle .domvec-pin-close { margin-left: 4px; opacity: .6; }
 .domvec-slate-cell .workspace-leaf-content { height: auto; }
+/* Code cells (PLUGIN_GOAL 133): CM5 mode token classes, theme-coloured. */
+.domvec-code-source .cm-keyword { color: var(--code-keyword); }
+.domvec-code-source .cm-string, .domvec-code-source .cm-string-2 { color: var(--code-string); }
+.domvec-code-source .cm-comment { color: var(--code-comment); font-style: italic; }
+.domvec-code-source .cm-number { color: var(--code-value); }
+.domvec-code-source .cm-def { color: var(--code-function); }
+.domvec-code-source .cm-builtin { color: var(--code-important); }
+.domvec-code-source .cm-variable-2, .domvec-code-source .cm-property { color: var(--code-property); }
+.domvec-code-source .cm-operator { color: var(--code-operator); }
+.domvec-code-source .cm-meta { color: var(--code-tag); }
+/* Embedded editor leaves (one markdown panel): a leaf's container has no
+   height of its own outside a split -- measured 0 px in the code cell. */
+.domvec-code-cell, .domvec-slate-cell { display: flex; flex-direction: column; height: 100%; min-height: 240px; }
+.domvec-code-cell > .workspace-leaf, .domvec-slate-cell > .workspace-leaf { flex: 1 1 auto; height: auto; min-height: 240px; position: relative; }
+.domvec-chat-log > .workspace-leaf { height: 100%; min-height: 160px; position: relative; }
+.domvec-code-source .cm-gutters { background: var(--background-secondary); color: var(--text-faint); border-right: 1px solid var(--background-modifier-border); }
+.domvec-code-source .cm-activeLineGutter, .domvec-code-source .cm-activeLine { background: var(--background-modifier-hover); }

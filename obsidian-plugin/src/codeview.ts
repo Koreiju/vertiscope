@@ -26,6 +26,7 @@ import { ItemView, MarkdownRenderer, TFile, type WorkspaceLeaf } from "obsidian"
 import { EditorState } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import type { Sidecar } from "./sidecar";
+import { codeCellExtensions } from "./codecell";
 
 export const CODE_VIEW = "domvec-code-view";
 
@@ -109,6 +110,11 @@ export class CodeView extends ItemView {
           EditorView.lineWrapping,
           keymap.of([{ key: "Mod-s", preventDefault: true, run: () => { void this.save(); return true; } }]),
           EditorView.updateListener.of((u) => { if (u.docChanged) this.renderHead(); }),
+          // VS Code-grade (PLUGIN_GOAL 133): see codecell.ts.
+          ...codeCellExtensions({
+            codeNodes: (q) => this.sidecar.codeNodes(q),
+            openCode: (u) => { const P: any = (this.app as any).plugins.plugins["domvec-bridge"]; void P?.openCode?.(u); },
+          }),
         ],
       }),
     });

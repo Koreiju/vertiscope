@@ -11723,13 +11723,14 @@ export function makeChecks(env) {
           const el = view.containerEl;
           const editor = el.querySelector(".domvec-code-cell .cm-editor");
           const chunks = el.querySelectorAll(".domvec-code-chunk").length;
+          const editor_px = editor ? Math.round(editor.getBoundingClientRect().height) : 0;
           const f = view.triePath ? app.vault.getAbstractFileByPath(view.triePath) : null;
           const sections = f ? ((await app.vault.read(f)).match(/<!-- cid:/g) || []).length : 0;
           for (const l of app.workspace.getLeavesOfType("domvec-code-view")) l.detach();
-          return { planted: ${planted}, editor: !!editor, static_chunks: chunks, note_sections: sections };
+          return { planted: ${planted}, editor: !!editor, editor_px, static_chunks: chunks, note_sections: sections };
         })()`, { timeout: 60000 });
         const clean = await arm(false), planted = await arm(true);
-        return { pass: !clean.error && clean.editor && clean.note_sections >= 3 && !planted.error && !planted.editor && planted.static_chunks >= 3, evidence: { clean, planted } };
+        return { pass: !clean.error && clean.editor && clean.editor_px >= 100 && clean.note_sections >= 3 && !planted.error && !planted.editor && planted.static_chunks >= 3, evidence: { clean, planted } };
       },
     },
     {
@@ -11927,6 +11928,70 @@ export function makeChecks(env) {
         })()`, { timeout: 60000 });
         const clean = await arm(false), planted = await arm(true);
         return { pass: !clean.error && clean.entry && clean.frontmatter === "chat" && clean.ask_shown && !planted.error && !planted.entry, evidence: { clean, planted } };
+      },
+    },
+    {
+      id: "PG-133-vscode-cell",
+      asks: "code cells have the full set of vscode capabilities (PLUGIN_GOAL 133): code://repo/trie.py in its code cell has line numbers, a fold gutter, Python highlighting, bracket auto-close, completion offering code-graph names, Mod-/ comment toggle and go-to-definition opening the definition's code cell; planted (__domvecPlantPlainCodeCell) a bare editor with none",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const P = app.plugins.plugins["domvec-bridge"];
+          window.__domvecPlantPlainCodeCell = ${planted};
+          for (const l of app.workspace.getLeavesOfType("domvec-code-view")) l.detach();
+          try {
+            const view = await P.openCode("code://repo/trie.py");
+            if (!view || !view.editor) return { error: "no code editor" };
+            await sleep(1200);
+            const ed = view.editor, root = ed.dom;
+            const out = { planted: ${planted} };
+            out.line_numbers = !!root.querySelector(".cm-lineNumbers");
+            out.fold_gutter = !!root.querySelector(".cm-foldGutter");
+            out.highlighted_spans = root.querySelectorAll(".cm-line span[class]").length;
+            const S = window.__domvecCodeCell || {};
+            out.extensions_built = S.built || 0;
+            if (!view.editable) return { ...out, editable: false };
+            const doc0 = ed.state.doc.toString(), end = doc0.length;
+            // Bracket auto-close: typing "(" through the input handler.
+            ed.dispatch({ selection: { anchor: end } }); ed.focus();
+            const handled = ed.inputState && true;
+            document.execCommand("insertText", false, "(");
+            await sleep(150);
+            out.autoclosed = ed.state.doc.toString().slice(end) === "()";
+            ed.dispatch({ changes: { from: end, to: ed.state.doc.length, insert: "" } });
+            // Completion: "Patric" at the end, asked explicitly.
+            ed.dispatch({ changes: { from: end, insert: String.fromCharCode(10) + "TrieNo" }, selection: { anchor: end + 7 } });
+            const ac = window.__domvecRequire("@codemirror/autocomplete");
+            ac.startCompletion(ed);
+            let opts = [];
+            for (let i = 0; i < 20; i++) { await sleep(250); opts = [...document.querySelectorAll(".cm-tooltip-autocomplete li")].map((li) => li.textContent); if (opts.length) break; }
+            out.completions = opts.slice(0, 5);
+            ac.closeCompletion(ed);
+            // Mod-/ comment toggle on the inserted line.
+            const before = ed.state.doc.toString();
+            const ok = window.__domvecRequire("@codemirror/commands").toggleComment(ed);
+            out.commented = ok && /# ?TrieNo$/.test(ed.state.doc.toString());
+            ed.dispatch({ changes: { from: 0, to: ed.state.doc.length, insert: doc0 } });
+            // Go to definition: a name defined in the repo.
+            const before_views = app.workspace.getLeavesOfType("domvec-code-view").map((l) => l.view.url);
+            const n0 = S.definitions_opened || 0;
+            const at = doc0.indexOf(" TrieNode(") + 1;
+            out.goto_asked_at = at;
+            if (S.gotoAt && at >= 0) { await S.gotoAt(ed, at + 3); await sleep(2000); }
+            out.definitions_opened = (S.definitions_opened || 0) - n0;
+            out.definition = S.last_definition || "";
+            out.views_after = app.workspace.getLeavesOfType("domvec-code-view").map((l) => l.view.url).filter((u) => !before_views.includes(u) || u !== "code://repo/trie.py").slice(0, 3);
+            return out;
+          } finally {
+            window.__domvecPlantPlainCodeCell = false;
+            for (const l of app.workspace.getLeavesOfType("domvec-code-view")) l.detach();
+          }
+        })()`, { timeout: 90000 });
+        const clean = await arm(false), planted = await arm(true);
+        return { pass: !clean.error && clean.line_numbers && clean.fold_gutter && clean.highlighted_spans > 20
+            && (clean.editable === false || (clean.autoclosed && clean.completions.some((c) => /TrieNode/.test(c)) && clean.commented && clean.definitions_opened >= 1))
+            && !planted.error && !planted.line_numbers && !planted.fold_gutter && planted.highlighted_spans < clean.highlighted_spans / 4,
+          evidence: { clean, planted } };
       },
     },
     {
