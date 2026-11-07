@@ -11722,6 +11722,32 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "PG-133-chat-panel",
+      asks: "one markdown panel for the browser chat too (PLUGIN_GOAL 133): the conversation is a note in a real Obsidian editor; planted (plantStaticChat) a static render, no editor",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const leaf = app.workspace.getLeavesOfType("domvec-browser-view")[0];
+          if (!leaf) return { error: "no browser view" };
+          const chat = leaf.view.chat;
+          if (!chat) return { error: "no chat" };
+          const keep = chat.turns;
+          chat.destroy(); chat.plantStaticChat = ${planted};
+          chat.turns = [{ prompt: "check prompt ${planted}", context: [], reply: "**check reply** for the one-panel rule", delta_chars: 0, resent_dropped: [], ms: 0 }];
+          chat.refresh(); await sleep(2500);
+          const log = chat.el.querySelector(".domvec-chat-log");
+          const editor = !!log.querySelector(".cm-editor");
+          const text = log.innerText.includes("check reply");
+          const f = app.vault.getAbstractFileByPath(chat.notePath);
+          const note = f ? (await app.vault.read(f)).includes("check reply") : false;
+          chat.turns = keep; chat.plantStaticChat = false; chat.destroy(); chat.refresh();
+          return { planted: ${planted}, editor, text_shown: text, note_written: note };
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        return { pass: !clean.error && clean.editor && clean.note_written && !planted.error && !planted.editor && planted.text_shown, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {

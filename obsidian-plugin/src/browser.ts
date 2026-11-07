@@ -688,6 +688,7 @@ export class BrowserView extends ItemView {
   }
 
   async onClose(): Promise<void> {
+    try { this.chat?.destroy(); } catch { /* gone */ }
     // The capture pump stops with the view. It kept sending its queue -- and
     // retrying refusals for up to 15 minutes -- after a plugin reload, beside
     // the new view's pump: two sensors' drains for one url interleaved on the

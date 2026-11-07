@@ -117,10 +117,42 @@ export class ChatPanel {
     const n = this.pending().length;
     this.label.setText(`chat${this.turns.length ? ` · ${this.turns.length} turn${this.turns.length > 1 ? "s" : ""}` : ""}`
       + (n ? ` · ${n} pinned to send` : ""));
+    const md = this.markdown() || "*Pin chunks with a double right-click, then ask.*";
+    // ONE markdown panel (PLUGIN_GOAL 133): the conversation is a note in the
+    // same Obsidian editor every other panel is. Planted `plantStaticChat`:
+    // a static render, as before.
+    const gen = ++this.renderGen;
+    if (!this.plantStaticChat) { void this.mountNote(md, gen); return; }
+    this.destroy();
     this.log.empty();
-    void MarkdownRenderer.render(this.app, this.markdown() || "*Pin chunks with a double right-click, then ask.*",
-      this.log, "", this.owner).then(() => { this.log.scrollTop = this.log.scrollHeight; });
+    void MarkdownRenderer.render(this.app, md, this.log, "", this.owner)
+      .then(() => { this.log.scrollTop = this.log.scrollHeight; });
   }
+
+  plantStaticChat = false;
+  private renderGen = 0;
+  chatLeaf: any = null;
+  get notePath(): string { return `domvec/chunks/chat ${this.session}.md`; }
+
+  private async mountNote(md: string, gen: number): Promise<void> {
+    const vault = this.app.vault, folder = "domvec/chunks", path = this.notePath;
+    if (!vault.getAbstractFileByPath(folder)) await vault.createFolder(folder).catch(() => undefined);
+    let f: any = vault.getAbstractFileByPath(path);
+    if (f) { if ((await vault.read(f)) !== md) await vault.modify(f, md); } else f = await vault.create(path, md);
+    if (gen !== this.renderGen) return;          // a later render owns the log
+    if (this.chatLeaf && this.log.contains(this.chatLeaf.containerEl)) return;
+    const ws: any = this.app.workspace;
+    const Leaf: any = ws.activeLeaf?.constructor ?? ws.getMostRecentLeaf()?.constructor;
+    if (!Leaf) return;
+    this.log.empty();
+    const leaf = new Leaf(this.app);
+    this.log.appendChild(leaf.containerEl);
+    this.chatLeaf = leaf;
+    await leaf.openFile(f, { state: { mode: "source", source: false } } as any);
+    if (gen !== this.renderGen && this.plantStaticChat) this.destroy();
+  }
+
+  destroy(): void { try { this.chatLeaf?.detach(); } catch { /* gone */ } this.chatLeaf = null; }
 
   async send(prompt: string): Promise<ChatTurn | null> {
     if (this.busy) return null;
