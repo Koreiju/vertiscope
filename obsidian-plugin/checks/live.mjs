@@ -12435,6 +12435,31 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "PG-137-gesture-spaced",
+      asks: "PLUGIN_GOAL 137 (10): the []() retrieval gesture fires as the reader typed it -- '[ love messages ] ()' with the cursor in the parentheses opens the results, in a slate (a browser cell's control note); planted (__domvecPlantTightGesture) only the touching form fires",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          window.__domvecPlantTightGesture = ${planted};
+          const NL = String.fromCharCode(10), T = String.fromCharCode(9);
+          const p = "domvec-checks/gesture spaced " + (${planted} ? "p" : "c") + ".md";
+          const old = app.vault.getAbstractFileByPath(p); if (old) await app.vault.trash(old, true);
+          const f = await app.vault.create(p, ["---", "domvec: slate", "---", "browser", T + "url" + T, "", "I am writing something with retrieval [ love messages ] ()", ""].join(NL));
+          const leaf = app.workspace.getLeaf("tab");
+          try {
+            await leaf.openFile(f, { state: { mode: "source", source: false } }); await sleep(800);
+            const ed = leaf.view.editor, lines = ed.getValue().split(NL);
+            const ln = lines.findIndex((l) => l.includes("love messages"));
+            ed.focus(); ed.setCursor({ line: ln, ch: lines[ln].lastIndexOf("(") + 1 }); await sleep(2500);
+            const overlay = leaf.view.containerEl.querySelector("[class*=gesture], .domvec-results, .domvec-link-results");
+            return { planted: ${planted}, opened: !!overlay, rows: overlay ? overlay.querySelectorAll("li, [class*=row], [class*=hit]").length : 0 };
+          } finally { window.__domvecPlantTightGesture = false; leaf.detach(); await app.vault.trash(f, true); }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        return { pass: !clean.error && clean.opened && !planted.error && !planted.opened, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {
