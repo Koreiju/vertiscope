@@ -2362,7 +2362,7 @@ class _Handler(BaseHTTPRequestHandler):
             except Exception as exc:                # noqa: BLE001
                 self._send(400, {"error": "bad body: %s" % exc})
                 return
-            url = str(body.get("url") or "")
+            url = _document_url(str(body.get("url") or ""))
             items = [it for it in (body.get("items") or []) if it.get("id") and str(it.get("text") or "").strip()][:400]
             if not url or not items:
                 self._send(200, {"pos": {}, "hsv": {}})

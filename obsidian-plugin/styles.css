@@ -1297,3 +1297,6 @@ button.domvec-run-fence:hover {
    the panel's own head names it. */
 .domvec-bb-body .view-header, .domvec-code-cell .view-header, .domvec-slate-cell .view-header, .domvec-chat-log .view-header { display: none; }
 .domvec-bb-body .inline-title, .domvec-slate-cell .inline-title, .domvec-chat-log .inline-title { display: none; }
+.domvec-browser-card { position: relative; }
+.domvec-browser-card-exit { position: absolute; top: 4px; right: 8px; z-index: 5; cursor: pointer; font-size: 16px; line-height: 1; padding: 2px 6px; border-radius: 4px; color: var(--text-muted); background: var(--background-secondary); }
+.domvec-browser-card-exit:hover { color: var(--text-normal); background: var(--background-modifier-hover); }

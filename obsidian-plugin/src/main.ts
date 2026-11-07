@@ -126,6 +126,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     // The plugin-scope require, for the harness to ask which CodeMirror
     // modules Obsidian hands a plugin (codecell.ts uses the same ones).
     (window as any).__domvecRequire = (m: string) => require(m);
+    this.routeLinksToCell();
     this.hookHoverCopy();
     // This load's generation (G-175): a view born in an earlier load whose
     // loop is still running reads a newer number and stops itself.
@@ -878,6 +879,39 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
 
   /** Every browser instance on the plane (item 87), the first the default. */
   browserPanels: BrowserPanel[] = [];
+  /** A web link clicked inside a domvec panel (a billboard's markdown, a
+   *  chunk note, the slate) loads in the BROWSER CELL. Obsidian opens links
+   *  with `window.open`, which reached the system browser (2026-11-07: "the
+   *  duckduckgo browser opens outside of the plugin"). Elsewhere in Obsidian
+   *  links behave as before. Planted `__domvecPlantLinksOut`. */
+  linkStats = { to_cell: 0, passed: 0 };
+  private lastPointerIn = false;
+  private routeLinksToCell(): void {
+    const inPanel = (t: any) => !!(t && t.closest && t.closest(".domvec-bb, .domvec-plane-card, .domvec-browser-md, .domvec-chat, .domvec-cockpit-card, .domvec-code-cell, .domvec-search3d"));
+    this.registerDomEvent(document, "mousedown", (e: MouseEvent) => { this.lastPointerIn = inPanel(e.target); }, { capture: true } as any);
+    const orig = window.open.bind(window);
+    const self = this;
+    (window as any).open = function (url?: any, ...rest: any[]) {
+      const u = String(url || "");
+      if (/^https?:/i.test(u) && self.lastPointerIn && !(window as any).__domvecPlantLinksOut) {
+        const b: any = self.activeBrowser();
+        if (b && typeof b.go === "function") { b.go(u); self.linkStats.to_cell++; return null; }
+      }
+      self.linkStats.passed++;
+      return orig(url, ...rest);
+    };
+    this.register(() => { (window as any).open = orig; });
+  }
+
+  /** For the harness: a browser cell on the plane over `path`, its plants set. */
+  async openBrowserPanel(path: string, planted = false): Promise<BrowserPanel> {
+    const bp = new BrowserPanel(this.app, { browserViewType: BROWSER_VIEW, desk: this.desk }, path);
+    bp.plantGoActions = planted; bp.plantNoExit = planted; bp.plantScopeFirstRead = planted;
+    this.browserPanels.push(bp);
+    await bp.open();
+    return bp;
+  }
+
   /** `+ browser`: the default browser if it is not on the plane, else a NEW
    *  instance -- its own cockpit note, its own session. */
   async openBrowserInstance(): Promise<BrowserPanel> {

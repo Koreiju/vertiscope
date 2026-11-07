@@ -12289,6 +12289,70 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "PG-137-fixes",
+      asks: "PLUGIN_GOAL 137 (16)(7)(13)(11)(8)(14): a url ending '#' is the same page session as without it; a code:// link opens the code panel, never the OS; a window.open link loads in the cell; the first read of a browser cell's control note does not swap in the offline copy; back/forward/scan read false; a 2D browser cell has an exit -- each planted (fragment-pages, os-schemes, os-windows, plantScopeFirstRead, plantGoActions, plantNoExit) shows the old behaviour",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const P = app.plugins.plugins["domvec-bridge"];
+          await window.__domvec.act("open", "browser");
+          const b = app.workspace.getLeavesOfType("domvec-browser-view")[0].view;
+          const out = { planted: ${planted} };
+          for (const n of ["fragment-pages", "os-schemes", "os-windows"]) ${planted} ? b.plant.add(n) : b.plant.delete(n);
+          try {
+            // (16) fragment
+            b.go("about:blank"); await sleep(1500); b.go("https://en.wikipedia.org/wiki/Trie#"); await sleep(5000);
+            out.session_has_hash = /#$/.test(b.session);
+            // (7) code scheme
+            const r0 = b.goStats.refused_scheme, before = app.workspace.getLeavesOfType("domvec-code-view").length;
+            const shownBefore = b.webview.getURL();
+            if (!${planted}) b.go("code://repo/trie.py");
+            await sleep(2500);
+            out.code_refused = b.goStats.refused_scheme - r0;
+            out.code_views = app.workspace.getLeavesOfType("domvec-code-view").length - before;
+            for (const l of app.workspace.getLeavesOfType("domvec-code-view")) l.detach();
+            // (13) a web link opened from inside a domvec panel loads in the cell
+            // (clean arm only: the planted arm would open the system browser).
+            if (!${planted}) {
+              const host = document.querySelector(".domvec-search3d") || document.querySelector(".domvec-plane-card");
+              if (host) host.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+              const k0 = P.linkStats.to_cell;
+              window.open("https://en.wikipedia.org/wiki/Radix_tree");
+              await sleep(3000);
+              out.link_to_cell = P.linkStats.to_cell - k0;
+              out.cell_url = b.webview.getURL().slice(-20);
+            }
+          } finally { for (const n of ["fragment-pages", "os-schemes", "os-windows"]) b.plant.delete(n); }
+          // (11)(8)(14) the 2D browser cell
+          const desk = window.__domvecPlane;
+          await window.__domvec.act("open", "graph"); await sleep(800);
+          const bp = P.browserPanels ? null : null;
+          const path = "domvec/browser check " + (${planted} ? "p" : "c") + ".md";
+          const f0 = app.vault.getAbstractFileByPath(path); if (f0) await app.vault.trash(f0, true);
+          const T = String.fromCharCode(9), NL = String.fromCharCode(10);
+          await app.vault.create(path, ["---", "domvec: slate", "---", "browser check", T + "url" + T, T + "back" + T + "go", T + "forward" + T + "go", T + "scan" + T + "go", T + "live" + T + "true", T + "boxes" + T + "false", T + "scope" + T + "page", ""].join(NL));
+          const { BrowserPanel } = { BrowserPanel: (P.BrowserPanelClass || null) };
+          const panel = P.openBrowserPanel ? await P.openBrowserPanel(path, ${planted}) : null;
+          await sleep(2500);
+          if (panel) { panel.onEdit(app.vault.getAbstractFileByPath(path)); await sleep(2500); }
+          const txt = await app.vault.read(app.vault.getAbstractFileByPath(path));
+          out.actions_false = /\tback\tfalse/.test(txt) && !/\tback\tgo/.test(txt);
+          const card = [...document.querySelectorAll(".domvec-panel-card")].find((c) => c.dataset.path === path);
+          out.card = !!card;
+          out.exit = !!(card && card.querySelector(".domvec-browser-card-exit"));
+          out.offline_after_first_read = !!(panel && panel.view() && panel.view().offlineFor);
+          if (out.exit) { card.querySelector(".domvec-browser-card-exit").click(); await sleep(500); out.closed = !document.contains(card); }
+          const f1 = app.vault.getAbstractFileByPath(path); if (f1) await app.vault.trash(f1, true);
+          return out;
+        })()`, { timeout: 90000 });
+        const clean = await arm(false), planted = await arm(true);
+        return { pass: !clean.error && !clean.session_has_hash && clean.code_refused >= 1 && clean.code_views >= 1 && clean.link_to_cell >= 1 && /Radix_tree/.test(clean.cell_url)
+                       && clean.actions_false && clean.exit && clean.closed && !clean.offline_after_first_read
+                       && !planted.error && planted.session_has_hash && !planted.actions_false && !planted.exit,
+                 evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {

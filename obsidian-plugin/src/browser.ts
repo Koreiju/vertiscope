@@ -175,6 +175,18 @@ function docKey(u: string): string {
   return String(u || "").split("#")[0];
 }
 
+/** The DOCUMENT a url names, as the sidecar's `_document_url` reads it: a
+ *  plain fragment (`#`, `#section`) is a place in one page, a hash route
+ *  (`#/...`, `#!...`) is kept. A link ending in "#" drew a second page node for
+ *  one page (2026-11-07: "duplicate page nodes because one link has '#' on the
+ *  tail end of its url"). Planted `fragment-pages`: the url as given. */
+export function documentUrl(u: string): string {
+  const s = String(u || ""), i = s.indexOf("#");
+  if (i < 0) return s;
+  const frag = s.slice(i + 1);
+  return frag.startsWith("/") || frag.startsWith("!") ? s : s.slice(0, i);
+}
+
 /** One queued capture: a drain's payload, or the settle of a page left. */
 interface CaptureJob {
   url: string;
@@ -499,7 +511,7 @@ export class BrowserView extends ItemView {
     });
     // The document is ready to read once dom-ready fires, whatever the network
     // is still doing; a new main-frame navigation (not an in-page one) resets it.
-    view.addEventListener("dom-ready", () => { this.domReady = true; this.fitDesktopWidth(); });
+    view.addEventListener("dom-ready", () => { this.domReady = true; this.fitDesktopWidth(); this.keepWindowsInCell(); });
     // DESKTOP WIDTH (2026-11-07: "rendering is degraded compared to the natural
     // rendering in the duckduckgo browser"): a half-screen cell is 991 px, and
     // sites serve their narrow layout there -- the Cyberpunk wiki's tiles lost
@@ -1196,6 +1208,23 @@ export class BrowserView extends ItemView {
   /** A push arrived mid-drain: drain again as soon as this one ends. */
   private drainAgain = false;
 
+  /** A link that opens a new window (`target=_blank`, `window.open`) loads
+   *  in THIS cell: it went to the system browser (2026-11-07: "the duckduckgo
+   *  browser opens outside of the plugin"). Planted `os-windows`. */
+  private windowsKept = false;
+  windowStats = { kept: 0 };
+  keepWindowsInCell(): void {
+    if (this.windowsKept || this.plant.has("os-windows")) return;
+    try {
+      const wc = (window as any).require("@electron/remote").webContents.fromId((this.webview as any).getWebContentsId());
+      wc.setWindowOpenHandler((d: { url: string }) => {
+        this.windowStats.kept++;
+        window.setTimeout(() => this.go(String(d.url || "")), 0);
+        return { action: "deny" };
+      });
+      this.windowsKept = true;
+    } catch (e) { console.warn("domvec: window-open handler not set", e); }
+  }
   static DESKTOP_PX = 1280;
   nativeWidth = false;
   widthButton: HTMLButtonElement | null = null;
@@ -1632,9 +1661,18 @@ export class BrowserView extends ItemView {
     return !this.app.workspace.getLeavesOfType(BROWSER_VIEW).includes(this.leaf);
   }
 
+  goStats = { refused_scheme: 0, to_code: 0 };
   go(where: string): void {
     if (!this.webview || !where.trim()) return;
     const url = /^[a-z]+:/i.test(where) ? where : `https://${where}`;
+    // Only web pages load in the cell. A `code://` address is a code artifact:
+    // it opens its code panel. Any other scheme went to the OS, which offered
+    // the Microsoft Store for "code" links (2026-11-07). Planted `os-schemes`.
+    if (!/^(https?|file|about|data):/i.test(url) && !this.plant.has("os-schemes")) {
+      this.goStats.refused_scheme++;
+      if (/^code:/i.test(url)) { const P: any = (this.app as any).plugins.plugins["domvec-bridge"]; void P?.openCode?.(url.split("#")[0]); this.goStats.to_code++; }
+      return;
+    }
     this.address.value = url;
     this.webview.loadURL(url);
     this.layoutSide();
@@ -2315,7 +2353,7 @@ export class BrowserView extends ItemView {
     }
     if (url === this.session || (this.session && docKey(url) === docKey(this.session))) return;
     const leaving = this.session;
-    this.session = url;
+    this.session = this.plant.has("fragment-pages") ? url : documentUrl(url);
     this.sessionDocSeq = this.docSeq;      // the document this session reads (G-216)
     // Sensor ids are per document: nothing streaming on the page left behind.
     this.pipebox?.clearStreaming();

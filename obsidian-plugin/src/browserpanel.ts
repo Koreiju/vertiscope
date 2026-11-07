@@ -35,7 +35,7 @@ export const BROWSER_COCKPIT_PATH = "domvec/browser.md";
 export const LADDER = ["chunk", "page", "live"] as const;
 const T = "\t";
 const BROWSER_TEXT = ["---", "domvec: slate", "---", "browser",
-  T + "url" + T, T + "back" + T + "go", T + "forward" + T + "go", T + "scan" + T + "go",
+  T + "url" + T, T + "back" + T + "false", T + "forward" + T + "false", T + "scan" + T + "false",
   T + "live" + T + "true", T + "boxes" + T + "false", T + "scope" + T + "live", ""].join("\n");
 
 export interface BrowserPanelHost { browserViewType: string; desk: PlaneDesk }
@@ -46,10 +46,14 @@ export class BrowserPanel {
   private chunkEl: HTMLElement | null = null;
   private chunkComp: Component | null = null;
   chunkShown = "";
-  stats = { opened: 0, went: 0, back: 0, forward: 0, scans: 0, toggles: 0, written: 0, scope: "" as string };
+  stats = { exited: 0, opened: 0, went: 0, back: 0, forward: 0, scans: 0, toggles: 0, written: 0, scope: "" as string };
   /** Planted (item 71): the cockpit's fields bind nothing. */
   plantUnbound = false;
   private seenUrl = "";
+  plantScopeFirstRead = false;
+  /** Planted: the action fields read "go", as before. */
+  plantGoActions = false;
+  plantNoExit = false;
   private scopeTry = 0;
   private hooked = new WeakSet<HTMLElement>();
 
@@ -72,6 +76,10 @@ export class BrowserPanel {
       // Its slate titled for its note: `browser`, `browser 2`, ...
       const title = this.path.slice(this.path.lastIndexOf("/") + 1).replace(/\.md$/, "");
       f = await this.app.vault.create(this.path, BROWSER_TEXT.replace("\nbrowser\n", "\n" + title + "\n"));
+    } else if (!this.plantGoActions) {
+      // Actions are booleans now (2026-11-07: "there should be no 'go' for
+      // booleans"): a note written with `go` reads `false`; a click acts.
+      await this.app.vault.process(f as TFile, (t: string) => t.replace(/^(\t(?:back|forward|scan)\t)go[ \t]*$/gm, "$1false"));
     }
     // Asked to open, it opens: the slate's REMEMBERED fold state said
     // "collapsed" (a right-click on its title, kept per note) and came back
@@ -86,6 +94,14 @@ export class BrowserPanel {
     await desk.open(f as TFile, {
       mount: async (card: HTMLElement) => {
         card.addClass("domvec-browser-card");
+        // Its exit (2026-11-07: "no option to exit a 2D plane browser cell").
+        // Planted `plantNoExit`: none, as before.
+        if (!this.plantNoExit) {
+          const x = card.createSpan({ cls: "domvec-browser-card-exit", text: "×" });
+          x.setAttr("aria-label", "close this browser cell");
+          x.onpointerdown = (e: PointerEvent) => e.stopPropagation();
+          x.onclick = (e: MouseEvent) => { e.stopPropagation(); this.stats.exited++; const q = desk.panelOf(this.path); if (q) q.leaf.detach(); };
+        }
         const Leaf = (this.app.workspace as any).activeLeaf?.constructor ?? (this.app.workspace.getMostRecentLeaf() as any)?.constructor;
         const leaf = new Leaf(this.app);
         leaf.containerEl.addClass("domvec-browser-panel-leaf");
@@ -189,6 +205,11 @@ export class BrowserPanel {
     const boxes = (this.field(fs, "boxes")?.value || "").trim();
     if ((boxes === "true" || boxes === "false") && (boxes === "true") !== !!v.boxesShown?.()) void v.toggleBoxes?.(boxes === "true");
     const scope = (this.field(fs, "scope")?.value || "").trim();
+    // Only a CHANGE of scope acts. The first read of the note is not one: it
+    // swapped the live page for the saved copy in temp whenever the reader
+    // first typed into the control markdown (2026-11-07). Planted
+    // `plantScopeFirstRead`: the first read acts, as before.
+    if (scope && !this.stats.scope && !this.plantScopeFirstRead) { this.stats.scope = scope; return; }
     if (scope && scope !== this.stats.scope) {
       this.stats.scope = scope;
       // The ladder's upper rungs (item 72): the page rebuilt from the store,
