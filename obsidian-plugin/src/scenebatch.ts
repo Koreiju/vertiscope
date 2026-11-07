@@ -274,6 +274,9 @@ export class SceneBatch {
   nodeBright = 1.4;
   /** A link's opacity (was 0.25): links visible, the nodes' colour first. */
   linkAlpha = 0.14;
+  /** Links longer than this are not drawn (set by the view from the cloud's size). */
+  maxLinkLen = Infinity;
+  linkStats = { drawn: 0, hidden: 0, cap: 0 };
   setBright(b: number): void {
     this.nodeBright = b;
     const m: any = this.glass && (this.glass.mesh.material as any);
@@ -669,11 +672,20 @@ export class SceneBatch {
       k++;
     }
     const lp = this.linePos.array as Float32Array, links = this.drawnLinks;
+    // NO LONG LINKS (2026-11-07, ruled): a link longer than `maxLinkLen` is
+    // not drawn -- its segment collapses onto its source. Streamed chunks
+    // projected to their meaning's place stayed linked to their tree parent
+    // across the map, a spider web from every hub.
+    const cap = this.maxLinkLen, cap2 = cap * cap;
+    let hidden = 0;
     for (let j = 0, o = 0; j < links.length; j++, o += 6) {
       const s = links[j].source, t = links[j].target;
+      const dx = t.x - s.x, dy = t.y - s.y, dz = (t.z || 0) - (s.z || 0);
       lp[o] = s.x; lp[o + 1] = s.y; lp[o + 2] = s.z || 0;
-      lp[o + 3] = t.x; lp[o + 4] = t.y; lp[o + 5] = t.z || 0;
+      if (dx * dx + dy * dy + dz * dz > cap2) { lp[o + 3] = s.x; lp[o + 4] = s.y; lp[o + 5] = s.z || 0; hidden++; }
+      else { lp[o + 3] = t.x; lp[o + 4] = t.y; lp[o + 5] = t.z || 0; }
     }
+    this.linkStats = { drawn: links.length - hidden, hidden, cap: Math.round(cap * 10) / 10 };
     for (const m of [this.opaque, this.clear, this.glass]) m.offset.needsUpdate = true;
     this.linePos.needsUpdate = true;
     this.positionStats = { runs: this.positionStats.runs + 1, refused: this.positionStats.refused, nodes: k,

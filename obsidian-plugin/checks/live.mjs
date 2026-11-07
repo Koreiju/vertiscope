@@ -12572,6 +12572,29 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "PG-138-no-long-links",
+      asks: "PLUGIN_GOAL 138: no long links in the 3D view -- every drawn segment is at most 10% of the cloud's radius (the spider web of streamed chunks tied to their tree parent across the map is gone); planted (plantLongLinks) segments run across the map",
+      async run() {
+        const arm = (planted) => inPane(`
+          v.plantLongLinks = ${planted}; v.linkCapAt = 0;
+          await sleep(1500);
+          const b = v.batch; if (!b) return { error: "no batch" };
+          const a = b.linePos.array, n = b.drawnLinks.length;
+          let max = 0, over = 0; const cap = b.maxLinkLen;
+          const sh = v.shellOf(v.graph.graphData().nodes);
+          const lim = sh.r * 0.1 + 1e-6;
+          for (let j = 0, o = 0; j < n; j++, o += 6) {
+            const d = Math.hypot(a[o + 3] - a[o], a[o + 4] - a[o + 1], a[o + 5] - a[o + 2]);
+            if (d > max) max = d; if (d > lim) over++;
+          }
+          v.plantLongLinks = false; v.linkCapAt = 0;
+          return { planted: ${planted}, links: n, radius: Math.round(sh.r), max_drawn: Math.round(max), over_cap: over, stats: { ...b.linkStats } };
+        `);
+        const clean = await arm(false), planted = await arm(true);
+        return { pass: !clean.error && clean.links > 0 && clean.over_cap === 0 && !planted.error && planted.over_cap > 0, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {

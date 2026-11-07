@@ -6904,6 +6904,12 @@ export class GraphView extends ItemView {
         this.drawPlan(g);
         // The craft: the ego computation graph as one unit (items 67-69).
         this.craftFrame();
+        // No long links (137/138): 10% of the cloud's radius, refreshed twice a second.
+        if (this.batch && t - this.linkCapAt > 500) {
+          this.linkCapAt = t;
+          const sh = this.shellOf(g.graphData().nodes);
+          this.batch.maxLinkLen = this.plantLongLinks || !(sh.r > 0) ? Infinity : Math.max(4, sh.r * this.linkCapShare);
+        }
         this.applyZoomFloor(g);
         // The halo rides the camera's cone (G-284).
         if (this.halo) this.placeHalo();
@@ -7601,6 +7607,9 @@ export class GraphView extends ItemView {
   plantRerankEveryAbsorb = false;
   plantLayerInPane = false;
   plantDropOnRedraw = false;
+  plantLongLinks = false;
+  linkCapShare = 0.1;
+  private linkCapAt = 0;
   redrawStats = { carried_nodes: 0, carried_links: 0, panels_rebound: 0 };
   private rerankTimer = 0;
   rerankStats = { asked: 0, fired: 0, skipped: 0 };
