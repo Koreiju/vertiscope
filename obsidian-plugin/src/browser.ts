@@ -2212,6 +2212,9 @@ export class BrowserView extends ItemView {
     // pin emerges as a stuck panel on the plane (the graph's `pinChunk`).
     // Planted `side-card`: rendered beside the page, as before.
     if (this.plant.has("side-card")) { await this.renderSide(); this.layoutSide(); }
+    // The chat strip pre-injects the new pins (G-43) whether or not the side
+    // panel draws: it refreshed only through renderSide, skipped since 133.
+    else this.chat?.refresh();
     void this.keepInView(read.matched);
     // The projector rings the same chunk (`G-38`) and opens its billboard.
     this.onHover(cid, read.url);

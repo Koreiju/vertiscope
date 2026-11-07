@@ -6387,8 +6387,15 @@ export function makeChecks(env) {
             for (const [fx, fy] of [[0.35, 0.35], [0.35, 0.6], [0.5, 0.8], [0.3, 0.45]]) { if (pins >= 2) break; if (await pinAt(fx, fy)) pins++; }
             out.pinned_first = b.pinned.size;
             const side = b.markdownWrap;
+            // The side panel is planted-only since PLUGIN_GOAL 133: when it is
+            // not shown, the chat strip's note IS the markdown panel the pins
+            // are pre-injected into.
+            const sideShown = !!side.offsetParent && (side.innerText || "").trim().length > 0;
+            await sleep(800);
+            const stripText = async () => { const nf = chat.notePath && app.vault.getAbstractFileByPath(chat.notePath); return (nf ? await app.vault.read(nf) : "") + (chat.el.innerText || ""); };
+            out.side_shown = sideShown;
             out.pre_injected = chat.pending().length === b.pinned.size
-              && /Next prompt includes/.test(side.innerText || "") && /Next prompt includes/.test(chat.el.innerText || "");
+              && (!sideShown || /Next prompt includes/.test(side.innerText || "")) && /Next prompt includes/.test(await stripText());
             const t1 = await chat.send("In two sentences: what do the pinned passages say about tries?");
             if (!t1) return { error: "first turn failed: " + chat.lastError, ...out };
             await sleep(600);
@@ -6403,8 +6410,15 @@ export function makeChecks(env) {
             out.reply_rendered_as_markdown = !!tr && !!tr.querySelector("blockquote, p, strong");
             // The one-note slate (PLUGIN_GOAL 133): the chat is the note's
             // last section, after every pin, drawn by the live editor.
+            if (!sideShown) {
+              await sleep(800);
+              const t = await stripText();
+              const ed = chat.el.querySelector(".domvec-chat-log .cm-editor");
+              out.reply_below_pins = t.indexOf(t1.reply.slice(0, 30).trim()) > t.indexOf("**You**") && t.includes(t1.reply.slice(0, 30).trim());
+              out.reply_rendered_as_markdown = !!ed && !!ed.querySelector(".HyperMD-quote, .cm-strong, .cm-quote");
+            }
             const slate = side.querySelector(".domvec-slate-cell .cm-editor");
-            if (slate && b.slatePath) {
+            if (sideShown && slate && b.slatePath) {
               const nf = app.vault.getAbstractFileByPath(b.slatePath);
               const txt = nf ? await app.vault.read(nf) : "";
               const lastPin = txt.lastIndexOf("<!-- cid:"), chatAt = txt.indexOf("## chat");
