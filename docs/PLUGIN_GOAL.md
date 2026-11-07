@@ -5249,6 +5249,15 @@ white box of titles); (f) Q.002 -- a hover pane's content is KEPT after it
 closes; (g) G-21/G-93/G-94 to be re-asked with their cause shown; (h) the
 G-145 image hovers and the 11-03 screenshots are omitted until they surface.*
 
+*2026-11-07, later (after "On the cyberpunk in the electron browser, rendering
+is degraded compared to the natural rendering in the duckduckgo browser."):*
+
+> Also, magnetizing new panels together doesn't create new links between panels. That comes from the compilation aspect and function-object undirected bidirectional forward-inverse calls on the computation graph as the reservoir of memory-linked artifacts.
+
+*Read as (136): snapping panels edge to edge is placement (and a chat cell's
+context), never a link; links between panels come only from the computation
+graph -- the function-object calls, forward and inverse, between artifacts.*
+
 ---
 
 ## Standing instructions carried in the verbatim
