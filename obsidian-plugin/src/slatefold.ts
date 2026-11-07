@@ -494,6 +494,14 @@ export function foldDecorations(doc: Text, st: FoldState): DecorationSet {
         const folded = foldAt.get(i);
         if (nodes) ranges.push([line.from + lead, line.from + lead + key.length,
           Decoration.mark({ class: "domvec-var domvec-var-key" + (folded ? " is-folded" : "") })]);
+        // An ACTION's value (back / forward / scan) reads false and shows
+        // true under the pointer; a click acts (2026-11-07: "no 'go' for
+        // booleans ... false with a hover to true"). Planted
+        // `__domvecPlantNoActionHover`: plain text.
+        if (tab >= 0 && /^(back|forward|scan)$/.test(key) && !(window as any).__domvecPlantNoActionHover) {
+          const v0 = line.from + lead + tab + 1, val = rest.slice(tab + 1).trim();
+          if (val) ranges.push([v0, v0 + rest.slice(tab + 1).length, Decoration.mark({ class: "domvec-var-action" })]);
+        }
         if (folded) {
           ranges.push([line.from + lead, line.from + lead, Decoration.widget({ widget: new BraceWidget("{"), side: -1 })]);
           ranges.push([line.from + lead + key.length, line.from + lead + key.length, Decoration.widget({ widget: new BraceWidget("}"), side: 1 })]);

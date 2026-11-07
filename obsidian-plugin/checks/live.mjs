@@ -12486,6 +12486,30 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "PG-137-action-hover",
+      asks: "PLUGIN_GOAL 137 (8): a browser cell's back/forward/scan read 'false' and turn 'true' under the pointer -- each value is marked as an action whose drawn text is 'false' (and 'true' on hover, by CSS); planted (__domvecPlantNoActionHover) plain text",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          window.__domvecPlantNoActionHover = ${planted};
+          const T = String.fromCharCode(9), NL = String.fromCharCode(10);
+          const path = "domvec-checks/action hover " + (${planted} ? "p" : "c") + ".md";
+          const old = app.vault.getAbstractFileByPath(path); if (old) await app.vault.trash(old, true);
+          const f = await app.vault.create(path, ["---", "domvec: slate", "---", "browser", T + "url" + T, T + "back" + T + "false", T + "forward" + T + "false", T + "scan" + T + "false", ""].join(NL));
+          const leaf = app.workspace.getLeaf("tab");
+          try {
+            await leaf.openFile(f, { state: { mode: "source", source: false } }); await sleep(1500);
+            const els = [...leaf.view.containerEl.querySelectorAll(".domvec-var-action")];
+            const drawn = els.map((e) => getComputedStyle(e, "::before").content);
+            const sheet = [...document.styleSheets].some((ss) => { try { return [...ss.cssRules].some((r) => /domvec-var-action:hover::before/.test(r.selectorText || "") && /true/.test(r.style.content)); } catch { return false; } });
+            return { planted: ${planted}, actions: els.length, drawn, hover_rule: sheet };
+          } finally { window.__domvecPlantNoActionHover = false; leaf.detach(); await app.vault.trash(f, true); }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        return { pass: !clean.error && clean.actions === 3 && clean.drawn.every((d) => /false/.test(d)) && clean.hover_rule && !planted.error && planted.actions === 0, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {
