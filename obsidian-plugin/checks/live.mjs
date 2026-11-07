@@ -11822,6 +11822,41 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "PG-134-magnet-links",
+      asks: "the block-magnet respects hard links (PLUGIN_GOAL 134): a chat cell's context is the cells magnetized to it AND the notes those link to, recursively -- B snapped to A, A links [[L]], L links [[M]]: B's context holds A, L, M; planted (__domvecPlantMagnetNoLinks) A alone",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          window.__domvecPlantMagnetNoLinks = ${planted};
+          await window.__domvec.act("open", "graph"); await sleep(1200);
+          const desk = window.__domvecPlane;
+          const tag = (${planted} ? "p" : "c") + Date.now(), NL = String.fromCharCode(10);
+          const D = "domvec-checks/", A = D + "pgml-a " + tag + ".md", B = D + "pgml-b " + tag + ".md", L = D + "pgml-l " + tag + ".md", M = D + "pgml-m " + tag + ".md";
+          const card = (p) => [...document.querySelectorAll(".domvec-panel-card")].find((c) => c.dataset.path === p);
+          try {
+            await app.vault.create(M, "m end");
+            await app.vault.create(L, "l links [[pgml-m " + tag + "]]");
+            await desk.create("notebook", { path: A, text: "a links [[pgml-l " + tag + "]]" + NL });
+            await desk.create("notebook", { path: B, text: "b" + NL });
+            let b = null;
+            for (let i = 0; i < 20 && !(card(A) && (b = card(B))); i++) await sleep(300);
+            if (!b) return { error: "no cards" };
+            for (let i = 0; i < 30; i++) { const r = app.metadataCache.resolvedLinks; if (r[A] && r[A][L] && r[L] && r[L][M]) break; await sleep(200); }
+            b.dataset.magnetLeft = A;
+            const ctx = desk.magnetized(B);
+            return { planted: ${planted}, context: ctx.map((x) => x.split("/").pop().split(" ")[0]) };
+          } finally {
+            window.__domvecPlantMagnetNoLinks = false;
+            for (const p of [A, B, L, M]) { const f = app.vault.getAbstractFileByPath(p); if (f) await app.vault.trash(f, true); }
+          }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        const has = (r, k) => (r.context || []).includes(k);
+        return { pass: !clean.error && has(clean, "pgml-a") && has(clean, "pgml-l") && has(clean, "pgml-m")
+          && !planted.error && has(planted, "pgml-a") && !has(planted, "pgml-l"), evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {

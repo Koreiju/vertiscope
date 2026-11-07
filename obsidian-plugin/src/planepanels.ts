@@ -617,7 +617,7 @@ export class PlaneDesk {
   }
 
   /** Minimized: the card is its header node alone (items 54-55). */
-  chatStats = { asks: 0, tokens: 0, context_cells: 0, last_ms: 0, first_token_ms: 0 };
+  chatStats = { asks: 0, tokens: 0, context_cells: 0, last_ms: 0, first_token_ms: 0, linked: 0 };
   /** The cells magnetized around `path`, recursively -- its context (PLUGIN_GOAL 134). */
   magnetized(path: string): string[] {
     const seen = new Set<string>([path]), order: string[] = [];
@@ -631,6 +631,23 @@ export class PlaneDesk {
       if (mine) for (const k of sides) { const v = (mine.dataset as any)[k]; if (v) next.add(v); }
       for (const c of cards()) for (const k of sides) if ((c.dataset as any)[k] === at && c.dataset.path) next.add(c.dataset.path);
       for (const n of next) if (!seen.has(n)) { seen.add(n); order.push(n); queue.push(n); }
+    }
+    // The magnet RESPECTS HARD LINKS (PLUGIN_GOAL 134: "the block-magnet
+    // element also respects hard links ... even for laterals"): every note a
+    // magnetized cell -- or the chat cell itself -- links to is context too,
+    // followed recursively (two hops; the budget truncates). Planted
+    // `__domvecPlantMagnetNoLinks`: the magnets alone, as before.
+    if (!(window as any).__domvecPlantMagnetNoLinks) {
+      const resolved: Record<string, Record<string, number>> = (this.app.metadataCache as any).resolvedLinks || {};
+      let frontier = [path, ...order];
+      for (let hop = 0; hop < 2 && frontier.length; hop++) {
+        const nextF: string[] = [];
+        for (const at of frontier) for (const to of Object.keys(resolved[at] || {})) {
+          if (seen.has(to) || !to.endsWith(".md")) continue;
+          seen.add(to); order.push(to); nextF.push(to); this.chatStats.linked++;
+        }
+        frontier = nextF;
+      }
     }
     return order;
   }
