@@ -2389,9 +2389,18 @@ export function makeChecks(env) {
             // can be open beside the pinned one, and the first .domvec-bb in
             // the document was the hover panel (an empty board, 2026-10-07).
             const pinCid = (b.pinnedState()[0] || {}).cid || "";
+            // The pin's panel waits for its vector, and a duplicate is drawn
+            // by another chunk's billboard (pinAlias).
+            const gv0 = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+            const bbId = () => (gv0.pinAlias && gv0.pinAlias.get(pinCid)) || pinCid;
+            for (let i = 0; i < 50 && !(gv0.billboards.get(bbId()) && gv0.billboards.get(bbId()).el.querySelector("iframe.domvec-snapshot, .domvec-bb-body")); i++) await sleep(500);
+            await sleep(1500);
             const boards = document.querySelectorAll(".domvec-bb").length;
+            const hasCard = !!document.querySelector('.domvec-pin-card[data-cid="' + pinCid + '"]');
             const read = (sel) => {
-              const own = sel + '[data-cid="' + pinCid + '"]';
+              // PLUGIN_GOAL 133: no side card -- the stuck billboard IS the card.
+              if (sel === ".domvec-pin-card" && !hasCard) sel = ".domvec-bb";
+              const own = sel + '[data-cid="' + (sel === ".domvec-bb" ? bbId() : pinCid) + '"]';
               const f = document.querySelector(own + " iframe.domvec-snapshot");
               if (!f || !f.contentDocument) {
                 const md = document.querySelector(sel === ".domvec-pin-card" ? own + " .domvec-browser-mdbody" : own + " .domvec-bb-body");
@@ -2425,7 +2434,9 @@ export function makeChecks(env) {
               fromGraph = st ? { form: st.form, elements: st.elements } : { form: "none" };
               gv.closeBillboard(other.id);
             }
-            return { planted: ${planted}, pins: b.pinnedState().length, pin_cid: pinCid, boards_open: boards,
+            const diag = { want: [...(gv0.pinWanted || [])], alias: [...(gv0.pinAlias || [])], bbs: [...gv0.billboards.keys()],
+                           place: await gv0.sidecar.place([pinCid]).then((x) => ({ n: (x.nodes || []).map((n) => n.cid + "@" + String(n.url).slice(-20)), al: x.aliases, unk: x.unknown, unplaced: x.unplaced })).catch((e) => String(e)) };
+            return { planted: ${planted}, diag, pins: b.pinnedState().length, pin_cid: pinCid, boards_open: boards,
                      snapshot: b.lastSnapshot, page, card, board, from_graph: fromGraph };
           } finally {
             for (const p of b.pinnedState()) b.unpin(p.cid);

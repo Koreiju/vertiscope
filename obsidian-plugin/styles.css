@@ -1293,3 +1293,7 @@ button.domvec-run-fence:hover {
 .domvec-chat-log > .workspace-leaf { height: 100%; min-height: 160px; position: relative; }
 .domvec-code-source .cm-gutters { background: var(--background-secondary); color: var(--text-faint); border-right: 1px solid var(--background-modifier-border); }
 .domvec-code-source .cm-activeLineGutter, .domvec-code-source .cm-activeLine { background: var(--background-modifier-hover); }
+/* Embedded editor leaves carry no Obsidian view header (path breadcrumb):
+   the panel's own head names it. */
+.domvec-bb-body .view-header, .domvec-code-cell .view-header, .domvec-slate-cell .view-header, .domvec-chat-log .view-header { display: none; }
+.domvec-bb-body .inline-title, .domvec-slate-cell .inline-title, .domvec-chat-log .inline-title { display: none; }

@@ -7409,7 +7409,13 @@ export class GraphView extends ItemView {
     let drawnAs = cid;
     for (let i = 0; !node && i < 40 && this.pinWanted.has(cid); i++) {
       const got: any = await this.sidecar.place([cid]).catch(() => null);
-      if (got?.nodes?.length) this.absorb(got.nodes, got.edges);
+      // A PIN is drawn whatever page holds it: its duplicate's copy can sit on
+      // a page the reader never opened, which `absorb` folds away -- the pin
+      // then waited 20 s for a node that never came (D-36, 2026-11-07: the
+      // Radix_tree paragraph drawn by Patricia_tree's copy). Planted
+      // `plantPinFolded`: folded like any placement, as before.
+      const keep = this.plantPinFolded ? undefined : new Set<string>([cid, ...Object.values(got?.aliases || {}).map(String)]);
+      if (got?.nodes?.length) this.absorb(got.nodes, got.edges, undefined, keep ? { keep } : {});
       // A duplicate or a merge group's member is drawn by ANOTHER chunk: the
       // pin's billboard opens on that one (G-82, 2026-10-12).
       if (got?.aliases?.[cid] && !this.plantNoPinAlias) drawnAs = String(got.aliases[cid]);
@@ -7417,6 +7423,17 @@ export class GraphView extends ItemView {
       // let the browser re-anchor the pin by its address (G-82).
       else if (got?.unknown?.includes(cid) && !this.plantWaitUnknown) break;
       node = this.graph.graphData().nodes.find((n: any) => n.id === drawnAs);
+      // UNPLACED (no position yet -- the duplicate it is drawn by has no
+      // vector): after ~3 s the pin's panel hangs from its own grey node under
+      // the page being browsed, rather than never opening (D-36, 2026-11-07:
+      // 0 boards in 25 s). Planted `plantPinWaitsForPlace`: it waits, as before.
+      if (!node && i >= 5 && !this.plantPinWaitsForPlace
+          && (got?.unplaced || []).some((u: string) => u === drawnAs || u === cid)) {
+        const url = this.browsingUrl ? this.browsingUrl() : "";
+        node = this.ensureUnitNode({ id: cid, url, virtual: true, name: cid });
+        drawnAs = cid; this.pinUnplacedOpened++;
+        break;
+      }
       if (!node) await new Promise((r) => window.setTimeout(r, 500));
     }
     if (!node || !this.pinWanted.has(cid)) return false;
@@ -7511,6 +7528,9 @@ export class GraphView extends ItemView {
     return "plane";
   }
   plantStuckXKeepsPin = false;
+  plantPinFolded = false;
+  plantPinWaitsForPlace = false;
+  pinUnplacedOpened = 0;
   /** Planted (133): a pin's billboard follows its node, as before. */
   plantPinFollows = false;
   stuckPins = 0;
