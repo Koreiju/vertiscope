@@ -12153,30 +12153,34 @@ export function makeChecks(env) {
             if (${planted}) b.plant.add("no-popup-link");
             try {
               b.popupOf.clear();
+              const diffs = []; const od = b.onDiff;
+              b.onDiff = (d) => { diffs.push({ added: d.added.length, kind: d.kind, url: String(d.url).slice(-22), seen: b.lastHoverSeen && (b.lastHoverSeen.stored || b.lastHoverSeen.cid), age: Math.round(performance.now() - b.lastHoverAt) }); od(d); };
               b.go(PAGE);
               for (let i = 0; i < 60; i++) { await sleep(250); if (b.pipebox && b.pipebox.map && b.pipebox.map.url && b.pipebox.map.cids().length >= 2) break; }
               await sleep(4000);
-              const r = await b.webview.executeJavaScript("(function(){var r=document.getElementById('t1').getBoundingClientRect();return [r.left+r.width/2, r.top+r.height/2];})()");
-              for (let k = 0; k < 4; k++) { b.webview.sendInputEvent({ type: "mouseMove", x: Math.round(r[0]) + k, y: Math.round(r[1]) }); await sleep(150); }
+              const wc = window.require("@electron/remote").webContents.fromId(b.webview.getWebContentsId());
+              const r = await b.webview.executeJavaScript("(function(){var r=document.querySelector('#t1 h3').getBoundingClientRect();return [r.left+20, r.top+r.height/2];})()");
+              for (let k = 0; k < 4; k++) { wc.sendInputEvent({ type: "mouseMove", x: Math.round(r[0]) + k, y: Math.round(r[1]) }); await sleep(150); }
               const opened = await b.webview.executeJavaScript("!!document.getElementById('pane')");
               let links = [];
               for (let i = 0; i < 40 && !links.length; i++) {
                 await sleep(400);
-                b.webview.sendInputEvent({ type: "mouseMove", x: Math.round(r[0]) + (i % 3), y: Math.round(r[1]) });
+                wc.sendInputEvent({ type: "mouseMove", x: Math.round(r[0]) + (i % 3), y: Math.round(r[1]) });
                 links = [...b.popupOf];
               }
               const texts = [];
               for (const [p, o] of links.slice(0, 3)) {
                 const pp = await b.sidecar.chunk(p).catch(() => null), oo = await b.sidecar.chunk(o).catch(() => null);
-                const t = (x) => ((x && x.lines) || []).map((l) => l.text).join(" ").slice(0, 120);
+                const t = (x) => ((x && x.lines) || []).map((l) => l.text).join(" ").slice(0, 300);
                 texts.push({ popup: t(pp), opener: t(oo) });
               }
               await sleep(2000);
-              return { planted: ${planted}, pane_opened: opened, links: links.length, texts, graph_links: g.popupLinks.size, stats: b.popupStats };
+              b.onDiff = od;
+              return { planted: ${planted}, diffs, pane_opened: opened, links: links.length, texts, graph_links: g.popupLinks.size, stats: b.popupStats };
             } finally { b.plant.delete("no-popup-link"); }
           })()`, { timeout: 120000 });
           const clean = await arm(false), planted = await arm(true);
-          const right = (r) => r.texts.some((t) => /About VHS Vault/.test(t.popup) && /VHS Vault/.test(t.opener) && !/About/.test(t.opener));
+          const right = (r) => r.texts.some((t) => /About VHS Vault/.test(t.popup) && /### VHS Vault/.test(t.opener) && !/About VHS/.test(t.opener));
           return { pass: !clean.error && clean.pane_opened && clean.links >= 1 && right(clean) && !planted.error && planted.pane_opened && planted.links === 0,
                    evidence: { clean, planted } };
         } finally { await fixtures.close(); }
