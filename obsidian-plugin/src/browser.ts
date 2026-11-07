@@ -412,6 +412,7 @@ export class BrowserView extends ItemView {
                                          return;
                                        }
                                        this.lastHovered = cid ? { cid, url, stored: stored || "" } : null;
+                                       if (cid) { this.lastHoverAt = performance.now(); this.lastHoverSeen = { cid, url, stored: stored || "" }; }
                                        this.onHover(cid, url, stored);
                                      });
       this.pipebox.urlOf = (u: string) => this.sessionAliases.get(u) || u;
@@ -1027,8 +1028,37 @@ export class BrowserView extends ItemView {
     const gone = new Set(diff.retired);
     const lost = [...this.pinned.keys()].filter((c) => gone.has(c) && !renamed[c]);
     if (lost.length && !this.plant.has("no-pin-reresolve")) void this.reanchorPins(lost);
+    this.linkPopups(diff);
     try { this.onDiff(diff); } catch (e) { console.error("domvec: onDiff failed", e); }
   }
+
+  /** Popup chunk -> the chunk whose hover opened it (G-120). */
+  popupOf = new Map<string, string>();
+  popupStats = { linked: 0, skipped_many: 0 };
+  /** Told when a popup is linked to its opener (the graph draws the link). */
+  onPopup: (popup: string, opener: string) => void = () => {};
+  /**
+   * A chunk that ENTERS the page while the reader hovers another one, on the
+   * same page, a few at most, is what that hover opened -- archive.org's tile
+   * pane (2026-10-07: "not sure if the popup chunks are captured as well and
+   * linked correctly"). A capture adding many chunks is the page loading,
+   * not a popup. Planted `no-popup-link`: nothing records the opener.
+   */
+  private linkPopups(diff: CentralDiff): void {
+    if (this.plant.has("no-popup-link")) return;
+    // The last hover SEEN, not the current one: the pointer report is cleared
+    // when the pane the hover opened re-cuts the page's map.
+    const h = this.lastHoverSeen, at = this.lastHoverAt;
+    if (!h || !h.cid || performance.now() - at > 3000 || docKey(h.url) !== docKey(diff.url)) return;
+    const renamedTo = new Set(Object.values(diff.renamed || {}));
+    const fresh = (diff.added || []).filter((c) => !renamedTo.has(c) && c !== h.cid && c !== h.stored);
+    if (!fresh.length) return;
+    if (fresh.length > 3) { this.popupStats.skipped_many++; return; }
+    const opener = h.stored || h.cid;
+    for (const c of fresh) { this.popupOf.set(c, opener); this.popupStats.linked++; try { this.onPopup(c, opener); } catch { /* view gone */ } }
+  }
+  private lastHoverAt = 0;
+  private lastHoverSeen: { cid: string; url: string; stored: string } | null = null;
 
   /** Pins whose chunk was retired, moved to whatever draws their address now. */
   /** old cid -> the cid its pin moved to, for a check holding the old one. */

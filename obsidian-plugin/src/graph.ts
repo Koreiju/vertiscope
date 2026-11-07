@@ -7556,6 +7556,24 @@ export class GraphView extends ItemView {
   /** A pinned chunk -> the chunk whose billboard shows it (duplicates, group members). */
   private pinAlias = new Map<string, string>();
 
+  /** Popup links drawn (G-120): popup cid -> opener cid. */
+  popupLinks = new Map<string, string>();
+  /** A popup chunk is linked to the chunk whose hover opened it (G-120),
+   *  once both are drawn -- retried while placement catches up. */
+  linkPopup(popup: string, opener: string, tries = 0): void {
+    if (!this.graph) return;
+    const data: any = this.graph.graphData();
+    const ids = new Set(data.nodes.map((n: any) => String(n.id)));
+    if (!ids.has(popup) || !ids.has(opener)) {
+      if (tries < 40) window.setTimeout(() => this.linkPopup(popup, opener, tries + 1), 500);
+      return;
+    }
+    if (this.popupLinks.get(popup) === opener) return;
+    this.popupLinks.set(popup, opener);
+    this.graph.graphData({ nodes: data.nodes, links: [...data.links, { source: opener, target: popup, popup: true }] });
+    this.batchDirty = true;
+  }
+
   /** The browser let a chunk go: close its billboard. */
   unpinChunk(cid: string): void {
     this.pinWanted.delete(cid);

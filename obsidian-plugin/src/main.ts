@@ -679,6 +679,8 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
               }
             });
           });
+        browser.onPopup = (popup: string, opener: string) =>
+          this.eachGraph((view) => view.linkPopup(popup, opener));
         browser.onPictures = (byCid: Record<string, string>) =>
           this.eachGraph((view) => view.setPictures(byCid));
         // Any billboard opened in 3D can ask for its chunk's page snapshot.
