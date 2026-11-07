@@ -90,6 +90,14 @@ export class PlaneDesk {
   private async restore(): Promise<void> {
     if (this.restored) return;
     this.restored = true;
+    // Cards a previous load of the plugin left on the plane (the plane
+    // outlives a reload): not this desk's, so each reload stacked another
+    // copy of every remembered panel. Planted `__domvecPlantKeepOrphans`.
+    const plane = this.host.plane();
+    if (plane && !(window as any).__domvecPlantKeepOrphans) {
+      const mine = new Set(this.panels.map((p) => p.card));
+      for (const old of Array.from(plane.querySelectorAll(".domvec-panel-card")) as HTMLElement[]) if (!mine.has(old)) old.remove();
+    }
     let paths: string[] = [];
     try { paths = JSON.parse(window.localStorage.getItem(OPEN_KEY) || "[]"); } catch { /* a convenience */ }
     for (const path of Array.isArray(paths) ? paths : []) {

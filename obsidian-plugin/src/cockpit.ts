@@ -185,6 +185,11 @@ export class Cockpit {
       return this.planeLeaf.view instanceof MarkdownView ? this.planeLeaf.view : null;
     }
     this.undock();
+    // ONE ego card. A plugin reload makes a new cockpit while the plane
+    // outlives the old one, and each reload left its ego card behind -- the
+    // plane filled with stacked copies (2026-11-07, the reader's screenshot).
+    // Planted `__domvecPlantKeepOrphans`: left, as before.
+    if (!(window as any).__domvecPlantKeepOrphans) for (const old of Array.from(plane.querySelectorAll(".domvec-cockpit-card"))) old.remove();
     const Leaf = (this.app.workspace as any).activeLeaf?.constructor ?? (this.app.workspace.getMostRecentLeaf() as any)?.constructor;
     if (!Leaf) return null;
     // No head of its own (item 54: "the duplicative "ego" part should
