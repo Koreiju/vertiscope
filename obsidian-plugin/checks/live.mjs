@@ -12841,7 +12841,11 @@ export function makeChecks(env) {
               if (!cid) return { ...out, error: "nothing pinned" };
 
               const frameOf = () => {
-                const card = b.markdownWrap.querySelector('.domvec-pin-card[data-cid="' + cid + '"]');
+                // The pin's panel: the side card, or (PLUGIN_GOAL 133) the
+                // stuck billboard that replaced it -- the same snapshot form.
+                const gv = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+                const bbE = gv && gv.billboards.get((gv.pinAlias && gv.pinAlias.get(cid)) || cid);
+                const card = b.markdownWrap.querySelector('.domvec-pin-card[data-cid="' + cid + '"]') || (bbE && bbE.el);
                 const f = card && card.querySelector("iframe.domvec-snapshot");
                 return f && f.contentDocument && f.contentDocument.getElementById("domvec-root") ? f : null;
               };
@@ -12918,6 +12922,7 @@ export function makeChecks(env) {
               await until(async () => { try { return b.webview.getURL() === "about:blank" && !b.webview.isLoading(); } catch (e) { return false; } }, 15000);
               await sleep(1500);
               out.card_after_leaving = !!frameOf();
+              try { out.acts_after_leaving = [...doc().querySelectorAll("[data-domvec-act]")].map((e) => e.getAttribute("data-domvec-act") + ":" + (e.textContent || "").trim()).slice(0, 6); } catch (e) { out.acts_after_leaving = String(e); }
               if (frameOf() && control("press", "Pick me")) {
                 click(control("press", "Pick me"));
                 out.arrived = await until(async () => { try { return b.webview.getURL() === PAGE; } catch (e) { return false; } }, 40000);

@@ -1241,7 +1241,13 @@ export class BrowserView extends ItemView {
       if (!xs.length) continue;
       try {
         const snap = await wv.executeJavaScript(snapshotScript(xs, {}));
-        if (snap && snap.html) { items.push({ cid, snap }); putSnapshot(cid, snap as Snapshot); this.saverStats.taken++; }
+        // Taken without the trie's addresses, so its controls are inert: it
+        // never replaces a form that HAS addressed controls (a pin's -- its
+        // controls went dead when the reader left the page, G-111 2026-11-07).
+        // Planted `saver-overwrites`: it replaces it, as before.
+        const had = getSnapshot(cid);
+        const keep = !!had && /data-domvec-act=/.test(had.html || "") && !/data-domvec-act=/.test(snap?.html || "") && !this.plant.has("saver-overwrites");
+        if (snap && snap.html) { items.push({ cid, snap }); if (!keep) putSnapshot(cid, snap as Snapshot); else (this.saverStats as any).kept = ((this.saverStats as any).kept || 0) + 1; this.saverStats.taken++; }
       } catch { this.saverStats.failed++; }
     }
     // The pictures these forms draw, queued to be saved too ("Even media").
