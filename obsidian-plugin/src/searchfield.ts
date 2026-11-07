@@ -172,6 +172,8 @@ export class SearchField {
   plantFixedPages = false;
   /** Planted: a page counts (and is asked) for all it holds -- two pages took all of n. */
   plantUncappedShare = false;
+  /** When the reader last scrolled the results (re-ranks wait for it to rest). */
+  lastScrollAt = 0;
   tierStats = { runs: 0, pages: 0, pages_done: 0, first_ms: 0, last_ms: 0, single_ms: 0 };
 
   /**
@@ -334,6 +336,7 @@ export class SearchField {
     // Every scroll, once a frame: the soft index moves continuously.
     this.scroller.addEventListener("scroll", () => {
       if (this.scrollRaf) return;
+      this.lastScrollAt = performance.now();
       this.scrollRaf = requestAnimationFrame(() => { this.scrollRaf = 0; this.onScroll(); });
     }, { passive: true });
   }

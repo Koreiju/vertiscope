@@ -5683,6 +5683,17 @@ export class GraphView extends ItemView {
     const q = this.followQuery;
     if (!f || !q || f.query !== q) { window.clearInterval(this.webTimer); this.webTimer = 0; return; }
     if (this.followBusy) return;
+    // Nothing arrived since the last ranking, or the reader is scrolling the
+    // results: no new ask (2026-11-07, the whole ranking re-ran every 3 s at
+    // n = 569). Planted `plantRerankEveryAbsorb` keeps the old timing.
+    if (!this.plantRerankEveryAbsorb) {
+      if (this.arrivalsSinceRerank === 0 || performance.now() - (f.lastScrollAt || 0) < 1500) {
+        if (++this.followQuiet >= this.rerankQuietRounds) { window.clearInterval(this.webTimer); this.webTimer = 0; }
+        this.rerankStats.skipped++;
+        return;
+      }
+    }
+    this.arrivalsSinceRerank = 0;
     this.followBusy = true;
     try {
       const d = await f.update().catch(() => null);
@@ -7559,6 +7570,10 @@ export class GraphView extends ItemView {
   /** Popup links drawn (G-120): popup cid -> opener cid. */
   popupLinks = new Map<string, string>();
   plantPopupWaitsForPlace = false;
+  plantRerankEveryAbsorb = false;
+  private rerankTimer = 0;
+  rerankStats = { asked: 0, fired: 0, skipped: 0 };
+  private arrivalsSinceRerank = 0;
   /** A popup chunk is linked to the chunk whose hover opened it (G-120),
    *  once both are drawn -- retried while placement catches up. */
   linkPopup(popup: string, opener: string, tries = 0, url = ""): void {
@@ -8647,8 +8662,23 @@ export class GraphView extends ItemView {
       { added: number; moved: number; edges: number } {
     // New nodes from the store: a standing query is re-ranked at once (item 106).
     if (this.followQuery && incoming && incoming.length && !this.plantNoRerank) {
+      this.arrivalsSinceRerank += incoming.length;
       this.followStore(this.followQuery);
-      if (!this.followBusy) window.setTimeout(() => { void this.rerank(); }, 0);
+      // DEBOUNCED (2026-11-07: retrieval "keeps re-triggering every time I
+      // scroll" -- every absorb re-ran the whole ranking while a DuckDuckGo
+      // scan streamed nodes in): one re-rank 1.5 s after the last arrival,
+      // and none while the reader scrolls the results. Planted
+      // `plantRerankEveryAbsorb`: at once, every time, as before.
+      if (this.plantRerankEveryAbsorb) { if (!this.followBusy) window.setTimeout(() => { void this.rerank(); }, 0); }
+      else {
+        window.clearTimeout(this.rerankTimer);
+        const fire = () => {
+          if (this.followBusy || performance.now() - (this.searchField?.lastScrollAt || 0) < 1500) { this.rerankTimer = window.setTimeout(fire, 1500); return; }
+          this.rerankStats.fired++; void this.rerank();
+        };
+        this.rerankTimer = window.setTimeout(fire, 1500);
+        this.rerankStats.asked++;
+      }
     }
     if (this.forceSpecs.size) {
       // Chunks placed just now carry their NEW content: a force node pending

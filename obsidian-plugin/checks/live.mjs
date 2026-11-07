@@ -12353,6 +12353,28 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "PG-137-rerank-debounce",
+      asks: "PLUGIN_GOAL 137 (19): a standing query is re-ranked once after arrivals rest, not once per arrival -- 10 placements streaming in 2 s under a standing query cause at most 2 rankings (one per rest); planted (plantRerankEveryAbsorb) 10",
+      async run() {
+        const arm = (planted) => inPane(`
+          v.plantRerankEveryAbsorb = ${planted};
+          let reranks = 0; const sf = v.searchField; const ou = sf.update.bind(sf); sf.update = async () => { reranks++; return null; }; const kq = sf.query; sf.query = "radix trie";
+          const keep = v.followQuery; v.followQuery = "radix trie"; v.followStore("radix trie");
+          try {
+            let some = [];
+            for (let w = 0; w < 30 && !some.length; w++) { some = v.graph.graphData().nodes.filter((n) => !n.force && Number.isFinite(n.x)).slice(0, 3)
+              .map((n) => ({ cid: String(n.id), url: n.url, level: n.level || "page", pos: [n.fitX ?? n.x, n.fitY ?? n.y, n.fitZ ?? n.z], placed: true })); if (!some.length) await sleep(500); }
+            if (!some.length) return { error: "no drawn chunks" };
+            for (let i = 0; i < 10; i++) { v.absorb(some, []); await sleep(200); }
+            await sleep(4000);
+            return { planted: ${planted}, reranks, stats: { ...v.rerankStats } };
+          } finally { sf.update = ou; sf.query = kq; v.followQuery = keep; v.plantRerankEveryAbsorb = false; }
+        `);
+        const clean = await arm(false), planted = await arm(true);
+        return { pass: !clean.error && clean.reranks <= 2 && !planted.error && planted.reranks >= 8, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {
