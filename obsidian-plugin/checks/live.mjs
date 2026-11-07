@@ -11695,6 +11695,33 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "PG-133-code-panel",
+      asks: "one markdown panel for code panels too (PLUGIN_GOAL 133: the same code over billboards, code panels and notebook cells): a code:// module opened in its code panel -- its trie side is a real Obsidian editor over a note of the module's chunks, each under its address; planted (plantStaticCodeChunks) a static render per chunk, no editor",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const P = app.plugins.plugins["domvec-bridge"];
+          const url = "code://repo/trie.py";
+          for (const l of app.workspace.getLeavesOfType("domvec-code-view")) l.detach();
+          const proto = Object.getPrototypeOf(P.app.workspace.getLeavesOfType("domvec-graph-view")[0].view).constructor;
+          window.__pg133codePlant = ${planted};
+          const view = await P.openCode(url);
+          if (!view) return { error: "no code view" };
+          view.plantStaticCodeChunks = ${planted};
+          await view.readTrie(); await sleep(2500);
+          const el = view.containerEl;
+          const editor = el.querySelector(".domvec-code-cell .cm-editor");
+          const chunks = el.querySelectorAll(".domvec-code-chunk").length;
+          const f = view.triePath ? app.vault.getAbstractFileByPath(view.triePath) : null;
+          const sections = f ? ((await app.vault.read(f)).match(/<!-- cid:/g) || []).length : 0;
+          for (const l of app.workspace.getLeavesOfType("domvec-code-view")) l.detach();
+          return { planted: ${planted}, editor: !!editor, static_chunks: chunks, note_sections: sections };
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        return { pass: !clean.error && clean.editor && clean.note_sections >= 3 && !planted.error && !planted.editor && planted.static_chunks >= 3, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {

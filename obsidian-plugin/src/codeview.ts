@@ -80,7 +80,7 @@ export class CodeView extends ItemView {
     });
   }
 
-  async onClose(): Promise<void> { this.editor?.destroy(); this.editor = null; }
+  async onClose(): Promise<void> { this.editor?.destroy(); this.editor = null; try { this.trieLeaf?.detach(); } catch { /* gone */ } this.trieLeaf = null; }
 
   get dirty(): boolean { return !!this.editor && this.text() !== this.savedText; }
   text(): string { return this.editor ? this.editor.state.doc.toString() : ""; }
@@ -189,6 +189,30 @@ export class CodeView extends ItemView {
     }
     this.chunks = next;
     this.trieEl.empty();
+    // ONE markdown panel (PLUGIN_GOAL 133: "the panel is the exact same code
+    // over all three"): the trie side is the notebook cell's own Obsidian
+    // editor, over a note of the module's chunks, each a section under its
+    // address -- every extension the notes have. Planted
+    // `plantStaticCodeChunks`: a static render per chunk, as before.
+    if (!this.plantStaticCodeChunks && next.length) {
+      const NL = String.fromCharCode(10);
+      const body = next.map((c) => `<!-- cid:${c.cid} -->` + NL + "`" + c.xpath + "`" + NL + NL + c.md).join(NL + NL);
+      const slug = this.url.replace(/[^\w.-]+/g, "_").slice(-120);
+      const folder = "domvec/chunks", path = `${folder}/code ${slug}.md`;
+      const vault = this.app.vault;
+      if (!vault.getAbstractFileByPath(folder)) await vault.createFolder(folder).catch(() => undefined);
+      let f: any = vault.getAbstractFileByPath(path);
+      if (f) { if ((await vault.read(f)) !== body) await vault.modify(f, body); } else f = await vault.create(path, body);
+      const Leaf: any = (this.app.workspace as any).activeLeaf?.constructor ?? (this.app.workspace.getMostRecentLeaf() as any)?.constructor;
+      if (Leaf) {
+        try { this.trieLeaf?.detach(); } catch { /* gone */ }
+        const leaf = new Leaf(this.app);
+        this.trieEl.createDiv({ cls: "domvec-code-cell" }).appendChild(leaf.containerEl);
+        await leaf.openFile(f, { state: { mode: "source", source: false } } as any);
+        this.trieLeaf = leaf; this.triePath = path;
+        return next;
+      }
+    }
     for (const c of next) {
       const box = this.trieEl.createDiv({ cls: "domvec-code-chunk", attr: { "data-cid": c.cid } });
       box.toggleClass("is-changed", this.changed.has(c.cid));
@@ -197,6 +221,11 @@ export class CodeView extends ItemView {
     }
     return next;
   }
+
+  /** Planted (133): the trie side a static render per chunk, as before. */
+  plantStaticCodeChunks = false;
+  trieLeaf: any = null;
+  triePath = "";
 
   /** Write the file and re-index it; both sides and the 3D view follow. */
   async save(): Promise<any> {
