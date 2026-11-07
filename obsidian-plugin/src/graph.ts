@@ -7600,6 +7600,8 @@ export class GraphView extends ItemView {
   plantPopupWaitsForPlace = false;
   plantRerankEveryAbsorb = false;
   plantLayerInPane = false;
+  plantDropOnRedraw = false;
+  redrawStats = { carried_nodes: 0, carried_links: 0, panels_rebound: 0 };
   private rerankTimer = 0;
   rerankStats = { asked: 0, fired: 0, skipped: 0 };
   private arrivalsSinceRerank = 0;
@@ -8961,6 +8963,21 @@ export class GraphView extends ItemView {
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;
     this.stopBatch();
+    // What the layout does not hold survives the redraw (2026-11-07:
+    // "switching from page to chunk view closes all nodes ... when they
+    // should persist"): the grey streamed nodes, unit nodes and the links
+    // between them, at the places they had. Planted `plantDropOnRedraw`.
+    let carryNodes: any[] = [], carryLinks: any[] = [];
+    if (this.graph && !this.plantDropOnRedraw) {
+      const old: any = this.graph.graphData();
+      const inLayout = new Set(layout.nodes.map((n: any) => String(n.cid ?? n.id)));
+      carryNodes = old.nodes.filter((n: any) => (n.force || n.unit) && !inLayout.has(String(n.id)));
+      const keepIds = new Set([...inLayout, ...carryNodes.map((n: any) => String(n.id))]);
+      const end = (x: any) => String(typeof x === "object" && x ? x.id : x);
+      carryLinks = old.links.filter((l: any) => (l.force || l.unit || l.popup) && keepIds.has(end(l.source)) && keepIds.has(end(l.target)))
+        .map((l: any) => ({ ...l, source: end(l.source), target: end(l.target) }));
+      this.redrawStats.carried_nodes = carryNodes.length; this.redrawStats.carried_links = carryLinks.length;
+    }
     this.graph?._destructor?.();
     this.graph = null;
     canvas.empty();
@@ -9069,7 +9086,8 @@ export class GraphView extends ItemView {
       : Math.max(0.5, uniform / 8);
 
     const graph = new ForceGraph3D(canvas)
-      .graphData({ nodes, links: layout.edges.map((e) => ({ ...e })) })
+      .graphData({ nodes: carryNodes.length ? nodes.concat(carryNodes.filter((c: any) => !nodes.some((n: any) => String(n.id) === String(c.id)))) : nodes,
+                   links: layout.edges.map((e) => ({ ...e })).concat(carryLinks) })
       .nodeLabel((n: any) => {
         // A merged node says how many chunks it stands for. Without it the
         // pane silently shows one node where the store holds eight, and a
@@ -9523,6 +9541,14 @@ export class GraphView extends ItemView {
     // point; without a reheat it was the finishing point too.
     graph.d3ReheatSimulation();
     this.graph = graph;
+    // Open panels follow their nodes into the new graph (same ids, new objects).
+    if (!this.plantDropOnRedraw) {
+      const byId = new Map<string, any>((graph.graphData().nodes as any[]).map((n: any) => [String(n.id), n]));
+      for (const e of this.billboards.values() as any) {
+        const now = byId.get(String(e.node?.id));
+        if (now && now !== e.node) { e.node = now; this.redrawStats.panels_rebound++; }
+      }
+    }
     // The search field over the canvas (item 84): `ForceGraph3D(canvas)` empties
     // its element, so the field is put back AFTER the graph is built.
     if (this.searchField && !canvas.contains(this.searchField.el)) canvas.appendChild(this.searchField.el);

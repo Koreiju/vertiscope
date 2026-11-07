@@ -12460,6 +12460,32 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "PG-137-switch-keeps",
+      asks: "PLUGIN_GOAL 137 (15): switching pages <-> chunks keeps what the layout does not hold -- a grey unit node and an open panel on a stored node survive two switches, the panel still bound to a node in the graph; planted (plantDropOnRedraw) the grey node is gone",
+      async run() {
+        const arm = (planted) => inPane(`
+          v.plantDropOnRedraw = ${planted};
+          const id = "pg137unit|" + Date.now();
+          try {
+            const anyNode = v.graph.graphData().nodes.find((n) => !n.force && Number.isFinite(n.x));
+            if (!anyNode) return { error: "no node" };
+            v.ensureUnitNode({ id, url: anyNode.url, virtual: true, name: "carry probe" });
+            await v.openBillboard(anyNode, false, false); await sleep(800);
+            const btn = [...v.containerEl.querySelectorAll("button")].find((b) => /^(pages|chunks)$/.test(b.textContent.trim()));
+            if (!btn) return { error: "no switch" };
+            for (let k = 0; k < 2; k++) { btn.click(); for (let i = 0; i < 40; i++) { await sleep(500); if (v.graph && v.graph.graphData().nodes.length > 5) break; } await sleep(1500); }
+            const ids = new Set(v.graph.graphData().nodes.map((n) => String(n.id)));
+            const e = v.billboards.get(anyNode.id);
+            const res = { planted: ${planted}, unit_kept: ids.has(id), panel_open: !!e && document.contains(e.el), panel_bound: !!e && v.graph.graphData().nodes.includes(e.node), stats: { ...v.redrawStats } };
+            v.closeBillboard(anyNode.id);
+            return res;
+          } finally { v.plantDropOnRedraw = false; }
+        `);
+        const clean = await arm(false), planted = await arm(true);
+        return { pass: !clean.error && clean.unit_kept && clean.panel_open && clean.panel_bound && !planted.error && !planted.unit_kept, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {
