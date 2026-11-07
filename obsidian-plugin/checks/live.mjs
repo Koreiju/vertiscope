@@ -12174,14 +12174,24 @@ export function makeChecks(env) {
                 const t = (x) => ((x && x.lines) || []).map((l) => l.text).join(" ").slice(0, 300);
                 texts.push({ popup: t(pp), opener: t(oo) });
               }
-              await sleep(2000);
+              // The link is drawn once both chunks are: open the fixture's page node.
+              let unfolded = false;
+              if (links.length) {
+                for (let i = 0; i < 70 && !g.popupLinks.size; i++) {
+                  const pg = g.graph.graphData().nodes.find((n) => n.level === "page" && String(n.url || "").split("#")[0] === PAGE);
+                  if (pg && !unfolded) { const r2 = await g.togglePage(pg).catch(() => null); unfolded = !!(r2 && r2.action === "expand"); }
+                  await sleep(700);
+                }
+              }
+              const drawnLink = [...g.popupLinks].some(([p, o]) => b.popupOf.get(p) === o)
+                && g.graph.graphData().links.some((l) => l.popup);
               b.onDiff = od;
-              return { planted: ${planted}, diffs, pane_opened: opened, links: links.length, texts, graph_links: g.popupLinks.size, stats: b.popupStats };
+              return { planted: ${planted}, unfolded, drawn_link: drawnLink, diffs, pane_opened: opened, links: links.length, texts, graph_links: g.popupLinks.size, stats: b.popupStats };
             } finally { b.plant.delete("no-popup-link"); }
           })()`, { timeout: 120000 });
           const clean = await arm(false), planted = await arm(true);
           const right = (r) => r.texts.some((t) => /About VHS Vault/.test(t.popup) && /### VHS Vault/.test(t.opener) && !/About VHS/.test(t.opener));
-          return { pass: !clean.error && clean.pane_opened && clean.links >= 1 && right(clean) && !planted.error && planted.pane_opened && planted.links === 0,
+          return { pass: !clean.error && clean.pane_opened && clean.links >= 1 && right(clean) && clean.drawn_link && !planted.error && !planted.drawn_link && planted.pane_opened && planted.links === 0,
                    evidence: { clean, planted } };
         } finally { await fixtures.close(); }
       },

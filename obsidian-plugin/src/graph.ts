@@ -7558,14 +7558,23 @@ export class GraphView extends ItemView {
 
   /** Popup links drawn (G-120): popup cid -> opener cid. */
   popupLinks = new Map<string, string>();
+  plantPopupWaitsForPlace = false;
   /** A popup chunk is linked to the chunk whose hover opened it (G-120),
    *  once both are drawn -- retried while placement catches up. */
-  linkPopup(popup: string, opener: string, tries = 0): void {
+  linkPopup(popup: string, opener: string, tries = 0, url = ""): void {
     if (!this.graph) return;
-    const data: any = this.graph.graphData();
-    const ids = new Set(data.nodes.map((n: any) => String(n.id)));
+    let data: any = this.graph.graphData();
+    let ids = new Set(data.nodes.map((n: any) => String(n.id)));
+    // Not placed yet after ~3 s: each missing end hangs from its own grey
+    // node under its page, so the link is drawn before placement (G-120).
+    // Planted `plantPopupWaitsForPlace`.
+    if ((!ids.has(popup) || !ids.has(opener)) && tries >= 6 && url && !this.plantPopupWaitsForPlace) {
+      for (const id of [opener, popup]) if (!ids.has(id)) this.ensureUnitNode({ id, url, virtual: true, name: id });
+      data = this.graph.graphData();
+      ids = new Set(data.nodes.map((n: any) => String(n.id)));
+    }
     if (!ids.has(popup) || !ids.has(opener)) {
-      if (tries < 40) window.setTimeout(() => this.linkPopup(popup, opener, tries + 1), 500);
+      if (tries < 240) window.setTimeout(() => this.linkPopup(popup, opener, tries + 1, url), 500);
       return;
     }
     if (this.popupLinks.get(popup) === opener) return;

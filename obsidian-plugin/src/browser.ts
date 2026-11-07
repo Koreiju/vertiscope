@@ -1036,7 +1036,7 @@ export class BrowserView extends ItemView {
   popupOf = new Map<string, string>();
   popupStats = { linked: 0, skipped_many: 0 };
   /** Told when a popup is linked to its opener (the graph draws the link). */
-  onPopup: (popup: string, opener: string) => void = () => {};
+  onPopup: (popup: string, opener: string, url: string) => void = () => {};
   /**
    * A chunk that ENTERS the page while the reader hovers another one, on the
    * same page, a few at most, is what that hover opened -- archive.org's tile
@@ -1055,7 +1055,7 @@ export class BrowserView extends ItemView {
     if (!fresh.length) return;
     if (fresh.length > 3) { this.popupStats.skipped_many++; return; }
     const opener = h.stored || h.cid;
-    for (const c of fresh) { this.popupOf.set(c, opener); this.popupStats.linked++; try { this.onPopup(c, opener); } catch { /* view gone */ } }
+    for (const c of fresh) { this.popupOf.set(c, opener); this.popupStats.linked++; try { this.onPopup(c, opener, diff.url); } catch { /* view gone */ } }
   }
   private lastHoverAt = 0;
   private lastHoverSeen: { cid: string; url: string; stored: string } | null = null;
