@@ -5258,6 +5258,81 @@ is degraded compared to the natural rendering in the duckduckgo browser."):*
 context), never a link; links between panels come only from the computation
 graph -- the function-object calls, forward and inverse, between artifacts.*
 
+*2026-11-07, evening (with screenshots: a Wikipedia Main_Page billboard whose
+markdown renders while the panel collapses to its head; a chunk panel drawn
+UNDER the browser; an image-with-caption panel cut into sub-chunks; the 3D view
+clumped; a code panel click opening Windows' "Get an app to open this 'code'
+link"; a browser-cell control panel with "go" on a boolean and plain text
+highlighted as variables; the Frutiger Aero archive rendered from a temp file; a
+yellow dot following the mouse; Gay, North Carolina's profile box sub-chunked;
+URL-view chunks overlapping; retrieval 569/569 re-triggering; bandcamp's
+"Selling right now" stream; archive.org tiles; DuckDuckGo image search; an
+exploding web of links from one node):*
+
+> For some reason, the markdown renders but the panel completely collapses.
+>
+> Also, two glitches in one image: chunk panels are supposed to be layered *overtop* and not underneath the browser, and the chunking issue produces subchunking on a likely global chunk, perhaps because of overtoken safety factors and how image links/captions are counted as tokens, or perhaps otherwise new/different issues causing subchunking on a nested image panel with a caption.
+>
+> Also, chunk rendering panels are technically just exceptional instances of full page views, both encapsulated in a browser cell with a markdown counterpart (perhaps as two seperate yet linked through the computation graph for this feature, simplified so that the computation graph can compactly show the link between the two representations through some singular or handful of central abstract-most nodes). So, an efficient browser essentially renders just the handful of chunks from the live pages that allows for actual interactions with chunks as would be expected, and so the current streaming approach would then also likely be encapsulated there. The dual-view method would then mean that the computation graph of representations are then what is billboarded, showing both the chunk-view in a new browser cell efficiently streaming the link to rendering just the specific chunk that could be tied to the main browser panel elsewhere or otherwise be its own independent node. The thing here is the need for speed and fullness of functionality, but perhaps web browsers as the chunk renderers and full-page renderers are the right compact, unified representations for interactive web data at their native interfaces, with clear links to extracted markdown content from each.
+>
+> Also, using arrow keys triggers the search render even when the search input field wasn't even interacted with and there is no text either
+>
+> Also, chunks are too closely clumped together. My intuition is that there are too aggressive forces on centroid attraction after initializing from the base UMAP coordinates, where the base UMAP coordinates may actually hold more dominance after scale normalization to get all nodes in a standard full 3D view.
+>
+> Also concerned about opening microsoft store when selecting a code artifact in the 3D graph view
+>
+> Also, there should be no "go" for booleans. It should be false with a hover to true, and a click to apply if toggling is so. And, when I write in new markdown for a browser cell markdown, all the regular text is highlighted as variables with no reference for doing so, and should just instead be plain markdown text. Retrieval also still doesn't work per the gesture. Also, when I add the markdown content to a browser's control panel (the real working expected behavior), what happens is the browser-side panel reloads a static page from in temp rather than continue rendering the live browser page as regularly functional operations would have it do.
+>
+> Also, there's this annoying yellow dot that appears randomly and follows the mouse around.
+>
+> Also, clicking on highlighted links doesn't open anything. When this is a function, the duckduckgo browser opens outside of the plugin.
+>
+> There is also no option to exit a 2D plane browser cell.
+>
+> Also, switching from page to chunk view closes all nodes (i.e. the previous browser node) entirely when they should persist.
+>
+> There are also duplicate page nodes because one link has "#" on the tail end of its url.
+>
+> I also have an exploding spider web problem with streamed grey nodes.
+>
+> I'm also getting subchunking issues for the wikipedia page at Gay, North Carolina (the profile chunk).
+>
+> Overlapping chunks significantly compacted in the URL view, awful. We need to really fix our UMAP balance with centroids.
+>
+> Also, navigating in one browser also navigates in other browsers which I don't like, namely clicking links to open new pages appears in both browser tabs. Retrieval is broken for very high numbers, perhaps there is some blocking process that requires rertrieval retriggers without debounce that keeps requests for slightly modified retrieval result top-k counts to retrigger the whole query again and again. It keeps re-triggering every time I scroll as well. We also have more retrieval ranking glitches that cycle back to dead end report chunks on the other end of the base query to duckduckgo. Bandcamp's diff stream saving is broken again and we've revisited this problem and solved it before. Check our transcripts and diffs on git. Also at some point, please push updates to master with all your fixes.
+>
+> Latent rotate is significantly latent/laggy with three browser tabs open, performance shouldn't degrade this fast. The retrieval results controller on the ego vs the search bar are somewhat disconnected. We should remove the slider and instead think of what other values would complete the controls between the UI elements and the control panel.
+>
+> Dragging the graph tab anywhere after a separated page breaks the app. We also have intermittent "exploding" node networks when hovering over the page panels. Navigating to new pages in the browser by clicking on links takes an extremely long time. Archive.org is also degraded on the shadow DOM elements (nested), and you can see the sparsity in the 3D graph. Duckduckgo image search chunk streaming and detection has also degraded significantly. Be careful to look through our diff history of when things did and didn't work on fixes along these lines, make sure the fixes are solidified along their fault lines and fixed concretely this time around. Also, search-scanning on duckduckgo has degraded and the "more results" button is no longer clicked for some reason. Also attached another image of exploding node network issues around the full chunk-mass.
+>
+> The "explode node networks when hovered feature" is outright malfunctional.
+
+*Read as (137), numbered for the work: (1) a billboard's panel collapses while
+its markdown renders; (2) chunk panels layer OVER the browser; (3) image+caption
+and infobox chunks are sub-chunked (Gay, North Carolina's profile); (4) a chunk
+view is a chunk-focused browser cell with a linked markdown counterpart, joined
+in the computation graph through a few abstract nodes; (5) arrow keys run the
+3D search with an empty, untouched field; (6) chunks clumped: centroid forces
+overpower the UMAP coordinates; (7) a code panel opens Windows' protocol
+handler; (8) booleans: no "go" -- false, hover shows true, click applies;
+(9) plain text in a browser cell's control markdown is highlighted as variables;
+(10) the `[]()` retrieval gesture does not work; (11) adding control markdown
+reloads the browser from a temp file instead of the live page; (12) a yellow
+dot follows the mouse; (13) highlighted links open nothing, or open DuckDuckGo
+outside the plugin; (14) no exit on a 2D-plane browser cell; (15) the
+page-to-chunk view switch closes the other nodes; (16) duplicate page nodes
+from a trailing "#"; (17) streamed grey nodes explode into a spider web, and
+hover "explode" is malfunctional; (18) navigation in one browser tab navigates
+the others; (19) retrieval at high n re-triggers without debounce, on scroll
+too, and cycles to dead-end chunks; (20) bandcamp's diff-stream saving broken
+again (solved before -- check git); (21) push the fixes to master; (22)
+rotation lags with three browser tabs; (23) the ego's retrieval controls and
+the search bar are disconnected -- remove the slider, connect the values; (24)
+dragging the graph tab after a separated page breaks the app; (25) link
+navigation is very slow; (26) archive.org's nested shadow DOM and DuckDuckGo
+image search capture degraded; DuckDuckGo "More results" no longer clicked.
+Each fix is checked against the git history of when it last worked.*
+
 ---
 
 ## Standing instructions carried in the verbatim
