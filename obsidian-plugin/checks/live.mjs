@@ -12094,6 +12094,52 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-198",
+      asks: "grey nodes show their markdown at once; the shadow-DOM panel streams in after; vectorisation and projection come last (Addendum X) -- on a page purged from the store, the first grey node's hover panel: markdown first, page form after, the chunk placed last; planted (no-force-panel) no markdown before the store answers",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const d = window.__domvec;
+          const PAGE = "https://en.wikipedia.org/wiki/Suffix_tree";
+          await d.act("open", "browser");
+          const b = app.workspace.getLeavesOfType("domvec-browser-view")[0].view;
+          const g = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          await d.act("navigate", "https://en.wikipedia.org/wiki/Trie"); await sleep(3000);
+          await d.act("navigate", "about:blank"); await sleep(800);
+          await b.sidecar.purge(PAGE); await sleep(500);
+          if (${planted}) b.plant.add("no-force-panel");
+          try {
+            const old = new Set(g.graph.graphData().nodes.filter((n) => String(n.url || "").includes("Suffix_tree")).map((n) => String(n.id)));
+            const T0 = performance.now();
+            await d.act("navigate", PAGE);
+            const greyOf = () => g.graph.graphData().nodes.find((n) => n.force && String(n.id).startsWith("f:") && String(n.id).includes("Suffix_tree") && !n.unit);
+            let grey = null;
+            for (let i = 0; i < 250 && !grey; i++) { await sleep(100); grey = greyOf(); }
+            if (!grey) return { error: "no grey node" };
+            const tGrey = Math.round(performance.now() - T0);
+            const t1 = performance.now();
+            void g.openBillboard(grey, false, true);
+            let tMd = null, tPage = null, tPlaced = null;
+            const placed = () => g.graph.graphData().nodes.some((n) => !n.force && n.level === "chunk" && !old.has(String(n.id)) && String(n.url || "").includes("Suffix_tree"));
+            for (let i = 0; i < 300 && (tMd === null || tPlaced === null); i++) {
+              await sleep(50);
+              const e = g.billboards.get(grey.id) || [...g.billboards.values()].find((x) => x.fromHover);
+              const now = Math.round(performance.now() - t1);
+              if (tMd === null && e && ((e.payload && e.payload.provisional && (e.el.innerText || "").length > 40) || e.el.querySelector(".domvec-bb-md, .domvec-bb-cell .cm-editor"))) tMd = now;
+              if (tPage === null && e && e.form === "page") tPage = now;
+              if (tPlaced === null && placed()) tPlaced = now;
+            }
+            for (const k of [...g.billboards.keys()]) g.closeBillboard(k);
+            return { planted: ${planted}, stale_nodes: old.size, grey_after_nav_ms: tGrey, markdown_ms: tMd, page_form_ms: tPage, placed_ms: tPlaced };
+          } finally { b.plant.delete("no-force-panel"); }
+        })()`, { timeout: 120000 });
+        const clean = await arm(false), planted = await arm(true);
+        const first = (r) => r.markdown_ms !== null && (r.placed_ms === null || r.markdown_ms < r.placed_ms) && (r.page_form_ms === null || r.markdown_ms <= r.page_form_ms);
+        return { pass: !clean.error && first(clean) && clean.markdown_ms <= 500 && !planted.error && !(planted.markdown_ms !== null && planted.markdown_ms <= 500),
+                 evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {
