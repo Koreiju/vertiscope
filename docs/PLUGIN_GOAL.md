@@ -5333,6 +5333,19 @@ navigation is very slow; (26) archive.org's nested shadow DOM and DuckDuckGo
 image search capture degraded; DuckDuckGo "More results" no longer clicked.
 Each fix is checked against the git history of when it last worked.*
 
+*2026-11-07, later, answering the decisions asked for (137):*
+
+> Thanks. On the decisions: 
+>
+> You may restart obsidian and refit UMAP, try new duckduckgo searches for things like shipwrecks, you may also force the sidecar restart, there shall be no long links in the 3D view and you're missing the point of the problem, do some image analysis on the pages reported from images and the like (perhaps your own explorations and observations via the MCP etc). Please keep careful track of all features/builds/tasks unstarted up until now with the full spec/docs/prd in mind.
+
+*Read as (138): authorised -- an Obsidian restart, a UMAP refit (spread), a
+forced sidecar restart, new DuckDuckGo searches (e.g. "shipwrecks"); ruled --
+NO long links in the 3D view; (17) is not about link length alone: read the
+reported screenshots and observe the app to find the actual problem; keep a
+tracked list of every unstarted feature/build/task against the full
+goal/PRD.*
+
 ---
 
 ## Standing instructions carried in the verbatim
