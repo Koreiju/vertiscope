@@ -321,6 +321,10 @@ export class BrowserView extends ItemView {
     // opacity 0 on the boxes). Hover, the 3D flight, panels, pins and the
     // stream behave the same either way. Planted (plantBoxesStopHover): off
     // also stops the hover, which is what "the same" forbids.
+    this.widthButton = bar.createEl("button");
+    this.widthButton.onclick = () => { this.nativeWidth = !this.nativeWidth; this.fitDesktopWidth(); };
+    this.widthButton.setText("desktop");
+    this.widthButton.title = "lay pages out at desktop width, scaled to the cell (click: native width)";
     this.boxesButton = bar.createEl("button");
     this.boxesButton.onclick = () => { void this.toggleBoxes(); };
     offlineBtn.onclick = () => {
@@ -495,7 +499,13 @@ export class BrowserView extends ItemView {
     });
     // The document is ready to read once dom-ready fires, whatever the network
     // is still doing; a new main-frame navigation (not an in-page one) resets it.
-    view.addEventListener("dom-ready", () => { this.domReady = true; });
+    view.addEventListener("dom-ready", () => { this.domReady = true; this.fitDesktopWidth(); });
+    // DESKTOP WIDTH (2026-11-07: "rendering is degraded compared to the natural
+    // rendering in the duckduckgo browser"): a half-screen cell is 991 px, and
+    // sites serve their narrow layout there -- the Cyberpunk wiki's tiles lost
+    // their pictures (0 wide backgrounds at 991 px, 5 at 1,982). The page is
+    // laid out at DESKTOP_PX and scaled to the cell; `native` turns it off.
+    try { new ResizeObserver(() => this.fitDesktopWidth()).observe(view); } catch { /* old runtime */ }
     // The session follows the DOCUMENT the moment it commits, not when it
     // finishes loading: in between, the new page's sensor already pushed
     // hovers, and they were read against the old page (2026-10-17, a TMDB
@@ -1186,6 +1196,21 @@ export class BrowserView extends ItemView {
   /** A push arrived mid-drain: drain again as soon as this one ends. */
   private drainAgain = false;
 
+  static DESKTOP_PX = 1280;
+  nativeWidth = false;
+  widthButton: HTMLButtonElement | null = null;
+  widthStats = { fits: 0, zoom: 1 };
+  /** Scale the page so it lays out at desktop width (or native, toggled). */
+  fitDesktopWidth(): void {
+    const wv: any = this.webview;
+    if (!wv || !this.domReady) return;
+    const px = wv.getBoundingClientRect().width;
+    if (!px) return;
+    const z = this.nativeWidth || this.plant.has("native-width") ? 1 : Math.min(1, px / BrowserView.DESKTOP_PX);
+    try { if (Math.abs(wv.getZoomFactor() - z) > 0.01) wv.setZoomFactor(z); } catch { return; }
+    this.widthStats.fits++; this.widthStats.zoom = +z.toFixed(3);
+    this.widthButton?.setText(this.nativeWidth ? "native" : "desktop");
+  }
   /** The current document has fired dom-ready (drains may run while loading). */
   private domReady = false;
 

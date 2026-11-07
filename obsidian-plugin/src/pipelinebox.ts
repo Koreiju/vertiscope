@@ -862,10 +862,20 @@ export class PipelineBox {
     return { wb, ox: pr.left + op.clientLeft - op.scrollLeft, oy: pr.top + op.clientTop - op.scrollTop };
   }
 
+  /** A guest-viewport rect (the page's CSS px) in the cell's px: the page is
+   *  laid out at desktop width and scaled by the webview's zoom factor. */
+  private toCell(r: { x: number; y: number; w: number; h: number }, wv: any): { x: number; y: number; w: number; h: number } {
+    let z = 1;
+    try { z = wv.getZoomFactor ? wv.getZoomFactor() : 1; } catch { z = 1; }
+    if (!z || Math.abs(z - 1) < 0.001 || (window as any).__domvecPlantUnscaledBoxes) return r;
+    return { x: r.x * z, y: r.y * z, w: r.w * z, h: r.h * z };
+  }
+
   private placeBox(el: HTMLElement, r: { x: number; y: number; w: number; h: number } | null,
                    frame?: { wb: DOMRect; ox: number; oy: number } | null) {
     const wv = this.webview();
     if (!r || !wv || r.w <= 0 || r.h <= 0) { el.hide(); return; }
+    r = this.toCell(r, wv);
     if (frame) {
       const wb = frame.wb;
       const left = wb.left + Math.max(0, r.x), top = wb.top + Math.max(0, r.y);
@@ -900,9 +910,10 @@ export class PipelineBox {
   outlinePlacements = 0;
   private placeOutline() {
     this.outlinePlacements++;
-    const r = this.hover?.rect;
+    const r0 = this.hover?.rect;
     const wv = this.webview();
-    if (!r || !wv || r.w <= 0 || r.h <= 0) { this.outline.hide(); return; }
+    if (!r0 || !wv || r0.w <= 0 || r0.h <= 0) { this.outline.hide(); return; }
+    const r = this.toCell(r0, wv);
     // The webview fills the wrap, so a guest-viewport rect IS a wrap rect,
     // offset by wherever the webview sits inside it.
     // Viewport coordinates throughout: the outline is `position: fixed`, and

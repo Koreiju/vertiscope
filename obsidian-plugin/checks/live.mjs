@@ -12225,6 +12225,27 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "PG-135-desktop-width",
+      asks: "the browser cell renders a page as a desktop browser does (2026-11-07: the Cyberpunk wiki's tiles lost their pictures in the cell): the page lays out at 1280 CSS px scaled to the cell, so its tile slider draws its image tiles; planted (native-width) the cell's own width, the narrow layout",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          await window.__domvec.act("open", "browser");
+          const b = app.workspace.getLeavesOfType("domvec-browser-view")[0].view;
+          if (${planted}) b.plant.add("native-width"); else b.plant.delete("native-width");
+          try {
+            b.go("https://cyberpunk.fandom.com/wiki/Cyberpunk_Wiki");
+            await sleep(9000); b.fitDesktopWidth(); await sleep(1500);
+            const r = JSON.parse(await b.webview.executeJavaScript("(function(){var s=document.getElementById('portal_slider');if(!s)return JSON.stringify({err:'no slider'});var bg=[...s.querySelectorAll('*')].filter(function(e){return getComputedStyle(e).backgroundImage!=='none'&&e.getBoundingClientRect().width>100;});return JSON.stringify({w:innerWidth,tiles:bg.length});})()"));
+            return { planted: ${planted}, zoom: b.webview.getZoomFactor(), cell_px: Math.round(b.webview.getBoundingClientRect().width), css_width: r.w, image_tiles: r.tiles, err: r.err };
+          } finally { b.plant.delete("native-width"); b.fitDesktopWidth(); }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        return { pass: !clean.error && !clean.err && clean.css_width >= 1270 && clean.image_tiles >= 5
+                       && !planted.error && planted.css_width < 1270 && planted.image_tiles === 0, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {
