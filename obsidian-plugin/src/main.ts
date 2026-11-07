@@ -1206,6 +1206,13 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     this.nbChats?.destroy();
     this.cockpit?.unload();
     this.desk?.unload();
+    // The plane's browser cells hold leaves made OUTSIDE the workspace (a
+    // card's own leaf), which Obsidian never detaches: each reload left the
+    // old view ticking against a detached webview, throwing every interval
+    // (2026-11-07, found moving the graph tab). Ours to release.
+    if (!(window as any).__domvecPlantKeepPanelLeaves) {
+      for (const bp of [this.browserPanel, ...(this.browserPanels || [])]) { try { bp?.browserLeaf?.detach(); } catch { /* gone */ } }
+    }
     this.surfaces.clear();
     // The view's own `onClose` releases the WebGL context; detaching leaves
     // is Obsidian's job and doing it here is explicitly discouraged, because

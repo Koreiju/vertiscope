@@ -1662,6 +1662,7 @@ export class BrowserView extends ItemView {
   }
 
   goStats = { refused_scheme: 0, to_code: 0 };
+  tickStats = { detached: 0 };
   go(where: string): void {
     if (!this.webview || !where.trim()) return;
     const url = /^[a-z]+:/i.test(where) ? where : `https://${where}`;
@@ -2603,7 +2604,15 @@ export class BrowserView extends ItemView {
     // never stop "loading" (streaming requests), and waiting for them to meant
     // 0 and 2 drains in 16 s -- the heavy live pages were barely scanned
     // (G-101, 2026-09-27).
-    if (!url || url === "about:blank" || (wv.isLoading() && !this.domReady)) return;
+    // A webview MOVED in the workspace (a tab dragged to another split)
+    // re-attaches and reloads: until its dom-ready every call on it throws --
+    // ten a second from this tick (2026-11-07: "dragging the graph tab
+    // anywhere after a separated page breaks the app"). Wait for it.
+    // Planted `tick-unguarded`: call it anyway, as before.
+    let loading = false;
+    if (this.plant.has("tick-unguarded")) loading = wv.isLoading();
+    else { try { loading = wv.isLoading(); } catch { this.domReady = false; this.tickStats.detached++; return; } }
+    if (!url || url === "about:blank" || (loading && !this.domReady)) return;
     // A HIDDEN cell showing the page a visible cell is already capturing
     // adds nothing but the same capture again: three cells on HN /newest,
     // two hidden, captured every change three times and each capture waited

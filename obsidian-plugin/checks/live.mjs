@@ -12543,6 +12543,35 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "PG-137-move-tab",
+      asks: "PLUGIN_GOAL 137 (24): moving the 3D view's tab into another split (as a drag does) leaves the app working -- no errors from the browser cells while their moved webviews re-attach, and the graph still draws its nodes; planted (tick-unguarded) the capture tick throws every interval",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const bs = app.workspace.getLeavesOfType("domvec-browser-view").map((l) => l.view);
+          for (const b of bs) ${planted} ? b.plant.add("tick-unguarded") : b.plant.delete("tick-unguarded");
+          let errs = 0; const oe = () => { errs++; };
+          window.addEventListener("error", oe); window.addEventListener("unhandledrejection", oe);
+          try {
+            const gl = app.workspace.getLeavesOfType("domvec-graph-view")[0], bl = app.workspace.getLeavesOfType("domvec-browser-view")[0];
+            const n0 = gl.view.graph ? gl.view.graph.graphData().nodes.length : 0;
+            const split = app.workspace.createLeafBySplit(bl, ${planted} ? "horizontal" : "vertical");
+            const target = split.parent, idx = target.children.indexOf(split);
+            gl.parent.removeChild(gl); target.insertChild(idx, gl); split.detach();
+            await sleep(5000);
+            const v = gl.view, cv = v.graph && v.graph.renderer && v.graph.renderer().domElement;
+            return { planted: ${planted}, errors: errs, nodes_before: n0, nodes_after: v.graph ? v.graph.graphData().nodes.length : 0, canvas: cv ? [cv.clientWidth, cv.clientHeight] : null, attached: document.contains(gl.containerEl) };
+          } finally {
+            window.removeEventListener("error", oe); window.removeEventListener("unhandledrejection", oe);
+            for (const b of bs) b.plant.delete("tick-unguarded");
+          }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        return { pass: !clean.error && clean.errors === 0 && clean.attached && clean.nodes_after >= clean.nodes_before * 0.9 && clean.canvas && clean.canvas[0] > 50
+                       && !planted.error && planted.errors > 0, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {
