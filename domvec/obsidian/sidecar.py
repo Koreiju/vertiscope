@@ -271,6 +271,8 @@ _LAST_WRITE = [0.0]
 _LAST_REQUEST = [0.0]
 #: The last full `/health` answer and when it was computed.
 _HEALTH_CACHE: Dict[str, object] = {}
+#: Set while a thread recomputes the health counts (one at a time).
+_HEALTH_REFRESHING = threading.Event()
 
 
 def _cache_health(body: Dict, key: object = None) -> Dict:
@@ -3999,7 +4001,8 @@ class _Handler(BaseHTTPRequestHandler):
                     return self.workspace.store._rows(q)[0][0]
                 except Exception:               # noqa: BLE001
                     return None
-            self._send(200, _cache_health(key=hkey, body={"ok": True,
+            def _health_body():
+                return {"ok": True,
                              "pages": len(self.workspace.pages()),
                              "addresses": _one(
                                  "MATCH (a:Address) RETURN count(a)"),
@@ -4096,7 +4099,39 @@ class _Handler(BaseHTTPRequestHandler):
                              "launch": {"python": sys.executable, "argv": list(sys.argv[1:]),
                                         "cwd": os.getcwd(),
                                         "workspace": str(getattr(self.workspace, "path", "") or ""),
-                                        "supervised": os.environ.get("DOMVEC_SUPERVISED") == "1"}}))
+                                        "supervised": os.environ.get("DOMVEC_SUPERVISED") == "1"}}
+            # **The counts never run inside the request** (2026-11-08, PLUGIN_GOAL
+            # 143 "fix the way the sidecar is run"): with the lock free they
+            # still took 20 s on the 32 GB store, so a reload waiting on
+            # /health stalled and clients aborted (35 ConnectionAbortedError in
+            # the log). They are computed on a thread and cached; the request
+            # answers at once with the last result (or a bare liveness when
+            # there is none yet), marked `refreshing`. Planted
+            # DOMVEC_PLANT_HEALTH_INLINE=1: computed in the request, as before.
+            if os.environ.get("DOMVEC_PLANT_HEALTH_INLINE") == "1" or cached is None:
+                # The FIRST answer of a server is computed here, once: there
+                # is nothing to serve before it.
+                self._send(200, _cache_health(key=hkey, body=_health_body()))
+                return
+            if not _HEALTH_REFRESHING.is_set():
+                _HEALTH_REFRESHING.set()
+                def _refresh():
+                    try:
+                        _cache_health(key=hkey, body=_health_body())
+                    except Exception:               # noqa: BLE001
+                        pass
+                    finally:
+                        _HEALTH_REFRESHING.clear()
+                threading.Thread(target=_refresh, name="domvec-health", daemon=True).start()
+            body = dict(cached) if cached is not None else {"ok": True, "warming": True}
+            body["refreshing"] = True
+            body["cached_s"] = round(now - _HEALTH_CACHE.get("at", now), 1)
+            # The launch is cheap and is what the plugin needs to restart a
+            # sidecar: always current, never from the cache.
+            body["launch"] = {"python": sys.executable, "argv": list(sys.argv[1:]), "cwd": os.getcwd(),
+                              "workspace": str(getattr(self.workspace, "path", "") or ""),
+                              "supervised": os.environ.get("DOMVEC_SUPERVISED") == "1"}
+            self._send(200, body)
             return
 
         if segments[0] == "snapshot" and len(segments) == 2:
