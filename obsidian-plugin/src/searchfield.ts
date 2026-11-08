@@ -172,9 +172,11 @@ export class SearchField {
   plantFixedPages = false;
   /** Planted: a page counts (and is asked) for all it holds -- two pages took all of n. */
   plantUncappedShare = false;
+  /** Planted (G-231): no pages asked past the count cut. */
+  plantNoReserve = false;
   /** When the reader last scrolled the results (re-ranks wait for it to rest). */
   lastScrollAt = 0;
-  tierStats = { runs: 0, pages: 0, pages_done: 0, first_ms: 0, last_ms: 0, single_ms: 0 };
+  tierStats = { runs: 0, pages: 0, pages_done: 0, first_ms: 0, last_ms: 0, single_ms: 0, reserve: 0 };
 
   /**
    * **Tiered retrieval** (2026-10-17, PLUGIN_GOAL 137/142: "retrieval new URL
@@ -202,9 +204,16 @@ export class SearchField {
     // and every result came from two pages (2026-10-18, PLUGIN_GOAL 160).
     // Planted `plantUncappedShare`: a page counted for all it holds.
     const share = this.plantUncappedShare ? Infinity : Math.max(5, Math.ceil(this.total / 6));
+    let reserve: typeof pages = [];
     if (!this.plantFixedPages && pages.every((p) => typeof p.n === "number")) {
       let sum = 0, cut = pages.length;
       for (let i = 0; i < pages.length; i++) { sum += Math.min(pages[i].n!, share); if (sum >= this.total) { cut = i + 1; break; } }
+      // The cut is where the COUNTS reach n; a page can hand back fewer
+      // chunks than it counted (G-231, 2026-11-08: 7 pages asked, 5 answered,
+      // 174 of 200). The pages past the cut are kept in reserve and asked, in
+      // rank order, while the set is still short of n. Planted
+      // `plantNoReserve`: the cut is the end, as before.
+      reserve = pages.slice(Math.max(1, cut));
       pages = pages.slice(0, Math.max(1, cut));
     }
     this.tierStats.runs++; this.tierStats.pages = pages.length; this.tierStats.pages_done = 0; this.tierStats.first_ms = 0;
@@ -228,8 +237,8 @@ export class SearchField {
     };
     let next = 0;
     const worker = async () => {
-      while (next < pages.length) {
-        const p = pages[next++];
+      while (next < pages!.length) {
+        const p = pages![next++];
         const got = await tiers.page(q, p.url, perOf(p));
         if (seq !== this.seq) return;
         for (const h of got?.hits || []) {
@@ -244,6 +253,13 @@ export class SearchField {
     };
     await Promise.all([worker(), worker(), worker()]);
     if (seq !== this.seq) return null;
+    if (!this.plantNoReserve) {
+      while (byCid.size < this.total && reserve.length) {
+        pages = reserve.splice(0, 3); next = 0; this.tierStats.reserve = (this.tierStats.reserve || 0) + pages.length;
+        await Promise.all([worker(), worker(), worker()]);
+        if (seq !== this.seq) return null;
+      }
+    }
     this.tierStats.last_ms = Math.round(performance.now() - t0);
     return this.hits;
   }

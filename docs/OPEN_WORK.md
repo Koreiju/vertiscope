@@ -79,8 +79,8 @@ Last updated 2026-11-07 late. A native store crash at CHECKPOINT (D-23 class, al
 |---|---|
 | G-21 / G-93 / G-94 coincident nodes | superseded in part by 138 (no long links); overlap ruling still the reader's |
 | G-120 hover popup linked | confirmed (linking + 3D link); keeping = Q.002 above |
-| G-198 grey markdown first | partial (104 ms; ordering of page form/projection unmeasured) |
-| G-231 retrieval as the reader uses it | partial (page breadth confirmed) |
+| G-198 grey markdown first | partial | 104 ms earlier; run 56: the check found no grey node in either arm (window minimized: nothing streams to draw) -- re-run with Obsidian on screen |
+| G-231 retrieval as the reader uses it | confirmed | G-231 run 58: n=200 -> 200 hits from 7 pages, top-2 share 0.40 (run 56: 174 hits, 5 pages -- a page handed back fewer chunks than it counted and nothing past the count cut was asked). Pages past the cut are now a reserve, asked in rank order while the set is short of n (planted plantNoReserve); planted plantUncappedShare: 5 pages, 0.67 |
 | D-36 / G-82 | resolved into 135(b); G-82 to be marked superseded |
 | PG-134-drop-plane | confirmed (run 84) |
 | ~60 PRD rows in **Partly** | see `build_analytics/design_state.md` |
