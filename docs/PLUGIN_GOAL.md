@@ -5437,6 +5437,12 @@ with it. Then every other open feature.*
 
 > Opening new vaults should automatically have our plugin installed and sidecar run available.
 
+*Answers (2026-11-08), (148), chosen in the question dialog:*
+
+> T-14: "No, share one" -- one interpreter for every workspace; nothing downloaded.
+> Sidecar split: "Yes, that shape" -- one small process always answers the plugin and never waits; separate worker processes own the store, the embedding encoder, and the UMAP fit.
+> Approved: "G-4: 94% is enough", "Re-key chunk trie" (five levels, and split over-long single lines, R-C5), "Drop spherical" (D-12 closed). Disk cleanup: not approved.
+
 ## Standing instructions carried in the verbatim
 
 Two of these are process rules, not features, and they bind every future
