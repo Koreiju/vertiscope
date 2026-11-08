@@ -5521,6 +5521,8 @@ export class GraphView extends ItemView {
   plantUmapNotAuthority = false;
   /** Planted (G-145): reheat the simulation on every delta, as before. */
   plantReheatAlways = false;
+  plantContainmentAll = false;
+  containmentStats = { calls: 0, cids: 0 };
   private postTimer = 0;
   postStats = { runs: 0 };
   // Every level, scaled map or not (T-1/T-17 rulings, PLUGIN_GOAL 145): the
@@ -8031,16 +8033,22 @@ export class GraphView extends ItemView {
    * either. Measured: 9,257 `Contains` edges in the store, 99 drawn, and
    * 110 of 189 nodes isolated.
    */
-  private async drawContainment(): Promise<number> {
+  private async drawContainment(onUrls?: Set<string>): Promise<number> {
     if (!this.graph) return 0;
     const data: any = this.graph.graphData();
+    // O(delta) (G-145): a placement asks only about the pages it touched.
+    // Measured 2026-11-08: every streamed placement sent all ~62k chunk ids
+    // for edges, ~0.9 s of every 15 s. Containment never crosses pages.
+    // Planted `plantContainmentAll`: every node, every time, as before.
+    const scoped = onUrls && onUrls.size && !this.plantContainmentAll;
     const cids = data.nodes
-      .filter((n: any) => n.level && n.level !== "page")
+      .filter((n: any) => n.level && n.level !== "page" && (!scoped || onUrls!.has(n.url)))
       .map((n: any) => n.id)
       .filter((id: string) => !String(id).startsWith("path:"));
     if (cids.length < 2) return 0;
-    const urls = [...new Set(data.nodes
+    const urls = scoped ? [...onUrls!] : [...new Set(data.nodes
       .filter((n: any) => n.url).map((n: any) => n.url))] as string[];
+    this.containmentStats.calls++; this.containmentStats.cids += cids.length;
     const got: any = await this.sidecar.edgesAmong(cids, urls);
     const edges = (got && got.edges) || [];
     if (!edges.length) return 0;
@@ -9189,7 +9197,7 @@ export class GraphView extends ItemView {
     this.motion.event("placed", { added: out.added, moved: out.moved, edges: out.edges });
     this.fitChunkSizes(data);
     this.graph.graphData(data);
-    void this.drawContainment();
+    void this.drawContainment(new Set((incoming as any[]).map((n: any) => String(n.url || "")).filter(Boolean)));
     // `absorb` ends here; the listener takes it from the scene.
     if (trace) {
       const absorbEnd = performance.now();
