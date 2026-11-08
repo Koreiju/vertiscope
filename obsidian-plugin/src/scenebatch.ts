@@ -354,10 +354,28 @@ export class SceneBatch {
     return m;
   }
   /** Pixels -> view-space units at unit depth, for the halo's floor: 2 / (H * P[1][1]). */
-  setViewport(heightPx: number, projYY: number): void {
+  setViewport(heightPx: number, projYY: number, widthPx = 0): void {
     const u = (this.halo.material as THREE.ShaderMaterial).uniforms;
     if (heightPx > 0 && projYY > 0) u.uPxView.value = 2 / (heightPx * projYY);
+    // PLUGIN_GOAL 137(6), seen 2026-11-08: at the full 60,927-node chunk
+    // view every node's additive halo (never under `haloMinPx` across) summed
+    // to white -- the cloud read as one mass however the nodes were spaced.
+    // The glow is now divided by how many halos stack on a pixel: N halos
+    // of at least that floor over the canvas. A few hundred nodes keep the
+    // full glow; tens of thousands each glow faintly and the sum stays a
+    // picture. Planted `__domvecPlantHaloCrowd`: full glow regardless.
+    const n = this.glass.geo.instanceCount;
+    if (widthPx > 0 && heightPx > 0 && n > 0) {
+      const r = this.haloMinPx / 2;
+      const stack = (n * Math.PI * r * r) / (widthPx * heightPx);
+      const k = (globalThis as any).__domvecPlantHaloCrowd ? 1 : Math.min(1, this.haloStack / Math.max(stack, 1e-6));
+      u.uHaloI.value = this.haloI * k;
+      this.haloCrowd = { n, stack: Math.round(stack * 100) / 100, k: Math.round(k * 1000) / 1000 };
+    }
   }
+  /** Halos a pixel may carry at full glow before the glow is divided (137(6)). */
+  haloStack = 3;
+  haloCrowd = { n: 0, stack: 0, k: 1 };
   setHalo(on: boolean): void { this.halo.visible = on && this.glass.mesh.visible; this.haloOn = on; }
   /** Tune the glow live: size factor, pixel floor, intensity, core share. */
   tuneHalo(t: { k?: number; minPx?: number; i?: number; core?: number }): void {

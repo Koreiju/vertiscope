@@ -8209,7 +8209,7 @@ export class GraphView extends ItemView {
     if (!this.batch) return;
     // The glow's pixel floor needs pixels -> view units (G-207).
     const cam0 = g.camera();
-    if (this.canvasEl && cam0?.projectionMatrix) this.batch.setViewport(this.canvasEl.clientHeight, cam0.projectionMatrix.elements[5]);
+    if (this.canvasEl && cam0?.projectionMatrix) this.batch.setViewport(this.canvasEl.clientHeight, cam0.projectionMatrix.elements[5], this.canvasEl.clientWidth);
     this.batch.setHalo(!this.plantNoHalo);
     let f = 1;
     if (!this.plantNoZoomScale && this.fullViewDist > 0) {
