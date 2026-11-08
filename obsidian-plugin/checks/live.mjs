@@ -13004,6 +13004,43 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "PG-137-new-window",
+      asks: "137(13)/(18): a new-window link (target=_blank) clicked in a browser cell loads in THAT cell -- not nowhere, not another tab. Planted (__domvecPlantNoPopups, set before the cell's webview is made): the link opens nothing",
+      async run() {
+        const fixtures = await serveFixtures();
+        try {
+          const arm = (planted) => evaluate(`(async () => {
+            const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+            window.__domvecPlantNoPopups = ${planted};
+            const P = app.plugins.plugins["domvec-bridge"];
+            const path = "domvec-checks/nw " + (${planted} ? "p" : "c") + Date.now() + ".md";
+            let bp = null;
+            try {
+              bp = await P.openBrowserPanel(path, false); await sleep(1500);
+              const v = bp.view(), wv = v.webview;
+              const others0 = [...document.querySelectorAll("webview")].filter((w) => w !== wv).map((w) => w.getURL());
+              await bp.go(${JSON.stringify(fixtures.origin + "/new_window_link.html")});
+              for (let i = 0; i < 40 && (wv.isLoading() || !/new_window_link/.test(wv.getURL())); i++) await sleep(200);
+              await sleep(800);
+              const kept0 = v.windowStats.kept;
+              await wv.executeJavaScript("document.getElementById('out').click()", true);
+              for (let i = 0; i < 50 && !/Shipwreck/.test(wv.getURL()); i++) await sleep(200);
+              const others1 = [...document.querySelectorAll("webview")].filter((w) => w !== wv).map((w) => w.getURL());
+              return { planted: ${planted}, popups_allowed: wv.hasAttribute("allowpopups"), cell_now: wv.getURL().slice(-30), handled: v.windowStats.kept - kept0,
+                       others_moved: others0.filter((u, i) => others1[i] !== u).length };
+            } finally {
+              window.__domvecPlantNoPopups = false;
+              if (bp) { window.__domvecPlane.closePath(path); const f = app.vault.getAbstractFileByPath(path); if (f) await app.vault.trash(f, true); }
+            }
+          })()`, { timeout: 60000 });
+          const clean = await arm(false), planted = await arm(true);
+          const pass = !clean.error && /Shipwreck/.test(clean.cell_now) && clean.handled >= 1 && clean.others_moved === 0
+            && !planted.error && !/Shipwreck/.test(planted.cell_now);
+          return { pass, evidence: { clean, planted } };
+        } finally { await fixtures.close(); }
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {

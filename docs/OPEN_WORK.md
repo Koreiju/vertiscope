@@ -31,7 +31,7 @@ Last updated 2026-11-07 late. A native store crash at CHECKPOINT (D-23 class, al
 | 15 | Page/chunk switch closes nodes | confirmed | PG-137-switch-keeps, run 73 |
 | 16 | Duplicate page nodes from a trailing "#" | confirmed | PG-137-fixes |
 | 17 | Exploding spider web / flickering links | confirmed | PG-138-no-long-links + PG-138-no-flicker, run 6 (after restart) |
-| 18 | One browser tab navigates the others | partial | likely the window-open path, now kept in the cell; not confirmed |
+| 18 | One browser tab navigates the others | confirmed | 2026-11-08, three right-hand tabs on three pages: a plain link click moved only its own tab. A new-window link (target=_blank) opened NOTHING anywhere: the webviews had no allowpopups, so Chromium dropped it before the cell's window-open handler (installed, 0 calls). Now allowed and routed into the clicking cell. PG-137-new-window run 54: clean -> the cell loads the link, handler 1 call, other webviews moved 0; planted __domvecPlantNoPopups -> stays on the fixture. Also covers 137(13) "links open nothing" for new-window links |
 | 19 | Retrieval re-triggers at high n / on scroll | confirmed | PG-137-rerank-debounce, run 58 |
 | 20 | Bandcamp diff-stream saving | partial (big win) | anchor edges 44.9 -> 2.1 ms a row live (`4a81f2a`); remaining: reconcile 0.6-2.6 s, lock wait up to 6 s. Earlier note: versions still saved (102 live); captures 4–9 s, anchor writes ~20 ms each on a 1.8M-address store. Per-branch timing now in; sidecar restarted — **read it next** |
 | 21 | Push fixes to master | done locally | no git remote configured; `master` moved to each commit |

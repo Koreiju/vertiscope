@@ -379,6 +379,13 @@ export class BrowserView extends ItemView {
     // types against HTMLElementTagNameMap, and `webview` is not in it.
     const view = document.createElement("webview") as any;
     view.setAttribute("partition", PARTITION);
+    // New-window links (target=_blank, window.open) reach the cell's own
+    // handler (`keepWindowsInCell`: denied as a window, loaded HERE) only when
+    // the webview allows popups; without the attribute Chromium dropped them
+    // before the handler -- the link opened nothing, anywhere (2026-11-08:
+    // three tabs, handler installed, 0 calls). 137(13)/(18). Planted
+    // `no-popups`: the attribute left off, as before.
+    if (!this.plant.has("no-popups") && !(globalThis as any).__domvecPlantNoPopups) view.setAttribute("allowpopups", "");
     // `allowpopups` stays OFF. A page that opens a window would put a browser
     // outside the panel, outside the session, and outside anything the
     // projector knows about.
