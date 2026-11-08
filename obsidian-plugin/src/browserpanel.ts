@@ -29,6 +29,10 @@
 import { App, Component, MarkdownRenderer, MarkdownView, TFile } from "obsidian";
 import { foldsOf, parseSlate, setFolds, type SlateLine } from "./slatefold";
 import type { PlaneDesk } from "./planepanels";
+import { capabilitiesOf, panelText, withMissing, type Capability } from "./governing";
+
+/** The browser's governing artifact (T-10): its methods are the panel's fields. */
+export const BROWSER_GOVERNING_PATH = "domvec/governing/browser.py";
 
 export const BROWSER_COCKPIT_PATH = "domvec/browser.md";
 /** The scope ladder, narrowest first (item 72; RESERVOIR_DESIGN 10.2). */
@@ -68,6 +72,19 @@ export class BrowserPanel {
    *  could be running their own sessions at a time"). */
   constructor(private app: App, private host: BrowserPanelHost, readonly path: string = BROWSER_COCKPIT_PATH) {}
 
+  /** Planted (T-10): the hard-coded field list, the code not read. */
+  plantHardFields = false;
+  governStats = { read: 0, caps: 0, added: 0 };
+  /** The governing class's capabilities, read from the vault each time (an
+   *  edit to the class shows on the next open). */
+  async capabilities(): Promise<Capability[]> {
+    const g = this.app.vault.getAbstractFileByPath(BROWSER_GOVERNING_PATH);
+    if (!(g instanceof TFile)) return [];
+    const caps = capabilitiesOf(await this.app.vault.read(g));
+    this.governStats.read++; this.governStats.caps = caps.length;
+    return caps;
+  }
+
   /** The slate's view on the plane, if open. */
   slateView(): MarkdownView | null { return this.host.desk.viewOf(this.path); }
   /** The browser's view inside the card, if mounted. */
@@ -81,11 +98,17 @@ export class BrowserPanel {
       if (!this.app.vault.getAbstractFileByPath("domvec")) await this.app.vault.createFolder("domvec").catch(() => undefined);
       // Its slate titled for its note: `browser`, `browser 2`, ...
       const title = this.path.slice(this.path.lastIndexOf("/") + 1).replace(/\.md$/, "");
-      f = await this.app.vault.create(this.path, BROWSER_TEXT.replace("\nbrowser\n", "\n" + title + "\n"));
+      const caps = this.plantHardFields ? [] : await this.capabilities();
+      f = await this.app.vault.create(this.path, caps.length ? panelText(title, caps) : BROWSER_TEXT.replace("\nbrowser\n", "\n" + title + "\n"));
     } else if (!this.plantGoActions) {
       // Actions are booleans now (2026-11-07: "there should be no 'go' for
       // booleans"): a note written with `go` reads `false`; a click acts.
       await this.app.vault.process(f as TFile, (t: string) => t.replace(/^(\t(?:back|forward|scan)\t)go[ \t]*$/gm, "$1false"));
+    }
+    // A method added to the governing class is a field added to the panel.
+    if (f instanceof TFile && !this.plantHardFields) {
+      const caps = await this.capabilities();
+      if (caps.length) await this.app.vault.process(f, (t: string) => { const r = withMissing(t, caps); this.governStats.added += r.added.length; return r.text; });
     }
     // Asked to open, it opens: the slate's REMEMBERED fold state said
     // "collapsed" (a right-click on its title, kept per note) and came back

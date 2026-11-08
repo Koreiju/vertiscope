@@ -266,8 +266,10 @@ export class Craft {
       // forward (code -> instance) and inverse (instance -> its code) alike.
       const browsers = nodes.filter((n) => n.kind === "note" && /^domvec\/browser( \d+)?\.md$/.test(n.path));
       if (browsers.length && !this.plantNoInstances) {
-        const code: CraftNode = { id: "craft:code:BrowserView", kind: "code", path: "obsidian-plugin/src/browser.ts", line: -1,
-                                  label: "BrowserView (code)", local: { x: 0, y: 0, z: 0 } };
+        // The class is the GOVERNING artifact (T-10): its methods are the
+        // instances' control fields; a click opens it as code.
+        const code: CraftNode = { id: "craft:code:BrowserView", kind: "code", path: "domvec/governing/browser.py", line: -1,
+                                  label: "Browser (governing)", local: { x: 0, y: 0, z: 0 } };
         nodes.push(code);
         edges.push({ a: ego.id, b: code.id, kind: "root" });
         for (const b of browsers) edges.push({ a: code.id, b: b.id, kind: "instance" });
