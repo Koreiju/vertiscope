@@ -1056,7 +1056,8 @@ export class GraphView extends ItemView {
     // A large graph waits a beat so deltas arriving together share one
     // rebuild (G-145); a small one flushes at once, as before.
     const big = !this.plantDeltaPerApply && (this.graph?.graphData().nodes.length || 0) > 5000;
-    this.deltaTimer = window.setTimeout(flush, big ? 400 : 0);
+    const huge = big && (this.graph?.graphData().nodes.length || 0) > 20000;
+    this.deltaTimer = window.setTimeout(flush, huge ? this.hugeDeltaWaitMs : big ? 400 : 0);
   }
   static DELTA_DEFER_MAX_MS = 1500;
   private deltaQueue: ForceNodeDelta[] = [];
@@ -1068,6 +1069,8 @@ export class GraphView extends ItemView {
   plantNoDeltaDefer = false;
   /** Planted (G-145): every delta rebuilds the graph on its own, as before. */
   plantDeltaPerApply = false;
+  /** Over 20k nodes, deltas gather this long so several share one rebuild (G-145). */
+  hugeDeltaWaitMs = 2000;
 
   private applyForceDelta(d: ForceNodeDelta, batch?: { nodes: any[]; links: any[]; byId: Map<string, any>; expanded: Set<string> | null }): void {
     if (d && d.url && d.added && d.added.length) profiler().mark(d.url, "grey", { nodes: d.added.length });
