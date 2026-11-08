@@ -145,6 +145,7 @@ export class Craft {
   plantNoReadouts = false;
   /** Planted (item 68): the craft drawn in the ego view too (around the camera). */
   plantAlwaysDrawn = false;
+  plantLargeCraft = false;
   plantHiddenInEgo = true;   // first person: the camera IS the craft; drawn there it filled the lens (2026-11-08 screenshot: giant "ego", "slate 2", a purple disc)
   /** Planted (146): the craft's map never turns with the heading. */
   plantFixedFrame = false;
@@ -340,7 +341,10 @@ export class Craft {
    *  the world, their trees and cells around them, outward. */
   private layout(): void {
     const w = this.host.world();
-    const R = Math.max(10, w.r * 0.22);
+    // Much smaller and more compact (PLUGIN_GOAL 149, 2026-11-08: "The ego in
+    // 3d could be much smaller and more compact"): 6% of the world's radius,
+    // was 22%. Planted `plantLargeCraft`: the old size.
+    const R = this.plantLargeCraft ? Math.max(10, w.r * 0.22) : Math.max(3, w.r * 0.06);
     this.stats.radius = Math.round(R);
     const vault = this.host.app.vault.getName();
     // Places from the EGO's own projection by knowledge key (item 76): a
