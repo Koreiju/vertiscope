@@ -437,6 +437,9 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     // PLUGIN_GOAL 144: workspaces per vault -- a new project starts empty.
     this.addCommand({ id: "domvec-workspace-new", name: "New workspace (empty store, nothing inherited)",
       callback: () => { new WorkspaceNameModal(this.app, (name) => { void this.useWorkspace(name, true); }).open(); } });
+    // T-15 (PLUGIN_GOAL 186f): a type from a trie-path pattern, as a code cell on the plane.
+    this.addCommand({ id: "domvec-typegen", name: "Type from a trie-path pattern (pydantic, across every stored page)",
+      callback: () => { new WorkspaceNameModal(this.app, (pat) => { void this.typeFromPattern(pat); }, "Trie-path pattern, e.g. /html/body/main/article[*]").open(); } });
     this.addCommand({ id: "domvec-idle-drift", name: "Toggle idle drift (camera turns and colours cycle when idle)",
       callback: () => { for (const leaf of this.app.workspace.getLeavesOfType("domvec-graph-view")) { const v: any = leaf.view; v.driftEnabled = !v.driftEnabled; new Notice("domvec idle drift " + (v.driftEnabled ? "on" : "off")); break; } } });
     this.addCommand({ id: "domvec-workspace-switch", name: "Switch workspace",
@@ -1640,6 +1643,17 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     await this.useWorkspace("default", !this.workspaceList()["default"]);
   }
 
+  typegenStats = { asked: 0, made: 0, last: null as any };
+  async typeFromPattern(pattern: string, name = "Item"): Promise<any> {
+    this.typegenStats.asked++;
+    const base = String(this.settings.sidecar || "").replace(/\/+$/, "");
+    const r = await fetch(`${base}/typegen?name=${encodeURIComponent(name)}&pattern=${encodeURIComponent(pattern.trim())}`).then((x) => x.json()).catch((e) => ({ error: String(e) }));
+    if (!r || r.error) { new Notice("domvec: " + (r?.error || "no answer")); return r; }
+    const BT = String.fromCharCode(96).repeat(3), NL = String.fromCharCode(10);
+    await this.desk.create("notebook", { text: [`${r.instances} instances on ${r.pages} pages of \`${pattern}\``, "", BT + "python", r.source.trimEnd(), BT, ""].join(NL) });
+    this.typegenStats.made++; this.typegenStats.last = { instances: r.instances, pages: r.pages, fields: r.fields };
+    return r;
+  }
   workspaceNameOf(dir?: string): string {
     if (!dir) return "";
     for (const [n, d] of Object.entries(this.workspaceList())) if (d === dir) return n;
@@ -2134,10 +2148,10 @@ class DomvecSettingTab extends PluginSettingTab {
 
 /** PLUGIN_GOAL 144: the name of a new, empty workspace. */
 class WorkspaceNameModal extends Modal {
-  constructor(app: App, private done: (name: string) => void) { super(app); }
+  constructor(app: App, private done: (name: string) => void, private title = "New workspace") { super(app); }
   onOpen(): void {
-    this.titleEl.setText("New workspace");
-    const input = this.contentEl.createEl("input", { type: "text", attr: { placeholder: "project name" } });
+    this.titleEl.setText(this.title);
+    const input = this.contentEl.createEl("input", { type: "text", attr: { placeholder: this.title === "New workspace" ? "project name" : "/html/body/..." } });
     input.style.width = "100%";
     input.addEventListener("keydown", (e) => { if (e.key === "Enter") { this.close(); this.done(input.value); } });
     window.setTimeout(() => input.focus(), 0);

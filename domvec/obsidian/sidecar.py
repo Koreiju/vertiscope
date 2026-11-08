@@ -4954,6 +4954,21 @@ class _Handler(BaseHTTPRequestHandler):
             except Exception as exc:                # noqa: BLE001
                 self._send(500, {"error": "%s: %s" % (type(exc).__name__, exc)})
             return
+        if segments[0] == "typegen":
+            # T-15 (PLUGIN_GOAL 186f): a pydantic type from a trie-path
+            # pattern over every stored page. Reads addresses; writes nothing.
+            from .. import typegen as _tg
+            params = parse_qs(parts.query)
+            pattern = (params.get("pattern") or [""])[0]
+            name = (params.get("name") or ["Item"])[0]
+            if not pattern.startswith("/"):
+                self._send(400, {"error": "pattern must be an xpath, e.g. /html/body/main/article[*]"})
+                return
+            rows = self.workspace.store._rows(
+                "MATCH (a:Address) WHERE starts_with(a.xpath, $p) "
+                "RETURN a.url, a.xpath, a.accessor, a.value LIMIT 200000", {"p": _tg.prefix_of(pattern)})
+            self._send(200, _tg.model(rows, pattern, name))
+            return
         if segments[0] == "page_status":
             from .. import tokens as _tokens
             from .layout import (_ESTIMATED_PAGES, _PAGE_POS, live_projection)
