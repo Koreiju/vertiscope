@@ -2058,6 +2058,49 @@ export class GraphView extends ItemView {
   /** Planted: a right-click folds whenever anything of the page is drawn. */
   plantToggleByDrawn = false;
 
+  /**
+   * T-16: what a node DOMINATES is what lies under it in the trie -- for a
+   * page, every page whose url extends its own (same host, deeper path); for
+   * a chunk, every chunk of its page whose xpath extends its own. A
+   * right-click folds those into it (taken out of the drawn graph, kept) and
+   * a second one puts them back where they were. Planted `plantNoTrieDominance`.
+   */
+  plantNoTrieDominance = false;
+  dominated = new Map<string, { nodes: any[]; links: any[] }>();
+  dominanceStats = { folded: 0, unfolded: 0, last: 0 };
+  private pageOpen(n: any): boolean {
+    const d: any = this.graph?.graphData();
+    return !!d && d.nodes.some((m: any) => m.level !== "page" && m.url === n.url);
+  }
+  private trieKey(n: any): string {
+    if (n.level === "page") { try { const u = new URL(String(n.url)); return u.host + u.pathname.replace(/\/+$/, ""); } catch { return String(n.url); } }
+    return String(n.url) + "|" + String(n.path || n.xpath || "");
+  }
+  toggleDominance2(n: any): boolean {
+    const g: any = this.graph;
+    if (!g) return false;
+    const id = String(n.id);
+    const data: any = g.graphData();
+    const kept = this.dominated.get(id);
+    if (kept) {
+      this.dominated.delete(id);
+      g.graphData({ nodes: data.nodes.concat(kept.nodes), links: data.links.concat(kept.links) });
+      this.dominanceStats.unfolded++; this.dominanceStats.last = kept.nodes.length;
+      return true;
+    }
+    const k = this.trieKey(n);
+    const sep = n.level === "page" ? "/" : "/";
+    const under = data.nodes.filter((m: any) => m !== n && m.level === n.level && (n.level !== "page" || true)
+      && (() => { const mk = this.trieKey(m); return mk.length > k.length && mk.startsWith(k) && mk[k.length] === sep; })());
+    if (!under.length) return false;
+    const gone = new Set(under.map((m: any) => String(m.id)));
+    const idOf = (x: any) => String(typeof x === "object" ? x.id : x);
+    const links = data.links.filter((l: any) => gone.has(idOf(l.source)) || gone.has(idOf(l.target)));
+    g.graphData({ nodes: data.nodes.filter((m: any) => !gone.has(String(m.id))), links: data.links.filter((l: any) => !links.includes(l)) });
+    this.dominated.set(id, { nodes: under, links });
+    this.dominanceStats.folded++; this.dominanceStats.last = under.length;
+    return true;
+  }
   async togglePage(node: any): Promise<{ action: string; url: string; nodes: number }> {
     if (this.plantNoToggle || !node || node.level !== "page" || !node.url) {
       this.onScope("");
@@ -9446,6 +9489,12 @@ export class GraphView extends ItemView {
           this.panelModeStats.right_opened++;
           void this.openBillboard(n);
           return;
+        }
+        // T-16 (PLUGIN_GOAL 145): rank-dominance collapse for EVERY node. A
+        // page with chunks open folds them (its own case, G-110); otherwise
+        // the node folds what it dominates in the trie, or unfolds it.
+        if (n && !this.plantNoTrieDominance && (this.dominated.has(String(n.id)) || !(n.level === "page" && this.pageOpen(n)))) {
+          if (this.toggleDominance2(n)) return;
         }
         void this.togglePage(n);
       });

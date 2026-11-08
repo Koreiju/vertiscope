@@ -37,7 +37,7 @@ Last updated 2026-11-08 evening (items 141-147 below). Earlier: 2026-11-07 late.
 | T-15 | pydantic types from trie-path patterns | confirmed | 8,028 instances / 51 pages / 20 fields live; planted split fields (`082aa33`) |
 | 140/5364 | one unified markdown panel | confirmed (no defect found) | right-click pins become plane panels (side card only under its plant); stuck billboards mount the editor cell |
 | T-13 | outputs in retrieval, ego only by default | confirmed (for outputs chunked on their own) | a 600-token output: unset search [] vs ego [/section/output]; planted outputs-everywhere: found unset too. An output small enough to share a chunk with prose stays with it (the chunk is the unit) |
-| T-16 | rank-dominance collapse for every node | not started | needs its rule stated for world nodes (url fold G-110 and craft bisectors exist) |
+| T-16 | rank-dominance collapse for every node | confirmed | ruled by PLUGIN_GOAL 145: a node dominates what extends its trie path (deeper url paths; deeper xpaths). archive.org/ folded 29 pages (1,011 -> 982) and unfolded (1,011); planted plantNoTrieDominance: the page fold ran instead |
 | T-5 | chunk = framed browser + markdown on one chunk object | stands (137(4) confirmed) | |
 
 ## PLUGIN_GOAL 137 — the 26 reported glitches
