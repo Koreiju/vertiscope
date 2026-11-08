@@ -8,7 +8,7 @@ not yet confirmed live), **partial**, **not started**, **needs the reader**.
 The PRD's own computed status lives in `build_analytics/design_state.md`; this
 file is the working list for items 130–139 and what they reopened.
 
-Last updated 2026-11-07, commit `c4216e2`.
+Last updated 2026-11-07 late. A native store crash at CHECKPOINT (D-23 class, also at 18:11 before today's store change) was restarted by the supervisor.
 
 ## PLUGIN_GOAL 137 — the 26 reported glitches
 
@@ -39,7 +39,7 @@ Last updated 2026-11-07, commit `c4216e2`.
 | 23 | Ego retrieval controls vs the search bar; remove the slider | confirmed | PG-137-search-linked, run 82 |
 | 24 | Dragging the graph tab breaks the app | confirmed (clean arm) | after the restart: 0 errors on a move (was 8 from orphaned views). Planted arm vacuous post-restart |
 | 25 | Link navigation very slow | needs the reader | 320 ms on Wikipedia; need the page |
-| 26 | archive.org nested shadow DOM; DuckDuckGo image search; "More results" not pressed | partial | "More results": G-176 confirmed run 2 (598 results; planted cap 3 rounds). G-158 clean passes (submit). archive.org M-10: 188/189 deep links (1 missing: web.archive.org "Web Sites"). DuckDuckGo image search ("shipwrecks"): captured once the queue was unblocked -- 29 chunks, 248 image lines / 222 distinct images for 100 tiles. It had been blocked by 110 refused bandcamp drains after a sidecar restart; fixed (PG-137-refused-queue, run 12) |
+| 26 | archive.org nested shadow DOM; DuckDuckGo image search; "More results" not pressed | partial | "More results": G-176 confirmed run 2 (598 results; planted cap 3 rounds). G-158 clean passes (submit). archive.org M-10: the "Web Sites" miss was the CHECK (its pattern cut an href at a space); fixed. Run 18: 215/219 deep links, the 4 missed now differ run to run (collection facets at depth 8) -- render timing, to be pinned down. DuckDuckGo image search ("shipwrecks"): captured once the queue was unblocked -- 29 chunks, 248 image lines / 222 distinct images for 100 tiles. It had been blocked by 110 refused bandcamp drains after a sidecar restart; fixed (PG-137-refused-queue, run 12) |
 
 ## PLUGIN_GOAL 135–136
 

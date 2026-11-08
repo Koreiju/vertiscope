@@ -15197,8 +15197,9 @@ export function makeChecks(env) {
               addrs = [];
               for (const [v, xp, acc] of await cy("MATCH (a:Address) WHERE a.url = '" + landed.replace(/'/g, "") + "' AND (a.tag IN ['link', 'text', 'button'] OR a.accessor STARTS WITH 'href') RETURN a.value, a.xpath, a.accessor")) {
                 const s = String(v);
-                const re = /\\]\\(([^)\\s]+)/g; let m;
-                while ((m = re.exec(s))) addrs.push([m[1], xp]);
+                // To the closing parenthesis: an href may hold a space ("web/*/radio drama"), which the old pattern cut at.
+                const re = /\\]\\(([^)\\n]*?)(?:\\s+"[^"]*")?\\)/g; let m;
+                while ((m = re.exec(s))) addrs.push([m[1].trim(), xp]);
                 if (String(acc).startsWith("href")) addrs.push([s.replace(/^\\(\\s*/, "").replace(/\\s*\\)$/, ""), xp]);
               }
               held = addrs.length === prev && addrs.length > 20 ? held + 1 : 0;
