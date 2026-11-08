@@ -271,6 +271,7 @@ _LAST_WRITE = [0.0]
 _LAST_REQUEST = [0.0]
 #: The last full `/health` answer and when it was computed.
 _HEALTH_CACHE: Dict[str, object] = {}
+PLANT_OUTPUTS_EVERYWHERE = [False]
 #: Set while a thread recomputes the health counts (one at a time).
 _HEALTH_REFRESHING = threading.Event()
 
@@ -805,6 +806,7 @@ _PLANTABLE = {
     "no-edge-memo": ("domvec.obsidian.layout", "PLANT_NO_EDGE_MEMO"),
     "no-declump": ("domvec.obsidian.layout", "PLANT_NO_DECLUMP"),            # 137(6)
     "lead-in-python": ("domvec.graphstore", "PLANT_LEAD_IN_PYTHON"),         # 143 fit read
+    "outputs-everywhere": ("domvec.obsidian.sidecar", "PLANT_OUTPUTS_EVERYWHERE"),  # T-13
     "aggregate-mid-stream": ("domvec.obsidian.sidecar", "PLANT_AGGREGATE_MID_STREAM"),  # 137(20)
     "furniture-is-content": ("domvec.markdown", "PLANT_FURNITURE_IS_CONTENT"),  # 137(3)       # chunk view, 2026-10-24
     "fixed-batch": ("domvec.obsidian.projector", "PLANT_FIXED_BATCH"),      # G-13, 2026-10-24
@@ -1894,6 +1896,13 @@ def search_payload(workspace, query: str, k: int = 8, *,
             # Ego or web (item 78): `ego` keeps only the ego set; `web` keeps
             # the world -- everything but the computation graph's own notes
             # (a tagged web chunk is in both). Unset: everything, as before.
+            # T-13 (PLUGIN_GOAL 145): a notebook cell's OUTPUT is retrievable
+            # in the ego scope only, unless asked for -- the vault reader roots
+            # it at an `output` step, so the rule reads the trie, not the text.
+            # Planted PLANT_OUTPUTS_EVERYWHERE: outputs in every scope.
+            if (where != "ego" and not PLANT_OUTPUTS_EVERYWHERE[0] and str(stored.url).startswith("vault://")
+                    and "/output" in str(stored.xpath or "")):
+                continue
             if where and not PLANT_NO_WHERE[0]:
                 ego_load(workspace)
                 if where == "ego" and not _in_ego(stored):
