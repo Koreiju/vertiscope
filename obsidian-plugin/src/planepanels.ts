@@ -577,8 +577,35 @@ export class PlaneDesk {
     const rl: Record<string, Record<string, number>> = (this.app.metadataCache as any).resolvedLinks || {};
     for (const t of Object.keys(rl[path] || {})) out.add(t);
     for (const [src, targets] of Object.entries(rl)) if (targets && targets[path]) out.add(src);
+    // T-4 (PLUGIN_GOAL 142/145): a `{ref}` naming another cell is a COMPILED
+    // reference -- a hard link as much as a note link ("hard links happen when
+    // one type of cell ... references another cell in any possible way").
+    // Planted `plantRefsNotLinks`: note links only, as before.
+    if (!this.plantRefsNotLinks) {
+      for (const t of this.refTargets(path)) out.add(t);
+      for (const p of this.panels) if (p.path !== path && this.refTargets(p.path).has(path)) out.add(p.path);
+    }
     out.delete(path);
     return out;
+  }
+  plantRefsNotLinks = false;
+  /** note path -> the open panels its `{name}` references resolve to (by
+   *  basename, spaces as underscores, case-folded). Re-read on edit. */
+  private refCache = new Map<string, { at: number; to: Set<string> }>();
+  refTargets(path: string): Set<string> {
+    const f = this.app.vault.getAbstractFileByPath(path);
+    if (!(f instanceof TFile)) return new Set();
+    const hit = this.refCache.get(path);
+    if (hit && hit.at === f.stat.mtime) return hit.to;
+    const key = (n: string) => n.toLowerCase().replace(/\s+/g, "_");
+    const byName = new Map(this.panels.map((p) => [key(p.path.slice(p.path.lastIndexOf("/") + 1).replace(/\.md$/, "")), p.path]));
+    const to = new Set<string>();
+    const entry = { at: f.stat.mtime, to };
+    this.refCache.set(path, entry);
+    void this.app.vault.cachedRead(f).then((t) => {
+      for (const m of t.matchAll(/\{([A-Za-z_][\w.]*)\}/g)) { const q = byName.get(key(m[1].split(".")[0])); if (q && q !== path) to.add(q); }
+    });
+    return to;
   }
   contain(path: string): string[] {
     const p = this.panelOf(path);
