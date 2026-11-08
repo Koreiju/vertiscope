@@ -206,6 +206,27 @@ interface CaptureJob {
 
 
 export class BrowserView extends ItemView {
+  /** This tab's own page, kept in its leaf state (137(18)). */
+  ownUrl = "";
+  restoredFrom = "";
+  getState(): Record<string, unknown> {
+    const base: any = (super.getState as any)?.call(this) || {};
+    return this.ownUrl ? { ...base, url: this.ownUrl } : base;
+  }
+  async setState(state: any, result: any): Promise<void> {
+    if (state && typeof state.url === "string" && /^https?:/.test(state.url)) {
+      const late = !!this.restoredFrom && state.url !== this.ownUrl;
+      this.ownUrl = state.url;
+      // A background tab's state arrives after its open-time restore had
+      // already fallen back to the shared page (tabs 2 and 3 of three, live):
+      // its own page, now.
+      if (late && !(globalThis as any).__domvecPlantSharedLastPage) {
+        let shown = ""; try { shown = String(this.webview?.getURL?.() || ""); } catch { /* not ready */ }
+        if (shown !== state.url) { this.go(state.url); this.restoredFrom = "own-late"; }
+      }
+    }
+    await (super.setState as any)?.call(this, state, result);
+  }
   /** Fetched once per app run and shared: it is one file on disk and it does
    *  not change under a running plugin. */
   private static sensorSource = "";
@@ -386,9 +407,9 @@ export class BrowserView extends ItemView {
     // three tabs, handler installed, 0 calls). 137(13)/(18). Planted
     // `no-popups`: the attribute left off, as before.
     if (!this.plant.has("no-popups") && !(globalThis as any).__domvecPlantNoPopups) view.setAttribute("allowpopups", "");
-    // `allowpopups` stays OFF. A page that opens a window would put a browser
-    // outside the panel, outside the session, and outside anything the
-    // projector knows about.
+    // No window ever opens, though: the handler DENIES each one and loads its
+    // url here, so nothing lands outside the panel, the session, or what the
+    // projector knows about (the reason the attribute was once kept off).
     view.setAttribute("src", "about:blank");
     view.style.width = "100%";
     view.style.height = "100%";
@@ -566,7 +587,16 @@ export class BrowserView extends ItemView {
       this.address.value = view.getURL();
       try {
         const u = view.getURL();
-        if (/^https?:/.test(u) && !this.hosted) (this.app as any).saveLocalStorage?.("domvec-browser-last", u);
+        if (/^https?:/.test(u) && !this.hosted) {
+          (this.app as any).saveLocalStorage?.("domvec-browser-last", u);
+          // Each tab remembers ITS page in its own leaf state (137(18)).
+          if (u !== this.ownUrl) { this.ownUrl = u; this.app.workspace.requestSaveLayout(); }
+          // And by LEAF ID, which survives a plugin reload: the view types are
+          // re-registered on load and Obsidian rebuilt the background tabs
+          // without their saved state (tabs 2 and 3 of three, live).
+          const id = String((this.leaf as any)?.id || "");
+          if (id) { try { const m = JSON.parse(window.localStorage.getItem("domvec-browser-tab-urls") || "{}"); m[id] = u; window.localStorage.setItem("domvec-browser-tab-urls", JSON.stringify(m)); } catch { /* a convenience */ } }
+        }
       } catch { /* not attached */ }
       this.say(view.getTitle() || view.getURL());
       // A PDF is read as a document, not folded as a viewer (G-248).
@@ -712,10 +742,22 @@ export class BrowserView extends ItemView {
     // restores the standalone's last page nor records its own as that.
     try {
       if (this.hosted) throw new Error("hosted");
-      const last = String((this.app as any).loadLocalStorage?.("domvec-browser-last") || "");
-      if (last && /^https?:/.test(last) && !/[?&](d3[5-7]|g9[34]|d36)=/.test(last)) {
-        window.setTimeout(() => this.go(last), 300);
-      }
+      // EACH TAB its own page (2026-11-07, 137(18): "navigating in one
+      // browser also navigates in other browsers"). The vault-wide last page
+      // was the only memory, so after any reload every tab came back on the
+      // ONE page last visited in any of them -- seen 2026-11-08: three tabs on
+      // B-tree / Shipwreck / Radix_tree all reopened on Rudolf_Bayer. A tab's
+      // own page lives in its leaf state (`getState`/`setState`, saved per
+      // leaf by Obsidian); the vault-wide page is only for a tab that has
+      // none. Planted `__domvecPlantSharedLastPage`: the shared page, as before.
+      window.setTimeout(() => {
+        let byLeaf = "";
+        try { byLeaf = String(JSON.parse(window.localStorage.getItem("domvec-browser-tab-urls") || "{}")[String((this.leaf as any)?.id || "")] || ""); } catch { /* none */ }
+        const own = (globalThis as any).__domvecPlantSharedLastPage ? "" : (this.ownUrl || byLeaf);
+        const last = own || String((this.app as any).loadLocalStorage?.("domvec-browser-last") || "");
+        if (last && /^https?:/.test(last) && !/[?&](d3[5-7]|g9[34]|d36)=/.test(last)) this.go(last);
+        this.restoredFrom = own ? "own" : "shared";
+      }, 300);
     } catch { /* storage unavailable: start blank */ }
   }
 
