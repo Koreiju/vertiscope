@@ -187,6 +187,10 @@ export interface DomvecSettings {
   /** How the reader's sidecar was launched, as its `/health` last said
    *  (python, argv, cwd, workspace): what a fresh supervisor is started with. */
   sidecarLaunch?: { python: string; argv: string[]; cwd: string; workspace: string; supervised: boolean };
+  /** PLUGIN_GOAL 144: this vault's named workspaces (name -> folder) and the
+   *  one the sidecar serves. Kept in the plugin's data, which is per vault. */
+  workspaces?: Record<string, string>;
+  activeWorkspace?: string;
   /** Start in the interactive surface rather than the distilled markdown. */
   interactiveByDefault: boolean;
   /**

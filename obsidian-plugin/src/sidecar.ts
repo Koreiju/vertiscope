@@ -262,6 +262,11 @@ export class Sidecar {
     return this.get(`/projector/delta?since=${since}&epoch=${epoch}`);
   }
 
+  /** The projector's state: fitted, fitting, how many placed. */
+  async projectorStatus(): Promise<any | null> {
+    return this.get("/projector/status");
+  }
+
   /** Where one page is in the pipeline: stored, embedded, windowed, fitted. */
   async pageStatus(url: string): Promise<any | null> {
     return this.get("/page_status?url=" + encodeURIComponent(url));

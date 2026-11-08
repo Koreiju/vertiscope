@@ -31,6 +31,9 @@ import {
   PluginSettingTab,
   Setting,
   editorInfoField,
+  Modal,
+  Menu,
+  SuggestModal,
 } from "obsidian";
 
 import { installHarness } from "./harness";
@@ -128,6 +131,11 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     (window as any).__domvecRequire = (m: string) => require(m);
     this.routeLinksToCell();
     this.hookHoverCopy();
+    // PLUGIN_GOAL 147: new vaults get the plugin, and a vault with no sidecar
+    // of its own starts one on its own fresh workspace.
+    window.setTimeout(() => { this.installIntoNewVaults(); }, 5000);
+    this.registerInterval(window.setInterval(() => this.installIntoNewVaults(), 15000));
+    window.setTimeout(() => { void this.autostartSidecar(); }, 4000);
     // This load's generation (G-175): a view born in an earlier load whose
     // loop is still running reads a newer number and stops itself.
     (window as any).__domvecLoadGen = ((window as any).__domvecLoadGen || 0) + 1;
@@ -417,6 +425,12 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     (window as any).__domvecActiveBrowser = () => this.activeBrowser();
     (window as any).__domvecHalo = this.halo;
     this.addCommand({ id: "domvec-cockpit", name: "Open the cockpit (ego slate)", callback: () => { void this.cockpit.open(); } });
+    // PLUGIN_GOAL 144: workspaces per vault -- a new project starts empty.
+    this.addCommand({ id: "domvec-workspace-new", name: "New workspace (empty store, nothing inherited)",
+      callback: () => { new WorkspaceNameModal(this.app, (name) => { void this.useWorkspace(name, true); }).open(); } });
+    this.addCommand({ id: "domvec-workspace-switch", name: "Switch workspace",
+      callback: () => { new WorkspacePickModal(this.app, this.workspaceList(), this.settings.activeWorkspace || "",
+        (name) => { void this.useWorkspace(name, false); }).open(); } });
     // The structural-cell strip at the bottom of every note (`P-M4`); put
     // back whenever Obsidian rebuilds a renderer under it.
     this.registerInterval(window.setInterval(() => this.applyCellBars(), 500));
@@ -546,6 +560,8 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
           if (browser && typeof browser.searchWeb === "function") void browser.searchWeb(query);
         };
         view.onSidecarTrigger = () => this.sidecarTrigger();
+        view.onWorkspaceMenu = (e, b) => this.workspaceMenu(e, b);
+        view.workspaceButton?.setText((this.settings.activeWorkspace || this.workspaceNameOf(this.settings.sidecarLaunch?.workspace) || "workspace") + " ▾");
         void this.sidecarTrigger(true).then((t) => view.sidecarButton?.setText(t));
         view.onReveal = (url: string, xpath: string) => {
           for (const l of this.app.workspace.getLeavesOfType(BROWSER_VIEW)) {
@@ -1531,6 +1547,177 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     this.cellBarStats.code_cells++;
   }
 
+  // ---- workspaces, per vault (PLUGIN_GOAL 144) ----------------------------
+  //
+  // A workspace is the sidecar's whole state: the trie store, the fits, the
+  // caches, the logs. "New project, fresh, without all the inheritance": a new
+  // workspace is an empty folder under THIS vault's `.domvec/workspaces/`, and
+  // the sidecar is restarted on it. The list lives in the plugin's data, which
+  // Obsidian keeps per vault, so another vault never sees this one's.
+  workspaceStats = { switched: 0, created: 0, last: null as any };
+  workspaceRoot(): string {
+    const req = (window as any).require, path = req("path");
+    const base = (this.app.vault.adapter as any).getBasePath?.() || "";
+    return path.join(base, ".domvec", "workspaces");
+  }
+  /** Names known to this vault, the running sidecar's own included. */
+  workspaceList(): Record<string, string> {
+    const out: Record<string, string> = { ...(this.settings.workspaces || {}) };
+    const L = this.settings.sidecarLaunch;
+    if (L?.workspace && !Object.values(out).includes(L.workspace)) {
+      const req = (window as any).require, path = req("path");
+      out[path.basename(L.workspace)] = L.workspace;
+    }
+    return out;
+  }
+  // ---- new vaults (PLUGIN_GOAL 147) -----------------------------------------
+  //
+  // "Opening new vaults should automatically have our plugin installed and
+  // sidecar run available." Obsidian has no event for a vault being made, so
+  // every running copy watches Obsidian's own vault list and installs into a
+  // vault whose `.obsidian` folder is NEWER than the moment this rule first ran
+  // (minus two hours, to catch the vault that prompted it). Older vaults are
+  // the reader's own and are never touched. Installing = the built files, the
+  // id in `community-plugins.json`, and community plugins switched on for that
+  // vault (Obsidian keeps that per vault in its local storage).
+  autoInstallStats = { scans: 0, installed: [] as string[], skipped_old: 0, errors: 0 };
+  installIntoNewVaults(): void {
+    const req = (window as any).require;
+    let fs: any, path: any;
+    try { fs = req("fs"); path = req("path"); } catch { return; }
+    this.autoInstallStats.scans++;
+    const SINCE = "domvec-autoinstall-since";
+    let since = Number(window.localStorage.getItem(SINCE) || 0);
+    if (!since) { since = Date.now() - 2 * 3600 * 1000; window.localStorage.setItem(SINCE, String(since)); }
+    const appdata = (window as any).process?.env?.APPDATA || "";
+    let cfg: any;
+    try { cfg = JSON.parse(fs.readFileSync(path.join(appdata, "obsidian", "obsidian.json"), "utf8")); } catch { return; }
+    const base = (this.app.vault.adapter as any).getBasePath?.() || "";
+    const src = path.join(base, this.app.vault.configDir, "plugins", this.manifest.id);
+    for (const [id, v] of Object.entries<any>(cfg.vaults || {})) {
+      try {
+        const conf = path.join(v.path, ".obsidian");
+        const dest = path.join(conf, "plugins", this.manifest.id);
+        if (dest === src || !fs.existsSync(conf)) continue;
+        const born = fs.statSync(conf).birthtimeMs || fs.statSync(conf).ctimeMs;
+        if (born < since) { this.autoInstallStats.skipped_old++; continue; }
+        const have = fs.existsSync(path.join(dest, "main.js"));
+        const newer = !have || fs.statSync(path.join(src, "main.js")).mtimeMs > fs.statSync(path.join(dest, "main.js")).mtimeMs;
+        if (newer) {
+          fs.mkdirSync(dest, { recursive: true });
+          for (const f of ["main.js", "manifest.json", "styles.css"]) {
+            if (fs.existsSync(path.join(src, f))) fs.copyFileSync(path.join(src, f), path.join(dest, f));
+          }
+        }
+        const listF = path.join(conf, "community-plugins.json");
+        let list: string[] = [];
+        try { list = JSON.parse(fs.readFileSync(listF, "utf8")); } catch { list = []; }
+        if (!list.includes(this.manifest.id)) { list.push(this.manifest.id); fs.writeFileSync(listF, JSON.stringify(list, null, 2)); }
+        if (window.localStorage.getItem("enable-plugin-" + id) !== "true") window.localStorage.setItem("enable-plugin-" + id, "true");
+        if (!have) { this.autoInstallStats.installed.push(v.path); new Notice(`domvec: installed into the new vault ${path.basename(v.path)} -- reopen it to load`, 6000); }
+      } catch { this.autoInstallStats.errors++; }
+    }
+  }
+  /** A vault with no sidecar of its own: start one on a fresh "default"
+   *  workspace, using only how this machine starts Python. */
+  async autostartSidecar(): Promise<void> {
+    if (this.settings.sidecarLaunch || this.settings.activeWorkspace) return;
+    if (!this.launchTemplate()) return;
+    const h: any = await this.sidecar.health().catch(() => null);
+    if (h && h.ok) return;
+    await this.useWorkspace("default", !this.workspaceList()["default"]);
+  }
+
+  workspaceNameOf(dir?: string): string {
+    if (!dir) return "";
+    for (const [n, d] of Object.entries(this.workspaceList())) if (d === dir) return n;
+    return (window as any).require("path").basename(dir);
+  }
+  /** Each workspace serves on its own port, so two vaults (or two projects)
+   *  run side by side and never share a store: 8788 for the first one this
+   *  machine knew, then the next free number recorded machine-wide. */
+  private workspacePort(dir: string): number {
+    const KEY = "domvec-workspace-ports";
+    let map: Record<string, number> = {};
+    try { map = JSON.parse(window.localStorage.getItem(KEY) || "{}"); } catch { map = {}; }
+    if (map[dir]) return map[dir];
+    const used = new Set(Object.values(map));
+    let p = 8788;
+    while (used.has(p) || p === 8790 || p === 8791) p++;
+    map[dir] = p;
+    try { window.localStorage.setItem(KEY, JSON.stringify(map)); } catch { /* recomputed next time */ }
+    return p;
+  }
+  /** A launch to start from: this vault's, else the last one any vault on this
+   *  machine recorded (a new vault has none of its own yet). */
+  private launchTemplate(): any {
+    const own = this.settings.sidecarLaunch;
+    if (own && own.python && Array.isArray(own.argv)) return own;
+    try { return JSON.parse(window.localStorage.getItem("domvec-sidecar-launch") || "null"); } catch { return null; }
+  }
+  /** The vault switcher's shape: workspaces with a check on the open one,
+   *  then "New workspace...". */
+  workspaceMenu(e: MouseEvent, button: HTMLElement): void {
+    const menu = new Menu();
+    const active = this.settings.activeWorkspace || this.workspaceNameOf(this.settings.sidecarLaunch?.workspace);
+    for (const name of Object.keys(this.workspaceList()).sort()) {
+      menu.addItem((it) => it.setTitle(name).setChecked(name === active)
+        .onClick(() => { if (name !== active) void this.useWorkspace(name, false).then(() => button.setText(name + " ▾")); }));
+    }
+    menu.addSeparator();
+    menu.addItem((it) => it.setTitle("New workspace…").setIcon("plus")
+      .onClick(() => new WorkspaceNameModal(this.app, (n) => { void this.useWorkspace(n, true).then(() => button.setText((this.settings.activeWorkspace || n) + " ▾")); }).open()));
+    menu.showAtMouseEvent(e);
+  }
+  async useWorkspace(name: string, create: boolean): Promise<void> {
+    name = (name || "").trim().replace(/[^\w.-]+/g, "-");
+    if (!name) return;
+    const req = (window as any).require;
+    const fs = req("fs"), path = req("path"), cp = req("child_process");
+    const known = this.workspaceList();
+    let dir = known[name];
+    if (create) {
+      if (dir) { new Notice(`domvec: a workspace named "${name}" already exists in this vault`, 6000); return; }
+      dir = path.join(this.workspaceRoot(), name);
+      fs.mkdirSync(dir, { recursive: true });
+      this.workspaceStats.created++;
+    }
+    if (!dir) { new Notice(`domvec: no workspace "${name}"`, 5000); return; }
+    const L = this.launchTemplate();
+    if (!L || !L.python || !Array.isArray(L.argv)) {
+      new Notice("domvec: no sidecar launch on record on this machine -- start the sidecar once, then switch", 8000);
+      return;
+    }
+    // Stop only THIS vault's sidecar (its own port); another vault's runs on.
+    const oldPort = Number((String(this.settings.sidecar).match(/:(\d+)/) || [])[1]) || 8788;
+    new Notice(`domvec: stopping the sidecar to open workspace "${name}" ...`, 4000);
+    await new Promise<void>((done) => {
+      const p = cp.spawn(L.python, ["-c", `from domvec.obsidian.controls import stop_sidecar; print(stop_sidecar(port=${oldPort}, force=True))`],
+        { cwd: L.cwd || undefined, windowsHide: true });
+      p.on("exit", () => done()); p.on("error", () => done());
+      window.setTimeout(done, 30000);
+    });
+    const argv = L.argv.slice();
+    const w = argv.indexOf("--workspace");
+    if (w >= 0) argv[w + 1] = dir; else argv.push("--workspace", dir);
+    const port = this.workspacePort(dir);
+    const pi = argv.indexOf("--port");
+    if (pi >= 0) argv[pi + 1] = String(port); else argv.push("--port", String(port));
+    this.settings.sidecar = "http://127.0.0.1:" + port;
+    this.settings.workspaces = { ...(this.settings.workspaces || {}), [name]: dir };
+    this.settings.activeWorkspace = name;
+    this.settings.sidecarLaunch = { ...L, argv, workspace: dir };
+    await this.saveSettings();
+    this.workspaceStats.switched++;
+    this.workspaceStats.last = { name, dir, create, at: Date.now() };
+    const said = await this.sidecarTrigger(false);
+    // The graph drops the old workspace's nodes: a fresh load from the new store.
+    for (const leaf of this.app.workspace.getLeavesOfType("domvec-graph-view")) {
+      try { await (leaf.view as any).reload?.(); } catch { /* the view reloads on its own poll */ }
+    }
+    new Notice(`domvec: workspace "${name}" ${said === "sidecar ●" ? "open" : "not answering yet"} -- ${dir}`, 8000);
+  }
+
   respawnStats = { checks: 0, respawned: 0, last: null as any };
   private respawning = false;
   async watchSidecar(): Promise<void> {
@@ -1538,8 +1725,9 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     this.respawnStats.checks++;
     const h: any = await this.sidecar.health().catch(() => null);
     if (h && h.launch && h.launch.python && Array.isArray(h.launch.argv)) {
+      try { window.localStorage.setItem("domvec-sidecar-launch", JSON.stringify(h.launch)); } catch { /* a convenience */ }
       const was = JSON.stringify(this.settings.sidecarLaunch || null);
-      if (was !== JSON.stringify(h.launch)) { this.settings.sidecarLaunch = h.launch; await this.saveSettings(); }
+      if (was !== JSON.stringify(h.launch) && (!this.settings.activeWorkspace || h.launch.workspace === this.settings.sidecarLaunch?.workspace)) { this.settings.sidecarLaunch = h.launch; await this.saveSettings(); }
       return;
     }
     const L = this.settings.sidecarLaunch;
@@ -1670,6 +1858,12 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
       return "sidecar ●";
     }
     if (quiet) return "sidecar ○";
+    // A vault with no sidecar of its own yet (a new vault): its own fresh
+    // workspace, "default", on its own port -- nothing inherited (144).
+    if (!this.settings.sidecarLaunch && this.launchTemplate() && !this.settings.activeWorkspace) {
+      await this.useWorkspace("default", !this.workspaceList()["default"]);
+      return (await this.sidecar.health().catch(() => null))?.ok ? "sidecar ●" : "sidecar ✕";
+    }
     const L = this.settings.sidecarLaunch;
     if (!L || !L.python || !Array.isArray(L.argv)) {
       new Notice("domvec sidecar ✕ not answering, and no launch on record -- start it once from the MCP or a terminal", 8000);
@@ -1908,4 +2102,28 @@ class DomvecSettingTab extends PluginSettingTab {
           }),
       );
   }
+}
+
+/** PLUGIN_GOAL 144: the name of a new, empty workspace. */
+class WorkspaceNameModal extends Modal {
+  constructor(app: App, private done: (name: string) => void) { super(app); }
+  onOpen(): void {
+    this.titleEl.setText("New workspace");
+    const input = this.contentEl.createEl("input", { type: "text", attr: { placeholder: "project name" } });
+    input.style.width = "100%";
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") { this.close(); this.done(input.value); } });
+    window.setTimeout(() => input.focus(), 0);
+  }
+  onClose(): void { this.contentEl.empty(); }
+}
+
+/** PLUGIN_GOAL 144: pick one of this vault's workspaces. */
+class WorkspacePickModal extends SuggestModal<string> {
+  constructor(app: App, private all: Record<string, string>, private active: string, private done: (name: string) => void) { super(app); }
+  getSuggestions(q: string): string[] { return Object.keys(this.all).filter((n) => n.toLowerCase().includes(q.toLowerCase())); }
+  renderSuggestion(n: string, el: HTMLElement): void {
+    el.createEl("div", { text: n + (n === this.active ? "  (open)" : "") });
+    el.createEl("small", { text: this.all[n] });
+  }
+  onChooseSuggestion(n: string): void { this.done(n); }
 }

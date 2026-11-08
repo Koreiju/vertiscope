@@ -188,6 +188,14 @@ export class UserAgent {
     // vehicle, the camera behind it -- a hover's flight does not move it.
     if (this.view === "third") { if (this.vehicle) this.craftAt = { ...this.vehicle.p }; this.target = null; this.fade(); return; }
     const p = cam.position, t = ctl.target;
+    // ALWAYS at the centre of view (PLUGIN_GOAL 146), every tick, at rest
+    // too: first person the craft is where the camera is (the cockpit); the
+    // map view, at the focus the view turns about (the screen's centre).
+    // Measured before: at rest it stayed where it last flew, 1,700 units off
+    // screen. Planted `plantCraftLeftBehind`: only while flying, as before.
+    if (!this.plantCraftLeftBehind) {
+      this.craftAt = this.mode === "ego" ? { x: p.x, y: p.y, z: p.z } : { x: t.x, y: t.y, z: t.z };
+    }
     const n = this.mode === "ego" ? this.target : null;
     // Nothing selected and at rest: the camera is the reader's alone.
     if (!n && len(this.vel) < 1e-4 && !(this.playing && !this.paused)) { this.stats.idle_ticks++; this.fade(); return; }
@@ -375,11 +383,19 @@ export class UserAgent {
    * (`craftAt`). W/S move along the heading, A/D turn it -- never sideways.
    */
   view: "first" | "third" = "first";
+  plantCraftLeftBehind = false;
   /** Planted (G-333): A/D strafe sideways, as before the vehicle. */
   plantStrafe = false;
   vehicleStats = { turns: 0, views: 0, sideways_max: 0 };
   /** The vehicle's place and heading (third person keeps them apart from the camera). */
   vehicle: { p: any; dir: any } | null = null;
+  /** Where the vehicle points (PLUGIN_GOAL 146): its own heading in third
+   *  person, the camera's look in first (the camera IS the vehicle). */
+  headingNow(): { x: number; y: number; z: number } | null {
+    if (this.view === "third" && this.vehicle) return { x: this.vehicle.dir.x, y: this.vehicle.dir.y, z: this.vehicle.dir.z };
+    const { back } = this.axes();
+    return back ? { x: -back.x, y: -back.y, z: -back.z } : null;
+  }
   /** The chase camera's distance behind the vehicle (third person); the wheel shortens it. */
   chaseD = 0;
   private cameThrough = false;

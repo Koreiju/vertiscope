@@ -60,6 +60,9 @@ export interface CraftHost {
   mode(): string;
   /** Where the agent's craft is: its last place flying, or null. */
   anchor(): V3 | null;
+  /** The vehicle's heading, a unit vector (PLUGIN_GOAL 146): the craft's own
+   *  UMAP turns with it -- non-holonomic, it points where it goes. */
+  heading?(): V3 | null;
   /** The world's centre and outer radius (the fit's shell). */
   world(): { cx: number; cy: number; cz: number; r: number };
   /** A node of the WORLD graph by id (a chunk's cid, `page:<url>`). */
@@ -142,6 +145,10 @@ export class Craft {
   plantNoReadouts = false;
   /** Planted (item 68): the craft drawn in the ego view too (around the camera). */
   plantAlwaysDrawn = false;
+  plantHiddenInEgo = false;
+  /** Planted (146): the craft's map never turns with the heading. */
+  plantFixedFrame = false;
+  private q = new THREE.Quaternion();
   private group: any = null;
   private lines: any = null;
   ioLines: any = null;
@@ -476,8 +483,11 @@ export class Craft {
       const a = byId.get(p.a), b = byId.get(p.b);
       const e = Math.min(1, (now - p.t0) / p.ms);
       if (a && b) {
-        p.dot.position.set(at.x + a.local.x + (b.local.x - a.local.x) * e, at.y + a.local.y + (b.local.y - a.local.y) * e,
-                           at.z + a.local.z + (b.local.z - a.local.z) * e);
+        // Along the drawn edge: the meshes are already turned with the heading.
+        const A = a.mesh?.position, B = b.mesh?.position;
+        if (A && B) p.dot.position.set(A.x + (B.x - A.x) * e, A.y + (B.y - A.y) * e, A.z + (B.z - A.z) * e);
+        else p.dot.position.set(at.x + a.local.x + (b.local.x - a.local.x) * e, at.y + a.local.y + (b.local.y - a.local.y) * e,
+                                at.z + a.local.z + (b.local.z - a.local.z) * e);
       }
       if (e < 1) { still.push(p); continue; }
       p.dot.removeFromParent(); p.dot.geometry.dispose();
@@ -590,7 +600,12 @@ export class Craft {
     // was drawn nowhere and no ray could reach it (found 2026-11-02, G-320).
     const scene = this.host.scene();
     if (scene && this.group.parent !== scene) { scene.add(this.group); this.stats.reattached = (this.stats.reattached || 0) + 1; }
-    const show = this.plantAlwaysDrawn || this.host.mode() !== "ego";
+    // Drawn in BOTH views (PLUGIN_GOAL 146: "moves in first and third person
+    // camera view, always at the 'center' of view"): third person, the chase
+    // camera keeps it at the centre of the screen; first person, the camera is
+    // at the ego node, inside its own map ("zoom ... into the microscope of
+    // the ego", PG 4909). Planted `plantHiddenInEgo`: hidden in the ego view.
+    const show = this.plantAlwaysDrawn || !this.plantHiddenInEgo || this.host.mode() !== "ego";
     this.group.visible = show;
     this.stats.visible = show;
     // Placed and counted drawn or not: hidden in the ego view, its I/O still
@@ -603,11 +618,19 @@ export class Craft {
     const sig = this.host.signalEdges();
     // Redrawn when the anchor, the open panels or the runs change -- and once a
     // second, for the world's nodes its I/O lines end on.
-    const key = `${Math.round(at.x)},${Math.round(at.y)},${Math.round(at.z)}|${open.join(",")}|${sig.length}|${this.nodes.length}|${Math.floor(performance.now() / 1000)}`;
+    // The heading turns the craft's frame: its map's +z points along it.
+    const h = this.plantFixedFrame ? null : this.host.heading?.();
+    if (h && Number.isFinite(h.x) && Math.hypot(h.x, h.y, h.z) > 1e-6) {
+      const L = Math.hypot(h.x, h.y, h.z);
+      this.q.setFromUnitVectors(new THREE.Vector3(0, 0, 1), new THREE.Vector3(h.x / L, h.y / L, h.z / L));
+    } else this.q.identity();
+    (this.stats as any).heading = h ? [h.x, h.y, h.z].map((v) => Math.round(v * 100) / 100) : null;
+    const key = `${Math.round(at.x)},${Math.round(at.y)},${Math.round(at.z)}|${this.q.x.toFixed(3)},${this.q.y.toFixed(3)},${this.q.z.toFixed(3)},${this.q.w.toFixed(3)}|${open.join(",")}|${sig.length}|${this.nodes.length}|${Math.floor(performance.now() / 1000)}`;
     if (key === this.key) return;
     this.key = key;
     const byId = new Map(this.nodes.map((n) => [n.id, n]));
-    const pos = (n: CraftNode) => ({ x: at.x + n.local.x, y: at.y + n.local.y, z: at.z + n.local.z });
+    const tmp = new THREE.Vector3();
+    const pos = (n: CraftNode) => { tmp.set(n.local.x, n.local.y, n.local.z).applyQuaternion(this.q); return { x: at.x + tmp.x, y: at.y + tmp.y, z: at.z + tmp.z }; };
     for (const n of this.nodes) { const p = pos(n); n.mesh?.position.set(p.x, p.y, p.z); }
     const R = this.stats.radius || 10;
     for (const s of this.labels) { const n = byId.get(s.__for); if (n) { const p = pos(n); s.position.set(p.x + R * 0.2, p.y + R * 0.07, p.z); } }

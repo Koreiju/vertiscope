@@ -72,6 +72,19 @@ async function deploy() {
     const { size } = await stat(join(dest, "main.js"));
     console.log(`  deployed ${DEPLOY.join(", ")} -> ${dest} ` +
                 `(main.js ${size} bytes)`);
+    // PLUGIN_GOAL 144: every OTHER vault on this machine that already has the
+    // plugin installed gets the same build, so a vault switch never meets a
+    // stale copy. Vaults without it are left alone (installing is the reader's).
+    try {
+      const cfg = JSON.parse(await readFile(join(process.env.APPDATA || "", "obsidian", "obsidian.json"), "utf8"));
+      for (const v of Object.values(cfg.vaults || {})) {
+        const other = join(v.path, ".obsidian", "plugins", manifest.id);
+        if (other === dest) continue;
+        try { await stat(join(other, "main.js")); } catch { continue; }
+        for (const f of DEPLOY) await copyFile(join(HERE, f), join(other, f));
+        console.log(`  also deployed -> ${other}`);
+      }
+    } catch { /* no Obsidian config: this vault only */ }
     // Obsidian does not notice a changed plugin file on its own, so a deploy
     // that did not say this reads as "the change did nothing".
     console.log("  reload the plugin to pick it up: " +

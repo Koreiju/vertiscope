@@ -496,6 +496,11 @@ export class GraphView extends ItemView {
     // "replace the euclidean button with a sidecar trigger to load and verify
     // the sidecar is setup"). Its dot is the sidecar's state; a click checks it
     // and starts one when none answers. The S3 toggle stays a command.
+    // PLUGIN_GOAL 144: the workspace menu, like Obsidian's vault switcher.
+    const ws = bar.createEl("button", { text: "workspace ▾" });
+    ws.addClass("domvec-workspace-menu");
+    this.workspaceButton = ws;
+    ws.onclick = (e) => this.onWorkspaceMenu(e as MouseEvent, ws);
     const side = bar.createEl("button", { text: "sidecar ○" });
     side.addClass("domvec-sidecar-trigger");
     this.sidecarButton = side;
@@ -831,10 +836,9 @@ export class GraphView extends ItemView {
     this.reload = load;
     const forceText = () => {
       const n = this.graph ? this.graph.graphData().nodes.length : 0;
-      return `force layout · ${n} nodes from ${this.forceStats.drains} drains · ` +
-             "no embedding needed";
+      return `${n} streamed nodes from ${this.forceStats.drains} drains`;
     };
-    this.forceCaption = () => status.setText(`${forceText()} · waiting for the projector's first fit`);
+    this.forceCaption = () => status.setText(`${forceText()} · fitting UMAP`);
     await load();
     // The stream. Once a second: what the projector placed since the last
     // sequence number this pane applied. O(delta) -- a quiet corpus costs
@@ -1238,6 +1242,8 @@ export class GraphView extends ItemView {
 
   /** Set by the plugin: check the sidecar, start it if none answers; the button's new text. */
   onSidecarTrigger: () => Promise<string> = async () => "sidecar ?";
+  onWorkspaceMenu: (e: MouseEvent, button: HTMLElement) => void = () => {};
+  workspaceButton: HTMLElement | null = null;
   sidecarButton: HTMLElement | null = null;
   /** The S3 toggle, kept as a command now the button is the sidecar's. */
   toggleSpace(): void { this.space = this.space ? "" : "S3"; }
@@ -2204,7 +2210,26 @@ export class GraphView extends ItemView {
    *   re-places every chunk that was open, so the reader keeps what they
    *   had unfolded, in the new fit's coordinates.
    */
+  /** Planted (143): a pane that loaded before the fit stays on the force layout. */
+  plantNoLateFit = false;
+  private lateFitAt = 0;
+  lateFitStats = { asked: 0, loaded: 0 };
   private async pullDelta(reload: () => Promise<void>): Promise<void> {
+    // STRICT UMAP on every node (PLUGIN_GOAL 143: "We need strict UMAP fits on
+    // all things"): a pane that loaded before the sidecar answered (or before
+    // any fit) never had an epoch, so it never asked again and drew the force
+    // layout forever -- found 2026-11-08 with 62,350 chunks already placed.
+    // Every 3 s until it has one, it asks the projector and loads the fit.
+    if (this.projEpoch < 0 && !this.pulling && !this.plantNoLateFit && performance.now() - this.lateFitAt > 3000) {
+      this.lateFitAt = performance.now();
+      this.lateFitStats.asked++;
+      this.pulling = true;
+      try {
+        const st: any = await this.sidecar.projectorStatus?.().catch(() => null);
+        if (st && st.fitted && !st.fitting) { this.lateFitStats.loaded++; await reload(); }
+      } finally { this.pulling = false; }
+      return;
+    }
     if (!this.graph || this.projEpoch < 0 || this.pulling) return;
     this.pulling = true;
     try {
@@ -2305,7 +2330,7 @@ export class GraphView extends ItemView {
         }
       }
       if (structural) this.graph.graphData(data);
-      if (moved || gone || pages || structural) { this.collideSoon(); this.graph.d3ReheatSimulation(); }
+      if (moved || gone || pages || structural) { if (!this.umapAuthority()) this.collideSoon(); this.graph.d3ReheatSimulation(); }
       let added = 0;
       if (toPlace.length) {
         const trace = profiler().begin("stream", [...openUrls][0] || "");
@@ -4282,14 +4307,14 @@ export class GraphView extends ItemView {
    */
   plantForceMapped = false;
   mapScale = 1;
-  scaledStats = { runs: 0, scale: 1, mapped: 0, overlapping_at_1: 0, left_overlapping: 0, coincident: 0, jumped: 0, glided: 0 };
+  scaledStats: any = { runs: 0, scale: 1, mapped: 0, overlapping_at_1: 0, left_overlapping: 0, coincident: 0, jumped: 0, glided: 0 };
   private mapScaleN = 0;
   private mapScaleSig = "";
   private mapScaleAt = 0;
   /** The scaled map is an OPTION, off (PLUGIN_GOAL 127, 2026-11-02: "nodes
    *  seem out of view with umap-only which is expected. we'll revert to our
    *  original older layout with more features"). */
-  useScaledMap = false;
+  useScaledMap = false;  // OFF again 2026-11-08: ON put nodes at fit x 34..3,475, out of view ("no nodes in view anywhere") -- the scale rule needs the camera fitted to it first
   get scaledMode(): boolean { return this.useScaledMap && !this.plantForceMapped; }
   /** Where a mapped node is drawn: its fit, scaled about the map's origin --
    *  and nothing else: no node is nudged (PLUGIN_GOAL 121). */
@@ -4376,6 +4401,10 @@ export class GraphView extends ItemView {
   /** Re-derive the scale when the map has grown by a sixth (or `force`).
    *  STRICT: any larger scale is adopted at once -- a smaller one only past a
    *  tenth, so the map does not breathe on every newcomer. */
+  plantScaleBreathes = false;
+  mapSettleMs = 2000;
+  private mapPendingSig = "";
+  private mapPendingAt = 0;
   private rescaleMap(force = false): void {
     if (!this.graph || !this.scaledMode) return;
     // Looked at twice a second, not every tick: the size sum is O(nodes).
@@ -4390,9 +4419,22 @@ export class GraphView extends ItemView {
     for (const n of nodes) if (!n.force && Number.isFinite(n.fitX)) { mapped++; reach += this.drawnRadiusOf(n); }
     const sig = mapped + "|" + Math.round(reach * 1000);
     if (!force && this.mapScaleSig === sig) return;
+    // ONE settled post-process, time-bounded (2026-11-08, 141: "a singular
+    // post-process that ensures stability/convergence on constraints within a
+    // limited time bound ... Shouldn't mean basically gaseous chunks moving
+    // erratically forever"). Re-derived every 500 ms while a scan streamed,
+    // the scale swung 34 -> 73 -> 44 -> 34 in 5 s and every mapped node jumped
+    // with it (1,592 of 1,600 moved in 5 s). Now: only once the mapped set has
+    // been still for `mapSettleMs`, and never smaller within a load -- a
+    // monotone step, so it converges. Planted `plantScaleBreathes`.
+    if (!force && !this.plantScaleBreathes) {
+      if (this.mapPendingSig !== sig) { this.mapPendingSig = sig; this.mapPendingAt = now; return; }
+      if (now - this.mapPendingAt < this.mapSettleMs) return;
+    }
     this.mapScaleSig = sig;
     const s = this.computeMapScale(nodes);
-    if (force || s > this.mapScale || s < 0.9 * this.mapScale) this.mapScale = s;
+    if (this.plantScaleBreathes) { if (force || s > this.mapScale || s < 0.9 * this.mapScale) this.mapScale = s; }
+    else if (force || s > this.mapScale) { this.mapScale = s; this.scaledStats.steps = (this.scaledStats.steps || 0) + 1; }
   }
   private mapNewcomers(nodes: any[]): void {
     for (const n of nodes) {
@@ -5374,21 +5416,45 @@ export class GraphView extends ItemView {
   }
   /** Planted by the glide check: fit moves assigned outright, as before. */
   plantTeleport = false;
+  /** Planted (2026-11-08): a landing off the fit always glides to the fit -- the endless loop. */
+  plantGlideToFitAlways = false;
   glideStats: { started: number; done: number; retargeted?: number } = { started: 0, done: 0 };
 
+  /**
+   * UMAP is the central authority over the chunk view's coordinates
+   * (2026-11-08: "umap is the central authority over the 3D graph coordinate
+   * layout. The jostling is because you try too many different and staggered
+   * motion for collisions rather than one correct answer"). One answer: a
+   * chunk-view node is AT its fit -- no relax pass, no glide, no stored
+   * relaxed place, no reheat after a scan's delta. Planted
+   * `plantUmapNotAuthority`: the staggered motions, as before.
+   */
+  plantUmapNotAuthority = false;
+  umapAuthority(): boolean { return this.scaledMode && !this.plantUmapNotAuthority; }
   private glide(n: any, to: number[], ms = 450): void {
     if (!to.every(Number.isFinite)) return;
     // A glide to the raw fit is a glide to the SCALED place (G-324): every
     // caller that says "to its fit" means "to where the map draws it".
     if (this.scaledMode && !n.force && !n.__spreadHome && Number.isFinite(n.fitX)
         && Math.abs(to[0] - n.fitX) + Math.abs(to[1] - n.fitY) + Math.abs(to[2] - (n.fitZ ?? 0)) < 1e-6) to = this.mapTarget(n);
+    // A MAPPED node is placed, never animated (141): one answer, no staggering.
+    // Live-scan diffs not yet mapped (`n.force`) keep their forces (107).
+    if (this.umapAuthority() && !n.force) {
+      n.x = n.fx = to[0]; n.y = n.fy = to[1]; n.z = n.fz = to[2];
+      n.vx = n.vy = n.vz = 0; delete n.__glide; this.glides.delete(n);
+      return;
+    }
     if (this.plantTeleport || !Number.isFinite(n.x)) {
       n.x = to[0]; n.y = to[1]; n.z = to[2];
       if (n.__calm) { n.fx = n.x; n.fy = n.y; n.fz = n.z; n.__calmFit = [n.fitX, n.fitY, n.fitZ]; }
       return;
     }
     if (Math.hypot(to[0] - n.x, to[1] - n.y, to[2] - (n.z ?? 0)) < 1e-6) return;
-    n.__glide = { from: [n.x, n.y, n.z ?? 0], to, t0: performance.now(), ms };
+    // Where "home" was when this glide began: a landing re-glides only when
+    // THIS glide was going home and home has since moved (below).
+    const home0 = this.scaledMode && !n.force ? this.mapTarget(n) : [n.fitX, n.fitY, n.fitZ || 0];
+    const toHome = home0.every(Number.isFinite) && Math.hypot(to[0] - home0[0], to[1] - home0[1], to[2] - home0[2]) < 1e-3;
+    n.__glide = { from: [n.x, n.y, n.z ?? 0], to, t0: performance.now(), ms, toHome, home0 };
     n.fx = n.x; n.fy = n.y; n.fz = n.z ?? 0; n.__calm = false;
     this.glides.add(n);
     this.glideStats.started++;
@@ -5416,7 +5482,16 @@ export class GraphView extends ItemView {
         // centred targets 35 s after landing (2026-10-18, G-245). Not under
         // the hover spread, whose glides are to its own homes.
         const want = this.scaledMode && !n.force ? this.mapTarget(n) : [n.fitX, n.fitY, n.fitZ || 0];
+        // ONLY a glide that was going home, whose home moved while it flew
+        // (2026-11-08, "continuous motion ... severe lag"): the rule compared
+        // the landing to the FIT, so every glide to a deliberate place -- the
+        // telescope's radial spread (G-115) above all -- was sent back to the
+        // fit on landing, the telescope sent it out again, and ~650 glides a
+        // second ran forever (1,312 retargets in 2 s, 680 nodes always moving).
+        // Planted `plantGlideToFitAlways`: any landing off the fit, as before.
+        const homeMoved = g.toHome && g.home0 && Math.hypot(want[0] - g.home0[0], want[1] - g.home0[1], want[2] - g.home0[2]) > 2;
         if (!this.plantTeleByForce && !n.__spreadHome && [n.fitX, n.fitY].every(Number.isFinite)
+            && (this.plantGlideToFitAlways || homeMoved)
             && Math.hypot(n.x - want[0], n.y - want[1], (n.z || 0) - want[2]) > 2) {
           this.glide(n, want);
           this.glideStats.retargeted = (this.glideStats.retargeted || 0) + 1;
@@ -6307,6 +6382,7 @@ export class GraphView extends ItemView {
         // Third person (G-333): the craft is drawn at the vehicle even in the ego view.
         mode: () => (this.agent.mode === "ego" && this.agent.view === "third" ? "third" : this.agent.mode),
         anchor: () => this.agent.craftAt,
+        heading: () => this.agent.headingNow(),
         world: () => this.shellOf((this.graph as any)?.graphData?.().nodes || []),
         // A chunk's node, else its page's (drawn whether or not it is open).
         worldNode: (id: string) => this.craftLookup(id) || (this.egoTagUrls[id] ? this.craftLookup("page:" + this.egoTagUrls[id]) : null),
@@ -8021,7 +8097,7 @@ export class GraphView extends ItemView {
   plantRelaxFrameBound = false;
   private relaxChunkView(): void {
     const g: any = this.graph;
-    if (!g || this.level !== "chunk" || this.plantNoChunkRelax || this.scaledMode) return;
+    if (!g || this.level !== "chunk" || this.plantNoChunkRelax || this.scaledMode || this.umapAuthority()) return;
     const seq = ++this.relaxSeq;
     const nodes = (g.graphData().nodes as any[]).filter((n) => Number.isFinite(n.fitX) && Number.isFinite(n.fitY));
     const N = nodes.length;
@@ -9624,7 +9700,7 @@ export class GraphView extends ItemView {
         // where the reader last saw the chunk, not the fit before relaxing.
         // Scaled map (G-324): at S x fit, and no relax pass after.
         if (this.scaledMode) { const t = this.mapTarget(n); n.x = n.fx = t[0]; n.y = n.fy = t[1]; n.z = n.fz = t[2]; n.__mapped = true; continue; }
-        const d = !this.plantNoDrawn && n.drawnAt;
+        const d = !this.plantNoDrawn && !this.umapAuthority() && n.drawnAt;
         if (d) { n.x = n.fx = d[0]; n.y = n.fy = d[1]; n.z = n.fz = d[2]; }
         else { n.x = n.fx = n.fitX; n.y = n.fy = n.fitY; n.z = n.fz = n.fitZ ?? 0; }
       }

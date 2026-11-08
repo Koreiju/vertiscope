@@ -5371,6 +5371,72 @@ panel's box, and converts back to its panel form.*
 
 ---
 
+
+*Verbatim (2026-11-08), (141):*
+
+> i feel like you threw out more than just the 3D stuff. The problem was coming from chunk nodes from scans constantly jostling after scanning, rather than just sticking to the UMAP project. Let's honestly nail this down forever: umap is the central authority over the 3D graph coordinate layout. The jostling is because you try too many different and staggered motion for collisions rather than one correct answer to this base requirement we keep facing issues with because you constantly take the approach of staggering stated previously.
+
+> Streaming correctness is different from layouts too
+
+> Pay much closer attention to how I want you to take care of the non-collision and clumping motion constraint concretely
+
+> We're going for a motion algorithm that essentially acts as a singular post-process that ensures stability/convergence on constraints within a limited time bound. That's it that's all. Shouldn't mean basically gaseous chunks moving erratically forever.
+
+*Read as (141): chunk-view coordinates are the UMAP fit, assigned once -- no
+relax, glide, stored relaxed place or post-delta reheat. Streaming (how deltas
+reach the graph, batching, no-op skips) is a separate concern and is kept.
+Concretely, per 107/119: mapped nodes sit at UMAP x ONE strict collision
+scale (the closest pair just touching); the only motion is ONE post-process,
+time-bounded, that converges and then stops -- every node still afterwards.*
+
+
+*Verbatim (2026-11-08), (142) -- the complete design vision, reviewed whole:*
+
+> Please also review all decisions waiting on me, and also review the complete set of verbatims on our ego, computation graph, panels, cells, gestures, rendering, syntax, assumptions, constraints, extensions to existing components. Do not filter by what is built vs unbuilt. Instead, please look closely at all the different components that, when put together, make a complete design vision, partially also carried over from previous designs (some superseded lucidly, others maybe may require some decisions similar from older designs vs current intuition of our approach). Consider the inspirations as well; kerbal space program, ai-driven programming languages with language models, interactive code graphs with code artifacts compiled over the graph, links between different styles of our own kernel cells (markdown, code, quantized ai model, browser chunk/full page/groups of collected live chunks and the full scale of abstraction over live web pages with rendering on the shadow DOM from a real browser, with its independent and linked corresponding markdown transform of the chunk, a component of the web chunk's object type, similar to our ego/browser panel controls, interpretations of interactions with live code compiled over the computation graph, that serve as an extension of markdown cells to ways in which code can be interacted with and rendered that is different from the artifact-centric code cells that also compile in things like jupyter notebooks. But here, we focus on extending interactions over the component artifacts over a common compilation of the full computation graph over all types of cells. Additionally, since each web browser has its own controls, we technically have code artifacts (as vscode panels) governing the web browser, referenced as controls within our extended markdown, which links to some web browser, perhaps a view of a full browser, rendering just a live page, rendering a live group of chunks, or rendering a singular chunk, and we have links of each browser's rendering of chunks with corresponding linked markdown chunks produced by the object model of the per-chunk-in-browser code artifacts, also governing and in the computation graph. Governing code artifacts follow a standard high-level architecture, meaning that 25 lines gives the full space of code capabilities of the the "thing" and essentially lists all capabilities of the object in code, which are then linked to by a markdown control panel counterpart on an instance of the artifact, and also rendering markdown nodes themselves that link to interactive browser forms undirectedly. Then, gestures on expanding and collapsing would work generally on both computation graph and markdown nested black box interpretations. Powershell terminals should also be added to the set of cells that can be magnetized both vertically and laterally. Magnetization means a temporary link for compilation serialization (up to down, left to right), hard links happen when one type of cell (at whichever level of abstraction, because we must generalize here too, structurally with the standard set of notebook-level cells like code artifacts and generally interactive objects with functions basically that we're mapping in the full computation graph's compilation live) references another cell in any possible way. Terminal calls, markdown references to objects in artifacts that run live code rendering in compilation, browser cells and markdown cells both attached to a chunk object in code, that type of thing. This doesn't affect panel/computation graph representations.
+
+*Read as (142): see `docs/DESIGN_VISION.md`, the whole-vision review this asked for.*
+
+*Verbatim (2026-11-08), (143):*
+
+> Youll have to fix the way the sidecar is run too.
+
+> New workspace view is basically currently broken because of the 3D layout regime. We need strict UMAP fits on all things for this very reason. i shouldn't see an excuse like "no embedding model needed" either. There will be no argument with this. Nothing showing in the chunks view either, even after clicking a center a couple times. All UMAP stuff seems really slow too, along with embeddings maybe.
+
+*Read as (143): supersedes the force-directed-first fallback (Addendum VIII,
+"first handful of scans ... full force-directed layout") and item 107's
+"force-directed live scan diffs not yet mapped": EVERY node is placed by a UMAP
+fit or transform; a fresh workspace fits on its first nodes rather than waiting.
+The force-layout status line goes. The chunk view must draw; UMAP and embedding
+latency are defects.*
+
+*Verbatim (2026-11-08), (144):*
+
+> We also need a clear way of managing new workspaces in our plugin between vaults. That way, we can start new projects fresh without all the inheritance.
+
+*Read as (144): a workspace (the store, fits, caches, logs) is chosen per vault
+and by name from the plugin; "new workspace" starts one empty and the sidecar
+is restarted on it, nothing inherited from another vault or project.*
+
+*Verbatim (2026-11-08), (145):*
+
+> Answer all design conflicts with the overall vision "an interactive computational knowledge graph that extends jupyter kernels to harness evolution using quantized language model kernels"
+
+*Read as (145): the seventeen tensions in `DESIGN_VISION.md` section 4 are
+ruled by that sentence; the rulings are written there, section 4b.*
+
+*Verbatim (2026-11-08), (146) -- set as the session goal:*
+
+> build out every single thing on this ego-centric and knowledge graph related tasks, all features, all design visions, integrated with our plugin, every single feature open for that matter afterwards too, but focusing on the computational reservoir of the ego and the 2D plane editor's designs and integrations with the 3D layout too as its own non-holonomic UMAP that moves in first and third person camera view, always at the "center" of view.
+
+*Read as (146): the ego is its OWN UMAP (its artifacts, not the world's), a
+non-holonomic vehicle drawn in 3D, and the camera keeps it at the centre of view
+in both the first- and third-person modes; the 2D plane editor is integrated
+with it. Then every other open feature.*
+
+*Verbatim (2026-11-08), (147):*
+
+> Opening new vaults should automatically have our plugin installed and sidecar run available.
+
 ## Standing instructions carried in the verbatim
 
 Two of these are process rules, not features, and they bind every future
