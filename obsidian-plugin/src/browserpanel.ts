@@ -46,7 +46,7 @@ export class BrowserPanel {
   private chunkEl: HTMLElement | null = null;
   private chunkComp: Component | null = null;
   chunkShown = "";
-  stats = { exited: 0, opened: 0, went: 0, back: 0, forward: 0, scans: 0, toggles: 0, written: 0, scope: "" as string, split: 0, joined: 0, restoredUrl: 0 };
+  stats = { exited: 0, opened: 0, went: 0, back: 0, forward: 0, scans: 0, toggles: 0, written: 0, scope: "" as string, split: 0, joined: 0, restoredUrl: 0, framed: 0 };
   /** Planted (item 71): the cockpit's fields bind nothing. */
   plantUnbound = false;
   private seenUrl = "";
@@ -137,7 +137,7 @@ export class BrowserPanel {
         card.addEventListener("wheel", onWheel, { capture: true, passive: false });
         return () => {
           card.removeEventListener("wheel", onWheel, true);
-          this.chunkComp?.unload(); this.chunkComp = null; this.chunkEl = null; this.chunkShown = "";
+          this.chunkComp?.unload(); this.chunkComp = null; try { this.chunkLeaf?.detach(); } catch { /* gone */ } this.chunkLeaf = null; this.chunkEl = null; this.chunkShown = "";
           try { leaf.detach(); } catch { /* gone */ }
           this.unsplit?.(); this.unsplit = null;
           if (this.browserLeaf === leaf) this.browserLeaf = null;
@@ -330,8 +330,17 @@ export class BrowserPanel {
     const chunk = scope === "chunk";
     if (this.chunkEl && this.browserLeaf) {
       this.chunkEl.style.display = chunk ? "" : "none";
-      this.browserLeaf.containerEl.style.display = chunk ? "none" : "";
-      if (chunk) void this.showChunk(v);
+      // 137(4): the chunk rung is a BROWSER cell framed on the chunk, with its
+      // markdown beneath -- not the markdown in the browser's place. Planted
+      // `plantChunkMarkdownOnly`: the browser hidden, as before.
+      this.browserLeaf.containerEl.style.display = chunk && this.plantChunkMarkdownOnly ? "none" : "";
+      if (chunk) {
+        void this.showChunk(v);
+        // The page reflows under a frame (lazy images, late fonts): the frame
+        // follows the chunk, re-read each second -- a clip set once drifted
+        // off the chunk within seconds on Wikipedia's B-tree page.
+        if (this.framed && !this.plantChunkMarkdownOnly && now - this.frameAt > 1000) { this.frameAt = now; void this.reframe(v); }
+      } else if (this.framed || this.chunkShown) this.unframe(v);
     }
     if (scope === "page" && !v.offlineFor && now - this.scopeTry > 3000) {
       this.scopeTry = now;
@@ -374,12 +383,88 @@ export class BrowserPanel {
     }
     if (!cid || cid === this.chunkShown) return;
     this.chunkShown = cid;
+    if (!this.plantChunkMarkdownOnly) void this.frame(v, cid);
+    // PLUGIN_GOAL 140(a): "I should only see one unified markdown panel. This
+    // panel format is deprecated." -- and 133(c): ONE markdown panel, the same
+    // code for a billboard's markdown half, a code panel and a notebook cell,
+    // with every special feature. So the chunk's markdown is its note
+    // (`domvec/chunks/<cid>.md`, as a billboard's) in a real editor leaf, never
+    // the fenced `domvec` block with its markdown / shadow-DOM toggle.
+    // Planted `plantChunkFencedBlock`: the old block.
     this.chunkComp?.unload();
     this.chunkComp = new Component();
     this.chunkComp.load();
+    try { this.chunkLeaf?.detach(); } catch { /* gone */ }
+    this.chunkLeaf = null;
     this.chunkEl.empty();
     const NL = "\n";
-    await MarkdownRenderer.render(this.app, "```domvec" + NL + "cid: " + cid + NL + "```", this.chunkEl, this.path, this.chunkComp);
+    if (this.plantChunkFencedBlock) {
+      await MarkdownRenderer.render(this.app, "```domvec" + NL + "cid: " + cid + NL + "```", this.chunkEl, this.path, this.chunkComp);
+      return;
+    }
+    const pay: any = await v.sidecar?.chunk?.(cid);
+    if (this.chunkShown !== cid || !this.chunkEl) return;
+    if (pay?.xpath) this.chunkAddr.set(cid, { url: pay.url, xpath: pay.xpath });
+    const md = ((pay && pay.lines) || []).map((l: any) => String(l.text ?? "")).join(NL);
+    const folder = "domvec/chunks", path = `${folder}/${cid.replace(/[^\w.-]+/g, "_")}.md`;
+    const vault = this.app.vault;
+    if (!vault.getAbstractFileByPath(folder)) await vault.createFolder(folder).catch(() => undefined);
+    let f: any = vault.getAbstractFileByPath(path);
+    if (!f) f = await vault.create(path, md);
+    const Leaf: any = (this.app.workspace as any).activeLeaf?.constructor ?? (this.app.workspace.getMostRecentLeaf() as any)?.constructor;
+    if (!Leaf || this.chunkShown !== cid || !this.chunkEl) return;
+    const leaf = new Leaf(this.app);
+    leaf.containerEl.addClass("domvec-browser-chunk-leaf");
+    this.chunkEl.appendChild(leaf.containerEl);
+    await leaf.openFile(f, { state: { mode: "source", source: false } });
+    this.chunkLeaf = leaf;
+  }
+
+  /** The chunk the browser is framed on, and its frame (host px), while framed. */
+  framed: { cid: string; xpath: string; rect: { top: number; left: number; width: number; height: number } } | null = null;
+  plantChunkMarkdownOnly = false;
+  plantChunkFencedBlock = false;
+  private chunkLeaf: any = null;
+  private chunkAddr = new Map<string, { url: string; xpath: string }>();
+  /** Frame the live browser on one chunk: clipped in OUR element (the webview
+   *  tag), never in the page; the page stays live and interactive within it. */
+  private async frame(v: any, cid: string): Promise<void> {
+    // The chunk's address, asked once per cid: the store is busy while the
+    // browser captures (a /chunk took 1.8 s, /health 10 s, live).
+    let pay: any = this.chunkAddr.get(cid);
+    if (!pay) { pay = await v.sidecar?.chunk?.(cid); if (pay?.xpath) this.chunkAddr.set(cid, { url: pay.url, xpath: pay.xpath }); }
+    const wv: HTMLElement | null = v?.webview || null;
+    if (!pay || !pay.xpath || !wv) return;
+    let shown = ""; try { shown = String(v.shownUrl?.() || (wv as any).getURL()); } catch { /* */ }
+    const key = (u: string) => { try { const x = new URL(u); return x.host + x.pathname.replace(/\/$/, ""); } catch { return u; } };
+    if (key(pay.url) !== key(shown)) { await this.go(pay.url); await new Promise((r) => setTimeout(r, 2500)); }
+    const rect = await v.chunkFrame?.(pay.xpath);
+    if (this.chunkShown !== cid) return;
+    // Not found yet (the page still loading): asked again on the next sync.
+    if (!rect) { this.chunkShown = ""; return; }
+    this.clipTo(wv, rect);
+    this.framed = { cid, xpath: pay.xpath, rect };
+    this.stats.framed = (this.stats.framed || 0) + 1;
+  }
+  private frameAt = 0;
+  async reframe(v: any): Promise<void> {
+    const f = this.framed, wv: HTMLElement | null = v?.webview || null;
+    if (!f || !wv) return;
+    const rect = await v.chunkFrame?.(f.xpath);
+    if (!rect || this.framed !== f) return;
+    this.clipTo(wv, rect); f.rect = rect;
+  }
+  private clipTo(wv: HTMLElement, rect: { top: number; left: number; width: number; height: number }): void {
+    const W = wv.clientWidth, H = wv.clientHeight;
+    const top = Math.max(0, rect.top), left = Math.max(0, rect.left);
+    const bottom = Math.max(0, H - (rect.top + rect.height)), right = Math.max(0, W - (rect.left + rect.width));
+    wv.style.clipPath = `inset(${top}px ${right}px ${bottom}px ${left}px)`;
+    wv.classList.add("domvec-chunk-framed");
+  }
+  private unframe(v: any): void {
+    const wv: HTMLElement | null = v?.webview || null;
+    if (wv) { wv.style.clipPath = ""; wv.classList.remove("domvec-chunk-framed"); }
+    this.framed = null; this.chunkShown = "";
   }
 
   close(): void { this.host.desk.closePath(this.path); }

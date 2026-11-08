@@ -1332,3 +1332,27 @@ button.domvec-run-fence:hover {
 /* 135(b): the flip -- panels around a spot drawn as graph form. */
 .domvec-flip-edges { position: absolute; left: 0; top: 0; pointer-events: none; z-index: 1; overflow: visible; }
 .domvec-flip-edges line { stroke: #9ab; stroke-width: 2.5; stroke-opacity: .9; }
+/* 140(a): the chunk's markdown is the one editor panel. */
+.domvec-browser-chunk > .domvec-browser-chunk-leaf { position: relative; height: 100%; min-height: 160px; }
+.domvec-browser-chunk > .domvec-browser-chunk-leaf > .workspace-leaf-content { height: 100%; }
+/* 140(a): the chunk's markdown is the one editor panel. */
+.domvec-browser-chunk > .domvec-browser-chunk-leaf { position: relative; height: 100%; min-height: 160px; }
+.domvec-browser-chunk > .domvec-browser-chunk-leaf > .workspace-leaf-content { height: 100%; }
+/* 140(b): "computation graphs cannot be contained by their panels. They are
+   contained on the 2D plane, but convert back to their panel form too."
+   A card whose slate is in graph form loses its box: no border, background,
+   clip, scrollbars, head tools or browser half -- the graph sits on the plane.
+   Double-click a node converts back (the slate's own gesture). Planted:
+   body.domvec-plant-graph-boxed keeps the box. */
+body:not(.domvec-plant-graph-boxed) .domvec-plane-card:has(.domvec-slate-graph) {
+  background: transparent !important; border-color: transparent !important; box-shadow: none !important;
+  overflow: visible !important; height: auto !important; resize: none !important;
+}
+body:not(.domvec-plant-graph-boxed) .domvec-plane-card:has(.domvec-slate-graph) :is(.workspace-leaf, .workspace-leaf-content, .view-content, .cm-editor, .cm-scroller, .cm-content, .markdown-source-view) {
+  background: transparent !important; overflow: visible !important; border: none !important;
+}
+body:not(.domvec-plant-graph-boxed) .domvec-plane-card:has(.domvec-slate-graph) :is(.view-header, .domvec-plane-head-tools, .domvec-browser-panel-leaf, .domvec-browser-chunk, .domvec-browser-card-split, .domvec-browser-card-exit) { display: none !important; }
+body:not(.domvec-plant-graph-boxed) .domvec-plane-card:has(.domvec-slate-graph) ::-webkit-scrollbar { display: none; }
+.domvec-slate-graph svg { overflow: visible; }
+.domvec-browser-chunk-leaf :is(.view-header, .metadata-container, .inline-title) { display: none !important; }
+body:not(.domvec-plant-graph-boxed) .domvec-plane-card:has(.domvec-slate-graph) .domvec-slate-graph { overflow: visible !important; width: max-content; }

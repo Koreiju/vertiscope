@@ -12883,6 +12883,102 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "PG-137-chunk-browser",
+      asks: "PLUGIN_GOAL 137(4): a chunk view is a browser cell -- the live page framed on the chunk (clipped in our element, nothing written into the page), still the live interactive page, with its markdown counterpart beneath. Planted (plantChunkMarkdownOnly): the markdown in the browser's place",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const B = window.__domvecBrowserPanel; const P = app.plugins.plugins["domvec-bridge"];
+          window.__domvecPlane.closePath(B.path); await sleep(600); await B.open(); await sleep(2000);
+          const got = await P.sidecar.search("B-tree insertion split node", { k: 10 });
+          const hit = got && got.hits.find((h) => /wikipedia\.org/.test(h.url) && h.xpath && h.xpath.split("/").length > 6);
+          if (!hit) return { planted: ${planted}, error: "no wikipedia chunk in the store" };
+          const v = B.view();
+            const setScope = (to) => { const ed = B.slateView().editor; const t = ed.getValue().split(String.fromCharCode(10)); const n = t.findIndex((l) => /^	scope	/.test(l)); if (n >= 0) ed.setLine(n, String.fromCharCode(9) + "scope" + String.fromCharCode(9) + to); };
+          B.plantChunkMarkdownOnly = ${planted};
+          try {
+            await B.go(hit.url); await sleep(4000);
+            v.lastHovered = { cid: hit.cid, url: hit.url, stored: hit.cid };
+            const fl = () => B.slateView().editor.getValue();
+            setScope("chunk");
+            let framed = null;
+            for (let i = 0; i < 100 && !framed; i++) { await sleep(250); B.sync(); framed = B.framed; }
+            const wv = v.webview, leaf = B.browserLeaf.containerEl;
+            const shown = getComputedStyle(leaf).display !== "none" && leaf.offsetHeight > 0;
+            const clip = wv.style.clipPath || "";
+            let centreInChunk = null, clipMatches = null, clipSeen = null;
+            await sleep(2500); for (let i = 0; i < 4; i++) { B.sync(); await sleep(400); } framed = B.framed;
+            if (framed) {
+              await B.reframe(v); await sleep(200);
+              let z = 1; try { z = wv.getZoomFactor(); } catch (e) {}
+              const clipNow = wv.style.clipPath || "";
+              const now = await wv.executeJavaScript("(function(x){var n=document.evaluate(x,document,null,XPathResult.FIRST_ORDERED_NODE_TYPE,null).singleNodeValue;if(n&&n.nodeType===3)n=n.parentElement;if(!n)return null;var b=n.getBoundingClientRect();var t=Math.max(b.top,0),bt=Math.min(b.bottom,innerHeight);var e=document.elementFromPoint(b.left+b.width/2,(t+bt)/2);return {top:b.top,left:b.left,width:b.width,inside:!!(e&&(n===e||n.contains(e)))};})(" + JSON.stringify(hit.xpath) + ")");
+              const m = clipNow.startsWith("inset(") ? [null, ...clipNow.slice(6, -1).split(" ").map((x) => parseFloat(x))] : null;
+              clipSeen = { clip: clipNow, element_host_px: now && [now.top * z, now.left * z] };
+              centreInChunk = !!now && now.inside;
+              clipMatches = !!(m && now) && Math.abs(+m[1] - Math.max(0, now.top * z)) < 6 && Math.abs(+m[4] - Math.max(0, now.left * z)) < 6;
+            }
+            const md = document.querySelector(".domvec-browser-chunk");
+            const mdShown = !!md && getComputedStyle(md).display !== "none";
+            return { planted: ${planted}, cid: hit.cid, url: hit.url, browser_shown: shown, clipped: clip.startsWith("inset"), frame: framed && framed.rect, centre_in_chunk: centreInChunk, clip_matches_element: clipMatches, clip_seen: clipSeen, markdown_beneath: mdShown };
+          } finally {
+            B.plantChunkMarkdownOnly = false;
+            setScope("live");
+            await sleep(300); B.sync();
+          }
+        })()`, { timeout: 90000 });
+        const clean = await arm(false), planted = await arm(true);
+        const pass = !clean.error && clean.browser_shown && clean.clipped && clean.centre_in_chunk === true && clean.clip_matches_element === true && clean.markdown_beneath
+          && !planted.error && !planted.browser_shown;
+        return { pass, evidence: { clean, planted } };
+      },
+    },
+    {
+      id: "PG-140",
+      asks: "PLUGIN_GOAL 140: (a) the chunk's markdown beneath a chunk-rung browser cell is the ONE markdown panel (an editor leaf on domvec/chunks/<cid>.md), not the deprecated fenced domvec block; (b) a panel's graph form is not contained by its panel -- no box, no clip, no browser half -- and converts back to the panel. Planted: plantChunkFencedBlock (a) and body.domvec-plant-graph-boxed (b)",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const B = window.__domvecBrowserPanel, P = app.plugins.plugins["domvec-bridge"];
+          window.__domvecPlane.closePath(B.path); await sleep(600); await B.open(); await sleep(2000);
+          const ed = () => B.slateView().editor;
+          const setScope = (to) => { const t = ed().getValue().split(String.fromCharCode(10)); const n = t.findIndex((l) => /^\tscope\t/.test(l)); if (n >= 0) ed().setLine(n, String.fromCharCode(9) + "scope" + String.fromCharCode(9) + to); };
+          B.plantChunkFencedBlock = ${planted};
+          document.body.classList.toggle("domvec-plant-graph-boxed", ${planted});
+          const out = { planted: ${planted} };
+          try {
+            const v = B.view();
+            v.lastHovered = { cid: "13acd1ce1fbfb2c9", url: "https://en.wikipedia.org/wiki/B-tree", stored: "13acd1ce1fbfb2c9" };
+            B.chunkShown = "";
+            setScope("chunk");
+            let el = null;
+            for (let i = 0; i < 60; i++) { await sleep(300); B.sync(); el = document.querySelector(".domvec-browser-chunk"); if (el && (el.querySelector(".cm-editor") || el.querySelector(".block-language-domvec, pre, .domvec-chunk"))) break; }
+            out.chunk_editor = !!(el && el.querySelector(".domvec-browser-chunk-leaf .cm-editor"));
+            out.chunk_fenced = !!(el && el.querySelector(".block-language-domvec"));
+            out.chunk_text = el ? (el.innerText || "").slice(0, 60) : "";
+            setScope("live"); await sleep(600); B.sync();
+            // (b) graph form
+            const sv = B.slateView(); const card = sv.containerEl.closest(".domvec-plane-card");
+            P.cockpit.flipForm(sv); await sleep(800);
+            const g = card.querySelector(".domvec-slate-graph");
+            const cs = getComputedStyle(card);
+            const br = card.querySelector(".domvec-browser-panel-leaf");
+            out.graph_form = !!g;
+            out.card_box = { border: cs.borderTopColor, bg: cs.backgroundColor, overflow: cs.overflow };
+            out.browser_half_shown = !!br && getComputedStyle(br).display !== "none";
+            out.unboxed = !!g && cs.overflow === "visible" && (cs.backgroundColor === "rgba(0, 0, 0, 0)" || cs.backgroundColor === "transparent") && !out.browser_half_shown;
+            P.cockpit.flipForm(sv); await sleep(800);
+            out.back_to_panel = !card.querySelector(".domvec-slate-graph") && getComputedStyle(card).overflow !== "visible";
+          } finally { B.plantChunkFencedBlock = false; document.body.classList.remove("domvec-plant-graph-boxed"); }
+          return out;
+        })()`, { timeout: 90000 });
+        const clean = await arm(false), planted = await arm(true);
+        const pass = !clean.error && clean.chunk_editor && !clean.chunk_fenced && clean.graph_form && clean.unboxed && clean.back_to_panel
+          && !planted.error && !planted.chunk_editor && !planted.unboxed;
+        return { pass, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {

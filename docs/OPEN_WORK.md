@@ -17,7 +17,7 @@ Last updated 2026-11-07 late. A native store crash at CHECKPOINT (D-23 class, al
 | 1 | Panel collapses while its markdown renders | confirmed (measured + screenshot) | head one row (29 px), body 270 px; `a6e6136`. No planted check yet |
 | 2 | Chunk panels under the browser | confirmed | PG-137-panels-over, run 61 |
 | 3 | Image+caption / infobox sub-chunking (Gay, NC) | needs the reader | store holds the box as ONE 18-line chunk; a live hover resolves to it. Not reproduced |
-| 4 | Chunk views as browser cells, linked to markdown through a few abstract graph nodes | **not started** | design item; largest open build |
+| 4 | Chunk views as browser cells, linked to markdown | confirmed | PG-137-chunk-browser run 51: on the chunk rung the LIVE browser stays, framed on the chunk by a clip-path on our webview element (nothing written into the page), re-framed each second as the page reflows; clip = element rect exactly (31.19/103.69 host px), the element at the frame's centre is the chunk's; its markdown beneath as the one editor panel (140a). Planted plantChunkMarkdownOnly: browser hidden. Found on the way: scrollIntoView({behavior:"instant"}) does not scroll in this Electron (rect read 3,400 px off); the store's /chunk is slow while capturing (memoised per cid) |
 | 5 | Arrow keys run the search with an empty field | needs the reader | synthetic arrow press runs nothing; need the steps |
 | 6 | Chunks clumped | partial | the layout keeps UMAP exactly (drift 0); the fit packs clusters tight. Refit run 2026-11-07 with min_dist 0.6 (pumap + umap): median nearest spacing / cloud radius 0.0029 -> 0.0026, i.e. **no effect** (the fit is reframed after); reverted. Next: a density-equalising step (densMAP, or rescaling each cluster about its centre) -- a design choice |
 | 7 | Code link opens the Microsoft Store | confirmed | PG-137-fixes, run 55 |
@@ -54,6 +54,14 @@ Last updated 2026-11-07 late. A native store crash at CHECKPOINT (D-23 class, al
 | 135(e) panel page view draws the page's own pictures | confirmed | desktop width (PG-135-desktop-width) + per-host native fallback (PG-139-richardmille) |
 | 135(f) Q.002: keep hover panes after they close | confirmed | Q-002 run 11: the closed VHS pane's text kept (as a version) after close and revisit; planted retire-in-session + no-versions: gone |
 | 136 magnetizing never creates links | confirmed by inspection | snapping records neighbours only |
+
+## PLUGIN_GOAL 140
+
+| Item | Status | Evidence |
+|---|---|---|
+| 140(a) one unified markdown panel; the fenced domvec block is deprecated | confirmed (chunk rung) | PG-140 run 52: the chunk's markdown is an editor leaf on domvec/chunks/<cid>.md; planted plantChunkFencedBlock: the old block. Other places still rendering the fenced block: not yet swept |
+| 140(b) graph forms are on the 2D plane, not contained by their panels; convert back | confirmed | PG-140 run 52: a slate in graph form loses its card's box, clip, head and browser half (transparent, overflow visible); flipping back restores the panel. Planted body.domvec-plant-graph-boxed. Screenshot app_20261107_235721 |
+| reload artefact | open | an editor leaf already on the plane before a plugin reload keeps no slate extension (raw text, no graph form) until the cell is reopened |
 
 ## PLUGIN_GOAL 138–139
 

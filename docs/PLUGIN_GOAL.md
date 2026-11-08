@@ -5356,6 +5356,19 @@ goal/PRD.*
 (b) links flicker in the 3D view (found: the no-long-links cap was applied by
 one of the two paths that write the link buffer).*
 
+*2026-11-07, late night (with a screenshot of a 2D browser cell on the chunk
+rung: the slate's fields drawn as a star graph INSIDE its panel, and beneath
+it the chunk 13acd1ce in the fenced `domvec` block with its "markdown /
+shadow DOM" toggle):*
+
+> I should only see one unified markdown panel. This panel format is deprecated. Also, computation graphs cannot be contained by their panels. They are contained on the 2D plane, but convert back to their panel form too.
+
+*Read as (140): (a) the chunk's markdown counterpart is the one unified
+markdown panel (an editor leaf, as billboards, chats, code and the slate
+are), never the deprecated fenced-block widget with its markdown/shadow-DOM
+toggle; (b) a panel's graph form is drawn on the 2D plane, not inside the
+panel's box, and converts back to its panel form.*
+
 ---
 
 ## Standing instructions carried in the verbatim

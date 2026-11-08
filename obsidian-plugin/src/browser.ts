@@ -1153,6 +1153,33 @@ export class BrowserView extends ItemView {
       JSON.stringify(xpath) + ")").catch(() => false);
   }
 
+  /**
+   * The chunk's frame on the LIVE page (PLUGIN_GOAL 137(4): "an efficient
+   * browser essentially renders just the handful of chunks from the live
+   * pages that allows for actual interactions with chunks"). The element is
+   * scrolled to the top -- a reader's action, nothing written -- and its
+   * rect read, in host pixels (the page's css px times the desktop-width zoom).
+   */
+  async chunkFrame(xpath: string): Promise<{ top: number; left: number; width: number; height: number } | null> {
+    const wv: any = this.webview;
+    if (!wv || !xpath) return null;
+    let z = 1; try { z = wv.getZoomFactor(); } catch { /* 1 */ }
+    const r = await wv.executeJavaScript(
+      "(function(x){var n=document.evaluate(x,document,null," +
+      "XPathResult.FIRST_ORDERED_NODE_TYPE,null).singleNodeValue;" +
+      "if(n&&n.nodeType===3)n=n.parentElement;if(!n)return null;" +
+      // scrollIntoView({behavior:'instant'}) did not scroll here at all
+      // (scrollY stayed 0, the rect read 3,400 px below): scrolled by the
+      // element's measured offset instead, then read again.
+      // 80 css px of room above: a page's sticky header (Wikipedia's) sits
+      // over the viewport's top, and the frame under it showed the header.
+      "var b=n.getBoundingClientRect();window.scrollTo({top:scrollY+b.top-80,behavior:'auto'});" +
+      "b=n.getBoundingClientRect();return {top:b.top,left:b.left,width:b.width,height:b.height};})(" +
+      JSON.stringify(xpath) + ")").catch(() => null);
+    if (!r) return null;
+    return { top: r.top * z, left: r.left * z, width: r.width * z, height: r.height * z };
+  }
+
   /** Which chunks are pinned -- for the harness. */
   pinnedState() {
     return [...this.pinned.values()].map((p) => ({
