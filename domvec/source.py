@@ -285,6 +285,76 @@ def _js_comments(text: str):
     return out
 
 
+#: Planted (R-C5): every node's whole source as one code value, as before.
+PLANT_WHOLE_BODIES = False
+
+#: The window a code piece is cut to, in the same tokens chunks are measured in.
+CODE_PIECE_TOKENS = 256
+
+
+def _own_lines(lines, node, first: int, last: int, doc) -> List[int]:
+    """The rows of `node` that no nested def/class covers (those are their own
+    addresses), less its docstring rows."""
+    covered = set()
+    for sub in getattr(node, "body", []):
+        if _kind_of(sub) is not None:
+            a = getattr(sub, "lineno", 1) - 1
+            # Decorators belong to the definition they decorate.
+            for d in getattr(sub, "decorator_list", []):
+                a = min(a, getattr(d, "lineno", a + 1) - 1)
+            b = getattr(sub, "end_lineno", a + 1) - 1
+            covered.update(range(a, b + 1))
+    if doc and getattr(node, "body", None):
+        d0 = node.body[0]
+        if isinstance(getattr(d0, "value", None), ast.Constant) and isinstance(d0.value.value, str):
+            covered.update(range(d0.lineno - 1, getattr(d0, "end_lineno", d0.lineno)))
+    return [r for r in range(first, min(last, len(lines) - 1) + 1) if r not in covered]
+
+
+def _pieces(lines, rows: List[int]):
+    """Consecutive runs of `rows`, each cut to about CODE_PIECE_TOKENS."""
+    from . import tokens as _tok
+    NL = chr(10)
+    run: List[int] = []
+    def flush():
+        if run:
+            yield run[0], run[-1], NL.join(lines[r] for r in run)
+    out = []
+    for r in rows:
+        if run and (r != run[-1] + 1 or _tok.budget(NL.join(lines[x] for x in run + [r])) > CODE_PIECE_TOKENS):
+            out.extend(flush()); run = []
+        run.append(r)
+    out.extend(flush())
+    return out
+
+
+def _text_pieces(value: str) -> List[str]:
+    """A docstring or comment over the window, cut at paragraph breaks, then
+    at lines, into pieces of about CODE_PIECE_TOKENS (R-C5: trie.py's module
+    docstring was one 1,006-token value, analytics/reach.py's 1,337)."""
+    from . import tokens as _tok
+    NL = chr(10)
+    if PLANT_WHOLE_BODIES or _tok.budget(value) <= CODE_PIECE_TOKENS:
+        return [value]
+    units: List[str] = []
+    for para in value.split(NL + NL):
+        if _tok.budget(para) <= CODE_PIECE_TOKENS:
+            units.append(para)
+        else:
+            units.extend(para.split(NL))
+    out: List[str] = []
+    cur = ""
+    for u in units:
+        joined = (cur + NL + NL + u) if cur else u
+        if cur and _tok.budget(joined) > CODE_PIECE_TOKENS:
+            out.append(cur); cur = u
+        else:
+            cur = joined
+    if cur:
+        out.append(cur)
+    return out
+
+
 def tag_source(text: str, *,
                root: str = "repo", rel_path: str = "",
                lines_at: Optional[Dict[str, Tuple[int, int]]] = None,
@@ -325,7 +395,11 @@ def tag_source(text: str, *,
         module = addr.step("module")
         for row, body in _js_comments(text):
             emit(addr.step("comment", module), "visible", body, row, row)
-        emit(addr.step("code", module), "code", text, 0, max(len(lines) - 1, 0))
+        if PLANT_WHOLE_BODIES:
+            emit(addr.step("code", module), "code", text, 0, max(len(lines) - 1, 0))
+        else:
+            for a, b, piece in _pieces(lines, list(range(len(lines)))):
+                emit(addr.step("code", module), "code", piece, a, b)
         return out
 
     try:
@@ -338,7 +412,8 @@ def tag_source(text: str, *,
     if tree is not None:
         doc = _docstring_of(tree)
         if doc:
-            emit(addr.step("docstring", module), "visible", doc, 0, 0)
+            for piece in _text_pieces(doc):
+                emit(addr.step("docstring", module), "visible", piece, 0, 0)
 
         def walk(node, parent_xpath: str) -> None:
             for child in getattr(node, "body", []):
@@ -358,8 +433,9 @@ def tag_source(text: str, *,
 
                 inner = _docstring_of(child)
                 if inner:
-                    emit(addr.step("docstring", here), "visible", inner,
-                         first, last)
+                    for piece in _text_pieces(inner):
+                        emit(addr.step("docstring", here), "visible", piece,
+                             first, last)
 
                 # The body, minus its docstring: the docstring is already an
                 # address of its own and carrying it twice would make one
@@ -368,7 +444,19 @@ def tag_source(text: str, *,
                 if inner:
                     body = body.replace('"""%s"""' % inner, "", 1)
                     body = body.replace("'''%s'''" % inner, "", 1)
-                emit(addr.step("code", here), "code", body, first, last)
+                if PLANT_WHOLE_BODIES:
+                    emit(addr.step("code", here), "code", body, first, last)
+                else:
+                    # R-C5 (2026-11-08): a class's body CONTAINED every method's
+                    # source, and `walk` then emitted each method again -- the
+                    # store's largest chunk was content_tagger.py's at 6,368
+                    # tokens, 25x the window. A node's code is now only the
+                    # lines its own nested definitions do not cover (they are
+                    # addresses of their own), and a body still past the window
+                    # is cut at line boundaries into window-sized pieces.
+                    own = _own_lines(lines, child, first, last, inner)
+                    for a, b, piece in _pieces(lines, own):
+                        emit(addr.step("code", here), "code", piece, a, b)
 
                 walk(child, here)
 
