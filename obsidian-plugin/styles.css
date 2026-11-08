@@ -1320,3 +1320,12 @@ button.domvec-run-fence:hover {
 .domvec-var-action { font-size: 0; cursor: pointer; }
 .domvec-var-action::before { content: "false"; font-size: var(--font-text-size, 16px); color: var(--text-muted); }
 .domvec-var-action:hover::before { content: "true"; color: var(--text-accent); }
+/* 135(b): a browser cell's pair pulled apart, joined by a solid link. */
+.domvec-browser-card-split { position: absolute; top: 4px; right: 28px; cursor: pointer; z-index: 5; opacity: .75; font-size: 14px; }
+.domvec-browser-card-split:hover { opacity: 1; }
+.domvec-browser-card.is-split { overflow: visible !important; height: auto !important; }
+.domvec-browser-card.is-split > .domvec-browser-panel-leaf.is-pulled { position: absolute !important; flex: none !important; border: 1px solid #556; border-radius: 6px; background: var(--background-primary); box-shadow: 0 4px 18px rgba(0,0,0,.35); display: flex; flex-direction: column; }
+.domvec-browser-card.is-split > .domvec-browser-panel-leaf.is-pulled > .workspace-leaf-content { flex: 1 1 auto; height: auto; }
+.domvec-browser-grip { flex: 0 0 auto; cursor: grab; font-size: 11px; padding: 2px 8px; background: var(--background-secondary); border-bottom: 1px solid #444; user-select: none; }
+.domvec-pair-link { position: absolute; overflow: visible; pointer-events: none; z-index: 4; }
+.domvec-pair-link line { stroke: #9ab; stroke-width: 3; pointer-events: stroke; cursor: context-menu; }

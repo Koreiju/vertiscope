@@ -12765,6 +12765,52 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "PG-135-pull-apart",
+      asks: "PLUGIN_GOAL 135(b): a 2D browser cell's markdown and browser halves, one unit, pull apart into two panels joined by a solid undirected link; the live page is kept (not reloaded); right-click toggles the link; again rejoins. Planted (plantPairNoLink): pulled apart with no link",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const B = window.__domvecBrowserPanel;
+          await B.open(); await sleep(1500);
+          B.plantPairNoLink = ${planted};
+          const v = B.view(); const wv = v && v.webview;
+          let loads = 0; const onL = () => loads++; wv && wv.addEventListener("did-start-loading", onL);
+          let url0 = ""; try { url0 = wv.getURL(); } catch (e) {}
+          const leafEl = B.browserLeaf.containerEl, card = leafEl.parentElement;
+          const slate = card.querySelector(":scope > .workspace-leaf:not(.domvec-browser-panel-leaf)");
+          const ov = (a, b) => !(a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top);
+          const before = ov(slate.getBoundingClientRect(), leafEl.getBoundingClientRect()) || Math.abs(slate.getBoundingClientRect().bottom - leafEl.getBoundingClientRect().top) < 3;
+          if (B.isSplit) B.togglePair();
+          B.togglePair(); await sleep(600);
+          const sr = slate.getBoundingClientRect(), br = leafEl.getBoundingClientRect();
+          const pr = card.parentElement.getBoundingClientRect();
+          const inside = br.left >= pr.left - 1 && br.right <= pr.right + 1 && br.top >= pr.top - 1;
+          const gap = Math.max(br.left - sr.right, sr.left - br.right, br.top - sr.bottom, sr.top - br.bottom);
+          const line = card.querySelector(":scope > svg.domvec-pair-link line");
+          let ends = null, op0 = null, op1 = null;
+          if (line) {
+            const lr = line.getBoundingClientRect();
+            ends = { touches_slate: lr.left <= sr.right && lr.right >= sr.left, touches_browser: lr.right >= br.left && lr.left <= br.right };
+            op0 = line.getAttribute("stroke-opacity");
+            const r = line.getBoundingClientRect();
+            line.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 }));
+            op1 = line.getAttribute("stroke-opacity");
+          }
+          let url1 = ""; try { url1 = wv.getURL(); } catch (e) {}
+          B.togglePair(); await sleep(300);
+          const rejoined = !card.classList.contains("is-split") && !card.querySelector(":scope > svg.domvec-pair-link");
+          wv && wv.removeEventListener("did-start-loading", onL);
+          B.plantPairNoLink = false;
+          return { planted: ${planted}, inside_plane: inside, one_unit_before: before, gap_px: Math.round(gap), link: !!line, ends, opacity: [op0, op1], same_url: url0 === url1, reloads: loads, rejoined };
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        const pass = !clean.error && clean.inside_plane && clean.one_unit_before && clean.gap_px > 20 && clean.link && clean.ends && clean.ends.touches_slate && clean.ends.touches_browser
+          && clean.opacity[0] === "0.95" && clean.opacity[1] === "0.25" && clean.same_url && clean.reloads === 0 && clean.rejoined
+          && !planted.error && !planted.link;
+        return { pass, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {

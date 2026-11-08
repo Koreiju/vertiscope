@@ -46,7 +46,7 @@ export class BrowserPanel {
   private chunkEl: HTMLElement | null = null;
   private chunkComp: Component | null = null;
   chunkShown = "";
-  stats = { exited: 0, opened: 0, went: 0, back: 0, forward: 0, scans: 0, toggles: 0, written: 0, scope: "" as string };
+  stats = { exited: 0, opened: 0, went: 0, back: 0, forward: 0, scans: 0, toggles: 0, written: 0, scope: "" as string, split: 0, joined: 0 };
   /** Planted (item 71): the cockpit's fields bind nothing. */
   plantUnbound = false;
   private seenUrl = "";
@@ -54,6 +54,10 @@ export class BrowserPanel {
   /** Planted: the action fields read "go", as before. */
   plantGoActions = false;
   plantNoExit = false;
+  /** Planted: pulled apart with no link drawn between the halves (135(b)). */
+  plantPairNoLink = false;
+  /** The pair's pull-apart, while split: undoes it. */
+  private unsplit: (() => void) | null = null;
   private scopeTry = 0;
   private hooked = new WeakSet<HTMLElement>();
 
@@ -108,6 +112,16 @@ export class BrowserPanel {
         card.appendChild(leaf.containerEl);
         await leaf.setViewState({ type: this.host.browserViewType, active: false });
         this.browserLeaf = leaf;
+        // PLUGIN_GOAL 135(b): "the markdown and browser panels in the 2D plane
+        // appear as one unit, but should still be able to be pulled apart and
+        // show solid links between the two". The browser keeps its DOM parent
+        // (a reparented <webview> reloads its page) and is offset out of the
+        // card; a solid undirected link joins the halves, right-click toggles
+        // it translucent (135(d)), the split control again rejoins.
+        const sp = card.createSpan({ cls: "domvec-browser-card-split", text: "⇹" });
+        sp.setAttr("aria-label", "pull the browser apart from its markdown");
+        sp.onpointerdown = (e: PointerEvent) => e.stopPropagation();
+        sp.onclick = (e: MouseEvent) => { e.stopPropagation(); this.togglePair(); };
         const chunkEl = card.createDiv({ cls: "domvec-browser-chunk" });
         chunkEl.style.display = "none";
         this.chunkEl = chunkEl;
@@ -123,6 +137,7 @@ export class BrowserPanel {
           card.removeEventListener("wheel", onWheel, true);
           this.chunkComp?.unload(); this.chunkComp = null; this.chunkEl = null; this.chunkShown = "";
           try { leaf.detach(); } catch { /* gone */ }
+          this.unsplit?.(); this.unsplit = null;
           if (this.browserLeaf === leaf) this.browserLeaf = null;
         };
       },
@@ -136,6 +151,75 @@ export class BrowserPanel {
     if (cm) { const st = foldsOf(cm); if (st.collapsed) cm.dispatch({ effects: setFolds.of({ ...st, collapsed: false }) }); }
     if (url) await this.go(url);
     return this.view();
+  }
+
+  /** Is the pair pulled apart? */
+  get isSplit(): boolean { return !!this.unsplit; }
+
+  /** Pull the browser half out of its card, or put it back (135(b)). */
+  togglePair(): boolean {
+    if (this.unsplit) { this.unsplit(); this.unsplit = null; this.stats.joined++; return false; }
+    const leafEl: HTMLElement | undefined = this.browserLeaf?.containerEl;
+    const card = leafEl?.parentElement;
+    if (!leafEl || !card) return false;
+    const w = card.offsetWidth; let h = Math.max(260, leafEl.offsetHeight);
+    card.addClass("is-split");
+    // Where the plane has room: beside the slate, else below it -- and kept
+    // inside the plane (first build placed it right of a narrow pane, clipped).
+    const plane = card.parentElement as HTMLElement;
+    const pw = plane?.clientWidth || 1e9, ph = plane?.clientHeight || 1e9;
+    const slateEl = card.querySelector(":scope > .workspace-leaf:not(.domvec-browser-panel-leaf)") as HTMLElement | null;
+    const cl = card.offsetLeft, ct = card.offsetTop, ch = slateEl ? slateEl.offsetTop + slateEl.offsetHeight : 200;
+    let dx = w + 60, dy = 0;
+    // Below the slate, shrunk to the room left -- never back over it.
+    if (cl + dx + w > pw) { dx = 0; dy = ch + 50; h = Math.max(160, Math.min(h, ph - ct - dy - 8)); }
+    const clamp = () => { dx = Math.max(-cl, Math.min(dx, pw - cl - w)); dy = Math.max(-ct, Math.min(dy, ph - ct - h)); };
+    clamp();
+    leafEl.addClass("is-pulled");
+    const place = () => { leafEl.style.left = dx + "px"; leafEl.style.top = dy + "px"; leafEl.style.width = w + "px"; leafEl.style.height = h + "px"; };
+    place();
+    const grip = leafEl.createDiv({ cls: "domvec-browser-grip", text: "browser ⠿" });
+    leafEl.prepend(grip);
+    grip.onpointerdown = (e: PointerEvent) => {
+      e.preventDefault(); e.stopPropagation();
+      const sx = e.clientX - dx, sy = e.clientY - dy;
+      const mv = (m: PointerEvent) => { dx = m.clientX - sx; dy = m.clientY - sy; clamp(); place(); draw(); };
+      const up = () => { window.removeEventListener("pointermove", mv); window.removeEventListener("pointerup", up); };
+      window.addEventListener("pointermove", mv); window.addEventListener("pointerup", up);
+    };
+    const NS = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(NS, "svg");
+    svg.classList.add("domvec-pair-link");
+    const line = document.createElementNS(NS, "line");
+    svg.appendChild(line);
+    if (!this.plantPairNoLink) card.appendChild(svg);
+    let solid = true;
+    line.addEventListener("contextmenu", (e) => { e.preventDefault(); e.stopPropagation(); solid = !solid; line.setAttribute("stroke-opacity", solid ? "0.95" : "0.25"); svg.dataset.on = String(solid); });
+    const draw = () => {
+      // In the card's own coordinates: the slate's centre to the browser's.
+      const slate = card.querySelector(":scope > .workspace-leaf:not(.domvec-browser-panel-leaf)") as HTMLElement | null;
+      // Edge to edge: the facing sides of the two halves, never across either.
+      const sTop = slate ? slate.offsetTop : 0, sBot = slate ? slate.offsetTop + slate.offsetHeight : 80;
+      let sx: number, sy: number, bx: number, by: number;
+      if (dy >= sBot) { sx = bx = Math.max(dx, 0) / 2 + Math.min(dx + w, card.offsetWidth) / 2; sy = sBot; by = dy; }
+      else if (dx >= card.offsetWidth) { sy = by = (sTop + sBot) / 2; sx = card.offsetWidth; bx = dx; }
+      else { sx = card.offsetWidth / 2; sy = (sTop + sBot) / 2; bx = dx + w / 2; by = dy + h / 2; }
+      const x0 = Math.min(sx, bx) - 4, y0 = Math.min(sy, by) - 4;
+      svg.style.left = x0 + "px"; svg.style.top = y0 + "px";
+      svg.setAttribute("width", String(Math.abs(bx - sx) + 8)); svg.setAttribute("height", String(Math.abs(by - sy) + 8));
+      line.setAttribute("x1", String(sx - x0)); line.setAttribute("y1", String(sy - y0));
+      line.setAttribute("x2", String(bx - x0)); line.setAttribute("y2", String(by - y0));
+    };
+    line.setAttribute("stroke-opacity", "0.95"); svg.dataset.on = "true";
+    draw();
+    const ro = new ResizeObserver(draw); ro.observe(card);
+    this.unsplit = () => {
+      ro.disconnect(); svg.remove(); grip.remove();
+      card.removeClass("is-split"); leafEl.removeClass("is-pulled");
+      leafEl.style.left = leafEl.style.top = leafEl.style.width = leafEl.style.height = "";
+    };
+    this.stats.split++;
+    return true;
   }
 
   /** The browser to a url, once its webview takes one (dom-ready). */
