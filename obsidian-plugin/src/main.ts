@@ -136,6 +136,15 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     window.setTimeout(() => { this.installIntoNewVaults(); }, 5000);
     this.registerInterval(window.setInterval(() => this.installIntoNewVaults(), 15000));
     window.setTimeout(() => { void this.autostartSidecar(); }, 4000);
+    // The workspace button names the open workspace (144); the view's header
+    // is built before the plugin hands it the menu, so it is labelled here.
+    this.registerInterval(window.setInterval(() => {
+      const name = (this.settings.activeWorkspace || this.workspaceNameOf(this.settings.sidecarLaunch?.workspace) || "workspace") + " ▾";
+      for (const leaf of this.app.workspace.getLeavesOfType("domvec-graph-view")) {
+        const b = (leaf.view as any).workspaceButton as HTMLElement | null;
+        if (b && b.textContent !== name) b.setText(name);
+      }
+    }, 2000));
     // This load's generation (G-175): a view born in an earlier load whose
     // loop is still running reads a newer number and stops itself.
     (window as any).__domvecLoadGen = ((window as any).__domvecLoadGen || 0) + 1;

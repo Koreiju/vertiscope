@@ -354,7 +354,7 @@ export class SceneBatch {
     return m;
   }
   /** Pixels -> view-space units at unit depth, for the halo's floor: 2 / (H * P[1][1]). */
-  setViewport(heightPx: number, projYY: number, widthPx = 0): void {
+  setViewport(heightPx: number, projYY: number, widthPx = 0, areaPx = 0, haloPx = 0): void {
     const u = (this.halo.material as THREE.ShaderMaterial).uniforms;
     if (heightPx > 0 && projYY > 0) u.uPxView.value = 2 / (heightPx * projYY);
     // PLUGIN_GOAL 137(6), seen 2026-11-08: at the full 60,927-node chunk
@@ -367,7 +367,8 @@ export class SceneBatch {
     const n = this.glass.geo.instanceCount;
     if (widthPx > 0 && heightPx > 0 && n > 0) {
       const r = this.haloMinPx / 2;
-      const stack = (n * Math.PI * r * r) / (widthPx * heightPx);
+      const area = areaPx > 0 ? Math.min(areaPx, widthPx * heightPx) : widthPx * heightPx;
+      const stack = (haloPx > 0 ? haloPx : n * Math.PI * r * r) / area;
       const k = (globalThis as any).__domvecPlantHaloCrowd ? 1 : Math.min(1, this.haloStack / Math.max(stack, 1e-6));
       u.uHaloI.value = this.haloI * k;
       this.haloCrowd = { n, stack: Math.round(stack * 100) / 100, k: Math.round(k * 1000) / 1000 };

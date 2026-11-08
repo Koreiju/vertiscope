@@ -8385,11 +8385,52 @@ export class GraphView extends ItemView {
   plantGreyBackground = false;
   /** Planted (G-207): the chunk glow off -- orbs only reflect, as before. */
   plantNoHalo = false;
+  plantCanvasHaloArea = false;
+  private cloudAreaAt = 0;
+  private cloudArea = 0;
+  private cloudHaloPx = 0;
   private zoomTick(g: any): void {
     if (!this.batch) return;
     // The glow's pixel floor needs pixels -> view units (G-207).
     const cam0 = g.camera();
-    if (this.canvasEl && cam0?.projectionMatrix) this.batch.setViewport(this.canvasEl.clientHeight, cam0.projectionMatrix.elements[5], this.canvasEl.clientWidth);
+    if (this.canvasEl && cam0?.projectionMatrix) {
+      const W = this.canvasEl.clientWidth, H = this.canvasEl.clientHeight;
+      // The area the cloud COVERS on screen, twice a second (137(6), seen
+      // 2026-11-08 at 931 nodes): the glow was divided by halos per pixel of
+      // the whole canvas, but a few hundred nodes in a small region stack far
+      // deeper there and summed to a white mass. The 10-90% box of a sample's
+      // projections, floored at 5% of the canvas. Planted `plantCanvasHaloArea`.
+      if (performance.now() - this.cloudAreaAt > 500) {
+        this.cloudAreaAt = performance.now();
+        const ns = g.graphData().nodes as any[];
+        const step = Math.max(1, Math.floor(ns.length / 300));
+        const xs: number[] = [], ys: number[] = [];
+        const v = new THREE.Vector3();
+        // Each glow's REAL size on screen (the shader's: orb x zoom x haloK,
+        // floored at haloMinPx), summed -- not the floor alone, which read
+        // 0.28 halos a pixel over a white mass.
+        const pxPerUnit = H * cam0.projectionMatrix.elements[5] / 2;
+        const b: any = this.batch;
+        let haloPx = 0;
+        for (let i = 0; i < ns.length; i += step) {
+          const n = ns[i]; if (!Number.isFinite(n.x)) continue;
+          v.set(n.x, n.y, n.z || 0).project(cam0);
+          if (v.z > 1) continue;
+          xs.push((v.x + 1) * W / 2); ys.push((1 - v.y) * H / 2);
+          const dist = Math.hypot(n.x - cam0.position.x, n.y - cam0.position.y, (n.z || 0) - cam0.position.z);
+          const r = Math.max(b.haloMinPx / 2, this.drawnRadiusOf(n) * (b.zoom || 1) * b.haloK * pxPerUnit / Math.max(dist, 1e-6));
+          haloPx += Math.PI * r * r * step;
+        }
+        this.cloudHaloPx = haloPx;
+        if (xs.length > 4) {
+          xs.sort((a, b) => a - b); ys.sort((a, b) => a - b);
+          const q = (a: number[], f: number) => a[Math.floor(f * (a.length - 1))];
+          const bw = Math.min(W, Math.max(0, q(xs, 0.9) - q(xs, 0.1)) * 1.25), bh = Math.min(H, Math.max(0, q(ys, 0.9) - q(ys, 0.1)) * 1.25);
+          this.cloudArea = Math.max(0.05 * W * H, bw * bh);
+        } else this.cloudArea = W * H;
+      }
+      this.batch.setViewport(H, cam0.projectionMatrix.elements[5], W, this.plantCanvasHaloArea ? 0 : this.cloudArea, this.plantCanvasHaloArea ? 0 : this.cloudHaloPx);
+    }
     this.batch.setHalo(!this.plantNoHalo);
     let f = 1;
     if (!this.plantNoZoomScale && this.fullViewDist > 0) {
