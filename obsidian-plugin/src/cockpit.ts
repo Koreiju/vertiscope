@@ -694,20 +694,35 @@ export class Cockpit {
   }
 
   plantSearchUnlinked = false;
-  linkStats = { synced: 0, added_fields: 0 };
+  linkStats = { synced: 0, added_fields: 0, removed_dupes: 0 };
   private seenEngine = { k: 0, n: 0 };
   private searchKey(g: any): string { const f = g?.searchField; return f ? `${f.k}/${f.total}/${f.matching}` : ""; }
   /** A cockpit written before `n` and `matching` existed gets them, under `k`. */
+  plantDupSearchFields = false;
   private ensureSearchFields(v: any): void {
     const fs = parseSlate(v.editor.getValue());
     const k = this.field(fs, "search", "k");
     if (!k) return;
-    const add: string[] = [];
-    if (!this.field(fs, "search", "n")) add.push(T.repeat(k.depth) + "n" + T + "50");
-    if (!this.field(fs, "search", "matching")) add.push(T.repeat(k.depth) + "matching" + T);
-    if (!add.length) return;
     const NL = String.fromCharCode(10);
-    const lines = v.editor.getValue().split(NL);
+    // Read by LINE at k's own depth (2026-11-08: the ego note held `n` and
+    // `matching` twice, the copy nested under an empty `matching` -- the parse
+    // read that empty field as a parent and the lookup missed them). Copies
+    // nested deeper than k are removed first.
+    const D = k.depth;
+    const deeper = new RegExp("^" + T + "{" + (D + 1) + ",}(n|matching)" + T);
+    const all = v.editor.getValue().split(NL);
+    if (!this.plantDupSearchFields && all.some((l: string) => deeper.test(l))) {
+      v.editor.setValue(all.filter((l: string) => !deeper.test(l)).join(NL));
+      this.linkStats.removed_dupes = (this.linkStats.removed_dupes || 0) + 1;
+      return;
+    }
+    const has = (key: string) => this.plantDupSearchFields ? !!this.field(fs, "search", key)
+      : all.some((l: string) => l.startsWith(T.repeat(D) + key + T) && !l.startsWith(T.repeat(D + 1)));
+    const add: string[] = [];
+    if (!has("n")) add.push(T.repeat(D) + "n" + T + "50");
+    if (!has("matching")) add.push(T.repeat(D) + "matching" + T);
+    if (!add.length) return;
+    const lines = all;
     v.editor.replaceRange(NL + add.join(NL), { line: k.line, ch: lines[k.line].length });
     this.linkStats.added_fields += add.length;
   }

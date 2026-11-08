@@ -14764,7 +14764,7 @@ export function makeChecks(env) {
             // Its results, not a fixed time: the search answers when it answers.
             for (let i = 0; i < 60 && !planted && !((g.searchField.window || []).length); i++) await sleep(250);
             await sleep(300);
-            out.query = g.searchField.query; out.k = g.searchField.k;
+            out.query = g.searchField.query; out.k = g.searchField.k; out.slate_k = Number(valOf("k"));
             c.resultsOpen = false; c.toggleResults();
             // The rows are written by the cockpit's sync once the search
             // answers: waited for, not a fixed 700 ms (a sidecar busy storing
@@ -14826,7 +14826,9 @@ export function makeChecks(env) {
         if (!got || got.error) return { pass: false, evidence: got };
         const c = got.clean, p = got.planted;
         return { pass: c.slate && c.agent_throttle === 40 && c.text_throttle === "45" && /throttle up/.test(c.text_last)
-                   && c.query === "radix tree" && c.k === 8 && c.rows >= 1 && c.row_flight >= 1
+                   // k is the bar's AND the slate's (137 (23): linked both ways) -- not the
+                   // template's 8, which the link replaces with the bar's own k.
+                   && c.query === "radix tree" && c.k === c.slate_k && c.rows >= 1 && c.row_flight >= 1
                    && c.db === "false" && c.query_db_off === ""
                    && p.agent_throttle === 20 && p.text_throttle === "40"
                    && got.extra.cockpit_circle === "ego" && got.extra.cockpit_reopened
