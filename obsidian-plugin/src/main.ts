@@ -572,6 +572,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
         };
         view.onSidecarTrigger = () => this.sidecarTrigger();
         view.onWorkspaceMenu = (e, b) => this.workspaceMenu(e, b);
+        view.onHalo = (path) => { void this.halo.toggle(path); };
         view.workspaceButton?.setText((this.settings.activeWorkspace || this.workspaceNameOf(this.settings.sidecarLaunch?.workspace) || "workspace") + " ▾");
         void this.sidecarTrigger(true).then((t) => view.sidecarButton?.setText(t));
         view.onReveal = (url: string, xpath: string) => {

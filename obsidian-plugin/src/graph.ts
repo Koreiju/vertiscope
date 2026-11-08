@@ -541,7 +541,21 @@ export class GraphView extends ItemView {
       if (!this.downAt || Math.hypot(e.clientX - this.downAt[0], e.clientY - this.downAt[1]) > 4) return;
       // A craft node: its panel on the plane, or closed back into it (item 65).
       const cn = this.craft?.nodeAt(e.clientX, e.clientY);
-      if (cn) { this.craft!.click(cn); return; }
+      if (cn) {
+        // T-8 (PLUGIN_GOAL 145): a CLICK opens the node's halo (retrieval is
+        // the primary act); a DOUBLE-click opens / closes its panel. The click
+        // waits out the double-click window. Planted `plantCraftClickOpens`.
+        if (this.plantCraftClickOpens) { this.craft!.click(cn); return; }
+        const now = performance.now();
+        if (this.craftClickAt && now - this.craftClickAt < 320 && this.craftClickId === cn.id) {
+          window.clearTimeout(this.craftClickTimer); this.craftClickAt = 0;
+          this.craftClicks.double++; this.craft!.click(cn); return;
+        }
+        this.craftClickAt = now; this.craftClickId = cn.id;
+        window.clearTimeout(this.craftClickTimer);
+        this.craftClickTimer = window.setTimeout(() => { this.craftClickAt = 0; this.craftClicks.halo++; if (cn.path) this.onHalo(cn.path); }, 330);
+        return;
+      }
       const hit = this.bisectorAt(e.clientX, e.clientY);
       if (hit) this.toggleBisector(hit);
     }, { passive: true, capture: true });
@@ -1253,6 +1267,12 @@ export class GraphView extends ItemView {
   /** Set by the plugin: check the sidecar, start it if none answers; the button's new text. */
   onSidecarTrigger: () => Promise<string> = async () => "sidecar ?";
   onWorkspaceMenu: (e: MouseEvent, button: HTMLElement) => void = () => {};
+  onHalo: (path: string) => void = () => {};
+  plantCraftClickOpens = false;
+  craftClicks = { halo: 0, double: 0 };
+  private craftClickAt = 0;
+  private craftClickId = "";
+  private craftClickTimer = 0;
   workspaceButton: HTMLElement | null = null;
   sidecarButton: HTMLElement | null = null;
   /** The S3 toggle, kept as a command now the button is the sidecar's. */
