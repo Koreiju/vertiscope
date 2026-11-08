@@ -384,6 +384,7 @@ export class UserAgent {
    */
   view: "first" | "third" = "first";
   plantCraftLeftBehind = false;
+  plantStoredUp = false;
   /** Planted (G-333): A/D strafe sideways, as before the vehicle. */
   plantStrafe = false;
   vehicleStats = { turns: 0, views: 0, sideways_max: 0 };
@@ -531,7 +532,10 @@ export class UserAgent {
     if (!ctl || !ctl.target) return;
     const t = ctl.target, p = cam.position;
     let rel = v3(p.x - t.x, p.y - t.y, p.z - t.z);
-    let newUp = v3(cam.up.x, cam.up.y, cam.up.z);
+    // The camera's OWN up (its matrix column), not `cam.up`: after a roll the
+    // stored up is not exactly perpendicular to the view, and re-aiming with
+    // it drifted the frame 0.2% a stroke (G-273, 2026-11-08).
+    let newUp = this.plantStoredUp ? v3(cam.up.x, cam.up.y, cam.up.z) : v3(up.x, up.y, up.z);
     if (yaw) { rel = rotate(rel, up, yaw * this.rotStep); }
     if (pitch) { rel = rotate(rel, right, -pitch * this.rotStep); newUp = rotate(newUp, right, -pitch * this.rotStep); }
     p.set(t.x + rel.x, t.y + rel.y, t.z + rel.z);
