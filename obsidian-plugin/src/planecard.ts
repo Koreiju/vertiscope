@@ -89,7 +89,7 @@ export function moveToPane(card: HTMLElement, from: HTMLElement, to: HTMLElement
 }
 
 export function makeDraggable(card: HTMLElement, home: HTMLElement, key: string, stats: PlaceStats,
-                              onClick?: () => void): () => void {
+                              onClick?: () => void, onDrop?: (x: number, y: number) => boolean): () => void {
   // The pane the card is on NOW: the 3D view's plane, or another pane it was
   // carried to (PLUGIN_GOAL 133: "move the computational graph editor
   // nodes/panels *across* panes like the 3D world viewer and the browser").
@@ -106,6 +106,7 @@ export function makeDraggable(card: HTMLElement, home: HTMLElement, key: string,
     e.preventDefault(); e.stopPropagation();
     const r = card.getBoundingClientRect(), p = plane.getBoundingClientRect();
     start = { x: e.clientX, y: e.clientY, left: r.left - p.left, top: r.top - p.top };
+    (card as any).__dragFrom = { left: start.left, top: start.top };
     window.addEventListener("mousemove", move, true);
     window.addEventListener("mouseup", up, true);
   };
@@ -127,6 +128,15 @@ export function makeDraggable(card: HTMLElement, home: HTMLElement, key: string,
     start = null;
     if (still && onClick) { onClick(); return; }
     stats.drags++;
+    // A drop the desk consumes (graph form's wiring): the card goes back.
+    if (e && onDrop) {
+      const back = { left: card.style.left, top: card.style.top };
+      const s0 = (card as any).__dragFrom as { left: number; top: number } | undefined;
+      if (onDrop(e.clientX, e.clientY)) {
+        if (s0) { card.style.left = `${s0.left}px`; card.style.top = `${s0.top}px`; } else { card.style.left = back.left; card.style.top = back.top; }
+        return;
+      }
+    }
     if (e) { const to = paneUnder(card, e.clientX, e.clientY, home); if (to && to !== plane) { moveToPane(card, plane, to, e.clientX, e.clientY); plane = to; (stats as any).crossed = ((stats as any).crossed || 0) + 1; } }
     snapToNeighbour(card, plane, stats);
     try { window.localStorage.setItem(key, JSON.stringify({ x: parseFloat(card.style.left) || 0, y: parseFloat(card.style.top) || 0 })); }

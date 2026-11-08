@@ -313,7 +313,8 @@ export class PlaneDesk {
       const fpath = file.path;
       // Alt+click on the node is the containment gesture (G-327), not the halo.
       const undrag = makeDraggable(card, plane, "domvec-plane-card:" + file.path, this.place,
-        () => { if (performance.now() - this.altAt < 800) return; this.host.headerClick?.(fpath); });
+        () => { if (performance.now() - this.altAt < 800) return; this.host.headerClick?.(fpath); },
+        (x, y) => this.wireDrop(fpath, x, y));
       clampToPlane(card, plane);
       p = { path: file.path, card, leaf, head, undrag };
       // The panel is the note's as soon as the note shows; anything mounted
@@ -834,6 +835,43 @@ export class PlaneDesk {
     ground.addEventListener("dblclick", onDbl);
     this.flipUnhook.push(() => ground.removeEventListener("dblclick", onDbl));
   }
+  /**
+   * WIRING in graph form (UR N.4; RESERVOIR_DESIGN 8b "left-drag wiring in
+   * graph form"): a node dragged onto another node writes a reference from
+   * the first note to the second -- a hard link, because one cell now
+   * references another (PLUGIN_GOAL 142) -- and springs back. The flip's
+   * edges are recomputed, so the new link is drawn at once. Only while
+   * flipped, and only between two of its nodes. Planted `plantNoWiring`.
+   */
+  plantNoWiring = false;
+  wireStats = { wired: 0, last: null as any };
+  wireDrop(from: string, x: number, y: number): boolean {
+    const f = this.flipped;
+    if (!f || this.plantNoWiring || !f.members.includes(from)) return false;
+    const to = f.members.find((m) => {
+      if (m === from) return false;
+      const c = this.panelOf(m)?.card.getBoundingClientRect();
+      return !!c && x >= c.left - 8 && x <= c.right + 8 && y >= c.top - 8 && y <= c.bottom + 8;
+    });
+    if (!to) return false;
+    const src = this.app.vault.getAbstractFileByPath(from), dst = this.app.vault.getAbstractFileByPath(to);
+    if (!(src instanceof TFile) || !(dst instanceof TFile)) return false;
+    const link = this.app.fileManager.generateMarkdownLink(dst, src.path);
+    void this.app.vault.process(src, (t) => t.replace(/\s*$/, "") + String.fromCharCode(10, 10) + link + String.fromCharCode(10)).then(() => {
+      // Re-drawn once the link is resolved: flip back and forth over the same members.
+      // Once Obsidian has RESOLVED the new link (polled, up to 4 s): a fixed
+      // 700 ms redrew before it, and the new edge was not drawn.
+      let tries = 0;
+      const wait = () => { if (!this.linkedTo(from).has(to) && ++tries < 40) { window.setTimeout(wait, 100); return; } redraw(); };
+      const redraw = () => { const keep = this.flipped; if (!keep) return; const pr = this.host.plane()?.getBoundingClientRect(); if (!pr) return;
+        const c = this.panelOf(from)?.card.getBoundingClientRect(); if (!c) return;
+        this.flip(0, 0); this.flip(c.left - pr.left + c.width / 2, c.top - pr.top + c.height / 2); };
+      wait();
+    });
+    this.wireStats.wired++; this.wireStats.last = { from, to };
+    return true;
+  }
+
   /** Flip the panels within reach of (x, y) in plane coordinates; again flips back. */
   flip(x: number, y: number): string[] {
     const plane = this.host.plane();
