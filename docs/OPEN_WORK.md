@@ -79,7 +79,7 @@ Last updated 2026-11-07 late. A native store crash at CHECKPOINT (D-23 class, al
 |---|---|
 | G-21 / G-93 / G-94 coincident nodes | superseded in part by 138 (no long links); overlap ruling still the reader's |
 | G-120 hover popup linked | confirmed (linking + 3D link); keeping = Q.002 above |
-| G-198 grey markdown first | partial | run 60 (on screen): clean markdown 81 ms, but page form and placement also 81 ms (the page was not purged from the store: stale_nodes 1, the chunk already placed), so "markdown FIRST" could not separate; planted: no markdown, placed 13.9 s. The check needs a page truly absent from the store |
+| G-198 grey markdown first | confirmed | run 67: on a purged page the first grey node appeared 1.8 s after navigation; its hover panel showed markdown at 173 ms, the page form at 283 ms, the chunk not yet placed -- markdown first, page form after, placement last; planted no-force-panel: no markdown. Run 60 (10.6 s to the first grey, everything at 81 ms) was a slow capture after a reload, not repeated |
 | G-231 retrieval as the reader uses it | confirmed | G-231 run 58: n=200 -> 200 hits from 7 pages, top-2 share 0.40 (run 56: 174 hits, 5 pages -- a page handed back fewer chunks than it counted and nothing past the count cut was asked). Pages past the cut are now a reserve, asked in rank order while the set is short of n (planted plantNoReserve); planted plantUncappedShare: 5 pages, 0.67 |
 | D-36 / G-82 | resolved into 135(b); G-82 to be marked superseded |
 | PG-134-drop-plane | confirmed (run 84) |
