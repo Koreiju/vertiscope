@@ -12678,6 +12678,34 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "PG-135-link-toggle",
+      asks: "PLUGIN_GOAL 135(d): a right-click on a drawn link toggles it as a memory link -- solid (alpha 0.95) when on, translucent (0.05) when off, a second right-click flipping it; a right-click off any link is unchanged; planted (plantNoLinkToggle) nothing toggles",
+      async run() {
+        const arm = (planted) => inPane(`
+          v.plantNoLinkToggle = ${planted};
+          const b = v.batch; if (!b) return { error: "no batch" };
+          await sleep(800);
+          const g = v.graph, cv = (v.canvasEl || v.contentEl).getBoundingClientRect();
+          const cand = g.graphData().links.filter((l) => l.source && l.target && typeof l.source === "object" && !l.__long && Number.isFinite(l.source.x)).map((l) => {
+            const a = g.graph2ScreenCoords(l.source.x, l.source.y, l.source.z || 0), c = g.graph2ScreenCoords(l.target.x, l.target.y, l.target.z || 0);
+            return { l, x: (a.x + c.x) / 2, y: (a.y + c.y) / 2, len: Math.hypot(c.x - a.x, c.y - a.y) };
+          }).filter((o) => o.len > 30 && o.x > 20 && o.y > 20 && o.x < cv.width - 20 && o.y < cv.height - 20);
+          if (!cand.length) return { error: "no clickable link on screen" };
+          const o = cand[0], l = o.l; delete l.memory;
+          const click = () => v.canvasEl.dispatchEvent(new MouseEvent("contextmenu", { clientX: cv.left + o.x, clientY: cv.top + o.y, bubbles: true, cancelable: true, button: 2 }));
+          const alphaOf = () => { const i = b.drawnLinks.indexOf(l); return i < 0 ? null : +b.lineCol.array[i * 8 + 3].toFixed(2); };
+          const picked = v.linkAt(cv.left + o.x, cv.top + o.y) === l;
+          click(); await sleep(700); const on = { memory: l.memory, alpha: alphaOf() };
+          click(); await sleep(700); const off = { memory: l.memory, alpha: alphaOf() };
+          delete l.memory; v.batchDirty = true; v.plantNoLinkToggle = false;
+          return { planted: ${planted}, picked, on, off };
+        `);
+        const clean = await arm(false), planted = await arm(true);
+        return { pass: !clean.error && clean.picked && clean.on.memory === true && clean.on.alpha === 0.95 && clean.off.memory === false && clean.off.alpha === 0.05
+                       && !planted.error && planted.on.memory === undefined, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {

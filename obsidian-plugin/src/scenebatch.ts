@@ -277,6 +277,15 @@ export class SceneBatch {
   /** Links longer than this are not drawn (set by the view from the cloud's size). */
   maxLinkLen = Infinity;
   linkStats = { drawn: 0, hidden: 0, cap: 0 };
+  /** A link's opacity set in place (a memory-link toggle), no resync. */
+  setLinkAlpha(l: any, a: number): boolean {
+    const i = this.drawnLinks.indexOf(l);
+    if (i < 0) return false;
+    const c = this.lineCol.array as Float32Array;
+    c[i * 8 + 3] = a; c[i * 8 + 7] = a;
+    this.lineCol.needsUpdate = true;
+    return true;
+  }
   /** Shown/hidden changes of any link, counted (flicker). */
   linkFlips = 0;
   setBright(b: number): void {
@@ -617,7 +626,10 @@ export class SceneBatch {
       else this.linePos.setXYZ(nl * 2 + 1, t.x, t.y, t.z || 0);
       // 3d-force-graph's own link colour (#f0f0f0) at the pane's linkOpacity;
       // during a search, the pane says how much of an edge to draw (item 88).
-      const a = lineAlpha ? lineAlpha(l) : this.linkAlpha;
+      // A MEMORY link (PLUGIN_GOAL 135(d): "Solid computational links can be
+      // turned on and off with a gesture ... semi translucent or solid"):
+      // solid when on, faint when switched off.
+      const a = (l as any).memory === true ? 0.95 : (l as any).memory === false ? 0.05 : (lineAlpha ? lineAlpha(l) : this.linkAlpha);
       // A typed edge (G-241: a code CALLS / INHERITS) carries its own colour.
       if (l.color) {
         const c = this.colour(l.color), la = l.alpha ?? 0.85;

@@ -563,6 +563,19 @@ export class GraphView extends ItemView {
       if (took) { e.preventDefault(); e.stopImmediatePropagation(); }
     }, { passive: false, capture: true });
     canvas.addEventListener("pointermove", (e) => { if (e.buttons) moved(); }, { passive: true, capture: true });
+    // A RIGHT-CLICK ON A LINK toggles it as a memory link (PLUGIN_GOAL
+    // 135(d)): solid (on) or translucent (off). Only within 6 px of a drawn
+    // segment; anywhere else the right-click is what it was.
+    canvas.addEventListener("contextmenu", (e: MouseEvent) => {
+      if (this.plantNoLinkToggle) return;
+      const l = this.linkAt(e.clientX, e.clientY);
+      if (!l) return;
+      e.preventDefault(); e.stopImmediatePropagation();
+      l.memory = l.memory === true ? false : true;
+      this.batch?.setLinkAlpha(l, l.memory ? 0.95 : 0.05);
+      this.linkToggleStats.toggled++; this.linkToggleStats.last = { on: l.memory, a: String(l.source?.id ?? l.source).slice(0, 40), b: String(l.target?.id ?? l.target).slice(0, 40) };
+      this.batchDirty = true;
+    }, { capture: true });
     // Arrow keys pan, precisely, while the pointer is over the 3D view and no
     // text field has the keyboard (2026-10-12, PLUGIN_GOAL 114). A held key
     // steps faster the longer it is held, as the k/n fields do (item 109).
@@ -7611,6 +7624,29 @@ export class GraphView extends ItemView {
   plantRerankEveryAbsorb = false;
   plantLayerInPane = false;
   plantDropOnRedraw = false;
+  plantNoLinkToggle = false;
+  linkToggleStats: { toggled: number; last: any } = { toggled: 0, last: null };
+  /** The drawn link nearest the screen point (within 6 px), or null. */
+  linkAt(x: number, y: number): any {
+    const g: any = this.graph;
+    if (!g) return null;
+    const cv = (this.canvasEl || this.contentEl).getBoundingClientRect();
+    const px = x - cv.left, py = y - cv.top;
+    let best: any = null, bd = 6;
+    const cap = this.batch && Number.isFinite(this.batch.maxLinkLen) ? this.batch.maxLinkLen : Infinity;
+    for (const l of g.graphData().links as any[]) {
+      const s = l.source, t = l.target;
+      if (!s || !t || typeof s !== "object" || typeof t !== "object" || !Number.isFinite(s.x) || !Number.isFinite(t.x)) continue;
+      if (l.__long || Math.hypot(t.x - s.x, t.y - s.y, (t.z || 0) - (s.z || 0)) > cap) continue;
+      const a = g.graph2ScreenCoords(s.x, s.y, s.z || 0), b = g.graph2ScreenCoords(t.x, t.y, t.z || 0);
+      const dx = b.x - a.x, dy = b.y - a.y, L2 = dx * dx + dy * dy;
+      if (L2 < 4) continue;
+      const u = Math.max(0, Math.min(1, ((px - a.x) * dx + (py - a.y) * dy) / L2));
+      const d = Math.hypot(px - (a.x + u * dx), py - (a.y + u * dy));
+      if (d < bd) { bd = d; best = l; }
+    }
+    return best;
+  }
   plantLongLinks = false;
   linkCapShare = 0.1;
   private linkCapAt = 0;
