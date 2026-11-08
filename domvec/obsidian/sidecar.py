@@ -802,6 +802,7 @@ _PLANTABLE = {
     "placeholder-target": ("domvec.markdown", "PLANT_PLACEHOLDER_TARGET"),   # G-197
     "no-edge-memo": ("domvec.obsidian.layout", "PLANT_NO_EDGE_MEMO"),
     "no-declump": ("domvec.obsidian.layout", "PLANT_NO_DECLUMP"),            # 137(6)
+    "aggregate-mid-stream": ("domvec.obsidian.sidecar", "PLANT_AGGREGATE_MID_STREAM"),  # 137(20)
     "furniture-is-content": ("domvec.markdown", "PLANT_FURNITURE_IS_CONTENT"),  # 137(3)       # chunk view, 2026-10-24
     "fixed-batch": ("domvec.obsidian.projector", "PLANT_FIXED_BATCH"),      # G-13, 2026-10-24
     "adaptive-window": ("domvec.obsidian.projector", "ADAPTIVE_WINDOW"),    # G-13, on: opens for a trickle only
@@ -1230,6 +1231,13 @@ def _save_lexical_due(workspace, every: float = 30.0) -> None:
         pass
 
 
+#: Seconds without a store write before a page is re-clustered (137(20)).
+_AGGREGATE_QUIET_S = 8.0
+#: Planted (137(20)): re-cluster as soon as due, mid-stream.
+PLANT_AGGREGATE_MID_STREAM = [False]
+_AGGREGATE_STATS = {"deferred": 0}
+
+
 def _aggregate_due(workspace) -> None:
     """Re-cluster the pages that have gone quiet (`G-65`).
 
@@ -1241,6 +1249,16 @@ def _aggregate_due(workspace) -> None:
     now = time.monotonic()
     due = [url for url, when in list(_AGGREGATE_AFTER.items()) if when <= now]
     for url in due:
+        # Not while captures are landing (137(20), bandcamp 2026-11-08): the
+        # aggregate holds `_WORK_LOCK` for ~6 s, and on a page that streams the
+        # next capture queued behind it -- lock wait p50 3.7 s of a 7.7 s
+        # capture. Deferred until the store has been quiet a few seconds.
+        # Planted `aggregate-mid-stream`: it runs as soon as due, as before.
+        if (not PLANT_AGGREGATE_MID_STREAM[0]
+                and time.time() - _LAST_WRITE[0] < _AGGREGATE_QUIET_S):
+            _AGGREGATE_AFTER[url] = now + _AGGREGATE_QUIET_S
+            _AGGREGATE_STATS["deferred"] += 1
+            continue
         _AGGREGATE_AFTER.pop(url, None)
         try:
             _yield_to_foreground()
