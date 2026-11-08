@@ -626,6 +626,9 @@ def _nearest_enclosing(nodes, order=None) -> List[Tuple[str, str]]:
     return pairs
 
 
+#: Planted (137 (20)): anchor edges by the two-MATCH statement, as before.
+PLANT_EDGE_TWO_MATCH = [False]
+
 class GraphStore:
     """Kuzu-backed unified store. Use as ``with GraphStore(path) as gs:``."""
 
@@ -1104,6 +1107,14 @@ class GraphStore:
         if edge_rows:
             self._create_anchors(edge_rows)
         counts["ms_anchors_edge"] = round((time.perf_counter() - _tb) * 1000, 1); counts["n_anchors_edge"] = len(edge_rows); _tb = time.perf_counter()
+        if edge_rows:
+            _w = dict(getattr(self, "last_anchor_write", {}) or {})
+            # Numbers under ms_ (the capture profile keeps those): rows, the
+            # path taken (1 = COPY), and the cost model's two estimates.
+            counts["ms_anchors_edge_rows"] = len(edge_rows)
+            counts["ms_anchors_edge_bycopy"] = 1 if _w.get("by") == "copy" else 0
+            counts["ms_anchors_edge_copy_est"] = _w.get("copy_ms") or 0
+            counts["ms_anchors_edge_row_est"] = _w.get("row_ms") or 0
 
         # Whatever is left in `anchor_of` is an anchor whose address this
         # write did not carry. Rare, and it still has to be created.
@@ -1622,14 +1633,31 @@ class GraphStore:
             if self._copy_rel("Anchors", {"from": [r["cid"] for r in rows], "to": [r["aid"] for r in rows],
                                           "ord": [int(r["ord"]) for r in rows]}, rows):
                 self._note_rel_cost("Anchors", "copy", (time.perf_counter() - _t) * 1000, len(rows))
+                self.last_anchor_write = {"by": "copy", "rows": len(rows), "ms": round((time.perf_counter() - _t) * 1000, 1)}
                 return
         _t = time.perf_counter()
-        self._batch(
-            "UNWIND $rows AS r MATCH (c:Chunk {cid: r.cid}) "
-            "MATCH (a:Address {aid: r.aid}) "
-            "CREATE (c)-[:Anchors {ord: r.ord}]->(a)",
-            rows,
-        )
+        # The FUSED shape (MERGE binds the address by key, then one Chunk
+        # lookup): measured 0.5 ms a row where the two-MATCH form was 6.5 --
+        # and 24 ms a row on bandcamp's in-place rewrites, 3.5-6.8 s a capture
+        # (2026-11-07, PLUGIN_GOAL 137 (20)). Every row's address is current
+        # by construction, so the MERGE only finds it. Planted
+        # `PLANT_EDGE_TWO_MATCH`: the two-MATCH form, as before.
+        if PLANT_EDGE_TWO_MATCH[0]:
+            self._batch(
+                "UNWIND $rows AS r MATCH (c:Chunk {cid: r.cid}) "
+                "MATCH (a:Address {aid: r.aid}) "
+                "CREATE (c)-[:Anchors {ord: r.ord}]->(a)",
+                rows,
+            )
+        else:
+            self._batch(
+                "UNWIND $rows AS r MERGE (a:Address {aid: r.aid}) "
+                "WITH a, r MATCH (c:Chunk {cid: r.cid}) "
+                "CREATE (c)-[:Anchors {ord: r.ord}]->(a)",
+                rows,
+            )
+        self.last_anchor_write = {"by": "statement", "rows": len(rows), "ms": round((time.perf_counter() - _t) * 1000, 1),
+                                  "copy_ms": self._rel_cost["copy_ms"], "row_ms": self._rel_cost["row_ms"].get("Anchors")}
         self._note_rel_cost("Anchors", "row", (time.perf_counter() - _t) * 1000, len(rows))
 
     _WRITES = re.compile(r"\b(CREATE|MERGE|SET|DELETE|DETACH|DROP|ALTER|COPY|CALL|CHECKPOINT|INSTALL|LOAD|REMOVE)\b", re.I)
