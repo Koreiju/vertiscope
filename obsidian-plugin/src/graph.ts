@@ -8360,6 +8360,11 @@ export class GraphView extends ItemView {
   driftHueRate = 0.8;       // "a lot faster" (2026-10-12): the wheel in ~8 s
   /** Planted: no drift at all. */
   plantNoDrift = false;
+  /** T-12 (PLUGIN_GOAL 145): the drift is a TOGGLE, off by default (it redraws
+   *  every frame, and stability comes first); remembered per viewer. */
+  get driftEnabled(): boolean { try { return window.localStorage.getItem("domvec-idle-drift") === "on"; } catch { return false; } }
+  set driftEnabled(on: boolean) { try { window.localStorage.setItem("domvec-idle-drift", on ? "on" : "off"); } catch { /* per session then */ } }
+  plantDriftDefaultOn = false;
   /** Planted: a standing query stops the drift, as it did. */
   plantDriftStopsOnSearch = false;
   driftStats = { active: false, turned: 0, hue: 0, started: 0, stopped: 0 };
@@ -8473,7 +8478,8 @@ export class GraphView extends ItemView {
     // adjusting per the query scroll window. pls dont forget about the
     // rotating xyzhsv"): the lights ride on the turning scene. Gated on the
     // search, it never ran once a query had been typed. Planted: gated again.
-    const on = idle && visible && !checking && !this.plantNoDrift && !(this.plantDriftStopsOnSearch && this.searchState);
+    const on = idle && visible && !checking && !this.plantNoDrift && (this.driftEnabled || this.plantDriftDefaultOn || this.driftInCheck)
+      && !(this.plantDriftStopsOnSearch && this.searchState);
     if (on !== this.driftStats.active) {
       this.driftStats.active = on;
       if (on) this.driftStats.started++; else this.driftStats.stopped++;

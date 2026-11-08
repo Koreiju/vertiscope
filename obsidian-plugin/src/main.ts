@@ -437,6 +437,8 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     // PLUGIN_GOAL 144: workspaces per vault -- a new project starts empty.
     this.addCommand({ id: "domvec-workspace-new", name: "New workspace (empty store, nothing inherited)",
       callback: () => { new WorkspaceNameModal(this.app, (name) => { void this.useWorkspace(name, true); }).open(); } });
+    this.addCommand({ id: "domvec-idle-drift", name: "Toggle idle drift (camera turns and colours cycle when idle)",
+      callback: () => { for (const leaf of this.app.workspace.getLeavesOfType("domvec-graph-view")) { const v: any = leaf.view; v.driftEnabled = !v.driftEnabled; new Notice("domvec idle drift " + (v.driftEnabled ? "on" : "off")); break; } } });
     this.addCommand({ id: "domvec-workspace-switch", name: "Switch workspace",
       callback: () => { new WorkspacePickModal(this.app, this.workspaceList(), this.settings.activeWorkspace || "",
         (name) => { void this.useWorkspace(name, false); }).open(); } });
