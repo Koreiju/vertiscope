@@ -1035,9 +1035,28 @@ export class GraphView extends ItemView {
       const q = this.deltaQueue;
       this.deltaQueue = [];
       if (q.length > 1) this.deltaStats.batched += q.length - 1;
-      for (const x of q) this.applyForceDelta(x);
+      // ONE graph rebuild for the whole batch (G-145, 2026-11-08): each delta
+      // copied all ~62k nodes, filtered ~52k links, mapped every node, and
+      // handed the graph new data -- a full force re-initialize per delta --
+      // so a streaming tab kept the main thread ~74% busy in chunk view.
+      // Planted `plantDeltaPerApply`: one rebuild per delta, as before.
+      if (q.length > 1 && this.graph && !this.plantDeltaPerApply) {
+        const data: any = this.graph.graphData();
+        const batch = { nodes: data.nodes.slice(), links: data.links.slice(),
+                        byId: new Map<string, any>(data.nodes.map((n: any) => [n.id, n])), expanded: null as Set<string> | null };
+        for (const x of q) this.applyForceDelta(x, batch);
+        this.graph.graphData({ nodes: batch.nodes, links: batch.links });
+        if (this.layoutMode === "projector") { this.treeSpring(); this.graph.d3ReheatSimulation?.(); }
+        this.deltaStats.rebuilds = (this.deltaStats.rebuilds || 0) + 1;
+      } else {
+        for (const x of q) this.applyForceDelta(x);
+        this.deltaStats.rebuilds = (this.deltaStats.rebuilds || 0) + q.length;
+      }
     };
-    this.deltaTimer = window.setTimeout(flush, 0);
+    // A large graph waits a beat so deltas arriving together share one
+    // rebuild (G-145); a small one flushes at once, as before.
+    const big = !this.plantDeltaPerApply && (this.graph?.graphData().nodes.length || 0) > 5000;
+    this.deltaTimer = window.setTimeout(flush, big ? 400 : 0);
   }
   static DELTA_DEFER_MAX_MS = 1500;
   private deltaQueue: ForceNodeDelta[] = [];
@@ -1045,10 +1064,12 @@ export class GraphView extends ItemView {
   private deltaTimer = 0;
   /** When the READER last moved the camera (wheel, drag) -- not the idle turn. */
   camMovedAt = 0;
-  deltaStats = { deferred: 0, batched: 0 };
+  deltaStats: { deferred: number; batched: number; rebuilds?: number } = { deferred: 0, batched: 0 };
   plantNoDeltaDefer = false;
+  /** Planted (G-145): every delta rebuilds the graph on its own, as before. */
+  plantDeltaPerApply = false;
 
-  private applyForceDelta(d: ForceNodeDelta): void {
+  private applyForceDelta(d: ForceNodeDelta, batch?: { nodes: any[]; links: any[]; byId: Map<string, any>; expanded: Set<string> | null }): void {
     if (d && d.url && d.added && d.added.length) profiler().mark(d.url, "grey", { nodes: d.added.length });
     if (!this.canvasEl) return;
     const t0 = performance.now();
@@ -1061,11 +1082,15 @@ export class GraphView extends ItemView {
     const gone = new Set(d.removed);
     const end = (x: any) => (typeof x === "object" && x ? x.id : x);
     const moving = new Map(d.reparented.map((r) => [r.id, r.parent]));
-    let nodes = gone.size ? data.nodes.filter((n: any) => !gone.has(n.id)) : data.nodes.slice();
-    let links = data.links.filter((l: any) =>
-      !gone.has(end(l.source)) && !gone.has(end(l.target)) && !moving.has(end(l.target)));
+    // In a batch (G-145): one copy of the arrays and one id map for every
+    // delta of the batch, filtered only when this delta removes or moves.
+    const srcNodes: any[] = batch ? batch.nodes : data.nodes, srcLinks: any[] = batch ? batch.links : data.links;
+    let nodes = gone.size ? srcNodes.filter((n: any) => !gone.has(n.id)) : (batch ? srcNodes : srcNodes.slice());
+    let links = (gone.size || moving.size || !batch) ? srcLinks.filter((l: any) =>
+      !gone.has(end(l.source)) && !gone.has(end(l.target)) && !moving.has(end(l.target))) : srcLinks;
     for (const id of gone) this.forceSpecs.delete(id);
-    const byId = new Map<string, any>(nodes.map((n: any) => [n.id, n]));
+    const byId: Map<string, any> = batch ? batch.byId : new Map<string, any>(nodes.map((n: any) => [n.id, n]));
+    if (batch) for (const id of gone) byId.delete(id);
     const pageNode = this.projectedPage(d.url, byId);
     for (const [id, parent] of moving) {
       const spec = this.forceSpecs.get(id);
@@ -1078,7 +1103,7 @@ export class GraphView extends ItemView {
     // ... or while the page is new since the fit (no page node yet): its
     // force tree is the only immediate picture of the scan.
     const drawHere = this.layoutMode !== "projector" || !pageNode
-      || this.expandedUrls(byId).has(d.url);
+      || (batch ? (batch.expanded ??= this.expandedUrls(byId)) : this.expandedUrls(byId)).has(d.url);
     for (const a of d.added) {
       if (byId.has(a.id)) continue;
       // A page the projector already draws needs no root of its own: the
@@ -1153,10 +1178,13 @@ export class GraphView extends ItemView {
     this.touchActive(d.url);
     this.motion.event("drain", { url: d.url.slice(-50), added: d.added.length, removed: d.removed.length,
                                  reparented: d.reparented.length });
-    this.graph.graphData({ nodes, links });
-    if (this.layoutMode === "projector") {
-      this.treeSpring();
-      this.graph.d3ReheatSimulation?.();
+    if (batch) { batch.nodes = nodes; batch.links = links; }
+    else {
+      this.graph.graphData({ nodes, links });
+      if (this.layoutMode === "projector") {
+        this.treeSpring();
+        this.graph.d3ReheatSimulation?.();
+      }
     }
     // Time to the SCREEN, not to the data: the next frame after the nodes
     // were handed over is when the renderer draws them (`G-90`).
