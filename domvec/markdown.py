@@ -3236,11 +3236,27 @@ PLANT_LONE_HEADING_KEPT_APART = False
 _ANCHOR_ONLY = re.compile(r"^\s*\[[^\]]{0,3}\]\(#[^)\s]*\)\s*$")
 
 
+#: A heading's FURNITURE (PLUGIN_GOAL 137(3), 2026-11-08): what a page hangs
+#: on a heading without it being what the heading heads -- a bracket alone,
+#: a link alone (Wikipedia's "[Edit section: History edit](...)]"), a short
+#: hatnote label ("See also:", "Main article:"). Durham, North Carolina's
+#: "## History" was a 19-token chunk of its own -- heading, "  [", the edit
+#: link, "See also:" and one link -- because the furniture read as content,
+#: so the heading never joined the 150-token section it heads.
+_FURNITURE = re.compile(
+    r"^\s*(?:[\[\]]|\[[^\]]*\]\([^)]*\)\]?|(?:see also|main articles?|further information|main|see)\s*:?)\s*$",
+    re.IGNORECASE)
+
+#: Planted (137(3)): heading furniture counts as content, as before.
+PLANT_FURNITURE_IS_CONTENT = False
+
+
 def _heads_only(lines) -> bool:
     """Headings, and anchors that belong to them -- nothing they head."""
     lines = [l for l in lines if (l.text or "").strip()]
+    furn = (lambda t: False) if PLANT_FURNITURE_IS_CONTENT else (lambda t: bool(_FURNITURE.match(t)))
     return (bool(lines) and any(_HEADING_FORM.match(l.text or "") for l in lines)
-            and all(_HEADING_FORM.match(l.text or "") or _ANCHOR_ONLY.match(l.text or "") for l in lines))
+            and all(_HEADING_FORM.match(l.text or "") or _ANCHOR_ONLY.match(l.text or "") or furn(l.text or "") for l in lines))
 
 
 def _heading_level(text: str) -> int:
