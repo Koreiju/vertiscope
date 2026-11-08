@@ -120,7 +120,14 @@ class Results {
     this.wanted = false;
     this.loading = true;
     const mine = ++this.token;
-    const got = await this.host.sidecar.search(this.query, { k: Results.PAGE, offset: this.offset });
+    // Plain triple retrieval (PLUGIN_GOAL 135(a): "I don't think we should
+    // need heuristics on which level the retrieval acts on ... a regular
+    // triple-retrieval mechanism with a properly engineered pagerank"): no
+    // coarse lead-only filter -- every chunk, group member or lead, ranked by
+    // the one score (lexical + semantic + PageRank + content). Planted
+    // `__domvecPlantGestureCoarse`: leads only, as before.
+    const coarse = !!(globalThis as any).__domvecPlantGestureCoarse;
+    const got = await this.host.sidecar.search(this.query, { k: Results.PAGE, offset: this.offset, coarse });
     this.loading = false;
     if (mine !== this.token) return;
     // The end of the list is the SERVER's word (`more`), never a page that did

@@ -12738,6 +12738,32 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "PG-135-gesture-plain",
+      asks: "PLUGIN_GOAL 135(a): the []() gesture retrieves by the plain triple score with PageRank, no level heuristic -- it asks the store with coarse off, so merge-group members rank on their own (not only their leads); planted (__domvecPlantGestureCoarse) leads only",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          window.__domvecPlantGestureCoarse = ${planted};
+          const P = app.plugins.plugins["domvec-bridge"];
+          const of = window.fetch; const asked = [];
+          window.fetch = async (u, ...rest) => { const r = await of(u, ...rest); const s = String(u); if (s.includes("/search?")) { let n = 0; try { n = (await r.clone().json()).hits.length; } catch (e) {} asked.push({ coarse: !s.includes("coarse=0"), hits: n, members: 0 }); } return r; };
+          const NL = String.fromCharCode(10);
+          const p = "domvec-checks/gesture plain " + (${planted} ? "p" : "c") + ".md";
+          const old = app.vault.getAbstractFileByPath(p); if (old) await app.vault.trash(old, true);
+          const f = await app.vault.create(p, "Looking for [radix tree insertion]()" + NL);
+          const leaf = app.workspace.getLeaf("tab");
+          try {
+            await leaf.openFile(f, { state: { mode: "source", source: false } }); await sleep(800);
+            const ed = leaf.view.editor, line = ed.getLine(0);
+            for (let t = 0; t < 3 && !asked.length; t++) { ed.focus(); ed.setCursor({ line: 0, ch: 0 }); await sleep(300); ed.setCursor({ line: 0, ch: line.lastIndexOf("(") + 1 }); await sleep(3000); }
+            return { planted: ${planted}, asks: asked.length, coarse_sent: asked.map((a) => a.coarse), hits: asked.reduce((n, a) => n + a.hits, 0), members: asked.reduce((n, a) => n + a.members, 0) };
+          } finally { window.fetch = of; window.__domvecPlantGestureCoarse = false; leaf.detach(); await app.vault.trash(f, true); }
+        })()`, { timeout: 60000 });
+        const planted = await arm(true), clean = await arm(false);  // the first gesture after a reload can miss; planted takes that slot
+        return { pass: !clean.error && clean.asks >= 1 && clean.coarse_sent.every((c) => c === false) && clean.hits > 0 && !planted.error && planted.coarse_sent.every((c) => c === true), evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {
