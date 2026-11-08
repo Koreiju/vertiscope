@@ -1044,9 +1044,14 @@ export class GraphView extends ItemView {
         const data: any = this.graph.graphData();
         const batch = { nodes: data.nodes.slice(), links: data.links.slice(),
                         byId: new Map<string, any>(data.nodes.map((n: any) => [n.id, n])), expanded: null as Set<string> | null };
+        const n0 = batch.nodes.length, l0 = batch.links.length;
         for (const x of q) this.applyForceDelta(x, batch);
-        this.graph.graphData({ nodes: batch.nodes, links: batch.links });
-        if (this.layoutMode === "projector") { this.treeSpring(); this.graph.d3ReheatSimulation?.(); }
+        const same = batch.nodes.length === n0 && batch.links.length === l0 && q.every((x) => !(x.removed || []).length && !(x.reparented || []).length);
+        if (same) { this.deltaStats.noops = (this.deltaStats.noops || 0) + 1; this.deltaStats.rebuilds = (this.deltaStats.rebuilds || 0) - 1; }
+        else {
+          this.graph.graphData({ nodes: batch.nodes, links: batch.links });
+          if (this.layoutMode === "projector") { this.treeSpring(); this.graph.d3ReheatSimulation?.(); }
+        }
         this.deltaStats.rebuilds = (this.deltaStats.rebuilds || 0) + 1;
       } else {
         for (const x of q) this.applyForceDelta(x);
@@ -1065,7 +1070,7 @@ export class GraphView extends ItemView {
   private deltaTimer = 0;
   /** When the READER last moved the camera (wheel, drag) -- not the idle turn. */
   camMovedAt = 0;
-  deltaStats: { deferred: number; batched: number; rebuilds?: number } = { deferred: 0, batched: 0 };
+  deltaStats: { deferred: number; batched: number; rebuilds?: number; noops?: number } = { deferred: 0, batched: 0 };
   plantNoDeltaDefer = false;
   /** Planted (G-145): every delta rebuilds the graph on its own, as before. */
   plantDeltaPerApply = false;
@@ -1181,8 +1186,14 @@ export class GraphView extends ItemView {
     this.touchActive(d.url);
     this.motion.event("drain", { url: d.url.slice(-50), added: d.added.length, removed: d.removed.length,
                                  reparented: d.reparented.length });
+    // Nothing drawn changed -- no node added, none removed or moved, no link
+    // -- so handing the graph its whole data again would only re-initialize
+    // every force for the same picture (G-145). Planted `plantDeltaPerApply`.
+    const unchanged = !this.plantDeltaPerApply && !gone.size && !moving.size
+      && nodes.length === srcNodes.length && links.length === srcLinks.length;
+    if (unchanged) this.deltaStats.noops = (this.deltaStats.noops || 0) + 1;
     if (batch) { batch.nodes = nodes; batch.links = links; }
-    else {
+    else if (!unchanged) {
       this.graph.graphData({ nodes, links });
       if (this.layoutMode === "projector") {
         this.treeSpring();
