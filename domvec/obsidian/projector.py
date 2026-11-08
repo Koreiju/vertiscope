@@ -410,6 +410,19 @@ class ChunkProjector:
                     if colour is not None:
                         hsv[cids[i]] = [float(v) for v in colour[j]]
             ms_transform = (time.perf_counter() - t) * 1000
+            # 137(6): the WHOLE placed cloud relaxed once, not only the fit
+            # sample -- `_spread` sees `sample_cap` points and the other ~60k
+            # are placed by `transform`, so relaxing the sample alone left the
+            # served picture exactly as clumped (28.9% of nodes inside half
+            # the median gap, before and after, live).
+            t = time.perf_counter()
+            if pos and not L.PLANT_NO_DECLUMP[0]:
+                keys = list(pos)
+                arr = np.asarray([pos[c] for c in keys], dtype=np.float32)
+                arr, _ = L._declump(arr, self.dims)
+                for i, c in enumerate(keys):
+                    pos[c] = [float(v) for v in arr[i][:self.dims]]
+            ms_declump = (time.perf_counter() - t) * 1000
 
             by_url: Dict[str, set] = {}
             for cid, url in zip(cids, urls):
@@ -440,6 +453,7 @@ class ChunkProjector:
                 "pages": len(page_pos), "fitted_chunks": self.fitted_chunks,
                 "ms_read": round(ms_read, 1), "ms_fit": round(ms_fit, 1),
                 "ms_transform": round(ms_transform, 1),
+                "ms_declump": round(ms_declump, 1),
                 "ms_pages": round(ms_pages, 1),
                 "ms": round((time.perf_counter() - started) * 1000, 1),
                 "at": round(time.time(), 3),
@@ -2064,6 +2078,18 @@ class PageProjector(ChunkProjector):
             self.page_scale, self.raw_pos = {}, {}
             pos, hsv = self._place_chunks(projection, vec, page_pos, url_of)
             ms_chunks = (time.perf_counter() - t) * 1000
+            # 137(6): the placed chunk cloud relaxed once -- this is the fit
+            # that serves the 3D view (the page-centroid one), and relaxing
+            # only the other fit changed nothing served (29.8% clean, 29.6%
+            # planted, live). Planted `no-declump`.
+            t = time.perf_counter()
+            if pos and not L.PLANT_NO_DECLUMP[0]:
+                keys = list(pos)
+                arr = np.asarray([pos[c] for c in keys], dtype=np.float32)
+                arr, _ = L._declump(arr, self.dims)
+                for i, c in enumerate(keys):
+                    pos[c] = [float(v) for v in arr[i][:self.dims]]
+            ms_declump = (time.perf_counter() - t) * 1000
             with self.lock:
                 self.projection = projection
                 if getattr(self, "_next_pumap", None) is not None:
@@ -2094,7 +2120,7 @@ class PageProjector(ChunkProjector):
                 "pages": len(urls), "chunks": len(rows), "fitted_chunks": self.fitted_chunks,
                 "ms_read": round(ms_read, 1), "ms_centroids": round(ms_centroids, 1),
                 "centroid_ms": dict(self.centroid_ms), "dims_in": int(X.shape[1]),
-                "ms_fit": round(ms_fit, 1), "ms_chunks": round(ms_chunks, 1),
+                "ms_fit": round(ms_fit, 1), "ms_chunks": round(ms_chunks, 1), "ms_declump": round(ms_declump, 1),
                 "engine": self.engine, "online": online is not None,
                 "scope": decision,
                 "pumap": dict(self.pumap.stats) if self.pumap is not None else None,

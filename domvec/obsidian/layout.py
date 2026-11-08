@@ -882,7 +882,66 @@ def _spread(coords: np.ndarray, dims: int) -> np.ndarray:
         # move every existing node a little on every capture.
         cdf[axis] = np.sort(column)
     _LAST_FIT["spread_cdf"] = cdf
+    out, _LAST_FIT["declump"] = _declump(out, dims)
     return out
+
+
+#: Planted (137(6)): no per-cluster spreading -- the clumped cloud, as before.
+PLANT_NO_DECLUMP = [False]
+
+
+def _declump(coords: np.ndarray, dims: int, iters: int = 8, k: int = 8):
+    """Push apart nodes closer than the cloud's own spacing (PLUGIN_GOAL 137(6)).
+
+    The reader: "chunks are too closely clumped together ... We need to
+    really fix our UMAP balance with centroids." Measured first, on the
+    61,030 chunk positions the sidecar serves: scaling each k-means cluster
+    about its centre was the wrong tool -- the dense clusters are NOT small
+    (75th-percentile radius ~60 units, like the sparse ones); their density
+    is fine clumping inside them, and growing a cluster about its centre runs
+    it into its neighbours long before that opens. A UMAP `min_dist` refit
+    moved nothing (0.0029 -> 0.0026), because the fit is reframed after.
+
+    So: a few bounded relaxation passes. Every pair of k-nearest neighbours
+    closer than the median nearest-neighbour gap pushes apart by the shortfall
+    -- each step capped at half that gap, so no node travels far and the
+    picture's arrangement is kept. On those 61,030 positions (1.1 s): nodes
+    closer than half the median gap 28.9% -> 0.7%, p10 gap 0.147 -> 0.703,
+    true 10-NN kept 85.8%, largest move 2.3 units on a cloud of radius 418,
+    extent unchanged.
+
+    A newcomer is placed by `_spread_apply` among nodes already relaxed and
+    is not moved again here: nothing already drawn moves on a capture.
+    Planted `PLANT_NO_DECLUMP`: the clumped cloud, as before.
+    """
+    if PLANT_NO_DECLUMP[0] or coords is None or len(coords) < 40:
+        return coords, None
+    try:
+        from scipy.spatial import cKDTree
+    except Exception:                                   # noqa: BLE001
+        return coords, None
+    X = np.asarray(coords[:, :dims], dtype=np.float64).copy()
+    target = float(np.median(cKDTree(X).query(X, k=2)[0][:, 1]))
+    if target <= 0:
+        return coords, None
+    kk = min(k + 1, len(X))
+    for _ in range(iters):
+        dist, idx = cKDTree(X).query(X, k=kk)
+        dist, idx = dist[:, 1:], idx[:, 1:]
+        v = X[:, None, :] - X[idx]
+        w = np.clip(target - dist, 0, None) / np.maximum(dist, 1e-9)
+        disp = (v * w[..., None]).sum(1) * 0.5
+        norm = np.linalg.norm(disp, axis=1, keepdims=True)
+        disp *= np.minimum(1.0, (target * 0.5) / np.maximum(norm, 1e-9))
+        X += disp
+    out = np.array(coords, dtype=np.float32, copy=True)
+    out[:, :dims] = X.astype(np.float32)
+    return out, {"target": target, "iters": iters}
+
+
+def _declump_apply(coords: np.ndarray, dims: int, params) -> np.ndarray:
+    """A newcomer is not relaxed: it lands among nodes already relaxed."""
+    return coords
 
 
 def _spacing(coords: np.ndarray, dims: int) -> Dict:
@@ -1176,6 +1235,7 @@ class Projection:
         self.hsv = hsv
         self.hsv_bands = hsv_bands
         self.spread_cdf = spread_cdf or {}
+        self.declump = _LAST_FIT.get("declump")
         self.frame_mid, self.frame_scale = frame if frame else (0.0, 1.0)
         #: How many POINTS the fit was made on -- pages for the page-level
         #: fit, chunks for the chunk-level one.
@@ -1242,6 +1302,7 @@ class Projection:
             # unconstrained coordinates, which φ₁ is not.
             return spherical_to_ball(coords[:, :self.dims]), colours
         coords = _spread_apply(coords, self.dims, self.spread_cdf)
+        coords = _declump_apply(coords, self.dims, getattr(self, "declump", None))
         coords = _frame_apply(coords, self.dims, self.frame_mid,
                               self.frame_scale)
         return coords[:, :self.dims], colours

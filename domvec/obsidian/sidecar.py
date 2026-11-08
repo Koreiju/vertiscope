@@ -800,7 +800,8 @@ _PLANT_NO_MD_HEAL = [os.environ.get("DOMVEC_PLANT_NO_MD_HEAL") == "1"]
 #: arm of a rule that runs in the sidecar's projection, not in the plugin.
 _PLANTABLE = {
     "placeholder-target": ("domvec.markdown", "PLANT_PLACEHOLDER_TARGET"),   # G-197
-    "no-edge-memo": ("domvec.obsidian.layout", "PLANT_NO_EDGE_MEMO"),       # chunk view, 2026-10-24
+    "no-edge-memo": ("domvec.obsidian.layout", "PLANT_NO_EDGE_MEMO"),
+    "no-declump": ("domvec.obsidian.layout", "PLANT_NO_DECLUMP"),            # 137(6)       # chunk view, 2026-10-24
     "fixed-batch": ("domvec.obsidian.projector", "PLANT_FIXED_BATCH"),      # G-13, 2026-10-24
     "adaptive-window": ("domvec.obsidian.projector", "ADAPTIVE_WINDOW"),    # G-13, on: opens for a trickle only
     "window-always": ("domvec.obsidian.projector", "PLANT_WINDOW_ALWAYS"),  # G-13, the window regardless of arrivals
