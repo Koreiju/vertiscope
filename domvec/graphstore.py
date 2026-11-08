@@ -439,6 +439,7 @@ VERSION_SUFFIX = "#~v"
 #: second would otherwise mint one a capture for as long as the tab is open.
 VERSIONS_PER_POSITION = 32
 #: Planted (G-253): an in-place rewrite overwrites the earlier content, as before.
+PLANT_LEAD_IN_PYTHON = [False]
 PLANT_NO_VERSIONS = [False]
 
 
@@ -2233,6 +2234,31 @@ class GraphStore:
         points ARE chunks.
         """
         out = []
+        # **Filtered and chosen IN the query** (2026-11-08, PLUGIN_GOAL 143 "All
+        # UMAP stuff seems really slow"): the fit's read was 13.3 s of a 27 s
+        # fit -- every chunk's TWO 768-d columns crossed into Python, then
+        # duplicates and group members were thrown away there. Now the store
+        # drops them and hands back the one vector that speaks for each row.
+        # A chosen vector of all zeros is skipped, as before. Planted
+        # PLANT_LEAD_IN_PYTHON: the old read.
+        if not PLANT_LEAD_IN_PYTHON[0]:
+            q = ("MATCH (p:Page)-[:HasChunk]->(c:Chunk) "
+                 "WHERE (c.dup_of IS NULL OR c.dup_of = '') "
+                 "AND (c.group_of IS NULL OR c.group_of = '' OR c.group_of = c.cid) "
+                 "RETURN c.url, c.cid, CASE WHEN c.group_n > 1 AND c.group_embedding IS NOT NULL "
+                 "THEN c.group_embedding ELSE c.embedding END")
+            rows = list(self._rows(q))
+            if not PLANT_NO_VERSIONS[0]:
+                rows += [(page_of(r[0]),) + tuple(r[1:]) for r in self._rows(
+                    "MATCH (c:Chunk)-[:VersionOf]->(:Chunk) "
+                    "WHERE (c.dup_of IS NULL OR c.dup_of = '') "
+                    "AND (c.group_of IS NULL OR c.group_of = '' OR c.group_of = c.cid) "
+                    "RETURN c.url, c.cid, CASE WHEN c.group_n > 1 AND c.group_embedding IS NOT NULL "
+                    "THEN c.group_embedding ELSE c.embedding END")]
+            for url, cid, vec in rows:
+                if url and vec is not None and any(vec):
+                    out.append((cid, url, vec))
+            return out
         rows = self._rows(
             "MATCH (p:Page)-[:HasChunk]->(c:Chunk) "
             "RETURN c.url, c.cid, c.dup_of, c.group_of, c.group_n, "
