@@ -83,4 +83,5 @@ Last updated 2026-11-07 late. A native store crash at CHECKPOINT (D-23 class, al
 | G-231 retrieval as the reader uses it | confirmed | G-231 run 58: n=200 -> 200 hits from 7 pages, top-2 share 0.40 (run 56: 174 hits, 5 pages -- a page handed back fewer chunks than it counted and nothing past the count cut was asked). Pages past the cut are now a reserve, asked in rank order while the set is short of n (planted plantNoReserve); planted plantUncappedShare: 5 pages, 0.67 |
 | D-36 / G-82 | resolved into 135(b); G-82 to be marked superseded |
 | PG-134-drop-plane | confirmed (run 84) |
+| G-4 discernible, not a clump | partial -- needs the window on screen | run 59 (2026-11-08, Obsidian MINIMIZED, frames at 1 Hz): pages rebuilt 926/928 clear (99.8%); chunk view 51,213/62,262 (82.3%) vs 94.7% on 2026-10-30 -- the client-side relax runs per frame and could not settle in the 40 s window; planted raw points 45.7% (caught). Not read as a regression; re-run on screen |
 | ~60 PRD rows in **Partly** | see `build_analytics/design_state.md` |
