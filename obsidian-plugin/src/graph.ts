@@ -1549,6 +1549,17 @@ export class GraphView extends ItemView {
    * guard (`sanitize`) keeps the octree safe, this says where the NaN came
    * from. O(nodes) per force per tick.
    */
+  /** Planted (G-145): the link force walks every link in chunk view at strength 0. */
+  plantLinkForceAtZero = false;
+  linkSkips = 0;
+  /** Is the link force's strength a constant 0? (d3 hands back a function.) */
+  private linkStrengthZero(f: any): boolean {
+    const st = f.strength();
+    let zero = false;
+    try { zero = typeof st === "function" ? st({ source: {}, target: {} }) === 0 : st === 0; } catch { zero = false; }
+    if (zero) this.linkSkips++;
+    return zero;
+  }
   private watchForces(): void {
     const g: any = this.graph;
     if (!g) return;
@@ -1558,6 +1569,13 @@ export class GraphView extends ItemView {
       let nodes: any[] = [];
       let calls = 0;
       const w: any = (alpha: number) => {
+        // G-145 (2026-11-08): chunk view sets the link force's strength to 0
+        // -- it contributes nothing -- yet each tick it still walked ~52k
+        // links (~30 ms a tick, 14 ticks in 5 s while streaming kept the
+        // simulation warm). Skipped there: the same result, none of the
+        // work. Planted `plantLinkForceAtZero`: it runs, as before.
+        if (name === "link" && this.level === "chunk" && !this.plantLinkForceAtZero
+            && typeof f.strength === "function" && this.linkStrengthZero(f)) return;
         const before = this.motion.forceBefore(nodes);
         f(alpha);
         this.motion.forceAfter(name, nodes, before, alpha);
