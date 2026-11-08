@@ -12615,6 +12615,34 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "PG-139-richardmille",
+      asks: "PLUGIN_GOAL 139 (a): richardmille.com works in the browser cell -- laid out at desktop width it hung on its loader (main thread blocked); a scaled page that stops answering falls back to native width and reloads, and then answers; planted (no-scale-watchdog) it stays hung",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const b = app.workspace.getLeavesOfType("domvec-browser-view")[0].view;
+          app.workspace.revealLeaf(b.leaf);
+          if (${planted}) b.plant.add("no-scale-watchdog"); else b.plant.delete("no-scale-watchdog");
+          b.nativeWidth = false; b.nativeHosts.clear(); b.scaleWatchSeq++; const f0 = b.widthStats.fallbacks || 0;
+          try {
+            b.go("about:blank"); await sleep(1500);
+            b.go("https://www.richardmille.com/");
+            let answered = false, zoom = 0;
+            const t0 = Date.now();
+            while (Date.now() - t0 < 32000) {
+              await sleep(3000);
+              const r = await Promise.race([b.webview.executeJavaScript("document.readyState + '|' + document.body.innerText.length").catch(() => null), new Promise((r) => setTimeout(() => r(null), 3000))]);
+              if (r && /^complete\|[1-9]/.test(r)) { answered = true; break; }
+            }
+            try { zoom = b.webview.getZoomFactor(); } catch (e) {}
+            return { planted: ${planted}, answered, zoom, fallbacks: (b.widthStats.fallbacks || 0) - f0, native_hosts: [...b.nativeHosts] };
+          } finally { b.scaleWatchSeq++; b.plant.delete("no-scale-watchdog"); }
+        })()`, { timeout: 90000 });
+        const clean = await arm(false), planted = await arm(true);
+        return { pass: !clean.error && clean.answered && clean.native_hosts.includes("www.richardmille.com") && !planted.error && !planted.answered, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {

@@ -512,6 +512,8 @@ export class BrowserView extends ItemView {
     // The document is ready to read once dom-ready fires, whatever the network
     // is still doing; a new main-frame navigation (not an in-page one) resets it.
     view.addEventListener("dom-ready", () => { this.domReady = true; this.fitDesktopWidth(); this.keepWindowsInCell(); });
+    // Armed on NAVIGATION: a page that hangs never reaches dom-ready.
+    view.addEventListener("did-navigate", () => { window.setTimeout(() => this.watchScaled(), 300); });
     // DESKTOP WIDTH (2026-11-07: "rendering is degraded compared to the natural
     // rendering in the duckduckgo browser"): a half-screen cell is 991 px, and
     // sites serve their narrow layout there -- the Cyberpunk wiki's tiles lost
@@ -1228,14 +1230,51 @@ export class BrowserView extends ItemView {
   static DESKTOP_PX = 1280;
   nativeWidth = false;
   widthButton: HTMLButtonElement | null = null;
-  widthStats = { fits: 0, zoom: 1 };
+  widthStats: { fits: number; zoom: number; fallbacks?: number } = { fits: 0, zoom: 1 };
+  /** Sites that hang when laid out scaled: shown at native width. */
+  nativeHosts = new Set<string>();
+  private scaleWatch = 0;
+  private scaleWatchSeq = 0;
+  /**
+   * A page laid out at desktop width that stops answering is shown at native
+   * width instead (2026-11-07: "richardmille.com ... is broken in the
+   * browser" -- at zoom 0.77 its loader never finished and its main thread
+   * stayed blocked; at native width it loads). Asked 10 s after dom-ready;
+   * no answer in 5 s: that host goes native and reloads. Planted
+   * `no-scale-watchdog`: it stays hung.
+   */
+  private watchScaled(): void {
+    const wv: any = this.webview;
+    if (!wv || this.plant.has("no-scale-watchdog")) return;
+    let z = 1; try { z = wv.getZoomFactor(); } catch { return; }
+    if (z >= 0.999) return;
+    const url = (() => { try { return wv.getURL(); } catch { return ""; } })();
+    let host = ""; try { host = new URL(url).host; } catch { return; }
+    if (!host || this.nativeHosts.has(host)) return;
+    // ONE watch at a time: a newer page (or a reload) cancels the last.
+    window.clearTimeout(this.scaleWatch);
+    const token = ++this.scaleWatchSeq;
+    this.scaleWatch = window.setTimeout(async () => {
+      if (token !== this.scaleWatchSeq || this.plant.has("no-scale-watchdog")) return;
+      let now = ""; try { now = wv.getURL(); } catch { return; }
+      if (now !== url) return;
+      const ok = await Promise.race([wv.executeJavaScript("1").then(() => true).catch(() => true), new Promise((r) => window.setTimeout(() => r(false), 5000))]);
+      if (ok || token !== this.scaleWatchSeq || this.nativeHosts.has(host)) return;
+      this.nativeHosts.add(host);
+      this.widthStats.fallbacks = (this.widthStats.fallbacks || 0) + 1;
+      this.fitDesktopWidth();
+      try { wv.reload(); } catch { /* gone */ }
+    }, 10000);
+  }
+
   /** Scale the page so it lays out at desktop width (or native, toggled). */
   fitDesktopWidth(): void {
     const wv: any = this.webview;
     if (!wv || !this.domReady) return;
     const px = wv.getBoundingClientRect().width;
     if (!px) return;
-    const z = this.nativeWidth || this.plant.has("native-width") ? 1 : Math.min(1, px / BrowserView.DESKTOP_PX);
+    let host = ""; try { host = new URL(wv.getURL()).host; } catch { /* not ready */ }
+    const z = this.nativeWidth || this.plant.has("native-width") || this.nativeHosts.has(host) ? 1 : Math.min(1, px / BrowserView.DESKTOP_PX);
     try { if (Math.abs(wv.getZoomFactor() - z) > 0.01) wv.setZoomFactor(z); } catch { return; }
     this.widthStats.fits++; this.widthStats.zoom = +z.toFixed(3);
     this.widthButton?.setText(this.nativeWidth ? "native" : "desktop");
