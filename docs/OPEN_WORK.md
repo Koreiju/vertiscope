@@ -39,7 +39,7 @@ Last updated 2026-11-07 late. A native store crash at CHECKPOINT (D-23 class, al
 | 23 | Ego retrieval controls vs the search bar; remove the slider | confirmed | PG-137-search-linked, run 82 |
 | 24 | Dragging the graph tab breaks the app | confirmed (clean arm) | after the restart: 0 errors on a move (was 8 from orphaned views). Planted arm vacuous post-restart |
 | 25 | Link navigation very slow | measured: the site, not the plugin | 2026-11-08: real link clicks in the 2D cell on Wikipedia: dom-ready 200-370 ms, loaded <= 560 ms. In a right-hand tab, a DuckDuckGo result to oceanbeachbulletin.com took ~4 s; loaded directly with no click (null arm) the same page took 5.3 s to its first response (did-navigate, before the plugin sees the page) while Wikipedia took 260 ms. The delay is that server's. DuckDuckGo image tiles open DDG's own preview, not a navigation |
-| 26 | archive.org nested shadow DOM; DuckDuckGo image search; "More results" not pressed | partial | "More results": G-176 confirmed run 2 (598 results; planted cap 3 rounds). G-158 clean passes (submit). archive.org M-10: the "Web Sites" miss was the CHECK (its pattern cut an href at a space); fixed. Run 18: 215/219 deep links, the 4 missed now differ run to run (collection facets at depth 8) -- render timing, to be pinned down. DuckDuckGo image search ("shipwrecks"): captured once the queue was unblocked -- 29 chunks, 248 image lines / 222 distinct images for 100 tiles. It had been blocked by 110 refused bandcamp drains after a sidecar restart; fixed (PG-137-refused-queue, run 12) |
+| 26 | archive.org nested shadow DOM; DuckDuckGo image search; "More results" not pressed | confirmed | archive.org: M-10 run 55 -- 229/229 deep links in the trie at their EXACT shadow depth (max depth 7), 0 missing (run 18 had missed 4 of 219); planted strip 8 exact, planted drop 0. "More results": G-176 run 2 (598 results; planted cap 3). DuckDuckGo image search "shipwrecks": 29 chunks, 248 image lines, 222 distinct images for 100 tiles once the refused-drain queue was cleared (PG-137-refused-queue run 12) |
 
 ## PLUGIN_GOAL 135–136
 
@@ -69,7 +69,7 @@ Last updated 2026-11-07 late. A native store crash at CHECKPOINT (D-23 class, al
 |---|---|---|
 | 138 no long links | confirmed | PG-138-no-long-links |
 | 138 UMAP refit | run, no effect, reverted | see 137(6) |
-| 138 new DuckDuckGo searches (shipwrecks) | partial | G-158/G-176 pass on their queries; a "shipwrecks" image-search run is next with 137(26) |
+| 138 new DuckDuckGo searches (shipwrecks) | confirmed | G-158/G-176 pass; the "shipwrecks" image search captured 29 chunks / 222 distinct images for 100 tiles (see 137(26)) |
 | 139(a) richardmille.com broken | confirmed | PG-139-richardmille, run 9 |
 | 139(b) flickering links | confirmed | PG-138-no-flicker |
 
