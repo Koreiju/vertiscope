@@ -83,7 +83,11 @@ export class PlaneHalo {
     this.navigate(); this.draw(plane);
   };
   private onDown = (e: PointerEvent) => this.stick(e);
-  private onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && this.focus) this.close(); };
+  private onKey = (e: KeyboardEvent) => {
+    if (e.key === "Escape" && this.focus) this.close();
+    else if ((e.key === "Delete" || e.key === "Backspace") && this.focus && this.navigated >= 0
+             && !(e.target as HTMLElement)?.closest?.("input, textarea, .cm-editor, [contenteditable]")) { e.preventDefault(); void this.dismiss(); }
+  };
 
   constructor(private host: HaloHost) {}
 
@@ -124,7 +128,9 @@ export class PlaneHalo {
     if (this.focus !== path) return false;
     this.focusKey = url; this.history = [];
     this.focusKind = this.kindOf(url);
-    const hits = this.strict(((got && got.hits) || []).filter((h: any) => h.url !== url)).slice(0, cap);
+    const all = this.strict(((got && got.hits) || []).filter((h: any) => h.url !== url));
+    const hits = all.slice(0, cap);
+    this.reserve = all.slice(cap);
     await this.place(hits);
     if (this.focus !== path) return false;
     this.cursor = { ...this.centre };
@@ -145,7 +151,32 @@ export class PlaneHalo {
 
   /** Results laid out round the current centre: radius by similarity, angle
    *  by the results' own similarity to one another. */
+  /**
+   * O.14 (UR; RESERVOIR_DESIGN 8b): deleting a halo result brings in the
+   * next. Delete (or Backspace) on the navigated result drops it; the best
+   * result the search returned past the halo's capacity takes its slot, and
+   * the halo is laid out again. Planted `plantNoRefill`: dropped, nothing in.
+   */
+  reserve: any[] = [];
+  private shownHits: any[] = [];
+  plantNoRefill = false;
+  dismissStats = { dismissed: 0, refilled: 0 };
+  async dismiss(): Promise<boolean> {
+    if (this.navigated < 0 || !this.focus) return false;
+    const gone = this.shownHits[this.navigated];
+    const keep = this.shownHits.filter((_, i) => i !== this.navigated);
+    this.dismissStats.dismissed++;
+    if (!this.plantNoRefill && this.reserve.length) { keep.push(this.reserve.shift()); this.dismissStats.refilled++; }
+    this.dismissed.add(String(gone?.cid || gone?.url || ""));
+    await this.place(keep);
+    this.navigated = -1; this.trace = [];
+    const plane = this.host.plane();
+    if (plane) this.draw(plane);
+    return true;
+  }
+  private dismissed = new Set<string>();
   private async place(hits: any[]): Promise<void> {
+    this.shownHits = hits.slice();
     const sc = this.host.sidecar()!;
     const r0 = this.stats.r0, R = this.stats.R;
     this.stats.results = hits.length;
@@ -276,7 +307,9 @@ export class PlaneHalo {
     this.centre = { x: h.x, y: h.y };
     const seen = new Set(this.history.map((q) => q.key).concat([h.key, "vault://" + this.host.app.vault.getName() + "/" + this.focus]));
     const got: any = await sc.search((h.preview || h.label).slice(0, 240), { k: 3 * this.stats.cap + seen.size, where: "ego" });
-    const hits = this.strict(((got && got.hits) || []).filter((x: any) => !seen.has(String(x.url).startsWith("vault://") ? String(x.url) : String(x.cid)))).slice(0, this.stats.cap);
+    const all2 = this.strict(((got && got.hits) || []).filter((x: any) => !seen.has(String(x.url).startsWith("vault://") ? String(x.url) : String(x.cid))));
+    const hits = all2.slice(0, this.stats.cap);
+    this.reserve = all2.slice(this.stats.cap);
     await this.place(hits);
     this.cursor = { ...this.centre };
     this.navigated = -1; this.trace = [];
