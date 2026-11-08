@@ -13090,6 +13090,43 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "PG-136-run-links",
+      asks: "PLUGIN_GOAL 136: a RUN is a computation-graph link -- a cell whose fence names another plane panel's note by {ref}, run with its Run button, is joined to that panel on the plane by a solid line (from the store's recorded run, /signal). Planted (plantNoMemoryLinks): no line",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const until = async (ok, ms) => { for (let t = 0; t < ms && !ok(); t += 250) await sleep(250); return ok(); };
+          await window.__domvec.act("open", "graph"); await sleep(1500);
+          const plugin = app.plugins.getPlugin("domvec-bridge"), desk = window.__domvecPlane;
+          desk.plantNoMemoryLinks = ${planted};
+          const NL = String.fromCharCode(10), F = String.fromCharCode(96).repeat(3), stamp = Date.now();
+          const folder = "domvec-checks";
+          const srcName = "runlink source " + stamp, srcPath = folder + "/" + srcName + ".md", cellPath = folder + "/runlink cell " + stamp + ".md";
+          const varName = srcName.replace(/[^A-Za-z0-9_]+/g, "_").replace(/^_+|_+$/g, "").toLowerCase();
+          const between = () => [...document.querySelectorAll("svg.domvec-memory-links line")].filter((l) => (l.dataset.a === srcPath && l.dataset.b === cellPath) || (l.dataset.a === cellPath && l.dataset.b === srcPath));
+          try {
+            const src = await app.vault.create(srcPath, "# Source" + NL + NL + "Run-link source, marker " + stamp + "." + NL);
+            await plugin.indexNote(src, "check");
+            const cell = await app.vault.create(cellPath, "# cell" + NL + NL + F + "python {" + srcName + "}" + NL + "print(len(" + varName + "))" + NL + F + NL);
+            await desk.open(src); await desk.open(cell);
+            const view = desk.viewOf(cellPath);
+            await until(() => !!view && !!view.containerEl.querySelector(".domvec-run-fence"), 8000);
+            const before = between().length;
+            view.containerEl.querySelector(".domvec-run-fence").click();
+            await until(() => view.editor.getValue().includes("nb-output"), 30000);
+            await desk.memRefreshSignal(true); desk.memDraw();
+            await until(() => between().length > 0 || ${planted}, 4000);
+            return { planted: ${planted}, ran: view.editor.getValue().includes("nb-output"), before, after: between().length, stats: { ...desk.memoryStats } };
+          } finally {
+            desk.plantNoMemoryLinks = false;
+            for (const p of [srcPath, cellPath]) { desk.closePath(p); const f = app.vault.getAbstractFileByPath(p); if (f) await app.vault.trash(f, true); }
+          }
+        })()`, { timeout: 120000 });
+        const clean = await arm(false), planted = await arm(true);
+        return { pass: !clean.error && clean.ran && clean.before === 0 && clean.after === 1 && clean.stats.from_signal >= 1 && !planted.error && planted.after === 0, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {
