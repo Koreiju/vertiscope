@@ -19,7 +19,7 @@ Last updated 2026-11-07, commit `c4216e2`.
 | 3 | Image+caption / infobox sub-chunking (Gay, NC) | needs the reader | store holds the box as ONE 18-line chunk; a live hover resolves to it. Not reproduced |
 | 4 | Chunk views as browser cells, linked to markdown through a few abstract graph nodes | **not started** | design item; largest open build |
 | 5 | Arrow keys run the search with an empty field | needs the reader | synthetic arrow press runs nothing; need the steps |
-| 6 | Chunks clumped | built-ready, **refit not yet run** | measured: layout keeps UMAP exactly (drift 0); the UMAP fit itself packs chunks 0.86 apart vs radius 0.31. Refit with more spread authorised (138) |
+| 6 | Chunks clumped | partial | the layout keeps UMAP exactly (drift 0); the fit packs clusters tight. Refit run 2026-11-07 with min_dist 0.6 (pumap + umap): median nearest spacing / cloud radius 0.0029 -> 0.0026, i.e. **no effect** (the fit is reframed after); reverted. Next: a density-equalising step (densMAP, or rescaling each cluster about its centre) -- a design choice |
 | 7 | Code link opens the Microsoft Store | confirmed | PG-137-fixes, run 55 |
 | 8 | Booleans: no "go"; false, hover true, click applies | confirmed | PG-137-fixes + PG-137-action-hover, run 75 |
 | 9 | Plain text highlighted as variables | confirmed | PG-137-prose-plain, run 71 |
@@ -33,7 +33,7 @@ Last updated 2026-11-07, commit `c4216e2`.
 | 17 | Exploding spider web / flickering links | confirmed | PG-138-no-long-links + PG-138-no-flicker, run 6 (after restart) |
 | 18 | One browser tab navigates the others | partial | likely the window-open path, now kept in the cell; not confirmed |
 | 19 | Retrieval re-triggers at high n / on scroll | confirmed | PG-137-rerank-debounce, run 58 |
-| 20 | Bandcamp diff-stream saving | partial | versions still saved (102 live); captures 4–9 s, anchor writes ~20 ms each on a 1.8M-address store. Per-branch timing now in; sidecar restarted — **read it next** |
+| 20 | Bandcamp diff-stream saving | partial (big win) | anchor edges 44.9 -> 2.1 ms a row live (`4a81f2a`); remaining: reconcile 0.6-2.6 s, lock wait up to 6 s. Earlier note: versions still saved (102 live); captures 4–9 s, anchor writes ~20 ms each on a 1.8M-address store. Per-branch timing now in; sidecar restarted — **read it next** |
 | 21 | Push fixes to master | done locally | no git remote configured; `master` moved to each commit |
 | 22 | Rotation lag with three browser tabs | partial | 131 fps measured with tabs on one page; G-101 showed ~1 fps frames when the panes were mis-arranged; orphan views (24) likely contributed. Re-measure after the restart |
 | 23 | Ego retrieval controls vs the search bar; remove the slider | confirmed | PG-137-search-linked, run 82 |
@@ -60,7 +60,7 @@ Last updated 2026-11-07, commit `c4216e2`.
 | Item | Status | Evidence |
 |---|---|---|
 | 138 no long links | confirmed | PG-138-no-long-links |
-| 138 UMAP refit | **authorised, not run** | see 137(6) |
+| 138 UMAP refit | run, no effect, reverted | see 137(6) |
 | 138 new DuckDuckGo searches (shipwrecks) | partial | G-158/G-176 pass on their queries; a "shipwrecks" image-search run is next with 137(26) |
 | 139(a) richardmille.com broken | confirmed | PG-139-richardmille, run 9 |
 | 139(b) flickering links | confirmed | PG-138-no-flicker |
