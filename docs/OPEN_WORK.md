@@ -124,3 +124,17 @@ Last updated 2026-11-08 evening (items 141-147 below). Earlier: 2026-11-07 late.
 - D-12 spherical layout closed (approved: dropped).
 - D-2/T-1 chunk trie re-key to five levels + R-C5 over-long single lines split: approved, not started.
 - Disk cleanup: not approved; nothing deleted.
+
+## Ego re-check, 2026-11-08 evening (PLUGIN_GOAL 149)
+
+| What | Status | Evidence |
+|---|---|---|
+| craft much smaller | confirmed | extent 119 -> 33 units (`93fda82`) |
+| craft not buried in the world | confirmed (seen) | drawn over the world, screenshot (`3e691dd`) |
+| computing triple lit (readout) | confirmed | readout lit vs planted not (`3e691dd`) |
+| computing triple lit (input lines) | built, unmeasured | the store's one recorded run is on a non-craft note |
+| ego controls, confirm run 1 | 10 of 13 pass after G-273's fix | G-271, G-273 (`239ba57`), G-281, G-282, G-283, G-284, G-285, G-331, G-333, G-334 |
+| G-275 plan leg drawn in the ego view | open | after map -> ego the craft moved 3.3 units in 20 s and never reached leg 1 (G-283, the cockpit's plan, passes) |
+| G-280 cockpit throttle text vs agent | open | after Shift the text read 45, the agent 40 |
+| G-270 store-wide dedup | open | 66 contents drawn twice, 101 extra group leads |
+| live memory structures from recursive calls (PG 4909) | not started | |
