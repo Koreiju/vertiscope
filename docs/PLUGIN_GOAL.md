@@ -5346,6 +5346,16 @@ reported screenshots and observe the app to find the actual problem; keep a
 tracked list of every unstarted feature/build/task against the full
 goal/PRD.*
 
+*2026-11-07, later still (two messages):*
+
+> Also, richardmille.com (the site itself) is broken in the browser
+
+> There is a TON of flickering links
+
+*Read as (139): (a) richardmille.com renders broken in the browser cell;
+(b) links flicker in the 3D view (found: the no-long-links cap was applied by
+one of the two paths that write the link buffer).*
+
 ---
 
 ## Standing instructions carried in the verbatim
