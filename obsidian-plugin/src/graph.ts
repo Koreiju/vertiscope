@@ -7955,6 +7955,10 @@ export class GraphView extends ItemView {
   plantRelaxEndInOneFrame = false;
   /** Work per frame, ms: the relax yields to the renderer past this. */
   relaxBudgetMs = 8;
+  /** Work per slice when frames are > 100 ms apart (no one sees them render). */
+  relaxBackgroundMs = 250;
+  /** Planted (G-4): the 8 ms budget whatever the frame rate, as before. */
+  plantRelaxFrameBound = false;
   private relaxChunkView(): void {
     const g: any = this.graph;
     if (!g || this.level !== "chunk" || this.plantNoChunkRelax || this.scaledMode) return;
@@ -8063,12 +8067,21 @@ export class GraphView extends ItemView {
     const t0 = performance.now();
     const before = overlaps();
     let it = 0, grid: Map<number, number[]> | null = null, cursor = 0, moved = 0, worst = 0;
+    let lastStep = 0;
     const step = () => {
       if (seq !== this.relaxSeq || this.level !== "chunk" || !this.graph) return;
       const tf = performance.now();
+      // Frames far apart (a minimized or hidden window: 1 Hz) are frames no
+      // one is watching render, so a slice may take more of each. At 8 ms a
+      // frame, 62,384 free nodes x 40 iterations never finished at 1 Hz -- 0
+      // runs in 60 s, the chunk view at the raw spacing (G-4, 2026-11-08). On
+      // screen the 8 ms budget holds. Planted `plantRelaxFrameBound`.
+      const gap = lastStep ? tf - lastStep : 0;
+      lastStep = tf;
+      const budget = (!this.plantRelaxFrameBound && gap > 100) ? this.relaxBackgroundMs : this.relaxBudgetMs;
       if (!grid) { grid = build(); cursor = 0; moved = 0; }
       // Pairs, until this frame's budget is spent; the iteration resumes next frame.
-      while (cursor < free.length && performance.now() - tf < this.relaxBudgetMs) {
+      while (cursor < free.length && performance.now() - tf < budget) {
         const i = free[cursor++];
         const cx = Math.floor(P[3 * i] / cell), cy = Math.floor(P[3 * i + 1] / cell), cz = Math.floor(P[3 * i + 2] / cell);
         for (let ox = -1; ox <= 1; ox++) for (let oy = -1; oy <= 1; oy++) for (let oz = -1; oz <= 1; oz++) {
