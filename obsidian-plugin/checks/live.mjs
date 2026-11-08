@@ -6038,6 +6038,12 @@ export function makeChecks(env) {
           // settling took is reported with the verdict.
           const settled = async () => {
             const t0 = performance.now();
+            if (v.level === "chunk" && !v.plantNoChunkRelax) {
+              // Settled = the relax FINISHED a run (~40 s on 62k nodes); the
+              // census at ~30 s read it half done (2026-11-08). Up to 90 s.
+              const r0 = v.chunkRelaxStats.runs;
+              for (let i = 0; i < 90 && v.chunkRelaxStats.runs === r0; i++) await sleep(1000);
+            }
             let c = census();
             for (let i = 0; i < 20 && !(c.share >= 0.95); i++) { await sleep(1000); c = census(); }
             c.settle_s = Math.round((performance.now() - t0) / 100) / 10;
