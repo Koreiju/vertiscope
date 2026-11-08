@@ -2330,7 +2330,16 @@ export class GraphView extends ItemView {
         }
       }
       if (structural) this.graph.graphData(data);
-      if (moved || gone || pages || structural) { if (!this.umapAuthority()) this.collideSoon(); this.graph.d3ReheatSimulation(); }
+      if (moved || gone || pages || structural) {
+        if (!this.umapAuthority()) this.collideSoon();
+        this.graph.d3ReheatSimulation();
+        // The ONE post-process (T-1): once the stream settles, a single spacing
+        // pass over what is new, applied in one step, then nothing moves.
+        if (this.umapAuthority()) {
+          window.clearTimeout(this.postTimer);
+          this.postTimer = window.setTimeout(() => { this.postStats.runs++; this.relaxChunkView(); }, 1500);
+        }
+      }
       let added = 0;
       if (toPlace.length) {
         const trace = profiler().begin("stream", [...openUrls][0] || "");
@@ -5215,7 +5224,11 @@ export class GraphView extends ItemView {
   /** Planted (2026-10-11): url nodes the fit put on each other stay there. */
   plantPagesTogether = false;
   private telescope(page: any, chunks: any[], bound: number, relSize: number, media: boolean): void {
-    if (this.plantNoTelescope || !chunks.length || !(bound > 0)) return;
+    // T-17 (PLUGIN_GOAL 145): the per-url telescope was a second layout rule
+    // fighting the first -- its radial targets were what the landing rule
+    // sent back to the fit, ~650 glides a second forever. Gone under the
+    // authority rule; planted `plantUmapNotAuthority` brings it back.
+    if (this.plantNoTelescope || this.umapAuthority() || !chunks.length || !(bound > 0)) return;
     const px = page.fitX ?? page.x, py = page.fitY ?? page.y, pz = page.fitZ ?? page.z ?? 0;
     if (![px, py, pz].every(Number.isFinite)) return;
     const raw: V3[] = [];
@@ -5430,7 +5443,12 @@ export class GraphView extends ItemView {
    * `plantUmapNotAuthority`: the staggered motions, as before.
    */
   plantUmapNotAuthority = false;
-  umapAuthority(): boolean { return this.scaledMode && !this.plantUmapNotAuthority; }
+  private postTimer = 0;
+  postStats = { runs: 0 };
+  // Every level, scaled map or not (T-1/T-17 rulings, PLUGIN_GOAL 145): the
+  // fit places a mapped node and ONE bounded spacing pass (`relaxChunkView`,
+  // applied in one step) is the only thing allowed to move it after.
+  umapAuthority(): boolean { return !this.plantUmapNotAuthority; }
   private glide(n: any, to: number[], ms = 450): void {
     if (!to.every(Number.isFinite)) return;
     // A glide to the raw fit is a glide to the SCALED place (G-324): every
@@ -8097,7 +8115,7 @@ export class GraphView extends ItemView {
   plantRelaxFrameBound = false;
   private relaxChunkView(): void {
     const g: any = this.graph;
-    if (!g || this.level !== "chunk" || this.plantNoChunkRelax || this.scaledMode || this.umapAuthority()) return;
+    if (!g || (this.level !== "chunk" && !this.umapAuthority()) || this.plantNoChunkRelax || this.scaledMode) return;
     const seq = ++this.relaxSeq;
     const nodes = (g.graphData().nodes as any[]).filter((n) => Number.isFinite(n.fitX) && Number.isFinite(n.fitY));
     const N = nodes.length;
@@ -8205,7 +8223,7 @@ export class GraphView extends ItemView {
     let it = 0, grid: Map<number, number[]> | null = null, cursor = 0, moved = 0, worst = 0;
     let lastStep = 0;
     const step = () => {
-      if (seq !== this.relaxSeq || this.level !== "chunk" || !this.graph) return;
+      if (seq !== this.relaxSeq || (this.level !== "chunk" && !this.umapAuthority()) || !this.graph) return;
       const tf = performance.now();
       // Frames far apart (a minimized or hidden window: 1 Hz) are frames no
       // one is watching render, so a slice may take more of each. At 8 ms a
@@ -9689,7 +9707,10 @@ export class GraphView extends ItemView {
     // has nothing to integrate and stops on its first cool tick. The pages
     // view gets its forces back on the next load (`draw` builds anew).
     // Planted: the pages view's forces in chunk view, as before.
-    if (this.level === "chunk" && !this.plantChunkForces) {
+    // UMAP is the authority at EVERY level (141/143/145): the pages view lost
+    // its forces too -- streaming bandcamp moved 330-656 of 1,297 mapped nodes
+    // every 5 s through charge/home/collide with no glide running.
+    if ((this.level === "chunk" || this.umapAuthority()) && !this.plantChunkForces) {
       for (const name of ["charge", "center", "home", "contain", "collide", "hold", "treeSpring"]) graph.d3Force(name, null);
       graph.d3Force("link")?.strength(0);
       // Nothing to integrate: two ticks put each proxy where its node is.
@@ -9700,7 +9721,7 @@ export class GraphView extends ItemView {
         // where the reader last saw the chunk, not the fit before relaxing.
         // Scaled map (G-324): at S x fit, and no relax pass after.
         if (this.scaledMode) { const t = this.mapTarget(n); n.x = n.fx = t[0]; n.y = n.fy = t[1]; n.z = n.fz = t[2]; n.__mapped = true; continue; }
-        const d = !this.plantNoDrawn && !this.umapAuthority() && n.drawnAt;
+        const d = !this.plantNoDrawn && n.drawnAt;
         if (d) { n.x = n.fx = d[0]; n.y = n.fy = d[1]; n.z = n.fz = d[2]; }
         else { n.x = n.fx = n.fitX; n.y = n.fy = n.fitY; n.z = n.fz = n.fitZ ?? 0; }
       }
