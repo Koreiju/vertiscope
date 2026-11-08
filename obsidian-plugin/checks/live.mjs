@@ -12861,6 +12861,28 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "PG-137-slate-url",
+      asks: "a 2D browser cell opened (or restored) with no url asked shows its slate's url, not about:blank (2026-11-07 screenshot: about:blank under a slate reading frutigeraeroarchive.org/music). Planted (plantNoRestoreUrl): stays blank",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const B = window.__domvecBrowserPanel, desk = window.__domvecPlane;
+          await B.open(); await sleep(1500);
+          const sv = B.slateView(); const m = /^\turl\t(.*)$/m.exec(sv.editor.getValue()); const want = m ? m[1].trim() : "";
+          desk.closePath(B.path); await sleep(800);
+          B.plantNoRestoreUrl = ${planted};
+          try {
+            await B.open(); let shown = "";
+            for (let i = 0; i < 40; i++) { await sleep(250); try { shown = B.view().webview.getURL(); } catch (e) {} if (shown && shown !== "about:blank") break; }
+            const host = (u) => { try { return new URL(u).host; } catch (e) { return ""; } };
+            return { planted: ${planted}, slate_url: want, shown, same_host: !!want && host(want) === host(shown) };
+          } finally { B.plantNoRestoreUrl = false; }
+        })()`, { timeout: 60000 });
+        const planted = await arm(true), clean = await arm(false);
+        return { pass: !clean.error && /^https?:/.test(clean.slate_url) && clean.same_host && !planted.error && !planted.same_host, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {

@@ -46,7 +46,7 @@ export class BrowserPanel {
   private chunkEl: HTMLElement | null = null;
   private chunkComp: Component | null = null;
   chunkShown = "";
-  stats = { exited: 0, opened: 0, went: 0, back: 0, forward: 0, scans: 0, toggles: 0, written: 0, scope: "" as string, split: 0, joined: 0 };
+  stats = { exited: 0, opened: 0, went: 0, back: 0, forward: 0, scans: 0, toggles: 0, written: 0, scope: "" as string, split: 0, joined: 0, restoredUrl: 0 };
   /** Planted (item 71): the cockpit's fields bind nothing. */
   plantUnbound = false;
   private seenUrl = "";
@@ -56,6 +56,8 @@ export class BrowserPanel {
   plantNoExit = false;
   /** Planted: pulled apart with no link drawn between the halves (135(b)). */
   plantPairNoLink = false;
+  /** Planted: opened with no url, the slate's url is not loaded (about:blank stays). */
+  plantNoRestoreUrl = false;
   /** The pair's pull-apart, while split: undoes it. */
   private unsplit: (() => void) | null = null;
   private scopeTry = 0;
@@ -150,6 +152,16 @@ export class BrowserPanel {
     const cm: any = (sv?.editor as any)?.cm;
     if (cm) { const st = foldsOf(cm); if (st.collapsed) cm.dispatch({ effects: setFolds.of({ ...st, collapsed: false }) }); }
     if (url) await this.go(url);
+    else if (!this.plantNoRestoreUrl) {
+      // Opened (or restored at load) with no url asked: the slate's own url is
+      // the page. The browser half sat on about:blank under a slate reading
+      // frutigeraeroarchive.org/music -- the url drove the browser only on an
+      // EDIT of the slate (2026-11-07, seen in a screenshot).
+      const want = (this.field(this.fields(), "url")?.value || "").trim();
+      const v = this.view();
+      let shown = ""; try { shown = String(v?.shownUrl?.() || v?.webview?.getURL?.() || ""); } catch { /* not ready */ }
+      if (/^https?:/.test(want) && (!shown || shown === "about:blank")) { this.seenUrl = want; await this.go(want); this.stats.restoredUrl++; }
+    }
     return this.view();
   }
 
