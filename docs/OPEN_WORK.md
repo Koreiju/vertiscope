@@ -8,7 +8,32 @@ not yet confirmed live), **partial**, **not started**, **needs the reader**.
 The PRD's own computed status lives in `build_analytics/design_state.md`; this
 file is the working list for items 130–139 and what they reopened.
 
-Last updated 2026-11-07 late. A native store crash at CHECKPOINT (D-23 class, also at 18:11 before today's store change) was restarted by the supervisor.
+Last updated 2026-11-08 evening (items 141-147 below). Earlier: 2026-11-07 late. A native store crash at CHECKPOINT (D-23 class, also at 18:11 before today's store change) was restarted by the supervisor.
+
+## PLUGIN_GOAL 141-147 -- 2026-11-08
+
+| # | What | Status | Evidence |
+|---|---|---|---|
+| 141/143/145 T-1,T-17 | UMAP the authority; one bounded spacing pass; no telescope | confirmed | frames with motion while streaming 2/2,260 vs planted 436/1,528 (`6676422`) |
+| 143 | pane loaded before the fit stays on force layout | confirmed | late fit asked 1 / loaded 1 vs planted 0/0 (`380e798`) |
+| 143 | strict UMAP for streamed, not-yet-placed nodes (no force layout at all) | partial | the caption no longer says "no embedding needed"; unplaced streamed nodes are still drawn by their parent until the fit places them |
+| 143 | sidecar /health stall | confirmed | 20.05 s timeout -> 0.01-0.04 s (`2d396a3`) |
+| 143 | UMAP slow | partial | fit read 25-30% less (`f2338c5`); chunk transform and redraw still seconds |
+| 143 | sidecar process split (micro-processes, PG 4519) | not started | |
+| 137(6) | white mass in the pages view | confirmed | halo stack 8.2 / k 0.366 vs planted 0.14 / 1 (`b9518c9`) |
+| 144 | workspaces per vault, menu, own port | confirmed | to scratch-144 and back, both listed, ports kept (`e6055f5`) |
+| 147 | new vaults get the plugin; sidecar autostart | confirmed (install) / built (autostart) | `test` vault enabled, 4 older skipped (`380e798`) |
+| 146 | ego craft centred, turns with heading | confirmed | centred 0-1 units vs planted 8,650-18,431; 88 deg turn vs 0 (`380e798`); hidden in first person (`e6055f5`) |
+| 142 T-11 | magnetised cells compile row-major | confirmed | A,B,terminal,chat vs planted BFS (`796ec71`) |
+| 142 | PowerShell terminal as a plane cell | confirmed | mounted in its card (`796ec71`) |
+| 142 T-10 | governing artifact generates the browser panel | confirmed | reader field appears vs planted absent (`368c944`) |
+| T-8 | click halo, double-click panel | confirmed | `0d06f36` |
+| T-12 | idle drift off by default | confirmed | 0 vs 0.106 rad (`9d03cf9`) |
+| UR N.4 | left-drag wiring in graph form | confirmed | 1 edge vs 0 (`3f6083a`) |
+| O.14 | delete a halo result, the next comes in | built, not confirmable | type-strict halos hold <= 2 results on this vault (`c859b9e`) |
+| T-14 | per-workspace Python environment | needs the reader | installing packages into a new environment is a download |
+| G-145 | streaming-layer rework | needs the reader | recommended yes |
+| T-4, T-5, T-13, T-15, T-16 | rulings not yet built | not started | `DESIGN_VISION.md` 4b |
 
 ## PLUGIN_GOAL 137 — the 26 reported glitches
 
