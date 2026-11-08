@@ -32,7 +32,7 @@ Last updated 2026-11-08 evening (items 141-147 below). Earlier: 2026-11-07 late.
 | UR N.4 | left-drag wiring in graph form | confirmed | 1 edge vs 0 (`3f6083a`) |
 | O.14 | delete a halo result, the next comes in | confirmed | with 18 same-kind fixture notes: 13 shown, reserve 4; dismissed -> 13 shown, gone not shown, refilled 1; planted plantNoRefill -> 12 (`c859b9e`) |
 | T-14 | per-workspace Python environment | needs the reader | installing packages into a new environment is a download |
-| G-145 | streaming-layer rework | needs the reader | recommended yes |
+| G-145 | streaming-layer rework | partial, re-measured | 2026-11-08 after T-1 (no forces in either view): bandcamp streaming into the 62,694-node chunk view, 60 s: main thread blocked 28.2 s (was 40.6), 154 long tasks, 1 freeze > 1 s (was 1), 17 rebuilds. One rebuild = ~230 ms against a ~30 ms idle frame, so rebuilds are ~4 s of the 28; the other ~24 s are not yet attributed (next: a CPU profile of the stream's apply path and the scene batch's per-sync work over 62k instances) |
 | T-4 | `{ref}` between plane cells is a hard link | confirmed | linked both ways vs planted none (`31592c5`) |
 | T-15 | pydantic types from trie-path patterns | confirmed | 8,028 instances / 51 pages / 20 fields live; planted split fields (`082aa33`) |
 | 140/5364 | one unified markdown panel | confirmed (no defect found) | right-click pins become plane panels (side card only under its plant); stuck billboards mount the editor cell |
