@@ -7955,7 +7955,7 @@ export class GraphView extends ItemView {
   plantRelaxEndInOneFrame = false;
   /** Work per frame, ms: the relax yields to the renderer past this. */
   relaxBudgetMs = 8;
-  /** Work per slice when frames are > 100 ms apart (no one sees them render). */
+  /** Work per slice when frames are > 900 ms apart (a minimized window, 1 Hz). */
   relaxBackgroundMs = 250;
   /** Planted (G-4): the 8 ms budget whatever the frame rate, as before. */
   plantRelaxFrameBound = false;
@@ -8078,7 +8078,10 @@ export class GraphView extends ItemView {
       // screen the 8 ms budget holds. Planted `plantRelaxFrameBound`.
       const gap = lastStep ? tf - lastStep : 0;
       lastStep = tf;
-      const budget = (!this.plantRelaxFrameBound && gap > 100) ? this.relaxBackgroundMs : this.relaxBudgetMs;
+      // 900 ms, the minimized window's 1 Hz signature -- not 100: an UNFOCUSED
+      // but visible window also gets slow frames, and 250 ms slices there were
+      // 95 visible stalls over 200 ms in 45 s (G-145, 2026-11-08).
+      const budget = (!this.plantRelaxFrameBound && gap > 900) ? this.relaxBackgroundMs : this.relaxBudgetMs;
       if (!grid) { grid = build(); cursor = 0; moved = 0; }
       // Pairs, until this frame's budget is spent; the iteration resumes next frame.
       while (cursor < free.length && performance.now() - tf < budget) {
