@@ -39,7 +39,7 @@ Last updated 2026-11-07, commit `c4216e2`.
 | 23 | Ego retrieval controls vs the search bar; remove the slider | confirmed | PG-137-search-linked, run 82 |
 | 24 | Dragging the graph tab breaks the app | confirmed (clean arm) | after the restart: 0 errors on a move (was 8 from orphaned views). Planted arm vacuous post-restart |
 | 25 | Link navigation very slow | needs the reader | 320 ms on Wikipedia; need the page |
-| 26 | archive.org nested shadow DOM; DuckDuckGo image search; "More results" not pressed | partial | "More results": G-176 confirmed run 2 (598 results; planted cap 3 rounds). G-158 clean passes (submit). archive.org M-10: 188/189 deep links (1 missing: web.archive.org "Web Sites"). **DuckDuckGo image search: not started** |
+| 26 | archive.org nested shadow DOM; DuckDuckGo image search; "More results" not pressed | partial | "More results": G-176 confirmed run 2 (598 results; planted cap 3 rounds). G-158 clean passes (submit). archive.org M-10: 188/189 deep links (1 missing: web.archive.org "Web Sites"). DuckDuckGo image search ("shipwrecks"): captured once the queue was unblocked -- 29 chunks, 248 image lines / 222 distinct images for 100 tiles. It had been blocked by 110 refused bandcamp drains after a sidecar restart; fixed (PG-137-refused-queue, run 12) |
 
 ## PLUGIN_GOAL 135–136
 

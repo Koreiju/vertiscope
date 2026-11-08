@@ -12656,6 +12656,28 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "PG-137-refused-queue",
+      asks: "PLUGIN_GOAL 137 (20)/(26): after a sidecar restart, a page left behind whose queued drains the sidecar refuses ('dictionary incomplete') does not block the page shown -- its other queued drains are dropped with the first refusal (they extend the same lost dictionary), its settle kept; planted (refused-one-at-a-time) they stay queued ahead of the shown page",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const b = app.workspace.getLeavesOfType("domvec-browser-view")[0].view;
+          if (${planted}) b.plant.add("refused-one-at-a-time"); else b.plant.delete("refused-one-at-a-time");
+          const keep = b.captureQueue; const left = "https://left.example/feed";
+          try {
+            b.captureQueue = [];
+            for (let i = 0; i < 20; i++) b.captureQueue.push({ url: left, payload: { v: 1 }, queuedAt: performance.now() });
+            b.captureQueue.push({ url: left, settle: true });
+            b.captureQueue.push({ url: b.session || "https://shown.example/", payload: { v: 1 }, queuedAt: performance.now() });
+            b.onRefused(left);
+            const q = b.captureQueue;
+            return { planted: ${planted}, left_drains: q.filter((j) => j.url === left && !j.settle).length, left_settle: q.filter((j) => j.url === left && j.settle).length, shown_position: q.findIndex((j) => j.url !== left) };
+          } finally { b.captureQueue = keep; b.plant.delete("refused-one-at-a-time"); }
+        })()`, { timeout: 30000 });
+        const clean = await arm(false), planted = await arm(true);
+        return { pass: !clean.error && clean.left_drains === 0 && clean.left_settle === 1 && clean.shown_position <= 1 && !planted.error && planted.left_drains === 20, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {

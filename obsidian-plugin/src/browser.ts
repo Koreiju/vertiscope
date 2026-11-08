@@ -3248,6 +3248,8 @@ export class BrowserView extends ItemView {
   /** Refusals ("dictionary incomplete") for a page no longer shown: counted,
    *  not answered with a rescan of the page that IS shown. */
   refusedLeft = 0;
+  /** Queued drains dropped with a refused left page (they share its dictionary). */
+  refusedDropped = 0;
 
   /**
    * The sidecar refused a capture of `url` -- its session does not hold the
@@ -3264,6 +3266,16 @@ export class BrowserView extends ItemView {
     const doc = (u: string) => this.sessionAliases.get(u) || u;
     if (this.plant.has("resync-any-refusal") || doc(url) === this.currentPage()) { void this.resyncSensor(); return; }
     this.refusedLeft++;
+    // Every queued drain of that page extends the SAME lost dictionary: none
+    // can be decoded. Dropped together (its settle stays), so the page shown
+    // is not stuck behind them -- after a sidecar restart, 110 bandcamp drains
+    // were refused one round trip at a time and a DuckDuckGo image search sat
+    // uncaptured behind them (2026-11-07). Planted `refused-one-at-a-time`.
+    if (!this.plant.has("refused-one-at-a-time")) {
+      const before = this.captureQueue.length;
+      this.captureQueue = this.captureQueue.filter((j) => j.settle || doc(j.url) !== doc(url));
+      this.refusedDropped += before - this.captureQueue.length;
+    }
   }
 
   /**
