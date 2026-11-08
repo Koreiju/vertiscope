@@ -5443,6 +5443,10 @@ with it. Then every other open feature.*
 > Sidecar split: "Yes, that shape" -- one small process always answers the plugin and never waits; separate worker processes own the store, the embedding encoder, and the UMAP fit.
 > Approved: "G-4: 94% is enough", "Re-key chunk trie" (five levels, and split over-long single lines, R-C5), "Drop spherical" (D-12 closed). Disk cleanup: not approved.
 
+*Verbatim (2026-11-08), (149):*
+
+> The ego in 3d could be much smaller and more compact. Also worried that you've deviated from the real full set of ego-oriented work
+
 ## Standing instructions carried in the verbatim
 
 Two of these are process rules, not features, and they bind every future

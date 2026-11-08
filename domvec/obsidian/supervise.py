@@ -239,6 +239,22 @@ def supervise(workspace: Path, serve_args: List[str], *,
     """Run `serve` with `serve_args` in a child process; restart it on a crash.
 
     `command` replaces the child for a test that plants a crash."""
+    # THE FRONT (PLUGIN_GOAL 148, step 1 of the split): this process -- the
+    # one that outlives every crash -- owns the public port and always
+    # answers; the worker serves on an internal one. Planted
+    # DOMVEC_NO_FRONT=1: the worker on the public port, as before.
+    public = _port_of(serve_args)
+    if public and command is None and os.environ.get("DOMVEC_NO_FRONT") != "1":
+        from .front import BACKEND_OFFSET, start_front, supervisor_launch
+        backend = public + BACKEND_OFFSET
+        serve_args = list(serve_args)
+        serve_args[serve_args.index("--port") + 1] = str(backend)
+        try:
+            start_front(public, backend, supervisor_launch(str(workspace)))
+            print("front on %d -> worker on %d" % (public, backend), flush=True)
+        except OSError as exc:                      # the port is taken: run as before
+            print("front not started (%s); worker on %d" % (exc, public), flush=True)
+            serve_args[serve_args.index("--port") + 1] = str(public)
     command = command or [sys.executable, "-X", "faulthandler", "-m",
                           "domvec.obsidian", "serve", "--workspace",
                           str(workspace), *serve_args]
