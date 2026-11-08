@@ -12979,6 +12979,31 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "PG-137-arrows-empty",
+      asks: "137(5): with the search text empty, Up/Down in the search bar's k or n box change the number but render nothing (no onScroll, no run, no clear). Planted (__domvecPlantArrowsEmptyRender): renders, as before",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          let g = null; app.workspace.iterateAllLeaves((l) => { if (l.view && l.view.getViewType && l.view.getViewType() === "domvec-graph-view") g = l.view; });
+          if (!g) { await window.__domvec.act("open", "graph"); await sleep(2000); app.workspace.iterateAllLeaves((l) => { if (l.view && l.view.getViewType && l.view.getViewType() === "domvec-graph-view") g = l.view; }); }
+          const sf = g.searchField; const c = { scroll: 0, clear: 0, run: 0 };
+          const os = sf.onScroll, oc = sf.onClear, orun = sf.run;
+          sf.onScroll = (...a) => { c.scroll++; return os(...a); }; sf.onClear = (...a) => { c.clear++; return oc(...a); }; sf.run = function () { c.run++; return orun.call(sf); };
+          window.__domvecPlantArrowsEmptyRender = ${planted};
+          sf.input.value = "";
+          const k0 = sf.kInput.value, n0 = sf.nInput.value;
+          try {
+            for (const el of [sf.kInput, sf.nInput]) { el.focus(); for (const key of ["ArrowUp", "ArrowDown", "ArrowUp"]) { el.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true })); el.dispatchEvent(new KeyboardEvent("keyup", { key, bubbles: true })); } }
+            await sleep(900);
+            return { planted: ${planted}, renders: { ...c }, k: [k0, sf.kInput.value], n: [n0, sf.nInput.value] };
+          } finally { sf.onScroll = os; sf.onClear = oc; sf.run = orun; window.__domvecPlantArrowsEmptyRender = false; sf.kInput.blur(); sf.nInput.blur(); }
+        })()`, { timeout: 30000 });
+        const clean = await arm(false), planted = await arm(true);
+        const quiet = (r) => r.scroll + r.clear + r.run === 0;
+        return { pass: !clean.error && quiet(clean.renders) && clean.k[0] !== clean.k[1] && !planted.error && !quiet(planted.renders), evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {

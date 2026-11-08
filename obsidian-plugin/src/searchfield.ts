@@ -153,7 +153,7 @@ export class SearchField {
   soft = 0;
   private scrollRaf = 0;
   stats = { queries: 0, answered: 0, lastMs: 0, submitted: 0, updates: 0, changed: 0,
-            added: 0, removed: 0, moved: 0, lastDiff: null as RankDiff | null, arrowSteps: 0 };
+            added: 0, removed: 0, moved: 0, lastDiff: null as RankDiff | null, arrowSteps: 0, emptyHeld: 0 };
   private diffTimer = 0;
   private totalTimer = 0;
 
@@ -358,6 +358,13 @@ export class SearchField {
   setK(k: number): void {
     this.k = Math.max(1, Math.min(MAX_ASK, Math.floor(k)));
     if (this.k > this.total) this.setTotal(this.k);
+    // No query, nothing to render (2026-11-07, 137(5): "using arrow keys
+    // triggers the search render even when the search input field wasn't even
+    // interacted with and there is no text either"). Reproduced 2026-11-08:
+    // Up/Down in the k box with the field empty fired onScroll twice -- the
+    // frontier re-rendered. The number changes; nothing is drawn.
+    // Planted `__domvecPlantArrowsEmptyRender`: it renders, as before.
+    else if (!this.input.value.trim() && !(globalThis as any).__domvecPlantArrowsEmptyRender) { this.paint(); this.stats.emptyHeld = (this.stats.emptyHeld || 0) + 1; }
     else { this.scroller.scrollLeft = 0; this.paint(); this.onScroll(true); }
   }
 
@@ -365,6 +372,9 @@ export class SearchField {
   setTotal(n: number): void {
     this.total = Math.max(1, Math.min(MAX_ASK, Math.floor(n)));
     if (this.k > this.total) this.k = this.total;
+    // The same for n (137(5)): with no query there is nothing to ask again --
+    // it ran the search and cleared the scene on every arrow.
+    if (!this.input.value.trim() && !(globalThis as any).__domvecPlantArrowsEmptyRender) { this.paint(); this.stats.emptyHeld = (this.stats.emptyHeld || 0) + 1; return; }
     void this.run();
   }
 
