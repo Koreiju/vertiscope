@@ -33,7 +33,12 @@ Last updated 2026-11-08 evening (items 141-147 below). Earlier: 2026-11-07 late.
 | O.14 | delete a halo result, the next comes in | built, not confirmable | type-strict halos hold <= 2 results on this vault (`c859b9e`) |
 | T-14 | per-workspace Python environment | needs the reader | installing packages into a new environment is a download |
 | G-145 | streaming-layer rework | needs the reader | recommended yes |
-| T-4, T-5, T-13, T-15, T-16 | rulings not yet built | not started | `DESIGN_VISION.md` 4b |
+| T-4 | `{ref}` between plane cells is a hard link | confirmed | linked both ways vs planted none (`31592c5`) |
+| T-15 | pydantic types from trie-path patterns | confirmed | 8,028 instances / 51 pages / 20 fields live; planted split fields (`082aa33`) |
+| 140/5364 | one unified markdown panel | confirmed (no defect found) | right-click pins become plane panels (side card only under its plant); stuck billboards mount the editor cell |
+| T-13 | outputs in retrieval, ego only by default | needs the reader | unset-scope search returns vault notes; excluding outputs changes every inline `[]()` result |
+| T-16 | rank-dominance collapse for every node | not started | needs its rule stated for world nodes (url fold G-110 and craft bisectors exist) |
+| T-5 | chunk = framed browser + markdown on one chunk object | stands (137(4) confirmed) | |
 
 ## PLUGIN_GOAL 137 — the 26 reported glitches
 
