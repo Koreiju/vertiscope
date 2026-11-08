@@ -1329,3 +1329,6 @@ button.domvec-run-fence:hover {
 .domvec-browser-grip { flex: 0 0 auto; cursor: grab; font-size: 11px; padding: 2px 8px; background: var(--background-secondary); border-bottom: 1px solid #444; user-select: none; }
 .domvec-pair-link { position: absolute; overflow: visible; pointer-events: none; z-index: 4; }
 .domvec-pair-link line { stroke: #9ab; stroke-width: 3; pointer-events: stroke; cursor: context-menu; }
+/* 135(b): the flip -- panels around a spot drawn as graph form. */
+.domvec-flip-edges { position: absolute; left: 0; top: 0; pointer-events: none; z-index: 1; overflow: visible; }
+.domvec-flip-edges line { stroke: #9ab; stroke-width: 2.5; stroke-opacity: .9; }

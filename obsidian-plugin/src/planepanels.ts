@@ -129,6 +129,7 @@ export class PlaneDesk {
     if (!plane) return null;
     if (this.toolsEl && plane.contains(this.toolsEl)) return this.toolsEl;
     const el = plane.createDiv({ cls: "domvec-plane-tools" });
+    this.hookFlip(plane);
     if (!this.plantToolButtons) { this.buildRetrievalBar(el); this.toolsEl = el; void this.restore(); return el; }
     for (const kind of ["notebook", "slate"] as const) {
       const b = el.createEl("button", { text: "+ " + kind, cls: "domvec-plane-tool" });
@@ -735,6 +736,96 @@ export class PlaneDesk {
     return made;
   }
 
+  /**
+   * PLUGIN_GOAL 135(b): "a single gesture allows the user to flip between the
+   * two representations depending on where they are localized". A double-click
+   * on the plane's empty ground flips the panels around that spot from panel
+   * form to graph form -- each folds to its node, and the links between them
+   * (note links either way, and magnets) are drawn as undirected edges -- and
+   * the same gesture flips them back. Planted `plantFlipNoLinks`: nodes, no edges.
+   */
+  flipped: { members: string[]; svg: SVGSVGElement; timer: number } | null = null;
+  flipStats = { flips: 0, back: 0, last: null as any };
+  plantFlipNoLinks = false;
+  static FLIP_RADIUS = 700;
+  private flipHooked = new WeakSet<HTMLElement>();
+  private flipUnhook: (() => void)[] = [];
+  private hookFlip(plane: HTMLElement): void {
+
+    // The plane is click-through (pointer-events: none): its empty ground is
+    // the 3D canvas beneath, so the gesture is heard there -- on the bare
+    // canvas only, never on a panel, a tool or a billboard.
+    const ground = plane.parentElement || plane;
+    // One listener per GROUND: the plane is rebuilt under the same canvas,
+    // and two listeners flipped and flipped back on one double-click.
+    if (this.flipHooked.has(ground)) return;
+    this.flipHooked.add(ground);
+    const onDbl = (e: MouseEvent) => {
+      if ((e as any).__domvecFlip) return;
+      (e as any).__domvecFlip = true;
+      const t = e.target as HTMLElement;
+      if (!(t?.classList?.contains("domvec-plane") || t?.tagName === "CANVAS")) return;
+      e.preventDefault(); e.stopPropagation();
+      const now = this.host.plane(); if (!now) return;
+      const r = now.getBoundingClientRect();
+      this.flip(e.clientX - r.left, e.clientY - r.top);
+    };
+    ground.addEventListener("dblclick", onDbl);
+    this.flipUnhook.push(() => ground.removeEventListener("dblclick", onDbl));
+  }
+  /** Flip the panels within reach of (x, y) in plane coordinates; again flips back. */
+  flip(x: number, y: number): string[] {
+    const plane = this.host.plane();
+    if (!plane) return [];
+    if (this.flipped) {
+      const f = this.flipped; this.flipped = null;
+      window.clearInterval(f.timer); f.svg.remove();
+      for (const m of f.members) { const q = this.panelOf(m); if (q && q.card.hasClass("is-collapsed")) this.toggleMinimized(m); }
+      this.flipStats.back++; this.flipStats.last = { back: f.members };
+      return [];
+    }
+    const pr = plane.getBoundingClientRect();
+    const centre = (q: PlanePanel) => { const c = q.card.getBoundingClientRect(); return { x: c.left - pr.left + c.width / 2, y: c.top - pr.top + c.height / 2 }; };
+    const members = this.panels.filter((q) => {
+      if (q.card.hasClass("is-collapsed")) return false;
+      const c = q.card.getBoundingClientRect();
+      // Near the spot: its nearest point within reach.
+      const nx = Math.max(c.left - pr.left, Math.min(x, c.right - pr.left)), ny = Math.max(c.top - pr.top, Math.min(y, c.bottom - pr.top));
+      return Math.hypot(nx - x, ny - y) <= PlaneDesk.FLIP_RADIUS;
+    }).map((q) => q.path);
+    for (const m of members) this.toggleMinimized(m);
+    const NS = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(NS, "svg") as SVGSVGElement;
+    svg.classList.add("domvec-flip-edges");
+    plane.appendChild(svg);
+    const pairs: [string, string][] = [];
+    if (!this.plantFlipNoLinks) {
+      for (let i = 0; i < members.length; i++) {
+        const a = members[i], la = this.linkedTo(a), ma = new Set(this.magnetized(a));
+        for (let j = i + 1; j < members.length; j++) { const b = members[j]; if (la.has(b) || ma.has(b)) pairs.push([a, b]); }
+      }
+    }
+    const draw = () => {
+      svg.setAttribute("width", String(plane.scrollWidth)); svg.setAttribute("height", String(plane.scrollHeight));
+      while (svg.firstChild) svg.firstChild.remove();
+      for (const [a, b] of pairs) {
+        const qa = this.panelOf(a), qb = this.panelOf(b);
+        if (!qa || !qb) continue;
+        const ca = centre(qa), cb = centre(qb);
+        const l = document.createElementNS(NS, "line");
+        l.setAttribute("x1", String(ca.x + plane.scrollLeft)); l.setAttribute("y1", String(ca.y + plane.scrollTop));
+        l.setAttribute("x2", String(cb.x + plane.scrollLeft)); l.setAttribute("y2", String(cb.y + plane.scrollTop));
+        l.dataset.a = a; l.dataset.b = b;
+        svg.appendChild(l);
+      }
+    };
+    draw();
+    const timer = window.setInterval(draw, 200);
+    this.flipped = { members, svg, timer };
+    this.flipStats.flips++; this.flipStats.last = { at: [Math.round(x), Math.round(y)], members, edges: pairs.length };
+    return members;
+  }
+
   toggleMinimized(path: string): boolean {
     const p = this.panelOf(path);
     if (!p) return false;
@@ -812,6 +903,8 @@ export class PlaneDesk {
   }
 
   unload(): void {
+    for (const u of this.flipUnhook) u(); this.flipUnhook = [];
+    if (this.flipped) { window.clearInterval(this.flipped.timer); this.flipped.svg.remove(); this.flipped = null; }
     // Unloading is not the reader closing them: the list is kept for the reload.
     for (const p of [...this.panels]) this.close(p.leaf, undefined, false);
     this.toolsEl?.remove();

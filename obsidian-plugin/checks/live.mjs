@@ -12811,6 +12811,56 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "PG-135-flip",
+      asks: "PLUGIN_GOAL 135(b): one gesture (a double-click on the plane's empty ground) flips the panels around that spot from panel form to graph form -- each folded to its node, linked ones joined by drawn undirected edges -- and the same gesture flips them back. Planted (plantFlipNoLinks): nodes with no edges",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          await window.__domvec.act("open", "graph"); await sleep(1500);
+          const desk = window.__domvecPlane;
+          if (desk.flipped) desk.flip(0, 0);
+          desk.plantFlipNoLinks = ${planted};
+          const t = Date.now(), a = "domvec-checks/flip a " + t + ".md", b = "domvec-checks/flip b " + t + ".md";
+          const NL = String.fromCharCode(10);
+          try {
+            await desk.create("notebook", { path: b, text: "flip b" + NL });
+            await desk.create("notebook", { path: a, text: "flip a links [[flip b " + t + "]]" + NL });
+            await sleep(2500);
+            const pa = desk.panelOf(a), pb = desk.panelOf(b), plane = pa.card.parentElement;
+            const pr = plane.getBoundingClientRect(), ca = pa.card.getBoundingClientRect();
+            const open0 = [pa, pb].filter((q) => !q.card.classList.contains("is-collapsed")).length;
+            // An empty spot of ground near panel a.
+            // Bare ground (the 3D canvas) near panel a: a ring of probes out to 400 px.
+            const groundNear = () => {
+              const c = pa.card.getBoundingClientRect(), cx = c.left + c.width / 2, cy = c.top + c.height / 2;
+              for (let rad = 40; rad <= 400; rad += 40) for (let k = 0; k < 16; k++) {
+                const px = cx + Math.cos(k * Math.PI / 8) * (c.width / 2 + rad), py = cy + Math.sin(k * Math.PI / 8) * (c.height / 2 + rad);
+                const hit = document.elementFromPoint(px, py);
+                if (hit && hit.tagName === "CANVAS" && plane.parentElement.contains(hit)) return { x: px, y: py, hit };
+              }
+              return null;
+            };
+            let g = groundNear(); const found = !!g;
+            if (g) g.hit.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, cancelable: true, clientX: g.x, clientY: g.y }));
+            await sleep(500);
+            const nodes = [pa, pb].filter((q) => q.card.classList.contains("is-collapsed")).length;
+            const edges = [...plane.querySelectorAll("svg.domvec-flip-edges line")].filter((l) => (l.dataset.a === a && l.dataset.b === b) || (l.dataset.a === b && l.dataset.b === a)).length;
+            g = groundNear(); if (g) g.hit.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, cancelable: true, clientX: g.x, clientY: g.y }));
+            await sleep(500);
+            const back = [pa, pb].filter((q) => !q.card.classList.contains("is-collapsed")).length;
+            return { planted: ${planted}, ground_found: found, open_before: open0, nodes_after_flip: nodes, edges_between: edges, open_after_flip_back: back, svg_left: !!plane.querySelector("svg.domvec-flip-edges"), stats: desk.flipStats.last };
+          } finally {
+            desk.plantFlipNoLinks = false; if (desk.flipped) desk.flip(0, 0);
+            for (const p of [a, b]) { desk.closePath(p); const f = app.vault.getAbstractFileByPath(p); if (f) await app.vault.trash(f, true); }
+          }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        const pass = !clean.error && clean.ground_found && clean.open_before === 2 && clean.nodes_after_flip === 2 && clean.edges_between === 1 && clean.open_after_flip_back === 2 && !clean.svg_left
+          && !planted.error && planted.nodes_after_flip === 2 && planted.edges_between === 0;
+        return { pass, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {
