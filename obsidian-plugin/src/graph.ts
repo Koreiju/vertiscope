@@ -6908,7 +6908,11 @@ export class GraphView extends ItemView {
         if (this.batch && t - this.linkCapAt > 500) {
           this.linkCapAt = t;
           const sh = this.shellOf(g.graphData().nodes);
-          this.batch.maxLinkLen = this.plantLongLinks || !(sh.r > 0) ? Infinity : Math.max(4, sh.r * this.linkCapShare);
+          // The cap moves slowly (a fifth of the way each refresh), so a
+          // breathing cloud does not sweep links across it.
+          const want = this.plantLongLinks || !(sh.r > 0) ? Infinity : Math.max(4, sh.r * this.linkCapShare);
+          const was = this.batch.maxLinkLen;
+          this.batch.maxLinkLen = !Number.isFinite(was) || !Number.isFinite(want) ? want : was + (want - was) * 0.2;
         }
         this.applyZoomFloor(g);
         // The halo rides the camera's cone (G-284).

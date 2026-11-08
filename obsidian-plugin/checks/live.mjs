@@ -3990,7 +3990,8 @@ export function makeChecks(env) {
           const q = "okapi giraffe relative habitat " + (${planted} ? "b" : "a");
           const asked0 = b.webSearchStats.asked, clicked0 = b.webSearchStats.clicked;
           try {
-            f.input.value = q; await f.run();
+            // The SEARCH press (item 107: typing never reaches the browser cell).
+            f.input.value = q; await f.run(); await f.submit();
             let url = "";
             for (let i = 0; i < 360; i++) { await sleep(500); url = b.webview.getURL(); if (b.webSearchStats.asked > asked0 && b.webSearchStats.ms && b.webSearchStats.last === q) break; if (${planted} && i > 60) break; }
             await sleep(3000);
@@ -12592,6 +12593,25 @@ export function makeChecks(env) {
         `);
         const clean = await arm(false), planted = await arm(true);
         return { pass: !clean.error && clean.links > 0 && clean.over_cap === 0 && !planted.error && planted.over_cap > 0, evidence: { clean, planted } };
+      },
+    },
+    {
+      id: "PG-138-no-flicker",
+      asks: "PLUGIN_GOAL 138 (2026-11-07: 'a TON of flickering links'): a hidden long link stays hidden on EVERY frame -- sampled each animation frame for 4 s, no frame's line buffer holds a segment over the cap; planted (__domvecPlantSyncUncapped: the sync path writes long links in full) frames show them",
+      async run() {
+        const arm = (planted) => inPane(`
+          window.__domvecPlantSyncUncapped = ${planted};
+          const b = v.batch; if (!b) return { error: "no batch" };
+          v.graph.d3ReheatSimulation && v.graph.d3ReheatSimulation();
+          let frames = 0, bad = 0; const t0 = performance.now();
+          await new Promise((res) => { const f = () => { frames++; const a = b.linePos.array, n = b.drawnLinks.length, c = b.maxLinkLen * 1.001; let over = false;
+            for (let j = 0, o = 0; j < n; j++, o += 6) { if (Math.hypot(a[o + 3] - a[o], a[o + 4] - a[o + 1], a[o + 5] - a[o + 2]) > c) { over = true; break; } }
+            if (over) bad++; if (performance.now() - t0 < 4000) requestAnimationFrame(f); else res(); }; requestAnimationFrame(f); });
+          window.__domvecPlantSyncUncapped = false;
+          return { planted: ${planted}, frames, frames_with_long: bad, cap: b.linkStats.cap };
+        `);
+        const clean = await arm(false), planted = await arm(true);
+        return { pass: !clean.error && clean.frames > 10 && clean.frames_with_long === 0 && !planted.error && planted.frames_with_long > 0, evidence: { clean, planted } };
       },
     },
     {

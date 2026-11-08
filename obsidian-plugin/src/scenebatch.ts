@@ -277,6 +277,8 @@ export class SceneBatch {
   /** Links longer than this are not drawn (set by the view from the cloud's size). */
   maxLinkLen = Infinity;
   linkStats = { drawn: 0, hidden: 0, cap: 0 };
+  /** Shown/hidden changes of any link, counted (flicker). */
+  linkFlips = 0;
   setBright(b: number): void {
     this.nodeBright = b;
     const m: any = this.glass && (this.glass.mesh.material as any);
@@ -605,7 +607,14 @@ export class SceneBatch {
       if (!Number.isFinite(s.x) || !Number.isFinite(t.x)) continue;
       drawn.push(l);
       this.linePos.setXYZ(nl * 2, s.x, s.y, s.z || 0);
-      this.linePos.setXYZ(nl * 2 + 1, t.x, t.y, t.z || 0);
+      // The same hidden state the per-frame pass keeps: this path wrote long
+      // links in full and the next frame collapsed them -- a blink every
+      // sync (2026-11-07, "a TON of flickering links").
+      const hid = !(globalThis as any).__domvecPlantSyncUncapped && ((l as any).__long
+        || (Number.isFinite(this.maxLinkLen) && (t.x - s.x) ** 2 + (t.y - s.y) ** 2 + ((t.z || 0) - (s.z || 0)) ** 2 > this.maxLinkLen ** 2));
+      if (hid) (l as any).__long = true;
+      if (hid) this.linePos.setXYZ(nl * 2 + 1, s.x, s.y, s.z || 0);
+      else this.linePos.setXYZ(nl * 2 + 1, t.x, t.y, t.z || 0);
       // 3d-force-graph's own link colour (#f0f0f0) at the pane's linkOpacity;
       // during a search, the pane says how much of an edge to draw (item 88).
       const a = lineAlpha ? lineAlpha(l) : this.linkAlpha;
@@ -676,13 +685,21 @@ export class SceneBatch {
     // not drawn -- its segment collapses onto its source. Streamed chunks
     // projected to their meaning's place stayed linked to their tree parent
     // across the map, a spider web from every hub.
-    const cap = this.maxLinkLen, cap2 = cap * cap;
+    const cap = this.maxLinkLen, cap2 = cap * cap, flick = !!(globalThis as any).__domvecPlantLinkFlicker;
     let hidden = 0;
     for (let j = 0, o = 0; j < links.length; j++, o += 6) {
       const s = links[j].source, t = links[j].target;
       const dx = t.x - s.x, dy = t.y - s.y, dz = (t.z || 0) - (s.z || 0);
       lp[o] = s.x; lp[o + 1] = s.y; lp[o + 2] = s.z || 0;
-      if (dx * dx + dy * dy + dz * dz > cap2) { lp[o + 3] = s.x; lp[o + 4] = s.y; lp[o + 5] = s.z || 0; hidden++; }
+      // Hysteresis (2026-11-07: "a TON of flickering links"): hidden past the
+      // cap, shown again only under 85% of it -- a link near the cap no
+      // longer blinks as its ends drift.
+      const d2 = dx * dx + dy * dy + dz * dz, L: any = links[j];
+      if (flick) L.__long = d2 > cap2;
+      else if (L.__long) { if (d2 < cap2 * 0.7225) L.__long = false; }
+      else if (d2 > cap2) L.__long = true;
+      if (L.__long !== L.__was) { L.__was = L.__long; this.linkFlips++; }
+      if (L.__long) { lp[o + 3] = s.x; lp[o + 4] = s.y; lp[o + 5] = s.z || 0; hidden++; }
       else { lp[o + 3] = t.x; lp[o + 4] = t.y; lp[o + 5] = t.z || 0; }
     }
     this.linkStats = { drawn: links.length - hidden, hidden, cap: Math.round(cap * 10) / 10 };
