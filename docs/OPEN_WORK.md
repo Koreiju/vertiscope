@@ -30,7 +30,7 @@ Last updated 2026-11-08 evening (items 141-147 below). Earlier: 2026-11-07 late.
 | T-8 | click halo, double-click panel | confirmed | `0d06f36` |
 | T-12 | idle drift off by default | confirmed | 0 vs 0.106 rad (`9d03cf9`) |
 | UR N.4 | left-drag wiring in graph form | confirmed | 1 edge vs 0 (`3f6083a`) |
-| O.14 | delete a halo result, the next comes in | built, not confirmable | type-strict halos hold <= 2 results on this vault (`c859b9e`) |
+| O.14 | delete a halo result, the next comes in | confirmed | with 18 same-kind fixture notes: 13 shown, reserve 4; dismissed -> 13 shown, gone not shown, refilled 1; planted plantNoRefill -> 12 (`c859b9e`) |
 | T-14 | per-workspace Python environment | needs the reader | installing packages into a new environment is a download |
 | G-145 | streaming-layer rework | needs the reader | recommended yes |
 | T-4 | `{ref}` between plane cells is a hard link | confirmed | linked both ways vs planted none (`31592c5`) |
