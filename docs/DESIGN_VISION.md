@@ -349,6 +349,24 @@ quantized model kernels are cells that evolve the graph.
 | T-16 | Yes: rank-dominance collapse applies to every node in 2D and 3D. | [KG] legibility at scale |
 | T-17 | Remove the per-url telescope. It is the second layout rule that fought the first (the endless glide loop). T-1's post-process is the only one. | [KG]; PG 5377 |
 
+
+### 4c. Where the rulings stand (2026-11-08, live-checked with a planted arm each)
+
+| | state | evidence |
+|---|---|---|
+| T-1/T-17 | built | frames with motion while streaming 2/2,260 vs planted 436/1,528 (6676422) |
+| T-2 | built | chat context read in compile order, then links (796ec71) |
+| T-3 | stands | the plane over the 3D view is the only editor host |
+| T-6 | stands | the ego's own UMAP places 25 craft nodes by trie address (`code://`, `vault://`, cid) |
+| T-7 | **amended** | your later words win (PG 5186, recency per PG 5107): "the motion velocity vector is the magnitude of the mouse from the origin" -- the halo is a joystick about the origin, and the retrace is the visible shortest-path trace to the origin node, not exact pointer reversibility. No code change. |
+| T-8 | built | click -> halo, double-click -> panel (0d06f36) |
+| T-9 | already built | wheel over the browser header steps chunk/page/live (item 72) |
+| T-10 | built | `domvec/governing/browser.py` generates the browser panel (368c944) |
+| T-11 | built | row-major compile order (796ec71) |
+| T-12 | built | drift off by default, a toggle (9d03cf9) |
+| T-14 | needs you | a per-workspace Python environment means installing packages into it (ipykernel etc.) -- a download; say yes and it is built |
+| T-4, T-5, T-13, T-15, T-16 | open | |
+
 ## 5. Engineering decisions still open (from this week)
 
 - **D-A G-145 streaming-layer rework** (O(delta) node updates instead of a
