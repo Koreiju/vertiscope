@@ -45,7 +45,7 @@ Last updated 2026-11-07 late. A native store crash at CHECKPOINT (D-23 class, al
 
 | Item | Status | Next step |
 |---|---|---|
-| 135(a) `[]()` retrieval = plain triple retrieval + PageRank, no level heuristics | built, **not confirmed** | the ranking already is lexical 0.30 + semantic 0.35 + PageRank 0.10 + content 0.25; the level heuristic was `coarse` (merge-group leads only) -- the gesture now asks with coarse off. PG-135-gesture-plain: planted arm saw coarse on; the clean arm's gesture did not fire inside the check (runs 22-27), cause not found |
+| 135(a) `[]()` retrieval = plain triple retrieval + PageRank, no level heuristics | confirmed | PG-135-gesture-plain run 30: clean asks coarse=0, 10 hits; planted asks coarse on. Runs 22-29 failed because the check fired before the reloaded plugin reached the sidecar (no request made; also misread as "sidecar died") -- the check now waits for the plugin's own client to answer |
 | 135(b) panel views by SOURCE; one markdown interface everywhere | partial | one markdown panel confirmed for billboards, code, chats, slate, hover; source-specific views (browser chunk view) = item 137(4) |
 | 135(b) markdown+browser pair pulls apart into two nodes with a solid link | **not started** | |
 | 135(b) one gesture flips panel form <-> graph form | **not started** | |

@@ -12745,12 +12745,13 @@ export function makeChecks(env) {
           const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
           window.__domvecPlantGestureCoarse = ${planted};
           const P = app.plugins.plugins["domvec-bridge"];
+          for (let w = 0; w < 60; w++) { try { if (await P.sidecar.search("warm", { k: 1 })) break; } catch (e) {} await sleep(500); }
           const of = window.fetch; const asked = [];
           window.fetch = async (u, ...rest) => { const r = await of(u, ...rest); const s = String(u); if (s.includes("/search?")) { let n = 0; try { n = (await r.clone().json()).hits.length; } catch (e) {} asked.push({ coarse: !s.includes("coarse=0"), hits: n, members: 0 }); } return r; };
           const NL = String.fromCharCode(10);
           const p = "domvec-checks/gesture plain " + (${planted} ? "p" : "c") + ".md";
           const old = app.vault.getAbstractFileByPath(p); if (old) await app.vault.trash(old, true);
-          const f = await app.vault.create(p, "Looking for [radix tree insertion]()" + NL);
+          const f = await app.vault.create(p, "Looking for [radix tree insertion " + (${planted} ? "lookup" : "prefix") + " " + Date.now() % 1000 + "]()" + NL);
           const leaf = app.workspace.getLeaf("tab");
           try {
             await leaf.openFile(f, { state: { mode: "source", source: false } }); await sleep(800);
