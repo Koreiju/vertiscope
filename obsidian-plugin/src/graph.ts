@@ -1223,7 +1223,7 @@ export class GraphView extends ItemView {
     if (batch) { batch.nodes = nodes; batch.links = links; }
     else if (!unchanged) {
       this.graph.graphData({ nodes, links });
-      if (this.layoutMode === "projector") {
+      if (this.layoutMode === "projector" && (!this.umapAuthority() || this.plantReheatAlways)) {
         this.treeSpring();
         this.graph.d3ReheatSimulation?.();
       }
@@ -2405,7 +2405,10 @@ export class GraphView extends ItemView {
       if (structural) this.graph.graphData(data);
       if (moved || gone || pages || structural) {
         if (!this.umapAuthority()) this.collideSoon();
-        this.graph.d3ReheatSimulation();
+        // Under the authority every mapped node is pinned and every force is
+        // off: a reheat only re-ran d3's tick over all 62k nodes for nothing
+        // (G-145 profile, 2026-11-08: tick/step/initialize ~2.9 s of 15 s).
+        if (!this.umapAuthority() || this.plantReheatAlways) this.graph.d3ReheatSimulation();
         // The ONE post-process (T-1): once the stream settles, a single spacing
         // pass over what is new, applied in one step, then nothing moves.
         if (this.umapAuthority()) {
@@ -5516,6 +5519,8 @@ export class GraphView extends ItemView {
    * `plantUmapNotAuthority`: the staggered motions, as before.
    */
   plantUmapNotAuthority = false;
+  /** Planted (G-145): reheat the simulation on every delta, as before. */
+  plantReheatAlways = false;
   private postTimer = 0;
   postStats = { runs: 0 };
   // Every level, scaled map or not (T-1/T-17 rulings, PLUGIN_GOAL 145): the
