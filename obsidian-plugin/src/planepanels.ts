@@ -1,3 +1,4 @@
+import { TERMINAL_VIEW } from "./terminal";
 /**
  * Panels on the 2D plane: every computation-graph artifact, not only the
  * cockpit (PLUGIN_GOAL 65-66, 2026-11-01: "The jupyter kernels/cells are
@@ -60,6 +61,7 @@ const OPEN_KEY = "domvec-plane-panels";
 
 // No heading: the header node IS the note's name (item 54, drawn once).
 const NOTEBOOK_TEXT = (_name: string) => "```python\n\n```\n";
+const TERMINAL_TEXT = ["---", "domvec: terminal", "---", "", "A PowerShell cell: snap it to other cells; its place sets its order.", ""].join(String.fromCharCode(10));
 const RESPONSE_HEAD = ["---", "domvec: response", "---", ""].join(String.fromCharCode(10));
 const SLATE_TEXT = (name: string) => `---\ndomvec: slate\n---\n${name}\n\tvalue\t\n`;
 
@@ -169,6 +171,9 @@ export class PlaneDesk {
       { label: "code cell", kind: "cell", act: () => { void this.create("notebook"); } },
       { label: "markdown cell", kind: "cell", act: () => { void this.create("slate"); } },
       { label: "browser cell", kind: "cell", act: () => { this.host.openBrowser?.(); } },
+      // PLUGIN_GOAL 142: "Powershell terminals should also be added to the set
+      // of cells that can be magnetized both vertically and laterally."
+      { label: "terminal cell", kind: "cell", act: () => { void this.create("notebook", { text: TERMINAL_TEXT }); } },
       // A CHAT cell (PLUGIN_GOAL 134: "a basic mistral 2 DPO chat model cell as
       // one of the primary jupyter level notebook cells"): its note carries
       // `domvec: chat`, so its head shows `ask`. Planted `plantNoChatEntry`.
@@ -222,6 +227,8 @@ export class PlaneDesk {
     const text = opts.text ?? (kind === "slate" ? SLATE_TEXT(name.replace(/\s+/g, "_")) : NOTEBOOK_TEXT(name));
     const f = await this.app.vault.create(path, text);
     this.stats.created++;
+    // A new note's frontmatter is not cached yet: a terminal is known by its text.
+    if (text === TERMINAL_TEXT) return this.open(f, { mount: (c) => this.terminalMount(c) });
     return this.open(f);
   }
 
@@ -314,7 +321,8 @@ export class PlaneDesk {
       // booting for seconds once hid the panel itself (G-300).
       this.panels.push(p);
       this.hook(p);
-      if (opts.mount) { const pp = p; const undo = await opts.mount(card); if (undo) pp.cleanup = undo; clampToPlane(card, plane); }
+      const mount = opts.mount || (this.isTerminal(file) ? (c: HTMLElement) => this.terminalMount(c, Leaf) : undefined);
+      if (mount) { const pp = p; const undo = await mount(card); if (undo) pp.cleanup = undo; clampToPlane(card, plane); }
       const path = file.path;
       // Ctrl+= / Ctrl+- (and Ctrl+0) resize THIS panel (PLUGIN_GOAL 133),
       // captured before Obsidian's own zoom of the whole app.
@@ -626,7 +634,56 @@ export class PlaneDesk {
   }
 
   /** Minimized: the card is its header node alone (items 54-55). */
-  chatStats = { asks: 0, tokens: 0, context_cells: 0, last_ms: 0, first_token_ms: 0, linked: 0 };
+  chatStats: any = { asks: 0, tokens: 0, context_cells: 0, last_ms: 0, first_token_ms: 0, linked: 0 };
+  isTerminal(file: TFile): boolean {
+    const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
+    if (fm) return String(fm.domvec || "") === "terminal";
+    return false;
+  }
+  terminalStats = { mounted: 0 };
+  /** A terminal cell: its note on top (what it is for), a live PowerShell
+   *  session beneath, in the same card -- so it snaps like any cell. */
+  private async terminalMount(card: HTMLElement, Leaf?: any): Promise<() => void> {
+    Leaf = Leaf || (this.app.workspace as any).activeLeaf?.constructor || (this.app.workspace.getMostRecentLeaf() as any)?.constructor;
+    const tl = new Leaf(this.app);
+    tl.containerEl.addClass("domvec-plane-terminal");
+    card.appendChild(tl.containerEl);
+    await tl.setViewState({ type: TERMINAL_VIEW, active: false });
+    this.terminalStats.mounted++;
+    return () => { try { tl.detach(); } catch { /* gone with the card */ } };
+  }
+
+  /**
+   * COMPILATION ORDER (PLUGIN_GOAL 142, ruling T-11): "Magnetization means a
+   * temporary link for compilation serialization (up to down, left to
+   * right)". The magnet-connected group of `path` (magnets only, never
+   * links), read row-major: rows by top edge (cards whose tops lie within
+   * half the shorter card's height share a row), left to right within a row.
+   * Planted `plantMagnetBfsOrder`: the order the magnets were walked in.
+   */
+  plantMagnetBfsOrder = false;
+  compileOrder(path: string): string[] {
+    const sides = ["magnetLeft", "magnetRight", "magnetTop", "magnetBottom"];
+    const seen = new Set<string>([path]), bfs = [path], queue = [path];
+    while (queue.length) {
+      const at = queue.shift()!;
+      const mine = this.panelOf(at)?.card;
+      const next = new Set<string>();
+      if (mine) for (const k of sides) { const v = (mine.dataset as any)[k]; if (v) next.add(v); }
+      for (const p of this.panels) for (const k of sides) if ((p.card.dataset as any)[k] === at) next.add(p.path);
+      for (const n of next) if (!seen.has(n) && this.panelOf(n)) { seen.add(n); bfs.push(n); queue.push(n); }
+    }
+    if (this.plantMagnetBfsOrder) return bfs;
+    const box = (q: string) => { const c = this.panelOf(q)!.card; return { t: c.offsetTop, l: c.offsetLeft, h: c.offsetHeight }; };
+    const items = bfs.map((q) => ({ q, ...box(q) })).sort((a, b) => a.t - b.t);
+    const rows: typeof items[] = [];
+    for (const it of items) {
+      const row = rows[rows.length - 1];
+      if (row && Math.abs(it.t - row[0].t) < 0.5 * Math.min(it.h, row[0].h)) row.push(it); else rows.push([it]);
+    }
+    return rows.flatMap((r) => r.sort((a, b) => a.l - b.l).map((x) => x.q));
+  }
+
   /** The cells magnetized around `path`, recursively -- its context (PLUGIN_GOAL 134). */
   magnetized(path: string): string[] {
     const seen = new Set<string>([path]), order: string[] = [];
@@ -671,7 +728,10 @@ export class PlaneDesk {
     const prompt = strip(await this.app.vault.read(f));
     const ctx: string[] = [];
     let budget = 6000;
-    for (const q of this.magnetized(path)) {
+    const order = this.compileOrder(path).filter((q) => q !== path);
+    const rest = this.magnetized(path).filter((q) => !order.includes(q));
+    this.chatStats.order = order.slice();
+    for (const q of [...order, ...rest]) {
       const g = this.app.vault.getAbstractFileByPath(q) as TFile | null;
       if (!g || budget <= 0) continue;
       const t = strip(await this.app.vault.read(g)).slice(0, budget);
