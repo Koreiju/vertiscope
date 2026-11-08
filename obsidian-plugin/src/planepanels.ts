@@ -695,7 +695,44 @@ export class PlaneDesk {
     });
     if (!editor) await this.app.vault.modify(rf, RESPONSE_HEAD + reply);
     this.chatStats.tokens += n; this.chatStats.last_ms = Math.round(performance.now() - t0); this.chatStats.first_token_ms = Math.round(first);
+    await this.spawnCodeCells(rp, reply);
     return reply;
+  }
+
+  /**
+   * Each fenced code block of a chat reply becomes its OWN code cell, snapped
+   * under the reply (PLUGIN_GOAL 135(c): "SLM model outputs of code artifacts
+   * should automatically render and register within the chat context as their
+   * own pickable/pullable magnetic nodes"). They are magnetized, so they are
+   * the chat's context too, and can be pulled away like any cell. Planted
+   * `plantNoCodeCells`: the code stays inside the reply only.
+   */
+  plantNoCodeCells = false;
+  codeCellStats = { spawned: 0 };
+  async spawnCodeCells(replyPath: string, reply: string): Promise<string[]> {
+    if (this.plantNoCodeCells) return [];
+    const NL = String.fromCharCode(10), BT = String.fromCharCode(96).repeat(3);
+    const re = new RegExp(BT + "([\\w+-]*)" + NL + "([\\s\\S]*?)" + BT, "g");
+    const made: string[] = [];
+    const dir = replyPath.includes("/") ? replyPath.slice(0, replyPath.lastIndexOf("/")) : "";
+    const base = replyPath.slice(replyPath.lastIndexOf("/") + 1).replace(/\.md$/, "");
+    let m: RegExpExecArray | null, i = 0, above = replyPath;
+    while ((m = re.exec(reply))) {
+      const lang = m[1] || "python", code = m[2].replace(/\s+$/, "");
+      if (!code.trim()) continue;
+      i++;
+      const path = `${dir ? dir + "/" : ""}${base} code ${i}.md`;
+      if (this.app.vault.getAbstractFileByPath(path)) continue;
+      await this.create("notebook", { path, text: ["---", "domvec: code-output", "from: " + replyPath, "---", "", BT + lang, code, BT, ""].join(NL) });
+      const c = this.panelOf(path)?.card, a = this.panelOf(above)?.card;
+      if (c && a) {
+        c.style.right = "auto"; c.style.left = a.style.left || `${a.offsetLeft}px`;
+        c.style.top = `${a.offsetTop + a.offsetHeight}px`;
+        c.dataset.magnetTop = above;
+      }
+      above = path; made.push(path); this.codeCellStats.spawned++;
+    }
+    return made;
   }
 
   toggleMinimized(path: string): boolean {

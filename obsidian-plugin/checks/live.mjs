@@ -12706,6 +12706,38 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "PG-135-code-cells",
+      asks: "PLUGIN_GOAL 135(c): a chat reply's code blocks become their own pickable, magnetic code cells -- two fenced blocks in a reply make two cells holding that code, snapped in order under the reply and part of the prompt cell's magnet context; planted (plantNoCodeCells) none",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          await window.__domvec.act("open", "graph"); await sleep(1000);
+          const desk = window.__domvecPlane; desk.plantNoCodeCells = ${planted};
+          const NL = String.fromCharCode(10), BT = String.fromCharCode(96).repeat(3), tag = (${planted} ? "p" : "c") + Date.now();
+          const Q = "domvec-checks/cc q " + tag + ".md", R = "domvec-checks/cc q " + tag + " reply 1.md";
+          const made = [];
+          try {
+            await desk.create("notebook", { path: Q, text: "---" + NL + "domvec: chat" + NL + "---" + NL + "write two functions" + NL });
+            await desk.create("notebook", { path: R, text: "---" + NL + "domvec: response" + NL + "---" + NL });
+            await sleep(800);
+            const rc = desk.panelOf(R).card, qc = desk.panelOf(Q).card; rc.dataset.magnetTop = Q;
+            const reply = "Here:" + NL + BT + "python" + NL + "def add(a, b):" + NL + "    return a + b" + NL + BT + NL + "and" + NL + BT + "python" + NL + "def sub(a, b):" + NL + "    return a - b" + NL + BT + NL;
+            const paths = await desk.spawnCodeCells(R, reply); made.push(...paths);
+            await sleep(800);
+            const texts = []; for (const p of paths) texts.push(await app.vault.read(app.vault.getAbstractFileByPath(p)));
+            const chain = paths.map((p) => (desk.panelOf(p)?.card?.dataset.magnetTop || "").split("/").pop());
+            const ctx = desk.magnetized(Q).map((p) => p.split("/").pop());
+            return { planted: ${planted}, cells: paths.length, has_add: texts.some((t) => /def add/.test(t)), has_sub: texts.some((t) => /def sub/.test(t)), chain, in_context: paths.filter((p) => desk.magnetized(Q).includes(p)).length };
+          } finally {
+            desk.plantNoCodeCells = false;
+            for (const p of [Q, R, ...made]) { const q = desk.panelOf(p); if (q) q.leaf.detach(); const f = app.vault.getAbstractFileByPath(p); if (f) await app.vault.trash(f, true); }
+          }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        return { pass: !clean.error && clean.cells === 2 && clean.has_add && clean.has_sub && clean.in_context === 2 && !planted.error && planted.cells === 0, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {

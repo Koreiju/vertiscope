@@ -49,7 +49,7 @@ Last updated 2026-11-07 late. A native store crash at CHECKPOINT (D-23 class, al
 | 135(b) panel views by SOURCE; one markdown interface everywhere | partial | one markdown panel confirmed for billboards, code, chats, slate, hover; source-specific views (browser chunk view) = item 137(4) |
 | 135(b) markdown+browser pair pulls apart into two nodes with a solid link | **not started** | |
 | 135(b) one gesture flips panel form <-> graph form | **not started** | |
-| 135(c) chat code outputs become pickable magnetic nodes with solid links | **not started** | |
+| 135(c) chat code outputs become pickable magnetic nodes with solid links | confirmed (cells + magnet) | PG-135-code-cells run 21: 2 code blocks -> 2 cells chained under the reply, both in the chat's context; planted none. Solid link drawing on the 2D plane: not yet |
 | 135(d) solid links toggle on/off by right-click (solid/translucent) | confirmed (3D view) | PG-135-link-toggle run 20: on 0.95, off 0.05; planted 0.14 unchanged. Not yet: persisted across reloads; tied to compiled function-object calls; the 2D plane's panel links |
 | 135(e) panel page view draws the page's own pictures | confirmed | desktop width (PG-135-desktop-width) + per-host native fallback (PG-139-richardmille) |
 | 135(f) Q.002: keep hover panes after they close | confirmed | Q-002 run 11: the closed VHS pane's text kept (as a version) after close and revisit; planted retire-in-session + no-versions: gone |
