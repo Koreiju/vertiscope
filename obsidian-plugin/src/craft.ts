@@ -145,7 +145,7 @@ export class Craft {
   plantNoReadouts = false;
   /** Planted (item 68): the craft drawn in the ego view too (around the camera). */
   plantAlwaysDrawn = false;
-  plantHiddenInEgo = false;
+  plantHiddenInEgo = true;   // first person: the camera IS the craft; drawn there it filled the lens (2026-11-08 screenshot: giant "ego", "slate 2", a purple disc)
   /** Planted (146): the craft's map never turns with the heading. */
   plantFixedFrame = false;
   private q = new THREE.Quaternion();

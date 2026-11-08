@@ -853,6 +853,16 @@ export class GraphView extends ItemView {
    * which would end the run that asked for it.
    */
   reload: () => Promise<void> = async () => {};
+  /** PLUGIN_GOAL 144: another workspace is a different store -- nothing the
+   *  old one drew may stay (an empty new store's load returns early and left
+   *  the old map's 931 nodes on screen). */
+  clearForWorkspace(): void {
+    this.projEpoch = -1; this.projSeq = 0;
+    this.payloadCache.clear();
+    this.forceSpecs.clear();
+    this.reopen.clear();
+    if (this.graph) this.graph.graphData({ nodes: [], links: [] });
+  }
 
   // -- the force-directed tree, first and primary (`G-89`) ------------------
 

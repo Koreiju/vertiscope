@@ -1636,6 +1636,15 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
   /** Each workspace serves on its own port, so two vaults (or two projects)
    *  run side by side and never share a store: 8788 for the first one this
    *  machine knew, then the next free number recorded machine-wide. */
+  private claimPort(dir: string, port: number): void {
+    const KEY = "domvec-workspace-ports";
+    let map: Record<string, number> = {};
+    try { map = JSON.parse(window.localStorage.getItem(KEY) || "{}"); } catch { map = {}; }
+    if (map[dir]) return;                     // it already has its own
+    if (Object.values(map).includes(port)) return;   // taken: it gets a new one when next opened
+    map[dir] = port;
+    try { window.localStorage.setItem(KEY, JSON.stringify(map)); } catch { /* recomputed */ }
+  }
   private workspacePort(dir: string): number {
     const KEY = "domvec-workspace-ports";
     let map: Record<string, number> = {};
@@ -1690,6 +1699,13 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     }
     // Stop only THIS vault's sidecar (its own port); another vault's runs on.
     const oldPort = Number((String(this.settings.sidecar).match(/:(\d+)/) || [])[1]) || 8788;
+    // The workspace being LEFT stays in the list, on the port it had: the
+    // first switch dropped `corpus123` and gave the new one its port 8788.
+    if (L.workspace && L.workspace !== dir) {
+      const was = this.workspaceNameOf(L.workspace);
+      this.settings.workspaces = { ...(this.settings.workspaces || {}), [was]: L.workspace };
+      this.claimPort(L.workspace, oldPort);
+    }
     new Notice(`domvec: stopping the sidecar to open workspace "${name}" ...`, 4000);
     await new Promise<void>((done) => {
       const p = cp.spawn(L.python, ["-c", `from domvec.obsidian.controls import stop_sidecar; print(stop_sidecar(port=${oldPort}, force=True))`],
@@ -1713,7 +1729,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     const said = await this.sidecarTrigger(false);
     // The graph drops the old workspace's nodes: a fresh load from the new store.
     for (const leaf of this.app.workspace.getLeavesOfType("domvec-graph-view")) {
-      try { await (leaf.view as any).reload?.(); } catch { /* the view reloads on its own poll */ }
+      try { (leaf.view as any).clearForWorkspace?.(); await (leaf.view as any).reload?.(); } catch { /* the view reloads on its own poll */ }
     }
     new Notice(`domvec: workspace "${name}" ${said === "sidecar ●" ? "open" : "not answering yet"} -- ${dir}`, 8000);
   }
