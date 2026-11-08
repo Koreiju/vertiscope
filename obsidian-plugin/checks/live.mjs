@@ -12261,14 +12261,14 @@ export function makeChecks(env) {
     },
     {
       id: "Q-002",
-      asks: "a hover pane's content is KEPT after the pane closes (2026-11-07: \"Q.002: Yes\"): on the hover-popup fixture the VHS Vault pane's chunks, recorded when it opened, are still in the store after another tile's hover replaces the pane -- and after the page is visited again; planted (retire-in-session) they are deleted when the pane closes",
+      asks: "a hover pane's content is KEPT after the pane closes (2026-11-07: \"Q.002: Yes\"): on the hover-popup fixture the VHS Vault pane's chunks, recorded when it opened, are still in the store after another tile's hover replaces the pane -- and after the page is visited again; planted (retire-in-session + no-versions) the closed pane's text is gone",
       async run() {
         const fixtures = await serveFixtures();
         const plant = (name, on) => fetch(SIDECAR + "/plant", { method: "POST",
           headers: { "content-type": "application/json", "X-Domvec-Client": "obsidian-plugin" }, body: JSON.stringify({ name, on }) });
         try {
           const arm = async (planted) => {
-            await plant("retire-in-session", planted);
+            await plant("retire-in-session", planted); await plant("no-versions", planted);
             try {
               return await evaluate(`(async () => {
                 ${PREP}
@@ -12287,17 +12287,30 @@ export function makeChecks(env) {
                 await hover("#t2 h3", 12);
                 const closed = await b.webview.executeJavaScript("document.getElementById('pane') ? document.getElementById('pane').textContent.slice(0, 30) : ''");
                 await sleep(9000);
-                const held = async () => { let n = 0; for (const c of vhs) { const p = await b.sidecar.chunk(c).catch(() => null); if (p && p.lines && p.lines.length) n++; } return n; };
+                // The VHS pane's TEXT, wherever the store keeps it: the pane is
+                // rewritten in place (same position, same id) when another tile
+                // opens it, so the id now holds the new pane -- the old content
+                // lives as a version under the page's marked url (G-253).
+                const held = async () => {
+                  let n = 0;
+                  for (const u of [PAGE, PAGE + "#~v"]) {
+                    for (const c of await b.sidecar.pageCids(u).catch(() => [])) {
+                      const p = await b.sidecar.chunk(c).catch(() => null);
+                      if (p && (p.lines || []).some((l) => /About VHS Vault/.test(l.text || ""))) n++;
+                    }
+                  }
+                  return n;
+                };
                 const after_close = await held();
                 b.go("about:blank"); await sleep(1500); b.go(PAGE); await sleep(12000);
                 const after_revisit = await held();
                 return { planted: ${planted}, pane_chunks: vhs.length, pane_now: closed, after_close, after_revisit };
               })()`, { timeout: 150000 });
-            } finally { await plant("retire-in-session", false); }
+            } finally { await plant("retire-in-session", false); await plant("no-versions", false); }
           };
           const clean = await arm(false), planted = await arm(true);
-          return { pass: !clean.error && clean.pane_chunks >= 1 && /Radio/.test(clean.pane_now) && clean.after_close === clean.pane_chunks && clean.after_revisit === clean.pane_chunks
-                         && !planted.error && planted.after_close < planted.pane_chunks, evidence: { clean, planted } };
+          return { pass: !clean.error && clean.pane_chunks >= 1 && /Radio/.test(clean.pane_now) && clean.after_close >= 1 && clean.after_revisit >= 1
+                         && !planted.error && planted.after_close === 0, evidence: { clean, planted } };
         } finally { await fixtures.close(); }
       },
     },

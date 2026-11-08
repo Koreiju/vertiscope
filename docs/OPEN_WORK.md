@@ -52,7 +52,7 @@ Last updated 2026-11-07, commit `c4216e2`.
 | 135(c) chat code outputs become pickable magnetic nodes with solid links | **not started** | |
 | 135(d) solid links toggle on/off by right-click (solid/translucent) | **not started** | |
 | 135(e) panel page view draws the page's own pictures | confirmed | desktop width (PG-135-desktop-width) + per-host native fallback (PG-139-richardmille) |
-| 135(f) Q.002: keep hover panes after they close | partial | clean arm confirmed (2/2 kept after close and revisit); **planted arm now runnable** (sidecar restarted) |
+| 135(f) Q.002: keep hover panes after they close | confirmed | Q-002 run 11: the closed VHS pane's text kept (as a version) after close and revisit; planted retire-in-session + no-versions: gone |
 | 136 magnetizing never creates links | confirmed by inspection | snapping records neighbours only |
 
 ## PLUGIN_GOAL 138–139
