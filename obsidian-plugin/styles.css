@@ -1356,3 +1356,6 @@ body:not(.domvec-plant-graph-boxed) .domvec-plane-card:has(.domvec-slate-graph) 
 .domvec-slate-graph svg { overflow: visible; }
 .domvec-browser-chunk-leaf :is(.view-header, .metadata-container, .inline-title) { display: none !important; }
 body:not(.domvec-plant-graph-boxed) .domvec-plane-card:has(.domvec-slate-graph) .domvec-slate-graph { overflow: visible !important; width: max-content; }
+/* 135(c)(d)/136: memory links between plane panels -- from the computation graph only. */
+.domvec-memory-links { position: absolute; left: 0; top: 0; pointer-events: none; z-index: 3; overflow: visible; }
+.domvec-memory-links line { stroke: #e8e8e8; stroke-width: 3; pointer-events: stroke; cursor: context-menu; }

@@ -13047,6 +13047,49 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "PG-136-memory-links",
+      asks: "PLUGIN_GOAL 135(c)(d)/136: links between plane panels come ONLY from the computation graph (a code output's `from:` its reply; a run's input note) -- never from magnet snapping; a right-click on a link toggles it solid/translucent, and that state is kept across the panels closing and reopening. Planted (plantNoMemoryLinks): no links",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          await window.__domvec.act("open", "graph"); await sleep(1500);
+          const desk = window.__domvecPlane;
+          desk.plantNoMemoryLinks = ${planted};
+          const t = Date.now(), NL = String.fromCharCode(10);
+          const A = "domvec-checks/mem a " + t + ".md", B = "domvec-checks/mem b " + t + ".md", C = "domvec-checks/mem c " + t + ".md";
+          const lines = () => [...document.querySelectorAll("svg.domvec-memory-links line")];
+          const between = (x, y) => lines().filter((l) => (l.dataset.a === x && l.dataset.b === y) || (l.dataset.a === y && l.dataset.b === x));
+          try {
+            await desk.create("notebook", { path: A, text: "a reply" + NL });
+            await desk.create("notebook", { path: B, text: ["---", "domvec: code-output", "from: " + A, "---", "", "x = 1", ""].join(NL) });
+            await desk.create("notebook", { path: C, text: "snapped, no call" + NL });
+            const pc = desk.panelOf(C); if (pc) pc.card.dataset.magnetTop = A;
+            for (let i = 0; i < 20 && !between(A, B).length && !${planted}; i++) await sleep(300);
+            await sleep(800);
+            const ab = between(A, B), ac = between(A, C);
+            let op0 = ab[0] ? ab[0].getAttribute("stroke-opacity") : null, op1 = null, kept = null;
+            if (ab[0]) {
+              const r = ab[0].getBoundingClientRect();
+              ab[0].dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 }));
+              await sleep(100); op1 = between(A, B)[0]?.getAttribute("stroke-opacity") ?? null;
+              desk.closePath(A); desk.closePath(B); await sleep(600);
+              for (const p of [A, B]) { const f = app.vault.getAbstractFileByPath(p); if (f) await desk.open(f); }
+              for (let i = 0; i < 20 && !between(A, B).length; i++) await sleep(300);
+              kept = between(A, B)[0]?.getAttribute("stroke-opacity") ?? null;
+            }
+            return { planted: ${planted}, ab: ab.length, snapped_ac: ac.length, opacity: [op0, op1], after_reopen: kept, stats: { ...desk.memoryStats } };
+          } finally {
+            desk.plantNoMemoryLinks = false;
+            for (const p of [A, B, C]) { desk.closePath(p); const f = app.vault.getAbstractFileByPath(p); if (f) await app.vault.trash(f, true); }
+          }
+        })()`, { timeout: 90000 });
+        const clean = await arm(false), planted = await arm(true);
+        const pass = !clean.error && clean.ab === 1 && clean.snapped_ac === 0 && clean.opacity[0] === "0.95" && clean.opacity[1] === "0.25" && clean.after_reopen === "0.25"
+          && !planted.error && planted.ab === 0;
+        return { pass, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-15",
       asks: "media is present in the PROJECTOR, not only in the panels",
       async run() {

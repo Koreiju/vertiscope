@@ -130,6 +130,7 @@ export class PlaneDesk {
     if (this.toolsEl && plane.contains(this.toolsEl)) return this.toolsEl;
     const el = plane.createDiv({ cls: "domvec-plane-tools" });
     this.hookFlip(plane);
+    this.startMemoryLinks();
     if (!this.plantToolButtons) { this.buildRetrievalBar(el); this.toolsEl = el; void this.restore(); return el; }
     for (const kind of ["notebook", "slate"] as const) {
       const b = el.createEl("button", { text: "+ " + kind, cls: "domvec-plane-tool" });
@@ -902,7 +903,125 @@ export class PlaneDesk {
     return p && p.leaf.view instanceof MarkdownView ? p.leaf.view : null;
   }
 
+  // ---- PLUGIN_GOAL 135(c)(d), 136: memory links on the plane -------------
+  //
+  // "magnetizing new panels together doesn't create new links between panels.
+  // That comes from the compilation aspect and function-object undirected
+  // bidirectional forward-inverse calls on the computation graph as the
+  // reservoir of memory-linked artifacts" (136); "Solid computational links
+  // can be turned 'on' and 'off' with a gesture (perhaps a right click on a
+  // clearly clickable solid undirected link) that is either semi translucent
+  // or solid" (135d); a chat's code outputs "with solid links" (135c).
+  //
+  // So a link between two plane panels is drawn ONLY from the computation
+  // graph: a recorded run whose input is another panel's note (`/signal`,
+  // the forward call and its inverse lookup), and a code-output cell's
+  // `from:` its reply. Snapping (magnets) is placement and never a link. A
+  // right-click on a link toggles it solid / translucent, and the state is
+  // KEPT across reloads by the pair's key. Planted `plantNoMemoryLinks`.
+  plantNoMemoryLinks = false;
+  memoryStats = { pairs: 0, from_signal: 0, from_output: 0, toggles: 0, drawn: 0 };
+  private memSvg: SVGSVGElement | null = null;
+  private memTimer = 0;
+  private memSignal: { note: string; path: string }[] = [];
+  private memSignalAt = -1e9;
+  static MEM_KEY = "domvec-memory-links";
+  private memState(): Record<string, boolean> {
+    try { return JSON.parse(window.localStorage.getItem(PlaneDesk.MEM_KEY) || "{}"); } catch { return {}; }
+  }
+  private memSave(st: Record<string, boolean>): void {
+    try { window.localStorage.setItem(PlaneDesk.MEM_KEY, JSON.stringify(st)); } catch { /* a convenience */ }
+  }
+  static pairKey(a: string, b: string): string { return a < b ? a + "|" + b : b + "|" + a; }
+  /** The panel pairs the computation graph links, among the panels open now. */
+  memoryPairs(): [string, string][] {
+    const open = new Set(this.panels.map((p) => p.path));
+    const out = new Map<string, [string, string]>();
+    let sig = 0, outp = 0;
+    for (const e of this.memSignal) {
+      if (e.note !== e.path && open.has(e.note) && open.has(e.path)) { out.set(PlaneDesk.pairKey(e.note, e.path), [e.note, e.path]); sig++; }
+    }
+    for (const p of this.panels) {
+      const f = this.app.vault.getAbstractFileByPath(p.path);
+      const fm: any = f instanceof TFile ? this.app.metadataCache.getFileCache(f)?.frontmatter : null;
+      const from = fm && typeof fm.from === "string" ? fm.from : "";
+      if (from && open.has(from)) { out.set(PlaneDesk.pairKey(p.path, from), [p.path, from]); outp++; }
+    }
+    this.memoryStats.from_signal = sig; this.memoryStats.from_output = outp; this.memoryStats.pairs = out.size;
+    return [...out.values()];
+  }
+  /** Refresh the recorded runs (forward calls) from the store, at most every 10 s. */
+  async memRefreshSignal(force = false): Promise<void> {
+    if (!force && performance.now() - this.memSignalAt < 10000) return;
+    this.memSignalAt = performance.now();
+    const P: any = (this.app as any).plugins?.plugins?.["domvec-bridge"];
+    let got: any = null;
+    try { got = await P?.sidecar?.signal?.(2000); } catch { got = null; }
+    const edges: any[] = (got && got.edges) || [];
+    this.memSignal = edges.map((e: any) => {
+      const u = String(e.url || "");
+      const path = u.startsWith("vault://") ? decodeURIComponent(u.replace(/^vault:\/\/[^/]*\//, "")) : "";
+      return { note: String(e.note || ""), path };
+    }).filter((e) => e.note && e.path);
+  }
+  memDraw(): void {
+    const plane = this.host.plane();
+    if (!plane) return;
+    if (this.plantNoMemoryLinks) { this.memSvg?.remove(); this.memSvg = null; this.memoryStats.drawn = 0; return; }
+    const NS = "http://www.w3.org/2000/svg";
+    if (!this.memSvg || !plane.contains(this.memSvg)) {
+      this.memSvg = document.createElementNS(NS, "svg") as SVGSVGElement;
+      this.memSvg.classList.add("domvec-memory-links");
+      plane.appendChild(this.memSvg);
+    }
+    const svg = this.memSvg;
+    svg.setAttribute("width", String(plane.scrollWidth)); svg.setAttribute("height", String(plane.scrollHeight));
+    const pr = plane.getBoundingClientRect(), st = this.memState();
+    const pairs = this.memoryPairs();
+    const want = new Set(pairs.map(([a, b]) => PlaneDesk.pairKey(a, b)));
+    for (const l of Array.from(svg.querySelectorAll("line"))) if (!want.has((l as any).dataset.key)) l.remove();
+    for (const [a, b] of pairs) {
+      const key = PlaneDesk.pairKey(a, b);
+      const pa = this.panelOf(a), pb = this.panelOf(b);
+      if (!pa || !pb) continue;
+      const ra = pa.card.getBoundingClientRect(), rb = pb.card.getBoundingClientRect();
+      const ca = { x: ra.left + ra.width / 2, y: ra.top + ra.height / 2 }, cb = { x: rb.left + rb.width / 2, y: rb.top + rb.height / 2 };
+      // Edge to edge: from each card's border toward the other's centre.
+      const clip = (c: any, r: DOMRect, to: any) => {
+        const dx = to.x - c.x, dy = to.y - c.y;
+        const t = Math.min(Math.abs((r.width / 2) / (dx || 1e-9)), Math.abs((r.height / 2) / (dy || 1e-9)), 1);
+        return { x: c.x + dx * t - pr.left + plane.scrollLeft, y: c.y + dy * t - pr.top + plane.scrollTop };
+      };
+      const p1 = clip(ca, ra, cb), p2 = clip(cb, rb, ca);
+      let line = Array.from(svg.querySelectorAll("line")).find((l) => (l as any).dataset.key === key) as SVGLineElement | undefined;
+      if (!line) {
+        line = document.createElementNS(NS, "line") as SVGLineElement;
+        (line as any).dataset.key = key; (line as any).dataset.a = a; (line as any).dataset.b = b;
+        line.addEventListener("contextmenu", (e) => {
+          e.preventDefault(); e.stopPropagation();
+          const s2 = this.memState(); s2[key] = s2[key] === false; this.memSave(s2);
+          this.memoryStats.toggles++; this.memDraw();
+        });
+        svg.appendChild(line);
+      }
+      const on = st[key] !== false;
+      line.setAttribute("x1", String(p1.x)); line.setAttribute("y1", String(p1.y));
+      line.setAttribute("x2", String(p2.x)); line.setAttribute("y2", String(p2.y));
+      line.setAttribute("stroke-opacity", on ? "0.95" : "0.25");
+      (line as any).dataset.on = String(on);
+    }
+    this.memoryStats.drawn = svg.querySelectorAll("line").length;
+  }
+  /** Start drawing memory links on the plane (once the plane exists). */
+  startMemoryLinks(): void {
+    if (this.memTimer) return;
+    const tick = () => { void this.memRefreshSignal().then(() => this.memDraw()); };
+    tick();
+    this.memTimer = window.setInterval(tick, 400);
+  }
+
   unload(): void {
+    if (this.memTimer) { window.clearInterval(this.memTimer); this.memTimer = 0; } this.memSvg?.remove(); this.memSvg = null;
     for (const u of this.flipUnhook) u(); this.flipUnhook = [];
     if (this.flipped) { window.clearInterval(this.flipped.timer); this.flipped.svg.remove(); this.flipped = null; }
     // Unloading is not the reader closing them: the list is kept for the reload.
