@@ -146,6 +146,9 @@ export class Craft {
   /** Planted (item 68): the craft drawn in the ego view too (around the camera). */
   plantAlwaysDrawn = false;
   plantLargeCraft = false;
+  plantCraftDepthTested = false;
+  plantLightCellOnly = false;
+  private hotLines: any = null;
   plantHiddenInEgo = true;   // first person: the camera IS the craft; drawn there it filled the lens (2026-11-08 screenshot: giant "ego", "slate 2", a purple disc)
   /** Planted (146): the craft's map never turns with the heading. */
   plantFixedFrame = false;
@@ -520,8 +523,19 @@ export class Craft {
       n.mesh.material = on ? LIT_MAT : (n.mesh.userData.base || n.mesh.material);
       n.mesh.scale.setScalar(on ? 1.8 : 1);
     }
+    // The whole TRIPLE lit while it computes (PG 4909: "these computations
+    // must be clearly visible lights from the active triples being computed"):
+    // the cell's readout node, and -- in `frame` -- its input lines drawn
+    // bright. Planted `plantLightCellOnly`: the note alone, as before.
+    const ro = this.nodes.find((x) => x.id === "craft:readout:" + path);
+    if (ro?.mesh && !this.plantLightCellOnly) {
+      if (on && !ro.mesh.userData.base) ro.mesh.userData.base = ro.mesh.material;
+      ro.mesh.material = on ? LIT_MAT : (ro.mesh.userData.base || ro.mesh.material);
+      ro.mesh.scale.setScalar(on ? 1.8 : 1);
+    }
     if (this.ioLines) this.ioLines.material.opacity = this.lit.size ? 0.95 : 0.4;
     this.stats.lit = this.lit.size;
+    this.key = "";
   }
 
   /** A note's I/O toggle (item 79): its `maps` frontmatter, "web" by default. */
@@ -543,6 +557,7 @@ export class Craft {
     const scene = this.host.scene();
     if (!scene) return;
     if (!this.group) { this.group = new THREE.Group(); this.group.name = "domvec-craft"; scene.add(this.group); }
+    this.hotLines = null;
     for (const c of [...this.group.children]) { c.removeFromParent(); c.geometry?.dispose?.(); if (c.material?.map) c.material.map.dispose(); }
     this.labels = [];
     const R = this.stats.radius || 10;
@@ -577,6 +592,17 @@ export class Craft {
     this.ioLines = new THREE.LineSegments(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: IO_COLOUR, transparent: true, opacity: 0.4 }));
     this.rings = new THREE.Group();
     this.group.add(this.lines, this.ioLines, this.rings);
+    // Drawn OVER the world (PLUGIN_GOAL 149 follow-up): centred on the focus,
+    // the craft sat inside the world cloud, buried under its billboards
+    // (screenshot 2026-11-08). Its meshes, labels and lines skip the depth
+    // test and draw last. Planted `plantCraftDepthTested`: buried, as before.
+    if (!this.plantCraftDepthTested) {
+      this.group.traverse((o: any) => {
+        o.renderOrder = 1000;
+        const ms = Array.isArray(o.material) ? o.material : o.material ? [o.material] : [];
+        for (const m of ms) { m.depthTest = false; m.depthWrite = false; m.transparent = true; }
+      });
+    }
     this.key = "";
   }
 
@@ -689,6 +715,27 @@ export class Craft {
     this.ioLines.geometry.dispose();
     this.ioLines.geometry = new THREE.BufferGeometry();
     this.ioLines.geometry.setAttribute("position", new THREE.Float32BufferAttribute(io, 3));
+    // A computing note's inputs: their lines again, bright, over the rest.
+    const hot: number[] = [];
+    if (!this.plantLightCellOnly && this.lit.size) {
+      for (const q of sig) {
+        if (!this.lit.has(q.note)) continue;
+        const n = byId.get("craft:readout:" + q.note) || byId.get("craft:" + q.note);
+        const w = this.host.worldNode(q.cid) || (q.url ? this.host.worldNode("page:" + q.url) : null);
+        if (!n || !w || !Number.isFinite(w.x)) continue;
+        const p = pos(n);
+        hot.push(w.x, w.y, w.z || 0, p.x, p.y, p.z);
+      }
+    }
+    if (!this.hotLines) {
+      this.hotLines = new THREE.LineSegments(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0xfff1a8, transparent: true, opacity: 1, depthTest: false }));
+      this.hotLines.renderOrder = 1001;
+      this.group.add(this.hotLines);
+    }
+    this.hotLines.geometry.dispose();
+    this.hotLines.geometry = new THREE.BufferGeometry();
+    this.hotLines.geometry.setAttribute("position", new THREE.Float32BufferAttribute(hot, 3));
+    (this.stats as any).lit_inputs = hot.length / 6;
     this.stats.io = io.length / 6;
     // A node whose panel is stuck on the plane is ringed.
     for (const r of [...this.rings.children]) { r.removeFromParent(); r.geometry?.dispose?.(); }
