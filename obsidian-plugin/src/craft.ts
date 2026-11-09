@@ -558,6 +558,7 @@ export class Craft {
     if (!scene) return;
     if (!this.group) { this.group = new THREE.Group(); this.group.name = "domvec-craft"; scene.add(this.group); }
     this.hotLines = null;
+    this.memRings = null;
     for (const c of [...this.group.children]) { c.removeFromParent(); c.geometry?.dispose?.(); if (c.material?.map) c.material.map.dispose(); }
     this.labels = [];
     const R = this.stats.radius || 10;
@@ -703,6 +704,13 @@ export class Craft {
     const fed = new Map<string, Set<string>>();
     for (const q of sig) { if (!fed.has(q.note)) fed.set(q.note, new Set()); fed.get(q.note)!.add(q.cid); }
     this.readoutInputs = Object.fromEntries([...fed].map(([k, v]) => [k, v.size]));
+    // THE EGO'S MEMORY, live (PG 4909: "actively evolving egoic memory
+    // structures being mapped from recursive calls ... with undirected
+    // lookup/indexing links"): each readout that has read inputs wears a
+    // memory ring whose radius grows with the log of the distinct inputs its
+    // runs have read -- a call on a new input grows it, a repeat does not.
+    // Planted `plantNoMemory`: no rings.
+    this.drawMemory(byId, pos);
     this.stats.readouts = this.nodes.filter((x) => x.kind === "readout").length;
     // A tagged chunk's line to its place in the world.
     for (const n of this.nodes) {
@@ -748,6 +756,33 @@ export class Craft {
       ring.lookAt(this.host.camera().position);
       (ring as any).__ringOf = id;
       this.rings.add(ring);
+    }
+  }
+
+  plantNoMemory = false;
+  memoryStats = { rings: 0, max_inputs: 0 };
+  private memRings: any = null;
+  private drawMemory(byId: Map<string, CraftNode>, pos: (n: CraftNode) => V3): void {
+    if (!this.group) return;
+    if (!this.memRings || this.memRings.parent !== this.group) { this.memRings = new THREE.Group(); this.group.add(this.memRings); }
+    for (const r of [...this.memRings.children]) { r.removeFromParent(); r.geometry?.dispose?.(); }
+    this.memoryStats.rings = 0; this.memoryStats.max_inputs = 0;
+    if (this.plantNoMemory) return;
+    const R = this.stats.radius || 10;
+    for (const [note, k] of Object.entries(this.readoutInputs)) {
+      const n = byId.get("craft:readout:" + note) || byId.get("craft:" + note);
+      if (!n || !k) continue;
+      const p = pos(n);
+      const rr = R * 0.06 * (1 + Math.log2(1 + k));
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(rr, R * 0.006, 6, 40),
+        new THREE.MeshBasicMaterial({ color: 0xfff1a8, transparent: true, opacity: 0.85, depthTest: false }));
+      ring.position.set(p.x, p.y, p.z);
+      ring.lookAt(this.host.camera().position);
+      ring.renderOrder = 1002;
+      (ring as any).__memory = note; (ring as any).__inputs = k;
+      this.memRings.add(ring);
+      this.memoryStats.rings++;
+      this.memoryStats.max_inputs = Math.max(this.memoryStats.max_inputs, k);
     }
   }
 
