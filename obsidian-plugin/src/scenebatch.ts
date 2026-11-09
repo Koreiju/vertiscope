@@ -37,7 +37,7 @@ attribute vec4 iUv;
 uniform float uZoom;
 uniform float uNear;
 uniform float uNearMin;
-float nearK(float z) { return uNear > 0.0 ? clamp(-z / uNear, uNearMin, 1.0) : 1.0; }
+float nearK(float z, float size) { return uNear > 0.0 ? clamp(-z / (uNear * max(size, 1e-3)), uNearMin, 1.0) : 1.0; }
 varying vec2 vCorner;
 varying vec4 vColor;
 varying vec4 vUv;
@@ -52,7 +52,7 @@ void main() {
   // orbs (iUv.z < 0) draw smaller at full view (G-206).
   // PLUGIN_GOAL 152: near the camera, nodes AND pictures shrink -- clumping
   // answered by locally shrinking, not by moving anything.
-  mv.xy += position.xy * iSize * (iUv.z < 0.0 ? uZoom : 1.0) * nearK(mv.z);
+  mv.xy += position.xy * iSize * (iUv.z < 0.0 ? uZoom : 1.0) * nearK(mv.z, iSize);
   gl_Position = projectionMatrix * mv;
 }`;
 
@@ -105,7 +105,7 @@ attribute vec4 iColor;
 uniform float uZoom;
 uniform float uNear;
 uniform float uNearMin;
-float nearK(float z) { return uNear > 0.0 ? clamp(-z / uNear, uNearMin, 1.0) : 1.0; }
+float nearK(float z, float size) { return uNear > 0.0 ? clamp(-z / (uNear * max(size, 1e-3)), uNearMin, 1.0) : 1.0; }
 varying vec2 vCorner;
 varying vec3 vCenterW;
 varying float vR;
@@ -116,8 +116,8 @@ void main() {
   vec4 w = modelMatrix * vec4(iOffset, 1.0);
   vCenterW = w.xyz;
   vec4 mv = viewMatrix * w;
-  vR = iSize * uZoom * nearK(mv.z);
-  mv.xy += position.xy * iSize * uZoom * nearK(mv.z);
+  vR = iSize * uZoom * nearK(mv.z, iSize);
+  mv.xy += position.xy * iSize * uZoom * nearK(mv.z, iSize);
   gl_Position = projectionMatrix * mv;
 }`;
 
@@ -194,7 +194,7 @@ uniform float uZoom;
 uniform float uHaloK;
 uniform float uNear;
 uniform float uNearMin;
-float nearK(float z) { return uNear > 0.0 ? clamp(-z / uNear, uNearMin, 1.0) : 1.0; }
+float nearK(float z, float size) { return uNear > 0.0 ? clamp(-z / (uNear * max(size, 1e-3)), uNearMin, 1.0) : 1.0; }
 uniform float uMinPx;
 uniform float uPxView;
 varying vec2 vCorner;
@@ -203,7 +203,7 @@ void main() {
   vCorner = position.xy;
   vTint = iColor;
   vec4 mv = modelViewMatrix * vec4(iOffset, 1.0);
-  float s = max(iSize * uZoom * uHaloK * nearK(mv.z), uMinPx * max(-mv.z, 0.0) * uPxView);
+  float s = max(iSize * uZoom * uHaloK * nearK(mv.z, iSize), uMinPx * max(-mv.z, 0.0) * uPxView);
   mv.xy += position.xy * s;
   gl_Position = projectionMatrix * mv;
 }`;

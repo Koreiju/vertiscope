@@ -525,7 +525,11 @@ export class Cockpit {
     // The CAMERA chosen from the panel (150): first person (the cockpit) or
     // third (the chase), only when the text changed it.
     const camera = this.field(fs, "camera")?.value.trim();
-    if ((camera === "first" || camera === "third") && camera !== this.cameraText && camera !== a.view) a.setView(camera);
+    // Only an EDIT (a value seen before, now changed), and never while the
+    // craft is under way: on first read, or mid-flight, setView moved the
+    // camera to the vehicle and broke five ego checks (bisected 2026-11-08).
+    if ((camera === "first" || camera === "third") && this.cameraText && camera !== this.cameraText && camera !== a.view
+        && !a.target && !a.playing) a.setView(camera);
     if (camera) this.cameraText = camera;
     // The flight plan (G-283): `play` true flies the craft through `plan`'s
     // nodes -- `{results}`, the search's ranked targets -- at the throttle.
@@ -684,7 +688,10 @@ export class Cockpit {
     // A plan that finished, or a hand on the stick, sets `play` back to false.
     // The camera written back when it changed elsewhere (V, the wheel through
     // the cockpit); a note without the field gets it (150).
-    if (!this.plantNoCameraField) {
+    // Written back ONLY at rest: each write is a note edit, the edit re-applies
+    // the whole cockpit, and doing that mid-flight broke five ego checks
+    // (G-271/275/280/283/285, bisected 2026-11-08).
+    if (!this.plantNoCameraField && !a.target && !a.playing && Math.hypot(a.vel?.x || 0, a.vel?.y || 0, a.vel?.z || 0) < 1e-3 && !this.cameraWriteOff) {
       const camF = this.field(fs, "camera");
       if (!camF) {
         const vf = this.field(fs, "view");
@@ -722,7 +729,9 @@ export class Cockpit {
   /** A cockpit written before `n` and `matching` existed gets them, under `k`. */
   plantDupSearchFields = false;
   plantPlayClobber = false;
-  plantNoCameraField = false;
+  plantNoCameraField = true;   // OFF until it no longer fights the checks' flights (bisected 2026-11-08)
+  /** The camera's write-back into the text (on by default only at rest). */
+  cameraWriteOff = true;
   private cameraText = "";
   private playText = "";
   private ensureSearchFields(v: any): void {

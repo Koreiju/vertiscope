@@ -347,7 +347,7 @@ export class Craft {
     // Much smaller and more compact (PLUGIN_GOAL 149, 2026-11-08: "The ego in
     // 3d could be much smaller and more compact"): 6% of the world's radius,
     // was 22%. Planted `plantLargeCraft`: the old size.
-    const R = this.plantLargeCraft ? Math.max(10, w.r * 0.22) : Math.max(3, w.r * 0.06);
+    const R = this.plantLargeCraft ? Math.max(10, w.r * 0.22) : Math.max(2, w.r * 0.03);
     this.stats.radius = Math.round(R);
     const vault = this.host.app.vault.getName();
     // Places from the EGO's own projection by knowledge key (item 76): a
