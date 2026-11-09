@@ -8303,6 +8303,8 @@ export class GraphView extends ItemView {
   relaxBackgroundMs = 250;
   /** Planted (G-4): the 8 ms budget whatever the frame rate, as before. */
   plantRelaxFrameBound = false;
+  /** Planted (G-145): the relax's spatial hash as a Map of JS arrays, and a boxed sort. */
+  plantMapGrid = false;
   private relaxChunkView(): void {
     const g: any = this.graph;
     if (!g || (this.level !== "chunk" && !this.umapAuthority()) || this.plantNoChunkRelax || this.scaledMode) return;
@@ -8345,7 +8347,7 @@ export class GraphView extends ItemView {
     });
     // The cell is a typical node's reach, not the largest one's: a few big
     // pictures would make every cell hold the whole cloud.
-    const sorted = Array.from(H).sort((x, y) => x - y);
+    const sorted = this.plantMapGrid ? Array.from(H).sort((x, y) => x - y) : H.slice().sort();
     const cell = Math.max(1e-3, 2 * S * sorted[Math.floor(N * 0.9)]);
     const hash = (cx: number, cy: number, cz: number) => ((cx * 73856093) ^ (cy * 19349663) ^ (cz * 83492791)) | 0;
     // A stored place that OVERLAPS a neighbour as drawn now is not settled:
@@ -8356,17 +8358,14 @@ export class GraphView extends ItemView {
     // stays exactly where the reader last saw it. Planted `plantRelaxNewOnly`.
     let clashed = 0;
     if (!this.plantRelaxNewOnly && stored > 0) {
-      const grid0 = new Map<number, number[]>();
-      for (let i = 0; i < N; i++) {
-        const k = hash(Math.floor(P[3 * i] / cell), Math.floor(P[3 * i + 1] / cell), Math.floor(P[3 * i + 2] / cell));
-        const l = grid0.get(k); if (l) l.push(i); else grid0.set(k, [i]);
-      }
+      const grid0 = this.plantMapGrid ? MapGrid.of(N, (i) => hash(Math.floor(P[3 * i] / cell), Math.floor(P[3 * i + 1] / cell), Math.floor(P[3 * i + 2] / cell)))
+        : new TypedGrid(N, (i) => hash(Math.floor(P[3 * i] / cell), Math.floor(P[3 * i + 1] / cell), Math.floor(P[3 * i + 2] / cell)));
       for (let i = 0; i < N; i++) {
         if (!fixed[i] || nodes[i].level === "page") continue;
         const cx = Math.floor(P[3 * i] / cell), cy = Math.floor(P[3 * i + 1] / cell), cz = Math.floor(P[3 * i + 2] / cell);
         let hit = false;
         for (let ox = -1; ox <= 1 && !hit; ox++) for (let oy = -1; oy <= 1 && !hit; oy++) for (let oz = -1; oz <= 1 && !hit; oz++) {
-          for (const j of grid0.get(hash(cx + ox, cy + oy, cz + oz)) || []) {
+          for (let q = grid0.from(hash(cx + ox, cy + oy, cz + oz)), qe = grid0.end; q < qe; q++) { const j = grid0.order[q];
             if (j === i) continue;
             if (Math.hypot(P[3 * i] - P[3 * j], P[3 * i + 1] - P[3 * j + 1], P[3 * i + 2] - P[3 * j + 2]) < H[i] + H[j]) { hit = true; break; }
           }
@@ -8382,14 +8381,12 @@ export class GraphView extends ItemView {
       return;
     }
     (this.drawnStats as any).clashed = clashed;
-    const build = () => {
-      const grid = new Map<number, number[]>();
-      for (let i = 0; i < N; i++) {
-        const k = hash(Math.floor(P[3 * i] / cell), Math.floor(P[3 * i + 1] / cell), Math.floor(P[3 * i + 2] / cell));
-        const l = grid.get(k); if (l) l.push(i); else grid.set(k, [i]);
-      }
-      return grid;
-    };
+    // G-145: the spatial hash in TYPED arrays -- one key per node, the
+    // indices sorted by key, a key -> range map. The Map of 62k little JS
+    // arrays it replaces cost ~0.3 s a build and a GC pause after it.
+    // Planted `plantMapGrid`: the Map of arrays, as before.
+    const keyOf = (i: number) => hash(Math.floor(P[3 * i] / cell), Math.floor(P[3 * i + 1] / cell), Math.floor(P[3 * i + 2] / cell));
+    const build = (): any => this.plantMapGrid ? MapGrid.of(N, keyOf) : new TypedGrid(N, keyOf);
     // Overlap, SAMPLED: every pair of a sample of nodes against all their
     // neighbours, as drawn (no safety). Exhaustive, it was one 1 s frame.
     const sampleStep = Math.max(1, Math.floor(N / 3000));
@@ -8399,7 +8396,7 @@ export class GraphView extends ItemView {
       for (let i = 0; i < N; i += sampleStep) {
         const cx = Math.floor(P[3 * i] / cell), cy = Math.floor(P[3 * i + 1] / cell), cz = Math.floor(P[3 * i + 2] / cell);
         for (let ox = -1; ox <= 1; ox++) for (let oy = -1; oy <= 1; oy++) for (let oz = -1; oz <= 1; oz++) {
-          for (const j of grid.get(hash(cx + ox, cy + oy, cz + oz)) || []) {
+          for (let q = grid.from(hash(cx + ox, cy + oy, cz + oz)), qe = grid.end; q < qe; q++) { const j = grid.order[q];
             if (j === i) continue;
             if (Math.hypot(P[3 * i] - P[3 * j], P[3 * i + 1] - P[3 * j + 1], P[3 * i + 2] - P[3 * j + 2]) < H[i] + H[j]) o++;
           }
@@ -8410,7 +8407,7 @@ export class GraphView extends ItemView {
     this.drawnStats.free = free.length; this.drawnStats.fixed = N - free.length;
     const t0 = performance.now();
     const before = overlaps();
-    let it = 0, grid: Map<number, number[]> | null = null, cursor = 0, moved = 0, worst = 0;
+    let it = 0, grid: any = null, cursor = 0, moved = 0, worst = 0;
     let lastStep = 0;
     const step = () => {
       if (seq !== this.relaxSeq || (this.level !== "chunk" && !this.umapAuthority()) || !this.graph) return;
@@ -8432,7 +8429,7 @@ export class GraphView extends ItemView {
         const i = free[cursor++];
         const cx = Math.floor(P[3 * i] / cell), cy = Math.floor(P[3 * i + 1] / cell), cz = Math.floor(P[3 * i + 2] / cell);
         for (let ox = -1; ox <= 1; ox++) for (let oy = -1; oy <= 1; oy++) for (let oz = -1; oz <= 1; oz++) {
-          for (const j of grid.get(hash(cx + ox, cy + oy, cz + oz)) || []) {
+          for (let q = grid.from(hash(cx + ox, cy + oy, cz + oz)), qe = grid.end; q < qe; q++) { const j = grid.order[q];
             // A free pair is handled once (from its lower index); a fixed
             // neighbour is handled from the free side, which takes it all.
             if (j === i || (!fixed[j] && j < i)) continue;
@@ -10494,5 +10491,57 @@ export class GraphView extends ItemView {
       if (fresh) entry.node = fresh;
     }
     if (this.billboards.size) this.startBillboardLoop();
+  }
+}
+
+/** A uniform-grid spatial hash over N points, in typed arrays (G-145):
+ *  `from(key)` returns the first index into `order` and sets `end`. */
+class TypedGrid {
+  order: Int32Array;
+  end = 0;
+  private start = new Map<number, number>();
+  private endOf: Int32Array;
+  constructor(N: number, keyOf: (i: number) => number) {
+    const keys = new Int32Array(N);
+    for (let i = 0; i < N; i++) keys[i] = keyOf(i);
+    const order = new Int32Array(N);
+    for (let i = 0; i < N; i++) order[i] = i;
+    order.sort((a, b) => keys[a] - keys[b]);
+    this.order = order;
+    this.endOf = new Int32Array(N);
+    let i = 0;
+    while (i < N) {
+      const k = keys[order[i]];
+      let j = i + 1;
+      while (j < N && keys[order[j]] === k) j++;
+      this.start.set(k, i);
+      this.endOf[i] = j;
+      i = j;
+    }
+  }
+  from(k: number): number {
+    const s = this.start.get(k);
+    if (s === undefined) { this.end = 0; return 0; }
+    this.end = this.endOf[s];
+    return s;
+  }
+}
+
+/** The planted form: a Map of JS arrays, behind the same interface. */
+class MapGrid {
+  order: Int32Array = new Int32Array(0);
+  end = 0;
+  private cells = new Map<number, number[]>();
+  private cur: number[] = [];
+  static of(N: number, keyOf: (i: number) => number): MapGrid {
+    const g = new MapGrid();
+    for (let i = 0; i < N; i++) { const k = keyOf(i); const l = g.cells.get(k); if (l) l.push(i); else g.cells.set(k, [i]); }
+    return g;
+  }
+  from(k: number): number {
+    this.cur = this.cells.get(k) || [];
+    this.order = Int32Array.from(this.cur);
+    this.end = this.cur.length;
+    return 0;
   }
 }
