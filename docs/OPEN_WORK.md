@@ -138,3 +138,17 @@ Last updated 2026-11-08 evening (items 141-147 below). Earlier: 2026-11-07 late.
 | G-280 cockpit throttle text vs agent | open | after Shift the text read 45, the agent 40 |
 | G-270 store-wide dedup | open | 66 contents drawn twice, 101 extra group leads |
 | live memory structures from recursive calls (PG 4909) | not started | |
+
+## Ego checks, full re-run 2026-11-08 20:22 (confirm runs 6-7)
+
+8 of 13 pass: G-270 (now passes: projected_not_drawable 0), G-273, G-281,
+G-282, G-284, G-331, G-333, G-334. REGRESSED since run 4 (18:58): G-271,
+G-275, G-280, G-283, G-285 -- flights do not close (G-271 cruise 20 at
+throttle 0.25 where 40 is expected; min_d 531 not the 24 floor), G-283 leaves
+play "true" in the text at the end, G-280's cockpit circle is null.
+Not yet attributed. Changed since run 4: idle drift on by default (now held
+off while the craft flies -- did not fix it), the cockpit's camera field and
+play write-back, tethers, memory rings, near-shrink, graph-card sizing. The
+ego note's text was also left by checks at throttle 100 / camera first.
+Next: bisect with each new binding planted off, starting with the cockpit's
+camera field and play write-back (they act on the same note the checks drive).

@@ -8634,7 +8634,12 @@ export class GraphView extends ItemView {
     // adjusting per the query scroll window. pls dont forget about the
     // rotating xyzhsv"): the lights ride on the turning scene. Gated on the
     // search, it never ran once a query had been typed. Planted: gated again.
-    const on = idle && visible && !checking && !this.plantNoDrift && (this.driftEnabled || this.plantDriftDefaultOn || this.driftInCheck)
+    // Never while the craft is under way: a flight or a plan in play owns the
+    // camera (2026-11-08: drift back on by default turned the camera under
+    // flights -- G-271/G-283/G-285 ended 400-650 units short).
+    const ag: any = this.agent;
+    const flying = !!ag && (!!ag.target || ag.playing || Math.hypot(ag.vel?.x || 0, ag.vel?.y || 0, ag.vel?.z || 0) > 1e-3);
+    const on = idle && visible && !checking && !flying && !this.plantNoDrift && (this.driftEnabled || this.plantDriftDefaultOn || this.driftInCheck)
       && !(this.plantDriftStopsOnSearch && this.searchState);
     if (on !== this.driftStats.active) {
       this.driftStats.active = on;
