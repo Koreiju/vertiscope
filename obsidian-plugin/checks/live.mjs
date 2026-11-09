@@ -9921,49 +9921,52 @@ export function makeChecks(env) {
     },
     {
       id: "G-331",
-      asks: "signal-flow glow, iterative-recursive (PLUGIN_GOAL 114): a finished run sends a glowing pulse from its note down the craft's edges -- to its cells, then on from each cell to its readout -- hop by hop (more hops than the note's own edges), pulses visibly in flight, and a panel the pulse reaches flashes on the plane; planted (plantNoPulse) no pulse",
+      asks: "signal-flow glow, iterative-recursive (PLUGIN_GOAL 114): a finished run sends a glowing pulse from its note down the craft's edges -- to its cells, then on from each cell to its readout -- hop by hop (more hops than the note's own edges), pulses visibly in flight, and a panel the pulse reaches flashes on the plane; the readout is in the craft when the run ends, read from the open panel (planted plantDiskText: from disk, not yet); planted (plantNoPulse) no pulse",
       async run() {
-        const arm = (planted) => evaluate(`(async () => {
+        const arm = (planted, disk = false) => evaluate(`(async () => {
           const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
           const until = async (ok, ms) => { for (let t = 0; t < ms && !(await ok()); t += 300) await sleep(300); return !!(await ok()); };
           const plugin = app.plugins.getPlugin("domvec-bridge");
           const d = window.__domvecPlane, c = window.__domvecCraft, NL = String.fromCharCode(10), F = String.fromCharCode(96).repeat(3);
           const path = "domvec/graph/g331 " + (${planted} ? "p" : "c") + " " + Date.now() + ".md";
-          c.plantNoPulse = ${planted};
-          const out = { planted: ${planted} };
+          c.plantNoPulse = ${planted}; c.plantDiskText = ${disk};
+          const out = { planted: ${planted}, disk: ${disk} };
           try {
             await d.create("notebook", { path, text: "# g331" + NL + NL + F + "python" + NL + "z = 41 + 1" + NL + "print(z)" + NL + F + NL });
             // A real run: the cell executes in the note's kernel; its end lights off and pulses.
-            const v = d.panelOf(path).leaf.view;
             const code = "z = 41 + 1" + NL + "print(z)";
-            await plugin.onRunFence({ lang: "python", code, line: 2, path });
-            c.dirty();
-            await until(() => c.nodes.some((n) => n.id === "craft:" + path) && c.downstream("craft:" + path).length > 0, 20000);
-            out.direct = c.downstream("craft:" + path).length;
-            const s0 = c.pulseStats.started, h0 = c.pulseStats.hops;
-            let flashed = false;
             const card = d.panelOf(path).card;
+            let flashed = false;
             const mo = new MutationObserver(() => { if (card.classList.contains("is-pulsed")) flashed = true; });
             mo.observe(card, { attributes: true, attributeFilter: ["class"] });
+            const s0 = c.pulseStats.started, h0 = c.pulseStats.hops;
+            // A real run, and its end at once -- no wait for the craft's timer:
+            // the end itself rebuilds the craft (live text) and then pulses.
+            await plugin.onRunFence({ lang: "python", code, line: 2, path });
             plugin.light(path, true);
             plugin.light(path, false);
-            await sleep(150);
+            await until(() => c.pulseStats.started > s0, 3000);
+            // The readout as the craft held it when the signal left.
+            out.readout_at_pulse = c.nodes.some((n) => n.id === "craft:readout:" + path);
             out.in_flight = c.pulses ? c.pulses.length : null;
             await sleep(3500);
             mo.disconnect();
+            out.direct = c.downstream("craft:" + path).length;
             out.started = c.pulseStats.started - s0;
             out.hops = c.pulseStats.hops - h0;
             out.panel_flashed = flashed;
             return out;
           } finally {
-            c.plantNoPulse = false;
+            c.plantNoPulse = false; c.plantDiskText = false;
             try { await d.trash(path); } catch (e) { /* gone */ }
           }
         })()`, { timeout: 90000 });
         const clean = await arm(false);
         const planted = await arm(true);
-        const ok = (x) => !!x && x.started >= 1 && x.hops > x.direct && x.in_flight >= 1 && x.panel_flashed;
-        return { pass: ok(clean) && !!planted && planted.hops === 0, evidence: { clean, planted } };
+        const disk = await arm(false, true);
+        const ok = (x) => !!x && x.started >= 1 && x.hops / x.started > x.direct && x.in_flight >= 1 && x.panel_flashed && x.readout_at_pulse;
+        return { pass: ok(clean) && !!planted && planted.hops === 0 && !!disk && !disk.readout_at_pulse,
+                 evidence: { clean, planted, disk_planted: disk } };
       },
     },
     {
@@ -14372,7 +14375,11 @@ export function makeChecks(env) {
           const g = v.graph, cam = g.camera(), ctl = g.controls(), a = v.agent;
           const saved = { p: cam.position.clone(), t: ctl.target.clone(), up: cam.up.clone(), mode: a.mode, thr: a.throttle };
           const dist = (n) => Math.hypot(cam.position.x - n.x, cam.position.y - n.y, cam.position.z - (n.z || 0));
-          const ns = g.graphData().nodes.filter((n) => Number.isFinite(n.x) && n.level !== "path");
+          // Nodes the WORLD draws: a computation-graph note is the ego's, drawn
+          // in the craft and not in the world's fit (PLUGIN_GOAL 76) -- it has
+          // no world radius for a wheel floor to fit.
+          const ns = g.graphData().nodes.filter((n) => Number.isFinite(n.x) && n.level !== "path" && v.proxyRadius(n) > 0
+            && !String(n.url || n.id).includes("vault://"));   // a note can join the ego mid-check
           ns.sort((x, y) => dist(y) - dist(x));
           const n1 = ns[0], n2 = ns[Math.min(ns.length - 1, 5)];
           const reset = () => { cam.position.copy(saved.p); ctl.target.copy(saved.t); cam.up.copy(saved.up); ctl.update?.(); a.vel = { x: 0, y: 0, z: 0 }; a.target = null; };
@@ -14437,7 +14444,11 @@ export function makeChecks(env) {
           const saved = { p: cam.position.clone(), t: ctl.target.clone(), up: cam.up.clone(), mode: a.mode, thr: a.throttle };
           const dist = (n) => Math.hypot(cam.position.x - n.x, cam.position.y - n.y, cam.position.z - (n.z || 0));
           const reset = () => { cam.position.copy(saved.p); ctl.target.copy(saved.t); cam.up.copy(saved.up); ctl.update?.(); a.vel = { x: 0, y: 0, z: 0 }; a.target = null; v.focusNode = null; v.focusPending = null; };
-          const ns = g.graphData().nodes.filter((n) => Number.isFinite(n.x) && n.level !== "path");
+          // Nodes the WORLD draws (a computation-graph note is the ego's, in
+          // the craft: no world radius for the wheel floor, PLUGIN_GOAL 76),
+          // and web pages only -- a vault note can join the ego mid-check.
+          const ns = g.graphData().nodes.filter((n) => Number.isFinite(n.x) && n.level !== "path"
+            && v.proxyRadius(n) > 0 && !String(n.url || n.id).includes("vault://"));
           if (ns.length < 3) return { error: "too few nodes" };
           // Nodes about 250 units from the camera, so a flight has room.
           ns.sort((x, y) => Math.abs(dist(x) - 250) - Math.abs(dist(y) - 250));
@@ -14783,6 +14794,11 @@ export function makeChecks(env) {
           const extra = async () => {
             const out = {};
             const cv = c.view(), cm = cv.editor.cm;
+            // The title is a TEXT-form gesture: a slate left in its graph form
+            // (the reader's last flip) is read in text, and put back after.
+            const wasGraph = !!cv.contentEl.querySelector(".domvec-slate-graph");
+            if (wasGraph) { c.flipForm(cv); await sleep(600); }
+            out.was_graph_form = wasGraph;
             const tpos = cm.state.doc.toString().indexOf(String.fromCharCode(10) + "ego") + 2;
             const at = cm.coordsAtPos(tpos);
             const rc = (el, x, y) => el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 2 }));
@@ -14792,6 +14808,7 @@ export function makeChecks(env) {
             out.cockpit_circle = circ ? circ.textContent : null;
             if (circ) { rc(circ, 1, 1); await sleep(500); }
             out.cockpit_reopened = !cv.contentEl.querySelector(".domvec-slate-circle");
+            if (wasGraph) { c.flipForm(cv); await sleep(400); }
             const NL2 = String.fromCharCode(10), TB2 = String.fromCharCode(9);
             const f = await app.vault.create("domvec-checks/g280 keys " + Date.now() + ".md", "---" + NL2 + "domvec: slate" + NL2 + "---" + NL2 + "listener" + NL2 + TB2 + "input" + TB2 + "{keys}" + NL2);
             const leaf = window.__domvecPlane.leaf();
@@ -15487,7 +15504,7 @@ export function makeChecks(env) {
     },
     {
       id: "G-284",
-      asks: "the halo's cone transport (UR O.18, O.3): the cursor on a stuck slate's literal-text field fires a halo -- its retrieved nodes transported onto the camera's cone (every node at the cone's half-angle from the axis, the more similar nearer the apex); orbiting the camera 25 deg, they slide and stay on the new cone; each node's similarity is the three-part score pagerank x max(minmax(nomic), minmax(tfidf)) (O.22; planted plantHaloSearchOrder: the retrieval's ranks instead); a double right-click on a halo node sends it home and transports in the next from the queue (O.14; planted plantNoHaloQueue: the halo shrinks); the cursor on a pure {ref} field ends it and every node is home again; planted (plantNoHaloTransport) nothing moves",
+      asks: "the halo's cone transport (UR O.18, O.3): the cursor on a stuck slate's literal-text field fires a halo -- its retrieved nodes transported onto the camera's cone (every node at the cone's half-angle from the axis, the more similar nearer the apex); orbiting the camera 25 deg, they slide and stay on the new cone; each node's similarity is the three-part score pagerank x max(minmax(nomic), minmax(tfidf)) (O.22; planted plantHaloSearchOrder: the retrieval's ranks instead); a double right-click on a halo node sends it home and transports in the next from the queue (O.14; planted plantNoHaloQueue: the halo shrinks); a stream delta mid-halo moves a transported node's home, not the node (planted plantHaloOverwritten: dragged off the cone); the cursor on a pure {ref} field ends it and every node is home again; planted (plantNoHaloTransport) nothing moves",
       async run() {
         const got = await evaluate(`(async () => {
           const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -15572,6 +15589,27 @@ export function makeChecks(env) {
               v.plantNoHaloQueue = false;
               return res;
             };
+            // A stream delta arriving mid-halo (a purged note retired, a scan
+            // streaming in): the glide the delta makes for a transported node
+            // moves its HOME, not the node -- it stays on the cone, and a drop
+            // later sends it to the new place. Planted (plantHaloOverwritten):
+            // the delta drags it off the cone.
+            const midDelta = (planted) => {
+              v.plantHaloOverwritten = planted;
+              const it = v.halo.items[v.halo.items.length - 1];
+              const at = [it.n.x, it.n.y, it.n.z || 0], home0 = it.home.slice();
+              const to = [home0[0] + 40, home0[1], home0[2]];
+              v.glide(it.n, to);
+              const res = { node_moved: Math.hypot(it.n.x - at[0], it.n.y - at[1], (it.n.z || 0) - at[2]),
+                            home_moved: Math.hypot(it.home[0] - home0[0], it.home[1] - home0[1], it.home[2] - home0[2]) };
+              // Put it back as it was for what follows.
+              it.n.x = at[0]; it.n.y = at[1]; it.n.z = at[2]; it.n.fx = at[0]; it.n.fy = at[1]; it.n.fz = at[2]; it.n.__halo = true;
+              it.home = home0;
+              v.plantHaloOverwritten = false;
+              return res;
+            };
+            out.mid_delta = midDelta(false);
+            out.mid_delta_planted = midDelta(true);
             out.drop = await drop(false);
             out.drop_planted = await drop(true);
             // Planted order: the retrieval's own ranks as similarity.
@@ -15603,7 +15641,9 @@ export function makeChecks(env) {
                    && got.slid > 1 && got.max_angle_err_after < 0.5 && got.ended && got.home_err < 1e-3 && !got.planted.halo
                    && got.score_err < 1e-9 && got.planted_score_err > 1e-3
                    && got.drop.home_err < 1e-3 && !got.drop.in_halo && got.drop.items_delta === 0 && got.drop.queue_delta === -1
-                   && got.drop_planted.items_delta === -1,
+                   && got.drop_planted.items_delta === -1
+                   && !!got.mid_delta && got.mid_delta.node_moved < 1e-6 && Math.abs(got.mid_delta.home_moved - 40) < 1e-3
+                   && !!got.mid_delta_planted && got.mid_delta_planted.node_moved > 1,
                  evidence: got };
       },
     },
@@ -15826,7 +15866,7 @@ export function makeChecks(env) {
     },
     {
       id: "G-270",
-      asks: "one content, one drawn chunk, store-wide: the store reports no content drawn twice, and the same text indexed under two pages adds COPIES, not drawn duplicates; the projector holds nothing the store calls a copy; planted (/plant page-scoped-dedup) the second page's text is drawn again",
+      asks: "one content, one drawn chunk, store-wide: the store reports no content drawn twice, and the same text indexed under two pages adds COPIES, not drawn duplicates; the projector holds nothing the store calls a copy (read until it settles); a purged note's projected chunks leave the projector at once (planted /plant purge-keeps-projected: still held); planted (/plant page-scoped-dedup) the second page's text is drawn again",
       async run() {
         const got = await evaluate(`(async () => {
           const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -15837,7 +15877,15 @@ export function makeChecks(env) {
           const plant = (on) => fetch(SIDE + "/plant", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "page-scoped-dedup", on }) });
           const purge = (url) => fetch(SIDE + "/purge", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url }) });
           const before = await dup();
-          const proj = await (await fetch(SIDE + "/projector?drawable=1")).json();
+          // The projector CONVERGES on the store: a snapshot taken while a
+          // page is being stored can hold a chunk the store just retired, for
+          // as long as one drain takes. Read until the two agree or 30 s pass
+          // -- what is left then is a held chunk nothing will retire.
+          const readProj = async () => (await fetch(SIDE + "/projector?drawable=1")).json();
+          let proj = await readProj();
+          const first = { projected_not_drawable: proj.projected_not_drawable, drawable_unprojected: proj.drawable_unprojected };
+          let settle_s = 0;
+          for (; settle_s < 30 && (proj.projected_not_drawable || proj.drawable_unprojected); settle_s += 3) { await sleep(3000); proj = await readProj(); }
           const arm = async (planted) => {
             const stamp = Date.now();
             const text = "# Shared notes " + stamp + NL + NL + "A paragraph that two notes both hold, word for word, " + stamp + "." + NL + NL + "A second shared paragraph about tries and radix trees " + stamp + "." + NL;
@@ -15858,13 +15906,40 @@ export function makeChecks(env) {
           };
           const clean = await arm(false);
           const planted = await arm(true);
-          return { before,
-                   projected_not_drawable: proj.projected_not_drawable, drawable_unprojected: proj.drawable_unprojected, clean, planted };
+          // A purged note's projected chunks leave the projector AT ONCE --
+          // its 3D node goes with the note -- not at the idle reconcile.
+          // Planted (/plant purge-keeps-projected): still held after the purge.
+          const held = async (url) => ((await (await fetch(SIDE + "/projector?url=" + encodeURIComponent(url))).json()).page || {}).chunks || 0;
+          const retire = async (planted) => {
+            const stamp = Date.now();
+            const text = "# Retired note " + stamp + NL + NL + "A paragraph only this note holds about purging " + stamp + "." + NL;
+            await fetch(SIDE + "/plant", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "purge-keeps-projected", on: planted }) });
+            try {
+              const got = await plugin.sidecar.note("domvec-checks/g270-retire-" + stamp + ".md", text, app.vault.getName());
+              const url = got && got.url;
+              if (!url) return { planted, error: "not stored" };
+              let before = 0;
+              for (let i = 0; i < 40 && !(before = await held(url)); i++) await sleep(500);
+              await purge(url);
+              let after = before;
+              for (let i = 0; i < 16 && (after = await held(url)); i++) await sleep(500);
+              return { planted, held_before: before, held_after: after };
+            } finally {
+              await fetch(SIDE + "/plant", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "purge-keeps-projected", on: false }) });
+            }
+          };
+          const retired = await retire(false);
+          const retired_planted = await retire(true);
+          return { before, first, settle_s, sample: proj.not_drawable_sample || null,
+                   projected_not_drawable: proj.projected_not_drawable, drawable_unprojected: proj.drawable_unprojected, clean, planted,
+                   retired, retired_planted };
         })()`, { timeout: 300000 });
         if (!got || got.error || !got.clean) return { pass: false, evidence: got };
         return { pass: got.before.extra_drawn_plain === 0 && got.projected_not_drawable === 0
                    && got.clean.notes === 2 && got.clean.copies_added > 0 && got.clean.extra_drawn_added === 0
-                   && got.planted.notes === 2 && got.planted.extra_drawn_added > 0,
+                   && got.planted.notes === 2 && got.planted.extra_drawn_added > 0
+                   && !!got.retired && got.retired.held_before > 0 && got.retired.held_after === 0
+                   && !!got.retired_planted && got.retired_planted.held_after > 0,
                  evidence: got };
       },
     },

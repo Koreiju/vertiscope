@@ -70,6 +70,9 @@ export interface CraftHost {
   /** Each recorded run's input -> its cell note (G-292). */
   signalEdges(): { note: string; cid: string; url: string }[];
   isOpen(path: string): boolean;
+  /** The note's text as its open panel holds it NOW -- a run's output is in
+   *  the editor before autosave writes it (G-331) -- or null when not open. */
+  liveText?(path: string): string | null;
   /** The ego set to the store: the craft's notes (items 74, 78). */
   postEgo?(urls: string[]): void;
   /** The web chunks the reader tagged into the ego (item 74b). */
@@ -182,6 +185,16 @@ export class Craft {
     }, 1200);
   }
   private dirtyTimer = 0;
+  /** The craft as the vault stands NOW (G-331): a build in flight is waited
+   *  out, then one more is made -- a run's end is pulsed through the craft
+   *  that holds its readout, not the one built before the output existed. */
+  async fresh(): Promise<void> {
+    window.clearTimeout(this.dirtyTimer);
+    for (let i = 0; this.building && i < 150; i++) await new Promise((r) => window.setTimeout(r, 20));
+    this.stale = true; this.key = "";
+    this.builtAt = performance.now();
+    await this.build();
+  }
 
   /** The craft's artifacts read from the vault. */
   async build(): Promise<void> {
@@ -215,7 +228,12 @@ export class Craft {
         // a kernel cell.
         if (f.path.includes("node_modules/") || f.path.startsWith(".")) continue;
         const onPlane = f.path.startsWith(PLANE_FOLDER + "/") || this.host.isOpen(f.path);
-        const text = await app.vault.cachedRead(f);
+        // The panel IS the node (item 65): an open panel's text is read as it
+        // stands, not as the disk had it at the last autosave -- a run's
+        // readout exists the moment its output is in the editor. Planted
+        // `plantDiskText`: the disk's, as before (the readout lags ~2 s).
+        const live = this.plantDiskText ? null : (this.host.liveText?.(f.path) ?? null);
+        const text = live ?? await app.vault.cachedRead(f);
         const fences = findFences(text).filter((x) => PY.test(x.lang));
         const ran = fences.length > 0 && /^\s*<!--\s*nb-output\s/m.test(text);
         // The reader's own markdown panels too (item 74c): on the plane, or
@@ -438,6 +456,8 @@ export class Craft {
    * plane, which lights that panel in the same order. Planted `plantNoPulse`.
    */
   plantNoPulse = false;
+  /** Planted (G-331): the craft reads every note from disk, open or not. */
+  plantDiskText = false;
   onPulse: ((path: string) => void) | null = null;
   pulseStats = { started: 0, hops: 0, reached: [] as string[], last_ms: 0 };
   private pulses: { a: string; b: string; t0: number; ms: number; dot: any; depth: number }[] = [];

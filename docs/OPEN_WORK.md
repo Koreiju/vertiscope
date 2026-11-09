@@ -152,3 +152,18 @@ play write-back, tethers, memory rings, near-shrink, graph-card sizing. The
 ego note's text was also left by checks at throttle 100 / camera first.
 Next: bisect with each new binding planted off, starting with the cockpit's
 camera field and play write-back (they act on the same note the checks drive).
+
+## Ego checks back to 13/13 (2026-11-08, confirm run 23)
+
+Runs 11-22 named five real defects behind the failures. Fixing them, not loosening the checks, is what brought the set back:
+
+- **Craft rebuild loop (no check saw it).** The vault is the repository, so the sidecar's `requests.log` and `graph.kuzu.wal` are vault files. Each request the craft's rebuild made wrote the log, which rebuilt the craft again: 67 rebuild requests in 8 s at rest. Now only `.md` changes mark the craft dirty. Measured: 0 builds in 15 s; planted `plantCraftAnyFile` gives 8.
+- **G-331: a readout is in the craft when its run ends.** The craft read every note from disk, and a run's output sits in the editor until autosave, so the pulse stopped at the cell. Now an open panel's live text is read (`liveText`), and a run's end rebuilds the craft (`fresh()`, bounded at 1.5 s) before pulsing. Clean: 2 hops per pulse. Planted `plantDiskText`: no readout, 1 hop.
+- **G-270: a purged note leaves the projector at once.** `/purge` removed the chunks but never told the projector, so they stayed drawn until the 180 s idle reconcile. Fixture notes from G-282 and G-284 were named by the new `not_drawable_sample`. Now `/purge` queues the page's held chunks. Clean: held 1 → 0. Planted `purge-keeps-projected`: still 1.
+  - **`lead_vectors` now agrees with the drain.** A group lead with an all-zero group vector falls back to its own vector in both (unit test plus a planted arm).
+  - **The reconcile's `not_drawable` mark is one-shot.** A content address that is stored again is drawable again.
+- **G-284: a stream delta during a halo moves a transported node's HOME, not the node.** Without this, a delta (for example the purge above) put halo nodes back at their fit under the halo. That was order-dependent: G-284 failed right after G-282. Clean: node moved 0, home moved 40. Planted `plantHaloOverwritten`: dragged 606 units off the cone.
+- **Check fixes (each named in the check):**
+  - **G-280:** reads the cockpit title in text form when the slate was left in graph form, and restores the form.
+  - **G-285 and G-271:** pick world-drawn web pages, because a vault note can be the ego's (PLUGIN_GOAL 76: radius 0 in the world).
+  - **G-270:** reads the projector until it settles (30 s cap) and reports the first snapshot too.

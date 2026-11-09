@@ -128,6 +128,31 @@ def test_an_all_zero_group_vector_falls_back_on_both_paths(ws):
     assert scan[0][2][5] == 1.0, "fell back to nothing instead of its own vector"
 
 
+def test_the_drawable_set_agrees_with_the_drain_on_a_zero_group_vector(ws):
+    """G-270: the drain places a lead whose group vector is all zeros by its
+    OWN vector; `lead_vectors` (the drawable set) must keep it too, or the
+    projector holds a chunk the store calls "not drawable". Planted
+    PLANT_ZERO_GROUP_DROPPED: left out, as before."""
+    from domvec import graphstore as gs
+    workspace, url = ws
+    store = workspace.store
+    lead = [c.cid for c in store.chunks(url)][2]
+    own = [0.0] * DIM
+    own[7] = 1.0
+    store._execute("MATCH (c:Chunk {cid: $c}) SET c.embedding = $v, "
+                   "c.group_embedding = $g, c.group_n = 2, c.group_of = $c",
+                   {"c": lead, "v": own, "g": [0.0] * DIM})
+    placed = {cid: v for cid, _c, v in store.chunks_for_placement([lead])}
+    assert placed[lead] is not None and placed[lead][7] == 1.0
+    rows = {cid: vec for cid, _u, vec in store.lead_vectors()}
+    assert lead in rows and float(rows[lead][7]) == 1.0
+    gs.PLANT_ZERO_GROUP_DROPPED[0] = True
+    try:
+        assert lead not in {cid for cid, _u, _v in store.lead_vectors()}
+    finally:
+        gs.PLANT_ZERO_GROUP_DROPPED[0] = False
+
+
 def test_unknown_cids_come_back_as_none_in_order(ws):
     workspace, url = ws
     real = [c.cid for c in workspace.store.chunks(url)][:2]

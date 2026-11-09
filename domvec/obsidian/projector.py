@@ -645,6 +645,9 @@ class ChunkProjector:
                 self.enqueue(batch)
                 return None
             for cid, url in gone:
+                # The reconcile's mark is spent once acted on: a content
+                # address stored again later is drawable again.
+                self.not_drawable.discard(cid)
                 if cid in self.pos:
                     self.pos.pop(cid, None)
                     self.hsv.pop(cid, None)

@@ -5598,8 +5598,25 @@ export class GraphView extends ItemView {
   // fit places a mapped node and ONE bounded spacing pass (`relaxChunkView`,
   // applied in one step) is the only thing allowed to move it after.
   umapAuthority(): boolean { return !this.plantUmapNotAuthority; }
+  /** A node the halo has transported onto its cone (UR O.18) is the halo's
+   *  while it lasts: a stream delta or the post-process that would place it
+   *  moves its HOME instead, so a drop or the halo's end sends it to where
+   *  the map has it NOW. Without this a delta arriving mid-halo (a purged
+   *  note's chunks retired, a scan streaming in) put transported nodes back
+   *  at their fit under the halo -- G-284's drop 826 units off, after G-282.
+   *  Planted `plantHaloOverwritten`: written through, as before. */
+  private haloHolds(n: any, x: number, y: number, z: number): boolean {
+    if (!n?.__halo || !this.halo || this.plantHaloOverwritten) return false;
+    const it = this.halo.items.find((k) => k.n === n);
+    if (!it) return false;
+    it.home = [x, y, z, x, y, z];
+    this.haloStats.held = (this.haloStats.held || 0) + 1;
+    return true;
+  }
+  plantHaloOverwritten = false;
   private glide(n: any, to: number[], ms = 450): void {
     if (!to.every(Number.isFinite)) return;
+    if (this.haloHolds(n, to[0], to[1], to[2])) return;
     // A glide to the raw fit is a glide to the SCALED place (G-324): every
     // caller that says "to its fit" means "to where the map draws it".
     if (this.scaledMode && !n.force && !n.__spreadHome && Number.isFinite(n.fitX)
@@ -6064,7 +6081,7 @@ export class GraphView extends ItemView {
    */
   plantNoHaloTransport = false;
   halo: { query: string; items: { n: any; s: number; home: number[] }[]; queue: { n: any; s: number }[]; hits?: any[] } | null = null;
-  haloStats = { fired: 0, ended: 0, nodes: 0, frames: 0, dropped: 0, queued: 0 };
+  haloStats = { fired: 0, ended: 0, nodes: 0, frames: 0, dropped: 0, queued: 0, held: 0 };
   /** How many retrieved nodes the halo shows; the rest wait in its queue. */
   haloShow = 10;
   /** Planted (O.22): the halo ranks by the retrieval's own order, not the three-part score. */
@@ -6523,6 +6540,8 @@ export class GraphView extends ItemView {
   craft: Craft | null = null;
   /** The craft's notes' urls (`vault://...`): not drawn in the world (item 76). */
   egoUrls = new Set<string>();
+  /** Planted: any vault file -- a log, a WAL -- marks the craft dirty. */
+  plantCraftAnyFile = false;
   egoHidden = 0;
   plantEgoInWorld = false;
   /** The chunks tagged into the ego (item 74b), as the store last said. */
@@ -6560,6 +6579,11 @@ export class GraphView extends ItemView {
           const cp: any = (this.app as any).plugins?.getPlugin?.("domvec-bridge")?.cockpit;
           return path === "domvec/ego.md" && !!cp?.card?.isConnected && !cp.card.hasClass("is-collapsed");
         },
+        liveText: (path: string) => {
+          const desk: any = (window as any).__domvecPlane;
+          const ed = desk?.panelOf(path)?.leaf?.view?.editor;
+          return ed && typeof ed.getValue === "function" ? String(ed.getValue()) : null;
+        },
         openPanel: (path: string, line: number) => {
           const desk: any = (window as any).__domvecPlane;
           const f = this.app.vault.getAbstractFileByPath(path);
@@ -6590,10 +6614,16 @@ export class GraphView extends ItemView {
         },
       });
       (window as any).__domvecCraft = this.craft;
-      this.registerEvent(this.app.vault.on("modify", () => this.craft?.dirty()));
-      this.registerEvent(this.app.vault.on("create", () => this.craft?.dirty()));
-      this.registerEvent(this.app.vault.on("delete", () => this.craft?.dirty()));
-      this.registerEvent(this.app.vault.on("rename", () => this.craft?.dirty()));
+      // Only a NOTE changes the craft: it reads markdown and nothing else.
+      // The vault is the repository, so the sidecar's own request log and
+      // store WAL are vault files too -- each request it answered for a
+      // rebuild wrote the log, which rebuilt the craft again: 67 rebuild
+      // requests in 8 s at rest. Planted `plantCraftAnyFile`: every file.
+      const note = (f: any, old?: string) => this.plantCraftAnyFile || /\.md$/i.test(String(f?.path || "")) || /\.md$/i.test(String(old || ""));
+      this.registerEvent(this.app.vault.on("modify", (f) => { if (note(f)) this.craft?.dirty(); }));
+      this.registerEvent(this.app.vault.on("create", (f) => { if (note(f)) this.craft?.dirty(); }));
+      this.registerEvent(this.app.vault.on("delete", (f) => { if (note(f)) this.craft?.dirty(); }));
+      this.registerEvent(this.app.vault.on("rename", (f, old) => { if (note(f, old)) this.craft?.dirty(); }));
       this.registerEvent(this.app.metadataCache.on("changed", () => this.craft?.dirty()));
     }
     this.craft.frame();
@@ -8444,7 +8474,7 @@ export class GraphView extends ItemView {
         const sh = Math.hypot(x - F[3 * i], y - F[3 * i + 1], z - F[3 * i + 2]);
         if (sh > 1e-6) shifted++;
         maxShift = Math.max(maxShift, sh / H[i]);
-        n.x = n.fx = x; n.y = n.fy = y; n.z = n.fz = z;
+        if (!this.haloHolds(n, x, y, z)) { n.x = n.fx = x; n.y = n.fy = y; n.z = n.fz = z; }
         n.relaxHalf = H[i];                 // the radius the leash was measured in
       });
       // The end, spread over frames (2026-10-30, G-170 live: one 566 ms

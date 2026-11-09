@@ -890,17 +890,25 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     // A finished run's signal flows on downstream (G-331): the craft's pulse,
     // and each panel it reaches on the plane flashing as it arrives.
     if (!on && g?.craft) {
-      g.craft.onPulse = (p: string) => {
-        const card = this.desk.panelOf(p)?.card;
-        if (!card) return;
-        card.addClass("is-pulsed");
-        window.setTimeout(() => card.removeClass("is-pulsed"), 450);
-      };
-      // The run's own panel flashes only when a signal actually leaves it.
-      const sent = g.craft.pulse(note);
-      const own = this.desk.panelOf(note)?.card;
-      if (sent && own) { own.addClass("is-pulsed"); window.setTimeout(() => own.removeClass("is-pulsed"), 450); }
+      // Through the craft as it stands after the run: rebuilt from the open
+      // panels' text first, so the readout the run just wrote is a node the
+      // signal reaches (bounded: a slow sidecar does not hold the pulse).
+      const craft = g.craft;
+      void Promise.race([craft.fresh(), new Promise((r) => window.setTimeout(r, 1500))])
+        .then(() => this.pulseFrom(craft, note), () => this.pulseFrom(craft, note));
     }
+  }
+  private pulseFrom(craft: any, note: string): void {
+    craft.onPulse = (p: string) => {
+      const card = this.desk.panelOf(p)?.card;
+      if (!card) return;
+      card.addClass("is-pulsed");
+      window.setTimeout(() => card.removeClass("is-pulsed"), 450);
+    };
+    // The run's own panel flashes only when a signal actually leaves it.
+    const sent = craft.pulse(note);
+    const own = this.desk.panelOf(note)?.card;
+    if (sent && own) { own.addClass("is-pulsed"); window.setTimeout(() => own.removeClass("is-pulsed"), 450); }
   }
 
   /** The halo that slides, on the plane (items 81-84). */

@@ -440,6 +440,9 @@ VERSION_SUFFIX = "#~v"
 VERSIONS_PER_POSITION = 32
 #: Planted (G-253): an in-place rewrite overwrites the earlier content, as before.
 PLANT_LEAD_IN_PYTHON = [False]
+#: Planted: a group lead with an all-zero group vector is left out of the
+#: drawable set (the drain still places it by its own vector).
+PLANT_ZERO_GROUP_DROPPED = [False]
 PLANT_NO_VERSIONS = [False]
 
 
@@ -2255,7 +2258,21 @@ class GraphStore:
                     "AND (c.group_of IS NULL OR c.group_of = '' OR c.group_of = c.cid) "
                     "RETURN c.url, c.cid, CASE WHEN c.group_n > 1 AND c.group_embedding IS NOT NULL "
                     "THEN c.group_embedding ELSE c.embedding END")]
+            # A group lead whose group vector is all zeros speaks through its
+            # OWN vector -- as `chunks_for_placement` (the drain) reads it.
+            # Dropping it here made the drawable set disagree with what the
+            # drain places: held by the projector, "not drawable" by the store
+            # (G-270's projected_not_drawable). Fetched for those few alone.
+            zero = [(url, cid) for url, cid, vec in rows
+                    if url and vec is not None and not any(vec)]
+            own = {}
+            if zero and not PLANT_ZERO_GROUP_DROPPED[0]:
+                own = {r[0]: r[1] for r in self._rows(
+                    "MATCH (c:Chunk) WHERE list_contains($cids, c.cid) AND c.group_n > 1 "
+                    "RETURN c.cid, c.embedding", {"cids": [c for _u, c in zero]})}
             for url, cid, vec in rows:
+                if url and vec is not None and not any(vec):
+                    vec = own.get(cid)
                 if url and vec is not None and any(vec):
                     out.append((cid, url, vec))
             return out

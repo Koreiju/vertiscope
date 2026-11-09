@@ -271,6 +271,9 @@ _LAST_WRITE = [0.0]
 _LAST_REQUEST = [0.0]
 #: The last full `/health` answer and when it was computed.
 _HEALTH_CACHE: Dict[str, object] = {}
+#: Planted (G-270): a purged page's projected chunks stay held until the
+#: idle reconcile finds them.
+PLANT_PURGE_KEEPS_PROJECTED = [False]
 PLANT_OUTPUTS_EVERYWHERE = [False]
 #: Set while a thread recomputes the health counts (one at a time).
 _HEALTH_REFRESHING = threading.Event()
@@ -806,7 +809,9 @@ _PLANTABLE = {
     "no-edge-memo": ("domvec.obsidian.layout", "PLANT_NO_EDGE_MEMO"),
     "no-declump": ("domvec.obsidian.layout", "PLANT_NO_DECLUMP"),            # 137(6)
     "lead-in-python": ("domvec.graphstore", "PLANT_LEAD_IN_PYTHON"),         # 143 fit read
+    "zero-group-dropped": ("domvec.graphstore", "PLANT_ZERO_GROUP_DROPPED"),  # G-270 drawable set
     "no-reconcile": ("domvec.obsidian.projector", "PLANT_NO_RECONCILE"),     # G-270
+    "purge-keeps-projected": ("domvec.obsidian.sidecar", "PLANT_PURGE_KEEPS_PROJECTED"),  # G-270
     "outputs-everywhere": ("domvec.obsidian.sidecar", "PLANT_OUTPUTS_EVERYWHERE"),  # T-13
     "aggregate-mid-stream": ("domvec.obsidian.sidecar", "PLANT_AGGREGATE_MID_STREAM"),  # 137(20)
     "furniture-is-content": ("domvec.markdown", "PLANT_FURNITURE_IS_CONTENT"),  # 137(3)       # chunk view, 2026-10-24
@@ -3138,7 +3143,25 @@ class _Handler(BaseHTTPRequestHandler):
             except Exception as exc:                # noqa: BLE001
                 self._send(500, {"error": "%s: %s" % (type(exc).__name__, exc)})
                 return
-            self._send(200, {"url": url, "chunks_removed": removed})
+            # The page's projected chunks go with it, NOW: the store no longer
+            # has them, so the drain reports each one gone in the delta and
+            # the 3D node leaves with the note. Without this a purged note's
+            # chunks stayed drawn until the idle reconcile (180 s) found them
+            # -- G-270 read 5 held-not-drawable after G-282/G-284 cleaned up.
+            # O(page). Planted PLANT_PURGE_KEEPS_PROJECTED.
+            retired = 0
+            if not PLANT_PURGE_KEEPS_PROJECTED[0]:
+                try:
+                    from .projector import projector as _get
+                    got = _get()
+                    if got is not None:
+                        with got.lock:
+                            held = list(got.by_url.get(url) or ())
+                        if held:
+                            retired = got.enqueue(held)
+                except Exception:                   # noqa: BLE001
+                    pass
+            self._send(200, {"url": url, "chunks_removed": removed, "projected_retired": retired})
             return
 
         if route == "capture":
@@ -4672,6 +4695,22 @@ class _Handler(BaseHTTPRequestHandler):
                 out["drawable_now"] = len(now)
                 out["drawable_unprojected"] = len(now - held)
                 out["projected_not_drawable"] = len(held - now)
+                # Named, not only counted: which held chunks the store
+                # disagrees about, and what the store says each one is.
+                odd = sorted(held - now)[:12]
+                if odd:
+                    with _WORK_LOCK:
+                        info = {}
+                        for r in self.workspace.store._rows(
+                                "MATCH (c:Chunk) WHERE list_contains($cids, c.cid) "
+                                "OPTIONAL MATCH (p:Page)-[:HasChunk]->(c) "
+                                "RETURN c.cid, c.url, c.dup_of, c.group_of, c.group_n, "
+                                "c.embedding IS NULL, p.url", {"cids": odd}):
+                            info[r[0]] = {"url": r[1], "dup_of": r[2] or "", "group_of": r[3] or "",
+                                          "group_n": r[4], "no_vec": bool(r[5]), "page": r[6]}
+                    with proj.lock:
+                        out["not_drawable_sample"] = [{"cid": c, "url_held": proj.url_of.get(c),
+                                                       "store": info.get(c)} for c in odd]
             self._send(200, out)
             return
 
