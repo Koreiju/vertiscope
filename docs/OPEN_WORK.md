@@ -221,3 +221,18 @@ The fit releases the GIL almost the whole time (torch on the GPU). Moving it out
 `scripts/d2_pilot.py`, read-only, 25 pages / 1,421 stored chunks of the copy: 1,219 chunk ids recur, but only 417 chunks (29%) re-render to identical markdown, 413 of them on one page. 202 chunks are gone and 138 are new. Causes, mixed: the renderer has changed since those pages were stored (R-C5 and earlier render fixes), and the store keeps no scan walk order, so siblings may re-order.
 
 So D-2 on the existing store is a RE-INDEX: about 70% of chunks change and need re-embedding, and the UMAP map moves. New pages and re-scans already get the markdown level wherever the store has the column. Decision for the reader: re-index the copy (hours of GPU embedding, map re-fit), or let the markdown level arrive page by page as pages are re-scanned.
+
+### G-145 profile of a switch to 62.5k nodes (2026-11-09, methods over 20 ms, wrapped)
+
+| Call | Time |
+|---|---|
+| relaxChunkView | 780 ms (now 318-486 with TypedGrid, 8f4e994) |
+| draw | 510 ms: a new ForceGraph3D plus one pickProxy Mesh per node, 62k objects |
+| fitRadiiToSpacing | 397 ms, of which spacingAllowed is ~190 ms |
+| fitProxies | 335 ms |
+
+A 288 ms single call nested in pickProxy -> lookOf -> baseLook -> unitVal is consistent with a GC pause after the per-node allocations.
+
+Tried and REVERTED: spacingAllowed on TypedGrid. Verdicts identical on 62,491 nodes, but 184-202 ms against 176-186 ms. Its grid is not the cost.
+
+Next: pick against the instanced batch instead of one proxy Mesh per node. That removes most of draw's and fitProxies' cost and the GC behind them. It is a hover/click refactor, measured by G-174 (picking) with a planted arm.
