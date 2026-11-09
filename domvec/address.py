@@ -82,6 +82,8 @@ __all__ = [
 # original components, so `parse(key(a)) == a` for every address.
 
 _SEP = "|"
+#: R-C5: a piece of a leaf split at the context window -- `text()~812`.
+PIECE_MARK = "~"
 _ESCAPES = {"%": "%25", _SEP: "%7C"}
 _UNESCAPE_RE = re.compile(r"%([0-9A-Fa-f]{2})")
 
@@ -503,6 +505,32 @@ class ContentAddress:
             )
             object.__setattr__(self, "_key_cache", cached)
         return cached
+
+    def whole(self) -> "ContentAddress":
+        """The leaf this address is a piece of (R-C5), or itself.
+
+        A line split at the context window keeps its first piece at the
+        leaf's own address and gives each later piece the leaf's accessor
+        plus the character offset it starts at -- ``text()~812`` -- an
+        intrinsic sub-path, the way ``srcset[1]`` is one. This strips it.
+
+        ``~``, not ``@``: the sensor already writes ``text()@116`` for a URL
+        found at offset 116 of a style's text, a leaf of its own. No accessor
+        in the frozen corpus ends ``~<digits>`` (12 pages checked).
+        """
+        acc = self.accessor
+        at = acc.rfind(PIECE_MARK)
+        if at > 0 and acc[at + 1:].isdigit():
+            return ContentAddress(url=self.url, xpath=self.xpath, tag=self.tag, accessor=acc[:at])
+        return self
+
+    @staticmethod
+    def whole_key(key: str) -> str:
+        """`whole` on a key, without parsing when there is no piece."""
+        at = key.rfind(PIECE_MARK)
+        if at > 0 and key[at + 1:].isdigit() and _SEP not in key[at:]:
+            return key[:at]
+        return key
 
     @staticmethod
     def parse(key: str) -> "ContentAddress":

@@ -450,6 +450,19 @@ class Workspace:
                 for chunk in chunks for line in chunk.lines
                 if line.address is not None
             ]
+        else:
+            # A piece of a line split at the window (R-C5) is a SUB-address
+            # (`text()~812`) with no trie leaf of its own. Without a row the
+            # store had nothing to anchor its line to: the edge fell to the
+            # two-lookup form, found no Address, and was dropped -- and lines
+            # pair with anchors BY POSITION, so every later line of that chunk
+            # would name the wrong element. Its row holds the piece's text.
+            from .trie import content_hash as _ch
+            pieces = [(line.address, line.text, _ch(line.text))
+                      for chunk in chunks for line in chunk.lines
+                      if line.address is not None and getattr(line, "piece", 0)]
+            if pieces:
+                addresses = list(addresses) + pieces
         # Retire the rows of chunks this page no longer produces, before
         # issuing rows for the ones it does. The graph reconciles the same set
         # (GraphStore._reconcile); doing it here too is what keeps the two

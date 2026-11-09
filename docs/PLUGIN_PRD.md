@@ -765,7 +765,7 @@ plugins not to claim one, and a conflict is silent.
 | R-C2 | "the structures like boxes and nested things can stay and be reconstructed from the patricia trie path nodes perhaps if we stick to absolute xpaths" | **Partial** — reading order 76% |
 | R-C3 | "matching cartesian coordinates kind of thing on the page (as in we keep all our structures distilled, but localized enough still such that we can render them as their intended cohesive structures)" | **Partial** — see the constraint below |
 | R-C4 | "switch to a more generalized xpath structure that keeps absolute structure with agnostic array indices for multiple/repeat fields like menu items, paragraphs, search results" | Done — as a second field, not a replacement |
-| R-C5 | "chunks should be at their context window limits and measured using markdown renderings for token counts" | **Partial** — one chunk is 15x the window |
+| R-C5 | "chunks should be at their context window limits and measured using markdown renderings for token counts" | Done — worst_overflow_ratio 1.49x (bar 1.5x) on 60 frozen-corpus pages, was 8.88x; over-long single lines split into `~offset` sub-addresses (tests/test_line_split.py, planted PLANT_NO_LINE_SPLIT) |
 | R-C6 | "Our chunking should be such that, for example, we get search results as singular chunks" | Done |
 | R-C7 | "…and semantic + frequency vectors" | Done |
 

@@ -152,6 +152,10 @@ class MarkdownLine:
     #: tuned 17:1 toward leaving noise rather than risking loss. Once a
     #: collapse names what it collapsed, folding harder stops meaning losing.
     absorbed: Tuple[ContentAddress, ...] = ()
+    #: R-C5: a later piece of a line split at the window -- the character
+    #: offset it starts at in the leaf's value (its accessor says the same,
+    #: `text()~812`). 0 for every whole line and every first piece.
+    piece: int = 0
 
     def render(self) -> str:
         return "  " * self.depth + self.text
@@ -199,7 +203,8 @@ class MarkdownChunk:
         """
         out: List[str] = []
         for line in self.lines:
-            out.append(line.address.key())
+            # A piece of a line split at the window (R-C5) covers its leaf.
+            out.append(line.address.whole().key() if line.piece else line.address.key())
             out.extend(a.key() for a in line.inline)
         return out
 
@@ -3022,7 +3027,9 @@ def _fill_report(
     """
     emitted = {key for chunk in chunks for key in chunk.anchors}
     report.addresses += len(trie)
-    report.rendered += sum(len(c.lines) for c in chunks)
+    # A leaf split at the window (R-C5) is ONE rendered unit, however many
+    # pieces carry it.
+    report.rendered += sum(1 for c in chunks for l in c.lines if not l.piece)
     for leaf in trie.leaves():
         if leaf.address is None or leaf.address.key() in emitted:
             continue
@@ -3196,17 +3203,27 @@ def _recut(chunks: List[MarkdownChunk], window: int) -> List[MarkdownChunk]:
     """
     out: List[MarkdownChunk] = []
     for chunk in chunks:
-        if (PLANT_NO_RECUT or len(chunk.lines) < 2
-                or tokens.budget(chunk.markdown) < LENIENCY * window):
+        if PLANT_NO_RECUT or tokens.budget(chunk.markdown) < LENIENCY * window:
+            out.append(chunk)
+            continue
+        # A single line over the window is split first (R-C5, approved
+        # 2026-11-08: "split over-long single lines"), superseding S-11's
+        # "stands alone": measured on the frozen corpus, 367 single lines
+        # over a 256 window survived every pass, the worst 2,273 tokens
+        # (8.9x) -- one archive.org input. Each piece keeps the line's
+        # address (`_split_long_line`).
+        lines = [p for l in chunk.lines for p in _split_long_line(l, window)]
+        if len(lines) < 2:
             out.append(chunk)
             continue
         runs: List[List[MarkdownLine]] = [[]]
         size = 0
-        for line in chunk.lines:
+        for line in lines:
             cost = tokens.budget(line.render()) + 1
             run = runs[-1]
             if run and size + cost > window:
-                if size + cost < LENIENCY * window and not _HEADING_FORM.match(line.text or ""):
+                # A piece of a split line (R-C5) is already window-sized: no leniency.
+                if size + cost < LENIENCY * window and not _HEADING_FORM.match(line.text or "") and not line.piece:
                     run.append(line)
                     runs.append([])
                     size = 0
@@ -3907,6 +3924,94 @@ def _descend(
     return out
 
 
+#: Planted (R-C5): a line longer than the window is kept whole, its own
+#: over-window run, as before the ruling.
+PLANT_NO_LINE_SPLIT = False
+
+#: One atom of a line: a markdown link or picture whole (its label may hold
+#: spaces), else a run of non-space, with the space after it.
+_ATOM = re.compile(r"(!?\[[^\]\n]*\]\([^)\s]*\)|\S+)(\s*)")
+
+
+def _split_long_line(line: MarkdownLine, window: int) -> List[MarkdownLine]:
+    """One over-window line as several, each within the window (R-C5).
+
+    Approved 2026-11-08 ("split over-long single lines"): a single value the
+    page writes as one line -- a 7,745-token paragraph against a 512 window
+    -- was its own run fifteen times over, so the encoder truncated it and
+    the reader got a wall. Cut at word boundaries, never inside a markdown
+    link or picture; every piece keeps the line's ADDRESS (the trie node it
+    came from), so each resolves back to the element that draws it. The
+    first piece keeps the line's inline and absorbed addresses: they were
+    merged into its opening words or speak for the element as a whole. An
+    atom longer than the window on its own (a data: URI, a base64 run) is
+    cut by characters -- the one place a word is broken.
+    """
+    if PLANT_NO_LINE_SPLIT or tokens.budget(line.render()) <= window:
+        return [line]
+    # Sized by `count`, which reads no lower than `budget`: a piece that fits
+    # by either measure fits by both.
+    target = max(16, int(window * 0.85)) - 2 * line.depth
+    pieces: List[Tuple[int, str]] = []          # (char offset in the line, text)
+    cur: List[str] = []
+    at = 0
+    cost = 0
+    for m in _ATOM.finditer(line.text):
+        atom = m.group(0)
+        c = tokens.count(atom)
+        if c > target:
+            if cur:
+                pieces.append((at, "".join(cur).rstrip())); cur, cost = [], 0
+            step = max(8, len(atom) * target // max(c, 1))
+            for i in range(0, len(atom), step):
+                pieces.append((m.start() + i, atom[i:i + step].rstrip()))
+            continue
+        if cur and cost + c > target:
+            pieces.append((at, "".join(cur).rstrip())); cur, cost = [], 0
+        if not cur:
+            at = m.start()
+        cur.append(atom); cost += c
+    if cur:
+        pieces.append((at, "".join(cur).rstrip()))
+    pieces = [(o, x) for o, x in pieces if x]
+    # Verified on the JOINED text, which a sum of per-atom counts can
+    # under-read (72 words summed to 108, joined to 145): a piece over the
+    # target is halved at an atom boundary until it fits.
+    fitted: List[Tuple[int, str]] = []
+    stack = list(reversed(pieces))
+    while stack:
+        off, txt = stack.pop()
+        if tokens.count(txt) <= target or " " not in txt.strip():
+            fitted.append((off, txt))
+            continue
+        # A space outside any link label, nearest the middle.
+        mid, cut = len(txt) // 2, -1
+        for k in sorted((i for i, ch in enumerate(txt) if ch == " " and i > 0), key=lambda i: abs(i - mid)):
+            if txt.count("[", 0, k) == txt.count("]", 0, k):
+                cut = k
+                break
+        if cut <= 0:
+            fitted.append((off, txt))
+            continue
+        head, tail = txt[:cut].rstrip(), txt[cut:].lstrip()
+        stack.append((off + len(txt) - len(tail), tail))
+        stack.append((off, head))
+    pieces = [(o, x) for o, x in fitted if x]
+    if len(pieces) <= 1:
+        return [line]
+    # The first piece IS the line (its address, inline and absorbed). Each
+    # later piece is a SUB-ADDRESS of the same leaf: its accessor carries the
+    # character offset it starts at (`text()~812`), the way `srcset[1]`
+    # carries a detector's intrinsic sub-path -- so the chunks still
+    # PARTITION the addresses, and a piece names exactly which part of the
+    # leaf it holds. `piece` marks it, so accounting counts the leaf once.
+    out = [replace(line, text=pieces[0][1])]
+    for off, t in pieces[1:]:
+        sub = replace(line.address, accessor="%s~%d" % (line.address.accessor, off))
+        out.append(MarkdownLine(depth=line.depth, text=t, address=sub, piece=off))
+    return out
+
+
 def _emit_runs(
     chunk: MarkdownChunk, window: int, out: List[MarkdownChunk]
 ) -> None:
@@ -3914,12 +4019,16 @@ def _emit_runs(
 
     Each run keeps the element's xpath and takes a distinct ``part``, which is
     what that field is for — several chunks sharing a root already collide on
-    their id without it. A line longer than the window on its own becomes its
-    own run rather than being cut.
+    their id without it. A line longer than the window on its own is split at
+    word boundaries into lines that fit (R-C5, `_split_long_line`), each
+    keeping its address.
     """
     run: List[MarkdownLine] = []
     size = 0
+    lines: List[MarkdownLine] = []
     for line in chunk.lines:
+        lines.extend(_split_long_line(line, window))
+    for line in lines:
         # The line as it will be written, indentation included, measured the
         # same way the whole chunk was -- `budget`, not `count`, because the
         # descent above sized the whole chunk that way. Summing a

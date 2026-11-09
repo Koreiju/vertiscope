@@ -66,6 +66,9 @@ def test_every_anchor_is_an_address_in_the_trie(rendered):
         known = {a.key() for a in m["trie"].addresses()}
         for chunk in m["chunks"]:
             for key in chunk.anchors:
+                # A piece of a line split at the window (R-C5) is a
+                # sub-address of its leaf: the LEAF must be in the trie.
+                key = ContentAddress.whole_key(key)
                 assert key in known, f"{m['page']}: anchor not in trie: {key[:90]}"
 
 
