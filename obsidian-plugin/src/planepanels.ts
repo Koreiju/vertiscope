@@ -309,7 +309,16 @@ export class PlaneDesk {
       }
       const leaf = opts.leaf || new Leaf(this.app);
       card.appendChild(leaf.containerEl);
-      await (leaf.__openFile || leaf.openFile).call(leaf, file, opts.state || { state: { mode: "source", source: false } });
+      // A failed open leaves no card behind (2026-11-08: an untracked, empty
+      // collapsed card stayed on the plane as a second "ego" circle).
+      try {
+        await (leaf.__openFile || leaf.openFile).call(leaf, file, opts.state || { state: { mode: "source", source: false } });
+      } catch (err) {
+        try { leaf.detach?.(); } catch { /* gone */ }
+        card.remove();
+        this.stats.failed_open = (this.stats.failed_open || 0) + 1;
+        throw err;
+      }
       const fpath = file.path;
       // Alt+click on the node is the containment gesture (G-327), not the halo.
       const undrag = makeDraggable(card, plane, "domvec-plane-card:" + file.path, this.place,
