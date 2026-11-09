@@ -43,6 +43,8 @@ export interface PlaneHost {
   openBrowser?(): void;
   /** A click (no drag) on a panel's header node: its halo (item 81). */
   headerClick?(path: string): void;
+  /** PLUGIN_GOAL 150: the panel goes back INTO 3D -- closed, the camera flown to its craft node. */
+  intoCraft?(path: string): boolean;
   /** The chat cell's model, streamed (PLUGIN_GOAL 134). */
   chatStream?(prompt: string, context: string[], onToken: (t: string) => void): Promise<string>;
   /** The soft-link field's query: the halo laid out for it (item 90). */
@@ -348,6 +350,17 @@ export class PlaneDesk {
         this.stats.zoomed = (this.stats.zoomed || 0) + 1;
       }, true);
       card.addEventListener("pointerdown", () => this.focus(path), true);
+      // INTO 3D (150): a double-click on a collapsed panel's node (its circle or
+      // header node) closes it back into its craft node, the camera flown there.
+      card.addEventListener("dblclick", (e: MouseEvent) => {
+        const t = e.target as HTMLElement;
+        const onCircle = !!t?.closest?.(".domvec-slate-circle, .domvec-slate-circle-dot");
+        if (!card.hasClass("is-collapsed") && !onCircle) return;
+        if (!this.host.intoCraft?.(path)) return;
+        e.preventDefault(); e.stopPropagation();
+        this.intoStats.sent++;
+        this.panelOf(path)?.leaf.detach();
+      }, true);
       card.addEventListener("focusin", () => this.focus(path), true);
       // `detach` closes the panel: the card goes with its leaf.
       const detach = leaf.detach.bind(leaf);
@@ -1151,6 +1164,7 @@ export class PlaneDesk {
    *  to the 3D canvas: card 180x120 under a 425x284 graph). Planted
    *  `plantGraphOverflow`. */
   plantGraphOverflow = false;
+  intoStats = { sent: 0 };
   fitGraphCards(): void {
     for (const p of this.panels) {
       const g = p.card.querySelector(".domvec-slate-graph") as HTMLElement | null;

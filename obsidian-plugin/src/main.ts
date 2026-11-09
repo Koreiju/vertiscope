@@ -865,6 +865,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     // layout events, which a leaf outside the tree never fires.
     openBrowser: () => { void this.openBrowserInstance(); },
     headerClick: (path) => { void this.halo.toggle(path); },
+    intoCraft: (path) => { const g: any = this.app.workspace.getLeavesOfType(GRAPH_VIEW)[0]?.view; return !!g?.flyToCraft?.(path); },
     chatStream: (prompt: string, ctx: string[], onTok: (t: string) => void) => this.sidecar.chatStream(prompt, ctx, onTok),
     codeNodes: (q: string) => this.sidecar.codeNodes(q),
     haloQuery: (path, q) => { void this.halo.open(path, q); },

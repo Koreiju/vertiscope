@@ -2074,6 +2074,21 @@ export class GraphView extends ItemView {
    * moves. Planted `plantNoTether`.
    */
   plantNoTether = false;
+  /** 150: the camera to a craft node (map view), the node at the centre. */
+  flyToCraft(path: string): boolean {
+    const g: any = this.graph, C: any = this.craft;
+    const n = C?.nodes?.find((x: any) => x.path === path && (x.kind === "note" || x.kind === "ego") && x.mesh);
+    if (!g || !n) return false;
+    this.agent.setMode("map");
+    const q = n.mesh.position, cam = g.camera(), ctl = g.controls();
+    const R = (C.stats.radius || 10) * 1.6;
+    const dx = cam.position.x - q.x, dy = cam.position.y - q.y, dz = cam.position.z - q.z, d = Math.hypot(dx, dy, dz) || 1;
+    cam.position.set(q.x + dx / d * R, q.y + dy / d * R, q.z + dz / d * R);
+    ctl.target.set(q.x, q.y, q.z); cam.lookAt(q.x, q.y, q.z); ctl.update?.();
+    this.intoCraftStats.flown++;
+    return true;
+  }
+  intoCraftStats = { flown: 0 };
   tetherStats = { drawn: 0 };
   private tetherSvg: SVGSVGElement | null = null;
   private tetherAt = 0;
