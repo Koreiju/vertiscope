@@ -1146,10 +1146,24 @@ export class PlaneDesk {
     }
     this.memoryStats.drawn = svg.querySelectorAll("line").length;
   }
+  /** PLUGIN_GOAL 150: a card showing a slate's graph form is at least the
+   *  graph's size, so the whole graph is grabbable (its overflow fell through
+   *  to the 3D canvas: card 180x120 under a 425x284 graph). Planted
+   *  `plantGraphOverflow`. */
+  plantGraphOverflow = false;
+  fitGraphCards(): void {
+    for (const p of this.panels) {
+      const g = p.card.querySelector(".domvec-slate-graph") as HTMLElement | null;
+      if (!g || this.plantGraphOverflow) { if (p.card.dataset.graphFit) { p.card.style.minWidth = ""; p.card.style.minHeight = ""; delete p.card.dataset.graphFit; } continue; }
+      const gr = g.getBoundingClientRect(), cr = p.card.getBoundingClientRect();
+      const w = Math.ceil(gr.right - cr.left + 8), h = Math.ceil(gr.bottom - cr.top + 8);
+      if (w > cr.width || h > cr.height) { p.card.style.minWidth = `${Math.max(w, cr.width)}px`; p.card.style.minHeight = `${Math.max(h, cr.height)}px`; p.card.dataset.graphFit = "1"; }
+    }
+  }
   /** Start drawing memory links on the plane (once the plane exists). */
   startMemoryLinks(): void {
     if (this.memTimer) return;
-    const tick = () => { void this.memRefreshSignal().then(() => this.memDraw()); };
+    const tick = () => { this.fitGraphCards(); void this.memRefreshSignal().then(() => this.memDraw()); };
     tick();
     this.memTimer = window.setInterval(tick, 400);
   }

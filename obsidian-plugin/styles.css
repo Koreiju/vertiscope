@@ -1368,3 +1368,9 @@ body:not(.domvec-plant-graph-boxed) .domvec-plane-card:has(.domvec-slate-graph) 
 .domvec-tethers { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; z-index: 3; }
 .domvec-tethers line { stroke: #c8b4ff; stroke-width: 1.5; stroke-dasharray: 4 3; opacity: 0.9; }
 .domvec-tethers circle { fill: none; stroke: #ffffff; stroke-width: 1.5; }
+/* PLUGIN_GOAL 150: a slate in graph form sizes its card to the graph, so the
+   whole graph is the card's (its overflow fell through to the 3D canvas). */
+.domvec-plane-card:has(.domvec-slate-graph) { height: auto !important; max-height: none !important; width: max-content !important; overflow: visible !important; }
+.domvec-plane-card:has(.domvec-slate-graph) .workspace-leaf,
+.domvec-plane-card:has(.domvec-slate-graph) .view-content,
+.domvec-plane-card:has(.domvec-slate-graph) .cm-scroller { height: auto !important; overflow: visible !important; }
