@@ -376,7 +376,7 @@ class Workspace:
         one place where the graph and the matrix can fall out of step. They
         cannot fall out of step, because neither is written without the other.
         """
-        chunks = render_trie(trie, context_window=self.context_window,
+        chunks = render_trie(trie, context_window=self.context_window, md_level=getattr(self.store, "md_level", False),
                              report=report)
         addresses = [
             (node.address, node.value, node.content_hash)
@@ -461,6 +461,19 @@ class Workspace:
             pieces = [(line.address, line.text, _ch(line.text))
                       for chunk in chunks for line in chunk.lines
                       if line.address is not None and getattr(line, "piece", 0)]
+            # D-2: a rendered line's address is the leaf's at the MARKDOWN
+            # level (`url|xpath|md|tag|accessor`). It is a row of its own,
+            # holding the leaf's value, or its anchor has nothing to attach to.
+            have = {a.key() for a, _v, _c in addresses}
+            leaf_val = {a.key(): (v, c) for a, v, c in addresses}
+            for chunk in chunks:
+                for line in chunk.lines:
+                    a = line.address
+                    if a is None or not a.md or getattr(line, "piece", 0) or a.key() in have:
+                        continue
+                    v, c = leaf_val.get(a.leaf().key(), (line.text, _ch(line.text)))
+                    pieces.append((a, v, c))
+                    have.add(a.key())
             if pieces:
                 addresses = list(addresses) + pieces
         # Retire the rows of chunks this page no longer produces, before

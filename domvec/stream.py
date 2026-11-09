@@ -389,7 +389,8 @@ class StreamingScan:
         # from one chunk.
         chunks = render_trie(update.trie, context_window=self.context_window,
                              memo=self.render_memo)
-        dirty = [c for c in chunks if touched.intersection(c.anchors)]
+        # D-2: an anchor at the markdown level is its LEAF for what a delta touched.
+        dirty = [c for c in chunks if touched.intersection(c.anchors) or touched.intersection(c.covered)]
         update.all_chunks = chunks
         update.dirty_chunks = dirty
         update.chunk_ms = (time.perf_counter() - started) * 1000

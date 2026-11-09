@@ -31,3 +31,31 @@ def test_a_piece_keeps_its_markdown_level():
     r = A(LEAF.url, LEAF.xpath, LEAF.tag, LEAF.accessor + "~812", md="abc123abc123")
     assert r.whole().md == "abc123abc123"
     assert r.leaf() == LEAF
+
+
+def test_a_new_store_writes_anchors_at_the_markdown_level(tmp_path):
+    """Stage 2: a store with the column renders and anchors every line at the
+    markdown level, each one's leaf a trie address; planted PLANT_NO_MD_LEVEL
+    keeps the four-part anchors."""
+    from domvec import markdown as md
+    from domvec.workspace import Workspace
+    html = "<html><body><h1>T</h1><p>one line</p><p>two <b>bold</b> line</p></body></html>"
+
+    def run(path, planted):
+        md.PLANT_NO_MD_LEVEL = planted
+        try:
+            with Workspace(path, context_window=256) as ws:
+                ws.index_html(html, "https://x.test/p")
+                ws.settle()
+                assert ws.store.md_level
+                got = [a for c in ws.store.chunks("https://x.test/p") for a, _v in ws.store.addresses_of(c.cid)]
+                return got
+        finally:
+            md.PLANT_NO_MD_LEVEL = False
+
+    clean = run(tmp_path / "a", False)
+    assert clean and all(a.md and len(a.md) == 12 for a in clean)
+    assert all(A.parse(a.key()) == a for a in clean)
+    planted = run(tmp_path / "b", True)
+    assert planted and not any(a.md for a in planted)
+    assert {a.leaf() for a in clean} == set(planted)

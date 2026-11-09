@@ -16,7 +16,7 @@ import pathlib
 import pytest
 
 from domvec import tokens
-from domvec.address import ContentAddress
+from domvec.address import ContentAddress, leaf_key
 from domvec.markdown import (
     DEFAULT_CONTEXT_WINDOW,
     MarkdownChunk,
@@ -68,7 +68,7 @@ def test_every_anchor_is_an_address_in_the_trie(rendered):
             for key in chunk.anchors:
                 # A piece of a line split at the window (R-C5) is a
                 # sub-address of its leaf: the LEAF must be in the trie.
-                key = ContentAddress.whole_key(key)
+                key = leaf_key(key)
                 assert key in known, f"{m['page']}: anchor not in trie: {key[:90]}"
 
 

@@ -642,3 +642,11 @@ def md_hash(line_text: str) -> str:
     """
     import hashlib
     return hashlib.sha1((line_text or "").encode("utf-8")).hexdigest()[:12]
+
+
+def leaf_key(key: str) -> str:
+    """The trie leaf's key for any address key: markdown level and piece dropped."""
+    try:
+        return ContentAddress.parse(key).leaf().key()
+    except ValueError:
+        return key

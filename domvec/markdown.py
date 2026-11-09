@@ -204,7 +204,8 @@ class MarkdownChunk:
         out: List[str] = []
         for line in self.lines:
             # A piece of a line split at the window (R-C5) covers its leaf.
-            out.append(line.address.whole().key() if line.piece else line.address.key())
+            # Coverage is of TRIE LEAVES: a piece (R-C5) or a rendered line (D-2) covers its leaf.
+            out.append(line.address.leaf().key())
             out.extend(a.key() for a in line.inline)
         return out
 
@@ -2416,6 +2417,7 @@ def render_trie(
     context_window: int = DEFAULT_CONTEXT_WINDOW,
     report: Optional[RenderReport] = None,
     memo: Optional[RenderMemo] = None,
+    md_level: Optional[bool] = None,
 ) -> List[MarkdownChunk]:
     """Render every page in the trie into context-window-sized chunks.
 
@@ -2487,6 +2489,15 @@ def render_trie(
         _level_page(fresh)
         chunks[:] = joined
     _number_parts(chunks)
+    # D-2 / T-1 (PLUGIN_GOAL 154, "Markdown line in the key"): last, on the
+    # lines every pass settled on, each line's address names the markdown
+    # line that draws it -- domain / url-tail / xpath / markdown /
+    # content-detection. `leaf()` reaches the trie leaf again.
+    if not PLANT_NO_MD_LEVEL and (MD_LEVEL if md_level is None else md_level):
+        for chunk in chunks:
+            chunk.lines = [replace(l, address=l.address.rendered(l.text))
+                           if l.address is not None and not l.address.md else l
+                           for l in chunk.lines]
     if memo is not None:
         memo.rotate()
 
@@ -3025,7 +3036,7 @@ def _fill_report(
     at least a loud way to fail, since the quantity is a count and cannot be
     negative for any real reason.
     """
-    emitted = {key for chunk in chunks for key in chunk.anchors}
+    emitted = {l.address.leaf().key() for chunk in chunks for l in chunk.lines if l.address is not None}
     report.addresses += len(trie)
     # A leaf split at the window (R-C5) is ONE rendered unit, however many
     # pieces carry it.
@@ -3927,6 +3938,13 @@ def _descend(
 #: Planted (R-C5): a line longer than the window is kept whole, its own
 #: over-window run, as before the ruling.
 PLANT_NO_LINE_SPLIT = False
+
+#: Planted (D-2): rendered lines keep the four-part trie address, no markdown level.
+PLANT_NO_MD_LEVEL = False
+#: D-2 is ON only where the store has the markdown-level column: the
+#: workspace passes `md_level` from its store; a bare render (tests, REPL
+#: without a store) follows this default.
+MD_LEVEL = False
 
 #: One atom of a line: a markdown link or picture whole (its label may hold
 #: spaces), else a run of non-space, with the space after it.

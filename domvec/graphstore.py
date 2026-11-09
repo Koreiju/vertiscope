@@ -195,6 +195,9 @@ _SCHEMA = [
 #: `ADD COLUMN IF NOT EXISTS`, so these are run individually and their
 #: "already exists" is swallowed -- the alternative is a store written
 #: yesterday failing to open today.
+#: The D-2 markdown-level SET clause, by whether the store has the column.
+_MD_SET = {True: "a.md = r.md, ", False: ""}
+
 _MIGRATIONS = [
     "ALTER TABLE Chunk ADD dup_of STRING",
     "ALTER TABLE Chunk ADD dup_n INT64",
@@ -737,6 +740,33 @@ class GraphStore:
                     self._execute(statement)
                 except RuntimeError:
                     pass    # already there
+        # D-2 (PLUGIN_GOAL 154): the MARKDOWN level of an address needs its
+        # own column. Added to a NEW store at once; an existing store gains
+        # it only when migrated on purpose (`DOMVEC_D2=1`, run against a copy
+        # first -- PLUGIN_GOAL 153 "migrate into a copy"), never by a
+        # restart. `md_level` says which this store is; rendering follows it.
+        self.md_level = self._has_md_column()
+        if not self.md_level and not self.read_only:
+            fresh = False
+            try:
+                fresh = not list(self._rows("MATCH (a:Address) RETURN a.aid LIMIT 1"))
+            except Exception:                       # noqa: BLE001
+                pass
+            if fresh or os.environ.get("DOMVEC_D2") == "1":
+                try:
+                    self._execute("ALTER TABLE Address ADD md STRING")
+                except RuntimeError:
+                    pass
+                self.md_level = self._has_md_column()
+
+    def _has_md_column(self) -> bool:
+        # Asked of the WRITER directly: a missing column is an expected answer
+        # here, not a read that failed and fell back (read_stats stay honest).
+        try:
+            self._execute("MATCH (a:Address) RETURN a.md LIMIT 1")
+            return True
+        except Exception:                           # noqa: BLE001
+            return False
 
     def __enter__(self) -> "GraphStore":
         return self
@@ -803,6 +833,7 @@ class GraphStore:
         # The page's trie nodes are re-read on its next layout (PLUGIN_GOAL 110),
         # and what was read from these chunks' markdown is stale.
         self._tnode_forget(url)
+        addresses = _with_line_rows(addresses, chunks)
         for c in chunks or ():
             CHUNK_WRITES[c.cid] = CHUNK_WRITES.get(c.cid, 0) + 1
         rows = rows or {}
@@ -943,7 +974,7 @@ class GraphStore:
         # idempotence is unchanged; only the trip count is.
         address_rows = [
             {"aid": a.aid, "akey": a.key(), "url": a.url, "xp": a.xpath,
-             "tag": a.tag, "acc": a.accessor, "val": (v or "")[:2000],
+             "tag": a.tag, "acc": a.accessor, "md": a.md, "val": (v or "")[:2000],
              "ch": ch}
             for a, v, ch in addresses
         ]
@@ -1091,7 +1122,7 @@ class GraphStore:
             self._batch(
                 "UNWIND $rows AS r MERGE (a:Address {aid: r.aid}) "
                 "SET a.akey = r.akey, a.url = r.url, a.xpath = r.xp, "
-                "a.tag = r.tag, a.accessor = r.acc, a.value = r.val, "
+                "a.tag = r.tag, a.accessor = r.acc, a.value = r.val, " + _MD_SET[self.md_level] +
                 "a.content_hash = r.ch "
                 "WITH a, r MATCH (c:Chunk {cid: r.cid}) "
                 "CREATE (c)-[:Anchors {ord: r.ord}]->(a)",
@@ -1102,7 +1133,7 @@ class GraphStore:
             self._batch(
                 "UNWIND $rows AS r MERGE (a:Address {aid: r.aid}) "
                 "SET a.akey = r.akey, a.url = r.url, a.xpath = r.xp, "
-                "a.tag = r.tag, a.accessor = r.acc, a.value = r.val, "
+                "a.tag = r.tag, a.accessor = r.acc, a.value = r.val, " + _MD_SET[self.md_level] +
                 "a.content_hash = r.ch",
                 plain_rows,
             )
@@ -2601,18 +2632,20 @@ class GraphStore:
 
         rows = self._rows(
             "MATCH (a:Address) WHERE a.akey IS NULL OR a.akey = '' "
-            "RETURN a.aid, a.url, a.xpath, a.tag, a.accessor")
+            "RETURN a.aid, a.url, a.xpath, a.tag, a.accessor, "
+            + ("a.md" if getattr(self, "md_level", False) else "''"))
         out = {"blank": len(rows), "repaired": 0, "unrepairable": 0}
         fixed = []
-        for aid, url, xpath, tag, accessor in rows:
+        for aid, url, xpath, tag, accessor, md in rows:
             # A row missing its url or xpath cannot be spelled back, and
             # inventing a key for it would put a handle on the page that
             # points nowhere. Counted, not guessed.
             if not url or not xpath:
                 out["unrepairable"] += 1
                 continue
-            fixed.append({"aid": aid, "akey": _SEP.join(
-                _esc(part or "") for part in (url, xpath, tag, accessor))})
+            # D-2: a rendered address keeps its markdown level.
+            parts = (url, xpath, md, tag, accessor) if md else (url, xpath, tag, accessor)
+            fixed.append({"aid": aid, "akey": _SEP.join(_esc(part or "") for part in parts)})
         for i in range(0, len(fixed), batch):
             self._batch(
                 "UNWIND $rows AS r MATCH (a:Address {aid: r.aid}) "
@@ -3298,3 +3331,35 @@ class GraphStore:
             if elsewhere:
                 self._write_dups(elsewhere)
         return len(cids)
+
+
+def _with_line_rows(addresses, chunks):
+    """Every line's address gets an Address row, or its anchor has nothing to
+    attach to -- and lines pair with anchors BY POSITION.
+
+    Two kinds of line address are not trie leaves: a piece of a line split at
+    the window (R-C5, `text()~812`), whose row holds the piece's text; and a
+    rendered line at the MARKDOWN level (D-2, `url|xpath|md|tag|accessor`),
+    whose row holds its leaf's value. Idempotent: rows already present are
+    not added twice.
+    """
+    from .trie import content_hash as _ch
+    addresses = list(addresses or ())
+    have = {a.key() for a, _v, _c in addresses}
+    leaf = {a.key(): (v, c) for a, v, c in addresses}
+    for chunk in chunks or ():
+        for line in chunk.lines:
+            a = line.address
+            if a is None or a.key() in have:
+                continue
+            if getattr(line, "piece", 0):
+                v, c = line.text, _ch(line.text)
+            elif a.md:
+                v, c = leaf.get(a.leaf().key(), (line.text, _ch(line.text)))
+                if not c:
+                    c = _ch(v or "")
+            else:
+                continue
+            addresses.append((a, v, c))
+            have.add(a.key())
+    return addresses
