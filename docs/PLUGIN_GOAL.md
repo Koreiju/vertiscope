@@ -5447,6 +5447,17 @@ with it. Then every other open feature.*
 
 > The ego in 3d could be much smaller and more compact. Also worried that you've deviated from the real full set of ego-oriented work
 
+*Verbatim (2026-11-08), (150), with a screenshot of the ego slate in graph form on the plane:*
+
+> I can't drag the computation graph and the cursor from the panel persists for some reason. Also, there must be a clearer connection between the ego's computation graph in 3D and its corresponding panel, including selecting the camera view, bringing in and out of 3D to the 2D plane, etc.
+
+> Also, rotation debounce no longer works
+
+*Read as (150): the idle drift is wanted ON (T-12's off-by-default ruling is
+overridden); the ego's graph form must drag; no stray caret; the 3D craft and
+its 2D panel are one thing with clear gestures between them -- choose the
+camera view from it, move it from 3D to the plane and back.*
+
 ## Standing instructions carried in the verbatim
 
 Two of these are process rules, not features, and they bind every future

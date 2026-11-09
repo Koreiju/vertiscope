@@ -42,6 +42,7 @@ export const COCKPIT_TEXT = [
   "---", "domvec: slate", "---",
   "ego",
   T + "view" + T + "ego",
+  T + "camera" + T + "first",
   T + "throttle" + T + "25",
   T + "keys" + T + "{keys}",
   T + "last" + T + "",
@@ -521,6 +522,11 @@ export class Cockpit {
     const a = g.agent;
     const view = this.field(fs, "view")?.value.trim();
     if ((view === "ego" || view === "map") && view !== a.mode) a.setMode(view);
+    // The CAMERA chosen from the panel (150): first person (the cockpit) or
+    // third (the chase), only when the text changed it.
+    const camera = this.field(fs, "camera")?.value.trim();
+    if ((camera === "first" || camera === "third") && camera !== this.cameraText && camera !== a.view) a.setView(camera);
+    if (camera) this.cameraText = camera;
     // The flight plan (G-283): `play` true flies the craft through `plan`'s
     // nodes -- `{results}`, the search's ranked targets -- at the throttle.
     const play = (this.field(fs, "play")?.value || "").trim() === "true";
@@ -676,6 +682,16 @@ export class Cockpit {
       this.seenEngineQuery = f.query;
     }
     // A plan that finished, or a hand on the stick, sets `play` back to false.
+    // The camera written back when it changed elsewhere (V, the wheel through
+    // the cockpit); a note without the field gets it (150).
+    if (!this.plantNoCameraField) {
+      const camF = this.field(fs, "camera");
+      if (!camF) {
+        const vf = this.field(fs, "view");
+        if (vf) { v.editor.replaceRange(String.fromCharCode(10) + T.repeat(vf.depth) + "camera" + T + a.view, { line: vf.line, ch: v.editor.getLine(vf.line).length }); this.cameraText = a.view; }
+      } else if (camF.value.trim() !== a.view && a.view !== this.cameraText) { put(["camera"], a.view); this.cameraText = a.view; }
+      else if (camF.value.trim() === a.view) this.cameraText = a.view;
+    }
     if (!a.playing && this.playSeen) { put(["play"], "false"); this.playSeen = false; this.playText = "false"; }
     // A play started elsewhere is written into the text, so the text is true.
     else if (a.playing && !this.playSeen && !this.plantPlayClobber) { put(["play"], "true"); this.playSeen = true; this.playText = "true"; }
@@ -706,6 +722,8 @@ export class Cockpit {
   /** A cockpit written before `n` and `matching` existed gets them, under `k`. */
   plantDupSearchFields = false;
   plantPlayClobber = false;
+  plantNoCameraField = false;
+  private cameraText = "";
   private playText = "";
   private ensureSearchFields(v: any): void {
     const fs = parseSlate(v.editor.getValue());

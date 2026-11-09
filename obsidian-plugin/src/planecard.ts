@@ -11,7 +11,9 @@
  * remembered per card.
  */
 
-const HANDLE = ".domvec-var-title, .domvec-slate-circle, .domvec-slate-circle-dot, .domvec-plane-head-node";
+// The graph form's empty ground drags too (150: "I can't drag the computation
+// graph"); its nodes do not -- they wire (UR N.4) and fold.
+const HANDLE = ".domvec-var-title, .domvec-slate-circle, .domvec-slate-circle-dot, .domvec-plane-head-node, .domvec-slate-graph";
 
 export interface PlaceStats { drags: number; clamped: number }
 
@@ -102,7 +104,9 @@ export function makeDraggable(card: HTMLElement, home: HTMLElement, key: string,
   } catch { /* a convenience only */ }
   let start: { x: number; y: number; left: number; top: number } | null = null;
   const down = (e: MouseEvent) => {
-    if (e.button !== 0 || !(e.target as HTMLElement)?.closest?.(HANDLE)) return;
+    const tg = e.target as HTMLElement;
+    if (e.button !== 0 || !tg?.closest?.(HANDLE)) return;
+    if (tg.closest?.(".domvec-slate-graph") && (tg.closest?.(".domvec-slate-graph-node") || tg.getAttribute?.("data-path") != null)) return;
     e.preventDefault(); e.stopPropagation();
     const r = card.getBoundingClientRect(), p = plane.getBoundingClientRect();
     start = { x: e.clientX, y: e.clientY, left: r.left - p.left, top: r.top - p.top };

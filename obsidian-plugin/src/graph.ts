@@ -2066,6 +2066,59 @@ export class GraphView extends ItemView {
    * a second one puts them back where they were. Planted `plantNoTrieDominance`.
    */
   plantNoTrieDominance = false;
+  /**
+   * TETHERS (PLUGIN_GOAL 150: "a clearer connection between the ego's
+   * computation graph in 3D and its corresponding panel"): every panel open
+   * on the plane that is a craft node is joined by a line from its card to
+   * that node where it is drawn in 3D, redrawn as the camera or the card
+   * moves. Planted `plantNoTether`.
+   */
+  plantNoTether = false;
+  tetherStats = { drawn: 0 };
+  private tetherSvg: SVGSVGElement | null = null;
+  private tetherAt = 0;
+  private drawTethers(): void {
+    const now = performance.now();
+    if (now - this.tetherAt < 80) return;
+    this.tetherAt = now;
+    const plane = this.plane(), g: any = this.graph, C: any = this.craft;
+    if (!plane || !g || !C) return;
+    const NS = "http://www.w3.org/2000/svg";
+    if (!this.tetherSvg || !plane.contains(this.tetherSvg)) {
+      this.tetherSvg = document.createElementNS(NS, "svg") as SVGSVGElement;
+      this.tetherSvg.classList.add("domvec-tethers");
+      plane.appendChild(this.tetherSvg);
+    }
+    const svg = this.tetherSvg;
+    while (svg.firstChild) svg.firstChild.remove();
+    this.tetherStats.drawn = 0;
+    if (this.plantNoTether || !C.group?.visible) return;
+    const desk: any = (window as any).__domvecPlane;
+    const cam = g.camera(), pr = plane.getBoundingClientRect(), cr = this.canvasEl!.getBoundingClientRect();
+    const v = new THREE.Vector3();
+    for (const n of C.nodes || []) {
+      if ((n.kind !== "note" && n.kind !== "ego") || !n.mesh) continue;
+      const card: HTMLElement | undefined = desk?.panelOf?.(n.path)?.card;
+      if (!card || card.hasClass("is-collapsed") && false) continue;
+      if (!card) continue;
+      v.copy(n.mesh.position).project(cam);
+      if (v.z > 1) continue;
+      const x2 = cr.left + (v.x + 1) / 2 * cr.width - pr.left, y2 = cr.top + (1 - v.y) / 2 * cr.height - pr.top;
+      const r = card.getBoundingClientRect();
+      const cx = r.left + r.width / 2 - pr.left, cy = r.top + r.height / 2 - pr.top;
+      const dx = x2 - cx, dy = y2 - cy;
+      const t = Math.min(Math.abs((r.width / 2) / (dx || 1e-9)), Math.abs((r.height / 2) / (dy || 1e-9)), 1);
+      const l = document.createElementNS(NS, "line");
+      l.setAttribute("x1", String(cx + dx * t)); l.setAttribute("y1", String(cy + dy * t));
+      l.setAttribute("x2", String(x2)); l.setAttribute("y2", String(y2));
+      (l as any).dataset.path = n.path;
+      svg.appendChild(l);
+      const dot = document.createElementNS(NS, "circle");
+      dot.setAttribute("cx", String(x2)); dot.setAttribute("cy", String(y2)); dot.setAttribute("r", "5");
+      svg.appendChild(dot);
+      this.tetherStats.drawn++;
+    }
+  }
   dominated = new Map<string, { nodes: any[]; links: any[] }>();
   dominanceStats = { folded: 0, unfolded: 0, last: 0 };
   private pageOpen(n: any): boolean {
@@ -6528,6 +6581,7 @@ export class GraphView extends ItemView {
       this.registerEvent(this.app.metadataCache.on("changed", () => this.craft?.dirty()));
     }
     this.craft.frame();
+    this.drawTethers();
   }
   /** Planted (item 97): the wheel over a craft node zooms as anywhere else. */
   plantNoMicroscope = false;
@@ -8438,7 +8492,7 @@ export class GraphView extends ItemView {
   plantNoDrift = false;
   /** T-12 (PLUGIN_GOAL 145): the drift is a TOGGLE, off by default (it redraws
    *  every frame, and stability comes first); remembered per viewer. */
-  get driftEnabled(): boolean { try { return window.localStorage.getItem("domvec-idle-drift") === "on"; } catch { return false; } }
+  get driftEnabled(): boolean { try { return window.localStorage.getItem("domvec-idle-drift") !== "off"; } catch { return true; } }  // ON by default again (150: "rotation debounce no longer works"); the command turns it off
   set driftEnabled(on: boolean) { try { window.localStorage.setItem("domvec-idle-drift", on ? "on" : "off"); } catch { /* per session then */ } }
   plantDriftDefaultOn = false;
   /** Planted: a standing query stops the drift, as it did. */
