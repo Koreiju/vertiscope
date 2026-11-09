@@ -31,6 +31,7 @@ import { forceCenter, forceCollide, forceManyBody } from "d3-force-3d";
 import type { ForceNodeDelta } from "./forcetree";
 import type { CentralDiff } from "./types";
 import * as THREE from "three";
+import { chunkNoteState } from "./planecard";
 import { NodeLook, Picture, SceneBatch } from "./scenebatch";
 import { flushTiny, octreeVerdict } from "./octreeguard";
 import { MotionRecorder } from "./motion";
@@ -7858,7 +7859,7 @@ export class GraphView extends ItemView {
     const box = body.createDiv({ cls: "domvec-bb-cell" });
     if (hidden) box.style.display = "none";
     box.appendChild(leaf.containerEl);
-    await leaf.openFile(f, { state: { mode: "source", source: false } } as any);
+    await leaf.openFile(f, chunkNoteState(f.path));
     entry.cellLeaf = leaf; entry.cellPath = path;
     this.cellStats.mounted++;
     return true;

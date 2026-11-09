@@ -5458,6 +5458,10 @@ overridden); the ego's graph form must drag; no stray caret; the 3D craft and
 its 2D panel are one thing with clear gestures between them -- choose the
 camera view from it, move it from 3D to the plane and back.*
 
+*Verbatim (2026-11-08), (151), with a screenshot of a Radix-tree chunk's markdown panel showing a text cursor:*
+
+> The markdown view of a cell must be its own cell, and cannot be editable
+
 ## Standing instructions carried in the verbatim
 
 Two of these are process rules, not features, and they bind every future

@@ -27,7 +27,7 @@ import { TERMINAL_VIEW } from "./terminal";
  * click on the craft's node closes the panel back into the node.
  */
 import { App, MarkdownView, TFile } from "obsidian";
-import { clampToPlane, makeDraggable, type PlaceStats } from "./planecard";
+import { chunkNoteState, clampToPlane, makeDraggable, type PlaceStats } from "./planecard";
 import { isSlate, COCKPIT_PATH } from "./cockpit";
 
 export interface PlaneHost {
@@ -314,7 +314,7 @@ export class PlaneDesk {
       // A failed open leaves no card behind (2026-11-08: an untracked, empty
       // collapsed card stayed on the plane as a second "ego" circle).
       try {
-        await (leaf.__openFile || leaf.openFile).call(leaf, file, opts.state || { state: { mode: "source", source: false } });
+        await (leaf.__openFile || leaf.openFile).call(leaf, file, opts.state || chunkNoteState(file.path));
       } catch (err) {
         try { leaf.detach?.(); } catch { /* gone */ }
         card.remove();

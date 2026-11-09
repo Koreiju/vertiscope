@@ -29,6 +29,7 @@
 import { App, Component, MarkdownRenderer, MarkdownView, TFile } from "obsidian";
 import { foldsOf, parseSlate, setFolds, type SlateLine } from "./slatefold";
 import type { PlaneDesk } from "./planepanels";
+import { chunkNoteState } from "./planecard";
 import { capabilitiesOf, panelText, withMissing, type Capability } from "./governing";
 
 /** The browser's governing artifact (T-10): its methods are the panel's fields. */
@@ -439,7 +440,7 @@ export class BrowserPanel {
     const leaf = new Leaf(this.app);
     leaf.containerEl.addClass("domvec-browser-chunk-leaf");
     this.chunkEl.appendChild(leaf.containerEl);
-    await leaf.openFile(f, { state: { mode: "source", source: false } });
+    await leaf.openFile(f, chunkNoteState(f.path));
     this.chunkLeaf = leaf;
   }
 

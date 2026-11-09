@@ -151,3 +151,13 @@ export function makeDraggable(card: HTMLElement, home: HTMLElement, key: string,
   sizes.observe(plane);
   return () => { card.removeEventListener("mousedown", down, true); sizes.disconnect(); };
 }
+
+/** PLUGIN_GOAL 151: "The markdown view of a cell must be its own cell, and
+ *  cannot be editable." A chunk's markdown note (`domvec/chunks/<cid>.md`,
+ *  not a chat or slate note kept there) opens in Obsidian's reading view --
+ *  the same native renderer, read-only. Planted `__domvecPlantChunkEditable`. */
+export function chunkNoteState(path: string): any {
+  const chunk = /^domvec\/chunks\//.test(path) && !/^domvec\/chunks\/(chat|slate) /.test(path);
+  const ro = chunk && !(window as any).__domvecPlantChunkEditable;
+  return { state: { mode: ro ? "preview" : "source", source: false } };
+}
