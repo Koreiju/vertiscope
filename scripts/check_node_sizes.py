@@ -4,7 +4,7 @@ own `drawnRadiusOf`), grouped by kind, with the largest named and the inputs
 of their size (val, fullVal, members, picture). No input sent, nothing moved.
 """
 import json, sys
-sys.path.insert(0, r"<home>\Documents\domvec")
+sys.path.insert(0, __import__("os").getcwd())
 from domvec.obsidian.live import Live
 live = Live()
 QUERY = next((a.split("=", 1)[1] for a in sys.argv[1:] if a.startswith("--search=")), "")

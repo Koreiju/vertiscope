@@ -1,5 +1,5 @@
 import json, os, sys, re
-P = os.environ.get("DOMVEC_TRANSCRIPT") or r"<home>\.claude\projects\C--Users-user-Documents-domvec\7d99cefc-6dd8-441d-8b5c-0394e3832ea2.jsonl"
+P = os.environ["DOMVEC_TRANSCRIPT"]
 out = {}
 def add(ts, content):
     texts, imgs = [], 0

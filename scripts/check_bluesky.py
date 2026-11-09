@@ -9,7 +9,7 @@ two; and how many of the page's grey chunks carry a picture in their lines.
 Reader-idle gated; the browser goes back where it was.
 """
 import json, sys
-sys.path.insert(0, r"<home>\Documents\domvec")
+sys.path.insert(0, __import__("os").getcwd())
 from domvec.obsidian.live import Live
 live = Live()
 if live.evaluate("window.__domvec.reader.idleMs()") < 60000:

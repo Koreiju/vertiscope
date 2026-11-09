@@ -35,7 +35,8 @@ from typing import Dict, List, Tuple
 
 ROOT = Path(__file__).resolve().parents[2]
 TRANSCRIPTS = os.path.join(os.path.expanduser("~"), ".claude", "projects",
-                           "C--Users-user-Documents-domvec", "*.jsonl")
+                           # Claude Code names the folder after the repo path.
+                           re.sub(r"[^A-Za-z0-9]", "-", str(ROOT)), "*.jsonl")
 OUT = ROOT / "docs" / "PROMPT_LEDGER.md"
 
 _MID = re.compile(r"The user sent a new message while you were working:\n(.*?)\n\n"

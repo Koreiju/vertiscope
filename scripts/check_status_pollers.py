@@ -9,7 +9,7 @@ loads show as separate call sites (their code is the OLD bundle).
 Read-only; `fetch` is put back.
 """
 import json, sys
-sys.path.insert(0, r"<home>\Documents\domvec")
+sys.path.insert(0, __import__("os").getcwd())
 from domvec.obsidian.live import Live
 secs = int(next((a.split("=", 1)[1] for a in sys.argv[1:] if a.startswith("--secs=")), "5"))
 JS = r"""(async (secs) => {

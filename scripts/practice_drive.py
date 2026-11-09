@@ -11,10 +11,10 @@ stamp moves.
 """
 import json, sys, time, re
 from pathlib import Path
-sys.path.insert(0, r"<home>\Documents\domvec")
+sys.path.insert(0, __import__("os").getcwd())
 from domvec.obsidian.live import Live
 
-OUT = Path(r"<home>\Documents\domvec\build_analytics\practice")
+OUT = Path(__import__("os").getcwd() + r"\build_analytics\practice")
 OUT.mkdir(parents=True, exist_ok=True)
 L = Live()
 

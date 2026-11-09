@@ -19,8 +19,8 @@ Arms: `--env=KEY=VAL` (e.g. DOMVEC_PLANT_NO_TRAIN_YIELD=1). Reader-idle
 gated; the reader stamp restored.
 """
 import json, random, sys, time, urllib.parse, urllib.request
-sys.path.insert(0, r"<home>\Documents\domvec")
-sys.path.insert(0, r"<home>\Documents\domvec\scripts")
+sys.path.insert(0, __import__("os").getcwd())
+sys.path.insert(0, __import__("os").getcwd() + r"\scripts")
 from domvec.obsidian.live import Live
 
 B = "http://127.0.0.1:8788"

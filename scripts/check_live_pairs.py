@@ -2,7 +2,7 @@
 (in the live trie) the value the line draws? Separates a trie whose values sit
 under wrong addresses from a render that pairs lines wrongly."""
 import sys, json, re, time, urllib.request, urllib.parse
-sys.path.insert(0, r"<home>\Documents\domvec\scripts")
+sys.path.insert(0, __import__("os").getcwd() + r"\scripts")
 from live_probe import Probe
 
 URL = sys.argv[1] if len(sys.argv) > 1 else "https://arxiv.org/list/stat.ML/recent"

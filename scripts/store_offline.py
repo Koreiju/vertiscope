@@ -10,7 +10,7 @@ Refuses while the reader is active in Obsidian.
 import contextlib, json, subprocess, sys, time, urllib.request
 from pathlib import Path
 
-REPO = Path(r"<home>\Documents\domvec")
+REPO = Path(__import__("os").getcwd())
 sys.path.insert(0, str(REPO))
 PORT = 8788
 

@@ -32,7 +32,7 @@ Reads a COPY of a store (never the live one, which the sidecar holds):
   python scripts/measure_layout_vs_obsidian.py <graph.kuzu copy> [pages=24] [max_chunks=150]
 """
 import random, sys, time
-sys.path.insert(0, r"<home>\Documents\domvec")
+sys.path.insert(0, __import__("os").getcwd())
 import numpy as np
 import networkx as nx
 from domvec.graphstore import GraphStore

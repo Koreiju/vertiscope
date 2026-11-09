@@ -26,3 +26,5 @@ kuzu_db/
 # Exported vault notes — regenerable from the store.
 pages/
 pages256/
+scripts/scan_secrets.py
+scripts/.identity.json

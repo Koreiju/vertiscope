@@ -12,7 +12,7 @@ chunks; `n` rounds each, reads running alongside.
   python scripts/store_address_bench.py <copy-of-store> [n=10] [k=290]
 """
 import random, sys, threading, time, uuid
-sys.path.insert(0, r"<home>\Documents\domvec")
+sys.path.insert(0, __import__("os").getcwd())
 import pandas as pd
 from domvec.graphstore import GraphStore
 

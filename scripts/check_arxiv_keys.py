@@ -1,7 +1,7 @@
 """Do a live page's stored lines carry addresses whose element holds their text?
 arXiv's listing, captured fresh in the browser cell; read-only in the page."""
 import sys, json, time
-sys.path.insert(0, r"<home>\Documents\domvec\scripts")
+sys.path.insert(0, __import__("os").getcwd() + r"\scripts")
 from live_probe import Probe
 p = Probe()
 if p.ev("window.__domvec.reader.idleMs()") < 60000:

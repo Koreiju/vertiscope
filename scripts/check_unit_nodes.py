@@ -18,7 +18,7 @@ first level with three lines -- a part of its row, as before).
 Reader-idle gated; plugin reloaded first; the reader's page restored.
 """
 import json, sys
-sys.path.insert(0, r"<home>\Documents\domvec")
+sys.path.insert(0, __import__("os").getcwd())
 from domvec.obsidian.live import Live
 live = Live()
 if live.evaluate("window.__domvec.reader.idleMs()") < 60000:

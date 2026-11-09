@@ -21,5 +21,5 @@ python scripts/scoreboard.py --workspace build/vaultws512 --live-from "$LIVE" "$
 CODE=$?
 
 echo "== restarting the sidecar"
-powershell.exe -NoProfile -Command "Set-Location '<home>\Documents\domvec'; Start-Process -FilePath 'python' -ArgumentList '-u','-m','domvec.obsidian','serve','--workspace','build/vaultws512','--port','8788' -WindowStyle Hidden" >/dev/null 2>&1
+powershell.exe -NoProfile -Command "Set-Location '$(pwd -W)'; Start-Process -FilePath 'python' -ArgumentList '-u','-m','domvec.obsidian','serve','--workspace','build/vaultws512','--port','8788' -WindowStyle Hidden" >/dev/null 2>&1
 exit $CODE

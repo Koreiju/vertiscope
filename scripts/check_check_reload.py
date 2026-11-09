@@ -13,7 +13,7 @@ Clean vs planted `store-gates` (the check stored and streamed as the page).
 Reader-idle gated; plugin reloaded first; the reader's page restored.
 """
 import json, subprocess, sys, time, urllib.request
-sys.path.insert(0, r"<home>\Documents\domvec")
+sys.path.insert(0, __import__("os").getcwd())
 from domvec.obsidian.live import Live
 FX = "http://127.0.0.1:8793"
 live = Live()
@@ -27,7 +27,7 @@ if "127.0.0.1:8793" in (was or ""): was = ""
 try:
     urllib.request.urlopen(FX + "/gate/hits", timeout=3).read()
 except Exception:
-    subprocess.Popen([sys.executable, r"<home>\Documents\domvec\scripts\fixture_gate_server.py"],
+    subprocess.Popen([sys.executable, __import__("os").getcwd() + r"\scripts\fixture_gate_server.py"],
                      stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                      creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(subprocess, "DETACHED_PROCESS", 0))
     time.sleep(2)

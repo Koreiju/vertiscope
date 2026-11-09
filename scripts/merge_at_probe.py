@@ -1,7 +1,7 @@
 """Hidden-window probe: with the sensor's `merge` variant on, what does `at()`
 answer for each member of a field list, after one fold and after a second?"""
 import json, sys
-sys.path.insert(0, r"<home>\Documents\domvec")
+sys.path.insert(0, __import__("os").getcwd())
 from domvec.obsidian.live import Live
 url = sys.argv[1] if len(sys.argv) > 1 else "https://archive.org/details/binocularvisions0000unse"
 sel = sys.argv[2] if len(sys.argv) > 2 else "dl"

@@ -1,7 +1,7 @@
 """Wait for the reader's next N hover panels and report how long each took to
 paint, and where the time went (read-only)."""
 import json, sys, time
-sys.path.insert(0, r"<home>\Documents\domvec")
+sys.path.insert(0, __import__("os").getcwd())
 from domvec.obsidian.live import Live
 N = int(sys.argv[1]) if len(sys.argv) > 1 else 5
 L = Live()

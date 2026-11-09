@@ -1,3 +1,6 @@
+---
+maps: web
+---
 # `alone` was asked of what arrived, not of what survived
 
 2026-09-05, found by checking whether the REPL sees the affordances the

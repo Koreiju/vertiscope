@@ -16,7 +16,7 @@ The fix's planted arm is the sensor test (`tests/test_svg_namespaces.py`,
 Reader-idle gated; the reader's page restored.
 """
 import json, sys, time
-sys.path.insert(0, r"<home>\Documents\domvec")
+sys.path.insert(0, __import__("os").getcwd())
 from domvec.obsidian.live import Live
 live = Live()
 if live.evaluate("window.__domvec.reader.idleMs()") < 60000:

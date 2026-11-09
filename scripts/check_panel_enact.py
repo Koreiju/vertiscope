@@ -2,7 +2,7 @@
 Enter pressed there reaches the LIVE page through its trie address. Planted
 (`act-noop`): the page is untouched. Reader-idle gated; the cell restored."""
 import sys, json, time
-sys.path.insert(0, r"<home>\Documents\domvec\scripts")
+sys.path.insert(0, __import__("os").getcwd() + r"\scripts")
 from live_probe import Probe
 p = Probe()
 if p.ev("window.__domvec.reader.idleMs()") < 60000:

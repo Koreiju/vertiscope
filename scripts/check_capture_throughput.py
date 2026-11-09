@@ -7,8 +7,8 @@ and 40 s to settle. From the sidecar's own profile over the window: anchor
 cost per row, store time, total capture time; from the plugin: the capture
 queue left behind and the oldest drain still waiting. Reader-idle gated."""
 import json, sys, time, urllib.request
-sys.path.insert(0, r"<home>\Documents\domvec")
-sys.path.insert(0, r"<home>\Documents\domvec\scripts")
+sys.path.insert(0, __import__("os").getcwd())
+sys.path.insert(0, __import__("os").getcwd() + r"\scripts")
 from domvec.obsidian.live import Live
 from store_offline import restart
 B = "http://127.0.0.1:8788"

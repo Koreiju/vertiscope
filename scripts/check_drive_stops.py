@@ -5,7 +5,7 @@ as back (the stamp the app's own listeners write) `after_s` seconds in, and
 times how long the drive takes to say it stopped. Run only while the reader
 is idle; the stamp is a simulation of the reader, nothing else changes."""
 import subprocess, sys, time, json
-sys.path.insert(0, r"<home>\Documents\domvec")
+sys.path.insert(0, __import__("os").getcwd())
 from domvec.obsidian.live import Live
 
 URL = sys.argv[1] if len(sys.argv) > 1 else "https://en.wikipedia.org/wiki/Comparison_of_web_browsers"

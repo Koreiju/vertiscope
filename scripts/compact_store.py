@@ -25,7 +25,7 @@ Without `--go`, only reports what it would do. Every phase is timed.
 import json, os, shutil, subprocess, sys, time, urllib.request
 from pathlib import Path
 
-REPO = Path(r"<home>\Documents\domvec")
+REPO = Path(__import__("os").getcwd())
 sys.path.insert(0, str(REPO))
 WS = Path(next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--workspace=")), str(REPO / "build" / "corpus123")))
 GO = "--go" in sys.argv

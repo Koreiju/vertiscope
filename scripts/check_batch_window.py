@@ -20,7 +20,7 @@ import sys
 import time
 import urllib.request
 
-sys.path.insert(0, r"<home>\\Documents\\domvec")
+sys.path.insert(0, r__import__("os").getcwd())
 from domvec.obsidian.live import Live  # noqa: E402
 
 SIDECAR = "http://127.0.0.1:8788"

@@ -2,7 +2,7 @@
 pane's own drawnRadiusOf), chunks inside their url node's drawn radius, the
 drawn sizes against the spacing, and links whose endpoints are not drawn."""
 import json, sys
-sys.path.insert(0, r"<home>\Documents\domvec")
+sys.path.insert(0, __import__("os").getcwd())
 from domvec.obsidian.live import Live
 print(Live().evaluate(r"""(() => {
   const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;

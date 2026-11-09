@@ -3,7 +3,7 @@ element address the sensor pushes, the tile's real text on the page, and
 what the force tree holds at that address (every chunk, live or retained).
 Reader-idle gated; the reader stamp restored."""
 import json, sys
-sys.path.insert(0, r"<home>\Documents\domvec")
+sys.path.insert(0, __import__("os").getcwd())
 from domvec.obsidian.live import Live
 live = Live()
 if live.evaluate("window.__domvec.reader.idleMs()") < 60000:

@@ -12,7 +12,7 @@ and whether the store reopens afterwards.
   python scripts/store_anchor_copy_trial.py <copy-of-store> [batches=30] [k=290]
 """
 import os, random, sys, threading, time
-sys.path.insert(0, r"<home>\Documents\domvec")
+sys.path.insert(0, __import__("os").getcwd())
 from domvec.graphstore import GraphStore, _pool_for
 
 path = sys.argv[1]

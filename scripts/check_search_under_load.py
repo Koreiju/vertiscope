@@ -7,7 +7,7 @@ the sidecar's own profile over the window (capture lock waits, render,
 checkpoints, embeds). The before arm is the measurement recorded in the PRD
 on the 67.8 GB store. Reader-idle gated; field restored; stamp restored."""
 import json, sys, time, urllib.request
-sys.path.insert(0, r"<home>\Documents\domvec")
+sys.path.insert(0, __import__("os").getcwd())
 from domvec.obsidian.live import Live
 live = Live()
 if live.evaluate("window.__domvec.reader.idleMs()") < 60000:
@@ -16,7 +16,7 @@ stamp = live.evaluate("window.__domvecReaderAt || 0")
 PLANTED = "--planted" in sys.argv
 ENV = dict(a[6:].split("=", 1) for a in sys.argv if a.startswith("--env="))
 if "--restart" in sys.argv or PLANTED or ENV:
-    sys.path.insert(0, r"<home>\Documents\domvec\scripts")
+    sys.path.insert(0, __import__("os").getcwd() + r"\scripts")
     from store_offline import restart
     env = {"DOMVEC_PLANT_INDEX_REBUILD": "1" if PLANTED else "0", "DOMVEC_PLANT_NO_TRAIN_YIELD": "0"}
     env.update(ENV)

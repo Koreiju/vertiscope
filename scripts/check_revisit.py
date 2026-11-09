@@ -8,7 +8,7 @@ store did with A each time (chunks added / changed / skipped as unchanged,
 anchors written, store ms). Reader-idle gated; the reader stamp restored.
 """
 import json, sys, time, urllib.parse, urllib.request
-sys.path.insert(0, r"<home>\Documents\domvec")
+sys.path.insert(0, __import__("os").getcwd())
 from domvec.obsidian.live import Live
 B = "http://127.0.0.1:8788"
 live = Live()

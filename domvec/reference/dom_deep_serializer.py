@@ -110,7 +110,7 @@ class ShadowDOMScanner:
 			self.driver = driver
 			logger.info("ShadowDOMScanner inherited live active Selenium WebDriver!")
 		else:
-			profile_path = r"<home>\AppData\Roaming\Mozilla\Firefox\Profiles\<profile>"
+			profile_path = __import__("os").environ.get("DOMVEC_FIREFOX_PROFILE", "")
 			options = Options()
 			options.add_argument("-profile")
 			options.add_argument(profile_path)

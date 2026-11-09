@@ -2,7 +2,7 @@
 `32(#cite_note-...)` text? (2026-10-11.) Opens one panel on the open page
 whose markdown holds a cite note; prints what the reader sees."""
 import json, sys
-sys.path.insert(0, r"<home>\Documents\domvec")
+sys.path.insert(0, __import__("os").getcwd())
 from domvec.obsidian.live import Live
 word = sys.argv[1] if len(sys.argv) > 1 else "cite_note"
 print(Live().evaluate(r"""(async () => {

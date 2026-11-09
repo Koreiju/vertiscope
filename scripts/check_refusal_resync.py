@@ -7,7 +7,7 @@ sidecar's own `capture_refused`. Clean vs planted (`resync-any-refusal`).
 Reader-idle gated; the plugin reloaded first; the reader stamp restored.
 """
 import json, sys, time
-sys.path.insert(0, r"<home>\Documents\domvec")
+sys.path.insert(0, __import__("os").getcwd())
 from domvec.obsidian.live import Live
 import urllib.request
 live = Live()

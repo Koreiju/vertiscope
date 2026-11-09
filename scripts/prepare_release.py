@@ -54,21 +54,30 @@ tracked = subprocess.run(["git", "ls-files"], cwd=REPO, capture_output=True, tex
 files = [f for f in tracked if not any(x.search(f) for x in EXCLUDE)]
 excluded = [f for f in tracked if any(x.search(f) for x in EXCLUDE)]
 
-PERSONAL = [
-    (re.compile(r"[A-Za-z]:[\\/]{1,2}Users/user", re.I), "<home>"),
-    (re.compile(r"/[a-z]/Users/user", re.I), "<home>"),
-    (re.compile(r"\bC--Users-user\b", re.I), "C--Users-user"),
-    (re.compile(r"maintainer@gmail\.com", re.I), "maintainer@example.org"),
-    (re.compile(r"Isaac\s+maintainer", re.I), "the maintainer"),
-    (re.compile(r"\bmaintainer\b", re.I), "maintainer"),
-    (re.compile(r"\buser\b", re.I), "user"),
-]
+# The maintainer's own spellings come from a GITIGNORED file, so the
+# scrubber that removes them does not itself publish them:
+# scripts/.identity.json = {"home": "...", "name": "...", "email": "..."}.
+import json as _json
+_ID = _json.loads((REPO / "scripts" / ".identity.json").read_text(encoding="utf-8")) \
+    if (REPO / "scripts" / ".identity.json").exists() else {}
+_home, _name, _email = (re.escape(_ID.get(k, "")) for k in ("home", "name", "email"))
+_last = re.escape(_ID.get("name", "").split()[-1]) if _ID.get("name") else ""
+_first = re.escape(_ID.get("name", "").split()[0]) if _ID.get("name") else ""
+PERSONAL = [(re.compile(p, re.I), r) for p, r in [
+    (r"[A-Za-z]:[\\/]{1,2}Users[\\/]{1,2}" + _home, "<home>"),
+    (r"/[a-z]/Users/" + _home, "<home>"),
+    (r"\bC--Users-" + _home + r"\b", "C--Users-user"),
+    (_email, "maintainer@example.org"),
+    (_first + r"\s+" + _last, "the maintainer"),
+    (r"\b" + _last + r"\b", "maintainer"),
+    (r"\b" + _home + r"\b", "user"),
+] if _ID]
 RENAME = [
     (re.compile(r"DOMVEC"), name.upper()),
     (re.compile(r"Domvec"), name.capitalize()),
     (re.compile(r"domvec"), name),
 ]
-RESIDUAL = re.compile(r"user|maintainer|Users/user|gmail", re.I)
+RESIDUAL = re.compile("|".join(x for x in (_home, _last, _email, "gmail") if x) or "(?!)", re.I)
 SECRET = re.compile(
     r"(ghp_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|gho_[A-Za-z0-9]{30,}|hf_[A-Za-z0-9]{30,}"
     r"|sk-ant-[A-Za-z0-9_-]{20,}|\bsk-[A-Za-z0-9]{32,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{35}"

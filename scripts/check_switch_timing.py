@@ -1,7 +1,7 @@
 """G-179 / G-182 live: chunk-view switch time, and the second switch reading
 stored drawn places instead of relaxing. Runs only with the reader idle."""
 import sys, json, time
-sys.path.insert(0, r"<home>\Documents\domvec\scripts")
+sys.path.insert(0, __import__("os").getcwd() + r"\scripts")
 from live_probe import Probe
 p = Probe()
 idle = p.ev("window.__domvec.reader.idleMs()")

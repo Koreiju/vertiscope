@@ -4,7 +4,7 @@ the fields read back once the tiers finish; and a broad query asked past 2000.
 Clean vs planted (`plantFixedCap`). The field's value is restored. Idle-gated.
 """
 import json, sys
-sys.path.insert(0, r"<home>\Documents\domvec")
+sys.path.insert(0, __import__("os").getcwd())
 from domvec.obsidian.live import Live
 live = Live()
 if live.evaluate("window.__domvec.reader.idleMs()") < 60000:

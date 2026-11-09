@@ -69,5 +69,5 @@ All major graph plugins appear to **avoid hooking the core graph renderer** and 
 
 **Notes on verification:**
 - Community plugin repo inspection needed to confirm exact physics choices (mark those rows UNCONFIRMED)
-- `obsidian.d.ts` at `<home>\Documents\domvec\obsidian-plugin\node_modules\obsidian\obsidian.d.ts` confirms no public Graph API
+- `obsidian.d.ts` at `<repo>\obsidian-plugin\node_modules\obsidian\obsidian.d.ts` confirms no public Graph API
 - docs.obsidian.md (if available locally) would show plugin API documentation; not found in scan

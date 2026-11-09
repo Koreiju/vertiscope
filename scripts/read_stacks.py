@@ -6,7 +6,7 @@ is serving a request or matches `--grep`, its top frames shortened.
 import re, sys
 from pathlib import Path
 
-ws = Path(next((a for a in sys.argv[1:] if not a.startswith("--")), r"<home>\Documents\domvec\build\corpus123"))
+ws = Path(next((a for a in sys.argv[1:] if not a.startswith("--")), __import__("os").getcwd() + r"\build\corpus123"))
 grep = next((a.split("=", 1)[1] for a in sys.argv[1:] if a.startswith("--grep=")), "do_GET|do_POST")
 frames = int(next((a.split("=", 1)[1] for a in sys.argv[1:] if a.startswith("--frames=")), "10"))
 s = (ws / "stacks.log").read_text(encoding="utf-8", errors="replace")

@@ -8,7 +8,7 @@ reloaded; the closed view's capture calls are counted for 60 s, with the
 sidecar's refusals. Clean vs planted (`pump-after-close`). Reader-idle gated.
 """
 import json, sys, time
-sys.path.insert(0, r"<home>\Documents\domvec")
+sys.path.insert(0, __import__("os").getcwd())
 from domvec.obsidian.live import Live
 import urllib.request
 live = Live()

@@ -1,5 +1,5 @@
 import json, sys, time
-sys.path.insert(0, r"<home>\Documents\domvec")
+sys.path.insert(0, __import__("os").getcwd())
 from domvec.obsidian.live import Live
 L = Live()
 JS = r'''(()=>{const v=app.workspace.getLeavesOfType("domvec-graph-view")[0].view;const d=v.graph.graphData();

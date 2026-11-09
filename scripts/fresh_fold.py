@@ -6,7 +6,7 @@ own mutations (the repair path).
   python fresh_fold.py <url> <css-selector-of-the-container> [<text-filter>]
 """
 import json, sys
-sys.path.insert(0, r"<home>\Documents\domvec")
+sys.path.insert(0, __import__("os").getcwd())
 from domvec.obsidian.live import Live
 
 url, sel = sys.argv[1], sys.argv[2]

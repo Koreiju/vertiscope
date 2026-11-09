@@ -9,7 +9,7 @@ as a fraction of their rms radius, split by kind. Reader-idle gated; the
 reader's page restored after.
 """
 import json, sys, time
-sys.path.insert(0, r"<home>\Documents\domvec")
+sys.path.insert(0, __import__("os").getcwd())
 from domvec.obsidian.live import Live
 live = Live()
 if live.evaluate("window.__domvec.reader.idleMs()") < 60000:

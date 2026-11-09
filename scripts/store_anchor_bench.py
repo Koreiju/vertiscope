@@ -12,7 +12,7 @@ says which form a capture should use, and how each scales with N.
   python scripts/store_anchor_bench.py [N=300000] [M=20000] [K=300]
 """
 import sys, tempfile, time
-sys.path.insert(0, r"<home>\Documents\domvec")
+sys.path.insert(0, __import__("os").getcwd())
 import pandas as pd
 from domvec.graphstore import GraphStore
 

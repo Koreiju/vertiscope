@@ -8,7 +8,7 @@ a safe margin of the context window limit for chunks".
 import json
 import sys
 
-sys.path.insert(0, r"<home>\Documents\domvec")
+sys.path.insert(0, __import__("os").getcwd())
 from domvec.obsidian.live import Live  # noqa: E402
 
 want = sys.argv[1:] or ["Addeddate", "Boxid", "Camera", "Identifier", "Isbn", "Notes"]

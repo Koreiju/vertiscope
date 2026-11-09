@@ -4,7 +4,7 @@ The act is INTERCEPTED (v.onAct replaced by a recorder): nothing reaches the
 live page. Clean and planted (plantRedrawWhileTyping) arms. Reader-idle gated.
 """
 import sys, json, time
-sys.path.insert(0, r"<home>\Documents\domvec\scripts")
+sys.path.insert(0, __import__("os").getcwd() + r"\scripts")
 from live_probe import Probe
 p = Probe()
 if p.ev("window.__domvec.reader.idleMs()") < 60000:

@@ -2,7 +2,7 @@
 clear any stale view registrations, enable (not awaited over CDP), reopen
 the graph and browser views, and wait for the graph. Reader-idle gated."""
 import sys, json, time
-sys.path.insert(0, r"<home>\Documents\domvec\scripts")
+sys.path.insert(0, __import__("os").getcwd() + r"\scripts")
 from live_probe import Probe
 p = Probe()
 if p.ev("window.__domvec.reader.idleMs()") < 60000 and "--force" not in sys.argv:

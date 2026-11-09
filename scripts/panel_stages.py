@@ -2,7 +2,7 @@
 Opens up to N stored chunks of the open page through the app's own
 openBillboard, wrapping each stage of the panel path."""
 import json, sys
-sys.path.insert(0, r"<home>\Documents\domvec")
+sys.path.insert(0, __import__("os").getcwd())
 from domvec.obsidian.live import Live
 N = int(sys.argv[1]) if len(sys.argv) > 1 else 6
 print(Live().evaluate(r"""(async () => {

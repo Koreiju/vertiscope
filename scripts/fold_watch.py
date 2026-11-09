@@ -3,7 +3,7 @@ Every 10 s: streamed nodes (covered / uncovered / branches), placed, the
 store's count, the projector's last online update. A covered streamed node
 still drawn on two consecutive samples 20 s apart is FLAGGED."""
 import json, sys, time
-sys.path.insert(0, r"<home>\Documents\domvec")
+sys.path.insert(0, __import__("os").getcwd())
 from domvec.obsidian.live import Live
 
 L = Live()

@@ -12,7 +12,7 @@ import base64
 import json
 import sys
 
-sys.path.insert(0, r"<home>\Documents\domvec")
+sys.path.insert(0, __import__("os").getcwd())
 from domvec.obsidian.live import Live
 
 live = Live()
@@ -71,7 +71,7 @@ for planted in (False, True):
           "front dark", [(x["front_dark"], x["front"]) for x in r["out"]])
     if not planted and r["out"]:
         data = live._cdp("Page.captureScreenshot", {"format": "png"})["data"]
-        open(r"<home>\Documents\domvec\build_analytics\hover_picture.png", "wb").write(base64.b64decode(data))
+        open(__import__("os").getcwd() + r"\build_analytics\hover_picture.png", "wb").write(base64.b64decode(data))
         rows["last_at"] = r["out"][-1]["at"]
 c, p = rows[False]["out"], rows[True]["out"]
 med = lambda xs: sorted(xs)[len(xs) // 2] if xs else 0

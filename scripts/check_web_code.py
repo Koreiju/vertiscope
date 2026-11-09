@@ -9,7 +9,7 @@ fragments), how many read only "button"/"copy". Clean vs planted
 plugin reloaded first; the reader's page restored.
 """
 import json, re, sys, time, urllib.parse, urllib.request
-sys.path.insert(0, r"<home>\Documents\domvec")
+sys.path.insert(0, __import__("os").getcwd())
 from domvec.obsidian.live import Live
 SC = "http://127.0.0.1:8788"
 live = Live()

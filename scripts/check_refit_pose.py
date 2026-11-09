@@ -12,7 +12,7 @@ idle gated; the camera is put back.
 import json
 import sys
 
-sys.path.insert(0, r"<home>\Documents\domvec")
+sys.path.insert(0, __import__("os").getcwd())
 from domvec.obsidian.live import Live
 
 live = Live()

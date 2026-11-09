@@ -2,7 +2,7 @@
 frame gaps for N seconds, with the plugin's own work attributed by wrapping
 its hot methods (read-only timing; restored afterwards)."""
 import json, sys, time
-sys.path.insert(0, r"<home>\Documents\domvec")
+sys.path.insert(0, __import__("os").getcwd())
 from domvec.obsidian.live import Live
 secs = float(sys.argv[1]) if len(sys.argv) > 1 else 40
 L = Live()

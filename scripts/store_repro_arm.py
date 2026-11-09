@@ -8,7 +8,7 @@ import json, os, shutil, subprocess, sys, time
 from pathlib import Path
 import psutil
 
-REPO = Path(r"<home>\Documents\domvec")
+REPO = Path(__import__("os").getcwd())
 LIVE, WS = REPO / "build" / "corpus123", REPO / "build" / "ws-repro"
 env_add = json.loads(sys.argv[1]) if len(sys.argv) > 1 else {}
 wait_s = float(sys.argv[2]) if len(sys.argv) > 2 else 240

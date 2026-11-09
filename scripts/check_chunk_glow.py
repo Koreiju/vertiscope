@@ -12,7 +12,7 @@ import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, r"<home>\Documents\domvec")
+sys.path.insert(0, __import__("os").getcwd())
 from domvec.obsidian.live import Live
 from PIL import Image
 import numpy as np
@@ -49,7 +49,7 @@ out = {}
 try:
     for planted in (False, True):
         info = json.loads(live.evaluate(SET + "(%s)" % ("true" if planted else "false")))
-        png = Path(r"<home>\Documents\domvec\build_analytics\glow_%s.png" % ("off" if planted else "on"))
+        png = Path(__import__("os").getcwd() + r"\build_analytics\glow_%s.png" % ("off" if planted else "on"))
         import base64
         data = live._cdp("Page.captureScreenshot", {"format": "png"})["data"]
         png.write_bytes(base64.b64decode(data))
