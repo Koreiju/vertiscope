@@ -298,6 +298,13 @@ class ContentAddress:
     xpath: str
     tag: str        # 'urls.external' — category.subcategory
     accessor: str   # 'srcset[1]' — detector with its intrinsic sub-path
+    #: D-2 / T-1, the MARKDOWN level (PLUGIN_GOAL 154: "Markdown line in the
+    #: key"): the trie is domain / url-tail / xpath / markdown /
+    #: content-detection, so a RENDERED address names the markdown line that
+    #: draws it -- a short hash of that line's exact text (`md_hash`). Empty
+    #: for an address not yet rendered (the sensor's, the trie's leaves), whose
+    #: key keeps the four-part form; `leaf()` drops it to reach the trie.
+    md: str = ""
 
     # -- derived forms -----------------------------------------------------
     @property
@@ -500,9 +507,9 @@ class ContentAddress:
         """
         cached = self.__dict__.get("_key_cache")
         if cached is None:
-            cached = _SEP.join(
-                _esc(p) for p in (self.url, self.xpath, self.tag, self.accessor)
-            )
+            parts = ((self.url, self.xpath, self.md, self.tag, self.accessor) if self.md
+                     else (self.url, self.xpath, self.tag, self.accessor))
+            cached = _SEP.join(_esc(p) for p in parts)
             object.__setattr__(self, "_key_cache", cached)
         return cached
 
@@ -521,8 +528,18 @@ class ContentAddress:
         acc = self.accessor
         at = acc.rfind(PIECE_MARK)
         if at > 0 and acc[at + 1:].isdigit():
-            return ContentAddress(url=self.url, xpath=self.xpath, tag=self.tag, accessor=acc[:at])
+            return ContentAddress(url=self.url, xpath=self.xpath, tag=self.tag, accessor=acc[:at], md=self.md)
         return self
+
+    def leaf(self) -> "ContentAddress":
+        """The trie leaf this address names: no markdown level, no piece."""
+        w = self.whole()
+        return w if not w.md else ContentAddress(url=w.url, xpath=w.xpath, tag=w.tag, accessor=w.accessor)
+
+    def rendered(self, line_text: str) -> "ContentAddress":
+        """This address at the markdown level of the line that draws it (D-2)."""
+        return ContentAddress(url=self.url, xpath=self.xpath, tag=self.tag,
+                              accessor=self.accessor, md=md_hash(line_text))
 
     @staticmethod
     def whole_key(key: str) -> str:
@@ -535,6 +552,9 @@ class ContentAddress:
     @staticmethod
     def parse(key: str) -> "ContentAddress":
         parts = key.split(_SEP)
+        if len(parts) == 5:                 # D-2: url | xpath | md | tag | accessor
+            url, xpath, md, tag, accessor = (_unesc(p) for p in parts)
+            return ContentAddress(url=url, xpath=xpath, tag=tag, accessor=accessor, md=md)
         if len(parts) != 4:
             raise ValueError(f"not an address key: {key!r}")
         url, xpath, tag, accessor = (_unesc(p) for p in parts)
@@ -612,3 +632,13 @@ def collisions(tags: Iterable, url: str) -> List[Tuple[ContentAddress, List[str]
 
 #: The one vocabulary, for consumers that want to enumerate it.
 RENDER_CLASSES = _SENSOR_CLASSES
+
+
+def md_hash(line_text: str) -> str:
+    """The markdown level of an address (D-2): 12 hex of the line's exact text.
+
+    Exact, not normalised: two lines that DRAW differently are different
+    renderings (CLAUDE.md 5b -- a projection memo keys on the exact form).
+    """
+    import hashlib
+    return hashlib.sha1((line_text or "").encode("utf-8")).hexdigest()[:12]

@@ -5656,3 +5656,7 @@ Electron host would not need the mirror at all.
 ### 153. (2026-11-09) Answers on the open items
 
 > Worker split: "Yes, start it now (Recommended)". Re-key D-2: "Yes, migrate into a copy". Close-to-camera shrink (12 radii, floor 1/4) and craft at 3% of the world radius: "Keep both".
+
+### 154. (2026-11-09) D-2: what the markdown level is
+
+> Asked: (a) the chunk as a trie level, or (b) the leaf's own rendered markdown LINE between xpath and content-detection. Answer: "(b) Markdown line in the key".
