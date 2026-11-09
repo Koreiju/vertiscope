@@ -174,3 +174,14 @@ Runs 11-22 named five real defects behind the failures. Fixing them, not looseni
 - **Turning it on surfaced one more feedback path.** Every cockpit write-back (camera, throttle, lit key) is an edit of `domvec/ego.md`, and each one rebuilt the craft, although the craft never reads that text. Run 25: G-331's run-end rebuild waited behind them, and the pulse left before the readout existed. The cockpit note no longer marks the craft dirty.
 - **G-284's drop is read as it lands.** A stream delta after the drop is the map's to make.
 - **Run 26: 12/13.** G-271 cruised 38 vs 45 (18%, its band is 15%). Re-run straight after G-333 (run 27): 40.8 vs 40.5. Recorded as a timing excursion, not a pass. Watch it.
+
+## Confirm run 30 (2026-11-09): 8/13, at 1.5 fps
+
+Every failure in this run depends on frames:
+- **G-271 and G-285:** flights did not arrive in time (end_d 312).
+- **G-275 and G-282:** the planted arms had not redrawn yet.
+- **G-331:** the readout was not there at the pulse.
+
+Measured straight after the run: 1.5 fps, with `document.visibilityState` reading visible and the window focused. Each render takes about 1 ms and there are no long tasks, so the main thread was idle. The browser was delivering frames slowly, which looks like the OS throttling an occluded window. That is not the plugin.
+
+Run 23 (13/13) and runs 26-29 were taken at normal frame rates. Re-run the full set with the Obsidian window uncovered before reading these results as regressions.
