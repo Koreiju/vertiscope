@@ -88,6 +88,7 @@ BATCH = 256
 #: times (wait p50 0.4 ms), where the planted window made it wait (140 ms).
 ADAPTIVE_WINDOW = [True]
 PLANT_FIXED_BATCH = [False]
+PLANT_NO_RECONCILE = [False]
 PLANT_WINDOW_ALWAYS = [False]
 #: Planted (G-80): a hovered chunk found without its vector is DROPPED from
 #: the queue like any other, as before -- and lost to a race (below).
@@ -277,6 +278,8 @@ class ChunkProjector:
         self.sample_cap = int(sample_cap)
         self.seed = seed
         self.lock = threading.RLock()
+        #: Held chunks found no longer drawable (G-270), reported gone by the drain.
+        self.not_drawable: set = set()
         self.projection = None
         #: Planted: the drain takes the work lock, as before (placement waits for captures).
         self.plant_drain_locks = False
@@ -610,7 +613,7 @@ class ChunkProjector:
         keep, gone, waiting = [], [], []
         for cid, chunk, vector in read:
             if chunk is None or chunk.redundant or (
-                    chunk.group_of and chunk.group_of != cid):
+                    chunk.group_of and chunk.group_of != cid) or cid in self.not_drawable:
                 gone.append((cid, chunk.url if chunk is not None else None))
             elif not vector or not any(vector):
                 waiting.append(cid)
@@ -790,6 +793,16 @@ class ChunkProjector:
                     # every hover's placement with it, so the camera stopped
                     # flying to hovered chunks (2026-10-10).
                     time.sleep(0.02)
+                # G-270: held but no longer drawable (a copy, a retired or
+                # page-less chunk) -- reconciled every few minutes while idle,
+                # reported gone by the drain. Planted PLANT_NO_RECONCILE.
+                if (not PLANT_NO_RECONCILE[0] and not self.fitting and not self.queue
+                        and time.monotonic() - self.reconciled_at > self.RECONCILE_S):
+                    self.reconciled_at = time.monotonic()
+                    try:
+                        self.reconcile_drawable(workspace)
+                    except Exception:               # noqa: BLE001
+                        pass
                 if time.monotonic() - checked > 5.0:
                     checked = time.monotonic()
                     try:
@@ -867,6 +880,24 @@ class ChunkProjector:
         except Exception as exc:                    # noqa: BLE001
             self.fit_error = "save failed: %s: %s" % (type(exc).__name__, exc)
             return False
+
+    #: Seconds between idle reconciles of held vs drawable (G-270).
+    RECONCILE_S = 180.0
+    reconciled_at = 0.0
+    reconcile_stats: Dict = {}
+
+    def reconcile_drawable(self, workspace) -> int:
+        """Queue every held chunk the store no longer counts as drawable;
+        the drain reports them gone. Returns how many."""
+        rows = workspace.store.lead_vectors()
+        now = {c for c, _u, _v in rows}
+        with self.lock:
+            stale = [c for c in self.pos if c not in now]
+        if stale:
+            self.not_drawable.update(stale)
+            self.enqueue(stale)
+        self.reconcile_stats = {"at": round(time.time(), 3), "held": len(self.pos), "drawable": len(now), "queued_gone": len(stale)}
+        return len(stale)
 
     def load(self, workspace) -> bool:
         """Restore a kept fit and reconcile it against the store, O(delta).
