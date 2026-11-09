@@ -8537,6 +8537,8 @@ export class GraphView extends ItemView {
   /** Planted (G-207): the chunk glow off -- orbs only reflect, as before. */
   plantNoHalo = false;
   plantCanvasHaloArea = false;
+  plantNoNearShrink = false;
+  nearShrinkAt = 0.6;
   private cloudAreaAt = 0;
   private cloudArea = 0;
   private cloudHaloPx = 0;
@@ -8583,6 +8585,14 @@ export class GraphView extends ItemView {
       this.batch.setViewport(H, cam0.projectionMatrix.elements[5], W, this.plantCanvasHaloArea ? 0 : this.cloudArea, this.plantCanvasHaloArea ? 0 : this.cloudHaloPx);
     }
     this.batch.setHalo(!this.plantNoHalo);
+    // PLUGIN_GOAL 152: nodes and pictures nearer the camera than 60% of the
+    // focus distance shrink with their distance (never under a quarter) --
+    // close-up clumping opened by shrinking locally. Planted `plantNoNearShrink`.
+    {
+      const ctl = g.controls?.(), c = cam0?.position;
+      const fd = ctl?.target && c ? Math.hypot(c.x - ctl.target.x, c.y - ctl.target.y, c.z - ctl.target.z) : 0;
+      this.batch.setNear(this.plantNoNearShrink || !Number.isFinite(fd) ? 0 : this.nearShrinkAt * fd);
+    }
     let f = 1;
     if (!this.plantNoZoomScale && this.fullViewDist > 0) {
       const cam = g.camera(), t = g.controls()?.target;

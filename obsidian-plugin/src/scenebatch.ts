@@ -35,6 +35,9 @@ attribute vec4 iColor;
 attribute vec4 iUv;
 // Display-only scale with the camera's distance (G-206: smaller at full view).
 uniform float uZoom;
+uniform float uNear;
+uniform float uNearMin;
+float nearK(float z) { return uNear > 0.0 ? clamp(-z / uNear, uNearMin, 1.0) : 1.0; }
 varying vec2 vCorner;
 varying vec4 vColor;
 varying vec4 vUv;
@@ -47,7 +50,9 @@ void main() {
   // A PICTURE keeps its size at every zoom: it is being presented (2026-10-17:
   // "hovering over nodes shows no image overlays in the chunk view"); only
   // orbs (iUv.z < 0) draw smaller at full view (G-206).
-  mv.xy += position.xy * iSize * (iUv.z < 0.0 ? uZoom : 1.0);
+  // PLUGIN_GOAL 152: near the camera, nodes AND pictures shrink -- clumping
+  // answered by locally shrinking, not by moving anything.
+  mv.xy += position.xy * iSize * (iUv.z < 0.0 ? uZoom : 1.0) * nearK(mv.z);
   gl_Position = projectionMatrix * mv;
 }`;
 
@@ -98,18 +103,21 @@ attribute vec3 iOffset;
 attribute float iSize;
 attribute vec4 iColor;
 uniform float uZoom;
+uniform float uNear;
+uniform float uNearMin;
+float nearK(float z) { return uNear > 0.0 ? clamp(-z / uNear, uNearMin, 1.0) : 1.0; }
 varying vec2 vCorner;
 varying vec3 vCenterW;
 varying float vR;
 varying vec4 vTint;
 void main() {
   vCorner = position.xy;
-  vR = iSize * uZoom;
   vTint = iColor;
   vec4 w = modelMatrix * vec4(iOffset, 1.0);
   vCenterW = w.xyz;
   vec4 mv = viewMatrix * w;
-  mv.xy += position.xy * iSize * uZoom;
+  vR = iSize * uZoom * nearK(mv.z);
+  mv.xy += position.xy * iSize * uZoom * nearK(mv.z);
   gl_Position = projectionMatrix * mv;
 }`;
 
@@ -184,6 +192,9 @@ attribute float iSize;
 attribute vec4 iColor;
 uniform float uZoom;
 uniform float uHaloK;
+uniform float uNear;
+uniform float uNearMin;
+float nearK(float z) { return uNear > 0.0 ? clamp(-z / uNear, uNearMin, 1.0) : 1.0; }
 uniform float uMinPx;
 uniform float uPxView;
 varying vec2 vCorner;
@@ -192,7 +203,7 @@ void main() {
   vCorner = position.xy;
   vTint = iColor;
   vec4 mv = modelViewMatrix * vec4(iOffset, 1.0);
-  float s = max(iSize * uZoom * uHaloK, uMinPx * max(-mv.z, 0.0) * uPxView);
+  float s = max(iSize * uZoom * uHaloK * nearK(mv.z), uMinPx * max(-mv.z, 0.0) * uPxView);
   mv.xy += position.xy * s;
   gl_Position = projectionMatrix * mv;
 }`;
@@ -330,7 +341,7 @@ export class SceneBatch {
   private makeHalo(): THREE.Mesh {
     const mat = new THREE.ShaderMaterial({
       vertexShader: HALO_VERT, fragmentShader: HALO_FRAG,
-      uniforms: { uZoom: { value: this.zoom }, uHaloK: { value: this.haloK }, uMinPx: { value: this.haloMinPx },
+      uniforms: { uNear: { value: 0 }, uNearMin: { value: this.nearMin }, uZoom: { value: this.zoom }, uHaloK: { value: this.haloK }, uMinPx: { value: this.haloMinPx },
                   uPxView: { value: 0.002 }, uHue: { value: 0 }, uHaloI: { value: this.haloI }, uCore: { value: this.haloCore } },
       transparent: true, depthWrite: false, depthTest: true,
       // Colour ADDED, alpha left alone. The canvas is transparent over the
@@ -377,6 +388,17 @@ export class SceneBatch {
   /** Halos a pixel may carry at full glow before the glow is divided (137(6)). */
   haloStack = 3;
   haloCrowd = { n: 0, stack: 0, k: 1 };
+  /** PLUGIN_GOAL 152: nearer than `d` world units to the camera, a node or
+   *  picture is drawn at (distance / d) of its size, never under `nearMin`.
+   *  0 turns it off. Set every frame from the camera's focus distance. */
+  nearMin = 0.25;
+  nearD = 0;
+  setNear(d: number): void {
+    this.nearD = d;
+    const set = (m: any) => { const u = m?.material?.uniforms; if (u?.uNear) { u.uNear.value = d; u.uNearMin.value = this.nearMin; } };
+    set(this.halo);
+    for (const m of [this.opaque, this.clear, this.glass] as any[]) if (m) set(m.mesh);
+  }
   setHalo(on: boolean): void { this.halo.visible = on && this.glass.mesh.visible; this.haloOn = on; }
   /** Tune the glow live: size factor, pixel floor, intensity, core share. */
   tuneHalo(t: { k?: number; minPx?: number; i?: number; core?: number }): void {
@@ -401,13 +423,14 @@ export class SceneBatch {
           uHue: { value: 0 },
           uBright: { value: this.nodeBright },
           uZoom: { value: this.zoom },
+          uNear: { value: 0 }, uNearMin: { value: this.nearMin },
         },
         transparent: true, depthWrite: false,
       });
     }
     return new THREE.ShaderMaterial({
       vertexShader: VERT, fragmentShader: FRAG,
-      uniforms: { atlas: { value: this.atlas }, uHue: { value: 0 }, uZoom: { value: this.zoom } },
+      uniforms: { atlas: { value: this.atlas }, uHue: { value: 0 }, uZoom: { value: this.zoom }, uNear: { value: 0 }, uNearMin: { value: this.nearMin } },
       transparent: translucent, depthWrite: !translucent,
     });
   }

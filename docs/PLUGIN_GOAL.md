@@ -5462,6 +5462,10 @@ camera view from it, move it from 3D to the plane and back.*
 
 > The markdown view of a cell must be its own cell, and cannot be editable
 
+*Verbatim (2026-11-08), (152), with a close-up screenshot of overlapping pictures and orbs:*
+
+> How about this, depending on camera proximity and zoom, icons and nodes shrink when within the close proximity of the camera so that the way we solve clumping is by locally shrinking nodes by some reasonable factor.
+
 ## Standing instructions carried in the verbatim
 
 Two of these are process rules, not features, and they bind every future
