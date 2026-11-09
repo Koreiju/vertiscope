@@ -208,3 +208,10 @@ Does a fit starve the worker's request threads? A ticker thread asked for 10 ms 
 - Null arm, no fit: p99 0.9 ms, max 1.0 ms.
 
 The fit releases the GIL almost the whole time (torch on the GPU). Moving it out would cost a model IPC on every drain transform and buy nothing measurable. The approved shape's responsive half is already built: the front process answers /health without the worker. Split further only if a profile shows a request blocked by the fit or the encoder. Script: scratchpad gil.py; the arms are reproducible.
+
+## D-2 stage 3 (2026-11-09): the copy, and why an in-place re-key is not faithful
+
+- **The copy:** `build/corpus123_d2`, 16.1 GB, taken with the sidecar stopped. The live store is untouched and its sidecar was restarted.
+- **The script:** `scripts/migrate_d2.py <store> [--limit N] [--check]` re-keys anchors from each chunk's stored markdown by position. `--check` verifies anchor counts, the md hash of each line, that every leaf exists, and that no key collides. Before migration it reports 1,772 anchors not at the markdown level in 300 chunks, so the check can fail.
+- **Finding:** only 139 of those 300 chunks pair stored lines 1:1 with anchors; the rest differ by -17 to +6 lines. Tables put several addresses on one row and add header and separator lines, so `c.md` is not the rendered line list. The script refuses a mismatched chunk instead of guessing, which would leave the copy about half migrated.
+- **The faithful path:** re-render each page from its STORED addresses with the current renderer, md level on. That re-chunks any page whose rendering changed since it was stored (R-C5 and others), and changed chunks need re-embedding. It is a re-index of the copy rather than a key rewrite. Next step: a pilot on a few pages of the copy, measuring how many chunks change.
