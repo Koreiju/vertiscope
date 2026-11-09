@@ -185,3 +185,9 @@ Every failure in this run depends on frames:
 Measured straight after the run: 1.5 fps, with `document.visibilityState` reading visible and the window focused. Each render takes about 1 ms and there are no long tasks, so the main thread was idle. The browser was delivering frames slowly, which looks like the OS throttling an occluded window. That is not the plugin.
 
 Run 23 (13/13) and runs 26-29 were taken at normal frame rates. Re-run the full set with the Obsidian window uncovered before reading these results as regressions.
+
+## Ego checks after R-C5, the camera field and the Obsidian restart (2026-11-09)
+
+The 8/13 runs were taken with the window MINIMIZED. `BrowserWindow.isMinimized()` was true while `document.visibilityState` still read visible, and the window ran at 1.5 fps. Restored, it runs at 240 fps.
+
+Run 2, uncovered: 12/13. G-331 measured nothing on all three arms (no edges, no pulses, 94 s), which points to a cold kernel straight after the Obsidian restart. Re-run alone (run 3): pass. Clean: 2 hops per pulse with the readout present. Planted plantDiskText: no readout, 1 hop.
