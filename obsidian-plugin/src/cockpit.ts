@@ -729,9 +729,9 @@ export class Cockpit {
   /** A cockpit written before `n` and `matching` existed gets them, under `k`. */
   plantDupSearchFields = false;
   plantPlayClobber = false;
-  plantNoCameraField = true;   // OFF until it no longer fights the checks' flights (bisected 2026-11-08)
+  plantNoCameraField = false;
   /** The camera's write-back into the text (on by default only at rest). */
-  cameraWriteOff = true;
+  cameraWriteOff = false;
   private cameraText = "";
   private playText = "";
   private ensureSearchFields(v: any): void {

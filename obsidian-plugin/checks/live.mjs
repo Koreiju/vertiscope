@@ -9971,7 +9971,7 @@ export function makeChecks(env) {
     },
     {
       id: "G-333",
-      asks: "the ego is a non-holonomic vehicle (PLUGIN_GOAL 116): D turns the heading without moving the camera, W moves it along the heading with nothing sideways; V to third person puts the camera behind the vehicle looking at it, the craft drawn there in the ego view, W in third person moves the vehicle and the camera follows; V back puts the camera in the cockpit; planted (plantStrafe) D slides the camera sideways",
+      asks: "the ego is a non-holonomic vehicle (PLUGIN_GOAL 116): D turns the heading without moving the camera, W moves it along the heading with nothing sideways; V to third person puts the camera behind the vehicle looking at it, the craft drawn there in the ego view, W in third person moves the vehicle and the camera follows; V back puts the camera in the cockpit; the cockpit panel's camera field follows V and an edit of it picks the view, at rest (planted plantNoCameraField: the text never follows); planted (plantStrafe) D slides the camera sideways",
       async run() {
         const arm = (planted) => evaluate(`(async () => {
           const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
@@ -10018,9 +10018,53 @@ export function makeChecks(env) {
         })()`, { timeout: 60000 });
         const clean = await arm(false);
         const planted = await arm(true);
+        // The camera from the cockpit panel (149/150: "selecting the camera
+        // view"), both ways, at rest: V writes the view into the slate's
+        // camera field; an edit of the field picks the view. Planted
+        // (cockpit.plantNoCameraField): the text never follows V.
+        const panel = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const NL = String.fromCharCode(10), TAB = String.fromCharCode(9);
+          const plugin = app.plugins.getPlugin("domvec-bridge"), c = plugin.cockpit;
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view, a = v.agent;
+          const cam = v.graph.camera(), ctl = v.graph.controls();
+          const save = { p: cam.position.clone(), t: ctl.target.clone(), u: cam.up.clone(), mode: a.mode };
+          await c.open(); await sleep(800);
+          const cv = c.view();
+          if (!cv) return { error: "no cockpit" };
+          const lineOf = () => cv.editor.getValue().split(NL).findIndex((l) => l.trim().split(TAB)[0] === "camera");
+          const field = () => { const i = lineOf(); return i < 0 ? null : (cv.editor.getLine(i).split(TAB).pop() || "").trim(); };
+          c.plantNoCameraField = ${planted};
+          const out = { planted: ${planted} };
+          try {
+            a.setMode("ego"); a.vel = { x: 0, y: 0, z: 0 }; a.target = null;
+            a.setView("first"); await sleep(1500);
+            a.setView("third"); await sleep(1800);
+            out.text_after_v = field();
+            const i = lineOf();
+            if (i >= 0) {
+              const ln = cv.editor.getLine(i), at = ln.lastIndexOf(TAB) + 1;
+              cv.editor.replaceRange("first", { line: i, ch: at }, { line: i, ch: ln.length });
+              await sleep(1500);
+            }
+            out.view_after_edit = a.view;
+            out.text_after_edit = field();
+          } finally {
+            c.plantNoCameraField = false;
+            a.setView("first");
+            cam.position.copy(save.p); ctl.target.copy(save.t); cam.up.copy(save.u); cam.lookAt(ctl.target); ctl.update && ctl.update();
+            a.setMode(save.mode);
+          }
+          return out;
+        })()`, { timeout: 60000 });
+        const pclean = await panel(false);
+        const pplanted = await panel(true);
         const ok = (x) => !!x && x.turn_moved < 1e-3 && x.turn_angle > 0.01 && x.forward > 0 && x.sideways < 1e-3
           && x.third && x.cam_behind > 1 && x.looks_at_vehicle && x.craft_drawn && x.vehicle_moved > 0 && x.camera_followed > 0 && x.back_first;
-        return { pass: ok(clean) && !!planted && planted.turn_moved > 1e-3 && !ok(planted), evidence: { clean, planted } };
+        const pOk = !!pclean && pclean.text_after_v === "third" && pclean.view_after_edit === "first" && pclean.text_after_edit === "first"
+          && !!pplanted && pplanted.text_after_v !== "third";
+        return { pass: ok(clean) && !!planted && planted.turn_moved > 1e-3 && !ok(planted) && pOk,
+                 evidence: { clean, planted, panel: pclean, panel_planted: pplanted } };
       },
     },
     {
@@ -15583,8 +15627,12 @@ export function makeChecks(env) {
               const q = cam.position.clone().set(top.n.x, top.n.y, top.n.z || 0).project(cam);
               const x = r.left + (q.x + 1) / 2 * r.width, y = r.top + (1 - q.y) / 2 * r.height;
               for (let k = 0; k < 2; k++) v.canvasEl.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 2 }));
+              // Where the DROP put it, read as it lands: a stream delta after
+              // that is the map's to make (the node is no longer the halo's).
+              const homeHeld = top.home.slice(0, 3);
+              const home_err = Math.hypot(top.n.x - homeHeld[0], top.n.y - homeHeld[1], (top.n.z || 0) - homeHeld[2]);
               await sleep(300);
-              const res = { home_err: Math.hypot(top.n.x - home[0], top.n.y - home[1], (top.n.z || 0) - home[2]), in_halo: v.halo.items.some((it) => it.n === top.n),
+              const res = { home_err, in_halo: v.halo.items.some((it) => it.n === top.n),
                             items_delta: v.halo.items.length - n0, queue_delta: v.halo.queue.length - q0 };
               v.plantNoHaloQueue = false;
               return res;

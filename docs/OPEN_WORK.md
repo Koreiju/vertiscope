@@ -167,3 +167,10 @@ Runs 11-22 named five real defects behind the failures. Fixing them, not looseni
   - **G-280:** reads the cockpit title in text form when the slate was left in graph form, and restores the form.
   - **G-285 and G-271:** pick world-drawn web pages, because a vault note can be the ego's (PLUGIN_GOAL 76: radius 0 in the world).
   - **G-270:** reads the projector until it settles (30 s cap) and reports the first snapshot too.
+
+## Cockpit camera field on (149/150 "selecting the camera view"), confirm runs 24-27
+
+- **The binding works both ways, at rest.** V writes the view into the slate's `camera` field, and an edit of the field picks the view. G-333 has a new arm. Clean: text `third` after V, view `first` after the edit. Planted `plantNoCameraField`: the text stays `first`.
+- **Turning it on surfaced one more feedback path.** Every cockpit write-back (camera, throttle, lit key) is an edit of `domvec/ego.md`, and each one rebuilt the craft, although the craft never reads that text. Run 25: G-331's run-end rebuild waited behind them, and the pulse left before the readout existed. The cockpit note no longer marks the craft dirty.
+- **G-284's drop is read as it lands.** A stream delta after the drop is the map's to make.
+- **Run 26: 12/13.** G-271 cruised 38 vs 45 (18%, its band is 15%). Re-run straight after G-333 (run 27): 40.8 vs 40.5. Recorded as a timing excursion, not a pass. Watch it.

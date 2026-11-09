@@ -6619,7 +6619,11 @@ export class GraphView extends ItemView {
       // store WAL are vault files too -- each request it answered for a
       // rebuild wrote the log, which rebuilt the craft again: 67 rebuild
       // requests in 8 s at rest. Planted `plantCraftAnyFile`: every file.
-      const note = (f: any, old?: string) => this.plantCraftAnyFile || /\.md$/i.test(String(f?.path || "")) || /\.md$/i.test(String(old || ""));
+      // Nor the cockpit's own text: the craft never reads it (its node is
+      // fixed), and every write-back -- the camera, the throttle, the lit key
+      // -- rebuilt the craft, keeping a run's end waiting on builds (G-331).
+      const md = (p: string) => /\.md$/i.test(p) && p !== "domvec/ego.md";
+      const note = (f: any, old?: string) => this.plantCraftAnyFile || md(String(f?.path || "")) || md(String(old || ""));
       this.registerEvent(this.app.vault.on("modify", (f) => { if (note(f)) this.craft?.dirty(); }));
       this.registerEvent(this.app.vault.on("create", (f) => { if (note(f)) this.craft?.dirty(); }));
       this.registerEvent(this.app.vault.on("delete", (f) => { if (note(f)) this.craft?.dirty(); }));
