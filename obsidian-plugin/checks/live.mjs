@@ -10000,6 +10000,8 @@ export function makeChecks(env) {
             out.cam_behind = veh ? Math.round(P().distanceTo(new cam.position.constructor(veh.x, veh.y, veh.z)) * 10) / 10 : null;
             out.looks_at_vehicle = veh ? T().distanceTo(new cam.position.constructor(veh.x, veh.y, veh.z)) < 1e-3 : false;
             await new Promise((r) => setTimeout(r, 300));
+            // Drawn on the next FRAME after V (a background window renders ~2 fps): waited for, up to 3 s.
+            for (let i = 0; i < 30 && !(v.craft && v.craft.group && v.craft.group.visible); i++) await new Promise((r) => setTimeout(r, 100));
             out.craft_drawn = !!(v.craft && v.craft.group && v.craft.group.visible);
             const v0 = { ...a.vehicle.p }, c0 = P();
             k("w");
