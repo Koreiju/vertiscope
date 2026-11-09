@@ -543,7 +543,11 @@ export class Cockpit {
           a.setPlan(nodes); a.play(true);
         });
       }
-    } else if (!play && a.playing) a.play(false);
+    } else if (!play && a.playing && (this.playText === "true" || this.plantPlayClobber)) a.play(false);
+    // Only an EDIT of the text to false stops a play (G-275, 2026-11-08): a
+    // plan started anywhere else -- the 3D field, a check -- was stopped by a
+    // `play false` the text had held all along. Planted `plantPlayClobber`.
+    this.playText = (this.field(fs, "play")?.value || "").trim();
     this.playSeen = play;
     const thr = Number(this.field(fs, "throttle")?.value);
     if (Number.isFinite(thr) && Math.abs(thr / 100 - a.throttle) > 0.004) a.setThrottle(thr / 100);
@@ -672,7 +676,9 @@ export class Cockpit {
       this.seenEngineQuery = f.query;
     }
     // A plan that finished, or a hand on the stick, sets `play` back to false.
-    if (!a.playing && this.playSeen) { put(["play"], "false"); this.playSeen = false; }
+    if (!a.playing && this.playSeen) { put(["play"], "false"); this.playSeen = false; this.playText = "false"; }
+    // A play started elsewhere is written into the text, so the text is true.
+    else if (a.playing && !this.playSeen && !this.plantPlayClobber) { put(["play"], "true"); this.playSeen = true; this.playText = "true"; }
     // ONE set of retrieval controls (2026-11-07: "the retrieval results
     // controller on the ego vs the search bar are somewhat disconnected"):
     // k and n are the search bar's, both ways; matching is read from it.
@@ -699,6 +705,8 @@ export class Cockpit {
   private searchKey(g: any): string { const f = g?.searchField; return f ? `${f.k}/${f.total}/${f.matching}` : ""; }
   /** A cockpit written before `n` and `matching` existed gets them, under `k`. */
   plantDupSearchFields = false;
+  plantPlayClobber = false;
+  private playText = "";
   private ensureSearchFields(v: any): void {
     const fs = parseSlate(v.editor.getValue());
     const k = this.field(fs, "search", "k");
