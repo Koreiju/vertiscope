@@ -5652,3 +5652,7 @@ centroid pre-filter; terminal plugins (`P-N2`'s separate pane needs a pty —
 nothing read yet); whether any package mirrors Selenium's call surface into a
 remote panel (`S-10`) — though §N makes that question smaller, since an
 Electron host would not need the mirror at all.
+
+### 153. (2026-11-09) Answers on the open items
+
+> Worker split: "Yes, start it now (Recommended)". Re-key D-2: "Yes, migrate into a copy". Close-to-camera shrink (12 radii, floor 1/4) and craft at 3% of the world radius: "Keep both".
