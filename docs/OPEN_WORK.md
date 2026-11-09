@@ -19,7 +19,7 @@ Last updated 2026-11-08 evening (items 141-147 below). Earlier: 2026-11-07 late.
 | 143 | strict UMAP for streamed, not-yet-placed nodes (no force layout at all) | partial | the caption no longer says "no embedding needed"; unplaced streamed nodes are still drawn by their parent until the fit places them |
 | 143 | sidecar /health stall | confirmed | 20.05 s timeout -> 0.01-0.04 s (`2d396a3`) |
 | 143 | UMAP slow | partial | fit read 25-30% less (`f2338c5`); chunk transform and redraw still seconds |
-| 143 | sidecar process split (micro-processes, PG 4519) | approved (148), not started | shape: an always-answering front process; workers own store, encoder, UMAP fit |
+| 143 | sidecar process split (micro-processes, PG 4519) | front built; fit worker measured unneeded (p99 2.1 ms GIL lag during a CUDA fit), see below | shape: an always-answering front process; workers own store, encoder, UMAP fit |
 | 137(6) | white mass in the pages view | confirmed | halo stack 8.2 / k 0.366 vs planted 0.14 / 1 (`b9518c9`) |
 | 144 | workspaces per vault, menu, own port | confirmed | to scratch-144 and back, both listed, ports kept (`e6055f5`) |
 | 147 | new vaults get the plugin; sidecar autostart | confirmed (install) / built (autostart) | `test` vault enabled, 4 older skipped (`380e798`) |
@@ -200,3 +200,11 @@ Three switches pages -> chunks (62,487 nodes), long-task observer on:
 - Recorded 2026-11-08: freezes of 2.8 s and 2.5 s, plus about 30 tasks of 400-500 ms.
 
 The planted arm (`plantReheatAlways`) did NOT discriminate: the clean switch measured worse than the planted one. Variance between switches is larger than the reheat effect, so the cause of the improvement is unnamed. Up-to-1 s frames remain a visible hitch. G-145 stays open.
+
+## 143 worker split: the UMAP fit measured, and NOT moved (2026-11-09)
+
+Does a fit starve the worker's request threads? A ticker thread asked for 10 ms sleeps while ParametricUMAP fitted 8,000 x 768 vectors on CUDA (167 s):
+- During the fit: lateness p50 0.5 ms, p99 2.1 ms, one stall of 180 ms.
+- Null arm, no fit: p99 0.9 ms, max 1.0 ms.
+
+The fit releases the GIL almost the whole time (torch on the GPU). Moving it out would cost a model IPC on every drain transform and buy nothing measurable. The approved shape's responsive half is already built: the front process answers /health without the worker. Split further only if a profile shows a request blocked by the fit or the encoder. Script: scratchpad gil.py; the arms are reproducible.
