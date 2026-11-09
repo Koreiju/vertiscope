@@ -5660,3 +5660,7 @@ Electron host would not need the mirror at all.
 ### 154. (2026-11-09) D-2: what the markdown level is
 
 > Asked: (a) the chunk as a trie level, or (b) the leaf's own rendered markdown LINE between xpath and content-detection. Answer: "(b) Markdown line in the key".
+
+### 155. (2026-11-09) D-2 migration
+
+> Asked: gradual (pages move as re-scanned), or a full re-index of the copy. Answer: "Full re-index of the copy".
