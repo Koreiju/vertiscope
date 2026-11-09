@@ -191,3 +191,12 @@ Run 23 (13/13) and runs 26-29 were taken at normal frame rates. Re-run the full 
 The 8/13 runs were taken with the window MINIMIZED. `BrowserWindow.isMinimized()` was true while `document.visibilityState` still read visible, and the window ran at 1.5 fps. Restored, it runs at 240 fps.
 
 Run 2, uncovered: 12/13. G-331 measured nothing on all three arms (no edges, no pulses, 94 s), which points to a cold kernel straight after the Obsidian restart. Re-run alone (run 3): pass. Clean: 2 hops per pulse with the readout present. Planted plantDiskText: no readout, 1 hop.
+
+## G-145 re-measured (2026-11-09): improved, not proven
+
+Three switches pages -> chunks (62,487 nodes), long-task observer on:
+- No task over 1 s. The longest tasks were 229, 781 and 240 ms; the worst frames 451, 947 and 477 ms.
+- 40k+ nodes reached in 2.9-7.9 s.
+- Recorded 2026-11-08: freezes of 2.8 s and 2.5 s, plus about 30 tasks of 400-500 ms.
+
+The planted arm (`plantReheatAlways`) did NOT discriminate: the clean switch measured worse than the planted one. Variance between switches is larger than the reheat effect, so the cause of the improvement is unnamed. Up-to-1 s frames remain a visible hitch. G-145 stays open.
