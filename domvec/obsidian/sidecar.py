@@ -811,6 +811,7 @@ _PLANTABLE = {
     "lead-in-python": ("domvec.graphstore", "PLANT_LEAD_IN_PYTHON"),         # 143 fit read
     "zero-group-dropped": ("domvec.graphstore", "PLANT_ZERO_GROUP_DROPPED"),  # G-270 drawable set
     "no-reconcile": ("domvec.obsidian.projector", "PLANT_NO_RECONCILE"),     # G-270
+    "replace-unchanged": ("domvec.obsidian.projector", "PLANT_REPLACE_UNCHANGED"),  # hover jump
     "purge-keeps-projected": ("domvec.obsidian.sidecar", "PLANT_PURGE_KEEPS_PROJECTED"),  # G-270
     "outputs-everywhere": ("domvec.obsidian.sidecar", "PLANT_OUTPUTS_EVERYWHERE"),  # T-13
     "aggregate-mid-stream": ("domvec.obsidian.sidecar", "PLANT_AGGREGATE_MID_STREAM"),  # 137(20)

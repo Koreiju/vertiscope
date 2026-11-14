@@ -957,7 +957,7 @@ def _spacing(coords: np.ndarray, dims: int) -> Dict:
     a duplication problem that belongs to the chunker.
     """
     if coords is None or len(coords) < 2:
-        return {"p05": 0.0, "p25": 0.0, "p50": 0.0, "n": int(len(coords or []))}
+        return {"p05": 0.0, "p25": 0.0, "p50": 0.0, "n": 0 if coords is None else int(len(coords))}
     block = np.asarray(coords, dtype=np.float64)[:, :max(1, dims)]
     try:
         from scipy.spatial import cKDTree
@@ -2553,9 +2553,11 @@ def projected_chunk_layout(workspace, proj=None) -> Optional[Dict]:
     timing["edge_pages_reused"] = hits
     timing["ms_edges"] = round((_time.perf_counter() - _t) * 1000, 1)
     status = proj.status(workspace)
+    coords = np.asarray([n["pos"] for n in nodes], dtype=np.float64) if nodes else None
     return {"nodes": nodes, "edges": edges, "spaces": ["semantic"],
             "space": "euclidean", "n": len(nodes), "level": "chunk",
             "dims": 3, "hsv": bool(hsv), "fitted_dims": 3,
+            "spacing": _spacing(coords, 3) if coords is not None and len(coords) else None,
             "chunks": status.get("chunks_now"),
             "fitted_on": {"semantic": True}, "source": "projector",
             "epoch": epoch, "seq": seq, "projector": status,

@@ -18,7 +18,7 @@
 import { UserAgent } from "./useragent";
 import { Craft } from "./craft";
 import { setFolds as setFoldsEffect } from "./slatefold";
-import { spreadFactor } from "./spread.ts";
+import { spreadFactor, adaptiveSpreadFactor } from "./spread.ts";
 import { unitOf, lineAddr, inUnit } from "./address.ts";
 import { centredTelescope, relaxCloud, zoomFor, similarityFit, similarityInverse, rotateInverse, type V3 } from "./camera";
 import { profiler } from "./profile";
@@ -275,7 +275,7 @@ export const STREAM = {
  * an oversized panel was displacing plain nodes too, and this wins 0.11 back
  * for the 4,510 chunks that never showed a picture at all.
  */
-const PANEL_GAIN = 1.75;
+const PANEL_GAIN = 1.35;
 
 /**
  * The edge of the square panel a picture node draws on, in world units.
@@ -1079,7 +1079,7 @@ export class GraphView extends ItemView {
         if (same) { this.deltaStats.noops = (this.deltaStats.noops || 0) + 1; this.deltaStats.rebuilds = (this.deltaStats.rebuilds || 0) - 1; }
         else {
           this.graph.graphData({ nodes: batch.nodes, links: batch.links });
-          if (this.layoutMode === "projector") { this.treeSpring(); this.graph.d3ReheatSimulation?.(); }
+          if (this.layoutMode === "projector" && (!this.umapAuthority() || this.plantReheatAlways)) { this.treeSpring(); this.graph.d3ReheatSimulation?.(); }
         }
         this.deltaStats.rebuilds = (this.deltaStats.rebuilds || 0) + 1;
       } else {
@@ -1989,8 +1989,10 @@ export class GraphView extends ItemView {
     }
     this.holdAll(nodes, new Set());
     this.graph.graphData({ nodes, links });
-    if (this.layoutMode === "projector") this.treeSpring();
-    this.graph.d3ReheatSimulation?.();
+    if (this.layoutMode === "projector" && (!this.umapAuthority() || this.plantReheatAlways)) {
+      this.treeSpring();
+      this.graph.d3ReheatSimulation?.();
+    }
     this.lastExpanded = [...expanded].sort().join("\n");
   }
 
@@ -2368,7 +2370,7 @@ export class GraphView extends ItemView {
       this.pulling = true;
       try {
         const st: any = await this.sidecar.projectorStatus?.().catch(() => null);
-        if (st && st.fitted && !st.fitting) { this.lateFitStats.loaded++; await reload(); }
+        if (st && st.fitted && !st.fitting) { this.lateFitStats.loaded++; this.capturePose(); await reload(); }
       } finally { this.pulling = false; }
       return;
     }
@@ -2858,7 +2860,7 @@ export class GraphView extends ItemView {
       ...((placed?.edges as { source: string; target: string }[]) || []),
     ]);
     this.graph.graphData(fresh);
-    this.graph.d3ReheatSimulation();
+    if (!this.umapAuthority() || this.plantReheatAlways) this.graph.d3ReheatSimulation();
     this.sayCounts();
     void this.drawContainment();
   }
@@ -2897,7 +2899,7 @@ export class GraphView extends ItemView {
   highlightChunk(cid: string, url = "", stored = ""): void {
     if (!this.graph) return;
     // The hovered url spreads; off every chunk, it goes back (G-230).
-    if (cid && url) this.spreadUrl(url); else if (!cid) this.unspread();
+    if (cid && url) this.spreadUrl(url); else if (!cid) this.scheduleUnspread();
     if (cid && url) void this.loadFiles(url);
     const data: any = this.graph.graphData();
     const seq = ++this.hoverSeq;
@@ -2905,10 +2907,16 @@ export class GraphView extends ItemView {
     // the camera and its panel go to THAT chunk (2026-10-06: "the camera
     // doesn't 'fly' for hovering over different chunks ... this also opens
     // the panels on the 3D side, but closes them when the hovering stops").
-    // Each id placed once per hover: a lead `absorb` does not draw (its page
-    // folded) would otherwise be asked for again on every re-ring.
-    if (cid !== this.hoverPlacedFor) { this.hoverPlacedFor = cid; this.hoverPlaced.clear(); }
-    if (cid && stored && !data.nodes.some((n: any) => n.id === stored) && !this.readerCollapsed(url)
+    // Each id placed once per url: `cid` includes `|xpath`, which changes on
+    // every child element under the mouse, so clearing `hoverPlaced` on `cid`
+    // re-asked `/place` and re-ran `absorb` on every mouse move over a copy.
+    const urlKey = String(url || "").split("#")[0];
+    if (urlKey !== this.hoverPlacedFor) { this.hoverPlacedFor = urlKey; this.hoverPlaced.clear(); }
+    const baseCid = String(cid || "").split("|")[0];
+    const resolvedStored = (!this.plantHoverIgnoresAlias && stored && this.hoverAliases.get(stored)) || stored;
+    if (cid && stored
+        && !data.nodes.some((n: any) => n.id === stored || n.id === resolvedStored || (baseCid && n.id === baseCid))
+        && !this.readerCollapsed(url)
         && !this.hoverPlaced.has(stored)) {
       this.hoverPlaced.add(stored);
       void this.sidecar.place([stored]).then((got: any) => {
@@ -2974,17 +2982,18 @@ export class GraphView extends ItemView {
       ? this.hoverElementOf(cid) : "";
     // A GREY chunk: the unit's own chunk, found among the page's live chunks
     // (the sensor's hovered chunk may not hold the tile at all).
+    const focusTarget = target;
     const gu = cid && cid.startsWith("f:") && target && (target.force || target.virtual) && !this.plantNoVirtualPanel
       ? this.greyUnitFor(cid) : null;
     if (gu) {
-      target = { id: `${gu.id}|${gu.at}`, url, level: "chunk", virtual: true, x: target.x, y: target.y, z: target.z ?? 0 };
+      target = { id: `${gu.id}|${gu.at}`, url, level: "chunk", virtual: true, base: focusTarget, x: target.x, y: target.y, z: target.z ?? 0 };
     } else if (el && !String(target.id).includes("|")) {
       target = { id: `${target.id}|${el}`, url, level: "chunk", virtual: true, base: target, hoverCid: cid, x: target.x, y: target.y, z: target.z ?? 0 };
     }
     const isChunk = !!target && target.level !== "page" && target.level !== "path";
     if (cid && url) { this.hoverAskAt = performance.now(); this.hoverAskUrl = url; }
     if (!cid || isChunk) {
-      this.focusOn(cid ? target : null);
+      this.focusOn(cid ? (focusTarget || target) : null);
       this.hoverPanel(cid ? target : null);
     } else {
       // Off every drawn chunk (the page node is only the fallback): the
@@ -3154,7 +3163,13 @@ export class GraphView extends ItemView {
             }
           }
         }
-        if (id !== target.id) target = { ...target, id };
+        if (id !== target.id) {
+          const existingBase = !id.includes("|")
+            ? ((target.base && !target.base.virtual && String(target.base.id) === id ? target.base : null)
+               || ((this.graph?.graphData() as any)?.nodes || []).find((n: any) => String(n.id) === id))
+            : null;
+          target = existingBase || { ...target, id, virtual: id.includes("|") || id.startsWith("f:") };
+        }
         if (u) this.hoverStats.units = (this.hoverStats.units || 0) + 1;
       }
       close();
@@ -3229,9 +3244,12 @@ export class GraphView extends ItemView {
     // A unit of a chunk the projector placed is a part of THAT chunk and
     // takes its colour; only a unit of a grey (streamed) chunk is grey.
     const color = v.color ? v.color : p && !p.force && p.level !== "page" && p.color ? p.color : "#9aa0a6";
+    const ux = cx + rr * Math.cos(th) * R, uy = cy + rr * Math.sin(th) * R, uz = cz + zz * R;
+    const pinUnit = this.umapAuthority() && !this.plantReheatAlways;
     const n: any = { id, level: "chunk", name: v.name || id, url: v.url, members: 1, tokens: 0,
                      force: true, unit: true, val: v.kgEntity ? 0.45 : 0.6, color, fileRef: v.fileRef, kgEntity: v.kgEntity,
-                     x: cx + rr * Math.cos(th) * R, y: cy + rr * Math.sin(th) * R, z: cz + zz * R };
+                     x: ux, y: uy, z: uz,
+                     ...(pinUnit ? { fx: ux, fy: uy, fz: uz } : {}) };
     const nodes = data.nodes.slice();
     const links = data.links.slice();
     nodes.push(n);
@@ -3252,8 +3270,10 @@ export class GraphView extends ItemView {
     } else {
       this.graph.graphData({ nodes, links });
     }
-    if (this.layoutMode === "projector") this.treeSpring();
-    this.graph.d3ReheatSimulation?.();
+    if (!pinUnit) {
+      if (this.layoutMode === "projector") this.treeSpring();
+      this.graph.d3ReheatSimulation?.();
+    }
     this.batchDirty = true;
     return n;
   }
@@ -4272,7 +4292,7 @@ export class GraphView extends ItemView {
     }
     // Each open page's bound, from the FIT (before anything is moved aside).
     const bounds = new Map<string, { B: number; R: number }>();
-    for (const [url] of byUrl) {
+    for (const [url, chs] of byUrl) {
       const page = pages.find((p: any) => p.url === url);
       if (!page) continue;
       const [px, py, pz] = at(page);
@@ -4282,7 +4302,15 @@ export class GraphView extends ItemView {
         const [qx, qy, qz] = at(q);
         nearest = Math.min(nearest, Math.hypot(px - qx, py - qy, pz - qz));
       }
-      if (!Number.isFinite(nearest)) continue;
+      if (!Number.isFinite(nearest)) {
+        // A 1-page workspace has no second page to measure `nearest` against:
+        // derive `nearest` from the page's own chunk cloud span so `telescope`,
+        // chunk `room` sizing, and open-page `reach` sizing still run.
+        const ds = chs.map((c: any) => Math.hypot((c.fitX ?? c.x ?? 0) - px, (c.fitY ?? c.y ?? 0) - py, (c.fitZ ?? c.z ?? 0) - pz))
+          .filter(Number.isFinite).sort((a: number, b: number) => a - b);
+        const p90 = ds.length ? ds[Math.floor(ds.length * 0.9)] : 0;
+        nearest = Math.max(60, p90 / 0.45, sceneR * 0.8);
+      }
       const R = 0.45 * nearest;                 // the projector's NEIGHBOURHOOD
       // The telescope's bound is the larger of that and a share of the
       // SCENE (2026-10-06, measured: on johnwick.movie the neighbourhood was
@@ -4431,7 +4459,8 @@ export class GraphView extends ItemView {
       if (fitD.length) {
         if (page.fullVal === undefined) page.fullVal = page.val ?? 1;
         const reach = Math.max(floor, (fitD[Math.floor(fitD.length * 0.1)] - COLLIDER_MARGIN) / COLLIDER_SAFETY);
-        const rp = drawnRadius({ ...page, val: page.fullVal }, relSize, media);
+        const ps = this.plantSmallPages ? 1 : Math.min(this.pageScale, 1.4);
+        const rp = drawnRadius({ ...page, val: page.fullVal }, relSize, media) * this.nodeScale * ps;
         const was = page.val;
         page.val = rp > reach ? page.fullVal * Math.pow(reach / rp, 3) : page.fullVal;
         if (was && Math.abs(was - page.val) > 0.05 * page.val) this.rescaleObject(page, was);
@@ -5291,10 +5320,36 @@ export class GraphView extends ItemView {
       if (o) { src.push([n.x, n.y, n.z ?? 0]); dst.push(o); }
     }
     const f = similarityFit(src, dst);
-    if (!f || !(f.s > 0)) { this.refitStats.reframed++; return null; }
+    if (!f || !(f.s > 0)) {
+      // Fewer than 3 pages matched (e.g. a 1- or 2-page workspace, or chunk
+      // view): preserve the reader's camera pose (translated by the mean page
+      // shift if 1-2 pages matched) instead of reframing to a fixed front view.
+      let dx = 0, dy = 0, dz = 0;
+      if (src.length > 0 && src.length === dst.length) {
+        for (let i = 0; i < src.length; i++) {
+          dx += src[i][0] - dst[i][0]; dy += src[i][1] - dst[i][1]; dz += src[i][2] - dst[i][2];
+        }
+        dx /= src.length; dy /= src.length; dz /= src.length;
+      }
+      const p: V3 = [prior.cam[0] + dx, prior.cam[1] + dy, prior.cam[2] + dz];
+      const t: V3 = [prior.target[0] + dx, prior.target[1] + dy, prior.target[2] + dz];
+      g.camera().up.set(prior.up[0], prior.up[1], prior.up[2]);
+      g.cameraPosition({ x: p[0], y: p[1], z: p[2] }, { x: t[0], y: t[1], z: t[2] }, 0);
+      g.camera().updateMatrixWorld?.();
+      const cov0 = this.screenCoverage ? this.screenCoverage() : null;
+      if (!cov0 || Math.abs(cov0.dx) > 0.45 + cov0.w / 2 || Math.abs(cov0.dy) > 0.45 + cov0.h / 2) return null;
+      if (prior.fullViewDist > 0) this.fullViewDist = prior.fullViewDist;
+      this.refitStats.registered++;
+      this.refitStats.last_matched = src.length;
+      this.refitStats.last_scale = 1;
+      return { x: p[0], y: p[1], z: p[2] };
+    }
     const p = similarityInverse(f, prior.cam), t = similarityInverse(f, prior.target), up = rotateInverse(f, prior.up);
     g.camera().up.set(up[0], up[1], up[2]);
     g.cameraPosition({ x: p[0], y: p[1], z: p[2] }, { x: t[0], y: t[1], z: t[2] }, 0);
+    g.camera().updateMatrixWorld?.();
+    const cov1 = this.screenCoverage ? this.screenCoverage() : null;
+    if (!cov1 || Math.abs(cov1.dx) > 0.45 + cov1.w / 2 || Math.abs(cov1.dy) > 0.45 + cov1.h / 2) return null;
     if (prior.fullViewDist > 0) this.fullViewDist = prior.fullViewDist / f.s;
     this.refitStats.registered++;
     this.refitStats.last_rms = Math.round(f.rms * 100) / 100;
@@ -5532,9 +5587,18 @@ export class GraphView extends ItemView {
    * fit gave them (`__spreadHome`). Planted `plantNoHoverSpread`.
    */
   private spread: { url: string; nodes: any[]; k: number } | null = null;
+  private unspreadTimer = 0;
   spreadStats = { spread: 0, restored: 0, last_k: 1, last_n: 0 };
   plantNoHoverSpread = false;
+  private scheduleUnspread(): void {
+    if (this.unspreadTimer) window.clearTimeout(this.unspreadTimer);
+    this.unspreadTimer = window.setTimeout(() => {
+      this.unspreadTimer = 0;
+      this.unspread();
+    }, 800);
+  }
   spreadUrl(url: string): void {
+    if (this.unspreadTimer) { window.clearTimeout(this.unspreadTimer); this.unspreadTimer = 0; }
     if (this.plantNoHoverSpread || !this.graph) return;
     const key = String(url || "").split("#")[0];
     if (this.spread && this.spread.url === key) return;
@@ -5542,33 +5606,59 @@ export class GraphView extends ItemView {
     if (!key) return;
     const all: any[] = (this.graph.graphData() as any).nodes;
     const page = all.find((n: any) => n.level === "page" && !n.force && String(n.url || "").split("#")[0] === key);
-    const members = all.filter((n: any) => n !== page && n.level !== "page" && Number.isFinite(n.x)
+    const members = all.filter((n: any) => n !== page && n.level !== "page" && !n.force && !n.unit && Number.isFinite(n.x)
       && String(n.url || "").split("#")[0] === key);
     if (members.length < 2 || members.length > 400) return;
-    const C = page && Number.isFinite(page.x) ? [page.x, page.y, page.z ?? 0]
-      : [0, 1, 2].map((a) => members.reduce((s: number, n: any) => s + ([n.x, n.y, n.z ?? 0][a]), 0) / members.length);
-    const homes = members.map((n: any) => n.__spreadHome || [n.x, n.y, n.z ?? 0]);
-    const rs = this.graph.nodeRelSize(), media = this.media();
-    const k = spreadFactor(homes, members.map((n: any) => drawnRadius(n, rs, media)));
+    // Under UMAP authority, once `relaxChunkView` has already separated the
+    // chunk orbs (`n.drawnAt`), do not re-explode the cloud on hover.
+    if (this.umapAuthority() && members.some((n: any) => Array.isArray(n.drawnAt))) return;
+    const homes = members.map((n: any) =>
+      n.__spreadHome || (Array.isArray(n.drawnAt) ? n.drawnAt.slice(0, 3) : [n.fitX ?? n.x, n.fitY ?? n.y, n.fitZ ?? n.z ?? 0])
+    );
+    // Always spread about the members' OWN centroid so a distant page node
+    // never flings the chunk cloud across space.
+    const C = [0, 1, 2].map((a) => homes.reduce((s: number, h: number[]) => s + h[a], 0) / homes.length);
+    const relSize = this.graph.nodeRelSize();
+    const one = this.level === "chunk" && !this.plantSizedInChunkView;
+    const uVal = one ? this.unitVal() : 1;
+    const radii = members.map((n: any) =>
+      Math.max(0.1, Math.cbrt(Math.max(one ? uVal : (n.val ?? 1), 1e-9)) * relSize * this.nodeScale)
+    );
+    const k = adaptiveSpreadFactor(homes, radii);
     this.spreadStats.last_k = Math.round(k * 100) / 100; this.spreadStats.last_n = members.length;
     if (k <= 1.01) return;
+    const dists = homes.map((h) => Math.hypot(h[0] - C[0], h[1] - C[1], h[2] - C[2])).sort((a, b) => a - b);
+    const p75 = dists[Math.floor(dists.length * 0.75)] || 1;
+    const sortedR = radii.slice().sort((a, b) => a - b);
+    const medR = sortedR[sortedR.length >> 1] || 1;
+    const maxStep = Math.max(medR * 2.5, p75 * 0.45);
     members.forEach((n: any, i: number) => {
+      delete n.__unspreading;
       n.__spreadHome = homes[i];
-      this.glide(n, [0, 1, 2].map((a) => C[a] + (homes[i][a] - C[a]) * k), 300);
+      const dx = (homes[i][0] - C[0]) * (k - 1);
+      const dy = (homes[i][1] - C[1]) * (k - 1);
+      const dz = (homes[i][2] - C[2]) * (k - 1);
+      const step = Math.hypot(dx, dy, dz);
+      const clamp = step > maxStep && step > 1e-9 ? maxStep / step : 1;
+      const to = [homes[i][0] + dx * clamp, homes[i][1] + dy * clamp, homes[i][2] + dz * clamp];
+      n.__spreadTo = to;
+      this.glide(n, to, 220, true);
     });
     this.spread = { url: key, nodes: members, k };
     this.spreadStats.spread++;
   }
   /** The spread url's nodes back where the fit put them. */
   unspread(): void {
+    if (this.unspreadTimer) { window.clearTimeout(this.unspreadTimer); this.unspreadTimer = 0; }
     const sp = this.spread;
     if (!sp) return;
     this.spread = null;
     for (const n of sp.nodes) {
       const h = n.__spreadHome;
+      delete n.__spreadTo;
       if (!h) continue;
-      delete n.__spreadHome;
-      this.glide(n, h, 300);
+      n.__unspreading = true;
+      this.glide(n, h, 220, true);
     }
     this.spreadStats.restored++;
   }
@@ -5614,16 +5704,22 @@ export class GraphView extends ItemView {
     return true;
   }
   plantHaloOverwritten = false;
-  private glide(n: any, to: number[], ms = 450): void {
+  private glide(n: any, to: number[], ms = 450, smooth = false): void {
     if (!to.every(Number.isFinite)) return;
     if (this.haloHolds(n, to[0], to[1], to[2])) return;
+    // While `n` is spread by hover, a background fit/telescope update moves
+    // `__spreadHome` without snapping `n` out of its spread place.
+    if (n.__spreadHome && !smooth) {
+      n.__spreadHome = [to[0], to[1], to[2]];
+      return;
+    }
     // A glide to the raw fit is a glide to the SCALED place (G-324): every
     // caller that says "to its fit" means "to where the map draws it".
     if (this.scaledMode && !n.force && !n.__spreadHome && Number.isFinite(n.fitX)
         && Math.abs(to[0] - n.fitX) + Math.abs(to[1] - n.fitY) + Math.abs(to[2] - (n.fitZ ?? 0)) < 1e-6) to = this.mapTarget(n);
     // A MAPPED node is placed, never animated (141): one answer, no staggering.
     // Live-scan diffs not yet mapped (`n.force`) keep their forces (107).
-    if (this.umapAuthority() && !n.force) {
+    if (this.umapAuthority() && !n.force && !smooth) {
       n.x = n.fx = to[0]; n.y = n.fy = to[1]; n.z = n.fz = to[2];
       n.vx = n.vy = n.vz = 0; delete n.__glide; this.glides.delete(n);
       return;
@@ -5655,8 +5751,10 @@ export class GraphView extends ItemView {
       n.fy = n.y = g.from[1] + (g.to[1] - g.from[1]) * k;
       n.fz = n.z = g.from[2] + (g.to[2] - g.from[2]) * k;
       n.vx = 0; n.vy = 0; n.vz = 0;
+      this.posDirty = true;
       if (e >= 1) {
         delete n.__glide;
+        if (n.__unspreading) { delete n.__unspreading; delete n.__spreadHome; }
         this.glides.delete(n);
         this.glideStats.done++;
         n.__calm = true; n.__calmFit = [n.fitX, n.fitY, n.fitZ];   // held where it landed
@@ -6393,11 +6491,14 @@ export class GraphView extends ItemView {
     // Planted `plantSmallPages`: the old sizes.
     const ps = n.level === "page" && !this.plantSmallPages ? this.pageScale : 1;
     if (n.force) {
-      // In chunk view a chunk still streaming is the size of a placed one:
-      // at STREAM.RADIUS it was 10x the median chunk, a pile of giant orbs
-      // over a page as it streamed (2026-10-11, PLUGIN_GOAL 110).
-      const streaming = this.level === "chunk" && !this.plantSizedInChunkView ? Math.cbrt(this.unitVal()) * relSize : STREAM.RADIUS;
-      return { half: (n.level === "page" && !(this.level === "chunk" && !this.plantSizedInChunkView) ? STREAM.RADIUS * 1.6 : streaming) * ps, translucent: true,
+      // In chunk view (and in page view once chunks are placed) a chunk still
+      // streaming is sized near a placed chunk: at raw STREAM.RADIUS (6) it
+      // was 10-40x a settled chunk, a pile of giant orbs over the page.
+      const uv = this.unitVal();
+      const streaming = (!this.plantSizedInChunkView && (this.level === "chunk" || uv < 0.99))
+        ? Math.min(STREAM.RADIUS, Math.max(0.35, Math.cbrt(uv) * relSize * 1.25))
+        : STREAM.RADIUS;
+      return { half: (n.level === "page" && !(this.level === "chunk" && !this.plantSizedInChunkView) ? streaming * 1.6 : streaming) * ps, translucent: true,
                alpha: n.hovered ? 0.9 : (n.projected ? 0.75 : STREAM.OPACITY), color: n.hovered ? "#ffffff" : (n.color || "#9aa0a6") };
     }
     const src = media && !(this.plantNoPicture && n.level !== "page") ? n.image?.src : undefined;
@@ -6419,39 +6520,14 @@ export class GraphView extends ItemView {
       // all (2026-10-17: "hovering over nodes shows no image overlays in the
       // chunk view"). Unrevealed, it stays the one-size orb below.
       const shown = this.detail.has(n) || n.hovered || this.billboards.has(n.id);
-      // Pictures too: a page's favicon is most of the colour in url view.
-      let half = billboardEdge(shown && !this.plantTinyReveal ? n : sized, relSize) / 2 * this.nodeScale * ps;
-      // Presented at a size a reader can see, on SCREEN: between
-      // `presentMinPx` and `presentMaxPx` of radius. A chunk's own panel
-      // scale follows its `val`, and small chunks presented at 2 px; right by
-      // the camera one filled the pane (1,204 px) (2026-10-17).
-      // ...only for a picture the READER acts on -- hovered, or its panel
-      // open (G-21). One revealed because it lies near the pointer's ray keeps
-      // the size its room allows: floored to a readable size it overlapped
-      // its neighbours (405 of 415 overlapping pairs held a picture,
-      // 2026-10-30). Planted `plantFloorAllRevealed`: every reveal floored.
-      const acted = n.hovered || n === this.presented || this.billboards.has(n.id) || this.plantFloorAllRevealed;
-      if (shown && acted && !this.plantTinyReveal && this.graph && this.canvasEl) {
-        const cam: any = this.graph.camera(), P = cam.position, e = cam.matrixWorld.elements;
-        const depth = -((n.x - P.x) * e[8] + (n.y - P.y) * e[9] + ((n.z || 0) - P.z) * e[10]);
-        const yy = cam.projectionMatrix.elements[5], H = this.canvasEl.clientHeight;
-        if (depth > 0 && yy > 0 && H > 0) {
-          const perPx = depth * 2 / (H * yy);
-          half = Math.min(Math.max(half, this.presentMinPx * perPx), this.presentMaxPx * perPx);
-        }
-      }
-      // Pictures near the pointer's ray only (`refreshDetail`); elsewhere the
-      // same size, as its colour -- so the collider, the pick proxy and the
-      // drawn extent never change with where the mouse is.
-      // Url (and branch) nodes always: the limit is for chunk view (2026-10-11:
-      // "hover images also only apply for chunk view. not url view.").
-      if (this.plantAllPictures || n.level === "page" || n.level === "path"
-          || this.detail.has(n) || n.hovered || this.billboards.has(n.id))
+      const willShow = this.plantAllPictures || n.level === "page" || n.level === "path" || shown;
+      // Page favicons get at most a modest boost (1.4x) rather than the full
+      // sphere `pageScale`, and EVERY drawn picture is capped on screen by
+      // `presentMaxPx` so distant page icons and detail images never blow up.
+      const picPs = n.level === "page" && !this.plantSmallPages ? Math.min(this.pageScale, 1.4) : 1;
+      const half = billboardEdge(shown && !this.plantTinyReveal ? n : sized, relSize) / 2 * this.nodeScale * picPs;
+      if (willShow)
         return { half, translucent: false, alpha: 0.95, color: n.color || "#888888", picture: src };
-      // Unrevealed, in chunk view: an orb the size of every other orb. At the
-      // panel's size it was 14x a chunk -- the DuckDuckGo page's 1,587 result
-      // favicons as a pile of giant orbs (2026-10-11). Revealed, it opens to
-      // its picture as before.
       if (one) return { half: Math.cbrt(sized.val) * relSize * this.nodeScale * ps, translucent: false, alpha: 1, color: n.color || "#888888" };
       return { half, translucent: false, alpha: 1, color: n.color || "#888888" };
     }
@@ -6463,8 +6539,8 @@ export class GraphView extends ItemView {
   /** The picture nearest the pointer's ray, presented at a readable size. */
   presented: any = null;
   /** A presented picture's largest radius on screen, px. */
-  presentMaxPx = 64;
-  presentMinPx = 12;
+  presentMaxPx = 28;
+  presentMinPx = 10;
   /** Planted (item 44): the hover ranking walks every node object, as before. */
   plantDetailFromNodes = false;
   /** Planted: a revealed picture at the one size (the invisible hover image). */
@@ -6475,7 +6551,7 @@ export class GraphView extends ItemView {
   /** A page (url) node's size over its chunks' (2026-10-24: "twice or three
    *  times"; 2026-10-30, item 41: "still much larger than their chunks, since
    *  they're hard to spot and interact with when scanning/unfolded"). */
-  pageScale = 5;
+  pageScale = 2.5;
   /** Planted (item 39): the agent's flight survives the reader's drag. */
   plantHoldFlight = false;
   /** Planted (items 47-48): the hover dwell dedupes by object identity. */
@@ -6754,7 +6830,7 @@ export class GraphView extends ItemView {
   unitVal(): number {
     const g: any = this.graph;
     const ns = g ? (g.graphData().nodes as any[]) : [];
-    if (this.unitValAt.n >= 0 && Math.abs(ns.length - this.unitValAt.n) < Math.max(50, this.unitValAt.n * 0.1)) return this.unitValAt.v;
+    if (this.unitValAt.n > 8 && Math.abs(ns.length - this.unitValAt.n) < Math.max(8, this.unitValAt.n * 0.1)) return this.unitValAt.v;
     const pts: number[][] = [];
     for (const n of ns) if (n.level !== "page" && !n.force && Number.isFinite(n.fitX)) pts.push([n.fitX, n.fitY, n.fitZ ?? 0]);
     let v = 1;
@@ -8923,6 +8999,11 @@ export class GraphView extends ItemView {
       if (idx.length > 1) {
         const got = this.spacingAllowed(idx.map((i) => nodes[i]), idx.map((i) => drawnOf[i]), this.plantSlowSpacing);
         idx.forEach((i, k) => pageAllowed.set(i, got[k]));
+      } else if (idx.length === 1 && nodes.length > 1) {
+        // A single-page workspace with unfolded chunks: cap the page node
+        // against its own chunks so it cannot sit at raw fallback size over them.
+        const pi = idx[0];
+        pageAllowed.set(pi, Math.min(drawnOf[pi], allowedOf[pi] * this.pageScale));
       }
     }
     for (let i = 0; i < nodes.length; i++) {
@@ -9241,18 +9322,20 @@ export class GraphView extends ItemView {
       }
       const existing = byId.get(node.cid);
       if (existing) {
-        // Fields the render reads, and the fit's own coordinates. `x/y/z` is
-        // set too: the simulation owns those, but a chunk whose meaning moved
-        // should not be left drawing at its old meaning's address.
+        const posMoved = Math.hypot((existing.fitX ?? existing.x ?? 0) - built.fitX,
+                                    (existing.fitY ?? existing.y ?? 0) - built.fitY,
+                                    (existing.fitZ ?? existing.z ?? 0) - built.fitZ) > 1e-3;
+        // Fields the render reads, and the fit's own coordinates.
         Object.assign(existing, {
-          name: built.name, url: built.url, val: built.val, fullVal: built.val,
+          name: built.name, url: built.url, val: existing.val ?? built.val, fullVal: built.val,
           projX: built.fitX, projY: built.fitY, projZ: built.fitZ,
           tokens: built.tokens, image: built.image, color: built.color,
           fitX: built.fitX, fitY: built.fitY, fitZ: built.fitZ,
         });
-        // To its new place by a glide, not a jump.
-        this.glide(existing, [built.x, built.y, built.z]);
-        out.moved++;
+        if (posMoved) {
+          this.glide(existing, [built.x, built.y, built.z]);
+          out.moved++;
+        }
       } else {
         built.__freeUntil = performance.now() + 3000;
         // A RENAMED chunk (the central diff: same content, shifted address)
@@ -9264,6 +9347,9 @@ export class GraphView extends ItemView {
             built.__glideTo = [built.x, built.y, built.z];
             [built.x, built.y, built.z] = carried.at;
           }
+        }
+        if ((this.level === "chunk" || this.umapAuthority()) && !this.plantChunkForces && !built.force && !built.__glideTo) {
+          built.fx = built.x; built.fy = built.y; built.fz = built.z ?? 0;
         }
         arrived.push(built);
         byId.set(node.cid, built);
@@ -9549,7 +9635,7 @@ export class GraphView extends ItemView {
     // distinct -- which is what `G-4` and `G-21` actually ask for.
     const relSize = measured > 0
       ? Math.max(0.05, measured / 12)
-      : Math.max(0.5, uniform / 8);
+      : (nodes.length < 8 ? Math.min(4, Math.max(0.5, uniform / 8)) : Math.max(0.5, uniform / 8));
 
     const graph = new ForceGraph3D(canvas)
       .graphData({ nodes: carryNodes.length ? nodes.concat(carryNodes.filter((c: any) => !nodes.some((n: any) => String(n.id) === String(c.id)))) : nodes,
@@ -10054,7 +10140,7 @@ export class GraphView extends ItemView {
       if (settles >= 3) return;
       settles += 1;
       if (this.fitRadiiToSpacing()) settles += 0;
-      if (this.relaxAfterSpacing && this.level === "chunk") {
+      if (this.relaxAfterSpacing) {
         this.relaxAfterSpacing = false;
         this.unitValAt.at = 0;
         window.setTimeout(() => this.relaxChunkView(), 50);
@@ -10117,6 +10203,9 @@ export class GraphView extends ItemView {
     // difference is how the observer below tells "this pane has not been
     // looked at yet" from "the reader has orbited somewhere".
     let placed: { x: number; y: number; z: number } | null = null;
+    const initialMoveAt = this.camMovedAt;
+    const initialFlights = this.agent.stats.flights;
+    const initialKeys = this.agent.stats.keys;
     const place = () => {
       try {
         const c = centre();
@@ -10129,6 +10218,7 @@ export class GraphView extends ItemView {
       }
     };
     const untouched = () => {
+      if (this.camMovedAt > initialMoveAt || this.agent.stats.flights > initialFlights || this.agent.stats.keys > initialKeys) return false;
       if (!placed) return true;
       const c: any = graph.cameraPosition();
       return Math.abs((c?.x ?? 0) - placed.x) < 1
@@ -10368,6 +10458,7 @@ export class GraphView extends ItemView {
         const floor = frontmost + Math.max(20, frontmost * 0.15);
         if (next < floor) next = floor;
         g.cameraPosition({ x: c.x, y: c.y, z: c.z + next }, c, 0);
+        placed = { x: c.x, y: c.y, z: c.z + next };
         this.fullViewDist = next;
       }
     };

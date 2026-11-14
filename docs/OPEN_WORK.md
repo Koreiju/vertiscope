@@ -236,3 +236,20 @@ A 288 ms single call nested in pickProxy -> lookOf -> baseLook -> unitVal is con
 Tried and REVERTED: spacingAllowed on TypedGrid. Verdicts identical on 62,491 nodes, but 184-202 ms against 176-186 ms. Its grid is not the cost.
 
 Next: pick against the instanced batch instead of one proxy Mesh per node. That removes most of draw's and fitProxies' cost and the GC behind them. It is a hover/click refactor, measured by G-174 (picking) with a planted arm.
+
+## The 2026-11-12 Antigravity session: its complaints and where they stand (2026-11-14)
+
+Read from the Antigravity conversation da8388bf (step text) and its uncommitted diff. Kept, rebuilt and live-checked:
+
+| Complaint (verbatim gist) | Status |
+|---|---|
+| "the maximum size of most of our images is too high" / "The giant image is the farthest away" | Antigravity: pictures capped on screen (`presentMaxPx` 64 -> 28, shader clamp 28 px), `pageScale` 5 -> 2.5, streaming orbs sized near a placed chunk. Seen in a screenshot: no giant images, all 972 nodes in view and drawn. |
+| "Now all the nodes are completely invisible" | Not reproduced: 972/972 placed, in view, radius > 0. |
+| "hovering on chunks in the browser expands their 3D graph way too far out" | Antigravity: `adaptiveSpreadFactor` (p75 of overlaps, cap shrinking with cluster size), spread about the members' own centroid, none once relaxed. |
+| "any time the mouse is moved while hovering over the browser, the re-snapping jostles ... two places at once" | Antigravity: hover placement keyed per URL, not per element under the mouse. Measured: 12 mouse moves, 0 nodes moved, camera still. |
+| "The 3D nodes keep jumping around with each new hover" | Hover-off unspread debounced (Antigravity). Found here: a hover's `/focus` re-queued placed chunks, and the drain re-transformed them through a model that online training had moved, so 12 chunks jumped 2-7 units on a page's first hover. Now a drain re-places only chunks whose vector changed (planted PLANT_REPLACE_UNCHANGED). Live: 1 node moved (the hovered one placed) vs 12 before. The planted arm did not reproduce (needs online training since the fit), so BUILT, NOT CONFIRMED. |
+| "flying to nodes does not resume from the camera's current perspective" | Antigravity: the flight re-aims along the current view and never backs out. Measured: 55 degrees turned smoothly (under 1 degree per frame, one 12 degree frame-time spike), no position snap. |
+| refit keeps the reader's pose with fewer than 3 matched pages; one-page workspaces get a neighbourhood | Antigravity, kept. |
+| sidecar launch "obsidian won't open" | Antigravity: argv no longer doubles `supervise`. |
+
+All 13 ego checks pass with this state (run 1, 2026-11-14 13:48).

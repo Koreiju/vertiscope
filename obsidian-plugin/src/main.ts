@@ -1748,7 +1748,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
       p.on("exit", () => done()); p.on("error", () => done());
       window.setTimeout(done, 30000);
     });
-    const argv = L.argv.slice();
+    const argv = ["supervise", ...L.argv.filter((a: string) => a !== "supervise" && a !== "serve")];
     const w = argv.indexOf("--workspace");
     if (w >= 0) argv[w + 1] = dir; else argv.push("--workspace", dir);
     const port = this.workspacePort(dir);
@@ -1791,9 +1791,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     try {
       const why = fs.readFileSync(marker, "utf8");
       fs.unlinkSync(marker);
-      const argv = L.argv.slice();
-      const at = argv.indexOf("serve");
-      if (at >= 0) argv[at] = "supervise"; else argv.unshift("supervise");
+      const argv = ["supervise", ...L.argv.filter((a: string) => a !== "supervise" && a !== "serve")];
       const log = fs.openSync(path.join(L.workspace, "sidecar.log"), "a");
       const child = cp.spawn(L.python, ["-X", "faulthandler", "-m", "domvec.obsidian", ...argv],
         { cwd: L.cwd || undefined, detached: true, windowsHide: true, stdio: ["ignore", log, log],
@@ -1922,9 +1920,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     }
     const req = (window as any).require;
     const fs = req("fs"), path = req("path"), cp = req("child_process");
-    const argv = L.argv.slice();
-    const at = argv.indexOf("serve");
-    if (at >= 0) argv[at] = "supervise"; else argv.unshift("supervise");
+    const argv = ["supervise", ...L.argv.filter((a: string) => a !== "supervise" && a !== "serve")];
     const log = fs.openSync(path.join(L.workspace, "sidecar.log"), "a");
     const child = cp.spawn(L.python, ["-X", "faulthandler", "-m", "domvec.obsidian", ...argv],
       { cwd: L.cwd || undefined, detached: true, windowsHide: true, stdio: ["ignore", log, log],
@@ -1935,7 +1931,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     for (let i = 0; i < 90; i++) {
       await new Promise((r) => setTimeout(r, 1000));
       h = await this.sidecar.health().catch(() => null);
-      if (h && h.ok) { new Notice("domvec sidecar ✓ started -- " + say(h), 8000); this.sidecarStats.last = { ok: true, started: true, at: Date.now() }; return "sidecar ●"; }
+      if (h && h.ok && h.backend !== "starting") { new Notice("domvec sidecar ✓ started -- " + say(h), 8000); this.sidecarStats.last = { ok: true, started: true, at: Date.now() }; return "sidecar ●"; }
     }
     new Notice("domvec sidecar ✕ started but not answering after 90 s -- see sidecar.log", 10000);
     return "sidecar ✕";

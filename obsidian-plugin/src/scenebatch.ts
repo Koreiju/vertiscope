@@ -20,7 +20,7 @@
 import * as THREE from "three";
 
 const ATLAS = 4096;
-const CELL = 64;
+const CELL = 128;
 const PER_ROW = ATLAS / CELL;               // 64 cells a row, 4,096 in the page
 /** Pictures decoded at once. Unbounded, 23k nodes asked for every picture in
  *  the corpus in one frame and Obsidian froze (2026-10-11). */
@@ -37,6 +37,9 @@ attribute vec4 iUv;
 uniform float uZoom;
 uniform float uNear;
 uniform float uNearMin;
+uniform float uPxView;
+uniform float uMaxPicPx;
+uniform float uMinPicPx;
 float nearK(float z, float size) { return uNear > 0.0 ? clamp(-z / (uNear * max(size, 1e-3)), uNearMin, 1.0) : 1.0; }
 varying vec2 vCorner;
 varying vec4 vColor;
@@ -52,7 +55,13 @@ void main() {
   // orbs (iUv.z < 0) draw smaller at full view (G-206).
   // PLUGIN_GOAL 152: near the camera, nodes AND pictures shrink -- clumping
   // answered by locally shrinking, not by moving anything.
-  mv.xy += position.xy * iSize * (iUv.z < 0.0 ? uZoom : 1.0) * nearK(mv.z, iSize);
+  float s = iSize * (iUv.z < 0.0 ? uZoom : 1.0) * nearK(mv.z, iSize);
+  if (iUv.z >= 0.0 && uPxView > 0.0) {
+    float vDepth = max(-mv.z, 0.1);
+    if (uMaxPicPx > 0.0) s = min(s, uMaxPicPx * vDepth * uPxView);
+    if (iColor.r > 1.05 && uMinPicPx > 0.0) s = max(s, uMinPicPx * vDepth * uPxView);
+  }
+  mv.xy += position.xy * s;
   gl_Position = projectionMatrix * mv;
 }`;
 
@@ -86,11 +95,11 @@ void main() {
     vec2 t = vCorner * 0.5 + 0.5;
     vec4 c = texture2D(atlas, vec2(mix(vUv.x, vUv.z, t.x), mix(vUv.y, vUv.w, t.y)));
     if (c.a < 0.04) discard;
-    // A hovered picture keeps its image and glows (item 102): vColor.r - 1 is
-    // the glow -- brighter, with a soft light at its edge.
-    float hg = max(vColor.r - 1.0, 0.0);
-    float edge = smoothstep(0.62, 1.0, max(abs(vCorner.x), abs(vCorner.y)));
-    gl_FragColor = vec4(c.rgb * (1.0 + 0.35 * hg) + vec3(0.9, 0.95, 1.0) * edge * hg * 0.85, c.a * vColor.a);
+    // A hovered picture keeps its image and glows at its rim without washing
+    // out light-background diagrams to white.
+    float hg = min(max(vColor.r - 1.0, 0.0), 1.0);
+    float edge = smoothstep(0.86, 1.0, max(abs(vCorner.x), abs(vCorner.y)));
+    gl_FragColor = vec4(mix(c.rgb, vec3(0.75, 0.88, 1.0), edge * hg * 0.55), c.a * vColor.a);
   }
   #include <colorspace_fragment>
 }`;
@@ -367,7 +376,14 @@ export class SceneBatch {
   /** Pixels -> view-space units at unit depth, for the halo's floor: 2 / (H * P[1][1]). */
   setViewport(heightPx: number, projYY: number, widthPx = 0, areaPx = 0, haloPx = 0): void {
     const u = (this.halo.material as THREE.ShaderMaterial).uniforms;
-    if (heightPx > 0 && projYY > 0) u.uPxView.value = 2 / (heightPx * projYY);
+    if (heightPx > 0 && projYY > 0) {
+      const pxv = 2 / (heightPx * projYY);
+      u.uPxView.value = pxv;
+      for (const m of [this.opaque, this.clear] as any[]) {
+        const mu = m?.mesh?.material?.uniforms;
+        if (mu?.uPxView) mu.uPxView.value = pxv;
+      }
+    }
     // PLUGIN_GOAL 137(6), seen 2026-11-08: at the full 60,927-node chunk
     // view every node's additive halo (never under `haloMinPx` across) summed
     // to white -- the cloud read as one mass however the nodes were spaced.
@@ -430,7 +446,7 @@ export class SceneBatch {
     }
     return new THREE.ShaderMaterial({
       vertexShader: VERT, fragmentShader: FRAG,
-      uniforms: { atlas: { value: this.atlas }, uHue: { value: 0 }, uZoom: { value: this.zoom }, uNear: { value: 0 }, uNearMin: { value: this.nearMin } },
+      uniforms: { atlas: { value: this.atlas }, uHue: { value: 0 }, uZoom: { value: this.zoom }, uNear: { value: 0 }, uNearMin: { value: this.nearMin }, uPxView: { value: 0.002 }, uMaxPicPx: { value: 28.0 }, uMinPicPx: { value: 22.0 } },
       transparent: translucent, depthWrite: !translucent,
     });
   }

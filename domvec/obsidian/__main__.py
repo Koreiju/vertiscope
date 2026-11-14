@@ -24,7 +24,7 @@ def main(argv=None) -> int:
     # native crash (`D-23`); every option after the workspace is serve's.
     if argv[:1] == ["supervise"]:
         from .supervise import supervise
-        rest = argv[1:]
+        rest = [a for a in argv[1:] if a != "supervise"]
         if "--workspace" not in rest:
             print("supervise needs --workspace", file=sys.stderr)
             return 2

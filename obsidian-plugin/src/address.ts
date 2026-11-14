@@ -106,6 +106,7 @@ export function unitOf(lines: any[], element: string, min = 3, max = 60): { at: 
       if (up0 && !(globalThis as any).__domvecPlantItemAlways && isListAbove(up0, addrs.filter(Boolean))
           && isProseItem(itemAt, addrs.filter(Boolean) as string[])
           && addrs.filter((a) => a && (a === up0 || a.startsWith(up0 + "/"))).length <= max) { at = up0; continue; }
+      if (pick.length >= lines.length) return null;
       return { at, lines: pick };
     }
     // A level holding a code block is a whole unit (G-233).
@@ -150,6 +151,12 @@ export function isProseItem(item: string, under: string[]): boolean {
  * lines are other items' (a tile whose own lines had not all streamed yet
  * climbed into the grid and showed a neighbour, 2026-10-17).
  */
+const PROSE_TAGS = new Set([
+  "p", "span", "a", "em", "strong", "b", "i", "u", "s", "sub", "sup",
+  "code", "pre", "blockquote", "h1", "h2", "h3", "h4", "h5", "h6",
+  "ul", "ol", "dl", "table", "thead", "tbody", "tfoot", "figure", "figcaption",
+]);
+
 export function isListAbove(parent: string, addrs: string[]): boolean {
   const kinds = new Map<string, Set<string>>();
   for (const a of addrs) {
@@ -157,9 +164,11 @@ export function isListAbove(parent: string, addrs: string[]): boolean {
     const step = a.slice(parent.length + 1).split("/")[0];
     const m = /^([^\[]+)\[(\d+)\]$/.exec(step);
     if (!m) continue;
-    const set = kinds.get(m[1]) || new Set<string>();
+    const tag = m[1].toLowerCase();
+    if (PROSE_TAGS.has(tag)) continue;
+    const set = kinds.get(tag) || new Set<string>();
     set.add(m[2]);
-    kinds.set(m[1], set);
+    kinds.set(tag, set);
   }
   for (const set of kinds.values()) if (set.size >= 2) return true;
   return false;

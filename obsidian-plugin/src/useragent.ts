@@ -170,8 +170,19 @@ export class UserAgent {
     // Never nearer than `stopFloor(n)`.
     if (!bend) {
       const cam = this.host.camera(), ctl = this.host.controls();
-      const d = cam && ctl && ctl.target ? Math.hypot(cam.position.x - ctl.target.x, cam.position.y - ctl.target.y, cam.position.z - ctl.target.z) : this.floor;
-      this.standoff = this.plantIgnoreZoom ? this.floor : Math.max(this.stopFloor(n), Number.isFinite(d) ? d : 0);
+      const dTarget = cam && ctl && ctl.target ? Math.hypot(cam.position.x - ctl.target.x, cam.position.y - ctl.target.y, cam.position.z - ctl.target.z) : this.floor;
+      const dNode = cam && n && Number.isFinite(n.x) ? Math.hypot(cam.position.x - n.x, cam.position.y - n.y, cam.position.z - (n.z || 0)) : dTarget;
+      const anchorD = Number.isFinite(dTarget) && dTarget > 1e-3 ? dTarget : (Number.isFinite(dNode) && dNode > 1e-3 ? dNode : this.floor);
+      if (cam && ctl && ctl.target && Number.isFinite(anchorD) && anchorD > 1e-3) {
+        const { back } = this.axes();
+        ctl.target.set(cam.position.x - back.x * anchorD, cam.position.y - back.y * anchorD, cam.position.z - back.z * anchorD);
+        if (ctl._zoomStart && ctl._zoomEnd) ctl._zoomStart.copy(ctl._zoomEnd);
+        if (ctl._panStart && ctl._panEnd) ctl._panStart.copy(ctl._panEnd);
+        if (typeof ctl._lastAngle === "number") ctl._lastAngle = 0;
+      }
+      const sf = this.stopFloor(n);
+      const floorHere = Number.isFinite(dNode) && dNode < sf ? Math.max(1.5, dNode) : sf;
+      this.standoff = this.plantIgnoreZoom ? this.floor : Math.max(floorHere, Number.isFinite(anchorD) ? anchorD : 0);
       this.stats.standoff = Math.round(this.standoff * 10) / 10;
     }
     this.target = n;
@@ -205,24 +216,28 @@ export class UserAgent {
     if (this.mode === "ego") this.craftAt = { x: p.x, y: p.y, z: p.z };
     if (this.rezoom) {
       this.rezoom = false;
-      const dz = Math.hypot(p.x - t.x, p.y - t.y, p.z - t.z);
-      if (Number.isFinite(dz)) { this.standoff = Math.max(this.stopFloor(n), dz); this.stats.standoff = Math.round(this.standoff * 10) / 10; }
+      const dT = Math.hypot(p.x - t.x, p.y - t.y, p.z - t.z);
+      const dN = n && Number.isFinite(n.x) ? Math.hypot(p.x - n.x, p.y - n.y, p.z - (n.z || 0)) : dT;
+      const dz = Math.min(dT, dN);
+      if (Number.isFinite(dz)) { this.standoff = Math.max(1.5, dz); this.vel = v3(); this.stats.standoff = Math.round(this.standoff * 10) / 10; }
     }
     let want = v3();
     let arrived = false;
+    let turned = false;
     if (n && Number.isFinite(n.x) && !this.paused && this.throttle > 0) {
       const nx = n.x, ny = n.y, nz = n.z || 0;
       // Aim: the look point turns onto the node at the craft's turn rate.
       const ka = 1 - Math.exp(-this.turn * 2 * dt);
       t.x += (nx - t.x) * ka; t.y += (ny - t.y) * ka; t.z += (nz - t.z) * ka;
+      turned = true;
       const to = v3(nx - p.x, ny - p.y, nz - p.z), d = len(to);
       this.stats.last_d = Math.round(d * 10) / 10;
-      // Signed: zoomed in nearer than the standoff, the craft backs out to it.
-      const left = d - this.standoff;
-      if (Math.abs(left) > 0.25) {
+      // Never back out when already zoomed in closer than `standoff`.
+      const left = Math.max(0, d - this.standoff);
+      if (left > 0.25) {
         // The speed the throttle asks for, capped so the craft can still stop
         // at the standoff: v^2 = 2 a s.
-        const speed = Math.min(this.throttle * this.vmax, Math.sqrt(2 * this.accel * Math.abs(left))) * Math.sign(left);
+        const speed = Math.min(this.throttle * this.vmax, Math.sqrt(2 * this.accel * left));
         want = v3(to.x / d * speed, to.y / d * speed, to.z / d * speed);
       } else {
         this.stats.at_floor++;
@@ -262,23 +277,24 @@ export class UserAgent {
     this.stats.speed = Math.round(speed * 10) / 10;
     if (speed > 1e-4) {
       let step = v3(this.vel.x * dt, this.vel.y * dt, this.vel.z * dt);
-      // The floor is HARD: no step ends nearer the target than it. And a
-      // step that would cross the standoff lands ON it, at rest.
+      // The floor is HARD when closing in: a step that would cross the
+      // standoff lands ON it, at rest, without ever snapping backwards.
       if (n && Number.isFinite(n.x)) {
         const nz = n.z || 0;
         const d0 = Math.hypot(p.x - n.x, p.y - n.y, p.z - nz);
         const q = v3(p.x + step.x - n.x, p.y + step.y - n.y, p.z + step.z - nz);
         const dq = len(q);
         const stop = this.plantIgnoreZoom ? this.floor : this.standoff;
-        const hard = Math.min(this.floor, stop);
-        const crossed = (d0 >= stop && dq < stop) || (d0 <= stop && dq > stop);
-        if (dq < hard || crossed) {
-          const k = (dq < hard ? hard : stop) / Math.max(dq, 1e-9);
+        if (d0 >= stop && dq < stop) {
+          const k = stop / Math.max(dq, 1e-9);
           step = v3(n.x + q.x * k - p.x, n.y + q.y * k - p.y, nz + q.z * k - p.z);
           this.vel = v3();
         }
       }
       p.x += step.x; p.y += step.y; p.z += step.z;
+      this.stats.frames++;
+      ctl.update?.();
+    } else if (turned) {
       this.stats.frames++;
       ctl.update?.();
     }

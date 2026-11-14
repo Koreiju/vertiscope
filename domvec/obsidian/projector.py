@@ -88,6 +88,9 @@ BATCH = 256
 #: times (wait p50 0.4 ms), where the planted window made it wait (140 ms).
 ADAPTIVE_WINDOW = [True]
 PLANT_FIXED_BATCH = [False]
+#: Planted (2026-11-14): a drain re-places a placed chunk whose vector is
+#: unchanged -- a hover's re-ask moves it.
+PLANT_REPLACE_UNCHANGED = [False]
 PLANT_NO_RECONCILE = [False]
 PLANT_WINDOW_ALWAYS = [False]
 #: Planted (G-80): a hovered chunk found without its vector is DROPPED from
@@ -280,6 +283,7 @@ class ChunkProjector:
         self.lock = threading.RLock()
         #: Held chunks found no longer drawable (G-270), reported gone by the drain.
         self.not_drawable: set = set()
+        self.unchanged_skipped = 0
         self.projection = None
         #: Planted: the drain takes the work lock, as before (placement waits for captures).
         self.plant_drain_locks = False
@@ -629,7 +633,13 @@ class ChunkProjector:
                     self.hot_retry[cid] = time.monotonic() + HOT_RETRY_EVERY_S
                     self.hot_stats["kept"] += 1
             else:
-                keep.append((cid, chunk.url, np.asarray(vector, dtype=np.float32)))
+                v = np.asarray(vector, dtype=np.float32)
+                old = self.vec.get(cid)
+                if (not PLANT_REPLACE_UNCHANGED[0] and old is not None and cid in self.pos
+                        and self.url_of.get(cid) == chunk.url and old.shape == v.shape and np.array_equal(old, v)):
+                    self.unchanged_skipped += 1      # placed, unchanged: stays (see PageProjector.drain)
+                    continue
+                keep.append((cid, chunk.url, v))
         ms_transform = 0.0
         where = colour = None
         if keep:
@@ -1687,9 +1697,9 @@ class PageProjector(ChunkProjector):
                 here = np.asarray(page_pos[u], dtype=np.float64)
                 d = np.linalg.norm(P - here, axis=1)
                 d = d[d > 1e-9]
-                room = float(d.min()) * self.NEIGHBOURHOOD if len(d) else 1.0
                 norms = np.asarray([np.linalg.norm(o) for _c, o in items])
                 reach = float(np.percentile(norms, 90)) if len(norms) else 0.0
+                room = float(d.min()) * self.NEIGHBOURHOOD if len(d) else 45.0
                 if u in self.page_scale and len(items) < 8:
                     scale = self.page_scale[u]          # a few streamed chunks
                 else:
@@ -2192,6 +2202,7 @@ class PageProjector(ChunkProjector):
         started = time.perf_counter()
         read = workspace.store.chunks_for_placement(batch)
         pages = set()
+        changed = set()
         with self.lock:
             for cid, chunk, vector in read:
                 drawable = (chunk is not None and not chunk.redundant
@@ -2199,10 +2210,24 @@ class PageProjector(ChunkProjector):
                             and vector and any(vector))
                 was = self.url_of.get(cid)
                 if drawable:
-                    self.vec[cid] = np.asarray(vector, dtype=np.float32)
+                    new = np.asarray(vector, dtype=np.float32)
+                    old = self.vec.get(cid)
+                    # A placed chunk whose vector has not changed stays where
+                    # it is: a hover's `/focus` re-queued it, and the model
+                    # an online update has since moved would otherwise put it
+                    # 2-7 units elsewhere -- every first hover on a page made
+                    # its chunks jump (2026-11-14). UMAP is the authority over
+                    # a placement, not over a re-ask. Planted
+                    # PLANT_REPLACE_UNCHANGED.
+                    if (not PLANT_REPLACE_UNCHANGED[0] and old is not None and cid in self.pos
+                            and was == chunk.url and old.shape == new.shape and np.array_equal(old, new)):
+                        self.unchanged_skipped += 1
+                        continue
+                    self.vec[cid] = new
                     self.url_of[cid] = chunk.url
                     self.by_url.setdefault(chunk.url, set()).add(cid)
                     pages.add(chunk.url)
+                    changed.add(cid)
                     if was and was != chunk.url:
                         self.by_url.get(was, set()).discard(cid)
                         pages.add(was)
@@ -2219,7 +2244,7 @@ class PageProjector(ChunkProjector):
         where, colour = (projection.place(np.asarray(X, dtype=np.float32))
                          if urls else (None, None))
         # The chunks of this batch, through the same fit (Addendum IX).
-        mine = {c: self.vec[c] for c, _ch, _v in read if c in self.vec}
+        mine = {c: self.vec[c] for c, _ch, _v in read if c in self.vec and (c in changed or c not in self.pos)}
         cpos, chsv = self._place_chunks(projection, mine)
         ms_transform = (time.perf_counter() - t) * 1000
         with self.lock:

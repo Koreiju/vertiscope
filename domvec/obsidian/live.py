@@ -39,10 +39,20 @@ class Live:
 
     def __init__(self, sidecar: str = "http://127.0.0.1:8788",
                  cdp: str = "", timeout: float = 120.0):
-        self.sidecar = sidecar.rstrip("/")
+        import os as _os
+        resolved = sidecar.rstrip("/")
+        if resolved == "http://127.0.0.1:8788" and not _os.environ.get("DOMVEC_SIDECAR"):
+            try:
+                cfg = Path(__file__).resolve().parents[2] / ".obsidian" / "plugins" / "domvec-bridge" / "data.json"
+                if cfg.exists():
+                    s_url = str(json.loads(cfg.read_text(encoding="utf-8")).get("sidecar") or "").rstrip("/")
+                    if s_url:
+                        resolved = s_url
+            except Exception:
+                pass
+        self.sidecar = resolved
         # `DOMVEC_CDP` names the app's debug port when 9222 is taken (a Chrome
         # holding 9222 answered for the app on 2026-10-07).
-        import os as _os
         self.cdp = (cdp or _os.environ.get("DOMVEC_CDP") or "http://127.0.0.1:9222").rstrip("/")
         self.timeout = timeout
         self._ws = None
