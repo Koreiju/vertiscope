@@ -508,6 +508,11 @@ export class GraphView extends ItemView {
     drift.setAttr("aria-label", "Idle drift: the camera turns and the colours cycle after a few seconds of no input");
     this.driftButton = drift;
     drift.onclick = () => { this.driftEnabled = !this.driftEnabled; };
+    // The ego graph as the 2D plane or in 3D (158).
+    const egoView = bar.createEl("button", { text: "ego 2D" });
+    egoView.addClass("domvec-ego-view-toggle");
+    egoView.setAttr("aria-label", "Ego graph: the flat 2D plane facing you, or its 3D layout");
+    egoView.onclick = () => { if (!this.craft) return; this.craft.flatView = !this.craft.flatView; (this.craft as any).key = ""; egoView.setText(this.craft.flatView ? "ego 2D" : "ego 3D"); };
     const side = bar.createEl("button", { text: "sidecar ○" });
     side.addClass("domvec-sidecar-trigger");
     this.sidecarButton = side;
@@ -529,6 +534,18 @@ export class GraphView extends ItemView {
     // canvas is a hand on the stick -- the flight and its velocity dropped --
     // and the wheel re-reads the distance a flight in progress stops at.
     canvas.addEventListener("pointerdown", (e: PointerEvent) => { this.downAt = [e.clientX, e.clientY]; if (!this.plantHoldFlight) this.agent.release(); }, { passive: true, capture: true });
+    // Pinch (Chromium: wheel + ctrl) or shift+scroll zooms the 2D EGO PLANE;
+    // a plain scroll stays the 3D view's zoom (158). Shift+wheel arrives as a
+    // HORIZONTAL delta on Windows, so either axis counts. Capture phase, so
+    // the orbit controls and the zoom-through never see it. Planted
+    // `plantPlaneZoomIs3D`: every scroll zooms the 3D view, as before.
+    canvas.addEventListener("wheel", (e: WheelEvent) => {
+      if (this.plantPlaneZoomIs3D || !this.craft || !(e.shiftKey || e.ctrlKey)) return;
+      const d = e.deltaY || e.deltaX;
+      if (!d) return;
+      e.preventDefault(); e.stopImmediatePropagation();
+      this.craft.zoomPlane(Math.exp(-d * (e.ctrlKey ? 0.01 : 0.0015)));
+    }, { passive: false, capture: true });
     // Grab a craft node and drag: the whole ego graph moves (2026-11-14: "I
     // should also be able to click and drag the ego graph when grabbing one
     // of the nodes"). Capture phase on the canvas, so the orbit controls never
@@ -565,6 +582,8 @@ export class GraphView extends ItemView {
       if (!this.downAt || Math.hypot(e.clientX - this.downAt[0], e.clientY - this.downAt[1]) > 4) return;
       // A craft node: its panel on the plane, or closed back into it (item 65).
       const cn = this.craft?.nodeAt(e.clientX, e.clientY);
+      // The codebase hub: a click unnests its modules, or folds them back.
+      if (cn && cn.id === "craft:codebase") { this.craft!.toggleCode(); return; }
       if (cn) {
         // T-8 (PLUGIN_GOAL 145): a CLICK opens the node's halo (retrieval is
         // the primary act); a DOUBLE-click opens / closes its panel. The click
@@ -576,6 +595,9 @@ export class GraphView extends ItemView {
           this.craftClicks.double++; this.craft!.click(cn); return;
         }
         this.craftClickAt = now; this.craftClickId = cn.id;
+        // Selected at once, and SEEN selected (158: "I also can't select the
+        // nodes"): a ring on it; the halo still opens after the double-click window.
+        this.craft!.select(cn.id);
         window.clearTimeout(this.craftClickTimer);
         this.craftClickTimer = window.setTimeout(() => { this.craftClickAt = 0; this.craftClicks.halo++; if (cn.path) this.onHalo(cn.path); }, 330);
         return;
@@ -6667,6 +6689,11 @@ export class GraphView extends ItemView {
         // Third person (G-333): the craft is drawn at the vehicle even in the ego view.
         mode: () => (this.agent.mode === "ego" && this.agent.view === "third" ? "third" : this.agent.mode),
         anchor: () => this.agent.craftAt,
+        planeAt: (path: string) => {
+          const q = (window as any).__domvecPlane?.panelOf?.(path);
+          const c = q?.card as HTMLElement | undefined;
+          return c ? { x: c.offsetLeft + c.offsetWidth / 2, y: c.offsetTop + c.offsetHeight / 2 } : null;
+        },
         heading: () => this.agent.headingNow(),
         world: () => this.shellOf((this.graph as any)?.graphData?.().nodes || []),
         // A chunk's node, else its page's (drawn whether or not it is open).
@@ -6732,6 +6759,8 @@ export class GraphView extends ItemView {
     this.craft.frame();
     this.drawTethers();
   }
+  /** Planted: pinch / shift+scroll zoom the 3D view, as before 158. */
+  plantPlaneZoomIs3D = false;
   /** Planted: a press on a craft node orbits the camera, as before. */
   plantNoCraftDrag = false;
   /** Planted (item 97): the wheel over a craft node zooms as anywhere else. */

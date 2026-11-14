@@ -324,3 +324,32 @@ queues behind the busy task, so the pause had nothing to land in.
 Open: `build/` (253k files) is inside the vault at all -- Obsidian loads and
 watches every one of them. Moving the stores out of the vault's scan (a
 dot-folder, or a vault root that is not the repo) is the user's call.
+
+## PLUGIN_GOAL 157-158 -- status, item by item (2026-11-14)
+
+Done, live-checked (check id, planted arm):
+- Freeze ("nothing is working"): Obsidian metadata cache, quadratic after a vault rename; reverted; `hang_watch`, fast-failing `live_health`. (above)
+- Sidecar console windows: `procs.hidden` on every spawn; tests/test_procs_windows.py (planted window caught). Live GUI-path census pending an MCP restart (the running MCP predates `screen`).
+- Ego missing: drawn in first person as an inset (G-299; hidden / lens arms).
+- Ego shake: stale matrixWorld under the render hook; G-337 spread 0 vs 2.61 planted.
+- Drag the ego graph by a node: G-337 (60 px; planted: camera turns 21 deg).
+- Larger nodes, one shape: G-337 (23 px; one sphere geometry).
+- Click on a 3D node navigated EVERY browser tab: G-335 (1 vs 5 planted).
+- Idle drift not turning: stale stored "off"; new key, bar toggle; G-156 now on the reader's default path.
+- Ego = tool space: the repository code net off the ego by default (G-318-net tool_space arm); when on (codeOnEgo), folded behind one codebase hub.
+- Clumping / 2D vs 3D / select: relax with collision ellipse + margin + boundary; 2D view (plane facing the camera, from plane-card positions where a note has a card) with a bar toggle; click selects with a ring (G-338, G-339 -- results pending the reader-idle run).
+
+Measured, NOT reproduced (instrument kept):
+- Hover then click does not open the panel: dimmed-in-front picks 0/300 even planted (hypothesis rejected); hovered points blocked by another element 0/120. G-336's synthetic press/release opened 0/12 in BOTH arms -- the instrument is not yet shown able to open a panel; cross-check with a trusted CDP click (`cdp.mjs --click`) is owed before reading it either way.
+
+Open (not started this session):
+- Retrieval latency + the max-results control re-triggering retrieval; profiling it through the MCP.
+- Dedup on revisit (URL lookup before rescan; a time dimension for shared trie addresses); Bandcamp / archive.org stream edge cases; scentless (CDP DOM.getDocument pierce) scanning comparison.
+- UMAP disorganisation: what text the embedder sees (URLs etc.).
+- Crystal Vaults encyclopedia renders no crystals in the browser cell.
+- VS Code editor (Monaco + marketplace), code tabs dragged into the 2D graph, module hub per dragged artifact; group / expand / unnest gestures in graph AND panel form.
+- Browser tab vs notebook browser cell: one linked representation.
+- Per-artifact scoping of interactions (158): each artifact panel's own tool space linked into the reservoir graph.
+- Ad-blocking beyond uBlock (YouTube ad skip): needs downloads -> the user's permission.
+- `build/` (253k files) inside the vault: the user's call where stores live.
+- Third-person framing: the world's centre can sit just off screen after a mode switch (G-299 'third' arm, NDC x -0.54..-1.08 across runs).

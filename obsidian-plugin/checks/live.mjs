@@ -10087,6 +10087,160 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-340",
+      asks: "two zooms (PLUGIN_GOAL 158: 'while scroll actions in the 3D view zoom on the 3D graph, pinching and unpinching actions or shift scroll should zoom in and out on the 2D graph plane'): in the map view, shift+scroll (sent as a horizontal delta, as Windows does) and a pinch (wheel + ctrl) scale the 2D ego plane and leave the camera's distance alone; a plain scroll moves the camera and leaves the plane's scale alone; planted (plantPlaneZoomIs3D) shift+scroll zooms the 3D view",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const frame = () => new Promise((r) => requestAnimationFrame(() => r(0)));
+          const g = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
+          const c = window.__domvecCraft;
+          if (!g || !c || !g.graph) return { error: "no graph or craft" };
+          const mode0 = g.agent.mode, s0 = c.planeScale;
+          const cam = g.graph.camera(), ctl = g.graph.controls(), el = g.graph.renderer().domElement, r = el.getBoundingClientRect();
+          const save = { p: cam.position.clone(), t: ctl.target.clone() };
+          const dist = () => cam.position.distanceTo(ctl.target);
+          const wheel = (o) => el.dispatchEvent(new WheelEvent("wheel", { clientX: r.left + r.width * 0.5, clientY: r.top + r.height * 0.3, bubbles: true, cancelable: true, ...o }));
+          try {
+            g.plantPlaneZoomIs3D = ${planted};
+            g.agent.setMode("map"); await sleep(1200);
+            const read = async (o) => { const d0 = dist(), p0 = c.planeScale; for (let i = 0; i < 5; i++) { wheel(o); await frame(); } await sleep(400); return { camera_ratio: Math.round(dist() / d0 * 1000) / 1000, plane_ratio: Math.round(c.planeScale / p0 * 1000) / 1000 }; };
+            const shift = await read({ deltaX: -100, deltaY: 0, shiftKey: true });
+            const pinch = await read({ deltaY: -20, ctrlKey: true });
+            const plain = await read({ deltaY: 100 });
+            return { planted: ${planted}, shift, pinch, plain };
+          } finally {
+            g.plantPlaneZoomIs3D = false; c.planeScale = s0; c.key = "";
+            cam.position.copy(save.p); ctl.target.copy(save.t); ctl.update?.();
+            g.agent.setMode(mode0);
+          }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        const c = clean || {}, p = planted || {};
+        const still = (x) => Math.abs(x - 1) < 0.01;
+        return {
+          pass: !c.error && c.shift.plane_ratio > 1.2 && still(c.shift.camera_ratio)
+                && c.pinch.plane_ratio > 1.2 && still(c.pinch.camera_ratio)
+                && !still(c.plain.camera_ratio) && still(c.plain.plane_ratio)
+                && !!p.shift && still(p.shift.plane_ratio),
+          evidence: { clean, planted },
+        };
+      },
+    },
+    {
+      id: "G-339",
+      asks: "the ego graph is a 2D plane you can select in (PLUGIN_GOAL 158: 'I also can't select the nodes in the 2D editor ... The 2D editor's graph is 2D truly, but the current graph clicking and dragging is in 3D ... We still want the 3D representation, but also be able to convert to our 2D plane more strictly'): in the map view with the ego graph in 2D, every craft node lies in ONE plane facing the camera (camera-space depth spread under 1% of the craft's radius) and a press-release on a note SELECTS it -- a ring drawn on it; notes with a card on the 2D plane editor take the card's place; 3D (the toggle) is the spatial layout again; planted (selection disabled) a click leaves nothing selected, (3D) the depth spreads",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const frame = () => new Promise((r) => requestAnimationFrame(() => r(0)));
+          const g = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
+          const c = window.__domvecCraft;
+          if (!g || !c || !g.graph) return { error: "no graph or craft" };
+          const planted = ${JSON.stringify(planted)};
+          const mode0 = g.agent.mode, flat0 = c.flatView, sel0 = c.select, selected0 = c.selected;
+          try {
+            c.flatView = planted !== "3d"; c.key = "";
+            if (planted === "noselect") c.select = () => {};
+            c.selected = null;
+            g.agent.setMode("map"); await sleep(1500); await frame(); await frame();
+            const cam = g.graph.camera(), el = g.graph.renderer().domElement, r = el.getBoundingClientRect();
+            cam.updateMatrixWorld();
+            const inv = cam.matrixWorldInverse;
+            const R = c.stats.radius || 10;
+            const zs = c.nodes.filter((n) => n.mesh).map((n) => n.mesh.position.clone().applyMatrix4(inv).z);
+            const depth_spread_r = zs.length ? Math.round((Math.max(...zs) - Math.min(...zs)) / R * 1000) / 1000 : null;
+            // Select: press-release on a note, through the pane's handlers.
+            const note = c.nodes.find((n) => n.kind === "note" && n.mesh);
+            let selected = null, ring = null;
+            if (note) {
+              c.group.updateMatrixWorld(true);
+              const p = note.mesh.position.clone().project(cam);
+              const x = r.left + (p.x + 1) / 2 * r.width, y = r.top + (1 - p.y) / 2 * r.height;
+              const pe = (t) => el.dispatchEvent(new PointerEvent(t, { clientX: x, clientY: y, bubbles: true, button: 0, buttons: t === "pointerdown" ? 1 : 0, pointerId: 1, pointerType: "mouse" }));
+              pe("pointerdown"); await sleep(40); pe("pointerup"); window.dispatchEvent(new PointerEvent("pointerup", { clientX: x, clientY: y, bubbles: true }));
+              await frame(); await frame(); await sleep(100);
+              selected = c.selected === note.id;
+              const rg = c.group.children.find((o) => o.geometry && o.geometry.type === "RingGeometry");
+              ring = !!rg && rg.visible && rg.position.distanceTo(note.mesh.position) < 1e-6 * Math.max(1, R) + 1e-3;
+            }
+            return { planted, view: c.stats.view, depth_spread_r, selected, ring, from_plane: c.relaxStats.from_plane, nodes: c.nodes.length };
+          } finally {
+            c.select = sel0; c.flatView = flat0; c.selected = selected0; c.key = "";
+            g.agent.setMode(mode0);
+          }
+        })()`, { timeout: 60000 });
+        const clean = await arm(null), noselect = await arm("noselect"), d3 = await arm("3d");
+        const c = clean || {};
+        return {
+          pass: !c.error && c.view === "2d" && c.depth_spread_r < 0.01 && c.selected === true && c.ring === true
+                && !!noselect && noselect.selected === false
+                && !!d3 && d3.view === "3d" && d3.depth_spread_r > 0.05,
+          evidence: { clean, noselect, d3 },
+        };
+      },
+    },
+    {
+      id: "G-338",
+      asks: "the ego graph does not clump (PLUGIN_GOAL 158: 'Still a little bit of clumping in the 2D graph layout, maybe more collision and boundary radius and force directed care'): in the first-person inset, measured in SCREEN pixels -- every node's drawn disc and every label's drawn rectangle -- no two node discs overlap, at most 10% of label pairs that could collide do, and every node is inside the inset's boundary; planted (plantNoRelax: the ego places as given, items 119/121) node discs and labels pile up",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const frame = () => new Promise((r) => requestAnimationFrame(() => r(0)));
+          const g = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
+          const c = window.__domvecCraft;
+          if (!g || !c || !g.graph) return { error: "no graph or craft" };
+          const mode0 = g.agent.mode;
+          try {
+            c.plantNoRelax = ${planted}; c.layout(); c.key = "";
+            g.agent.setMode("ego"); await sleep(1200); await frame(); await frame();
+            const cam = g.graph.camera(), el = g.graph.renderer().domElement, r = el.getBoundingClientRect();
+            const px = (v) => [(v.x + 1) / 2 * r.width, (1 - v.y) / 2 * r.height];
+            const right = new (cam.position.constructor)(1, 0, 0).applyQuaternion(cam.quaternion);
+            const up = new (cam.position.constructor)(0, 1, 0).applyQuaternion(cam.quaternion);
+            const discs = [], labels = [];
+            for (const n of c.nodes) {
+              if (!n.mesh) continue;
+              const m = n.mesh; m.geometry.computeBoundingSphere();
+              const ctr = m.position.clone(); const rad = m.geometry.boundingSphere.radius * m.scale.x;
+              const a = px(ctr.clone().project(cam)), b = px(ctr.clone().addScaledVector(right, rad).project(cam));
+              discs.push({ id: n.id, x: a[0], y: a[1], r: Math.hypot(b[0] - a[0], b[1] - a[1]) });
+            }
+            for (const sp of c.labels) {
+              const ctr = sp.position.clone();
+              const a = px(ctr.clone().addScaledVector(right, -sp.scale.x / 2).addScaledVector(up, sp.scale.y / 2).project(cam));
+              const b = px(ctr.clone().addScaledVector(right, sp.scale.x / 2).addScaledVector(up, -sp.scale.y / 2).project(cam));
+              // the drawn text is about 70% of the sprite's width, and its middle half in height
+              const w = (b[0] - a[0]), h = (b[1] - a[1]);
+              labels.push({ x0: a[0], y0: a[1] + h * 0.25, x1: a[0] + w * 0.7, y1: b[1] - h * 0.25 });
+            }
+            let discOverlap = 0;
+            for (let i = 0; i < discs.length; i++) for (let j = i + 1; j < discs.length; j++) if (Math.hypot(discs[i].x - discs[j].x, discs[i].y - discs[j].y) < discs[i].r + discs[j].r) discOverlap++;
+            let labelOverlap = 0, pairs = 0;
+            for (let i = 0; i < labels.length; i++) for (let j = i + 1; j < labels.length; j++) {
+              pairs++;
+              const A = labels[i], B = labels[j];
+              if (A.x0 < B.x1 && B.x0 < A.x1 && A.y0 < B.y1 && B.y0 < A.y1) labelOverlap++;
+            }
+            const outside = discs.filter((d) => d.x < 0 || d.y < 0 || d.x > r.width || d.y > r.height).length;
+            return { planted: ${planted}, nodes: discs.length, labels: labels.length, disc_overlaps: discOverlap, label_overlaps: labelOverlap,
+                     label_pairs: pairs, outside, node_px: discs.length ? Math.round(discs[0].r * 2) : 0, relax: { ...c.relaxStats } };
+          } finally {
+            c.plantNoRelax = false; c.layout(); c.key = "";
+            g.agent.setMode(mode0);
+          }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        const c = clean || {}, p = planted || {};
+        return {
+          pass: !c.error && c.nodes > 10 && c.disc_overlaps === 0 && c.outside === 0
+                && c.label_overlaps <= Math.max(2, Math.round(0.1 * (p.label_overlaps || 0)))
+                && p.disc_overlaps > 0 && p.label_overlaps > c.label_overlaps,
+          evidence: { clean, planted },
+        };
+      },
+    },
+    {
       id: "G-337",
       asks: "the ego inset holds still on screen while the camera moves, can be dragged by any of its nodes, and is legible (2026-11-14: 'significant shaking of the ego when moving around in the 3D graph with panning and mouse moving. I should also be able to click and drag the ego graph when grabbing one of the nodes ... see the nodes much larger'): in the first-person view, with the camera yawed every frame by the agent's own arrow key, the ego node's place on screen AT EACH DRAW moves under 0.5% of the screen; a press on a craft node and a 60 px drag moves the whole inset about 60 px and does not turn the camera; the ego node is drawn at least 10 px across; every craft node one shape (2026-11-14: 'one uniform display of node and links. No fancy shapes'); planted (plantStaleMatrices) drawn and picked where it was a frame ago -- the shake's cause; plantInsetOnTick is reported, not required: it did not discriminate once the matrices were fresh, (plantNoCraftDrag) the drag turns the camera instead",
       async run() {
@@ -10679,14 +10833,24 @@ export function makeChecks(env) {
     },
     {
       id: "G-318-net",
-      asks: "the code graph web in the ego (PLUGIN_GOAL 93-95: \"its nodes an ego-UMAP network\"): the code graph's most central modules are code nodes of the craft, joined by the calls/imports/inherits between them, placed by the ego's OWN projection of their code:// address -- and still the world's pages, drawn there; planted (plantNoCodeNet) the craft holds no module",
+      asks: "the code graph web in the ego (PLUGIN_GOAL 93-95: \"its nodes an ego-UMAP network\"): the code graph's most central modules are code nodes of the craft, joined by the calls/imports/inherits between them, placed by the ego's OWN projection of their code:// address -- and still the world's pages, drawn there; OFF the ego by default -- the ego is its tool space (PLUGIN_GOAL 158) -- and when put on it (codeOnEgo), FOLDED behind one codebase hub, unfolded by a click, its modules then on the hub, none on the ego; planted (plantNoCodeNet) the craft holds no module",
       async run() {
         const arm = (planted) => evaluate(`(async () => {
           const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
           const until = async (ok, ms) => { for (let t = 0; t < ms && !(await ok()); t += 400) await sleep(400); return !!(await ok()); };
           const c = window.__domvecCraft, v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
           c.plantNoCodeNet = ${planted};
+          const open0 = c.codeOpen, onEgo0 = c.codeOnEgo;
           try {
+            // The ego is its TOOL SPACE (158): by default no code net on it at all.
+            c.codeOnEgo = false; c.dirty(); await sleep(2500); await until(() => !c.building, 20000);
+            const tool_space = { hub: c.nodes.some((n) => n.id === "craft:codebase"), modules: c.nodes.filter((n) => n.id.startsWith("craft:mod:")).length };
+            c.codeOnEgo = true;
+            // Folded by default (158): the hub alone, no module drawn.
+            c.codeOpen = false; c.dirty();
+            await until(() => !c.building && c.nodes.length > 0, 20000); await sleep(2500); await until(() => !c.building, 20000);
+            const folded = { hub: c.nodes.some((n) => n.id === "craft:codebase"), modules: c.nodes.filter((n) => n.id.startsWith("craft:mod:")).length, total: c.stats.modules_total };
+            c.codeOpen = true;
             c.dirty();
             const want = ${planted} ? 0 : 8;
             await until(() => !c.building && (${planted} ? c.stats.modules === 0 : c.stats.modules >= want), 30000);
@@ -10696,17 +10860,21 @@ export function makeChecks(env) {
             const modEdges = c.edges.filter((e) => e.kind === "module").length;
             const urls = mods.map((n) => n.path);
             const hiddenInWorld = urls.filter((u) => v.egoUrls && v.egoUrls.has(u)).length;
-            return { planted: ${planted}, modules: mods.length, module_edges: modEdges, by_ego: c.stats.modules_by_ego,
+            const onHub = c.edges.filter((e) => e.a === "craft:codebase" && e.b.startsWith("craft:mod:")).length;
+            const onEgo = c.edges.filter((e) => e.kind === "root" && e.b.startsWith("craft:mod:")).length;
+            return { planted: ${planted}, tool_space, folded, on_hub: onHub, on_ego: onEgo, modules: mods.length, module_edges: modEdges, by_ego: c.stats.modules_by_ego,
                      labels: mods.slice(0, 6).map((n) => n.label), hidden_in_world: hiddenInWorld,
                      distinct_places: new Set(mods.map((n) => [n.local.x, n.local.y, n.local.z].map((x) => Math.round(x)).join(","))).size };
           } finally {
-            c.plantNoCodeNet = false; c.dirty();
+            c.plantNoCodeNet = false; c.codeOpen = open0; c.codeOnEgo = onEgo0; c.dirty();
           }
         })()`, { timeout: 90000 });
         const clean = await arm(false);
         const planted = await arm(true);
         const ok = (x) => !!x && x.modules >= 8 && x.module_edges >= 5 && x.by_ego >= Math.ceil(x.modules / 2)
-          && x.hidden_in_world === 0 && x.distinct_places === x.modules;
+          && x.hidden_in_world === 0 && x.distinct_places === x.modules
+          && x.tool_space && !x.tool_space.hub && x.tool_space.modules === 0
+          && x.folded && x.folded.hub && x.folded.modules === 0 && x.folded.total >= 8 && x.on_hub === x.modules && x.on_ego === 0;
         return { pass: ok(clean) && !!planted && planted.modules === 0, evidence: { clean, planted } };
       },
     },

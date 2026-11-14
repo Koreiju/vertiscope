@@ -47,6 +47,8 @@ export interface CraftNode {
   id: string; kind: CraftKind; path: string; line: number; label: string;
   /** Where in the craft's own frame. */
   local: { x: number; y: number; z: number };
+  /** The first-person inset's layout: the plane facing the lens, relaxed. */
+  flat?: { x: number; y: number; z: number };
   mesh?: any;
 }
 export interface CraftEdge { a: string; b: string; kind: "root" | "contains" | "order" | "ref" | "forward" | "instance" | "module" }
@@ -58,6 +60,8 @@ export interface CraftHost {
   camera(): any;
   canvas(): HTMLElement | null;
   mode(): string;
+  /** Where a note's card sits on the 2D plane editor, in plane pixels, or null. */
+  planeAt?(path: string): { x: number; y: number } | null;
   /** Where the agent's craft is: its last place flying, or null. */
   anchor(): V3 | null;
   /** The vehicle's heading, a unit vector (PLUGIN_GOAL 146): the craft's own
@@ -129,9 +133,40 @@ export class Craft {
   edges: CraftEdge[] = [];
   stats = { builds: 0, notes: 0, cells: 0, trees: 0, web: 0, edges: 0, io: 0, refs: 0, visible: false, opened: 0, closed: 0,
             projection: "", placed_by_ego: 0, io_to_ego: 0, lit: 0, readouts: 0, reattached: 0,
-            anchor: null as V3 | null, radius: 0, map_scale: 0, map_left_overlapping: 0, modules: 0, modules_by_ego: 0 };
+            anchor: null as V3 | null, radius: 0, map_scale: 0, map_left_overlapping: 0, modules: 0, modules_by_ego: 0, modules_total: 0 };
   /** Planted (G-318): the code graph's modules are not the ego's. */
   plantNoCodeNet = false;
+  /** 2D: the craft drawn as the FLAT plane facing the camera, in every view;
+   *  picking and dragging then happen in that plane (PLUGIN_GOAL 158: "The 2D
+   *  editor's graph is 2D truly, but the current graph clicking and dragging
+   *  is in 3D ... We still want the 3D representation, but also be able to
+   *  convert to our 2D plane more strictly"). 3D: the spatial layout. */
+  flatView = true;
+  /** The 2D plane's own zoom (158: "pinching and unpinching actions or shift
+   *  scroll should zoom in and out on the 2D graph plane"): positions, nodes
+   *  and labels together; the 3D view's scroll zoom is untouched. */
+  planeScale = 1;
+  zoomPlane(factor: number): number {
+    this.planeScale = Math.max(0.3, Math.min(6, this.planeScale * factor));
+    this.key = ""; this.zoomStats.zooms++; this.zoomStats.scale = Math.round(this.planeScale * 1000) / 1000;
+    return this.planeScale;
+  }
+  zoomStats = { zooms: 0, scale: 1 };
+  /** The selected craft node (a click), drawn with a ring. */
+  selected: string | null = null;
+  private selRing: any = null;
+  select(id: string | null): void { this.selected = id; this.key = ""; this.selectStats.selects++; }
+  selectStats = { selects: 0 };
+  /** Planted: plane cards ignored -- the flat layout is the 3D one squashed. */
+  plantFlatIgnoresPlane = false;
+  /** The repository's code net on the ego (off: the ego is its tool space, 158). */
+  codeOnEgo = false;
+  /** The codebase hub unfolded (a click on it toggles). */
+  codeOpen = false;
+  /** Planted: the modules hang off the ego, always drawn (before 158). */
+  plantCodeUnfolded = false;
+  toggleCode(): boolean { this.codeOpen = !this.codeOpen; this.dirty(); this.foldStats.toggles++; return this.codeOpen; }
+  foldStats = { toggles: 0 };
   /** Planted (G-324): every craft node on a sphere by bearing, the map's distances dropped. */
   plantSphereEgo = false;
   /** Planted (G-302): a plane panel that is not a slate or a ran notebook is not the craft's. */
@@ -342,14 +377,35 @@ export class Craft {
       // calls / imports / inherits between them -- and posted into the ego set,
       // so the ego's OWN projection places them (item 76). Planted `plantNoCodeNet`.
       const modUrls: string[] = [];
-      const net = this.plantNoCodeNet || !this.host.codeNet ? null : await this.host.codeNet().catch(() => null);
+      // THE EGO IS ITS TOOL SPACE (PLUGIN_GOAL 158: "Most things attached to
+      // the ego are about code backends to the app itself ... It's supposed to
+      // be a more compact representation of the *tool space* of the ego (i.e.
+      // web browser, attached artifacts, interactions with the database)"):
+      // the repository's code net is OFF the ego unless `codeOnEgo`.
+      const net = this.plantNoCodeNet || !this.codeOnEgo || !this.host.codeNet ? null : await this.host.codeNet().catch(() => null);
+      // FOLDED behind one hub by default (PLUGIN_GOAL 158: "The computation
+      // graph's complexity and illegibility may mean improvements required to
+      // the architecture of what code is currently attached to the ego and
+      // how"): every module hung off the ego itself -- 12 root edges and 27
+      // module edges, always drawn. Now ONE `codebase` node on the ego, a
+      // black box a click unnests: the modules then hang off the hub, not the
+      // ego. Still all posted to the ego set, so its projection places them.
+      // Planted `plantCodeUnfolded`: every module on the ego, as before.
       if (net && net.nodes.length) {
-        for (const m of net.nodes) {
-          if (!m.url) continue;
+        const unfolded = this.plantCodeUnfolded || this.codeOpen;
+        const hubId = "craft:codebase";
+        const real = net.nodes.filter((m) => !!m.url);
+        this.stats.modules_total = real.length;
+        if (!this.plantCodeUnfolded) {
+          nodes.push({ id: hubId, kind: "code", path: "", line: -1, label: "codebase (" + real.length + (unfolded ? ") \u25be" : ") \u25b8"), local: { x: 0, y: 0, z: 0 } });
+          edges.push({ a: ego.id, b: hubId, kind: "root" });
+        }
+        for (const m of real) {
+          modUrls.push(m.url);
+          if (!unfolded) continue;
           const id = "craft:mod:" + m.name;
           nodes.push({ id, kind: "code", path: m.url, line: -1, label: m.name.split(".").slice(-1)[0] + " (module)", local: { x: 0, y: 0, z: 0 } });
-          edges.push({ a: ego.id, b: id, kind: "root" });
-          modUrls.push(m.url);
+          edges.push(this.plantCodeUnfolded ? { a: ego.id, b: id, kind: "root" } : { a: hubId, b: id, kind: "contains" });
         }
         const have = new Set(nodes.map((n) => n.id));
         for (const e of net.edges) {
@@ -357,7 +413,7 @@ export class Craft {
           if (have.has(a) && have.has(b)) edges.push({ a, b, kind: "module" });
         }
       }
-      this.stats.modules = modUrls.length;
+      this.stats.modules = nodes.filter((n) => n.id.startsWith("craft:mod:")).length;
       const vaultName = app.vault.getName();
       this.host.postEgo?.(nodes.filter((n) => n.kind === "note" || n.kind === "ego").map((n) => "vault://" + vaultName + "/" + n.path).concat(modUrls));
       let refs = 0;
@@ -475,6 +531,96 @@ export class Craft {
       });
     });
     this.stats.placed_by_ego = byEgo;
+    this.relax(R);
+  }
+
+  /** Planted: the layout as placed, clumps and all (items 119/121). */
+  plantNoRelax = false;
+  relaxStats: any = { from_plane: 0, iters: 0, overlaps_before: 0, overlaps_after: 0, flat_overlaps_before: 0, flat_overlaps_after: 0, max_shift: 0 };
+
+  /**
+   * Collision, a boundary, and force-directed care (PLUGIN_GOAL 158: "Still a
+   * little bit of clumping in the 2D graph layout, maybe more collision and
+   * boundary radius and force directed care"). Each node is held to its ego
+   * place by a spring, linked nodes by a weaker one, and pushed off any node
+   * inside its collision ellipse -- wide, because a label runs to the right of
+   * its node. All inside a boundary radius. Run twice: in 3D for the map view
+   * (`local`), and flattened to the plane facing the lens for the first-person
+   * inset (`flat`, z = 0), where what the reader sees is exactly that plane.
+   */
+  private relax(R: number): void {
+    const nodes = this.nodes;
+    for (const n of nodes) { if (!n.local) n.local = { x: 0, y: 0, z: 0 }; n.flat = { x: n.local.x, y: n.local.y, z: 0 }; }
+    if (this.plantNoRelax || nodes.length < 2) return;
+    const idx = new Map(nodes.map((n, i) => [n.id, i]));
+    const links = this.edges.map((e) => [idx.get(e.a), idx.get(e.b)]).filter(([a, b]) => a !== undefined && b !== undefined) as [number, number][];
+    // Collision ellipse half-axes: a label is ~0.4R wide (x1.4 in the inset)
+    // and ~0.14R tall; the node itself 0.05R.
+    const AX = R * 0.34, AY = R * 0.16, AZ = R * 0.16, BOUND = R * 2.2;
+    const run = (key: "local" | "flat", flat: boolean) => {
+      const P = nodes.map((n) => ({ ...(n as any)[key] }));
+      const home = P.map((p) => ({ ...p }));
+      const overlaps = () => { let c = 0; for (let i = 0; i < P.length; i++) for (let j = i + 1; j < P.length; j++) { const dx = (P[j].x - P[i].x) / AX, dy = (P[j].y - P[i].y) / AY, dz = flat ? 0 : (P[j].z - P[i].z) / AZ; if (dx * dx + dy * dy + dz * dz < 1) c++; } return c; };
+      const before = overlaps();
+      let it = 0;
+      for (; it < 300; it++) {
+        const F = P.map(() => ({ x: 0, y: 0, z: 0 }));
+        let hit = 0;
+        for (let i = 0; i < P.length; i++) for (let j = i + 1; j < P.length; j++) {
+          let dx = (P[j].x - P[i].x) / AX, dy = (P[j].y - P[i].y) / AY, dz = flat ? 0 : (P[j].z - P[i].z) / AZ;
+          let d = Math.hypot(dx, dy, dz);
+          if (d >= 1.15) continue;   // pushed to a MARGIN past touching: at 1.0 the home spring held them just inside
+          if (d < 1) hit++;
+          if (d < 1e-6) { const a = (i * 2.399 + j) % (2 * Math.PI); dx = Math.cos(a); dy = Math.sin(a); dz = 0; d = 1e-6; }
+          const push = (1.15 - d) * 0.5;
+          const ux = dx / Math.max(d, 1e-6), uy = dy / Math.max(d, 1e-6), uz = dz / Math.max(d, 1e-6);
+          F[i].x -= ux * push * AX; F[i].y -= uy * push * AY; F[i].z -= uz * push * AZ;
+          F[j].x += ux * push * AX; F[j].y += uy * push * AY; F[j].z += uz * push * AZ;
+        }
+        // Springs: home (the ego's own place) and links (kept from drifting apart).
+        for (let i = 0; i < P.length; i++) { F[i].x += (home[i].x - P[i].x) * 0.004; F[i].y += (home[i].y - P[i].y) * 0.004; if (!flat) F[i].z += (home[i].z - P[i].z) * 0.004; }
+        for (const [a, b] of links) {
+          const dx = P[b].x - P[a].x, dy = P[b].y - P[a].y, dz = flat ? 0 : P[b].z - P[a].z;
+          const d = Math.hypot(dx, dy, dz), rest = R * 0.9;
+          if (d <= rest) continue;
+          const k = (d - rest) / d * 0.005;
+          F[a].x += dx * k; F[a].y += dy * k; F[a].z += dz * k; F[b].x -= dx * k; F[b].y -= dy * k; F[b].z -= dz * k;
+        }
+        for (let i = 0; i < P.length; i++) {
+          if (nodes[i].kind === "ego") continue;   // the ego is the centre; others move about it
+          P[i].x += F[i].x; P[i].y += F[i].y; if (!flat) P[i].z += F[i].z;
+          // The boundary: nothing past BOUND from the centre.
+          const r = Math.hypot(P[i].x, P[i].y, flat ? 0 : P[i].z);
+          if (r > BOUND) { const k = BOUND / r; P[i].x *= k; P[i].y *= k; if (!flat) P[i].z *= k; }
+        }
+        if (!hit && it > 20) break;
+      }
+      let ms = 0;
+      nodes.forEach((n, i) => { ms = Math.max(ms, Math.hypot(P[i].x - home[i].x, P[i].y - home[i].y, P[i].z - home[i].z)); (n as any)[key] = P[i]; });
+      return { before, after: overlaps(), it, ms };
+    };
+    // STRICT 2D: a note with a card on the plane takes the card's place (the
+    // plane's box scaled into the craft), y flipped (screen down, plane up);
+    // its cells and readout move with it.
+    let fromPlane = 0;
+    if (!this.plantFlatIgnoresPlane && this.host.planeAt) {
+      const on = nodes.filter((n) => n.kind === "note" || n.kind === "ego").map((n) => ({ n, q: n.kind === "ego" ? null : this.host.planeAt!(n.path) })).filter((o) => o.q);
+      if (on.length) {
+        const xs = on.map((o) => o.q!.x), ys = on.map((o) => o.q!.y);
+        const cx = (Math.min(...xs) + Math.max(...xs)) / 2, cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+        const span = Math.max(1, Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
+        const k = (2 * R) / span;
+        for (const { n, q } of on) {
+          const to = { x: (q!.x - cx) * k, y: -(q!.y - cy) * k, z: 0 };
+          const dx = to.x - n.flat!.x, dy = to.y - n.flat!.y;
+          for (const m of nodes) if (m !== n && m.path === n.path && m.kind !== "note") { m.flat!.x += dx; m.flat!.y += dy; }
+          n.flat = to; fromPlane++;
+        }
+      }
+    }
+    const a = run("local", false), b = run("flat", true);
+    (this.relaxStats as any).from_plane = fromPlane;
+    this.relaxStats = { from_plane: fromPlane, iters: a.it + b.it, overlaps_before: a.before, overlaps_after: a.after, flat_overlaps_before: b.before, flat_overlaps_after: b.after, max_shift: Math.round(Math.max(a.ms, b.ms) / R * 100) / 100 };
   }
 
   /**
@@ -714,7 +860,7 @@ export class Craft {
       const prev = scene.onBeforeRender;
       scene.onBeforeRender = (...args: any[]) => {
         try { if (typeof prev === "function") prev.apply(scene, args); } catch { /* theirs */ }
-        if (this.group?.visible && this.host.mode() === "ego" && !this.plantNoInset && !this.plantInsetOnTick) {
+        if (this.group?.visible && ((this.host.mode() === "ego" && !this.plantNoInset) || this.flatView) && !this.plantInsetOnTick) {
           try {
             this.frame(true);
             // The renderer updated world matrices BEFORE calling this hook:
@@ -742,7 +888,10 @@ export class Craft {
     const insetMode = egoView && !this.plantNoInset;
     // The inset is placed by the render hook only (see above), at full
     // precision every frame; the tick's call does the rest of the frame work.
-    if (insetMode && !fromRender && !this.plantInsetOnTick) return;
+    // Facing the camera (the inset, or the 2D view anywhere): placed by the
+    // render hook only, since its frame turns with the camera every frame.
+    const facing = insetMode || this.flatView;
+    if (facing && !fromRender && !this.plantInsetOnTick) return;
     if (insetMode) { if (fromRender) this.insetStats.render_places++; else this.insetStats.tick_places++; }
     const inset = insetMode ? this.inset() : null;
     const at = inset ? inset.at : this.where();
@@ -756,6 +905,7 @@ export class Craft {
     // The heading turns the craft's frame: its map's +z points along it.
     const h = this.plantFixedFrame ? null : this.host.heading?.();
     if (inset) this.q.copy(inset.q);
+    else if (this.flatView) this.q.copy(this.host.camera().quaternion);
     else if (h && Number.isFinite(h.x) && Math.hypot(h.x, h.y, h.z) > 1e-6) {
       const L = Math.hypot(h.x, h.y, h.z);
       this.q.setFromUnitVectors(new THREE.Vector3(0, 0, 1), new THREE.Vector3(h.x / L, h.y / L, h.z / L));
@@ -764,13 +914,31 @@ export class Craft {
     const key = `${Math.round(at.x)},${Math.round(at.y)},${Math.round(at.z)}|${this.q.x.toFixed(3)},${this.q.y.toFixed(3)},${this.q.z.toFixed(3)},${this.q.w.toFixed(3)}|${open.join(",")}|${sig.length}|${this.nodes.length}|${Math.floor(performance.now() / 1000)}`;
     // The inset redraws every frame: a key rounded to whole units held it
     // still under small camera moves and then snapped it (the shake).
-    if (key === this.key && !(inset && !this.plantInsetOnTick)) return;
+    if (key === this.key && !(facing && !this.plantInsetOnTick)) return;
     this.key = key;
     const byId = new Map(this.nodes.map((n) => [n.id, n]));
     const tmp = new THREE.Vector3();
-    const pos = (n: CraftNode) => { tmp.set(n.local.x, n.local.y, n.local.z).applyQuaternion(this.q); return { x: at.x + tmp.x, y: at.y + tmp.y, z: at.z + tmp.z }; };
-    const kN = inset ? this.insetNodeScale : 1, kL = inset ? this.insetLabelScale : 1;
+    // The inset draws the FLAT layout (the plane facing the lens); the map view the 3D one.
+    const zs = this.planeScale;
+    const pos = (n: CraftNode) => { const L = (inset || this.flatView) && n.flat ? n.flat : n.local; tmp.set(L.x * zs, L.y * zs, L.z * zs).applyQuaternion(this.q); return { x: at.x + tmp.x, y: at.y + tmp.y, z: at.z + tmp.z }; };
+    const kN = (inset ? this.insetNodeScale : 1) * this.planeScale, kL = (inset ? this.insetLabelScale : 1) * this.planeScale;
+    (this.stats as any).view = inset ? "inset" : this.flatView ? "2d" : "3d";
     for (const n of this.nodes) { const p = pos(n); n.mesh?.position.set(p.x, p.y, p.z); n.mesh?.scale.setScalar(kN); }
+    {
+      const sel = this.selected ? byId.get(this.selected) : null;
+      if (sel && sel.mesh) {
+        if (!this.selRing || this.selRing.parent !== this.group) {
+          this.selRing = new THREE.Mesh(new THREE.RingGeometry((this.stats.radius || 10) * 0.075, (this.stats.radius || 10) * 0.1, 40), new THREE.MeshBasicMaterial({ color: 0xffe08a, side: THREE.DoubleSide, transparent: true, depthTest: false }));
+          this.selRing.renderOrder = 1002;
+          this.group.add(this.selRing);
+        }
+        const p = pos(sel);
+        this.selRing.position.set(p.x, p.y, p.z);
+        this.selRing.quaternion.copy(this.host.camera().quaternion);
+        this.selRing.scale.setScalar(kN);
+        this.selRing.visible = true;
+      } else if (this.selRing) this.selRing.visible = false;
+    }
     const R = this.stats.radius || 10;
     for (const s of this.labels) { const n = byId.get(s.__for); if (n) { const p = pos(n); s.position.set(p.x + R * 0.2 * kL, p.y + R * 0.07 * kL, p.z); s.scale.set(R * 0.4 * kL, R * 0.1 * kL, 1); } }
     const pts: number[] = [];
