@@ -10080,6 +10080,69 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-335",
+      asks: "a graph click takes ONE browser to the page -- the one on screen (PLUGIN_GOAL 157: two browser tabs, 'both browser tabs open the same page when I click on a node', the hidden one was playing music): with a shown browser tab and a hidden one used more recently, the graph's reveal reaches only the shown tab, no other browser leaf; planted (plantRevealAll) every browser leaf is sent",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const plugin = app.plugins.plugins["domvec-bridge"];
+          const g = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
+          if (!plugin || !g) return { error: "no plugin or graph" };
+          const T = "domvec-browser-view";
+          const before = new Set(app.workspace.getLeavesOfType(T));
+          const got = new Map();
+          const restore = [];
+          const out = { planted: ${planted} };
+          let a = null, b = null;
+          try {
+            plugin.plantRevealAll = ${planted};
+            // Two scratch tabs in ONE new tab group: A behind, B shown.
+            b = app.workspace.getLeaf("split");
+            await b.setViewState({ type: T, active: false });
+            a = app.workspace.createLeafInParent(b.parent, 1);
+            await a.setViewState({ type: T, active: false });
+            app.workspace.setActiveLeaf(b, { focus: false });
+            await sleep(600);
+            // The graph is where the click happens: it is the active leaf.
+            app.workspace.setActiveLeaf(app.workspace.getLeavesOfType("domvec-graph-view")[0], { focus: false });
+            await sleep(300);
+            // Recency: B used, then A (hidden) used LAST -- recency alone picks A.
+            plugin.touchBrowser(b.view); await sleep(20); plugin.touchBrowser(a.view);
+            // Every browser's reveal is a recorder: no tab is navigated.
+            for (const l of app.workspace.getLeavesOfType(T)) {
+              const v = l.view, orig = v.reveal;
+              restore.push(() => { v.reveal = orig; });
+              v.reveal = async (url) => { got.set(v, url); };
+            }
+            const rect = (v) => { const r = v.containerEl.getBoundingClientRect(); return [Math.round(r.width), Math.round(r.height)]; };
+            out.a_rect = rect(a.view); out.b_rect = rect(b.view);
+            g.onReveal("https://en.wikipedia.org/wiki/Trie", "");
+            await sleep(200);
+            out.sent = got.size;
+            out.to_shown = got.has(b.view);
+            out.to_hidden = got.has(a.view);
+            out.to_others = [...got.keys()].filter((v) => v !== a.view && v !== b.view).length;
+            out.leaves = app.workspace.getLeavesOfType(T).length;
+            out.stats = { ...plugin.revealStats };
+            return out;
+          } finally {
+            plugin.plantRevealAll = false;
+            for (const r of restore) r();
+            for (const l of [a, b]) { try { if (l && !before.has(l)) l.detach(); } catch (e) { /* gone */ } }
+          }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false);
+        const planted = await arm(true);
+        const c = clean || {}, p = planted || {};
+        return {
+          pass: !c.error && c.a_rect && c.a_rect[0] === 0 && c.b_rect[0] > 0
+                && c.sent === 1 && c.to_shown && !c.to_hidden && c.to_others === 0
+                && p.sent === p.leaves && p.leaves >= 2,
+          evidence: { clean, planted },
+        };
+      },
+    },
+    {
       id: "G-334",
       asks: "keys typed into text never drive (PLUGIN_GOAL 116): with the pointer over the 3D view, a W pressed while a plane panel's markdown editor or an input field has the focus is the text's -- the camera does not move and the refusal is counted -- and the same W with nothing focused drives; planted (plantKeysThroughText) the editor's W drives the camera",
       async run() {

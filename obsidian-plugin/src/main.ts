@@ -578,12 +578,18 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
         view.onHalo = (path) => { void this.halo.toggle(path); };
         view.workspaceButton?.setText((this.settings.activeWorkspace || this.workspaceNameOf(this.settings.sidecarLaunch?.workspace) || "workspace") + " ▾");
         void this.sidecarTrigger(true).then((t) => view.sidecarButton?.setText(t));
+        // ONE browser follows the click -- the one on screen (activeBrowser).
+        // Every leaf did until 2026-11-14, so a background tab playing music
+        // was navigated away (PLUGIN_GOAL 157).
         view.onReveal = (url: string, xpath: string) => {
-          for (const l of this.app.workspace.getLeavesOfType(BROWSER_VIEW)) {
-            const browser = l.view as BrowserView;
-            if (browser && typeof browser.reveal === "function") {
-              void browser.reveal(url, xpath);
-            }
+          const targets = this.plantRevealAll
+            ? this.app.workspace.getLeavesOfType(BROWSER_VIEW).map((l) => l.view as BrowserView)
+            : [this.activeBrowser() as BrowserView].filter(Boolean);
+          this.revealStats.reveals++;
+          this.revealStats.browsers = targets.length;
+          this.revealStats.last = url;
+          for (const browser of targets) {
+            if (browser && typeof browser.reveal === "function") void browser.reveal(url, xpath);
           }
         };
         // Closing a billboard the browser pinned lets the browser drop the
@@ -977,15 +983,25 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     this.browserStats.touched++;
   }
   activeBrowser(): any {
-    const first = this.app.workspace.getLeavesOfType(BROWSER_VIEW)[0]?.view || null;
+    const all = this.app.workspace.getLeavesOfType(BROWSER_VIEW).map((l) => l.view as any).filter(Boolean);
+    const first = all[0] || null;
     if (this.plantFirstBrowser) return first;
-    let best: any = null, at = -1;
-    for (const [v, t] of this.browserUsedAt) {
-      if (!v?.containerEl?.isConnected) { this.browserUsedAt.delete(v); continue; }
-      if (t > at) { at = t; best = v; }
-    }
-    return best || first;
+    // A browser ON SCREEN outranks one behind another tab (PLUGIN_GOAL 157:
+    // "I had music playing on the other browser tab ... just focus on the
+    // browser panel that I was actively having open and was actually showing
+    // to the screen"). Among the shown, the last one used; then any.
+    const shown = (v: any) => { const el = v?.containerEl; if (!el?.isConnected) return false; const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+    const used = (v: any) => this.browserUsedAt.get(v) ?? -1;
+    for (const v of [...this.browserUsedAt.keys()]) if (!v?.containerEl?.isConnected) this.browserUsedAt.delete(v);
+    const pick = (vs: any[]) => vs.reduce((b: any, v: any) => (b === null || used(v) > used(b) ? v : b), null);
+    const active = this.app.workspace.getActiveViewOfType?.(BrowserView as any) as any;
+    if (active && shown(active)) return active;
+    return pick(all.filter(shown)) || pick(all) || first;
   }
+
+  /** Planted: a graph click reveals in EVERY browser leaf, as before 2026-11-14. */
+  plantRevealAll = false;
+  revealStats = { reveals: 0, browsers: 0, last: "" };
 
   /** The browser cell as a panel on the plane, with its cockpit (item 71). */
   browserPanel: BrowserPanel = new BrowserPanel(this.app, { browserViewType: BROWSER_VIEW, desk: this.desk });
