@@ -3698,6 +3698,12 @@ export function makeChecks(env) {
           for (let i = 0; i < 60 && !(v.graph && v.batch); i++) await sleep(500);
           const stamp0 = window.__domvecReaderAt;
           const after0 = v.idleDriftAfterMs;
+          // The reader's DEFAULT: no stored setting (kept and put back). The
+          // check flag no longer lifts the setting, so this is the real gate.
+          const KEY = v.constructor.DRIFT_KEY, stored0 = window.localStorage.getItem(KEY);
+          window.localStorage.removeItem(KEY);
+          const enabled_by_default = v.driftEnabled;
+          const button = v.driftButton ? v.driftButton.textContent : null;
           v.plantNoDrift = ${planted}; v.driftInCheck = true; v.idleDriftAfterMs = 3000;
           const g = v.graph;
           const az = () => { const c = g.camera().position, t = g.controls().target; return Math.atan2(c.z - t.z, c.x - t.x); };
@@ -3718,8 +3724,9 @@ export function makeChecks(env) {
             const a1 = az();
             await sleep(1500);
             const acted = { turned: turn(a1, az()), hue: v.batch.hue, active: v.driftStats.active };
-            return { planted: ${planted}, idle, acted };
+            return { planted: ${planted}, idle, acted, enabled_by_default, button };
           } finally {
+            if (stored0 === null) window.localStorage.removeItem(KEY); else window.localStorage.setItem(KEY, stored0);
             v.plantNoDrift = false; v.driftInCheck = false; v.idleDriftAfterMs = after0;
             // Put back only a stamp this check wrote: a real input meanwhile stays.
             if (mine.includes(window.__domvecReaderAt)) window.__domvecReaderAt = stamp0;
@@ -3727,7 +3734,7 @@ export function makeChecks(env) {
         })()`, { timeout: 60000 });
         const clean = await arm(false), planted = await arm(true);
         const c = clean;
-        return { pass: c.idle.active && Math.abs(c.idle.turned) > 0.1 && c.idle.hue > 0.08 && !c.idle.colours_written && c.idle.distance_kept && c.idle.glass_hue === c.idle.hue
+        return { pass: c.enabled_by_default === true && !!c.button && c.idle.active && Math.abs(c.idle.turned) > 0.1 && c.idle.hue > 0.08 && !c.idle.colours_written && c.idle.distance_kept && c.idle.glass_hue === c.idle.hue
                        && !c.acted.active && Math.abs(c.acted.turned) < 0.005 && c.acted.hue === 0
                        && !planted.idle.active && Math.abs(planted.idle.turned) < 0.005 && planted.idle.hue === 0,
                  evidence: { clean, planted } };
@@ -10080,6 +10087,142 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-337",
+      asks: "the ego inset holds still on screen while the camera moves, can be dragged by any of its nodes, and is legible (2026-11-14: 'significant shaking of the ego when moving around in the 3D graph with panning and mouse moving. I should also be able to click and drag the ego graph when grabbing one of the nodes ... see the nodes much larger'): in the first-person view, with the camera yawed every frame by the agent's own arrow key, the ego node's place on screen AT EACH DRAW moves under 0.5% of the screen; a press on a craft node and a 60 px drag moves the whole inset about 60 px and does not turn the camera; the ego node is drawn at least 10 px across; every craft node one shape (2026-11-14: 'one uniform display of node and links. No fancy shapes'); planted (plantStaleMatrices) drawn and picked where it was a frame ago -- the shake's cause; plantInsetOnTick is reported, not required: it did not discriminate once the matrices were fresh, (plantNoCraftDrag) the drag turns the camera instead",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const frame = () => new Promise((r) => requestAnimationFrame(() => r(0)));
+          const g = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
+          const c = window.__domvecCraft;
+          if (!g || !c || !g.graph) return { error: "no graph or craft" };
+          const planted = ${JSON.stringify(planted)};
+          const mode0 = g.agent.mode, shift0 = { ...c.insetShift };
+          const scene = g.graph.scene(), cam = g.graph.camera(), el = g.graph.renderer().domElement;
+          const out = { planted };
+          const after0 = scene.onAfterRender;
+          try {
+            c.plantInsetOnTick = planted === "tick"; g.plantNoCraftDrag = planted === "drag"; c.plantStaleMatrices = planted === "stale";
+            g.agent.setMode("ego"); await sleep(1500);
+            const ego = c.nodes.find((n) => n.kind === "ego");
+            if (!ego || !ego.mesh) return { error: "no ego node" };
+            // One shape: every craft node's geometry is the ego's own.
+            out.shapes = new Set(c.nodes.filter((n) => n.mesh).map((n) => n.mesh.geometry.type + ":" + n.mesh.geometry.uuid)).size;
+            // 1. Steadiness: the ego node's NDC at every DRAW, the camera yawing.
+            const seen = [];
+            // From matrixWorld -- what the draw and the pick actually use.
+            scene.onAfterRender = (r, sc, camera) => { const v = ego.mesh.position.clone().setFromMatrixPosition(ego.mesh.matrixWorld).project(camera); seen.push([v.x, v.y]); };
+            const q0 = cam.quaternion.clone();
+            for (let i = 0; i < 50; i++) { g.agent.key(new KeyboardEvent("keydown", { key: "ArrowLeft" })); await frame(); }
+            await frame(); await frame();
+            scene.onAfterRender = after0;
+            const turned = 2 * Math.acos(Math.min(1, Math.abs(q0.dot(cam.quaternion)))) * 180 / Math.PI;
+            const xs = seen.map((p) => p[0]), ys = seen.map((p) => p[1]);
+            const spread = seen.length ? Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)) : null;
+            out.steady = { draws: seen.length, camera_turned_deg: Math.round(turned * 10) / 10, spread_ndc: spread == null ? null : Math.round(spread * 10000) / 10000 };
+            await sleep(600);
+            // 2. Size: the ego node's drawn diameter in pixels.
+            const r = el.getBoundingClientRect();
+            const geo = ego.mesh.geometry; geo.computeBoundingSphere();
+            const rad = geo.boundingSphere.radius * ego.mesh.scale.x;
+            const pc = ego.mesh.position.clone(), right = new (pc.constructor)(1, 0, 0).applyQuaternion(cam.quaternion);
+            const a = pc.clone().project(cam), b = pc.clone().addScaledVector(right, rad).project(cam);
+            out.ego_px = Math.round(Math.hypot((b.x - a.x) * r.width / 2, (b.y - a.y) * r.height / 2) * 2 * 10) / 10;
+            // 3. Drag: press on the ego node, move 60 px right, release -- the pane's own handlers.
+            const p0 = ego.mesh.position.clone().project(cam);
+            const x0 = r.left + (p0.x + 1) / 2 * r.width, y0 = r.top + (1 - p0.y) / 2 * r.height;
+            const camQ = cam.quaternion.clone();
+            const pe = (t, x, y, target) => (target || el).dispatchEvent(new PointerEvent(t, { clientX: x, clientY: y, bubbles: true, button: 0, buttons: t === "pointerup" ? 0 : 1, pointerId: 1, pointerType: "mouse" }));
+            pe("pointerdown", x0, y0);
+            for (let k = 1; k <= 6; k++) { pe("pointermove", x0 + 10 * k, y0, window); pe("pointermove", x0 + 10 * k, y0); await frame(); }
+            pe("pointerup", x0 + 60, y0, window); pe("pointerup", x0 + 60, y0);
+            await frame(); await frame(); await sleep(200);
+            const p1 = ego.mesh.position.clone().project(cam);
+            out.drag = { moved_px: Math.round((p1.x - p0.x) * r.width / 2), moved_y_px: Math.round((p1.y - p0.y) * r.height / 2),
+                         camera_turned_deg: Math.round(2 * Math.acos(Math.min(1, Math.abs(camQ.dot(cam.quaternion)))) * 1800 / Math.PI) / 10,
+                         stats: { ...c.dragStats } };
+            return out;
+          } finally {
+            scene.onAfterRender = after0;
+            c.plantInsetOnTick = false; g.plantNoCraftDrag = false; c.plantStaleMatrices = false;
+            c.insetShift.x = shift0.x; c.insetShift.y = shift0.y;
+            g.agent.setMode(mode0);
+          }
+        })()`, { timeout: 90000 });
+        const clean = await arm(null), tick = await arm("tick"), drag = await arm("drag"), stale = await arm("stale");
+        const c = clean || {}, st = c.steady || {}, t = (tick || {}).steady || {}, d = c.drag || {}, pd = (drag || {}).drag || {}, ss = (stale || {}).steady || {};
+        return {
+          pass: !c.error && st.draws >= 30 && st.camera_turned_deg >= 5 && st.spread_ndc < 0.01
+                && c.ego_px >= 10
+                && Math.abs(d.moved_px - 60) <= 15 && Math.abs(d.moved_y_px) <= 10 && d.camera_turned_deg < 0.5
+                && Math.abs(pd.moved_px || 0) < 15
+                && c.shapes === 1
+                && ss.camera_turned_deg >= 5 && ss.spread_ndc > 0.02,
+          evidence: { clean, tick, drag, stale },
+        };
+      },
+    },
+    {
+      id: "G-336",
+      asks: "hover a chunk node, then click it, and ITS panel opens (PLUGIN_GOAL 157: 'hovering the mouse over one of the chunk nodes ... doesn't allow me to click on the hovered node to open the panel'): in chunk view, for chunk nodes on screen, a pointer move onto the node then a press and release at the same point -- through the pane's own pointer handlers -- leaves that node's panel open and not a mere preview, and what is under the pointer at the node is the 3D canvas (or a pass-through preview), never another panel; planted (every pick proxy's raycast disabled) no click reaches a node",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const frame = () => new Promise((r) => requestAnimationFrame(() => r(0)));
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
+          if (!v || !v.graph) return { error: "no graph" };
+          const unit = [...v.containerEl.querySelectorAll(".domvec-graph-bar button")].find((b) => /^(pages|chunks)$/.test(b.textContent.trim()));
+          const chunkView = () => v.level === "chunk" && v.umapOnly && v.graph && v.graph.graphData().nodes.length > 2000;
+          if (!chunkView() && unit) { const r0 = v.chunkRelaxStats.runs; unit.click(); for (let i = 0; i < 240 && !chunkView(); i++) await sleep(500); for (let i = 0; i < 160 && v.chunkRelaxStats.runs <= r0; i++) await sleep(500); await sleep(1500); }
+          if (!chunkView()) return { error: "chunk view did not arrive", level: v.level };
+          const pickWas = v.plantNoPick;
+          const cam = v.graph.camera(), el = v.graph.renderer().domElement, r = el.getBoundingClientRect();
+          const open0 = new Set(v.billboards.keys());
+          const out = { planted: ${planted}, tried: 0, opened: 0, preview_only: 0, other: 0, blocked: 0, blockers: [] };
+          const unpicked = [];
+          try {
+            if (${planted}) for (const n of v.graph.graphData().nodes) { const ob = n.__threeObj; if (ob && ob.__proxy) { unpicked.push([ob, ob.raycast]); ob.raycast = () => {}; } }
+            const nodes = v.graph.graphData().nodes.filter((n) => n.__threeObj && Number.isFinite(n.x) && n.url && n.level !== "page" && n.level !== "path");
+            const pts = nodes.map((nd) => { const q = cam.position.clone().set(nd.x, nd.y, nd.z || 0).project(cam); return { nd, x: q.x, y: q.y, z: q.z }; })
+              .filter((o) => Math.abs(o.x) < 0.8 && Math.abs(o.y) < 0.8 && o.z < 1);
+            const step = Math.max(1, Math.floor(pts.length / 12));
+            for (let i = 0; i < pts.length && out.tried < 12; i += step) {
+              const o = pts[i]; out.tried++;
+              const cx = r.left + (o.x + 1) / 2 * r.width, cy = r.top + (1 - o.y) / 2 * r.height;
+              const ev = (type) => new PointerEvent(type, { clientX: cx, clientY: cy, bubbles: true, pointerId: 1, pointerType: "mouse", button: 0, buttons: type === "pointerdown" ? 1 : 0 });
+              el.dispatchEvent(ev("pointermove")); await frame(); await frame(); await sleep(250);
+              const top = document.elementFromPoint(cx, cy);
+              if (top && top !== el && !top.closest(".is-preview")) { out.blocked++; if (out.blockers.length < 3) out.blockers.push(top.tagName + "." + String(top.className).slice(0, 40)); }
+              const hov = v.graph.graphData().nodes.find((n) => n.hovered) || null;
+              el.dispatchEvent(ev("pointerdown")); await sleep(60); el.dispatchEvent(ev("pointerup"));
+              el.dispatchEvent(new MouseEvent("click", { clientX: cx, clientY: cy, bubbles: true }));
+              await sleep(700);
+              // Which node the click took: a panel newly open, not a preview.
+              const now = [...v.billboards.entries()].filter(([id, b]) => !open0.has(id));
+              const kept = now.filter(([id, b]) => !b.el.hasClass("is-preview"));
+              if (kept.some(([id]) => id === o.nd.id || (hov && id === hov.id))) out.opened++;
+              else if (now.length && !kept.length) out.preview_only++;
+              else if (kept.length) out.other++;
+              for (const [id] of now) v.closeBillboard(id);
+              await sleep(150);
+            }
+            return out;
+          } finally {
+            v.plantNoPick = pickWas;
+            for (const [ob, rc] of unpicked) ob.raycast = rc;
+            for (const id of [...v.billboards.keys()]) if (!open0.has(id)) v.closeBillboard(id);
+          }
+        })()`, { timeout: 180000 });
+        const clean = await arm(false);
+        const planted = await arm(true);
+        const c = clean || {}, p = planted || {};
+        return {
+          pass: !c.error && c.tried >= 8 && c.blocked === 0 && c.opened >= Math.ceil(c.tried * 0.9) && !p.error && p.opened === 0,
+          evidence: { clean, planted },
+        };
+      },
+    },
+    {
       id: "G-335",
       asks: "a graph click takes ONE browser to the page -- the one on screen (PLUGIN_GOAL 157: two browser tabs, 'both browser tabs open the same page when I click on a node', the hidden one was playing music): with a shown browser tab and a hidden one used more recently, the graph's reveal reaches only the shown tab, no other browser leaf; planted (plantRevealAll) every browser leaf is sent",
       async run() {
@@ -10094,6 +10237,12 @@ export function makeChecks(env) {
           const restore = [];
           const out = { planted: ${planted} };
           let a = null, b = null;
+          // The reader's layout comes back exactly: a scratch split resizes its
+          // neighbours, and detaching it does not undo that (2026-11-14: the
+          // first run left the graph pane at a third of its width).
+          const dims = [];
+          const walk = (sp) => { for (const ch of (sp.children || [])) { dims.push([ch, ch.dimension]); walk(ch); } };
+          walk(app.workspace.rootSplit);
           try {
             plugin.plantRevealAll = ${planted};
             // Two scratch tabs in ONE new tab group: A behind, B shown.
@@ -10129,6 +10278,8 @@ export function makeChecks(env) {
             plugin.plantRevealAll = false;
             for (const r of restore) r();
             for (const l of [a, b]) { try { if (l && !before.has(l)) l.detach(); } catch (e) { /* gone */ } }
+            for (const [ch, d] of dims) { try { if (ch.parent && typeof ch.setDimension === "function" && d != null) ch.setDimension(d); } catch (e) { /* gone */ } }
+            try { app.workspace.requestResize?.(); } catch (e) { /* older API */ }
           }
         })()`, { timeout: 60000 });
         const clean = await arm(false);

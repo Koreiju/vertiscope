@@ -502,6 +502,12 @@ export class GraphView extends ItemView {
     ws.addClass("domvec-workspace-menu");
     this.workspaceButton = ws;
     ws.onclick = (e) => this.onWorkspaceMenu(e as MouseEvent, ws);
+    // The idle drift, on the bar where it can be seen (it was a command only).
+    const drift = bar.createEl("button", { text: this.driftEnabled ? "drift ●" : "drift ○" });
+    drift.addClass("domvec-drift-toggle");
+    drift.setAttr("aria-label", "Idle drift: the camera turns and the colours cycle after a few seconds of no input");
+    this.driftButton = drift;
+    drift.onclick = () => { this.driftEnabled = !this.driftEnabled; };
     const side = bar.createEl("button", { text: "sidecar ○" });
     side.addClass("domvec-sidecar-trigger");
     this.sidecarButton = side;
@@ -523,6 +529,23 @@ export class GraphView extends ItemView {
     // canvas is a hand on the stick -- the flight and its velocity dropped --
     // and the wheel re-reads the distance a flight in progress stops at.
     canvas.addEventListener("pointerdown", (e: PointerEvent) => { this.downAt = [e.clientX, e.clientY]; if (!this.plantHoldFlight) this.agent.release(); }, { passive: true, capture: true });
+    // Grab a craft node and drag: the whole ego graph moves (2026-11-14: "I
+    // should also be able to click and drag the ego graph when grabbing one
+    // of the nodes"). Capture phase on the canvas, so the orbit controls never
+    // see the press; a press that does not move is still the click (pointerup
+    // below reads downAt). Planted `plantNoCraftDrag`.
+    canvas.addEventListener("pointerdown", (e: PointerEvent) => {
+      if (this.plantNoCraftDrag || e.button !== 0 || !this.craft) return;
+      const cn = this.craft.nodeAt(e.clientX, e.clientY);
+      if (!cn) return;
+      e.stopImmediatePropagation(); e.preventDefault();
+      this.craft.dragStats.started++;
+      let lx = e.clientX, ly = e.clientY;
+      const move = (m: PointerEvent) => { this.craft?.dragBy(m.clientX - lx, m.clientY - ly); lx = m.clientX; ly = m.clientY; };
+      const up = () => { window.removeEventListener("pointermove", move, true); window.removeEventListener("pointerup", up, true); };
+      window.addEventListener("pointermove", move, true);
+      window.addEventListener("pointerup", up, true);
+    }, { capture: true });
     // A double right-click on a halo node deletes it from the halo (G-284).
     canvas.addEventListener("contextmenu", (e: MouseEvent) => {
       const h = this.halo ? this.haloAt(e.clientX, e.clientY) : null;
@@ -6709,6 +6732,8 @@ export class GraphView extends ItemView {
     this.craft.frame();
     this.drawTethers();
   }
+  /** Planted: a press on a craft node orbits the camera, as before. */
+  plantNoCraftDrag = false;
   /** Planted (item 97): the wheel over a craft node zooms as anywhere else. */
   plantNoMicroscope = false;
   microscopeStats = { steps: 0, entered: 0, last: "", d: 0 };
@@ -8615,8 +8640,14 @@ export class GraphView extends ItemView {
   plantNoDrift = false;
   /** T-12 (PLUGIN_GOAL 145): the drift is a TOGGLE, off by default (it redraws
    *  every frame, and stability comes first); remembered per viewer. */
-  get driftEnabled(): boolean { try { return window.localStorage.getItem("domvec-idle-drift") !== "off"; } catch { return true; } }  // ON by default again (150: "rotation debounce no longer works"); the command turns it off
-  set driftEnabled(on: boolean) { try { window.localStorage.setItem("domvec-idle-drift", on ? "on" : "off"); } catch { /* per session then */ } }
+  // ON by default (150, and again 157: "the 3D layout should be rotating ...
+  // there's no rotation happening at all"). A NEW key: the old one held an
+  // "off" from the T-12 days, and it silently kept the drift off for good --
+  // nothing on screen said so. The bar's drift button shows and flips it.
+  static DRIFT_KEY = "domvec-idle-drift-2";
+  get driftEnabled(): boolean { try { return window.localStorage.getItem(GraphView.DRIFT_KEY) !== "off"; } catch { return true; } }
+  set driftEnabled(on: boolean) { try { window.localStorage.setItem(GraphView.DRIFT_KEY, on ? "on" : "off"); } catch { /* per session then */ } this.driftButton?.setText(on ? "drift ●" : "drift ○"); }
+  driftButton: HTMLElement | null = null;
   plantDriftDefaultOn = false;
   /** Planted: a standing query stops the drift, as it did. */
   plantDriftStopsOnSearch = false;
@@ -8744,7 +8775,10 @@ export class GraphView extends ItemView {
     // flights -- G-271/G-283/G-285 ended 400-650 units short).
     const ag: any = this.agent;
     const flying = !!ag && (!!ag.target || ag.playing || Math.hypot(ag.vel?.x || 0, ag.vel?.y || 0, ag.vel?.z || 0) > 1e-3);
-    const on = idle && visible && !checking && !flying && !this.plantNoDrift && (this.driftEnabled || this.plantDriftDefaultOn || this.driftInCheck)
+    // The check flag lifts only the "a check is running" gate, never the
+    // reader's own setting: lifting both is how G-156 passed for weeks while
+    // a stored "off" kept the drift off for the reader (2026-11-14).
+    const on = idle && visible && !checking && !flying && !this.plantNoDrift && (this.driftEnabled || this.plantDriftDefaultOn)
       && !(this.plantDriftStopsOnSearch && this.searchState);
     if (on !== this.driftStats.active) {
       this.driftStats.active = on;

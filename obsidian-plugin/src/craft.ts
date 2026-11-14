@@ -160,7 +160,30 @@ export class Craft {
   /** Planted: first person draws the craft AT the camera (the 11-08 lens). */
   plantNoInset = false;
   /** First person: the craft's angular radius on screen, degrees. */
-  insetDeg = 7;
+  insetDeg = 10;
+  /** In the inset, nodes and labels drawn this much larger (2026-11-14: "I
+   *  should also see the nodes much larger than currently, which are
+   *  illegible"). */
+  insetNodeScale = 1.6;
+  insetLabelScale = 1.4;   // 2.6 overlapped into a wall of text (2026-11-14 screenshot)
+  /** Planted: a shape per kind, as before 2026-11-14. */
+  plantKindShapes = false;
+  /** Planted: world matrices left to the scene's own pass -- which runs
+   *  BEFORE the render hook places the inset, so the inset was drawn and
+   *  picked where it was a frame (or more) ago. */
+  plantStaleMatrices = false;
+  /** Where the inset sits, as a fraction of the half-screen (x right, y up);
+   *  moved by dragging any craft node. */
+  insetShift = { x: 0, y: -0.4 };
+  /** Third person: the craft's offset from its anchor, moved by a drag. */
+  mapShift = { x: 0, y: 0, z: 0 };
+  /** Planted: the inset placed on the TICK with a rounded redraw key, as it
+   *  was -- it trailed the camera and snapped ("significant shaking of the
+   *  ego when moving around", 2026-11-14). Now it is placed in the scene's
+   *  onBeforeRender, after the camera has moved for that frame. */
+  plantInsetOnTick = false;
+  insetStats = { render_places: 0, tick_places: 0 };
+  private hookedScene: any = null;
   /** Planted (146): the craft's map never turns with the heading. */
   plantFixedFrame = false;
   private q = new THREE.Quaternion();
@@ -585,14 +608,17 @@ export class Craft {
     const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(cam.quaternion);
     const up = new THREE.Vector3(0, 1, 0).applyQuaternion(cam.quaternion);
     const halfH = D * Math.tan(((cam.fov || 50) * Math.PI) / 360);
-    const p = cam.position.clone().addScaledVector(fwd, D).addScaledVector(up, -halfH * 0.55);
+    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion);
+    const halfW = halfH * (cam.aspect || 1);
+    const p = cam.position.clone().addScaledVector(fwd, D)
+      .addScaledVector(up, halfH * this.insetShift.y).addScaledVector(right, halfW * this.insetShift.x);
     (this.stats as any).inset = { D: Math.round(D), deg: this.insetDeg };
     return { at: { x: p.x, y: p.y, z: p.z }, q: cam.quaternion.clone() };
   }
 
   where(): V3 {
     const a = this.host.anchor();
-    if (a) return a;
+    if (a) return { x: a.x + this.mapShift.x, y: a.y + this.mapShift.y, z: a.z + this.mapShift.z };
     const w = this.host.world();
     return { x: w.cx + w.r * 1.3, y: w.cy, z: w.cz };
   }
@@ -606,7 +632,12 @@ export class Craft {
     for (const c of [...this.group.children]) { c.removeFromParent(); c.geometry?.dispose?.(); if (c.material?.map) c.material.map.dispose(); }
     this.labels = [];
     const R = this.stats.radius || 10;
-    const geo: Record<CraftKind, any> = {
+    // ONE shape for every node (2026-11-14: "we should only have one uniform
+    // display of node and links. No fancy shapes."): a sphere, one size; the
+    // kind is its colour alone. Planted `plantKindShapes`: the old cubes,
+    // octahedra, tetrahedra and icosahedra.
+    const ball = new THREE.SphereGeometry(R * 0.05, 16, 12);
+    const geo: Record<CraftKind, any> = this.plantKindShapes ? {
       ego: new THREE.SphereGeometry(R * 0.07, 20, 14),
       note: new THREE.SphereGeometry(R * 0.045, 16, 12),
       tree: new THREE.OctahedronGeometry(R * 0.032),
@@ -614,7 +645,7 @@ export class Craft {
       web: new THREE.TetrahedronGeometry(R * 0.04),
       readout: new THREE.IcosahedronGeometry(R * 0.04),
       code: new THREE.BoxGeometry(R * 0.07, R * 0.07, R * 0.07),
-    };
+    } : { ego: ball, note: ball, tree: ball, cell: ball, web: ball, readout: ball, code: ball };
     const mat: Record<CraftKind, any> = {
       ego: new THREE.MeshBasicMaterial({ color: 0xffffff }),
       note: new THREE.MeshBasicMaterial({ color: CRAFT_COLOUR }),
@@ -667,7 +698,7 @@ export class Craft {
 
   /** Each frame: drawn in the map view only, placed at its anchor; its I/O
    *  lines follow the world's nodes. Cheap when nothing moved. */
-  frame(): void {
+  frame(fromRender = false): void {
     // Rebuilt at most every two seconds: an autosave per keystroke burst is a
     // vault change, and the craft reads every artifact's text.
     if (this.stale && !this.building && performance.now() - this.builtAt > 2000) { this.builtAt = performance.now(); void this.build(); }
@@ -677,6 +708,23 @@ export class Craft {
     // was drawn nowhere and no ray could reach it (found 2026-11-02, G-320).
     const scene = this.host.scene();
     if (scene && this.group.parent !== scene) { scene.add(this.group); this.stats.reattached = (this.stats.reattached || 0) + 1; }
+    if (scene && this.hookedScene !== scene) {
+      // Placed AFTER the camera moved this frame: the renderer calls the
+      // scene's onBeforeRender once per draw, with the camera it draws with.
+      const prev = scene.onBeforeRender;
+      scene.onBeforeRender = (...args: any[]) => {
+        try { if (typeof prev === "function") prev.apply(scene, args); } catch { /* theirs */ }
+        if (this.group?.visible && this.host.mode() === "ego" && !this.plantNoInset && !this.plantInsetOnTick) {
+          try {
+            this.frame(true);
+            // The renderer updated world matrices BEFORE calling this hook:
+            // without this the draw (and every pick) used last frame's place.
+            if (!this.plantStaleMatrices) this.group.updateMatrixWorld(true);
+          } catch { /* next frame */ }
+        }
+      };
+      this.hookedScene = scene;
+    }
     // Drawn in BOTH views (PLUGIN_GOAL 146: "moves in first and third person
     // camera view, always at the 'center' of view"): third person, the chase
     // camera keeps it at the centre of the screen; first person, the camera is
@@ -691,7 +739,12 @@ export class Craft {
     // First person (2026-11-14): an INSET -- ahead of the camera and below the
     // centre, sized to a fixed angle, facing the lens -- so the ego is always
     // in view without filling it. Third person keeps the chase anchor.
-    const inset = egoView && !this.plantNoInset ? this.inset() : null;
+    const insetMode = egoView && !this.plantNoInset;
+    // The inset is placed by the render hook only (see above), at full
+    // precision every frame; the tick's call does the rest of the frame work.
+    if (insetMode && !fromRender && !this.plantInsetOnTick) return;
+    if (insetMode) { if (fromRender) this.insetStats.render_places++; else this.insetStats.tick_places++; }
+    const inset = insetMode ? this.inset() : null;
     const at = inset ? inset.at : this.where();
     this.stats.anchor = { x: Math.round(at.x), y: Math.round(at.y), z: Math.round(at.z) };
     // Pulses move every frame, before the redraw key can skip it (G-331).
@@ -709,14 +762,17 @@ export class Craft {
     } else this.q.identity();
     (this.stats as any).heading = h ? [h.x, h.y, h.z].map((v) => Math.round(v * 100) / 100) : null;
     const key = `${Math.round(at.x)},${Math.round(at.y)},${Math.round(at.z)}|${this.q.x.toFixed(3)},${this.q.y.toFixed(3)},${this.q.z.toFixed(3)},${this.q.w.toFixed(3)}|${open.join(",")}|${sig.length}|${this.nodes.length}|${Math.floor(performance.now() / 1000)}`;
-    if (key === this.key) return;
+    // The inset redraws every frame: a key rounded to whole units held it
+    // still under small camera moves and then snapped it (the shake).
+    if (key === this.key && !(inset && !this.plantInsetOnTick)) return;
     this.key = key;
     const byId = new Map(this.nodes.map((n) => [n.id, n]));
     const tmp = new THREE.Vector3();
     const pos = (n: CraftNode) => { tmp.set(n.local.x, n.local.y, n.local.z).applyQuaternion(this.q); return { x: at.x + tmp.x, y: at.y + tmp.y, z: at.z + tmp.z }; };
-    for (const n of this.nodes) { const p = pos(n); n.mesh?.position.set(p.x, p.y, p.z); }
+    const kN = inset ? this.insetNodeScale : 1, kL = inset ? this.insetLabelScale : 1;
+    for (const n of this.nodes) { const p = pos(n); n.mesh?.position.set(p.x, p.y, p.z); n.mesh?.scale.setScalar(kN); }
     const R = this.stats.radius || 10;
-    for (const s of this.labels) { const n = byId.get(s.__for); if (n) { const p = pos(n); s.position.set(p.x + R * 0.2, p.y + R * 0.07, p.z); } }
+    for (const s of this.labels) { const n = byId.get(s.__for); if (n) { const p = pos(n); s.position.set(p.x + R * 0.2 * kL, p.y + R * 0.07 * kL, p.z); s.scale.set(R * 0.4 * kL, R * 0.1 * kL, 1); } }
     const pts: number[] = [];
     for (const e of this.edges) {
       const a = byId.get(e.a), b = byId.get(e.b);
@@ -842,6 +898,7 @@ export class Craft {
     if (!this.group || !this.group.visible || !el) return null;
     const r = el.getBoundingClientRect();
     const ndc = new THREE.Vector2(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1);
+    if (!this.plantStaleMatrices) this.group.updateMatrixWorld(true);
     const rc = new THREE.Raycaster();
     rc.setFromCamera(ndc, this.host.camera());
     const meshes = this.nodes.map((n) => n.mesh).filter(Boolean);
@@ -849,6 +906,30 @@ export class Craft {
     const id = hits.length ? (hits[0].object as any).__craft : null;
     return id ? this.nodes.find((n) => n.id === id) || null : null;
   }
+
+  /** Drag the whole craft by a node: in the inset, its place on screen; in
+   *  third person, its anchor, in the camera's plane. `dx, dy` in pixels. */
+  dragBy(dx: number, dy: number): void {
+    const el = this.host.canvas(), cam = this.host.camera();
+    if (!el || !cam) return;
+    const r = el.getBoundingClientRect();
+    if (this.host.mode() === "ego" && !this.plantNoInset) {
+      this.insetShift.x = Math.max(-0.95, Math.min(0.95, this.insetShift.x + (2 * dx) / r.width));
+      this.insetShift.y = Math.max(-0.95, Math.min(0.95, this.insetShift.y - (2 * dy) / r.height));
+    } else {
+      const at = this.where();
+      const dist = cam.position.distanceTo(new THREE.Vector3(at.x, at.y, at.z));
+      const perPx = (2 * dist * Math.tan(((cam.fov || 50) * Math.PI) / 360)) / r.height;
+      const right = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion);
+      const up = new THREE.Vector3(0, 1, 0).applyQuaternion(cam.quaternion);
+      this.mapShift.x += (right.x * dx - up.x * dy) * perPx;
+      this.mapShift.y += (right.y * dx - up.y * dy) * perPx;
+      this.mapShift.z += (right.z * dx - up.z * dy) * perPx;
+    }
+    this.key = "";
+    this.dragStats.moved++;
+  }
+  dragStats = { started: 0, moved: 0 };
 
   /** A click on a craft node: its panel on the plane, or closed back into it. */
   click(n: CraftNode): "opened" | "closed" {
