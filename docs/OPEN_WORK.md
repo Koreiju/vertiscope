@@ -253,3 +253,23 @@ Read from the Antigravity conversation da8388bf (step text) and its uncommitted 
 | sidecar launch "obsidian won't open" | Antigravity: argv no longer doubles `supervise`. |
 
 All 13 ego checks pass with this state (run 1, 2026-11-14 13:48).
+
+### D-2 re-index of the copy: finished, NOT ready to switch (2026-11-14)
+
+All 1,025 pages were re-rendered at the markdown level and re-embedded. The second run (after a native crash at page 839) embedded 6,993 vectors and reused 2,984.
+
+| | live corpus123 | copy |
+|---|---|---|
+| pages | 1,028 | 1,025 |
+| current chunks (Page-HasChunk) | 88,003 | 79,772 |
+| current chunks without a vector | 3,247 | 57 |
+| current anchors at the markdown level | 0 | 658,131 of 660,574 |
+| current anchors still four-part | all | 2,443 |
+| five-part keys shared by two chunks | - | 0 |
+| VERSION chunks | ? | 69,255 |
+| orphans | ? | 1,807 |
+
+Blockers:
+1. **69,255 versions.** The re-render changed almost every chunk, and G-253 keeps a changed chunk's earlier state as a VERSION. `lead_vectors` includes versions, so the map would draw them: about double the cloud. A migration is not page history; these versions must be removed before a switch (they are recognisable as the pre-reindex chunk ids).
+2. **2,443 current anchors still four-part.** Chunks the write path judged unchanged were skipped, so they kept their old anchors.
+3. **54,504 markdown-level anchors whose `leaf()` is not a stored Address row.** The sample is renderer-synthesized accessors (reddit `aria-label|heading.tag/heading`): lines whose address was never a trie leaf. Most likely pre-existing renderer behaviour, not migration loss. To confirm against the live store, which is locked while the sidecar runs.
