@@ -340,7 +340,7 @@ Done, live-checked (check id, planted arm):
 - Clumping / 2D vs 3D / select: relax with collision ellipse + margin + boundary; 2D view (plane facing the camera, from plane-card positions where a note has a card) with a bar toggle; click selects with a ring (G-338, G-339 -- results pending the reader-idle run).
 
 Measured, NOT reproduced (instrument kept):
-- Hover then click does not open the panel: dimmed-in-front picks 0/300 even planted (hypothesis rejected); hovered points blocked by another element 0/120. G-336's synthetic press/release opened 0/12 in BOTH arms -- the instrument is not yet shown able to open a panel; cross-check with a trusted CDP click (`cdp.mjs --click`) is owed before reading it either way.
+- Hover then click: FIXED (G-336 12/12, planted 0/12) -- reproduced with a trusted CDP click; the 3D library's click never fired; resolved as the hover shows it. Open: why the library's own click never fires.
 
 Open (not started this session):
 - Retrieval latency + the max-results control re-triggering retrieval; profiling it through the MCP.

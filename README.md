@@ -1,4 +1,73 @@
-# domvec
+# vertiscope (domvec)
+
+An **Obsidian plugin** that turns the web you browse into a navigable 3D
+knowledge graph, with an "ego" that sits at the centre of view: a compact,
+draggable 2D/3D computation graph of your own tool space -- your browsers,
+the artifacts you attach, your notebooks and their runs, your database
+queries.
+
+Everything is driven by one data structure: a **patricia trie keyed on
+`url : xpath : markdown line : content`**, built in-page by a recursive,
+shadow-DOM-aware MutationObserver fold, and streamed as diffs into the graph.
+
+## The plugin
+
+| Pane | What it is |
+|---|---|
+| **3D graph** | Every scanned chunk a node, placed by a UMAP of its embedding (position and colour); pages unfold into their chunks; hover presents a chunk's picture, a click opens its panel. Plain scroll zooms the 3D view. Idle, the scene slowly turns (`drift` on the bar). |
+| **The ego** | The tool space as one graph: the ego at the centre, browsers, slates, notebooks with their cells and readouts, tagged web chunks. Drawn as an inset in first person and beside the world in third; `ego 2D` / `ego 3D` switches the flat plane facing you or the spatial layout; drag any of its nodes to move it; pinch or shift+scroll zooms its plane; a click selects. |
+| **Browser cell** | An Electron webview in an Obsidian tab. As you browse, the sensor folds each DOM mutation (open shadow roots included, recursively) into the trie and streams the diff to the graph. uBlock Origin is bundled. |
+| **Panels** | A chunk's markdown, each line carrying its trie address; controls in it act on the live page through that address. |
+| **Notebook / slates** | Python cells in notes, run on a kernel; their inputs and outputs are wired into the ego graph. |
+| **Search** | Retrieval over the store (frequency x PageRank x semantic), drawn as light in the 3D graph. |
+
+Behind it runs a **sidecar** (Python): a supervisor with a front proxy and a
+worker that holds the store (kuzu graph + vectors), the embedder and the UMAP
+projector. The plugin starts it (the `sidecar` button) and every child process
+is windowless.
+
+### Build and run
+
+```bash
+cd obsidian-plugin && npm install && npm run build
+```
+
+`npm run build` type-checks, bundles, and installs into the vault's
+`.obsidian/plugins/domvec-bridge/` -- by default this repository, which is
+itself the vault; `DOMVEC_VAULT=<path>` installs elsewhere. Every build says
+where it wrote.
+
+The sidecar by hand, if you are not using the button:
+
+```bash
+python -m domvec.obsidian supervise --workspace build/<store> --port 8788 --semantic --capture --enact --kernel
+```
+
+### How it is verified
+
+Not by a green suite alone. Each requirement has a **live check** that runs
+inside the running plugin (`obsidian-plugin/checks/live.mjs`), reloads the
+plugin first so the code under test is the code that is loaded, and carries a
+**planted arm** -- the defect put back on purpose -- that must fail, so a
+check that cannot fail is caught. They are run through the project's MCP
+server (`domvec/obsidian/mcp.py`: `confirm`, `pipeline_profile`,
+`app_anomalies`, `hang_watch`, ...), gated on the reader being idle.
+`python -m pytest -q` covers the backend.
+
+### Where the design lives
+
+- `docs/PLUGIN_GOAL.md` -- the user's own words, verbatim and dated; binding.
+- `docs/PLUGIN_PRD.md` -- those words decomposed into numbered requirements.
+- `docs/OPEN_WORK.md` -- what is done, measured, and still open.
+- `docs/AFFINE_MAP_GOAL.md` -- the sensor's goal: the affine map from the shadow DOM to the REPL.
+
+---
+
+## The distiller underneath
+
+What follows is the backend the plugin is built on -- the scanner, the
+content-address trie, the markdown renderer and the store -- usable on its
+own from the command line.
 
 Scan pages into a **universal content-address trie**, render them as markdown
 that links back to the DOM, index them three ways, and browse the result in an
@@ -10,7 +79,7 @@ domvec find "einstein world"                       # pagerank x frequency x sema
 domvec browse                                      # click, scroll, type, navigate
 ```
 
-## The one output type
+### The one output type
 
 Everything the scanner finds is reported as a **content address**:
 
@@ -44,7 +113,7 @@ anchors with the line marked in context, or to the REPL's `open`, which loads
 the page and scrolls to it. Three spellings work: the id, the full injective
 key, and the absolute xpath, which is the one a person can read off a page.
 
-## The three checkpoints
+### The three checkpoints
 
 ```
    live page
@@ -62,7 +131,7 @@ key, and the absolute xpath, which is the one a person can read off a page.
 3. the interactive REPL                click · scroll · type · navigate
 ```
 
-## O(delta), measured on a live scan
+### O(delta), measured on a live scan
 
 `domvec scan` drives the page and folds in each snapshot as it arrives. The
 in-page walker hashes every subtree and is told which hashes the caller
@@ -119,7 +188,7 @@ The two flat pages are plain-text documents, where every paragraph hangs off
 one element. They are also static — nothing re-scans them — so the cost is
 real and does not arise.
 
-## Retrieval
+### Retrieval
 
 The mortegon triple product, with the two vector axes kept apart:
 
@@ -154,7 +223,7 @@ may name a vector or a document, and the retrieval-side collapse is checked by
 running the same query with and without vectors loaded and comparing what
 merged.
 
-## Commands
+### Commands
 
 ```bash
 domvec scan <url>...          live streaming scan into a workspace
@@ -183,7 +252,7 @@ The semantic vectors live with their chunks because a vector is a function of
 that chunk's text. The frequency vectors do not, because their idf term is a
 function of the whole corpus and would go stale on the next scan.
 
-## The REPL
+### The REPL
 
 Clicks, drags, the wheel, cursor placement, text fields and checkboxes, over a
 markdown rendering of the page — with every line still carrying the address it
@@ -209,7 +278,7 @@ sequences, which is an ordinary parser over bytes, so that is proved too.
 into a separate `domvec browse` process and reading the tick back out of its
 rendered output.
 
-## Quality, against the pages themselves
+### Quality, against the pages themselves
 
 Every other measurement here is internal — addresses unique, chunks
 partitioning them, accounting balancing. All of that can be perfect while the
@@ -233,7 +302,7 @@ cause rather than a mystery: json leaking out of an attribute past the
 no content to dilute their `<head>`; and a SQL grammar reference that repeats
 `expr` three hundred times because the grammar does.
 
-## Verifying
+### Verifying
 
 ```bash
 python -m pytest                          # 1140 tests, ~6 min
@@ -253,7 +322,7 @@ accepted, and fixing one forces its bound to be updated rather than passing
 silently. `notes/ERRATA.md` carries the reasoning; `docs/THEORY.md` carries the
 results the code cites.
 
-## Documents
+### Documents
 
 | file | what it is |
 |---|---|
@@ -264,7 +333,7 @@ results the code cites.
 | `notes/ERRATA.md` | what earlier revisions got wrong, and why |
 | `notes/observations/` | measurements, dated |
 
-## Requirements
+### Requirements
 
 Python 3.10+, Firefox (for live scans), and `pip install -e .`.
 `kuzu`, `numpy` and `scipy` are required; `gpt4all` for `--semantic`, `pynput`
