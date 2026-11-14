@@ -55,7 +55,12 @@ def main(argv=None) -> int:
     ap.add_argument("workspace")
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--no-embed", action="store_true")
+    ap.add_argument("--variants", action="store_true",
+                    help="re-render chunk URL VARIANTS (fragments: wiki/Trie#...) that hold "
+                         "addresses of their own; a page pass reads only the exact page URL")
     a = ap.parse_args(argv)
+    if a.variants:
+        return variants(a)
     embedder = None
     if not a.no_embed:
         from domvec.core.embedding_service import get_default_service
@@ -95,6 +100,34 @@ def main(argv=None) -> int:
                 print("embedding the rest...", flush=True)
                 print("vectors:", ws.flush_vectors(), flush=True)
     print("done: %d pages, %d chunks, %.0f s" % (n, chunks_total, time.time() - t0), flush=True)
+    return 0
+
+
+def variants(a) -> int:
+    """Every chunk URL that is not its page's URL and has Address rows of its
+    own (a fragment capture) is rebuilt and ingested under that URL."""
+    embedder = None
+    if not a.no_embed:
+        from domvec.core.embedding_service import get_default_service
+        embedder = get_default_service()
+    with Workspace(a.workspace, embedder=embedder) as ws:
+        rows = ws.store._rows("MATCH (p:Page)-[:HasChunk]->(c:Chunk) WHERE c.url <> p.url "
+                              "RETURN DISTINCT c.url")
+        urls = [u for (u,) in rows if u]
+        print("variant urls:", len(urls), flush=True)
+        n = 0
+        for url in urls:
+            trie = page_trie(ws.store, url)
+            if len(trie) == 0:
+                print("  no addresses:", url[:90], flush=True)
+                continue
+            chunks, _c = ws.ingest(url, trie)
+            ws.settle()
+            n += 1
+            print("  %s: %d chunks" % (url[:90], len(chunks)), flush=True)
+        if embedder is not None:
+            print("vectors:", ws.flush_vectors(), flush=True)
+    print("variants re-rendered:", n, flush=True)
     return 0
 
 

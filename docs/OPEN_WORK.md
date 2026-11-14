@@ -283,3 +283,19 @@ Blockers:
 - **Damage, copy only:** a positional re-key of those 3 pages ran out of kuzu buffer memory between deleting and re-creating edges and left 129 chunks without anchors. The re-ingest did not restore them, because they are the fragment-URL chunks. 666 current chunks have no anchors in total, mostly pre-existing (ja.wikipedia 187, sourceforge 63, annas-archive 56; live has 443 empty-md chunks).
 
 Current state of the copy: 79,772 current chunks, 57 without a vector, 431 of about 660k anchors four-part, 5,629 versions. Next: re-render fragment-URL variants, then a final live comparison. A switch replaces the live store and is the reader's call.
+
+### D-2 copy: READY for the reader's switch decision (2026-11-14)
+
+`reindex_d2.py --variants` re-rendered 29 chunk URL variants (fragments such as `wiki/Trie#`, and trailing-slash spellings) and embedded 996 vectors. Its 604 new versions were deleted against the live version set.
+
+| | live corpus123 | copy corpus123_d2 |
+|---|---|---|
+| pages | 1,028 | 1,025 |
+| current chunks | 88,003 | 80,419 |
+| current chunks without a vector | 3,247 | 57 |
+| current chunks without an anchor | 10,901 | 56 (one annas-archive page, also unanchored in live) |
+| anchors at the markdown level | 0 | all (0 four-part) |
+| five-part keys shared by two chunks | - | 0 |
+| versions | 6,545 | 5,626 |
+
+Fewer chunks is the current renderer's output (R-C5 splitting and render changes since the pages were stored), not loss. The 1-to-1 check is the pilot's: 29% of stored chunks re-render identically. A switch moves the UMAP map once (refit).
