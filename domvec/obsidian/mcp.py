@@ -786,6 +786,44 @@ class DomvecMCP:
 
     # --- protocol ------------------------------------------------------------
 
+    # Modules this server CALLS INTO, reloaded when their file changes on disk.
+    # Without this the server kept the code it was started with for the whole
+    # Claude Code session: a harness fix was invisible to the harness until a
+    # restart -- the "probe scores the instrument that is LOADED" trap, on the
+    # instrument itself. The server's own tool table (this file) still needs a
+    # restart; everything it delegates to does not.
+    _FRESH = ("domvec.procs", "domvec.obsidian.controls", "domvec.obsidian.live")
+
+    def _fresh(self) -> List[str]:
+        import importlib
+        mt = getattr(self, "_mtimes", None)
+        if mt is None:
+            mt = self._mtimes = {}
+        done = []
+        for name in self._FRESH:
+            mod = sys.modules.get(name)
+            if mod is None or not getattr(mod, "__file__", None):
+                continue
+            try:
+                m = os.path.getmtime(mod.__file__)
+            except OSError:
+                continue
+            if name in mt and m != mt[name]:
+                try:
+                    importlib.reload(mod)
+                    done.append(name)
+                except Exception:                   # noqa: BLE001
+                    continue
+                if name.endswith(".live") and self._live is not None:
+                    try:
+                        self._live.close()
+                    except Exception:               # noqa: BLE001
+                        pass
+                    self._live = None
+            mt[name] = m
+        self.reloaded = done
+        return done
+
     def handle(self, message: Dict) -> Optional[Dict]:
         """One request in, at most one response out.
 
@@ -817,6 +855,7 @@ class DomvecMCP:
             elif method == "tools/list":
                 result = {"tools": TOOLS}
             elif method == "tools/call":
+                self._fresh()
                 params = message.get("params") or {}
                 name = params.get("name")
                 handler = self.handlers.get(name)

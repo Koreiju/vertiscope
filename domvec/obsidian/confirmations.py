@@ -34,8 +34,9 @@ OUT = ROOT / "build_analytics"
 
 def _head() -> str:
     try:
-        return subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=str(ROOT), stdin=subprocess.DEVNULL,
-                              capture_output=True, text=True).stdout.strip()
+        from ..procs import hidden
+        return subprocess.run(["git", "rev-parse", "--short", "HEAD"], **hidden(cwd=str(ROOT), stdin=subprocess.DEVNULL,
+                              capture_output=True, text=True)).stdout.strip()
     except OSError:
         return ""
 

@@ -76,8 +76,9 @@ _STOP = frozenset("a an and are as at be by for from has have in is it its of on
 # ---- git --------------------------------------------------------------------
 
 def git(repo: Path, *args: str, check: bool = True, stdin: Optional[str] = None) -> str:
-    got = subprocess.run(["git", "-C", str(repo), *args], capture_output=True,
-                         check=check, input=stdin.encode("utf-8") if stdin is not None else None)
+    from .procs import hidden
+    got = subprocess.run(["git", "-C", str(repo), *args], **hidden(capture_output=True,
+                         check=check, input=stdin.encode("utf-8") if stdin is not None else None))
     return got.stdout.decode("utf-8", errors="replace")
 
 

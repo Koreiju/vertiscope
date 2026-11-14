@@ -107,8 +107,12 @@ def _run_child(command: List[str], env: dict, port: Optional[int], *,
     # (a blocked reader on the pipe: HUNG > 15 s; DEVNULL: 0.08 s).
     # Planted: `DOMVEC_PLANT_INHERIT_STDIN=1`.
     stdin = None if os.environ.get("DOMVEC_PLANT_INHERIT_STDIN") == "1" else subprocess.DEVNULL
-    proc = subprocess.Popen(command, env=env, stdin=stdin,
-                            stdout=subprocess.PIPE if capture else None, text=capture)
+    # Windowless (`procs.hidden`): the plugin starts this supervisor DETACHED
+    # (no console), and a console child of a console-less parent is given a
+    # new VISIBLE window -- one per worker start (PLUGIN_GOAL 157).
+    from ..procs import hidden
+    proc = subprocess.Popen(command, **hidden(env=env, stdin=stdin,
+                            stdout=subprocess.PIPE if capture else None, text=capture))
     started = time.time()
     planted = os.environ.get("DOMVEC_PLANT_NO_START_DEADLINE") == "1"
     healthy = port is None or planted

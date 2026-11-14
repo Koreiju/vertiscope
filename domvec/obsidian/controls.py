@@ -9,6 +9,8 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+
+from ..procs import hidden
 import sys
 import time
 import urllib.request
@@ -205,7 +207,7 @@ def start_sidecar(
         stdout=log_fh,
         stderr=err_fh,
         env=env,
-        creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0,
+        **hidden(creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0),
     )
 
     # Wait for /health
@@ -255,6 +257,12 @@ def sidecar_status(port: int = 8788, url: str = "http://127.0.0.1:8788") -> Dict
     t0 = time.time()
     health_data = _health(port, 20.0)
     ws = _workspace_of(procs)
+    # What the sidecar puts on the screen (PLUGIN_GOAL 157: "4 to 5 different
+    # command lines"): its process tree and the visible windows it owns.
+    from ..procs import census
+    roots = [p["pid"] for p in procs if isinstance(p, dict) and p.get("pid")]
+    tops = [r for r in roots if not any(r != o and r in [c["pid"] for c in census(o).get("tree", [])] for o in roots)]
+    screen = [census(r) for r in tops]
     state = ("down" if not procs else
              "healthy" if "error" not in health_data else
              "busy" if "timed out" in health_data.get("error", "") else "unreachable")
@@ -266,6 +274,8 @@ def sidecar_status(port: int = 8788, url: str = "http://127.0.0.1:8788") -> Dict
         "health": health_data,
         "workspace": ws,
         "wal_mb": round(wal_bytes(ws) / 1e6, 2) if ws else None,
+        "screen": [{k: c.get(k) for k in ("root", "processes", "consoles", "visible_windows", "windows", "planted", "error")}
+                   for c in screen],
         "url": "http://127.0.0.1:%d" % port,
         "port": port,
     }
@@ -393,13 +403,13 @@ def close_obsidian() -> Dict:
     # workspace (pane layout, open leaves). /F straight away lost it.
     graceful = False
     if sys.platform == "win32" and alive():
-        subprocess.run(["taskkill", "/IM", "Obsidian.exe"], capture_output=True, stdin=subprocess.DEVNULL)
+        subprocess.run(["taskkill", "/IM", "Obsidian.exe"], **hidden(capture_output=True, stdin=subprocess.DEVNULL))
         deadline = time.time() + 10.0
         while time.time() < deadline and alive():
             time.sleep(0.5)
         graceful = not alive()
         if not graceful:
-            subprocess.run(["taskkill", "/F", "/IM", "Obsidian.exe", "/T"], capture_output=True, stdin=subprocess.DEVNULL)
+            subprocess.run(["taskkill", "/F", "/IM", "Obsidian.exe", "/T"], **hidden(capture_output=True, stdin=subprocess.DEVNULL))
 
     for p in psutil.process_iter(["pid", "name"]):
         try:
@@ -471,7 +481,7 @@ def launch_obsidian(
         stdin=subprocess.DEVNULL,
         stdout=log_fh,
         stderr=log_fh,
-        creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0,
+        **hidden(creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0),
     )
 
     # Verify CDP answers. The renderer answering is not the layout being
