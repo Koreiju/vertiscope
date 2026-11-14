@@ -26,6 +26,7 @@ so diagnostics go to stderr.
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
@@ -83,6 +84,19 @@ TOOLS: List[Dict] = [
             "and which panes are open. Either half can be the problem and "
             "this says which.",
         "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "hang_watch",
+        "description": (
+            "Attach the debugger to the Obsidian renderer NOW, then wait up to "
+            "`seconds` for its main thread to stop answering; if it does, return "
+            "the JS stacks it is stuck in (several samples). Use right after "
+            "obsidian_launch or before a risky gesture: a renderer that is ALREADY "
+            "wedged cannot be paused, because Debugger.enable queues behind the "
+            "busy task. Found 2026-11-14: Obsidian core MetadataCache.initialize "
+            "-> deletePath -> updateRelatedLinks, quadratic after a folder rename."),
+        "inputSchema": {"type": "object", "properties": {
+            "seconds": {"type": "number", "description": "How long to watch (default 180)"}}},
     },
     {
         "name": "wake",
@@ -487,6 +501,7 @@ class DomvecMCP:
             "ui_act": self._ui_act,
             "live_health": self._live_health,
             "wake": self._wake,
+            "hang_watch": self._hang_watch,
             "pipeline_profile": self._pipeline_profile,
             "repair_keys": self._repair_keys,
             "relink": self._relink,
@@ -577,6 +592,18 @@ class DomvecMCP:
 
     def _live_health(self, args: Dict) -> Dict:
         return self.live().health()
+
+    def _hang_watch(self, args: Dict) -> Dict:
+        import subprocess
+        secs = float(args.get("seconds") or 180)
+        root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        r = subprocess.run(["node", os.path.join(root, "obsidian-plugin", "cdp.mjs"), "--watch-hang", str(secs)],
+                           capture_output=True, text=True, timeout=secs + 60,
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        try:
+            return json.loads(r.stdout)
+        except Exception:                           # noqa: BLE001
+            return {"error": (r.stderr or r.stdout)[-400:]}
 
     def _wake(self, args: Dict) -> Dict:
         return self.live().wake()

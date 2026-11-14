@@ -252,6 +252,16 @@ and `design_state.md` prints where each record ends.
 
 ## Verification
 
+**Every test and every interaction goes through the MCP harness** (PLUGIN_GOAL
+157): the `domvec` MCP tools, `obsidian-plugin/cdp.mjs`, `checks/live.mjs`,
+`tests/`. No one-off scratch or smoke scripts against the app or the store.
+A probe the harness lacks is BUILT INTO it first, with a planted arm.
+
+**The repo root is the Obsidian vault.** Never rename or move large folders
+under it (`build/` holds 250k+ files): Obsidian's metadata cache deletes each
+vanished path with a scan over every cached file, and a folder rename froze
+the app for 30+ minutes at every launch (2026-11-14). Switch a store by PATH.
+
 `python -m pytest -q` from the repo root. Live-gated tests need
 `DOMVEC_LIVE=1`. Always clean up browser processes: a previous session leaked
 216 orphaned Firefox processes and took the machine to 1.8 GB free.

@@ -299,3 +299,28 @@ Current state of the copy: 79,772 current chunks, 57 without a vector, 431 of ab
 | versions | 6,545 | 5,626 |
 
 Fewer chunks is the current renderer's output (R-C5 splitting and render changes since the pages were stored), not loss. The 1-to-1 check is the pilot's: 29% of stored chunks re-render identically. A switch moves the UMAP map once (refit).
+
+## 2026-11-14 -- "nothing is working": Obsidian frozen by its own metadata cache
+
+Cause, caught on the stack (`cdp.mjs --watch-hang`, debugger attached before
+the hang): Obsidian core `MetadataCache.initialize -> deletePath ->
+updateRelatedLinks`, once per cached path that vanished, each a scan of every
+cached file. The vault is the repo root; the D-2 switch renamed
+`build/corpus123` <-> `corpus123_d2`, and the cache held ~20k paths under
+them (snapshots, media). The live window wedged at 14:39 (5 min after the
+rename, last plugin request 14:39:31), and every relaunch wedged again in
+`initialize`. Undone: the folders carry their old names again, and the
+sidecar serves the D-2 store by path (`build/corpus123_d2`, 86,760 chunks;
+the pre-D-2 store is `build/corpus123`). Relaunch then answered for 150 s
+under the watcher (`hung: false`) and `live_health` read the panes.
+
+Harness, so the next freeze is named through it rather than by hand:
+`live_health` now fails fast with "renderer not answering" (5 s, own socket)
+instead of waiting out a 120 s socket; MCP `hang_watch` attaches the debugger
+and samples the stuck stack; `cdp.mjs --reload` (browser-side reload) and
+`--stack`. My first `--stack` read "native block" -- wrong: `Debugger.enable`
+queues behind the busy task, so the pause had nothing to land in.
+
+Open: `build/` (253k files) is inside the vault at all -- Obsidian loads and
+watches every one of them. Moving the stores out of the vault's scan (a
+dot-folder, or a vault root that is not the repo) is the user's call.

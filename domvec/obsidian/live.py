@@ -28,6 +28,7 @@ the UI is renamed, instead of quietly returning ``undefined``.
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 import urllib.error
 import urllib.request
@@ -782,6 +783,39 @@ class Live:
             "sample": traces[-3:],
         }
 
+    def responsive(self, seconds: float = 5.0) -> Dict:
+        """Does the renderer's main thread answer at all, on its OWN socket?
+
+        A wedged renderer answers no `Runtime.evaluate`, and every other probe
+        here then waits out the 120 s socket timeout and says nothing -- which
+        is what `live_health` did on 2026-11-14 while Obsidian's metadata cache
+        ran quadratic for half an hour. This asks `1+1` with a short timeout on
+        a fresh connection, so a late reply cannot land on the main session.
+        """
+        from websocket import create_connection
+        t0 = time.time()
+        try:
+            ws = create_connection(self._page_target(), timeout=seconds, suppress_origin=True)
+        except Exception as exc:                    # noqa: BLE001
+            return {"answering": False, "why": "no page target: %s" % str(exc)[:120]}
+        try:
+            ws.send(json.dumps({"id": 1, "method": "Runtime.evaluate",
+                                "params": {"expression": "1+1", "returnByValue": True}}))
+            while True:
+                msg = json.loads(ws.recv())
+                if msg.get("id") == 1:
+                    return {"answering": True, "ms": round((time.time() - t0) * 1000)}
+        except Exception:                           # noqa: BLE001
+            return {"answering": False, "waited_s": seconds,
+                    "why": "the renderer's main thread did not answer 1+1",
+                    "next": "hang_watch catches it on the stack (attach BEFORE the hang: "
+                            "relaunch, then hang_watch)"}
+        finally:
+            try:
+                ws.close()
+            except Exception:                       # noqa: BLE001
+                pass
+
     def health(self) -> Dict:
         """Both halves, in one answer, because either can be the problem."""
         out: Dict[str, object] = {}
@@ -789,6 +823,10 @@ class Live:
             out["sidecar"] = self.get("/health")
         except Exception as exc:                    # noqa: BLE001
             out["sidecar"] = {"error": str(exc)[:160]}
+        alive = self.responsive()
+        if not alive.get("answering"):
+            out["app"] = {"error": "renderer not answering", **alive}
+            return out
         try:
             ui = self.ui()
             out["app"] = {

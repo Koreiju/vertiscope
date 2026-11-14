@@ -187,7 +187,7 @@ export async function screenshot(outPath, selector = "") {
  * depth-limited fetch plus one per box, and paying a WebSocket handshake for
  * each turns a snapshot into a visible pause.
  */
-async function session() {
+async function session({ emulate = true } = {}) {
   const ws = new WebSocket(await pageTarget());
   await new Promise((ok, no) => {
     ws.addEventListener("open", ok, { once: true });
@@ -210,9 +210,11 @@ async function session() {
   // The occlusion override, for the same reason `evaluate` needs it: a covered
   // renderer stops laying out, and an accessibility tree taken then is a tree
   // of zero-sized nodes with no names.
-  await send("Emulation.setFocusEmulationEnabled", { enabled: true });
-  await send("Page.setWebLifecycleState", { state: "active" });
-  return { send, close: () => ws.close() };
+  if (emulate) {
+    await send("Emulation.setFocusEmulationEnabled", { enabled: true });
+    await send("Page.setWebLifecycleState", { state: "active" });
+  }
+  return { send, ws, close: () => ws.close() };
 }
 
 /**
@@ -380,6 +382,94 @@ export const drag = (x1, y1, x2, y2, steps = 12) => {
   return mouse(path);
 };
 
+/**
+ * Attach BEFORE the hang, then catch it on the stack.
+ *
+ * `stack()` below cannot work on a renderer that is already wedged in JS:
+ * `Debugger.pause` is delivered by interrupt, but `Debugger.enable` is not --
+ * it queues behind the busy task, so the pause arrives with no debugger to
+ * land in (2026-11-14: read as "native block", which it was not shown to be).
+ * Here the debugger is enabled while the page still answers; a heartbeat
+ * `Runtime.evaluate` then marks the hang, and pauses sample where it is.
+ */
+export async function watchHang({ seconds = 300, beatMs = 1500, hangMs = 4000, samples = 4 } = {}) {
+  const s = await session({ emulate: false });
+  const paused = [];
+  s.ws.addEventListener("message", (ev) => {
+    const m = JSON.parse(ev.data);
+    if (m.method === "Debugger.paused") paused.push(m.params);
+  });
+  await s.send("Debugger.enable");
+  const end = Date.now() + seconds * 1000;
+  const out = { hung: false, samples: [] };
+  try {
+    while (Date.now() < end) {
+      const t0 = Date.now();
+      const beat = await Promise.race([s.send("Runtime.evaluate", { expression: "1" }).then(() => true),
+                                       new Promise((r) => setTimeout(() => r(false), hangMs))]);
+      if (beat) { await new Promise((r) => setTimeout(r, beatMs)); continue; }
+      out.hung = true; out.hung_at = new Date(t0).toISOString();
+      for (let i = 0; i < samples; i++) {
+        paused.length = 0;
+        const p0 = Date.now();
+        s.ws.send(JSON.stringify({ id: 9100 + i, method: "Debugger.pause", params: {} }));
+        while (!paused.length && Date.now() - p0 < 8000) await new Promise((r) => setTimeout(r, 25));
+        if (!paused.length) { out.samples.push({ landed: false }); break; }
+        out.samples.push({ landed: true, waited_ms: Date.now() - p0,
+          frames: paused[0].callFrames.slice(0, 24).map((f) =>
+            `${f.functionName || "(anon)"} @ ${String(f.url).split("/").pop()}:${f.location.lineNumber + 1}:${f.location.columnNumber + 1}`) });
+        s.ws.send(JSON.stringify({ id: 9200 + i, method: "Debugger.resume", params: {} }));
+        await new Promise((r) => setTimeout(r, 700));
+      }
+      break;
+    }
+    return out;
+  } finally {
+    try { s.ws.send(JSON.stringify({ id: 9300, method: "Debugger.disable", params: {} })); } catch {}
+    s.close();
+  }
+}
+
+/**
+ * WHERE the renderer's main thread is, when it is not answering.
+ *
+ * A frozen app answers no `Runtime.evaluate` -- the probe and the reader wait
+ * on the same thread -- so every other instrument here times out and says
+ * nothing about why. `Debugger.pause` is delivered by V8's interrupt, not by
+ * the event loop, so it lands inside a busy JS loop and the paused event
+ * carries the stack. If it does NOT land within `ms`, the thread is not in JS
+ * at all (a synchronous IPC, a native call, layout) -- which is a finding too.
+ */
+export async function stack(ms = 8000, samples = 3) {
+  const s = await session({ emulate: false });  // emulation waits on the busy thread
+  const out = [];
+  try {
+    const paused = [];
+    s.ws.addEventListener("message", (ev) => {
+      const m = JSON.parse(ev.data);
+      if (m.method === "Debugger.paused") paused.push(m.params);
+    });
+    s.ws.send(JSON.stringify({ id: 9001, method: "Debugger.enable", params: {} }));
+    for (let i = 0; i < samples; i++) {
+      const t0 = Date.now();
+      paused.length = 0;
+      s.ws.send(JSON.stringify({ id: 9100 + i, method: "Debugger.pause", params: {} }));
+      while (!paused.length && Date.now() - t0 < ms) await new Promise((r) => setTimeout(r, 25));
+      if (!paused.length) { out.push({ sample: i, landed: false, waited_ms: Date.now() - t0 }); break; }
+      const p = paused[0];
+      out.push({ sample: i, landed: true, waited_ms: Date.now() - t0, reason: p.reason,
+                 frames: p.callFrames.slice(0, 18).map((f) =>
+                   `${f.functionName || "(anon)"} @ ${String(f.url).split("/").pop()}:${f.location.lineNumber + 1}:${f.location.columnNumber + 1}`) });
+      s.ws.send(JSON.stringify({ id: 9200 + i, method: "Debugger.resume", params: {} }));
+      await new Promise((r) => setTimeout(r, 400));
+    }
+    s.ws.send(JSON.stringify({ id: 9300, method: "Debugger.disable", params: {} }));
+    return out;
+  } finally {
+    s.close();
+  }
+}
+
 // `pathToFileURL` rather than string-building: on Windows the argv path is
 // `C:\...`, and hand-rolling `file://` + that yields two slashes where Node
 // produces three. The guard never matched, so every invocation exited 0 with
@@ -392,6 +482,24 @@ if (process.argv[1] &&
     const rest = args.slice(1).filter((a) => a !== "--boxes");
     console.log(await axTree(rest[0] || "",
                              { boxes: args.includes("--boxes") }));
+    process.exit(0);
+  }
+  if (args[0] === "--watch-hang") {
+    console.log(JSON.stringify(await watchHang({ seconds: Number(args[1]) || 300 }), null, 1));
+    process.exit(0);
+  }
+  if (args[0] === "--reload") {
+    // Recovery for a renderer whose main thread is wedged: `Page.reload` is
+    // served by the BROWSER-side page handler (the navigation controller),
+    // so it lands when nothing evaluated in the page can. Vault, workspace
+    // layout and the sidecar are untouched; the plugin loads again.
+    const s = await session({ emulate: false });
+    try { console.log(JSON.stringify(await s.send("Page.reload", { ignoreCache: false }))); }
+    finally { s.close(); }
+    process.exit(0);
+  }
+  if (args[0] === "--stack") {
+    console.log(JSON.stringify(await stack(Number(args[1]) || 8000, Number(args[2]) || 3), null, 1));
     process.exit(0);
   }
   if (args[0] === "--click" || args[0] === "--drag") {
