@@ -273,3 +273,13 @@ Blockers:
 1. **69,255 versions.** The re-render changed almost every chunk, and G-253 keeps a changed chunk's earlier state as a VERSION. `lead_vectors` includes versions, so the map would draw them: about double the cloud. A migration is not page history; these versions must be removed before a switch (they are recognisable as the pre-reindex chunk ids).
 2. **2,443 current anchors still four-part.** Chunks the write path judged unchanged were skipped, so they kept their old anchors.
 3. **54,504 markdown-level anchors whose `leaf()` is not a stored Address row.** The sample is renderer-synthesized accessors (reddit `aria-label|heading.tag/heading`): lines whose address was never a trie leaf. Most likely pre-existing renderer behaviour, not migration loss. To confirm against the live store, which is locked while the sidecar runs.
+
+### D-2 copy cleanup (2026-11-14)
+
+`scripts/d2_cleanup.py <copy> <live> [--apply]` reads the live store read-only (sidecar stopped briefly):
+- **Versions:** the live store has 6,545. The re-index created **63,626** more in the copy, now DELETED; 5,629 real versions are kept. The copy now holds 5,629.
+- **The leaf question:** accessors with an escaped `|` are 96.2% of live anchors and 96.0% of the copy's, so it is the normal accessor format, not migration loss. The 54,504 markdown-level anchors without a leaf row are lines whose address was never a trie leaf; `_with_line_rows` gives each a row, so nothing is unanchored by D-2.
+- **Residue:** 431 four-part anchors on chunks filed under FRAGMENT URLs (`wiki/Trie#` 107 chunks, `Radix_tree#PATRICIA` 54, one GitHub page). The re-index rebuilds a page only from addresses under the exact page URL; fragment variants need their own pass.
+- **Damage, copy only:** a positional re-key of those 3 pages ran out of kuzu buffer memory between deleting and re-creating edges and left 129 chunks without anchors. The re-ingest did not restore them, because they are the fragment-URL chunks. 666 current chunks have no anchors in total, mostly pre-existing (ja.wikipedia 187, sourceforge 63, annas-archive 56; live has 443 empty-md chunks).
+
+Current state of the copy: 79,772 current chunks, 57 without a vector, 431 of about 660k anchors four-part, 5,629 versions. Next: re-render fragment-URL variants, then a final live comparison. A switch replaces the live store and is the reader's call.
