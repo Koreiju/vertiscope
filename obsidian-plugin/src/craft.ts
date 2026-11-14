@@ -152,7 +152,15 @@ export class Craft {
   plantCraftDepthTested = false;
   plantLightCellOnly = false;
   private hotLines: any = null;
-  plantHiddenInEgo = true;   // first person: the camera IS the craft; drawn there it filled the lens (2026-11-08 screenshot: giant "ego", "slate 2", a purple disc)
+  /** Planted: hidden in the first-person view -- shipped TRUE from 2026-11-08
+   *  (drawn around the camera it filled the lens) until 2026-11-14, when the
+   *  reader could not find the ego at all: "I cannot find our ego anywhere. I
+   *  can't even find the node" (PLUGIN_GOAL 157). */
+  plantHiddenInEgo = false;
+  /** Planted: first person draws the craft AT the camera (the 11-08 lens). */
+  plantNoInset = false;
+  /** First person: the craft's angular radius on screen, degrees. */
+  insetDeg = 7;
   /** Planted (146): the craft's map never turns with the heading. */
   plantFixedFrame = false;
   private q = new THREE.Quaternion();
@@ -566,6 +574,22 @@ export class Craft {
   }
 
   /** The craft's centre in the world. */
+  /** Where the craft sits in first person, and how it faces: on the view
+   *  axis at the distance that makes its radius `insetDeg` on screen, lowered
+   *  to the bottom third, turned to face the lens. */
+  inset(): { at: V3; q: any } | null {
+    const cam = this.host.camera();
+    if (!cam || !cam.position) return null;
+    const R = this.stats.radius || 10;
+    const D = R / Math.tan((this.insetDeg * Math.PI) / 180);
+    const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(cam.quaternion);
+    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(cam.quaternion);
+    const halfH = D * Math.tan(((cam.fov || 50) * Math.PI) / 360);
+    const p = cam.position.clone().addScaledVector(fwd, D).addScaledVector(up, -halfH * 0.55);
+    (this.stats as any).inset = { D: Math.round(D), deg: this.insetDeg };
+    return { at: { x: p.x, y: p.y, z: p.z }, q: cam.quaternion.clone() };
+  }
+
   where(): V3 {
     const a = this.host.anchor();
     if (a) return a;
@@ -658,12 +682,17 @@ export class Craft {
     // camera keeps it at the centre of the screen; first person, the camera is
     // at the ego node, inside its own map ("zoom ... into the microscope of
     // the ego", PG 4909). Planted `plantHiddenInEgo`: hidden in the ego view.
-    const show = this.plantAlwaysDrawn || !this.plantHiddenInEgo || this.host.mode() !== "ego";
+    const egoView = this.host.mode() === "ego";
+    const show = this.plantAlwaysDrawn || !this.plantHiddenInEgo || !egoView;
     this.group.visible = show;
     this.stats.visible = show;
     // Placed and counted drawn or not: hidden in the ego view, its I/O still
     // counts (a count taken only when drawn read 0 in the ego view, G-306).
-    const at = this.where();
+    // First person (2026-11-14): an INSET -- ahead of the camera and below the
+    // centre, sized to a fixed angle, facing the lens -- so the ego is always
+    // in view without filling it. Third person keeps the chase anchor.
+    const inset = egoView && !this.plantNoInset ? this.inset() : null;
+    const at = inset ? inset.at : this.where();
     this.stats.anchor = { x: Math.round(at.x), y: Math.round(at.y), z: Math.round(at.z) };
     // Pulses move every frame, before the redraw key can skip it (G-331).
     this.stepPulses(at);
@@ -673,7 +702,8 @@ export class Craft {
     // second, for the world's nodes its I/O lines end on.
     // The heading turns the craft's frame: its map's +z points along it.
     const h = this.plantFixedFrame ? null : this.host.heading?.();
-    if (h && Number.isFinite(h.x) && Math.hypot(h.x, h.y, h.z) > 1e-6) {
+    if (inset) this.q.copy(inset.q);
+    else if (h && Number.isFinite(h.x) && Math.hypot(h.x, h.y, h.z) > 1e-6) {
       const L = Math.hypot(h.x, h.y, h.z);
       this.q.setFromUnitVectors(new THREE.Vector3(0, 0, 1), new THREE.Vector3(h.x / L, h.y / L, h.z / L));
     } else this.q.identity();

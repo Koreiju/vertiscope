@@ -8379,7 +8379,7 @@ export function makeChecks(env) {
     },
     {
       id: "G-299",
-      asks: "the ego computation graph is ONE unit in 3D, its own graph apart from the fit's world (PLUGIN_GOAL 67-69): the craft holds exactly the vault's computation-graph artifacts -- the cockpit as ego, each slate, each notebook whose cell has run, each note on the plane -- with their cells and markdown trees, every node linked to ego (containment, the kernel's order, a {ref} from one note's tree to another's); none of its nodes is a node of the fit's graph; a run's recorded input, a chunk of the world, is wired to its cell's note (I/O); the map view (third person) frames the craft beside the world, both on screen; the ego view (first person) does not draw it; planted (plantNoLinks) the craft falls apart, (plantAlwaysDrawn) it is drawn around the camera in the ego view",
+      asks: "the ego computation graph is ONE unit in 3D, its own graph apart from the fit's world (PLUGIN_GOAL 67-69): the craft holds exactly the vault's computation-graph artifacts -- the cockpit as ego, each slate, each notebook whose cell has run, each note on the plane -- with their cells and markdown trees, every node linked to ego (containment, the kernel's order, a {ref} from one note's tree to another's); none of its nodes is a node of the fit's graph; a run's recorded input, a chunk of the world, is wired to its cell's note (I/O); the map view (third person) frames the craft beside the world, both on screen; the ego view (first person) draws it as an INSET -- every node on screen, its footprint under half the lens (2026-11-14, PLUGIN_GOAL 157: 'I cannot find our ego anywhere'); planted (plantNoLinks) the craft falls apart, (plantHiddenInEgo) it is not drawn in the ego view, (plantNoInset) it is drawn around the camera and fills the lens",
       async run() {
         // 2026-11-01: "the full ego computation graph as one unit, its own
         // graph separate from the red of the UMAPped components, all
@@ -8398,7 +8398,7 @@ export function makeChecks(env) {
           const pa = "domvec/graph/g299 a " + stamp + ".md", pb = "domvec/graph/g299 b " + stamp + ".md";
           const out = { planted };
           try {
-            c.plantNoLinks = planted === "links"; c.plantAlwaysDrawn = planted === "drawn";
+            c.plantNoLinks = planted === "links"; c.plantHiddenInEgo = planted === "hidden"; c.plantNoInset = planted === "lens";
             // Two notes through the create tool: A binds a tree; B reads A's
             // tree by {ref} and runs a cell whose input is a chunk of the world.
             // A name no other note binds: a ref resolves by name, and a second
@@ -8445,20 +8445,29 @@ export function makeChecks(env) {
             const sh = g.shellOf(world);
             const e = c.where();
             out.third = { drawn: c.stats.visible, craft: ndc(e), world: ndc({ x: sh.cx, y: sh.cy, z: sh.cz }) };
-            // First person.
-            g.agent.setMode("ego"); await sleep(400);
+            // First person: drawn, and where -- every node's NDC, the footprint.
+            g.agent.setMode("ego"); await sleep(1200);
             out.drawn_in_ego = c.stats.visible;
+            const cam1 = g.graph.camera();
+            cam1.updateMatrixWorld();
+            const pts = c.nodes.filter((n) => n.mesh).map((n) => { const v = n.mesh.position.clone().project(cam1); return [v.x, v.y, v.z]; });
+            const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
+            out.ego_inset = { nodes: pts.length, all_on_screen: pts.length > 0 && pts.every((p) => Math.abs(p[0]) <= 1 && Math.abs(p[1]) <= 1 && p[2] < 1),
+              w: pts.length ? Math.round((Math.max(...xs) - Math.min(...xs)) * 100) / 100 : null,
+              h: pts.length ? Math.round((Math.max(...ys) - Math.min(...ys)) * 100) / 100 : null, stats: c.stats.inset || null };
             return out;
           } finally {
-            c.plantNoLinks = false; c.plantAlwaysDrawn = false; c.dirty();
+            c.plantNoLinks = false; c.plantHiddenInEgo = false; c.plantNoInset = false; c.dirty();
             g.agent.setMode(mode0);
             for (const p of [pa, pb]) { try { await d.trash(p); } catch (e) { /* gone */ } }
           }
         })()`, { timeout: 120000 });
         const clean = await arm(null);
         const links = await arm("links");
-        const drawn = await arm("drawn");
+        const hidden = await arm("hidden");
+        const lens = await arm("lens");
         const c = clean || {};
+        const insetOk = (x) => !!x && x.drawn_in_ego === true && !!x.ego_inset && x.ego_inset.all_on_screen && x.ego_inset.w < 1 && x.ego_inset.h < 1;
         const onScreen = (v) => !!v && Math.abs(v[0]) <= 1 && Math.abs(v[1]) <= 1 && v[2] < 1;
         const third = c.third || {};
         return {
@@ -8467,10 +8476,11 @@ export function makeChecks(env) {
                 && c.ref_ab && c.in_world === 0 && c.io >= 1
                 && third.drawn && onScreen(third.craft) && onScreen(third.world)
                 && Math.hypot(third.craft[0] - third.world[0], third.craft[1] - third.world[1]) > 0.2
-                && c.drawn_in_ego === false
+                && insetOk(c)
                 && !!links && !!links.summary && links.summary.reached_from_ego < links.summary.nodes
-                && !!drawn && drawn.drawn_in_ego === true,
-          evidence: { clean, links, drawn },
+                && !!hidden && hidden.drawn_in_ego === false
+                && !!lens && !insetOk(lens),
+          evidence: { clean, links, hidden, lens },
         };
       },
     },
