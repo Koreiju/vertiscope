@@ -10318,7 +10318,7 @@ export function makeChecks(env) {
     },
     {
       id: "G-336",
-      asks: "hover a chunk node, then click it, and ITS panel opens (PLUGIN_GOAL 157: 'hovering the mouse over one of the chunk nodes ... doesn't allow me to click on the hovered node to open the panel'): in chunk view, for chunk nodes on screen, a pointer move onto the node then a press and release at the same point -- through the pane's own pointer handlers -- leaves that node's panel open and not a mere preview, and what is under the pointer at the node is the 3D canvas (or a pass-through preview), never another panel; planted (every pick proxy's raycast disabled) no click reaches a node",
+      asks: "hover a chunk node, then click it, and ITS panel opens (PLUGIN_GOAL 157: 'hovering the mouse over one of the chunk nodes ... doesn't allow me to click on the hovered node to open the panel'): in chunk view, for chunk nodes on screen, a pointer move onto the node then a press and release at the same point -- through the pane's own pointer handlers -- leaves that node's panel open and not a mere preview, and what is under the pointer at the node is the 3D canvas (or a pass-through preview), never another panel; planted (every pick proxy's raycast disabled AND plantNoClickFallback -- the click resolved as the hover shows it) no click reaches a node",
       async run() {
         const arm = (planted) => evaluate(`(async () => {
           const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -10334,9 +10334,14 @@ export function makeChecks(env) {
           const open0 = new Set(v.billboards.keys());
           const out = { planted: ${planted}, tried: 0, opened: 0, preview_only: 0, other: 0, blocked: 0, blockers: [] };
           const unpicked = [];
+          let fb0 = { used: 0, none: 0 };
           try {
             if (${planted}) for (const n of v.graph.graphData().nodes) { const ob = n.__threeObj; if (ob && ob.__proxy) { unpicked.push([ob, ob.raycast]); ob.raycast = () => {}; } }
-            const nodes = v.graph.graphData().nodes.filter((n) => n.__threeObj && Number.isFinite(n.x) && n.url && n.level !== "page" && n.level !== "path");
+            v.plantNoClickFallback = ${planted};
+            fb0 = { ...v.clickFallbackStats };
+            // Web chunks: a code:// chunk's click opens its code panel over the
+            // canvas, which then covered the points after it (the first run).
+            const nodes = v.graph.graphData().nodes.filter((n) => n.__threeObj && Number.isFinite(n.x) && /^https?:/.test(String(n.url || "")) && n.level !== "page" && n.level !== "path");
             const pts = nodes.map((nd) => { const q = cam.position.clone().set(nd.x, nd.y, nd.z || 0).project(cam); return { nd, x: q.x, y: q.y, z: q.z }; })
               .filter((o) => Math.abs(o.x) < 0.8 && Math.abs(o.y) < 0.8 && o.z < 1);
             const step = Math.max(1, Math.floor(pts.length / 12));
@@ -10346,23 +10351,31 @@ export function makeChecks(env) {
               const ev = (type) => new PointerEvent(type, { clientX: cx, clientY: cy, bubbles: true, pointerId: 1, pointerType: "mouse", button: 0, buttons: type === "pointerdown" ? 1 : 0 });
               el.dispatchEvent(ev("pointermove")); await frame(); await frame(); await sleep(250);
               const top = document.elementFromPoint(cx, cy);
-              if (top && top !== el && !top.closest(".is-preview")) { out.blocked++; if (out.blockers.length < 3) out.blockers.push(top.tagName + "." + String(top.className).slice(0, 40)); }
+              if (top && top !== el && !top.closest(".is-preview")) {
+                // A panel the reader had open before the check is the reader's
+                // state, not this defect: that point is skipped, and counted.
+                const bb = top.closest(".domvec-bb");
+                if (bb && open0.has(bb.dataset.cid)) { out.skipped_under_open = (out.skipped_under_open || 0) + 1; out.tried--; continue; }
+                out.blocked++; if (out.blockers.length < 3) out.blockers.push(top.tagName + "." + String(top.className).slice(0, 40));
+              }
               const hov = v.graph.graphData().nodes.find((n) => n.hovered) || null;
+              const shown = v.presented || null;   // what the hover is showing
               el.dispatchEvent(ev("pointerdown")); await sleep(60); el.dispatchEvent(ev("pointerup"));
               el.dispatchEvent(new MouseEvent("click", { clientX: cx, clientY: cy, bubbles: true }));
               await sleep(700);
               // Which node the click took: a panel newly open, not a preview.
               const now = [...v.billboards.entries()].filter(([id, b]) => !open0.has(id));
               const kept = now.filter(([id, b]) => !b.el.hasClass("is-preview"));
-              if (kept.some(([id]) => id === o.nd.id || (hov && id === hov.id))) out.opened++;
+              if (kept.some(([id]) => id === o.nd.id || (hov && id === hov.id) || (shown && id === shown.id))) out.opened++;
               else if (now.length && !kept.length) out.preview_only++;
               else if (kept.length) out.other++;
               for (const [id] of now) v.closeBillboard(id);
               await sleep(150);
             }
+            out.fallback = { used: v.clickFallbackStats.used - fb0.used, none: v.clickFallbackStats.none - fb0.none };
             return out;
           } finally {
-            v.plantNoPick = pickWas;
+            v.plantNoPick = pickWas; v.plantNoClickFallback = false;
             for (const [ob, rc] of unpicked) ob.raycast = rc;
             for (const id of [...v.billboards.keys()]) if (!open0.has(id)) v.closeBillboard(id);
           }

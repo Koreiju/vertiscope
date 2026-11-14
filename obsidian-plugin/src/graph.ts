@@ -534,6 +534,20 @@ export class GraphView extends ItemView {
     // canvas is a hand on the stick -- the flight and its velocity dropped --
     // and the wheel re-reads the distance a flight in progress stops at.
     canvas.addEventListener("pointerdown", (e: PointerEvent) => { this.downAt = [e.clientX, e.clientY]; if (!this.plantHoldFlight) this.agent.release(); }, { passive: true, capture: true });
+    // A click the library's pick missed lands on what the hover shows (see
+    // nodeAtScreen). After the library's own handling: if it clicked a node,
+    // nothing more happens. Not on the craft, not after a drag.
+    canvas.addEventListener("click", (e: MouseEvent) => {
+      if (this.plantNoClickFallback || !this.clickNode || !this.graph || e.button !== 0) return;
+      if (!this.downAt || Math.hypot(e.clientX - this.downAt[0], e.clientY - this.downAt[1]) > 4) return;
+      const x = e.clientX, y = e.clientY, at = performance.now();
+      window.setTimeout(() => {
+        if (this.nodeClickAt >= at - 400) return;
+        if (this.craft?.nodeAt(x, y)) return;
+        const n = this.nodeAtScreen(x, y);
+        if (n) { this.clickFallbackStats.used++; this.clickNode!(n); } else this.clickFallbackStats.none++;
+      }, 0);
+    });
     // Pinch (Chromium: wheel + ctrl) or shift+scroll zooms the 2D EGO PLANE;
     // a plain scroll stays the 3D view's zoom (158). Shift+wheel arrives as a
     // HORIZONTAL delta on Windows, so either axis counts. Capture phase, so
@@ -6759,6 +6773,66 @@ export class GraphView extends ItemView {
     this.craft.frame();
     this.drawTethers();
   }
+  /** The graph's node-click, callable by the fallback below. */
+  clickNode: ((n: any) => void) | null = null;
+  nodeClickAt = 0;
+  /** Planted: a click the library's pick misses opens nothing, as before. */
+  plantNoClickFallback = false;
+  clickFallbackStats = { used: 0, none: 0, presented: 0, glow: 0 };
+  /**
+   * The node a click at (x, y) means, as the HOVER shows it -- not as the
+   * pick proxies resolve it. Measured 2026-11-14 with a trusted click on a
+   * chunk node's own centre: the pane's ray hit nothing, the node's proxy is
+   * 0.106 units (sub-pixel) and it was not even a pick candidate, so the
+   * click opened nothing ("hovering the mouse over one of the chunk nodes ...
+   * doesn't allow me to click on the hovered node"). The presented picture
+   * if the pointer is on its drawn disc; else the brightest glowing node
+   * whose drawn disc (at least 6 px) holds the pointer.
+   */
+  nodeAtScreen(x: number, y: number): any {
+    const g = this.graph;
+    if (!g) return null;
+    const cam = g.camera(), el = g.renderer().domElement, r = el.getBoundingClientRect();
+    const rs = g.nodeRelSize(), media = this.drawnMedia;
+    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion);
+    const disc = (n: any) => {
+      const c = new THREE.Vector3(n.x, n.y, n.z || 0);
+      const a = c.clone().project(cam);
+      if (a.z >= 1) return null;
+      const half = this.lookOf(n, rs, media).half * this.zoomScale;
+      const b = c.clone().addScaledVector(right, half).project(cam);
+      const px = r.left + (a.x + 1) / 2 * r.width, py = r.top + (1 - a.y) / 2 * r.height;
+      return { d: Math.hypot(px - x, py - y), rad: Math.max(6, Math.hypot((b.x - a.x) * r.width / 2, (b.y - a.y) * r.height / 2)) };
+    };
+    const P = this.presented;
+    if (P && Number.isFinite(P.x)) { const q = disc(P); if (q && q.d <= q.rad) { this.clickFallbackStats.presented++; return P; } }
+    let best: any = null, bestGlow = -1, bestD = Infinity;
+    for (const [n, glow] of this.glowNear) {
+      if (!Number.isFinite(n.x)) continue;
+      const q = disc(n);
+      if (!q || q.d > q.rad) continue;
+      if (glow > bestGlow + 1e-9 || (Math.abs(glow - bestGlow) <= 1e-9 && q.d < bestD)) { best = n; bestGlow = glow; bestD = q.d; }
+    }
+    if (best) { this.clickFallbackStats.glow++; return best; }
+    // The glow list can be a frame stale (or the node outside its cylinder):
+    // one direct screen-space pass over every node, the nearest whose drawn
+    // disc holds the pointer, nearer the camera on a tie. Once per click.
+    let near: any = null, nearD = Infinity, nearZ = Infinity;
+    const v3 = new THREE.Vector3();
+    for (const n of g.graphData().nodes) {
+      if (!Number.isFinite(n.x)) continue;
+      v3.set(n.x, n.y, n.z || 0).project(cam);
+      if (v3.z >= 1 || v3.z <= -1) continue;
+      const px = r.left + (v3.x + 1) / 2 * r.width, py = r.top + (1 - v3.y) / 2 * r.height;
+      const d = Math.hypot(px - x, py - y);
+      if (d > 24) continue;
+      const q = disc(n);
+      if (!q || q.d > q.rad) continue;
+      if (q.d < nearD - 1e-6 || (Math.abs(q.d - nearD) <= 1e-6 && v3.z < nearZ)) { near = n; nearD = q.d; nearZ = v3.z; }
+    }
+    if (near) (this.clickFallbackStats as any).scan = ((this.clickFallbackStats as any).scan || 0) + 1;
+    return near;
+  }
   /** Planted: pinch / shift+scroll zoom the 3D view, as before 158. */
   plantPlaneZoomIs3D = false;
   /** Planted: a press on a craft node orbits the camera, as before. */
@@ -9725,7 +9799,8 @@ export class GraphView extends ItemView {
       // Black, opaque (2026-10-17: "ensure the background is also black and
       // not grey"): the glowing chunks read as points of light on it.
       .backgroundColor(this.plantGreyBackground ? "rgba(0,0,0,0)" : "#000000")
-      .onNodeClick((n: any) => {
+      .onNodeClick(this.clickNode = (n: any) => {
+        this.nodeClickAt = performance.now();
         // A page or a branch unravels; a chunk opens (`G-54`). One gesture,
         // and which it means is a property of the node rather than of a mode
         // the reader has to remember they are in.
