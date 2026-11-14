@@ -6706,7 +6706,13 @@ export class GraphView extends ItemView {
         planeAt: (path: string) => {
           const q = (window as any).__domvecPlane?.panelOf?.(path);
           const c = q?.card as HTMLElement | undefined;
-          return c ? { x: c.offsetLeft + c.offsetWidth / 2, y: c.offsetTop + c.offsetHeight / 2 } : null;
+          if (!c || !c.isConnected) return null;
+          // In the PLANE's own frame: its centre 0, its half-extent 1 -- so a
+          // card's node is placed by where the card is, not by where the
+          // other cards are.
+          const home = (c.offsetParent as HTMLElement | null) || c.parentElement;
+          const W = home?.clientWidth || 1, H = home?.clientHeight || 1, half = Math.max(W, H) / 2;
+          return { x: (c.offsetLeft + c.offsetWidth / 2 - W / 2) / half, y: (c.offsetTop + c.offsetHeight / 2 - H / 2) / half };
         },
         heading: () => this.agent.headingNow(),
         world: () => this.shellOf((this.graph as any)?.graphData?.().nodes || []),

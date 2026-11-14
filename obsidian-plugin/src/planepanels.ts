@@ -35,6 +35,8 @@ export interface PlaneHost {
   plane(): HTMLElement | null;
   /** A panel opened or closed: the craft redraws its stuck rings. */
   changed?(): void;
+  /** A card was dragged to a new place: the ego's 2D plane follows it (158). */
+  moved?(path: string): void;
   /** A note just shown in a panel (the plugin's notebook bookkeeping). */
   opened?(file: TFile): void;
   /** The retrieval bar's code nodes by name (PLUGIN_GOAL 133). */
@@ -325,7 +327,8 @@ export class PlaneDesk {
       // Alt+click on the node is the containment gesture (G-327), not the halo.
       const undrag = makeDraggable(card, plane, "domvec-plane-card:" + file.path, this.place,
         () => { if (performance.now() - this.altAt < 800) return; this.host.headerClick?.(fpath); },
-        (x, y) => this.wireDrop(fpath, x, y));
+        (x, y) => this.wireDrop(fpath, x, y),
+        () => this.host.moved?.(fpath));
       clampToPlane(card, plane);
       p = { path: file.path, card, leaf, head, undrag };
       // The panel is the note's as soon as the note shows; anything mounted

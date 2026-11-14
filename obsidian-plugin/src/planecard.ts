@@ -91,7 +91,8 @@ export function moveToPane(card: HTMLElement, from: HTMLElement, to: HTMLElement
 }
 
 export function makeDraggable(card: HTMLElement, home: HTMLElement, key: string, stats: PlaceStats,
-                              onClick?: () => void, onDrop?: (x: number, y: number) => boolean): () => void {
+                              onClick?: () => void, onDrop?: (x: number, y: number) => boolean,
+                              onMoved?: () => void): () => void {
   // The pane the card is on NOW: the 3D view's plane, or another pane it was
   // carried to (PLUGIN_GOAL 133: "move the computational graph editor
   // nodes/panels *across* panes like the 3D world viewer and the browser").
@@ -143,6 +144,8 @@ export function makeDraggable(card: HTMLElement, home: HTMLElement, key: string,
     }
     if (e) { const to = paneUnder(card, e.clientX, e.clientY, home); if (to && to !== plane) { moveToPane(card, plane, to, e.clientX, e.clientY); plane = to; (stats as any).crossed = ((stats as any).crossed || 0) + 1; } }
     snapToNeighbour(card, plane, stats);
+    // The card's place is its node's place in the ego's 2D plane: told at once.
+    onMoved?.();
     try { window.localStorage.setItem(key, JSON.stringify({ x: parseFloat(card.style.left) || 0, y: parseFloat(card.style.top) || 0 })); }
     catch { /* a convenience only */ }
   };

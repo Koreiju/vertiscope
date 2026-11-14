@@ -867,6 +867,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
       return g && typeof g.plane === "function" ? g.plane() : null;
     },
     changed: () => { const g: any = this.app.workspace.getLeavesOfType(GRAPH_VIEW)[0]?.view; g?.craft?.dirty(); this.cockpit.decorate(); },
+    moved: () => { const g: any = this.app.workspace.getLeavesOfType(GRAPH_VIEW)[0]?.view; g?.craft?.replane?.(); },
     // A panel on the plane gets at once what a tab gets from the workspace's
     // layout events, which a leaf outside the tree never fires.
     openBrowser: () => { void this.openBrowserInstance(); },

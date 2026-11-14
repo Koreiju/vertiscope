@@ -39,6 +39,8 @@ import { App, TFile } from "obsidian";
 import { findFences } from "./fences";
 import { COCKPIT_PATH } from "./cockpit";
 import { PLANE_FOLDER } from "./planepanels";
+/** Where the live checks write their scratch notes. */
+export const CHECKS_FOLDER = "domvec-checks";
 
 const PY = /^(python|py|python3)$/;
 
@@ -60,7 +62,8 @@ export interface CraftHost {
   camera(): any;
   canvas(): HTMLElement | null;
   mode(): string;
-  /** Where a note's card sits on the 2D plane editor, in plane pixels, or null. */
+  /** Where a note's card sits on the 2D plane editor -- its centre, in the
+   *  plane's own frame (centre 0, half-extent 1, y down) -- or null. */
   planeAt?(path: string): { x: number; y: number } | null;
   /** Where the agent's craft is: its last place flying, or null. */
   anchor(): V3 | null;
@@ -133,7 +136,18 @@ export class Craft {
   edges: CraftEdge[] = [];
   stats = { builds: 0, notes: 0, cells: 0, trees: 0, web: 0, edges: 0, io: 0, refs: 0, visible: false, opened: 0, closed: 0,
             projection: "", placed_by_ego: 0, io_to_ego: 0, lit: 0, readouts: 0, reattached: 0,
-            anchor: null as V3 | null, radius: 0, map_scale: 0, map_left_overlapping: 0, modules: 0, modules_by_ego: 0, modules_total: 0 };
+            anchor: null as V3 | null, radius: 0, map_scale: 0, map_left_overlapping: 0, modules: 0, modules_by_ego: 0, modules_total: 0, check_notes_kept_off: 0 };
+  /**
+   * The live checks' own scratch notes (domvec-checks/) are not the reader's
+   * tool space (PLUGIN_GOAL 158: "It's supposed to be a more compact
+   * representation of the *tool space* of the ego"). Measured 2026-11-14: 9
+   * of the ego's 11 notes were check leftovers. They join the ego while a
+   * verify run is in progress (the checks measure through the craft) or while
+   * open on the plane, never otherwise. Planted: they join it always.
+   */
+  plantCheckNotesOnEgo = false;
+  private builtDuringRun = false;
+  private checksRunning(): boolean { return !!(window as any).__domvec?.verify?.state?.()?.running; }
   /** Planted (G-318): the code graph's modules are not the ego's. */
   plantNoCodeNet = false;
   /** 2D: the craft drawn as the FLAT plane facing the camera, in every view;
@@ -262,6 +276,30 @@ export class Craft {
     await this.build();
   }
 
+  /**
+   * The sidecar's part of a build -- the tagged chunks, the code net, the
+   * ego's projection -- waited for at most this long; past it the build goes
+   * on with what was last known. Measured 2026-11-14: the worker busy on a
+   * long job held `/ego/projection` open, `build()` never returned, and
+   * `building` stayed true -- every later rebuild returned at once, so the
+   * ego stopped following the vault altogether. The ego is the vault's first;
+   * the sidecar only adds places. Planted (`plantUnboundedSidecar`): waited
+   * for however long it takes, as before.
+   */
+  sidecarWaitMs = 4000;
+  plantUnboundedSidecar = false;
+  sidecarStats = { timeouts: 0, last_timeout: "" };
+  private lastTags: string[] = [];
+  private lastProj: any = null;
+  private within<T>(what: string, p: Promise<T>, fallback: T): Promise<T> {
+    if (this.plantUnboundedSidecar) return p;
+    let timer = 0;
+    return Promise.race([
+      p.finally(() => window.clearTimeout(timer)),
+      new Promise<T>((r) => { timer = window.setTimeout(() => { this.sidecarStats.timeouts++; this.sidecarStats.last_timeout = what; r(fallback); }, this.sidecarWaitMs); }),
+    ]);
+  }
+
   /** The craft's artifacts read from the vault. */
   async build(): Promise<void> {
     if (this.building) return;
@@ -275,8 +313,12 @@ export class Craft {
       const names = new Map<string, string>();          // a name -> the node it is
       names.set("ego", ego.id);
       const pending: { from: string; ref: string }[] = [];
+      const run = this.checksRunning();
+      this.builtDuringRun = run;
+      let keptOff = 0;
       for (const f of app.vault.getMarkdownFiles()) {
         if (f.path === COCKPIT_PATH) continue;
+        if (!this.plantCheckNotesOnEgo && !run && f.path.startsWith(CHECKS_FOLDER + "/") && !this.host.isOpen(f.path)) { keptOff++; continue; }
         const cache = app.metadataCache.getFileCache(f);
         const kind = String(cache?.frontmatter?.domvec || "");
         if (kind === "chunk") continue;
@@ -364,7 +406,7 @@ export class Craft {
       }
       // Web chunks tagged into the ego (item 74b): each a `web` node of the
       // craft, its I/O line to its world node.
-      const tags = this.host.egoTags ? await this.host.egoTags() : [];
+      const tags = this.host.egoTags ? await this.within("tags", this.host.egoTags().then((t) => (this.lastTags = t)), this.lastTags) : [];
       for (const cid of tags) {
         const w = this.host.worldNode(cid);
         const label = String((w && (w.name || w.title)) || cid).slice(0, 18);
@@ -382,7 +424,7 @@ export class Craft {
       // be a more compact representation of the *tool space* of the ego (i.e.
       // web browser, attached artifacts, interactions with the database)"):
       // the repository's code net is OFF the ego unless `codeOnEgo`.
-      const net = this.plantNoCodeNet || !this.codeOnEgo || !this.host.codeNet ? null : await this.host.codeNet().catch(() => null);
+      const net = this.plantNoCodeNet || !this.codeOnEgo || !this.host.codeNet ? null : await this.within("codenet", this.host.codeNet().catch(() => null), null);
       // FOLDED behind one hub by default (PLUGIN_GOAL 158: "The computation
       // graph's complexity and illegibility may mean improvements required to
       // the architecture of what code is currently attached to the ego and
@@ -426,7 +468,7 @@ export class Craft {
       // the membership the post above sent it -- and the new graph published
       // only once it is placed and drawn (published before this await, a
       // reader saw nodes with no mesh, G-299).
-      const proj = this.host.egoProjection ? await this.host.egoProjection() : null;
+      const proj = this.host.egoProjection ? await this.within("projection", this.host.egoProjection().then((p) => (p ? (this.lastProj = p) : p)), this.lastProj) : null;
       this.nodes = nodes;
       this.edges = this.plantNoLinks ? [] : edges;
       this.places = proj?.places || {};
@@ -434,6 +476,7 @@ export class Craft {
       this.layout();
       this.rebuildScene();
       this.stats.builds++;
+      this.stats.check_notes_kept_off = keptOff;
       this.stats.notes = nodes.filter((n) => n.kind === "note").length;
       this.stats.cells = nodes.filter((n) => n.kind === "cell").length;
       this.stats.trees = nodes.filter((n) => n.kind === "tree").length;
@@ -443,6 +486,24 @@ export class Craft {
       this.building = false;
       this.stale = false;
     }
+  }
+
+  /**
+   * A card moved on the 2D plane editor: the layout is re-run (its plane
+   * homes, then the relax) on the nodes already built -- no vault read -- so
+   * the ego's 2D plane follows the editor's at once (PLUGIN_GOAL 158: "convert
+   * to our 2D plane more strictly"). Planted: a move reaches the ego only at
+   * its next rebuild, as before.
+   */
+  plantNoReplane = false;
+  replaneStats = { calls: 0, ms: 0 };
+  replane(): void {
+    if (this.plantNoReplane || this.building || !this.nodes.length) return;
+    const t0 = performance.now();
+    this.layout();
+    this.key = "";
+    this.replaneStats.calls++;
+    this.replaneStats.ms = Math.round((performance.now() - t0) * 10) / 10;
   }
 
   /** The craft's own frame: notes on its sphere along their UMAP bearing in
@@ -606,12 +667,13 @@ export class Craft {
     if (!this.plantFlatIgnoresPlane && this.host.planeAt) {
       const on = nodes.filter((n) => n.kind === "note" || n.kind === "ego").map((n) => ({ n, q: n.kind === "ego" ? null : this.host.planeAt!(n.path) })).filter((o) => o.q);
       if (on.length) {
-        const xs = on.map((o) => o.q!.x), ys = on.map((o) => o.q!.y);
-        const cx = (Math.min(...xs) + Math.max(...xs)) / 2, cy = (Math.min(...ys) + Math.max(...ys)) / 2;
-        const span = Math.max(1, Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
-        const k = (2 * R) / span;
+        // The plane's frame scaled onto the craft's: the editor's centre is
+        // the ego's, its edge 1.6 R out. Not the cards' own bounding box --
+        // that put a lone card on the ego and rescaled every node when one
+        // card moved (2026-11-14).
+        const k = 1.6 * R;
         for (const { n, q } of on) {
-          const to = { x: (q!.x - cx) * k, y: -(q!.y - cy) * k, z: 0 };
+          const to = { x: q!.x * k, y: -q!.y * k, z: 0 };
           const dx = to.x - n.flat!.x, dy = to.y - n.flat!.y;
           for (const m of nodes) if (m !== n && m.path === n.path && m.kind !== "note") { m.flat!.x += dx; m.flat!.y += dy; }
           n.flat = to; fromPlane++;
@@ -848,6 +910,8 @@ export class Craft {
     // Rebuilt at most every two seconds: an autosave per keystroke burst is a
     // vault change, and the craft reads every artifact's text.
     if (this.stale && !this.building && performance.now() - this.builtAt > 2000) { this.builtAt = performance.now(); void this.build(); }
+    // A run starting or ending changes who belongs (check notes, above).
+    if (!this.building && !this.stale && this.builtDuringRun !== this.checksRunning()) this.dirty();
     if (!this.group) return;
     // The graph view rebuilds its whole scene on a redraw (a refit, a level
     // toggle): the craft rejoins the CURRENT scene -- left in the old one it

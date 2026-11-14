@@ -10087,6 +10087,100 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-341",
+      asks: "the ego is the reader's tool space, not the checks' (PLUGIN_GOAL 158: 'It's supposed to be a more compact representation of the *tool space* of the ego'): measured 2026-11-14, 9 of the ego's 11 notes were live-check scratch notes; a slate in domvec-checks/ stays OFF the ego when no verify run is in progress, and joins it during one (the checks measure through the craft); planted (plantCheckNotesOnEgo) it is on the ego with no run",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const c = window.__domvecCraft;
+          if (!c) return { error: "no craft" };
+          const NL = String.fromCharCode(10);
+          const path = "domvec-checks/g341 " + (${planted} ? "p" : "c") + Date.now() + ".md";
+          if (!app.vault.getAbstractFileByPath("domvec-checks")) await app.vault.createFolder("domvec-checks").catch(() => 0);
+          await app.vault.create(path, ["---", "domvec: slate", "---", "g341", ""].join(NL));
+          for (let i = 0; i < 30 && app.metadataCache.getCache(path)?.frontmatter?.domvec !== "slate"; i++) await sleep(100);
+          const on = () => c.nodes.some((n) => n.path === path);
+          try {
+            c.plantCheckNotesOnEgo = ${planted};
+            c.checksRunning = () => false; await c.fresh();
+            const idle = on(), kept_off = c.stats.check_notes_kept_off;
+            const user_notes = c.nodes.filter((n) => n.kind === "note" && !n.path.startsWith("domvec-checks/")).length;
+            const check_notes = c.nodes.filter((n) => n.kind === "note" && n.path.startsWith("domvec-checks/")).length;
+            c.checksRunning = () => true; await c.fresh();
+            const running = on();
+            return { planted: ${planted}, idle, running, kept_off, user_notes, check_notes };
+          } finally {
+            delete c.checksRunning; c.plantCheckNotesOnEgo = false;
+            const f = app.vault.getAbstractFileByPath(path); if (f) await app.vault.trash(f, true);
+            await c.fresh();
+          }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        const c = clean || {}, p = planted || {};
+        return {
+          pass: !c.error && c.idle === false && c.running === true && c.kept_off >= 1 && c.check_notes === 0
+                && p.idle === true,
+          evidence: { clean, planted },
+        };
+      },
+    },
+    {
+      id: "G-342",
+      asks: "the 2D plane editor IS the ego's 2D plane (PLUGIN_GOAL 158: 'The 2D editor's graph is 2D truly ... be able to convert to our 2D plane more strictly'): a note with a card on the plane takes the card's place in the ego's flat layout, in the PLANE's frame -- a card in the plane's left half puts its node left of the ego, and DRAGGING the card (the real header gesture) to the right half moves the node right of the ego at once, by the replane, with no rebuild; planted (plantNoReplane) the node stays where it was until the next rebuild",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          await window.__domvec.act("open", "graph"); await sleep(1200);
+          const c = window.__domvecCraft, desk = window.__domvecPlane;
+          if (!c || !desk) return { error: "no craft or plane" };
+          const NL = String.fromCharCode(10);
+          const path = "domvec-checks/g342 " + (${planted} ? "p" : "c") + Date.now() + ".md";
+          const flat0 = c.flatView;
+          try {
+            c.flatView = true; c.plantNoReplane = ${planted};
+            await desk.create("slate", { path, text: ["---", "domvec: slate", "---", "g342", ""].join(NL) });
+            let card = null;
+            for (let i = 0; i < 30 && !card; i++) { await sleep(200); card = desk.panelOf(path)?.card || null; }
+            if (!card) return { error: "no card" };
+            const home = card.offsetParent;
+            // Start in the plane's left half, through the card's own style (the place a reload restores).
+            card.style.right = "auto"; card.style.left = Math.round(home.clientWidth * 0.12) + "px"; card.style.top = Math.round(home.clientHeight * 0.4) + "px";
+            await c.fresh();
+            const node = () => c.nodes.find((n) => n.path === path && n.kind === "note");
+            const R = c.stats.radius || 10;
+            const q0 = c.host.planeAt(path), a = node()?.flat ? { ...node().flat } : null;
+            const builds0 = c.stats.builds, calls0 = c.replaneStats.calls;
+            // The real gesture: mousedown on the header handle, move, release in the right half.
+            const h = card.querySelector(".domvec-var-title, .domvec-slate-circle, .domvec-slate-circle-dot, .domvec-plane-head-node, .domvec-slate-graph");
+            if (!h) return { error: "no handle", a };
+            const hr = h.getBoundingClientRect(), x0 = hr.left + Math.min(8, hr.width / 2), y0 = hr.top + hr.height / 2;
+            const dx = Math.round(home.clientWidth * 0.6);
+            const me = (t, x, y, tg) => (tg || window).dispatchEvent(new MouseEvent(t, { clientX: x, clientY: y, button: 0, buttons: t === "mouseup" ? 0 : 1, bubbles: true, cancelable: true }));
+            me("mousedown", x0, y0, h);
+            for (let i = 1; i <= 6; i++) { me("mousemove", x0 + dx * i / 6, y0); await sleep(16); }
+            me("mouseup", x0 + dx, y0);
+            await sleep(60);
+            const q1 = c.host.planeAt(path), b = node()?.flat ? { ...node().flat } : null;
+            return { planted: ${planted}, R, q0, q1, a, b, rebuilt: c.stats.builds !== builds0, replanes: c.replaneStats.calls - calls0, replane_ms: c.replaneStats.ms };
+          } finally {
+            c.flatView = flat0; c.plantNoReplane = false;
+            try { desk.panelOf(path)?.leaf.detach(); } catch (e) {}
+            const f = app.vault.getAbstractFileByPath(path); if (f) await app.vault.trash(f, true);
+            try { localStorage.removeItem("domvec-plane-card:" + path); } catch (e) {}
+            await c.fresh();
+          }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        const c = clean || {}, p = planted || {};
+        return {
+          pass: !c.error && c.q0 && c.q0.x < 0 && c.a && c.a.x < -0.2 * c.R
+                && c.q1 && c.q1.x > 0 && c.b && c.b.x > 0.2 * c.R && c.replanes >= 1 && !c.rebuilt
+                && !p.error && p.b && p.a && Math.abs(p.b.x - p.a.x) < 1e-6,
+          evidence: { clean, planted },
+        };
+      },
+    },
+    {
       id: "G-340",
       asks: "two zooms (PLUGIN_GOAL 158: 'while scroll actions in the 3D view zoom on the 3D graph, pinching and unpinching actions or shift scroll should zoom in and out on the 2D graph plane'): in the map view, shift+scroll (sent as a horizontal delta, as Windows does) and a pinch (wheel + ctrl) scale the 2D ego plane and leave the camera's distance alone; a plain scroll moves the camera and leaves the plane's scale alone; planted (plantPlaneZoomIs3D) shift+scroll zooms the 3D view",
       async run() {
