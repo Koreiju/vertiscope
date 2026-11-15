@@ -1758,17 +1758,57 @@ class Workspace:
                 t1 = _time.perf_counter()
                 self._hydrate_embeddings(backfill=self.embed_inline)
                 t2 = _time.perf_counter()
-                self._index = ThreeFormIndex(
-                    self.store, self.freq, self.embeddings,
-                    embedder=self.embedder,
-                ).build()
+                # A saved build first (`ThreeFormIndex.load_saved`): rows that
+                # changed hands or arrived since are re-read as a delta, and the
+                # full build runs in the background and replaces it. Planted
+                # `PLANT_NO_INDEX_CACHE`: built here, as before.
+                saved, redo = (None, None)
+                if not self.PLANT_NO_INDEX_CACHE[0] and self.path is not None:
+                    saved, redo = ThreeFormIndex.load_saved(Path(self.path) / "index_cache", self.store, self.freq,
+                                                            self.embeddings, embedder=self.embedder)
+                if saved is not None:
+                    if redo:
+                        saved.apply_delta(redo)
+                    self._index = saved
+                    self._index_written_at = 0.0
+                    self._schedule_index_rebuild()
+                else:
+                    self._index = ThreeFormIndex(
+                        self.store, self.freq, self.embeddings,
+                        embedder=self.embedder,
+                    ).build()
+                    self._save_index_soon(self._index)
                 t3 = _time.perf_counter()
                 self.index_builds = (getattr(self, "index_builds", []) + [{
                     "ms_flush": round((t1 - t0) * 1000, 1),
                     "ms_hydrate": round((t2 - t1) * 1000, 1),
                     "ms_build": round((t3 - t2) * 1000, 1),
+                    "from_saved": saved is not None, "redo": len(redo or ()),
                     "at": round(_time.time(), 3)}])[-16:]
         return self._index
+
+    #: Planted: no saved index; the first search waits for a full build.
+    PLANT_NO_INDEX_CACHE = [os.environ.get("DOMVEC_PLANT_NO_INDEX_CACHE") == "1"]
+
+    def _save_index_soon(self, idx) -> None:
+        """Write a FULL build's per-row state beside the store, off the
+        caller's path (~15 MB of row metadata)."""
+        if self.read_only or self.path is None or idx is None:
+            return
+        snap = idx.snapshot()
+        if snap is None:
+            return
+        import threading
+
+        def run():
+            try:
+                t0 = time.perf_counter()
+                ThreeFormIndex.write_snapshot(Path(self.path) / "index_cache", snap)
+                self.index_saved = {"rows": snap["n"], "ms": round((time.perf_counter() - t0) * 1000, 1),
+                                    "at": round(time.time(), 3)}
+            except Exception as exc:                # noqa: BLE001
+                self.index_saved = {"error": "%s: %s" % (type(exc).__name__, exc)}
+        threading.Thread(target=run, name="domvec-index-save", daemon=True).start()
 
     #: Planted: every write throws the index away (a full rebuild per search).
     _PLANT_INDEX_REBUILD = [os.environ.get("DOMVEC_PLANT_INDEX_REBUILD") == "1"]
@@ -1816,6 +1856,7 @@ class Workspace:
                     self.index_builds = (getattr(self, "index_builds", []) + [{
                         "background": True, "ms_build": round((time.time() - started) * 1000, 1),
                         "at": round(time.time(), 3)}])[-16:]
+                self._save_index_soon(fresh)
                 if time.time() - getattr(self, "_index_written_at", 0) >= self.INDEX_QUIET_REBUILD_S:
                     return
         self._index_rebuilder = threading.Thread(target=run, name="domvec-index-rebuild", daemon=True)

@@ -254,6 +254,80 @@ class ThreeFormIndex:
                 self._live[row] = 0.0
         return self
 
+    # -- persistence: what `build` read, so a restart need not read it again --
+    #
+    # `build` reads every chunk's markdown and every edge: 10.5-36.8 s on the
+    # working store (92k chunks, 2026-11-15), and the first search after a
+    # restart waited on it. What it produces is per ROW, and a row is the
+    # lexical matrix's: saved with the cid each row held, a saved index is
+    # valid for every row whose cid is still the one at that row. The rest
+    # (rows that changed hands, rows added since) go through `apply_delta`,
+    # and the workspace's background full build replaces the whole of it.
+
+    def snapshot(self) -> Optional[dict]:
+        if self._ranks is None or self._live is None or self._content is None:
+            return None
+        n = len(self._ranks)
+        meta = [list(self._meta[r]) if r in self._meta else None for r in range(n)]
+        digests = [self._digests.get(r) for r in range(n)] if getattr(self, "_digests", None) is not None else [None] * n
+        return {"n": n, "ranks": self._ranks.copy(), "live": self._live.copy(), "content": self._content.copy(),
+                "meta": meta, "digests": digests}
+
+    @staticmethod
+    def write_snapshot(base, snap) -> bool:
+        import json as _json, os as _os
+        from pathlib import Path as _P
+        base = _P(base)
+        npz, meta = base.with_suffix(".npz"), base.with_suffix(".json")
+        tnpz, tmeta = base.with_suffix(".tmp.npz"), base.with_suffix(".json.tmp")
+        np.savez(tnpz, ranks=snap["ranks"], live=snap["live"], content=snap["content"])
+        tmeta.write_text(_json.dumps({"n": snap["n"], "meta": snap["meta"], "digests": snap["digests"]}), encoding="utf-8")
+        _os.replace(tnpz, npz)
+        _os.replace(tmeta, meta)
+        return True
+
+    @classmethod
+    def load_saved(cls, base, store, freq, embeddings=None, *, embedder=None):
+        """(index, cids to re-read) from a saved build, or (None, None).
+
+        A saved row counts only while the lexical matrix still holds the same
+        cid at that row; every other row, and every row added since, is
+        returned for `apply_delta`."""
+        import json as _json
+        from pathlib import Path as _P
+        base = _P(base)
+        npz, meta = base.with_suffix(".npz"), base.with_suffix(".json")
+        if not npz.exists() or not meta.exists():
+            return None, None
+        try:
+            info = _json.loads(meta.read_text(encoding="utf-8"))
+            arr = np.load(npz, allow_pickle=False)
+            ranks, live, content = arr["ranks"].copy(), arr["live"].copy(), arr["content"].copy()
+        except (OSError, ValueError, KeyError):
+            return None, None
+        n_saved = int(info.get("n") or 0)
+        metas, digs = info.get("meta") or [], info.get("digests") or []
+        if not (len(ranks) == len(live) == len(content) == len(metas) == n_saved):
+            return None, None
+        out = cls(store, freq, embeddings, embedder=embedder)
+        n = len(freq.rows)
+        redo = []
+        out._meta, out._digests, out._cid_row = {}, {}, None
+        for r in range(min(n_saved, n)):
+            m = metas[r]
+            cid = freq.rows[r]
+            if m and cid and m[0] == cid:
+                out._meta[r] = (m[0], m[1], m[2])
+                if r < len(digs) and digs[r] is not None:
+                    out._digests[r] = digs[r]
+            else:
+                live[r] = 0.0
+                if cid:
+                    redo.append(cid)
+        redo.extend(c for c in freq.rows[n_saved:] if c)
+        out._ranks, out._live, out._content = ranks[:n] if n < n_saved else ranks, live[:n] if n < n_saved else live, content[:n] if n < n_saved else content
+        return out, redo
+
     def apply_delta(self, cids) -> Dict[str, int]:
         """Bring the index up to date for the chunks a capture wrote or
         retired -- O(delta), not O(corpus).
