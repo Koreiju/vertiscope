@@ -436,8 +436,12 @@ Open (not started this session):
     to system memory. The 5.1 GB live allocation was pumap's landmark
     selection, ONE cdist of a page's rows against all ~85k held rows; now
     blocked (34 vs 347 MB peak on a 3k x 20k test, identical picks) and
-    torch's cache given back after every fit/update. NOT YET confirmed on
-    a warm live worker.
+    torch's cache given back after every fit/update. CONFIRMED live: a
+    worker warm ~15 min ran at 46.4 tok/s with torch at 796 MB; a live
+    6,955-row page update peaked at 769 MB in selection (one-piece: ~2.4 GB
+    for the distance matrix alone), and a chat turn right after it ran at
+    30.0 tok/s, torch 614 -> 1,558 MB -- under the ~2.8 GB that pages the
+    model out.
   - CRASH: two turns on the one gpt4all model at once -> "Windows fatal
     exception: access violation" in `prompt_model`. FIXED: `chat.GEN_LOCK`
     serializes every generation on the shared model (a second turn waits,
