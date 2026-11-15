@@ -398,8 +398,10 @@ Measured, not fixed:
   three times today; the process was healthy each time).
 
 Open (not started this session):
-- Double-click fly: the 2D camera plane flies to a linked node and takes
-  it in at the intersection (MIMO: the rank-1 centroid).
+- Double-click fly: BUILT (a0aae8c), NOT live-confirmed. `Craft.linkedWorld`
+  (rank-1 world addresses + centroid), `GraphView.flyThroughPlane` (camera
+  carried by target - plane centre; linked chunks tagged at arrival);
+  G-355 written, not run -- needs tagged web nodes, i.e. a live worker.
 - World nodes' panels as the authority for every 2D representation;
   "rendering issues with representations" not yet itemised.
 - Semantic keyword anchors beside hover pictures (the tooltip header is
