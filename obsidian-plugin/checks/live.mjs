@@ -3102,6 +3102,10 @@ export function makeChecks(env) {
             out.pick = pick;
             v.plantNoFocus = ${planted};
             const f0 = { ...v.focusStats }, n0 = v.billboardLog.length;
+            // What the hover handed the view: which cid, and whether a stored
+            // chunk came with it (2026-11-15: the stored chunk was never placed).
+            const calls = [], hc = v.highlightChunk;
+            v.highlightChunk = function (cid, url, stored) { if (calls.length < 12) calls.push({ cid: String(cid || "").slice(-60), stored: stored || "", collapsed: url ? v.readerCollapsed(url) : null }); return hc.apply(this, arguments); };
             wc.sendInputEvent({ type: "mouseMove", x: pick.x, y: pick.y });
             await sleep(40);
             wc.sendInputEvent({ type: "mouseMove", x: pick.x + 2, y: pick.y + 1 });
@@ -3110,6 +3114,15 @@ export function makeChecks(env) {
             const vp = JSON.parse(await b.webview.executeJavaScript("JSON.stringify([innerWidth, innerHeight])"));
             out.outline = rect || null;
             out.outline_frac = rect ? Math.round(rect.w * rect.h / (vp[0] * vp[1]) * 1000) / 1000 : null;
+            v.highlightChunk = hc; out.calls = calls;
+            // THE chunk is the one the hover handed the view -- the sensor's
+            // attribution through the composed tree. The pick above is a
+            // document-level hit test, which stops at shadow hosts: on this
+            // shadow fixture it named #1 while the pointer was in #2's
+            // article (run 61). The pick only chooses where to point.
+            const handed = calls.length ? calls[calls.length - 1].stored : "";
+            const lead = (v.hoverAliases && v.hoverAliases.get(handed)) || handed;
+            out.handed = { stored: handed, lead, placed: !!(v.hoverPlaced && v.hoverPlaced.has(handed)), drawn: v.graph.graphData().nodes.some((n) => n.id === lead) };
             out.flown = v.focusStats.flown - f0.flown;
             out.flew_to = v.focusStats.last;
             // Why the stored chunk was or was not reached (2026-11-14: the
@@ -3118,7 +3131,8 @@ export function makeChecks(env) {
             out.why = { asked_place: v.hoverPlaced && v.hoverPlaced.has(pick.stored), drawn: v.graph.graphData().nodes.some((n) => n.id === pick.stored),
                         collapsed: typeof v.readerCollapsed === "function" ? v.readerCollapsed(PAGE) : null, alias: v.hoverAliases && v.hoverAliases.get(pick.stored) || null,
                         focus: { ...v.focusStats } };
-            const e = v.billboards.get(pick.stored);
+            const hk = out.handed.lead;
+            const e = v.billboards.get(hk) || [...v.billboards.entries()].find(([k]) => String(k).split("|")[0] === hk)?.[1];
             // Text where the reader sees it: the body, its shadow roots, and the
             // page form's frame (innerText does not reach into an iframe).
             const textOf = (el) => {
@@ -3150,7 +3164,7 @@ export function makeChecks(env) {
         })()`, { timeout: 180000 });
         const clean = await arm(false);
         const planted = await arm(true, clean && clean.pick ? clean.pick : null);
-        const works = (x) => !x.error && x.flown >= 1 && x.flew_to === x.pick.stored && !!x.panel
+        const works = (x) => !x.error && x.flown >= 1 && !!x.handed && !!x.handed.lead && x.flew_to === x.handed.lead.slice(0, 60) && !!x.panel
           && x.panel.from_hover && x.panel.text > 0 && (x.panel.first_paint_ms ?? 1e9) <= 500
           && x.outline_frac !== null && x.outline_frac < 1;
         // Closing on leave was REPLACED by G-125 (2026-10-10: "showing hovered panels ...

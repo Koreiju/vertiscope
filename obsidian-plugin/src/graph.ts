@@ -3679,6 +3679,9 @@ export class GraphView extends ItemView {
     if (this.agent.fly(n)) {
       this.focusStats.flown++;
       this.focusStats.agent = (this.focusStats.agent || 0) + 1;
+      // Which node, on this path too: only the tween's path named it, so a
+      // flight the agent flew read as a flight to nowhere (G-113's flew_to "").
+      this.focusStats.last = String(n.id).slice(0, 60);
       this.focusNode = n;
       this.focusLast = [n.x, n.y, n.z || 0];
       return;
