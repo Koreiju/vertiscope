@@ -184,6 +184,9 @@ export class SearchField {
   plantUncappedShare = false;
   /** Planted (G-231): no pages asked past the count cut. */
   plantNoReserve = false;
+  /** Planted (G-231): the share is per URL, so one page held under several
+   *  fragments (Trie, Trie#, Trie#~v, Trie##~v) is asked for a share each. */
+  plantShareByUrl = false;
   /** When the reader last scrolled the results (re-ranks wait for it to rest). */
   lastScrollAt = 0;
   tierStats = { runs: 0, pages: 0, pages_done: 0, first_ms: 0, last_ms: 0, single_ms: 0, reserve: 0 };
@@ -214,10 +217,27 @@ export class SearchField {
     // and every result came from two pages (2026-10-18, PLUGIN_GOAL 160).
     // Planted `plantUncappedShare`: a page counted for all it holds.
     const share = this.plantUncappedShare ? Infinity : Math.max(5, Math.ceil(this.total / 6));
+    // The share is the DOCUMENT's, not the url's: the store can hold one page
+    // under several fragments -- Trie, Trie#, Trie#~v and Trie##~v, 246
+    // matches -- and a share each gave Trie four sixths of n and the hits five
+    // pages (G-231, run 48). Each tier-1 entry is allotted what is left of
+    // its document's share, in rank order; one with nothing left is skipped.
+    // Planted `plantShareByUrl`: a share per url, as before.
+    const docOf = (u: string) => this.plantShareByUrl ? u : String(u).split("#")[0];
+    const allot = new Map<string, number>();
     let reserve: typeof pages = [];
     if (!this.plantFixedPages && pages.every((p) => typeof p.n === "number")) {
+      const used = new Map<string, number>();
+      pages = pages.filter((p) => {
+        const d = docOf(p.url), left = share - (used.get(d) || 0);
+        const a = Math.min(p.n!, left);
+        if (!(a > 0)) return false;
+        used.set(d, (used.get(d) || 0) + a);
+        allot.set(p.url, a);
+        return true;
+      });
       let sum = 0, cut = pages.length;
-      for (let i = 0; i < pages.length; i++) { sum += Math.min(pages[i].n!, share); if (sum >= this.total) { cut = i + 1; break; } }
+      for (let i = 0; i < pages.length; i++) { sum += allot.get(pages[i].url)!; if (sum >= this.total) { cut = i + 1; break; } }
       // The cut is where the COUNTS reach n; a page can hand back fewer
       // chunks than it counted (G-231, 2026-11-08: 7 pages asked, 5 answered,
       // 174 of 200). The pages past the cut are kept in reserve and asked, in
@@ -229,7 +249,7 @@ export class SearchField {
     this.tierStats.runs++; this.tierStats.pages = pages.length; this.tierStats.pages_done = 0; this.tierStats.first_ms = 0;
     const per = Math.max(5, Math.ceil(this.total / pages.length) + 5);
     // Each page asked for what it HOLDS (bounded by n), not an even share.
-    const perOf = (p: { n?: number | null }) => (!this.plantFixedPages && typeof p.n === "number") ? Math.max(1, Math.min(this.total, p.n, share)) : per;
+    const perOf = (p: { url: string; n?: number | null }) => (!this.plantFixedPages && typeof p.n === "number") ? Math.max(1, Math.min(this.total, p.n, allot.get(p.url) ?? share)) : per;
     const byCid = new Map<string, FieldHit>();
     let first = true, matching = 0;
     // The corpus's own count when tier 1 gave one; the per-page sum only
