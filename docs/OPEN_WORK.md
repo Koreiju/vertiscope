@@ -550,6 +550,13 @@ Open (not started this session):
     - markdown render: 3.8 s;
     - /place: 1.7 s;
     - prequery: 1.7 s.
+    **Re-measured at full speed (0382ae2, run 74, live captures):**
+    Radix_tree re-scanned 2.2-2.4 s page-to-placed (52 chunks), Trie
+    3.9-4.4 s (101) -- against 31 s (Suffix_tree) and 38.7 s (B-tree) this
+    morning, throttled. By phase: anchors 0.7-1.4 s, render 0.25-0.81 s,
+    reconcile 0.13-0.63 s, place 0.34-0.60 s, prequery 0.17-0.20 s, contains
+    0.01-0.26 s. Tier 1's lexical phase right after a capture: 0.78-0.94 s
+    (the tf-idf rebuild over the store), 20 ms at rest.
   - Retrieval: G-210's first tier-1 answer took 12.8 s, and 22.8 s on a
     freshly restarted worker (cold). **Re-measured 2026-11-15 after
     3365015, 7707854, 79c5948**: tiered first answer 235-1,414 ms over six
