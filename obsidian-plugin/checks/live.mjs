@@ -10361,6 +10361,45 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-346",
+      asks: "a streaming node tagged into the ego is tagged as the CHUNK it becomes (2026-11-14: of the ego's 4 tags, 2 named no stored chunk -- one a streaming node's id, f:https://en.wikipedia.org/wiki/Main_Page#18|..., drawn as 'f:https://en.wikip'): tagging a node whose streaming spec the store has saved puts the saved cid in the ego set, never the streaming id; a streaming node the store has not saved is refused, not tagged; planted (plantTagForceId) the streaming id is tagged",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const g = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
+          if (!g) return { error: "no graph" };
+          // A stored chunk not already tagged, standing for what a streaming node became.
+          const eg = await g.sidecar.ego().catch(() => null);
+          const tagged = new Set((eg && eg.cids) || []);
+          const stored = g.graph.graphData().nodes.find((n) => n.level !== "page" && !String(n.id).startsWith("page:") && !String(n.id).startsWith("f:") && !n.force && !tagged.has(String(n.id)));
+          if (!stored) return { error: "no stored chunk drawn" };
+          const real = String(stored.id), fid = "f:g346-check#" + Date.now() + "|/html/body", unsaved = fid + "/u";
+          g.forceSpecs.set(fid, { parent: "", url: "g346", title: "g346", lines: 0, cid: real });
+          g.forceSpecs.set(unsaved, { parent: "", url: "g346", title: "g346", lines: 0 });
+          g.plantTagForceId = ${planted};
+          try {
+            const ok = await g.tagEgo(fid, true);
+            const after = await g.sidecar.ego();
+            const set = new Set((after && after.cids) || []);
+            const t0 = Date.now(); const ok2 = await g.tagEgo(unsaved, true); const waited = Date.now() - t0;
+            const after2 = await g.sidecar.ego();
+            return { planted: ${planted}, ok, real_tagged: set.has(real), force_tagged: set.has(fid), unsaved_ok: ok2, unsaved_tagged: ((after2 && after2.cids) || []).includes(unsaved), waited_ms: waited, stats: { ...g.tagStats } };
+          } finally {
+            g.plantTagForceId = false;
+            for (const c of [real, fid, unsaved]) { try { await g.sidecar.egoPost("ego/tag", { cid: c, on: false }); } catch (e) {} }
+            g.forceSpecs.delete(fid); g.forceSpecs.delete(unsaved);
+            try { const e2 = await g.sidecar.ego(); g.egoTags = new Set((e2 && e2.cids) || []); } catch (e) {}
+          }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        const c = clean || {}, p = planted || {};
+        return {
+          pass: !c.error && c.ok === true && c.real_tagged && !c.force_tagged && c.unsaved_ok === false && !c.unsaved_tagged
+                && !p.error && p.force_tagged === true,
+          evidence: { clean, planted },
+        };
+      },
+    },
+    {
       id: "G-340",
       asks: "two zooms (PLUGIN_GOAL 158: 'while scroll actions in the 3D view zoom on the 3D graph, pinching and unpinching actions or shift scroll should zoom in and out on the 2D graph plane'): in the map view, shift+scroll (sent as a horizontal delta, as Windows does) scales the 2D ego plane and leaves the camera's distance alone; a pinch (wheel + ctrl) does NOT touch the plane (159: 'remove the pinch gesture ... stick to shift scroll'); a plain scroll moves the camera and leaves the plane's scale alone; planted (plantPlaneZoomIs3D) shift+scroll zooms the 3D view",
       async run() {

@@ -3713,11 +3713,11 @@ export class GraphView extends ItemView {
     if (node.level !== "page" && !String(node.id || "").startsWith("page:")) {
       const cid = String(node.id);
       const tag = head.createSpan({ cls: "domvec-bb-cell domvec-bb-ego" });
-      const paint = () => { const on = this.egoTags.has(cid); tag.setText(on ? "ego ✓" : "+ ego"); tag.toggleClass("is-on", on); };
+      const paint = () => { const on = this.egoTags.has(cid) || this.egoTags.has(this.storedCidOf(cid)); tag.setText(on ? "ego ✓" : "+ ego"); tag.toggleClass("is-on", on); };
       paint();
       tag.setAttr("aria-label", "tag this chunk into the ego");
       tag.onpointerdown = (e: PointerEvent) => e.stopPropagation();
-      tag.onclick = (e: MouseEvent) => { e.stopPropagation(); void this.tagEgo(cid, !this.egoTags.has(cid)).then(paint); };
+      tag.onclick = (e: MouseEvent) => { e.stopPropagation(); void this.tagEgo(cid, !(this.egoTags.has(cid) || this.egoTags.has(this.storedCidOf(cid)))).then(paint); };
     }
     // Any code node opens its module as a standalone artifact (P-C1).
     if (String(node.url || "").startsWith("code://")) {
@@ -6691,7 +6691,25 @@ export class GraphView extends ItemView {
   plantDrawMissingTags = false;
   private egoPosted = "";
   /** The `+ ego` tag on a billboard: the chunk joins the ego set, or leaves it. */
+  /**
+   * A STREAMING node's id is not a chunk's: tagged as it was, the ego held a
+   * tag the store never had (2026-11-14: `f:https://en.wikipedia.org/wiki/
+   * Main_Page#18|/html/...`, one of two dangling tags, drawn as
+   * "f:https://en.wikip"). The chunk it becomes is tagged -- waited for until
+   * the store confirms it saved, up to 10 s -- and an unsaved one is refused
+   * rather than tagged. Planted `plantTagForceId`: the streaming id is tagged.
+   */
+  plantTagForceId = false;
+  tagStats = { resolved: 0, refused_unsaved: 0 };
+  /** The chunk a node id names: a streaming node's saved cid, else the id itself. */
+  storedCidOf(id: string): string { return this.forceSpecs.get(id)?.cid || id; }
   async tagEgo(cid: string, on: boolean): Promise<boolean> {
+    if (!this.plantTagForceId && this.forceSpecs.has(cid)) {
+      for (let i = 0; i < 40 && !this.forceSpecs.get(cid)?.cid; i++) await new Promise((r) => window.setTimeout(r, 250));
+      const real = this.forceSpecs.get(cid)?.cid;
+      if (!real) { this.tagStats.refused_unsaved++; return false; }
+      cid = real; this.tagStats.resolved++;
+    }
     const got = await this.sidecar.egoPost("ego/tag", { cid, on });
     if (!got || !Array.isArray(got.cids)) return false;
     this.egoTags = new Set(got.cids);
