@@ -10822,6 +10822,53 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-362",
+      asks: "picture sizes have an upper limit and a midpoint (PLUGIN_GOAL 161: 'the image billboard sizing needs a better upper limit but also a better midpoint'): with one picture hovered and its neighbours lit, the hovered one is drawn 72-144 px wide, each lit one at most 56 px, every other picture at most 28 px, widths as drawn on screen; planted (plantOldPicTiers): every lit picture drew in the presented range and every limit at twice its number",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          await window.__domvec.act("open", "graph"); await sleep(800);
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
+          if (!v || !v.graph || !v.batch) return { error: "no graph" };
+          const b = v.batch, cam = v.graph.camera();
+          const setOld = (on) => { b.plantOldPicTiers = on; for (const m of [b.opaque, b.clear]) { const u = m && m.mesh.material.uniforms; if (u && u.uOldTiers) u.uOldTiers.value = on ? 1 : 0; } };
+          const nodes = v.graph.graphData().nodes;
+          const before = b.picturePx(cam);
+          const byId = new Map(nodes.map((n) => [String(n.id).slice(0, 24), n]));
+          // The pictures in view, nearest the camera first: the hover takes the
+          // first, its neighbours the next four.
+          const ids = [...new Set(before.map((p) => p.id))].filter((id) => byId.has(id));
+          if (ids.length < 3) return { error: "fewer than 3 pictures drawn", pictures: ids.length, level: v.level };
+          const pos = new (cam.position.constructor)();
+          ids.sort((a, c) => { const na = byId.get(a), nc = byId.get(c); return cam.position.distanceTo(pos.set(na.x, na.y, na.z || 0)) - cam.position.distanceTo(pos.set(nc.x, nc.y, nc.z || 0)); });
+          const hov = byId.get(ids[0]), lit = ids.slice(1, 5).map((id) => byId.get(id));
+          const was = v.glowNear;
+          try {
+            setOld(${planted});
+            hov.hovered = true;
+            v.glowNear = new Map(lit.map((n, k) => [n, 1 - 0.15 * k]));
+            v.batchDirty = true; v.batchSync(); await sleep(100);
+            const got = b.picturePx(cam);
+            const max = (t) => Math.max(0, ...got.filter((p) => p.tier === t).map((p) => p.px));
+            const min = (t) => Math.min(...got.filter((p) => p.tier === t).map((p) => p.px));
+            const litIds = new Set(lit.map((n) => String(n.id).slice(0, 24)));
+            return { planted: ${planted}, pictures: got.length, level: v.level,
+                     presented: got.filter((p) => p.tier === 3).length, lit: got.filter((p) => p.tier === 2).length,
+                     presented_px: [min(3), max(3)], lit_max: max(2), rest_max: max(1),
+                     lit_as_drawn: got.filter((p) => litIds.has(p.id)).map((p) => p.px) };
+          } finally {
+            setOld(false); hov.hovered = false; v.glowNear = was; v.batchDirty = true; v.batchSync();
+          }
+        })()`, { timeout: 60000 });
+        const c = (await arm(false)) || {}, p = (await arm(true)) || {};
+        return {
+          pass: !c.error && c.presented === 1 && c.presented_px[0] >= 72 && c.presented_px[1] <= 144 && c.lit >= 1 && c.lit_max <= 56 && c.rest_max <= 28
+            && !p.error && (p.presented > 1 || Math.max(0, ...(p.lit_as_drawn || [])) > 56),
+          evidence: { clean: c, planted: p },
+        };
+      },
+    },
+    {
       id: "G-361",
       asks: "the tiered search streams pages in and its top result can change while the query is the same: the flight and its panel follow the top the strip ends up leading with, and the superseded flight's panel is closed (found 2026-11-15: flown to the first page's top, the panel on a result no longer first); planted (plantFirstTopOnly): the first top is the one flown to, whatever leads after",
       async run() {

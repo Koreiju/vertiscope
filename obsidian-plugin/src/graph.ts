@@ -32,7 +32,7 @@ import type { ForceNodeDelta } from "./forcetree";
 import type { CentralDiff } from "./types";
 import * as THREE from "three";
 import { chunkNoteState } from "./planecard";
-import { NodeLook, Picture, SceneBatch } from "./scenebatch";
+import { NodeLook, Picture, SceneBatch, PIC_PX } from "./scenebatch";
 import { flushTiny, octreeVerdict } from "./octreeguard";
 import { MotionRecorder } from "./motion";
 
@@ -9041,7 +9041,9 @@ export class GraphView extends ItemView {
     if (this.plantNearOld) { bb.nearMin = 0.25; bb.nearPow = 1; } else { bb.nearMin = 0.4; bb.nearPow = 0.5; }
     // The hovered node's picture, larger (159: "a little too much shrinkage");
     // planted `plantSmallPresented`: 22-28 px, as before.
-    if (this.plantSmallPresented) { bb.presentMinPx = 22; bb.presentMaxPx = 28; } else { bb.presentMinPx = 64; bb.presentMaxPx = 140; }
+    // 161: the widths are PIC_PX's, set in one place (64/140 here held them
+    // back from the batch's own every frame).
+    if (this.plantSmallPresented) { bb.presentMinPx = 22; bb.presentMaxPx = 28; } else { bb.presentMinPx = PIC_PX.shownMin; bb.presentMaxPx = PIC_PX.shownMax; }
     this.batch.setNear(this.plantNoNearShrink ? 0 : (this.plantNearOld ? 12 : this.nearShrinkAt));
     let f = 1;
     if (!this.plantNoZoomScale && this.fullViewDist > 0) {

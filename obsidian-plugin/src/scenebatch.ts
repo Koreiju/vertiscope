@@ -42,6 +42,8 @@ uniform float uPxView;
 uniform float uMaxPicPx;
 uniform float uMinPicPx;
 uniform float uMaxShownPx;
+uniform float uLitPx;
+uniform float uOldTiers;
 float nearK(float z, float size) { return uNear > 0.0 ? clamp(pow(max(-z / (uNear * max(size, 1e-3)), 0.0), uNearPow), uNearMin, 1.0) : 1.0; }
 varying vec2 vCorner;
 varying vec4 vColor;
@@ -60,12 +62,22 @@ void main() {
   float s = iSize * (iUv.z < 0.0 ? uZoom : 1.0) * nearK(mv.z, iSize);
   if (iUv.z >= 0.0 && uPxView > 0.0) {
     float vDepth = max(-mv.z, 0.1);
-    // The PRESENTED picture (the hovered node's, marked iColor.r > 1.05) has
-    // its own range, uMinPicPx..uMaxShownPx: capped at the others' 28 px it
-    // read as "a little too much shrinkage" (159). Every other picture stays
-    // capped at uMaxPicPx, so the scene is not covered in pictures.
-    if (iColor.r > 1.05 && uMinPicPx > 0.0) s = clamp(s, uMinPicPx * vDepth * uPxView, max(uMaxShownPx, uMinPicPx) * vDepth * uPxView);
-    else if (uMaxPicPx > 0.0) s = min(s, uMaxPicPx * vDepth * uPxView);
+    // Three tiers, each limit an on-screen WIDTH in px (PLUGIN_GOAL 161: "a
+    // better upper limit but also a better midpoint"). The quad spans -1..1,
+    // so s is the HALF-width: before 161 every limit drew at twice its number.
+    // iColor.g names the tier:
+    // - presented, 3: the hovered picture, uMinPicPx..uMaxShownPx;
+    // - lit, 2: a shown search result or a hover's neighbour, at most uLitPx
+    //   (the midpoint);
+    // - every other picture, 1: at most uMaxPicPx.
+    // Before 161 "presented" was any picture with glow (iColor.r > 1.05), so
+    // every lit picture drew in the presented range. Planted uOldTiers: as before.
+    float px = uOldTiers > 0.5 ? vDepth * uPxView : 0.5 * vDepth * uPxView;
+    bool shown = uOldTiers > 0.5 ? iColor.r > 1.05 : iColor.g > 2.5;
+    bool lit = uOldTiers < 0.5 && iColor.g > 1.5 && !shown;
+    if (shown && uMinPicPx > 0.0) s = clamp(s, uMinPicPx * px, max(uMaxShownPx, uMinPicPx) * px);
+    else if (lit && uLitPx > 0.0) s = min(s, uLitPx * px);
+    else if (uMaxPicPx > 0.0) s = min(s, uMaxPicPx * px);
   }
   mv.xy += position.xy * s;
   gl_Position = projectionMatrix * mv;
@@ -109,6 +121,13 @@ void main() {
   }
   #include <colorspace_fragment>
 }`;
+
+/** A picture's size tier, carried in iColor.g (161): 3 presented (the hovered
+ *  node's), 2 lit (any glow: a shown result, a hover's neighbour), 1 the rest. */
+/** The picture widths on screen, px (161): the one place they are set. */
+export const PIC_PX = { rest: 28, lit: 56, shownMin: 72, shownMax: 144 };
+
+export function picTier(n: any, glow: number): number { return n && n.hovered ? 3 : glow > 0.05 ? 2 : 1; }
 
 /** Point lights the glass is lit by: the shown search results (item 88). */
 export const MAX_LIGHTS = 16;
@@ -390,7 +409,8 @@ export class SceneBatch {
       for (const m of [this.opaque, this.clear] as any[]) {
         const mu = m?.mesh?.material?.uniforms;
         if (mu?.uPxView) mu.uPxView.value = pxv;
-        if (mu?.uMinPicPx) { mu.uMinPicPx.value = this.presentMinPx; mu.uMaxPicPx.value = this.picMaxPx; if (mu.uMaxShownPx) mu.uMaxShownPx.value = this.presentMaxPx; }
+        if (mu?.uMinPicPx) { mu.uMinPicPx.value = this.presentMinPx; mu.uMaxPicPx.value = this.picMaxPx; if (mu.uMaxShownPx) mu.uMaxShownPx.value = this.presentMaxPx;
+                             if (mu.uLitPx) mu.uLitPx.value = this.litPx; if (mu.uOldTiers) mu.uOldTiers.value = this.plantOldPicTiers ? 1 : 0; }
       }
     }
     // PLUGIN_GOAL 137(6), seen 2026-11-08: at the full 60,927-node chunk
@@ -417,11 +437,50 @@ export class SceneBatch {
    *  picture is drawn at (distance / d) of its size, never under `nearMin`.
    *  0 turns it off. Set every frame from the camera's focus distance. */
   nearMin = 0.4;
-  /** Pictures on screen: every picture at most picMaxPx; the PRESENTED one
-   *  (the hover's) between presentMinPx and presentMaxPx (159). */
-  picMaxPx = 28;
-  presentMinPx = 64;
-  presentMaxPx = 140;
+  /** Pictures on screen, as drawn WIDTHS in px (161): every picture at most
+   *  picMaxPx; a LIT one (a shown result, a hover's neighbour) at most litPx,
+   *  the midpoint; the PRESENTED one (the hover's) presentMinPx..presentMaxPx.
+   *  Before 161 these drew at twice their number, and every lit picture in the
+   *  presented range: 128-280 px, a ring of them round a hover. */
+  picMaxPx = PIC_PX.rest;
+  litPx = PIC_PX.lit;
+  presentMinPx = PIC_PX.shownMin;
+  presentMaxPx = PIC_PX.shownMax;
+  /** Planted (161): the old tiers -- presented = any glow, limits drawn at 2x. */
+  plantOldPicTiers = false;
+  /**
+   * Every drawn picture's on-screen WIDTH in px and its tier, for the checks
+   * (161). This is the vertex shader's size arithmetic over the same uniforms
+   * and instance data. It is a mirror, so it must change WITH the shader: a
+   * change to one is a change to both.
+   */
+  picturePx(camera: THREE.Camera): { tier: number; px: number; id: string }[] {
+    const out: { tier: number; px: number; id: string }[] = [];
+    const v = new THREE.Vector3();
+    for (const [k, m] of [[0, this.opaque], [1, this.clear]] as [number, Mesh][]) {
+      const u: any = (m.mesh.material as THREE.ShaderMaterial).uniforms;
+      if (!u || !u.uPxView) continue;
+      const near = u.uNear.value, nmin = u.uNearMin.value, npow = u.uNearPow.value, pxv = u.uPxView.value;
+      const old = u.uOldTiers && u.uOldTiers.value > 0.5;
+      for (let i = 0; i < m.geo.instanceCount; i++) {
+        if (m.uv.getZ(i) < 0) continue;                      // an orb, not a picture
+        v.set(m.offset.getX(i), m.offset.getY(i), m.offset.getZ(i)).applyMatrix4(m.mesh.matrixWorld).applyMatrix4(camera.matrixWorldInverse);
+        if (v.z >= 0) continue;                              // behind the camera
+        const size = m.size.getX(i);
+        const nk = near > 0 ? Math.min(1, Math.max(nmin, Math.pow(Math.max(-v.z / (near * Math.max(size, 1e-3)), 0), npow))) : 1;
+        let s = size * nk;
+        const depth = Math.max(-v.z, 0.1), px = (old ? 1 : 0.5) * depth * pxv;
+        const r = m.color.getX(i), g = m.color.getY(i);
+        const shown = old ? r > 1.05 : g > 2.5, lit = !old && g > 1.5 && !shown;
+        if (shown && u.uMinPicPx.value > 0) s = Math.min(Math.max(s, u.uMinPicPx.value * px), Math.max(u.uMaxShownPx.value, u.uMinPicPx.value) * px);
+        else if (lit && u.uLitPx.value > 0) s = Math.min(s, u.uLitPx.value * px);
+        else if (u.uMaxPicPx.value > 0) s = Math.min(s, u.uMaxPicPx.value * px);
+        const n = this.slots[k][i];
+        out.push({ tier: shown ? 3 : lit ? 2 : 1, px: Math.round(2 * s / (depth * pxv)), id: n ? String(n.id).slice(0, 24) : "" });
+      }
+    }
+    return out;
+  }
   /** The curve: (distance / d) ^ nearPow. 0.5 (PLUGIN_GOAL 159: "node
    *  shrinking should respond a lot more farther away since we'd appreciate
    *  less occlusion of our nodes at closer proximities"; "a little too much
@@ -466,7 +525,7 @@ export class SceneBatch {
     }
     return new THREE.ShaderMaterial({
       vertexShader: VERT, fragmentShader: FRAG,
-      uniforms: { atlas: { value: this.atlas }, uHue: { value: 0 }, uZoom: { value: this.zoom }, uNear: { value: 0 }, uNearMin: { value: this.nearMin }, uNearPow: { value: this.nearPow }, uPxView: { value: 0.002 }, uMaxPicPx: { value: this.picMaxPx }, uMinPicPx: { value: this.presentMinPx }, uMaxShownPx: { value: this.presentMaxPx } },
+      uniforms: { atlas: { value: this.atlas }, uHue: { value: 0 }, uZoom: { value: this.zoom }, uNear: { value: 0 }, uNearMin: { value: this.nearMin }, uNearPow: { value: this.nearPow }, uPxView: { value: 0.002 }, uMaxPicPx: { value: this.picMaxPx }, uMinPicPx: { value: this.presentMinPx }, uMaxShownPx: { value: this.presentMaxPx }, uLitPx: { value: this.litPx }, uOldTiers: { value: 0 } },
       transparent: translucent, depthWrite: !translucent,
     });
   }
@@ -666,7 +725,7 @@ export class SceneBatch {
         // Row 0 of the atlas is the picture's top: the quad's top corner reads v0.
         m.uv.setXYZW(i, u0, v0 + 1 / PER_ROW, u0 + 1 / PER_ROW, v0);
         const pg = lk.glow || 0;
-        m.color.setXYZW(i, 1 + pg, 1, 1, lk.alpha);
+        m.color.setXYZW(i, 1 + pg, picTier(n, pg), 1, lk.alpha);
         n.imgLoaded = true;
       } else {
         m.uv.setXYZW(i, lk.glow || 0, 0, -1, 0);
@@ -858,7 +917,7 @@ export class SceneBatch {
     if (cell !== undefined) {
       const u0 = (cell % PER_ROW) / PER_ROW, v0 = Math.floor(cell / PER_ROW) / PER_ROW;
       m.uv.setXYZW(i, u0, v0 + 1 / PER_ROW, u0 + 1 / PER_ROW, v0);
-      m.color.setXYZW(i, 1 + (lk.glow || 0), 1, 1, lk.alpha);
+      m.color.setXYZW(i, 1 + (lk.glow || 0), picTier(n, lk.glow || 0), 1, lk.alpha);
     } else {
       const col = this.colour(lk.color);
       m.uv.setXYZW(i, pending ? 0 : (lk.glow || 0), 0, -1, 0);

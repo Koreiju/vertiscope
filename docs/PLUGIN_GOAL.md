@@ -5716,3 +5716,24 @@ Read here (mine, not the user's words): "s and d keys should be lateral" is read
 ### 160. (2026-11-14) README install and usage, proven before the next push
 
 in the next push, please ensure to prove out and test installation and usage instructions for new obsidian users in the README
+
+### 161. (2026-11-15) Image billboard sizing: a better upper limit and a better midpoint
+
+the image billboard sizing needs a better upper limit but also a better midpoint
+
+What the two screenshots attached to it show (mine, not the user's words):
+- The first: picture nodes around the ego, drawn very large next to its
+  ~20 px orbs. A facebook logo, a cat, the julia logo, an "R" tile and a
+  portrait are each about 190 px, and three copies of one white thumbnail
+  ("Bottled Team") are as large.
+- The second: the cat picture drawn over the ego graph at about 200 px, with
+  more pictures stacked behind it.
+- A third screenshot, sent right after with no text: a portrait picture at
+  about 200 px over the ego graph, with the frames of more pictures stacked
+  behind it.
+
+Read here (mine, to be confirmed): "upper limit" is the largest a picture is
+ever drawn; "midpoint" is the size of the pictures between an ordinary one and
+the one being presented. Measured in the code before any change, every picture
+with any glow drew in the presented range (hover, its glowing neighbours, and
+each shown search result), and every limit drew at twice its number on screen.
