@@ -149,6 +149,12 @@ _PLANT_NO_LOCK = [False]
 #: 10.0-16.3 s; concurrent search-field calls stalled together for 7-16 s.
 PLANT_LEXICAL_SAVE_LOCKED = [False]
 
+#: Planted (2026-11-15): every mutation rebuilds the whole CSR from the
+#: per-row dicts, as before -- a Python loop over every count of every row,
+#: seconds on the live store's 90k rows, paid by the next search after any
+#: write (one ego note's save was enough).
+PLANT_FULL_CSR_REBUILD = [False]
+
 #: A keyword anchor is a word at most this share of chunks hold. Half let
 #: "the" and "edit" through on a mixed-language store (Radix tree's page,
 #: 2026-11-15), where "the" is in fewer than half the chunks.
@@ -197,6 +203,14 @@ class FreqMatrix:
     #: The version last written to disk, so an older snapshot never lands
     #: over a newer one.
     _written_version: int = field(default=-1, repr=False, compare=False)
+    #: The last CSR built, and the rows changed since: `_matrix` splices only
+    #: those rows into it. None means the next build is a whole one (nothing
+    #: built yet, or the columns were renumbered by `forget_vocabulary`).
+    _base: Optional[sparse.csr_matrix] = field(default=None, repr=False, compare=False)
+    _dirty: set = field(default_factory=set, repr=False, compare=False)
+    #: Builds by kind, for tests and the profile.
+    csr_builds: dict = field(default_factory=lambda: {"whole": 0, "spliced": 0, "rows_spliced": 0},
+                             repr=False, compare=False)
 
     # -- build -------------------------------------------------------------
     @_locked
@@ -234,7 +248,7 @@ class FreqMatrix:
                 self.rows[row] = cid
                 self._counts[row] = counts
             self._row_of[cid] = row
-        self._invalidate()
+        self._invalidate(rows=(row,))
         return row
 
     def add_many(self, pairs: Iterable[Tuple[str, str]]) -> List[int]:
@@ -261,7 +275,7 @@ class FreqMatrix:
         self._counts[row] = {}
         self.rows[row] = ""          # tombstone
         self._free.append(row)       # reclaimable by the next add
-        self._invalidate()
+        self._invalidate(rows=(row,))
         return True
 
     @_locked
@@ -307,9 +321,19 @@ class FreqMatrix:
         """Rows still holding a chunk, tombstones excluded."""
         return sum(1 for cid in self.rows if cid)
 
-    def _invalidate(self) -> None:
+    def _invalidate(self, rows=None) -> None:
         # df is a corpus aggregate (THEORY Prop. 14.6) and the matrix is a
-        # view of the counts; both are re-derived rather than patched.
+        # view of the counts; both are re-derived rather than patched -- the
+        # matrix from the last one built plus the rows named here, or whole
+        # when no rows are named (the columns moved).
+        if rows is None or PLANT_FULL_CSR_REBUILD[0]:
+            self._base = None
+            self._dirty = set()
+        else:
+            if self._csr is not None:
+                self._base = self._csr
+            if self._base is not None:
+                self._dirty.update(rows)
         self._csr = None
         self._df = None
         self._tfidf = None
@@ -322,6 +346,12 @@ class FreqMatrix:
         """Raw term counts as CSR, built once per mutation batch."""
         if self._csr is not None:
             return self._csr
+        if self._base is not None and not PLANT_FULL_CSR_REBUILD[0]:
+            self._csr = self._splice(self._base, self._dirty)
+            self._base, self._dirty = None, set()
+            return self._csr
+        self._base, self._dirty = None, set()
+        self.csr_builds["whole"] += 1
         n_rows, n_cols = len(self._counts), max(len(self.vocab), 1)
         if not n_rows:
             self._csr = sparse.csr_matrix((0, n_cols), dtype=np.float32)
@@ -340,6 +370,48 @@ class FreqMatrix:
             shape=(n_rows, n_cols),
         )
         return self._csr
+
+    def _splice(self, base: sparse.csr_matrix, dirty: set) -> sparse.csr_matrix:
+        """The CSR of the current counts, from `base` with only `dirty` rows
+        (and rows added past its end) re-read from their dicts.
+
+        Every other row's entries are moved as arrays: a row's new start
+        minus its old one is its shift, applied to all its entries at once.
+        Same entries, same order within a row, as a whole build gives -- held
+        to that by `tests/test_csr_splice.py`.
+        """
+        n_rows, n_cols = len(self._counts), max(len(self.vocab), 1)
+        n_old = int(base.shape[0])
+        old_len = np.diff(base.indptr).astype(np.int64)
+        keep = np.ones(n_old, dtype=bool)
+        fill = sorted({int(r) for r in dirty if 0 <= int(r) < n_rows} | set(range(n_old, n_rows)))
+        stale = [r for r in fill if r < n_old]
+        if stale:
+            keep[stale] = False
+        lengths = np.zeros(n_rows, dtype=np.int64)
+        lengths[:n_old] = np.where(keep, old_len, 0)
+        for r in fill:
+            lengths[r] = len(self._counts[r])
+        indptr = np.zeros(n_rows + 1, dtype=np.int64)
+        np.cumsum(lengths, out=indptr[1:])
+        nnz = int(indptr[-1])
+        data = np.empty(nnz, dtype=np.float32)
+        indices = np.empty(nnz, dtype=np.int32)
+        if base.nnz:
+            entry_keep = np.repeat(keep, old_len)
+            shift = indptr[:n_old] - base.indptr[:n_old].astype(np.int64)
+            dest = np.arange(base.nnz, dtype=np.int64) + np.repeat(shift, old_len)
+            data[dest[entry_keep]] = base.data[entry_keep]
+            indices[dest[entry_keep]] = base.indices[entry_keep]
+        for r in fill:
+            c = self._counts[r]
+            if c:
+                s = int(indptr[r])
+                indices[s:s + len(c)] = np.fromiter(c.keys(), dtype=np.int32, count=len(c))
+                data[s:s + len(c)] = np.fromiter(c.values(), dtype=np.float32, count=len(c))
+        self.csr_builds["spliced"] += 1
+        self.csr_builds["rows_spliced"] += len(fill)
+        return sparse.csr_matrix((data, indices, indptr), shape=(n_rows, n_cols))
 
     # -- read --------------------------------------------------------------
     def row_of(self, cid: str) -> Optional[int]:
