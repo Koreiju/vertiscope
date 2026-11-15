@@ -101,3 +101,27 @@ def test_a_torn_save_is_refused(tmp_path):
         assert idx is None and redo is None
     finally:
         w.close()
+
+
+def test_a_row_the_build_left_dark_is_not_reread_while_its_cid_holds(tmp_path):
+    # 19,585 of 112,054 rows on the working store are in the lexical matrix
+    # and not in the store; the build leaves them dark. Re-reading them all
+    # at every start cost 20 s and found nothing (2026-11-15).
+    path = tmp_path / "ws"
+    _build(path)
+    meta_path = path / "index_cache.json"
+    info = json.loads(meta_path.read_text(encoding="utf-8"))
+    row = next(r for r, m in enumerate(info["meta"]) if m)
+    info["meta"][row] = None                       # as the build left it: dark
+    meta_path.write_text(json.dumps(info), encoding="utf-8")
+    w = Workspace(path)
+    try:
+        idx, redo = ThreeFormIndex.load_saved(path / "index_cache", w.store, w.freq)
+        assert idx is not None and redo == [] and idx._live[row] == 0.0, redo
+        # ...and the same dark row recorded under ANOTHER cid is re-read.
+        info["cids"][row] = "0000deadbeef0000"
+        meta_path.write_text(json.dumps(info), encoding="utf-8")
+        idx, redo = ThreeFormIndex.load_saved(path / "index_cache", w.store, w.freq)
+        assert redo == [w.freq.rows[row]], redo
+    finally:
+        w.close()

@@ -271,7 +271,7 @@ class ThreeFormIndex:
         meta = [list(self._meta[r]) if r in self._meta else None for r in range(n)]
         digests = [self._digests.get(r) for r in range(n)] if getattr(self, "_digests", None) is not None else [None] * n
         return {"n": n, "ranks": self._ranks.copy(), "live": self._live.copy(), "content": self._content.copy(),
-                "meta": meta, "digests": digests}
+                "meta": meta, "digests": digests, "cids": list(self.freq.rows[:n])}
 
     @staticmethod
     def write_snapshot(base, snap) -> bool:
@@ -281,7 +281,8 @@ class ThreeFormIndex:
         npz, meta = base.with_suffix(".npz"), base.with_suffix(".json")
         tnpz, tmeta = base.with_suffix(".tmp.npz"), base.with_suffix(".json.tmp")
         np.savez(tnpz, ranks=snap["ranks"], live=snap["live"], content=snap["content"])
-        tmeta.write_text(_json.dumps({"n": snap["n"], "meta": snap["meta"], "digests": snap["digests"]}), encoding="utf-8")
+        tmeta.write_text(_json.dumps({"n": snap["n"], "meta": snap["meta"], "digests": snap["digests"],
+                                      "cids": snap.get("cids")}), encoding="utf-8")
         _os.replace(tnpz, npz)
         _os.replace(tmeta, meta)
         return True
@@ -307,6 +308,11 @@ class ThreeFormIndex:
             return None, None
         n_saved = int(info.get("n") or 0)
         metas, digs = info.get("meta") or [], info.get("digests") or []
+        # The cid at each row when it was built, live or not: a row the build
+        # itself left dark (in the lexical matrix, not in the store -- 19,585
+        # of 112,054 on the working store) is unchanged while its cid is, and
+        # re-reading it found nothing for 20 s of a start.
+        built = info.get("cids") or [None] * n_saved
         if not (len(ranks) == len(live) == len(content) == len(metas) == n_saved):
             return None, None
         out = cls(store, freq, embeddings, embedder=embedder)
@@ -320,6 +326,8 @@ class ThreeFormIndex:
                 out._meta[r] = (m[0], m[1], m[2])
                 if r < len(digs) and digs[r] is not None:
                     out._digests[r] = digs[r]
+            elif not m and cid and r < len(built) and built[r] == cid:
+                live[r] = 0.0
             else:
                 live[r] = 0.0
                 if cid:
