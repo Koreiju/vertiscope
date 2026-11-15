@@ -10573,6 +10573,71 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-367",
+      asks: "the world's panel opens AT the ego node on the 2D plane (PLUGIN_GOAL 159: 'keep consistent ... the 3D world's nodes and their panel representations as the authority of how we extend on the representations and their interactions at the precise level in the 2D computation graph plane'): a click on a tagged chunk's ego node, through the pane's own pointer handlers, opens THAT chunk's world panel (the same billboard the world draws, its tether to the world node) beside the ego node -- the node within 40 px of the panel's rectangle -- and wholly inside the pane; planted (plantPanelAtWorld) it opens where the world node projects (measured 2026-11-15: 290 px off and clipped by the pane's bottom edge)",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const frame = () => new Promise((r) => requestAnimationFrame(() => r(0)));
+          const g = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
+          const c = window.__domvecCraft;
+          if (!g || !c || !g.graph) return { error: "no graph or craft" };
+          const mode0 = g.agent.mode, flat0 = c.flatView;
+          let tagged = null, opened = [];
+          try {
+            g.plantPanelAtWorld = ${planted};
+            c.flatView = true; g.agent.setMode("map"); await sleep(800);
+            await c.fresh();
+            for (let i = 0; i < 4 && !c.nodes.some((n) => n.kind === "web"); i++) { await sleep(2000); await c.fresh(); }
+            let web = c.nodes.find((n) => n.kind === "web");
+            if (!web) {
+              const ch = g.graph.graphData().nodes.find((n) => n.cid);
+              if (!ch) return { error: "no web node and no chunk to tag" };
+              await g.tagEgo(ch.cid, true); tagged = ch.cid; await c.fresh();
+              web = c.nodes.find((n) => n.id === "craft:web:" + ch.cid);
+            }
+            if (!web || !web.mesh) return { error: "no web node" };
+            const cid = web.id.slice("craft:web:".length);
+            for (let i = 0; i < 4; i++) await frame();
+            const el = g.graph.renderer().domElement, r = el.getBoundingClientRect();
+            const px = g.craftNodePx(web);
+            if (!px) return { error: "ego node not in front of the camera" };
+            const x = r.left + px.x, y = r.top + px.y;
+            const before = new Set([...g.billboards.keys()]);
+            const pe = (t) => el.dispatchEvent(new PointerEvent(t, { clientX: x, clientY: y, bubbles: true, button: 0, buttons: t === "pointerdown" ? 1 : 0, pointerId: 1, pointerType: "mouse" }));
+            pe("pointerdown"); await sleep(40); pe("pointerup");
+            for (let i = 0; i < 60; i++) { await sleep(250); opened = [...g.billboards.keys()].filter((k) => !before.has(k)); if (opened.length) break; }
+            if (!opened.length) return { planted: ${planted}, cid, opened: 0 };
+            await sleep(1200);
+            const bb = g.billboards.get(opened[0]), b = bb.el.getBoundingClientRect();
+            const dx = Math.max(b.left - x, 0, x - b.right), dy = Math.max(b.top - y, 0, y - b.bottom);
+            const w = bb.node && Number.isFinite(bb.node.x) ? g.graph.graph2ScreenCoords(bb.node.x, bb.node.y, bb.node.z || 0) : null;
+            return { planted: ${planted}, cid, key: opened[0], same_panel: opened[0] === cid || (g.pinAlias && g.pinAlias.get(cid) === opened[0]),
+                     node: [Math.round(x), Math.round(y)], panel: [Math.round(b.left), Math.round(b.top), Math.round(b.width), Math.round(b.height)],
+                     pane: [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)],
+                     off_px: Math.round(Math.hypot(dx, dy)),
+                     inside: b.left >= r.left - 1 && b.top >= r.top - 1 && b.right <= r.right + 1 && b.bottom <= r.bottom + 1,
+                     world_to_node_px: w ? Math.round(Math.hypot(r.left + w.x - x, r.top + w.y - y)) : null,
+                     stats: { ...g.egoPanelStats } };
+          } finally {
+            for (const k of opened) { try { g.closeBillboard(k); } catch (e) {} }
+            g.plantPanelAtWorld = false; c.flatView = flat0;
+            if (tagged) { try { await g.tagEgo(tagged, false); } catch (e) {} }
+            g.agent.setMode(mode0); c.dirty();
+          }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        const c = clean || {}, p = planted || {};
+        // Non-vacuous only where the world node is not already beside the ego node.
+        const apart = p.world_to_node_px == null || p.world_to_node_px > 60;
+        return {
+          pass: !c.error && c.opened !== 0 && c.same_panel && c.off_px <= 40 && c.inside
+                && !p.error && p.opened !== 0 && apart && (p.off_px > 60 || !p.inside),
+          evidence: { clean, planted, planted_apart: apart },
+        };
+      },
+    },
+    {
       id: "G-346",
       asks: "a streaming node tagged into the ego is tagged as the CHUNK it becomes (2026-11-14: of the ego's 4 tags, 2 named no stored chunk -- one a streaming node's id, f:https://en.wikipedia.org/wiki/Main_Page#18|..., drawn as 'f:https://en.wikip'): tagging a node whose streaming spec the store has saved puts the saved cid in the ego set, never the streaming id; a streaming node the store has not saved is refused, not tagged; planted (plantTagForceId) the streaming id is tagged",
       async run() {

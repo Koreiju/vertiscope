@@ -77,7 +77,7 @@ export interface CraftHost {
   /** A tagged chunk's title (its first line with words), from the sidecar. */
   tagTitle?(cid: string): string;
   /** Open a tagged chunk's panel (the world node's own), placing it if needed. */
-  openChunk?(cid: string): Promise<boolean>;
+  openChunk?(cid: string, from?: CraftNode): Promise<boolean>;
   /** Each recorded run's input -> its cell note (G-292). */
   signalEdges(): { note: string; cid: string; url: string }[];
   isOpen(path: string): boolean;
@@ -1307,7 +1307,7 @@ export class Craft {
     if (n.kind === "web") {
       const cid = n.id.slice("craft:web:".length);
       this.stats.opened++; (this.stats as any).web_opened = ((this.stats as any).web_opened || 0) + 1;
-      void this.host.openChunk?.(cid);
+      void this.host.openChunk?.(cid, n);
       return "opened";
     }
     if (n.kind === "code") return "opened";   // its panel is elsewhere

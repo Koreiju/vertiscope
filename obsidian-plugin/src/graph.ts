@@ -6981,7 +6981,10 @@ export class GraphView extends ItemView {
         // first if its page is not unfolded -- held on the plane (159: "Clicking
         // on an ego node should open the markdown or linked nodes locally";
         // the 3D world's panel is the authority for its representation).
-        openChunk: async (cid: string) => { const ok = await this.pinChunk(cid); this.pinWanted.delete(cid); return ok; },
+        openChunk: async (cid: string, from?: any) => {
+          const ok = await this.pinChunk(cid, from && !this.plantPanelAtWorld ? this.craftNodePx(from) : null);
+          this.pinWanted.delete(cid); return ok;
+        },
       });
       (window as any).__domvecCraft = this.craft;
       // Only a NOTE changes the craft: it reads markdown and nothing else.
@@ -7018,6 +7021,23 @@ export class GraphView extends ItemView {
   plantPanelsPassThrough = false;
   /** Planted (159): a click on a tagged web chunk's ego node opens nothing, as before. */
   plantWebNodeNoOpen = false;
+  /**
+   * Planted (159): a panel opened from an ego node opens where its WORLD node
+   * projects, as before -- 290 px from the ego node and clipped by the pane's
+   * bottom edge when measured (2026-11-15).
+   */
+  plantPanelAtWorld = false;
+  egoPanelStats = { at_node: 0, clamped: 0 };
+  /** A craft node's place on the canvas, in the billboards' own coordinates. */
+  craftNodePx(cn: any): { x: number; y: number } | null {
+    const g: any = this.graph;
+    if (!g || !cn?.mesh) return null;
+    const cam = g.camera(), el = g.renderer().domElement;
+    (this.craft as any)?.group?.updateMatrixWorld?.(true);
+    const p = cn.mesh.getWorldPosition(cam.position.clone()).project(cam);
+    if (!(p.z > -1 && p.z < 1)) return null;
+    return { x: (p.x + 1) / 2 * el.clientWidth, y: (1 - p.y) / 2 * el.clientHeight };
+  }
   panelGuardStats = { kept_off: 0 };
   onScene(e: Event): boolean {
     if (this.plantPanelsPassThrough) return true;
@@ -8334,7 +8354,7 @@ export class GraphView extends ItemView {
   /** Planted: an unknown cid is retried like an unembedded one (the 25 s wait). */
   plantWaitUnknown = false;
 
-  async pinChunk(cid: string): Promise<boolean> {
+  async pinChunk(cid: string, at: { x: number; y: number } | null = null): Promise<boolean> {
     if (!this.graph || !cid) return false;
     this.pinWanted.add(cid);
     let node = this.graph.graphData().nodes.find((n: any) => n.id === cid);
@@ -8384,6 +8404,13 @@ export class GraphView extends ItemView {
     if (stuck && !this.plantPinFollows) {
       stuck.pinned = true; stuck.el.addClass("is-stuck"); stuck.el.removeClass("is-preview"); this.stuckPins++;
       if (stuck.form !== "page") await this.renderForm(stuck, "markdown").catch(() => false);
+      // Opened FROM THE EGO, it opens on the plane beside that node (PLUGIN_GOAL
+      // 159: the world's panels are "the authority of how we extend on the
+      // representations ... at the precise level in the 2D computation graph
+      // plane"): the same panel the world draws, held at the ego node and
+      // inside the pane, its tether still reaching its world node. Opened from
+      // the world, it stays where its world node is. Planted `plantPanelAtWorld`.
+      if (at) this.placeInPane(stuck.el, at.x + 14, at.y - 18);
     }
     if (drawnAs !== cid) {
       this.pinAlias.set(cid, drawnAs);
@@ -8391,6 +8418,21 @@ export class GraphView extends ItemView {
       if (entry) (entry.pins = entry.pins || new Set()).add(cid);
     }
     return true;
+  }
+  /** Put a panel at (x, y) on the canvas, kept wholly inside it. */
+  private placeInPane(el: HTMLElement, x: number, y: number): void {
+    const c = this.graph ? (this.graph as any).renderer().domElement : null;
+    const W = c?.clientWidth || 0, H = c?.clientHeight || 0;
+    const w = el.offsetWidth || 340, h = el.offsetHeight || 300;
+    let l = x, t = y;
+    if (W && H) {
+      l = Math.max(4, Math.min(l, W - w - 4));
+      t = Math.max(4, Math.min(t, H - h - 4));
+    }
+    if (l !== x || t !== y) this.egoPanelStats.clamped++;
+    el.style.left = `${Math.round(l)}px`;
+    el.style.top = `${Math.round(t)}px`;
+    this.egoPanelStats.at_node++;
   }
   /** Planted (133): stuck panels' markdown the static render, as before. */
   plantStaticMarkdown = false;
