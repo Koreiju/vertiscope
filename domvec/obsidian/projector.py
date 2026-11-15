@@ -1690,16 +1690,13 @@ class PageProjector(ChunkProjector):
         # fraction of the way to the nearest other page; the true coordinates
         # stay in `raw_pos`.
         if offsets:
-            names = list(page_pos)
-            P = np.asarray([page_pos[n] for n in names], dtype=np.float64)
+            rooms = self._rooms(page_pos, list(offsets))
             for u, items in offsets.items():
                 items = self._local_offsets(u, items)
                 here = np.asarray(page_pos[u], dtype=np.float64)
-                d = np.linalg.norm(P - here, axis=1)
-                d = d[d > 1e-9]
                 norms = np.asarray([np.linalg.norm(o) for _c, o in items])
                 reach = float(np.percentile(norms, 90)) if len(norms) else 0.0
-                room = float(d.min()) * self.NEIGHBOURHOOD if len(d) else 45.0
+                room = rooms[u]
                 if u in self.page_scale and len(items) < 8:
                     scale = self.page_scale[u]          # a few streamed chunks
                 else:
@@ -1767,6 +1764,52 @@ class PageProjector(ChunkProjector):
     #: Planted (PLUGIN_GOAL 110): a refit replaces every chunk's local
     #: position -- the page jumbles each time it grows by a quarter.
     plant_local_jumble = False
+
+    #: The nearest page a neighbourhood is measured to is never nearer than
+    #: this share of the cloud's median page spacing.
+    ROOM_FLOOR = 0.25
+    #: Planted: the room is the raw nearest-page distance (G-94's collapse).
+    PLANT_ROOM_RAW_NEAREST = [False]
+
+    def _rooms(self, page_pos: Dict[str, List[float]], urls) -> Dict[str, float]:
+        """{url: how far its chunks may reach}: NEIGHBOURHOOD x the distance
+        to its nearest other page -- floored at ROOM_FLOOR x the median
+        nearest-page distance of the whole cloud.
+
+        **A page drawn on top of this one is not a neighbour to keep clear
+        of.** A copy of a page -- a re-capture under a query string, a
+        check's `?d36=` fixture, a mirror -- has its centroid and so its
+        fitted position; unfloored, the room went to ~0 and BOTH pages'
+        clouds were drawn as one point: Radix_tree's 40 chunks and its page
+        within 0.045 units, every `?d35=`/`?g80=`/`?d37=` page under 0.5,
+        against a median of 4.2 (G-94, 2026-11-15). The restart's fit, with
+        the copies purged, read 2.08 at a room of 7.3: the cap, not the fit.
+        Two near-identical pages overlap as their content does. Cost: one
+        tree over the page positions per call, O(P log P) for P pages.
+        Planted `PLANT_ROOM_RAW_NEAREST`.
+        """
+        names = [n for n in page_pos if page_pos[n]]
+        out: Dict[str, float] = {}
+        if len(names) < 2:
+            return {u: 45.0 for u in urls}
+        P = np.asarray([page_pos[n][:self.dims] for n in names], dtype=np.float64)
+        from scipy.spatial import cKDTree
+        tree = cKDTree(P)
+        dd, _ = tree.query(P, k=2)
+        nn = dd[:, 1]
+        nn = nn[nn > 1e-9]
+        floor = (float(np.median(nn)) * self.ROOM_FLOOR) if len(nn) else 0.0
+        if self.PLANT_ROOM_RAW_NEAREST[0]:
+            floor = 0.0
+        k = int(min(len(names), 8))
+        for u in urls:
+            here = np.asarray(page_pos[u][:self.dims], dtype=np.float64)
+            d, _ = tree.query(here, k=k)
+            d = np.atleast_1d(d)
+            d = d[d > 1e-9]
+            near = float(d.min()) if len(d) else 0.0
+            out[u] = max(near, floor) * self.NEIGHBOURHOOD if (near > 0 or floor > 0) else 45.0
+        return out
 
     def _local_offsets(self, u: str, items):
         """`items` ([(cid, offset in the page fit)]) with each offset replaced

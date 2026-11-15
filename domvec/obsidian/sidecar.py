@@ -3148,6 +3148,80 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send(500, {"error": "%s: %s" % (type(exc).__name__, exc)})
             return
 
+        if route == "page_spread":
+            # Read-only: is one page's cloud COLLAPSED, and is the cause its
+            # INPUTS or its FIT? (G-94, 2026-11-15: Radix_tree's 40 chunks
+            # and its page placed within 0.045 units of one point; 6 of 49
+            # sampled pages under 0.5 against a median of 4.2.) The page's
+            # stored vectors -- how many, how many distinct, their mean
+            # pairwise cosine -- against the spread of the positions the
+            # projector answers for them and where its page row sits.
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                url = str(json.loads(self.rfile.read(length) or b"{}").get("url") or "")
+                from .projector import projector as _get_proj
+                import numpy as _np
+                proj = _get_proj()
+                if proj is None or not url:
+                    self._send(200, {"url": url, "error": "no projector" if proj is None else "no url"})
+                    return
+                with proj.lock:
+                    cids = sorted(proj.by_url.get(url) or ())
+                    vecs = {c: proj.vec[c] for c in cids if c in proj.vec}
+                    pos = {c: list(proj.pos[c]) for c in cids if c in proj.pos}
+                    page_pos = list(proj.page_pos.get(url) or []) or None
+                    page_vec = proj.page_vec.get(url) if hasattr(proj, "page_vec") else None
+                    online = list(getattr(proj, "online_updates", []) or [])[-3:]
+                    trained = url in (getattr(proj, "trained", None) or ())
+                    # The neighbourhood that caps the cloud: `_place_chunks` scales a
+                    # page's chunks into NEIGHBOURHOOD x its nearest OTHER page, so a
+                    # page drawn on top of this one shrinks it to a point.
+                    others = [(u, v) for u, v in proj.page_pos.items() if u != url and v]
+                    scale = (getattr(proj, "page_scale", None) or {}).get(url)
+                    hood = float(getattr(proj, "NEIGHBOURHOOD", 0.0) or 0.0)
+                out = {"url": url, "chunks": len(cids), "with_vector": len(vecs), "with_pos": len(pos),
+                       "page_pos": [round(float(x), 3) for x in page_pos] if page_pos else None,
+                       "kind": type(proj).__name__, "trained": bool(trained),
+                       "online_last": [{k: r.get(k) for k in ("pages_trained", "chunks_trained", "pages_moved", "chunks_moved", "at")} for r in online]}
+                if vecs:
+                    V = _np.asarray(list(vecs.values()), dtype=_np.float32)
+                    norms = _np.linalg.norm(V, axis=1)
+                    out["zero_vectors"] = int((norms < 1e-9).sum())
+                    U = V / _np.maximum(norms, 1e-9)[:, None]
+                    out["distinct_vectors"] = int(len({tuple(_np.round(u, 4)) for u in U}))
+                    if len(U) >= 2:
+                        G = U @ U.T
+                        iu = _np.triu_indices(len(U), 1)
+                        out["cos_mean"] = round(float(G[iu].mean()), 4)
+                        out["cos_min"] = round(float(G[iu].min()), 4)
+                    if page_vec is not None:
+                        pv = _np.asarray(page_vec, dtype=_np.float32)
+                        pv = pv / max(float(_np.linalg.norm(pv)), 1e-9)
+                        out["cos_to_page_mean"] = round(float((U @ pv).mean()), 4)
+                if pos:
+                    P = _np.asarray(list(pos.values()), dtype=_np.float32)
+                    c = P.mean(axis=0)
+                    out["pos_centroid"] = [round(float(x), 3) for x in c]
+                    out["pos_spread"] = round(float(_np.linalg.norm(P - c, axis=1).mean()), 4)
+                    if page_pos:
+                        out["page_to_centroid"] = round(float(_np.linalg.norm(_np.asarray(page_pos[:len(c)], dtype=_np.float32) - c)), 4)
+                if page_pos and others:
+                    O = _np.asarray([v[:len(page_pos)] for _u, v in others], dtype=_np.float64)
+                    d = _np.linalg.norm(O - _np.asarray(page_pos, dtype=_np.float64), axis=1)
+                    order = _np.argsort(d)[:3]
+                    out["nearest_pages"] = [{"url": others[i][0], "dist": round(float(d[i]), 4)} for i in order]
+                    out["room"] = round(float(d.min()) * hood, 4)
+                    # The cloud's own spacing: every page's nearest-page distance.
+                    A = _np.asarray([v[:len(page_pos)] for v in proj.page_pos.values() if v], dtype=_np.float64)
+                    if len(A) >= 3:
+                        from scipy.spatial import cKDTree as _T
+                        dd, _ = _T(A).query(A, k=2)
+                        out["page_nn_median"] = round(float(_np.median(dd[:, 1])), 4)
+                out["page_scale"] = None if scale is None else round(float(scale), 4)
+                self._send(200, out)
+            except Exception as exc:                # noqa: BLE001
+                self._send(500, {"error": "%s: %s" % (type(exc).__name__, exc)})
+            return
         if route == "place":
             try:
                 length = int(self.headers.get("Content-Length") or 0)

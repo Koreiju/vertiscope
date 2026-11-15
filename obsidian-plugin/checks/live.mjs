@@ -2757,7 +2757,26 @@ export function makeChecks(env) {
             }
             const multi = [...parents.values()].filter((k) => k > 1).length;
             const multiAll = [...parentsAll.values()].filter((k) => k > 1).length;
-            return { chunks: r.length, own_nearest: ownNearest, p50: q(0.5), p90: q(0.9), max: q(1), multi_parent: multi, open_chunks: open.size, multi_parent_corpus: multiAll };
+            // WHERE the open page's node sits against its own chunks: drawn
+            // node, chunks' centroid, their distance in nearest-page units, and
+            // the nearest page to the centroid (run 123/124: own_nearest 0/61,
+            // every chunk 2.34-2.49 units off -- a compact cloud, its page
+            // displaced; run 85 read 40/40).
+            const pg = byUrl.get(PAGE);
+            const mineC = ns.filter((c) => !c.force && c.level !== "page" && c.url === PAGE && Number.isFinite(c.x));
+            let where = null;
+            if (pg && mineC.length) {
+              const cen = [0, 1, 2].map((k) => mineC.reduce((acc, c) => acc + [c.x, c.y, c.z || 0][k], 0) / mineC.length);
+              const dist = (q) => Math.hypot(q.x - cen[0], q.y - cen[1], (q.z || 0) - cen[2]);
+              let nearestToCen = null, best = Infinity;
+              for (const q of pages) { const d = dist(q); if (d < best) { best = d; nearestToCen = q; } }
+              const spread = mineC.reduce((acc, c) => acc + Math.hypot(c.x - cen[0], c.y - cen[1], (c.z || 0) - cen[2]), 0) / mineC.length;
+              where = { page_xyz: [pg.x, pg.y, pg.z || 0].map((x) => Math.round(x * 10) / 10), fit_xyz: [pg.fitX, pg.fitY, pg.fitZ].map((x) => Number.isFinite(x) ? Math.round(x * 10) / 10 : null),
+                        pinned: Number.isFinite(pg.fx), centroid: cen.map((x) => Math.round(x * 10) / 10),
+                        page_to_centroid: Math.round(dist(pg) * 10) / 10, cloud_spread: Math.round(spread * 10) / 10, nn_page: Math.round(nn(pg) * 10) / 10,
+                        nearest_page_to_centroid: nearestToCen ? String(nearestToCen.url).slice(-50) : null, source: pg.source || null };
+            }
+            return { chunks: r.length, own_nearest: ownNearest, p50: q(0.5), p90: q(0.9), max: q(1), multi_parent: multi, open_chunks: open.size, multi_parent_corpus: multiAll, where };
           };
           try {
             await land(PAGE, 30000);
@@ -2766,6 +2785,19 @@ export function makeChecks(env) {
             const onPage = v.seenLayout();
             onPage.world = v.overlapCensus();
             onPage.near_page = nearPage();
+            try {
+              const some = v.graph.graphData().nodes.find((c) => !c.force && c.level !== "page" && c.url === PAGE);
+              const got = some ? await v.sidecar.place([some.id]) : null;
+              const pn = got && (got.nodes || []).find((x) => (x.cid ?? x.id) === "page:" + PAGE);
+              onPage.store_page = pn ? { pos: (pn.pos || []).map((x) => Math.round(x * 10) / 10), source: pn.source || null } : null;
+              // The store's own reading of the page's cloud (/page_spread): its
+              // vectors against the spread of the positions it answers. A
+              // collapse (Radix_tree 0.045, 2026-11-15) shows here first.
+              const sb = v.sidecar.base().trim().replace(/\\/+$/, "");
+              onPage.store_spread = await fetch(sb + "/page_spread", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url: PAGE }) })
+                .then((r) => r.json()).then((x) => ({ chunks: x.chunks, with_pos: x.with_pos, distinct: x.distinct_vectors, cos_mean: x.cos_mean, spread: x.pos_spread, page_to_centroid: x.page_to_centroid, room: x.room, page_scale: x.page_scale, nn_median: x.page_nn_median, nearest: (x.nearest_pages || []).map((n) => ({ url: String(n.url).slice(-60), dist: n.dist })), error: x.error || null }))
+                .catch((err) => ({ error: String(err).slice(0, 80) }));
+            } catch (err) { onPage.store_page = { error: String(err).slice(0, 80) }; }
             onPage.tree_seen = treeSeen();
             onPage.follows = await followTest();
             await sleep(1500);
