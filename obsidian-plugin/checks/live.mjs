@@ -5580,7 +5580,7 @@ export function makeChecks(env) {
     },
     {
       id: "G-39",
-      asks: "right-click is the browser's menu; DOUBLE right-click puts the markdown beside the page and rings the node",
+      asks: "right-click is the browser's menu; DOUBLE right-click pins the chunk, which emerges as a STUCK panel on the 2D plane with its content (PLUGIN_GOAL 133: \"instead of showing in the clipboard\" -- the side card stays hidden), its address an xpath, and rings the node; the single right-click is the null arm: a menu, no pin",
       async run() {
         const got = await evaluate(`(async () => {
           const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -5736,18 +5736,20 @@ export function makeChecks(env) {
             const g0 = gv0 && gv0.view && gv0.view.graph;
             ringedAtPin = g0 ? g0.graphData().nodes.filter((n) => n.hovered).length : 0;
           }
-          await sleep(1200);
-          // The SLATE (PLUGIN_GOAL 131/132): the pins are one vault note in a
-          // live editor, .domvec-slate-cell; the address is each pin
-          // handle's title. The static card (.domvec-browser-mdbody) is
-          // the planted plantStaticSide form, read when it is the one shown.
-          // Runs 98-99 read only the card and found 0 chars beside a slate.
-          const slate = b.markdownWrap.querySelector(".domvec-slate-cell");
-          const body = slate ? (slate.querySelector(".cm-content") || slate) : b.markdownWrap.querySelector(".domvec-browser-mdbody");
-          const handle = b.markdownWrap.querySelector(".domvec-pin-handle[title]") || b.markdownWrap.querySelector(".domvec-browser-mdhead span[title]");
-          const head = handle ? { textContent: handle.getAttribute("title") } : null;
-          let slateText = "";
-          if (slate) { try { const f = app.vault.getAbstractFileByPath(b.slatePath); if (f) slateText = await app.vault.read(f); } catch (e) {} }
+          // PLUGIN_GOAL 133: the pin emerges as a stuck panel on the plane
+          // (the graph's pinChunk), not in the side "clipboard". Waited for:
+          // the panel opens asynchronously.
+          const pinCid = () => (b.pinnedState()[0] || {}).cid || "";
+          const panelOf = () => { const c = pinCid(); return c && v ? (v.billboards.get(c) || [...v.billboards.entries()].find(([k]) => String(k).split("|")[0] === c)?.[1]) : null; };
+          const panelText = (el) => { if (!el) return 0; let t = (el.innerText || "").trim().length;
+            el.querySelectorAll("iframe").forEach((f) => { try { t += ((f.contentDocument && f.contentDocument.body && f.contentDocument.body.innerText) || "").trim().length; } catch (x) {} });
+            el.querySelectorAll("*").forEach((x) => { if (x.shadowRoot) t += (x.shadowRoot.textContent || "").trim().length; });
+            return t; };
+          const tSide = performance.now();
+          for (let i = 0; i < 40; i++) { const pe = panelOf(); if (pe && panelText(pe.el) > 0) break; await sleep(200); }
+          const sideMs = Math.round(performance.now() - tSide);
+          const pe = panelOf();
+          const pinNow = b.pinnedState()[0] || null;
           // Let late input land, then let go of what this check pinned: a
           // right-click delivered after the check ended pinned chunks of the
           // NEXT check's page.
@@ -5763,19 +5765,14 @@ export function makeChecks(env) {
             page_shown: b.browserWrap.offsetWidth > 50 && b.browserWrap.offsetHeight > 50,
             face_toggle: [...b.containerEl.querySelectorAll(".domvec-browser-bar button")]
               .some((e) => /^(markdown|browser)$/.test((e.textContent || "").trim())),
-            heading: head ? head.textContent : null,
-            rendered_chars: body ? (body.innerText || "").length : 0,
-            // Rendered, not dumped: a code block would have no elements.
-            rendered_elements: body ? body.querySelectorAll("*").length : 0,
-            // Relative targets must have been resolved against the PAGE.
-            // Rendered as-written they ask Obsidian for a vault file and
-            // come back "could not be found".
-            links: slate
-              ? [...slateText.matchAll(/\\]\\(([^)\\s]+)/g)].map((m) => m[1]).filter((u) => !u.startsWith("#")).slice(0, 6)
-              : body ? Array.from(body.querySelectorAll("a[href], img[src]"))
-                .map(e => e.getAttribute("href") || e.getAttribute("src"))
-                .slice(0, 4) : [],
-            surface: slate ? "slate" : body ? "card" : null,
+            // The pin's address, as the gesture resolved it.
+            heading: pinNow ? pinNow.matched : null,
+            plane_panel: pe ? { stuck: !!pe.pinned, cls_stuck: pe.el.classList.contains("is-stuck"), chars: panelText(pe.el),
+                                elements: pe.el.querySelectorAll("*").length, form: pe.form || null } : null,
+            // Relative targets resolved against the PAGE, in the panel's own links.
+            links: pe ? Array.from(pe.el.querySelectorAll("a[href], img[src]")).map((x) => x.getAttribute("href") || x.getAttribute("src")).slice(0, 6) : [],
+            side_ms: sideMs,
+            // The old side card: hidden since 133 ("instead of showing in the clipboard").
             side: { shown: b.markdownWrap.offsetWidth > 0, children: [...b.markdownWrap.children].map((c) => c.className).slice(0, 6), pinned: b.pinnedState().length },
             status: b.status ? b.status.textContent : null,
             // The other half of the correspondence (G-38, as far as it is
@@ -5804,7 +5801,8 @@ export function makeChecks(env) {
              && got.double_gesture === "pin"
              && got.page_shown === true && got.face_toggle === false
              && !!got.heading && got.heading.startsWith("/html")
-             && got.rendered_chars > 0 && got.rendered_elements > 0
+             && !!got.plane_panel && got.plane_panel.stuck && got.plane_panel.chars > 0
+             && got.side && got.side.shown === false
              && (got.links || []).every(
                   (u) => !u || /^[a-z][a-z0-9+.-]*:/i.test(u))
              && got.ringed === 1,
